@@ -21,12 +21,14 @@ import { textOf } from "./agent.ts";
 import type { CodeTurn } from "./agent.ts";
 import { appendAuditEvent } from "./audit-outbox.ts";
 import {
+  memoryKeyOf,
   mergeRecalled,
+  profileAs,
   recallOwnedAs,
   recallQuestionMaxLength,
   recalledTokens,
 } from "./brain-next.ts";
-import type { RecalledPack } from "./brain-next.ts";
+import type { RecalledMemory, RecalledPack } from "./brain-next.ts";
 import { questionText } from "./chat-agent.ts";
 import { describeRun, sourceHash } from "./code-mode.ts";
 import type { CodeRunStatus } from "./code-run-statuses.ts";
@@ -35,6 +37,7 @@ import {
   brainCompanyVersionRead,
   brainGrantRead,
   brainMemoryRead,
+  brainProfileMemoryRead,
   brainVersionRead,
   recalledMemoryPin,
 } from "./history-access.ts";
@@ -286,6 +289,85 @@ const leftOf = (started: number, ms: number): number =>
   Math.max(0, started + ms - Date.now());
 
 /**
+ * The profile the turn starts with (GRA-1745, brain-next.ts `profileAs`):
+ * for a recall as the person alone, what the Brain holds about them in
+ * their own word, from their own store, newest first. Read alongside the
+ * question's search, from the same moment, and never waited for: `take`
+ * answers it if it has arrived when the search has ended, and otherwise
+ * nothing, logging why (it failed, or hasn't answered yet), as `lookElsewhere`
+ * does; so a slow store never holds the search's recall up, and what
+ * arrives later is dropped. Missing guidance is no question of access, as
+ * for the instruction files. Handed over only as far as the search left
+ * room (`fitted`).
+ */
+const profileOf = (
+  { env, turn }: Recalling,
+  reads: Reads
+): { take: () => RecalledMemory[] } => {
+  if (!reads.personal) {
+    return { take: () => [] };
+  }
+  let found: RecalledMemory[] | "failed" | undefined;
+  const read = async () => {
+    try {
+      ({ memories: found } = await profileAs(
+        env,
+        turn.scope.personId,
+        turnRecallBudget
+      ));
+    } catch {
+      found = "failed";
+    }
+  };
+  // Not awaited, and it never rejects: the search never waits on it.
+  void read();
+  return {
+    take: () => {
+      if (Array.isArray(found)) {
+        return found;
+      }
+      log.warn("chat.profile_unavailable", {
+        reason: found === "failed" ? "failed" : "late",
+      });
+      return [];
+    },
+  };
+};
+
+/**
+ * Of `profile` (newest first), those the search's `pack` left room for in
+ * the turn's budget, in that order, each whole, stopping at the first that
+ * doesn't fit; one the search handed over already takes no room again. So
+ * the search is never smaller for it: it ran with the whole budget, as
+ * without a profile.
+ */
+const fitted = (
+  profile: readonly RecalledMemory[],
+  pack: RecalledPack
+): RecalledMemory[] => {
+  const held = new Set(pack.memories.map((memory) => memoryKeyOf(memory)));
+  let left = turnRecallBudget.tokens - recalledTokens(pack);
+  const kept: RecalledMemory[] = [];
+  for (const memory of profile) {
+    if (!held.has(memoryKeyOf(memory))) {
+      const tokens = recalledTokens({
+        items: [],
+        memories: [memory],
+        contested: [],
+        notFound: [],
+        truncated: false,
+      });
+      if (tokens > left) {
+        break;
+      }
+      left -= tokens;
+      kept.push(memory);
+    }
+  }
+  return kept;
+};
+
+/**
  * The first pass, and a second for the analysis's words, within the
  * budget the first left, when the first is thin and the analysis answered
  * in time with words of its own; and whether the person's own store made
@@ -535,7 +617,20 @@ export const recallForTurn = async (
   let result: string | undefined;
   let failure = "The recall failed.";
   try {
-    const { pack, fromOwn } = await recalled(recalling, reads, query, analysed);
+    // The search as without a profile, with the profile read alongside,
+    // from the same moment, taken if it arrived by the search's end; the
+    // profile only in the room the search left.
+    const profiling = profileOf(recalling, reads);
+    const searched = await recalled(recalling, reads, query, analysed);
+    const profile = fitted(profiling.take(), searched.pack);
+    const pack = {
+      ...searched.pack,
+      memories: [...searched.pack.memories, ...profile],
+    };
+    // What only the person may read marks the chat (private-reads.ts):
+    // their profile too, from their own store, whatever the search found.
+    const fromOwn = searched.fromOwn || profile.length > 0;
+    const ofProfile = new Set(profile.map((memory) => memoryKeyOf(memory)));
     // Its answer can no longer be used: let go of now, not after the writes.
     analysis.abort();
     const versions = [
@@ -547,11 +642,18 @@ export const recallForTurn = async (
         )
       ),
     ];
-    const memories = pack.memories.map((memory) =>
-      reads.personal
-        ? brainMemoryRead(recalledMemoryPin(memory))
-        : brainCompanyMemoryRead(recalledMemoryPin(memory))
-    );
+    // A profile's memory is pinned as one, which is no use of it
+    // (history-access.ts `brainProfileMemoryRead`): only what the search
+    // found is.
+    const memories = pack.memories.map((memory) => {
+      const pin = recalledMemoryPin(memory);
+      if (ofProfile.has(memoryKeyOf(memory))) {
+        return brainProfileMemoryRead(pin);
+      }
+      return reads.personal
+        ? brainMemoryRead(pin)
+        : brainCompanyMemoryRead(pin);
+    });
     const call = {
       method: turnRecallMethod,
       detail: {

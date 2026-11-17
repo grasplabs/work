@@ -213,16 +213,20 @@ export const recallFor = async (
     });
     // A capture and an interview are one person's own, kept only in their
     // own store (core's addSource refuses them anywhere else), which this
-    // recall never reads; a team's claims from its interviews are read as
-    // the person alone (brain-next.ts `readerOf`): none can be here.
-    // Narrowed for the SDK's type, never thrown over.
+    // recall never reads; a team's claim or drawing from the onboarding's
+    // interviews is read by members as themselves alone (brain-next.ts
+    // `membersGroup`),
+    // which code never reads as, so no statement of this recall ever ranks
+    // or counts one: none can be here. Narrowed for the SDK's type, never
+    // thrown over.
     const pack: BrainPack = {
       ...recalled,
       items: recalled.items.flatMap((item) => {
         const { producer, id } = item.source;
         return producer === "capture" ||
           producer === "interview" ||
-          producer === "claim"
+          producer === "claim" ||
+          producer === "drawing"
           ? []
           : [{ ...item, source: { producer, id } }];
       }),
@@ -404,9 +408,9 @@ export const skillsCallFor = async (
 //   answered as one nobody holds.
 // - What it hands over rests on memories: a card's, and those that make
 //   every entity it names seen, named and found. The caller keeps each
-//   version of a source they rest on, and each memory in a writer's own
-//   word, before it gets the answer (a run's pins, a chat's reads), and
-//   code never sees them.
+//   version of a source they rest on, and each of those memories with
+//   what it rests on (`CodeRestsOn`), before it gets the answer (a run's
+//   pins, a chat's reads), and code never sees them.
 
 // What a workflow's test run checks a request with before it answers from
 // its fixtures (workflows/brain-calls.ts), which reaches brain-next.ts

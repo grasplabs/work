@@ -68,16 +68,25 @@ export const deleteMemories = (
     "DELETE FROM memories WHERE row IN (SELECT value FROM json_each(?))",
     listed
   );
-  sql.exec(
-    `DELETE FROM entities WHERE row IN (
-      SELECT touched.value FROM json_each(?1) AS touched
-      WHERE NOT EXISTS (SELECT 1 FROM memories WHERE memories.entity = touched.value)
-        AND NOT EXISTS (SELECT 1 FROM memories WHERE memories.object = touched.value)
-        -- The store's own entity stays with no memories (own-entity.ts).
-        AND NOT EXISTS (SELECT 1 FROM own_entity WHERE own_entity.entity = touched.value)
-    )`,
-    JSON.stringify(touched.flatMap(({ entity }) => entity ?? []))
-  );
+  const gone = sql
+    .exec<{ id: string }>(
+      `DELETE FROM entities WHERE row IN (
+        SELECT touched.value FROM json_each(?1) AS touched
+        WHERE NOT EXISTS (SELECT 1 FROM memories WHERE memories.entity = touched.value)
+          AND NOT EXISTS (SELECT 1 FROM memories WHERE memories.object = touched.value)
+          -- The store's own entity stays with no memories (own-entity.ts).
+          AND NOT EXISTS (SELECT 1 FROM own_entity WHERE own_entity.entity = touched.value)
+      ) RETURNING id`,
+      JSON.stringify(touched.flatMap(({ entity }) => entity ?? []))
+    )
+    .toArray();
+  // A card a restore given up recorded goes with what it recorded of it.
+  if (gone.length > 0) {
+    sql.exec(
+      "DELETE FROM restore_cards WHERE entity IN (SELECT value FROM json_each(?))",
+      JSON.stringify(gone.map(({ id }) => id))
+    );
+  }
   return setsOf(
     sql,
     touched.map(({ readers }) => readers)

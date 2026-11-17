@@ -2,6 +2,7 @@
  * The onboarding's Durable Object SQLite (onboarding/store.ts): one per
  * deployment. Migrates itself on first wake-up after a release.
  */
+import type { StatementKind } from "@grasp-os/shared/brain";
 import { sql } from "drizzle-orm";
 import {
   check,
@@ -76,7 +77,19 @@ export const teams = sqliteTable("teams", {
   name: text().notNull(),
   /** Its lead, by person. */
   lead: text(),
+  /**
+   * What it does, as the admin described it on the roster they saved: only
+   * ever the admin's own words, which every member reads once confirmed
+   * (GRA-1748). Never the lead's map (`mappedDoes`).
+   */
   does: text().notNull(),
+  /**
+   * What it does, as its lead's map drew it (team-map.ts): a model's answer
+   * from the lead's own interview. Read by Grasp's staff alone, as before;
+   * never handed to the Brain nor shown to members (GRA-1748). None before
+   * a map said it.
+   */
+  mappedDoes: text("mapped_does"),
   off: integer({ mode: "boolean" }).notNull(),
   /**
    * When its lead's map of the team's work was drawn (ISO 8601): its links
@@ -488,21 +501,26 @@ export const countedWorks = sqliteTable("counted_works", {
 });
 
 /**
- * Each team on its way into the brain (onboarding/brain-intake.ts): when
- * something new of it waits to be given to the brain (`dueAt`), and when
- * the brain first had any of it (`sentAt`), both ISO 8601.
+ * Each team whose intake may be due (onboarding/brain-intake.ts): when
+ * something new of it waits to be taken in (`dueAt`), ISO 8601.
  */
 export const brainTeams = sqliteTable("brain_teams", {
   team: text().primaryKey(),
   dueAt: text("due_at"),
+  /**
+   * When the old brain's records first had any of the team (GRA-1748):
+   * written and read by nothing since the onboarding keeps what it learned
+   * itself. Dropped in a later release (expand, then contract).
+   */
   sentAt: text("sent_at"),
 });
 
 /**
- * Who each record the onboarding gave the brain rests on: a statement on
- * whoever agreed to its fact, a drawing on whom it was drawn from. The
- * brain's records never name a person; this is how deleting an interview
- * finds what it is in (GRA-368). Goes with nothing else.
+ * Who each of a team's claims and drawings rests on: a claim
+ * (`statement`) on whoever agreed to its fact, a drawing
+ * (`workflowVersion`) on whom it was drawn from. The Brain never names a
+ * person; this is how deleting an interview finds what it is in
+ * (GRA-368). Goes with nothing else.
  */
 export const brainSent = sqliteTable(
   "brain_sent",
@@ -512,8 +530,9 @@ export const brainSent = sqliteTable(
     team: text().notNull(),
     person: text().notNull(),
     /**
-     * The record it belongs to: a drawing's workflow, which goes once none
-     * of its drawings is left. None for anything else.
+     * The old brain's workflow a drawing belonged to (GRA-1748): written
+     * and read by nothing since the onboarding keeps its drawings itself.
+     * Dropped in a later release (expand, then contract).
      */
     parent: text(),
   },
@@ -711,9 +730,11 @@ export const brainInterviews = sqliteTable(
  * the team's people back, as the intake counts them here (`brain_sent`,
  * record `record`), given to the Brain as a source of its own
  * (`claim:<source>`) under an id minted here each time it stands. Who
- * backs it is counted here alone, never in the Brain. Once the recount
- * drops it below five it is erased (`erase`), and the row goes once the
- * Brain's erasure returned; a claim backed again later is a new source.
+ * backs it is counted here alone, never in the Brain. Once a change drops
+ * it (below five, its team below seven, or no longer made), it is marked
+ * to be erased (`erase`), then taken out of use and erased in the Brain,
+ * all before that change commits; the row goes once the Brain's erasure
+ * returned. A claim backed again later is a new source.
  */
 export const brainClaims = sqliteTable(
   "brain_claims",
@@ -723,9 +744,59 @@ export const brainClaims = sqliteTable(
     /** The intake's statement record it stands for. */
     record: text().notNull(),
     team: text().notNull(),
+    /**
+     * What kind of thing was said (a goal, a blocker, ...), as the Brain
+     * page groups the team's claims (GRA-1748). None on a row from before
+     * it was kept: onboarding migration 0040 owes those an erasure. None
+     * also on a claim noted while the admin rolled back past 0040 and
+     * rolled forward again: such a claim stays off the page for good
+     * (hidden, never shown wrongly) until its team's claims are put
+     * together anew.
+     */
+    kind: text().$type<StatementKind>(),
     text: text().notNull(),
     /** Whether it is to be erased: set once, never cleared. */
     erase: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [index("brain_claims_record").on(table.record)]
+);
+
+/**
+ * Each drawing of a team's piece of work given to the Brain and to the
+ * Brain page (GRA-1748): only the parts five or more told, checked, as
+ * the intake drew it, given to the Brain as a source of its own
+ * (`drawing:<source>`) under an id minted here each time it stands. Whom
+ * it rests on is noted here alone (`brain_sent`, record `record`), never
+ * in the Brain. Once a change drops it (someone it rests on no longer
+ * counts, its team under five, its map no longer its lead's, a newer
+ * drawing of the work, or a document's reading it may have had), it is
+ * marked to be erased (`erase`), then taken out of use and erased in the
+ * Brain, all before that change commits; the row goes once the Brain's
+ * erasure returned. One drawn again later is a new source.
+ */
+export const brainDrawings = sqliteTable(
+  "brain_drawings",
+  {
+    /** The source's id in the Brain (`drawing:<source>`), minted here. */
+    source: text().primaryKey(),
+    /** The drawing's own id, from what it holds: whom it rests on is noted under it. */
+    record: text().notNull(),
+    /** The piece of work's id on the Brain page, from its team and its work. */
+    workflow: text().notNull(),
+    team: text().notNull(),
+    /** The piece of work's name, in English. */
+    name: text().notNull(),
+    /** Its name in the language its people speak; none when the same. */
+    local: text(),
+    /** The drawing, as a brain record (`workflowVersion`), as JSON. */
+    drawing: text().notNull(),
+    /** When it was noted (ISO 8601): a document's removal takes what came since. */
+    at: text().notNull(),
+    /** Whether it is to be erased: set once, never cleared. */
+    erase: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [
+    index("brain_drawings_record").on(table.record),
+    index("brain_drawings_team").on(table.team),
+  ]
 );

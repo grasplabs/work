@@ -32,8 +32,11 @@ import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { teamsOf } from "../src/auth/identity.ts";
 import {
   addSource,
+  brainWorkOverview,
   eraseSource,
   recallAs,
+  recallPassagesAs,
+  recalledTokens,
   workBrain,
 } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
@@ -61,6 +64,7 @@ import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { testApp } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { failingAuditLog } from "./failing-audit-log.ts";
+import { noProducers } from "./no-producers.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
@@ -137,13 +141,57 @@ const brainGrant = (
   binding: `BRAIN_${unique().replaceAll(/\W/gu, "_").toUpperCase()}`,
 });
 
+/** A version as `passedOn` names it: its source's id, shortened, and its number. */
+const versionKey = (id: string, version: number): string =>
+  `${id.slice(0, 8)} v${version}`;
+
+/**
+ * The versions everyone in the company may read now, of every test in this
+ * file, by their source's id: each `forEveryone` and upload for everyone
+ * adds, until core adds
+ * the source again for other readers (narrowed: no version of it is the
+ * company's then) or erases it (`addSourceNoLongerEveryones`,
+ * `eraseSourceNoLongerEveryones` below). What
+ * code's recall as the company may find by meaning, whichever test added
+ * it, and nothing else.
+ */
+const everyonesVersions = new Map<string, string>();
+
+/** Whether `key` (`versionKey`) is a version everyone may read now. */
+const isEveryones = (key: string): boolean =>
+  [...everyonesVersions.values()].includes(key);
+
+/**
+ * Core's `addSource`, which every call in this file goes through: a
+ * source of everyone's added again for other readers is no longer
+ * everyone's (`everyonesVersions`).
+ */
+const addSourceNoLongerEveryones = async (
+  ...args: Parameters<typeof addSource>
+): Promise<void> => {
+  everyonesVersions.delete(args[1].source.id);
+  await addSource(...args);
+};
+
+/**
+ * Core's `eraseSource`, which every call in this file goes through: an
+ * erased source is no one's (`everyonesVersions`).
+ */
+const eraseSourceNoLongerEveryones = async (
+  ...args: Parameters<typeof eraseSource>
+): Promise<void> => {
+  everyonesVersions.delete(args[1].source.id);
+  await eraseSource(...args);
+};
+
 /** A source in the Brain that `readers` may read. */
 const added = async (
   text: string,
-  readers: SourceReaders
+  readers: SourceReaders,
+  producer: "upload" | "claim" = "upload"
 ): Promise<SourceRef> => {
-  const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
-  await addSource(env, {
+  const source: SourceRef = { producer, id: crypto.randomUUID() };
+  await addSourceNoLongerEveryones(env, {
     source,
     change: crypto.randomUUID(),
     text,
@@ -154,10 +202,13 @@ const added = async (
 
 /**
  * A source everyone in the company may read, added to the shared store
- * as an upload shared with everyone is (brain-uploads.ts).
+ * as an upload shared with everyone is (brain-uploads.ts). Code's recall
+ * finds these by words and every such source of earlier tests by meaning
+ * too.
  */
 const forEveryone = async (text: string): Promise<SourceRef> => {
   const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+  everyonesVersions.set(source.id, versionKey(source.id, 1));
   await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addSource({
     source: `upload:${source.id}`,
     change: crypto.randomUUID(),
@@ -165,6 +216,30 @@ const forEveryone = async (text: string): Promise<SourceRef> => {
     access: { kind: "audience", group: "company" },
   });
   return source;
+};
+
+/**
+ * A team's claim from the onboarding's interviews, as core hands one over
+ * (onboarding/new-brain.ts): for every member reading as themselves.
+ */
+const claimed = async (text: string): Promise<SourceRef> =>
+  await added(text, { kind: "members" }, "claim");
+
+/** Most ticks of the Brain's work `embeddedAll` waits for. */
+const embedTicksMax = 30;
+
+/** Runs the Brain's work until every current chunk of the shared store is embedded, or found unembeddable. */
+const embeddedAll = async (): Promise<void> => {
+  for (let tick = 1; tick <= embedTicksMax; tick += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one tick at a time
+    await workBrain(env, new Date(Date.now() + tick * 60_000), noProducers);
+    // oxlint-disable-next-line no-await-in-loop -- one tick at a time
+    const { embedding } = await brainWorkOverview(env);
+    if (embedding.embedded + embedding.unembeddable === embedding.chunks) {
+      return;
+    }
+  }
+  throw new Error(`Not every chunk was embedded in ${embedTicksMax} ticks.`);
 };
 
 /** A WebVTT file saying `text`, as a person uploads one. */
@@ -234,8 +309,17 @@ const company = async () => {
     kind: "team",
     teamId: payroll,
   });
-  await forEveryone(`For everyone: ${word} is in the handbook.`);
-  return { word, admin, ada, uma, teams: { payroll, adas, umas } };
+  const everyone = await forEveryone(
+    `For everyone: ${word} is in the handbook.`
+  );
+  return {
+    word,
+    admin,
+    ada,
+    uma,
+    teams: { payroll, adas, umas },
+    everyone: versionKey(everyone.id, 1),
+  };
 };
 
 /** The request every surface sends here. */
@@ -491,6 +575,11 @@ const recallEvents = async (
 describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
   it("answers an App and a workflow the same pack, of what everyone in the company may read, and a chat's code what its person's teams may", async () => {
     const { word, admin, ada } = await company();
+    // A team's claim from the interviews: every member reads it, as Ada
+    // does in her own chat, but code is never handed one, which it could
+    // keep past the claim's fall (GRA-1946).
+    const claimNote = `Five of a team said ${word} is planned after the review.`;
+    await claimed(claimNote);
     const request = requestOf(word);
     // The App.
     const app = await askOf(ada, []);
@@ -548,11 +637,14 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       // Her chat's code: her team's note and the note for everyone, never
       // her own.
       chat: [teamNote, forEveryoneNote].toSorted(),
-      // Her own search: hers too, and never a team's she isn't in.
+      // Her own search, as her chat's turn recalls before her question:
+      // hers too, the team's claim from the interviews, and never a
+      // team's she isn't in.
       own: [
         `Ada's own note: ask your lead about ${word}.`,
         teamNote,
         forEveryoneNote,
+        claimNote,
       ].toSorted(),
     });
     // Each audited for her, with what it found counted, never said.
@@ -573,6 +665,7 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       crypto.randomUUID(),
     ];
     // Uploaded as the Sources page uploads, through the producer itself.
+    everyonesVersions.set(everyoneUpload, versionKey(everyoneUpload, 1));
     await uploadToBrain(
       env,
       ada,
@@ -845,12 +938,12 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     );
     // The first plan is erased (it was in the shared store, as any
     // source not one person's own is); the third narrowed to a team.
-    await eraseSource(env, {
+    await eraseSourceNoLongerEveryones(env, {
       source: erased,
       readers: { kind: "none" },
       reason: "deleted",
     });
-    await addSource(env, {
+    await addSourceNoLongerEveryones(env, {
       source: narrowed,
       change: crypto.randomUUID(),
       text: `Route plan: ${narrowedWord} departs at four.`,
@@ -894,13 +987,13 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       runs.push(runId);
     }
     // Once they ended: the first plan narrowed to a team, the second erased.
-    await addSource(env, {
+    await addSourceNoLongerEveryones(env, {
       source: narrowed,
       change: crypto.randomUUID(),
       text: `Salary band: ${narrowedWord} is 95k.`,
       readers: { kind: "team", teamId: elsewhere },
     });
-    await eraseSource(env, {
+    await eraseSourceNoLongerEveryones(env, {
       source: erased,
       readers: { kind: "none" },
       reason: "deleted",
@@ -969,13 +1062,13 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     await handOver();
     const handed = await ofRuns("Workflow run completed");
     const before = [await ofRuns(narrowedWord), await ofRuns(erasedWord)];
-    await addSource(env, {
+    await addSourceNoLongerEveryones(env, {
       source: narrowed,
       change: crypto.randomUUID(),
       text: `Salary band: ${narrowedWord} is 95k.`,
       readers: { kind: "team", teamId: elsewhere },
     });
-    await eraseSource(env, {
+    await eraseSourceNoLongerEveryones(env, {
       source: erased,
       readers: { kind: "none" },
       reason: "deleted",
@@ -1027,7 +1120,7 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
         await Promise.resolve();
       }),
       erased: await sentAfter(async (source) => {
-        await eraseSource(env, {
+        await eraseSourceNoLongerEveryones(env, {
           source,
           readers: { kind: "team", teamId: team },
           reason: "deleted",
@@ -1035,7 +1128,7 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
       }),
       // Narrowed to a team she isn't in.
       narrowed: await sentAfter(async (source, word) => {
-        await addSource(env, {
+        await addSourceNoLongerEveryones(env, {
           source,
           change: crypto.randomUUID(),
           text: `Route plan: ${word} departs at one.`,
@@ -1195,8 +1288,43 @@ const calledOf = async (
   return result.ok ? result.value : { failed: result.error.code };
 };
 
-/** What a run's recall handed on: its items' texts, joined. */
-const joinedTexts = "recalled.items.map((item) => item.text).join(' | ')";
+/**
+ * What a run's recall handed on: each item as the way it was found and
+ * its version (`versionKey`), joined: short, so a pack of every item it
+ * may hold stays within a decision's prompt, and a version of any test's
+ * passage the run may not read would be in it.
+ */
+const joinedTexts =
+  "recalled.items.map((item) => item.found + ' ' + item.source.id.slice(0, 8) + ' v' + item.version).join(' | ')";
+
+/**
+ * `joined` (`joinedTexts`) as what it handed on: the versions found by
+ * words or an exact part (which one depends on whether the random word
+ * holds two digits), and those found by meaning that everyone may not
+ * read: none, for code's recall as the company. That anything comes back
+ * by meaning isn't asserted: a test run alone holds no other note for
+ * everyone, and its own is found by its word, so by meaning there is
+ * nothing it may get; run whole, the file's earlier notes come back.
+ */
+const passedOn = (joined: unknown) => {
+  const items = (typeof joined === "string" ? joined.split(" | ") : []).map(
+    (each) => {
+      const [way = "", ...version] = each.split(" ");
+      return { way, version: version.join(" ") };
+    }
+  );
+  return {
+    byWord: items
+      .filter(({ way }) => way === "words" || way === "exact")
+      .map(({ version }) => version),
+    hiddenByMeaning: items
+      .filter(
+        ({ way, version }) =>
+          way !== "words" && way !== "exact" && !isEveryones(version)
+      )
+      .map(({ way, version }) => `${way} ${version}`),
+  };
+};
 
 /**
  * A workflow of `by`'s that recalls its args' question, its `brain`
@@ -1255,7 +1383,7 @@ const recallingThen = async (
 
 describe("what code recalls, passed on", setUpTime, () => {
   it("reaches a shared App as what everyone in the company may read: never the team text of the person the run was for", async () => {
-    const { word, admin, uma } = await company();
+    const { word, admin, uma, everyone } = await company();
     const bob = await person("builder");
     const ben = await person("user");
     // Bob's Notes, with no Brain, shared with Uma and Ben.
@@ -1308,15 +1436,20 @@ describe("what code recalls, passed on", setUpTime, () => {
     const ran = await ranOf(uma, workflow.id, { question: word, tokens: 800 });
     expect({
       ran: z.object({ failed: z.unknown() }).safeParse(ran).success,
-      benReads: await calledOf(notes, ben, "notes.titles", {}),
+      benReads: z
+        .array(z.string())
+        .parse(await calledOf(notes, ben, "notes.titles", {}))
+        .map(passedOn),
     }).toStrictEqual({
       ran: false,
-      benReads: [`For everyone: ${word} is in the handbook.`],
+      // The note for everyone by its word, never the team note; by
+      // meaning, only what everyone may read.
+      benReads: [{ byWord: [everyone], hiddenByMeaning: [] }],
     });
   });
 
   it("asks deciders about what everyone in the company may read, never the team text of the person the run was for", async () => {
-    const { word, admin, uma } = await company();
+    const { word, admin, uma, everyone } = await company();
     const bob = await person("builder");
     const reviewer = await person("user");
     const contract = `recalled-review-${unique()}`;
@@ -1367,7 +1500,10 @@ describe("what code recalls, passed on", setUpTime, () => {
       },
       { timeout: 20_000, interval: 100 }
     );
-    expect(asked).toBe(`For everyone: ${word} is in the handbook.`);
+    expect(passedOn(asked)).toStrictEqual({
+      byWord: [everyone],
+      hiddenByMeaning: [],
+    });
   });
 });
 
@@ -2014,5 +2150,105 @@ describe("an App whose grant names teams", setUpTime, () => {
         brainGrant({ type: "app", appId: app.app }, [teams.adas, teams.adas])
       )
     ).rejects.toMatchObject({ code: "permission.invalid" });
+  });
+});
+
+// Last in this file: it embeds every chunk of the shared store, so the
+// search by meaning of any test after it would also find what earlier
+// tests added for everyone.
+describe("code's recall beside team claims", setUpTime, () => {
+  it("answers an App, a workflow and a chat's code exactly as before any team claim, however many match and however small the budget, while the member reads them", async () => {
+    const { word, admin, ada } = await company();
+    const question = `${word} rota`;
+    // A budget that holds one passage: what the company may read for the
+    // question, recalled with room to spare and counted as the Brain
+    // counts it. Whatever else took a place would show.
+    await embeddedAll();
+    const { items: roomy } = await recallPassagesAs(env, ada.userId, {
+      question,
+      budget: { tokens: 2000 },
+      personal: false,
+      company: true,
+      teams: [],
+    });
+    const [onePassage] = roomy;
+    if (onePassage === undefined) {
+      throw new Error("Nothing the company may read answers the question.");
+    }
+    const request = {
+      question,
+      budget: {
+        tokens: recalledTokens({
+          items: [onePassage],
+          memories: [],
+          contested: [],
+          notFound: [],
+          truncated: false,
+        }),
+      },
+    };
+    const app = await askOf(ada, []);
+    const appGrant = await granted(
+      ada,
+      admin,
+      brainGrant({ type: "app", appId: app.app }),
+      app.release.manifest.resourceVersion
+    );
+    await approveResourceBinding(env, admin, {
+      app: app.app,
+      alias: "brain",
+      target: { kind: "brain", permissionId: appGrant },
+      reviewed: { version: 1 },
+    });
+    const { workflow } = await recallingWorkflow(ada, admin);
+    const { stub, chat, ask, agent } = await chatOf(
+      ada.userId,
+      recallCode(request),
+      says("Done."),
+      recallCode(request),
+      says("Done.")
+    );
+    await granted(ada, admin, brainGrant(agent));
+    const asked = { question: request.question, tokens: request.budget.tokens };
+    const codeRecalls = async () => ({
+      app: await askedOf(app, ada, asked),
+      run: await ranOf(ada, workflow.id, asked),
+    });
+    await embeddedAll();
+    const before = await codeRecalls();
+    await ask("What about leave?");
+    // Claims that match the question better than anything code may read,
+    // shorter, newer and many: each would take the one place, change what
+    // is not found and whether the budget cut something, if code's recall
+    // so much as counted it.
+    const claims = Array.from(
+      { length: 12 },
+      (_, at) => `${word} rota ${at}: five said so.`
+    );
+    for (const text of claims) {
+      // oxlint-disable-next-line no-await-in-loop -- one claim at a time
+      await claimed(text);
+    }
+    // Embedded too, so the search by meaning is asked of them as well.
+    await embeddedAll();
+    const after = await codeRecalls();
+    await ask("And now?");
+    const [chatBefore, chatAfter] = await codeResults(stub, chat.id);
+    const own = await recallAs(env, ada.userId, {
+      question: request.question,
+      budget: { tokens: 2000 },
+      personal: true,
+    });
+    expect({
+      heldBefore: textsOf(before.app).length,
+      after,
+      chat: returnedOf(chatAfter?.text),
+      ownFindsClaims: own.items.some(({ text }) => claims.includes(text)),
+    }).toStrictEqual({
+      heldBefore: 1,
+      after: before,
+      chat: returnedOf(chatBefore?.text),
+      ownFindsClaims: true,
+    });
   });
 });

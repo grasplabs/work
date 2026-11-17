@@ -90,11 +90,6 @@ const EffectLines = ({
             : t`These notes rest on nothing else and go too: ${named}.`}
         </p>
       ) : null}
-      {effect.workflows.length > 0 ? (
-        <p>
-          {t`${plural(effect.workflows.length, { one: "# workflow keeps its numbers, which will say their source was removed.", other: "# workflows keep their numbers, which will say their source was removed." })}`}
-        </p>
-      ) : null}
     </>
   );
 };

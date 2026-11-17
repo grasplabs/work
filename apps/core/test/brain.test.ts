@@ -3,7 +3,6 @@ import { purgedMarker } from "@grasp-os/shared/brain-records";
 import { visionFields } from "@grasp-os/shared/kickoff";
 import type { VisionField } from "@grasp-os/shared/kickoff";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
-import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { zipSync } from "fflate";
 import { describe, expect, it } from "vite-plus/test";
@@ -14,7 +13,7 @@ import { adminKickoff } from "./admin-kickoff.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { fakeProvider } from "./model-provider.ts";
-import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
+import { signedInApi, unique } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 
 // The company brain's workspace (`brain.read`, brain-rpc.ts), assembled
@@ -24,9 +23,8 @@ import { connectDb } from "./test-env.ts";
 // provider behind connect is the outside system, a fake. What can go wrong,
 // tried here: a team counted twice when two sources name it; the
 // onboarding, which only admins see, reaching anyone else, beyond the
-// kickoff's vision and teams, which it gives the brain as records; the
-// kickoff kept twice, its vision written over, or a replaced transcript's
-// vision and teams still read, or deleted; an interview
+// kickoff's vision and teams, which every member reads; a replaced
+// transcript's vision and teams still read; an interview
 // shown before the admin's progress counts it, an employee's shown at
 // all, or anything said in one reaching the brain; a tool counted twice
 // when two documents, or a document and a brain record, name it; a
@@ -221,31 +219,15 @@ const kickoffAs = <T extends { id: string }>(teams: T[]): T[] =>
     team.id.startsWith("onb-kt-") ? { ...team, id: "kickoff" } : team
   );
 
-/** The records `run` gave the brain, by type, and who gave them. */
-const keptBy = async (run: () => Promise<unknown>) => {
-  const events = await auditedDuring(run);
-  return events
-    .filter(({ action }) => action.startsWith("brain.records."))
-    .map(({ action, actor, provenance }) => ({
-      action,
-      actor: actor.type,
-      records: provenance.map((key) => key.split(":")[0]),
-    }));
-};
-
-/** Whether each of `ids` is kept in the brain's records, and retired. */
-const retiredOf = async (ids: readonly string[]) => {
-  const { results } = await env.DB.prepare(
-    "SELECT id, retired_at IS NOT NULL AS retired FROM brain_records WHERE id IN (SELECT value FROM json_each(?)) ORDER BY position"
-  )
-    .bind(JSON.stringify(ids))
-    .all<{ id: string; retired: number }>();
-  return results.map(({ retired }) => retired === 1);
-};
-
-/** The names of the teams the kickoff named, as records. */
-const kickoffTeams = (teams: { id: string; name: string }[]) =>
-  teams.flatMap(({ id, name }) => (id.startsWith("onb-kt-") ? [name] : []));
+/**
+ * The names of the teams the kickoff named: found in it first, alone or
+ * joined to the confirmed roster's team of their name, which every member
+ * reads too (GRA-1748).
+ */
+const kickoffTeams = (teams: { sourceId: string; name: string }[]) =>
+  teams.flatMap(({ sourceId, name }) =>
+    sourceId === "src-kickoff" ? [name] : []
+  );
 
 describe("the brain's workspace", { timeout: 120_000 }, () => {
   it("is a valid empty workspace while the deployment holds nothing for it", async () => {
@@ -286,7 +268,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     // The sponsor answers what the kickoff already said something about:
     // the brain keeps both.
     await bringInKickoff({ pain: "Clients wait weeks for their numbers." });
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.confirmRoster(roster);
     await mailConnection();
 
     const workspace = await admin.api.brain.read();
@@ -389,11 +371,14 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       others: true,
     });
 
-    // Someone who isn't an admin gets the connections and the kickoff's
-    // vision and teams, which are the company's, never the rest of the
-    // onboarding: no roster, no business, no head count.
-    const kickoffSource = workspace.sources.filter(
-      ({ id }) => id === "src-kickoff"
+    // Someone who isn't an admin gets the connections, the kickoff's
+    // vision and teams with the sizes the sponsor gave them, and the
+    // confirmed roster's teams taking part with their head counts (GRA-1748,
+    // the owner on 17 November): never anyone on the roster, its roles or
+    // leads, a team switched off (Operations), the business, or the
+    // company's head count (`company.people`).
+    const companySources = workspace.sources.filter(
+      ({ id }) => id === "src-kickoff" || id === "src-roster"
     );
     expect({
       company: asMember.company,
@@ -406,15 +391,18 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       vision: { ...workspace.vision, inviteTeamIds: [] },
       teams: [
         {
-          id: "kickoff",
+          id: "team-finance",
           name: "Finance",
           sourceId: "src-kickoff",
-          counts: [{ sourceId: "src-kickoff", date: today(), people: 8 }],
+          counts: [
+            { sourceId: "src-kickoff", date: today(), people: 8 },
+            { sourceId: "src-roster", date: today(), people: 3 },
+          ],
           stakeholders: [],
         },
         kickoffAs(workspace.teams).find(({ name }) => name === "Legal"),
       ],
-      sources: kickoffSource,
+      sources: companySources,
       mail: workspace.connections.filter(({ name }) => name === "mail"),
     });
   });
@@ -628,6 +616,93 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     });
   });
 
+  it("leaves out a team an admin's records name that the kickoff names no more, never showing it by its id", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const member = await signedInApi(idp, "user");
+    // The kickoff names Finance and Legal; an admin's records name Legal.
+    await bringInKickoff();
+    const { teams: named } = await member.api.brain.read();
+    const idOf = (name: string): string =>
+      named.find((team) => team.name === name)?.id ?? "";
+    const legal = idOf("Legal");
+    const finance = idOf("Finance");
+    const tag = unique();
+    const source = `src-${tag}`;
+    await admin.api.brain.addRecords([
+      {
+        type: "source",
+        id: source,
+        kind: "interview",
+        title: "Legal interview",
+        date: today(),
+        teamIds: [legal, finance],
+      },
+      {
+        type: "tool",
+        id: `tool-${tag}`,
+        name: `ledger ${tag}`,
+        teamIds: [legal],
+        sourceId: source,
+      },
+      {
+        type: "statement",
+        id: `st-${tag}`,
+        kind: "goal",
+        text: `Close the books in ${tag} days.`,
+        sourceId: source,
+        teamIds: [legal, finance],
+      },
+    ]);
+    // The next kickoff names Finance alone: Legal is gone, as an earlier
+    // release's kickoff teams are since migration 0259.
+    await bringInKickoff(
+      {},
+      {
+        ...kickoffReading,
+        teams: [{ name: "Finance", does: "Bookkeeping", people: 8 }],
+      }
+    );
+
+    /** Where `read` names Legal, by any record. */
+    const legalIn = (
+      read: Awaited<ReturnType<typeof admin.api.brain.read>>
+    ) => ({
+      team: read.teams.some(({ id }) => id === legal),
+      sources: read.sources
+        .filter(({ id }) => id === source)
+        .map(({ teamIds }) => teamIds),
+      tools: read.tools
+        .filter(({ id }) => id === `tool-${tag}`)
+        .map(({ teamIds }) => teamIds),
+      statements: read.statements
+        .filter(({ id }) => id === `st-${tag}`)
+        .map(({ teamIds }) => teamIds),
+      anywhere: JSON.stringify(read).includes(legal),
+    });
+
+    const asAdmin = await admin.api.brain.read();
+    // Finance as the admin reads it: the roster's, when a roster has it.
+    const financeNow =
+      asAdmin.teams.find(({ name }) => name === "Finance")?.id ?? "";
+
+    expect({
+      legal: legal === "" ? "" : "named",
+      admin: legalIn(asAdmin),
+      member: legalIn(await member.api.brain.read()).anywhere,
+    }).toStrictEqual({
+      legal: "named",
+      // Finance, which the kickoff still names, stays on each.
+      admin: {
+        team: false,
+        sources: [[financeNow]],
+        tools: [[]],
+        statements: [[financeNow]],
+        anywhere: false,
+      },
+      member: false,
+    });
+  });
+
   it("keeps a connection to an entry an admin hid, by its catalog name, and offers the entry no more", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
@@ -697,32 +772,18 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     });
   });
 
-  it("gives the brain the kickoff's vision and teams as records every member reads, each once, a new vision whenever it changes", async () => {
+  it("shows every member the kickoff's vision as the sponsor answers it, and its teams, which an admin's records may name", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
     const staff = adminKickoff();
     await bringInKickoff();
-    const answerPain = async (text: string) =>
-      await keptBy(async () => await staff.answerKickoff("pain", text));
     const said = `Clients wait ${unique()} weeks.`;
-    const before = await member.api.brain.read();
 
-    // The sponsor answers about the pain: a new vision, as the onboarding.
-    const answered = await answerPain(said);
-    const afterAnswer = await member.api.brain.read();
-    // The same answer again: nothing new.
-    const again = await answerPain(said);
-    const afterAgain = await member.api.brain.read();
-    // Another answer, then the first one back: each a version of its own,
-    // the newest counting.
-    const changedBack = [
-      ...(await answerPain("Reports are late.")),
-      ...(await answerPain(said)),
-    ];
-    const last = await member.api.brain.read();
-    const legal = last.teams.find(({ name }) => name === "Legal");
-    // A team the kickoff named is a record with an id: an admin can add
-    // what is known of it.
+    await staff.answerKickoff("pain", said);
+    const answered = await member.api.brain.read();
+    const legal = answered.teams.find(({ name }) => name === "Legal");
+    // A team the kickoff named has an id: an admin can add what is known
+    // of it.
     const source = `src-${unique()}`;
     const stakeholder = await admin.api.brain.addRecords([
       {
@@ -742,58 +803,35 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       },
     ]);
     const { teams } = await member.api.brain.read();
-    const vision = {
-      action: "brain.records.added",
-      actor: "system",
-      records: ["vision"],
-    };
 
     expect({
-      answered,
-      afterAnswer: {
-        ambition: afterAnswer.vision.ambition,
-        whyNow: afterAnswer.vision.whyNow,
-        sourceId: afterAnswer.vision.sourceId,
-        version: afterAnswer.vision.version - before.vision.version,
-        teams: kickoffTeams(afterAnswer.teams),
-        kickoff: afterAnswer.sources.some(({ id }) => id === "src-kickoff"),
+      vision: {
+        ambition: answered.vision.ambition,
+        whyNow: answered.vision.whyNow,
+        sourceId: answered.vision.sourceId,
       },
-      again,
-      afterAgain: {
-        version: afterAgain.vision.version - before.vision.version,
-        teams: kickoffTeams(afterAgain.teams),
-      },
-      changedBack,
-      lastVision: {
-        whyNow: last.vision.whyNow,
-        version: last.vision.version - before.vision.version,
-      },
+      teams: kickoffTeams(answered.teams),
+      kickoff: answered.sources.some(({ id }) => id === "src-kickoff"),
       legal: legal?.counts.map(({ people }) => people),
       stakeholder,
       legalRoles: teams
         .find(({ id }) => id === legal?.id)
         ?.stakeholders.map(({ role }) => role),
     }).toStrictEqual({
-      answered: [vision],
-      afterAnswer: {
+      vision: {
         ambition: "Every client gets their numbers within a week.",
         whyNow: `Copying invoices by hand.\n${said}`,
         sourceId: "src-kickoff",
-        version: 1,
-        teams: ["Finance", "Legal"],
-        kickoff: true,
       },
-      again: [],
-      afterAgain: { version: 1, teams: ["Finance", "Legal"] },
-      changedBack: [vision, vision],
-      lastVision: { whyNow: `Copying invoices by hand.\n${said}`, version: 3 },
+      teams: ["Finance", "Legal"],
+      kickoff: true,
       legal: [3],
       stakeholder: { added: 2, unchanged: 0 },
       legalRoles: ["Head of legal"],
     });
   });
 
-  it("retires what a replaced kickoff gave the brain, keeping it, and reads the new one's vision and teams alone", async () => {
+  it("reads a replaced kickoff's vision and teams alone, a team it names again keeping what an admin added for it", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
     const staff = adminKickoff();
@@ -802,11 +840,8 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     await staff.answerKickoff("pain", "");
     await bringInKickoff();
     const first = await member.api.brain.read();
-    const firstIds = first.teams.flatMap(({ id }) =>
-      id.startsWith("onb-kt-") ? [id] : []
-    );
-    // An admin adds what is known of the first transcript's Legal: it goes
-    // with Legal when the next transcript names it again.
+    // An admin adds what is known of Legal: it stays with Legal when the
+    // next transcript names it again.
     const firstLegal =
       first.teams.find(({ name }) => name === "Legal")?.id ?? "";
     const source = `src-${unique()}`;
@@ -837,80 +872,148 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
     ]);
 
     // The second transcript reads other goals, and Legal alone, now of 8.
-    const replaced = await keptBy(async () => {
-      await bringInKickoff(
-        {},
-        {
-          fields: [
-            {
-              field: "goals",
-              text: "AI helps the firm get there.",
-              quote: "AI should help us get there",
-              ask: "",
-            },
-          ],
-          teams: [{ name: "Legal", does: "Contracts", people: 8 }],
-        }
-      );
-    });
+    await bringInKickoff(
+      {},
+      {
+        fields: [
+          {
+            field: "goals",
+            text: "AI helps the firm get there.",
+            quote: "AI should help us get there",
+            ask: "",
+          },
+        ],
+        teams: [{ name: "Legal", does: "Contracts", people: 8 }],
+      }
+    );
     const second = await member.api.brain.read();
     const secondLegal = second.teams.find(({ name }) => name === "Legal");
 
     expect({
       first: {
         ambition: first.vision.ambition,
-        version: first.vision.version,
         teams: kickoffTeams(first.teams),
       },
-      replaced,
       second: {
         ambition: second.vision.ambition,
         whyNow: second.vision.whyNow,
-        version: second.vision.version,
         teams: second.teams
           .filter(({ id }) => id.startsWith("onb-kt-"))
           .map(({ name, counts }) => [
             name,
             counts.map(({ people }) => people),
           ]),
-        notFirst: second.teams.every(({ id }) => !firstIds.includes(id)),
       },
-      // What the admin added for the first Legal is the new Legal's: its
-      // newest stakeholder (an earlier test's Legal gave it one too).
+      // What the admin added for Legal is still Legal's: its newest
+      // stakeholder (an earlier test's Legal gave it one too).
       legalRole: secondLegal?.stakeholders.at(-1)?.role,
       statementTeams: second.statements
         .find(({ id }) => id === `${source}-st`)
         ?.teamIds.map((id) => id === secondLegal?.id),
-      // The first transcript's teams are kept, retired.
-      retired: await retiredOf(firstIds),
     }).toStrictEqual({
       first: {
         ambition: "Every client gets their numbers within a week.",
-        version: 1,
         teams: ["Finance", "Legal"],
       },
-      replaced: [
-        {
-          action: "brain.records.added",
-          actor: "system",
-          records: ["vision", "team", "teamCount"],
-        },
-        {
-          action: "brain.records.retired",
-          actor: "system",
-          records: ["vision", "team", "teamCount", "team", "teamCount"],
-        },
-      ],
       second: {
         ambition: "AI helps the firm get there.",
         whyNow: "",
-        version: 1,
         teams: [["Legal", [8]]],
-        notFirst: true,
       },
       legalRole: "General counsel",
       statementTeams: [true],
-      retired: [true, true],
+    });
+  });
+
+  it("keeps a team the kickoff names again in another case one team, with what an admin added for it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const member = await signedInApi(idp, "user");
+    await bringInKickoff();
+    const before = await member.api.brain.read();
+    const legal = before.teams.find(({ name }) => name === "Legal")?.id ?? "";
+    const source = `src-${unique()}`;
+    await admin.api.brain.addRecords([
+      {
+        type: "source",
+        id: source,
+        kind: "interview",
+        title: "Legal interview",
+        date: today(),
+      },
+      {
+        type: "stakeholder",
+        id: `${source}-lead`,
+        teamId: legal,
+        sourceId: source,
+        date: today(),
+        role: "Head of contracts",
+      },
+    ]);
+
+    // The transcript read again names it twice more, in other cases.
+    await bringInKickoff(
+      {},
+      {
+        ...kickoffReading,
+        teams: [
+          { name: "LEGAL", does: "Contracts", people: 3 },
+          { name: "legal ", does: "Contracts", people: 3 },
+        ],
+      }
+    );
+    const after = await member.api.brain.read();
+    const named = after.teams.filter(
+      ({ name }) => name.trim().toLowerCase() === "legal"
+    );
+
+    expect({
+      named: named.map(({ id, name }) => ({ same: id === legal, name })),
+      role: named[0]?.stakeholders.at(-1)?.role,
+    }).toStrictEqual({
+      named: [{ same: true, name: "LEGAL" }],
+      role: "Head of contracts",
+    });
+  });
+
+  it("shows no team of the kickoff once the admin deletes it, the roster's teams alone", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const member = await signedInApi(idp, "user");
+    await admin.api.onboarding.confirmRoster(roster);
+    await bringInKickoff();
+    const before = await member.api.brain.read();
+
+    await admin.api.onboarding.deleteKickoff();
+    const asAdmin = await admin.api.brain.read();
+    const asMember = await member.api.brain.read();
+
+    expect({
+      before: before.teams.map(({ name }) => name),
+      admin: asAdmin.teams.map(({ name, sourceId, counts }) => ({
+        name,
+        sourceId,
+        sources: [...new Set(counts.map((count) => count.sourceId))],
+      })),
+      member: asMember.teams.map(({ name, sourceId, counts }) => ({
+        name,
+        sourceId,
+        sources: [...new Set(counts.map((count) => count.sourceId))],
+      })),
+      vision: asMember.vision.sourceId,
+    }).toStrictEqual({
+      before: ["Finance", "Legal"],
+      admin: [
+        { name: "Finance", sourceId: "src-roster", sources: ["src-roster"] },
+        {
+          name: "Operations",
+          sourceId: "src-roster",
+          sources: ["src-roster"],
+        },
+      ],
+      // The confirmed roster's team taking part, not the one switched off.
+      member: [
+        { name: "Finance", sourceId: "src-roster", sources: ["src-roster"] },
+      ],
+      vision: "",
     });
   });
 
@@ -1007,38 +1110,6 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
         (each) => each === "Finance" || each === "Legal"
       )
     ).toStrictEqual((kept.reading?.teams ?? []).map(({ name }) => name));
-  });
-
-  it("keeps the kickoff's records once their write failed, from the store's alarm", async () => {
-    const member = await signedInApi(idp, "user");
-    const staff = adminKickoff();
-    await bringInKickoff();
-    const pain = `Late reports ${unique()}.`;
-    // D1 refuses the brain's write of the vision naming this answer, and
-    // only that one, until the trigger goes: however often anything tries
-    // it meanwhile (an alarm left due by an earlier test, say), it fails.
-    const trigger = `refuse_${unique().replaceAll(/\W/gu, "_")}`;
-    await env.DB.exec(
-      `CREATE TRIGGER ${trigger} BEFORE INSERT ON brain_records WHEN NEW.body LIKE '%${pain}%' BEGIN SELECT RAISE(ABORT, 'D1 is unavailable'); END`
-    );
-    let answered: unknown;
-    let before: string;
-    try {
-      answered = await staff.answerKickoff("pain", pain);
-      before = JSON.stringify(await member.api.brain.read());
-    } finally {
-      await env.DB.exec(`DROP TRIGGER IF EXISTS ${trigger}`);
-    }
-    await runInDurableObject(onboardingStore(env), async (store) => {
-      await store.alarm();
-    });
-    const after = JSON.stringify(await member.api.brain.read());
-
-    expect({
-      answered: answered !== undefined,
-      before: before.includes(pain),
-      after: after.includes(pain),
-    }).toStrictEqual({ answered: true, before: false, after: true });
   });
 
   it("joins no two teams an earlier release's purge left named the same", async () => {

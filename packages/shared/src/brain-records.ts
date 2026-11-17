@@ -79,12 +79,6 @@ export const brainGapTextMaxLength = 2000;
 /** Longest a statement's text may be. */
 export const brainStatementMaxLength = 2000;
 
-/**
- * Longest the vision's ambition, or why now, may be: what the kickoff read
- * and the sponsor's answer beside it.
- */
-export const brainVisionTextMaxLength = 5000;
-
 /** Most teams, tools or other ids one record lists. */
 const listMax = 50;
 
@@ -449,21 +443,6 @@ const goalLinkRecordSchema = z.strictObject({
 });
 
 /**
- * The company's vision, as the kickoff set it: where it wants to be in one
- * to two years (`ambition`) and why AI now (`whyNow`). Never edited: when
- * it changes, the onboarding adds a new one, and the newest counts.
- */
-const visionText = z.string().trim().max(brainVisionTextMaxLength);
-const visionRecordSchema = z.strictObject({
-  type: z.literal("vision"),
-  id: ownIdSchema,
-  ambition: visionText,
-  whyNow: visionText,
-  sourceId: brainRecordIdSchema,
-  date: day,
-});
-
-/**
  * What a gap may be about: the records that are notes of their own, so
  * each opens its page. A team's count or stakeholder is a value of its
  * team, a source is where it was noticed (`sourceId`), and another gap
@@ -491,7 +470,6 @@ export const brainRecordSchema = z.discriminatedUnion("type", [
   goalRecordSchema,
   goalVersionRecordSchema,
   goalLinkRecordSchema,
-  visionRecordSchema,
 ]);
 export type BrainRecordInput = z.input<typeof brainRecordSchema>;
 export type BrainRecord = z.infer<typeof brainRecordSchema>;
@@ -500,13 +478,11 @@ export type WorkflowVersionRecord = Extract<
   BrainRecord,
   { type: "workflowVersion" }
 >;
-export type VisionRecord = Extract<BrainRecord, { type: "vision" }>;
 
-/** The types only the onboarding adds: it draws the work and reads the kickoff. */
+/** The types only the onboarding adds: it draws the work. */
 const onboardingTypes: ReadonlySet<BrainRecordType> = new Set([
   "workflow",
   "workflowVersion",
-  "vision",
 ]);
 
 /**

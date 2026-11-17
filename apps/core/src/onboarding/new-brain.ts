@@ -3,11 +3,12 @@ import { log } from "@grasp-os/shared/log";
 
 import { erasureBegun } from "../brain-hand-overs.ts";
 import { addSource, eraseSource } from "../brain-next.ts";
-import type { Handed, SourceRef } from "../brain-next.ts";
+import type { Handed, SourceReaders, SourceRef } from "../brain-next.ts";
 import { onboardingStore } from "./store.ts";
-import type { OwedErasure } from "./store.ts";
+import type { OwedErasure, StandingDrawing } from "./store.ts";
+import { claimSource } from "./team-claims.ts";
 
-// What the onboarding gives the new Brain (GRA-1790, GRA-1741), and takes
+// What the onboarding gives the new Brain (GRA-1790, GRA-1741, GRA-1748), and takes
 // back. The onboarding's store decides what stands, from its own records:
 //
 // - A person's interview (`interview:<id>`): the facts they approved,
@@ -20,11 +21,41 @@ import type { OwedErasure } from "./store.ts";
 //   of anyone's interview may reach that log, not even that it is in their
 //   Brain. Only the onboarding's own log, which staff read, notes it.
 // - A team's claim (`claim:<id>`): its sentence alone (no names, no
-//   quotes), readable by the people of that staff-list team, only while
-//   five or more back it and seven or more of the team were interviewed
+//   quotes), readable by every member of the company reading as themselves
+//   (GRA-1748, decided on 16 November; `members`: never code, an App or a
+//   workflow, which could keep a copy past its fall, until the owner says
+//   whether code may copy claims), only while five or more back it and
+//   seven or more of the team were interviewed
 //   (counted by the store, never in the Brain). Noted by an audit event
 //   for the hand-over (brain-hand-overs.ts), which reads it here
 //   (`claimOf`) when it runs: a team's, never a person's.
+// - A drawing of a team's piece of work (`drawing:<id>`, GRA-1748): only
+//   the parts five or more of its people told, checked, never who told
+//   what, readable by every member reading as themselves (`members`, as a
+//   claim), only while everyone it rests on still counts, its team has
+//   five or more who tell their own work, and its map stands on its lead's
+//   facts (counted by the store). Noted and read like a claim
+//   (`drawingOf`); one drawn anew is a new source.
+// - The kickoff (`kickoff:<id>`, GRA-1748): what every member reads of it
+//   (kickoff-company.ts), readable by everyone, under an id minted for
+//   each kickoff. Noted for the hand-over like a claim, and read here
+//   when it runs (`kickoffOf`): a version is what it reads then, so saves
+//   and answers between two hand-overs are one version, and nothing
+//   anyone could read is lost.
+//   The admin's delete erases it (`eraseOwedKickoffs`), every version.
+// - The company's teams (`roster:teams-<n>`, GRA-1748): each confirmed
+//   team taking part, as the admin described it, and its head count, never
+//   what a lead's map says it does nor who is in it (company-teams.ts),
+//   readable by everyone. Noted and read like the kickoff (`rosterOf`): a
+//   version is what a hand-over reads, so confirmed changes between two
+//   hand-overs are one version, and nothing anyone could read is lost. The admin may erase it, every
+//   version (`eraseOwedRosters`); the next confirmed save gives it afresh
+//   under a new id.
+//
+// A claim or a drawing that stops standing is out of use in the shared
+// store before the change that drops it commits (the store's
+// `#fallenFirst`), so no read after that change finds it (GRA-1946); its
+// erasure follows.
 //
 // What no longer stands is erased with `eraseSource`, directly: at once
 // after anything that takes an interview out (links.ts, admin-command.ts,
@@ -35,12 +66,6 @@ import type { OwedErasure } from "./store.ts";
 /** An interview's source, by the store's id for it. */
 export const interviewSource = (id: string): SourceRef => ({
   producer: "interview",
-  id,
-});
-
-/** A team claim's source, by the store's id for it. */
-export const claimSource = (id: string): SourceRef => ({
-  producer: "claim",
   id,
 });
 
@@ -100,8 +125,159 @@ export const claimOf = async (env: Env, id: string): Promise<Handed> => {
         change: id,
         text: held.text,
         whenTooLarge: "A claim of the team's too large to keep.",
-        readers: { kind: "interviews", teamId: held.team },
+        readers: { kind: "members" },
       };
+};
+
+/** A drawing's source, by the store's id for it (`brain_drawings.source`). */
+export const drawingSource = (id: string): SourceRef => ({
+  producer: "drawing",
+  id,
+});
+
+/**
+ * Drawing `drawing` of `name` (`local` in its people's words) as the new
+ * Brain's source text, for recall: written for a model to read, in
+ * English like the rest of Grasp's own words to it. Its parts are only
+ * what five or more told, with no one's name in them (brain-intake.ts).
+ */
+export const drawingText = ({
+  name,
+  local,
+  drawing,
+}: Pick<StandingDrawing, "name" | "local" | "drawing">): string => {
+  const steps = drawing.steps.map(({ text, who, tool, minutes }, at) => {
+    const about = [
+      who,
+      tool,
+      minutes === null ? "" : `about ${minutes.normal} minutes`,
+    ].filter((part) => part !== "");
+    return `${at + 1}. ${text}${about.length === 0 ? "" : ` (${about.join(", ")})`}`;
+  });
+  return [
+    `How a team does ${name}${local === undefined ? "" : ` (${local})`}, as ${drawing.people} of its people told it`,
+    drawing.starts === "" ? "" : `What starts one: ${drawing.starts}`,
+    steps.length === 0 ? "" : `Its steps:\n${steps.join("\n")}`,
+    drawing.waits.length === 0
+      ? ""
+      : `Where it waits: ${drawing.waits.join("; ")}`,
+  ]
+    .filter((part) => part !== "")
+    .join("\n\n");
+};
+
+/** Drawing `id` as the onboarding holds it now: what five or more told of the piece of work; nothing once it no longer stands. */
+export const drawingOf = async (env: Env, id: string): Promise<Handed> => {
+  const held = await onboardingStore(env).drawingToHand(id);
+  return held === null
+    ? gone
+    : {
+        kind: "source",
+        change: id,
+        text: drawingText(held),
+        whenTooLarge: "A drawing of the team's work too large to keep.",
+        readers: { kind: "members" },
+      };
+};
+
+/** The kickoff's source, by the store's id for it (`kickoffBrainId`). */
+export const kickoffSource = (id: string): SourceRef => ({
+  producer: "kickoff",
+  id,
+});
+
+/** The kickoff `id` as the onboarding holds it now: what every member reads of it; nothing once it was deleted. */
+export const kickoffOf = async (env: Env, id: string): Promise<Handed> => {
+  const held = await onboardingStore(env).kickoffToHand(id);
+  return held === null
+    ? gone
+    : {
+        kind: "source",
+        change: held.change,
+        text: held.text,
+        whenTooLarge: "The company's vision too large to keep.",
+        readers: { kind: "everyone" },
+      };
+};
+
+/** The company's teams' source, by the store's id for it. */
+export const rosterSource = (id: string): SourceRef => ({
+  producer: "roster",
+  id,
+});
+
+/** Who reads the company's teams in the Brain: everyone in the company (the owner, 17 November). */
+const rosterReaders: SourceReaders = { kind: "everyone" };
+
+/** The company's teams as the admin last confirmed them (`rosterToHand`), for everyone in the company. */
+export const rosterOf = async (env: Env, id: string): Promise<Handed> => {
+  const held = await onboardingStore(env).rosterToHand(id);
+  return held === null
+    ? gone
+    : {
+        kind: "source",
+        change: held.change,
+        text: held.text,
+        whenTooLarge: "The company's teams too many to keep.",
+        readers: rosterReaders,
+      };
+};
+
+/**
+ * Erases from the Brain every kickoff the admin deleted that it may still
+ * hold (`kickoffErasuresOwed`), each then forgotten there: right after the
+ * delete, and on core's clock until none is owed. Each failure is logged
+ * by name alone and left owed. Whether none is owed any more.
+ */
+export const eraseOwedKickoffs = async (env: Env): Promise<boolean> => {
+  const store = onboardingStore(env);
+  for (const id of await store.kickoffErasuresOwed()) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
+      await eraseSource(env, {
+        source: kickoffSource(id),
+        readers: { kind: "everyone" },
+        reason: "deleted",
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
+      await store.kickoffErased(id);
+    } catch (error) {
+      log.error("onboarding.brain_erasure_failed", {
+        error: error instanceof Error ? error.name : "unknown",
+      });
+    }
+  }
+  const owed = await store.kickoffErasuresOwed();
+  return owed.length === 0;
+};
+
+/**
+ * Erases from the Brain every id of the company's teams the admin erased
+ * that it may still hold (`rosterErasuresOwed`), each then forgotten
+ * there: right after the erase, and on core's clock until none is owed.
+ * Each failure is logged by name alone and left owed. Whether none is
+ * owed any more.
+ */
+export const eraseOwedRosters = async (env: Env): Promise<boolean> => {
+  const store = onboardingStore(env);
+  for (const id of await store.rosterErasuresOwed()) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
+      await eraseSource(env, {
+        source: rosterSource(id),
+        readers: rosterReaders,
+        reason: "deleted",
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
+      await store.rosterErased(id);
+    } catch (error) {
+      log.error("onboarding.brain_erasure_failed", {
+        error: error instanceof Error ? error.name : "unknown",
+      });
+    }
+  }
+  const owed = await store.rosterErasuresOwed();
+  return owed.length === 0;
 };
 
 /** Erases one owed source from the Brain, with the readers it was added for. */
@@ -115,8 +291,11 @@ const erase = async (env: Env, owed: OwedErasure): Promise<void> => {
     return;
   }
   await eraseSource(env, {
-    source: claimSource(owed.source),
-    readers: { kind: "interviews", teamId: owed.team },
+    source:
+      owed.kind === "claim"
+        ? claimSource(owed.source)
+        : drawingSource(owed.source),
+    readers: { kind: "members" },
     reason: "deleted",
   });
 };
@@ -154,10 +333,13 @@ export const eraseOwedOnboardingSources = async (
 
 /**
  * Settles what the onboarding owes the new Brain: every erasure owed
- * first, then every interview to add (`addOwedInterviews`). Core's clock
- * runs it every minute.
+ * first (a deleted kickoff's, then the interviews' and claims'), then
+ * every interview to add (`addOwedInterviews`). Core's clock runs it
+ * every minute.
  */
 export const settleOnboardingBrain = async (env: Env): Promise<void> => {
+  await eraseOwedKickoffs(env);
+  await eraseOwedRosters(env);
   await eraseOwedOnboardingSources(env);
   await addOwedInterviews(env);
 };

@@ -1,5 +1,4 @@
 import { agentErrors } from "@grasp-os/shared/agent";
-import { agentAppOf } from "@grasp-os/shared/agents";
 import type { AgentApp, AgentAppsWorkedOut } from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
 import { companyToolClasses } from "@grasp-os/shared/connect";
@@ -10,21 +9,24 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { changeableAgent, firstAgentId, readableAgent } from "./agents.ts";
-import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
+import { offeredApps } from "./agent-apps-offered.ts";
+import type { OfferedApp } from "./agent-apps-offered.ts";
 import {
-  agentApps,
-  agents,
-  agentToolClasses,
-  hiddenConnectors,
-} from "./db/core/schema.ts";
+  agentInstructionFile,
+  changeableAgent,
+  firstAgentId,
+  readableAgent,
+} from "./agents.ts";
+import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
+import { readInstructionFilesAs } from "./brain-next.ts";
+import { agentApps, agents, agentToolClasses } from "./db/core/schema.ts";
 import { modelForRole, models, modelSettings } from "./models.ts";
 
 // The apps an agent may use (GRA-1852): each a catalog entry the company
 // offers, by `<source>:<id>`. Whoever manages an agent adds and removes
 // them by hand, and Grasp works them out from its name, job and
-// instructions (`workOutAgentApps`): "check incoming email once a week
-// with Gmail" gives it Gmail.
+// instruction file (`workOutAgentApps`): "check incoming email once a
+// week with Gmail" gives it Gmail.
 //
 // The gate (`requireAgentHasApp`, agent-app-gate.ts, called by the class
 // gate in tool-classes.ts on every call of a connection) holds them: an agent
@@ -33,7 +35,9 @@ import { modelForRole, models, modelSettings } from "./models.ts";
 // widens: the company's classes, the app's, and the agent's still apply.
 //
 // Working them out is a model call on the organization's models, made for
-// whoever asks, on the instructions they may read anyway. What it answers
+// whoever asks, on the instruction file they may read anyway: whoever may
+// change the agent, by the rule that lets them read and write its file
+// (instruction-files.ts), read from the Brain as it is now. What it answers
 // only proposes: core keeps only apps the company offers now and nobody
 // took off, and turns on only kinds of work that read, and only on a
 // company agent whose class is off (a person's own has no class rows: it
@@ -82,35 +86,6 @@ export const listAgentApps = async (
   const agent = await readableAgent(env, identity, agentId);
   const rows = await rowsOf(env, agent.id);
   return rows.map(appOf);
-};
-
-/** An app the company offers: in its catalog, and not hidden by an admin. */
-interface OfferedApp {
-  app: string;
-  name: string;
-  description: string | null;
-}
-
-/** The apps the company offers now, by key. */
-export const offeredApps = async (
-  env: Env
-): Promise<Map<string, OfferedApp>> => {
-  const [catalog, hidden] = await Promise.all([
-    env.CONNECT.catalog(),
-    drizzle(env.DB)
-      .select({
-        source: hiddenConnectors.source,
-        id: hiddenConnectors.connectorId,
-      })
-      .from(hiddenConnectors),
-  ]);
-  const off = new Set(hidden.map(({ source, id }) => agentAppOf(source, id)));
-  return new Map(
-    catalog.entries.flatMap(({ source, id, name, description }) => {
-      const app = agentAppOf(source, id);
-      return off.has(app) ? [] : [[app, { app, name, description }] as const];
-    })
-  );
 };
 
 /**
@@ -245,7 +220,17 @@ export const workOutAgentApps = async (
     rowsOf(env, agent.id),
   ]);
   const offeredList = [...offered.values()];
-  const said = await askModel(env, identity, agent, offeredList);
+  // Its file as it is now, which whoever may change the agent may read
+  // and write (instruction-files.ts).
+  const [file] = await readInstructionFilesAs(env, identity.userId, [
+    agentInstructionFile(agent),
+  ]);
+  const said = await askModel(
+    env,
+    identity,
+    { name: agent.name, job: agent.job, instructions: file?.text ?? "" },
+    offeredList
+  );
   const kept = new Set(had.map(({ app }) => app));
   const added = [...new Set(said.apps)].flatMap((app) => {
     const found = offered.get(app);

@@ -38,10 +38,12 @@ import {
   newSourceSchema,
   onlyInOwnStore,
   ownEntityRequestSchema,
+  profileRequestSchema,
   ownExportFileRequestSchema,
   ownExportRequestSchema,
   ownExportStartSchema,
   personErasureSchema,
+  sharedPersonErasureSchema,
   writerErasureSchema,
   readableMemoriesRequestSchema,
   erasedRequestSchema,
@@ -49,6 +51,7 @@ import {
   recallRequestSchema,
   restoringNow,
   retireRequestSchema,
+  retireWrittenRequestSchema,
   sourceErasureSchema,
   sourceRemovalSchema,
   sourceIdSchema,
@@ -58,11 +61,15 @@ import {
   storeKindOf,
   vectorModelNameOf,
   vectorSearchSchema,
+  writtenRequestSchema,
   vectorsToPutSchema,
   versionListRequestSchema,
   versionRequestSchema,
 } from "./contract.ts";
 import type {
+  RetireWrittenRequest,
+  WrittenPage,
+  WrittenRequest,
   AddedInstructions,
   AddedVersion,
   Card,
@@ -79,6 +86,8 @@ import type {
   EntityId,
   EntityRequest,
   OwnEntityRequest,
+  Profile,
+  ProfileRequest,
   MemoriesRead,
   MemoriesRequest,
   MemoryChangeOutcome,
@@ -86,6 +95,7 @@ import type {
   NewMemories,
   ReadableMemoriesRequest,
   Erased,
+  ErasedMemory,
   ErasedRequest,
   RetireRequest,
   RetiredMemory,
@@ -114,6 +124,7 @@ import type {
   StoreKind,
   NewSource,
   PersonErasure,
+  SharedPersonErasure,
   WriterErasure,
   WriterErased,
   RecallRequest,
@@ -150,6 +161,7 @@ import {
   deleteStoreObjects,
   erase,
   eraseBatch,
+  erasePersonShared,
   eraseWriter,
   eraseWriterBatch,
   erasureStatusOf,
@@ -200,7 +212,13 @@ import {
   retireMemory,
   writerErasedAfterSql,
 } from "./memories.ts";
-import { ownEntityId } from "./own-entity.ts";
+import { ownEntityId, readProfile } from "./own-entity.ts";
+import {
+  closedOf,
+  entityClosureOf,
+  isErasedPerson,
+  personSubjectOf,
+} from "./people.ts";
 import { rebuildMissingSets } from "./reader-sets.ts";
 import {
   countingInto,
@@ -245,6 +263,7 @@ import {
   workOverview,
   workTick,
 } from "./work.ts";
+import { listWritten, retireWritten } from "./written.ts";
 
 /** What a person's own store's alarm works with (`BrainStore.alarmHost`). */
 export interface AlarmHost {
@@ -660,7 +679,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * at `at`.
    */
   #pageMoments(
-    after: { at: Date; learned?: Date } | undefined,
+    after?: { at: Date; learned?: Date },
     asOf?: Date
   ): { at: number; cursorAt: number; learned: number } {
     if (after !== undefined) {
@@ -1104,7 +1123,8 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
   /**
    * What an erasure took for good of the keys and memories asked
    * (contract.ts), from the erasure ledger alone: what this store has
-   * applied of it (`erasures`), which a lost storage reads again before
+   * applied of it (`erasures`, and what a person's erasure closed:
+   * `person_erasure_subjects`), which a lost storage reads again before
    * it answers (`#ready`). Never from whether it holds a memory: a
    * storage lost or brought back from an older copy lacks memories nobody
    * erased, which a restore puts back by their own ids. A person's own
@@ -1144,13 +1164,25 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     const writers = [
       ...new Set(memories.flatMap(({ writer }) => writer ?? [])),
     ];
-    const [found, subjects] = await Promise.all([
+    const people = [
+      ...new Set(
+        memories.flatMap(({ speaker }) =>
+          speaker.kind === "internal" ? [speaker.person] : []
+        )
+      ),
+    ];
+    const [found, subjects, personSubjects] = await Promise.all([
       Promise.all(
         keys.map(async (key) => ((await this.#keyErased(key)) ? [key] : []))
       ),
       Promise.all(
         writers.map(
           async (writer) => [writer, await writerSubjectOf(writer)] as const
+        )
+      ),
+      Promise.all(
+        people.map(
+          async (person) => [person, await personSubjectOf(person)] as const
         )
       ),
     ]);
@@ -1166,13 +1198,38 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
           at
         )
         .toArray().length > 0;
+    // A person's erasure (people.ts) takes a memory in their word, for
+    // good, whenever it was learned (an add in it is refused after), and
+    // one about or relating to an entity it closed by its id: a UUID never
+    // used again, that nobody may name once its memories are hidden. Both
+    // are the ledger's (`erasures`, `person_erasure_subjects`), never the
+    // rows it hid, which the tick deletes.
+    const erasedPeople = new Set(
+      personSubjects.flatMap(([person, subject]) =>
+        isErasedPerson(sql, subject) ? [person] : []
+      )
+    );
+    const closedCards = closedOf(
+      sql,
+      memories.flatMap(({ about, object }) =>
+        (object === null ? [about] : [about, object]).map((entity) =>
+          entityClosureOf(entity)
+        )
+      )
+    );
+    const takenByPerson = ({ speaker, about, object }: ErasedMemory): boolean =>
+      (speaker.kind === "internal" && erasedPeople.has(speaker.person)) ||
+      closedCards.has(entityClosureOf(about)) ||
+      (object !== null && closedCards.has(entityClosureOf(object)));
     return {
       sources: sources.filter((key) => closed.has(key)),
       memories: memories
         .filter(
-          ({ source, writer, learnedAt }) =>
-            (source !== null && closed.has(source)) ||
-            (writer !== null && writerErased(writer, learnedAt))
+          (memory) =>
+            (memory.source !== null && closed.has(memory.source)) ||
+            (memory.writer !== null &&
+              writerErased(memory.writer, memory.learnedAt)) ||
+            takenByPerson(memory)
         )
         .map(({ memory }) => memory),
     };
@@ -1276,6 +1333,27 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     const { person, reason } = checked(personErasureSchema, request);
     this.#ownOnly(person);
     await this.#eraseWhole(reason);
+  }
+
+  /**
+   * Erases what this shared store derived about a person, and what is in
+   * their own word (erasure.ts `erasePersonShared`, people.ts): recorded in
+   * the ledger and hidden before it returns, deleted by its tick if not at
+   * once. The shared store's alone: a person's own store is erased whole
+   * (`erasePerson`).
+   */
+  async erasePersonShared(request: SharedPersonErasure): Promise<void> {
+    const { person, identifiers, reason } = checked(
+      sharedPersonErasureSchema,
+      request
+    );
+    if (this.#kind.kind === "person") {
+      throw new Error(sharedOnly);
+    }
+    await this.#changing(async () => {
+      await this.#readyToWrite();
+      await erasePersonShared(this.#erasures, { person, identifiers, reason });
+    });
   }
 
   /**
@@ -1781,7 +1859,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       // Nothing of the error is kept: the batch stays to do.
       failed = true;
     }
-    // Then a batch of the memories writers' erasures hid, on its own, so a
+    // Then a batch of the memories writers' and people's erasures hid, on its own, so a
     // failure of either never holds the other back (erasure.ts
     // `eraseWriterBatch`). What it fails to delete stays hidden from every
     // read (memories.ts `unerasedSql`) and is tried again next tick.
@@ -2319,6 +2397,52 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     });
   }
 
+  /** A page of what a writer wrote and hasn't retired, for a reader (written.ts). */
+  async listWritten(request: WrittenRequest): Promise<WrittenPage> {
+    const { writer, reader, after, limit } = checked(
+      writtenRequestSchema,
+      request
+    );
+    this.#mayRead(reader);
+    if (!(await this.#readable())) {
+      return { memories: [], more: false };
+    }
+    const subject = await writerSubjectOf(writer);
+    return listWritten(this.ctx.storage.sql, {
+      writer,
+      subject,
+      reader,
+      after,
+      limit,
+    });
+  }
+
+  /** Retires one of a writer's own memories, whoever may read it (written.ts). */
+  async retireWritten(
+    request: RetireWrittenRequest
+  ): Promise<RetiredMemory | null> {
+    const { memory, writer, change } = checked(
+      retireWrittenRequestSchema,
+      request
+    );
+    return await this.#changing(async () => {
+      if (!(await this.#readable())) {
+        return null;
+      }
+      return this.ctx.storage.transactionSync(() => {
+        // Refused while a restore runs, as an add is (restoring.ts).
+        if (isRestoring(this.ctx.storage.sql)) {
+          throw new Error(restoringNow);
+        }
+        return retireWritten(this.ctx.storage.sql, {
+          id: memory,
+          writer,
+          change,
+        });
+      });
+    });
+  }
+
   /** The reader confirms a memory as their own word (memories.ts). */
   async confirmMemory(request: ConfirmRequest): Promise<MemoryChangeOutcome> {
     const { memory, reader } = checked(confirmRequestSchema, request);
@@ -2342,7 +2466,13 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     const asked = checked(entitiesRequestSchema, request);
     this.#mayRead(asked.reader);
     if (!(await this.#readable())) {
-      return { entities: [], more: false, restsOn: [], restsOnWords: [] };
+      return {
+        entities: [],
+        more: false,
+        restsOn: [],
+        restsOnWords: [],
+        restsOnMemories: [],
+      };
     }
     return findEntities(this.ctx.storage.sql, {
       reader: asked.reader,
@@ -2391,6 +2521,19 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     const { reader } = checked(ownEntityRequestSchema, request);
     this.#ownOnly(reader.person);
     return (await this.#readable()) ? ownEntityId(this.ctx.storage.sql) : null;
+  }
+
+  /** The reader's profile, in their own store, built now (own-entity.ts). */
+  async readProfile(request: ProfileRequest): Promise<Profile> {
+    const { reader, budget } = checked(profileRequestSchema, request);
+    this.#ownOnly(reader.person);
+    return (await this.#readable())
+      ? readProfile(this.ctx.storage.sql, {
+          reader,
+          tokens: budget.tokens,
+          ...this.#pageMoments(),
+        })
+      : { memories: [] };
   }
 
   /** An entity's card as the reader sees it, built now (cards.ts). */

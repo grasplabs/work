@@ -255,16 +255,6 @@ export default defineConfig({
     // the fake IdP below (e2e/people.ts).
     {
       command: [
-        // No core dump of the runtime (GRA-1922). Now and then workerd
-        // fails one of V8's CHECKs while it builds a stack trace
-        // (`OptimizedJSFrame::Summarize`), which ends it with SIGTRAP and
-        // no output. CI's runners hand every core dump to
-        // systemd-coredump, so the kernel held the dying runtime, about
-        // 1.6 GB, for 20 to 90 s while it wrote one: every request waited
-        // that long and failed with it, before miniflare could restart
-        // it. Without a dump it is gone at once and restarted, as after
-        // any crash.
-        "ulimit -c 0 &&",
         // Connect's config, which sends the AI providers' requests to the
         // fake ones below (e2e/connect-config.ts).
         "node e2e/connect-config.ts &&",

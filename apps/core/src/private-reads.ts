@@ -22,7 +22,10 @@ import { workspace } from "./durable-objects.ts";
 //   what the shared store alone would hand over because of the person's
 //   own store, where everything only they may read is kept: a passage or
 //   a memory of it, or only which words it says were not found or that
-//   it was cut short (turn-recall.ts, brain-next.ts `recallOwnedAs`);
+//   it was cut short (turn-recall.ts, brain-next.ts `recallOwnedAs`); and
+//   with it any of the person's profile (what the Brain holds about them
+//   in their own word, from their own store: turn-recall.ts `profileOf`),
+//   until the owner rules otherwise (GRA-1745);
 // - an answer read through the person's own personal connection (their
 //   mailbox, their drive: agent-connections.ts), a call's or a confirmed
 //   held call's;
@@ -47,8 +50,9 @@ import { workspace } from "./durable-objects.ts";
 // would write for others. Which writes those are, from the code:
 // - A write to an App (`env.apps.call`, a mutation or an action): its
 //   data is read by the App's members. Held in the chat for its person
-//   (held-app-calls.ts) while the chat is marked; refused in a chat app's
-//   conversation, which can't show the hold yet (GRA-1929).
+//   (held-app-calls.ts) while the chat is marked, in Grasp's own chat or
+//   on the card of the person's direct message in a chat app
+//   (channels/held.ts); refused in a chat app's thread others share.
 // - A request for a shared connection (`env.connections.request`): its
 //   reason is read by admins, and nothing holds it, so it is refused
 //   while the chat is marked (chat-connections.ts).

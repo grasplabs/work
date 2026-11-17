@@ -194,6 +194,26 @@ const recalledAs = async (
   return items.map(({ text }) => text);
 };
 
+/**
+ * What `personId` recalls for `question`, each chunk's text, its source's
+ * id and the way it was found: by words, an exact part or meaning.
+ */
+const foundAs = async (
+  personId: string,
+  question: string
+): Promise<{ text: string; source: string; found: string }[]> => {
+  const { items } = await recallAs(env, personId, {
+    personal: true,
+    question,
+    budget: { tokens: recallBudgetMax },
+  });
+  return items.map(({ text, source, found }) => ({
+    text,
+    source: source.id,
+    found,
+  }));
+};
+
 /** `source`'s `version` as `personId` reads it: null if not. */
 const historyAs = async (
   personId: string,
@@ -644,14 +664,26 @@ describe("erasing a source", { timeout: 120_000 }, () => {
       await tickPastGrace();
     }
 
+    const keptFound = await foundAs(reader, wordOf(keptMark));
     expect({
       tables: await tablesHolding([erasedMark]),
       vectors: await vectorsOf(erasedRows, []),
-      kept: await recalledAs(reader, wordOf(keptMark)),
+      // By its word (an exact part: it holds digits), the kept source
+      // alone; by meaning, other passages the reader may read, never one
+      // of the erased source.
+      byWords: keptFound.filter(({ found }) => found !== "meaning"),
+      erasedBack: keptFound.filter(({ source }) => source === erased.id),
     }).toStrictEqual({
       tables: [],
       vectors: { codes: 0, inBlocks: 0, kept: 0 },
-      kept: [`Staying ${wordOf(keptMark)}`],
+      byWords: [
+        {
+          text: `Staying ${wordOf(keptMark)}`,
+          source: kept.id,
+          found: "exact",
+        },
+      ],
+      erasedBack: [],
     });
   });
 
@@ -1088,54 +1120,6 @@ describe("the erasure ledger out of reach", { timeout: 120_000 }, () => {
     });
   });
 
-  // A person's row the shared store recorded until GRA-1903, never
-  // written (its write failed): a tick writes the source entries behind it
-  // and never the person's, which an older release replaying it would
-  // refuse.
-  it("writes the source entries behind a person's row recorded before GRA-1903, and never that row", async () => {
-    const reader = await person();
-    const source = newSource();
-    await add(
-      source,
-      `Behind a person's row ${wordOf(newMark())}`,
-      await alone(reader)
-    );
-    await nextBucketPut(async () => {
-      await Promise.resolve();
-      throw new Error("R2 failed, by the test");
-    });
-    await settled(eraseShared(source, "deleted"));
-    const subject = await hashOf(crypto.randomUUID());
-    // At the source's time, sorting before it.
-    const personRow = await runInDurableObject(store(), (_instance, state) => {
-      const { sql } = state.storage;
-      const { key, at } = sql
-        .exec<{ key: string; at: number }>(
-          `SELECT key, erased_at AS at FROM erasures
-            WHERE confirmed = 0 ORDER BY key DESC LIMIT 1`
-        )
-        .one();
-      const row = `${key.slice(0, "erasures/".length + 15)}-person-person_erased-${subject}`;
-      sql.exec(
-        `INSERT INTO erasures (key, kind, subject, reason, erased_at, confirmed)
-          VALUES (?, 'person', ?, 'person_erased', ?, 0)`,
-        row,
-        subject,
-        at
-      );
-      return row;
-    });
-    await workBrain(env, new Date(), noProducers);
-    const { erasures } = await brainWorkOverview(env);
-
-    // The row stays, as every record of an erasure does.
-    expect({
-      written: await ledgerCount(source),
-      personWritten: (await env.BRAIN_OBJECTS.head(personRow)) !== null,
-      unwritten: erasures.source.unwritten,
-    }).toStrictEqual({ written: 1, personWritten: false, unwritten: 0 });
-  });
-
   it("writes one entry for an erasure whose write landed though its answer was lost, retried", async () => {
     const reader = await person();
     const source = newSource();
@@ -1381,8 +1365,11 @@ describe(
       const backup = await copyOfStore();
       await eraseShared(source, "deleted");
       const [erasure] = await ledgerOf(keyOf(source));
-      // A person's entry and more parts of it than a page of the listing:
-      // at the same time, sorting before the erasure after them.
+      // A person's entry as the shared store wrote them before GRA-1822
+      // (`{ parts }`), and more parts of it than a page of the listing: at
+      // the same time, sorting before the erasure after them. Read as its
+      // record alone (erasure.ts `personBodySchema`); this case goes with
+      // that legacy body and `personEntryPattern` (GRA-1907, #2311).
       const entry = `${erasure?.slice(0, "erasures/".length + 15) ?? ""}-person-person_erased-${await hashOf(crypto.randomUUID())}`;
       const parts = Array.from(
         { length: 1001 },
@@ -1783,7 +1770,12 @@ const addAt = async (
   }
 };
 
-/** Every version `personId`'s packs cite for the questions, as of each moment. */
+/**
+ * Every version `personId`'s packs cite for the questions, as of each
+ * moment, by words, an exact part or a phrase. What a pack cites by
+ * meaning besides is whatever else they may read; an erased source's
+ * vectors are held by the leak harness, which embeds it first.
+ */
 const citedBy = async (
   personId: string,
   questions: readonly string[],
@@ -1803,7 +1795,9 @@ const citedBy = async (
     )
   );
   return packs.flatMap(({ items }) =>
-    items.map(({ source, version }) => `${source.id} v${version}`)
+    items.flatMap(({ source, version, found }) =>
+      found === "meaning" ? [] : [`${source.id} v${version}`]
+    )
   );
 };
 

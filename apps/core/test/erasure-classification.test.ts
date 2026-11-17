@@ -1,3 +1,4 @@
+import * as brainStore from "@grasp-os/brain-next/schema";
 import { personColumn } from "@grasp-os/shared/person-columns";
 import { is } from "drizzle-orm";
 import { getTableConfig, SQLiteTable } from "drizzle-orm/sqlite-core";
@@ -21,12 +22,16 @@ import {
 // the inventory keeps up with the schemas.
 
 // Every database core keeps: a new one goes here too, or the guard can't see it.
+// `brainStore` is the new Brain's shared store (its `BrainStore` named
+// `brain`); a person's own store has the same tables and is erased whole
+// (person-erasure-inventory.ts).
 const schemas = {
   core,
   workspace,
   onboarding,
   dataStore,
   auditLog,
+  brainStore,
 };
 
 /** Every table of core's databases, by `<database>.<table>`. */

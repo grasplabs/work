@@ -200,6 +200,18 @@ const ProducerBadge = ({ producer }: { producer: BrainSourceProducer }) => {
       message: "What your team said",
       context: "a source of the Brain",
     }),
+    drawing: t({
+      message: "How a team works",
+      context: "a source of the Brain",
+    }),
+    kickoff: t({
+      message: "The company's vision",
+      context: "a source of the Brain",
+    }),
+    roster: t({
+      message: "The company's teams",
+      context: "a source of the Brain",
+    }),
   }[producer];
   return <Badge variant="outline">{label}</Badge>;
 };
@@ -810,11 +822,11 @@ const ConnectionFeeds = ({ connections }: { connections: Connection[] }) => {
         <>
           <p className="text-muted-foreground text-sm">
             <Trans>
-              The Brain keeps one Gmail message or attachment, or one OneNote
-              page, when an agent reads it for you through an account you
-              connected yourself, and keeps it for you alone. Everything else
-              agents search live when you ask, and the Brain keeps nothing of
-              it.
+              The Brain keeps one Gmail message or attachment, one OneNote page,
+              or the answer of a read in an app that holds your own things, when
+              an agent reads it for you through an account you connected
+              yourself, and keeps it for you alone. Everything else agents
+              search live when you ask, and the Brain keeps nothing of it.
             </Trans>
           </p>
           <ul className="flex flex-col gap-2 text-sm">
@@ -824,8 +836,8 @@ const ConnectionFeeds = ({ connections }: { connections: Connection[] }) => {
                 <span className="text-muted-foreground">
                   {keepsReads === true ? (
                     <Trans>
-                      The Brain keeps the messages and pages an agent reads for
-                      you from this.
+                      The Brain may keep some of what an agent reads for you
+                      from this.
                     </Trans>
                   ) : (
                     <Trans>Searched live, nothing kept.</Trans>

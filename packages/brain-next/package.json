@@ -8,6 +8,7 @@
   "exports": {
     "./across": "./src/across.ts",
     "./contract": "./src/contract.ts",
+    "./schema": "./src/db/schema.ts",
     "./skills": "./src/skills.ts",
     "./store": "./src/store.ts",
     "./work": "./src/work.ts"

@@ -415,11 +415,12 @@ describe("the new Brain, inside core", { timeout: 60_000 }, () => {
     await expect(recalledAs(reader, "anything")).rejects.toMatchObject(invalid);
   });
 
-  it("holds to its bounds: as many teams as a reader's groups hold beside the company, and no more", async () => {
+  it("holds to its bounds: as many teams as a reader's groups hold beside the company and the members, and no more", async () => {
     const [atMost, overMost] = await Promise.all([person(), person()]);
-    // A member's reader holds the company's group too.
-    await inTeams(atMost, readerGroupsMax - 1);
-    await inTeams(overMost, readerGroupsMax);
+    // A member's reader holds the company's group too, and the members'
+    // (what members read as themselves alone, a team's claim).
+    await inTeams(atMost, readerGroupsMax - 2);
+    await inTeams(overMost, readerGroupsMax - 1);
     const secret = word();
     const id = await add(secret, { kind: "owner", personId: atMost });
 

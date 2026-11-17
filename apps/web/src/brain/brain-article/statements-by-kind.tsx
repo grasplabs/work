@@ -9,6 +9,7 @@ import { useLingui } from "@lingui/react/macro";
 import { useEffect, useRef, useState } from "react";
 
 import type { Kern, StatementRow } from "../article-kern.ts";
+import { isTeamClaim } from "../brain.ts";
 import { KindLabel } from "../statement-kind.tsx";
 import { PartHeading, StatementLine } from "./kern.tsx";
 
@@ -26,7 +27,7 @@ export const StatementsByKind = ({
   kern: Kern;
   rows: StatementRow[];
   activeId?: string | undefined;
-  /** Takes one statement out of the brain, for whoever may. */
+  /** Takes one statement out of the brain, for whoever may: never a team's claim. */
   onRemove?: ((statement: Statement) => void) | undefined;
 }) => {
   const { t } = useLingui();
@@ -72,7 +73,11 @@ export const StatementsByKind = ({
                 .map((row) => (
                   <StatementLine
                     key={row.statement.id}
-                    onRemove={onRemove}
+                    // Never a team's claim: it stands while five of its
+                    // people back it (GRA-1748).
+                    onRemove={
+                      isTeamClaim(row.statement.id) ? undefined : onRemove
+                    }
                     row={row}
                   />
                 ))}

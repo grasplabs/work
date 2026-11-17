@@ -25,6 +25,7 @@ import {
   brainCompanyVersionRead,
   brainGrantRead,
   brainMemoryRead,
+  brainRestingMemoryRead,
   brainTeamVersionRead,
 } from "./history-access.ts";
 import { grantedPermissions } from "./permissions.ts";
@@ -154,12 +155,17 @@ const handedOf = (
  * connections, where no pin of the chat's follows it). Everything the
  * answer rests on is pinned with the run before the code gets it, as
  * recall's are at that reach: in their own chat each version as
- * `brain-team-version` (checked as their teams), and each memory in a
- * writer's own word as `brain-memory` (checked as the person, which for
- * the shared store it names is their teams and the company); elsewhere
- * as `brain-company-version` and `brain-company-memory`, checked as the
- * company, and cut while the chat has anyone Grasp can't name
- * (history-access.ts). Recorded as every call of its code is, refused or
+ * `brain-team-version` (checked as their teams), and each memory it rests
+ * on with what that memory rests on (its source or writer, whose word it
+ * is, its entities: GRA-1982), as `brain-memory` when it handed it over
+ * and `brain-resting-memory` when it didn't (checked as the person, which
+ * for the shared store it names is their teams and the company);
+ * elsewhere as `brain-company-version` and `brain-company-memory`,
+ * checked as the company, and cut while the chat has anyone Grasp can't
+ * name (history-access.ts). So a run is withheld and its result replaced
+ * once an erasure took anything it rests on, a person's included: her
+ * card's name, a fact in her word, though the documents they were drawn
+ * from stay. Recorded as every call of its code is, refused or
  * not; `entitiesCallFor` keeps its own audit event.
  */
 const entitiesRead = async (
@@ -179,19 +185,25 @@ const entitiesRead = async (
       {
         ...caller,
         ...(ownChat ? { reach: "teams" as const } : {}),
-        keep: async ({ versions, words }) => {
+        keep: async ({ versions, memories, handed: given }) => {
+          const shown = new Set(given);
           await recordRunReads(env, scope, [
             ...versions.map((version) =>
               ownChat
                 ? brainTeamVersionRead(version)
                 : brainCompanyVersionRead(version)
             ),
-            // Handed over by id alone: never told erased (history-access.ts).
-            ...words.map((memory) =>
-              ownChat
-                ? brainMemoryRead({ ...memory, basis: null })
-                : brainCompanyMemoryRead({ ...memory, basis: null })
-            ),
+            // Each with what it rests on, so an erasure of it, a person's
+            // too, is told (history-access.ts): in their own chat what it
+            // handed over as their use of it, the rest as no use.
+            ...memories.map((memory) => {
+              if (!ownChat) {
+                return brainCompanyMemoryRead(memory);
+              }
+              return shown.has(memory.memory)
+                ? brainMemoryRead(memory)
+                : brainRestingMemoryRead(memory);
+            }),
           ]);
         },
       },
@@ -302,9 +314,12 @@ export class BrainAgentApi extends WorkerEntrypoint<Env, AgentScope> {
 }
 
 /** The types `env.brain` returns, as the model reads them. */
-const brainTypes = `/** A passage a recall found: the part of it that best answers the question, or all of it (\`whole\`), cited by its source (an upload, a chat or a run, and its ID), the source's version and the passage's place in it. */
+const brainTypes = `/** A passage a recall found: the part of it that best answers the question, or all of it (\`whole\`), cited by its source (an upload, a chat, a run, the company's vision from the onboarding's kickoff or the company's teams from its staff list, and its ID), the source's version and the passage's place in it. */
 interface BrainPackItem {
-  source: { producer: "upload" | "chat" | "run"; id: string };
+  source: {
+    producer: "upload" | "chat" | "run" | "kickoff" | "roster";
+    id: string;
+  };
   version: number;
   position: number;
   text: string;

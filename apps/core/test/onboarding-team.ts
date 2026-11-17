@@ -419,6 +419,27 @@ export const told = async (ids: Ids) => {
   await agree(ids.rik, [fact("r1", "step", "Checks the queue at noon.")]);
 };
 
+/**
+ * The team with Sam in it too: with him seven tell their own work (the
+ * lead isn't counted), as a team needs before it has any claims at all
+ * (`teamMayClaim`), so the Brain and its page hold the team's claims.
+ */
+export const sevenTeam = async () =>
+  await team(["lea", "max", "mia", "mo", "noor", "pim", "rik", "sam"]);
+
+/**
+ * As `sevenTeam`, Ada in it too: eight who tell their own work, so one of
+ * them leaving still leaves seven, and what the rest told still shows.
+ */
+export const eightTeam = async () =>
+  await team(["lea", "max", "mia", "mo", "noor", "pim", "rik", "sam", "ada"]);
+
+/** What the six tell (`told`), and Sam a step of his own. */
+export const sevenTold = async (ids: Ids) => {
+  await told(ids);
+  await agree(ids.sam, [fact("s1", "step", "Answers the phone.")]);
+};
+
 /** What the five who spoke of Zendesk said of it, in their own words. */
 export const zendeskSaid = [
   "Tickets arrive in Zendesk.",
@@ -653,21 +674,39 @@ export const intake = async (
   return { gave: given.result, requests: given.requests };
 };
 
-/** Every record the brain keeps whose id is the onboarding's, for a team: as stored. */
+/**
+ * The team's claims and drawings standing now, which the onboarding keeps
+ * itself (GRA-1748): each as the record it was, by its id on the Brain
+ * page.
+ */
 export const kept = async (ids: Ids) => {
-  const { results } = await env.DB.prepare(
-    "SELECT type, id, body FROM brain_records WHERE id LIKE 'onb-%' OR id = ? ORDER BY position"
-  )
-    .bind(`team-${ids.team}`)
-    .all<{ type: string; id: string; body: string }>();
-  // Only this team's: its records name its team, or a workflow of it.
-  const ours = new Set([`team-${ids.team}`]);
-  return results.filter(({ id, body }) => {
-    const mine =
-      ours.has(id) || [...ours].some((each) => body.includes(`"${each}"`));
-    if (mine) {
-      ours.add(id);
-    }
-    return mine;
-  });
+  const store = onboardingStore(env);
+  const [claims, drawings] = await Promise.all([
+    store.standingClaims(),
+    store.standingDrawings(),
+  ]);
+  return [
+    ...claims
+      .filter(({ team: of }) => of === ids.team)
+      .map(({ source, kind, text }) => ({
+        type: "statement",
+        id: `onb-claim-${source}`,
+        body: JSON.stringify({ kind, text, teamIds: [`team-${ids.team}`] }),
+      })),
+    // Each piece of work with its one drawing, as the Brain page shows them.
+    ...drawings
+      .filter(({ team: of }) => of === ids.team)
+      .flatMap(({ workflow, name, local, drawing }) => [
+        {
+          type: "workflow",
+          id: workflow,
+          body: JSON.stringify({ name, local, teamId: `team-${ids.team}` }),
+        },
+        {
+          type: "workflowVersion",
+          id: drawing.id,
+          body: JSON.stringify(drawing),
+        },
+      ]),
+  ];
 };

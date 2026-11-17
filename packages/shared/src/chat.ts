@@ -493,12 +493,84 @@ export const chatAskLimits = {
 const unpadded = /^\S(?:.*\S)?$/su;
 
 /**
- * What a question or an option never holds: controls (line breaks among
- * them), invisible formatting (bidi overrides, zero-width characters) and
- * the line and paragraph separators, so it shows as the one line it reads
- * as, and can't pass for something the page itself shows.
+ * The characters nobody sees as text, one class for every rule that reads
+ * them: controls (line breaks among them), invisible formatting (bidi
+ * overrides, zero-width characters, tag characters: Cf), private-use and
+ * unassigned code points (Co, Cn), half a surrogate pair alone (Cs), and
+ * what Unicode lists as drawn as nothing though it is no format character
+ * (`Default_Ignorable_Code_Point`: variation selectors, which can carry a
+ * byte each after a visible letter, Hangul fillers, the grapheme joiner).
+ * Written once, as a regular expression's class, so the rules below can't
+ * drift apart.
  */
-const notInAskLine = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+const unseenClass = String.raw`\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Default_Ignorable_Code_Point}`;
+
+/**
+ * What a question or an option never holds outside a standard emoji
+ * (`withoutStandardEmoji`): anything nobody sees as text (`unseenClass`) and the
+ * line and paragraph separators, so it shows as the one line it reads as,
+ * and can't pass for something the page itself shows.
+ */
+const notInAskLine = new RegExp(`[${unseenClass}\\p{Zl}\\p{Zp}]`, "u");
+
+/**
+ * A standard emoji (Unicode's recommended sequences: `RGI_Emoji`), its
+ * selectors, skin tones, joiners and tags included: text people read, so a
+ * line that asks something may hold one. Only ask lines read it; what a
+ * person confirms before it is sent (`shownVisibly`) shows every character
+ * nobody sees, inside an emoji too.
+ *
+ * `RGI_Emoji` needs the `v` flag, which not every browser the web build
+ * targets has (Chrome 111, Firefox 114 and 115, Safari 16.4 to 16.6 lack
+ * it), so the pattern is built the first time an ask line is read, never
+ * as this module loads. Where it can't be built, it is `null` and no emoji
+ * is taken out: an ask line holding one is refused, the stricter rule.
+ */
+let standardEmoji: RegExp | null | undefined;
+
+/** `line` with every standard emoji taken out, where the runtime can find them. */
+const withoutStandardEmoji = (line: string): string => {
+  if (standardEmoji === undefined) {
+    try {
+      // From a string: the `v` flag is newer than the language level the
+      // App compiler type-checks this file at.
+      // oxlint-disable-next-line prefer-regex-literals -- see above
+      standardEmoji = new RegExp(String.raw`\p{RGI_Emoji}`, "gv");
+    } catch {
+      standardEmoji = null;
+    }
+  }
+  return standardEmoji === null ? line : line.replaceAll(standardEmoji, "");
+};
+
+/**
+ * What a person sees of text that is sent as it is, which they confirm
+ * before it goes (a held write's exact request or values, on a card in
+ * Grasp or a chat app): every character nobody sees as text
+ * (`unseenClass`) shown as an escape of its code point, `\u{200D}`; a tab
+ * and a line break are text. So a title the model was steered to hide
+ * something in shows what it holds, and is sent unchanged: only what is
+ * shown is escaped. An ordinary emoji keeps its picture, its variation
+ * selector shown beside it (`❤\u{FE0F}`).
+ *
+ * Every `\u{` in what is shown is such an escape: a backslash the text
+ * itself has before `u{` is escaped too (`\u{5C}`), so a written escape
+ * never looks like a hidden character, and no two texts look the same.
+ * JSON's own escapes (`\\`, `\"`, `\n`) never start `u{`, and stay as
+ * they are.
+ */
+const unseenOrEscape = new RegExp(
+  String.raw`\\(?=u\{)|(?![\t\n\r])[${unseenClass}]`,
+  "gu"
+);
+
+/** `text` as a person is shown it before it is sent as it is: see `unseenOrEscape`. */
+export const shownVisibly = (text: string): string =>
+  text.replaceAll(
+    unseenOrEscape,
+    (character) =>
+      `\\u{${(character.codePointAt(0) ?? 0).toString(16).toUpperCase()}}`
+  );
 
 /**
  * One line of plain text, as everything asked is: taken as written or
@@ -509,10 +581,14 @@ const askLine = (max: number) =>
     .string()
     .max(max)
     .regex(unpadded)
-    .refine((line) => !notInAskLine.test(line) && line.isWellFormed(), {
-      message:
-        "One line of well-formed text, with no control or invisible formatting characters",
-    });
+    .refine(
+      (line) =>
+        !notInAskLine.test(withoutStandardEmoji(line)) && line.isWellFormed(),
+      {
+        message:
+          "One line of well-formed text, with no control or invisible formatting characters outside a standard emoji",
+      }
+    );
 
 /** An option to pick: a few words, and a line saying what it means. */
 const askOptionSchema = z.strictObject({

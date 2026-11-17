@@ -12,6 +12,7 @@ import {
   memoryKeyOf,
   readableMemoriesAs,
   readableVersionsAs,
+  speakerSchema,
   versionRefSchema,
 } from "./brain-next.ts";
 import type {
@@ -145,6 +146,22 @@ export const brainCompanyVersionRead = (ref: SourceVersionRef): string =>
 // the company pinned is either kind.
 export const brainMemoryPrefix = "brain-memory:";
 const brainCompanyMemoryPrefix = "brain-company-memory:";
+/**
+ * A memory of the person's profile (turn-recall.ts `profileOf`): read
+ * again as a memory the person recalled is, but never counted as their
+ * use of it (workspace.ts `memory_uses`), which only what a search found
+ * is.
+ */
+const brainProfileMemoryPrefix = "brain-profile-memory:";
+/**
+ * A memory what a chat's code read of the Brain's entities rests on but
+ * didn't hand over (agent-brain.ts): the one that gave an entity its
+ * name, made it seen, a contested fact's rival, what a confirmation was
+ * made over, the one past the page. Read again as a memory the person
+ * recalled is, but never their use of it (`memory_uses`): they never saw
+ * it (GRA-1982).
+ */
+const brainRestingMemoryPrefix = "brain-resting-memory:";
 
 /** Whether `source` is a pin of a recall as the company. */
 const isCompanyPin = (source: string): boolean =>
@@ -258,7 +275,9 @@ const readableBrainCompanyVersions = async (
 
 // A pin carries what its memory rests on as the recall read it
 // (`MemoryBasis`): the source it was drawn from, its writer, and when the
-// store learned it. That is what an erasure of it is told by
+// store learned it; whose word it is, and the entity it is about and the
+// one it relates to, which a person's erasure takes it by (GRA-1981). None
+// of them ever changes for a memory. That is what an erasure of it is told by
 // (`erasedSources`): the erasure ledger names those, and outlives a lost
 // storage, which a memory's row doesn't. A pin of a memory handed over
 // without them (what names an entity a chat's code read rests on) holds
@@ -277,6 +296,9 @@ export const recalledMemoryPin = (memory: RecalledMemory): MemoryPin => ({
     source: memory.source?.source ?? null,
     writer: memory.writer,
     learnedAt: memory.learnedAt.getTime(),
+    speaker: memory.speaker,
+    about: memory.about,
+    object: memory.object,
   },
 });
 
@@ -293,8 +315,19 @@ export const brainMemoryRead = ({ store, memory, basis }: MemoryPin): string =>
             : [basis.source.producer, basis.source.id],
           basis.writer,
           basis.learnedAt,
+          basis.speaker,
+          basis.about,
+          basis.object,
         ],
   ])}`;
+
+/** The source a memory of the person's profile handed a run is recorded as. */
+export const brainProfileMemoryRead = (pin: MemoryPin): string =>
+  `${brainProfileMemoryPrefix}${brainMemoryRead(pin).slice(brainMemoryPrefix.length)}`;
+
+/** The source a memory code's read rests on but didn't hand over is recorded as, in its person's own chat. */
+export const brainRestingMemoryRead = (pin: MemoryPin): string =>
+  `${brainRestingMemoryPrefix}${brainMemoryRead(pin).slice(brainMemoryPrefix.length)}`;
 
 /** The source a memory a recall as the company handed a run is recorded as. */
 export const brainCompanyMemoryRead = (pin: MemoryPin): string =>
@@ -309,10 +342,14 @@ const memoryBasisSchema = z
     z.tuple([z.unknown(), z.unknown()]).nullable(),
     z.string().min(1).nullable(),
     z.int().nonnegative(),
+    speakerSchema,
+    z.uuid(),
+    z.uuid().nullable(),
   ])
-  .transform(([source, writer, learnedAt], context) => {
+  .transform(([source, writer, learnedAt, speaker, about, object], context) => {
+    const rest = { writer, learnedAt, speaker, about, object };
     if (source === null) {
-      return { source: null, writer, learnedAt };
+      return { source: null, ...rest };
     }
     const ref = versionRefSchema.shape.source.safeParse({
       producer: source[0],
@@ -322,7 +359,7 @@ const memoryBasisSchema = z
       context.addIssue({ code: "custom", message: "Not a source" });
       return z.NEVER;
     }
-    return { source: ref.data, writer, learnedAt };
+    return { source: ref.data, ...rest };
   });
 
 /** A memory's pin: its place, and what it rests on, or none. */
@@ -385,13 +422,23 @@ const readableMemoriesAt = async (
   );
 };
 
-/** Of the memories the person's own chat pinned in `sources`, those they may still read. */
+/**
+ * Of the memories the person's own chat pinned in `sources`, recalled or
+ * of their profile, those they may still read.
+ */
 const readableBrainMemories = async (
   env: Env,
   scope: Omit<AgentScope, "runId">,
   sources: readonly string[]
-): Promise<string[]> =>
-  await readableMemoriesAt(env, scope, sources, brainMemoryPrefix, "person");
+): Promise<string[]> => {
+  const read = await Promise.all(
+    [brainMemoryPrefix, brainProfileMemoryPrefix, brainRestingMemoryPrefix].map(
+      async (prefix) =>
+        await readableMemoriesAt(env, scope, sources, prefix, "person")
+    )
+  );
+  return read.flat();
+};
 
 /**
  * Of the memories a recall as the company handed over in `sources`, those
@@ -500,6 +547,8 @@ type WithheldKind =
 const withheldKindOf = (source: string): WithheldKind => {
   if (
     source.startsWith(brainMemoryPrefix) ||
+    source.startsWith(brainProfileMemoryPrefix) ||
+    source.startsWith(brainRestingMemoryPrefix) ||
     source.startsWith(brainCompanyMemoryPrefix)
   ) {
     return "memories";
@@ -734,6 +783,8 @@ const versionPinOf = (source: string): SourceVersionRef | undefined => {
 /** The memory a pin of the new Brain names, at whatever reach it was read. */
 const memoryPinOf = (source: string): MemoryPin | undefined =>
   brainMemoryOf(source, brainMemoryPrefix) ??
+  brainMemoryOf(source, brainProfileMemoryPrefix) ??
+  brainMemoryOf(source, brainRestingMemoryPrefix) ??
   brainMemoryOf(source, brainCompanyMemoryPrefix);
 
 /** A pinned version's source, as one string. */

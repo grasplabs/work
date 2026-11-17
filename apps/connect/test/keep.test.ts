@@ -4,10 +4,12 @@ import { addConnection, agentFor, callAs } from "./connect.ts";
 import { fakeMcpServer } from "./mcp-server.ts";
 
 // What connect lets core keep of a call as sources in the Brain
-// (`ConnectResult.keep`, GRA-1730). The ways it can fail, which these
-// start from: a change, a held call or a stored answer replayed is kept;
-// a read whose server named no item is kept as if it were one; a toolkit
-// whose provider's terms forbid copies is kept.
+// (`ConnectResult.keep`, GRA-1730, GRA-1845). The ways it can fail, which
+// these start from: a change, a held call or a stored answer replayed is
+// kept; a toolkit whose provider's terms forbid copies is kept. A
+// toolkit's read is kept whatever its server named: core keeps its whole
+// answer, keyed by the call. An error answer never comes back as one
+// (`connect.action_failed`).
 
 const url = "https://backend.composio.dev/v3/mcp/server-keep?user_id=grasp";
 
@@ -57,7 +59,7 @@ const chat = agentFor("user-anna", "agent-chat", "interactive");
 const run = agentFor("user-anna");
 
 describe("what connect lets core keep of a call", () => {
-  it("is a read carried out now whose server named its items", async () => {
+  it("is a toolkit's read carried out now, whether or not its server named its items", async () => {
     const connectionId = await connection();
 
     const [named, unnamed] = await Promise.all([
@@ -67,8 +69,7 @@ describe("what connect lets core keep of a call", () => {
 
     expect({ named: named.keep, unnamed: unnamed.keep }).toStrictEqual({
       named: true,
-      // Known by its toolkit and tool alone: no item of its own.
-      unnamed: undefined,
+      unnamed: true,
     });
   });
 

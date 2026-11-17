@@ -12,13 +12,15 @@ import { mockIdp } from "./idp.ts";
 import { answering, holdAlarm, onLink } from "./interview-link.ts";
 import {
   agree,
+  eightTeam,
   fact,
   fiveToldReply,
   intake,
   kept,
   mapped,
   openLink,
-  team,
+  sevenTeam,
+  sevenTold,
   ticketsReply,
   told,
 } from "./onboarding-team.ts";
@@ -119,6 +121,10 @@ const shownOf = (brain: Workspace, teamId: string) => {
   };
 };
 
+/** The types of `records`, each once, in order. */
+const typesOf = (records: readonly { type: string }[]): string[] =>
+  [...new Set(records.map(({ type }) => type))].toSorted();
+
 describe(
   "what the onboarding learned, in the brain",
   { timeout: 120_000 },
@@ -129,9 +135,10 @@ describe(
 
     it("is the team, one source, its statements and the drawn workflow, read by every member, and no record names a person", async () => {
       const store = onboardingStore(env);
-      const ids = await team();
+      // Seven tell their own work, as a team needs to have claims.
+      const ids = await sevenTeam();
       await mapped(ids);
-      await told(ids);
+      await sevenTold(ids);
       await answering([fiveToldReply(ids)], async () => await store.drawNext());
       const { gave } = await intake(ids);
       const member = await signedInApi(idp, "user");
@@ -147,7 +154,7 @@ describe(
         team: "Ops",
         source: {
           title: "Interviews with Ops",
-          how: "7 people",
+          how: "8 people",
           kind: "interview",
           who: null,
         },
@@ -170,7 +177,7 @@ describe(
           // The median of the five's own normal minutes, never one of theirs
           // as a lowest or highest.
           minutes: { quickest: 4, normal: 4, longest: 4, basis: "estimated" },
-          people: 6,
+          people: 7,
           volumes: [
             {
               of: "me",
@@ -208,14 +215,15 @@ describe(
           (sum, { interviews }) => sum + interviews,
           0
         ),
-      }).toStrictEqual({ mondays: true, fiveOrMore: true, counted: 7 });
+      }).toStrictEqual({ mondays: true, fiveOrMore: true, counted: 8 });
     });
 
     it("keeps only a drawing's newest checked version once it is drawn again, and knows whose interview each record rests on", async () => {
       const store = onboardingStore(env);
-      const ids = await team();
+      // Seven tell their own work, as a team's drawings need.
+      const ids = await sevenTeam();
       await mapped(ids);
-      await told(ids);
+      await sevenTold(ids);
       await answering([fiveToldReply(ids)], async () => await store.drawNext());
       await intake(ids);
       const before = await kept(ids);
@@ -286,21 +294,21 @@ describe(
         rests: {
           // The claim rests on the five who made it, the drawing on whom it
           // was drawn from.
-          max: ["statement", "workflow", "workflowVersion"],
-          mia: ["statement", "workflow", "workflowVersion"],
-          // The lead named the work, and was the drawing's context; the
-          // work rests on whom it was drawn from too.
-          lea: ["workflow", "workflowVersion"],
-          noor: ["statement", "workflow", "workflowVersion"],
+          max: ["statement", "workflowVersion"],
+          mia: ["statement", "workflowVersion"],
+          // The lead was the drawing's context.
+          lea: ["workflowVersion"],
+          noor: ["statement", "workflowVersion"],
         },
       });
     });
 
     it("takes out a drawing the brain holds from before, with no note of whom it rests on, once the work is drawn and checked anew", async () => {
       const store = onboardingStore(env);
-      const ids = await team();
+      // Seven tell their own work, as a team's drawings need.
+      const ids = await sevenTeam();
       await mapped(ids);
-      await told(ids);
+      await sevenTold(ids);
       await answering([fiveToldReply(ids)], async () => await store.drawNext());
       await intake(ids);
       const first = await kept(ids);
@@ -344,16 +352,20 @@ describe(
 
     it("counts a week's interviews only of people still taking part, and never moves a week a withdrawal took below five into another", async () => {
       const store = onboardingStore(env);
-      const ids = await team();
+      // Eight tell their own work, and Lea leads: one of them and Lea
+      // going still leaves seven who tell, so the team's interviews show.
+      const ids = await eightTeam();
       await mapped(ids);
-      await told(ids);
-      await answering([fiveToldReply(ids)], async () => await store.drawNext());
-      await intake(ids);
-      // Six finished in the week of 5 October, Noor the week after.
+      await sevenTold(ids);
+      await agree(ids.ada, [fact("a1", "step", "Answers the chat.")]);
+      // Six finished in the week of 5 October, the other three the week
+      // after.
       await runInDurableObject(store, (_instance, state) => {
         state.storage.sql.exec(
-          "UPDATE interview_states SET completed_at = CASE person WHEN ? THEN '2026-10-13T09:00:00.000Z' ELSE '2026-10-06T09:00:00.000Z' END WHERE completed_at IS NOT NULL",
-          ids.noor
+          "UPDATE interview_states SET completed_at = CASE WHEN person IN (?, ?, ?) THEN '2026-10-13T09:00:00.000Z' ELSE '2026-10-06T09:00:00.000Z' END WHERE completed_at IS NOT NULL",
+          ids.rik,
+          ids.sam,
+          ids.ada
         );
       });
       const member = await signedInApi(idp, "user");
@@ -364,62 +376,157 @@ describe(
       const before = await weeks();
       await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
       const oneWithdrew = await weeks();
-      await onLink({ action: "withdraw", ...(await openLink(ids.rik)) });
+      await onLink({ action: "withdraw", ...(await openLink(ids.lea)) });
       const twoWithdrew = await weeks();
       expect({ before, oneWithdrew, twoWithdrew }).toStrictEqual({
         before: [{ week: "2026-10-05", interviews: 6 }],
         oneWithdrew: [{ week: "2026-10-05", interviews: 5 }],
-        // The four left of that week stay out, and never join Noor's week,
-        // where the five they would make would tell how many were left.
+        // The four left of that week stay out, and never join the three of
+        // the week after, where the seven they would make would tell how
+        // many were left.
         twoWithdrew: [],
       });
     });
 
-    it("holds back a team until five who tell their own work agreed: its lead isn't counted", async () => {
+    it("asks no model for a team that can't show its results: under seven who tell, switched off, or switched on again but waiting for the admin", async () => {
       const store = onboardingStore(env);
-      const ids = await team(["lea", "max", "mia", "mo", "noor", "pim"]);
+      const ids = await sevenTeam();
       await mapped(ids);
-      await agree(ids.max, [
-        fact("m2", "system", "Tickets arrive in Zendesk."),
-      ]);
-      await agree(ids.mia, [
-        fact(
-          "i2",
-          "wish",
-          "Would like the customer number filled in for them."
-        ),
-      ]);
-      await agree(ids.mo, [
-        fact("o1", "wait", "A ticket waits days for the customer's reply."),
-      ]);
-      await agree(ids.noor, [fact("n1", "step", "Reads the ticket first.")]);
+      /** The team's next intake, the model putting the five's claim together: what it asked of it, and what it noted. */
+      const intakeNow = async () => {
+        const { gave, requests } = await intake(ids);
+        return {
+          gave,
+          asked: requests.length,
+          noted: typesOf(await kept(ids)),
+        };
+      };
+      /** Sam agrees to `facts`, and the work is drawn again: the team is due. */
+      const samTold = async (facts: string[], version?: number) => {
+        await agree(
+          ids.sam,
+          facts.map((text, at) => fact(`s${at}`, "step", text)),
+          version
+        );
+        await answering(
+          [ticketsReply(ids)],
+          async () => await store.drawNext()
+        );
+      };
+      // Six tell their own work (Lea leads: not counted), five of them of
+      // Zendesk alike.
+      await told(ids);
       await answering([ticketsReply(ids)], async () => await store.drawNext());
-      // Lea and four: five people, but only four whose facts reach it.
-      const early = await store.intakeNext();
-      const waiting = await kept(ids);
-      await agree(ids.pim, [fact("p1", "step", "Tags the ticket.")]);
-      await answering([ticketsReply(ids)], async () => await store.drawNext());
-      const late = await store.intakeNext();
-      const given = await kept(ids);
+      const six = await intakeNow();
+      // Sam too: seven, the team's results may show, and its intake asks.
+      await samTold(["Answers the phone."]);
+      const seven = await intakeNow();
+      // Switched off, confirmed; then on again in a save not confirmed.
+      const view = await store.view();
+      const roster = view.roster ?? { teams: [], people: [] };
+      const by = { type: "system" } as const;
+      await store.saveRoster(
+        {
+          ...roster,
+          teams: roster.teams.map((each) => ({ ...each, off: true })),
+        },
+        by
+      );
+      await samTold(["Answers the phone.", "Logs the call."], 1);
+      const off = await intakeNow();
+      await store.saveRoster(roster, by, { confirmed: false });
+      await samTold(
+        ["Answers the phone.", "Logs the call.", "Closes the call."],
+        2
+      );
+      const waiting = await intakeNow();
+      const due = `brain:${ids.team}`;
       expect({
-        early,
-        waiting: waiting.length,
-        late,
-        types: [...new Set(given.map(({ type }) => type))].toSorted(),
+        six,
+        seven: { ...seven, asked: seven.asked > 0 },
+        off,
+        waiting,
       }).toStrictEqual({
-        early: `brain:${ids.team}`,
-        waiting: 0,
-        late: `brain:${ids.team}`,
-        // Nothing five of them said alike: no statement.
-        types: ["team", "workflow", "workflowVersion"],
+        six: { gave: due, asked: 0, noted: [] },
+        seven: {
+          gave: due,
+          asked: true,
+          noted: ["statement", "workflow", "workflowVersion"],
+        },
+        off: { gave: due, asked: 0, noted: [] },
+        waiting: { gave: due, asked: 0, noted: [] },
+      });
+    });
+
+    it("shows a member a team's name, its interviews and their weeks only while its results may show: not at six who tell, nor once it is switched off or waiting for the admin", async () => {
+      const store = onboardingStore(env);
+      const ids = await sevenTeam();
+      await mapped(ids);
+      await told(ids);
+      const member = await signedInApi(idp, "user");
+      const teamId = `team-${ids.team}`;
+      const shown = async () => {
+        const brain = await member.api.brain.read();
+        return {
+          team: brain.teams.some(({ id }) => id === teamId),
+          interviews:
+            brain.sources.find(
+              ({ teamIds }) => teamIds?.includes(teamId) === true
+            )?.how ?? null,
+          weeks: brain.interviewWeeks.reduce(
+            (sum, { interviews }) => sum + interviews,
+            0
+          ),
+        };
+      };
+      // Six tell their own work, and the team's intake runs.
+      await answering([ticketsReply(ids)], async () => await store.drawNext());
+      await intake(ids);
+      const six = await shown();
+      // Sam too: seven.
+      await agree(ids.sam, [fact("s1", "step", "Answers the phone.")]);
+      await answering([ticketsReply(ids)], async () => await store.drawNext());
+      await intake(ids);
+      const seven = await shown();
+      // The admin switches the team off, then on again in a save not
+      // confirmed, then confirms it.
+      const view = await store.view();
+      const roster = view.roster ?? { teams: [], people: [] };
+      const by = { type: "system" } as const;
+      await store.saveRoster(
+        {
+          ...roster,
+          teams: roster.teams.map((each) => ({ ...each, off: true })),
+        },
+        by
+      );
+      const off = await shown();
+      await store.saveRoster(roster, by, { confirmed: false });
+      const waiting = await shown();
+      await store.saveRoster(roster, by);
+      const confirmed = await shown();
+      await intake(ids);
+      const again = await shown();
+      expect({ six, seven, off, waiting, confirmed, again }).toStrictEqual({
+        // The roster's team, as the admin confirmed it, without its
+        // interviews.
+        six: { team: true, interviews: null, weeks: 0 },
+        seven: { team: true, interviews: "8 people", weeks: 8 },
+        off: { team: false, interviews: null, weeks: 0 },
+        waiting: { team: false, interviews: null, weeks: 0 },
+        // A member reads the interviews as what its claims cite: back
+        // once its next intake notes them again.
+        confirmed: { team: true, interviews: null, weeks: 8 },
+        again: { team: true, interviews: "8 people", weeks: 8 },
       });
     });
 
     it("gives its interviews' source no transcript and no statement, for members and admins alike, and nothing to staff or anyone outside", async () => {
       const store = onboardingStore(env);
-      const ids = await team();
+      // Seven tell their own work, as a team needs to have claims.
+      const ids = await sevenTeam();
       await mapped(ids);
-      await told(ids);
+      await sevenTold(ids);
       // Rik also says something he doesn’t approve.
       await agree(
         ids.rik,
@@ -473,7 +580,7 @@ describe(
         };
       };
       const safe = {
-        listed: { how: "7 people" },
+        listed: { how: "8 people" },
         turns: undefined,
         inListing: undefined,
         statements: [],

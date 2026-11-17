@@ -51,11 +51,6 @@ msgstr "{0, plural, one {# fila para importar.} other {# filas para importar.}}"
 msgid "{0, plural, one {# thing that was said in it goes with it.} other {# things that were said in it go with it.}}"
 msgstr "{0, plural, one {# cosa que se dijo en ella se va con ella.} other {# cosas que se dijeron en ella se van con ella.}}"
 
-#. placeholder {0}: effect.workflows.length
-#: src/brain/forget.tsx
-msgid "{0, plural, one {# workflow keeps its numbers, which will say their source was removed.} other {# workflows keep their numbers, which will say their source was removed.}}"
-msgstr "{0, plural, one {# flujo de trabajo conserva sus cifras, que indicarán que su fuente se eliminó.} other {# flujos de trabajo conservan sus cifras, que indicarán que su fuente se eliminó.}}"
-
 #. placeholder {0}: held.length
 #: src/onboarding/send-plan-form.tsx
 msgid "{0, plural, one {The team you left out} other {The # teams you left out}}"
@@ -1739,6 +1734,10 @@ msgctxt "what a decision is about, as its workflow run passed it"
 msgid "About"
 msgstr "Sobre"
 
+#: src/brain/memories-page.tsx
+msgid "About {aboutShown}"
+msgstr "Sobre {aboutShown}"
+
 #: src/workflows/requests/request-plan.tsx
 msgid "About {ahead} by {end}"
 msgstr "Unas {ahead} para el {end}"
@@ -2151,6 +2150,10 @@ msgstr "Agente no encontrado"
 msgid "Agents"
 msgstr "Agentes"
 
+#: src/agents/agent-share.tsx
+msgid "Agents people made for themselves and offered to the company. Taking one on makes it the company's: it starts reaching nobody, with nothing it may do, until you say so."
+msgstr "Agentes que las personas crearon para sí mismas y ofrecieron a la empresa. Si adoptas uno, pasa a ser de la empresa: empieza sin llegar a nadie y sin poder hacer nada, hasta que tú lo decidas."
+
 #: src/agents/own-agents-admin.tsx
 msgid "Agents people make for themselves. Only their owner sees and asks them, and they do at most what Grasp may do for that person. You see how many each person has and what they cost, never what they are told."
 msgstr "Agentes que las personas crean para sí mismas. Solo su propietario los ve y les pregunta, y hacen como mucho lo que Grasp puede hacer por esa persona. Ves cuántos tiene cada persona y lo que cuestan, nunca lo que se les dice."
@@ -2309,6 +2312,10 @@ msgstr "Un administrador"
 #: src/drafts/publish-errors.ts
 msgid "An admin abandoned the data change this version needs, so it can't be shared. Ask Grasp to build the change again."
 msgstr "Un administrador abandonó el cambio de datos que necesita esta versión, así que no se puede compartir. Pide a Grasp que vuelva a construir el cambio."
+
+#: src/settings/erasures.tsx
+msgid "An admin can still delete a specific document."
+msgstr "Un administrador todavía puede eliminar un documento concreto."
 
 #: src/routes/_shell.settings.profile.tsx
 msgid "An admin changes it, in Members and roles."
@@ -3409,6 +3416,7 @@ msgstr "No se puede ofrecer Ejecutar: {unread}"
 #: src/link-confirmation.tsx
 #: src/onboarding/document-drop.tsx
 #: src/onboarding/forget-kickoff.tsx
+#: src/onboarding/forget-teams.tsx
 #: src/onboarding/place-picker.tsx
 #: src/projects/file-item-dialog.tsx
 #: src/projects/project-dialog.tsx
@@ -3451,6 +3459,10 @@ msgstr "Mayúsculas, dígitos y guiones bajos, empezando por una letra, como CRM
 #: src/routes/_shell.settings.billing.tsx
 msgid "Card"
 msgstr "Tarjeta"
+
+#: src/settings/erasures.tsx
+msgid "Cards about them without the address they signed in with can remain. Those built from documents go when an admin deletes those documents, and those an App wrote go when that App’s data is reset."
+msgstr "Las fichas sobre esa persona sin la dirección con la que iniciaba sesión pueden quedar. Las creadas a partir de documentos desaparecen cuando un administrador borra esos documentos, y las que escribió una App, cuando se restablecen los datos de esa App."
 
 #: src/activity/audit-words.ts
 msgid "Carried out a confirmed write to an App, or failed to"
@@ -4584,6 +4596,7 @@ msgstr "Decisión no encontrada"
 msgid "Decisions"
 msgstr "Decisiones"
 
+#: src/agents/agent-share.tsx
 #: src/brain/skills-page.tsx
 #: src/inbox/item-detail.tsx
 msgid "Decline"
@@ -4931,6 +4944,10 @@ msgstr "Documentos"
 msgid "Documents and workflow runs show here once they reach the Brain."
 msgstr "Los documentos y las ejecuciones de flujos de trabajo aparecen aquí cuando llegan al cerebro."
 
+#: src/settings/erasures.tsx
+msgid "Documents they or others shared with a team or the company stay, and their text can still name them."
+msgstr "Los documentos que esa persona u otras compartieron con un equipo o con la empresa se conservan, y su texto aún puede nombrarla."
+
 #: src/settings/stephen-settings.tsx
 msgid "Does things for people here"
 msgstr "Hace cosas por las personas aquí"
@@ -5262,6 +5279,10 @@ msgstr "Borrar a {who}"
 msgid "Erase for good"
 msgstr "Borrar para siempre"
 
+#: src/onboarding/forget-teams.tsx
+msgid "Erase them"
+msgstr "Bórralos"
+
 #: src/brain/sources-page.tsx
 msgid "Erase this upload for good"
 msgstr "Borrar este archivo subido para siempre"
@@ -5269,6 +5290,14 @@ msgstr "Borrar este archivo subido para siempre"
 #: src/brain/sources-page.tsx
 msgid "Erase this upload for good?"
 msgstr "¿Borrar este archivo subido para siempre?"
+
+#: src/onboarding/forget-teams.tsx
+msgid "Erase your teams from your Brain"
+msgstr "Borrar tus equipos de tu Brain"
+
+#: src/onboarding/forget-teams.tsx
+msgid "Erase your teams from your Brain?"
+msgstr "¿Borrar tus equipos de tu Brain?"
 
 #: src/settings/erasures.tsx
 msgid "Erase…"
@@ -5289,6 +5318,10 @@ msgstr "Borró para siempre un archivo subido del Brain"
 #: src/activity/audit-words.ts
 msgid "Erased what the Brain kept from a connection, as it was disconnected"
 msgstr "Borró lo que el Brain había guardado de una conexión, al desconectarla"
+
+#: src/onboarding/forget-teams.tsx
+msgid "Erased. Your Brain keeps nothing of your teams until you confirm them again."
+msgstr "Borrados. Tu Brain no guarda nada de tus equipos hasta que los vuelvas a confirmar."
 
 #: src/settings/erasures.tsx
 msgid "Erasing, {done} of {total}"
@@ -5395,6 +5428,7 @@ msgid "Every weekday at {time}"
 msgstr "Todos los días laborables a las {time}"
 
 #: src/agents/agent-facts.tsx
+#: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
 #: src/settings/stephen-audience.tsx
 msgid "Everyone"
@@ -6034,6 +6068,14 @@ msgctxt "where a decision comes from"
 msgid "From"
 msgstr "De"
 
+#: src/agents/agent-share.tsx
+msgid "From {from}"
+msgstr "De {from}"
+
+#: src/agents/agent-share.tsx
+msgid "From {from} · {job}"
+msgstr "De {from} · {job}"
+
 #: src/brain/memories-page.tsx
 msgid "From a chat, version {version}"
 msgstr "De un chat, versión {version}"
@@ -6059,9 +6101,21 @@ msgstr "De una subida, versión {version}"
 msgid "From Google Drive. I read only the files you add."
 msgstr "De Google Drive. Solo leo los archivos que añadas."
 
+#: src/brain/memories-page.tsx
+msgid "From how a team works, version {version}"
+msgstr "De cómo trabaja un equipo, versión {version}"
+
 #: src/onboarding/place-picker.tsx
 msgid "From SharePoint or OneDrive. I read only the files you add."
 msgstr "De SharePoint o OneDrive. Solo leo los archivos que añadas."
+
+#: src/brain/memories-page.tsx
+msgid "From the company's teams, version {version}"
+msgstr "De los equipos de la empresa, versión {version}"
+
+#: src/brain/memories-page.tsx
+msgid "From the company's vision, version {version}"
+msgstr "De la visión de la empresa, versión {version}"
 
 #: src/brain/memories-page.tsx
 msgid "From what your team said, version {version}"
@@ -6705,6 +6759,11 @@ msgstr "Mantén pulsado 4 segundos"
 msgid "Hours not known yet"
 msgstr "Horas aún desconocidas"
 
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "How a team works"
+msgstr "Cómo trabaja un equipo"
+
 #: src/workflows/requests/request-plan.tsx
 msgid "How far back"
 msgstr "Hasta cuándo"
@@ -6874,6 +6933,10 @@ msgstr "Borro lo que se dijo y todo lo que saqué de ello: lo que sé de tu empr
 msgid "I do every interview myself. Here’s what that sounds like."
 msgstr "Hago cada entrevista yo mismo. Así suena."
 
+#: src/onboarding/forget-teams.tsx
+msgid "I erase everything your Brain keeps of your teams, every earlier version too, for everyone. Your list of teams and people stays as it is, and the next time you confirm it, your Brain gets it again. This can’t be undone."
+msgstr "Borro todo lo que tu Brain guarda de tus equipos, también cada versión anterior, para todos. Tu lista de equipos y personas se queda como está, y la próxima vez que la confirmes, tu Brain la vuelve a recibir. No se puede deshacer."
+
 #: src/onboarding/document-drop.tsx
 msgid "I forget what I read in it, and draw again what I drew with it. If you shared it, its file in your Brain, if there is one, is deleted too; if another admin did, the file stays in theirs until they delete it. This can’t be undone."
 msgstr "Olvido lo que leí en él y vuelvo a dibujar lo que dibujé con él. Si lo compartiste tú, su archivo en tu Brain, si lo hay, también se elimina; si lo compartió otro administrador, el archivo se queda en el suyo hasta que lo elimine. No se puede deshacer."
@@ -6913,6 +6976,10 @@ msgstr "Apunto lo que me cuentas. Al final te lo leo y tú dices qué está mal.
 #: src/interview/before.tsx
 msgid "I’m {firstName}."
 msgstr "Soy {firstName}."
+
+#: src/onboarding/forget-teams.tsx
+msgid "I’m erasing your teams from your Brain. It isn’t finished yet, and I finish it by myself."
+msgstr "Estoy borrando tus equipos de tu Brain. Aún no ha terminado, y lo termino yo solo."
 
 #: src/tour/tour-script.ts
 msgid "I’m ready"
@@ -9583,6 +9650,22 @@ msgstr "Desactivado, nadie puede conectarlo, tampoco los administradores. Las co
 #: src/connections/offer-switch.tsx
 msgid "Offer {name}"
 msgstr "Ofrecer {name}"
+
+#: src/agents/agent-share.tsx
+msgid "Offer {name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it."
+msgstr "Ofrece {name} a los administradores de tu empresa. Si lo adoptan, pasa a ser un agente de la empresa: ellos eligen quién puede preguntarle y qué puede hacer, y tú ya no lo cambias."
+
+#: src/agents/agent-share.tsx
+msgid "Offer to the company"
+msgstr "Ofrecer a la empresa"
+
+#: src/agents/agent-share.tsx
+msgid "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
+msgstr "Ofrecido el {since}. Los administradores de tu empresa pueden quedarse con {name}. Lo que le dijiste no se va con él y, una vez que se lo queden, ya no podrás abrirlo."
+
+#: src/agents/agent-share.tsx
+msgid "Offered to the company"
+msgstr "Ofrecidos a la empresa"
 
 #: src/connections/offer-switch.tsx
 msgid "Offered to your organization"
@@ -12365,6 +12448,7 @@ msgstr "Resuelto: {choice}"
 msgid "Several for one question"
 msgstr "Varias por cada pregunta"
 
+#: src/brain/memories-page.tsx
 #: src/drafts/share-with-team.tsx
 #: src/drafts/sharing.tsx
 msgid "Share"
@@ -12398,6 +12482,10 @@ msgstr "Parte de {name} que preguntó"
 msgid "Share once it's ready"
 msgstr "Compártelo cuando esté listo"
 
+#: src/brain/memories-page.tsx
+msgid "Share this memory?"
+msgstr "¿Compartir este recuerdo?"
+
 #: src/brain/skills-page.tsx
 msgid "Share this version instead"
 msgstr "Compartir esta versión en su lugar"
@@ -12406,6 +12494,11 @@ msgstr "Compartir esta versión en su lugar"
 msgid "Share with a team"
 msgstr "Compartir con un equipo"
 
+#: src/brain/memories-page.tsx
+msgid "Share with others: {statement}"
+msgstr "Compartir con otros: {statement}"
+
+#: src/agents/agent-share.tsx
 #: src/brain/skills-page.tsx
 msgid "Share with the company"
 msgstr "Compartir con la empresa"
@@ -12418,6 +12511,14 @@ msgstr "Compartir con tu equipo"
 #: src/onboarding/setup-steps.tsx
 msgid "Share your staff list"
 msgstr "Comparte tu lista de personal"
+
+#: src/brain/memories-page.tsx
+msgid "Share…"
+msgstr "Compartir…"
+
+#: src/brain/memories-page.tsx
+msgid "Shared {when}"
+msgstr "Compartido el {when}"
 
 #: src/settings/stephen-settings.tsx
 msgid "Shared mailboxes, colleagues' calendars and the company's files."
@@ -12438,6 +12539,22 @@ msgstr "Compartida con"
 #: src/drafts/share-with-team.tsx
 msgid "Shared with {who}"
 msgstr "Compartido con {who}"
+
+#: src/brain/memories-page.tsx
+msgid "Shared with a team you are no longer in."
+msgstr "Compartido con un equipo del que ya no formas parte."
+
+#: src/brain/memories-page.tsx
+msgid "Shared with everyone."
+msgstr "Compartido con todos."
+
+#: src/brain/memories-page.tsx
+msgid "Shared with team {team}."
+msgstr "Compartido con el equipo {team}."
+
+#: src/brain/memories-page.tsx
+msgid "Shared. It shows under the same name for those you shared it with."
+msgstr "Compartido. Quienes pueden leerlo lo ven con el mismo nombre."
 
 #: src/brain/skills-page.tsx
 msgid "Shares waiting for you"
@@ -12791,6 +12908,7 @@ msgstr "Alguien con quien ya no se comparte"
 msgid "Someone no longer here"
 msgstr "Alguien que ya no está"
 
+#: src/agents/agent-share.tsx
 #: src/agents/agent-wakes.tsx
 #: src/agents/own-agents-admin.tsx
 msgid "Someone no longer in the company"
@@ -13272,6 +13390,10 @@ msgstr "¿Quitar {itemName} de {projectName}?"
 msgid "Take {itemName} out of the project"
 msgstr "Quitar {itemName} del proyecto"
 
+#: src/agents/agent-share.tsx
+msgid "Take {name} on for the company"
+msgstr "Adoptar {name} para la empresa"
+
 #: src/projects/project-people.tsx
 msgid "Take {name} out of {projectName}?"
 msgstr "¿Quitar a {name} de {projectName}?"
@@ -13284,6 +13406,18 @@ msgstr "Quitar a {name} del proyecto"
 msgid "Take {who} off {name}"
 msgstr "Quitar a {who} de {name}"
 
+#: src/brain/memories-page.tsx
+msgid "Take back"
+msgstr "Retirar"
+
+#: src/brain/memories-page.tsx
+msgid "Take back what you shared"
+msgstr "Retirar lo que compartiste"
+
+#: src/brain/memories-page.tsx
+msgid "Take back what you shared: {statement}"
+msgstr "Retirar lo que compartiste: {statement}"
+
 #: src/agents/agent-apps-card.tsx
 msgid "Take off"
 msgstr "Quitar"
@@ -13291,6 +13425,10 @@ msgstr "Quitar"
 #: src/dashboard/widget-board.tsx
 msgid "Take off the dashboard"
 msgstr "Quitar del panel"
+
+#: src/agents/agent-share.tsx
+msgid "Take on"
+msgstr "Adoptar"
 
 #: src/projects/project-people.tsx
 #: src/projects/project-view.tsx
@@ -13304,6 +13442,10 @@ msgstr "Quitar: {text}"
 #: src/onboarding/hr-leads.tsx
 msgid "Take the leads from {name}"
 msgstr "Tomar los responsables de {name}"
+
+#: src/agents/agent-share.tsx
+msgid "Take the offer back"
+msgstr "Retirar la oferta"
 
 #: src/frame/person-menu.tsx
 msgid "Take the tour"
@@ -13379,6 +13521,7 @@ msgctxt "what the Brain remembers about something"
 msgid "Team"
 msgstr "Equipo"
 
+#: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
 msgid "Team {name}"
 msgstr "Equipo {name}"
@@ -13791,12 +13934,12 @@ msgid "The Brain keeps nothing that only you may read yet, so your export holds 
 msgstr "El Brain todavía no guarda nada que solo tú puedas leer, así que tu exportación no contiene nada."
 
 #: src/brain/sources-page.tsx
-msgid "The Brain keeps one Gmail message or attachment, or one OneNote page, when an agent reads it for you through an account you connected yourself, and keeps it for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it."
-msgstr "El cerebro guarda un mensaje o un adjunto de Gmail, o una página de OneNote, cuando un agente lo lee para ti a través de una cuenta que conectaste tú mismo, y lo guarda solo para ti. Todo lo demás lo buscan los agentes en directo cuando lo pides, y el cerebro no guarda nada de ello."
+msgid "The Brain keeps one Gmail message or attachment, one OneNote page, or the answer of a read in an app that holds your own things, when an agent reads it for you through an account you connected yourself, and keeps it for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it."
+msgstr "El cerebro guarda un mensaje o un adjunto de Gmail, una página de OneNote, o la respuesta de una lectura en una app que contiene tus propias cosas, cuando un agente lo lee para ti a través de una cuenta que conectaste tú mismo, y lo guarda solo para ti. Todo lo demás lo buscan los agentes en directo cuando lo pides, y el cerebro no guarda nada de ello."
 
 #: src/brain/sources-page.tsx
-msgid "The Brain keeps the messages and pages an agent reads for you from this."
-msgstr "El cerebro guarda los mensajes y las páginas que un agente lee para ti desde aquí."
+msgid "The Brain may keep some of what an agent reads for you from this."
+msgstr "El cerebro puede guardar parte de lo que un agente lee para ti desde aquí."
 
 #: src/workflows/binding-approvals.tsx
 msgid "The Brain, as each run's person may read it"
@@ -13874,10 +14017,20 @@ msgstr "Las reglas de la empresa para cada agente."
 msgid "The company's skills"
 msgstr "Skills de la empresa"
 
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "The company's teams"
+msgstr "Los equipos de la empresa"
+
 #: src/chat/agent-change-card.tsx
 #: src/chat/agent-draft-card.tsx
 msgid "the company's time zone"
 msgstr "zona horaria de la empresa"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "The company's vision"
+msgstr "La visión de la empresa"
 
 #: src/inbox/items.ts
 msgid "The connection stopped working. Workflows that use it wait until someone signs in again."
@@ -14415,6 +14568,10 @@ msgstr "Nos contaron"
 msgid "They use"
 msgstr "Usan"
 
+#: src/brain/memories-page.tsx
+msgid "They will read exactly what is below, as someone's own word, without your name. Your own memory stays yours alone, and you can take the copy back."
+msgstr "Leerán exactamente lo que aparece abajo, como palabra propia de alguien, sin tu nombre. Tu recuerdo sigue siendo solo tuyo, y puedes retirar la copia."
+
 #: src/drafts/share-with-team.tsx
 msgid "They'll find it under Apps, and see it as it is now."
 msgstr "Lo encontrarán en Apps y lo verán tal como está ahora."
@@ -14604,6 +14761,10 @@ msgstr "Esta lista es demasiado grande. Puedo aceptar hasta {peopleMost} persona
 #: src/brain/memories-page.tsx
 msgid "This memory has changed or is no longer yours to read. Look at it again first."
 msgstr "Este recuerdo ha cambiado o ya no puedes leerlo. Vuelve a mirarlo primero."
+
+#: src/brain/memories-page.tsx
+msgid "This memory has changed or is no longer yours to share. Look at it again first."
+msgstr "Este recuerdo ha cambiado o ya no puedes compartirlo. Vuelve a mirarlo primero."
 
 #: src/chat/failure.ts
 msgid "This model can't give an answer that long. Pick another model, or ask for less."
@@ -14948,6 +15109,14 @@ msgstr "Disparador {trigger}"
 msgctxt "a workflow's settings section"
 msgid "Triggers"
 msgstr "Disparadores"
+
+#: src/brain/memories-page.tsx
+msgid "True from {from}"
+msgstr "Válido desde {from}"
+
+#: src/brain/memories-page.tsx
+msgid "True until {until}"
+msgstr "Válido hasta {until}"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Try"
@@ -15319,6 +15488,10 @@ msgstr "Valor"
 #: src/apps/data-model-changes.tsx
 msgid "Value for {name}"
 msgstr "Valor para {name}"
+
+#: src/brain/memories-page.tsx
+msgid "Value: {held}"
+msgstr "Valor: {held}"
 
 #: src/apps/app-data.tsx
 msgid "Values aren't kept: the table is sensitive."
@@ -15838,6 +16011,11 @@ msgstr "Lo que se comparte con este equipo deja de compartirse con sus miembros 
 msgid "What it did"
 msgstr "Qué hizo"
 
+#: src/brain/brain.ts
+msgctxt "a team, as the company's admin described it"
+msgid "What it does"
+msgstr "Qué hace"
+
 #: src/agents/new-agent.tsx
 #: src/workflows/requests/request-table.tsx
 msgid "What it is"
@@ -15880,6 +16058,7 @@ msgid "What it returned"
 msgstr "Qué devolvió"
 
 #: src/agents/agent-form.tsx
+#: src/agents/agent-page.tsx
 msgid "What it should know and how it should work. Grasp's own rules always hold over these."
 msgstr "Qué debe saber y cómo debe trabajar. Las reglas de Grasp siempre están por encima de estas."
 
@@ -15982,6 +16161,10 @@ msgstr "Lo que el cerebro guarda y puedes leer, y la búsqueda en ello tal como 
 #: src/brain/brain-log.tsx
 msgid "What the brain kept of it"
 msgstr "Lo que el cerebro guardó"
+
+#: src/settings/erasures.tsx
+msgid "What the Brain learned about them under the address they signed in with, and what they said, where others may read it"
+msgstr "Lo que el Brain aprendió sobre esa persona con la dirección con la que iniciaba sesión y lo que dijo, donde otros pueden leerlo"
 
 #: src/brain/memories-page.tsx
 msgid "What the Brain learns from sources and from what you tell it shows here."
@@ -16100,6 +16283,10 @@ msgstr "Lo que pediste compartir"
 #: src/connections/connected-dialog.tsx
 msgid "What you chose"
 msgstr "Lo que elegiste"
+
+#: src/brain/memories-page.tsx
+msgid "What you shared"
+msgstr "Lo que has compartido"
 
 #: src/routes/_shell.settings.instructions.tsx
 msgid "What your chats with Grasp start with, and only yours: how you like to work, what you are responsible for."
@@ -16350,6 +16537,11 @@ msgstr "Quién puede preguntarle"
 
 #: src/brain/sources-page.tsx
 msgctxt "a file uploaded into the Brain"
+msgid "Who may read it"
+msgstr "Quién puede leerlo"
+
+#: src/brain/memories-page.tsx
+msgctxt "a memory shared with others"
 msgid "Who may read it"
 msgstr "Quién puede leerlo"
 
@@ -16768,6 +16960,11 @@ msgstr "Sí: su hash coincide y enlaza con el evento anterior."
 msgid "You"
 msgstr "Tú"
 
+#: src/brain/memories-page.tsx
+msgctxt "the person themselves, as the Brain names them"
+msgid "You"
+msgstr "Tú"
+
 #: src/interview/words.ts
 msgid "You and AI"
 msgstr "Tú y la IA"
@@ -16783,6 +16980,14 @@ msgstr "Has iniciado sesión como personal de Grasp, por un tiempo limitado."
 #: src/onboarding/setup-steps.tsx
 msgid "You can close this page now. Come back here to see how far I am."
 msgstr "Ya puedes cerrar esta página. Vuelve aquí para ver por dónde voy."
+
+#: src/brain/memories-page.tsx
+msgid "You can no longer read this memory."
+msgstr "Ya no puedes leer este recuerdo."
+
+#: src/brain/memories-page.tsx
+msgid "You can share with a team of yours, or with everyone, once it has three people or more."
+msgstr "Puedes compartir con uno de tus equipos, o con todos, cuando tenga tres personas o más."
 
 #: src/pages/frame-failure.tsx
 msgid "You can't open this App"
@@ -16835,6 +17040,10 @@ msgstr "No tienes ejecuciones recientes cuya entrada se conserve, así que no ha
 #: src/brain/skills-page.tsx
 msgid "You have no skills of your own yet."
 msgstr "Aún no tienes skills propias."
+
+#: src/brain/memories-page.tsx
+msgid "You haven't shared any of your memories."
+msgstr "Aún no has compartido ninguno de tus recuerdos."
 
 #: src/onboarding/about-story.tsx
 msgid "You show me who’s who, where the documents are, and which tools people use."

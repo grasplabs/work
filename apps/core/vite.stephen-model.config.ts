@@ -51,6 +51,8 @@ const git = (...args: string[]): string =>
 /** Hours a run may take before Vitest stops it. */
 const maxHours = 2;
 
+// No meaning hit of the test model reaches it: its chats hold no `brain`
+// grant, so none recalls core's Brain.
 export default coreProject(
   {
     name: "@grasp-os/core:stephen-model",
