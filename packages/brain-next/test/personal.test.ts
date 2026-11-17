@@ -2765,7 +2765,6 @@ describe("what an erasure took for good, asked of a person's own store", () => {
     const asked = {
       sources: [kept.source, erased.source, `${group}/1`, `${group}/2`],
       memories: [onKept, onErased, onTurn, retired, later, never, onErased],
-      entities: [],
     };
     const now = await own().erasedOf(asked);
     await restore(own(), copy);
@@ -2773,7 +2772,6 @@ describe("what an erasure took for good, asked of a person's own store", () => {
     const expected = {
       sources: [erased.source, `${group}/1`, `${group}/2`],
       memories: [onErased.memory, onTurn.memory],
-      entities: [],
     };
     expect({ now, restored: await own().erasedOf(asked) }).toStrictEqual({
       now: expected,
@@ -2786,26 +2784,16 @@ describe("what an erasure took for good, asked of a person's own store", () => {
     const memory = await memoryOn("Numbat", { kind: "writer", writer: person });
     const copy = await copyOf(own());
     await eraseWhole();
-    const entity = crypto.randomUUID();
     const erased = await own().erasedOf({
       sources: [source],
       memories: [memory],
-      entities: [entity],
     });
     await restore(own(), copy);
 
-    const all = {
-      sources: [source],
-      memories: [memory.memory],
-      entities: [entity],
-    };
+    const all = { sources: [source], memories: [memory.memory] };
     expect({
       erased,
-      restored: await own().erasedOf({
-        sources: [source],
-        memories: [memory],
-        entities: [entity],
-      }),
+      restored: await own().erasedOf({ sources: [source], memories: [memory] }),
     }).toStrictEqual({ erased: all, restored: all });
   });
 });

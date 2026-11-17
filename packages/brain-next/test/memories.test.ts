@@ -1018,16 +1018,26 @@ describe("who may read a memory", () => {
     expect(second.entities.p).not.toBe(first.entities.p);
     const leftReader = readerOf(unique("l"), left);
 
-    await expect(
-      shared().findEntities({
-        reader: leftReader,
-        identifier: { type: "email", value: email.toUpperCase() },
-      })
-    ).resolves.toStrictEqual({
+    const found = await shared().findEntities({
+      reader: leftReader,
+      identifier: { type: "email", value: email.toUpperCase() },
+    });
+    expect({
+      ...found,
+      // Each memory it rests on, with its record: by id and entity here.
+      restsOnMemories: found.restsOnMemories.map((record) => ({
+        memory: record.memory,
+        about: record.about,
+      })),
+    }).toStrictEqual({
       entities: [{ id: first.entities.p, kind: "person", name: "Anna" }],
       more: false,
       restsOn: [],
       restsOnWords: first.memories,
+      restsOnMemories: first.memories.map((memory) => ({
+        memory,
+        about: first.entities.p,
+      })),
     });
     await expect(
       shared().findEntities({ reader: leftReader, name: secret })
@@ -1036,6 +1046,7 @@ describe("who may read a memory", () => {
       more: false,
       restsOn: [],
       restsOnWords: [],
+      restsOnMemories: [],
     });
     await expect(
       shared().findEntities({
@@ -1048,6 +1059,7 @@ describe("who may read a memory", () => {
       more: false,
       restsOn: [],
       restsOnWords: [],
+      restsOnMemories: [],
     });
     await expect(
       shared().readEntity({
@@ -1464,6 +1476,7 @@ describe("erasure", () => {
       more: false,
       restsOn: [],
       restsOnWords: [],
+      restsOnMemories: [],
     });
     await tick();
     await expect(left()).resolves.toBe(0);
@@ -1965,7 +1978,13 @@ describe("what a reader sees of a retire and of an extraction", () => {
 
     expect({ empty, others }).toStrictEqual({
       empty: [
-        { entities: [], more: false, restsOn: [], restsOnWords: [] },
+        {
+          entities: [],
+          more: false,
+          restsOn: [],
+          restsOnWords: [],
+          restsOnMemories: [],
+        },
         { facts: [], more: false },
         null,
       ],

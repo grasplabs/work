@@ -408,9 +408,9 @@ export const skillsCallFor = async (
 //   answered as one nobody holds.
 // - What it hands over rests on memories: a card's, and those that make
 //   every entity it names seen, named and found. The caller keeps each
-//   version of a source they rest on, and each memory in a writer's own
-//   word, before it gets the answer (a run's pins, a chat's reads), and
-//   code never sees them.
+//   version of a source they rest on, and each of those memories with
+//   what it rests on (`CodeRestsOn`), before it gets the answer (a run's
+//   pins, a chat's reads), and code never sees them.
 
 // What a workflow's test run checks a request with before it answers from
 // its fixtures (workflows/brain-calls.ts), which reaches brain-next.ts

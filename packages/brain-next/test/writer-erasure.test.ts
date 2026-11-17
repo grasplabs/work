@@ -388,7 +388,6 @@ describe("a writer's erasure", () => {
     const asked = {
       sources: [],
       memories: [...before, ...(await pinned(anew.memories))],
-      entities: [],
     };
     const hidden = await shared().erasedOf(asked);
     await holdDeletes(false);
@@ -404,9 +403,9 @@ describe("a writer's erasure", () => {
       replayed: await shared().erasedOf(asked),
     }).toStrictEqual({
       asked: 3,
-      hidden: { sources: [], memories: [mine], entities: [] },
-      deleted: { sources: [], memories: [mine], entities: [] },
-      replayed: { sources: [], memories: [mine], entities: [] },
+      hidden: { sources: [], memories: [mine] },
+      deleted: { sources: [], memories: [mine] },
+      replayed: { sources: [], memories: [mine] },
     });
   });
 

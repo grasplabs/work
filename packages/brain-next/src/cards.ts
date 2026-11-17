@@ -170,7 +170,7 @@ export const readCard = (
     ...(page.next === undefined ? {} : { next: page.next }),
     // What makes the entity seen, as of what the store had learned; the
     // names; and what the page's memories say rests on.
-    ...restingOn([
+    ...restingOn(sql, [
       ...heldBy(sql, [found.row], reader, learned),
       ...seen.held,
       ...named.held,

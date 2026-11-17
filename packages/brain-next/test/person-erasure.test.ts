@@ -740,8 +740,6 @@ describe("a person's erasure in the shared store", () => {
     const statements = new Map<string, string>();
     const asked = {
       sources: [],
-      // Every entity Bob was shown the name of: hers alone was closed.
-      entities: Object.values(at.entities),
       memories: read
         .flat()
         .flatMap(
@@ -775,14 +773,9 @@ describe("a person's erasure in the shared store", () => {
     };
     const erasedNow = async (): Promise<string[]> => {
       const answer = await shared().erasedOf(asked);
-      return [
-        ...answer.memories.map((memory) =>
-          (statements.get(memory) ?? "").replace(at.name, "her")
-        ),
-        ...answer.entities.map((entity) =>
-          entity === at.entities.anna ? "her card" : entity
-        ),
-      ].toSorted();
+      return answer.memories
+        .map((memory) => (statements.get(memory) ?? "").replace(at.name, "her"))
+        .toSorted();
     };
     const before = await copyOf(shared());
     const none = await erasedNow();
@@ -815,7 +808,6 @@ describe("a person's erasure in the shared store", () => {
       `Bob reports to her ${at.marker}`,
       `her is on leave in March ${at.marker}`,
       `her leads finance ${at.marker}`,
-      "her card",
     ].toSorted();
     expect({
       asked: [...statements.values()].length,

@@ -398,6 +398,12 @@ const findCode = (address: string) =>
     `export default async (self, env) => { const { entities } = await env.brain.findEntities({ identifier: { type: "email", value: ${JSON.stringify(address)} } }); return entities.map(({ id, name }) => id + " " + name); };`
   );
 
+/** Code that returns each entity of kind `kind` `env.brain.findEntities` finds: its id and name. */
+const kindCode = (kind: string) =>
+  codeStep(
+    `export default async (self, env) => { const { entities } = await env.brain.findEntities({ kind: ${JSON.stringify(kind)} }); return entities.map(({ id, name }) => id + " " + name); };`
+  );
+
 /** Code that pages through every entity named `name`, at most five pages: each one's id and name. */
 const pagingCode = (name: string) =>
   codeStep(
@@ -471,6 +477,15 @@ const erasedByAdmin = async (
   }
   return await hiddenByErasures();
 };
+
+/** The memories `stub`'s person used, by id (`memory_uses`): what was handed to them. */
+const usedIn = async (stub: WorkspaceStub): Promise<string[]> =>
+  await runInDurableObject(stub, (_instance, state) =>
+    state.storage.sql
+      .exec<{ memory: string }>("SELECT memory FROM memory_uses")
+      .toArray()
+      .map(({ memory }) => memory)
+  );
 
 /** A result as the chat shows it, without what tells one call or moment from another. */
 const shapeOf = (message: ChatMessage | undefined) =>
@@ -1092,9 +1107,9 @@ describe("what a chat shows of what it read from the Brain", () => {
 // GRA-1982: what a chat's code read of the Brain's entities (`env.brain`
 // `getEntity`, `findEntities`) shows of what a person's erasure took (her
 // card, what is about it or relates to it) is withheld from the model and
-// replaced on screen, as any erasure for good: by its memories' pins with
-// what they rest on, and a pin for each entity whose name it shows,
-// answered from the ledger alone. A team or desk that only held her
+// replaced on screen, as any erasure for good: by a pin of every memory
+// the answer rests on (what it hands over, what gave a name or made an
+// entity seen), with what each rests on, answered from the ledger alone. A team or desk that only held her
 // address keeps showing (#2339). An App's action keeps nothing of what it
 // read in Grasp; a workflow's run is GRA-1985.
 describe("what a chat's code read of an erased member's card", () => {
@@ -1384,19 +1399,218 @@ describe("what a chat's code read of an erased member's card", () => {
         found: 101,
         onTheSecondPage: true,
         after: withheldResult,
-        // Her card's name, and the memory on it in a writer's own word.
-        audited: [
-          {
-            workspace: chats.id,
-            runs: 1,
-            sources: 2,
-            memories: 1,
-            entities: 1,
-          },
-        ],
+        // The memory that named and showed her card, counted, never which.
+        audited: [{ workspace: chats.id, runs: 1, sources: 1, memories: 1 }],
         held: false,
         sentAgain: false,
       });
+    }
+  );
+
+  it(
+    "replaces a find whose names rest on what her erasure took, in her word or about her card, though the find handed over no memory",
+    slow,
+    async () => {
+      const chats = await recallingChats();
+      const admin = await signedInApi(idp, "admin");
+      const ben = chats.person.userId;
+      const at = await benAndAnna(ben);
+      const transcript = await added(
+        `${at.name}: Falcon starts Monday. Kite is mine.`,
+        at.team
+      );
+      const mark = { falcon: word(), kite: word() };
+      const named = await brainOf(
+        inJurisdiction(env, env.BRAIN_STORE)
+      ).addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group: at.group },
+        entities: [
+          {
+            key: "anna",
+            kind: "person",
+            names: [at.name],
+            identifiers: [{ type: "email", value: at.address }],
+          },
+          { key: "falcon", kind: "project", names: [`Falcon ${mark.falcon}`] },
+          { key: "kite", kind: "project", names: [`Kite ${mark.kite}`] },
+        ],
+        memories: [
+          // In her word, about a project: it alone names the project.
+          {
+            about: "falcon",
+            type: "fact",
+            statement: "Falcon starts Monday",
+            speaker: saidBy(at.anna.userId),
+            basis: on(transcript, "Falcon starts Monday"),
+          },
+          // About her card, relating to a project: it alone names that one.
+          {
+            about: "anna",
+            attribute: "owns",
+            object: "kite",
+            type: "fact",
+            statement: "She owns Kite",
+            speaker: saidBy(ben),
+            basis: on(transcript, "Kite is mine"),
+          },
+        ],
+      });
+      const replies: ProviderReply[] = [kindCode("project"), says("Noted.")];
+      const provider = await answeringProvider(() => replies.shift());
+      const { chat, ask } = await chats.newChat();
+      await ask(word());
+      const before = resultsOf(await opened(chats.person, chat.id)).at(-1);
+      // Rested on, never handed over: no use of Ben's.
+      const used = await usedIn(chats.stub);
+
+      const left = await erasedByAdmin(admin, at.anna);
+      const after = resultsOf(await opened(chats.person, chat.id)).at(-1);
+      replies.push(says("Ok."));
+      const sentBefore = provider.requests.length;
+      await ask("Thanks, and what else is new?");
+      const sent = JSON.stringify(
+        provider.requests.slice(sentBefore).map(({ body }) => body)
+      );
+
+      expect({
+        before: [mark.falcon, mark.kite].map(
+          (needle) => before?.includes(needle) === true
+        ),
+        left,
+        after,
+        held: await Promise.all(
+          [mark.falcon, mark.kite].map(
+            async (needle) => await objectHolds(chats.stub, needle)
+          )
+        ),
+        sent: [mark.falcon, mark.kite].map((needle) => sent.includes(needle)),
+        used: named.memories.filter((memory) => used.includes(memory)),
+      }).toStrictEqual({
+        used: [],
+        before: [true, true],
+        left: 0,
+        after: withheldResult,
+        held: [false, false],
+        sent: [false, false],
+      });
+    }
+  );
+
+  it(
+    "replaces a colleague's card that holds a fact in her word, drawn from minutes that stay",
+    slow,
+    async () => {
+      const chats = await recallingChats();
+      const admin = await signedInApi(idp, "admin");
+      const ben = chats.person.userId;
+      const at = await benAndAnna(ben);
+      const minutes = await added(
+        `${at.name}: Bob ships on Tuesdays.`,
+        at.team
+      );
+      const mark = word();
+      const written = await brainOf(
+        inJurisdiction(env, env.BRAIN_STORE)
+      ).addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group: at.group },
+        entities: [{ key: "bob", kind: "person", names: [`Bob ${word()}`] }],
+        memories: [
+          {
+            about: "bob",
+            type: "fact",
+            statement: `Bob ships on Tuesdays ${mark}`,
+            speaker: saidBy(at.anna.userId),
+            basis: on(minutes, "Bob ships on Tuesdays"),
+          },
+        ],
+      });
+      const replies: ProviderReply[] = [
+        cardCode(written.entities.bob ?? ""),
+        says("Noted."),
+        says("Ok."),
+      ];
+      const provider = await answeringProvider(() => replies.shift());
+      const { chat, ask } = await chats.newChat();
+      await ask(word());
+      const before = resultsOf(await opened(chats.person, chat.id)).at(-1);
+      // Handed over on the card: Ben's use of it.
+      const used = await usedIn(chats.stub);
+
+      const left = await erasedByAdmin(admin, at.anna);
+      const after = resultsOf(await opened(chats.person, chat.id)).at(-1);
+      const sentBefore = provider.requests.length;
+      await ask("Thanks, and what else is new?");
+
+      expect({
+        used: written.memories.filter((memory) => used.includes(memory)),
+        before: before?.includes(mark),
+        left,
+        after,
+        held: await objectHolds(chats.stub, mark),
+        sent: JSON.stringify(
+          provider.requests.slice(sentBefore).map(({ body }) => body)
+        ).includes(mark),
+      }).toStrictEqual({
+        used: written.memories,
+        before: true,
+        left: 0,
+        after: withheldResult,
+        held: false,
+        sent: false,
+      });
+    }
+  );
+
+  it(
+    "hands code nothing of a card whose pins can't be kept with the run first",
+    slow,
+    async () => {
+      const chats = await recallingChats();
+      const ben = chats.person.userId;
+      const at = await benAndAnna(ben);
+      const mark = word();
+      const { entities } = await brainOf(
+        inJurisdiction(env, env.BRAIN_STORE)
+      ).addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group: at.group },
+        entities: [{ key: "bob", kind: "person", names: [`Bob ${word()}`] }],
+        memories: [
+          {
+            about: "bob",
+            type: "fact",
+            statement: `Bob ships on Tuesdays ${mark}`,
+            speaker: saidBy(at.anna.userId),
+            basis: { kind: "writer", writer: ben },
+          },
+        ],
+      });
+      // The chat's object refuses to keep a memory's pin with a run.
+      await runInDurableObject(chats.stub, (_instance, state) => {
+        state.storage.sql.exec(
+          `CREATE TRIGGER test_refuse_pins BEFORE INSERT ON chat_run_sources
+          WHEN NEW.source_id LIKE 'brain-%memory:%'
+          BEGIN SELECT RAISE(ABORT, 'refused by the test'); END`
+        );
+      });
+      const replies: ProviderReply[] = [
+        cardCode(entities.bob ?? ""),
+        says("Noted."),
+      ];
+      await answeringProvider(() => replies.shift());
+      const { chat, ask } = await chats.newChat();
+      await ask(word());
+      const shown = await opened(chats.person, chat.id);
+
+      const result = shown.findLast(({ role }) => role === "result");
+
+      expect({
+        failed: result?.role === "result" && result.failed,
+        shown: result?.role === "result" && result.text.includes(mark),
+        held: await objectHolds(chats.stub, mark),
+      }).toStrictEqual({ failed: true, shown: false, held: false });
     }
   );
 });

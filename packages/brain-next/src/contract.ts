@@ -2338,14 +2338,12 @@ export const erasedMemorySchema = z.strictObject({
 export type ErasedMemory = z.infer<typeof erasedMemorySchema>;
 
 /**
- * Keys, memories and entities to ask whether an erasure took them for
- * good (`Brain.erasedOf`): what a host once read itself. An entity is one
- * whose name it was shown.
+ * Keys and memories to ask whether an erasure took them for good
+ * (`Brain.erasedOf`): what a host once read itself.
  */
 export const erasedRequestSchema = z.strictObject({
   sources: z.array(sourceIdSchema).max(readableCheckMax),
   memories: z.array(erasedMemorySchema).max(readableCheckMax),
-  entities: z.array(entityIdSchema).max(readableCheckMax),
 });
 export type ErasedRequest = z.infer<typeof erasedRequestSchema>;
 
@@ -2353,7 +2351,6 @@ export type ErasedRequest = z.infer<typeof erasedRequestSchema>;
 export interface Erased {
   sources: SourceId[];
   memories: MemoryId[];
-  entities: EntityId[];
 }
 
 /**
@@ -2505,6 +2502,18 @@ export interface EntityPage {
    * it has no version for. For the host to keep as `restsOn`.
    */
   restsOnWords: MemoryId[];
+  /**
+   * Every memory what it says rests on, the same as `restsOn` and
+   * `restsOnWords` name, each once, with its record as `erasedOf` is
+   * asked by it (`ErasedMemory`): its id, its source's key or writer, when
+   * the store learned it, whose word it is, and its entities' ids. Each is
+   * a memory the reader may read through this answer, so it tells no
+   * reader anything they may not know; for the host to keep with what it
+   * hands on (a run's pins), so what an erasure took of it is told by the
+   * ledger alone (a person's erasure takes a memory by its speaker and
+   * entities); never shown to anyone.
+   */
+  restsOnMemories: ErasedMemory[];
 }
 
 /** An entity to read, for a reader. */
@@ -2722,6 +2731,18 @@ export interface Card {
    * it has no version for. For the host to keep as `restsOn`.
    */
   restsOnWords: MemoryId[];
+  /**
+   * Every memory what it says rests on, the same as `restsOn` and
+   * `restsOnWords` name, each once, with its record as `erasedOf` is
+   * asked by it (`ErasedMemory`): its id, its source's key or writer, when
+   * the store learned it, whose word it is, and its entities' ids. Each is
+   * a memory the reader may read through this answer, so it tells no
+   * reader anything they may not know; for the host to keep with what it
+   * hands on (a run's pins), so what an erasure took of it is told by the
+   * ledger alone (a person's erasure takes a memory by its speaker and
+   * entities); never shown to anyone.
+   */
+  restsOnMemories: ErasedMemory[];
 }
 
 // Memories in a recall's pack (recall-memories.ts, pack.ts).
@@ -3234,8 +3255,7 @@ export interface Brain {
    * whose source's key is so erased, whose writer was erased after the
    * store learned it (`eraseWriter`), or that a person's erasure takes
    * (`erasePersonShared`): in that person's word, or about or relating to
-   * an entity it closed (their card); and an entity it closed. Never a
-   * retired memory, a key whose
+   * an entity it closed (their card). Never a retired memory, a key whose
    * readers only changed, nor a memory only because the store doesn't
    * hold it now: a lost storage, until a restore puts it back, lacks what
    * was never erased. For the host only, which asks of what it once read
