@@ -14,6 +14,7 @@
 // A screen reader hears a step when it finishes, not every tick. Every value is a token.
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import {
   Collapsible,
@@ -23,11 +24,11 @@ import {
 import type { CollapsibleState } from "@ui-sdk/react/collapsible";
 import { useEffect, useRef, useState } from "react";
 
+import { AgentIndicator } from "../agent-indicator";
 import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
 import { ChevronDown, Icon } from "../icons";
-import { TextShimmer } from "../text-shimmer";
-import { WorkingMark } from "../working-mark";
+import { Shimmer } from "../shimmer";
 import { seconds, summaryOf } from "./format";
 import { Step } from "./step";
 import { activityStyles as styles } from "./styles";
@@ -60,6 +61,8 @@ export interface AgentActivityProps {
    * the light, says Working, and shows no time yet.
    * @default false
    */
+  loading?: boolean;
+  /** @deprecated Use `loading`. */
   working?: boolean;
   /**
    * What the line says while the run goes on between two steps.
@@ -120,7 +123,8 @@ export const AgentActivity = ({
   open,
   onOpenChange,
   "aria-label": ariaLabel = "Agent activity",
-  working: running = false,
+  working: runningDeprecated,
+  loading: running = runningDeprecated ?? false,
   workingLabel = "Working",
   words: given,
 }: AgentActivityProps) => {
@@ -215,7 +219,7 @@ export const AgentActivity = ({
                 <span aria-hidden="true" {...stylex.props(styles.target)} />
                 {/* One mark in view: on the line while closed; open, the working step has it, and the
                   line's words stand on the column's edge, as they do once the run is done. */}
-                {working && !state.open && <WorkingMark />}
+                {working && !state.open && <AgentIndicator />}
                 {/* The line changes as the work goes on: the new words replace the old in one
                   frame, never passing through empty. It is a sentence, so on a narrow screen it may
                   wrap rather than lose its end. */}
@@ -226,7 +230,7 @@ export const AgentActivity = ({
                     working && styles.headWorking
                   )}
                 >
-                  {working ? <TextShimmer>{line}</TextShimmer> : line}
+                  {working ? <Shimmer>{line}</Shimmer> : line}
                 </span>
                 {!working && duration !== undefined && (
                   <span {...stylex.props(styles.time)}>

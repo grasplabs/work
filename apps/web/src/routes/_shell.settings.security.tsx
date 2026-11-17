@@ -9,7 +9,13 @@ import { deadline, unlessAborted } from "../core.ts";
 import { formatDateTime } from "../format.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Item, ItemGroup } from "../grasp/item/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+  ItemTitle,
+} from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -72,35 +78,35 @@ const DeviceRow = ({ session }: { session: OwnSession }) => {
     });
   };
   return (
-    <Item
-      {...(session.current
-        ? {}
-        : {
-            actions: (
-              // Plain words: a Button with a result reserves the width of its longest words, which leaves a phone's row no room.
-              <Button
-                aria-label={t`Sign out ${device}, signed in ${time}`}
-                disabled={busy}
-                onClick={() => {
-                  void signOut();
-                }}
-                size="sm"
-                variant="ghost"
-              >
-                {t`Sign out`}
-              </Button>
-            ),
-          })}
-      size="sm"
-      title={
-        <TitleLine
-          detail={<RowNote failure={failure}>{t`Signed in ${time}`}</RowNote>}
-        >
-          {device}
-          {session.current ? <Badge size="sm">{t`This device`}</Badge> : null}
-        </TitleLine>
-      }
-    />
+    <Item size="sm">
+      <ItemContent>
+        <ItemTitle>
+          <TitleLine
+            detail={<RowNote failure={failure}>{t`Signed in ${time}`}</RowNote>}
+          >
+            {device}
+            {session.current ? <Badge size="sm">{t`This device`}</Badge> : null}
+          </TitleLine>
+        </ItemTitle>
+      </ItemContent>
+      {session.current ? null : (
+        <ItemActions>
+          {/* Plain words: a Button with a result reserves the width of its
+            longest words, which leaves a phone's row no room. */}
+          <Button
+            aria-label={t`Sign out ${device}, signed in ${time}`}
+            disabled={busy}
+            onClick={() => {
+              void signOut();
+            }}
+            size="sm"
+            variant="ghost"
+          >
+            {t`Sign out`}
+          </Button>
+        </ItemActions>
+      )}
+    </Item>
   );
 };
 

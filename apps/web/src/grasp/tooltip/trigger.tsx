@@ -3,6 +3,7 @@
 // It carries the tooltip's words as its description (`aria-describedby`).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import { TooltipTrigger as TriggerPrimitive } from "@ui-sdk/react/tooltip";
 import type { ComponentProps } from "react";
 
@@ -25,19 +26,34 @@ type TriggerPrimitiveProps = ComponentProps<typeof TriggerPrimitive>;
 interface TriggerWithWords {
   /** The words on the trigger: what it does ("Publish", "Share"). */
   children: ButtonWords;
-  /** An icon before the words, or the whole trigger with `label`. Import it from the icons entry (`@/components/grasp/icons`). */
+  /** An icon before the words, or the whole trigger with `aria-label`. Import it from the icons entry (`@/components/grasp/icons`). */
   icon?: IconData;
+  /** @deprecated Use `aria-label`. */
   label?: never;
+  "aria-label"?: string;
 }
 
 /**
- * A trigger that is only an icon. `label` is its name; the tooltip adds to it.
+ * A trigger that is only an icon. `aria-label` is its name; the tooltip adds to it.
  */
 interface TriggerIconOnly {
   children?: never;
   icon: IconData;
   /** The name of an icon-only trigger, for a screen reader, a voice command and an agent. */
+  "aria-label": string;
+  /** @deprecated Use `aria-label`. */
+  label?: never;
+}
+
+/**
+ * The same, named the old way.
+ */
+interface TriggerIconOnlyLabel {
+  children?: never;
+  icon: IconData;
+  /** @deprecated Use `aria-label`. */
   label: string;
+  "aria-label"?: string;
 }
 
 /** Every prop a TooltipTrigger takes: these, and the rest of UI SDK's TooltipTrigger. */
@@ -45,7 +61,7 @@ export type TooltipTriggerProps = Omit<
   TriggerPrimitiveProps,
   "render" | "children" | "className" | "style" | "disabled"
 > &
-  (TriggerWithWords | TriggerIconOnly) & {
+  (TriggerWithWords | TriggerIconOnly | TriggerIconOnlyLabel) & {
     /**
      * The trigger is a Button, in any of its variants: `ghost` in a toolbar, `quiet` beside other
      * buttons.
@@ -57,9 +73,9 @@ export type TooltipTriggerProps = Omit<
      * @default "md"
      */
     size?: ButtonSize;
-    /** Layout only: margins and alignment, as on a Button. */
+    /** @deprecated Use `layout`. */
     style?: ButtonLayoutStyle;
-    /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+    /** Layout only: margins and alignment, as on a Button. */
     layout?: ButtonLayoutStyle;
   };
 
@@ -68,7 +84,8 @@ export const TooltipTrigger = ({
   variant = "quiet",
   size = "md",
   icon,
-  label,
+  label: labelDeprecated,
+  "aria-label": label = labelDeprecated,
   children,
   style: styleProp,
   layout,
@@ -81,7 +98,7 @@ export const TooltipTrigger = ({
     variant,
     size,
     icon,
-    label,
+    "aria-label": label,
     layout: layout ?? styleProp,
     children,
   } as ButtonProps;

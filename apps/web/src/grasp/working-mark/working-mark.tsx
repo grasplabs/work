@@ -12,6 +12,7 @@
 // two in one view. Every value is a token (src/tokens). A caller may set layout only (`style`).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
 
@@ -22,22 +23,23 @@ import type { LayoutStyle } from "../layout/layout";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { markVars as v } from "./working-mark.stylex";
 
-/** How the mark moves: the dither glyph (Grasp's), or one of the three it was chosen from. */
+/** How the mark moves: the dither glyph (Grasp's), or one of the three it was chosen from. @deprecated Use `AgentIndicatorVariant`, from `@/components/grasp/agent-indicator`. */
 export type WorkingMarkVariant = "dither" | "orbit" | "breath" | "bead";
 
-/** The dither glyph's path: a diagonal wave, round its edge, or row by row. */
+/** The dither glyph's path: a diagonal wave, round its edge, or row by row. @deprecated Use `AgentIndicatorPath`, from `@/components/grasp/agent-indicator`. */
 export type WorkingMarkPath = "wave" | "circle" | "snake";
 
 /**
  * The mark every part shows while it works. The one place the choice is written: change it here
  * and Agent activity, the Composer and Chat message follow.
+ * @deprecated Use `agentIndicatorVariant`, from `@/components/grasp/agent-indicator`.
  */
 export const workingMarkVariant: WorkingMarkVariant = "dither";
 
-/** What a caller may style: where the mark sits. Never its look. */
+/** What a caller may style: where the mark sits. Never its look. @deprecated Use `AgentIndicatorLayoutStyle`, from `@/components/grasp/agent-indicator`. */
 export type WorkingMarkLayoutStyle = LayoutStyle;
 
-/** Every prop a WorkingMark takes. */
+/** Every prop a WorkingMark takes. @deprecated Use `AgentIndicatorProps`, from `@/components/grasp/agent-indicator`. */
 export interface WorkingMarkProps {
   /**
    * How it moves. Leave it out for Grasp's choice (`workingMarkVariant`).
@@ -59,10 +61,12 @@ export interface WorkingMarkProps {
    * What is working, said once to a screen reader, never shown. Give it when no words beside it
    * say so; leave it out when they do, and make those words the status.
    */
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
   label?: string;
-  /** Layout only: margins and alignment. The look belongs to the mark. */
+  /** @deprecated Use `layout`. */
   style?: WorkingMarkLayoutStyle;
-  /** The same as `style`, under a name the product's lint lets a component take; it wins over `style`. */
+  /** Layout only: margins and alignment. The look belongs to the mark. */
   layout?: WorkingMarkLayoutStyle;
 }
 
@@ -370,23 +374,27 @@ const Body = ({
   return <Dither path={path} />;
 };
 
-/** Grasp's sign that an agent is working, in an icon's room; a tick drawn in once it is `done`. */
+/** Grasp's sign that an agent is working, in an icon's room; a tick drawn in once it is `done`. @deprecated Use `AgentIndicator`, from `@/components/grasp/agent-indicator`. */
 export const WorkingMark = ({
   variant = workingMarkVariant,
   path = "wave",
   done = false,
-  label,
+  label: labelDeprecated,
+  "aria-label": label = labelDeprecated,
   style,
   layout,
 }: WorkingMarkProps) => {
   const { ref, seen } = useSeen();
+  // The caller's layout goes on the root: the mark alone, or the status round it when named.
+  const named = label !== undefined && label !== "";
+  const place = layout ?? style;
   const mark = (
     <span
       ref={ref}
       aria-hidden="true"
       data-slot="working-mark"
       data-variant={variant}
-      {...stylex.props(styles.mark, !seen && styles.paused, layout ?? style)}
+      {...stylex.props(styles.mark, !seen && styles.paused, !named && place)}
     >
       {done ? (
         <span data-slot="working-mark-done" {...stylex.props(styles.tick)}>
@@ -397,13 +405,13 @@ export const WorkingMark = ({
       )}
     </span>
   );
-  if (label === undefined || label === "") {
+  if (!named) {
     return mark;
   }
   // A live region reads its text, not a name: the label is hidden text inside the status.
   return (
     // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- not every screen reader treats <output> as a live region; role="status" is
-    <span role="status">
+    <span role="status" {...stylex.props(place)}>
       {mark}
       <span {...stylex.props(visuallyHidden)}>{label}</span>
     </span>

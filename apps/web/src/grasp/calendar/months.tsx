@@ -80,7 +80,7 @@ export const CalendarMonths = ({
               variant="ghost"
               size="sm"
               icon={ChevronLeft}
-              label={previousLabel}
+              aria-label={previousLabel}
             />
           )}
         />
@@ -100,7 +100,7 @@ export const CalendarMonths = ({
               variant="ghost"
               size="sm"
               icon={ChevronRight}
-              label={nextLabel}
+              aria-label={nextLabel}
             />
           )}
         />

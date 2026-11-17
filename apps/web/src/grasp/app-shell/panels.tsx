@@ -31,6 +31,8 @@ import { Cross } from "../icons";
 import { simply } from "../motion/simply.stylex";
 import { Resizable } from "../resizable";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { CardLine } from "./card-line";
+import { cardLine } from "./card-line.stylex";
 import { FOCUSABLE, firstStop, placeOf } from "./focus-place";
 
 const NARROW = "@container app-shell (width < 40rem)";
@@ -38,7 +40,6 @@ const NARROW = "@container app-shell (width < 40rem)";
 // guessed in CSS for the default least widths: the page's 366 with its margin and the panels' 340.
 // Once measured, the script decides, with the host's own least.
 const CROWDED = "@container app-shell-column (width < 706px)";
-const FORCED = media.forced;
 
 /** The page card's least width, in pixels: a phone's width less the window's margins, so the
  * product's page stays readable. Where the column cannot hold the page at this width beside the
@@ -135,23 +136,34 @@ const styles = stylex.create({
     overflow: "clip",
     borderRadius: grasp.shellCardCorner,
     backgroundColor: grasp.shellCard,
-    boxShadow: grasp.shellCardShadow,
-    outlineWidth: { default: 0, [FORCED]: grasp.hairline },
-    outlineStyle: "solid",
-    outlineColor: "CanvasText",
-    outlineOffset: `calc(-1 * ${grasp.hairline})`,
+    // Its edge a line inside it, round all four corners, as the page's card (app-shell.tsx `card`,
+    // FRESH.md F89): drawn outside, a lift was cut by the clip of its side of the group. Drawn over
+    // what it holds (card-line.tsx), so a head's ground never covers it; the card is its box.
+    position: "relative",
+    [cardLine.width]: grasp.hairline,
+  },
+  headLine: {
+    position: "absolute",
+    insetBlockStart: `calc(${grasp.shellBar} - ${grasp.hairline})`,
+    insetInline: { default: grasp.hairline, [NARROW]: 0 },
+    zIndex: `calc(${grasp.shellPageLayer} + 1)`,
+    height: grasp.hairline,
+    backgroundColor: {
+      default: grasp.shellCardLine,
+      [media.forced]: "CanvasText",
+    },
+    pointerEvents: "none",
   },
   // On a narrow shell the panels take the whole window, over the page, on the card's ground.
   panelsNarrow: {
-    position: { default: "static", [NARROW]: "absolute" },
+    position: { default: "relative", [NARROW]: "absolute" },
     inset: { default: null, [NARROW]: 0 },
     zIndex: { default: null, [NARROW]: grasp.shellPageLayer },
     marginBlock: { default: grasp.shellInset, [NARROW]: 0 },
     marginInlineEnd: { default: grasp.shellInset, [NARROW]: 0 },
     borderRadius: { default: grasp.shellCardCorner, [NARROW]: 0 },
     backgroundColor: { default: grasp.shellCard, [NARROW]: "transparent" },
-    boxShadow: { default: grasp.shellCardShadow, [NARROW]: "none" },
-    outlineWidth: { default: 0, [FORCED]: grasp.hairline, [NARROW]: 0 },
+    [cardLine.width]: { default: grasp.hairline, [NARROW]: "0px" },
   },
   // Lifted off their side while they go full screen or come back beside the page (F13): over the
   // column, in the box they have beside the page, their start easing to its place as the page's
@@ -175,7 +187,7 @@ const styles = stylex.create({
   stillCard: {
     borderRadius: { default: grasp.shellCardCorner, [NARROW]: 0 },
     backgroundColor: { default: grasp.shellCard, [NARROW]: "transparent" },
-    boxShadow: { default: grasp.shellCardShadow, [NARROW]: "none" },
+    [cardLine.width]: { default: grasp.hairline, [NARROW]: "0px" },
   },
   // While their box moves (going full screen or docking again), what is in them is held at the width
   // it ends at: its words wrap once, never again every frame (App shell FRESH.md F82), as `hold` does
@@ -226,7 +238,7 @@ const styles = stylex.create({
     borderRadius: 0,
     backgroundColor: "transparent",
     boxShadow: "none",
-    outlineWidth: 0,
+    [cardLine.width]: "0px",
   },
   // The gutter between the two cards is the handle. Nothing marks it but the resize cursor, and the
   // focus ring for the keyboard (the product's Panel handle). On a narrow shell, or while the
@@ -249,7 +261,7 @@ const styles = stylex.create({
     marginInlineEnd: 0,
     borderRadius: { default: grasp.shellCardCorner, [NARROW]: 0 },
     backgroundColor: grasp.shellCard,
-    boxShadow: { default: grasp.shellCardShadow, [NARROW]: "none" },
+    [cardLine.width]: { default: grasp.hairline, [NARROW]: "0px" },
   },
   // The guess before measuring: crowded, the panels lie over the page as their own card.
   panelsGuess: {
@@ -347,6 +359,8 @@ interface PanelsProps {
   /** Says whether the column is too crowded for the page beside the panels, each time that changes;
    * undefined until the column is measured. */
   onCrowdedChange: (crowded: boolean | undefined) => void;
+  /** A line at the foot of the panels' head row (AppShell's `panelsHeadLine`). */
+  headLine?: boolean;
 }
 
 /** A width kept between its least and most, in whole pixels. */
@@ -756,6 +770,7 @@ interface SideProps {
   cover: Cover;
   onClose?: () => void;
   closeLabel: string;
+  headLine: boolean;
 }
 
 /** What stands in the panels' side: their card, held at its final width while the side moves. */
@@ -771,6 +786,7 @@ const PanelsCard = ({
   cover,
   onClose,
   closeLabel,
+  headLine,
 }: SideProps) => {
   const out = phase === "coming" || phase === "open";
   const over = covered || crowded;
@@ -795,6 +811,14 @@ const PanelsCard = ({
           )}
         >
           {panels}
+          <CardLine />
+          {headLine && (
+            <span
+              aria-hidden="true"
+              data-slot="app-shell-panels-head-line"
+              {...stylex.props(styles.headLine)}
+            />
+          )}
           {crowded && onClose !== undefined && (
             <span
               data-slot="app-shell-panels-close"
@@ -804,7 +828,7 @@ const PanelsCard = ({
                 variant="ghost"
                 size="sm"
                 icon={Cross}
-                label={closeLabel}
+                aria-label={closeLabel}
                 onClick={onClose}
               />
             </span>
@@ -845,6 +869,7 @@ export const Panels = ({
   onClose,
   closeLabel,
   keep,
+  headLine = true,
 }: PanelsProps) => {
   const column = useRef<HTMLDivElement>(null);
   const side = useRef<HTMLDivElement>(null);
@@ -965,6 +990,7 @@ export const Panels = ({
               cover={cover}
               onClose={onClose}
               closeLabel={closeLabel}
+              headLine={headLine}
             />
           </div>
         </ResizablePanelPrimitive>

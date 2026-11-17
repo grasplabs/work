@@ -13,6 +13,7 @@
 // the arrow keys pick a point and the caller shows it in the tile's own figure; never a tooltip.
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { useId, useState } from "react";
 import type { PointerEvent } from "react";
@@ -34,7 +35,9 @@ import type { SparkPoint, SparkShape } from "./spark";
 /** Every prop a ChartSpark takes. */
 export interface ChartSparkProps {
   /** What it shows, as a screen reader and an agent say it ("Revenue, last 12 weeks"). */
-  label: string;
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
+  label?: string;
   /** The trend in one short sentence ("Up 8%", "Down from 52 to 47 days"). */
   summary: string;
   /** The values, oldest first. One value, or all alike, draws a straight line. */
@@ -49,6 +52,8 @@ export interface ChartSparkProps {
    * `value` in the value colour, or `quiet` for a comparison: last year's, another team's.
    * @default "value"
    */
+  variant?: "value" | "quiet";
+  /** @deprecated Use `variant`. */
   look?: "value" | "quiet";
   /**
    * A soft area under the line.
@@ -70,6 +75,8 @@ export interface ChartSparkProps {
   /** Writes a value as people read it, for a screen reader at the tile size ("€12.4k"). */
   format?: (value: number) => string;
   /** Its width and where it sits. */
+  layout?: ChartLayoutStyle;
+  /** @deprecated Use `layout`. */
   style?: ChartLayoutStyle;
 }
 
@@ -278,7 +285,7 @@ interface LiveProps extends Omit<DrawingProps, "activeAt" | "name"> {
   onPoint: (index: number | null) => void;
   pointLabels: readonly string[] | undefined;
   format: (value: number) => string;
-  style: ChartLayoutStyle | undefined;
+  layout: ChartLayoutStyle | undefined;
 }
 
 // At the tile size with onPoint: a control. A range input lies over the drawing, unseen: it takes
@@ -291,7 +298,7 @@ const Live = ({
   onPoint,
   pointLabels,
   format,
-  style,
+  layout: style,
   ...drawing
 }: LiveProps) => {
   const count = values.length;
@@ -358,17 +365,20 @@ const Live = ({
 };
 
 export const ChartSpark = ({
-  label,
+  label: labelDeprecated,
+  "aria-label": label = labelDeprecated ?? "",
   summary,
   values,
   size = "line",
-  look = "value",
+  look: lookDeprecated,
+  variant: look = lookDeprecated ?? "value",
   area = false,
   mark = "none",
   onPoint,
   pointLabels,
   format = String,
-  style,
+  style: styleDeprecated,
+  layout: style = styleDeprecated,
 }: ChartSparkProps) => {
   const shape = sparkShape(values, SIZES[size].height, SIZES[size].pad);
   const marked = markOf(values, mark);
@@ -385,7 +395,7 @@ export const ChartSpark = ({
         onPoint={onPoint}
         pointLabels={pointLabels}
         format={format}
-        style={style}
+        layout={style}
       />
     );
   }

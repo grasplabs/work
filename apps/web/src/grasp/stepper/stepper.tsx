@@ -17,6 +17,7 @@
 // (src/tokens). A caller may set layout only (the `style` prop).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
@@ -55,6 +56,8 @@ export interface StepperProps {
    * The step you are on, counted from 0. Past the last step, every step is done.
    * @default 0
    */
+  value?: number;
+  /** @deprecated Use `value`. */
   current?: number;
   /**
    * `horizontal` runs across, the names beside their marks; `vertical` runs down, with room for
@@ -63,15 +66,17 @@ export interface StepperProps {
    */
   orientation?: "horizontal" | "vertical";
   /** What the steps are for, for a screen reader ("Setting up the workspace"). */
-  label: string;
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
+  label?: string;
   /**
    * How each state is said to a screen reader, in the page's language.
    * @default { done: "done", current: "current step", coming: "not started", failed: "failed" }
    */
   stateLabels?: Partial<Record<StepperState, string>>;
-  /** Layout only: where it sits, and how wide it is. */
+  /** @deprecated Use `layout`. */
   style?: StepperLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: where it sits, and how wide it is. */
   layout?: StepperLayoutStyle;
   /**
    * How it is drawn. `light`: the light on the line: small dots on a quiet line, done solid in the
@@ -82,6 +87,8 @@ export interface StepperProps {
    * ring of marks joined by hairlines. Provisional: Ruben chooses one.
    * @default "light"
    */
+  variant?: StepperLook;
+  /** @deprecated Use `variant`. */
   look?: StepperLook;
   /**
    * The current step is in progress: its ring gives way to the working light, travelling the line
@@ -89,11 +96,15 @@ export interface StepperProps {
    * the step waits on the person. The light look only.
    * @default false
    */
+  loading?: boolean;
+  /** @deprecated Use `loading`. */
   working?: boolean;
   /**
    * Called with a done step's index when the person presses it, to go back to it. Given, every done
    * step is a button (a 44px target); left out, the stepper only shows progress.
    */
+  onValueChange?: (index: number) => void;
+  /** @deprecated Use `onValueChange`. */
   onSelect?: (index: number) => void;
   /**
    * The words for where the person is, said to a screen reader when the step changes and shown
@@ -496,8 +507,23 @@ const ClassicStepper = ({
   );
 };
 
+/**
+ * The props by their new names, else the deprecated old ones (the breaking release's step 1): the
+ * two drawings read the old names, so the new ones are put there once, here.
+ */
+const withNewNames = (props: StepperProps): StepperProps => ({
+  ...props,
+  look: props.variant ?? props.look,
+  working: props.loading ?? props.working,
+  current: props.value ?? props.current,
+  onSelect: props.onValueChange ?? props.onSelect,
+  label: props["aria-label"] ?? props.label,
+  style: props.layout ?? props.style,
+});
+
 /** A Stepper: classic, or one of Grasp's own looks (./looks.tsx). */
-export const Stepper = (props: StepperProps) => {
+export const Stepper = (given: StepperProps) => {
+  const props = withNewNames(given);
   if (props.look === "classic") {
     return <ClassicStepper {...props} />;
   }

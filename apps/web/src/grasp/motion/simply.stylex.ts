@@ -1,4 +1,4 @@
-// Simply there: the times things move or fade in Grasp UI, which become 0s when the person asks
+// Simply there: the times things move or fade in Damsko, which become 0s when the person asks
 // for reduced motion. A part that would move, grow or fade is then simply there, and simply gone.
 // One place for it, so every part gets it the same way:
 //

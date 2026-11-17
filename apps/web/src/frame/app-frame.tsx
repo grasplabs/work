@@ -202,7 +202,7 @@ export const AppFrame = ({
           <GraspToaster
             closeLabel={t`Close`}
             failedLabel={t`Could not finish`}
-            label={t`Notifications`}
+            aria-label={t`Notifications`}
             pendingLabel={t`Still working`}
           />
           <TourLayer identity={identity} />

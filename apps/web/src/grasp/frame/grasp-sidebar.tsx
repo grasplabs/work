@@ -376,7 +376,7 @@ export const useGraspSidebar = ({
     foldLabel: t`Show or hide the sidebar`,
     groups,
     head: <GraspMark aria-hidden />,
-    label: t`Sidebar`,
+    "aria-label": t`Sidebar`,
     navLabel: t`Main`,
     onOpenChange,
     open,

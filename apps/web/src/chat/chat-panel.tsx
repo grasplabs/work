@@ -15,7 +15,7 @@ import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import {
   Tooltip,
-  TooltipPanel,
+  TooltipContent,
   TooltipShortcut,
   TooltipTrigger,
 } from "../grasp/tooltip/index.ts";
@@ -44,12 +44,15 @@ const panelStyles = stylex.create({
     height: "100%",
     minHeight: 0,
   },
+  // One bar tall, at the page's room from the card's sides, as App shell's
+  // docked panel has it: the line under it meets the line under the page's bar.
   head: {
     display: "flex",
     alignItems: "center",
     gap: grasp.space1,
-    paddingBlock: grasp.space2,
-    paddingInline: grasp.space3,
+    boxSizing: "border-box",
+    minHeight: grasp.shellBar,
+    paddingInline: grasp.shellPageInline,
   },
   // The title takes the room the buttons leave, and gives way first: a
   // Button can't cut its words short (asked of Grasp UI), so it is clipped.
@@ -168,17 +171,17 @@ const HeaderButton = ({
   <Tooltip shortcut={shortcut}>
     <TooltipTrigger
       icon={icon}
-      label={label}
+      aria-label={label}
       onClick={() => {
         onClick();
       }}
       size="sm"
       variant="ghost"
     />
-    <TooltipPanel>
+    <TooltipContent>
       {label}
       {shortcut === undefined ? null : <TooltipShortcut />}
-    </TooltipPanel>
+    </TooltipContent>
   </Tooltip>
 );
 

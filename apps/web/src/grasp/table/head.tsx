@@ -2,6 +2,7 @@
 // name as a button, with the sort's icon after it, and says its sort to a screen reader.
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import type { MouseEvent, ReactNode, ThHTMLAttributes } from "react";
 
@@ -28,6 +29,8 @@ export interface TableHeadProps {
    */
   align?: "start" | "center" | "end";
   /** The name of a column whose head shows no words, such as a column of actions. */
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
   label?: string;
   /**
    * How the column is sorted now. You own the sort: sort the rows yourself and pass it here, on
@@ -53,6 +56,8 @@ export interface TableHeadProps {
   /** The column's key in code, as `data-column`, for a script or a test that finds it. */
   column?: string;
   /** Controls at the head's end, after the name: a column's menu, a handle to resize it. */
+  end?: ReactNode;
+  /** @deprecated Use `end`. */
   after?: ReactNode;
   /** Dragging the head moves the column (a Data table that reorders); the drop's own events. */
   drag?: Pick<
@@ -159,14 +164,16 @@ const lookOf = (headLook: TableHeadLook, sorted: boolean) => [
 export const TableHead = ({
   children,
   align = "start",
-  label,
+  label: labelDeprecated,
+  "aria-label": label = labelDeprecated,
   sort,
   onSort,
   order,
   orderWords = sortedPlace,
   pin,
   width,
-  after,
+  after: afterDeprecated,
+  end: after = afterDeprecated,
   drag,
   column,
 }: TableHeadProps) => {

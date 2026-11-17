@@ -2,7 +2,7 @@ import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
 import { Card } from "../grasp/card/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import { Empty, EmptyHeader, EmptyDescription } from "../grasp/empty/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
 import { Text } from "../grasp/text/index.ts";
@@ -73,7 +73,11 @@ export const PageHeading = ({
 /** A list with nothing in it: one quiet sentence in a card, where the list would be. */
 export const EmptyCard = ({ children }: { children: ReactNode }) => (
   <Card>
-    <Empty size="inline">{children}</Empty>
+    <Empty size="sm">
+      <EmptyHeader>
+        <EmptyDescription>{children}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
   </Card>
 );
 

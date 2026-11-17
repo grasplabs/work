@@ -11,6 +11,7 @@
 // One share (62% of a target) is its simplest form: one value and a `whole` it is part of.
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { useId, useState } from "react";
 
@@ -29,7 +30,9 @@ import type { Arc } from "./ring";
 /** Every prop a ChartRing takes. */
 export interface ChartRingProps {
   /** What the ring shows, as a screen reader and an agent say it ("October's invoices"). */
-  label: string;
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
+  label?: string;
   /** One sentence that says what the parts mean ("Two in three matched themselves"). */
   summary: string;
   /** Each part's value, by its key in the config, in the order they go round. */
@@ -50,6 +53,8 @@ export interface ChartRingProps {
   /** Writes a share as people read it ("62%"). */
   formatShare?: (share: number) => string;
   /** Its width and where it sits. */
+  layout?: ChartLayoutStyle;
+  /** @deprecated Use `layout`. */
   style?: ChartLayoutStyle;
 }
 
@@ -435,7 +440,8 @@ const centreOf = (
 };
 
 export const ChartRing = ({
-  label,
+  label: labelDeprecated,
+  "aria-label": label = labelDeprecated ?? "",
   summary,
   values,
   config,
@@ -444,7 +450,8 @@ export const ChartRing = ({
   fill = "plain",
   format = plainNumber,
   formatShare = plainShare,
-  style,
+  style: styleDeprecated,
+  layout: style = styleDeprecated,
 }: ChartRingProps) => {
   const chart = `chart-${useId().replaceAll(/[^a-zA-Z0-9-]/gu, "")}`;
   const parts = partsOf(config, values, whole);

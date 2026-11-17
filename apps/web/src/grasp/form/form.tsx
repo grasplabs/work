@@ -19,6 +19,7 @@
 //   </Form>
 //
 // Every value is a token (src/tokens). A caller may set layout and width only (the `style` prop).
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode, SubmitEvent, SyntheticEvent } from "react";
 
@@ -42,9 +43,9 @@ export interface FormProps {
   id?: string;
   /** Its name, when no heading names it, so a screen reader lists it ("Profile"). */
   "aria-label"?: string;
-  /** Layout only: where it sits and how wide it is. It stands at most `form-width` wide. */
+  /** @deprecated Use `layout`. */
   style?: FormLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: where it sits and how wide it is. It stands at most `form-width` wide. */
   layout?: FormLayoutStyle;
 }
 

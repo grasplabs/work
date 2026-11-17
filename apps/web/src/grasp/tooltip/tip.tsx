@@ -14,7 +14,7 @@ import { useRef } from "react";
 import type { ReactElement } from "react";
 
 import { ms } from "../tokens/tokens.values";
-import { TooltipPanel } from "./panel";
+import { TooltipContent } from "./panel";
 
 export interface TipProps {
   /** The tooltip's words. */
@@ -49,7 +49,7 @@ export const Tip = ({ tooltip, render }: TipProps) => {
           render(mergeProps(trigger, { ref: keep }))
         }
       />
-      <TooltipPanel>{tooltip}</TooltipPanel>
+      <TooltipContent>{tooltip}</TooltipContent>
     </TooltipPrimitive>
   );
 };

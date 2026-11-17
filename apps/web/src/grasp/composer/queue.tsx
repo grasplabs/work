@@ -64,11 +64,12 @@ const styles = stylex.create({
     // send ends.
     marginInline: grasp.space2,
     paddingInlineStart: `calc(${grasp.space4} - ${grasp.space2})`,
-    paddingInlineEnd: `calc(${grasp.space3} - ${grasp.space2})`,
+    // The row actions end where send ends: the footer's inset, space-2, less the panel's own.
+    paddingInlineEnd: 0,
     paddingBlockStart: grasp.space1,
     // The card overlaps the panel's foot, so the queue reads as tucked behind it.
-    marginBlockEnd: `calc(-1 * ${grasp.corner})`,
-    paddingBlockEnd: grasp.corner,
+    marginBlockEnd: `calc(-1 * ${grasp.composerCorner})`,
+    paddingBlockEnd: grasp.composerCorner,
     borderStartStartRadius: grasp.corner,
     borderStartEndRadius: grasp.corner,
     cornerShape: grasp.cornerShape,
@@ -112,7 +113,13 @@ const RowAction = ({
     onClick={onPress}
     pendingAnnouncement=""
     render={(props: Record<string, unknown>) => (
-      <Button {...props} variant="ghost" size="sm" icon={icon} label={label} />
+      <Button
+        {...props}
+        variant="ghost"
+        size="sm"
+        icon={icon}
+        aria-label={label}
+      />
     )}
   />
 );

@@ -14,7 +14,7 @@ import {
 import { useRef } from "react";
 
 import { ms } from "../tokens/tokens.values";
-import { TooltipPanel } from "../tooltip/panel";
+import { TooltipContent } from "../tooltip/panel";
 import { Button } from "./button";
 import type { ButtonProps } from "./button";
 
@@ -57,7 +57,7 @@ export const CutButton = (props: ButtonProps) => {
           return <Button {...merged} {...rest} />;
         }}
       />
-      <TooltipPanel>{rest.children}</TooltipPanel>
+      <TooltipContent>{rest.children}</TooltipContent>
     </TooltipPrimitive>
   );
 };

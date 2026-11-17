@@ -18,7 +18,7 @@ import {
   DialogBody,
   DialogDescription,
   DialogFooter,
-  DialogPanel,
+  DialogContent,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
 import { Field, FieldLabel } from "../grasp/field/index.ts";
@@ -81,7 +81,7 @@ const ProjectForm = ({
   };
   const title = editing === undefined ? t`New project` : t`Change project`;
   return (
-    <DialogPanel closeLabel={t`Close`}>
+    <DialogContent closeLabel={t`Close`}>
       <DialogTitle>{title}</DialogTitle>
       <DialogDescription>
         {t`A project groups apps and workflows for a process, a team or a goal. Putting something in it shares it with nobody.`}
@@ -160,7 +160,7 @@ const ProjectForm = ({
           {editing === undefined ? t`Make project` : t`Save`}
         </Button>
       </DialogFooter>
-    </DialogPanel>
+    </DialogContent>
   );
 };
 

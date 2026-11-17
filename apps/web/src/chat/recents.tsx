@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Clock } from "../grasp/icons/index.ts";
 import {
   Popover,
-  PopoverPanel,
+  PopoverContent,
   PopoverTrigger,
 } from "../grasp/popover/index.ts";
 import { ChatList, useSelectChat } from "./chat-window.tsx";
@@ -22,7 +22,7 @@ export const RecentsButton = () => {
       <PopoverTrigger icon={Clock} size="sm" variant="ghost">
         {t`Recents`}
       </PopoverTrigger>
-      <PopoverPanel align="end" aria-label={t`Recent chats`}>
+      <PopoverContent align="end" aria-label={t`Recent chats`}>
         <ChatList
           onOpen={(chatId) => {
             setOpen(false);
@@ -30,7 +30,7 @@ export const RecentsButton = () => {
           }}
           shown={open}
         />
-      </PopoverPanel>
+      </PopoverContent>
     </Popover>
   );
 };

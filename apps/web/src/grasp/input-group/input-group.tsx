@@ -17,6 +17,7 @@
 // Every value is a token (src/tokens). A caller may set layout and width only (the `style` prop).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { InputGroup as GroupPrimitive } from "@ui-sdk/react/input";
 import type { ReactNode } from "react";
@@ -43,9 +44,9 @@ export interface InputGroupProps {
    * @default "md"
    */
   size?: InputGroupSize;
-  /** Layout only: margins, alignment and width. Colours, heights and corners belong to the group. */
+  /** @deprecated Use `layout`. */
   style?: InputGroupLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: margins, alignment and width. Colours, heights and corners belong to the group. */
   layout?: InputGroupLayoutStyle;
 }
 

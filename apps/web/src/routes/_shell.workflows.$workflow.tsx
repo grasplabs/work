@@ -252,7 +252,7 @@ const ViewSwitch = ({
     },
   ] as const;
   return (
-    <TabsNav label={t`Workflow views`} variant="segmented">
+    <TabsNav aria-label={t`Workflow views`} variant="segmented">
       {views.map(({ view: each, label }) => (
         <TabsLink
           current={each === view}

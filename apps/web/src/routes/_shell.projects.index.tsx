@@ -12,9 +12,24 @@ import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { Button } from "../grasp/button/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../grasp/empty/index.ts";
 import { Plus, Projects as ProjectsIcon } from "../grasp/icons/index.ts";
-import { Item, ItemGroup } from "../grasp/item/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemDetail,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { projectCountsWords } from "../projects/project-counts.tsx";
 import { ProjectDialog } from "../projects/project-dialog.tsx";
@@ -36,15 +51,24 @@ const ProjectRow = ({
   href: string;
 }) => {
   const counts = projectCountsWords(project.counts);
+  const hasGoal = project.description !== "";
   return (
-    <Item
-      description={project.description === "" ? counts : project.description}
-      detail={project.description === "" ? undefined : counts}
-      href={href}
-      icon={projectIconShapes[project.icon]}
-      size="sm"
-      title={project.name}
-    />
+    <Item href={href} size="sm">
+      <ItemMedia icon={projectIconShapes[project.icon]} />
+      <ItemContent>
+        <ItemTitle>
+          {project.name}
+          {hasGoal && counts !== undefined ? (
+            <ItemDetail>{counts}</ItemDetail>
+          ) : null}
+        </ItemTitle>
+        {hasGoal || counts !== undefined ? (
+          <ItemDescription>
+            {hasGoal ? project.description : counts}
+          </ItemDescription>
+        ) : null}
+      </ItemContent>
+    </Item>
   );
 };
 
@@ -79,15 +103,18 @@ const Projects = () => {
           title={<Trans>Projects</Trans>}
         />
         {page.data.length === 0 ? (
-          <Empty
-            icon={ProjectsIcon}
-            title={t`No projects yet`}
-            {...(builds ? { action: make } : {})}
-          >
-            <Trans>
-              Group the apps and workflows of a process, a team or a goal in a
-              project. You see the projects you are in.
-            </Trans>
+          <Empty>
+            <EmptyHeader>
+              <EmptyMedia icon={ProjectsIcon} />
+              <EmptyTitle>{t`No projects yet`}</EmptyTitle>
+              <EmptyDescription>
+                <Trans>
+                  Group the apps and workflows of a process, a team or a goal in
+                  a project. You see the projects you are in.
+                </Trans>
+              </EmptyDescription>
+            </EmptyHeader>
+            {builds ? <EmptyContent>{make}</EmptyContent> : null}
           </Empty>
         ) : (
           <div ref={links}>

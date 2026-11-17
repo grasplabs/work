@@ -522,7 +522,9 @@ const FilterField = ({
           }
         }}
       />
-      {filter.clear !== undefined && <InputGroupClear label={filter.clear} />}
+      {filter.clear !== undefined && (
+        <InputGroupClear aria-label={filter.clear} />
+      )}
     </InputGroup>
   </div>
 );

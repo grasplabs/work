@@ -3,6 +3,7 @@
 // its name. Enter, Space and the down arrow open it on the first item, the up arrow on the last.
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import { MenuTrigger as TriggerPrimitive } from "@ui-sdk/react/menu";
 import { mergeProps } from "@ui-sdk/react/primitive";
 import type { ComponentProps } from "react";
@@ -27,25 +28,41 @@ type TriggerPrimitiveProps = ComponentProps<typeof TriggerPrimitive>;
 interface TriggerWithWords {
   /** The words on the trigger: what the menu acts on ("Report", "Account"). */
   children: ButtonWords;
-  /** An icon before the words, or the whole trigger with `label`. Import it from the icons entry (`@/components/grasp/icons`). */
+  /** An icon before the words, or the whole trigger with `aria-label`. Import it from the icons entry (`@/components/grasp/icons`). */
   icon?: IconData;
   /**
    * A chevron after the words, to say a menu opens here.
    * @default false
    */
   chevron?: boolean;
+  /** @deprecated Use `aria-label`. */
   label?: never;
+  "aria-label"?: string;
 }
 
 /**
- * A trigger that is only an icon. `label` is its name.
+ * A trigger that is only an icon. `aria-label` is its name.
  */
 interface TriggerIconOnly {
   children?: never;
   icon: IconData;
   chevron?: never;
   /** The name of an icon-only trigger, for a screen reader, a voice command and an agent ("Actions for Q3 report"). */
+  "aria-label": string;
+  /** @deprecated Use `aria-label`. */
+  label?: never;
+}
+
+/**
+ * The same, named the old way.
+ */
+interface TriggerIconOnlyLabel {
+  children?: never;
+  icon: IconData;
+  chevron?: never;
+  /** @deprecated Use `aria-label`. */
   label: string;
+  "aria-label"?: string;
 }
 
 /** Every prop a DropdownMenuTrigger takes: these, and the rest of UI SDK's MenuTrigger. */
@@ -53,7 +70,7 @@ export type DropdownMenuTriggerProps = Omit<
   TriggerPrimitiveProps,
   "render" | "children" | "className" | "style" | "payload"
 > &
-  (TriggerWithWords | TriggerIconOnly) & {
+  (TriggerWithWords | TriggerIconOnly | TriggerIconOnlyLabel) & {
     /**
      * The trigger is a Button, in any of its variants: `quiet` beside other buttons, `ghost` in a
      * toolbar or a row.
@@ -65,9 +82,9 @@ export type DropdownMenuTriggerProps = Omit<
      * @default "md"
      */
     size?: ButtonSize;
-    /** Layout only: margins and alignment, as on a Button. */
+    /** @deprecated Use `layout`. */
     style?: ButtonLayoutStyle;
-    /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+    /** Layout only: margins and alignment, as on a Button. */
     layout?: ButtonLayoutStyle;
     /**
      * Words for a tooltip on the trigger: what the menu is for, when the trigger alone does not
@@ -81,7 +98,8 @@ export const DropdownMenuTrigger = ({
   variant = "quiet",
   size = "md",
   icon,
-  label,
+  label: labelDeprecated,
+  "aria-label": label = labelDeprecated,
   chevron = false,
   children,
   style: styleProp,
@@ -95,7 +113,7 @@ export const DropdownMenuTrigger = ({
     variant,
     size,
     icon,
-    label,
+    "aria-label": label,
     layout: layout ?? styleProp,
     children,
     iconEnd: chevron ? ChevronDown : undefined,

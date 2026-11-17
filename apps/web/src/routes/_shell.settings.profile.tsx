@@ -1,48 +1,66 @@
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { formatList } from "../format.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { DE, ES, FR, GB, NL } from "../grasp/flags/index.ts";
+import type { FlagData } from "../grasp/flags/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import { LanguageSwitch } from "../grasp/language-switch/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import { Select } from "../grasp/select/index.ts";
-import { chooseLocale, isLocale, localeNames } from "../i18n.ts";
-import { roleLabel } from "../labels.ts";
 import {
   FactRow,
   SettingRow,
-  SettingsError,
   SettingsRows,
-} from "../settings/section.tsx";
+} from "../grasp/setting-row/index.ts";
+import { chooseLocale, isLocale, localeNames } from "../i18n.ts";
+import type { Locale } from "../i18n.ts";
+import { roleLabel } from "../labels.ts";
+import { ProfileName } from "../settings/profile-name.tsx";
+import { SettingsError } from "../settings/section.tsx";
 
-// Settings → Profile: who the person is in Grasp, and how Grasp is for
-// them. Their name and email come from their organization's sign-in,
-// their role and teams from an admin, so they are shown, not changed,
-// here. The language is theirs to pick.
+// Settings › Profile: who the person is in Grasp and the language it
+// speaks to them, as the library's Settings pattern has it: one compact
+// card of rows, every control on one edge and as wide as the others. Their
+// name is theirs to change; their email is their sign-in's, so it stands in
+// a field that only reads; their role is an admin's to give. Their teams
+// are shown where they are managed.
 
-const languages = Object.entries(localeNames).map(([value, label]) => ({
-  value,
-  label,
-}));
+const styles = stylex.create({
+  // Every control fills the rows' shared control column.
+  control: { width: "100%" },
+});
+
+/** The flag that stands for each language Grasp speaks: its home region's. */
+const flags: Record<Locale, FlagData> = {
+  en: GB,
+  de: DE,
+  nl: NL,
+  es: ES,
+  fr: FR,
+};
+
+const languages = Object.entries(localeNames).flatMap(([code, name]) =>
+  isLocale(code) ? [{ code, name, flag: flags[code] }] : []
+);
 
 /** The language Grasp speaks to this person, chosen as it is picked. */
 const LanguageRow = () => {
   const { t, i18n } = useLingui();
+  const label = t`Language`;
   return (
-    <SettingRow
-      help={t`Numbers, dates and amounts follow it too.`}
-      label={t`Language`}
-    >
-      {(field) => (
-        <Select
-          {...field}
-          items={languages}
-          onValueChange={(value) => {
-            if (isLocale(value)) {
-              void chooseLocale(value);
-            }
-          }}
-          value={i18n.locale}
-        />
-      )}
+    <SettingRow label={label}>
+      <LanguageSwitch
+        label={label}
+        layout={styles.control}
+        onValueChange={(code) => {
+          if (isLocale(code)) {
+            void chooseLocale(code);
+          }
+        }}
+        options={languages}
+        value={i18n.locale}
+      />
     </SettingRow>
   );
 };
@@ -50,23 +68,28 @@ const LanguageRow = () => {
 const Profile = () => {
   const { t } = useLingui();
   const { identity } = Route.useRouteContext();
-  const teams = identity.teams.map(({ name }) => name);
   return (
-    <SectionCard
-      flush
-      footer={
-        identity.staff
-          ? t`You are signed in as Grasp staff, for a limited time.`
-          : t`Your organization’s sign-in sets your name and email; an admin, your role and teams.`
-      }
-      title={t`Profile`}
-    >
+    <SectionCard density="compact" flush title={t`Your details`}>
       <SettingsRows>
-        <FactRow label={t`Name`}>{identity.name}</FactRow>
-        <FactRow label={t`Email`}>{identity.email}</FactRow>
-        <FactRow label={t`Role`}>{roleLabel(identity.role)}</FactRow>
-        <FactRow label={t`Teams`}>
-          {teams.length === 0 ? t`No teams` : formatList(teams)}
+        {/* Grasp's staff sign in for a while, as Grasp names them. */}
+        {identity.staff ? (
+          <FactRow label={t`Name`}>{identity.name}</FactRow>
+        ) : (
+          <ProfileName name={identity.name} />
+        )}
+        <SettingRow label={t`Email`}>
+          {(field) => (
+            <Input
+              {...field}
+              layout={styles.control}
+              readOnly
+              type="email"
+              value={identity.email}
+            />
+          )}
+        </SettingRow>
+        <FactRow label={t`Role`}>
+          <Badge size="sm">{roleLabel(identity.role)}</Badge>
         </FactRow>
         <LanguageRow />
       </SettingsRows>

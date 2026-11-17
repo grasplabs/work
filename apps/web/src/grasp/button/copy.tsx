@@ -54,7 +54,7 @@ export const CopyButton = ({
       variant="ghost"
       size={size}
       icon={Copy}
-      label={label}
+      aria-label={label}
       disabled={disabled}
       {...copy.props}
     />

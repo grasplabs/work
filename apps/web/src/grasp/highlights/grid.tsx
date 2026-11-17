@@ -1,16 +1,17 @@
 // HighlightsGrid: several highlights read as one row (highlight.tsx), after Palermo's
 // HighlightsGrid: one box with the system's edge, its cells parted by hairlines. It takes at
 // most two columns under 768px.
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 
+import type { StatProps } from "../stats";
 import { useHighlightBody } from "./highlight";
-import type { HighlightProps } from "./highlight";
 import { highlightStyles as styles } from "./styles";
 
-/** Every prop a HighlightsGrid takes. */
+/** Every prop a HighlightsGrid takes. @deprecated Use `StatsGridProps`, from `@/components/grasp/stats`. */
 export interface HighlightsGridProps {
   /** The highlights, in reading order: each takes a Highlight's props. */
-  items: HighlightProps[];
+  items: StatProps[];
   /** What the row is about, for a screen reader and an agent ("This month"). */
   "aria-label": string;
   /**
@@ -61,7 +62,7 @@ const Cell = ({
   loading,
   span,
 }: {
-  item: HighlightProps;
+  item: StatProps;
   loading: boolean;
   span: ReturnType<typeof spanOf> | null;
 }) => {
@@ -97,7 +98,7 @@ const columnsFor = (count: number): 1 | 2 | 3 | 4 => {
   return 4;
 };
 
-/** The row: one box, hairlines between its highlights. */
+/** The row: one box, hairlines between its highlights. @deprecated Use `StatsGrid`, from `@/components/grasp/stats`. */
 export const HighlightsGrid = ({
   items,
   "aria-label": ariaLabel,

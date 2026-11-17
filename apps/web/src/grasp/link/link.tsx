@@ -10,6 +10,7 @@
 //
 // Plain semantic HTML (an `a`): UI SDK has no link primitive, and a link needs none. Every value
 // is a token (src/tokens). A caller may set layout only (the `style` prop).
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { renderElement } from "@ui-sdk/react/primitive";
 import type { RenderProp } from "@ui-sdk/react/primitive";
@@ -63,9 +64,9 @@ export interface LinkProps extends Omit<
    * @default "opens in a new tab"
    */
   externalLabel?: string;
-  /** Layout only: margins and alignment. The look belongs to the link. */
+  /** @deprecated Use `layout`. */
   style?: LinkLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: margins and alignment. The look belongs to the link. */
   layout?: LinkLayoutStyle;
 }
 

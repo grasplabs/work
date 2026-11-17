@@ -107,6 +107,7 @@ export const grasp = stylex.defineConsts({
   // Corners: corners.
   corner: "var(--grasp-corner)",
   cornerShape: "var(--grasp-corner-shape)",
+  composerCorner: "var(--grasp-composer-corner)",
   cornerMark: "var(--grasp-corner-mark)",
   cornerPill: "var(--grasp-corner-pill)",
   cornerCircle: "var(--grasp-corner-circle)",
@@ -598,6 +599,7 @@ export const grasp = stylex.defineConsts({
   shellTextSecondary: "var(--grasp-shell-text-secondary)",
   shellTextTertiary: "var(--grasp-shell-text-tertiary)",
   shellCardShadow: "var(--grasp-shell-card-shadow)",
+  shellCardLine: "var(--grasp-shell-card-line)",
   shellPeek: "var(--grasp-shell-peek)",
   shellPeekShadow: "var(--grasp-shell-peek-shadow)",
   shellPopup: "var(--grasp-shell-popup)",
@@ -632,6 +634,7 @@ export const grasp = stylex.defineConsts({
   shellPageRoomBelow: "var(--grasp-shell-page-room-below)",
   shellPageRoomChat: "var(--grasp-shell-page-room-chat)",
   pageMeasure: "var(--grasp-page-measure)",
+  pageColumnMeasure: "var(--grasp-page-column-measure)",
   pageMeasureWide: "var(--grasp-page-measure-wide)",
   // Carousel: carousel.
   carouselGap: "var(--grasp-carousel-gap)",
@@ -789,6 +792,7 @@ export const grasp = stylex.defineConsts({
   backdropPreviewWords: "var(--grasp-backdrop-preview-words)",
   backdropDitherMask: "var(--grasp-backdrop-dither-mask)",
   chatStartGap: "var(--grasp-chat-start-gap)",
+  chatStartWidth: "var(--grasp-chat-start-width)",
   // Inspector panel: inspector panel.
   inspectorWidth: "var(--grasp-inspector-width)",
   inspectorBar: "var(--grasp-inspector-bar)",

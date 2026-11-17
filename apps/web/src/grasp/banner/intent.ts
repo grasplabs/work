@@ -2,7 +2,7 @@
 // server read this one file (src/intent/README.md). A line with `source` comes from that file, a
 // line with `proposed` is not yet confirmed, and any other restates the component's own page.
 export const intent = {
-  what: "A strip across the top of a page or app that shares news, like an outage.",
+  what: 'A strip across the top of a page or app that shares news, like an outage. Now Alert\'s banner look: use Alert with variant="banner".',
   useWhen: [
     {
       when: "News across the top of a page or the app: a notice, a warning, an outage.",
@@ -12,7 +12,7 @@ export const intent = {
     {
       when: "A note about one part of the page, set where it is.",
       instead: ["alert"],
-      source: "src/components/banner/banner.tsx",
+      source: "src/components/alert/alert.tsx",
     },
     {
       when: "A receipt that something happened, for a moment.",

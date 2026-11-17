@@ -6,6 +6,7 @@
 //   <Highlight title="Open tickets" value="12" loading />
 //
 // It says, it does not do: nothing in it is pressed. Every value is a token (src/tokens).
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { useId, useState } from "react";
 import type { ReactNode } from "react";
@@ -16,6 +17,7 @@ import { arrive } from "../motion/arrive";
 import { Skeleton } from "../skeleton";
 import { highlightStyles as styles } from "./styles";
 
+/** @deprecated Use `StatTone`, from `@/components/grasp/stats`. */
 export type HighlightTone =
   | "neutral"
   | "success"
@@ -23,7 +25,7 @@ export type HighlightTone =
   | "attention"
   | "info";
 
-/** Every prop a Highlight takes. */
+/** Every prop a Highlight takes. @deprecated Use `StatProps`, from `@/components/grasp/stats`. */
 export interface HighlightProps {
   /** What the figure is, in a word or two ("Revenue", "Active users"). */
   title: string;
@@ -87,7 +89,7 @@ export const useHighlightBody = ({
         </div>
         {loading ? (
           <div {...stylex.props(styles.figures)}>
-            <Skeleton shape="block" layout={styles.skeletonValue} />
+            <Skeleton variant="block" layout={styles.skeletonValue} />
             {change !== undefined && (
               <Skeleton layout={styles.skeletonChange} />
             )}
@@ -110,7 +112,7 @@ export const useHighlightBody = ({
   };
 };
 
-/** One highlight: a card on its own. Put several in a HighlightsGrid to read them as one row. */
+/** One highlight: a card on its own. Put several in a HighlightsGrid to read them as one row. @deprecated Use `Stat`, from `@/components/grasp/stats`. */
 export const Highlight = (props: HighlightProps) => {
   const { id, body } = useHighlightBody(props);
   return (

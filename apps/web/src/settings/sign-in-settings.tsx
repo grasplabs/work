@@ -104,7 +104,7 @@ export const SignInView = ({
       ) : null}
       {signIn?.state === "ready" ? (
         // Nobody can sign in: someone should look.
-        <Alert variant="attention">
+        <Alert tone="attention">
           {t`Sign-in isn’t set up for this workspace yet, so nobody can sign in. Grasp sets it up.`}
         </Alert>
       ) : null}

@@ -1,4 +1,4 @@
-// Arrive: how content comes in after it has loaded, in Grasp UI. It fades in over duration-mark on
+// Arrive: how content comes in after it has loaded, in Damsko. It fades in over duration-mark on
 // the one ease, where its placeholder stood: the placeholder goes at once, the content takes its
 // exact place, so nothing moves. With reduced motion it is there at once. Like src/focus/focus.ts,
 // it is one shared style:

@@ -13,6 +13,7 @@
 //   </TabsNav>
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { renderElement } from "@ui-sdk/react/primitive";
 import type { RenderProp } from "@ui-sdk/react/primitive";
@@ -30,7 +31,9 @@ import { rowMarker } from "./tabs.stylex";
 /** Every prop a TabsNav takes. */
 export interface TabsNavProps {
   /** What the views are of, as a screen reader and an agent say it ("Run"): the navigation's name. */
-  label: string;
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
+  label?: string;
   /**
    * `line`, words on one hairline, the current one underlined; `segmented`, words on a soft track,
    * the current one raised. The same two looks as Tabs.
@@ -203,7 +206,8 @@ const watchFold = (box: HTMLElement | null) => {
 
 /** A row of links that looks like Tabs, folding to one menu button where they do not fit. */
 export const TabsNav = ({
-  label,
+  label: labelDeprecated,
+  "aria-label": label = labelDeprecated ?? "",
   variant = "line",
   children,
   layout,

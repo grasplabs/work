@@ -15,7 +15,7 @@ import { hoverCardStyles as styles } from "./styles";
 type ContentPrimitiveProps = ComponentProps<typeof ContentPrimitive>;
 
 /** Every prop a HoverCardPanel takes. */
-export interface HoverCardPanelProps {
+export interface HoverCardContentProps {
   /** The title, a line about it, and a quiet fact. Nothing to press: the link's page has the actions. */
   children: ReactNode;
   /**
@@ -44,7 +44,7 @@ const watchPhone = (change: () => void) => {
 };
 const onPhone = () => window.matchMedia(PHONE).matches;
 const notOnPhone = () => false;
-const across = new Set<HoverCardPanelProps["side"]>([
+const across = new Set<HoverCardContentProps["side"]>([
   "left",
   "right",
   "start",
@@ -52,11 +52,11 @@ const across = new Set<HoverCardPanelProps["side"]>([
 ]);
 
 /** The card, beside its link. Under 640px it takes the window's width less the gutter, under or over the link. */
-export const HoverCardPanel = ({
+export const HoverCardContent = ({
   children,
   side,
   align,
-}: HoverCardPanelProps) => {
+}: HoverCardContentProps) => {
   const phone = useSyncExternalStore(watchPhone, onPhone, notOnPhone);
   return (
     <ContentPrimitive
@@ -70,3 +70,8 @@ export const HoverCardPanel = ({
     </ContentPrimitive>
   );
 };
+
+/** @deprecated Use `HoverCardContent`. */
+export const HoverCardPanel = HoverCardContent;
+/** @deprecated Use `HoverCardContentProps`. */
+export type HoverCardPanelProps = HoverCardContentProps;

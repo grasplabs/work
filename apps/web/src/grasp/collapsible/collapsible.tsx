@@ -9,6 +9,7 @@
 // The panel stays readable by the browser's find in page while closed. Every value is a token.
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import {
   Collapsible as CollapsiblePrimitive,
@@ -59,9 +60,9 @@ export interface CollapsibleProps {
    * @default false
    */
   disabled?: boolean;
-  /** Layout only: where it sits and how wide it is. */
+  /** @deprecated Use `layout`. */
   style?: CollapsibleLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: where it sits and how wide it is. */
   layout?: CollapsibleLayoutStyle;
 }
 

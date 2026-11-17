@@ -3,6 +3,19 @@
 // the system's edge and corner, Geist, words in ink and muted. Plain semantic HTML: UI SDK has no
 // primitive for it, and a row is a <div> or, with `href`, a link.
 //
+// Since release step 6 its words, mark and actions are parts, as in shadcn's:
+//
+//   <Item>
+//     <ItemMedia icon={Folder} />
+//     <ItemContent>
+//       <ItemTitle>Spring launch</ItemTitle>
+//       <ItemDescription>Updated 2 hours ago</ItemDescription>
+//     </ItemContent>
+//     <ItemActions><Button>Open</Button></ItemActions>
+//   </Item>
+//
+// The older shape below keeps working until step 9:
+//
 //   <Item icon={Folder} title="Spring launch" description="Updated 2 hours ago" />
 //   <Item variant="outline" title="Two-step sign-in" description="On" actions={<Button>Manage</Button>} />
 //   <Item href="/settings/billing" title="Billing" description="Plan, invoices and payment" />
@@ -15,8 +28,9 @@
 // Every value is a token (src/tokens). A caller may set layout only (the `style` prop).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
-import { useContext } from "react";
+import { createContext, isValidElement, useContext } from "react";
 import type { ReactNode } from "react";
 
 import { focus } from "../focus/focus";
@@ -27,7 +41,7 @@ import type { LayoutStyle } from "../layout/layout";
 import { Separator } from "../separator";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { ItemGroupContext } from "./context";
-import { itemRowMarker } from "./markers.stylex";
+import { itemMarker, itemRowMarker } from "./markers.stylex";
 
 export type ItemVariant = "plain" | "outline" | "soft";
 export type ItemSize = "xs" | "sm" | "md";
@@ -37,27 +51,22 @@ export type ItemLayoutStyle = LayoutStyle;
 
 /** What every item takes. */
 interface ItemBase {
-  /** Its name, in a few words ("Spring launch"). */
-  title: ReactNode;
   /**
-   * A quieter word or two on the title's line, after the name: a role, "you", a count ("Admin").
-   * In the muted ink at the regular weight; it wraps with the title, never cut off.
+   * Its parts: an ItemMedia, an ItemContent (with ItemTitle and ItemDescription) and ItemActions.
+   * Leave it out only in the older shape, where `title` and the props below draw the row.
    */
+  children?: ReactNode;
+  /** @deprecated Use `ItemTitle`. */
+  title?: ReactNode;
+  /** @deprecated Use `ItemDetail`, in the ItemTitle. */
   detail?: ReactNode;
-  /** One line about it: a date, a state, a count ("Updated 2 hours ago"). It wraps; never cut off. */
+  /** @deprecated Use `ItemDescription`. */
   description?: ReactNode;
-  /** An icon in a square before the words, when it says what kind of thing it is. From the icons entry (`@/components/grasp/icons`). */
+  /** @deprecated Use `ItemMedia.icon`. */
   icon?: IconData;
-  /**
-   * How the icon stands: `square` in its 40px box (32px at `sm`), or `inline`, the bare icon in
-   * line with the title, for a row that is dense or carries its kind in its words already.
-   * @default "square"
-   */
+  /** @deprecated Use `ItemMedia.iconLook`. */
   iconLook?: "square" | "inline";
-  /**
-   * Before the words, in place of an icon: an Avatar for a person (`xs` or `sm`), or a Brand icon
-   * for a provider. Centred on the title's line, with the row's gap after it.
-   */
+  /** @deprecated Use `ItemMedia`, with the mark as its children. */
   media?: ReactNode;
   /**
    * `plain` in a list on the page, `outline` for a row that stands alone, `soft` on a quieter fill.
@@ -71,9 +80,9 @@ interface ItemBase {
    * @default "md"
    */
   size?: ItemSize;
-  /** Layout only: margins, alignment and width. The look belongs to the item. */
+  /** @deprecated Use `layout`. */
   style?: ItemLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: margins, alignment and width. The look belongs to the item. */
   layout?: ItemLayoutStyle;
 }
 
@@ -81,7 +90,7 @@ interface ItemBase {
  * An item that does things: its buttons at the end.
  */
 interface WithActions {
-  /** Buttons at the end of the row, most used last ("Manage"). Not with `href`. */
+  /** @deprecated Use `ItemActions`. */
   actions?: ReactNode;
   href?: never;
 }
@@ -217,6 +226,16 @@ const styles = stylex.create({
     height: grasp.textSmLine,
   },
   leadAlone: { alignSelf: "center" },
+  // In the parts shape: centred when the row has no description, read from the row.
+  leadAuto: {
+    alignSelf: {
+      default: "flex-start",
+      [stylex.when.ancestor(
+        ":not(:has([data-slot=item-description]))",
+        itemMarker
+      )]: "center",
+    },
+  },
   // On a line of their own the actions keep to the row's end edge.
   actionsEnd: { marginInlineStart: "auto" },
   title: {
@@ -312,6 +331,183 @@ const Title = ({ title, detail }: Pick<ItemProps, "title" | "detail">) => (
     )}
   </span>
 );
+
+// ---- The parts (release step 6) --------------------------------------------------------------------
+
+/** Nothing to show: none, false, or empty words. */
+const isBlank = (children: ReactNode) =>
+  children === undefined ||
+  children === null ||
+  children === false ||
+  children === "";
+
+/** Every prop an ItemMedia takes: what stands before the words. Give an icon or a mark. */
+export interface ItemMediaProps {
+  /** An icon, when it says what kind of thing it is. From the icons entry (`@/components/grasp/icons`). */
+  icon?: IconData;
+  /**
+   * How the icon stands: `square` in its 40px box (32px at `sm`), or `inline`, the bare icon in
+   * line with the title, for a row that is dense or carries its kind in its words already.
+   * @default "square"
+   */
+  iconLook?: "square" | "inline";
+  /**
+   * In place of an icon: an Avatar for a person (`xs` or `sm`), or a Brand icon for a provider.
+   * Centred on the title's line, with the row's gap after it.
+   */
+  children?: ReactNode;
+}
+
+/** Every prop an ItemContent, ItemTitle, ItemDetail, ItemDescription or ItemActions takes. */
+export interface ItemPartProps {
+  /** What it holds. */
+  children: ReactNode;
+}
+
+// The row's size, for a mark's box and the words' gap.
+const RowSize = createContext<ItemSize>("md");
+
+/** What stands before the words: an icon in its square, the bare icon in line, or a mark. */
+export const ItemMedia = ({
+  icon,
+  iconLook = "square",
+  children,
+}: ItemMediaProps) => {
+  const size = useContext(RowSize);
+  if (children !== undefined && children !== null) {
+    return (
+      <span {...stylex.props(styles.mediaSlot, styles.leadAuto)}>
+        {children}
+      </span>
+    );
+  }
+  if (!icon) {
+    return null;
+  }
+  return (
+    <span
+      aria-hidden="true"
+      {...stylex.props(
+        iconLook === "inline"
+          ? [styles.mediaInline, styles.leadAuto]
+          : [styles.media, size !== "md" && styles.mediaSm]
+      )}
+    >
+      <Icon icon={icon} />
+    </span>
+  );
+};
+
+/** The words: the title, and the line about it under it. */
+export const ItemContent = ({ children }: ItemPartProps) => {
+  const size = useContext(RowSize);
+  return (
+    <span {...stylex.props(styles.words, size === "xs" && styles.wordsXs)}>
+      {children}
+    </span>
+  );
+};
+
+/** Its name, in a few words ("Spring launch"). */
+export const ItemTitle = ({ children }: ItemPartProps) => (
+  <span {...stylex.props(styles.title)}>{children}</span>
+);
+
+/**
+ * A quieter word or two on the title's line, after the name: a role, "you", a count ("Admin"). In
+ * the muted ink at the regular weight; it wraps with the title, never cut off. Put it in the ItemTitle.
+ */
+export const ItemDetail = ({ children }: ItemPartProps) =>
+  children === undefined || children === null || children === false ? null : (
+    <>
+      {" "}
+      <span data-slot="item-detail" {...stylex.props(styles.detail)}>
+        {children}
+      </span>
+    </>
+  );
+
+/** One line about it: a date, a state, a count ("Updated 2 hours ago"). It wraps; never cut off. */
+export const ItemDescription = ({ children }: ItemPartProps) =>
+  // With no words, nothing: the row then centres its mark on the title alone.
+  isBlank(children) ? null : (
+    <span data-slot="item-description" {...stylex.props(styles.description)}>
+      {children}
+    </span>
+  );
+
+/** Buttons at the end of the row, most used last ("Manage"). Not in an Item with `href`. */
+export const ItemActions = ({ children }: ItemPartProps) =>
+  isBlank(children) ? null : (
+    <span {...stylex.props(styles.actions, styles.actionsEnd)}>{children}</span>
+  );
+
+/** Children as a flat list: one child, or a list (as JSX writes several). */
+const listOf = (children: ReactNode): ReactNode[] => [children].flat();
+/** Whether the parts hold actions: then the row may wrap them under its words. */
+const holdsActions = (children: ReactNode) =>
+  listOf(children).some(
+    (child) =>
+      isValidElement<ItemPartProps>(child) &&
+      child.type === ItemActions &&
+      !isBlank(child.props.children)
+  );
+
+/** A row in the parts shape: its parts, and a link's chevron at the end. */
+const PartsRow = ({
+  children,
+  variant = "plain",
+  size = "md",
+  href,
+  layout,
+}: Pick<ItemProps, "children" | "variant" | "size" | "href" | "layout">) => {
+  const linked = href !== undefined && href !== "";
+  const inside = (
+    <RowSize value={size}>
+      {children}
+      {linked && (
+        <span aria-hidden="true" {...stylex.props(styles.chevron)}>
+          <Icon icon={ChevronRight} />
+        </span>
+      )}
+    </RowSize>
+  );
+  if (linked) {
+    return (
+      <a
+        href={href}
+        data-slot="item"
+        {...stylex.props(
+          itemMarker,
+          styles.item,
+          styles[size],
+          styles[variant],
+          styles.link,
+          linkLook[variant],
+          focus.ring,
+          layout
+        )}
+      >
+        {inside}
+      </a>
+    );
+  }
+  return (
+    <div
+      data-slot="item"
+      {...stylex.props(
+        itemMarker,
+        styles.item,
+        styles[size],
+        styles[variant],
+        holdsActions(children) && styles.wraps,
+        layout
+      )}
+    >
+      {inside}
+    </div>
+  );
+};
 
 const ItemRow = ({
   title,
@@ -410,19 +606,23 @@ const rowStyles = stylex.create({
 });
 
 /** One row of a list: its name, a line about it, an icon and its actions, or a link. */
-export const Item = (props: ItemProps) => {
+export const Item = ({ style: styleProp, layout, ...props }: ItemProps) => {
   const group = useContext(ItemGroupContext);
-  const row = <ItemRow {...props} />;
+  const placed = layout ?? styleProp;
+  // The parts shape when it has children; the older shape, drawn from its props, when not.
+  const Row = props.children === undefined ? ItemRow : PartsRow;
   if (!group.grouped) {
-    return row;
+    return <Row {...props} layout={placed} />;
   }
-  // In an ItemGroup, a row of its list, with the hairline over it when the group is separated.
+  // In an ItemGroup, a row of its list, with the hairline over it when the group is separated. The
+  // list item is its root there, so the caller's layout is the list item's.
   return (
     <li
       {...stylex.props(
         rowStyles.row,
         itemRowMarker,
-        group.separated && rowStyles.lined
+        group.separated && rowStyles.lined,
+        placed
       )}
     >
       {group.separated && (
@@ -430,7 +630,7 @@ export const Item = (props: ItemProps) => {
           <Separator decorative />
         </span>
       )}
-      {row}
+      <Row {...props} />
     </li>
   );
 };

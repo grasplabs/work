@@ -10,6 +10,7 @@
 // The layout is its own (sankey.ts): columns by longest path, nodes ordered to cut crossings.
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { useId, useState } from "react";
 
@@ -43,7 +44,9 @@ export interface ChartSankeyFlow {
 /** Every prop a ChartSankey takes. */
 export interface ChartSankeyProps {
   /** What it shows, as a screen reader and an agent say it ("Where October's invoices went"). */
-  label: string;
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
+  label?: string;
   /** One sentence that says what the flows mean ("Nine in ten were paid; 61 are disputed"). */
   summary: string;
   /** The stages' nodes: an id, the name read beside it, and `quiet` for an end not hoped for. */
@@ -75,6 +78,8 @@ export interface ChartSankeyProps {
    */
   flowLabel?: (flow: ChartSankeyFlow) => string;
   /** Its width and where it sits. */
+  layout?: ChartLayoutStyle;
+  /** @deprecated Use `layout`. */
   style?: ChartLayoutStyle;
 }
 
@@ -620,8 +625,20 @@ const drawingOf = (
   });
 };
 
+/** Its name and layout by their new names, else their deprecated old ones (the breaking release's step 1). */
+const namedAndPlaced = (given: {
+  named: string | undefined;
+  label: string | undefined;
+  placed: ChartLayoutStyle | undefined;
+  style: ChartLayoutStyle | undefined;
+}) => ({
+  label: given.named ?? given.label ?? "",
+  style: given.placed ?? given.style,
+});
+
 export const ChartSankey = ({
-  label,
+  label: labelDeprecated,
+  "aria-label": named,
   summary,
   nodes,
   links,
@@ -631,8 +648,15 @@ export const ChartSankey = ({
   formatShare = plainShare,
   shareOf = englishShareOf,
   flowLabel = englishFlowLabel,
-  style,
+  style: styleDeprecated,
+  layout: placed,
 }: ChartSankeyProps) => {
+  const { label, style } = namedAndPlaced({
+    named,
+    label: labelDeprecated,
+    placed,
+    style: styleDeprecated,
+  });
   const chart = `chart-${useId().replaceAll(/[^a-zA-Z0-9-]/gu, "")}`;
   const [width, watch] = useWidth();
   const [active, setActive] = useState<Active | null>(null);

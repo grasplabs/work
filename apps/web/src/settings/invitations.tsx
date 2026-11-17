@@ -15,7 +15,7 @@ import {
   DialogBody,
   DialogDescription,
   DialogFooter,
-  DialogPanel,
+  DialogContent,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
 import {
@@ -27,8 +27,18 @@ import {
 import { Form } from "../grasp/form/index.ts";
 import { Plus } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
-import { Item } from "../grasp/item/index.ts";
-import { Select } from "../grasp/select/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemTitle,
+  ItemActions,
+} from "../grasp/item/index.ts";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+} from "../grasp/select/index.ts";
 import { roleLabel } from "../labels.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
@@ -103,7 +113,7 @@ export const InviteButton = () => {
         }}
         open={open}
       >
-        <DialogPanel closeLabel={t`Close`}>
+        <DialogContent closeLabel={t`Close`}>
           <DialogTitle>{t`Invite someone`}</DialogTitle>
           <DialogDescription>
             {t`They get this role when they first sign in with your organization’s account. Grasp sends no email, so let them know.`}
@@ -150,7 +160,12 @@ export const InviteButton = () => {
                     }
                   }}
                   value={role}
-                />
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent />
+                </Select>
                 <FieldDescription>
                   {t`Roles, at the foot of this page, say what each may do.`}
                 </FieldDescription>
@@ -168,7 +183,7 @@ export const InviteButton = () => {
               {t`Invite`}
             </Button>
           </DialogFooter>
-        </DialogPanel>
+        </DialogContent>
       </Dialog>
     </>
   );
@@ -184,8 +199,21 @@ export const InvitationRow = ({ invitation }: { invitation: Invitation }) => {
   const role = roleLabel(invitation.role);
   const inviter = invitation.invitedBy;
   return (
-    <Item
-      actions={
+    <Item size="sm">
+      <ItemContent>
+        <ItemTitle>
+          <TitleLine
+            detail={
+              <RowNote failure={failure}>
+                {t`Invited as ${role} by ${inviter} on ${date}`}
+              </RowNote>
+            }
+          >
+            {email}
+          </TitleLine>
+        </ItemTitle>
+      </ItemContent>
+      <ItemActions>
         <Button
           aria-label={t`Withdraw the invitation of ${email}`}
           disabled={busy}
@@ -206,19 +234,7 @@ export const InvitationRow = ({ invitation }: { invitation: Invitation }) => {
         >
           {t`Withdraw`}
         </Button>
-      }
-      size="sm"
-      title={
-        <TitleLine
-          detail={
-            <RowNote failure={failure}>
-              {t`Invited as ${role} by ${inviter} on ${date}`}
-            </RowNote>
-          }
-        >
-          {email}
-        </TitleLine>
-      }
-    />
+      </ItemActions>
+    </Item>
   );
 };

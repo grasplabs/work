@@ -31,7 +31,7 @@ import { Button } from "../grasp/button/index.ts";
 import {
   DropdownMenu,
   DropdownMenuItem,
-  DropdownMenuPanel,
+  DropdownMenuContent,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../grasp/dropdown-menu/index.ts";
@@ -44,8 +44,21 @@ import {
   Trash,
   Workflow,
 } from "../grasp/icons/index.ts";
-import { Item, ItemGroup } from "../grasp/item/index.ts";
-import { Tabs, TabsList, TabsPanel, TabsTab } from "../grasp/tabs/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import {
+  Tabs,
+  TabsList,
+  TabsContent,
+  TabsTrigger,
+} from "../grasp/tabs/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { roleLabel } from "../labels.ts";
 import { useCoreAction } from "../use-core-action.ts";
@@ -204,16 +217,22 @@ const Items = ({
     <>
       <ItemGroup separated>
         {items.map((item) => (
-          <Item
-            actions={
-              builds ? <RemoveItem item={item} project={project} /> : undefined
-            }
-            description={<SharedWords role={item.sharedAs} />}
-            icon={item.type === "app" ? AppPanels : Workflow}
-            key={`${item.type}:${item.id}`}
-            size="sm"
-            title={<ItemLink item={item} />}
-          />
+          <Item key={`${item.type}:${item.id}`} size="sm">
+            <ItemMedia icon={item.type === "app" ? AppPanels : Workflow} />
+            <ItemContent>
+              <ItemTitle>
+                <ItemLink item={item} />
+              </ItemTitle>
+              <ItemDescription>
+                <SharedWords role={item.sharedAs} />
+              </ItemDescription>
+            </ItemContent>
+            {builds ? (
+              <ItemActions>
+                <RemoveItem item={item} project={project} />
+              </ItemActions>
+            ) : null}
+          </Item>
         ))}
       </ItemGroup>
       {pages.more ? (
@@ -318,16 +337,16 @@ const ProjectMenu = ({
   const title = project.name;
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger icon={More} label={t`More for ${title}`} />
-      <DropdownMenuPanel align="end">
+      <DropdownMenuTrigger aria-label={t`More for ${title}`} icon={More} />
+      <DropdownMenuContent align="end">
         <DropdownMenuItem icon={Edit} onSelect={onChange}>
           {t`Change`}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem danger icon={Trash} onSelect={onDelete}>
+        <DropdownMenuItem icon={Trash} onSelect={onDelete} variant="danger">
           {t`Delete`}
         </DropdownMenuItem>
-      </DropdownMenuPanel>
+      </DropdownMenuContent>
     </DropdownMenu>
   );
 };
@@ -397,25 +416,25 @@ export const ProjectView = ({
         />
         <Tabs defaultValue={firstTab}>
           <TabsList aria-label={project.name}>
-            <TabsTab value="apps">
+            <TabsTrigger value="apps">
               <KindTab count={apps}>{t`Apps`}</KindTab>
-            </TabsTab>
-            <TabsTab value="workflows">
+            </TabsTrigger>
+            <TabsTrigger value="workflows">
               <KindTab count={workflows}>{t`Workflows`}</KindTab>
-            </TabsTab>
-            <TabsTab value="people">
+            </TabsTrigger>
+            <TabsTrigger value="people">
               <KindTab count={project.people}>{t`People`}</KindTab>
-            </TabsTab>
+            </TabsTrigger>
           </TabsList>
-          <TabsPanel value="apps">
+          <TabsContent value="apps">
             <Items kind="app" pages={pages} project={project} />
-          </TabsPanel>
-          <TabsPanel value="workflows">
+          </TabsContent>
+          <TabsContent value="workflows">
             <Items kind="workflow" pages={pages} project={project} />
-          </TabsPanel>
-          <TabsPanel value="people">
+          </TabsContent>
+          <TabsContent value="people">
             <ProjectPeople project={project} />
-          </TabsPanel>
+          </TabsContent>
         </Tabs>
       </Page>
       <ProjectDialog

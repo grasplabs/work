@@ -1,3 +1,4 @@
+import type { ChatSummary } from "@grasp-os/shared/chat";
 import { Button } from "@grasp-os/ui/components/button";
 import { Kbd } from "@grasp-os/ui/components/kbd";
 import {
@@ -6,6 +7,7 @@ import {
   TooltipTrigger,
 } from "@grasp-os/ui/components/tooltip";
 import { useLingui } from "@lingui/react/macro";
+import { useMatchRoute } from "@tanstack/react-router";
 import { MessagesSquareIcon } from "lucide-react";
 import {
   createContext,
@@ -19,9 +21,12 @@ import {
 import type { ReactNode } from "react";
 
 import { isShortcut, shortcutLabel } from "../shortcuts.ts";
+import { chatLink } from "./chat-link.ts";
+import { DeleteChatDialog } from "./delete-chat-dialog.tsx";
 
 // The way to the person's chats window (chat-window.tsx) on every page: ⌘K
-// anywhere, and the icon a page's header may show. The window itself, with
+// anywhere, and the icon a page's header may show; and the one delete
+// dialog the sidebar's chat rows ask in. The window itself, with
 // its command list, loads the first time it opens.
 
 const ChatWindow = lazy(async () => {
@@ -69,6 +74,42 @@ export const HeaderIcon = ({
   </Tooltip>
 );
 
+/** Asks to delete a chat, behind the frame's one delete dialog (the sidebar's row menu). */
+const AskDelete = createContext<(chat: ChatSummary) => void>(() => {
+  // Outside the frame there is no dialog to ask in.
+});
+
+/**
+ * The frame's delete dialog, for a chat asked of it: the same question as
+ * the chats window and the chat's own menu ask. A chat deleted while its
+ * page is open leaves it for a new chat.
+ */
+const DeleteAsked = ({
+  chat,
+  onDone,
+}: {
+  chat: ChatSummary;
+  onDone: () => void;
+}) => {
+  const onItsPage = useMatchRoute()(chatLink(chat.id)) !== false;
+  return (
+    <DeleteChatDialog
+      active={onItsPage}
+      chat={chat}
+      onOpenChange={(next) => {
+        if (!next) {
+          onDone();
+        }
+      }}
+      open
+    />
+  );
+};
+
+/** Asks to delete a chat, behind the frame's delete dialog. */
+export const useAskDeleteChat = (): ((chat: ChatSummary) => void) =>
+  use(AskDelete);
+
 /** Opens (or closes) the frame's chats window. */
 const OpenChats = createContext<(open: boolean) => void>(() => {
   // Outside the frame there is no window to open.
@@ -80,6 +121,7 @@ const OpenChats = createContext<(open: boolean) => void>(() => {
  */
 export const ChatSwitcherProvider = ({ children }: { children: ReactNode }) => {
   const [open, setOpen] = useState(false);
+  const [deleting, setDeleting] = useState<ChatSummary>();
   // Kept once opened, so it closes as a dialog does, not all at once.
   const [opened, setOpened] = useState(false);
   if (open && !opened) {
@@ -103,7 +145,15 @@ export const ChatSwitcherProvider = ({ children }: { children: ReactNode }) => {
   }, []);
   return (
     <OpenChats value={setOpen}>
-      {children}
+      <AskDelete value={setDeleting}>{children}</AskDelete>
+      {deleting === undefined ? null : (
+        <DeleteAsked
+          chat={deleting}
+          onDone={() => {
+            setDeleting(undefined);
+          }}
+        />
+      )}
       {opened ? (
         <Suspense fallback={null}>
           <ChatWindow onOpenChange={setOpen} open={open} />

@@ -4,6 +4,15 @@
 // and for good if it fails. The sizes and the initials at half the size are Palermo's; the circle
 // and the soft fill with the system's edge are Grasp's.
 //
+// Since release step 6 its picture and initials are parts, as in shadcn's:
+//
+//   <Avatar name="Anna de Vries">
+//     <AvatarImage src="/people/anna.jpg" />
+//     <AvatarFallback />                                          initials of the name: AV
+//   </Avatar>
+//
+// The older shape below, the picture as a prop, keeps working until step 9:
+//
 //   <Avatar name="Anna de Vries" />                              initials: AV
 //   <Avatar name="Anna de Vries" src="/people/anna.jpg" />
 //   <Avatar name="Anna de Vries" decorative />                   her name is written beside it
@@ -12,12 +21,15 @@
 // Every value is a token (src/tokens).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 6: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import {
   Avatar as AvatarPrimitive,
-  AvatarFallback,
-  AvatarImage,
+  AvatarFallback as FallbackPrimitive,
+  AvatarImage as ImagePrimitive,
 } from "@ui-sdk/react/avatar";
+import { createContext, useContext } from "react";
+import type { ReactNode } from "react";
 
 import { arrive } from "../motion/arrive";
 import { grasp, media } from "../tokens/tokens.stylex";
@@ -28,7 +40,12 @@ export type AvatarSize = "xs" | "sm" | "md" | "lg" | "xl";
 export interface AvatarProps {
   /** Who it is: a person's or a team's name. It names the avatar, and gives the initials. */
   name: string;
-  /** The picture. Until it loads, and if it fails, the initials show. */
+  /**
+   * Its picture and initials: an AvatarImage and an AvatarFallback. Leave it out only in the older
+   * shape, where `src` gives the picture.
+   */
+  children?: ReactNode;
+  /** @deprecated Use `AvatarImage.src`. */
   src?: string;
   /**
    * `xs` 24px, `sm` 32px, `md` 40px, `lg` 48px, `xl` 64px.
@@ -41,12 +58,26 @@ export interface AvatarProps {
    * @default false
    */
   decorative?: boolean;
+  /** @deprecated Use `AvatarImage.eager`. */
+  eager?: boolean;
+}
+
+/** Every prop an AvatarImage takes: the picture, over the initials once it has loaded. */
+export interface AvatarImageProps {
+  /** The picture. Until it loads, and if it fails, the AvatarFallback shows. Without one, nothing. */
+  src?: string;
   /**
    * Load the picture at once, for an avatar known to be on the first screen. Otherwise it loads
    * only as it nears the window, so portraits far down a page cost nothing on the first visit.
    * @default false
    */
   eager?: boolean;
+}
+
+/** Every prop an AvatarFallback takes: what shows until the picture loads, and if it fails. */
+export interface AvatarFallbackProps {
+  /** Its words. Leave it out for the initials of the Avatar's `name` ("Anna de Vries" is AV). */
+  children?: ReactNode;
 }
 
 const styles = stylex.create({
@@ -133,8 +164,37 @@ export const initialsOf = (name: string) => {
   return `${firstOf(words[0])}${firstOf(last)}`.toUpperCase();
 };
 
+// The Avatar's name, for an AvatarFallback that shows its initials.
+const AvatarName = createContext("");
+
+/** The picture, over the initials once it has loaded. The Avatar names it, so its own alt is empty. */
+export const AvatarImage = ({ src, eager = false }: AvatarImageProps) =>
+  // The class only: UI SDK hides the image with its own style until it has loaded. An avatar never
+  // opens larger: data-no-zoom keeps a page's image zoom (the docs' own) off it.
+  src === undefined || src === "" ? null : (
+    <ImagePrimitive
+      src={src}
+      alt=""
+      loading={eager ? "eager" : "lazy"}
+      decoding="async"
+      data-no-zoom=""
+      className={stylex.props(styles.image, arrive.whenLoaded).className}
+    />
+  );
+
+/** What shows until the picture loads, and for good if it fails: the name's initials by default. */
+export const AvatarFallback = ({ children }: AvatarFallbackProps) => {
+  const name = useContext(AvatarName);
+  return (
+    <FallbackPrimitive aria-hidden="true" {...stylex.props(styles.fallback)}>
+      {children ?? initialsOf(name)}
+    </FallbackPrimitive>
+  );
+};
+
 export const Avatar = ({
   name,
+  children,
   src,
   size = "md",
   decorative = false,
@@ -152,21 +212,14 @@ export const Avatar = ({
       aria-hidden={hidden ? true : undefined}
       {...stylex.props(styles.avatar, styles[size])}
     >
-      {/* The class only: UI SDK hides the image with its own style until it has loaded. An avatar
-          never opens larger: data-no-zoom keeps a page's image zoom (the docs' own) off it. */}
-      {src !== undefined && src !== "" && (
-        <AvatarImage
-          src={src}
-          alt=""
-          loading={eager ? "eager" : "lazy"}
-          decoding="async"
-          data-no-zoom=""
-          className={stylex.props(styles.image, arrive.whenLoaded).className}
-        />
-      )}
-      <AvatarFallback aria-hidden="true" {...stylex.props(styles.fallback)}>
-        {initialsOf(name)}
-      </AvatarFallback>
+      <AvatarName value={name}>
+        {children ?? (
+          <>
+            <AvatarImage src={src} eager={eager} />
+            <AvatarFallback />
+          </>
+        )}
+      </AvatarName>
       <span aria-hidden="true" {...stylex.props(styles.edge)} />
     </AvatarPrimitive>
   );
