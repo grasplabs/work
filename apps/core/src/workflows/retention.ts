@@ -226,42 +226,49 @@ const notKept = (runId: SQLiteColumn): SQL =>
 const releasedPerSweep = 500;
 
 /**
+ * That run `runId` (a column) is named by no key of a workflow's state,
+ * nor by a run that started from its keys (`runStateWriters`), as SQL.
+ */
+const unnamedSql = (runId: SQLiteColumn): SQL =>
+  sql`NOT EXISTS (SELECT 1 FROM ${workflowState}
+      WHERE ${workflowState.runId} = ${runId})
+    AND NOT EXISTS (SELECT 1 FROM ${runStateWriters}
+      WHERE ${runStateWriters.writerRunId} = ${runId})`;
+
+/**
  * Releases the evidence retention kept of runs no key of their workflow's
  * state names any more (overwritten, reset, or gone with the workflow),
  * and no run started from (`runStateWriters`: those rows go with their
  * run's details, or with its release here), at most `releasedPerSweep` of
- * them, in one batch: their evidence and the runs they started from, then
- * their mark. A run past its details has ended: a key is set only by a run
- * that hasn't (workflow-state.ts), and a start that froze its key is
- * admitted only while it keeps its evidence (workflow-starts.ts), so none
- * of them is named again while this runs; each statement picks the same
- * runs, in order. A run whose own release lets a writer of its go frees
- * that writer at the next sweep.
+ * them: picked first, then in one batch their evidence, the runs they
+ * started from and their mark, each statement checking again that the
+ * run is still unnamed. Picked once, so a release that lets a writer of
+ * one of them go never takes that writer's mark and leaves its evidence:
+ * it is freed whole at the next sweep. A run past its details has ended:
+ * a key is set only by a run that hasn't (workflow-state.ts), and a start
+ * that froze its key is admitted only while it keeps its evidence
+ * (workflow-starts.ts), so none of them is named again meanwhile.
  */
 const keptEvidenceReleased = async (env: Env): Promise<void> => {
   const db = drizzle(env.DB);
-  const released = sql`(SELECT ${keptRunEvidence.runId} FROM ${keptRunEvidence}
-    WHERE NOT EXISTS (SELECT 1 FROM ${workflowState}
-      WHERE ${workflowState.runId} = ${keptRunEvidence.runId})
-    AND NOT EXISTS (SELECT 1 FROM ${runStateWriters}
-      WHERE ${runStateWriters.writerRunId} = ${keptRunEvidence.runId})
-    ORDER BY ${keptRunEvidence.runId} LIMIT ${releasedPerSweep})`;
+  const picked = await db
+    .select({ runId: keptRunEvidence.runId })
+    .from(keptRunEvidence)
+    .where(unnamedSql(keptRunEvidence.runId))
+    .orderBy(asc(keptRunEvidence.runId))
+    .limit(releasedPerSweep);
+  if (picked.length === 0) {
+    return;
+  }
+  const ids = JSON.stringify(picked.map(({ runId }) => runId));
+  const released = (runId: SQLiteColumn): SQL =>
+    sql`${runId} IN (SELECT value FROM json_each(${ids})) AND ${unnamedSql(runId)}`;
   await db.batch([
-    db
-      .delete(runBrainVersions)
-      .where(sql`${runBrainVersions.runId} IN ${released}`),
-    db
-      .delete(runBrainMemories)
-      .where(sql`${runBrainMemories.runId} IN ${released}`),
-    db
-      .delete(runChatSources)
-      .where(sql`${runChatSources.runId} IN ${released}`),
-    db
-      .delete(runStateWriters)
-      .where(sql`${runStateWriters.runId} IN ${released}`),
-    db
-      .delete(keptRunEvidence)
-      .where(sql`${keptRunEvidence.runId} IN ${released}`),
+    db.delete(runBrainVersions).where(released(runBrainVersions.runId)),
+    db.delete(runBrainMemories).where(released(runBrainMemories.runId)),
+    db.delete(runChatSources).where(released(runChatSources.runId)),
+    db.delete(runStateWriters).where(released(runStateWriters.runId)),
+    db.delete(keptRunEvidence).where(released(keptRunEvidence.runId)),
   ]);
 };
 

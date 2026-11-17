@@ -209,7 +209,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
       "which Brain versions a run recalled, identifiers only, as runs are (D3)",
   },
   "core.kept_run_evidence": noPerson,
-  "core.run_state_writers": noPerson,
+  "core.run_state_writers": {
+    none: "which runs a run started from the kept state of: its writer is a run, by id, never a person",
+  },
   "core.run_brain_memories": {
     company:
       "which Brain memories a run's entity reads rested on, identifiers only, no person's, as runs are (D3)",
@@ -701,6 +703,7 @@ export const reviewedPersonColumns: Readonly<
   "core.app_members": ["added_by", "member_id", "member_type"],
   "core.app_pointers": ["changed_by"],
   "core.app_requests": ["requested_by"],
+  "core.run_state_writers": ["writer_run_id"],
   "core.skill_shares": ["decided_by", "requested_by"],
   "core.skill_decisions": ["decided_by"],
   "core.skill_deletions": ["person_id"],

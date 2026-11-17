@@ -7,9 +7,16 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { appFor } from "../src/apps.ts";
+import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import type { Acting } from "../src/auth/identity.ts";
-import { erasePersonShared, eraseSource } from "../src/brain-next.ts";
+import {
+  erasePersonShared,
+  eraseSource,
+  readSourceVersionAs,
+  workBrain,
+} from "../src/brain-next.ts";
 import type { SourceRef } from "../src/brain-next.ts";
+import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import {
@@ -140,8 +147,9 @@ const keepingCall = (id: string, keep: string) => ({
  * named by the step's ID), then, if its `keep` argument says so, keeps
  * `keep` (an expression over it) in the workflow's state as `kept`. With
  * `carry`, it reads nothing in the Brain and keeps `kept` as it found it
- * with `ask` added (unchanged for an empty one), as a step carrying a
- * value forward does, after a moment's wait with `hold`. Bound by `admin` to a grant of
+ * (`"notified"` when it found none) with `ask` added, unchanged for an
+ * empty one, as a step carrying a value forward does, after a moment's
+ * wait with `hold`. Bound by `admin` to a grant of
  * its own to read the Brain.
  */
 const keepingWorkflow = async (
@@ -170,6 +178,9 @@ const keepingWorkflow = async (
       },
       permissions: { brain: { docs: { contract: key } } },
       state: { kept: { kind: "string" } },
+      // What it found kept as it started, returned whole.
+      returns: { kind: "object", fields: { found: { kind: "string" } } },
+      result: { found: { $expr: 'state.kept ?? ""' } },
       steps: [
         {
           id: "reading",
@@ -200,7 +211,7 @@ const keepingWorkflow = async (
               // oxlint-disable-next-line unicorn/no-thenable -- the if step's list
               then: [{ id: "hold", type: "wait", for: "3 seconds" }],
             },
-            keepingCall("carry", '(state.kept ?? "") + args.ask'),
+            keepingCall("carry", '(state.kept ?? "notified") + args.ask'),
           ],
         },
       ],
@@ -311,6 +322,65 @@ const evidenceOf = async (runId: string): Promise<number> =>
   )
     .bind(runId)
     .first<number>("n")) ?? 0;
+
+/**
+ * `real`, running `between` once, just before the first statement that
+ * reads what runs recalled (`run_brain_versions`) runs, alone or in a
+ * batch: what lands between a read of what a workflow keeps and a read of
+ * its writers' evidence, when the two are read apart.
+ */
+const evidenceHeld = (
+  real: D1Database,
+  between: () => Promise<void>
+): D1Database => {
+  let ran = false;
+  const once = async (): Promise<void> => {
+    if (!ran) {
+      ran = true;
+      await between();
+    }
+  };
+  const recalled = /"run_brain_versions"/u;
+  const unwrapped = new WeakMap<object, D1PreparedStatement>();
+  const held = (statement: D1PreparedStatement): D1PreparedStatement => {
+    const proxy = new Proxy(statement, {
+      get: (target, property) => {
+        if (property === "bind") {
+          return (...values: unknown[]) => held(target.bind(...values));
+        }
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        return async (...args: unknown[]) => {
+          await once();
+          // oxlint-disable-next-line typescript/no-unsafe-return -- the statement's own answer
+          return Reflect.apply(value, target, args);
+        };
+      },
+    });
+    unwrapped.set(proxy, statement);
+    return proxy;
+  };
+  return {
+    prepare: (query) => {
+      const statement = real.prepare(query);
+      return recalled.test(query) ? held(statement) : statement;
+    },
+    batch: async <T>(statements: D1PreparedStatement[]) => {
+      if (statements.some((statement) => unwrapped.has(statement))) {
+        await once();
+      }
+      return await real.batch<T>(
+        statements.map((statement) => unwrapped.get(statement) ?? statement)
+      );
+    },
+    exec: async (query) => await real.exec(query),
+    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+    dump: async () => await real.dump(),
+    withSession: (constraint) => real.withSession(constraint),
+  };
+};
 
 /** Ada, who builds, an admin, and Ben, who builds the workflow with her. */
 const people = async () => {
@@ -455,6 +525,7 @@ describe("what a workflow keeps of what its run read", setUpTime, () => {
       keep: true,
     });
     const run = await ended(ada, workflow.id, runId);
+    const shownBefore = await readWorkflowState(env, admin, workflow.id);
     const before = {
       builder: await keptFor(ben, workflow.id),
       admin: await keptFor(admin, workflow.id),
@@ -465,6 +536,7 @@ describe("what a workflow keeps of what its run read", setUpTime, () => {
       personId: anna.personId,
       email: anna.address,
     });
+    const shownAfter = await readWorkflowState(env, admin, workflow.id);
 
     expect({
       run,
@@ -474,6 +546,8 @@ describe("what a workflow keeps of what its run read", setUpTime, () => {
         admin: await keptFor(admin, workflow.id),
         next: await nextRunReads(ben, workflow.id),
       },
+      // What it takes counts no withheld value, so tells no length.
+      bytes: { before: shownBefore.bytes > 0, after: shownAfter.bytes },
     }).toStrictEqual({
       run: { status: "completed", error: null },
       before: {
@@ -486,6 +560,7 @@ describe("what a workflow keeps of what its run read", setUpTime, () => {
         admin: "revoked",
         next: { state: {}, withheld: 1 },
       },
+      bytes: { before: true, after: 0 },
     });
   });
 
@@ -620,58 +695,6 @@ describe("what a workflow keeps of what its run read", setUpTime, () => {
     });
   });
 
-  it("keeps the run that read a value as its writer when a later run that read nothing keeps it again unchanged, so the value still follows its source", async () => {
-    const { admin, ada } = await people();
-    const word = `ledger${unique().replaceAll(/\W/gu, "")}`;
-    const passage = `The ${word} closes on Friday.`;
-    const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
-    await sourceSaying(source, passage);
-    const workflow = await keepingWorkflow(ada, admin, recalling);
-    const reader = await started(ada, workflow.id, {
-      entity: unique(),
-      ask: word,
-      keep: true,
-    });
-    await ended(ada, workflow.id, reader);
-    // A run that reads nothing in the Brain and keeps `kept` as it found
-    // it: the same value, written again.
-    const carrier = await started(ada, workflow.id, {
-      entity: unique(),
-      ask: "",
-      keep: true,
-      carry: true,
-    });
-    const carried = await ended(ada, workflow.id, carrier);
-    const before = await readWorkflowState(env, ada, workflow.id);
-
-    await eraseSource(env, {
-      source,
-      readers: { kind: "none" },
-      reason: "deleted",
-    });
-    const after = await readWorkflowState(env, ada, workflow.id);
-
-    expect({
-      carried,
-      carrierRead: await evidenceOf(carrier),
-      writer: before.entries.find(({ key }) => key === "kept")?.runId,
-      after: await keptFor(ada, workflow.id),
-      // What it takes counts no withheld value, so tells no length.
-      bytes: {
-        before: before.bytes > 0,
-        after: after.bytes,
-      },
-      next: await nextRunReads(ada, workflow.id),
-    }).toStrictEqual({
-      carried: { status: "completed", error: null },
-      carrierRead: 0,
-      writer: reader,
-      after: "revoked",
-      bytes: { before: true, after: 0 },
-      next: { state: {}, withheld: 1 },
-    });
-  });
-
   it("starts a test run without a key whose run read what is gone: read as unset, counted on its start", async () => {
     const { admin, ada } = await people();
     const word = `ledger${unique().replaceAll(/\W/gu, "")}`;
@@ -719,6 +742,47 @@ describe("what a workflow keeps of what its run read", setUpTime, () => {
       state: frozen === null ? null : z.json().parse(JSON.parse(frozen)),
       withheld: startedEvent?.detail?.stateWithheld ?? 0,
     }).toStrictEqual({ state: {}, withheld: 1 });
+  });
+
+  it("shows no value whose writer's evidence a release takes while the state is read: the rows and their evidence are one read", async () => {
+    const { admin, ada } = await people();
+    const word = `ledger${unique().replaceAll(/\W/gu, "")}`;
+    const passage = `The ${word} closes on Friday.`;
+    const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+    await sourceSaying(source, passage);
+    const workflow = await keepingWorkflow(ada, admin, recalling);
+    await ended(
+      ada,
+      workflow.id,
+      await started(ada, workflow.id, {
+        entity: unique(),
+        ask: word,
+        keep: true,
+      })
+    );
+    // Its run past its details, its evidence kept for the key.
+    const past = new Date(Date.now() + 31 * day);
+    await runQuarterHourTasks({}, past);
+    await eraseSource(env, {
+      source,
+      readers: { kind: "none" },
+      reason: "deleted",
+    });
+    // As the state is read, the key goes and the sweep releases its
+    // writer's evidence.
+    const { entries } = await readWorkflowState(
+      {
+        ...env,
+        DB: evidenceHeld(env.DB, async () => {
+          await resetWorkflowState(env, ada, workflow.id);
+          await runQuarterHourTasks({}, new Date(past.getTime() + 15 * 60_000));
+        }),
+      },
+      ada,
+      workflow.id
+    );
+
+    expect(entries.filter(({ value }) => value === passage)).toStrictEqual([]);
   });
 
   it("refuses a run that started from a copy once what its writer read is erased: what it sends, keeps and returns", async () => {
@@ -815,6 +879,154 @@ describe("what a workflow keeps of what its run read", setUpTime, () => {
       once: { builder: "revoked", next: { state: {}, withheld: 1 } },
       twice: `${passage} (seen) (again)`,
     });
+  });
+
+  it("lets a run that was never shown a withheld key set it anew: its own value, shown and read by the next run", async () => {
+    const { admin, ada } = await people();
+    const word = `ledger${unique().replaceAll(/\W/gu, "")}`;
+    const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+    await sourceSaying(source, `The ${word} closes on Friday.`);
+    // A keeps a constant after reading the Brain: "notified".
+    const workflow = await keepingWorkflow(ada, admin, {
+      first: recalling.first,
+      keep: '"notified"',
+    });
+    await ended(
+      ada,
+      workflow.id,
+      await started(ada, workflow.id, {
+        entity: unique(),
+        ask: word,
+        keep: true,
+      })
+    );
+    await eraseSource(env, {
+      source,
+      readers: { kind: "none" },
+      reason: "deleted",
+    });
+    const withheld = await keptFor(ada, workflow.id);
+    // C starts without the key, reads nothing, and keeps "notified" itself.
+    const fresh = await started(ada, workflow.id, {
+      entity: unique(),
+      ask: "",
+      keep: true,
+      carry: true,
+    });
+    const freshEnded = await ended(ada, workflow.id, fresh);
+
+    expect({
+      withheld,
+      fresh: freshEnded,
+      freshRead: await evidenceOf(fresh),
+      after: await keptFor(ada, workflow.id),
+      next: await nextRunReads(ada, workflow.id),
+    }).toStrictEqual({
+      withheld: "revoked",
+      fresh: { status: "completed", error: null },
+      freshRead: 0,
+      after: "notified",
+      next: { state: { kept: "notified" }, withheld: 0 },
+    });
+  });
+
+  it("hands only how a run ended to its person's Brain when the kept state it started from was set by a run that read the Brain", async () => {
+    const { admin, ada } = await people();
+    const word = `ledger${unique().replaceAll(/\W/gu, "")}`;
+    const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+    await sourceSaying(source, `The ${word} closes on Friday.`);
+    const workflow = await keepingWorkflow(ada, admin, recalling);
+    await ended(
+      ada,
+      workflow.id,
+      await started(ada, workflow.id, {
+        entity: unique(),
+        ask: word,
+        keep: true,
+      })
+    );
+    // It reads nothing in the Brain, and returns the copy it started from.
+    const carrier = await started(ada, workflow.id, {
+      entity: unique(),
+      ask: "",
+      keep: false,
+      carry: true,
+    });
+    const run = await resourceRunFor(env, ada, workflow.id, carrier);
+    await ended(ada, workflow.id, carrier);
+    const returned = await resourceRunFor(env, ada, workflow.id, carrier);
+    await drainAuditOutboxes(env);
+    await relayHandOvers(env);
+    await workBrain(env, new Date(Date.now() + 60_000), producersOf(env));
+    const kept = await readSourceVersionAs(env, ada.userId, {
+      source: { producer: "run", id: carrier },
+      version: 1,
+    });
+
+    expect({
+      started: run.id,
+      returnedTheCopy: JSON.stringify(returned.result).includes(word),
+      kept: kept?.text,
+    }).toStrictEqual({
+      started: carrier,
+      returnedTheCopy: true,
+      kept: "Workflow run completed.",
+    });
+  });
+
+  it("reads a key's writer and the runs whose state it started from in one snapshot with their evidence: releases landing as the state is read show nothing erased", async () => {
+    const { admin, ada } = await people();
+    const word = `ledger${unique().replaceAll(/\W/gu, "")}`;
+    const passage = `The ${word} closes on Friday.`;
+    const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+    await sourceSaying(source, passage);
+    const workflow = await keepingWorkflow(ada, admin, recalling);
+    await ended(
+      ada,
+      workflow.id,
+      await started(ada, workflow.id, {
+        entity: unique(),
+        ask: word,
+        keep: true,
+      })
+    );
+    await ended(
+      ada,
+      workflow.id,
+      await started(ada, workflow.id, {
+        entity: unique(),
+        ask: " (seen)",
+        keep: true,
+        carry: true,
+      })
+    );
+    const past = new Date(Date.now() + 31 * day);
+    await runQuarterHourTasks({}, past);
+    await eraseSource(env, {
+      source,
+      readers: { kind: "none" },
+      reason: "deleted",
+    });
+    // As the state is read, the key goes and two sweeps release the later
+    // run and then the run whose copy it started from.
+    const { entries } = await readWorkflowState(
+      {
+        ...env,
+        DB: evidenceHeld(env.DB, async () => {
+          await resetWorkflowState(env, ada, workflow.id);
+          await runQuarterHourTasks({}, new Date(past.getTime() + 15 * 60_000));
+          await runQuarterHourTasks({}, new Date(past.getTime() + 30 * 60_000));
+        }),
+      },
+      ada,
+      workflow.id
+    );
+
+    expect(
+      entries.filter(({ value }) =>
+        JSON.stringify(value ?? null).includes(word)
+      )
+    ).toStrictEqual([]);
   });
 
   it("keeps the evidence of a run another run started from past both runs' retention while a key names the later run, and releases it once none does", async () => {

@@ -1,7 +1,9 @@
 import type { PermissionId } from "@grasp-os/shared/ids";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { and, eq, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import {
   runBrainMemories,
@@ -100,9 +102,16 @@ export const recordRunVersions = async (
   }
 };
 
-/** What each of runs `runIds` was handed, as their evidence keeps it. */
-export const evidenceOfRuns = async (env: Env, runIds: readonly string[]) =>
-  await drizzle(env.DB)
+/**
+ * The query of what the runs `ofRuns` picks (a condition on the run's ID
+ * column) were handed, as their evidence keeps it: for a caller that
+ * reads it in one batch with what names them (workflow-state.ts).
+ */
+export const versionEvidenceQuery = (
+  db: DrizzleD1Database,
+  ofRuns: (runId: typeof runBrainVersions.runId) => SQL | undefined
+) =>
+  db
     .select({
       runId: runBrainVersions.runId,
       producer: runBrainVersions.producer,
@@ -111,11 +120,11 @@ export const evidenceOfRuns = async (env: Env, runIds: readonly string[]) =>
       permissionId: runBrainVersions.permissionId,
     })
     .from(runBrainVersions)
-    .where(inList(runBrainVersions.runId, runIds));
+    .where(ofRuns(runBrainVersions.runId));
 
-/** What run `runId` was handed, as its evidence keeps it. */
-export const evidenceOf = async (env: Env, runId: string) =>
-  await evidenceOfRuns(env, [runId]);
+/** What each of runs `runIds` was handed, as their evidence keeps it. */
+export const evidenceOfRuns = async (env: Env, runIds: readonly string[]) =>
+  await versionEvidenceQuery(drizzle(env.DB), (runId) => inList(runId, runIds));
 
 /**
  * Adds `memories` (of the shared store), what an entity read handed run
@@ -141,6 +150,20 @@ export const recordRunMemories = async (
     .onConflictDoNothing();
 };
 
+/** `versionEvidenceQuery` for what entity reads rested on. */
+export const memoryEvidenceQuery = (
+  db: DrizzleD1Database,
+  ofRuns: (runId: typeof runBrainMemories.runId) => SQL | undefined
+) =>
+  db
+    .select({
+      runId: runBrainMemories.runId,
+      memoryId: runBrainMemories.memoryId,
+      permissionId: runBrainMemories.permissionId,
+    })
+    .from(runBrainMemories)
+    .where(ofRuns(runBrainMemories.runId));
+
 /**
  * What the entity reads of each of runs `runIds` rested on, as their
  * evidence keeps it.
@@ -149,14 +172,30 @@ export const memoryEvidenceOfRuns = async (
   env: Env,
   runIds: readonly string[]
 ) =>
-  await drizzle(env.DB)
-    .select({
-      runId: runBrainMemories.runId,
-      memoryId: runBrainMemories.memoryId,
-      permissionId: runBrainMemories.permissionId,
-    })
-    .from(runBrainMemories)
-    .where(inList(runBrainMemories.runId, runIds));
+  await memoryEvidenceQuery(drizzle(env.DB), (runId) => inList(runId, runIds));
+
+/**
+ * Whether run `runId` keeps any evidence of what it read: a version its
+ * recalls were handed, a memory its entity reads rested on (GRA-1985), or
+ * what the chat that started it had read (`runChatSources`); or so does
+ * a run whose kept state it started from (`runStateWriters`, one hop).
+ * What it returned may then copy what can later be erased or narrowed, so
+ * the Brain keeps only how it ended (brain-sources.ts, GRA-1996). One
+ * statement.
+ */
+export const readAnything = async (
+  env: Env,
+  runId: string
+): Promise<boolean> => {
+  const [row] = await drizzle(env.DB).all<{ read: number }>(
+    sql`WITH read_by(id) AS (SELECT ${runId}
+        UNION SELECT writer_run_id FROM run_state_writers WHERE run_id = ${runId})
+      SELECT (EXISTS (SELECT 1 FROM run_brain_versions WHERE run_id IN (SELECT id FROM read_by))
+      OR EXISTS (SELECT 1 FROM run_brain_memories WHERE run_id IN (SELECT id FROM read_by))
+      OR EXISTS (SELECT 1 FROM run_chat_sources WHERE run_id IN (SELECT id FROM read_by))) AS read`
+  );
+  return row?.read === 1;
+};
 
 /**
  * The runs whose keys each of runs `runIds` started from
