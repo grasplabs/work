@@ -6,6 +6,7 @@ import {
 } from "@grasp-os/brain-next/contract";
 import { auditOutboxTakeMax, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import { redact } from "@grasp-os/shared/redact";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -601,6 +602,75 @@ describe("what core hands over to the new Brain", () => {
       ],
       content: false,
     });
+  });
+
+  it("keeps a run's result without the credentials an outside system's answer carried, while the run itself shows what it returned", async () => {
+    const runner = await builder();
+    const [marker, password, token, signature, plain] = [
+      word(),
+      word(),
+      word(),
+      word(),
+      word(),
+    ];
+    // What a run copies from an answer it read: a credential written in
+    // its text, one as a member of a record on one line, and a signed
+    // link, beside what carries none.
+    const returned = {
+      status: `${marker} signed in with password: ${password} and done`,
+      record: { name: marker, token },
+      link: `https://files.example/report.pdf?sig=${signature}&name=${marker}`,
+    };
+    const workflow = await published(
+      runner,
+      definitionOf([], {
+        output: {
+          status: { kind: "string" },
+          record: {
+            kind: "object",
+            fields: { name: { kind: "string" }, token: { kind: "string" } },
+          },
+          link: { kind: "string" },
+        },
+        value: returned,
+      })
+    );
+    const { runId } = await start(runner, workflow.id);
+    const run = await ended(runner, workflow.id, runId);
+    const clean = await endedRun(runner, plain);
+    await handOverNow();
+    const keptOf = async (id: string | null) =>
+      await readSourceVersionAs(env, runner.userId, {
+        source: { producer: "run", id: id ?? "" },
+        version: 1,
+      });
+    const [kept, keptClean] = await Promise.all([keptOf(runId), keptOf(clean)]);
+    // What was kept before redaction: the result as the run's read gives it.
+    const asReturned = `Workflow run completed.\n\n${JSON.stringify(run.result)}`;
+    const found = await Promise.all(
+      [marker, password, token, signature].map(async (question) => {
+        const items = await recalled(runner.userId, question);
+        return items.map(({ source }) => source.id);
+      })
+    );
+
+    expect({
+      shown: run.result,
+      kept: kept?.text,
+      found,
+      clean: keptClean?.text,
+    }).toStrictEqual({
+      shown: returned,
+      kept: redact(asReturned),
+      found: [[runId], [], [], []],
+      clean: `Workflow run completed.\n\n${JSON.stringify({ status: plain })}`,
+    });
+    // `redact` as it stands removes each: the kept text holds none of them.
+    expect(
+      [password, token, signature].filter((secret) =>
+        (kept?.text ?? "").includes(secret)
+      )
+    ).toStrictEqual([]);
   });
 });
 
