@@ -10,10 +10,9 @@ import * as stylex from "@stylexjs/stylex";
 
 import {
   Chart,
+  ChartArea,
   ChartAxis,
-  ChartBar,
   ChartBarList,
-  ChartGrid,
   ChartTooltip,
 } from "../grasp/chart/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
@@ -28,8 +27,8 @@ import { SectionNotLoaded } from "./section.tsx";
 // Settings › AI and spend, its last card: what the models cost this month
 // on the organization's keys (core's `models.spend()` and the Apps' model
 // bindings from `models.settings()`). The month's total as the key figure,
-// with where it ends at this pace; each day's spend as bars; then where it
-// went, chat, each workflow and each App, as a list of bars. Read-only:
+// with where it ends at this pace; the month so far as one area, day by
+// day; then where it went, chat, each workflow and each App, as a list of bars. Read-only:
 // nothing in Grasp limits what an organization spends on its own keys.
 
 const styles = stylex.create({
@@ -88,6 +87,22 @@ const whereItWent = (
   ].filter((row) => row.spend > 0);
 };
 
+/**
+ * The month so far as a running total, day by day: one calm line that
+ * ends at the key figure above it, never a spike for a busy day.
+ */
+const runningTotal = (
+  days: readonly number[]
+): { day: string; spend: number }[] => {
+  const points: { day: string; spend: number }[] = [];
+  let sofar = 0;
+  for (const [at, amount] of days.entries()) {
+    sofar += amount;
+    points.push({ day: String(at + 1), spend: sofar });
+  }
+  return points;
+};
+
 /** The month's spend: the total, each day's, and where it went. */
 export const SpendCard = ({
   spend,
@@ -113,10 +128,7 @@ export const SpendCard = ({
     chat: t`Chat`,
     other: t`Other`,
   });
-  const days = month.days.map((amount, at) => ({
-    day: String(at + 1),
-    spend: amount,
-  }));
+  const days = runningTotal(month.days);
   // An App's binding whose target can't be read serves nothing: worth a look.
   const unreadable = (bound?.bindings.listed ?? []).filter(
     ({ model }) => model === null
@@ -139,17 +151,16 @@ export const SpendCard = ({
         ) : (
           <>
             <Chart
-              aria-label={t`Spend per day this month`}
+              aria-label={t`Spend so far this month, day by day`}
               config={{ spend: { label: t`Spend` } }}
               data={days}
-              height={160}
+              height={220}
               layout={styles.chart}
               summary={t`${total} so far this month.`}
               xKey="day"
             >
-              <ChartGrid />
               <ChartAxis side="x" />
-              <ChartBar fill="plain" series="spend" />
+              <ChartArea fill="dither-dots" series="spend" />
               <ChartTooltip format={dollars} />
             </Chart>
             <ChartBarList
