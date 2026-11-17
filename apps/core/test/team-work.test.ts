@@ -7,6 +7,7 @@ import { drainObjectOutbox } from "../src/audit-outbox.ts";
 import { recallAs, recallPassagesAs, workBrain } from "../src/brain-next.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { claimsAbout } from "../src/onboarding/team-claims.ts";
 import { adminCommands } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -19,6 +20,7 @@ import type { ProviderReply } from "./model-provider.ts";
 import {
   agree,
   anonymous,
+  backingAsked,
   claimsReply,
   fact,
   judgedIn,
@@ -576,6 +578,62 @@ describe(
         part: judged.includes("Open the ticket."),
         lines: lines.filter((line) => judged.includes(line)),
       }).toStrictEqual({ calls: 2, claim: true, part: true, lines: [] });
+    });
+
+    it("withholds a claim the answer backs with another claim's fact, from another teller", async () => {
+      const reader = await colleague();
+      const billing = "Billing questions go to the finance desk.";
+      const ids = await toldBy(["max", "mia"], {
+        linesOf: (key) =>
+          key === "mia"
+            ? [fact("i1", "handoff", billing)]
+            : [fact("m1", "system", "Tickets arrive in Zendesk.")],
+      });
+      const handover: FakeClaim = {
+        kind: "handover",
+        text: billing,
+        cites: [billing],
+      };
+      const checker = claimsReply([zendeskClaim, handover]);
+      // The claims' backing answer cites, for the handover, the label of
+      // Max's fact about Zendesk: a real label, but another claim's.
+      const crossed = (
+        requests: Parameters<typeof checker>[0]
+      ): ProviderReply => {
+        const asked = backingAsked(requests.at(-1));
+        const reply = checker(requests);
+        if (asked?.about !== claimsAbout || !("text" in reply)) {
+          return reply;
+        }
+        const zendesk = asked.lines.find(
+          ({ text }) => text === "Tickets arrive in Zendesk."
+        )?.id;
+        return {
+          ...reply,
+          text: JSON.stringify({
+            backing: asked.items.map(({ id, text, lines }) => ({
+              id,
+              lines: text === billing ? [zendesk ?? ""] : lines,
+            })),
+          }),
+        };
+      };
+      for (let round = 0; round < teamsDueMax; round += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one team at a time, as the alarm gives them
+        const { result } = await answeringWith(
+          crossed,
+          async () => await onboardingStore(env).intakeNext()
+        );
+        if (result === `brain:${ids.team}` || result === null) {
+          break;
+        }
+      }
+      await handOverNow();
+      const { claims } = await workOnPage(ids);
+      expect({
+        page: claims,
+        recalled: await recalled(reader, "finance desk", "claim"),
+      }).toStrictEqual({ page: [zendeskClaim.text], recalled: [] });
     });
 
     it("withholds a part the answer leaves out or backs with a line it wasn't shown, shows the rest, and writes nothing from an answer that isn't one", async () => {

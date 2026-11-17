@@ -595,6 +595,14 @@ export const checksIn = (
     );
   });
 
+/** What a backing check in `request` was given, as sent; none for any other call. */
+export const backingAsked = (
+  request: SentRequest | undefined
+): z.output<typeof backingSchema> | undefined => {
+  const asked = backingSchema.safeParse(dataOf(request, "data"));
+  return asked.success ? asked.data : undefined;
+};
+
 /** The claims the quick model was asked to check in `requests`, each once, sorted. */
 export const checkedClaimsIn = (requests: readonly SentRequest[]): string[] =>
   [...new Set(checksIn(requests).map(({ claim }) => claim))].toSorted();
