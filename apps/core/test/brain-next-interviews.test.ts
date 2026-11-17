@@ -65,6 +65,7 @@ import { acmeTenant } from "./sign-in-config.ts";
 import {
   entraPerson,
   openRpc,
+  outcome,
   signedInApi,
   signedIn,
   unique,
@@ -2509,7 +2510,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     });
   });
 
-  it("bring nothing of a switched-off team back while switching it on again waits for the admin's confirmation, and show it at the intake after", async () => {
+  it("bring nothing of a switched-off team back while switching it on again waits for the admin's confirmation, and show it at the next intake once confirmed, with nothing else changed", async () => {
     const { ids, max } = await drawnTeam({ eight: true });
     await intakeOf(ids, [zendeskClaim]);
     await handOverNow();
@@ -2534,7 +2535,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
         ids.sam,
         [
           fact("s1", "step", "Answers the phone."),
-          fact(`s${version + 1}`, "step", "Logs the call."),
+          fact("s2", "step", "Logs the call."),
         ],
         version
       );
@@ -2557,12 +2558,66 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     );
     await nextIntake(1);
     const unconfirmed = await readNow();
-    // The admin confirms it.
+    // The admin confirms it, and nothing else changes: the clock's next
+    // intake notes the team's results.
     await onboardingStore(env).saveRoster(listOf(), { type: "system" });
-    await nextIntake(2);
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
     expect({ unconfirmed, confirmed: await readNow() }).toStrictEqual({
       unconfirmed: { claims: [], drawings: 0, page: [] },
       confirmed: {
+        claims: [zendeskClaim.text],
+        drawings: 1,
+        page: [["handling new tickets", 1]],
+      },
+    });
+  });
+
+  it("give a team's results back at the clock's next intake when the Brain refused its switch-off, with nothing else changed", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    const keys: Key[] = [...everyone, "sam", "ada"];
+    const readNow = async () => {
+      const drawings = await recalled(max, "ticket", "drawing");
+      return {
+        claims: await recalled(max, "Zendesk", "claim"),
+        drawings: drawings.length,
+        page: await workOnPage(ids),
+      };
+    };
+    // The Brain's store restores, so it takes nothing out of use: the
+    // switch-off is refused whole, its team's results already marked.
+    const shared = inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
+    const restore = `restore-${unique()}`;
+    await runInDurableObject(shared, (_, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO restores (export, checked, part, restored, state, started_at) VALUES (?, 0, 0, 0, 'running', ?)",
+        restore,
+        Date.now()
+      );
+    });
+    const refused = await outcome(
+      savedRoster(ids, keys, (roster) => ({
+        ...roster,
+        teams: roster.teams.map((each) => ({ ...each, off: true })),
+      }))
+    );
+    const { roster } = await onboardingStore(env).view();
+    const off = roster?.teams.find(({ id }) => id === ids.team)?.off;
+    await runInDurableObject(shared, (_, state) => {
+      state.storage.sql.exec("DELETE FROM restores WHERE export = ?", restore);
+    });
+    await intakeOf(ids, [zendeskClaim]);
+    await handOverNow();
+    expect({
+      refused: refused === "ok" ? "saved" : "refused",
+      off,
+      again: await readNow(),
+    }).toStrictEqual({
+      refused: "refused",
+      off: false,
+      again: {
         claims: [zendeskClaim.text],
         drawings: 1,
         page: [["handling new tickets", 1]],

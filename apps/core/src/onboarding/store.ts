@@ -1343,10 +1343,14 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * The admin confirmed the organization: nothing waits for it any more,
    * and a team that takes part only now, the ones that waited or were
-   * switched on, starts as a late one, its lead first (`#lateTeams`).
+   * switched on, starts as a late one, its lead first (`#lateTeams`), and
+   * is due to be given to the Brain again.
    */
   #confirmed(before: Roster | null, roster: Roster): void {
     const { teams: waited } = this.#unconfirmed();
+    // Its results may be shown now: an intake that ran while it waited
+    // noted none of them (`#teamShowsResults`), so it is given again.
+    this.#dueAgain([...waited]);
     this.#lateTeams(
       before === null
         ? roster
@@ -7281,6 +7285,36 @@ export class Onboarding extends DurableObject<Env> {
     );
   }
 
+  /** Notes, in a transaction of its own or the caller's, that the teams `due` are due to be given to the Brain again. */
+  #dueAgain(due: readonly string[]): void {
+    const at = new Date().toISOString();
+    this.ctx.storage.transactionSync(() => {
+      for (const team of new Set(due)) {
+        this.#brainDue(team, at);
+      }
+    });
+  }
+
+  /** The teams of the claims and drawings `sources`. */
+  #teamsOf(sources: readonly FallingSource[]): string[] {
+    const of = (producer: FallingSource["producer"]): string[] =>
+      sources.flatMap((source) =>
+        source.producer === producer ? [source.id] : []
+      );
+    return [
+      ...this.#db
+        .select({ team: brainClaims.team })
+        .from(brainClaims)
+        .where(inList(brainClaims.source, of("claim")))
+        .all(),
+      ...this.#db
+        .select({ team: brainDrawings.team })
+        .from(brainDrawings)
+        .where(inList(brainDrawings.source, of("drawing")))
+        .all(),
+    ].map(({ team }) => team);
+  }
+
   /**
    * Whether `source`, marked to be erased or not (`erase`), may still be in
    * use in the Brain: standing, or marked but not seen taken out by this
@@ -7345,7 +7379,7 @@ export class Onboarding extends DurableObject<Env> {
           cause: error,
         });
       }
-      const erased = await this.#removeFallen(sources);
+      const erased = await this.#takeOut(this.#removeFallen, sources);
       for (const source of sources) {
         this.#takenOut.add(fallenKey(source));
       }
@@ -7353,6 +7387,25 @@ export class Onboarding extends DurableObject<Env> {
         this.erasedFromBrain(producer, id);
       }
       return await this.#fallenFirst(change, true);
+    }
+  }
+
+  /**
+   * Takes `sources`, marked already, out of the Brain with `remove`: the
+   * ones it erased. When the Brain can't, the change is refused, its
+   * sources off the page: their teams are given again at their next
+   * intake (`#dueAgain`), so what still stands comes back once the Brain
+   * takes it.
+   */
+  async #takeOut(
+    remove: SourceRemover,
+    sources: readonly FallingSource[]
+  ): Promise<readonly FallingSource[]> {
+    try {
+      return await remove(sources);
+    } catch (error) {
+      this.#dueAgain(this.#teamsOf(sources));
+      throw error;
     }
   }
 
