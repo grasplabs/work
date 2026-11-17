@@ -27,7 +27,8 @@ import { ProjectIcon } from "../projects/project-icon.tsx";
 // index.tsx`): the projects the person is in, each a card with its icon,
 // name and what it is for, its hours a week and what it holds that the
 // person may open. Who builds makes one with New project, as an App: its
-// builders decide whom what is shared with it reaches.
+// builders decide whom what is shared with it reaches. What a project
+// should be for a company is being rethought on feat/projects-rethink.
 
 /** One project's card; the whole card is its link. */
 const ProjectCard = ({ project }: { project: ProjectSummary }) => (
