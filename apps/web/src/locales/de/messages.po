@@ -185,7 +185,7 @@ msgstr "{back} gemessener Ertrag"
 
 #: src/agents/agent-page.tsx
 msgid "{before} the month before"
-msgstr "{before} im Monat davor"
+msgstr "{before} im Vormonat"
 
 #: src/workflows/requests/request-detail.tsx
 msgid "{billed, plural, one {# request} other {# requests}}"
@@ -1872,6 +1872,7 @@ msgctxt "memory record state"
 msgid "Accepted"
 msgstr "Akzeptiert"
 
+#: src/agents/agent-page.tsx
 #: src/agents/agent-section.tsx
 #: src/apps/publish.tsx
 msgid "Access"
@@ -3087,10 +3088,6 @@ msgstr "In diesem Tempo"
 #: src/workflows/workflows-table.tsx
 msgid "At work"
 msgstr "Im Einsatz"
-
-#: src/agents/agent-wakes.tsx
-msgid "At, in the company's time zone"
-msgstr "Um, in der Zeitzone des Unternehmens"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -4971,6 +4968,7 @@ msgid "Designed"
 msgstr "Neu gestaltet"
 
 #: src/activity/audit-log.tsx
+#: src/agents/agent-page.tsx
 #: src/knowledge/document.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Details"
@@ -6612,6 +6610,7 @@ msgid "Grasp's chat"
 msgstr "Grasps Chat"
 
 #: src/agents/agent-form.tsx
+#: src/agents/agent-page.tsx
 msgid "Grasp's own rules always hold over these."
 msgstr "Die eigenen Regeln von Grasp gehen immer vor."
 
@@ -7073,6 +7072,10 @@ msgstr "Läuft"
 #: src/brain/brain.ts
 msgid "In the brain"
 msgstr "Im Brain"
+
+#: src/agents/agent-wakes.tsx
+msgid "In the company's time zone"
+msgstr "In der Zeitzone des Unternehmens"
 
 #: src/onboarding/review-parts.tsx
 msgid "In the Exchange admin center, go to Mail flow, then Rules, and add a rule."
@@ -10235,6 +10238,7 @@ msgstr "Außerhalb von Grasp in diesem Monat."
 msgid "Over the next two weeks you’ll get a short personal link to talk with Stephen, Grasp’s AI interviewer: leads for about 20 minutes, everyone else for 10 to 15. By voice or by typing."
 msgstr "In den nächsten zwei Wochen erhalten Sie einen kurzen persönlichen Link, um mit Stephen zu sprechen, dem KI-Interviewer von Grasp: Teamleitungen etwa 20 Minuten, alle anderen 10 bis 15. Per Sprache oder per Tippen."
 
+#: src/agents/agent-page.tsx
 #: src/agents/agent-section.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Overview"
@@ -12160,6 +12164,7 @@ msgstr "Sagen Sie, was sich ändern soll. Nur Sie sehen die Änderungen, im Flow
 msgid "Say what you want to build, and Grasp builds it."
 msgstr "Sagen Sie, was Sie bauen möchten, und Grasp baut es."
 
+#: src/agents/agent-page.tsx
 #: src/agents/agent-section.tsx
 #: src/agents/agent-wakes.tsx
 msgid "Schedule"
@@ -14822,6 +14827,10 @@ msgstr "Bis Eintrag {through}…"
 msgid "Through Grasp's own connector, which keeps the access in your deployment. Your workflows can use it once it is connected, only for what you allow."
 msgstr "Über den eigenen Connector von Grasp, der den Zugriff in Ihrer Installation aufbewahrt. Ihre Workflows können es nach dem Verbinden nutzen, nur für das, was Sie erlauben."
 
+#: src/agents/agent-wakes.tsx
+msgid "Time"
+msgstr "Uhrzeit"
+
 #: src/brain/forget.tsx
 msgid "Time left to undo"
 msgstr "Verbleibende Zeit zum Rückgängigmachen"
@@ -15957,6 +15966,7 @@ msgid "What it is bound to has changed since the binding was approved. Bind it a
 msgstr "Woran sie gebunden ist, hat sich seit der Genehmigung der Bindung geändert. Binde sie erneut, sobald du geprüft hast, dass es noch passt."
 
 #: src/agents/agent-form.tsx
+#: src/agents/agent-page.tsx
 msgid "What it is for"
 msgstr "Wofür er da ist"
 

@@ -4,6 +4,7 @@ import {
   agentNameMax,
 } from "@grasp-os/shared/agents";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import { modelName } from "../chat/model-names.tsx";
@@ -40,6 +41,11 @@ export interface Typed {
   model: string | null;
 }
 
+const styles = stylex.create({
+  // One field alone in its card takes the card's whole width.
+  whole: { maxWidth: "none" },
+});
+
 /** No models to give an agent: a form that doesn't ask for one. */
 const noModels: readonly string[] = [];
 
@@ -70,6 +76,7 @@ export const AgentForm = ({
 }) => {
   const { t } = useLingui();
   const [typed, setTyped] = useState<Typed>(initial);
+  const alone = parts.length === 1;
   // Its own model stays offered while it has one the organization no longer chose.
   const offered = [
     ...models,
@@ -80,6 +87,7 @@ export const AgentForm = ({
   return (
     <Form
       id={id}
+      layout={alone ? styles.whole : undefined}
       onSubmit={(event) => {
         event.preventDefault();
         // Only this form's parts: another form may have saved the rest
@@ -148,7 +156,23 @@ export const AgentForm = ({
           </FieldDescription>
         </Field>
       ) : null}
-      {parts.includes("instructions") ? (
+      {/* Alone, the card it stands in names it: its label and help are
+          the card's own title and line. */}
+      {parts.includes("instructions") && alone ? (
+        <Field disabled={!can}>
+          <Textarea
+            aria-label={t`Instructions`}
+            maxLength={agentInstructionsMax}
+            onValueChange={(instructions) => {
+              setTyped({ ...typed, instructions });
+            }}
+            placeholder={t`What it should know and how it should work.`}
+            rows={16}
+            value={typed.instructions}
+          />
+        </Field>
+      ) : null}
+      {parts.includes("instructions") && !alone ? (
         <Field disabled={!can}>
           <FieldLabel>{t`Instructions`}</FieldLabel>
           <Textarea
@@ -157,7 +181,7 @@ export const AgentForm = ({
               setTyped({ ...typed, instructions });
             }}
             placeholder={t`What it should know and how it should work.`}
-            rows={parts.length === 1 ? 16 : 6}
+            rows={6}
             value={typed.instructions}
           />
           <FieldDescription>

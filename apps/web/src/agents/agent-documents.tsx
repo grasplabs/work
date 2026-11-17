@@ -94,6 +94,7 @@ export const AgentDocuments = ({
   const editing = editable && documents !== undefined;
   return (
     <SectionCard
+      density="compact"
       description={t`Files ${name} reads when a question needs them. Anyone who may ask it can learn what they say.`}
       flush
       footer={
@@ -142,7 +143,8 @@ export const AgentDocuments = ({
           {t`The documents couldn't be loaded. Reload the page.`}
         </Empty>
       ) : null}
-      {documents?.length === 0 ? (
+      {/* Where documents can be added, the place to add them says enough. */}
+      {documents?.length === 0 && !editing ? (
         <Empty size="inline">{t`${name} has no documents.`}</Empty>
       ) : null}
       {editing && kept >= most ? (

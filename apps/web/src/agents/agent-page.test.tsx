@@ -494,10 +494,16 @@ const field = (label: string): HTMLInputElement | HTMLTextAreaElement => {
   const named = [...document.querySelectorAll("label")].find((each) =>
     each.textContent?.trim().startsWith(label)
   );
-  const found =
-    named?.htmlFor === undefined || named.htmlFor === ""
-      ? named?.parentElement?.querySelector("input, textarea")
+  const byLabel = (): Element | null | undefined => {
+    if (named === undefined) {
+      // A field alone in its card is named by the card, not a label.
+      return document.querySelector(`[aria-label="${label}"]`);
+    }
+    return named.htmlFor === ""
+      ? named.parentElement?.querySelector("input, textarea")
       : document.querySelector(`#${CSS.escape(named.htmlFor)}`);
+  };
+  const found = byLabel();
   if (
     !(found instanceof HTMLInputElement || found instanceof HTMLTextAreaElement)
   ) {
@@ -652,7 +658,7 @@ describe("an agent's page", () => {
     await shown(connections, { agent: "Claire" });
     await press(onSwitch());
     expect(asked).toStrictEqual([["paused", "agent-1", true]]);
-    expect(document.querySelector("header")?.textContent).toContain("Paused");
+    expect(onSwitch().getAttribute("aria-checked")).toBe("false");
   });
 
   it("offers someone who isn't the company's admin nothing to change", async () => {
@@ -712,7 +718,7 @@ describe("an agent's page", () => {
     const { connections, asked } = fakeConnections();
     await shown(connections, { agent: "Stephen", tab: "schedule" });
     await press(button("Add a time"));
-    await set(field("At, in the company's time zone"), "07:30", "input");
+    await set(field("Time"), "07:30", "input");
     await set(
       field("What to ask it each time"),
       " Look for invoices that are overdue. ",

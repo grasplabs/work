@@ -240,15 +240,6 @@ const buttonStarting = (words: string) =>
     each.textContent?.trim().startsWith(words)
   );
 
-/** The fact row named `name` that opens to say more. */
-const factNamed = (name: string) =>
-  [...document.querySelectorAll("button[aria-labelledby]")].find(
-    (each) =>
-      document.querySelector(
-        `#${CSS.escape(each.getAttribute("aria-labelledby") ?? "")}`
-      )?.textContent === name
-  );
-
 /** One agent's page, as its route shows it. */
 const page = (agent: Agent, tab: AgentTab, usable = true) => (
   <AgentPage
@@ -447,7 +438,6 @@ describe("the company's agents, on pages of their own", () => {
 
     it("says what an agent used this month: how much and how often, never what", async () => {
       await mounted(page(claire, "overview"));
-      await press(factNamed("November 2026"));
       const said = document.body.textContent ?? "";
       expect(
         [

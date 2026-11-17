@@ -17,7 +17,7 @@ import {
   DialogTitle,
 } from "../grasp/dialog/index.ts";
 import { Empty } from "../grasp/empty/index.ts";
-import { Field, FieldLabel } from "../grasp/field/index.ts";
+import { Field, FieldDescription, FieldLabel } from "../grasp/field/index.ts";
 import { Form, FormRow } from "../grasp/form/index.ts";
 import { Plus, Trash } from "../grasp/icons/index.ts";
 import { inputStyles, sizeStyles } from "../grasp/input/input.tsx";
@@ -153,7 +153,6 @@ const TimeInput = ({
     onChange={(event) => {
       onChange(event.target.value);
     }}
-    required
     type="time"
     value={value}
     {...stylex.props(inputStyles.input, sizeStyles.md)}
@@ -246,15 +245,14 @@ const NewWake = ({
                   />
                 </Field>
                 <Field disabled={!can}>
-                  <FieldLabel htmlFor={timeId}>
-                    {t`At, in the company's time zone`}
-                  </FieldLabel>
+                  <FieldLabel htmlFor={timeId}>{t`Time`}</FieldLabel>
                   <TimeInput
                     disabled={!can}
                     id={timeId}
                     onChange={setTime}
                     value={time}
                   />
+                  <FieldDescription>{t`In the company's time zone`}</FieldDescription>
                 </Field>
               </FormRow>
               <Field disabled={!can}>
@@ -331,6 +329,7 @@ export const AgentWakes = ({
   };
   return (
     <SectionCard
+      density="compact"
       actions={
         editable ? (
           <NewWake agent={agent} can={can} change={change} people={people} />

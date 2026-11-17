@@ -19,7 +19,6 @@ import { changeThenRefresh } from "../change-then-refresh.ts";
 import { modelName } from "../chat/model-names.tsx";
 import type { Session } from "../core.ts";
 import { Page } from "../frame/page.tsx";
-import { AgentMark } from "../grasp/agent-mark/index.ts";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -45,14 +44,9 @@ import {
   EmptyTitle,
 } from "../grasp/empty/index.ts";
 import {
-  Agent as AgentIcon,
   CalendarIcon,
-  Clock,
   Conversation,
   Edit,
-  Money,
-  People,
-  Tool,
   Trash,
 } from "../grasp/icons/index.ts";
 import {
@@ -63,14 +57,12 @@ import {
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
-import { KeyValueList } from "../grasp/key-value/index.ts";
-import type { KeyValueItem } from "../grasp/key-value/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { Switch } from "../grasp/switch/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { dollars } from "../settings/money.ts";
-import { SettingRow, SettingsRows } from "../settings/section.tsx";
+import { FactRow, SettingRow, SettingsRows } from "../settings/section.tsx";
 import {
   AudienceControl,
   appAudienceOf,
@@ -83,7 +75,6 @@ import { useCoreAction } from "../use-core-action.ts";
 import { AgentDocuments } from "./agent-documents.tsx";
 import {
   AgentFailure,
-  AgentStateBadge,
   classesOn,
   nextWakeAt,
   useAudienceLine,
@@ -132,7 +123,6 @@ export const agentTabOf = (value: unknown): AgentTab =>
   agentTabs.find((tab) => tab === value) ?? "overview";
 
 const styles = stylex.create({
-  title: { display: "flex", alignItems: "center", gap: grasp.space3 },
   actions: {
     display: "flex",
     flexWrap: "wrap",
@@ -196,7 +186,34 @@ const useAccessWords = (
   };
 };
 
-/** The agent's facts, as a rail: one row each, this month's use opening to say more. */
+/** What the agent used this month, as a fact row: how much and how often, never what. */
+const UsageRow = ({ usage }: { usage: AgentUsage }) => {
+  const { t } = useLingui();
+  const monthName = useMonthName();
+  const { requests, people } = usage;
+  const before = dollars(usage.spentBefore);
+  return (
+    <FactRow
+      help={[
+        plural(requests, {
+          one: "# request to a model",
+          other: "# requests to a model",
+        }),
+        plural(people, { one: "for # person", other: "for # people" }),
+        t`${before} the month before`,
+      ].join(" · ")}
+      label={monthName(usage.month)}
+    >
+      {dollars(usage.spent)}
+    </FactRow>
+  );
+};
+
+/**
+ * The agent's facts, as rows of a settings card: what it is for, whom it
+ * answers, how much it may do, when it works on its own, its model and
+ * this month's use, every value on one edge, as Settings has its facts.
+ */
 const Facts = ({
   agent,
   first,
@@ -214,53 +231,33 @@ const Facts = ({
 }) => {
   const { t } = useLingui();
   const moment = useMoment();
-  const monthName = useMonthName();
   const { who, may } = useAccessWords(first, settings, teams);
   const scheduled = wakesOn(wakes).length;
   const next = nextWakeAt(wakes);
   const nextMoment = next === undefined ? "" : moment(next);
-  const items: KeyValueItem[] = [
-    { key: t`Answers`, value: who, icon: People },
-    { key: t`May do`, value: may, icon: Tool },
-    {
-      key: t`On its own`,
-      value:
-        scheduled === 0
-          ? t`Only when asked`
-          : t`${scheduled} on a schedule, next ${nextMoment}`,
-      icon: CalendarIcon,
-    },
-    {
-      key: t`Model`,
-      value: agent.model === null ? t`The asker's` : modelName(agent.model),
-      icon: AgentIcon,
-    },
-  ];
-  if (usage !== undefined) {
-    const before = dollars(usage.spentBefore);
-    const { requests, people } = usage;
-    items.push({
-      key: monthName(usage.month),
-      value: dollars(usage.spent),
-      icon: Money,
-      detail: [
-        plural(requests, {
-          one: "# request to a model",
-          other: "# requests to a model",
-        }),
-        plural(people, { one: "for # person", other: "for # people" }),
-        t`${before} the month before`,
-      ].join(" · "),
-    });
-  }
-  if (agent.changedAt !== null) {
-    items.push({
-      key: t`Changed`,
-      value: moment(agent.changedAt),
-      icon: Clock,
-    });
-  }
-  return <KeyValueList divided items={items} variant="inline" />;
+  return (
+    <SectionCard density="compact" flush title={t`Details`}>
+      <SettingsRows>
+        <FactRow label={t`What it is for`}>
+          {agent.job === "" ? t`No job written yet` : agent.job}
+        </FactRow>
+        <FactRow label={t`Answers`}>{who}</FactRow>
+        <FactRow label={t`May do`}>{may}</FactRow>
+        <FactRow label={t`On its own`}>
+          {scheduled === 0
+            ? t`Only when asked`
+            : t`${scheduled} on a schedule, next ${nextMoment}`}
+        </FactRow>
+        <FactRow label={t`Model`}>
+          {agent.model === null ? t`The asker's` : modelName(agent.model)}
+        </FactRow>
+        {usage === undefined ? null : <UsageRow usage={usage} />}
+        {agent.changedAt === null ? null : (
+          <FactRow label={t`Changed`}>{moment(agent.changedAt)}</FactRow>
+        )}
+      </SettingsRows>
+    </SectionCard>
+  );
 };
 
 /**
@@ -284,7 +281,7 @@ const RecentActivity = ({
     .toSorted((a, b) => b.lastAt.localeCompare(a.lastAt));
   const asked = usage?.lastAt ?? null;
   return (
-    <SectionCard flush title={t`Recent activity`}>
+    <SectionCard density="compact" flush title={t`Recent activity`}>
       {ran.length === 0 && asked === null ? (
         <Empty size="inline">{t`Nothing yet. What it does shows here.`}</Empty>
       ) : (
@@ -357,7 +354,7 @@ const Access = ({
   }
   return (
     <>
-      <SectionCard flush title={t`Who may use it`}>
+      <SectionCard density="compact" flush title={t`Who may use it`}>
         <SettingsRows>
           <SettingRow
             help={t`Nobody outside it can ask it anything, in Grasp or a chat app.`}
@@ -386,6 +383,7 @@ const Access = ({
         </SettingsRows>
       </SectionCard>
       <SectionCard
+        density="compact"
         description={t`Each as the company has it, or for fewer people. Never more.`}
         flush
         title={t`What it may do`}
@@ -499,6 +497,7 @@ const DeleteAgent = ({
   const { t } = useLingui();
   return (
     <SectionCard
+      density="compact"
       actions={
         <AlertDialog>
           <AlertDialogTrigger
@@ -527,8 +526,9 @@ const DeleteAgent = ({
           </AlertDialogContent>
         </AlertDialog>
       }
-      density="compact"
       description={t`To stop it for a while, turn it off instead.`}
+      // Its head says it all: no body, so no room under it.
+      flush
       title={t`Delete ${name}`}
     >
       {null}
@@ -636,6 +636,12 @@ export const AgentPage = ({
     }
     await navigate({ to: "/agents", replace: true });
   };
+  const partNames = {
+    overview: t`Overview`,
+    instructions: t`Instructions`,
+    access: t`Access`,
+    schedule: t`Schedule`,
+  } as const satisfies Record<AgentTab, string>;
   return (
     <Page>
       <PageHeader
@@ -669,15 +675,10 @@ export const AgentPage = ({
             ) : null}
           </div>
         }
-        aside={<AgentStateBadge state={agent.state} />}
-        description={agent.job === "" ? t`No job written yet` : agent.job}
-        descriptionLines={2}
-        title={
-          <span {...stylex.props(styles.title)}>
-            <AgentMark name={name} size="lg" />
-            {name}
-          </span>
-        }
+        // The part shown, as Settings names its page: the agent's mark and
+        // name stand above it in the sidebar, and in the crumbs.
+        size="sm"
+        title={partNames[tab]}
       />
       <AgentFailure>{failure}</AgentFailure>
       {/* Every tab stays mounted, the others hidden: what is typed and
@@ -702,6 +703,7 @@ export const AgentPage = ({
         {...stylex.props(styles.stack, tab !== "instructions" && styles.hidden)}
       >
         <SectionCard
+          density="compact"
           actions={
             <Button
               disabled={!can}
@@ -713,6 +715,7 @@ export const AgentPage = ({
               {t`Save`}
             </Button>
           }
+          description={t`Grasp's own rules always hold over these.`}
           title={t`Instructions`}
         >
           <AgentForm
