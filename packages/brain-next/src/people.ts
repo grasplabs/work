@@ -274,7 +274,9 @@ export interface PersonFound {
 export const applyPerson = (
   sql: SqlStorage,
   { key, subject }: { key: string; subject: string },
-  { people, identifiers, subjects }: PersonFound
+  { people, identifiers, subjects }: PersonFound,
+  /** An export being restored, which holds it by design: never made stale. */
+  restoring: string | null = null
 ): number => {
   let changed = 0;
   const holding = entitiesHolding(sql, identifiers);
@@ -357,11 +359,61 @@ export const applyPerson = (
   if (changed > 0) {
     sql.exec(
       `INSERT OR IGNORE INTO export_sources (export, subject, version, written)
-      SELECT id, ?1, 0, 1 FROM exports`,
-      subject
+      SELECT id, ?1, 0, 1 FROM exports WHERE id IS NOT ?2`,
+      subject,
+      restoring
     );
   }
   return changed;
+};
+
+/**
+ * Closes, for a restore of the export `restoring` (restore.ts `checkPart`),
+ * each card its lines give: `entities` with the subjects of the
+ * identifiers each line gives them (`identifiers`, in order). One of kind
+ * `person` holding an identifier a person's erasure closed is theirs, by
+ * the rule an add leaves it out by (`strippedOf`): closed by its id under
+ * that erasure, with what of it the store holds hidden (`applyPerson`), so
+ * every line about it or relating to it is passed over (restore.ts
+ * `passesOverMemory`), whichever comes first. In the caller's transaction.
+ */
+export const closeCards = (
+  sql: SqlStorage,
+  restoring: string,
+  entities: readonly {
+    id: string;
+    kind: string;
+    identifiers: readonly Identifier[];
+  }[],
+  identifiers: readonly string[][]
+): void => {
+  const { erased } = strippedOf(
+    sql,
+    entities.map((entity) => ({ ...entity, key: entity.id })),
+    identifiers
+  );
+  for (const [index, { id }] of entities.entries()) {
+    const [by] = erased.has(id)
+      ? sql
+          .exec<{ key: string; person: string }>(
+            `SELECT closed.erasure AS key, erasures.subject AS person
+            FROM person_erasure_subjects AS closed
+            JOIN erasures ON erasures.key = closed.erasure
+            WHERE closed.subject IN (SELECT value FROM json_each(?1))
+            LIMIT 1`,
+            JSON.stringify(identifiers[index] ?? [])
+          )
+          .toArray()
+      : [];
+    if (by !== undefined) {
+      applyPerson(
+        sql,
+        { key: by.key, subject: by.person },
+        { people: [], identifiers: [], subjects: [entityClosureOf(id)] },
+        restoring
+      );
+    }
+  }
 };
 
 /**

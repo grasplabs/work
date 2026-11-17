@@ -73,6 +73,7 @@ import {
   writerErasedAfterSql,
 } from "./memories.ts";
 import {
+  closeCards,
   closedOf,
   entityClosureOf,
   isErasedPerson,
@@ -1089,9 +1090,25 @@ const checkPart = async (
     (lines ?? []).map(async (line) => await heldBy(line))
   );
   const fromLines = heldByLines.filter((held) => held !== undefined);
+  const memoryLines = (lines ?? []).filter(
+    (line): line is MemoryLine => !isVersionLine(line) && line.kind === "memory"
+  );
+  const namings = await Promise.all(
+    memoryLines.map(async ({ entities }) => {
+      const { identifiers } = await namingOf(entities, []);
+      return identifiers;
+    })
+  );
   storage.transactionSync(() => {
     const { sql } = storage;
     recordExportSources(sql, id, [...(holdings ?? []), ...fromLines]);
+    // Each card of a person an erasure took, as the export gives it, closed
+    // before any line is written (every part is checked first, on every
+    // start): so every line about it is passed over, whichever comes first
+    // in the export, and nothing rests on what an earlier start recorded.
+    for (const [at, { entities }] of memoryLines.entries()) {
+      closeCards(sql, id, entities, namings[at] ?? []);
+    }
     // A part whose lines don't check, or whose holdings are missing or
     // unreadable (what it holds may not all be on record), is damaged.
     sql.exec(

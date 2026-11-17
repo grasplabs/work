@@ -3864,6 +3864,14 @@ export const coreProbes = {
       });
     }),
   ],
+  // Pure: whether an error is the Brain's refusal while it restores; a
+  // yes or no, whatever the error holds.
+  isBrainRestoring: async ({ markers }) => [
+    await answer("an error naming the markers", async () => {
+      await Promise.resolve();
+      return coreBrain.isBrainRestoring(new Error(markers.join(" ")));
+    }),
+  ],
   // Pure: a skill's key as a run keeps it, from what the caller names
   // alone (a name it gives comes back as given), so no markers.
   skillVersionRefOf: async () => [

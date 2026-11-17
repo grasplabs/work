@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { BrainBucket } from "./bucket.ts";
-import { erasureReasons, refusalPrefix } from "./contract.ts";
+import { erasureReasons, refusalPrefix, restoringNow } from "./contract.ts";
 import type {
   ErasureReason,
   ErasureStatus,
@@ -29,6 +29,7 @@ import {
   personSubjectOf,
 } from "./people.ts";
 import type { HeldIdentifier, PersonFound, ReplayMemo } from "./people.ts";
+import { isRestoring } from "./restoring.ts";
 import { removeVectorsOf, repackBlocks } from "./vectors.ts";
 
 // Erasure: what goes for good, apart from ordinary removal. A new version
@@ -1532,6 +1533,13 @@ export const erasePersonShared = async (
     const before = personErasureOf(sql, subject);
     if (before !== undefined) {
       return before;
+    }
+    // Not while a restore writes the store back, asked in the transaction
+    // that records it, so none starts in between: it runs once the restore
+    // is through or given up, and the restore finds what it closed in the
+    // export (restore.ts `checkPart`). The host asks again.
+    if (isRestoring(sql)) {
+      throw new Error(restoringNow);
     }
     const entry: LedgerEntry = {
       kind: "person",

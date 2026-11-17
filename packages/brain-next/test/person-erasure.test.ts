@@ -1588,16 +1588,22 @@ describe("a person's erasure in the shared store", () => {
     await restore(shared(), backup ?? empty);
     const state = await restoreEnded(id);
     await erase(at.anna, [email(at.local)]);
+    // Rolled back to the backup once more, after her erasure: the ledger,
+    // replayed, takes her again, and the restore resumes without her.
+    await restore(shared(), backup ?? empty);
+    const resumed = await restoreEnded(id);
 
     expect({
       backup: backup !== undefined,
       meanwhile,
       state,
+      resumed,
       left: await leftOf(at),
     }).toStrictEqual({
       backup: true,
       meanwhile: `Error: ${restoringNow}`,
       state: "done",
+      resumed: "done",
       left: { read: [], exported: [] },
     });
   });

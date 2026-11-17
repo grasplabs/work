@@ -35,6 +35,7 @@ import { eraseGapAnswerer } from "./brain-gaps.ts";
 import {
   erasePerson as eraseFromBrain,
   erasePersonShared,
+  isBrainRestoring,
   stillDeletingTooLong,
 } from "./brain-next.ts";
 import { endHandOversOf } from "./brain-sources.ts";
@@ -921,6 +922,12 @@ const runErasure = async (env: Env, userId: string): Promise<void> => {
       // oxlint-disable-next-line no-await-in-loop -- one area at a time
       await step.erase(env, userId);
     } catch (error) {
+      // The Brain restores an export: its part waits for it, as it should
+      // (brain-next.ts `erasePersonShared`), and the clock asks again.
+      if (isBrainRestoring(error)) {
+        log.info("member.erasure_waiting", { area, until: "brain_restored" });
+        continue;
+      }
       log.error("member.erasure_failed", { area, ...errorFields(error) });
       // oxlint-disable-next-line no-await-in-loop -- one area at a time
       await db

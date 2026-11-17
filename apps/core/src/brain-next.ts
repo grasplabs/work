@@ -181,6 +181,10 @@ import type { SkillNeeds } from "./skill-needs.ts";
 // well-formed (the Brain's own rule, `wellFormedString`), so no two become
 // one once encoded.
 
+/** Whether `error` is the Brain's refusal while it restores an export (contract.ts `restoringNow`): a wait, not a failure. */
+export const isBrainRestoring = (error: unknown): boolean =>
+  error instanceof Error && error.message === restoringNow;
+
 /**
  * `add`, its refusal while the Brain restores an export (contract.ts
  * `restoringNow`) answered as `brain.restoring`: a code a producer makes

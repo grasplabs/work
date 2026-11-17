@@ -5,6 +5,7 @@
 import { brainOf, recallBudgetMax } from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -18,7 +19,11 @@ import {
   startBrainExport,
   workBrain,
 } from "../src/brain-next.ts";
-import { teamMembers, teams } from "../src/db/core/schema.ts";
+import {
+  personErasureAreas,
+  teamMembers,
+  teams,
+} from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { finishedByTheClock } from "./brain-next-own-store.ts";
 import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
@@ -337,6 +342,7 @@ describe(
       let meanwhile:
         | Awaited<ReturnType<typeof at.admin.api.members.erasure>>
         | undefined;
+      let waited: { attempts: number } | undefined;
       try {
         await at.admin.api.members.remove(at.anna.userId);
         await at.admin.api.members.erase(
@@ -344,6 +350,17 @@ describe(
           String(at.anna.person.name)
         );
         meanwhile = await at.admin.api.members.erasure(at.anna.userId);
+        // The clock asks again while the restore runs: a wait, no failure.
+        await runMinuteTasks();
+        [waited] = await drizzle(env.DB)
+          .select({ attempts: personErasureAreas.attempts })
+          .from(personErasureAreas)
+          .where(
+            and(
+              eq(personErasureAreas.userId, at.anna.userId),
+              eq(personErasureAreas.area, "brain_shared")
+            )
+          );
       } finally {
         await restoring(false);
       }
@@ -361,11 +378,13 @@ describe(
         herMemories: bob.memories.filter((statement) =>
           statement.includes(at.name)
         ),
+        waited: waited?.attempts,
       }).toStrictEqual({
         meanwhile: [
           { area: "brain_shared", state: "pending" },
           { area: "identity", state: "pending" },
         ],
+        waited: 0,
         done: true,
         herEntity: false,
         herMemories: [],

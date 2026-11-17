@@ -3026,13 +3026,18 @@ export interface Brain {
    * stale, when it changed anything. Their identifiers stay closed: a
    * write leaves one out and writes the rest, answering as for an
    * identifier held nowhere; what is drawn from a source (extraction, a
-   * write resting on a version, a restore of one) also leaves out a
-   * person's card holding one, with what is about it or relates to it,
-   * and their word. Closed for good: nothing opens one again, also once
+   * write resting on a version) also leaves out a person's card holding
+   * one, with what is about it or relates to it, and their word. A restore
+   * of an export (`startRestore`), before it writes any line and again on
+   * every start, closes each `person` card the export gives with one, and
+   * then passes over every line about it or relating to it, whichever
+   * comes first, and every line in their word; another entity only loses
+   * the identifier. Closed for good: nothing opens one again, also once
    * the host gives the address to someone else. The sources stay. Safe
    * to repeat: the same person is the same erasure, its identifiers those
-   * of its first call. Refused while the store restores an export
-   * (`restoringNow`), to be asked again once it is through or given up.
+   * of its first call. Refused while a restore runs (`restoringNow`), to
+   * be asked again once it is through or given up; not held by one that
+   * failed.
    * Returns only once its entry is in the ledger: one that throws must be
    * repeated. The shared store's alone: a person's own store refuses.
    */
