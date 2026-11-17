@@ -2064,6 +2064,10 @@ msgstr "Add index"
 msgid "Add option"
 msgstr "Add option"
 
+#: src/projects/project-people-stack.tsx
+msgid "Add people"
+msgstr "Add people"
+
 #: src/apps/indexes-view.tsx
 msgid "Add search"
 msgstr "Add search"
@@ -3769,7 +3773,6 @@ msgstr "Chat with {name}"
 #: src/chat/chat-switcher.tsx
 #: src/chat/chat-window.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
-#: src/projects/project-view.tsx
 msgid "Chats"
 msgstr "Chats"
 
@@ -3973,6 +3976,7 @@ msgstr "Cliffs"
 #: src/onboarding/place-picker.tsx
 #: src/projects/project-chats.tsx
 #: src/projects/project-dialog.tsx
+#: src/projects/project-people-stack.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/audit-archive.tsx
 #: src/settings/erasures.tsx
@@ -7495,7 +7499,7 @@ msgstr "Its apps and workflows aren’t deleted, and nothing in it is shared wit
 msgid "Its apps and workflows aren’t deleted, but they stop being shared with everyone in it: {who} lose access to them, unless they are shared with them another way."
 msgstr "Its apps and workflows aren’t deleted, but they stop being shared with everyone in it: {who} lose access to them, unless they are shared with them another way."
 
-#: src/projects/project-connections.tsx
+#: src/projects/project-view.tsx
 msgid "Its apps and workflows use no connections."
 msgstr "Its apps and workflows use no connections."
 
@@ -8840,6 +8844,10 @@ msgstr "No App has a model bound to it."
 msgid "No App is called “{asked}”"
 msgstr "No App is called “{asked}”"
 
+#: src/projects/project-view.tsx
+msgid "No Apps in it yet."
+msgstr "No Apps in it yet."
+
 #: src/apps/apps-overview.tsx
 msgid "No Apps yet"
 msgstr "No Apps yet"
@@ -9087,6 +9095,10 @@ msgstr "No workflow with counted hours here yet."
 msgid "No workflow yet"
 msgstr "No workflow yet"
 
+#: src/projects/project-view.tsx
+msgid "No workflows in it yet."
+msgstr "No workflows in it yet."
+
 #: src/workflows/workflows-table.tsx
 msgid "No workflows yet"
 msgstr "No workflows yet"
@@ -9210,7 +9222,7 @@ msgstr "None of the App's integration permissions serves {contract} with every a
 msgid "None of this is right"
 msgstr "None of this is right"
 
-#: src/projects/project-chats.tsx
+#: src/projects/project-view.tsx
 msgid "None of your chats are in it. Only you see the chats you put here."
 msgstr "None of your chats are in it. Only you see the chats you put here."
 
@@ -10473,7 +10485,7 @@ msgstr "Pending"
 #: src/people/people-teams-picker.tsx
 #: src/people/share-picker.tsx
 #: src/projects/project-dialog.tsx
-#: src/projects/project-view.tsx
+#: src/projects/project-people-stack.tsx
 #: src/workflows/share-workflow.tsx
 msgid "People"
 msgstr "People"
@@ -10509,6 +10521,10 @@ msgstr "People do “{name}” in two ways"
 #: src/dashboard/report.ts
 msgid "People heard"
 msgstr "People heard"
+
+#: src/projects/project-people-stack.tsx
+msgid "People in it: {count}"
+msgstr "People in it: {count}"
 
 #: src/agents/agent-page.tsx
 msgid "People it worked for"
@@ -17093,6 +17109,7 @@ msgid "Your chat's agent asked to start this workflow for you. Nothing runs unti
 msgstr "Your chat's agent asked to start this workflow for you. Nothing runs until you confirm it, with exactly the input shown."
 
 #: src/projects/project-chats.tsx
+#: src/projects/project-view.tsx
 msgid "Your chats"
 msgstr "Your chats"
 

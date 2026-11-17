@@ -2064,6 +2064,10 @@ msgstr "Index hinzufügen"
 msgid "Add option"
 msgstr "Option hinzufügen"
 
+#: src/projects/project-people-stack.tsx
+msgid "Add people"
+msgstr "Personen hinzufügen"
+
 #: src/apps/indexes-view.tsx
 msgid "Add search"
 msgstr "Suche hinzufügen"
@@ -3769,7 +3773,6 @@ msgstr "Mit {name} chatten"
 #: src/chat/chat-switcher.tsx
 #: src/chat/chat-window.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
-#: src/projects/project-view.tsx
 msgid "Chats"
 msgstr "Chats"
 
@@ -3973,6 +3976,7 @@ msgstr "Klippen"
 #: src/onboarding/place-picker.tsx
 #: src/projects/project-chats.tsx
 #: src/projects/project-dialog.tsx
+#: src/projects/project-people-stack.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/audit-archive.tsx
 #: src/settings/erasures.tsx
@@ -7495,7 +7499,7 @@ msgstr "Seine Apps und Workflows werden nicht gelöscht, und nichts darin ist mi
 msgid "Its apps and workflows aren’t deleted, but they stop being shared with everyone in it: {who} lose access to them, unless they are shared with them another way."
 msgstr "Seine Apps und Workflows werden nicht gelöscht, aber nicht mehr mit allen darin geteilt: {who} verlieren den Zugriff darauf, sofern sie nicht anders mit ihnen geteilt sind."
 
-#: src/projects/project-connections.tsx
+#: src/projects/project-view.tsx
 msgid "Its apps and workflows use no connections."
 msgstr "Seine Apps und Workflows nutzen keine Verbindungen."
 
@@ -8840,6 +8844,10 @@ msgstr "An keine App ist ein Modell gebunden."
 msgid "No App is called “{asked}”"
 msgstr "Keine App heißt „{asked}“"
 
+#: src/projects/project-view.tsx
+msgid "No Apps in it yet."
+msgstr "Noch keine Apps darin."
+
 #: src/apps/apps-overview.tsx
 msgid "No Apps yet"
 msgstr "Noch keine Apps"
@@ -9087,6 +9095,10 @@ msgstr "Hier noch kein Workflow mit gezählten Stunden."
 msgid "No workflow yet"
 msgstr "Noch kein Workflow"
 
+#: src/projects/project-view.tsx
+msgid "No workflows in it yet."
+msgstr "Noch keine Workflows darin."
+
 #: src/workflows/workflows-table.tsx
 msgid "No workflows yet"
 msgstr "Noch keine Workflows"
@@ -9210,7 +9222,7 @@ msgstr "Keine Integrationsberechtigung der App bedient {contract} mit allen dekl
 msgid "None of this is right"
 msgstr "Davon stimmt nichts"
 
-#: src/projects/project-chats.tsx
+#: src/projects/project-view.tsx
 msgid "None of your chats are in it. Only you see the chats you put here."
 msgstr "Keiner Ihrer Chats ist darin. Nur Sie sehen die Chats, die Sie hier ablegen."
 
@@ -10473,7 +10485,7 @@ msgstr "Ausstehend"
 #: src/people/people-teams-picker.tsx
 #: src/people/share-picker.tsx
 #: src/projects/project-dialog.tsx
-#: src/projects/project-view.tsx
+#: src/projects/project-people-stack.tsx
 #: src/workflows/share-workflow.tsx
 msgid "People"
 msgstr "Personen"
@@ -10509,6 +10521,10 @@ msgstr "„{name}“ wird auf zwei Arten gemacht"
 #: src/dashboard/report.ts
 msgid "People heard"
 msgstr "Gehörte Personen"
+
+#: src/projects/project-people-stack.tsx
+msgid "People in it: {count}"
+msgstr "Personen darin: {count}"
 
 #: src/agents/agent-page.tsx
 msgid "People it worked for"
@@ -17093,6 +17109,7 @@ msgid "Your chat's agent asked to start this workflow for you. Nothing runs unti
 msgstr "Der Agent Ihres Chats möchte diesen Workflow für Sie starten. Nichts läuft, bis Sie es bestätigen, mit genau der gezeigten Eingabe."
 
 #: src/projects/project-chats.tsx
+#: src/projects/project-view.tsx
 msgid "Your chats"
 msgstr "Ihre Chats"
 

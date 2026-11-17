@@ -1,7 +1,6 @@
 import type { ChatSummary } from "@grasp-os/shared/chat";
 import type { Project } from "@grasp-os/shared/projects";
 import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
@@ -26,24 +25,12 @@ import {
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
-import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // A project's chats: the person's own that they put in it, and nobody
 // else's (core's `chats.setProject`, kept in their own Workspace). They
 // add one of their chats, or take one out; the chat itself stays theirs,
 // in their own list, either way.
-
-const styles = stylex.create({
-  tab: {
-    display: "grid",
-    gap: grasp.space3,
-  },
-  bar: {
-    display: "flex",
-    justifyContent: "flex-end",
-  },
-});
 
 /** A chat's row: its link, and taking it out of the project. */
 const ChatRow = ({
@@ -78,7 +65,7 @@ const ChatRow = ({
 };
 
 /** Adding one of the person's chats that isn't in the project yet. */
-const AddChat = ({
+export const AddChat = ({
   project,
   filed,
 }: {
@@ -161,12 +148,10 @@ const AddChat = ({
   );
 };
 
-/** The project's Chats tab: the person's own chats in it. */
-export const ProjectChats = ({
-  project,
+/** The person's own chats in the project, each with Take out. */
+export const ProjectChatList = ({
   chats,
 }: {
-  project: Project;
   chats: readonly ChatSummary[];
 }) => {
   const { t } = useLingui();
@@ -179,29 +164,20 @@ export const ProjectChats = ({
     await router.invalidate();
   };
   return (
-    <div {...stylex.props(styles.tab)}>
-      <div {...stylex.props(styles.bar)}>
-        <AddChat filed={chats} project={project} />
-      </div>
-      {chats.length === 0 ? (
-        <Empty size="inline">
-          {t`None of your chats are in it. Only you see the chats you put here.`}
-        </Empty>
-      ) : (
-        <ItemGroup aria-label={t`Your chats`} separated>
-          {chats.map((chat) => (
-            <ChatRow
-              busy={busy}
-              chat={chat}
-              key={chat.id}
-              onTakeOut={() => {
-                void takeOut(chat.id);
-              }}
-            />
-          ))}
-        </ItemGroup>
-      )}
+    <>
+      <ItemGroup aria-label={t`Your chats`} separated>
+        {chats.map((chat) => (
+          <ChatRow
+            busy={busy}
+            chat={chat}
+            key={chat.id}
+            onTakeOut={() => {
+              void takeOut(chat.id);
+            }}
+          />
+        ))}
+      </ItemGroup>
       <ErrorText>{failure}</ErrorText>
-    </div>
+    </>
   );
 };

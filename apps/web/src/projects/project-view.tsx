@@ -22,6 +22,7 @@ import { Button as KitButton } from "@grasp-os/ui/components/button";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
+import type { ReactNode } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { ErrorText } from "../error-text.tsx";
@@ -38,8 +39,11 @@ import {
   DropdownMenuTrigger,
 } from "../grasp/dropdown-menu/index.ts";
 import { Empty } from "../grasp/empty/index.ts";
+import type { IconData } from "../grasp/icons/index.ts";
 import {
   AppPanels,
+  Cable,
+  Chat,
   Edit,
   More,
   Plus,
@@ -55,22 +59,16 @@ import {
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
-import {
-  Tabs,
-  TabsList,
-  TabsContent,
-  TabsTrigger,
-} from "../grasp/tabs/index.ts";
-import { Text } from "../grasp/text/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import { roleLabel } from "../labels.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { FileItemDialog } from "./file-item-dialog.tsx";
-import { ProjectChats } from "./project-chats.tsx";
-import { ProjectConnections } from "./project-connections.tsx";
+import { AddChat, ProjectChatList } from "./project-chats.tsx";
+import { ProjectConnectionList } from "./project-connections.tsx";
 import { ProjectDialog } from "./project-dialog.tsx";
 import { usePages } from "./project-pages.ts";
 import { namesInProject } from "./project-people-names.ts";
-import { ProjectPeople } from "./project-people.tsx";
+import { ProjectPeopleStack } from "./project-people-stack.tsx";
 
 // A project's page (GRA-1458): its icon, name and what it is for, its
 // hours and counts, then the Apps and workflows in it that the person may
@@ -317,14 +315,26 @@ const DeleteProject = ({
   );
 };
 
-/** A tab's name, and how many it holds, quieter beside it. */
-const KindTab = ({ children, count }: { children: string; count: number }) => (
-  <>
-    {children}{" "}
-    <Text element="span" size="xs" tone="muted">
-      {count}
-    </Text>
-  </>
+/**
+ * A kind the project has nothing of yet: one quiet row inviting the first
+ * one, in place of an empty card.
+ */
+const QuietKind = ({
+  icon,
+  children,
+  action,
+}: {
+  icon: IconData;
+  children: string;
+  action?: ReactNode;
+}) => (
+  <Item size="sm" variant="soft">
+    <ItemMedia icon={icon} iconLook="inline" />
+    <ItemContent>
+      <ItemDescription>{children}</ItemDescription>
+    </ItemContent>
+    {action === undefined ? null : <ItemActions>{action}</ItemActions>}
+  </Item>
 );
 
 /** The page's menu, for the project's builders: change it, or delete it. */
@@ -376,8 +386,8 @@ export const ProjectView = ({
   const makes = builds && canBuild(identity.role);
   const { apps, workflows } = project.counts;
   const pages = useItemPages(project);
-  // Opens on what it has: its Apps, else its workflows.
-  const firstTab = apps === 0 && workflows > 0 ? "workflows" : "apps";
+  const connectionsUsed =
+    connections.connections.length > 0 || connections.unseen > 0;
   return (
     <>
       <SiteHeader
@@ -391,6 +401,7 @@ export const ProjectView = ({
           action={
             builds ? (
               <>
+                <ProjectPeopleStack project={project} />
                 <ProjectMenu
                   onChange={() => {
                     setEditing(true);
@@ -400,7 +411,6 @@ export const ProjectView = ({
                   }}
                   project={project}
                 />
-                <FileItemDialog project={project} />
                 {makes ? (
                   <Button
                     icon={Plus}
@@ -415,7 +425,9 @@ export const ProjectView = ({
                   </Button>
                 ) : null}
               </>
-            ) : undefined
+            ) : (
+              <ProjectPeopleStack project={project} />
+            )
           }
           clamp
           description={
@@ -423,42 +435,66 @@ export const ProjectView = ({
           }
           title={project.name}
         />
-        <Tabs defaultValue={firstTab}>
-          <TabsList aria-label={project.name}>
-            <TabsTrigger value="apps">
-              <KindTab count={apps}>{t`Apps`}</KindTab>
-            </TabsTrigger>
-            <TabsTrigger value="workflows">
-              <KindTab count={workflows}>{t`Workflows`}</KindTab>
-            </TabsTrigger>
-            <TabsTrigger value="chats">
-              <KindTab count={chats.length}>{t`Chats`}</KindTab>
-            </TabsTrigger>
-            <TabsTrigger value="connections">
-              <KindTab count={project.counts.connections}>
-                {t`Connections`}
-              </KindTab>
-            </TabsTrigger>
-            <TabsTrigger value="people">
-              <KindTab count={project.people}>{t`People`}</KindTab>
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="apps">
+        {apps === 0 ? (
+          <QuietKind
+            action={builds ? <FileItemDialog project={project} /> : undefined}
+            icon={AppPanels}
+          >
+            {t`No Apps in it yet.`}
+          </QuietKind>
+        ) : (
+          <SectionCard
+            actions={builds ? <FileItemDialog project={project} /> : undefined}
+            density="compact"
+            flush
+            title={t`Apps`}
+          >
             <Items kind="app" pages={pages} project={project} />
-          </TabsContent>
-          <TabsContent value="workflows">
+          </SectionCard>
+        )}
+        {workflows === 0 ? (
+          <QuietKind
+            action={builds ? <FileItemDialog project={project} /> : undefined}
+            icon={Workflow}
+          >
+            {t`No workflows in it yet.`}
+          </QuietKind>
+        ) : (
+          <SectionCard
+            actions={builds ? <FileItemDialog project={project} /> : undefined}
+            density="compact"
+            flush
+            title={t`Workflows`}
+          >
             <Items kind="workflow" pages={pages} project={project} />
-          </TabsContent>
-          <TabsContent value="chats">
-            <ProjectChats chats={chats} project={project} />
-          </TabsContent>
-          <TabsContent value="connections">
-            <ProjectConnections connections={connections} />
-          </TabsContent>
-          <TabsContent value="people">
-            <ProjectPeople project={project} />
-          </TabsContent>
-        </Tabs>
+          </SectionCard>
+        )}
+        {chats.length === 0 ? (
+          <QuietKind
+            action={<AddChat filed={chats} project={project} />}
+            icon={Chat}
+          >
+            {t`None of your chats are in it. Only you see the chats you put here.`}
+          </QuietKind>
+        ) : (
+          <SectionCard
+            actions={<AddChat filed={chats} project={project} />}
+            density="compact"
+            flush
+            title={t`Your chats`}
+          >
+            <ProjectChatList chats={chats} />
+          </SectionCard>
+        )}
+        {connectionsUsed ? (
+          <SectionCard density="compact" flush title={t`Connections`}>
+            <ProjectConnectionList connections={connections} />
+          </SectionCard>
+        ) : (
+          <QuietKind icon={Cable}>
+            {t`Its apps and workflows use no connections.`}
+          </QuietKind>
+        )}
       </Page>
       <ProjectDialog
         editing={project}

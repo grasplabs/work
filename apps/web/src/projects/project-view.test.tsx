@@ -251,10 +251,17 @@ const button = (name: string) =>
       each.getAttribute("aria-label") === name
   );
 
-/** One of the page's tabs, by its name (its count follows). */
-const tab = (name: string) =>
-  [...document.querySelectorAll('[role="tab"]')].find((each) =>
-    each.textContent?.trim().startsWith(name)
+/** The faces in the header, which open the project's people. */
+const peopleButton = () =>
+  [...document.querySelectorAll("button")].find(
+    (each) =>
+      each.getAttribute("aria-label")?.startsWith("People in it") === true
+  );
+
+/** A button inside the open dialog, by its words. */
+const inDialog = (name: string) =>
+  [...document.querySelectorAll('[role="dialog"] button')].find(
+    (each) => each.textContent?.trim() === name
   );
 
 const link = (name: string) =>
@@ -356,7 +363,7 @@ describe("A project's page", () => {
   it("adds someone as a user, from who core offers when the list opens, and says why an add was refused", async () => {
     const { session, asked } = fakeProjects();
     await shown(session, project("builder"));
-    await press(tab("People"));
+    await press(peopleButton());
 
     const before = [...asked];
     await press(button("Add someone"));
@@ -390,7 +397,7 @@ describe("A project's page", () => {
       { id: "user-bo", name: "Bo" },
     ]);
     await shown(session, project("builder"));
-    await press(tab("People"));
+    await press(peopleButton());
 
     await press(button("Add someone"));
     const options = [...document.querySelectorAll("[cmdk-item]")].map((each) =>
@@ -419,7 +426,7 @@ describe("A project's page", () => {
       ...project("builder"),
       members: [ada, { ...ada, id: "user-ada-222222" }],
     });
-    await press(tab("People"));
+    await press(peopleButton());
 
     expect([
       button("Take Ada (ID …er-ada) out of the project") !== undefined,
@@ -463,8 +470,11 @@ describe("A project's page", () => {
 
   it("shows a project bigger than one page a page at a time, reading the next after the last shown", async () => {
     const { session, asked } = fakeProjects();
-    await shown(session, { ...project("user"), moreItems: true });
-    await press(tab("Apps"));
+    await shown(session, {
+      ...project("user"),
+      moreItems: true,
+      counts: { apps: 1, workflows: 1, connections: 0 },
+    });
 
     const before = document.body.textContent?.includes("Desk");
     await press(button("Show more"));
@@ -487,13 +497,15 @@ describe("A project's page", () => {
       { items: [invoicesMoved], more: true },
       { items: [desk], more: false },
     ]);
-    await shown(session, { ...project("user"), moreItems: true });
-    await press(tab("Apps"));
+    await shown(session, {
+      ...project("user"),
+      moreItems: true,
+      counts: { apps: 1, workflows: 1, connections: 0 },
+    });
 
     await press(button("Show more"));
     await press(button("Show more"));
     const deskShown = document.body.textContent?.includes("Desk");
-    await press(tab("Workflows"));
 
     expect({
       desk: deskShown,
@@ -514,14 +526,13 @@ describe("A project's page", () => {
   it("lists only the person's own chats in it, adds one of theirs not in it yet, and takes one out", async () => {
     const { session, asked } = fakeProjects();
     await shown(session, project("user"), [accruals]);
-    await press(tab("Chats"));
 
     const listed = document.body.textContent?.includes("Accruals");
     await press(button("Add a chat"));
     const choices = [...document.querySelectorAll('[role="dialog"] li')].map(
       (row) => row.textContent?.trim()
     );
-    await press(button("Add"));
+    await press(inDialog("Add"));
     await press(button("Take out"));
 
     expect({ listed, choices, asked }).toStrictEqual({
