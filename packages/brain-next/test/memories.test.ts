@@ -3941,3 +3941,122 @@ describe("which memories a reader may still read", () => {
     }).toStrictEqual({ before: [leave], after: [leave] });
   });
 });
+
+// What a card or a find rests on beyond what it hands over
+// (`restsOnMemories`, GRA-1982): a host pins each memory by its record, so
+// one an erasure takes (a person's: by whose word it is) withholds what
+// was read. Each must be there, also when it isn't on the page.
+const annasWord = { kind: "internal", person: "anna-person" } as const;
+/** A fact about `c` in `writer`'s word: a system's, unless `extra` says whose. */
+const inWordOf = (
+  statement: string,
+  writer: string,
+  extra: Partial<NewMemory> = {}
+): NewMemory => ({
+  about: "c",
+  type: "fact",
+  statement,
+  speaker: { kind: "system" },
+  basis: { kind: "writer", writer },
+  ...extra,
+});
+
+/** A status fact's attribute and value. */
+const statusOf = (value: string) => ({ attribute: "status", value });
+
+describe("what a card or a find rests on, beyond what it shows", () => {
+  it("keeps the record of a contested fact's rival off the page, in her word", async () => {
+    const group = unique("g");
+    const reader = readerOf(unique("ben"), group);
+    const made = await remember(
+      audience(group),
+      [customer()],
+      [inWordOf("A customer", "w-dave")]
+    );
+    const c = made.entities.c ?? "";
+    const again = customer({ id: c, names: [] });
+    const hers = await remember(
+      audience(group),
+      [again],
+      [
+        inWordOf("Status red", "w-anna", {
+          ...statusOf("red"),
+          speaker: annasWord,
+        }),
+      ]
+    );
+    const carol = await remember(
+      audience(group),
+      [again],
+      [inWordOf("Status amber", "w-carol", statusOf("amber"))]
+    );
+    const ben = await remember(
+      audience(group),
+      [again],
+      [inWordOf("Status green", "w-ben", statusOf("green"))]
+    );
+
+    const card = await shared().readCard({ entity: c, reader, limit: 1 });
+    const record = card?.restsOnMemories.find(
+      ({ memory }) => memory === hers.memories[0]
+    );
+    expect({
+      onPage: card?.attributes.flatMap(({ memories }) =>
+        memories.map(({ id }) => id)
+      ),
+      contested: card?.attributes[0]?.contested,
+      rivals: [hers, carol, ben].map(({ memories }) =>
+        card?.restsOnMemories.some(({ memory }) => memory === memories[0])
+      ),
+      her: {
+        speaker: record?.speaker,
+        about: record?.about,
+        writer: record?.writer,
+      },
+    }).toStrictEqual({
+      onPage: ben.memories,
+      contested: true,
+      rivals: [true, true, true],
+      her: { speaker: annasWord, about: c, writer: "w-anna" },
+    });
+  });
+
+  it("keeps the record of the memory that gave a found entity its name, though another first made it seen", async () => {
+    const group = unique("g");
+    const reader = readerOf(unique("ben"), group);
+    const ref = `acme:${crypto.randomUUID()}`;
+    const made = await remember(
+      audience(group),
+      [
+        {
+          key: "c",
+          kind: "supplier",
+          names: [],
+          identifiers: [{ type: "ref", value: ref }],
+        },
+      ],
+      [inWordOf("A supplier", "w-dave")]
+    );
+    const c = made.entities.c ?? "";
+    const name = unique("Named");
+    const hers = await remember(
+      audience(group),
+      [{ key: "c", id: c, kind: "supplier", names: [name] }],
+      [inWordOf("The supplier is named", "w-anna", { speaker: annasWord })]
+    );
+
+    const page = await shared().findEntities({
+      reader,
+      identifier: { type: "ref", value: ref },
+    });
+    expect({
+      entities: page.entities,
+      named: page.restsOnMemories.some(
+        ({ memory }) => memory === hers.memories[0]
+      ),
+    }).toStrictEqual({
+      entities: [{ id: c, kind: "supplier", name }],
+      named: true,
+    });
+  });
+});
