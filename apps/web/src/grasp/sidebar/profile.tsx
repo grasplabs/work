@@ -342,7 +342,9 @@ const styles = stylex.create({
     gridAutoColumns: "minmax(0, 1fr)",
   },
   themeSegment: {
-    minHeight: { default: grasp.space6, [COARSE]: grasp.tap },
+    // A step under the row's height with the track's padding, so the track clears the rows above
+    // and below: a neighbour's hover fill is the track's own colour and would run into it.
+    minHeight: { default: grasp.space5, [COARSE]: grasp.tap },
     paddingInline: grasp.space1,
     outline: "none",
     // The menu moves its highlight by the keys: the highlighted segment takes the ring.

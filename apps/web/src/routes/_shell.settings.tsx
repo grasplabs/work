@@ -1,8 +1,9 @@
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, Outlet, useLocation } from "@tanstack/react-router";
 
-import { Page, PageHeading } from "../frame/page.tsx";
+import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { PageHeader } from "../grasp/page-header/index.ts";
 import { sectionsFor } from "../settings/sections.ts";
 
 // Settings: the workspace and who may do what in it, then one's own
@@ -30,7 +31,8 @@ const SettingsLayout = () => {
       />
       <Page>
         {/* One header: the section's own name; the crumbs above already say Settings. */}
-        <PageHeading
+        <PageHeader
+          size="sm"
           title={current === undefined ? t`Settings` : i18n._(current.label)}
         />
         <Outlet />

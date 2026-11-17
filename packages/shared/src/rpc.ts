@@ -76,6 +76,11 @@ export interface SessionApi {
   /** The person behind the session, with their current role and teams. */
   whoami: () => Promise<Identity>;
   /**
+   * Changes the person's own name (`personNameSchema`), as Grasp shows it
+   * everywhere; their email, role and teams are not theirs to change.
+   */
+  setName: (name: string) => Promise<void>;
+  /**
    * The person's chats with the organization's agent: their list, questions,
    * and each chat's messages as they stream in.
    */
