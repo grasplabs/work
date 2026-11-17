@@ -1622,6 +1622,9 @@ const leavingNone = [
   // Memories and entities are written and read whole in their call, and
   // erased with what they rest on: none of their methods leaves work.
   "addMemories",
+  // A person's own store takes only their own readers, which its sources
+  // already have: it answers with the current version, writing nothing.
+  "changeReaders",
   // One statement of which version a change made, if the reader may read it.
   "changeVersion",
   "confirmMemory",

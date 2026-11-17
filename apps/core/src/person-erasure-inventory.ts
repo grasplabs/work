@@ -481,13 +481,13 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   },
   "onboarding.brain_teams": noPerson,
   "onboarding.brain_claims": {
-    company: "a team's claims seven or more told and five back, names out",
+    company: "how a team works, as its people shared it, names out",
   },
   "onboarding.brain_drawings": {
-    company: "a team's work as five or more told it, names out",
+    company: "a team's work as its people shared it, names out",
   },
   "onboarding.checked_differences": {
-    company: "a team's difference five or more told each way, names out",
+    company: "a team's difference as its people told each way, names out",
   },
   "onboarding.draw_failures": noPerson,
   "onboarding.drawn_works": noPerson,
