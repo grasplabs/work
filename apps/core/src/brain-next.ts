@@ -1231,13 +1231,14 @@ const findingsOf = async (
 
 /** `items` of a pack, each citing its source as its producer named it. */
 const recalledItems = (items: Pack["items"]): RecalledItem[] =>
-  items.map(({ source, version, position, text, whole, found }) => ({
+  items.map(({ source, version, position, text, whole, found, readAt }) => ({
     source: sourceRefOf(source),
     version,
     position,
     text,
     whole,
     found,
+    ...(readAt === undefined ? {} : { readAt }),
   }));
 
 /**
@@ -1653,6 +1654,8 @@ export interface ListedSource {
   firstLine: string;
   personal: boolean;
   versions: number;
+  /** When its current version was last read where it lives, if its producer said. */
+  readAt?: Date;
 }
 
 /** A page of sources, and where the next one starts: null at the last. */
@@ -1709,6 +1712,7 @@ export const listSourcesAs = async (
       opening,
       personal,
       versions,
+      readAt,
     }): ListedSource => ({
       source: sourceRefOf(source),
       version,
@@ -1716,6 +1720,7 @@ export const listSourcesAs = async (
       firstLine: firstLineOf(opening),
       personal,
       versions,
+      ...(readAt === undefined ? {} : { readAt }),
     })
   );
   const last = listed.at(-1);

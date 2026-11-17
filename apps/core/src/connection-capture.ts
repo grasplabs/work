@@ -1,6 +1,6 @@
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import { brainSourceErrors } from "@grasp-os/shared/brain-sources";
-import type { ConnectResult } from "@grasp-os/shared/connect";
+import type { ConnectResult, ToolClass } from "@grasp-os/shared/connect";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { redact } from "@grasp-os/shared/redact";
 import { drizzle } from "drizzle-orm/d1";
@@ -34,15 +34,16 @@ import { classOf } from "./tool-classes.ts";
 //   read. Without its word nothing is kept: a change, a held call, a
 //   replay, a refusal. An error answer never reaches capture: the call
 //   throws it (`connect.action_failed`).
-// - Only the person's own connection, and only a tool that reaches the
-//   person's own things (classed `read-own`: its manifest's reach `own`,
-//   or a Composio tool its review classes so). Its items are theirs alone
+// - Only the person's own connection. What it keeps is theirs alone
 //   (`owner`), as the plan's Owner is "the one whose own connection
-//   brought it in". A shared connection's reads, and a tool that reaches
+//   brought it in". A native tool only when it reaches the person's own
+//   things (its manifest's reach `own`, classed `read-own`); a toolkit's
+//   as below. A shared connection's reads, and a native tool that reaches
 //   the company's or others' things (a SharePoint list, a shared drive,
-//   another mailbox), are kept by nothing yet: a copy readable by its
-//   person alone would outlive their access at the source. They come back
-//   with native sync, which brings each item's readers.
+//   another mailbox), are kept by nothing yet: a native connection may
+//   wait to be signed in again with its captures standing, so a copy
+//   could outlive the person's access at the source. They come back with
+//   native sync, which brings each item's readers.
 // - Only a tool that answers one item's content, as its manifest declares
 //   (`answersItem`: Gmail's message and attachment reads, OneNote's page
 //   read), kept whole as that item's source for the tool, in the person's
@@ -66,14 +67,33 @@ import { classOf } from "./tool-classes.ts";
 //   content, or its text, never an image, audio or another binary block,
 //   which is counted (`leftOut`); an answer with no text in it is skipped
 //   (`no_text`). Only for a tool connect takes to read the person's own
-//   things (`read-own`: its review's class of a read, and the admin's
-//   mark of one), as for a native tool. Not a native connector's, which
-//   is kept item by item as above.
+//   things or the company's (`read-own`, `read-company`: its review's
+//   class of a read, and the admin's mark of one), never others' things
+//   (`read-others`): Nick's decision on GRA-1845 (17 November), a
+//   person only ever gets back what they themselves opened with their own
+//   login at the time, for them alone, with no check against the source
+//   afterwards ("a person keeps what they read before losing access at
+//   the source"). Disconnecting the connection, the person's removal and
+//   their erasure erase it all (below). A shared connection's reads stay
+//   uncaptured: they are the shared Brain's, with the audience an admin
+//   chooses (GRA-1831), under their own connection's keys, so the two
+//   never meet. Not a native connector's, which is kept item by item as
+//   above, its own things only.
+// - When it was read is the version's, not its text's: each capture
+//   carries when its tool answered (`readAt`), which the Brain keeps per
+//   read and gives as the version's latest read time, on the person's
+//   Sources page and in the passage the model reads. A read again of the
+//   same text adds that read time to its version, and no version.
+// - Credentials are redacted once, over exactly the text kept (a
+//   toolkit's blocks joined first, a native item's whole answer), so what
+//   is kept never holds anything `redact` removes from that same text. Not
+//   yet inside JSON string values, where an escaped newline can hide the
+//   next line's credential (GRA-1880).
 // - Capturing never holds up or fails the call: it runs once the agent
 //   has its answer (`waitUntil`). Every call ends in one audit event, of
 //   IDs and counts alone (items, kept, failed, skipped, adding up to
 //   items): kept, failed, or skipped with the reason (`shared`, `reach`,
-//   `list`, `file`, `erased`, `stale`). Captures of one item run
+//   `list`, `file`, `no_text`, `erased`, `stale`). Captures of one item run
 //   independently and may land out of order: each carries when its tool
 //   answered (`readAt`), and the Brain, in the transaction that would make
 //   it current, writes nothing for a read older than the current version's
@@ -177,8 +197,8 @@ const skippedAll = (reason: string, items: number): Ended => [
 ];
 
 /**
- * Keeps `text` under `id` for the chat's person alone, redacted: what it
- * ended in, kept, or skipped as `stale` or `erased`. Throws when the Brain
+ * Keeps `text` (redacted) under `id` for the chat's person alone, read at
+ * `readAt`: what it ended in, kept, or skipped as `stale` or `erased`. Throws when the Brain
  * refused it otherwise (a text past its limit) or couldn't be reached.
  */
 const keptAs = async (
@@ -198,10 +218,11 @@ const keptAs = async (
       // from then on.
       group: captureGroupOf(connectionId),
       // A change of its own each time: the same text again is the current
-      // version (the Brain's rule), so reading an unchanged item adds
-      // nothing, and an item that changed back is a version again.
+      // version (the Brain's rule), so reading an unchanged item adds no
+      // version, only its read time, and an item that changed back is a
+      // version again.
       change: crypto.randomUUID(),
-      text: redact(text),
+      text,
       readers: { kind: "owner", personId: scope.personId },
       readAt,
     });
@@ -232,12 +253,15 @@ const answerCaptured = async (
   input: unknown,
   { result, readAt }: Read
 ): Promise<Ended> => {
-  const { text, leftOut } = answerText(result.output);
+  const { texts, leftOut } = answerText(result.output);
   const counted: Record<string, number> = leftOut === 0 ? {} : { leftOut };
-  if (text.trim() === "") {
+  if (texts.join("").trim() === "") {
     const [event, detail] = skippedAll("no_text", 1);
     return [event, { ...detail, ...counted }];
   }
+  // Redacted once, over exactly the text kept: a credential's name in one
+  // block and its value in the next are one credential.
+  const text = redact(texts.join("\n\n"));
   let ended: Ended;
   try {
     const id = await answerCaptureIdOf(
@@ -264,6 +288,15 @@ const answerCaptured = async (
   return [event, { ...detail, ...counted }];
 };
 
+/** The classes of a native tool whose one item capture keeps. */
+const itemClasses: ReadonlySet<ToolClass | undefined> = new Set(["read-own"]);
+
+/** The classes of a tool whose whole answer capture keeps (GRA-1845). */
+const answerClasses: ReadonlySet<ToolClass | undefined> = new Set([
+  "read-own",
+  "read-company",
+]);
+
 /** What capturing `result` of `action` ended in. */
 const captured = async (
   env: Env,
@@ -280,7 +313,7 @@ const captured = async (
   if (owner?.ownerUserId !== scope.personId) {
     return skippedAll("shared", named);
   }
-  if (classOf(owner, action) !== "read-own") {
+  if (!(answers ? answerClasses : itemClasses).has(classOf(owner, action))) {
     return skippedAll("reach", named);
   }
   if (answers) {
@@ -299,7 +332,14 @@ const captured = async (
     return skippedAll("file", 1);
   }
   const id = await captureIdOf(connectionId, scope.personId, action, itemId);
-  return await keptAs(env, scope, connectionId, id, result.output, readAt);
+  return await keptAs(
+    env,
+    scope,
+    connectionId,
+    id,
+    redact(result.output),
+    readAt
+  );
 };
 
 /**

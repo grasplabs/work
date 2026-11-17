@@ -7868,6 +7868,10 @@ msgstr "Vorige maand"
 msgid "Last ran {when}"
 msgstr "Laatst uitgevoerd op {when}"
 
+#: src/brain/sources-page.tsx
+msgid "Last read {lastRead}"
+msgstr "Laatst gelezen {lastRead}"
+
 #: src/workflows/workflows-table.tsx
 msgid "Last run"
 msgstr "Laatste run"
@@ -14060,12 +14064,8 @@ msgid "The Brain keeps nothing that only you may read yet, so your export holds 
 msgstr "Het Brain bewaart nog niets wat alleen jij mag lezen, dus je export bevat niets."
 
 #: src/brain/sources-page.tsx
-msgid "The Brain keeps one Gmail message or attachment, one OneNote page, or the answer of a read in an app that holds your own things, when an agent reads it for you through an account you connected yourself, and keeps it for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it."
-msgstr "Het brein bewaart één Gmail-bericht of -bijlage, één OneNote-pagina, of het antwoord van een leesactie in een app met je eigen dingen, als een agent die voor jou leest via een account dat je zelf hebt gekoppeld, en bewaart die alleen voor jou. Al het andere doorzoeken agents live als je het vraagt, en het brein bewaart er niets van."
-
-#: src/brain/sources-page.tsx
-msgid "The Brain may keep some of what an agent reads for you from this."
-msgstr "Het brein bewaart mogelijk een deel van wat een agent hierlangs voor jou leest."
+msgid "The Brain may keep, for you alone, some of what an agent reads for you through this connection, while it stays connected."
+msgstr "Het brein bewaart mogelijk, alleen voor jou, een deel van wat een agent via deze koppeling voor jou leest, zolang die gekoppeld blijft."
 
 #: src/workflows/binding-approvals.tsx
 msgid "The Brain, as each run's person may read it"
@@ -16444,6 +16444,10 @@ msgstr "Wanneer"
 #: src/workflows/trigger-description.ts
 msgid "When {account} reports an event"
 msgstr "Wanneer {account} een gebeurtenis meldt"
+
+#: src/brain/sources-page.tsx
+msgid "When an agent reads for you through an account you connected yourself, the Brain keeps what it read for you alone, while that account stays connected: one Gmail message or attachment, one OneNote page, or the answer of a read in another app, the company’s records included. Everything else agents search live when you ask, and the Brain keeps nothing of it."
+msgstr "Als een agent voor jou leest via een account dat je zelf hebt gekoppeld, bewaart het brein wat die las alleen voor jou, zolang dat account gekoppeld blijft: één Gmail-bericht of -bijlage, één OneNote-pagina, of het antwoord van een leesactie in een andere app, de gegevens van het bedrijf inbegrepen. Al het andere doorzoeken agents live als je het vraagt, en het brein bewaart er niets van."
 
 #: src/workflows/trigger-description.ts
 msgid "When an email arrives at its own address"

@@ -7868,6 +7868,10 @@ msgstr "El mes pasado"
 msgid "Last ran {when}"
 msgstr "Última ejecución: {when}"
 
+#: src/brain/sources-page.tsx
+msgid "Last read {lastRead}"
+msgstr "Leído por última vez {lastRead}"
+
 #: src/workflows/workflows-table.tsx
 msgid "Last run"
 msgstr "Última ejecución"
@@ -14060,12 +14064,8 @@ msgid "The Brain keeps nothing that only you may read yet, so your export holds 
 msgstr "El Brain todavía no guarda nada que solo tú puedas leer, así que tu exportación no contiene nada."
 
 #: src/brain/sources-page.tsx
-msgid "The Brain keeps one Gmail message or attachment, one OneNote page, or the answer of a read in an app that holds your own things, when an agent reads it for you through an account you connected yourself, and keeps it for you alone. Everything else agents search live when you ask, and the Brain keeps nothing of it."
-msgstr "El cerebro guarda un mensaje o un adjunto de Gmail, una página de OneNote, o la respuesta de una lectura en una app que contiene tus propias cosas, cuando un agente lo lee para ti a través de una cuenta que conectaste tú mismo, y lo guarda solo para ti. Todo lo demás lo buscan los agentes en directo cuando lo pides, y el cerebro no guarda nada de ello."
-
-#: src/brain/sources-page.tsx
-msgid "The Brain may keep some of what an agent reads for you from this."
-msgstr "El cerebro puede guardar parte de lo que un agente lee para ti desde aquí."
+msgid "The Brain may keep, for you alone, some of what an agent reads for you through this connection, while it stays connected."
+msgstr "El cerebro puede guardar, solo para ti, parte de lo que un agente lee para ti a través de esta conexión, mientras siga conectada."
 
 #: src/workflows/binding-approvals.tsx
 msgid "The Brain, as each run's person may read it"
@@ -16444,6 +16444,10 @@ msgstr "Cuándo"
 #: src/workflows/trigger-description.ts
 msgid "When {account} reports an event"
 msgstr "Cuando {account} informa de un evento"
+
+#: src/brain/sources-page.tsx
+msgid "When an agent reads for you through an account you connected yourself, the Brain keeps what it read for you alone, while that account stays connected: one Gmail message or attachment, one OneNote page, or the answer of a read in another app, the company’s records included. Everything else agents search live when you ask, and the Brain keeps nothing of it."
+msgstr "Cuando un agente lee para ti a través de una cuenta que conectaste tú mismo, el cerebro guarda lo que leyó solo para ti, mientras esa cuenta siga conectada: un mensaje o un adjunto de Gmail, una página de OneNote, o la respuesta de una lectura en otra app, incluidos los registros de la empresa. Todo lo demás lo buscan los agentes en directo cuando lo pides, y el cerebro no guarda nada de ello."
 
 #: src/workflows/trigger-description.ts
 msgid "When an email arrives at its own address"
