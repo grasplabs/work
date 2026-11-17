@@ -122,6 +122,11 @@ export type Ids = Awaited<ReturnType<typeof team>>;
 /** The links opened so far, by person: signed in once, as the page stays. */
 const opened = new Map<string, Device>();
 
+/** Forgets someone's opened link, as after a new start gives them another: the next `openLink` opens the one they have now. */
+export const linkReplaced = (person: string): void => {
+  opened.delete(person);
+};
+
 /**
  * Someone's link opened as the page opens it: signed in with the company's
  * sign-in as the address the list has for them, their link's secret and
@@ -505,6 +510,18 @@ const numberSchema = z.object({
   number: z.string(),
   facts: z.array(z.string()),
 });
+const describesSchema = z.strictObject({ description: z.string() });
+
+/**
+ * Whether a description of the team's work (a claim, a drawing's part)
+ * says only how the work runs, as the fake judgment check answers
+ * (`onlyHowItRuns`): `true` keeps it, `false` drops it, `"fails"` fails
+ * the call at the provider.
+ */
+export type Describes = (description: string) => boolean | "fails";
+
+/** The fake judgment check's answer, unless a test gives one: it says only how the work runs. */
+const keeps: Describes = () => true;
 
 /**
  * Whether a person's facts say a part of a drawing, or give a number the
@@ -545,14 +562,16 @@ const shownIn = (request: SentRequest | undefined) =>
 
 /**
  * The model, faked: a check of one fact against one claim answered by
- * `says`, one of a person's facts against a drawing's part by `part`;
- * anything else, the claims, by `claims`.
+ * `says`, one of a person's facts against a drawing's part by `part`, the
+ * judgment check of a description by `describes`; anything else, the
+ * claims, by `claims`.
  */
 const claimsOrCheck =
   (
     claims: (request: SentRequest | undefined) => unknown,
     says: (claim: string, fact: string) => boolean | "fails",
-    part: PartJudge = agrees
+    part: PartJudge = agrees,
+    describes: Describes = keeps
   ) =>
   (requests: readonly SentRequest[]): ProviderReply => {
     const request = requests.at(-1);
@@ -560,8 +579,11 @@ const claimsOrCheck =
     const check = checkSchema.safeParse(data);
     const ofPart = partSchema.safeParse(data);
     const ofNumber = numberSchema.safeParse(data);
+    const judged = describesSchema.safeParse(data);
     let answer: boolean | "fails" | undefined;
-    if (check.success) {
+    if (judged.success) {
+      answer = describes(judged.data.description);
+    } else if (check.success) {
       answer = says(check.data.claim, check.data.fact);
     } else if (ofPart.success) {
       answer = part(
@@ -596,7 +618,8 @@ const claimsOrCheck =
  */
 export const claimsReply = (
   claims: readonly FakeClaim[],
-  part: PartJudge = agrees
+  part: PartJudge = agrees,
+  describes: Describes = keeps
 ) =>
   claimsOrCheck(
     (request) => {
@@ -623,7 +646,8 @@ export const claimsReply = (
       }
       return of.some(({ cites, says }) => (says ?? cites).includes(said));
     },
-    part
+    part,
+    describes
   );
 
 /**
@@ -680,7 +704,8 @@ export const zendeskClaim: FakeClaim = {
 export const intake = async (
   ids: { team: string },
   claims: readonly FakeClaim[] = [zendeskClaim],
-  part: PartJudge = agrees
+  part: PartJudge = agrees,
+  describes: Describes = keeps
 ) => {
   let given: Awaited<ReturnType<typeof answeringWith<string | null>>> = {
     requests: [],
@@ -689,7 +714,7 @@ export const intake = async (
   for (let round = 0; round < 5; round += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one team at a time, as the alarm gives them
     given = await answeringWith(
-      claimsReply(claims, part),
+      claimsReply(claims, part, describes),
       async () => await onboardingStore(env).intakeNext()
     );
     if (given.result === null || given.result === `brain:${ids.team}`) {

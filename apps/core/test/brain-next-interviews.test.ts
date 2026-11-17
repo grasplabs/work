@@ -29,7 +29,6 @@ import {
   settleOnboardingBrain,
 } from "../src/onboarding/new-brain.ts";
 import { Onboarding, onboardingStore } from "../src/onboarding/store.ts";
-import { teamMayClaim } from "../src/onboarding/team-claims.ts";
 import { retryErasures } from "../src/person-erasure.ts";
 import { adminCommands } from "./admin-command.ts";
 import { setObjectEnv } from "./agent-chat.ts";
@@ -1321,13 +1320,6 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       max: await recalled(max, "Zendesk", "claim"),
       listed: await claimsOf(max),
     }).toStrictEqual({ max: [], listed: [] });
-  });
-
-  it("follow the one floor: two more interviewed than it", () => {
-    expect({
-      atFive: [6, 7].map((interviewed) => teamMayClaim(interviewed, 5)),
-      atThree: [4, 5].map((interviewed) => teamMayClaim(interviewed, 3)),
-    }).toStrictEqual({ atFive: [false, true], atThree: [false, true] });
   });
 
   it("are not noted from an intake whose backers changed while it ran", async () => {

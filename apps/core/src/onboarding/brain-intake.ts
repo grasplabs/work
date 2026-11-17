@@ -15,33 +15,35 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { log } from "@grasp-os/shared/log";
-import { minTeamShown } from "@grasp-os/shared/onboarding";
 
 import type { Support } from "./drawing-support.ts";
 import { plainPart } from "./plain-text.ts";
 import type { TeamClaim } from "./team-claims.ts";
 import { inUnitOf } from "./work-drawing.ts";
 
-// What the onboarding learned of a team (GRA-367, GRA-1748): what five or
-// more of its people said, put together, as its claims (GRA-1084,
-// team-claims.ts), and a drawing of each piece of its work. The onboarding
-// keeps both itself and hands each to the new Brain as a source of its
-// own; none is a record of the brain's (`brain_records`). Decided in
-// GRA-359: nothing in them points at one person. So:
+// What the onboarding learned of a team (GRA-367, GRA-1748): how its work
+// runs, as its people told it in the lines they shared with their team
+// (GRA-1987), put together as its claims (GRA-1084, team-claims.ts), and a
+// drawing of each piece of its work. The onboarding keeps both itself and
+// hands each to the new Brain as a source of its own; none is a record of
+// the brain's (`brain_records`). Both show from the first person who told
+// them, so both are held to saying only how the work runs, never who said
+// it or how many did:
 //
 // - No source per person: one per team, served live by the Brain page
-//   (brain-rpc.ts) with how many people it rests on, never who.
-// - A claim is the team's that five or more of its people made, never one
-//   person's fact, nor their words (`text`) or quote; never resting on the
-//   lead, whose role alone says who they are; and a name on the staff list
-//   in it is taken out.
-// - A drawing keeps no `from` and no `told`: its numbers are ranges over
-//   everyone who gave one, and how many did, never whose; and only what
-//   five or more of its people told, each part apart (`versionOf`,
-//   GRA-1084).
-// - A team is taken in only while its results may be shown: seven or more
-//   tell their own work, so five can back a claim (the store's
-//   `#teamShowsResults`); the store holds it back until then.
+//   (brain-rpc.ts), never with who or how many it rests on.
+// - A claim is the team's, never one person's fact, nor their words
+//   (`text`) or quote; never resting on the lead, whose role alone says
+//   who they are; a name on the staff list in it is taken out; and it
+//   holds no judgment (`onlyHowItRuns`).
+// - A drawing keeps no `from` and no `told`, and no count of people: its
+//   numbers are medians over whoever gave one, never whose, and a count
+//   someone gave as their own never shows; and only what one or more of
+//   its people are checked to have told, each part apart, with no
+//   judgment in it (`versionOf`, drawing-support.ts).
+// - A team is taken in only while its work may be shown: someone in it
+//   told it (the store's `#teamShowsResults`); the store holds it back
+//   until then.
 //
 // Who each claim and drawing rests on is kept apart, in the onboarding's
 // own store (`brain_sent`), so deleting an interview can find what it is
@@ -127,8 +129,9 @@ export interface IntakeClaim {
 /**
  * A drawing of one of the team's pieces of work, as the onboarding keeps
  * it (`brain_drawings`) and every member reads it, on the Brain page and
- * in the new Brain (GRA-1748): only the parts five or more told, checked,
- * never who told what. Never a record of the brain's own.
+ * in the new Brain (GRA-1748): only the parts its people are checked to
+ * have told, never who told what or how many. Never a record of the
+ * brain's own.
  */
 export interface IntakeDrawing {
   /** Its id, from what it holds: whom it rests on is noted under it. */
@@ -186,54 +189,55 @@ export const withoutNames = (
 const medianOf = (values: readonly number[]): number | undefined =>
   values.toSorted((x, y) => x - y)[Math.floor((values.length - 1) / 2)];
 
-/** A median of some numbers, when five or more gave one: what one of them gave never shows. */
+/**
+ * A number as a drawing shows it (GRA-1987): from the first person checked
+ * to have given it, the median of whoever was (the lower of the middle
+ * two): with one, theirs; with two, the lower; with four, the second;
+ * checking stops at five (`checkedEnough`). Never how many gave it.
+ */
 const shownMedian = (values: readonly number[]): number | null =>
-  values.length >= minTeamShown ? (medianOf(values) ?? null) : null;
+  medianOf(values) ?? null;
 
 /**
- * How often, by whose count it is: a median of the quiet weeks (or months)
- * and of the busy ones, each over five or more who gave that one
- * themselves and were checked to (`numbers.volume`); one side alone
- * stands for both. None for a count with neither.
+ * How often the whole team does it: a median of the quiet weeks (or
+ * months) and of the busy ones, each over the people checked to have
+ * given that one as the team's count (`numbers.volume`); one side alone
+ * stands for both. None without one. A count someone gave as their own
+ * ("I do 30 a week") is what one person does, never shown (GRA-1987).
  */
 const volumesOf = (
   told: readonly (readonly [string, Told])[],
-  numbers: Support["numbers"]["volume"],
+  counted: Support["numbers"]["volume"],
   per: DrawnWork["per"]
-): WorkflowVersionRecord["volumes"] =>
-  (["me", "team", "unknown"] as const).flatMap((of) => {
-    const counted = numbers[of];
-    const given = (people: readonly string[], value: "quiet" | "busy") =>
-      told.flatMap(([person, { gave }]) => {
-        const own = gave?.[value] ?? null;
-        return people.includes(person) && own !== null ? [own] : [];
-      });
-    const quiets = given(counted.quiet, "quiet");
-    const busies = given(counted.busy, "busy");
-    const quiet = shownMedian(quiets);
-    const busy = shownMedian(busies);
-    const low = quiet ?? busy;
-    const high = busy ?? quiet;
-    return low === null || high === null
-      ? []
-      : [
-          {
-            of,
-            per,
-            low,
-            high: Math.max(low, high),
-            people: Math.max(quiets.length, busies.length),
-            basis: "estimated" as const,
-          },
-        ];
-  });
+): WorkflowVersionRecord["volumes"] => {
+  const given = (people: readonly string[], value: "quiet" | "busy") =>
+    told.flatMap(([person, { gave }]) => {
+      const own = gave?.[value] ?? null;
+      return people.includes(person) && own !== null ? [own] : [];
+    });
+  const quiet = shownMedian(given(counted.quiet, "quiet"));
+  const busy = shownMedian(given(counted.busy, "busy"));
+  const low = quiet ?? busy;
+  const high = busy ?? quiet;
+  return low === null || high === null
+    ? []
+    : [
+        {
+          of: "team",
+          per,
+          low,
+          high: Math.max(low, high),
+          basis: "estimated",
+        },
+      ];
+};
 
 /**
  * How long one whole one takes, in the drawing's unit: a median of the
- * quickest and of the longest, each over five or more who gave that one
- * themselves and were checked to, taken of the minutes as they gave them
- * and rounded to the unit only then; one end alone stands for both, and a
- * normal one alone for both too. None with none of them.
+ * quickest and of the longest, each over the people checked to have given
+ * that one themselves, taken of the minutes as they gave them and rounded
+ * to the unit only then; one end alone stands for both, and a normal one
+ * alone for both too. None with none of them.
  */
 const takesOf = (
   toldOf: (people: readonly string[]) => Told[],
@@ -265,22 +269,22 @@ const takesOf = (
         unit,
         quickest,
         longest: Math.max(quickest, longest),
-        people: Math.max(quickests.length, longests.length, normals.length),
         basis: "estimated",
       };
 };
 
 /**
- * A drawing as the brain keeps it (GRA-1084): only the parts five or more
- * of the people it was drawn from are checked to have told
- * (drawing-support.ts), in their bare words without a name, and what came
- * with them (who and with what, what is done in a case, what a term
- * means, why a step differs) left out. Each number is a median over five
- * or more who gave it, the lead never among them: a step's minutes and a
- * case's share over the people the part rests on, how often, how long and
- * how many come in wrong over the people it was drawn from. What the next
- * interviews should ask is never the brain's: it is written from what few
- * said.
+ * A drawing as the brain keeps it (GRA-1084, GRA-1987): only the parts
+ * one or more of the people it was drawn from are checked to have told,
+ * holding nothing but how the work runs (drawing-support.ts), in their
+ * bare words without a name, and what came with them (who and with what,
+ * what is done in a case, what a term means, why a step differs) left
+ * out. Each number is a median over whoever was checked to have given it
+ * (`shownMedian`), the lead never among them: a step's minutes and a
+ * case's share over the people the part rests on, how often (the team's
+ * count only), how long and how many come in wrong over the people it was
+ * drawn from. No count of people. What the next interviews should ask is
+ * never the brain's.
  */
 const versionOf = (
   work: TeamIntake["works"][number],
@@ -299,14 +303,14 @@ const versionOf = (
   // A part's words as checked: the claim's allowlist, or nothing.
   const words = (text: string): string => plainPart(clean(text)) ?? "";
   const shown = (people: readonly string[], text: string): string =>
-    people.length >= minTeamShown ? words(text) : "";
+    people.length > 0 ? words(text) : "";
   const { numbers } = support;
-  // The steps five or more are checked to have told, and where each step
+  // The steps someone is checked to have told, and where each step
   // of the drawing lands among them: a case off the path after a step left
   // out follows the last step kept before it, and one with no step kept
   // before it has no place, so it is left out (never put after the first).
   const kept = drawn.steps.flatMap((step, index) =>
-    (support.steps[index] ?? []).length >= minTeamShown ? [{ step, index }] : []
+    (support.steps[index] ?? []).length > 0 ? [{ step, index }] : []
   );
   const placeOf = (index: number): number | null => {
     const before = kept.filter((each) => each.index <= index).length;
@@ -323,12 +327,11 @@ const versionOf = (
   const differsKept =
     differs !== null &&
     kept.some(({ index }) => index === differs.step) &&
-    support.other.length >= minTeamShown;
+    support.other.length > 0;
   return {
     type: "workflowVersion",
     date: dayOf(drawn.at),
     state: work.state,
-    people: drawn.from.length,
     starts: shown(support.starts, drawn.starts),
     steps: kept.map(({ step: { text, documented }, index }) => {
       const minutes = shownMedian(
@@ -357,14 +360,11 @@ const versionOf = (
       };
     }),
     waits: drawn.waits.flatMap((wait, index) =>
-      (support.waits[index] ?? []).length >= minTeamShown ? [words(wait)] : []
+      (support.waits[index] ?? []).length > 0 ? [words(wait)] : []
     ),
     differently: drawn.differently.flatMap(({ when, after }, index) => {
       const place = placeOf(after);
-      if (
-        (support.differently[index] ?? []).length < minTeamShown ||
-        place === null
-      ) {
+      if ((support.differently[index] ?? []).length === 0 || place === null) {
         return [];
       }
       const outOfTen = shownMedian(
@@ -383,7 +383,7 @@ const versionOf = (
     ask: shown(support.answers.ask ?? [], drawn.ask),
     next: shown(support.answers.next ?? [], drawn.next),
     term:
-      drawn.term === null || support.term.length < minTeamShown
+      drawn.term === null || support.term.length === 0
         ? null
         : { word: words(drawn.term.word), meaning: "" },
     differs:
@@ -399,14 +399,7 @@ const versionOf = (
     volumes: volumesOf(tellers, numbers.volume, drawn.per),
     takes,
     wrong:
-      wrong === null
-        ? null
-        : {
-            low: wrong,
-            high: wrong,
-            people: wrongs.length,
-            basis: "estimated",
-          },
+      wrong === null ? null : { low: wrong, high: wrong, basis: "estimated" },
     open: [],
   };
 };
@@ -422,8 +415,8 @@ export const recordOf = (record: BrainRecordInput): BrainRecord[] => {
 };
 
 /**
- * What a team's intake notes: its claims (`claims`, each resting on five
- * or more people) and the drawings of its pieces of work (`drawings`),
+ * What a team's intake notes: its claims (`claims`, each resting on the
+ * people checked to say it) and the drawings of its pieces of work (`drawings`),
  * each naming the one source of its interviews, which the onboarding
  * keeps itself and the Brain page reads there (GRA-1748). The same claim
  * or drawing is the same id, so noting it again keeps nothing twice; a
@@ -439,11 +432,11 @@ export const intakeOf = async (
   const sourceId = await intakeIds.interviews(intake.team.id);
   const rests: Rest[] = [];
   const kept: IntakeClaim[] = [];
-  // Only what five or more of its people said, put together
+  // Only what its people said, put together and checked
   // (team-claims.ts): never one person's fact as a statement of its own.
   for (const claim of claims) {
     const text = clean(claim.text).trim();
-    if (text === "" || claim.people.length < minTeamShown) {
+    if (text === "" || claim.people.length === 0) {
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- a hash each, in order

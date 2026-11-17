@@ -66,7 +66,7 @@ const holdersOf = (team: Team, role: string): number =>
 /**
  * Who said a sentence, as the company may read it: their role in their
  * team where five or more of the team hold it, else the team; nothing
- * until five or more told about the work, or where no team is known.
+ * until the work is heard, or where no team is known.
  */
 const byOf = (
   heard: boolean,
@@ -164,8 +164,9 @@ export const knowledgeOf = (
   const statements = ws.statements.filter(
     (statement) => statement.candidateId === id
   );
-  // Enough people told about it: its newest drawing rests on five or
-  // more, or five or more conversations said what the brain holds of it.
+  // Heard: a drawing of it stands (one shows from the first person who
+  // told it, GRA-1987, and only while it stands), or five or more
+  // conversations said what the brain holds of it.
   const conversations = new Set(
     statements
       .filter(
@@ -176,8 +177,7 @@ export const knowledgeOf = (
       )
       .map(({ sourceId }) => sourceId)
   );
-  const heard =
-    Math.max(drawing?.people ?? 0, conversations.size) >= minTeamShown;
+  const heard = drawing !== undefined || conversations.size >= minTeamShown;
   return {
     id,
     name: workflow?.name ?? candidate?.name ?? id,

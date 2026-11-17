@@ -6781,6 +6781,13 @@ msgstr "How often"
 msgid "How sure"
 msgstr "How sure"
 
+#. Under a statement put together from the interviews
+#. Under a statement put together from the interviews
+#: src/brain/aggregate.tsx
+#: src/brain/brain.ts
+msgid "How the team works, as its people told it"
+msgstr "How the team works, as its people told it"
+
 #: src/brain/work-knowledge.tsx
 msgid "How the work goes today"
 msgstr "How the work goes today"
@@ -11892,13 +11899,6 @@ msgstr "Runs: {total}"
 msgctxt "what something known rests on: people said it"
 msgid "Said"
 msgstr "Said"
-
-#. Under a statement put together from the interviews
-#. Under a statement put together from the interviews
-#: src/brain/aggregate.tsx
-#: src/brain/brain.ts
-msgid "Said by five or more people"
-msgstr "Said by five or more people"
 
 #: src/brain/work-knowledge.tsx
 msgid "Said in an interview"

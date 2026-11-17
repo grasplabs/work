@@ -307,9 +307,13 @@ const workflowRecordSchema = z.strictObject({
 /**
  * One drawing of a workflow, as it runs today: its steps, each with who
  * does it (a role) and where, and the rest of what was said about it.
- * Numbers are estimated, never averaged: a range over everyone who gave
- * one, and how many did. Nothing says who told what. A drawing never
- * changes: drawn again, it is a new version, and the newest counts.
+ * Numbers are estimated, never averaged. Nothing says who told what, nor
+ * how many: a team's work shows from the first person who told it
+ * (GRA-1987), so a count of people would say whose it is. The `people`
+ * counts are written by nothing since, kept optional until a later
+ * release drops them (expand, then contract).
+ * A drawing never changes: drawn again, it is a new version, and the
+ * newest counts.
  */
 const workflowVersionRecordSchema = z.strictObject({
   type: z.literal("workflowVersion"),
@@ -319,8 +323,8 @@ const workflowVersionRecordSchema = z.strictObject({
   date: day,
   /** How far it is known, under the organization's rules. */
   state: z.enum(["mapping", "saturating", "complete", "variants", "blocked"]),
-  /** How many people it was drawn from, never who. */
-  people: z.int().min(0).max(1000),
+  /** Written by nothing since GRA-1987 (see above). */
+  people: z.int().min(0).max(1000).optional(),
   /** What starts one. */
   starts: shortText,
   steps: z
@@ -373,7 +377,7 @@ const workflowVersionRecordSchema = z.strictObject({
         per: z.enum(["week", "month"]),
         low: count,
         high: count,
-        people: z.int().min(1).max(1000),
+        people: z.int().min(1).max(1000).optional(),
         basis: estimated,
       })
     )
@@ -384,7 +388,7 @@ const workflowVersionRecordSchema = z.strictObject({
       unit: z.enum(["minutes", "hours"]),
       quickest: count,
       longest: count,
-      people: z.int().min(1).max(1000),
+      people: z.int().min(1).max(1000).optional(),
       basis: estimated,
     })
     .nullable(),
@@ -393,7 +397,7 @@ const workflowVersionRecordSchema = z.strictObject({
     .strictObject({
       low: outOfTen,
       high: outOfTen,
-      people: z.int().min(1).max(1000),
+      people: z.int().min(1).max(1000).optional(),
       basis: estimated,
     })
     .nullable(),
