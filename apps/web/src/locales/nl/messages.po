@@ -16780,6 +16780,11 @@ msgstr "Ja: de hash klopt en hij verwijst naar de gebeurtenis ervoor."
 msgid "You"
 msgstr "Jij"
 
+#: src/brain/memories-page.tsx
+msgctxt "the person themselves, as the Brain names them"
+msgid "You"
+msgstr "Jij"
+
 #: src/interview/words.ts
 msgid "You and AI"
 msgstr "Jij en AI"

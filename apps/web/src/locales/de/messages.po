@@ -16780,6 +16780,11 @@ msgstr "Ja: Sein Hash stimmt, und es ist mit dem vorherigen Ereignis verknüpft.
 msgid "You"
 msgstr "Sie"
 
+#: src/brain/memories-page.tsx
+msgctxt "the person themselves, as the Brain names them"
+msgid "You"
+msgstr "Sie"
+
 #: src/interview/words.ts
 msgid "You and AI"
 msgstr "Sie und KI"

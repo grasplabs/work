@@ -16780,6 +16780,11 @@ msgstr "Oui : son hachage correspond et il est lié à l’événement précéde
 msgid "You"
 msgstr "Vous"
 
+#: src/brain/memories-page.tsx
+msgctxt "the person themselves, as the Brain names them"
+msgid "You"
+msgstr "Vous"
+
 #: src/interview/words.ts
 msgid "You and AI"
 msgstr "Vous et l’IA"

@@ -6382,11 +6382,20 @@ const corePersonMemories = {
   // The reader's own entity (GRA-1836): theirs alone, whatever someone
   // else's holds; refused for someone who isn't a member.
   ownEntityIdAs: async ({ personId, markers }) => {
+    // As the RPC's probe: the reader's own, before and after someone
+    // else's own entity holds marked memories, the same both times.
+    const before = await answer(
+      "the reader's own, before anyone else's holds marked memories",
+      async () => await coreBrain.ownEntityIdAs(env, personId),
+      "nothing"
+    );
     await othersOwnEntity(markers);
     return [
+      before,
       await answer(
-        "the reader's own",
-        async () => await coreBrain.ownEntityIdAs(env, personId)
+        "the reader's own, once someone else's holds marked memories",
+        async () => await coreBrain.ownEntityIdAs(env, personId),
+        "hidden"
       ),
       await answer(
         "as someone who isn't a member",
@@ -10012,6 +10021,31 @@ export const memoriesRpcProbes = {
       await forget("not an id", { memory: markers }),
     ];
   },
+  // Which entity is the person themselves: theirs alone, whatever someone
+  // else's own entity holds; refused for someone who isn't a member.
+  // The reader's own, asked before and after someone else's own entity
+  // holds marked memories: the same answer both times (theirs, or the same
+  // refusal), so any id handed to the wrong person is a finding.
+  ownEntity: async ({ personId, markers }) => {
+    const before = await answer(
+      "the reader's own, before anyone else's holds marked memories",
+      async () => await memoriesAs(personId).ownEntity(),
+      "nothing"
+    );
+    await othersOwnEntity(markers);
+    return [
+      before,
+      await answer(
+        "the reader's own, once someone else's holds marked memories",
+        async () => await memoriesAs(personId).ownEntity(),
+        "hidden"
+      ),
+      await answer(
+        "as someone who isn't a member",
+        async () => await memoriesAs(stranger()).ownEntity()
+      ),
+    ];
+  },
   ...showingPage(
     memoryPageProbes({
       entities: async (personId, kind, from) =>
@@ -10035,7 +10069,13 @@ export const memoriesRpcProbes = {
     })
   ),
 } satisfies Record<
-  "forget" | "entities" | "memories" | "contested" | "confirm" | "correct",
+  | "forget"
+  | "ownEntity"
+  | "entities"
+  | "memories"
+  | "contested"
+  | "confirm"
+  | "correct",
   Probe
 >;
 
