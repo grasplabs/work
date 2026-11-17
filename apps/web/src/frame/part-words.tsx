@@ -2,15 +2,19 @@ import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import type { ReactNode } from "react";
 
+import { useApprovalWords } from "../chat/approval-words.ts";
 import { agentActivityWords } from "../grasp/agent-activity/words.ts";
 import { alertWords } from "../grasp/alert/words.ts";
 import { appShellPanelWords, appShellWords } from "../grasp/app-shell/words.ts";
+import { approvalRequestWords } from "../grasp/approval-request/words.ts";
 import { badgeWords } from "../grasp/badge/words.ts";
 import { buttonWords } from "../grasp/button/words.ts";
 import { chatMessageWords } from "../grasp/chat-message/words.ts";
 import { codeBlockWords } from "../grasp/code-block/words.ts";
 import { copyFieldWords } from "../grasp/copy-field/words.ts";
 import { dialogWords } from "../grasp/dialog/words.ts";
+import { emptyWords } from "../grasp/empty/words.ts";
+import { fileUploadWords, imageWellWords } from "../grasp/file-upload/words.ts";
 import { markdownWords } from "../grasp/markdown/words.ts";
 import { paginationWords } from "../grasp/pagination/words.ts";
 import { settingRowWords } from "../grasp/setting-row/words.ts";
@@ -38,12 +42,16 @@ export const englishPartWords: GraspWordsCatalog = {
   agentActivity: agentActivityWords,
   alert: alertWords,
   appShell: appShellWords,
+  approvalRequest: approvalRequestWords,
   badge: badgeWords,
   button: buttonWords,
   chatMessage: chatMessageWords,
   codeBlock: codeBlockWords,
   copyField: copyFieldWords,
   dialog: dialogWords,
+  empty: emptyWords,
+  fileUpload: fileUploadWords,
+  imageWell: imageWellWords,
   markdown: markdownWords,
   pagination: paginationWords,
   rename: renameWords,
@@ -58,7 +66,58 @@ export const englishPartWords: GraspWordsCatalog = {
 /** Every installed part's words in the page's language, from its Lingui catalog. */
 export const usePartWords = (): GraspWordsCatalog => {
   const { t, i18n } = useLingui();
+  const approval = useApprovalWords();
+  // Why a file stays out, from what the part says (its reason's code).
+  const refusedFile = (name: string, reason: string, picture: boolean) => {
+    if (reason === "file-type") {
+      return picture
+        ? t`${name} is not a kind of picture this takes.`
+        : t`${name} is not a kind of file this takes.`;
+    }
+    if (reason === "file-too-large") {
+      return t`${name} is too large.`;
+    }
+    if (reason === "file-too-small") {
+      return t`${name} is empty.`;
+    }
+    if (reason === "too-many-files") {
+      return t`${name} is one file too many.`;
+    }
+    return t`${name}: ${reason}`;
+  };
   return {
+    approvalRequest: {
+      ...approval,
+      approve: t({ message: "Approve", context: "an agent's request" }),
+      changesPlaceholder: t`Say what should change`,
+      viewer: t({ message: "You", context: "who answered an agent's request" }),
+    },
+    empty: { failed: t`This did not load` },
+    fileUpload: {
+      drop: t`Drop files here, or`,
+      choose: t`Choose files`,
+      uploading: t`Uploading`,
+      done: t({ message: "Uploaded", context: "a file" }),
+      failed: t`Could not upload`,
+      retry: t`Try again`,
+      files: t`Files`,
+      doneLine: (size) => t`${size}, uploaded`,
+      sent: (name) => t`${name} uploaded.`,
+      notSent: (name) => t`Could not upload ${name}.`,
+      remove: (name) => t`Remove ${name}`,
+      refused: (name, reason) => refusedFile(name, reason, false),
+    },
+    imageWell: {
+      change: t`Change picture`,
+      add: t`Add a picture`,
+      remove: t`Remove picture`,
+      saving: t`Saving`,
+      saved: t`Saved`,
+      failed: t`Could not save`,
+      retry: t`Try again`,
+      how: t`Click or drop a picture.`,
+      refused: (name, reason) => refusedFile(name, reason, true),
+    },
     agentActivity: {
       states: {
         waiting: t({ message: "Waiting", context: "a step's state" }),
@@ -99,6 +158,7 @@ export const usePartWords = (): GraspWordsCatalog => {
       streaming: t`Writing`,
       done: t`Answer ready`,
       thinking: t`Thinking`,
+      stopped: t({ message: "Stopped", context: "an answer stopped part way" }),
       thought: (seconds) =>
         t`${plural(seconds, { one: "Thought for # second", other: "Thought for # seconds" })}`,
     },

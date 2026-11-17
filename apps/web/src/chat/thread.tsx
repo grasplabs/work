@@ -460,13 +460,10 @@ const KeyFailed = () => (
  * A stored reply's words that cite documents: each cited span marked, and
  * the documents (read by AnswerCited around it) listed under them.
  */
-const CitedWords = ({ text }: { text: string }) => {
+const CitedWords = ({ text, cut }: { text: string; cut: boolean }) => {
   const sources = useCitedDocuments();
-  return <AnswerWords cited={sources} text={text} writing={false} />;
+  return <AnswerWords cited={sources} cut={cut} text={text} writing={false} />;
 };
-
-/** A link still being written at the end of an answer: `[words` or `[words](address`. */
-const halfLink = /\s*\[[^\]]*(?:\]\([^)]*)?$/u;
 
 /** One reply's words, its citations inline where it cites documents. */
 const ReplyWords = ({
@@ -483,10 +480,9 @@ const ReplyWords = ({
   chatId: string;
   writing: boolean;
 }) => {
-  // Stopped mid-way: cut back to before a half-written link, which
-  // Markdown hides only while it streams.
-  const text =
-    reply.end === "cancelled" ? reply.text.replace(halfLink, "") : reply.text;
+  const { text } = reply;
+  // Stopped part way: Markdown tidies what it was still writing.
+  const cut = reply.end === "cancelled";
   if (text.trim() === "") {
     return null;
   }
@@ -495,11 +491,11 @@ const ReplyWords = ({
     reply.citations === undefined ||
     reply.citations.length === 0
   ) {
-    return <AnswerWords text={text} writing={writing} />;
+    return <AnswerWords cut={cut} text={text} writing={writing} />;
   }
   return (
     <AnswerCited cited={{ chatId, messageId: reply.id }}>
-      <CitedWords text={text} />
+      <CitedWords cut={cut} text={text} />
     </AnswerCited>
   );
 };
@@ -508,17 +504,23 @@ const ReplyWords = ({
 const statusOf = ({
   live,
   failed,
+  stopped,
   shows,
 }: {
   live: boolean;
   failed: boolean;
+  /** The person stopped it part way: its words kept, said as stopped. */
+  stopped: boolean;
   /** It shows steps or words already. */
   shows: boolean;
-}): "thinking" | "streaming" | "done" | "failed" => {
+}): "thinking" | "streaming" | "done" | "stopped" | "failed" => {
   if (live) {
     return shows ? "streaming" : "thinking";
   }
-  return failed ? "failed" : "done";
+  if (failed) {
+    return "failed";
+  }
+  return stopped ? "stopped" : "done";
 };
 
 /** One answer of Grasp's in the thread: what it stood on while it worked. */
@@ -830,17 +832,6 @@ const AnswerEnding = ({
   );
 };
 
-/** The steps' line for an answer stopped mid-way: while it worked, or while it wrote. */
-const useStoppedSummary = () => {
-  const { t } = useLingui();
-  return (stopped: boolean, wrote: boolean): string | undefined => {
-    if (!stopped) {
-      return undefined;
-    }
-    return wrote ? t`Stopped while writing` : t`Stopped while working`;
-  };
-};
-
 /** What an answer holds: its steps, what they did, its words, and how it ended. */
 const AnswerBody = ({
   turn,
@@ -855,7 +846,6 @@ const AnswerBody = ({
 }) => {
   const { t } = useLingui();
   const activityWords = useActivityWords();
-  const stoppedSummary = useStoppedSummary();
   const { replies, partial, live } = turn;
   const stepped: Stepped[] = partial === null ? replies : [...replies, partial];
   const firstId = replies[0]?.id;
@@ -863,12 +853,8 @@ const AnswerBody = ({
     firstId === undefined ? undefined : context.worked.get(firstId);
   // The activity's line says what Grasp does once steps show, or between two
   // replies; while words arrive, they say it themselves.
-  const stopped = ending.end === "cancelled";
   const activity =
-    stopped ||
-    steps.length > 0 ||
-    (live && (context.checking || partial === null));
-  const wrote = replies.some(({ text }) => text.trim() !== "");
+    steps.length > 0 || (live && (context.checking || partial === null));
   return (
     <div {...stylex.props(styles.stack)}>
       {activity ? (
@@ -876,7 +862,6 @@ const AnswerBody = ({
           aria-label={t`What Grasp did`}
           duration={live || seconds === undefined ? undefined : seconds * 1000}
           steps={steps}
-          summary={stoppedSummary(stopped, wrote)}
           words={activityWords}
           loading={live}
           workingLabel={context.workingLabel}
@@ -945,7 +930,12 @@ const answerStateOf = (
     last,
     failed,
     ending,
-    status: statusOf({ live, failed, shows }),
+    status: statusOf({
+      live,
+      failed,
+      stopped: !live && last?.end === "cancelled",
+      shows,
+    }),
   };
 };
 

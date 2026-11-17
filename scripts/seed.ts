@@ -145,6 +145,16 @@ const seedPeople = async (): Promise<{
         "The core answering at localhost doesn't keep its state in this checkout: run the seed from the checkout `vp run dev` runs from."
       );
     }
+    // Someone of the seed's removed while the app was tried (Members ›
+    // Remove) can't sign in again, and the product keeps no way back: the
+    // seed brings its own people back, in this checkout's state only.
+    // Their teams are set again below.
+    const comeBack = core.prepare(
+      "DELETE FROM member_removals WHERE user_id IN (SELECT id FROM users WHERE email = ?)"
+    );
+    for (const { email } of people) {
+      comeBack.run(email);
+    }
     await mapLimited(people, signInsAtOnce, async ({ email }) => {
       await signInAs(email);
     });

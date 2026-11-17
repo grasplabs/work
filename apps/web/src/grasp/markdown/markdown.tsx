@@ -45,7 +45,7 @@ import { useWords, withGiven } from "../words/words";
 import { NOTHING, readBlocks } from "./blocks";
 import type { Placed } from "./blocks";
 import { parse, safeHref, schemeOf } from "./parse";
-import { openFence, repair } from "./repair";
+import { openFence, repair, tidy } from "./repair";
 import { markdownStyles as styles } from "./styles";
 import type {
   FootnoteDefinition,
@@ -81,6 +81,13 @@ export interface MarkdownProps {
   source: string;
   /** The answer is still being written: its words come at a steady pace, and what is half-written is shown whole. */
   streaming?: boolean;
+  /**
+   * The answer was cut off part way (stopped): a link still being written at its end goes, and
+   * bold or code left open is closed, so no raw mark shows. Once `streaming` turns false on an
+   * answer written here this happens by itself; set it for a cut answer drawn from history.
+   * @default false
+   */
+  cut?: boolean;
   /**
    * How fast the words come while it is written: `calm`, `steady` or `quick`.
    * @default "quick"
@@ -740,18 +747,24 @@ const Notes = ({
 );
 
 /**
- * What to draw of an answer: all of it once it is written; while it is, as much as the pace has let
- * out, made whole.
+ * What to draw of an answer: all of it once it is written, tidied if it may have been cut off;
+ * while it is, as much as the pace has let out, made whole.
  */
 const useAnswer = (
   source: string,
   streaming: boolean,
+  cut: boolean,
   options: PacedOptions
 ) => {
   const paced = usePaced(source, streaming, options);
+  // Written here: once the stream ends, whatever it ended on is tidied.
+  const [streamed, setStreamed] = useState(streaming);
+  if (streaming && !streamed) {
+    setStreamed(true);
+  }
   // Still being written until the last word is out, a moment after the stream has ended.
   if (!streaming && paced.done) {
-    return { shown: source, live: false };
+    return { shown: cut || streamed ? tidy(source) : source, live: false };
   }
   return { shown: repair(paced.text).text, live: true };
 };
@@ -863,6 +876,7 @@ const useWrittenHere = (live: boolean) => {
 export const Markdown = ({
   source,
   streaming = false,
+  cut = false,
   pace,
   size = "md",
   codeMaxLines = 18,
@@ -884,7 +898,7 @@ export const Markdown = ({
     table: tableLabel,
   });
   const prefix = useId().replaceAll(":", "");
-  const { shown, live } = useAnswer(source, streaming, { pace });
+  const { shown, live } = useAnswer(source, streaming, cut, { pace });
   const { setRoot, written } = useWrittenHere(live);
   const all = useBlocks(shown, live);
   const { definitions, notes } = gather(all.map(({ node }) => node));

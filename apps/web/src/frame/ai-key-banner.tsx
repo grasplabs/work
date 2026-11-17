@@ -38,6 +38,18 @@ const styles = stylex.create({
 /** How often the banner asks again how the providers fare, in ms. */
 const refreshMs = 60_000;
 
+/** The word that a provider was added, replaced or removed, or the source switched. */
+const providersChanged = "grasp-ai-providers-changed";
+
+/**
+ * Says the organization's providers changed (Settings › AI providers): the
+ * banner reads again at once, so a deleted or replaced key stops being
+ * named as refused now, not at the next minute's read.
+ */
+export const tellProvidersChanged = (): void => {
+  document.dispatchEvent(new Event(providersChanged));
+};
+
 /** A connected provider whose calls fail, as the banner names it. */
 export interface FailingProvider {
   label: string;
@@ -160,7 +172,8 @@ export interface BannerReads {
    * the banner then comes with the page, and never pushes it down under
    * the person's pointer as it arrives. Without it, read once mounted.
    * Only what it had as it mounted counts: after that it reads again
-   * itself, every minute.
+   * itself, every minute and whenever the providers change
+   * (`tellProvidersChanged`).
    */
   failing?: FailingProvider[];
 }
@@ -197,14 +210,15 @@ export const useFailingProviders = ({
     if (!readAtMount.current) {
       void read();
     }
-    const timer = shown
-      ? setInterval(() => {
-          void read();
-        }, refreshMs)
-      : undefined;
+    const again = () => {
+      void read();
+    };
+    const timer = shown ? setInterval(again, refreshMs) : undefined;
+    document.addEventListener(providersChanged, again);
     return () => {
       live = false;
       clearInterval(timer);
+      document.removeEventListener(providersChanged, again);
     };
   }, [providers, shown]);
   return shown ? failing : [];

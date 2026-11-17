@@ -353,6 +353,7 @@ export const SectionCard = ({
       padding="none"
       fill={fill}
       aria-label={ariaLabel}
+      aria-labelledby={titled && ariaLabel === undefined ? id : undefined}
       layout={layout ?? styleProp}
     >
       <div {...stylex.props(styles.card, fill && styles.cardFill)}>

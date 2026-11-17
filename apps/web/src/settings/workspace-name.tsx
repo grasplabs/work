@@ -3,12 +3,14 @@ import {
   organizationLogoTypes,
 } from "@grasp-os/shared/organization";
 import type { Organization } from "@grasp-os/shared/organization";
+import { toast } from "@grasp-os/ui/components/toast";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
 import type { Session } from "../core.ts";
+import { formatBytes } from "../format.ts";
 import {
   organizationLogoChanged,
   organizationRenamed,
@@ -170,8 +172,58 @@ export const NameField = ({
 /** The logo's limits, in words, for the well's tooltip. */
 const useLogoHint = (): string => {
   const { t } = useLingui();
-  const most = `${String(organizationLogoMaxBytes / 1024)} KB`;
+  const most = formatBytes(organizationLogoMaxBytes);
   return t`PNG, JPEG or WebP, up to ${most}.`;
+};
+
+/** Sets the removed logo again, or says it could not. */
+const putBack = async (
+  image: Uint8Array,
+  setLogo: (image: Uint8Array) => Promise<void>,
+  failed: string
+): Promise<void> => {
+  try {
+    await setLogo(image);
+  } catch {
+    toast.add({ type: "error", title: failed });
+  }
+};
+
+/**
+ * Removes the logo at once and offers Undo in a toast, as the library's
+ * Confirmations pattern has an undoable removal: the picture's bytes are
+ * read first and kept only for the toast's lifetime, and Undo sets them
+ * again through the same call as choosing a logo. Outside the component,
+ * as the React Compiler can't compile `try`.
+ */
+const removeWithUndo = async (
+  address: string,
+  removeLogo: () => Promise<void>,
+  setLogo: (image: Uint8Array) => Promise<void>,
+  words: { done: string; failed: string; undo: string; undoFailed: string }
+): Promise<void> => {
+  let image: Uint8Array;
+  try {
+    const response = await fetch(address);
+    if (!response.ok) {
+      throw new Error(`The logo could not be read: ${String(response.status)}`);
+    }
+    image = new Uint8Array(await response.arrayBuffer());
+    await removeLogo();
+  } catch {
+    toast.add({ type: "error", title: words.failed });
+    return;
+  }
+  toast.add({
+    type: "success",
+    title: words.done,
+    actionProps: {
+      children: words.undo,
+      onClick: () => {
+        void putBack(image, setLogo, words.undoFailed);
+      },
+    },
+  });
 };
 
 /**
@@ -179,7 +231,7 @@ const useLogoHint = (): string => {
  * image well, itself the control. A press or a dropped image saves it at
  * once (PNG, JPEG or WebP, at most 512 KB, which core checks again by its
  * bytes); the well shows the save, and a failure with Try again. Remove
- * takes it away. The sidebar shows the new one at once.
+ * takes it away at once, with Undo in a toast. The sidebar shows the new one at once.
  */
 export const LogoField = ({
   name,
@@ -209,11 +261,31 @@ export const LogoField = ({
     kept(organization);
     return organization.logo ?? undefined;
   };
-  const remove = async (): Promise<void> => {
-    const organization = await core.withSession(
-      async (session) => await session.organization.removeLogo()
+  const setLogo = async (image: Uint8Array): Promise<void> => {
+    kept(
+      await core.withSession(
+        async (session) => await session.organization.setLogo(image)
+      )
     );
-    kept(organization);
+  };
+  const remove = async (address: string): Promise<void> => {
+    await removeWithUndo(
+      address,
+      async () => {
+        kept(
+          await core.withSession(
+            async (session) => await session.organization.removeLogo()
+          )
+        );
+      },
+      setLogo,
+      {
+        done: t`Logo removed`,
+        failed: t`The logo could not be removed`,
+        undo: t`Undo`,
+        undoFailed: t`The logo could not be put back`,
+      }
+    );
   };
   return (
     <SettingRow label={t`Logo`}>
@@ -228,7 +300,7 @@ export const LogoField = ({
           maxSize={organizationLogoMaxBytes}
           onValueChange={(value) => {
             if (value === null && saved !== null) {
-              void remove();
+              void remove(saved);
             }
           }}
           upload={upload}

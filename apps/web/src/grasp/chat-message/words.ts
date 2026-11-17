@@ -19,6 +19,8 @@ export const chatMessageWords = {
   streaming: "Writing",
   /** Said to a screen reader once the agent has finished writing (`doneLabel`). */
   done: "Answer ready",
+  /** Under a message stopped part way, and said once when it stops (`stoppedLabel`). */
+  stopped: "Stopped",
   /** The thinking line while the agent works (`thinkingLabel`). */
   thinking: "Thinking",
   /** What the thinking line settles to, from how many seconds it took (`thoughtLabel`). */

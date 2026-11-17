@@ -103,7 +103,9 @@ const ShellError = ({ error, reset, info }: ErrorComponentProps) => {
   }
   return (
     <PageError
-      reason={t`Grasp can't be reached right now. Try again in a moment.`}
+      // The pattern's calm sentence: the dot under it says, live, whether
+      // Grasp can be reached again.
+      reason={t`Grasp could not reach its servers. Nothing you saved is lost.`}
     />
   );
 };

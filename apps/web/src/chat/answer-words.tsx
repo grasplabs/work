@@ -131,16 +131,20 @@ const sourceOf = ({ title, path, snippet }: ChatCitedDocument): Source => ({
 export const AnswerWords = ({
   text,
   writing,
+  cut = false,
   cited,
 }: {
   text: string;
   writing: boolean;
+  /** Stopped part way: a link it was still writing goes, an open mark closes. */
+  cut?: boolean;
   cited?: readonly ChatCitedDocument[];
 }) => {
   const navigate = useNavigate();
   const words = (
     <Markdown
       renderLink={(link) => <AnswerLink cited={cited} link={link} />}
+      cut={cut}
       source={text}
       streaming={writing}
     />

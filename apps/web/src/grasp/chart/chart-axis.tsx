@@ -19,6 +19,12 @@ export interface ChartAxisProps {
   side: "x" | "y";
   /** Writes a value as people read it ("40k", "Jan"). */
   format?: (value: string | number) => string;
+  /**
+   * The y axis's width in pixels, room for its longest label: wider for currency or long numbers
+   * ("€5,000" needs about 52). The x axis takes the chart's width.
+   * @default 36
+   */
+  width?: number;
 }
 
 const styles = stylex.create({
@@ -62,7 +68,7 @@ const Tick = ({
   );
 };
 
-export const ChartAxis = ({ side, format }: ChartAxisProps) => {
+export const ChartAxis = ({ side, format, width = 36 }: ChartAxisProps) => {
   const { xKey } = useChart();
   const tick = (props: XAxisTickContentProps | YAxisTickContentProps) => (
     <Tick
@@ -87,7 +93,7 @@ export const ChartAxis = ({ side, format }: ChartAxisProps) => {
       axisLine={false}
       tickLine={false}
       tickMargin={4}
-      width={36}
+      width={width}
       tick={tick}
     />
   );

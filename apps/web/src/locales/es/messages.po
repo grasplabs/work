@@ -98,6 +98,14 @@ msgstr "{about} tiene {open, plural, one {# decisión abierta} other {# decision
 msgid "{account} on {provider}"
 msgstr "{account} en {provider}"
 
+#: src/activity/audit-log.tsx
+msgid "{agent} for {person}"
+msgstr "{agent} para {person}"
+
+#: src/activity/audit-log.tsx
+msgid "{agent} for {person}, in {app}"
+msgstr "{agent} para {person}, en {app}"
+
 #: src/brain/brain.ts
 msgid "{ai, select, tool {An AI tool, as the team said it} builtIn {AI built in, as the team said it} other {No AI, as the team said it}}"
 msgstr "{ai, select, tool {Una herramienta de IA, según el equipo} builtIn {Con IA integrada, según el equipo} other {Sin IA, según el equipo}}"
@@ -862,6 +870,10 @@ msgstr "{name} en {appName}"
 msgid "{name} is connected. I’ll only read what you share with me."
 msgstr "{name} está conectado. Solo leeré lo que compartas conmigo."
 
+#: src/frame/part-words.tsx
+msgid "{name} is empty."
+msgstr "{name} está vacío."
+
 #: src/settings/erasures.tsx
 msgid "{name} is erased."
 msgstr "{name} está borrado."
@@ -874,6 +886,14 @@ msgstr "{name} está invitado, pero aún no entrevistado."
 msgid "{name} is named, but not seen in use yet."
 msgstr "{name} se nombra, pero aún no se ha visto en uso."
 
+#: src/frame/part-words.tsx
+msgid "{name} is not a kind of file this takes."
+msgstr "{name} no es un tipo de archivo que se acepte aquí."
+
+#: src/frame/part-words.tsx
+msgid "{name} is not a kind of picture this takes."
+msgstr "{name} no es un tipo de imagen que se acepte aquí."
+
 #: src/apps/field-editor.tsx
 msgid "{name} is now at place {place}."
 msgstr "{name} está ahora en el puesto {place}."
@@ -881,6 +901,10 @@ msgstr "{name} está ahora en el puesto {place}."
 #: src/agents/agent-page.tsx
 msgid "{name} is on"
 msgstr "{name} está activo"
+
+#: src/frame/part-words.tsx
+msgid "{name} is one file too many."
+msgstr "{name} es un archivo de más."
 
 #: src/agents/agent-page.tsx
 msgid "{name} is paused"
@@ -897,6 +921,10 @@ msgstr "Se ha eliminado a {name}. {count, plural, one {Se ha desconectado # cone
 #: src/routes/_shell.settings.members.tsx
 msgid "{name} is signed out everywhere."
 msgstr "{name} ha cerrado sesión en todas partes."
+
+#: src/frame/part-words.tsx
+msgid "{name} is too large."
+msgstr "{name} es demasiado grande."
 
 #: src/frame/setting-up.tsx
 msgid "{name} isn't ready yet"
@@ -926,6 +954,10 @@ msgstr "{name} restauró un estado anterior"
 msgid "{name} takes part"
 msgstr "{name} participa"
 
+#: src/frame/part-words.tsx
+msgid "{name} uploaded."
+msgstr "{name} subido."
+
 #: src/apps/app-workspace.tsx
 msgid "{name}, as your team sees it"
 msgstr "{name}, como lo ve tu equipo"
@@ -949,6 +981,10 @@ msgstr "{name}: {count}"
 #: src/brain/thinking/use-thinking.ts
 msgid "{name}: {hours, plural, one {# hour a week} other {# hours a week}}"
 msgstr "{name}: {hours, plural, one {# hora a la semana} other {# horas a la semana}}"
+
+#: src/frame/part-words.tsx
+msgid "{name}: {reason}"
+msgstr "{name}: {reason}"
 
 #: src/dashboard/report.ts
 msgid "{name}: {started} started, {completed} completed, {failed} failed"
@@ -1175,6 +1211,10 @@ msgstr "{signIn} está conectado. Veo {people} personas en {teams} equipos."
 #: src/agents/agent-documents.tsx
 msgid "{size} · Added {when}"
 msgstr "{size} · Añadido el {when}"
+
+#: src/frame/part-words.tsx
+msgid "{size}, uploaded"
+msgstr "{size}, subido"
 
 #: src/brain/brain.ts
 msgid "{sources, plural, one {Time-consuming work that could be automated, raised in # source by {teams}.} other {Time-consuming work that could be automated, raised in # sources by {teams}.}}"
@@ -1532,7 +1572,7 @@ msgstr "Un token bearer"
 
 #: src/workflows/binding-approvals.tsx
 msgid "A Brain collection it may read"
-msgstr "Una colección de Brain que puede leer"
+msgstr "Una colección del cerebro que puede leer"
 
 #: src/inbox/items.ts
 msgid "A builder asked for this version of {name} to go live: approved, it is the version the company runs. Send it back to keep the version that runs now."
@@ -2055,6 +2095,10 @@ msgstr "Añadir un objetivo"
 msgid "Add a logo"
 msgstr "Añadir un logo"
 
+#: src/frame/part-words.tsx
+msgid "Add a picture"
+msgstr "Añadir una imagen"
+
 #: src/settings/stephen-settings.tsx
 msgid "Add a place"
 msgstr "Añadir un lugar"
@@ -2191,6 +2235,10 @@ msgstr "Añadió un miembro a una aplicación"
 msgid "Added a webhook to an App"
 msgstr "Añadió un webhook a una aplicación"
 
+#: src/activity/audit-words.ts
+msgid "Added an AI provider's key"
+msgstr "Añadió la clave de un proveedor de IA"
+
 #: src/apps/app-integrations.tsx
 msgctxt "why an integration is one of an App's"
 msgid "Added by hand"
@@ -2265,12 +2313,8 @@ msgid "Agent {agent}"
 msgstr "Agente {agent}"
 
 #: src/activity/audit-log.tsx
-msgid "Agent {agentId} for {person}"
-msgstr "Agente {agentId} para {person}"
-
-#: src/activity/audit-log.tsx
-msgid "Agent {agentId} for {person}, in {app}"
-msgstr "Agente {agentId} para {person}, en {app}"
+msgid "Agent {agentId}"
+msgstr "Agente {agentId}"
 
 #: src/frame/part-words.tsx
 msgid "Agent activity"
@@ -2741,6 +2785,11 @@ msgstr "Aprobación"
 #: src/inbox/item-detail.tsx
 #: src/routes/decisions.$decision.tsx
 #: src/workflows/binding-approvals.tsx
+msgid "Approve"
+msgstr "Aprobar"
+
+#: src/frame/part-words.tsx
+msgctxt "an agent's request"
 msgid "Approve"
 msgstr "Aprobar"
 
@@ -3667,6 +3716,10 @@ msgstr "Cambiar {name}"
 msgid "Change {title}"
 msgstr "Cambiar {title}"
 
+#: src/frame/part-words.tsx
+msgid "Change picture"
+msgstr "Cambiar la imagen"
+
 #: src/projects/project-dialog.tsx
 msgid "Change project"
 msgstr "Cambiar proyecto"
@@ -3793,6 +3846,10 @@ msgstr "No lo modifica nadie"
 msgid "Changed knowledge"
 msgstr "Cambió el conocimiento"
 
+#: src/activity/audit-words.ts
+msgid "Changed the AI providers"
+msgstr "Cambió los proveedores de IA"
+
 #: src/brain/brain.ts
 msgid "Changed the answer to: {question}"
 msgstr "Respuesta cambiada: {question}"
@@ -3800,6 +3857,10 @@ msgstr "Respuesta cambiada: {question}"
 #: src/chat/thread.tsx
 msgid "Changed the App's definition"
 msgstr "Cambió la definición de la App"
+
+#: src/activity/audit-words.ts
+msgid "Changed the default and fallback models"
+msgstr "Cambió los modelos predeterminado y de respaldo"
 
 #: src/activity/audit-words.ts
 msgid "Changed the organization's logo"
@@ -3994,11 +4055,11 @@ msgstr "Elige una fuente."
 
 #: src/apps/app-workflows.tsx
 msgid "Choose a version"
-msgstr "Elija una versión"
+msgstr "Elige una versión"
 
 #: src/apps/app-workflows.tsx
 msgid "Choose a workflow"
-msgstr "Elija un flujo de trabajo"
+msgstr "Elige un flujo de trabajo"
 
 #: src/activity/audit-log.tsx
 msgid "Choose dates"
@@ -4007,6 +4068,10 @@ msgstr "Elegir fechas"
 #: src/onboarding/place-picker.tsx
 msgid "Choose documents"
 msgstr "Elegir documentos"
+
+#: src/frame/part-words.tsx
+msgid "Choose files"
+msgstr "Elegir archivos"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Choose from Google Drive"
@@ -4018,7 +4083,7 @@ msgstr "Elegir de SharePoint o OneDrive"
 
 #: src/apps/app-access-requests.tsx
 msgid "Choose one"
-msgstr "Elija uno"
+msgstr "Elige uno"
 
 #: src/interview/before.tsx
 msgid "Choose who you want to be interviewed by."
@@ -4038,6 +4103,10 @@ msgstr "Elige tu lista de personal"
 #: src/workflows/workflow-triggers.tsx
 msgid "Choose…"
 msgstr "Elige…"
+
+#: src/activity/audit-words.ts
+msgid "Chose between Grasp's AI and the organization's own key"
+msgstr "Eligió entre la IA de Grasp y la clave propia de la organización"
 
 #: src/knowledge/new-collection.tsx
 #: src/settings/stephen-audience.tsx
@@ -4075,6 +4144,7 @@ msgstr "Borrar búsqueda"
 msgid "Clear the search"
 msgstr "Borrar la búsqueda"
 
+#: src/frame/part-words.tsx
 #: src/settings/workspace-name.tsx
 msgid "Click or drop a picture."
 msgstr "Haz clic o suelta una imagen."
@@ -4265,7 +4335,7 @@ msgstr "Empresa"
 
 #: src/activity/pending.tsx
 msgid "Company Brain, read only. This can read company Brain evidence and its open questions, from the collections it was granted and only what the person it works for may read too. It can never write to the Brain. Every read is recorded"
-msgstr "Company Brain, solo lectura. Puede leer evidencias y preguntas abiertas del Company Brain, de las colecciones que se le concedieron y solo lo que también puede leer la persona para la que trabaja. Nunca puede escribir en el Brain. Cada lectura queda registrada"
+msgstr "Company Brain, solo lectura. Puede leer evidencias y preguntas abiertas del Company Brain, de las colecciones que se le concedieron y solo lo que también puede leer la persona para la que trabaja. Nunca puede escribir en el cerebro. Cada lectura queda registrada"
 
 #: src/dashboard/runs-widget.tsx
 #: src/workflows/runs.tsx
@@ -4322,10 +4392,6 @@ msgstr "Confirmar"
 msgctxt "confirm an answer to a decision"
 msgid "Confirm"
 msgstr "Confirmar"
-
-#: src/chat/held-writes.tsx
-msgid "Confirm {what}"
-msgstr "Confirmar {what}"
 
 #: src/decision-confirmation.tsx
 msgid "Confirm your approval"
@@ -4433,7 +4499,7 @@ msgstr "Conectada, acceso directo"
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Connected, used by no workflow you can open"
-msgstr "Conectadas, sin usar en ningún flujo de trabajo que usted pueda abrir"
+msgstr "Conectadas, sin usar en ningún flujo de trabajo que puedas abrir"
 
 #: src/brain/brain.ts
 msgid "Connected, via Composio"
@@ -4735,6 +4801,7 @@ msgstr "No se pudo hacer administrador"
 msgid "Could not remove"
 msgstr "No se pudo eliminar"
 
+#: src/frame/part-words.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/team-members-dialog.tsx
 #: src/settings/workspace-name.tsx
@@ -4772,8 +4839,13 @@ msgid "Could not sign out"
 msgstr "No se pudo cerrar la sesión"
 
 #: src/chat/chat-files.tsx
+#: src/frame/part-words.tsx
 msgid "Could not upload"
 msgstr "No se pudo subir"
+
+#: src/frame/part-words.tsx
+msgid "Could not upload {name}."
+msgstr "No se pudo subir {name}."
 
 #: src/apps/app-owner.tsx
 msgid "Couldn't load who may answer for it."
@@ -5119,6 +5191,10 @@ msgstr "Eliminó un equipo"
 #: src/activity/audit-words.ts
 msgid "Deleted a webhook source"
 msgstr "Eliminó una fuente de webhook"
+
+#: src/activity/audit-words.ts
+msgid "Deleted an AI provider's key"
+msgstr "Eliminó la clave de un proveedor de IA"
 
 #: src/activity/audit-words.ts
 msgid "Deleted entries past their retention"
@@ -5506,6 +5582,10 @@ msgstr "Unidad"
 msgid "Drop files here"
 msgstr "Suelta los archivos aquí"
 
+#: src/frame/part-words.tsx
+msgid "Drop files here, or"
+msgstr "Suelta archivos aquí, o"
+
 #: src/apps/publish.tsx
 msgid "Drop them and go back"
 msgstr "Descartarlos y volver"
@@ -5541,7 +5621,7 @@ msgstr "Crepúsculo"
 
 #: src/agents/agents-overview.tsx
 msgid "Each agent has its own name and job, answers only the people you choose, and does only what you let it."
-msgstr "Cada agente tiene su propio nombre y su tarea, responde solo a las personas que usted elija y hace solo lo que usted le permita."
+msgstr "Cada agente tiene su propio nombre y su tarea, responde solo a las personas que elijas y hace solo lo que le permitas."
 
 #: src/connections/http-connections.tsx
 msgid "Each allows everything under it; / allows all paths."
@@ -6129,6 +6209,7 @@ msgid "File {where}: {message}"
 msgstr "Archivo {where}: {message}"
 
 #: src/apps/app-code.tsx
+#: src/frame/part-words.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Files"
@@ -6651,7 +6732,6 @@ msgstr "Grasp está disponible"
 #: src/guest/api.ts
 #: src/interview/api.ts
 #: src/load-from-core.tsx
-#: src/routes/_shell.tsx
 #: src/routes/decisions.$decision.tsx
 #: src/routes/sign-in.tsx
 msgid "Grasp can't be reached right now. Try again in a moment."
@@ -6677,6 +6757,10 @@ msgstr "Grasp comprueba qué hace falta para conectarla. La encuentras en Solici
 #: src/chat/failure.ts
 msgid "Grasp could not be reached. Try again."
 msgstr "No se pudo contactar con Grasp. Vuelve a intentarlo."
+
+#: src/routes/_shell.tsx
+msgid "Grasp could not reach its servers. Nothing you saved is lost."
+msgstr "Grasp no pudo conectar con sus servidores. No se ha perdido nada de lo que guardaste."
 
 #: src/pages/frame-failure.tsx
 msgid "Grasp couldn't confirm this page's code for you. Reload to try again."
@@ -7331,7 +7415,7 @@ msgstr "En el archivo"
 
 #: src/brain/brain.ts
 msgid "In the brain"
-msgstr "En el Brain"
+msgstr "En el cerebro"
 
 #: src/onboarding/review-parts.tsx
 msgid "In the Exchange admin center, go to Mail flow, then Rules, and add a rule."
@@ -7691,7 +7775,7 @@ msgstr "No inicia nada hasta que un administrador le permita iniciar este flujo 
 
 #: src/agents/new-agent.tsx
 msgid "It starts on, reaching nobody and with nothing it may do. You say who may ask it right after."
-msgstr "Empieza activado, sin llegar a nadie y sin nada que pueda hacer. Justo después usted decide quién puede preguntarle."
+msgstr "Empieza activado, sin llegar a nadie y sin nada que pueda hacer. Justo después decides quién puede preguntarle."
 
 #: src/knowledge/new-document.tsx
 msgid "It starts with its name as a heading; write the rest in the editor."
@@ -8424,6 +8508,10 @@ msgstr "Cargando…"
 #: src/settings/workspace-name.tsx
 msgid "Logo"
 msgstr "Logo"
+
+#: src/settings/workspace-name.tsx
+msgid "Logo removed"
+msgstr "Logo eliminado"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -9559,7 +9647,7 @@ msgstr "Nadie todavía"
 
 #: src/agents/agent-page.tsx
 msgid "Nobody yet, until you choose."
-msgstr "A nadie todavía, hasta que usted elija."
+msgstr "A nadie todavía, hasta que elijas."
 
 #: src/settings/backdrop-settings.tsx
 #: src/workflows/workflow-settings.tsx
@@ -10516,6 +10604,10 @@ msgstr "Abrir tu onboarding"
 msgid "Open: {open}"
 msgstr "Abiertas: {open}"
 
+#: src/settings/ai-providers.tsx
+msgid "OpenAI-compatible endpoint"
+msgstr "Endpoint compatible con OpenAI"
+
 #: src/onboarding/platform-reveal.tsx
 msgid "Opening Grasp"
 msgstr "Grasp se está abriendo"
@@ -10765,7 +10857,7 @@ msgstr "Parte {n} de {parts}: {label}"
 
 #: src/routes/_shell.brain.sections.$sectionId.tsx
 msgid "Part of the brain not found"
-msgstr "Parte del brain no encontrada"
+msgstr "Parte del cerebro no encontrada"
 
 #: src/dashboard/outcome-card.tsx
 msgid "Part of what was sent is cut short above. Show it all, or exactly what was sent, before you say it didn't happen."
@@ -10774,6 +10866,10 @@ msgstr "Parte de lo que se envió aparece recortado arriba. Muéstralo todo, o e
 #: src/chat/held-writes.tsx
 msgid "Part of what will be sent is cut short above. Show it all, or exactly what will be sent, to confirm."
 msgstr "Parte de lo que se enviará aparece recortado arriba. Muéstralo todo, o exactamente lo que se enviará, para confirmar."
+
+#: src/chat/held-writes.tsx
+msgid "Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm."
+msgstr "Parte de lo que se enviará está recortado. Abre Detalles y muéstralo todo, o exactamente lo que se enviará, para confirmar."
 
 #: src/interview/words.ts
 msgid "Passing it on"
@@ -11628,10 +11724,6 @@ msgctxt "send a waiting item back to people"
 msgid "Reject"
 msgstr "Rechazar"
 
-#: src/chat/held-writes.tsx
-msgid "Reject {what}"
-msgstr "Rechazar {what}"
-
 #: src/dashboard/pile-cards.tsx
 #: src/inbox/item-detail.tsx
 msgid "Reject {who}"
@@ -11712,6 +11804,7 @@ msgstr "Quitar {file}"
 
 #: src/activity/audit-event.tsx
 #: src/connections/tool-permissions.tsx
+#: src/frame/part-words.tsx
 #: src/workflows/binding-approvals.tsx
 msgid "Remove {name}"
 msgstr "Quitar {name}"
@@ -11765,6 +11858,10 @@ msgstr "Eliminar"
 #: src/apps/app-own-link.tsx
 msgid "Remove link"
 msgstr "Quitar enlace"
+
+#: src/frame/part-words.tsx
+msgid "Remove picture"
+msgstr "Quitar la imagen"
 
 #: src/apps/field-editor.tsx
 msgid "Remove spaces at the start and end"
@@ -11884,6 +11981,10 @@ msgstr "Sustituir la versión {newerVersion} por la mía"
 #: src/activity/audit-words.ts
 msgid "Replaced a request for packages"
 msgstr "Reemplazó una solicitud de paquetes"
+
+#: src/activity/audit-words.ts
+msgid "Replaced an AI provider's key"
+msgstr "Sustituyó la clave de un proveedor de IA"
 
 #: src/chat/approval-words.ts
 msgid "Replaced by a newer request"
@@ -12673,6 +12774,7 @@ msgid "Say it like you'd tell a colleague. Grasp works out what to make."
 msgstr "Dilo como se lo dirías a un compañero. Grasp decide qué hacer."
 
 #: src/chat/chat-subject.ts
+#: src/frame/part-words.tsx
 msgid "Say what should change"
 msgstr "Di qué debe cambiar"
 
@@ -13952,6 +14054,11 @@ msgstr "¿Detener esta ejecución?"
 msgid "Stopped"
 msgstr "Detenido"
 
+#: src/frame/part-words.tsx
+msgctxt "an answer stopped part way"
+msgid "Stopped"
+msgstr "Detenido"
+
 #: src/activity/audit-words.ts
 msgid "Stopped a schedule that kept failing"
 msgstr "Detuvo una programación que fallaba una y otra vez"
@@ -13972,14 +14079,6 @@ msgstr "Programación detenida"
 #: src/activity/audit-words.ts
 msgid "Stopped someone visiting an App"
 msgstr "Dejó de permitir que alguien visite una aplicación"
-
-#: src/chat/thread.tsx
-msgid "Stopped while working"
-msgstr "Detenido mientras trabajaba"
-
-#: src/chat/thread.tsx
-msgid "Stopped while writing"
-msgstr "Detenido mientras escribía"
 
 #: src/chat/chat-markdown.ts
 msgid "Stopped."
@@ -14216,6 +14315,10 @@ msgstr "Probar con elementos recientes"
 msgid "Test revision {revision} on recent items"
 msgstr "Probar la revisión {revision} con elementos recientes"
 
+#: src/activity/audit-words.ts
+msgid "Tested an AI provider's key"
+msgstr "Probó la clave de un proveedor de IA"
+
 #: src/settings/ai-providers.tsx
 msgid "Testing"
 msgstr "Probando"
@@ -14379,7 +14482,7 @@ msgstr "Los agentes a los que puede preguntar. Cada uno tiene su tarea y conoce 
 
 #: src/agents/agents-overview.tsx
 msgid "The agents your company sets up for you show here."
-msgstr "Los agentes que su empresa configure para usted aparecen aquí."
+msgstr "Los agentes que tu empresa configure para ti aparecen aquí."
 
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
@@ -14530,7 +14633,7 @@ msgstr "La dirección aún no ha confirmado la visión."
 #: src/brain/brain-nav.tsx
 #: src/workflows/requests/request-parts.tsx
 msgid "The brain"
-msgstr "El Brain"
+msgstr "El cerebro"
 
 #: src/workflows/business-process.tsx
 msgid "The business process {name} serves"
@@ -14566,11 +14669,11 @@ msgstr "No se pudo cambiar el nombre del chat. Inténtalo de nuevo."
 
 #: src/workflows/business-process.tsx
 msgid "The checks, reviews and records the regulator expects from you."
-msgstr "Los controles, revisiones y registros que el regulador espera de usted."
+msgstr "Los controles, revisiones y registros que el regulador espera de ti."
 
 #: src/routes/setup.tsx
 msgid "The company brain: {percent}% known. Dark dots are what I know, grey dots what I still need to learn."
-msgstr "El Brain de la empresa: {percent} % conocido. Los puntos oscuros son lo que sé; los grises, lo que aún tengo que aprender."
+msgstr "El cerebro de la empresa: {percent} % conocido. Los puntos oscuros son lo que sé; los grises, lo que aún tengo que aprender."
 
 #: src/agents/agent-page.tsx
 msgid "The company's first agent"
@@ -14720,6 +14823,14 @@ msgstr "El enlace no se abrió."
 #: src/routes/guest.tsx
 msgid "The link works until {until}."
 msgstr "El enlace funciona hasta el {until}."
+
+#: src/settings/workspace-name.tsx
+msgid "The logo could not be put back"
+msgstr "No se pudo recuperar el logo"
+
+#: src/settings/workspace-name.tsx
+msgid "The logo could not be removed"
+msgstr "No se pudo eliminar el logo"
 
 #: src/knowledge/new-collection.tsx
 msgid "The members of the teams you choose, and their agents."
@@ -15251,6 +15362,10 @@ msgstr "Esta implementación no permite ningún modelo."
 #: src/routes/_shell.settings.security.tsx
 msgid "This device"
 msgstr "Este dispositivo"
+
+#: src/frame/part-words.tsx
+msgid "This did not load"
+msgstr "Esto no se cargó"
 
 #: src/knowledge/document.tsx
 msgid "This document changed since you opened it. Version {newerVersion} is below; your text is kept. Start again from it, or replace it with your text."
@@ -15791,6 +15906,7 @@ msgstr "En marcha"
 #: src/brain/region-edit.tsx
 #: src/chat/approval-words.ts
 #: src/chat/saved-memory.tsx
+#: src/settings/workspace-name.tsx
 msgid "Undo"
 msgstr "Deshacer"
 
@@ -15925,11 +16041,17 @@ msgstr "Archivo subido"
 msgid "Upload a PDF, Word or Excel file, or captions (.vtt)"
 msgstr "Sube un archivo PDF, Word o Excel, o subtítulos (.vtt)"
 
+#: src/frame/part-words.tsx
+msgctxt "a file"
+msgid "Uploaded"
+msgstr "Subido"
+
 #: src/activity/audit-words.ts
 msgid "Uploaded to knowledge"
 msgstr "Subió al conocimiento"
 
 #: src/chat/chat-files.tsx
+#: src/frame/part-words.tsx
 msgid "Uploading"
 msgstr "Subiendo"
 
@@ -16299,11 +16421,7 @@ msgstr "Esperando por ti"
 
 #: src/workflows/go-lives-waiting.tsx
 msgid "Waiting for you to let them go live"
-msgstr "Esperan a que usted los publique"
-
-#: src/chat/held-writes.tsx
-msgid "Waiting for you: {title}"
-msgstr "Esperando por ti: {title}"
+msgstr "Esperan a que los publiques"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Waiting for your approval"
@@ -16720,7 +16838,7 @@ msgstr "Lo que la dirección quiere del sprint: sus objetivos y las reglas del j
 
 #: src/settings/erasures.tsx
 msgid "What the Brain keeps that only they may read"
-msgstr "Lo que el Brain guarda y solo esa persona puede leer"
+msgstr "Lo que el cerebro guarda y solo esa persona puede leer"
 
 #: src/brain/sources-page.tsx
 msgid "What the Brain keeps that you may read, and search through it as your agents recall it."
@@ -16854,7 +16972,7 @@ msgstr "Cuando {account} informa de un evento"
 
 #: src/brain/lessons-view.tsx
 msgid "When a task keeps failing the same way, the Brain notes it here as a lesson you can check."
-msgstr "Cuando una tarea falla una y otra vez de la misma forma, el Brain lo anota aquí como una lección que puedes revisar."
+msgstr "Cuando una tarea falla una y otra vez de la misma forma, el cerebro lo anota aquí como una lección que puedes revisar."
 
 #: src/workflows/trigger-description.ts
 msgid "When an email arrives at its own address"
@@ -17086,7 +17204,7 @@ msgstr "Quién puede usar a {name}"
 
 #: src/agents/agent-page.tsx
 msgid "Who may use {name} and what it may do couldn't be read. Only the company's own admins see it. If that is you, load the page again."
-msgstr "No se pudo leer quién puede usar a {name} ni qué puede hacer. Solo lo ven los administradores de la propia empresa. Si es usted, vuelva a cargar la página."
+msgstr "No se pudo leer quién puede usar a {name} ni qué puede hacer. Solo lo ven los administradores de la propia empresa. Si eres tú, vuelve a cargar la página."
 
 #: src/agents/agent-page.tsx
 msgid "Who may use it"
@@ -17523,6 +17641,11 @@ msgstr "ti"
 #: src/workflows/run-detail.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/traces.tsx
+msgid "You"
+msgstr "Tú"
+
+#: src/frame/part-words.tsx
+msgctxt "who answered an agent's request"
 msgid "You"
 msgstr "Tú"
 

@@ -73,7 +73,7 @@ test("a person stops an answer mid-way: what was written stays, said as stopped,
 
   await page.getByRole("button", { name: "Stop", exact: true }).click();
 
-  await expect(messages.getByText("Stopped while writing")).toBeVisible({
+  await expect(messages.getByText("Stopped", { exact: true })).toBeVisible({
     timeout: 30_000,
   });
   await expect(messages.getByText(firstWords, { exact: false })).toBeVisible();
@@ -272,7 +272,7 @@ test("on a phone, a person asks, follows the words coming in, and stops the answ
 
   await page.getByRole("button", { name: "Stop", exact: true }).click();
 
-  await expect(messages.getByText("Stopped while writing")).toBeVisible({
+  await expect(messages.getByText("Stopped", { exact: true })).toBeVisible({
     timeout: 30_000,
   });
   // Nothing runs off the screen's side.

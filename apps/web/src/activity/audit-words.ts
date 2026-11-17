@@ -336,6 +336,19 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`Stopped a schedule that kept failing`,
   },
   { action: "workflow", text: msg`Changed a workflow` },
+  { action: "ai_provider.added", text: msg`Added an AI provider's key` },
+  { action: "ai_provider.replaced", text: msg`Replaced an AI provider's key` },
+  { action: "ai_provider.removed", text: msg`Deleted an AI provider's key` },
+  { action: "ai_provider.tested", text: msg`Tested an AI provider's key` },
+  {
+    action: "ai_provider.models_set",
+    text: msg`Changed the default and fallback models`,
+  },
+  {
+    action: "ai_provider.source_set",
+    text: msg`Chose between Grasp's AI and the organization's own key`,
+  },
+  { action: "ai_provider", text: msg`Changed the AI providers` },
   { action: "platform", text: msg`Updated Grasp` },
   {
     action: "improvement.signals.computed",

@@ -36,7 +36,8 @@ import { SectionNotLoaded } from "./section.tsx";
 
 // Settings › AI and spend, its last card: what the models cost this month
 // on the organization's keys (core's `models.spend()` and the Apps' model
-// bindings from `models.settings()`). The month's total as the key figure,
+// bindings from `models.settings()`), as Grasp UI's spend card draws it
+// (examples/chart/spend-card.tsx). The month's total as the key figure,
 // with where it ends at this pace; the month so far as one area, day by
 // day; then where it went, chat, each workflow and each App, as a list of bars. Read-only:
 // nothing in Grasp limits what an organization spends on its own keys.
@@ -56,6 +57,9 @@ const styles = stylex.create({
   },
 });
 
+/** The value axis's width: room for its longest label, "$0.075" (Grasp UI's spend card). */
+const axisWidth = 56;
+
 /** Dollars short enough for the chart's value axis: cents under a dollar, then compact. */
 const axisDollars = (value: string | number): string => {
   const amount = Number(value);
@@ -63,9 +67,10 @@ const axisDollars = (value: string | number): string => {
     style: "currency",
     currency: "USD",
     notation: amount < 1 ? "standard" : "compact",
-    // Two decimals at most: the axis has room for about four characters
-    // (Grasp UI's ChartAxis), so a quarter step under a dollar rounds.
-    maximumFractionDigits: amount < 1 ? 2 : 1,
+    // Under a dollar a quarter step keeps its third decimal ($0.025): the
+    // axis is wide enough for it (`axisWidth`).
+    minimumFractionDigits: amount < 1 ? 2 : 0,
+    maximumFractionDigits: amount < 1 ? 3 : 1,
   }).format(amount);
 };
 
@@ -154,7 +159,9 @@ export const SpendSummary = ({ spend }: { spend: ModelMonthSpend }) => {
   const total = dollars(spend.total);
   return (
     <>
+      {/* Bare: the figure at the card's start edge, as Grasp UI's spend card. */}
       <Stat
+        bare
         change={
           ending === null ? "" : t`About ${ending} by the end of the month`
         }
@@ -171,14 +178,13 @@ export const SpendSummary = ({ spend }: { spend: ModelMonthSpend }) => {
           aria-label={t`Spend so far this month, day by day`}
           config={{ spend: { label: t`Spend` } }}
           data={runningTotal(spend.days)}
-          height={220}
           layout={styles.chart}
           summary={t`${total} so far this month.`}
           xKey="day"
         >
           <ChartGrid />
           <ChartAxis side="x" />
-          <ChartAxis format={axisDollars} side="y" />
+          <ChartAxis format={axisDollars} side="y" width={axisWidth} />
           <ChartArea fill="plain" series="spend" />
           <ChartTooltip format={dollars} />
         </Chart>

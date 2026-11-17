@@ -23,9 +23,11 @@ export const ChatBar = () => {
   const { placement, stage, composer, words, view } = useGlobalChat();
   const openHere = useOpenChat();
   const bar = useRef<HTMLDivElement>(null);
-  // Back as the chat closes: the chat had the cursor, which it lost as it
-  // went. Only then: a menu or window closing elsewhere leaves the cursor
-  // nowhere for a moment too, and it belongs to what opens next.
+  // Back as the chat closes: the chat had the cursor, which it loses as it
+  // goes. Only then: a menu or window closing elsewhere leaves the cursor
+  // nowhere for a moment too, and it belongs to what opens next. The App
+  // shell's panel the chat stood in is still there as the bar shows (it
+  // goes after), so the cursor may still stand in it.
   const chatWasOpen = useRef(false);
   useEffect(() => {
     if (stage.card) {
@@ -35,7 +37,12 @@ export const ChatBar = () => {
     if (!stage.bar) {
       return;
     }
-    if (chatWasOpen.current && document.activeElement === document.body) {
+    const { activeElement } = document;
+    const lost =
+      activeElement === null ||
+      activeElement === document.body ||
+      activeElement.closest("[data-slot=app-shell-panels]") !== null;
+    if (chatWasOpen.current && lost) {
       bar.current?.querySelector("textarea")?.focus();
     }
     chatWasOpen.current = false;

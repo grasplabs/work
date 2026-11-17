@@ -37,7 +37,9 @@ import { simply } from "../motion/simply.stylex";
 import { Spinner } from "../spinner/spinner";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { Tooltip, TooltipContent } from "../tooltip";
+import { useWords, withGiven } from "../words/words";
 import { wellMarker } from "./markers.stylex";
+import { imageWellWords } from "./words";
 
 /** What a caller may style: where it sits. */
 export type ImageWellLayoutStyle = LayoutStyle;
@@ -111,23 +113,6 @@ export interface ImageWellProps {
   /** Layout only: where it sits. */
   layout?: ImageWellLayoutStyle;
 }
-
-const defaults: ImageWellWords = {
-  change: "Change picture",
-  add: "Add a picture",
-  remove: "Remove picture",
-  saving: "Saving",
-  saved: "Saved",
-  failed: "Could not save",
-  retry: "Try again",
-  how: "Click or drop a picture.",
-  refused: (name, reason) =>
-    ({
-      "file-type": `${name} is not a kind of picture this takes.`,
-      "file-too-large": `${name} is too large.`,
-      "file-too-small": `${name} is empty.`,
-    })[reason] ?? `${name}: ${reason}`,
-};
 
 const pictures = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
 
@@ -675,7 +660,8 @@ export const ImageWell = ({
   layout,
   ...picture
 }: ImageWellProps) => {
-  const words = { ...defaults, ...given };
+  // Its words: the product's, by its catalogue, else English; the caller's `words` still win.
+  const words = withGiven(useWords("imageWell", imageWellWords), given ?? {});
   const { kept, pending, said, setSaid, save, remove } = usePicture(
     picture,
     words

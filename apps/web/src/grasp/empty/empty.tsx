@@ -41,10 +41,12 @@ import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { grasp } from "../tokens/tokens.stylex";
+import { useWords } from "../words/words";
 import { EmptyPictureDrawing } from "./pictures";
 import type { EmptyPicture } from "./pictures";
 import { EmptyShapeAround, EmptyShapePicture } from "./shape";
 import type { EmptyShape } from "./shape";
+import { emptyWords } from "./words";
 
 export type { EmptyPicture } from "./pictures";
 export type { EmptyShape } from "./shape";
@@ -441,7 +443,8 @@ export const EmptyHeader = ({ children }: EmptyHeaderProps) => {
 /** The short title. An error's is "This did not load" unless it is given words. */
 export const EmptyTitle = ({ children, headingLevel }: EmptyTitleProps) => {
   const error = useContext(EmptyError);
-  const words = children ?? (error ? "This did not load" : undefined);
+  const { failed } = useWords("empty", emptyWords);
+  const words = children ?? (error ? failed : undefined);
   const Title =
     headingLevel === undefined ? "p" : (`h${headingLevel}` as const);
   return words === undefined || words === null || words === "" ? null : (
@@ -543,11 +546,12 @@ export const Empty = ({
 }: EmptyProps) => {
   const kind = kindOf(tone, kindDeprecated);
   const size = sizeOf(sizeGiven);
+  const { failed } = useWords("empty", emptyWords);
   const error = kind === "error";
   const top = place === "top";
   const behind = shape !== undefined && !top;
   // An error always says so in a title, so it is never read as an empty list.
-  const heading = title ?? (error ? "This did not load" : "");
+  const heading = title ?? (error ? failed : "");
   // A picture stands where the icon would: one or the other, never both.
   const mark = picture ? undefined : (icon ?? (error ? Alert : undefined));
   return (

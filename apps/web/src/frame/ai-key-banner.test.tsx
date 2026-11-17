@@ -18,6 +18,7 @@ import { formatSince } from "../format.ts";
 import {
   FailingBanner,
   failingUpFront,
+  tellProvidersChanged,
   useFailingProviders,
 } from "./ai-key-banner.tsx";
 import type { BannerReads, FailingProvider } from "./ai-key-banner.tsx";
@@ -188,6 +189,17 @@ const bannerFor = async (
   return { said, links };
 };
 
+/** Lets what the banner read show. */
+const settle = async (): Promise<void> => {
+  await act(async () => {
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    setTimeout(() => {
+      resolve(true);
+    }, 0);
+    await promise;
+  });
+};
+
 describe("the AI key banner", () => {
   afterEach(() => {
     act(() => {
@@ -253,6 +265,49 @@ describe("the AI key banner", () => {
     );
 
     expect(replaced).toStrictEqual({ said: "", links: [] });
+  });
+
+  it("reads again at once when a provider's key is replaced or deleted in Settings, not at the next minute", async () => {
+    let listing = listingWith(refused);
+    const host = document.createElement("div");
+    document.body.append(host);
+    const router = createRouter({
+      routeTree: createRootRoute({
+        component: () => (
+          <AiKeyBanner
+            identity={personWith("admin")}
+            providers={async () => await Promise.resolve(listing)}
+          />
+        ),
+      }),
+      history: createMemoryHistory(),
+    });
+    await act(async () => {
+      root = createRoot(host);
+      root.render(
+        <I18nProvider i18n={i18n}>
+          <RouterProvider router={router} />
+        </I18nProvider>
+      );
+      await router.load();
+    });
+    await settle();
+    const before = host.textContent.includes("refusing your key");
+
+    listing = listingWith({
+      ...refused,
+      failingClass: null,
+      failingSince: null,
+    });
+    act(() => {
+      tellProvidersChanged();
+    });
+    await settle();
+
+    expect({ before, after: host.textContent }).toStrictEqual({
+      before: true,
+      after: "",
+    });
   });
 
   it("comes with the page when read before it showed, and keeps it when the page is loaded again without a read", async () => {
