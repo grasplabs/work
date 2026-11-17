@@ -101,6 +101,8 @@ export interface TeamCount extends Dated {
 export interface Team {
   id: string;
   name: string;
+  /** What it does, as the company's admin described it on the roster; none when they didn't. */
+  does?: string;
   /** Where the team was first found. */
   sourceId: string;
   /** Size and roles per import, oldest first; the newest counts. */

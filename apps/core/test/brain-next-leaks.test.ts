@@ -468,10 +468,12 @@ describe(
       const companyMarkers = {
         "an upload for everyone": markerWord(),
         "the company's vision from the kickoff": markerWord(),
+        "the company's teams from its staff list": markerWord(),
       };
       const {
         "an upload for everyone": everyoneUploadMarker,
         "the company's vision from the kickoff": kickoffMarker,
+        "the company's teams from its staff list": rosterMarker,
       } = companyMarkers;
       const {
         "the holder's own source": ownerMarker,
@@ -893,6 +895,13 @@ describe(
         { kind: "everyone" },
         { producer: "kickoff", id: crypto.randomUUID() }
       );
+      // The company's teams, as the onboarding hands its confirmed staff
+      // list over: every member's, without the shared word.
+      const rosterSource = await add(
+        `The company's teams ${rosterMarker}`,
+        { kind: "everyone" },
+        { producer: "roster", id: crypto.randomUUID() }
+      );
 
       // Through each producer core hands over (brain-hand-overs.ts), as it
       // does: a workflow run of the holder's that ended, and a turn of the
@@ -1093,6 +1102,11 @@ describe(
         kickoff: {
           marker: "the company's vision from the kickoff",
           source: kickoffSource,
+          reader: outsider,
+        },
+        roster: {
+          marker: "the company's teams from its staff list",
+          source: rosterSource,
           reader: outsider,
         },
       };

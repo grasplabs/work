@@ -3,7 +3,7 @@ import { log } from "@grasp-os/shared/log";
 
 import { erasureBegun } from "../brain-hand-overs.ts";
 import { addSource, eraseSource } from "../brain-next.ts";
-import type { Handed, SourceRef } from "../brain-next.ts";
+import type { Handed, SourceReaders, SourceRef } from "../brain-next.ts";
 import { onboardingStore } from "./store.ts";
 import type { OwedErasure } from "./store.ts";
 
@@ -32,6 +32,14 @@ import type { OwedErasure } from "./store.ts";
 //   and answers between two hand-overs are one version, and nothing
 //   anyone could read is lost.
 //   The admin's delete erases it (`eraseOwedKickoffs`), every version.
+// - The company's teams (`roster:teams-<n>`, GRA-1748): each confirmed
+//   team taking part, as the admin described it, and its head count, never
+//   what a lead's map says it does nor who is in it (company-teams.ts),
+//   readable by everyone. Noted and read like the kickoff (`rosterOf`): a
+//   version is what a hand-over reads, so confirmed changes between two
+//   hand-overs are one version, and nothing anyone could read is lost. The admin may erase it, every
+//   version (`eraseOwedRosters`); the next confirmed save gives it afresh
+//   under a new id.
 //
 // What no longer stands is erased with `eraseSource`, directly: at once
 // after anything that takes an interview out (links.ts, admin-command.ts,
@@ -131,6 +139,29 @@ export const kickoffOf = async (env: Env, id: string): Promise<Handed> => {
       };
 };
 
+/** The company's teams' source, by the store's id for it. */
+export const rosterSource = (id: string): SourceRef => ({
+  producer: "roster",
+  id,
+});
+
+/** Who reads the company's teams in the Brain: everyone in the company (the owner, 17 November). */
+const rosterReaders: SourceReaders = { kind: "everyone" };
+
+/** The company's teams as the admin last confirmed them (`rosterToHand`), for everyone in the company. */
+export const rosterOf = async (env: Env, id: string): Promise<Handed> => {
+  const held = await onboardingStore(env).rosterToHand(id);
+  return held === null
+    ? gone
+    : {
+        kind: "source",
+        change: held.change,
+        text: held.text,
+        whenTooLarge: "The company's teams too many to keep.",
+        readers: rosterReaders,
+      };
+};
+
 /**
  * Erases from the Brain every kickoff the admin deleted that it may still
  * hold (`kickoffErasuresOwed`), each then forgotten there: right after the
@@ -156,6 +187,35 @@ export const eraseOwedKickoffs = async (env: Env): Promise<boolean> => {
     }
   }
   const owed = await store.kickoffErasuresOwed();
+  return owed.length === 0;
+};
+
+/**
+ * Erases from the Brain every id of the company's teams the admin erased
+ * that it may still hold (`rosterErasuresOwed`), each then forgotten
+ * there: right after the erase, and on core's clock until none is owed.
+ * Each failure is logged by name alone and left owed. Whether none is
+ * owed any more.
+ */
+export const eraseOwedRosters = async (env: Env): Promise<boolean> => {
+  const store = onboardingStore(env);
+  for (const id of await store.rosterErasuresOwed()) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
+      await eraseSource(env, {
+        source: rosterSource(id),
+        readers: rosterReaders,
+        reason: "deleted",
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
+      await store.rosterErased(id);
+    } catch (error) {
+      log.error("onboarding.brain_erasure_failed", {
+        error: error instanceof Error ? error.name : "unknown",
+      });
+    }
+  }
+  const owed = await store.rosterErasuresOwed();
   return owed.length === 0;
 };
 
@@ -215,6 +275,7 @@ export const eraseOwedOnboardingSources = async (
  */
 export const settleOnboardingBrain = async (env: Env): Promise<void> => {
   await eraseOwedKickoffs(env);
+  await eraseOwedRosters(env);
   await eraseOwedOnboardingSources(env);
   await addOwedInterviews(env);
 };

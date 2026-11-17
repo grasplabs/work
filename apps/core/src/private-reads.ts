@@ -22,7 +22,10 @@ import { workspace } from "./durable-objects.ts";
 //   what the shared store alone would hand over because of the person's
 //   own store, where everything only they may read is kept: a passage or
 //   a memory of it, or only which words it says were not found or that
-//   it was cut short (turn-recall.ts, brain-next.ts `recallOwnedAs`);
+//   it was cut short (turn-recall.ts, brain-next.ts `recallOwnedAs`); and
+//   with it any of the person's profile (what the Brain holds about them
+//   in their own word, from their own store: turn-recall.ts `profileOf`),
+//   until the owner rules otherwise (GRA-1745);
 // - an answer read through the person's own personal connection (their
 //   mailbox, their drive: agent-connections.ts), a call's or a confirmed
 //   held call's;

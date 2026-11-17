@@ -195,6 +195,8 @@ import {
   withoutNames,
 } from "./brain-intake.ts";
 import type { TeamIntake } from "./brain-intake.ts";
+import { companyTeamsText } from "./company-teams.ts";
+import type { CompanyTeam } from "./company-teams.ts";
 import { storedDocumentReadingSchema } from "./document-reading.ts";
 import { checkedSupport } from "./drawing-support.ts";
 import type { Support } from "./drawing-support.ts";
@@ -309,6 +311,58 @@ const queuedKey = "forget_lines_queued";
  * no change since reads the same key and text and adds nothing.
  */
 const kickoffChangesKey = "kickoff_changes";
+
+/**
+ * The company's teams as the admin last confirmed them (`#rosterConfirmed`):
+ * when, and each confirmed team taking part, its name, the admin's own
+ * description and its head count. What every member reads on the Brain
+ * page (`companyTeams`); gone with the Brain's copy when the admin erases
+ * it (`eraseTeamsFromBrain`), until the next confirmed save.
+ */
+const rosterConfirmedKey = "roster_confirmed";
+
+const companyTeamSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  does: z.string(),
+  people: z.int(),
+});
+
+const rosterConfirmedSchema = z.object({
+  at: z.string(),
+  teams: z.array(companyTeamSchema),
+});
+
+/**
+ * What the new Brain was last given of the company's teams: under which of
+ * its ids (`rosterBrainIdKey`), the key of that change (a count that only
+ * grows, so a text back to an earlier one is a new version), and the text.
+ * Gone once the admin erased it (`eraseTeamsFromBrain`), so the next
+ * confirmed save gives the Brain the teams afresh.
+ */
+const rosterHandedKey = "roster_handed";
+
+const rosterHandedSchema = z.object({
+  id: z.string(),
+  change: z.int(),
+  text: z.string(),
+});
+
+/**
+ * How often the admin erased the company's teams from the Brain: the
+ * teams' id there is `teams-<that count>` (`rosterBrainId`), so the teams
+ * given after an erase are a source of their own, never under the key the
+ * erase closed.
+ */
+const rosterErasesKey = "roster_erases";
+
+/**
+ * What starts the key of each id of the company's teams the admin erased
+ * that the Brain may still hold, the rest being that id: set with the
+ * erase in one transaction, gone once core's erasure of it returned
+ * (`rosterErased`).
+ */
+const rosterErasurePrefix = "roster_erasure_owed:";
 
 /**
  * What starts the key of each kickoff the admin deleted whose source the
@@ -1038,6 +1092,7 @@ export class Onboarding extends DurableObject<Env> {
       agreed: agreementsIn(row.agreements, flowAgreementsOf(row.flow)),
       paused: row.pausedAt !== null,
       kickoff: this.#kickoffState(),
+      teamsInBrain: this.#teamsInBrain(),
       sponsor: this.#sponsor(),
       context: this.#context(),
       waiting: roster === null ? 0 : this.#waiting(roster),
@@ -1153,6 +1208,7 @@ export class Onboarding extends DurableObject<Env> {
       });
       if (confirmed) {
         this.#confirmed(before, roster);
+        this.#rosterConfirmed(new Date().toISOString());
       } else {
         this.#holdNew(before, roster);
       }
@@ -1295,6 +1351,7 @@ export class Onboarding extends DurableObject<Env> {
           lead: teams.lead,
           mappedAt: teams.mappedAt,
           mappedFrom: teams.mappedFrom,
+          mappedDoes: teams.mappedDoes,
         })
         .from(teams)
         .all()
@@ -1310,6 +1367,8 @@ export class Onboarding extends DurableObject<Env> {
           ...team,
           position,
           mappedAt: was?.mappedAt ?? null,
+          // What its map drew, kept apart from what the admin wrote (GRA-1748).
+          mappedDoes: was?.mappedDoes ?? null,
           // A map stands on the lead it was drawn from, and no other.
           mappedFrom:
             was?.lead === team.lead ? (was?.mappedFrom ?? null) : null,
@@ -4034,6 +4093,176 @@ export class Onboarding extends DurableObject<Env> {
     this.#noteHandOver("kickoff", this.kickoffBrainId());
   }
 
+  /**
+   * The company's teams as the admin confirmed them (GRA-1748): each team
+   * taking part, its name, the admin's own description and how many
+   * people the roster has in it, in the admin's order. Only what the admin
+   * gave: never what a lead's map says a team does (`mappedDoes`, from
+   * their own interview), who is in a team, their titles or its lead;
+   * never a team switched off, nor a team or person still waiting for the
+   * admin to confirm the organization.
+   */
+  #confirmedTeams(): CompanyTeam[] {
+    const roster = this.#roster();
+    const waiting = this.#unconfirmed();
+    const confirmed = (roster?.people ?? []).filter(
+      ({ id }) => !waiting.people.has(id)
+    );
+    return (roster?.teams ?? [])
+      .filter(({ id, off }) => !off && !waiting.teams.has(id))
+      .map(({ id, name, does }) => ({
+        id,
+        name,
+        does,
+        people: confirmed.filter(({ team }) => team === id).length,
+      }));
+  }
+
+  /**
+   * The company's teams as every member reads them (GRA-1748): as the admin
+   * last confirmed them (`rosterConfirmedKey`), and when. Null before any
+   * confirmed save.
+   */
+  companyTeams(): z.infer<typeof rosterConfirmedSchema> | null {
+    const held = this.ctx.storage.kv.get(rosterConfirmedKey);
+    return held === undefined ? null : rosterConfirmedSchema.parse(held);
+  }
+
+  /**
+   * The roster as Grasp's staff read it: what each team does as its lead's
+   * map drew it, where it did (`mappedDoes`), else as the admin described
+   * it. Staff's alone (admin-snapshot.ts); never a member's, never the
+   * Brain's (GRA-1748).
+   */
+  rosterAsMapped(): Roster | null {
+    const roster = this.#roster();
+    if (roster === null) {
+      return null;
+    }
+    const mapped = new Map(
+      this.#db
+        .select({ id: teams.id, mappedDoes: teams.mappedDoes })
+        .from(teams)
+        .all()
+        .flatMap(({ id, mappedDoes }) =>
+          mappedDoes === null ? [] : [[id, mappedDoes] as const]
+        )
+    );
+    return {
+      ...roster,
+      teams: roster.teams.map((team) => ({
+        ...team,
+        does: mapped.get(team.id) ?? team.does,
+      })),
+    };
+  }
+
+  /** The company's teams' id in the new Brain now: `teams-<erases>` (`rosterErasesKey`). */
+  rosterBrainId(): string {
+    const erases = this.ctx.storage.kv.get(rosterErasesKey);
+    return `teams-${typeof erases === "number" ? erases : 0}`;
+  }
+
+  /** What the new Brain was last given of the company's teams (`rosterHandedKey`); null before any, or since the admin erased it. */
+  #rosterHanded(): z.infer<typeof rosterHandedSchema> | null {
+    const held = this.ctx.storage.kv.get(rosterHandedKey);
+    return held === undefined ? null : rosterHandedSchema.parse(held);
+  }
+
+  /**
+   * The company's teams as the hand-over gives the new Brain now: as the
+   * admin last confirmed them, under the key of that change, so confirmed
+   * changes since the last hand-over are one version. Null for any
+   * id but the one they were given under, or once the admin erased them.
+   */
+  rosterToHand(id: string): { change: string; text: string } | null {
+    const handed = this.#rosterHanded();
+    return handed === null || id !== handed.id
+      ? null
+      : { change: String(handed.change), text: handed.text };
+  }
+
+  /**
+   * In the transaction of a save the admin confirmed: the company's teams
+   * as they stand now (`#confirmedTeams`), kept as what every member reads
+   * (`companyTeams`) and, when their text differs from what the Brain was
+   * last given, given to it under its id now, noted for the hand-over,
+   * which reads them when it runs (`rosterToHand`). The same text changes
+   * nothing in the Brain and notes nothing: no version, and no event in
+   * the audit log. No team taking part is given only once the Brain holds
+   * teams, as a version saying so, so it never keeps listing them.
+   */
+  #rosterConfirmed(at: string): void {
+    const confirmed = this.#confirmedTeams();
+    this.ctx.storage.kv.put(rosterConfirmedKey, { at, teams: confirmed });
+    const before = this.#rosterHanded();
+    if (confirmed.length === 0 && before === null) {
+      return;
+    }
+    const text = companyTeamsText(confirmed);
+    if (text === before?.text) {
+      return;
+    }
+    const id = this.rosterBrainId();
+    this.ctx.storage.kv.put(rosterHandedKey, {
+      id,
+      change: (before?.change ?? 0) + 1,
+      text,
+    });
+    this.#noteHandOver("roster", id);
+  }
+
+  /**
+   * The admin erases the company's teams from the Brain (GRA-1748): every
+   * version, through the Brain's ledger, owed from this transaction
+   * (`rosterErasuresOwed`) until core's erasure of it returned
+   * (onboarding/new-brain.ts `eraseOwedRosters`). What members read of
+   * them on the Brain page goes in the same transaction; the roster itself
+   * stays as it is. The next confirmed save gives both the teams afresh,
+   * the Brain under a new id
+   * (`rosterBrainId`). One audit event, never a word of them. False, with
+   * nothing recorded, when the Brain was given nothing of them.
+   */
+  eraseTeamsFromBrain(by: AuditActor): boolean {
+    const handed = this.#rosterHanded();
+    if (handed === null) {
+      return false;
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.kv.put(`${rosterErasurePrefix}${handed.id}`, true);
+      const erases = this.ctx.storage.kv.get(rosterErasesKey);
+      this.ctx.storage.kv.put(
+        rosterErasesKey,
+        (typeof erases === "number" ? erases : 0) + 1
+      );
+      this.ctx.storage.kv.delete(rosterHandedKey);
+      this.ctx.storage.kv.delete(rosterConfirmedKey);
+      this.#changed(by, "onboarding.roster.brain_erased", {});
+    });
+    this.#deliverAudit();
+    return true;
+  }
+
+  /** The ids of the company's teams the admin erased that the Brain may still hold (`rosterErasurePrefix`). */
+  rosterErasuresOwed(): string[] {
+    return [...this.ctx.storage.kv.list({ prefix: rosterErasurePrefix })].map(
+      ([key]) => key.slice(rosterErasurePrefix.length)
+    );
+  }
+
+  /** Notes that core erased the company's teams `id` from the new Brain: nothing of them is owed. */
+  rosterErased(id: string): void {
+    this.ctx.storage.kv.delete(`${rosterErasurePrefix}${id}`);
+  }
+
+  /** Whether the Brain holds the company's teams, or they are still being erased from it. */
+  #teamsInBrain(): OnboardingView["teamsInBrain"] {
+    if (this.rosterErasuresOwed().length > 0) {
+      return "erasing";
+    }
+    return this.#rosterHanded() === null ? null : "in";
+  }
+
   /** The ids of the deleted kickoffs whose source the new Brain still holds (`kickoffErasurePrefix`). */
   kickoffErasuresOwed(): string[] {
     return [...this.ctx.storage.kv.list({ prefix: kickoffErasurePrefix })].map(
@@ -6233,7 +6462,7 @@ export class Onboarding extends DurableObject<Env> {
    * notes the hand-over (brain-hand-overs.ts). Names the source by its id
    * alone; what it holds is read when the hand-over runs.
    */
-  #noteHandOver(producer: "claim" | "kickoff", id: string): void {
+  #noteHandOver(producer: "claim" | "kickoff" | "roster", id: string): void {
     const at = new Date().toISOString();
     const {
       actions: [action],
@@ -7227,7 +7456,10 @@ export class Onboarding extends DurableObject<Env> {
       this.#db
         .update(teams)
         .set({
-          does: map.does === "" ? still.does : map.does,
+          // The lead's map is theirs, from their interview: kept apart from
+          // what the admin wrote, never shown as theirs (GRA-1748). A map
+          // saying nothing of it leaves nothing of an earlier one.
+          mappedDoes: map.does === "" ? null : map.does,
           ...(generation === input.generation && admission === input.admission
             ? {
                 mappedAt: sql`coalesce(${teams.mappedAt}, ${at})`,
@@ -7596,7 +7828,8 @@ export class Onboarding extends DurableObject<Env> {
     if (lost) {
       // Every drawing it was in goes, whatever still counts: one drawn
       // from what no longer does never comes back, even when drawing it
-      // again fails.
+      // again fails. So does what their map says a team does.
+      this.#forgetMapOf(person.id);
       this.#forgetDrawings(person.id);
       this.#db
         .update(interviewStates)
@@ -7676,6 +7909,7 @@ export class Onboarding extends DurableObject<Env> {
    */
   #erase(person: string): void {
     this.#queueSpokenOf(person);
+    this.#forgetMapOf(person);
     this.#forgetDrawings(person);
     this.#db.delete(interviews).where(eq(interviews.person, person)).run();
     this.#db
@@ -7939,25 +8173,7 @@ export class Onboarding extends DurableObject<Env> {
    * away as it ends (`#drawWork`).
    */
   #forgetDrawings(person: string): void {
-    const [state] = this.#db
-      .select({ leadOf: interviewStates.leadOf })
-      .from(interviewStates)
-      .where(eq(interviewStates.person, person))
-      .all();
-    const [link] = this.#db
-      .select({ ledTeam: links.ledTeam })
-      .from(links)
-      .where(eq(links.person, person))
-      .all();
-    const led = new Set(
-      [
-        state?.leadOf,
-        link?.ledTeam,
-        ...(this.#roster()
-          ?.teams.filter(({ lead }) => lead === person)
-          .map(({ id }) => id) ?? []),
-      ].flatMap((team) => (team === undefined || team === null ? [] : [team]))
-    );
+    const led = this.#ledBy(person);
     const teamOf = new Map(
       this.#db
         .select({ id: works.id, team: works.team })
@@ -7985,6 +8201,48 @@ export class Onboarding extends DurableObject<Env> {
           .where(eq(drawFailures.item, `work:${row.work}`))
           .run();
       }
+    }
+  }
+
+  /** The teams `person` leads or led in their interview, by its state, their link or the roster. */
+  #ledBy(person: string): Set<string> {
+    const [state] = this.#db
+      .select({ leadOf: interviewStates.leadOf })
+      .from(interviewStates)
+      .where(eq(interviewStates.person, person))
+      .all();
+    const [link] = this.#db
+      .select({ ledTeam: links.ledTeam })
+      .from(links)
+      .where(eq(links.person, person))
+      .all();
+    return new Set(
+      [
+        state?.leadOf,
+        link?.ledTeam,
+        ...(this.#roster()
+          ?.teams.filter(({ lead }) => lead === person)
+          .map(({ id }) => id) ?? []),
+      ].flatMap((team) => (team === undefined || team === null ? [] : [team]))
+    );
+  }
+
+  /**
+   * Takes what `person`'s map says a team they lead does (`mappedDoes`), a
+   * model's answer from their interview, from staff too, in the
+   * transaction of their withdrawal, delete or erasure, or of an approval
+   * they took back (GRA-1748); a map drawn again gives it anew. The
+   * team's pieces of work stay: the rest of the team was asked about them,
+   * and they are drawn again from what those people agreed (GRA-329).
+   */
+  #forgetMapOf(person: string): void {
+    const led = [...this.#ledBy(person)];
+    if (led.length > 0) {
+      this.#db
+        .update(teams)
+        .set({ mappedDoes: null })
+        .where(inArray(teams.id, led))
+        .run();
     }
   }
 

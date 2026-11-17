@@ -204,6 +204,10 @@ const ProducerBadge = ({ producer }: { producer: BrainSourceProducer }) => {
       message: "The company's vision",
       context: "a source of the Brain",
     }),
+    roster: t({
+      message: "The company's teams",
+      context: "a source of the Brain",
+    }),
   }[producer];
   return <Badge variant="outline">{label}</Badge>;
 };

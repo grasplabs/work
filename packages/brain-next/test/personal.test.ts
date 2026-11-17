@@ -1627,8 +1627,10 @@ const leavingNone = [
   "confirmMemory",
   // Cards likewise: read whole in their call (cards.ts).
   "erasePerson",
-  // A person's own entity, read in one statement (own-entity.ts).
+  // A person's own entity and their profile, each read in one snapshot
+  // (own-entity.ts).
   "ownEntity",
+  "readProfile",
   // One read of which keys and memories an erasure took.
   "erasedOf",
   // The shared store's alone: a person's own store refuses them.
