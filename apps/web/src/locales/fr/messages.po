@@ -9343,10 +9343,6 @@ msgstr "Aucun."
 msgid "Not added yet"
 msgstr "Pas encore ajouté"
 
-#: src/chat/agent-draft-card.tsx
-msgid "Not all of it could be set, so the agent is paused. <0>Finish it on its page</0>."
-msgstr "Tout n’a pas pu être appliqué, l’agent est donc en pause. <0>Terminez-le sur sa page</0>."
-
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Not allowed"

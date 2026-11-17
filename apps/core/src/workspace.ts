@@ -435,6 +435,9 @@ export const questionSchema = z.strictObject({
       app: z.strictObject({ id: z.string(), name: z.string() }).optional(),
       workflow: z.strictObject({ id: z.string(), name: z.string() }).optional(),
       project: z.string().optional(),
+      agent: z.strictObject({ id: z.string(), name: z.string() }).optional(),
+      agentAction: z.enum(["made", "changed"]).optional(),
+      unfinished: z.literal(true).optional(),
     })
     .optional(),
 });
