@@ -300,8 +300,7 @@ const meaningAsksMost = 5;
 
 /**
  * What `run` answered, and every console line written meanwhile, for a
- * test that holds answers by meaning (`findingsOf` with `before`,
- * `answersOf`). Run again while a recall it made went without meaning:
+ * test that holds answers by meaning (`findingsOf`, `answersOf`). Run again while a recall it made went without meaning:
  * core then logs `brain.recall.without_meaning` (its question embedder
  * missed its deadline, as it can on a busy machine), and that answer is
  * by words alone, so unlike the same question's by meaning with nothing
@@ -349,8 +348,8 @@ const askedEachByMeaning = async (
  * Calls every surface (or those `among`) as `probing`'s reader; what they
  * gave away, in their answers or in the console. `inRecall` is forbidden
  * in what the recall surfaces answer too: instruction files, which no
- * recall finds, the reader's own included. With `before`, each surface is
- * asked by meaning (`recalledByMeaning`).
+ * recall finds, the reader's own included. Each surface is asked by
+ * meaning (`recalledByMeaning`).
  */
 export const findingsOf = async (
   pass: string,
@@ -367,17 +366,11 @@ export const findingsOf = async (
     before?: ReadonlyMap<string, readonly Answer[]>;
   } = {}
 ): Promise<Finding[]> => {
-  const { value: answered, lines } =
-    before === undefined
-      ? await logsOf(async () => {
-          const found: [string, Answer[]][] = [];
-          for (const [name, probe] of among) {
-            // oxlint-disable-next-line no-await-in-loop -- one surface at a time
-            found.push([name, await probe(probing)]);
-          }
-          return found;
-        })
-      : await askedEachByMeaning(among, probing);
+  // Every pass asks by meaning: one held to before compares whole
+  // answers, and one held to the twins compares them apart from what
+  // meaning found, whose cut and `fromOwn` still move when only one of a
+  // pair went without meaning.
+  const { value: answered, lines } = await askedEachByMeaning(among, probing);
   return [
     ...answered.flatMap(([name, answers]) =>
       findingsIn(
