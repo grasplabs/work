@@ -22,12 +22,14 @@ import { Button } from "../button";
 import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
 import { ChevronLeft, ChevronRight } from "../icons";
+import { useWords, withGiven } from "../words/words";
 import { calendarStyles as styles } from "./styles";
+import { calendarWords } from "./words";
 
 interface CalendarMonthsProps {
   months: number;
-  previousLabel: string;
-  nextLabel: string;
+  previousLabel?: string;
+  nextLabel?: string;
 }
 
 /** Says whether the months have wrapped under each other (a narrow screen), now and on each resize. */
@@ -55,9 +57,13 @@ const watchStacked = (
 /** Previous, the month's name and Next, then the days of each month shown. */
 export const CalendarMonths = ({
   months,
-  previousLabel,
-  nextLabel,
+  previousLabel: previousGiven,
+  nextLabel: nextGiven,
 }: CalendarMonthsProps) => {
+  const { previous: previousLabel, next: nextLabel } = withGiven(
+    useWords("calendar", calendarWords),
+    { previous: previousGiven, next: nextGiven }
+  );
   const dayLook = stylex.props(styles.day, focus.mark);
   // Side by side, the heading names both months ("November – December"). Stacked under each other,
   // each month shows its own name over its days, or the second reads as more of the first.

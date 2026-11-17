@@ -16,6 +16,10 @@ msgstr "“{action}” bestaat nog niet"
 msgid "“{text}”"
 msgstr "‘{text}’"
 
+#: src/frame/part-words.tsx
+msgid "“{word}” is already added."
+msgstr "“{word}” is al toegevoegd."
+
 #: src/routes/_shell.knowledge.index.tsx
 msgid "(company)"
 msgstr "(bedrijf)"
@@ -605,14 +609,6 @@ msgstr "{failed, plural, one {# mislukte run} other {# mislukte runs}} van {name
 msgid "{field} in {table} needs a change in code before this can be published."
 msgstr "{field} in {table} heeft een wijziging in code nodig voordat dit gepubliceerd kan worden."
 
-#: src/settings/workspace-name.tsx
-msgid "{file} is not a kind of picture this takes."
-msgstr "{file} is geen soort afbeelding die hier past."
-
-#: src/settings/workspace-name.tsx
-msgid "{file} is too large."
-msgstr "{file} is te groot."
-
 #: src/onboarding/document-drop.tsx
 msgid "{file} removed"
 msgstr "{file} verwijderd"
@@ -738,6 +734,10 @@ msgstr "{label} antwoordt niet sinds {since}."
 #: src/onboarding/ai-step.tsx
 msgid "{label} refused that key. Check it in your provider's console and paste it again."
 msgstr "{label} heeft die sleutel geweigerd. Controleer hem in de console van je aanbieder en plak hem opnieuw."
+
+#: src/frame/part-words.tsx
+msgid "{label}, {current}"
+msgstr "{label}, {current}"
 
 #: src/onboarding/setup-parts.tsx
 msgid "{label}, on Grasp’s support site, in a new tab"
@@ -1010,10 +1010,6 @@ msgstr "{name}: agents doorzoeken het live als je iets vraagt. Het brein bewaart
 msgid "{name}: share of this month"
 msgstr "{name}: aandeel van deze maand"
 
-#: src/routes/_shell.settings.profile.tsx
-msgid "{named}, {current}"
-msgstr "{named}, {current}"
-
 #: src/routes/_shell.settings.appearance.tsx
 msgid "{named}, {current}. Switch to {next}"
 msgstr "{named}, {current}. Wissel naar {next}"
@@ -1135,6 +1131,10 @@ msgstr "{query} doorzoekt deze tabel, die geen zoekfunctie heeft."
 #: src/interview/closed.tsx
 msgid "{rating} of 5"
 msgstr "{rating} van 5"
+
+#: src/frame/part-words.tsx
+msgid "{rest, plural, one {# other} other {# others}}"
+msgstr "{rest, plural, one {# andere} other {# anderen}}"
 
 #: src/brain/work-knowledge.tsx
 msgid "{rests} · {role}, {team} · week {week}"
@@ -1569,6 +1569,10 @@ msgstr "**Jij:**"
 #: src/workflows/requests/request-parts.tsx
 msgid "+{by}"
 msgstr "+{by}"
+
+#: src/frame/part-words.tsx
+msgid "+{count}"
+msgstr "+{count}"
 
 #: src/brain/brain.ts
 msgid "1 Vision"
@@ -2430,7 +2434,7 @@ msgstr "Alle"
 msgid "All chats"
 msgstr "Alle chats"
 
-#: src/routes/_shell.settings.profile.tsx
+#: src/frame/part-words.tsx
 msgid "All languages"
 msgstr "Alle talen"
 
@@ -4092,6 +4096,10 @@ msgstr "Kies een versie"
 msgid "Choose a workflow"
 msgstr "Kies een workflow"
 
+#: src/frame/part-words.tsx
+msgid "Choose date"
+msgstr "Kies een datum"
+
 #: src/activity/audit-log.tsx
 msgid "Choose dates"
 msgstr "Datums kiezen"
@@ -4177,7 +4185,6 @@ msgid "Clear filters"
 msgstr "Filters wissen"
 
 #: src/frame/part-words.tsx
-#: src/routes/_shell.settings.profile.tsx
 msgid "Clear search"
 msgstr "Zoekopdracht wissen"
 
@@ -5045,6 +5052,11 @@ msgstr "Datum"
 
 #: src/dashboard/runs-widget.tsx
 #: src/settings/ai-spend.tsx
+msgid "Day"
+msgstr "Dag"
+
+#: src/frame/part-words.tsx
+msgctxt "a calendar's grid of one day"
 msgid "Day"
 msgstr "Dag"
 
@@ -6180,6 +6192,11 @@ msgctxt "a figure of the report"
 msgid "Failed"
 msgstr "Mislukt"
 
+#: src/frame/part-words.tsx
+msgctxt "a list row's action"
+msgid "Failed"
+msgstr "Mislukt"
+
 #: src/chat/thread.tsx
 #: src/frame/part-words.tsx
 msgctxt "a step's state"
@@ -7035,6 +7052,14 @@ msgstr "De AI van Grasp werkt met de eigen sleutel van een AI-aanbieder van je o
 msgid "Grasp's chat"
 msgstr "De chat van Grasp"
 
+#: src/settings/staff-access.tsx
+msgid "Grasp's own team can sign in here to help only while Grasp has opened a window, for at most 7 days, and you can end it at any time. Full access: they can do everything their role allows in the whole workspace, not only the onboarding."
+msgstr "Het eigen team van Grasp kan hier alleen inloggen om te helpen zolang Grasp een venster heeft geopend, voor hooguit 7 dagen, en je kunt het op elk moment beëindigen. Volledige toegang: ze kunnen alles wat hun rol toestaat in de hele werkruimte, niet alleen de onboarding."
+
+#: src/settings/staff-access.tsx
+msgid "Grasp's own team can sign in here to help only while Grasp has opened a window, for at most 7 days, and you can end it at any time. Onboarding only: they reach the onboarding alone, and lose access 7 days after Grasp's go."
+msgstr "Het eigen team van Grasp kan hier alleen inloggen om te helpen zolang Grasp een venster heeft geopend, voor hooguit 7 dagen, en je kunt het op elk moment beëindigen. Alleen onboarding: ze bereiken alleen de onboarding en verliezen hun toegang 7 dagen na het go van Grasp."
+
 #: src/settings/backdrop-settings.tsx
 msgid "Grid"
 msgstr "Raster van stippen"
@@ -7131,7 +7156,7 @@ msgstr "Van genoeg mensen gehoord"
 msgid "Hello"
 msgstr "Hallo"
 
-#: src/routes/_shell.settings.profile.tsx
+#: src/frame/part-words.tsx
 msgid "Help translate"
 msgstr "Help vertalen"
 
@@ -8246,6 +8271,7 @@ msgstr "Bekend"
 msgid "Known about your organization"
 msgstr "Bekend over je organisatie"
 
+#: src/frame/part-words.tsx
 #: src/routes/_shell.settings.profile.tsx
 msgid "Language"
 msgstr "Taal"
@@ -8254,11 +8280,11 @@ msgstr "Taal"
 msgid "Language: {name}"
 msgstr "Taal: {name}"
 
-#: src/activity/audit-log.tsx
+#: src/frame/part-words.tsx
 msgid "Last 30 days"
 msgstr "Laatste 30 dagen"
 
-#: src/activity/audit-log.tsx
+#: src/frame/part-words.tsx
 msgid "Last 7 days"
 msgstr "Laatste 7 dagen"
 
@@ -8952,6 +8978,10 @@ msgstr "Maandbudget voor AI"
 msgid "More"
 msgstr "Meer"
 
+#: src/settings/staff-access.tsx
+msgid "More about Grasp staff access"
+msgstr "Meer over toegang voor Grasp-medewerkers"
+
 #: src/onboarding/connect-steps.tsx
 msgid "More about Pulse"
 msgstr "Meer over Pulse"
@@ -9341,7 +9371,7 @@ msgstr "Volgende"
 msgid "Next match"
 msgstr "Volgende treffer"
 
-#: src/activity/audit-log.tsx
+#: src/frame/part-words.tsx
 msgid "Next month"
 msgstr "Volgende maand"
 
@@ -9508,7 +9538,7 @@ msgstr "Nog geen integraties."
 msgid "No job written yet"
 msgstr "Nog geen taak beschreven"
 
-#: src/routes/_shell.settings.profile.tsx
+#: src/frame/part-words.tsx
 msgid "No language found"
 msgstr "Geen taal gevonden"
 
@@ -9603,6 +9633,10 @@ msgstr "Geen verzoeken in {month}"
 #: src/routes/_shell.workflows.requests.tsx
 msgid "No requests in the last twelve months"
 msgstr "Geen verzoeken in de afgelopen twaalf maanden"
+
+#: src/frame/part-words.tsx
+msgid "No results"
+msgstr "Geen resultaten"
 
 #: src/dashboard/report.ts
 msgid "No run asked anyone for a decision."
@@ -9810,6 +9844,10 @@ msgstr "Geen: de provider ervan is verwijderd."
 msgid "None."
 msgstr "Geen."
 
+#: src/settings/workspace-name.tsx
+msgid "Not a PNG, JPEG or WebP picture"
+msgstr "Geen PNG-, JPEG- of WebP-afbeelding"
+
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Not allowed"
@@ -9983,6 +10021,11 @@ msgstr "Nog niet gebruikt"
 #: src/settings/invitations.tsx
 msgid "not valid"
 msgstr "ongeldig"
+
+#: src/frame/part-words.tsx
+msgctxt "a tag typed"
+msgid "not valid"
+msgstr "niet geldig"
 
 #: src/activity/audit-log.tsx
 msgid "Not verified"
@@ -11329,7 +11372,7 @@ msgstr "Praag"
 msgid "Preference"
 msgstr "Voorkeur"
 
-#: src/activity/audit-log.tsx
+#: src/frame/part-words.tsx
 msgid "Presets"
 msgstr "Voorinstellingen"
 
@@ -11337,6 +11380,7 @@ msgstr "Voorinstellingen"
 msgid "Press a line to change it, take out what is wrong, or type what is missing. What you leave in is what counts."
 msgstr "Druk op een regel om hem aan te passen, haal weg wat niet klopt, of typ wat er ontbreekt. Wat je laat staan, telt."
 
+#: src/frame/part-words.tsx
 #: src/settings/invitations.tsx
 msgid "Press Enter to add it."
 msgstr "Druk op Enter om het toe te voegen."
@@ -11365,7 +11409,7 @@ msgstr "Vorige hash"
 msgid "Previous match"
 msgstr "Vorige treffer"
 
-#: src/activity/audit-log.tsx
+#: src/frame/part-words.tsx
 msgid "Previous month"
 msgstr "Vorige maand"
 
@@ -12988,7 +13032,7 @@ msgstr "Integraties doorzoeken"
 msgid "Search Knowledge"
 msgstr "Zoeken in Kennis"
 
-#: src/routes/_shell.settings.profile.tsx
+#: src/frame/part-words.tsx
 msgid "Search languages"
 msgstr "Talen zoeken"
 
@@ -13529,6 +13573,10 @@ msgstr "Zijbalk tonen of verbergen"
 #: src/workflows/requests/request-who.tsx
 msgid "Show people one by one"
 msgstr "Mensen één voor één tonen"
+
+#: src/frame/part-words.tsx
+msgid "Show the choices"
+msgstr "Toon de keuzes"
 
 #: src/settings/ai-providers.tsx
 msgid "Show the models"
@@ -14253,7 +14301,7 @@ msgstr "Gestopt."
 msgid "Such as: look for invoices that are overdue and say which."
 msgstr "Bijvoorbeeld: zoek naar facturen die over de vervaldatum zijn en zeg welke."
 
-#: src/routes/_shell.settings.profile.tsx
+#: src/frame/part-words.tsx
 msgid "Suggested"
 msgstr "Voorgesteld"
 
@@ -15629,7 +15677,7 @@ msgstr "Dit model kan geen antwoord geven dat zo lang is. Kies een ander model, 
 msgid "This model has one level of effort."
 msgstr "Dit model heeft één niveau van inspanning."
 
-#: src/activity/audit-log.tsx
+#: src/frame/part-words.tsx
 #: src/settings/ai-spend.tsx
 #: src/workflows/requests/request-plan.tsx
 msgid "This month"
@@ -15841,7 +15889,6 @@ msgstr "Naar de teamleiders. Alle anderen volgen zodra hun teamleider heeft gesp
 msgid "To these teams"
 msgstr "Naar deze teams"
 
-#: src/activity/audit-log.tsx
 #: src/brain/brain-log.tsx
 #: src/frame/part-words.tsx
 msgid "Today"
@@ -15869,6 +15916,10 @@ msgstr "Morgen"
 #: src/onboarding/setup-steps.tsx
 msgid "Too large to read"
 msgstr "Te groot om te lezen"
+
+#: src/settings/workspace-name.tsx
+msgid "Too large: at most {most}"
+msgstr "Te groot: hooguit {most}"
 
 #: src/pages/page-files.ts
 msgid "Too many files are moving at once. Try again shortly."
@@ -16197,6 +16248,10 @@ msgstr "Niet meer delen"
 #: src/onboarding/no-sender.tsx
 msgid "Until Grasp support sets one, interview links can’t go out by email. Send each one their link by hand from Interviews."
 msgstr "Tot Grasp-support er een instelt, kunnen interviewlinks niet per mail weg. Stuur iedereen zelf zijn link, vanuit Interviews."
+
+#: src/frame/part-words.tsx
+msgid "Up to {most}."
+msgstr "Maximaal {most}."
 
 #: src/activity/audit-words.ts
 msgid "Updated Grasp"

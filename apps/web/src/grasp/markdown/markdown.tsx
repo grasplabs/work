@@ -107,8 +107,9 @@ export interface MarkdownProps {
   /**
    * How a single newline inside a paragraph is drawn. `space`: as CommonMark has it, a space, so a
    * paragraph wrapped by hand reads as one. `line`: a line break, for answers written as short
-   * lines. `auto`: a line break only in a paragraph of short lines (three or more, each under 60
-   * characters, or two or more that each read "Label: value"); any other paragraph runs on.
+   * lines. `auto`: a line break only in a paragraph of short lines (two or more, each under 60
+   * characters or each "Label: value"); any other paragraph runs on. While it is written, a short
+   * line breaks as its newline comes, and nothing drawn apart is drawn back together.
    * @default "space"
    */
   softBreaks?: MarkdownSoftBreaks;
@@ -274,23 +275,41 @@ const SHORT_LINE = 60;
 // A labelled line: a few words, a colon, then its value ("Owner: Dana", "Due date: Friday").
 const LABELLED = /^[^\s:][^:]{0,30}:\s+\S/u;
 
-/** Whether a paragraph's lines are short lines, not prose wrapped by hand (`softBreaks="auto"`). */
-const shortLines = (text: string) => {
+// The start of a labelled line still being written: a few words with no colon yet, or the colon.
+const LABEL_COMING = /^[^\s:][^:]{0,30}(?::\s*)?$/u;
+
+/**
+ * Whether a paragraph's lines are short lines, not prose wrapped by hand (`softBreaks="auto"`): two
+ * or more lines, every one under 60 characters or every one "Label: value". While the answer is
+ * written, its last line still coming counts if it still may: so a paragraph breaks from its first
+ * newline and never runs together again, and prose, whose first line passes 60 before its newline,
+ * never breaks at all. Nothing that was drawn on its own line is ever drawn back onto another.
+ */
+const shortLines = (text: string, writing: boolean) => {
   const lines = text.split("\n").map((line) => line.trim());
   if (lines.length < 2) {
     return false;
   }
-  return (
-    (lines.length >= 3 && lines.every((line) => line.length < SHORT_LINE)) ||
-    lines.every((line) => LABELLED.test(line))
-  );
+  const done = writing ? lines.slice(0, -1) : lines;
+  const coming = writing ? (lines.at(-1) ?? "") : "";
+  const short =
+    done.every((line) => line.length < SHORT_LINE) &&
+    coming.length < SHORT_LINE;
+  const labelled =
+    done.every((line) => LABELLED.test(line)) &&
+    (!writing || LABELLED.test(coming) || LABEL_COMING.test(coming));
+  return short || labelled;
 };
 
 /** The context for one paragraph: whether its single newlines are line breaks. */
 const inParagraph = (node: Paragraph, context: Context): Context => {
   const lineBreaks =
     context.softBreaks === "line" ||
-    (context.softBreaks === "auto" && shortLines(spokenOf(node)));
+    (context.softBreaks === "auto" &&
+      shortLines(
+        spokenOf(node),
+        context.streaming && context.writing === node
+      ));
   return lineBreaks === context.lineBreaks
     ? context
     : { ...context, lineBreaks };

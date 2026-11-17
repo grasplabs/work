@@ -136,10 +136,11 @@ const styles = stylex.create({
     flexShrink: 0,
     color: grasp.muted,
   },
+  // No inset of its own: its heading, its levels' names and its note stand on the model row's
+  // mark, its tick under the model row's chevron, and its rows' fill spans as the model row's does.
   effort: {
     display: "grid",
     minWidth: 0,
-    paddingInline: grasp.space2,
     paddingBlockStart: grasp.space1,
     borderBlockStartWidth: grasp.hairline,
     borderBlockStartStyle: "solid",
@@ -148,6 +149,7 @@ const styles = stylex.create({
   none: {
     margin: 0,
     paddingBlock: grasp.space2,
+    paddingInline: grasp.space2,
     color: grasp.muted,
     fontFamily: grasp.fontSans,
     fontSize: grasp.textXs,

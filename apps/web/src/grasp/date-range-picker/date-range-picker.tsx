@@ -37,7 +37,9 @@ import { Icon, Tick } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { popup, px } from "../tokens/tokens.values";
+import { useWords, withGiven } from "../words/words";
 import { addDays, monthOf } from "./dates";
+import { dateRangePickerWords } from "./words";
 
 type RootProps = ComponentProps<typeof RootPrimitive>;
 
@@ -272,12 +274,6 @@ const useToday = (given?: string, timeZone?: string) => {
 const defaultRangeLabels: [string, string] = ["start", "end"];
 
 /** The default presets' names, when the page gives none. */
-const defaultPresetLabels: [string, string, string, string] = [
-  "Today",
-  "Last 7 days",
-  "Last 30 days",
-  "This month",
-];
 
 /** No presets. */
 const none: DateRangePreset[] = [];
@@ -362,14 +358,29 @@ export const DateRangePicker = ({
   rangeLabels = defaultRangeLabels,
   formatLabels = defaultFormatLabels,
   triggerLabel,
-  presetLabels = defaultPresetLabels,
-  presetsLabel = "Presets",
-  previousLabel = "Previous month",
-  nextLabel = "Next month",
+  presetLabels: presetLabelsGiven,
+  presetsLabel: presetsLabelGiven,
+  previousLabel,
+  nextLabel,
   showOutsideDays,
   today: givenToday,
   ...rest
 }: DateRangePickerProps) => {
+  const {
+    presets: presetsLabel,
+    today: todayLabel,
+    last7,
+    last30,
+    thisMonth,
+  } = withGiven(useWords("dateRangePicker", dateRangePickerWords), {
+    presets: presetsLabelGiven,
+  });
+  const presetLabels = presetLabelsGiven ?? [
+    todayLabel,
+    last7,
+    last30,
+    thisMonth,
+  ];
   const label = nameOf(named, labelDeprecated);
   const today = useToday(givenToday, rest.timeZone);
   const offered =

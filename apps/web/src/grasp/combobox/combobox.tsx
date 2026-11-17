@@ -57,8 +57,10 @@ import { scroll } from "../scroll/scroll";
 import { grasp, media } from "../tokens/tokens.stylex";
 // UI SDK places a popup in pixels: popup-gap and popup-gutter, as the generator writes them.
 import { popup } from "../tokens/tokens.values";
+import { useWords, withGiven } from "../words/words";
 import { listStyles } from "./list.styles";
 import { listMarker } from "./list.stylex";
+import { comboboxNotices, comboboxWords } from "./words";
 
 export type ComboboxSize = "sm" | "md" | "lg";
 
@@ -328,8 +330,8 @@ const Options = ({ items }: { items: ListData<unknown> }) =>
 export const Combobox = ({
   items,
   size = "md",
-  empty = "No results",
-  triggerLabel = "Show the choices",
+  empty: emptyGiven,
+  triggerLabel: triggerLabelGiven,
   placeholder,
   style: styleProp,
   layout,
@@ -338,6 +340,10 @@ export const Combobox = ({
   onValueChange,
   ...options
 }: ComboboxProps) => {
+  const { empty, trigger: triggerLabel } = withGiven(
+    useWords("combobox", comboboxWords),
+    { empty: emptyGiven, trigger: triggerLabelGiven }
+  );
   // The value is always an item's: a value from outside the list (an agent's, or code's) is refused,
   // so whoever set it hears that it failed.
   const known = valuesOf(items);
@@ -349,7 +355,7 @@ export const Combobox = ({
       details.cancel();
       // An agent hears why, in words.
       if (details.source === "agent") {
-        throw new Error(`${next} is not one of the choices`);
+        throw new Error(comboboxNotices.notChoice(next));
       }
       return;
     }
@@ -380,7 +386,7 @@ export const Combobox = ({
     }
     for (const start of [options.value, options.defaultValue]) {
       if (start !== null && start !== undefined && !known.has(start)) {
-        console.error(`Combobox: ${start} is not one of its items.`);
+        console.error(comboboxNotices.notItem(start));
       }
     }
   }, [known, options.value, options.defaultValue]);

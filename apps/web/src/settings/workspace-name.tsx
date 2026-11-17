@@ -246,6 +246,7 @@ export const LogoField = ({
   const core = useCore();
   const router = useRouter();
   const hint = useLogoHint();
+  const most = formatBytes(organizationLogoMaxBytes);
   // What core last took: the page's read catches up behind it.
   const [saved, setSaved] = useState(logo);
   const kept = (organization: Organization): void => {
@@ -314,10 +315,12 @@ export const LogoField = ({
             failed: t`Could not save`,
             retry: t`Try again`,
             how: t`Click or drop a picture.`,
-            refused: (file, reason) =>
+            // One short line under the well, with the limit in it: the
+            // file's own name only makes the line wrap.
+            refused: (_file, reason) =>
               reason === "file-too-large"
-                ? t`${file} is too large.`
-                : t`${file} is not a kind of picture this takes.`,
+                ? t`Too large: at most ${most}`
+                : t`Not a PNG, JPEG or WebP picture`,
           }}
         />
       )}
