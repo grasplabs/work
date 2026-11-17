@@ -1,12 +1,16 @@
+import type { AuditRecord } from "@grasp-os/shared/audit-log";
 import { eventSourcePath } from "@grasp-os/shared/event-source-path";
 import { eventSourceHeaders } from "@grasp-os/shared/event-sources";
 import type { EventSource } from "@grasp-os/shared/event-sources";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useRouter } from "@tanstack/react-router";
-import { useState } from "react";
+import { Link as RouterLink, useRouter } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 
-import { formatDate, formatList } from "../format.ts";
+import { useCopy } from "../copy.ts";
+import type { CoreConnection } from "../core-connection.ts";
+import { formatDateTime } from "../format.ts";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,6 +22,7 @@ import {
 import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
+import { CodeBlock } from "../grasp/code-block/index.ts";
 import { CopyField } from "../grasp/copy-field/index.ts";
 import {
   Dialog,
@@ -27,7 +32,6 @@ import {
   DialogDescription,
   DialogFooter,
   DialogTitle,
-  DialogTrigger,
 } from "../grasp/dialog/index.ts";
 import {
   DropdownMenu,
@@ -38,12 +42,12 @@ import {
 } from "../grasp/dropdown-menu/index.ts";
 import {
   Empty,
+  EmptyContent,
   EmptyDescription,
   EmptyHeader,
-  EmptyTitle,
 } from "../grasp/empty/index.ts";
 import { Field, FieldError, FieldLabel } from "../grasp/field/index.ts";
-import { Edit, More, Plus, Trash } from "../grasp/icons/index.ts";
+import { Copy, Edit, More, Plus, Tick, Trash } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
 import {
   Item,
@@ -53,30 +57,36 @@ import {
   ItemGroup,
   ItemTitle,
 } from "../grasp/item/index.ts";
-import { Link } from "../grasp/link/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
+import {
+  Sheet,
+  SheetBody,
+  SheetDescription,
+  SheetContent,
+  SheetTitle,
+} from "../grasp/sheet/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { useCore } from "../use-core.ts";
 import { SectionNotLoaded, SettingsStack } from "./section.tsx";
 
-// Settings › Webhooks, for the organization's own admins: the event
-// sources outside systems send events to (core's event-sources.ts), one
-// per sender ("Stripe", "Shop system"), as rows of one card: its name,
-// when it was made, its URL to copy, and a menu to rotate, revoke or
-// delete its secret, each asking first. A new source is made in a dialog.
-// A secret is shown once, as core answers it on create or rotate, in a
-// dialog kept above the list (with how a sender signs with it), so reading
-// the list again never takes it away. The card stays mounted whatever its
-// list's read came to: a read that fails says so in the list's place.
-// Builders start workflows on a source's events from a workflow's Triggers
-// tab.
+// Settings › Incoming events, for the organization's own admins: the event
+// sources outside systems send events to (core's event-sources.ts), one per
+// sender ("Stripe", "Shop system"). One compact card, a row per source: its
+// name, its secret's state only when it needs someone (revoked), how many
+// workflows start on it, its URL to copy and a menu to rotate, revoke or
+// delete its secret, each asking first. A source opens beside the list with
+// what it takes to set the sender up, the workflows it starts and the runs
+// it started. A new source is made in two steps of one dialog: its name,
+// then what to give the sender, the secret shown that once. Core keeps no
+// record of deliveries, so nothing here speaks of them.
 
 const styles = stylex.create({
-  // The URL, under the source's name, as wide as the row lets it.
-  url: { marginBlockStart: grasp.space1, maxWidth: "100%" },
   form: { display: "grid", gap: grasp.space3 },
+  rowEnd: { display: "flex", alignItems: "center", gap: grasp.space1 },
 });
 
 /**
@@ -86,22 +96,76 @@ const styles = stylex.create({
 const urlOf = (token: string): string =>
   `${globalThis.location.origin}${eventSourcePath}/${token}`;
 
-/** How a sender signs a delivery, by the headers core reads. */
-const SigningNote = () => {
-  const headers = formatList(Object.values(eventSourceHeaders));
-  const example = '{ "type": "payment.paid", "data": { … } }';
+/** The workflows each source starts, by the source's ID. */
+export type SourceStarts = Readonly<
+  Record<string, readonly { id: string; name: string }[]>
+>;
+
+/**
+ * The workflows each source starts, as the admin sees them: every workflow's
+ * triggers, read once for the page, the webhook ones kept by their source.
+ */
+export const sourceStartsOf = async (
+  core: Pick<CoreConnection, "withSession">
+): Promise<Loaded<SourceStarts>> =>
+  await loadFromCore(core, async (session) => {
+    const workflows = await session.workflowResources.list();
+    const triggered = await Promise.all(
+      workflows.map(async (workflow) => ({
+        workflow,
+        triggers: await session.workflowResources.triggers.list(workflow.id),
+      }))
+    );
+    const starts: Record<string, { id: string; name: string }[]> = {};
+    for (const { workflow, triggers } of triggered) {
+      const sources = new Set(
+        triggers.flatMap(({ source }) => (source === null ? [] : [source.id]))
+      );
+      for (const source of sources) {
+        starts[source] = [
+          ...(starts[source] ?? []),
+          { id: workflow.id, name: workflow.name },
+        ];
+      }
+    }
+    return starts;
+  });
+
+/**
+ * How a sender signs and sends one event, in the shell: the three headers
+ * Standard Webhooks names, the signature the base64 HMAC-SHA256 of
+ * "<id>.<timestamp>.<body>" keyed with the secret's key (the part after
+ * `whsec_`, in base64). With the secret when it is shown; a stand-in
+ * otherwise.
+ */
+const recipeOf = (url: string, secret: string | undefined): string =>
+  [
+    `SECRET='${secret ?? "whsec_…"}'`,
+    `URL='${url}'`,
+    `BODY='{"type":"payment.paid","data":{"invoice":"INV-42"}}'`,
+    `ID="msg_$(uuidgen)"`,
+    "TS=$(date +%s)",
+    `KEY=$(printf %s "\${SECRET#whsec_}" | base64 -d | xxd -p -c 256)`,
+    `SIG=$(printf '%s.%s.%s' "$ID" "$TS" "$BODY" | openssl dgst -sha256 -mac HMAC -macopt "hexkey:$KEY" -binary | base64)`,
+    `curl -X POST "$URL" \\`,
+    `  -H "content-type: application/json" \\`,
+    `  -H "${eventSourceHeaders.id}: $ID" \\`,
+    `  -H "${eventSourceHeaders.timestamp}: $TS" \\`,
+    `  -H "${eventSourceHeaders.signature}: v1,$SIG" \\`,
+    `  --data "$BODY"`,
+  ].join("\n");
+
+/** How a sender sends one event: the recipe, to copy. */
+const Recipe = ({ url, secret }: { url: string; secret?: string }) => {
+  const { t } = useLingui();
   return (
-    <Text size="sm" tone="muted">
-      <Trans>
-        The sender POSTs each event as JSON, with its type and data (
-        <code>{example}</code>), signed with the secret as{" "}
-        <Link external href="https://www.standardwebhooks.com">
-          Standard Webhooks
-        </Link>{" "}
-        describes, in the headers {headers}. A delivery more than five minutes
-        old is refused.
-      </Trans>
-    </Text>
+    <CodeBlock
+      code={recipeOf(url, secret)}
+      copyLabel={t`Copy the example`}
+      language="bash"
+      languageLabel={t`Send one event`}
+      lineNumbers={false}
+    />
   );
 };
 
@@ -171,32 +235,17 @@ const ConfirmChange = ({
   );
 };
 
-/** One source: its name, its URL, and its menu to rotate, revoke or delete. */
-const SourceRow = ({
-  source,
-  onSecret,
-  onChanged,
-}: {
-  source: EventSource;
-  onSecret: (secret: string) => void;
-  onChanged: () => Promise<void>;
-}) => {
-  const { t } = useLingui();
+/** What may be done to a source's secret, and the source itself, each asking first. */
+const useSourceChanges = (
+  source: EventSource,
+  onSecret: (secret: string) => void,
+  onChanged: () => Promise<void>
+) => {
   const { busy, failure, run } = useCoreAction();
   const [asking, setAsking] = useState<SourceChange>();
-  const { name } = source;
-  const created = formatDate(source.createdAt);
-  const url =
-    source.delivery === null ? undefined : urlOf(source.delivery.token);
   const revoked = source.delivery?.secret === "revoked";
-
-  const change = async (action: Parameters<typeof run>[0]): Promise<void> => {
-    await run(action);
-    // Read again whatever came of it.
-    await onChanged();
-  };
-  const confirmed = (which: SourceChange): void => {
-    void change(async (session) => {
+  const confirmed = async (which: SourceChange): Promise<void> => {
+    await run(async (session) => {
       const { sources } = session.workflowResources;
       if (which === "rotate") {
         const { secret } = await sources.rotateSecret(source.id);
@@ -207,164 +256,512 @@ const SourceRow = ({
         await sources.delete(source.id);
       }
     });
+    // Read again whatever came of it.
+    await onChanged();
   };
+  const confirmation =
+    asking === undefined ? null : (
+      <ConfirmChange
+        change={asking}
+        name={source.name}
+        onConfirm={() => {
+          void confirmed(asking);
+        }}
+        onOpenChange={(open) => {
+          if (!open) {
+            setAsking(undefined);
+          }
+        }}
+        open
+        revoked={revoked}
+      />
+    );
+  return { busy, failure, revoked, handleAsk: setAsking, confirmation };
+};
 
+/** A source's menu: rotate or make its secret, revoke it, delete the source. */
+const SourceMenu = ({
+  name,
+  revoked,
+  busy,
+  onAsk,
+}: {
+  name: string;
+  revoked: boolean;
+  busy: boolean;
+  onAsk: (change: SourceChange) => void;
+}) => {
+  const { t } = useLingui();
   return (
-    <Item size="sm">
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label={t`More for ${name}`}
+        disabled={busy}
+        icon={More}
+        size="sm"
+        variant="ghost"
+      />
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem
+          icon={Edit}
+          onSelect={() => {
+            onAsk("rotate");
+          }}
+        >
+          {revoked ? t`Make a new secret` : t`Rotate the secret`}
+        </DropdownMenuItem>
+        {revoked ? null : (
+          <DropdownMenuItem
+            onSelect={() => {
+              onAsk("revoke");
+            }}
+          >
+            {t`Revoke the secret`}
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          icon={Trash}
+          onSelect={() => {
+            onAsk("delete");
+          }}
+          variant="danger"
+        >
+          {t`Delete`}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
+
+/** How many workflows a source starts, said in a row; nothing when they couldn't be read. */
+const useStartsLine = (count: number | undefined): string | undefined => {
+  const { t } = useLingui();
+  if (count === undefined) {
+    return undefined;
+  }
+  return count === 0
+    ? t`Starts no workflow yet`
+    : t`${plural(count, { one: "Starts # workflow", other: "Starts # workflows" })}`;
+};
+
+/** One source: its name, its state when it needs someone, how many workflows it starts, its URL to copy, its menu. */
+const SourceRow = ({
+  source,
+  starts,
+  onOpen,
+  onSecret,
+  onChanged,
+}: {
+  source: EventSource;
+  starts: number | undefined;
+  onOpen: () => void;
+  onSecret: (secret: string) => void;
+  onChanged: () => Promise<void>;
+}) => {
+  const { t } = useLingui();
+  const { copied, copy } = useCopy();
+  const changes = useSourceChanges(source, onSecret, onChanged);
+  const { name } = source;
+  const url =
+    source.delivery === null ? undefined : urlOf(source.delivery.token);
+  const line = useStartsLine(starts);
+  return (
+    <Item size="xs">
       <ItemContent>
         <ItemTitle>
           {name}{" "}
-          {revoked ? (
+          {changes.revoked ? (
             <Badge size="sm" tone="attention">{t`Secret revoked`}</Badge>
           ) : null}
         </ItemTitle>
-        <ItemDescription>
-          {revoked
-            ? t`Created ${created}. It takes no event until you make it a new secret.`
-            : t`Created ${created}`}
-        </ItemDescription>
-        {url === undefined ? null : (
-          <CopyField
-            aria-label={t`Copy the URL of ${name}`}
-            layout={styles.url}
-            value={url}
-          />
+        {line === undefined ? null : <ItemDescription>{line}</ItemDescription>}
+        {changes.failure === undefined ? null : (
+          <Alert tone="danger">{changes.failure}</Alert>
         )}
-        {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
       </ItemContent>
       <ItemActions>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            aria-label={t`More for ${name}`}
-            disabled={busy}
-            icon={More}
-            size="sm"
-            variant="ghost"
-          />
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              icon={Edit}
-              onSelect={() => {
-                setAsking("rotate");
+        <div {...stylex.props(styles.rowEnd)}>
+          {url === undefined ? null : (
+            <Button
+              aria-label={copied ? t`Copied` : t`Copy the URL of ${name}`}
+              icon={copied ? Tick : Copy}
+              onClick={() => {
+                void copy(url);
               }}
-            >
-              {revoked ? t`Make a new secret` : t`Rotate the secret`}
-            </DropdownMenuItem>
-            {revoked ? null : (
-              <DropdownMenuItem
-                onSelect={() => {
-                  setAsking("revoke");
-                }}
-              >
-                {t`Revoke the secret`}
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              icon={Trash}
-              onSelect={() => {
-                setAsking("delete");
-              }}
-              variant="danger"
-            >
-              {t`Delete`}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        {asking === undefined ? null : (
-          <ConfirmChange
-            change={asking}
+              size="sm"
+              variant="ghost"
+            />
+          )}
+          <Button onClick={onOpen} size="sm" variant="ghost">
+            {t`Details`}
+          </Button>
+          <SourceMenu
+            busy={changes.busy}
             name={name}
-            onConfirm={() => {
-              confirmed(asking);
-            }}
-            onOpenChange={(open) => {
-              if (!open) {
-                setAsking(undefined);
-              }
-            }}
-            open
-            revoked={revoked}
+            onAsk={changes.handleAsk}
+            revoked={changes.revoked}
           />
-        )}
+        </div>
+        {changes.confirmation}
       </ItemActions>
     </Item>
   );
 };
 
-/** A new source, in a dialog from the card's head: its name. */
-const AddSource = ({
+/** The runs a source started, as the audit log keeps them: its newest first. */
+interface StartedRun {
+  workflowId: string;
+  at: string;
+}
+
+/** The newest runs at most to show. */
+const runsShown = 10;
+
+/** The run a record says source `sourceId` started, if it is one. */
+const runOf = (record: AuditRecord, sourceId: string): StartedRun[] => {
+  const { event } = record;
+  const workflowId = event?.target?.id;
+  if (workflowId === undefined || event?.detail?.source !== sourceId) {
+    return [];
+  }
+  return [{ workflowId, at: record.receivedAt }];
+};
+
+/**
+ * The runs source `sourceId` started, read from the audit log's
+ * `workflow.start.admitted` events, newest first, `pages` stretches of it
+ * at a time; and where an older stretch would start, if any is left.
+ */
+const startedRuns = async (
+  core: Pick<CoreConnection, "withSession">,
+  sourceId: string,
+  before?: number
+): Promise<{ runs: StartedRun[]; next: number | null }> =>
+  await core.withSession(async ({ audit }) => {
+    const runs: StartedRun[] = [];
+    let next: number | null = before ?? null;
+    let first = true;
+    // A few stretches at most per look: each page reads a bounded part of the log.
+    for (let page = 0; page < 5 && runs.length < runsShown; page += 1) {
+      if (!first && next === null) {
+        break;
+      }
+      first = false;
+      // oxlint-disable-next-line no-await-in-loop -- each page goes on from the one before
+      const read = await audit.search(
+        { action: "workflow.start.admitted" },
+        next ?? undefined
+      );
+      runs.push(...read.records.flatMap((record) => runOf(record, sourceId)));
+      ({ next } = read);
+    }
+    return { runs: runs.slice(0, runsShown), next };
+  });
+
+/** What reading a source's runs came to. */
+type RunsRead =
+  | { state: "reading" }
+  | { state: "read"; runs: StartedRun[] }
+  | { state: "failed" };
+
+/**
+ * Reads the runs source `sourceId` started into `onRead`, while `current`
+ * is live. Outside the component, as the React Compiler can't compile `try`.
+ */
+const readRuns = async (
+  core: Pick<CoreConnection, "withSession">,
+  sourceId: string,
+  current: { live: boolean },
+  onRead: (read: RunsRead) => void
+): Promise<void> => {
+  let read: RunsRead;
+  try {
+    const { runs } = await startedRuns(core, sourceId);
+    read = { state: "read", runs };
+  } catch {
+    read = { state: "failed" };
+  }
+  if (current.live) {
+    onRead(read);
+  }
+};
+
+/** The runs a source started, newest first, read as it opens. */
+const RecentRuns = ({
+  sourceId,
+  names,
+}: {
+  sourceId: string;
+  names: ReadonlyMap<string, string>;
+}) => {
+  const { t } = useLingui();
+  const core = useCore();
+  const [read, setRead] = useState<RunsRead>({ state: "reading" });
+  useEffect(() => {
+    const current = { live: true };
+    void readRuns(core, sourceId, current, setRead);
+    return () => {
+      current.live = false;
+    };
+  }, [core, sourceId]);
+  if (read.state === "reading") {
+    return <Text tone="muted">{t`Reading the runs…`}</Text>;
+  }
+  if (read.state === "failed") {
+    return <Text tone="muted">{t`The runs couldn't be read.`}</Text>;
+  }
+  if (read.runs.length === 0) {
+    return <Text tone="muted">{t`No run started from it lately.`}</Text>;
+  }
+  return (
+    <ItemGroup aria-label={t`Recent runs`} separated>
+      {read.runs.map((run) => (
+        <Item key={`${run.workflowId}-${run.at}`} size="xs">
+          <ItemContent>
+            <ItemTitle>
+              <RouterLink
+                params={{ workflow: run.workflowId }}
+                search={{ view: "runs" }}
+                to="/workflows/$workflow"
+              >
+                {names.get(run.workflowId) ?? t`A workflow`}
+              </RouterLink>
+            </ItemTitle>
+            <ItemDescription>{formatDateTime(run.at)}</ItemDescription>
+          </ItemContent>
+        </Item>
+      ))}
+    </ItemGroup>
+  );
+};
+
+/**
+ * A source, opened beside the list: what the sender needs (its URL, its
+ * secret's state and how to sign with it), the workflows it starts, and
+ * the runs it started.
+ */
+const SourceDetails = ({
+  source,
+  starts,
   onSecret,
   onChanged,
 }: {
+  source: EventSource;
+  starts: readonly { id: string; name: string }[] | undefined;
   onSecret: (secret: string) => void;
   onChanged: () => Promise<void>;
 }) => {
   const { t } = useLingui();
+  const changes = useSourceChanges(source, onSecret, onChanged);
+  const url =
+    source.delivery === null ? undefined : urlOf(source.delivery.token);
+  const names = new Map((starts ?? []).map(({ id, name }) => [id, name]));
+  return (
+    <SettingsStack>
+      <SectionCard
+        actions={
+          <Button
+            onClick={() => {
+              changes.handleAsk("rotate");
+            }}
+            size="sm"
+            variant="ghost"
+          >
+            {changes.revoked ? t`Make a new secret` : t`Rotate the secret`}
+          </Button>
+        }
+        density="compact"
+        headingLevel={3}
+        title={t`Setup`}
+      >
+        <SettingsStack>
+          {url === undefined ? null : (
+            <CopyField aria-label={t`Copy the URL`} value={url} />
+          )}
+          {changes.revoked ? (
+            <Alert tone="attention">
+              {t`The secret is revoked: nothing this source sends starts a workflow until you make it a new one.`}
+            </Alert>
+          ) : null}
+          {url === undefined ? null : <Recipe url={url} />}
+          {changes.failure === undefined ? null : (
+            <Alert tone="danger">{changes.failure}</Alert>
+          )}
+        </SettingsStack>
+      </SectionCard>
+      <SectionCard
+        density="compact"
+        flush={starts !== undefined && starts.length > 0}
+        headingLevel={3}
+        title={t`Workflows it starts`}
+      >
+        {starts === undefined ? (
+          <Text tone="muted">{t`The workflows couldn't be read.`}</Text>
+        ) : null}
+        {starts?.length === 0 ? (
+          <Text tone="muted">
+            {t`None yet: a workflow starts on its events from the workflow's Triggers tab.`}
+          </Text>
+        ) : null}
+        {starts !== undefined && starts.length > 0 ? (
+          <ItemGroup aria-label={t`Workflows it starts`} separated>
+            {starts.map((workflow) => (
+              <Item key={workflow.id} size="xs">
+                <ItemContent>
+                  <ItemTitle>
+                    <RouterLink
+                      params={{ workflow: workflow.id }}
+                      to="/workflows/$workflow"
+                    >
+                      {workflow.name}
+                    </RouterLink>
+                  </ItemTitle>
+                </ItemContent>
+              </Item>
+            ))}
+          </ItemGroup>
+        ) : null}
+      </SectionCard>
+      <SectionCard density="compact" headingLevel={3} title={t`Recent runs`}>
+        <RecentRuns names={names} sourceId={source.id} />
+      </SectionCard>
+      {changes.confirmation}
+    </SettingsStack>
+  );
+};
+
+/** A secret core answered once, with the warning that it is shown this once. */
+const SecretOnce = ({ secret }: { secret: string }) => {
+  const { t } = useLingui();
+  return (
+    <>
+      {/* Mounted with each secret, so Copied never carries over. */}
+      <CopyField key={secret} aria-label={t`Copy the secret`} value={secret} />
+      <Alert tone="attention">
+        {t`Copy it now: you won't see it again. Lost, it can only be replaced.`}
+      </Alert>
+    </>
+  );
+};
+
+/**
+ * A new source, in two steps of one dialog: its name, after its sender;
+ * then what to give the sender, the secret shown this once. Kept mounted
+ * above the list, so a read of the list after it, failed or empty, never
+ * takes the secret away.
+ */
+const AddSource = ({
+  open,
+  onOpenChange,
+  onChanged,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onChanged: () => Promise<void>;
+}) => {
+  const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
-  const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
+  const [made, setMade] = useState<{ url: string; secret: string }>();
+  const close = (): void => {
+    onOpenChange(false);
+    setName("");
+    setMade(undefined);
+  };
   const add = async (): Promise<void> => {
     const created = await run(
       async (session) =>
         await session.workflowResources.sources.create({ name: name.trim() })
     );
     if (created !== undefined) {
-      setName("");
-      setOpen(false);
-      onSecret(created.secret);
+      const token = created.source.delivery?.token;
+      setMade({
+        url: token === undefined ? "" : urlOf(token),
+        secret: created.secret,
+      });
     }
     await onChanged();
   };
   return (
-    <Dialog onOpenChange={setOpen} open={open}>
-      <DialogTrigger icon={Plus} size="sm">
-        {t`Add a source`}
-      </DialogTrigger>
-      <DialogContent closeLabel={t`Close`}>
-        <DialogTitle>{t`Add a source`}</DialogTitle>
-        <DialogDescription>
-          {t`One source per sender: it gets its own URL and secret.`}
-        </DialogDescription>
-        <DialogBody>
-          <form
-            aria-label={t`New source`}
-            id="new-source"
-            onSubmit={(submitted) => {
-              submitted.preventDefault();
-              void add();
-            }}
-            {...stylex.props(styles.form)}
-          >
-            <Field invalid={failure !== undefined}>
-              <FieldLabel>{t`Named after its sender`}</FieldLabel>
-              <Input
-                maxLength={80}
-                onValueChange={setName}
-                placeholder="Stripe"
-                required
-                value={name}
-              />
-              {failure === undefined ? null : (
-                <FieldError match>{failure}</FieldError>
-              )}
-            </Field>
-          </form>
-        </DialogBody>
-        <DialogFooter>
-          <DialogAction>{t`Cancel`}</DialogAction>
-          <Button disabled={busy} form="new-source" type="submit" variant="ink">
-            {t`Add the source`}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
+    <Dialog
+      // Once the secret shows, only Done takes it away: never a stray press beside it.
+      dismissible={made === undefined}
+      onOpenChange={(next) => {
+        if (!next) {
+          close();
+        }
+      }}
+      open={open}
+    >
+      {made === undefined ? (
+        <DialogContent closeLabel={t`Close`}>
+          <DialogTitle>{t`Add a source`}</DialogTitle>
+          <DialogDescription>
+            {t`Name it after the system that sends the events.`}
+          </DialogDescription>
+          <DialogBody>
+            <form
+              aria-label={t`Add a source`}
+              id="new-source"
+              onSubmit={(submitted) => {
+                submitted.preventDefault();
+                void add();
+              }}
+              {...stylex.props(styles.form)}
+            >
+              <Field invalid={failure !== undefined}>
+                <FieldLabel>{t`Name`}</FieldLabel>
+                <Input
+                  maxLength={80}
+                  onValueChange={setName}
+                  placeholder="Stripe"
+                  required
+                  value={name}
+                />
+                {failure === undefined ? null : (
+                  <FieldError match>{failure}</FieldError>
+                )}
+              </Field>
+            </form>
+          </DialogBody>
+          <DialogFooter>
+            <DialogAction>{t`Cancel`}</DialogAction>
+            <Button
+              disabled={busy}
+              form="new-source"
+              type="submit"
+              variant="ink"
+            >
+              {t`Next`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      ) : (
+        <DialogContent closeLabel={t`Close`}>
+          <DialogTitle>{t`Give this to the sender`}</DialogTitle>
+          <DialogDescription>
+            {t`It sends each event to the URL, signed with the secret.`}
+          </DialogDescription>
+          <DialogBody>
+            <SettingsStack>
+              <CopyField aria-label={t`Copy the URL`} value={made.url} />
+              <SecretOnce secret={made.secret} />
+              <Recipe secret={made.secret} url={made.url} />
+            </SettingsStack>
+          </DialogBody>
+          <DialogFooter>
+            <DialogAction variant="ink">{t`Done`}</DialogAction>
+          </DialogFooter>
+        </DialogContent>
+      )}
     </Dialog>
   );
 };
 
 /**
- * A secret core answered once: shown with the way to copy it, and how a
- * sender signs with it, until it is closed on purpose.
+ * A secret core answered once on a rotation: shown with the way to copy it
+ * and how the sender signs with it, until it is closed on purpose.
  */
 const SecretDialog = ({
   secret,
@@ -386,22 +783,13 @@ const SecretDialog = ({
       open={secret !== undefined}
     >
       <DialogContent closeLabel={t`Close`}>
-        <DialogTitle>{t`The source's secret`}</DialogTitle>
+        <DialogTitle>{t`The new secret`}</DialogTitle>
         <DialogDescription>
-          {t`The sender signs every event with it, so Grasp can tell an event is theirs.`}
+          {t`Give it to the sender: it signs every event with it.`}
         </DialogDescription>
         <DialogBody>
           <SettingsStack>
-            {/* Mounted with each secret, so Copied never carries over. */}
-            <CopyField
-              key={secret}
-              aria-label={t`Copy the secret`}
-              value={secret ?? ""}
-            />
-            <Alert tone="attention">
-              {t`Copy it now: you won't see it again. Lost, it can only be replaced.`}
-            </Alert>
-            <SigningNote />
+            {secret === undefined ? null : <SecretOnce secret={secret} />}
           </SettingsStack>
         </DialogBody>
         <DialogFooter>
@@ -414,26 +802,47 @@ const SecretDialog = ({
 
 /**
  * The organization's event sources, for an admin, as their list's read
- * came to (`page`): the list, or why it couldn't be read, in its place.
+ * came to (`page`), with the workflows each starts (`starts`): the list, or
+ * why it couldn't be read, in its place.
  */
 export const EventSourcesSettings = ({
   page,
+  starts,
 }: {
   page: Loaded<readonly EventSource[]>;
+  starts: Loaded<SourceStarts>;
 }) => {
   const { t } = useLingui();
   const router = useRouter();
   // A secret as core just answered it: kept here, above the list, so
   // reading it again never takes the secret away unseen.
   const [secret, setSecret] = useState<string>();
+  const [opened, setOpened] = useState<string>();
+  const [adding, setAdding] = useState(false);
+  const addButton = (variant: "quiet" | "ink") => (
+    <Button
+      icon={Plus}
+      onClick={() => {
+        setAdding(true);
+      }}
+      size="sm"
+      variant={variant}
+    >
+      {t`Add a source`}
+    </Button>
+  );
   const changed = async (): Promise<void> => {
     await router.invalidate({ sync: true });
   };
+  const startsOf = (id: string) =>
+    starts.state === "ready" ? (starts.data[id] ?? []) : undefined;
+  const sources = page.state === "ready" ? page.data : [];
+  const open = sources.find(({ id }) => id === opened);
   return (
     <SectionCard
-      actions={<AddSource onChanged={changed} onSecret={setSecret} />}
+      actions={sources.length > 0 ? addButton("quiet") : null}
       density="compact"
-      description={t`Where outside systems send events, such as a payment that came in. Give each sender its source's URL and secret; workflows start on its events from their Triggers tab.`}
+      description={t`Outside systems send events here; workflows start on them.`}
       flush
       title={t`Sources`}
     >
@@ -443,29 +852,60 @@ export const EventSourcesSettings = ({
         }}
         secret={secret}
       />
+      <AddSource onChanged={changed} onOpenChange={setAdding} open={adding} />
       {page.state === "ready" ? null : <SectionNotLoaded page={page} />}
-      {page.state === "ready" && page.data.length === 0 ? (
+      {page.state === "ready" && sources.length === 0 ? (
         <Empty size="section">
           <EmptyHeader>
-            <EmptyTitle>{t`No source yet`}</EmptyTitle>
             <EmptyDescription>
-              {t`Add one for each system that sends Grasp events.`}
+              {t`Add a source for each system that sends Grasp events.`}
             </EmptyDescription>
           </EmptyHeader>
+          <EmptyContent>{addButton("ink")}</EmptyContent>
         </Empty>
       ) : null}
-      {page.state === "ready" && page.data.length > 0 ? (
+      {sources.length > 0 ? (
         <ItemGroup aria-label={t`Sources`} separated>
-          {page.data.map((source) => (
+          {sources.map((source) => (
             <SourceRow
               key={source.id}
               onChanged={changed}
+              onOpen={() => {
+                setOpened(source.id);
+              }}
               onSecret={setSecret}
               source={source}
+              starts={startsOf(source.id)?.length}
             />
           ))}
         </ItemGroup>
       ) : null}
+      <Sheet
+        size="md"
+        onOpenChange={(next) => {
+          if (!next) {
+            setOpened(undefined);
+          }
+        }}
+        open={open !== undefined}
+      >
+        <SheetContent>
+          <SheetTitle>{open?.name ?? ""}</SheetTitle>
+          <SheetDescription>
+            {t`What its sender needs, and what it starts.`}
+          </SheetDescription>
+          <SheetBody>
+            {open === undefined ? null : (
+              <SourceDetails
+                onChanged={changed}
+                onSecret={setSecret}
+                source={open}
+                starts={startsOf(open.id)}
+              />
+            )}
+          </SheetBody>
+        </SheetContent>
+      </Sheet>
     </SectionCard>
   );
 };

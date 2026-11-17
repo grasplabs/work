@@ -27,6 +27,8 @@ import { PageBar } from "./bar";
 import type { AppShellCrumb } from "./bar";
 import { CardLine } from "./card-line";
 import { cardLine } from "./card-line.stylex";
+import type { PanelPlacement } from "./float-window";
+import type { PanelPosition } from "./floating";
 import { FOCUSABLE, placeOf } from "./focus-place";
 import { Panels, ShellCoverContext } from "./panels";
 import type { Cover } from "./panels";
@@ -185,12 +187,39 @@ export interface AppShellProps {
    */
   panelsToggleLabel?: string;
   /**
-   * How wide the panels are, in pixels. Keep it in your own state with `onPanelWidthChange`.
-   * @default 416
+   * How wide the panels are, in pixels, docked or floating. Keep it in your own state with
+   * `onPanelWidthChange`. Unset, 416 docked and 400 floating.
    */
   panelWidth?: number;
   /** Runs as the panels are resized, by pointer or keys, with their new width in pixels. */
   onPanelWidthChange?: (width: number) => void;
+  /**
+   * Where the panels stand: beside the page (`docked`), or over it as a window the person moves by
+   * its head and resizes from its start edge and its top (`floating`), kept inside the shell. The
+   * same panels either way: switching never draws them anew. On a phone, floating falls back to
+   * the panels over the window, as docked does. Keep it in your own state with
+   * `onPanelPlacementChange`; `AppShellPanelHead` gives the person the switch.
+   * @default "docked"
+   */
+  panelPlacement?: PanelPlacement;
+  /** Runs when the person switches the placement (`AppShellPanelHead`'s control), with the new one. */
+  onPanelPlacementChange?: (placement: PanelPlacement) => void;
+  /**
+   * Where the floating window stands, in pixels: its end edge `x` from the shell's end, its foot `y`
+   * from the shell's foot, so it keeps to its corner as the window resizes. Unset, its first place:
+   * the bottom end corner, the shell's margins in. Keep it in your own state with
+   * `onPanelPositionChange`; nothing in the shell stores it.
+   */
+  panelPosition?: PanelPosition;
+  /** Runs as the floating window is moved, by its head's drag or its arrow keys, with its new place. */
+  onPanelPositionChange?: (position: PanelPosition) => void;
+  /**
+   * How tall the floating window is, in pixels. Unset, 560, never more than the shell has. Keep it
+   * in your own state with `onPanelHeightChange`.
+   */
+  panelHeight?: number;
+  /** Runs as the floating window is resized from its top, by pointer or keys, with its new height. */
+  onPanelHeightChange?: (height: number) => void;
   /**
    * The least the panels get, in pixels.
    * @default 340
@@ -1191,9 +1220,6 @@ const PanelsToggle = ({
   </span>
 );
 
-/** The panels' width when the host gives none: the product's chat, docked. */
-const PANEL_WIDTH = 416;
-
 type CardProps = Pick<
   AppShellProps,
   | "children"
@@ -1663,8 +1689,14 @@ export const AppShell = ({
   panelsOpen,
   onPanelsShown,
   onPanelsGone,
-  panelWidth = PANEL_WIDTH,
+  panelWidth,
   onPanelWidthChange,
+  panelPlacement,
+  onPanelPlacementChange,
+  panelPosition,
+  onPanelPositionChange,
+  panelHeight,
+  onPanelHeightChange,
   minPanelWidth = 340,
   maxPanelWidth = 720,
   panelResizeLabel,
@@ -1765,6 +1797,13 @@ export const AppShell = ({
           onShown={onPanelsShown}
           onGone={onPanelsGone}
           width={panelWidth}
+          narrow={narrow}
+          placement={panelPlacement}
+          onPlacementChange={onPanelPlacementChange}
+          position={panelPosition}
+          onPositionChange={onPanelPositionChange}
+          height={panelHeight}
+          onHeightChange={onPanelHeightChange}
           min={minPanelWidth}
           max={maxPanelWidth}
           covered={over}

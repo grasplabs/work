@@ -45,6 +45,10 @@ export interface CardProps {
    * @default "div"
    */
   element?: "div" | "article" | "section" | "li";
+  /** Its name for a screen reader, where no heading inside names it (a `section` with no title). */
+  "aria-label"?: string;
+  /** The id of what names it, a heading inside it. */
+  "aria-labelledby"?: string;
   /**
    * The card takes the height it is given (a dashboard's fixed grid cell) and clips what does not
    * fit. A single child, a Section card's inside or a chart, stretches to fill it; several stand
@@ -143,6 +147,8 @@ export const Card = ({
   padding = "md",
   element = "div",
   fill = false,
+  "aria-label": ariaLabel,
+  "aria-labelledby": labelledBy,
   style: styleProp,
   layout,
 }: CardProps) => {
@@ -151,6 +157,8 @@ export const Card = ({
     <Element
       data-slot="card"
       data-fill={fill || undefined}
+      aria-label={ariaLabel}
+      aria-labelledby={labelledBy}
       {...stylex.props(
         styles.card,
         styles[ground],

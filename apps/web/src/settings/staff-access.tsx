@@ -111,7 +111,7 @@ export const StaffAccessSection = ({
         ? { actions: <EndStaffAccess onFailure={setFailure} /> }
         : {})}
       density="compact"
-      description={t`Grasp’s team can sign in to help only when Grasp opens a time-limited window, at most 7 days. You can end it at any time.`}
+      description={t`Only in a window Grasp opens, for at most 7 days.`}
       flush
       title={t`Grasp staff access`}
     >

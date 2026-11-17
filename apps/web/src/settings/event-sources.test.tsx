@@ -17,12 +17,15 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import type { Loaded } from "../load-from-core.tsx";
 import { EventSourcesSettings } from "./event-sources.tsx";
+import type { SourceStarts } from "./event-sources.tsx";
 
-// Settings › Webhooks, against core's workflowResources.sources as the
-// page reaches them over RPC, faked: a source shows its URL with a way to
-// copy it and how a sender signs; a new source's secret, and a rotated
-// one, show once and never again once closed; rotating, revoking and
-// deleting happen only once confirmed, and a refusal is said in the row.
+// Settings › Incoming events, against core's workflowResources.sources
+// and audit log as the page reaches them over RPC, faked: a source's URL
+// is copied from its row; a new source's secret, and a rotated one, show
+// once with how a sender signs, and never again once closed; rotating,
+// revoking and deleting happen only once confirmed, and a refusal is said
+// in the row; a source opens with the workflows it starts and the runs it
+// started.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -37,6 +40,15 @@ const settled = async (): Promise<void> => {
 };
 
 const secret = "whsec_c2hvd24tb25seS1vbmNl";
+
+/** A start the audit log keeps of `workflow`, by source `source`: what the page reads of it. */
+const started = (source: string, workflow: string) => ({
+  receivedAt: "2026-11-17T10:00:00.000Z",
+  event: {
+    target: { type: "workflow_resource", id: workflow },
+    detail: { source },
+  },
+});
 
 const shop: EventSource = {
   id: "source-shop",
@@ -54,7 +66,8 @@ const shop: EventSource = {
 const shown = async (
   listed: readonly EventSource[] = [shop],
   fails = false,
-  readsFail = false
+  readsFail = false,
+  starts: SourceStarts = {}
 ): Promise<unknown[]> => {
   const asked: unknown[] = [];
   const answer = async <T,>(call: unknown, value: T): Promise<T> => {
@@ -79,12 +92,24 @@ const shown = async (
       await answer({ delete: id }, null);
     },
   };
+  // The log holds one start of the shop's workflow, and one of another source's.
+  const audit = {
+    search: async () =>
+      await Promise.resolve({
+        records: [
+          started(shop.id, "wf-invoices"),
+          started("source-other", "wf-other"),
+        ],
+        next: null,
+      }),
+  };
   const core = {
     withSession: async <T,>(
       action: (session: {
         workflowResources: { sources: typeof sources };
+        audit: typeof audit;
       }) => Promise<T>
-    ): Promise<T> => await action({ workflowResources: { sources } }),
+    ): Promise<T> => await action({ workflowResources: { sources }, audit }),
   };
   let reads = 0;
   const read = async (): Promise<Loaded<readonly EventSource[]>> => {
@@ -100,7 +125,12 @@ const shown = async (
     path: "/",
     loader: read,
   });
-  const Settings = () => <EventSourcesSettings page={page.useLoaderData()} />;
+  const Settings = () => (
+    <EventSourcesSettings
+      page={page.useLoaderData()}
+      starts={{ state: "ready", data: starts }}
+    />
+  );
   page.update({ component: Settings });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
@@ -211,7 +241,7 @@ const submit = async (): Promise<void> => {
   });
 };
 
-describe("the Webhooks settings", () => {
+describe("the Incoming events settings", () => {
   afterEach(() => {
     act(() => {
       root?.unmount();
@@ -220,31 +250,28 @@ describe("the Webhooks settings", () => {
     document.body.replaceChildren();
   });
 
-  it("shows a source's URL with a way to copy it", async () => {
+  it("copies a source's URL from its row", async () => {
     await shown();
-    const url = copyValue("Copy the URL of Shop system");
     await act(async () => {
       named("Copy the URL of Shop system")?.click();
       await settled();
     });
 
-    expect({
-      url,
-      clipboard: await navigator.clipboard.readText(),
-    }).toStrictEqual({
-      url: `${globalThis.location.origin}/api/hooks/token-0b7c`,
-      clipboard: `${globalThis.location.origin}/api/hooks/token-0b7c`,
-    });
+    await expect(navigator.clipboard.readText()).resolves.toBe(
+      `${globalThis.location.origin}/api/hooks/token-0b7c`
+    );
   });
 
-  it("adds a source in a dialog by the name typed, trimmed, and shows its secret once, with how a sender signs, never again once closed", async () => {
+  it("adds a source in a dialog by the name typed, trimmed, and shows its URL and secret once, with how a sender signs, never again once closed", async () => {
     const asked = await shown([]);
     await openAdd();
     await typeName("  Stripe ");
     await submit();
     const shownOnce = copyValue("Copy the secret");
     const warned = document.body.textContent.includes("you won't see it again");
-    const signing = document.body.textContent.includes("Standard Webhooks");
+    const signing =
+      document.body.textContent.includes("webhook-signature: v1,") &&
+      document.body.textContent.includes(secret);
     await press("Done");
 
     expect({
@@ -333,5 +360,23 @@ describe("the Webhooks settings", () => {
       ),
       secret: copyValue("Copy the secret"),
     }).toStrictEqual({ confirming: 0, said: true, secret: undefined });
+  });
+
+  it("opens a source with the workflows it starts and the runs it started", async () => {
+    await shown([shop], false, false, {
+      [shop.id]: [{ id: "wf-invoices", name: "Invoice check" }],
+    });
+    const said = document.body.textContent.includes("Starts 1 workflow");
+    await press("Details");
+
+    const panel = document.querySelector('[role="dialog"]');
+    const links = [...(panel?.querySelectorAll("a") ?? [])].map(
+      (link) => link.textContent
+    );
+    expect({ said, links }).toStrictEqual({
+      said: true,
+      // The workflow it starts, then its run: none of the other source's.
+      links: ["Invoice check", "Invoice check"],
+    });
   });
 });

@@ -15,7 +15,6 @@ import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
-import { formatList } from "../format.ts";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,15 +34,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../grasp/dropdown-menu/index.ts";
-import {
-  Icon,
-  Minus,
-  More,
-  Search,
-  SignOut,
-  Tick,
-  Trash,
-} from "../grasp/icons/index.ts";
+import { Info, More, Search, SignOut, Trash } from "../grasp/icons/index.ts";
 import {
   InputGroup,
   InputGroupInput,
@@ -59,7 +50,6 @@ import {
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
-import { KeyValueList } from "../grasp/key-value/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   Select,
@@ -67,16 +57,14 @@ import {
   SelectValue,
   SelectContent,
 } from "../grasp/select/index.ts";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../grasp/table/index.ts";
+import { Separator } from "../grasp/separator/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "../grasp/tooltip/index.ts";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { RemovedRow, useRemovedPeople } from "../settings/erasures.tsx";
@@ -114,11 +102,15 @@ const styles = stylex.create({
   role: { width: roleWidth },
   // Your own row has no menu: its room is kept, so every role stands on one edge.
   menuRoom: { width: grasp.controlSm, flexShrink: 0 },
-  rolesNarrow: {
-    display: { default: "none", [media.belowPhone]: "block" },
-    padding: grasp.space5,
+  // The quiet row over the members, in the rows' own inset.
+  rolesRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space1,
+    paddingBlock: grasp.space2,
+    paddingInline: grasp.tableCellInline,
   },
-  rolesWide: { display: { default: "block", [media.belowPhone]: "none" } },
+  roleLine: { display: "block" },
 });
 
 /** The roles to pick from, in the page's language. */
@@ -314,90 +306,45 @@ const MemberActions = ({
   );
 };
 
-/**
- * What each role may do in Grasp, as core allows it (`@grasp-os/shared/roles`
- * and the calls that check it): everyone uses what is shared with them;
- * builders build; admins decide who does what.
- */
-const capabilities: { label: MessageDescriptor; roles: Role[] }[] = [
-  {
-    label: msg`Use the chat, Knowledge and the Apps shared with them`,
-    roles: ["admin", "builder", "user"],
-  },
-  {
-    label: msg`Connect accounts of their own`,
-    roles: ["admin", "builder", "user"],
-  },
-  {
-    label: msg`Build Apps and workflows, and ask for the permissions they need`,
-    roles: ["admin", "builder"],
-  },
-  {
-    label: msg`Connect shared accounts and decide what Apps may do`,
-    roles: ["admin"],
-  },
-  {
-    label: msg`See the models, AI spend and the audit trail`,
-    roles: ["admin"],
-  },
-  {
-    label: msg`Invite people, change roles, sign them out and remove them`,
-    roles: ["admin"],
-  },
-];
+/** What each role may do, in one line each: the three roles, most first. */
+const roleLines: Record<Role, MessageDescriptor> = {
+  admin: msg`Manages people, teams and permissions, and can do everything a Builder can.`,
+  builder: msg`Builds Apps and workflows, and asks for the permissions they need.`,
+  user: msg`Uses the Apps and workflows shared with them, and chats with Grasp.`,
+};
 
-/** What each role may do: a column a role, a tick where it may. */
-const Roles = () => {
+/**
+ * One quiet row over the members: "Roles", and behind its info mark what
+ * each role may do, one line each, on hover or focus. Until the library's
+ * Roles button and role lines in the Select land (/patterns/members).
+ */
+const RolesRow = () => {
   const { t, i18n } = useLingui();
-  const roles = roleSchema.options;
   return (
-    <SectionCard density="compact" flush title={t`Roles`}>
-      {/* On a phone, what each may do with the roles that may under it: four columns don't fit. */}
-      <div {...stylex.props(styles.rolesNarrow)}>
-        <KeyValueList
-          items={capabilities.map((capability) => ({
-            key: i18n._(capability.label),
-            value: formatList(capability.roles.map((role) => roleLabel(role))),
-          }))}
+    <div {...stylex.props(styles.rolesRow)}>
+      <Text element="span" size="sm" tone="muted">
+        {t`Roles`}
+      </Text>
+      <Tooltip>
+        <TooltipTrigger
+          aria-label={t`What each role may do`}
+          icon={Info}
+          size="xs"
+          variant="ghost"
         />
-      </div>
-      <div {...stylex.props(styles.rolesWide)}>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>
-                {t({
-                  message: "May",
-                  comment:
-                    "Heading of a list of what each role is allowed to do",
-                })}
-              </TableHead>
-              {roles.map((role) => (
-                <TableHead align="center" key={role}>
-                  {roleLabel(role)}
-                </TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {capabilities.map((capability) => (
-              <TableRow key={capability.label.id}>
-                <TableCell lead>{i18n._(capability.label)}</TableCell>
-                {roles.map((role) => (
-                  <TableCell align="center" key={role}>
-                    {capability.roles.includes(role) ? (
-                      <Icon icon={Tick} label={t`Yes`} />
-                    ) : (
-                      <Icon icon={Minus} label={t`No`} />
-                    )}
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    </SectionCard>
+        <TooltipContent>
+          {roleSchema.options.map((role) => {
+            const name = roleLabel(role);
+            const does = i18n._(roleLines[role]);
+            return (
+              <span key={role} {...stylex.props(styles.roleLine)}>
+                {t`${name}: ${does}`}
+              </span>
+            );
+          })}
+        </TooltipContent>
+      </Tooltip>
+    </div>
   );
 };
 
@@ -548,6 +495,8 @@ const MembersList = ({
       }
       title={t`Members`}
     >
+      <RolesRow />
+      <Separator decorative />
       {notice.failure === undefined && notice.done === undefined ? null : (
         <div {...stylex.props(styles.notice)}>
           {notice.failure === undefined ? (
@@ -587,8 +536,9 @@ const MembersList = ({
 };
 
 /**
- * Settings › Members and roles on one page: the people, then (for the
- * organization's own admins) their teams, then what each role may do.
+ * Settings › Members and roles on one page: the people, with what each
+ * role may do over them, then (for the organization's own admins) their
+ * teams.
  */
 const MembersPage = () => {
   const { t } = useLingui();
@@ -610,7 +560,6 @@ const MembersPage = () => {
       )}
       {/* Core refuses the teams to anyone else. */}
       {isMemberAdmin(identity) ? <TeamsPanel /> : null}
-      <Roles />
     </div>
   );
 };

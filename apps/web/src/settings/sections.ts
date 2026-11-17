@@ -142,7 +142,8 @@ export const settingsSections: readonly SettingsSection[] = [
   {
     // The event sources outside systems send events to.
     id: "webhooks",
-    label: msg`Webhooks`,
+    // Where outside systems send events in (settings/event-sources.tsx).
+    label: msg`Incoming events`,
     href: "/settings/webhooks",
     group: "workspace",
     icon: Link,
