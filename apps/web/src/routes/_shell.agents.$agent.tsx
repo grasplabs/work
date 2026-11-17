@@ -1,7 +1,6 @@
 import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { BotIcon } from "lucide-react";
 
 import { AgentPage, agentTabOf } from "../agents/agent-page.tsx";
 import type { AgentTab, FirstAgentAccess } from "../agents/agent-page.tsx";
@@ -43,7 +42,6 @@ const AgentRoutePage = () => {
     return (
       <PageNotLoaded
         crumbs={[...crumbs, { label: t`Agent` }]}
-        icon={BotIcon}
         notFound={t`Agent not found`}
         page={page}
       />
@@ -55,7 +53,6 @@ const AgentRoutePage = () => {
     return (
       <PageNotLoaded
         crumbs={[...crumbs, { label: t`Agent` }]}
-        icon={BotIcon}
         notFound={t`Agent not found`}
         page={{ state: "missing" }}
       />
