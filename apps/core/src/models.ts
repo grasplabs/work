@@ -469,6 +469,11 @@ export type ModelCall<Output> = z.input<typeof callSchema> & {
 export interface ModelAnswer<Output> {
   /** The answer's text. */
   text: string;
+  /**
+   * The model that answered, `<provider>/<model>`: the call's, or the one
+   * it fell back to.
+   */
+  model: string;
   /** The answer parsed with the call's schema; `undefined` without one. */
   output: Output;
   /** The model hit its output limit, so the text may stop short. */
@@ -2146,7 +2151,16 @@ const answerCall = async <Output>(
       // SAFETY: without a schema `Output` can't be inferred, so it is its
       // default, `undefined`.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      return { text, output: undefined as Output, truncated, usage, cost };
+      const output = undefined as Output;
+      // A fallback puts its route in place of the request's (`sendFallingBack`).
+      return {
+        text,
+        model: request.call.model,
+        output,
+        truncated,
+        usage,
+        cost,
+      };
     }
     // An answer cut short is judged like any other: JSON that stops short
     // doesn't parse, so the model is asked again.
@@ -2160,7 +2174,14 @@ const answerCall = async <Output>(
       result.ok ? "answered" : "invalid_output"
     );
     if (result.ok) {
-      return { text, output: result.output, truncated, usage, cost };
+      return {
+        text,
+        model: request.call.model,
+        output: result.output,
+        truncated,
+        usage,
+        cost,
+      };
     }
     request.messages.push(answer, {
       role: "user",

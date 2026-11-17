@@ -75,7 +75,7 @@ const breakBulk = async (
 /** The host's model: it is never asked here, and answers nothing. */
 const quietAsk: AskModel = async () => {
   await Promise.resolve();
-  return { kind: "answer", text: "" };
+  return { kind: "answer", text: "", model: "test/model" };
 };
 
 /**

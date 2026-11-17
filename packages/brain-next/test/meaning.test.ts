@@ -26,7 +26,7 @@ import {
 /** The host's model calls: none are made here. */
 const quietAsk: AskModel = async () => {
   await Promise.resolve();
-  return { kind: "answer", text: "" };
+  return { kind: "answer", text: "", model: "test/model" };
 };
 
 /** The host's embedders, while no model runs. */

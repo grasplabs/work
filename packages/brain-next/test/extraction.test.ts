@@ -55,9 +55,18 @@ const noModel: Embedders = {
 /**
  * What the model answers a call, by the test whose token its message
  * holds: it may act on the store before it answers, as another call
- * landing while the model thinks.
+ * landing while the model thinks. Its text, answered by the model of the
+ * call's role (`modelOf`), or its text and the model that answered.
  */
-type Answer = (request: ModelRequest) => string | Promise<string>;
+type Answer = (
+  request: ModelRequest
+) =>
+  | string
+  | { text: string; model: string }
+  | Promise<string | { text: string; model: string }>;
+
+/** The model that answers a call of `role` unless a test says another. */
+const modelOf = (role: ModelRequest["role"]): string => `test/${role}`;
 
 /** No hand-overs: none is queued in these tests. */
 const noHandOvers: HandOvers = {
@@ -78,9 +87,13 @@ const ask: AskModel = async (request) => {
   await Promise.resolve();
   calls.push(request);
   const answer = [...answers].find(([token]) => request.input.includes(token));
-  return answer === undefined
-    ? { kind: "answer", text: '{"entities":[],"memories":[]}' }
-    : { kind: "answer", text: await answer[1](request) };
+  const answered =
+    answer === undefined
+      ? '{"entities":[],"memories":[]}'
+      : await answer[1](request);
+  return typeof answered === "string"
+    ? { kind: "answer", text: answered, model: modelOf(request.role) }
+    : { kind: "answer", ...answered };
 };
 
 /**
@@ -272,6 +285,51 @@ const sha256 = async (text: string): Promise<string> =>
     ),
     (byte) => byte.toString(16).padStart(2, "0")
   ).join("");
+
+/** A line of an export, as far as the tests read a memory's. */
+const exportLineSchema = z.looseObject({
+  kind: z.string().optional(),
+  source: z.string().nullable().optional(),
+  statement: z.string().optional(),
+  extractor: z.unknown().optional(),
+});
+
+/**
+ * The memories drawn from `source` in an export of the shared store made
+ * now, read as an admin downloads it: each statement with the calls that
+ * drew it.
+ */
+const exportedMemoriesOf = async (source: string) => {
+  const { id } = await shared().startExport("test");
+  let status = await shared().exportStatus({ id });
+  for (let ticks = 0; ticks < 100 && status?.state === "writing"; ticks += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    await tick();
+    // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    status = await shared().exportStatus({ id });
+  }
+  if (status?.state !== "done") {
+    throw new Error(`The export ended ${status?.state ?? "unknown"}`);
+  }
+  const { parts } = z
+    .looseObject({ parts: z.array(z.looseObject({ file: z.string() })) })
+    .parse(
+      JSON.parse(
+        (await shared().exportFile({ id, file: "manifest.json" })) ?? "null"
+      )
+    );
+  const lines: z.infer<typeof exportLineSchema>[] = [];
+  for (const { file } of parts) {
+    // oxlint-disable-next-line no-await-in-loop -- a part at a time
+    const body = await shared().exportFile({ id, file });
+    for (const line of (body ?? "").split("\n").filter(Boolean)) {
+      lines.push(exportLineSchema.parse(JSON.parse(line)));
+    }
+  }
+  return lines
+    .filter((line) => line.kind === "memory" && line.source === source)
+    .map(({ statement, extractor }) => ({ statement, extractor }));
+};
 
 /** Every memory about `entity` `reader` may read, ended ones too with `history`, page after page. */
 const memoriesAbout = async (
@@ -1967,6 +2025,89 @@ describe("extracting memories", () => {
       seen: [[0, 1], [2]],
       kept: [`${name} fact 2`],
     });
+  });
+
+  it("records which prompt and model drew each memory and which check call supported it, also when one piece's check calls are answered by different models", async () => {
+    const token = unique("t");
+    const group = unique("g");
+    const name = unique("Drawn");
+    const source = unique("drawn");
+    // Three statements, two checked in one message and the third in
+    // another (as above), each message answered by another model: an
+    // admin changing the model between two check calls of one piece.
+    const text = `${token}: ${name} fact 0. ${name} fact 1. ${name} fact 2.`;
+    const window =
+      2 * (tokensOf(proposeInstructions) + tokensOf(checkInstructions) + 200);
+    const checkTokens =
+      window - Math.floor(window / 4) - tokensOf(checkInstructions);
+    const digits = Math.min(
+      950,
+      Math.floor((checkTokens - tokensOf(text) - 200) / 2.2)
+    );
+    answers.set(token, (request) => {
+      if (request.purpose === "brain.extract") {
+        return {
+          text: answering({
+            entities: [{ key: "c", kind: "customer", names: [name] }],
+            memories: [0, 1, 2].map((index) => ({
+              about: "c",
+              type: "fact",
+              statement: `${name} fact ${index} ${"7".repeat(digits)}`,
+              quote: `${name} fact ${index}`,
+            })),
+          })(request),
+          model: "test/reader",
+        };
+      }
+      const shown = checkedIndexesSchema
+        .parse(JSON.parse(request.input))
+        .statements.map(({ index }) => index);
+      return {
+        text: JSON.stringify({ supported: shown }),
+        model: shown.includes(0) ? "test/first-checker" : "test/second-checker",
+      };
+    });
+    await added(text, audience(group), { extract: fromOutside(), source });
+    await tick(1, window);
+
+    const read = {
+      prompt: await sha256(proposeInstructions),
+      model: "test/reader",
+    };
+    const check = await sha256(checkInstructions);
+    const exported = await exportedMemoriesOf(source);
+    expect(
+      exported
+        .map(({ statement, extractor }) => ({
+          statement: statement?.slice(0, name.length + 7),
+          extractor,
+        }))
+        .toSorted((a, b) =>
+          (a.statement ?? "").localeCompare(b.statement ?? "")
+        )
+    ).toStrictEqual([
+      {
+        statement: `${name} fact 0`,
+        extractor: {
+          read,
+          check: { prompt: check, model: "test/first-checker" },
+        },
+      },
+      {
+        statement: `${name} fact 1`,
+        extractor: {
+          read,
+          check: { prompt: check, model: "test/first-checker" },
+        },
+      },
+      {
+        statement: `${name} fact 2`,
+        extractor: {
+          read,
+          check: { prompt: check, model: "test/second-checker" },
+        },
+      },
+    ]);
   });
 
   it("parks a piece that can't hold even one character, asking nothing and never going round", async () => {

@@ -1,13 +1,4 @@
 import type { Agent, AgentChangeDrafted } from "@grasp-os/shared/agents";
-import type { ChatMessage } from "@grasp-os/shared/chat";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@grasp-os/ui/components/card";
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { ReactNode } from "react";
 
@@ -20,6 +11,7 @@ import {
   Line,
 } from "./agent-draft-card.tsx";
 import type { ThreadBuild } from "./build-progress.tsx";
+import { MakeCard } from "./make-card.tsx";
 
 // A change to one of the person's agents that Grasp's chat drafted
 // (`draftAgentChange`), in the thread: what the agent is now and what it
@@ -27,18 +19,6 @@ import type { ThreadBuild } from "./build-progress.tsx";
 // Change it, which changes it as the card shows it, by the agent page's
 // own checks (`ChatsApi.changeDraftedAgent`), then lands the person on its
 // page. What the model wrote is shown as text.
-
-/** The change waiting for the person: the latest reply's, while nothing runs and nothing was said since. */
-export const pendingAgentChange = (
-  messages: readonly ChatMessage[],
-  running: boolean
-): AgentChangeDrafted | undefined => {
-  if (running) {
-    return undefined;
-  }
-  const last = messages.findLast(({ role }) => role !== "result");
-  return last?.role === "assistant" ? last.agentChange : undefined;
-};
 
 /** The agent a change names, as it is now: among the person's own, or the company's for an admin. */
 const useAgentNow = (change: AgentChangeDrafted): Agent | undefined => {
@@ -99,65 +79,61 @@ export const AgentChangeCard = ({
     schedule,
   } = change;
   return (
-    <Card aria-label={t`A change to ${name}`} render={<section />}>
-      <CardHeader>
-        <CardTitle>
-          <h2 className="type-display">{t`Change ${name}`}</h2>
-        </CardTitle>
-        <CardDescription>
-          <Trans>
-            Nothing changes until you say Change it. You can change any of it
-            first.
-          </Trans>
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <dl className="flex flex-col gap-3">
-          {job === undefined ? null : (
-            <Line label={t`What it is for`}>
-              <BeforeAfter becomes={job} now={now?.job} />
-            </Line>
-          )}
-          {addInstructions === undefined ? null : (
-            <Line label={t`Added to its instructions`}>
-              <span className="block max-h-64 overflow-y-auto whitespace-pre-wrap">
-                {addInstructions}
-              </span>
-            </Line>
-          )}
-          {addApps.length === 0 ? null : (
-            <Line label={t`Apps it gets`}>
-              <AppNames apps={addApps} />
-            </Line>
-          )}
-          {removeApps.length === 0 ? null : (
-            <Line label={t`Apps taken off`}>
-              <AppNames apps={removeApps} />
-            </Line>
-          )}
-          {audience === undefined ? null : (
-            <Line label={t`Who may ask it`}>
-              <AudienceWords audience={audience} />
-            </Line>
-          )}
-          {turnOn.length === 0 ? null : (
-            <Line label={t`What it may also do`}>
-              {turnOn.map((each) => i18n._(classNames[each])).join(", ")}
-            </Line>
-          )}
-          {schedule === undefined ? null : (
-            <Line label={t`Also works on its own`}>
-              <span className="font-mono text-xs">{schedule.cron}</span>
-              {" · "}
-              {schedule.timeZone ?? t`the company's time zone`}
-              {" · "}
-              {schedule.opening}
-            </Line>
-          )}
-        </dl>
-      </CardContent>
-      {actions === undefined ? null : <CardFooter>{actions}</CardFooter>}
-    </Card>
+    <MakeCard
+      actions={actions}
+      description={
+        <Trans>
+          Nothing changes until you say Change it. You can change any of it
+          first.
+        </Trans>
+      }
+      label={t`A change to ${name}`}
+      title={t`Change ${name}`}
+    >
+      <dl className="flex flex-col gap-3">
+        {job === undefined ? null : (
+          <Line label={t`What it is for`}>
+            <BeforeAfter becomes={job} now={now?.job} />
+          </Line>
+        )}
+        {addInstructions === undefined ? null : (
+          <Line label={t`Added to its instructions`}>
+            <span className="block max-h-64 overflow-y-auto whitespace-pre-wrap">
+              {addInstructions}
+            </span>
+          </Line>
+        )}
+        {addApps.length === 0 ? null : (
+          <Line label={t`Apps it gets`}>
+            <AppNames apps={addApps} />
+          </Line>
+        )}
+        {removeApps.length === 0 ? null : (
+          <Line label={t`Apps taken off`}>
+            <AppNames apps={removeApps} />
+          </Line>
+        )}
+        {audience === undefined ? null : (
+          <Line label={t`Who may ask it`}>
+            <AudienceWords audience={audience} />
+          </Line>
+        )}
+        {turnOn.length === 0 ? null : (
+          <Line label={t`What it may also do`}>
+            {turnOn.map((each) => i18n._(classNames[each])).join(", ")}
+          </Line>
+        )}
+        {schedule === undefined ? null : (
+          <Line label={t`Also works on its own`}>
+            <span className="font-mono text-xs">{schedule.cron}</span>
+            {" · "}
+            {schedule.timeZone ?? t`the company's time zone`}
+            {" · "}
+            {schedule.opening}
+          </Line>
+        )}
+      </dl>
+    </MakeCard>
   );
 };
 
