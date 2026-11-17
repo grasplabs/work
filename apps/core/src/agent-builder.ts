@@ -186,6 +186,11 @@ const ownDetailOf = ({ instructions }: AgentSaid): Record<string, string> => ({
   instructionsLength: String(instructions.length),
 });
 
+/** Where an agent was made, when not on the Agents page: a chat's draft. */
+interface MadeFrom {
+  from?: "chat";
+}
+
 /** What an audit event says of an agent: never its instructions. */
 const detailOf = ({
   name,
@@ -228,7 +233,8 @@ export const listAgents = async (env: Env): Promise<Agent[]> => {
 export const makeAgent = async (
   env: Env,
   identity: Identity,
-  input: unknown
+  input: unknown,
+  { from }: MadeFrom = {}
 ): Promise<Agent> => {
   requireCompanyAdmin(identity);
   const made = inputOf(input);
@@ -269,7 +275,10 @@ export const makeAgent = async (
           actor: actorOf(identity),
           action: "agent.made",
           target: { type: "agent", id },
-          detail: detailOf(made),
+          detail: {
+            ...detailOf(made),
+            ...(from === undefined ? {} : { from }),
+          },
         }),
       ])
   );
@@ -332,7 +341,8 @@ const requireOwnNameFree = async (
 export const makeOwnAgent = async (
   env: Env,
   identity: Identity,
-  input: unknown
+  input: unknown,
+  { from }: MadeFrom = {}
 ): Promise<Agent> => {
   if (identity.staff) {
     throw roleErrors.create("role.forbidden");
@@ -369,7 +379,7 @@ export const makeOwnAgent = async (
       actor: actorOf(identity),
       action: "agent.made",
       target: { type: "agent", id },
-      detail: ownDetailOf(made),
+      detail: { ...ownDetailOf(made), ...(from === undefined ? {} : { from }) },
     }),
   ]);
   const kept = await readAgent(env, id);

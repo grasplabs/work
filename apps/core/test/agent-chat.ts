@@ -237,14 +237,14 @@ export const codeStatuses = async (stub: WorkspaceStub, chatId: string) => {
  * back what was there with the restore this returns (in a `finally`), or
  * the tests after it run under its values.
  */
-export const setObjectEnv = async (
-  stub: WorkspaceStub,
+export const setObjectEnv = async <O extends Rpc.DurableObjectBranded>(
+  stub: DurableObjectStub<O>,
   vars: Record<string, unknown>
 ): Promise<() => Promise<void>> => {
   const before = await runInDurableObject(stub, (instance) => {
     const objectEnv: unknown = Reflect.get(instance, "env");
     if (typeof objectEnv !== "object" || objectEnv === null) {
-      throw new TypeError("The Workspace object has no env");
+      throw new TypeError("The object has no env");
     }
     const kept: Record<string, { value: unknown } | undefined> = {};
     for (const key of Object.keys(vars)) {
@@ -258,7 +258,7 @@ export const setObjectEnv = async (
     await runInDurableObject(stub, (instance) => {
       const objectEnv: unknown = Reflect.get(instance, "env");
       if (typeof objectEnv !== "object" || objectEnv === null) {
-        throw new TypeError("The Workspace object has no env");
+        throw new TypeError("The object has no env");
       }
       for (const [key, was] of Object.entries(before)) {
         if (was === undefined) {

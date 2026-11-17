@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "c712ab97-5b60-4f01-a715-dfa370977832",
+  "id": "6aa86e84-3836-46b7-8a9d-12cd28bbd41e",
   "prevId": "132d924f-ba0f-4238-a1bc-96d9f053bd2a",
   "tables": {
     "access_revocations": {
@@ -1022,13 +1022,6 @@
         "owner_id": {
           "name": "owner_id",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "offered_at": {
-          "name": "offered_at",
-          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -11836,6 +11829,13 @@
           "name": "stephen_requests_question_idx",
           "columns": [
             "question_id"
+          ],
+          "isUnique": false
+        },
+        "stephen_requests_topic_idx": {
+          "name": "stephen_requests_topic_idx",
+          "columns": [
+            "topic_id"
           ],
           "isUnique": false
         }

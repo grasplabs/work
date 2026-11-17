@@ -253,7 +253,7 @@ describe("the built-in blueprints' build", () => {
       [onPlatform("STATS", ["statistics", "guests"])],
     ],
     ["a binding name twice", [onPlatform(), onPlatform("STATS", ["guests"])]],
-    ["a platform binding name", [onPlatform("KNOWLEDGE")]],
+    ["a platform binding name", [onPlatform("DB")]],
     [
       "a Knowledge collection, which nothing grants any more",
       [

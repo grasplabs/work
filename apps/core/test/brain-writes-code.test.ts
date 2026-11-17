@@ -18,12 +18,14 @@ import { appUsersReadBy, appWriteFor } from "../src/brain-app-writes.ts";
 import {
   codeCardAs,
   codeEntitiesAs,
+  isCodeWriteRequest,
   memoriesAs,
   recallAs,
 } from "../src/brain-next.ts";
 import { deleteStore, liveStoreOf } from "../src/data-stores.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { StoreHost } from "../src/store-host.ts";
+import { setObjectEnv } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   answerOf,
@@ -266,6 +268,21 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
       said: false,
       conflicts: 0,
     });
+  });
+
+  it("is refused at its request check when it names a person's own entity", () => {
+    const remembered = {
+      about: { kind: "person", names: ["Ann Smit"] },
+      statement: "Ann leads the Rotterdam depot",
+    };
+
+    expect({
+      named: isCodeWriteRequest("remember", remembered),
+      own: isCodeWriteRequest("remember", {
+        ...remembered,
+        about: { kind: "person", own: true },
+      }),
+    }).toStrictEqual({ named: true, own: false });
   });
 
   it("is refused, writing nothing, when an agent or Code Mode calls the App", async () => {
@@ -782,6 +799,30 @@ const firstBatchFailing = (on: Env): Env => {
 };
 
 /**
+ * Runs `work` with `vars` in the env of `app`'s store object, then puts it
+ * back: so the store's own alarm, which a deletion sets to run at once,
+ * meets the fault core's call meets instead of finishing the deletion
+ * while the test looks. The env is the test Worker's own, shared by every
+ * object of the file and the test itself (`setObjectEnv`): a call the
+ * test makes meanwhile meets `vars` too, unless given an env taken before.
+ */
+const withStoreEnv = async <T>(
+  app: App,
+  vars: Record<string, unknown>,
+  work: () => Promise<T>
+): Promise<T> => {
+  const restore = await setObjectEnv(
+    env.DATA_STORES.getByName(storeOf(app)),
+    vars
+  );
+  try {
+    return await work();
+  } finally {
+    await restore();
+  }
+};
+
+/**
  * `namespace` with object `name`'s `method` failing, on every call,
  * before it reaches the object: a call that never lands.
  */
@@ -921,15 +962,24 @@ describe("an App's memories go with its data", setUpTime, () => {
       await onPage(app, ada, "remember", fact(`Cutco ${unique()}`))
     );
     await freed(app);
-    // Erased, then cut off before core's inventory marks it deleted.
-    const cutOff = await failureOf(async () => {
-      await deleteStore(firstBatchFailing(env), ada, storeOf(app));
-    });
-    const marked = await env.DB.prepare(
-      "SELECT deleted_at FROM business_stores WHERE id = ?"
-    )
-      .bind(storeOf(app))
-      .first<{ deleted_at: number | null }>();
+    // Erased, then cut off before core's inventory marks it deleted; the
+    // store's alarm, set to run at once, can't record it meanwhile. Core's
+    // env taken first: what `withStoreEnv` sets, the test's calls see too.
+    const cut = firstBatchFailing(env);
+    const { cutOff, marked } = await withStoreEnv(
+      app,
+      { BRAIN_STORE: failing(env.BRAIN_STORE, "brain", "eraseWriter") },
+      async () => ({
+        cutOff: await failureOf(async () => {
+          await deleteStore(cut, ada, storeOf(app));
+        }),
+        marked: await env.DB.prepare(
+          "SELECT deleted_at FROM business_stores WHERE id = ?"
+        )
+          .bind(storeOf(app))
+          .first<{ deleted_at: number | null }>(),
+      })
+    );
     // The store's alarm, run here rather than waited for.
     await inHost(storeOf(app), async (host) => {
       await host.runAlarm({});
@@ -996,21 +1046,35 @@ describe("an App's memories go with its data", setUpTime, () => {
       )
     );
     await freed(deleted);
-    const erasing = await failureOf(async () => {
-      await deleteStore(
-        {
-          ...env,
-          BRAIN_STORE: failing(env.BRAIN_STORE, "brain", "eraseWriter"),
-        },
-        ada,
-        storeOf(deleted)
-      );
-    });
-    const marked = await env.DB.prepare(
-      "SELECT deleted_at FROM business_stores WHERE id = ?"
-    )
-      .bind(storeOf(deleted))
-      .first<{ deleted_at: number | null }>();
+    // Its erasure fails wherever it is tried: in core's call, and in the
+    // store's alarm, which the deletion sets to run at once.
+    const failingBrain = failing(env.BRAIN_STORE, "brain", "eraseWriter");
+    const { erasing, marked, deletedApps } = await withStoreEnv(
+      deleted,
+      { BRAIN_STORE: failingBrain },
+      async () => ({
+        erasing: await failureOf(async () => {
+          await deleteStore(
+            { ...env, BRAIN_STORE: failingBrain },
+            ada,
+            storeOf(deleted)
+          );
+        }),
+        marked: await env.DB.prepare(
+          "SELECT deleted_at FROM business_stores WHERE id = ?"
+        )
+          .bind(storeOf(deleted))
+          .first<{ deleted_at: number | null }>(),
+        // Still the deleted App's.
+        deletedApps: await codeCardAs(
+          env,
+          ada.userId,
+          "company",
+          { entity: kept[0]?.entity ?? "" },
+          deleted.app
+        ).then((card) => card !== null),
+      })
+    );
     const resetting = await failureOf(async () => {
       await resetAppData(
         {
@@ -1026,14 +1090,8 @@ describe("an App's memories go with its data", setUpTime, () => {
       erasing,
       marked: marked?.deleted_at ?? null,
       resetting,
-      // Still the deleted App's, and the reset App's gone.
-      deletedApps: await codeCardAs(
-        env,
-        ada.userId,
-        "company",
-        { entity: kept[0]?.entity ?? "" },
-        deleted.app
-      ).then((card) => card !== null),
+      deletedApps,
+      // The reset App's gone.
       resetApps: await codeCardAs(
         env,
         ada.userId,

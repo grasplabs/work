@@ -231,6 +231,29 @@ export const chunks = sqliteTable(
   ]
 );
 
+/**
+ * The calendar days a chunk mentions, however its text writes them
+ * (dates.ts `daysIn`), written with its words (words.ts `indexWords`):
+ * how recall finds a question's date by its day. `month_day` is the month
+ * and day as one number (314 is 14 March); `year` is 0 when the text
+ * writes none. Integers alone, no text, and deleted with their chunk.
+ */
+export const chunkDays = sqliteTable(
+  "chunk_days",
+  {
+    chunk: integer()
+      .notNull()
+      .references(() => chunks.row, { onDelete: "cascade" }),
+    monthDay: integer("month_day").notNull(),
+    year: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.monthDay, table.year, table.chunk] }),
+    // A chunk's rows, for its delete.
+    index("chunk_days_chunk_idx").on(table.chunk),
+  ]
+);
+
 // The vector way (vectors.ts). A chunk of a current version can hold a
 // code per embedding model: a 1-bit code that every search scans, and an
 // 8-bit code that re-scores the best candidates. A code takes the set of
@@ -1004,6 +1027,23 @@ export const entityNames = sqliteTable(
     index("entity_names_entity_idx").on(table.entity, table.type, table.folded),
     index("entity_names_memory_idx").on(table.memory),
   ]
+);
+
+/**
+ * The entity a person's own store's person is (contract.ts "The store's
+ * own entity"): one row at most, made by the first add naming it `own`,
+ * never an entity a name or an identifier found. Deleting memories never deletes
+ * it (forget.ts); erasing the store whole does. Empty in the shared store.
+ */
+export const ownEntity = sqliteTable(
+  "own_entity",
+  {
+    id: integer().primaryKey(),
+    entity: integer()
+      .notNull()
+      .references(() => entities.row),
+  },
+  () => [check("own_entity_one", sql.raw("id = 1"))]
 );
 
 /**

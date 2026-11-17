@@ -41,9 +41,9 @@ import { onboardingStore } from "./onboarding/store.ts";
 //   brain is theirs to fill in; staff may not. Each answer is audited.
 // - An answerer's name frozen at write: an answer keeps who gave it by
 //   user id, and the brain shows that person's name as it is now.
-// - An answer that can't be erased: an admin redacts one; a content purge
-//   rewrites every answer holding its terms; a personal purge forgets the
-//   person as anyone's answerer (knowledge/purge.ts).
+// - An answer that can't be erased: an admin redacts one; a person's
+//   erasure forgets them as anyone's answerer (`eraseGapAnswerer`, from
+//   person-erasure.ts's `brain` area).
 // - An answer written over, or a closed gap reopened: every close is
 //   guarded in SQL (`closed_at IS NULL`), so of two racing answers one
 //   lands and the other is refused, and nothing reopens a gap.

@@ -2330,6 +2330,10 @@ msgstr "Un agent pour l'entreprise, ou un que vous seul utilisez."
 msgid "An agent of your own, for a job you do often. Only you see and ask it, in Grasp's chat."
 msgstr "Un agent à vous, pour une tâche que vous faites souvent. Vous seul le voyez et l'interrogez, dans le chat de Grasp."
 
+#: src/chat/agent-draft-card.tsx
+msgid "An agent to make: {name}"
+msgstr "Un agent à créer : {name}"
+
 #: src/chat/thread.tsx
 msgid "An agent you can no longer ask"
 msgstr "Un agent que vous ne pouvez plus interroger"
@@ -3480,6 +3484,10 @@ msgstr "Changer d’abonnement"
 #: src/projects/project-dialog.tsx
 msgid "Change project"
 msgstr "Modifier le projet"
+
+#: src/chat/agent-draft-card.tsx
+msgid "Change something"
+msgstr "Changer quelque chose"
 
 #: src/chat/chat-panel.tsx
 msgid "Change something about the plan"
@@ -5393,6 +5401,10 @@ msgstr "Tout le monde dans un projet dont vous ne faites pas partie"
 msgid "Everyone in it · {shownRole}"
 msgstr "Tous ses membres · {shownRole}"
 
+#: src/chat/agent-draft-card.tsx
+msgid "Everyone in the company"
+msgstr "Tout le monde dans l’entreprise"
+
 #: src/settings/team-members-dialog.tsx
 msgid "Everyone in the organization is in this team."
 msgstr "Tout le monde dans l’organisation fait partie de cette équipe."
@@ -6859,8 +6871,8 @@ msgid "I hear you. Shall we start?"
 msgstr "Je vous entends. On commence ?"
 
 #: src/onboarding/setup-steps.tsx
-msgid "I keep each file in your Brain, for you alone."
-msgstr "Je garde chaque fichier dans votre Brain, pour vous uniquement."
+msgid "I keep each file in your Brain, for you alone. What I read in it, never the file itself, helps me in the interviews with the teams it is about, or with every team when it names none."
+msgstr "Je garde chaque fichier dans votre Brain, pour vous uniquement. Ce que j’y lis, jamais le fichier lui-même, m’aide dans les entretiens avec les équipes dont il parle, ou avec chaque équipe quand il n’en nomme aucune."
 
 #: src/interview/words.ts
 msgid "I lost the connection. Please check your internet. I have kept what you said, and I keep trying."
@@ -7422,6 +7434,10 @@ msgstr "Ses données"
 #: src/apps/app-settings.tsx
 msgid "Its definition to keep or move, and a blueprint others can start from."
 msgstr "Sa définition à conserver ou à déplacer, et un modèle dont d'autres peuvent partir."
+
+#: src/chat/agent-draft-card.tsx
+msgid "Its instructions"
+msgstr "Ses instructions"
 
 #: src/agents/agent-apps-card.tsx
 msgid "Its instructions name apps your company doesn't offer: {missing}."
@@ -8084,6 +8100,10 @@ msgstr "Crée une App à partir du blueprint {name} : {description}"
 #: src/make/make-ideas.tsx
 msgid "Make an App from the {name} blueprint."
 msgstr "Crée une App à partir du blueprint {name}."
+
+#: src/chat/agent-draft-card.tsx
+msgid "Make it"
+msgstr "Le créer"
 
 #: src/agents/agents-overview.tsx
 msgid "Make one for a job, such as chasing unpaid invoices, and say who may ask it."
@@ -9046,6 +9066,10 @@ msgstr "Personne pour l’instant"
 msgid "Nobody yet, until you choose."
 msgstr "À personne pour l'instant, jusqu'à ce que vous choisissiez."
 
+#: src/chat/agent-draft-card.tsx
+msgid "Nobody yet: you say who on its page"
+msgstr "Personne pour l’instant : vous choisissez qui sur sa page"
+
 #: src/brain/skills-page.tsx
 msgid "Nobody's agents use {name} from then on. Its versions stay as history, and a new approved share of its name brings it back."
 msgstr "Plus aucun agent n'utilise {name} ensuite. Ses versions restent dans l'historique, et un nouveau partage approuvé sous ce nom le rétablit."
@@ -9361,6 +9385,10 @@ msgstr "Rien n'est encore conservé."
 msgid "Nothing is made until you say Build it. You can change any of it first."
 msgstr "Rien n’est créé tant que vous n’avez pas cliqué sur Construire. Vous pouvez d’abord tout modifier."
 
+#: src/chat/agent-draft-card.tsx
+msgid "Nothing is made until you say Make it. You can change any of it first."
+msgstr "Rien n’est créé avant que vous cliquiez sur Le créer. Vous pouvez tout changer avant."
+
 #: src/inbox/items.ts
 msgid "Nothing is sent or changed on {connection} until you approve it, with exactly what is shown."
 msgstr "Rien n’est envoyé ni modifié sur {connection} tant que vous ne l’approuvez pas, avec exactement ce qui est affiché."
@@ -9446,6 +9474,10 @@ msgstr "Rien n'a été ajouté. Corrigez ces lignes et réessayez."
 #: src/brain/brain.ts
 msgid "Nothing yet"
 msgstr "Rien pour l’instant"
+
+#: src/chat/agent-draft-card.tsx
+msgid "Nothing yet: you turn it on on its page"
+msgstr "Rien pour l’instant : vous l’activez sur sa page"
 
 #: src/brain/memories-page.tsx
 msgid "Nothing you can read"
@@ -9684,6 +9716,10 @@ msgstr "Un instant"
 #: src/apps/field-kinds.tsx
 msgid "One of a list of options"
 msgstr "Un choix dans une liste d’options"
+
+#: src/chat/agent-draft-card.tsx
+msgid "One of the company's agents"
+msgstr "Un des agents de l’entreprise"
 
 #: src/interview/words.ts
 msgid "One real case"
@@ -10368,6 +10404,10 @@ msgstr "« {name} » se fait de deux façons"
 #: src/dashboard/report.ts
 msgid "People heard"
 msgstr "Personnes entendues"
+
+#: src/chat/agent-draft-card.tsx
+msgid "People in these teams: {named}"
+msgstr "Les personnes de ces équipes : {named}"
 
 #: src/agents/agent-page.tsx
 msgid "People it worked for"
@@ -13840,6 +13880,10 @@ msgstr "Les règles de l’entreprise pour chaque agent."
 msgid "The company's skills"
 msgstr "Skills de l'entreprise"
 
+#: src/chat/agent-draft-card.tsx
+msgid "the company's time zone"
+msgstr "fuseau horaire de l’entreprise"
+
 #: src/inbox/items.ts
 msgid "The connection stopped working. Workflows that use it wait until someone signs in again."
 msgstr "La connexion ne fonctionne plus. Les workflows qui l’utilisent attendent qu’une personne se reconnecte."
@@ -15817,6 +15861,7 @@ msgid "What it is bound to has changed since the binding was approved. Bind it a
 msgstr "Ce à quoi elle est liée a changé depuis l'approbation de la liaison. Liez-la à nouveau une fois que vous avez vérifié que cela convient toujours."
 
 #: src/agents/agent-form.tsx
+#: src/chat/agent-draft-card.tsx
 msgid "What it is for"
 msgstr "À quoi il sert"
 
@@ -15830,6 +15875,7 @@ msgid "What it is told"
 msgstr "Ce qu'on lui dit"
 
 #: src/agents/agent-page.tsx
+#: src/chat/agent-draft-card.tsx
 msgid "What it may do"
 msgstr "Ce qu’il peut faire"
 
@@ -16106,6 +16152,7 @@ msgid "When it was added"
 msgstr "Quand il a été ajouté"
 
 #: src/agents/agent-wakes.tsx
+#: src/chat/agent-draft-card.tsx
 msgid "When it works on its own"
 msgstr "Quand il travaille de lui-même"
 
@@ -16300,6 +16347,10 @@ msgstr "À qui il est destiné"
 msgid "Who leads it?"
 msgstr "Qui la dirige ?"
 
+#: src/chat/agent-draft-card.tsx
+msgid "Who may ask it"
+msgstr "Qui peut lui demander"
+
 #: src/brain/sources-page.tsx
 msgctxt "a file uploaded into the Brain"
 msgid "Who may read it"
@@ -16348,6 +16399,10 @@ msgstr "Qui est qui dans votre entreprise ?"
 #: src/apps/draft-changes.tsx
 msgid "whoever added the row"
 msgstr "la personne qui a ajouté la ligne"
+
+#: src/chat/agent-draft-card.tsx
+msgid "Whose it is"
+msgstr "À qui il est"
 
 #: src/apps/release-controls.tsx
 #: src/workflows/requests/request-table.tsx
@@ -17116,6 +17171,10 @@ msgstr "Les vôtres"
 #: src/agents/agent-page.tsx
 msgid "Yours alone: nobody else sees or asks it"
 msgstr "À vous seul : personne d'autre ne le voit ni ne l'interroge"
+
+#: src/chat/agent-draft-card.tsx
+msgid "Yours alone: only you ask it"
+msgstr "À vous seul : vous seul lui demandez"
 
 #: src/brain/atlas-overlays.tsx
 #: src/workflows/workflow-flow.tsx

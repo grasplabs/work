@@ -14,7 +14,7 @@ import { byBytes, byFreshness, byNearness, byWordsFound } from "./order.ts";
 import type { MemoryOrder } from "./order.ts";
 import { fuse, packOf } from "./pack.ts";
 import type { Entry } from "./pack.ts";
-import { holdsTerm, sequenceOf, termsOf, wordsOf } from "./words.ts";
+import { holdsTerm, termsOf, wordsOf } from "./words.ts";
 import type { WordMemo } from "./words.ts";
 
 // A recall's pack from what one store or several found (`Finding`, each a
@@ -42,8 +42,8 @@ import type { WordMemo } from "./words.ts";
 //   it had more (`capped`). The first `exactCandidatesMax` of all are
 //   among those; a part is capped when a store capped it or all together
 //   give more. Only then is each candidate checked to hold the part as
-//   written, and each part's list ordered by the merged words list's
-//   rank, as one store does.
+//   written (a date, to mention one of its days), and each part's list
+//   ordered by the merged words list's rank, as one store does.
 // - Meaning: each store's nearest, by cosine, merged by cosine. One store
 //   re-scores the `rescoreCandidates` codes nearest by Hamming distance
 //   (vectors.ts), so two stores re-score up to twice as many: a passage
@@ -116,7 +116,12 @@ const byWords = (
 
 /**
  * The exact way's lists, one per part, the parts it found and those it
- * capped, its lists in the words way's order (`byWordsRank`).
+ * capped, its lists in the words way's order (`byWordsRank`). A date's
+ * list holds only the passages mentioning its day that the words way's
+ * list doesn't (exact.ts rule 3): what the date finds that the words
+ * missed. A passage the words list holds counts once, by its words, so a
+ * day many passages mention never lifts them twice above an ID's or a
+ * phrase's passage; the date's own words are the words way's.
  */
 const byExact = (
   findings: readonly Finding[],
@@ -146,18 +151,18 @@ const byExact = (
   const held = candidates.map((candidate) => ({
     candidate,
     parts: new Set(
-      foundIn(
-        sequenceOf(candidate.text),
-        exacts,
-        among.get(candidate.row) ?? []
-      )
+      foundIn(candidate.text, exacts, among.get(candidate.row) ?? [])
     ),
   }));
   const rankOf = ({ row }: FoundPassage): number =>
     byWordsRank.get(row) ?? recallLimit;
-  const lists = exacts.map((_, part) =>
+  const lists = exacts.map(({ kind }, part) =>
     held
-      .filter(({ parts }) => parts.has(part))
+      .filter(
+        ({ candidate, parts }) =>
+          parts.has(part) &&
+          (kind !== "date" || !byWordsRank.has(candidate.row))
+      )
       .map(({ candidate }) => candidate)
       .toSorted((a, b) => rankOf(a) - rankOf(b) || byPassage(a, b))
       .slice(0, recallLimit)
@@ -165,9 +170,7 @@ const byExact = (
   );
   return {
     lists,
-    parts: new Set(
-      lists.flatMap((list, part) => (list.length > 0 ? [part] : []))
-    ),
+    parts: new Set(held.flatMap(({ parts }) => [...parts])),
     capped,
   };
 };
@@ -274,11 +277,15 @@ const memoriesOf = (
 /**
  * The pack for `question` within `budget` tokens from what `findings` (one
  * per store, each `find` of the same request) found: the stores' lists
- * merged per way, fused by rank (the exact parts' first on a tie, in the
- * question's order, then words, then meaning) and packed, with the parts
- * of the question no store found by words or exact and no packed memory
- * holds: its exact parts, but those capped, then its telling words, but
- * those of its IDs. The same pack, for one finding, as one store makes.
+ * merged per way, fused by rank (on a tie, the phrases' and IDs' first, in
+ * the question's order, then words, then the dates', so a day many
+ * passages mention never puts its own first before an ID's or a phrase's,
+ * then meaning) and packed, with the parts of the question no store found
+ * by words or exact and no packed memory holds: its phrases and IDs, but
+ * those capped, then its telling words, but those of its IDs and of its
+ * dates found (a date stands for its words once a passage or packed
+ * memory mentions its day, or more do than were checked, exact.ts rule
+ * 3). The same pack, for one finding, as one store makes.
  */
 export const packAcross = (
   question: string,
@@ -287,10 +294,6 @@ export const packAcross = (
 ): Pack => {
   const exacts = exactsOf(question);
   const terms = termsOf(question);
-  // An ID stands for its words: none is said not found apart.
-  const standing = new Set(
-    exacts.filter(({ kind }) => kind === "id").flatMap(({ words }) => words)
-  );
   const words = byWords(findings);
   const exact = byExact(
     findings,
@@ -302,10 +305,12 @@ export const packAcross = (
     )
   );
   const memories = memoriesOf(findings);
+  const dated = (index: number) => exacts[index]?.kind === "date";
   const pack = packOf(
     fuse([
-      ...exact.lists,
+      ...exact.lists.filter((_, index) => !dated(index)),
       words.found,
+      ...exact.lists.filter((_, index) => dated(index)),
       memories.words,
       memories.entities,
       byMeaning(findings),
@@ -319,20 +324,26 @@ export const packAcross = (
   const memo: WordMemo = new Map();
   const held = pack.memories.map(({ statement, quote }) => {
     const text = quote === null ? statement : `${statement}\n${quote}`;
-    return { sequence: sequenceOf(text), words: wordsOf(text, memo) };
+    return { text, words: wordsOf(text, memo) };
   });
   const every = exacts.map((_, index) => index);
   const partsHeld = new Set(
-    held.flatMap(({ sequence }) => foundIn(sequence, exacts, every))
+    held.flatMap(({ text }) => foundIn(text, exacts, every))
+  );
+  const found = (index: number) =>
+    exact.parts.has(index) || exact.capped.has(index) || partsHeld.has(index);
+  // An ID stands for its words, and a date found for its: none is said
+  // not found apart.
+  const standing = new Set(
+    exacts
+      .filter(
+        ({ kind }, index) => kind === "id" || (kind === "date" && found(index))
+      )
+      .flatMap(({ words: of }) => of)
   );
   const notFound = [
     ...exacts
-      .filter(
-        (_, index) =>
-          !exact.parts.has(index) &&
-          !exact.capped.has(index) &&
-          !partsHeld.has(index)
-      )
+      .filter(({ kind }, index) => kind !== "date" && !found(index))
       .map(({ asked: part }) => part),
     ...terms.telling
       .filter(

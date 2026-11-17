@@ -153,6 +153,7 @@ export const rpcParamNames: ParamNames = {
     "grantConnection": ["chatId","id"],
     "heldCalls": ["chatId","after"],
     "list": [],
+    "makeDraftedAgent": ["chatId","make"],
     "models": [],
     "packageRequests": ["chatId"],
     "people": [],

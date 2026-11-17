@@ -175,12 +175,6 @@
       "database_name": "grasp-os-core",
       "migrations_dir": "src/db/core/migrations",
     },
-    {
-      "binding": "KNOWLEDGE",
-      "database_name": "grasp-os-knowledge",
-      // The Brain's own migrations: the package owns its whole database.
-      "migrations_dir": "../../packages/brain/src/db/migrations",
-    },
   ],
   "r2_buckets": [
     {
@@ -195,12 +189,10 @@
       "bucket_name": "grasp-os-audit-archive",
       "jurisdiction": "eu",
     },
-    // The Brain's files. The new Brain's original source files, one per
-    // content hash under `sources/` (@grasp-os/brain-next's files.ts), and
-    // today's Knowledge's version texts under `payloads/`
-    // (src/knowledge/payloads.ts). The bucket stays when today's Brain is
-    // removed. One bucket per deployment, private, in the EU; only core
-    // reads and writes it.
+    // The Brain's files: its original source files, one per content hash
+    // under `sources/` (@grasp-os/brain-next's files.ts), and what its
+    // stores keep beside them. One bucket per deployment, private, in the
+    // EU; only core reads and writes it.
     {
       "binding": "BRAIN_OBJECTS",
       "bucket_name": "grasp-os-brain-objects",

@@ -91,9 +91,11 @@ import {
   notHelpfulAction,
   signInCard,
   startAction,
+  undoAction,
 } from "./cards.tsx";
 import { inertInMessage } from "./inert.ts";
 import { pressCard } from "./press.ts";
+import { withoutQuotedReply } from "./quoted-reply.ts";
 import { isSetUp } from "./set-up.ts";
 import { countSignal } from "./signals.ts";
 import { slackAdapter, verifiedSlackRequest } from "./slack.ts";
@@ -101,6 +103,7 @@ import { rateRequest } from "./stephen-requests.ts";
 import type { ConnectedTeamsAdapter } from "./teams-adapter.ts";
 import { teamsAdapter, verifiedTeamsRequest } from "./teams.ts";
 import type { TeamsKeys } from "./teams.ts";
+import { pressUndo } from "./undo.ts";
 import { inDirectory, teamsMembers, writerOf } from "./who.ts";
 import { channelLocales, say } from "./words.ts";
 import type { ChannelLocale } from "./words.ts";
@@ -219,6 +222,9 @@ const activitySchema = z.object({
     .optional(),
 });
 type Activity = z.infer<typeof activitySchema>;
+
+/** Every field of an activity the door took, to send on as Teams sent it. */
+const activityFieldsSchema = z.looseObject({});
 
 /** The language `locale` (`nl-NL`, `de`) names, or English. */
 const localeOf = (locale: string | undefined): ChannelLocale => {
@@ -687,8 +693,10 @@ const gate = async (
 /**
  * What a press on a card's button does, on any platform, by the member
  * the door let in, in their own private chat: Confirm or Cancel on a card
- * of held writes (press.ts), or Start on a card offering a workflow
- * (workflow-offers.ts), which starts it if it is theirs.
+ * of held writes (press.ts), Start on a card offering a workflow
+ * (workflow-offers.ts), which starts it if it is theirs, or Undo on the
+ * notice of a memory of theirs, taken only from their direct message
+ * (`inDirect`, undo.ts).
  */
 const onPresses = (
   env: Env,
@@ -698,15 +706,20 @@ const onPresses = (
     userId,
     state,
     locale,
+    inDirect,
   }: {
     platform: "teams" | "slack";
     userId: string;
     state: StateAdapter;
     locale: ChannelLocale;
+    inDirect: boolean;
   }
 ): void => {
   chat.onAction([confirmAction, cancelAction], async (event) => {
     await pressCard(env, { platform, userId, event, state });
+  });
+  chat.onAction(undoAction, async (event) => {
+    await pressUndo(env, { platform, userId, event, state }, inDirect);
   });
   chat.onAction(startAction, async (event) => {
     if (event.thread === null) {
@@ -802,6 +815,8 @@ const slackPressResponse = async (
     userId: writer.userId,
     state,
     locale: "en",
+    // Only a press in their direct message gets this far.
+    inDirect: true,
   });
   return await chat.webhooks.slack(
     new Request(request.url, {
@@ -1064,13 +1079,27 @@ export const channelResponse = async (
     ctx.waitUntil(countSignal(env, platform, "refused"));
     return new Response("Unauthorized", { status: 401 });
   }
-  const parsed = activitySchema.safeParse(jsonOf(body));
+  const sent = jsonOf(body);
+  const parsed = activitySchema.safeParse(sent);
   // Verified, but nothing the door takes (a typing indicator has a
   // `from`; an installation update may not): acknowledged, and dropped.
   if (!parsed.success || parsed.data.type !== "message") {
     return new Response(null, { status: 200 });
   }
-  const activity = parsed.data;
+  // In a direct message, what they said, without a message their reply
+  // quotes (quoted-reply.ts): read so by the door and every handler after
+  // it. Only there, where `remember` may keep their words: in a group chat
+  // or channel the quote is the only copy the turn gets of what it answers.
+  const text =
+    parsed.data.text === undefined ||
+    parsed.data.conversation.conversationType !== "personal"
+      ? parsed.data.text
+      : await withoutQuotedReply(parsed.data.text);
+  const activity = { ...parsed.data, text };
+  const theirs =
+    text === parsed.data.text
+      ? body
+      : JSON.stringify({ ...activityFieldsSchema.parse(sent), text });
   const state = durableObjectState(inJurisdiction(env, env.CHAT_STATE));
   const adapter = await teamsAdapter(env, teamsKeys);
   const { line, userId, acts, kept, place } = await gate(
@@ -1124,6 +1153,7 @@ export const channelResponse = async (
     userId,
     state,
     locale: localeOf(activity.locale),
+    inDirect: place?.kind === "direct",
   });
   // A thumb on one of his answers: kept on the request it is for, only
   // when that request is the presser's own (stephen-requests.ts).
@@ -1174,7 +1204,7 @@ export const channelResponse = async (
       new Request(request.url, {
         method: "POST",
         headers: request.headers,
-        body,
+        body: theirs,
       }),
       { waitUntil: background }
     );

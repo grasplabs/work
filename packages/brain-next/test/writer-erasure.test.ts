@@ -896,7 +896,8 @@ describe("a writer's erasure", () => {
       // that points at the erasure.
       const before: Copy = {
         // The table of memories that failed to delete is the release's own,
-        // and so are the quotes' (migration 0022, quotes.ts).
+        // and so are the quotes' (migration 0022, quotes.ts) and the days
+        // chunks mention (migration 0024, dates.ts).
         tables: now.tables
           .filter(
             ({ name }) =>
@@ -907,6 +908,9 @@ describe("a writer's erasure", () => {
                 "memory_ins",
                 "memory_judging",
                 "memory_judging_places",
+                "chunk_days",
+                // A person's own entity (migration 0025, own-entity.ts).
+                "own_entity",
               ].includes(name)
           )
           .map((table) => {
@@ -1002,7 +1006,8 @@ describe("a writer's erasure", () => {
             !made.includes("work_items_key_idx") &&
             !made.includes("memory_outs") &&
             !made.includes("memory_ins") &&
-            !made.includes("current_versions_unjudged_idx")
+            !made.includes("current_versions_unjudged_idx") &&
+            !made.includes("chunk_days_chunk_idx")
         ),
       };
       expect(

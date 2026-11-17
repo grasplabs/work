@@ -17,7 +17,7 @@ import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { soleReadersOf } from "./brain-next-sole-readers.ts";
 import { mockIdp } from "./idp.ts";
 import { noProducers } from "./no-producers.ts";
-import { signedInWithRole, unique } from "./sign-in.ts";
+import { signedInWithRole, uniqueWord } from "./sign-in.ts";
 
 // Recall finds words in their other forms (GRA-1725): every word is
 // indexed under its stem in English, Dutch, German, French and Spanish,
@@ -128,7 +128,7 @@ const indexesStore = async (term: string): Promise<boolean[]> =>
 describe("finding words in their other forms", { timeout: 120_000 }, () => {
   it("finds the passage of a long document that holds another form of the word, and only that passage", async () => {
     const reader = await person();
-    const tag = `w${unique()}`;
+    const tag = uniqueWord();
     // Paragraphs too long to share a passage: each is a chunk of its own.
     const passages = [
       `${filler("magazijn")} ${tag}`,
@@ -178,7 +178,7 @@ describe("finding words in their other forms", { timeout: 120_000 }, () => {
 
   it("ranks the form asked for above another form, whatever hidden sources hold", async () => {
     const [reader, other] = await Promise.all([person(), person()]);
-    const tag = `w${unique()}`;
+    const tag = uniqueWord();
     // The other form in a shorter passage, which shorter-first alone would
     // put first.
     const otherForm = await add(`factuur ${tag}`, await ownedBy(reader));
@@ -252,7 +252,7 @@ describe("finding words in their other forms", { timeout: 120_000 }, () => {
 
   it("finds what shares only a question's common words after what its other words find, and never what the reader may not read", async () => {
     const [reader, other] = await Promise.all([person(), person()]);
-    const tag = `w${unique()}`;
+    const tag = uniqueWord();
     const telling = await add(`Laptop ${tag} bestellen`, await ownedBy(reader));
     const phrasing = await add(
       "Wie en wat: de servicedesk, voor wie vastloopt",
@@ -310,7 +310,7 @@ describe("finding words in their other forms", { timeout: 120_000 }, () => {
       // oxlint-disable-next-line no-await-in-loop -- one source at a time
       await add(text, await ownedBy(reader));
     }
-    const after = `w${unique()}`;
+    const after = uniqueWord();
     const id = await add(`Added after them: ${after}`, await ownedBy(reader));
 
     await expect(recalledAs(reader, after)).resolves.toStrictEqual([id]);
@@ -461,9 +461,15 @@ describe(
   () => {
     it("finds other forms and newly folded letters in an older store's passages once their turn in the rebuild came, and never another reader's", async () => {
       const [reader, other] = await Promise.all([person(), person()]);
-      const mark = `w${unique()}`;
+      const mark = uniqueWord();
       const invoices = await add(
         `De facturen van maart ${mark}`,
+        await ownedBy(reader)
+      );
+      // A passage mentioning a day: the rebuild rewrites its days with its
+      // words (dates.ts), and finds it by that day written otherwise.
+      const signed = await add(
+        `Signed March 14th, 2098 ${mark}`,
         await ownedBy(reader)
       );
       const street = await add(
@@ -486,6 +492,7 @@ describe(
         invoice: await recalledAs(reader, "factuur"),
         street: await recalledAs(reader, "strasse"),
         other: await recalledAs(other, "strasse"),
+        signed: await recalledAs(reader, "le 14 mars"),
         // The first rules' rows went: none is left beside the new ones.
         firstRules: await chunksFoundBy(mark, "straße"),
       }).toStrictEqual({
@@ -494,13 +501,14 @@ describe(
         invoice: [invoices],
         street: [street],
         other: [],
+        signed: [signed],
         firstRules: 0,
       });
     });
 
     it("finds symbols that fold into letters by those letters, as the first rules did, on a fresh add and after a rebuild", async () => {
       const reader = await person();
-      const mark = `w${unique()}`;
+      const mark = uniqueWord();
       // "㍿" folds to "株式会社", "℡" to "tel", "Ⓐ" to "a".
       const symbols = await add(`㍿ ℡ Ⓐ ${mark}`, await ownedBy(reader));
       const questions = ["株式会社", "TEL", "a"];

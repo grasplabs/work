@@ -157,6 +157,11 @@ const shown = async (
       notes = [];
     },
   };
+  // The draft's revision, which each change moves on. The page is shown
+  // at revision 1 and never reads the draft again here, as a page whose
+  // read after a change hasn't landed yet: its next change still goes
+  // over the revision the last one left, or core refuses it.
+  let revisionNow = 1;
   const definitions = {
     dataModel: async () => {
       await Promise.resolve();
@@ -164,11 +169,19 @@ const shown = async (
     },
     define: async (
       _app: string,
-      _revision: number,
+      revision: number,
       operation: ModelChange,
       preview = false
     ): Promise<DataModelChange> => {
       await Promise.resolve();
+      if (revision !== revisionNow) {
+        throw Object.assign(
+          new Error(
+            "Someone else changed the draft at the same time. Read it again and retry."
+          ),
+          { code: "draft.conflict" }
+        );
+      }
       sent.push({ operation, preview });
       // A few operations as one: each after the one before, all or none.
       let after: DataModel = held;
@@ -182,8 +195,15 @@ const shown = async (
       }
       if (!preview) {
         held = after;
+        revisionNow += 1;
       }
-      return { ok: true, model: after, plan, change: plan };
+      return {
+        ok: true,
+        model: after,
+        plan,
+        change: plan,
+        revision: revisionNow,
+      };
     },
   };
   const apps = { ...definitions, preview: testData };

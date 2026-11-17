@@ -1,5 +1,7 @@
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import { agentErrors } from "@grasp-os/shared/agent";
+import { agentDraftSchema } from "@grasp-os/shared/agents";
+import type { AgentDraft } from "@grasp-os/shared/agents";
 import {
   actorOf,
   auditEventSchema,
@@ -12,6 +14,7 @@ import type {
   AuditDetailValue,
   AuditEntry,
 } from "@grasp-os/shared/audit";
+import type { ChatSavedMemory } from "@grasp-os/shared/brain-memories";
 import {
   chatChannelSchema,
   chatFilesMax,
@@ -70,6 +73,7 @@ import {
 } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { redact } from "@grasp-os/shared/redact";
+import type { Role } from "@grasp-os/shared/roles";
 import { canBuild, roleSchema } from "@grasp-os/shared/roles";
 import { subjectSchema } from "@grasp-os/shared/subject";
 import type { Subject } from "@grasp-os/shared/subject";
@@ -116,7 +120,6 @@ import type { QuestionBuilt, TurnContext, TurnResult } from "./agent.ts";
 import { turnAgent } from "./agents.ts";
 import { drainObjectOutbox, uuidFromHash } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
-import { eraseCaptured } from "./brain-capture.ts";
 import { loneNotesPerDrain } from "./brain-hand-overs.ts";
 import { chatTurnSource, eraseChat } from "./brain-next-origins.ts";
 import { skillsFor, skillsReachOf } from "./brain-skills.ts";
@@ -140,7 +143,12 @@ import type {
   TurnRequest,
   TurnStop,
 } from "./chat-harness.ts";
-import { chatMessageOf, partialOf, shownBuiltSchema } from "./chat-messages.ts";
+import {
+  chatMessageOf,
+  partialOf,
+  savedOf,
+  shownBuiltSchema,
+} from "./chat-messages.ts";
 import type { ShownBuilt } from "./chat-messages.ts";
 import {
   saidOf,
@@ -206,6 +214,7 @@ import type { InstructionContext } from "./instruction-files.ts";
 import { inputTokens, modelSettings, models } from "./models.ts";
 import { hasBrainGrant } from "./permissions.ts";
 import type { WorkContext } from "./restricted.ts";
+import { retireUnseen } from "./unseen-memories.ts";
 
 export type Chat = typeof chats.$inferSelect;
 
@@ -233,6 +242,12 @@ interface LiveTurn {
    * and how each ended, never what they read. Only when its asker wants them.
    */
   calls?: ToolCall[];
+  /**
+   * The memories its agent saved for the person (agent-remember.ts), as
+   * their notices show them: for a chat app's asker, who posts each with
+   * its Undo (channels/remembered.ts). Only when its asker wants them.
+   */
+  remembered?: ChatSavedMemory[];
   /** Tells a chat platform's asker the answer's text so far. */
   onText?: (text: string) => unknown;
   /**
@@ -744,6 +759,31 @@ const traceKeyPrefix = "trace:";
  * proposed them (`takePlan`), so each is made once.
  */
 const builtKeyPrefix = "built:";
+
+/**
+ * Which agents a turn may draft for its person (`TurnContext.drafts`):
+ * only one they asked for, in their own chat in Grasp; one of the
+ * company's for its admins, else one of their own.
+ */
+const draftsOf = ({
+  shared,
+  unattended,
+  via,
+  role,
+}: {
+  shared: boolean;
+  unattended: boolean;
+  via: ChatChannel;
+  role: Role | undefined;
+}): TurnContext["drafts"] => {
+  if (shared || unattended || via !== "web" || role === undefined) {
+    return undefined;
+  }
+  return role === "admin" ? "company" : "own";
+};
+
+/** Where a chat keeps the agents it drafted that Make it took, by call. */
+const draftedKeyPrefix = "drafted:";
 
 const builtSchema = z.array(z.string());
 
@@ -2202,7 +2242,12 @@ export class Workspace extends DurableObject<Env> {
     text: string,
     onText: ((text: string) => unknown) | undefined,
     place: ChatPlace
-  ): Promise<{ chatId: string; answer: Answer; calls: ToolCall[] }> {
+  ): Promise<{
+    chatId: string;
+    answer: Answer;
+    calls: ToolCall[];
+    remembered: ChatSavedMemory[];
+  }> {
     const platform = chatPlatformSchema.parse(via);
     const parsedPlace = permissionErrors.parse(
       "permission.context_invalid",
@@ -2255,11 +2300,25 @@ export class Workspace extends DurableObject<Env> {
       );
     }
     const calls: ToolCall[] = [];
-    return {
-      chatId: chat.id,
-      answer: await this.#turn(chat, { text, model }, false, { onText, calls }),
-      calls,
-    };
+    const remembered: ChatSavedMemory[] = [];
+    let answer: Answer;
+    try {
+      answer = await this.#turn(chat, { text, model }, false, {
+        onText,
+        calls,
+        remembered,
+      });
+    } catch (error) {
+      // What the turn saved before it threw reaches no notice: retired.
+      await retireUnseen(
+        this.env,
+        personId,
+        "turn_threw",
+        remembered.map(({ memory }) => memory)
+      );
+      throw error;
+    }
+    return { chatId: chat.id, answer, calls, remembered };
   }
 
   /**
@@ -2309,7 +2368,8 @@ export class Workspace extends DurableObject<Env> {
    * it there and then: every entry point says which, as what the turn may
    * read depends on it (`answersAlone`). `started` is called once the turn
    * is under way: the model admitted, and nothing kept yet. `calls` gets
-   * each call its code makes, as it ends.
+   * each call its code makes, as it ends; `remembered` each memory its
+   * agent saved, as it is kept.
    */
   async #turn(
     chat: Chat,
@@ -2319,10 +2379,12 @@ export class Workspace extends DurableObject<Env> {
       started,
       onText,
       calls,
+      remembered,
     }: {
       started?: () => void;
       onText?: (text: string) => unknown;
       calls?: ToolCall[];
+      remembered?: ChatSavedMemory[];
     } = {}
   ): Promise<Answer> {
     const parsed = questionSchema.safeParse(question);
@@ -2349,6 +2411,7 @@ export class Workspace extends DurableObject<Env> {
       agentId: chat.agentId,
       reads: [],
       calls,
+      remembered,
       cache: { requests: 0, inputTokens: 0, cacheReadTokens: 0 },
     };
     this.#turns.set(chat.id, live);
@@ -2407,7 +2470,7 @@ export class Workspace extends DurableObject<Env> {
         scope,
         authority,
         work,
-        { shared, personal },
+        { shared, personal, unattended },
         agent
       );
       // Refuses a model the deployment or its rules don't allow before
@@ -2744,7 +2807,11 @@ export class Workspace extends DurableObject<Env> {
     scope: Parameters<typeof auditAgentCall>[1],
     authority: Authority,
     work: Extract<WorkContext, { type: "chat" }>,
-    { shared, personal }: { shared: boolean; personal: boolean },
+    {
+      shared,
+      personal,
+      unattended,
+    }: { shared: boolean; personal: boolean; unattended: boolean },
     agent: Awaited<ReturnType<typeof turnAgent>>
   ): Promise<TurnContext> {
     const chat = this.#chat(work.chatId);
@@ -2814,6 +2881,8 @@ export class Workspace extends DurableObject<Env> {
     // included, needs a role that builds (app-access.ts).
     const role = await memberRole(this.env.DB, scope.personId);
     const builds = !shared && role !== undefined && canBuild(role);
+    // Who drafts an agent for its person to make (`draftAgent`).
+    const drafts = draftsOf({ shared, unattended, via, role });
     // The documents an admin gave the chat's agent, by name.
     const kept =
       agent === undefined ? [] : await documentsOf(this.env, agent.id);
@@ -2823,6 +2892,7 @@ export class Workspace extends DurableObject<Env> {
       skills,
       channel,
       builds,
+      ...(drafts === undefined ? {} : { drafts }),
       // The first agent as Grasp ships it, with no document, is told
       // nothing more.
       ...(agent === undefined ||
@@ -3086,7 +3156,7 @@ export class Workspace extends DurableObject<Env> {
     if (this.chatState(chatId) === undefined || this.#deleting.has(chatId)) {
       return undefined;
     }
-    const { agentId: chatAgent } = this.#chat(chatId);
+    const { agentId: chatAgent, personId, via } = this.#chat(chatId);
     const live = this.#turns.get(chatId);
     // What the model said is its turn's agent's: the live turn's, or, for
     // a turn a restart cut short, the chat's, which the turn set as it
@@ -3128,12 +3198,38 @@ export class Workspace extends DurableObject<Env> {
       if (message.role === "assistant") {
         answer = id;
       }
+      this.#savedIn({ personId, via }, live, message);
     }
     // With the messages: no await between, so they are stored together.
     if (through > before.through) {
       this.ctx.storage.kv.put(copiedKey, { through, answer });
     }
     return answered ? answer : undefined;
+  }
+
+  /**
+   * A memory the chat's agent saved (`message`, a call of `remember`), for
+   * the asker of the live turn who shows its notice. In a chat app's
+   * conversation with nobody here to post it (the turn was cut short, or
+   * its result came after the turn ended), nobody ever will: retired
+   * (unseen-memories.ts). Grasp's own chat shows it from the message.
+   */
+  #savedIn(
+    { personId, via }: Pick<Chat, "personId" | "via">,
+    live: LiveTurn | undefined,
+    message: Message
+  ): void {
+    const saved = message.role === "toolResult" ? savedOf(message) : undefined;
+    if (saved === undefined) {
+      return;
+    }
+    if (live?.remembered !== undefined) {
+      live.remembered.push(saved);
+    } else if (via !== "web") {
+      this.ctx.waitUntil(
+        retireUnseen(this.env, personId, "no_asker", [saved.memory])
+      );
+    }
   }
 
   /** Shows the chat's watchers the answer streaming in, or none. */
@@ -4092,15 +4188,71 @@ export class Workspace extends DurableObject<Env> {
     personId: string,
     callId: unknown
   ): { plan: ChatPlan; make: ChatMake | null } {
+    const { chat, args } = this.#takeCall(chatId, personId, callId, {
+      tool: "proposePlan",
+      keyPrefix: builtKeyPrefix,
+      notFound: "agent.plan_not_found",
+    });
+    const plan = chatPlanSchema.parse(args);
+    return { plan, make: makeOf(chat) };
+  }
+
+  /**
+   * Takes the agent `personId`'s chat `chatId` drafted with the call
+   * `callId` (`draftAgent`), as the call kept it, to make it once: a
+   * chat they don't hold, a draft the tool refused or none, or one taken
+   * already is `agent.draft_not_found`; while its agent works,
+   * `agent.busy`. `releaseAgentDraft` gives it back when Make it made
+   * nothing.
+   */
+  takeAgentDraft(
+    chatId: unknown,
+    personId: string,
+    callId: unknown
+  ): AgentDraft {
+    const { args } = this.#takeCall(chatId, personId, callId, {
+      tool: "draftAgent",
+      keyPrefix: draftedKeyPrefix,
+      notFound: "agent.draft_not_found",
+    });
+    return agentDraftSchema.parse(args);
+  }
+
+  /** Gives back a draft `takeAgentDraft` took, of which Make it made nothing. */
+  releaseAgentDraft(chatId: ChatId, callId: string): void {
+    this.#releaseCall(`${draftedKeyPrefix}${chatId}`, callId);
+  }
+
+  /**
+   * The arguments of the call `callId` to `tool` in `personId`'s chat
+   * `chatId`, as the tool took them, marked taken under `keyPrefix` so
+   * none is taken twice; `notFound` for a chat they don't hold, a call
+   * the tool refused, none, or one taken already, and `agent.busy` while
+   * the chat's agent works.
+   */
+  #takeCall(
+    chatId: unknown,
+    personId: string,
+    callId: unknown,
+    {
+      tool,
+      keyPrefix,
+      notFound,
+    }: {
+      tool: "proposePlan" | "draftAgent";
+      keyPrefix: string;
+      notFound: "agent.plan_not_found" | "agent.draft_not_found";
+    }
+  ): { chat: Chat; args: unknown } {
     const chat = this.#graspChat(chatId, personId);
     const { id } = chat;
     // Its question would be refused: nothing is made for it.
     if (this.#turns.has(id) || this.#isRunning(id)) {
       throw agentErrors.create("agent.busy");
     }
-    const key = `${builtKeyPrefix}${id}`;
+    const key = `${keyPrefix}${id}`;
     const kept = builtSchema.safeParse(this.ctx.storage.kv.get(key));
-    const built = kept.success ? kept.data : [];
+    const taken = kept.success ? kept.data : [];
     const transcript = this.#transcript(id);
     const refused = new Set(
       transcript.flatMap((message) =>
@@ -4115,28 +4267,26 @@ export class Workspace extends DurableObject<Env> {
       )
       .find(
         (part) =>
-          part.type === "toolCall" &&
-          part.name === "proposePlan" &&
-          part.id === callId
+          part.type === "toolCall" && part.name === tool && part.id === callId
       );
-    const plan =
+    const schema = tool === "proposePlan" ? chatPlanSchema : agentDraftSchema;
+    const args =
       call?.type === "toolCall" && !refused.has(call.id)
-        ? chatPlanSchema.safeParse(call.arguments)
+        ? schema.safeParse(call.arguments)
         : undefined;
     if (
       typeof callId !== "string" ||
-      plan?.success !== true ||
-      built.includes(callId)
+      args?.success !== true ||
+      taken.includes(callId)
     ) {
-      throw agentErrors.create("agent.plan_not_found");
+      throw agentErrors.create(notFound);
     }
-    this.ctx.storage.kv.put(key, [...built, callId]);
-    return { plan: plan.data, make: makeOf(chat) };
+    this.ctx.storage.kv.put(key, [...taken, callId]);
+    return { chat, args: args.data };
   }
 
-  /** Gives back a plan `takePlan` took, of which Build it made nothing. */
-  releasePlan(chatId: ChatId, callId: string): void {
-    const key = `${builtKeyPrefix}${chatId}`;
+  /** Gives back the call `callId` taken under `key`. */
+  #releaseCall(key: string, callId: string): void {
     const kept = builtSchema.safeParse(this.ctx.storage.kv.get(key));
     if (kept.success) {
       this.ctx.storage.kv.put(
@@ -4144,6 +4294,11 @@ export class Workspace extends DurableObject<Env> {
         kept.data.filter((each) => each !== callId)
       );
     }
+  }
+
+  /** Gives back a plan `takePlan` took, of which Build it made nothing. */
+  releasePlan(chatId: ChatId, callId: string): void {
+    this.#releaseCall(`${builtKeyPrefix}${chatId}`, callId);
   }
 
   /**
@@ -4596,9 +4751,6 @@ export class Workspace extends DurableObject<Env> {
       );
       // Nor any workflow start its agent asked its person to confirm.
       await dropHeldStarts(this.env, { chatId: id });
-      // What today's Brain captured of its turns goes before it does:
-      // should that fail, the chat stays (brain-capture.ts).
-      await eraseCaptured(this.env, [id]);
       // And what its agent kept, the transcript the model reads with it:
       // erased for good, so nothing told it meanwhile is kept.
       await this.#toSession(id, async (session) => {
@@ -4669,9 +4821,8 @@ export class Workspace extends DurableObject<Env> {
    * the person it is for (GRA-903, GRA-1181; core's person-erasure.ts):
    * it is theirs alone (`personalWorkspaceId`), and nobody else's data is
    * ever in it. Actions held for them in connect are connect's erasure
-   * step's (`erasePersonal` drops every one made for them), not this. First what lives outside it: what the Brain captured of
-   * their chats' turns, any connection granted in those chats, and the
-   * stores their drafts' previews wrote to. Then its own storage, all of
+   * step's (`erasePersonal` drops every one made for them), not this. First what lives outside it: any connection granted in
+   * their chats, and the stores their drafts' previews wrote to. Then its own storage, all of
    * it, once its audit outbox is delivered (an event never goes with it),
    * and the object restarts empty. Refused (`agent.busy`) while a turn
    * runs; asking again finishes what a failure left. Answers how many
@@ -4694,9 +4845,6 @@ export class Workspace extends DurableObject<Env> {
     await Promise.allSettled(this.#sent);
     const held = this.#db.select({ id: chats.id }).from(chats).all();
     const ids = held.map(({ id }) => id);
-    if (ids.length > 0) {
-      await eraseCaptured(this.env, ids);
-    }
     for (const id of ids) {
       // oxlint-disable-next-line no-await-in-loop -- one chat at a time
       await this.#toSession(id, async (session) => {

@@ -2330,6 +2330,10 @@ msgstr "An agent for the company, or one only you use."
 msgid "An agent of your own, for a job you do often. Only you see and ask it, in Grasp's chat."
 msgstr "An agent of your own, for a job you do often. Only you see and ask it, in Grasp's chat."
 
+#: src/chat/agent-draft-card.tsx
+msgid "An agent to make: {name}"
+msgstr "An agent to make: {name}"
+
 #: src/chat/thread.tsx
 msgid "An agent you can no longer ask"
 msgstr "An agent you can no longer ask"
@@ -3480,6 +3484,10 @@ msgstr "Change plan"
 #: src/projects/project-dialog.tsx
 msgid "Change project"
 msgstr "Change project"
+
+#: src/chat/agent-draft-card.tsx
+msgid "Change something"
+msgstr "Change something"
 
 #: src/chat/chat-panel.tsx
 msgid "Change something about the plan"
@@ -5393,6 +5401,10 @@ msgstr "Everyone in a project you aren’t in"
 msgid "Everyone in it · {shownRole}"
 msgstr "Everyone in it · {shownRole}"
 
+#: src/chat/agent-draft-card.tsx
+msgid "Everyone in the company"
+msgstr "Everyone in the company"
+
 #: src/settings/team-members-dialog.tsx
 msgid "Everyone in the organization is in this team."
 msgstr "Everyone in the organization is in this team."
@@ -6859,8 +6871,8 @@ msgid "I hear you. Shall we start?"
 msgstr "I hear you. Shall we start?"
 
 #: src/onboarding/setup-steps.tsx
-msgid "I keep each file in your Brain, for you alone."
-msgstr "I keep each file in your Brain, for you alone."
+msgid "I keep each file in your Brain, for you alone. What I read in it, never the file itself, helps me in the interviews with the teams it is about, or with every team when it names none."
+msgstr "I keep each file in your Brain, for you alone. What I read in it, never the file itself, helps me in the interviews with the teams it is about, or with every team when it names none."
 
 #: src/interview/words.ts
 msgid "I lost the connection. Please check your internet. I have kept what you said, and I keep trying."
@@ -7422,6 +7434,10 @@ msgstr "Its data"
 #: src/apps/app-settings.tsx
 msgid "Its definition to keep or move, and a blueprint others can start from."
 msgstr "Its definition to keep or move, and a blueprint others can start from."
+
+#: src/chat/agent-draft-card.tsx
+msgid "Its instructions"
+msgstr "Its instructions"
 
 #: src/agents/agent-apps-card.tsx
 msgid "Its instructions name apps your company doesn't offer: {missing}."
@@ -8084,6 +8100,10 @@ msgstr "Make an App from the {name} blueprint: {description}"
 #: src/make/make-ideas.tsx
 msgid "Make an App from the {name} blueprint."
 msgstr "Make an App from the {name} blueprint."
+
+#: src/chat/agent-draft-card.tsx
+msgid "Make it"
+msgstr "Make it"
 
 #: src/agents/agents-overview.tsx
 msgid "Make one for a job, such as chasing unpaid invoices, and say who may ask it."
@@ -9046,6 +9066,10 @@ msgstr "Nobody yet"
 msgid "Nobody yet, until you choose."
 msgstr "Nobody yet, until you choose."
 
+#: src/chat/agent-draft-card.tsx
+msgid "Nobody yet: you say who on its page"
+msgstr "Nobody yet: you say who on its page"
+
 #: src/brain/skills-page.tsx
 msgid "Nobody's agents use {name} from then on. Its versions stay as history, and a new approved share of its name brings it back."
 msgstr "Nobody's agents use {name} from then on. Its versions stay as history, and a new approved share of its name brings it back."
@@ -9361,6 +9385,10 @@ msgstr "Nothing is kept yet."
 msgid "Nothing is made until you say Build it. You can change any of it first."
 msgstr "Nothing is made until you say Build it. You can change any of it first."
 
+#: src/chat/agent-draft-card.tsx
+msgid "Nothing is made until you say Make it. You can change any of it first."
+msgstr "Nothing is made until you say Make it. You can change any of it first."
+
 #: src/inbox/items.ts
 msgid "Nothing is sent or changed on {connection} until you approve it, with exactly what is shown."
 msgstr "Nothing is sent or changed on {connection} until you approve it, with exactly what is shown."
@@ -9446,6 +9474,10 @@ msgstr "Nothing was added. Fix these rows and try again."
 #: src/brain/brain.ts
 msgid "Nothing yet"
 msgstr "Nothing yet"
+
+#: src/chat/agent-draft-card.tsx
+msgid "Nothing yet: you turn it on on its page"
+msgstr "Nothing yet: you turn it on on its page"
 
 #: src/brain/memories-page.tsx
 msgid "Nothing you can read"
@@ -9684,6 +9716,10 @@ msgstr "One moment"
 #: src/apps/field-kinds.tsx
 msgid "One of a list of options"
 msgstr "One of a list of options"
+
+#: src/chat/agent-draft-card.tsx
+msgid "One of the company's agents"
+msgstr "One of the company's agents"
 
 #: src/interview/words.ts
 msgid "One real case"
@@ -10368,6 +10404,10 @@ msgstr "People do “{name}” in two ways"
 #: src/dashboard/report.ts
 msgid "People heard"
 msgstr "People heard"
+
+#: src/chat/agent-draft-card.tsx
+msgid "People in these teams: {named}"
+msgstr "People in these teams: {named}"
 
 #: src/agents/agent-page.tsx
 msgid "People it worked for"
@@ -13840,6 +13880,10 @@ msgstr "The company’s rules for every agent."
 msgid "The company's skills"
 msgstr "The company's skills"
 
+#: src/chat/agent-draft-card.tsx
+msgid "the company's time zone"
+msgstr "the company's time zone"
+
 #: src/inbox/items.ts
 msgid "The connection stopped working. Workflows that use it wait until someone signs in again."
 msgstr "The connection stopped working. Workflows that use it wait until someone signs in again."
@@ -15817,6 +15861,7 @@ msgid "What it is bound to has changed since the binding was approved. Bind it a
 msgstr "What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits."
 
 #: src/agents/agent-form.tsx
+#: src/chat/agent-draft-card.tsx
 msgid "What it is for"
 msgstr "What it is for"
 
@@ -15830,6 +15875,7 @@ msgid "What it is told"
 msgstr "What it is told"
 
 #: src/agents/agent-page.tsx
+#: src/chat/agent-draft-card.tsx
 msgid "What it may do"
 msgstr "What it may do"
 
@@ -16106,6 +16152,7 @@ msgid "When it was added"
 msgstr "When it was added"
 
 #: src/agents/agent-wakes.tsx
+#: src/chat/agent-draft-card.tsx
 msgid "When it works on its own"
 msgstr "When it works on its own"
 
@@ -16300,6 +16347,10 @@ msgstr "Who it is for"
 msgid "Who leads it?"
 msgstr "Who leads it?"
 
+#: src/chat/agent-draft-card.tsx
+msgid "Who may ask it"
+msgstr "Who may ask it"
+
 #: src/brain/sources-page.tsx
 msgctxt "a file uploaded into the Brain"
 msgid "Who may read it"
@@ -16348,6 +16399,10 @@ msgstr "Who’s who at your company?"
 #: src/apps/draft-changes.tsx
 msgid "whoever added the row"
 msgstr "whoever added the row"
+
+#: src/chat/agent-draft-card.tsx
+msgid "Whose it is"
+msgstr "Whose it is"
 
 #: src/apps/release-controls.tsx
 #: src/workflows/requests/request-table.tsx
@@ -17116,6 +17171,10 @@ msgstr "Yours"
 #: src/agents/agent-page.tsx
 msgid "Yours alone: nobody else sees or asks it"
 msgstr "Yours alone: nobody else sees or asks it"
+
+#: src/chat/agent-draft-card.tsx
+msgid "Yours alone: only you ask it"
+msgstr "Yours alone: only you ask it"
 
 #: src/brain/atlas-overlays.tsx
 #: src/workflows/workflow-flow.tsx

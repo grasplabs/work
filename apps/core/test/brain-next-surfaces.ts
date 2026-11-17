@@ -350,9 +350,24 @@ const strangers = (): Access => ({
   group: `team:${stranger()}`,
 });
 
-/** A source's text holding every marker. */
+/**
+ * The day every marked text mentions, and no other source: a question
+ * asking it otherwise (`markedDayAsked`) must answer as one asking a day
+ * nobody mentions (`absentDayAsked`).
+ */
+const markedDay = "13/11/2091";
+
+/** A source's text holding every marker, and the marked day. */
 const markedText = (markers: readonly string[]): string =>
-  `Withheld ${markers.join(" ")}`;
+  `Withheld ${markers.join(" ")}, due ${markedDay}.`;
+
+/**
+ * The marked day as a question asks it, and a day nobody mentions, alike
+ * but for their month: a word of letters, which `echoesHidden` writes as
+ * a place in the list like a marker, never touching the places' digits.
+ */
+const markedDayAsked = { month: "november", day: "13", year: "2091" } as const;
+const absentDayAsked = { month: "december", day: "13", year: "2091" } as const;
 
 /** The same text, past the most bytes a source may have. */
 const oversizedText = (markers: readonly string[]): string =>
@@ -372,12 +387,16 @@ const twinOf = (marker: string): string =>
       : String.fromCodePoint((character.codePointAt(0) ?? 0) + 6)
   ).join("")}`;
 
-/** A question built on words: the markers, or their twins. */
+/**
+ * A question built on words: the markers, or their twins; with `day`,
+ * also the marked day, or for the twins a day nobody mentions.
+ */
 interface Asked {
   name: string;
   text: (words: readonly string[]) => string;
   budget?: number;
   asOf?: Date;
+  day?: boolean;
 }
 
 /** What a pack is asked for in a probe. */
@@ -420,6 +439,11 @@ const askedOf = (
       name: "the markers and a date",
       text: (words) => `${words.join(" ")} 14 maart 2026`,
     },
+    {
+      name: "the markers and the day only marked sources mention",
+      text: (words) => words.join(" "),
+      day: true,
+    },
     { name: "the shared word and the markers", text: withShared },
     ...[1, 40].map((tokens) => ({
       name: `the shared word and the markers in ${tokens} tokens`,
@@ -436,6 +460,12 @@ const askedOf = (
         name: `the shared word and the markers as of ${asOf.toISOString()}`,
         text: withShared,
         asOf,
+      },
+      {
+        name: `the markers and the marked day as of ${asOf.toISOString()}`,
+        text: (words: readonly string[]) => words.join(" "),
+        asOf,
+        day: true,
       },
     ]),
   ];
@@ -490,13 +520,16 @@ const askedOfMarkers = async (
 ): Promise<Answer[]> => {
   const twins = probing.markers.map(twinOf);
   const asked: Answer[] = [];
-  for (const { name, text, budget, asOf } of askedOf(probing, moments)) {
-    for (const [about, words] of [
-      ["hidden", probing.markers],
-      ["nothing", twins],
+  for (const { name, text, budget, asOf, day } of askedOf(probing, moments)) {
+    for (const [about, words, dayAsked] of [
+      ["hidden", probing.markers, markedDayAsked],
+      ["nothing", twins, absentDayAsked],
     ] as const) {
       const asking: PackAsk = {
-        question: text(words),
+        question:
+          day === true
+            ? `${text(words)} ${dayAsked.day} ${dayAsked.month} ${dayAsked.year}`
+            : text(words),
         budget: { tokens: budget ?? recallBudgetMax },
         ...(asOf === undefined ? {} : { asOf }),
       };
@@ -507,7 +540,12 @@ const askedOfMarkers = async (
         about,
         name
       );
-      asked.push(echoesHidden(answered, words));
+      asked.push(
+        echoesHidden(
+          answered,
+          day === true ? [...words, dayAsked.month] : words
+        )
+      );
     }
   }
   return asked;
@@ -1106,6 +1144,7 @@ type CorePersonMember =
   | "forgetAs"
   | "memoryChoices"
   | "ownEntityAs"
+  | "ownEntityIdAs"
   | "entitiesAs"
   | "memoriesAs"
   | "contestedAs"
@@ -1329,6 +1368,31 @@ const othersOwnMemory = async (
     ],
   });
   return { entity: added.entities.c ?? "", memory: added.memories[0] ?? "" };
+};
+
+/**
+ * A stranger whose own entity holds a marked memory about it:
+ * someone else's, as `ownEntity` probes ask of it.
+ */
+const othersOwnEntity = async (markers: readonly string[]): Promise<string> => {
+  const person = stranger();
+  const theirs = personalStore(person);
+  const text = markedText(markers);
+  await theirs.addMemories({
+    change: crypto.randomUUID(),
+    access: { kind: "owner", person },
+    entities: [{ key: "me", kind: "person", own: true }],
+    memories: [
+      {
+        about: "me",
+        type: "fact",
+        statement: text,
+        speaker: { kind: "internal", person },
+        basis: { kind: "writer", writer: person },
+      },
+    ],
+  });
+  return person;
 };
 
 /**
@@ -6233,6 +6297,25 @@ const corePersonMemories = {
       await read("an id of the markers", markers.join("")),
     ];
   },
+  // The reader's own entity (GRA-1836): theirs alone, whatever someone
+  // else's holds; refused for someone who isn't a member.
+  ownEntityIdAs: async ({ personId, markers }) => {
+    await othersOwnEntity(markers);
+    return [
+      await answer(
+        "the reader's own",
+        async () => await coreBrain.ownEntityIdAs(env, personId)
+      ),
+      await answer(
+        "as someone who isn't a member",
+        async () => await coreBrain.ownEntityIdAs(env, stranger())
+      ),
+      await answer(
+        "as a person named by the markers",
+        async () => await coreBrain.ownEntityIdAs(env, markers.join(""))
+      ),
+    ];
+  },
   // The Brain's own lists and bounds, the same for every reader: no reader
   // asks, and no marker can be in them.
   memoryChoices: async () => [
@@ -6941,6 +7024,34 @@ export const memoriesProbes = (() => {
 
 /** The probes of cards. */
 const linkingProbes = {
+  // Someone else's own entity, with marked memories about it, answers the
+  // reader as a store that never made one does (GRA-1836).
+  ownEntity: async ({ markers, reader }) => {
+    // A refusal by its words alone: the object's id it carries is no answer.
+    const read = async (name: string, brain: Brain, about?: Answer["about"]) =>
+      await answer(
+        name,
+        async () =>
+          await refusedWith(async () => {
+            await brain.ownEntity({ reader });
+          }),
+        about
+      );
+    return [
+      await read(
+        "someone else's own store, holding marked memories about their own entity",
+        personalStore(await othersOwnEntity(markers)),
+        "hidden"
+      ),
+      await read(
+        "someone else's own store, never written",
+        personalStore(stranger()),
+        "nothing"
+      ),
+      await read("the shared store", store()),
+      await read("the reader's own store", personalStore(reader.person)),
+    ];
+  },
   readCard: async (probing) => {
     const { reader } = probing;
     const fixture = await recallFixture(probing);
@@ -9368,7 +9479,7 @@ export const shareProbes = {
 } satisfies Record<ShareMember, Probe>;
 
 /** The Sources page's RPC for `personId`, signed in as a member. */
-const sourcesAs = (personId: string): BrainSourcesRpc =>
+export const sourcesAs = (personId: string): BrainSourcesRpc =>
   new BrainSourcesRpc(
     env,
     async () => await Promise.resolve(sessionOf(personId))
@@ -9747,7 +9858,7 @@ export const sourcesProbes = {
 >;
 
 /** The memories' RPC for `personId`, signed in as a member. */
-const memoriesAs = (personId: string): BrainMemoriesRpc =>
+export const memoriesAs = (personId: string): BrainMemoriesRpc =>
   new BrainMemoriesRpc(
     env,
     async () => await Promise.resolve(sessionOf(personId))
