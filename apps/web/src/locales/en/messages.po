@@ -2311,6 +2311,10 @@ msgctxt "tab listing every workflow"
 msgid "All"
 msgstr "All"
 
+#: src/grasp/frame/grasp-sidebar.tsx
+msgid "All chats"
+msgstr "All chats"
+
 #: src/workflows/requests/request-filters.tsx
 msgid "All places"
 msgstr "All places"
@@ -2591,6 +2595,10 @@ msgstr "Answered: {question}"
 msgid "Answered: {title}"
 msgstr "Answered: {title}"
 
+#: src/chat/sidebar-chats.tsx
+msgid "Answering"
+msgstr "Answering"
+
 #: src/agents/agent-page.tsx
 msgid "Answers nobody anywhere"
 msgstr "Answers nobody anywhere"
@@ -2869,10 +2877,6 @@ msgstr "As its action, set the spam confidence level (SCL) to “Bypass spam fil
 msgid "As of {date}."
 msgstr "As of {date}."
 
-#: src/activity/audit-event.tsx
-msgid "As stored"
-msgstr "As stored"
-
 #: src/apps/access-view.tsx
 msgid "As the App's code sets it"
 msgstr "As the App's code sets it"
@@ -2914,6 +2918,10 @@ msgstr "Ask again"
 #: src/apps/app-access-requests.tsx
 msgid "Ask an admin"
 msgstr "Ask an admin"
+
+#: src/settings/composer-settings.tsx
+msgid "Ask anything"
+msgstr "Ask anything"
 
 #: src/chat/chat-composer.tsx
 #: src/chat/global-chat.tsx
@@ -3150,6 +3158,10 @@ msgstr "Back to {destination}"
 #: src/dashboard/widget-board.tsx
 msgid "Back to how it began"
 msgstr "Back to how it began"
+
+#: src/chat/answer-words.tsx
+msgid "Back to reference {number}"
+msgstr "Back to reference {number}"
 
 #: src/knowledge/document.tsx
 msgid "Back to the current version"
@@ -3750,10 +3762,6 @@ msgstr "Changes who can see and change the records of {table}."
 msgid "Changing the App's definition"
 msgstr "Changing the App's definition"
 
-#: src/activity/audit-event.tsx
-msgid "Charged to run"
-msgstr "Charged to run"
-
 #: src/projects/project-dialog.tsx
 msgid "Chart"
 msgstr "Chart"
@@ -3786,6 +3794,10 @@ msgstr "Chat apps"
 #: src/settings/backdrop-settings.tsx
 msgid "Chat background"
 msgstr "Chat background"
+
+#: src/settings/composer-settings.tsx
+msgid "Chat box"
+msgstr "Chat box"
 
 #: src/chat/chat-more.tsx
 #: src/chat/chat-window.tsx
@@ -4114,6 +4126,7 @@ msgid "Collections hold the documents Grasp and its agents may read. An admin sh
 msgstr "Collections hold the documents Grasp and its agents may read. An admin shares them with you, or you add your own."
 
 #: src/settings/backdrop-settings.tsx
+#: src/settings/composer-settings.tsx
 msgid "Colour"
 msgstr "Colour"
 
@@ -4500,10 +4513,6 @@ msgstr "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgid "Copy the answer"
 msgstr "Copy the answer"
 
-#: src/activity/audit-event.tsx
-msgid "Copy the event"
-msgstr "Copy the event"
-
 #: src/settings/event-sources.tsx
 msgid "Copy the example"
 msgstr "Copy the example"
@@ -4603,6 +4612,7 @@ msgstr "Could not save. Your name is kept."
 
 #: src/chat/asked-questions.tsx
 #: src/chat/chat-composer.tsx
+#: src/settings/composer-settings.tsx
 #: src/settings/invitations.tsx
 msgid "Could not send"
 msgstr "Could not send"
@@ -4985,6 +4995,7 @@ msgctxt "workflow status"
 msgid "Designed"
 msgstr "Designed"
 
+#: src/activity/audit-event.tsx
 #: src/activity/audit-log.tsx
 #: src/knowledge/document.tsx
 #: src/routes/_shell.brain.$noteId.tsx
@@ -5113,6 +5124,10 @@ msgstr "Dismiss this signal about {name}"
 msgid "Dismissed a knowledge signal"
 msgstr "Dismissed a knowledge signal"
 
+#: src/settings/composer-settings.tsx
+msgid "Dither"
+msgstr "Dither"
+
 #: src/workflows/requests/request-needs.tsx
 msgid "Do it"
 msgstr "Do it"
@@ -5174,6 +5189,7 @@ msgid "Don’t upload interview recordings or their captions: interviews go thro
 msgstr "Don’t upload interview recordings or their captions: interviews go through the interview flow."
 
 #: src/apps/blueprints.tsx
+#: src/chat/answer-words.tsx
 #: src/chat/thread.tsx
 #: src/chat/use-dictation.ts
 #: src/onboarding/setup-steps.tsx
@@ -5365,6 +5381,10 @@ msgstr "Each place only narrows who reaches him there, and whether he does thing
 msgctxt "older chats"
 msgid "Earlier"
 msgstr "Earlier"
+
+#: src/settings/composer-settings.tsx
+msgid "Edge"
+msgstr "Edge"
 
 #: src/knowledge/document.tsx
 #: src/onboarding/setup-steps.tsx
@@ -5712,10 +5732,6 @@ msgstr "Everything Grasp and its agents may read, in collections: your own, your
 #: src/brain/brain.ts
 msgid "Everything Grasp learned about {company}, each fact traceable to the conversation, document or connection it came from."
 msgstr "Everything Grasp learned about {company}, each fact traceable to the conversation, document or connection it came from."
-
-#: src/activity/audit-event.tsx
-msgid "Everything Grasp recorded about what was done."
-msgstr "Everything Grasp recorded about what was done."
 
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Everything Grasp stores for you stays here."
@@ -6092,6 +6108,10 @@ msgstr "Follow quotes to payment"
 msgid "Follow the erasure of {who}"
 msgstr "Follow the erasure of {who}"
 
+#: src/chat/answer-words.tsx
+msgid "Footnote {number}"
+msgstr "Footnote {number}"
+
 #: src/activity/audit-event.tsx
 msgid "For"
 msgstr "For"
@@ -6158,10 +6178,6 @@ msgstr "For example: read new hires and prepare their first day"
 #: src/agents/agent-page.tsx
 msgid "For good. To stop it answering for a while, turn it off instead."
 msgstr "For good. To stop it answering for a while, turn it off instead."
-
-#: src/activity/audit-event.tsx
-msgid "For Grasp staff"
-msgstr "For Grasp staff"
 
 #: src/workflows/requests/request-needs.tsx
 msgid "For Stephen's requests, about “{label}” ({why}), do this: {proposal}"
@@ -6390,7 +6406,6 @@ msgid "Granted a permission"
 msgstr "Granted a permission"
 
 #. tab: what Grasp did itself, its questions
-#: src/activity/audit-event.tsx
 #: src/apps/app-data.tsx
 #: src/brain/brain-log.tsx
 msgid "Grasp"
@@ -6629,10 +6644,6 @@ msgstr "Grasp will remember: {statement} (value: {value})"
 msgid "Grasp, in {name}'s chat"
 msgstr "Grasp, in {name}'s chat"
 
-#: src/activity/audit-event.tsx
-msgid "Grasp's admin"
-msgstr "Grasp's admin"
-
 #: src/settings/ai-providers.tsx
 msgid "Grasp’s AI isn’t available here any more: AI is off until you switch to your own keys."
 msgstr "Grasp’s AI isn’t available here any more: AI is off until you switch to your own keys."
@@ -6664,10 +6675,6 @@ msgstr "Guest"
 #: src/sign-in-errors.ts
 msgid "Guest accounts can't sign in. Use your organization's own account."
 msgstr "Guest accounts can't sign in. Use your organization's own account."
-
-#: src/activity/audit-event.tsx
-msgid "Guest chat"
-msgstr "Guest chat"
 
 #: src/activity/pending.tsx
 msgid "Guest chats. This App can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them"
@@ -6705,10 +6712,6 @@ msgstr "Handover"
 msgid "Handovers"
 msgstr "Handovers"
 
-#: src/activity/audit-event.tsx
-msgid "Happened"
-msgstr "Happened"
-
 #: src/apps/publish.tsx
 msgid "has it"
 msgstr "has it"
@@ -6716,10 +6719,6 @@ msgstr "has it"
 #: src/activity/audit-event.tsx
 msgid "Hash"
 msgstr "Hash"
-
-#: src/activity/audit-event.tsx
-msgid "Hash format"
-msgstr "Hash format"
 
 #: src/workflows/requests/request-needs.tsx
 msgid "He can't do it yet"
@@ -7104,10 +7103,6 @@ msgstr "In the archive"
 msgid "In the brain"
 msgstr "In the brain"
 
-#: src/activity/audit-event.tsx
-msgid "In the chain"
-msgstr "In the chain"
-
 #: src/onboarding/review-parts.tsx
 msgid "In the Exchange admin center, go to Mail flow, then Rules, and add a rule."
 msgstr "In the Exchange admin center, go to Mail flow, then Rules, and add a rule."
@@ -7196,6 +7191,10 @@ msgstr "Integration"
 #: src/routes/_shell.integrations.index.tsx
 msgid "Integrations"
 msgstr "Integrations"
+
+#: src/activity/audit-event.tsx
+msgid "Integrity"
+msgstr "Integrity"
 
 #: src/settings/audit-chain.tsx
 msgid "Integrity and archive"
@@ -7868,6 +7867,10 @@ msgstr "Lately the trail only records its own searches: older events are in the 
 msgid "Latest activity"
 msgstr "Latest activity"
 
+#: src/settings/composer-settings.tsx
+msgid "Lavender"
+msgstr "Lavender"
+
 #: src/workflows/workflow-flow.tsx
 msgid "Lay it out left to right"
 msgstr "Lay it out left to right"
@@ -8017,6 +8020,7 @@ msgstr "Lift the legal hold {hold} from version {label}?"
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.settings.appearance.tsx
 #: src/settings/backdrop-settings.tsx
+#: src/settings/composer-settings.tsx
 msgid "Light"
 msgstr "Light"
 
@@ -8402,6 +8406,7 @@ msgid "Microphone: {name}"
 msgstr "Microphone: {name}"
 
 #: src/settings/backdrop-settings.tsx
+#: src/settings/composer-settings.tsx
 msgid "Mint"
 msgstr "Mint"
 
@@ -8413,7 +8418,6 @@ msgstr "Minutes saved a request"
 msgid "Mode"
 msgstr "Mode"
 
-#: src/activity/audit-event.tsx
 #: src/agents/agent-form.tsx
 #: src/agents/agent-page.tsx
 #: src/apps/resource-bindings.tsx
@@ -9135,8 +9139,8 @@ msgid "No workflows yet"
 msgstr "No workflows yet"
 
 #: src/activity/audit-event.tsx
-msgid "No: its hash or its link to the event before it doesn't match."
-msgstr "No: its hash or its link to the event before it doesn't match."
+msgid "No: it was changed, or doesn't link to the event before it."
+msgstr "No: it was changed, or doesn't link to the event before it."
 
 #: src/apps/access-view.tsx
 msgid "Nobody"
@@ -9291,6 +9295,10 @@ msgstr "Not confirmed by the board yet"
 #: src/workflows/files-and-apps.tsx
 msgid "Not connected"
 msgstr "Not connected"
+
+#: src/chat/answer-words.tsx
+msgid "Not done"
+msgstr "Not done"
 
 #: src/brain/brain.ts
 msgid "Not drawn yet"
@@ -10713,10 +10721,6 @@ msgstr "Policies, procedures, work instructions. Share whatever you have. Drafts
 #: src/activity/audit-event.tsx
 msgid "Position"
 msgstr "Position"
-
-#: src/activity/audit-event.tsx
-msgid "Position {position}"
-msgstr "Position {position}"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -12543,10 +12547,6 @@ msgstr "Sent an App's event to a webhook"
 msgid "Sent back: {who}, version {version}."
 msgstr "Sent back: {who}, version {version}."
 
-#: src/activity/audit-event.tsx
-msgid "Sent by"
-msgstr "Sent by"
-
 #: src/decision-confirmation.tsx
 msgctxt "what an App's page sends with an answer to a decision"
 msgid "Sent by the app"
@@ -12793,13 +12793,11 @@ msgstr "Show in the log"
 msgid "Show its definition"
 msgstr "Show its definition"
 
-#: src/activity/audit-event.tsx
 #: src/chat/held-writes.tsx
 #: src/chat/thread.tsx
 msgid "Show less"
 msgstr "Show less"
 
-#: src/activity/audit-event.tsx
 #: src/brain/since-last-look.tsx
 #: src/brain/sources-page.tsx
 #: src/chat/thread.tsx
@@ -13059,6 +13057,10 @@ msgstr "Skip for now"
 msgid "Skipped, may still hold data"
 msgstr "Skipped, may still hold data"
 
+#: src/settings/composer-settings.tsx
+msgid "Smooth"
+msgstr "Smooth"
+
 #: src/onboarding/document-drop.tsx
 msgid "Some files weren’t added. I can read PDF, Word, Excel, PowerPoint and text."
 msgstr "Some files weren’t added. I can read PDF, Word, Excel, PowerPoint and text."
@@ -13162,6 +13164,7 @@ msgid "Source {number}: {title}"
 msgstr "Source {number}: {title}"
 
 #: src/brain/brain.ts
+#: src/chat/answer-words.tsx
 #: src/chat/chat-markdown.ts
 #: src/routes/_shell.brain.$noteId.tsx
 #: src/settings/event-sources.tsx
@@ -13294,10 +13297,6 @@ msgstr "Started following a connection late: changes before then weren't read"
 #: src/activity/audit-words.ts
 msgid "Started following what changes at a connection"
 msgstr "Started following what changes at a connection"
-
-#: src/activity/audit-event.tsx
-msgid "Started from run"
-msgstr "Started from run"
 
 #: src/inbox/item-detail.tsx
 msgid "Started: {name}."
@@ -13579,6 +13578,7 @@ msgid "System"
 msgstr "System"
 
 #: src/apps/app-data.tsx
+#: src/chat/answer-words.tsx
 msgid "Table"
 msgstr "Table"
 
@@ -13889,6 +13889,10 @@ msgstr "That’s plenty to start with. Let’s move on."
 msgid "That’s the tour. Ask me anything, on any page. You’ll find me right here."
 msgstr "That’s the tour. Ask me anything, on any page. You’ll find me right here."
 
+#: src/activity/audit-event.tsx
+msgid "the action"
+msgstr "the action"
+
 #: src/settings/erasures.tsx
 msgid "The address"
 msgstr "The address"
@@ -14177,8 +14181,8 @@ msgid "The earlier wording stays in the goal's history."
 msgstr "The earlier wording stays in the goal's history."
 
 #: src/activity/audit-event.tsx
-msgid "The event exactly as it was written and hashed."
-msgstr "The event exactly as it was written and hashed."
+msgid "the event ID"
+msgstr "the event ID"
 
 #: src/workflows/binding-approvals.tsx
 msgid "The events its contract admits"
@@ -14202,6 +14206,10 @@ msgstr "The first links go out"
 #: src/inbox/inbox-page.tsx
 msgid "The full audit trail"
 msgstr "The full audit trail"
+
+#: src/activity/audit-event.tsx
+msgid "the hash"
+msgstr "the hash"
 
 #: src/apps/app-history.tsx
 msgid "The history of your changes couldn't be read. Try again in a moment."
@@ -14354,6 +14362,10 @@ msgstr "The platform's statistics"
 msgid "The preview didn't start"
 msgstr "The preview didn't start"
 
+#: src/activity/audit-event.tsx
+msgid "the previous hash"
+msgstr "the previous hash"
+
 #: src/inbox/items.ts
 msgid "The provider refused access, so your triggers there start nothing new. Sign in to the connection again, or ask whoever manages it to give its access back. Grasp asks again once a day."
 msgstr "The provider refused access, so your triggers there start nothing new. Sign in to the connection again, or ask whoever manages it to give its access back. Grasp asks again once a day."
@@ -14383,9 +14395,17 @@ msgstr "The request allows nothing until an admin grants it. They see what the a
 msgid "The request failed."
 msgstr "The request failed."
 
+#: src/activity/audit-event.tsx
+msgid "the request ID"
+msgstr "the request ID"
+
 #: src/interview/read-back.tsx
 msgid "The rest is correct"
 msgstr "The rest is correct"
+
+#: src/activity/audit-event.tsx
+msgid "the run ID"
+msgstr "the run ID"
 
 #: src/workflows/run-detail.tsx
 msgid "The run started {openedAt}"
@@ -14526,6 +14546,10 @@ msgstr "The workflow run that asked this has ended, so this decision has closed.
 #: src/settings/event-sources.tsx
 msgid "The workflows couldn't be read."
 msgstr "The workflows couldn't be read."
+
+#: src/activity/audit-event.tsx
+msgid "Their events"
+msgstr "Their events"
 
 #: src/settings/erasures.tsx
 msgid "Their name, on what they did, so it stays traceable"
@@ -15091,10 +15115,6 @@ msgstr "Today"
 msgid "Token"
 msgstr "Token"
 
-#: src/activity/audit-event.tsx
-msgid "Tokens"
-msgstr "Tokens"
-
 #: src/onboarding/send-plan-form.tsx
 msgid "Tomorrow"
 msgstr "Tomorrow"
@@ -15246,7 +15266,6 @@ msgctxt "inbox item kind: two sources disagree"
 msgid "Two answers"
 msgstr "Two answers"
 
-#: src/activity/audit-event.tsx
 #: src/activity/audit-log.tsx
 #: src/apps/field-editor.tsx
 #: src/workflows/files-and-apps.tsx
@@ -15713,10 +15732,6 @@ msgstr "Visitor"
 msgid "Visitor of {app}"
 msgstr "Visitor of {app}"
 
-#: src/activity/audit-event.tsx
-msgid "Visitor session"
-msgstr "Visitor session"
-
 #: src/voice/sound-controls.tsx
 msgid "Volume"
 msgstr "Volume"
@@ -15971,10 +15986,6 @@ msgstr "Welcome to Grasp. Shall I show you around? It takes about a minute."
 msgid "went to people"
 msgstr "went to people"
 
-#: src/activity/audit-event.tsx
-msgid "What"
-msgstr "What"
-
 #: src/workflows/binding-approvals.tsx
 msgid "What {alias} reaches"
 msgstr "What {alias} reaches"
@@ -16149,10 +16160,6 @@ msgstr "What it should say"
 #: src/inbox/item-detail.tsx
 msgid "What it starts with"
 msgstr "What it starts with"
-
-#: src/activity/audit-event.tsx
-msgid "What it was done to. Open it for every event about it."
-msgstr "What it was done to. Open it for every event about it."
 
 #: src/workflows/item-test.tsx
 msgid "What its calls answer"
@@ -16459,10 +16466,6 @@ msgstr "Where people reach him"
 msgid "Where the App’s data comes from. Those its code asks for are here by themselves; add any other it needs. Adding one connects nothing."
 msgstr "Where the App’s data comes from. Those its code asks for are here by themselves; add any other it needs. Adding one connects nothing."
 
-#: src/activity/audit-event.tsx
-msgid "Where the event stands in the tamper-evident chain, and whether it checks out."
-msgstr "Where the event stands in the tamper-evident chain, and whether it checks out."
-
 #: src/brain/thinking/shapes.ts
 msgid "Where the hours go"
 msgstr "Where the hours go"
@@ -16575,10 +16578,6 @@ msgstr "Who can see records in {name}?"
 #: src/settings/stephen-card.tsx
 msgid "Who can talk to him"
 msgstr "Who can talk to him"
-
-#: src/activity/audit-event.tsx
-msgid "Who did it. Open a row for their events, the App or the workflow."
-msgstr "Who did it. Open a row for their events, the App or the workflow."
 
 #: src/routes/_shell.settings.audit.tsx
 msgid "Who did what in Grasp, and when."
@@ -16997,8 +16996,8 @@ msgid "Yes, that’s correct."
 msgstr "Yes, that’s correct."
 
 #: src/activity/audit-event.tsx
-msgid "Yes: its hash matches, and it links to the event before it."
-msgstr "Yes: its hash matches, and it links to the event before it."
+msgid "Yes: it is unchanged and links to the event before it."
+msgstr "Yes: it is unchanged and links to the event before it."
 
 #: src/chat/thread.tsx
 msgctxt "a date line in a chat"

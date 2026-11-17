@@ -206,6 +206,8 @@ const browserSource = (
   recognition.continuous = true;
   recognition.interimResults = true;
   let heard: Heard = { settled: "", interim: "" };
+  // What earlier runs settled: the browser starts each run's results anew.
+  let kept = "";
   let listening = false;
   let ended: (() => void) | undefined;
   return {
@@ -225,7 +227,7 @@ const browserSource = (
             interim = both(interim, result.text);
           }
         }
-        heard = { settled, interim };
+        heard = { settled: both(kept, settled), interim };
         listener.heard(heard);
       });
       recognition.addEventListener("error", (event) => {
@@ -240,6 +242,8 @@ const browserSource = (
         // The browser stops by itself after a silence: listening goes on
         // until Done or Cancel.
         if (listening) {
+          kept = heard.settled;
+          heard = { settled: kept, interim: "" };
           recognition.start();
           return;
         }

@@ -14,6 +14,7 @@ import {
 import type { ComposerFile } from "../grasp/composer/index.ts";
 import { accepted, useAttachmentWords } from "./chat-files.tsx";
 import type { CardFile } from "./chat-files.tsx";
+import { useOwnComposerLook } from "./composer-look.ts";
 import { useComposerMentions } from "./mentions.tsx";
 import type { Mentionable } from "./mentions.tsx";
 import { ModelControls } from "./model-controls.tsx";
@@ -221,9 +222,12 @@ export const ChatComposer = ({
   const noProvider = models !== undefined && lacksModel(model);
   const answered = useJustAnswered(running);
   const dictating = useDictation(text, onText);
+  const look = useOwnComposerLook();
   return (
     <Composer
+      accent={look.accent}
       activity={activityOf(running, answered, noProvider || disabled, takeover)}
+      edge={look.edge}
       footer={footer}
       {...dictating}
       showWorking={showWorking}

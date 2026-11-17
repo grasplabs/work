@@ -158,6 +158,10 @@ const page = () => ({
   rows: document.querySelectorAll("tbody tr").length,
 });
 
+/** What the event's details panel says. */
+const panel = (): string =>
+  document.querySelector('[aria-label="Event details"]')?.textContent ?? "";
+
 describe(LogRecords, () => {
   afterEach(() => {
     act(() => {
@@ -203,21 +207,24 @@ describe(LogRecords, () => {
     });
   });
 
-  it("opens an event's details beside the table: what, its position, check and hash", async () => {
+  it("opens an event's details beside the table: what happened, and its place in the chain under Integrity", async () => {
     await shown({ records: records(3, 1), next: null }, () => ({
       records: [],
       next: null,
     }));
     await press("Details of event 2");
-    const panel =
-      document.querySelector('[aria-label="Event details"]')?.textContent ?? "";
+    const folded = panel();
+    await press("Integrity");
+    const open = panel();
 
     expect({
-      action: panel.includes("test.done"),
-      position: panel.includes("Position2"),
-      verified: panel.includes("Yes: its hash matches"),
-      hash: panel.includes("hash-of-2"),
+      what: folded.includes("test.done"),
+      action: open.includes("test.done"),
+      position: open.includes("Position2"),
+      verified: open.includes("Yes: it is unchanged"),
+      hash: open.includes("hash-of-2"),
     }).toStrictEqual({
+      what: true,
       action: true,
       position: true,
       verified: true,

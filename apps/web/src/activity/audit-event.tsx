@@ -85,7 +85,7 @@ const useKindWord = () => {
         return t`Visitor`;
       }
       case "system": {
-        return t`Grasp`;
+        return "Grasp";
       }
       default: {
         return event.actor satisfies never;
@@ -105,7 +105,8 @@ const useWhoRows = () => {
         id: "actor",
         icon: actorIcon(actor),
         name: actorOf(actor, directory).label,
-        detail: kindWord(event),
+        // Grasp itself is named once: its kind would say its name again.
+        ...(actor.type === "system" ? {} : { detail: kindWord(event) }),
       },
     ];
     if (actor.type === "agent") {

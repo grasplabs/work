@@ -30,6 +30,7 @@ import {
   ChatMessageAction,
 } from "../grasp/chat-message/index.ts";
 import { Retry } from "../grasp/icons/index.ts";
+import { Markdown } from "../grasp/markdown/index.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { Thread } from "../grasp/thread/index.ts";
@@ -1015,7 +1016,6 @@ const AnswerRow = ({
           : failureMessage(last?.failure, i18n)
       }
       from="agent"
-      name="Grasp"
       onRetry={ending.providerMissing ? undefined : retry}
       retryLabel={t`Try again`}
       status={ending.providerMissing ? "done" : status}
@@ -1024,7 +1024,15 @@ const AnswerRow = ({
       thoughtLabel={(time) =>
         t`${plural(time, { one: "Thought for # second", other: "Thought for # seconds" })}`
       }
-      thoughts={thought.thoughts}
+      thoughts={
+        thought.thoughts === undefined ? undefined : (
+          <Markdown
+            size="sm"
+            source={thought.thoughts}
+            streaming={status === "thinking"}
+          />
+        )
+      }
       thoughtSeconds={thought.seconds}
     >
       {status === "thinking" ? undefined : (
