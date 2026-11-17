@@ -543,7 +543,15 @@ export const workflowStateKeySchema = z
 /** One value a workflow keeps between its runs. */
 export interface WorkflowStateEntry {
   key: string;
-  value: Json;
+  /** Its value, unless it is withheld. */
+  value?: Json;
+  /**
+   * Why its value isn't shown, if it isn't: the run that set it read what
+   * the company may no longer read (`revoked`: a source erased or
+   * narrowed, a person erased), and later runs read it as unset; or that
+   * can't be checked now (`unchecked`).
+   */
+  withheld?: "revoked" | "unchecked";
   /** The run whose step set it last. */
   runId: string;
   updatedAt: string;

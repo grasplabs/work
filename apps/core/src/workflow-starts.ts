@@ -57,7 +57,7 @@ import { frozenParams } from "./workflow-params.ts";
 import { isPaused } from "./workflow-pause.ts";
 import { bindingsOf, requireWorkflowRole } from "./workflow-resources.ts";
 import { workflowRoleSql } from "./workflow-roles.ts";
-import { workflowStateOf } from "./workflow-state.ts";
+import { readableStateOf } from "./workflow-state.ts";
 import { triggeredAccountClaimed } from "./workflows/quotas.ts";
 import type { LineagePlace } from "./workflows/quotas.ts";
 import { frozenBindingsOf } from "./workflows/resource-authority.ts";
@@ -210,19 +210,25 @@ export interface TriggerCause {
 }
 
 /**
- * What workflow `id` keeps between its runs, read once as a start that
- * admits a run (`buildHash`) is decided and frozen with it, for its run
- * alone: a write landing after this is the next start's to read. Null for
- * a start that admits no run.
+ * What workflow `id` keeps between its runs that the person it starts for,
+ * `principal`, may read (workflow-state.ts `readableStateOf`), read once
+ * as a start that admits a run (`buildHash`) is decided and frozen with
+ * it, for its run alone: a write landing after this is the next start's
+ * to read. With how many keys it left out, as withheld. Null for a start
+ * that admits no run.
  */
 const frozenState = async (
   env: Env,
   id: string,
+  principal: string,
   buildHash: string | null
-): Promise<StateSnapshot | null> =>
-  buildHash === null
-    ? null
-    : await snapshotFrom(await workflowStateOf(env, id));
+): Promise<(StateSnapshot & { withheld: number }) | null> => {
+  if (buildHash === null) {
+    return null;
+  }
+  const { values, withheld } = await readableStateOf(env, id, principal);
+  return { ...(await snapshotFrom(values)), withheld };
+};
 
 /**
  * A new start the host decided on: what it freezes, and what admitting it
@@ -249,9 +255,10 @@ export interface StartAuthorization {
   /**
    * What the workflow kept between its runs as it was decided
    * (workflows/state-snapshots.ts), which its run reads in every
-   * activation; null for a start that admits no run.
+   * activation, with how many keys it left out as withheld (GRA-1996);
+   * null for a start that admits no run.
    */
-  state: StateSnapshot | null;
+  state: (StateSnapshot & { withheld: number }) | null;
   /**
    * Whether it starts in restricted mode (`restrictedStart`): its run is
    * restricted for good.
@@ -1290,7 +1297,7 @@ export const decideWorkflowStart = async (
   // revision in force, and what serves each binding.
   const params = await frozenParams(env, id, version, configRevision);
   const bindings = await frozenBindings(env, id, version);
-  const state = await frozenState(env, id, buildHash);
+  const state = await frozenState(env, id, rule.principal, buildHash);
   // Read again as the admitting statement runs: the workflow live at the
   // same policy generation, parameter revision and live version, the same
   // manifest, everything its bindings need, and the invoker's own rule.
@@ -1484,6 +1491,11 @@ export const admitWorkflowStart = async (
     paramsRevision: authorization.paramsRevision,
     bindingsHash,
     restricted: authorization.restricted,
+    // How many keys of what the workflow keeps its run reads as unset:
+    // the run that set each read what the company may no longer read.
+    ...(authorization.state !== null && authorization.state.withheld > 0
+      ? { stateWithheld: authorization.state.withheld }
+      : {}),
   };
   // Why it wasn't admitted, if it isn't: read in the admitting batch, just
   // before its insert, so the reason is the state it was refused in.

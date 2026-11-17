@@ -154,11 +154,13 @@ const versionKey = (
  * permission of a workflow and person, and two of the Brain per person,
  * however many runs and decisions it holds. A failure counts against the
  * runs of the check it came from alone. A read of the evidence that fails
- * throws.
+ * throws. Without `grants`, what they read alone, not the grants it came
+ * through (`copiesEvidence`).
  */
 const evidenceChecked = async (
   env: Env,
-  runs: readonly EvidenceRun[]
+  runs: readonly EvidenceRun[],
+  grants: boolean
 ): Promise<Checked> => {
   const byId = new Map(runs.map((run) => [run.runId, run]));
   const ids = [...byId.keys()];
@@ -173,16 +175,18 @@ const evidenceChecked = async (
   ]);
   // Each permission its recalls came through still the run's, active, now
   // (`authorize`): decided by the run's workflow and person, once each.
-  const grants = groupedBy(
-    [...rows, ...memoryRows].flatMap(({ runId, permissionId }) => {
-      const run = byId.get(runId);
-      return run === undefined ? [] : [{ run, permissionId }];
-    }),
+  const granted = groupedBy(
+    (grants ? [...rows, ...memoryRows] : []).flatMap(
+      ({ runId, permissionId }) => {
+        const run = byId.get(runId);
+        return run === undefined ? [] : [{ run, permissionId }];
+      }
+    ),
     ({ run, permissionId }) =>
       JSON.stringify([run.workflowId, run.principal, permissionId])
   );
   await Promise.all(
-    [...grants.values()].map(async (holders) => {
+    [...granted.values()].map(async (holders) => {
       const [first] = holders;
       if (first === undefined) {
         return;
@@ -291,7 +295,7 @@ const requireOwnEvidenceReadable = async (
   env: Env,
   run: EvidenceRun
 ): Promise<void> => {
-  const { refused, failed } = await evidenceChecked(env, [run]);
+  const { refused, failed } = await evidenceChecked(env, [run], true);
   if (refused.has(run.runId)) {
     throw workflowResourceErrors.create("brain.revoked");
   }
@@ -391,11 +395,13 @@ const unchecked = (runId: string, error: unknown): EvidenceState => {
  * run whose check failed otherwise is checked again alone, so another
  * run's failure in the same check never counts against it; one whose own
  * check fails is unchecked, logged, and so is every run when the evidence
- * can't be read at all.
+ * can't be read at all. Without `grants`, what they read alone, not the
+ * grants it came through (`copiesEvidence`).
  */
 export const runsEvidence = async (
   env: Env,
-  runs: readonly EvidenceRun[]
+  runs: readonly EvidenceRun[],
+  { grants = true }: { grants?: boolean } = {}
 ): Promise<Map<string, EvidenceState>> => {
   const unique = [...new Map(runs.map((run) => [run.runId, run])).values()];
   /** How `some` stand, each failed one checked again alone if `again`. */
@@ -405,7 +411,7 @@ export const runsEvidence = async (
   ): Promise<[string, EvidenceState][]> => {
     let checked: Checked;
     try {
-      checked = await evidenceChecked(env, some);
+      checked = await evidenceChecked(env, some, grants);
     } catch (error) {
       return some.map(({ runId }) => [runId, unchecked(runId, error)]);
     }
@@ -427,3 +433,30 @@ export const runsEvidence = async (
   };
   return new Map(await states(unique, unique.length > 1));
 };
+
+/**
+ * How what each of runs `writers` read stands for a copy of it they wrote
+ * (`EvidenceState`), by run ID: what a workflow keeps between its runs
+ * (workflow-state.ts, GRA-1996). A copy follows what happens to what was
+ * read: each version still one the company may read, each memory still
+ * one a person's erasure didn't take nor its writer retire, and what the
+ * chat behind a run had read still the chat's, as `runsEvidence` checks
+ * them, all read by `reader` at company reach. Never the grants it came
+ * through, nor whether the writer's person is still a member: a copy is
+ * the company's, and pulling a workflow's grant or someone leaving
+ * protects no one by hiding it (GRA-1996, decision Q4).
+ */
+export const copiesEvidence = async (
+  env: Env,
+  writers: readonly Pick<EvidenceRun, "runId" | "workflowId">[],
+  reader: string
+): Promise<Map<string, EvidenceState>> =>
+  await runsEvidence(
+    env,
+    writers.map(({ runId, workflowId }) => ({
+      runId,
+      workflowId,
+      principal: reader,
+    })),
+    { grants: false }
+  );

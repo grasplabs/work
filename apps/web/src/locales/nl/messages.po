@@ -3436,6 +3436,10 @@ msgstr "Kan bestanden die mensen mogen lezen doorgeven aan haar workflows."
 msgid "Can’t be read"
 msgstr "Niet leesbaar"
 
+#: src/workflows/kept-state.tsx
+msgid "Can't be shown right now."
+msgstr "Kan nu niet worden getoond."
+
 #: src/workflows/start-run.tsx
 msgid "Can't offer Run: {unread}"
 msgstr "Uitvoeren kan niet: {unread}"
@@ -16886,6 +16890,10 @@ msgstr "Uitnodiging van {email} intrekken"
 #: src/activity/audit-words.ts
 msgid "Withdrew an invitation"
 msgstr "Heeft een uitnodiging ingetrokken"
+
+#: src/workflows/kept-state.tsx
+msgid "Withheld: the run that kept it read something that is no longer there to read, so later runs start without it."
+msgstr "Achtergehouden: de run die dit bewaarde, las iets wat niet meer te lezen is, dus latere runs beginnen zonder deze waarde."
 
 #: src/brain/memories-page.tsx
 msgid "Without a name"

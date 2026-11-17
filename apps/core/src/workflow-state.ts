@@ -27,6 +27,8 @@ import {
 import { notNullFailed } from "./db/d1.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { requireWorkflowRole } from "./workflow-resources.ts";
+import { copiesEvidence } from "./workflows/resource-reads.ts";
+import type { EvidenceState } from "./workflows/resource-reads.ts";
 
 // What an independent workflow keeps between its runs (GRA-1552): a few
 // JSON values by key, which a run reads once as it starts (its `state`)
@@ -64,9 +66,26 @@ import { requireWorkflowRole } from "./workflow-resources.ts";
 // - Concurrent runs: each key's value is the last write that landed (the
 //   database serializes batches). Nothing merges.
 // - Erasure: state is the company's record of what its runs computed, as
-//   their outputs are (D3, person-erasure-inventory.ts); it names no
-//   person. It goes with its workflow when the workflow is deleted, and
-//   its builders can empty it any time.
+//   their outputs are (D3, person-erasure-inventory.ts). It goes with its
+//   workflow when the workflow is deleted, and its builders can empty it
+//   any time.
+// - A copy of what a run read outliving what it was read from (GRA-1996):
+//   a step may keep part of what its run read in the Brain (a card, a
+//   passage), checked as it writes (sealed-run.ts `stepRecording`), and
+//   the source may be erased or narrowed, or a person erased, after. So a
+//   key is read only while what the run that set it read is still the
+//   company's to read (resource-reads.ts `copiesEvidence`): checked as
+//   its builders and admins read the state, and as a run's start freezes
+//   it. One refused is shown to them as withheld, never its value, and
+//   read as unset by the run, its start's event counting it; one that
+//   can't be checked now is shown as such, and the start fails rather
+//   than reading it as unset, since that run would write over it. Its
+//   value stays stored: a widened source brings it back, and an erasure
+//   is never undone, so the key is never read again. Retention keeps that
+//   run's evidence while a key names it (workflows/retention.ts), so the
+//   check never passes for want of it. A copy follows what was read, not
+//   the writing run's grants or person (decision Q4): it is read as its
+//   reader reads the company.
 // - What the audit log learns: each write and reset is recorded with the
 //   run, step and sizes, never a key's value.
 
@@ -94,18 +113,60 @@ const rowsOf = async (env: Env, workflowId: string) =>
     .where(eq(workflowState.workflowResourceId, workflowId))
     .orderBy(asc(workflowState.key));
 
+type StateRow = Awaited<ReturnType<typeof rowsOf>>[number];
+
 /**
- * What workflow `workflowId` keeps now, by key: the snapshot a run reads
- * once as it starts, and keeps for every activation after.
+ * The state's rows of workflow `workflowId`, by key, each with how what
+ * the run that set it read stands as `reader` reads the company
+ * (`copiesEvidence`): one check of every run that set a key, however many
+ * keys each set.
  */
-export const workflowStateOf = async (
+const checkedRowsOf = async (
   env: Env,
-  workflowId: string
-): Promise<Record<string, Json>> => {
+  workflowId: string,
+  reader: string
+): Promise<(StateRow & { evidence: EvidenceState })[]> => {
   const rows = await rowsOf(env, workflowId);
-  return Object.fromEntries(
-    rows.map(({ key, value }) => [key, z.json().parse(JSON.parse(value))])
+  const evidence = await copiesEvidence(
+    env,
+    [...new Set(rows.map(({ runId }) => runId))].map((runId) => ({
+      runId,
+      workflowId,
+    })),
+    reader
   );
+  return rows.map((row) => ({
+    ...row,
+    evidence: evidence.get(row.runId) ?? "unchecked",
+  }));
+};
+
+/**
+ * What workflow `workflowId` keeps now that `reader`, the person a run
+ * starts for, may read, by key: the snapshot the run reads once as it
+ * starts, and keeps for every activation after. A key whose run read what
+ * the company may no longer read is left out, read as unset, and counted
+ * (`withheld`); one that can't be checked now fails the start, which
+ * would otherwise read it as unset and may write over it.
+ */
+export const readableStateOf = async (
+  env: Env,
+  workflowId: string,
+  reader: string
+): Promise<{ values: Record<string, Json>; withheld: number }> => {
+  const rows = await checkedRowsOf(env, workflowId, reader);
+  if (rows.some(({ evidence }) => evidence === "unchecked")) {
+    throw new Error(
+      "What a workflow keeps could not be checked: its run starts later"
+    );
+  }
+  const kept = rows.filter(({ evidence }) => evidence === "holds");
+  return {
+    values: Object.fromEntries(
+      kept.map(({ key, value }) => [key, z.json().parse(JSON.parse(value))])
+    ),
+    withheld: rows.length - kept.length,
+  };
 };
 
 /**
@@ -262,14 +323,33 @@ const requireStateReader = async (env: Env, by: Acting, id: unknown) => {
   return workflow;
 };
 
-/** `rows` as the workflow's page shows them. */
-const stateOf = (rows: Awaited<ReturnType<typeof rowsOf>>): WorkflowState => {
-  const entries: WorkflowStateEntry[] = rows.map((row) => ({
-    key: row.key,
-    value: z.json().parse(JSON.parse(row.value)),
-    runId: row.runId,
-    updatedAt: row.updatedAt.toISOString(),
-  }));
+/** Why a key's value isn't shown, by how its run's evidence stands. */
+const withheldFor = {
+  refused: "revoked",
+  unchecked: "unchecked",
+} as const satisfies Record<
+  Exclude<EvidenceState, "holds">,
+  WorkflowStateEntry["withheld"]
+>;
+
+/**
+ * `rows` as the workflow's page shows them: a key whose value its reader
+ * may no longer read, or can't be checked now, withheld, its value never
+ * shown. What it takes counts every key, withheld or not, as the cap does.
+ */
+const stateOf = (
+  rows: readonly (StateRow & { evidence: EvidenceState })[]
+): WorkflowState => {
+  const entries: WorkflowStateEntry[] = rows.map((row) => {
+    const shown = {
+      key: row.key,
+      runId: row.runId,
+      updatedAt: row.updatedAt.toISOString(),
+    };
+    return row.evidence === "holds"
+      ? { ...shown, value: z.json().parse(JSON.parse(row.value)) }
+      : { ...shown, withheld: withheldFor[row.evidence] };
+  });
   return {
     entries,
     bytes: rows.reduce(
@@ -286,7 +366,7 @@ export const readWorkflowState = async (
   id: unknown
 ): Promise<WorkflowState> => {
   const workflow = await requireStateReader(env, by, id);
-  return stateOf(await rowsOf(env, workflow.id));
+  return stateOf(await checkedRowsOf(env, workflow.id, by.userId));
 };
 
 /**

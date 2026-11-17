@@ -208,6 +208,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     company:
       "which Brain versions a run recalled, identifiers only, as runs are (D3)",
   },
+  "core.kept_run_evidence": noPerson,
   "core.run_brain_memories": {
     company:
       "which Brain memories a run's entity reads rested on, identifiers only, no person's, as runs are (D3)",
@@ -384,6 +385,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.workflow_ai_waits": noPerson,
   // Nothing writes it since GRA-1552; dropped in GRA-1613.
   "core.workflow_stores": noPerson,
+  // A key may hold what its run read of a person's card: read only while
+  // what that run read holds (workflow-state.ts, GRA-1996), so withheld
+  // for good once their erasure took it.
   "core.workflow_state": {
     company: "what a workflow keeps between its runs, as their outputs (D3)",
   },
