@@ -150,7 +150,6 @@ import {
 import { parseModelRef } from "./model-catalog.ts";
 import { brainSpendByPurpose, spendMonth } from "./model-spend.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
-import { onboardingStoreName } from "./onboarding/store-name.ts";
 import { organizationTimeZone } from "./organization.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { shippedSkills } from "./shipped-skills.ts";
@@ -208,20 +207,18 @@ const teamPrefix = "team:";
 const companyGroup = "company";
 
 /**
- * A team of the onboarding's staff list, as the Brain's group: its people
- * who took part read what five or more of them said in their interviews
- * (GRA-1741). A staff-list team is not one of core's teams, so it is a
- * group of its own kind.
+ * Every current member reading as themselves is in this group
+ * (`personReaderOf`), never code, an App or a workflow acting for them
+ * (`readerOf` at `teams` or `company`): what every member may read and
+ * nothing may copy elsewhere, as a team's claim from the onboarding's
+ * interviews (GRA-1946). Being a reader set of its own, it is left out
+ * by every statement that reads for code, before anything is ranked,
+ * counted or packed, so code's recall answers as if it weren't there.
  */
-const interviewsPrefix = "interviews:";
+const membersGroup = "members";
 
-/** A staff-list team's ID, as core passes it: never empty. */
-const rosterTeamIdSchema = wellFormedString()
-  .min(1)
-  .max(principalMaxLength - interviewsPrefix.length);
-
-/** What reading as a member needs: core's records and the onboarding's. */
-type ReaderEnv = Pick<Env, "DB" | "ONBOARDING" | "DURABLE_OBJECT_JURISDICTION">;
+/** What reading as a member needs: core's records. */
+type ReaderEnv = Pick<Env, "DB">;
 
 /** A person's or a team's ID, as core passes it: never empty. */
 const idSchema = wellFormedString()
@@ -232,7 +229,7 @@ const sourceReadersSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("owner"), personId: idSchema }),
   z.strictObject({ kind: z.literal("team"), teamId: idSchema }),
   z.strictObject({ kind: z.literal("everyone") }),
-  z.strictObject({ kind: z.literal("interviews"), teamId: rosterTeamIdSchema }),
+  z.strictObject({ kind: z.literal("members") }),
   z.strictObject({ kind: z.literal("none") }),
 ]);
 
@@ -726,10 +723,6 @@ const keptIn = async <T>(
 const teamGroup = (teamId: string): string =>
   `${teamPrefix}${checked(idSchema, teamId)}`;
 
-/** A staff-list team, as the Brain's group (`interviewsPrefix`). */
-const interviewsGroup = (teamId: string): string =>
-  `${interviewsPrefix}${checked(rosterTeamIdSchema, teamId)}`;
-
 const accessOf = (readers: SourceReaders): Access => {
   switch (readers.kind) {
     case "owner": {
@@ -741,8 +734,8 @@ const accessOf = (readers: SourceReaders): Access => {
     case "everyone": {
       return { kind: "audience", group: companyGroup };
     }
-    case "interviews": {
-      return { kind: "audience", group: interviewsGroup(readers.teamId) };
+    case "members": {
+      return { kind: "audience", group: membersGroup };
     }
     case "none": {
       return { kind: "none" };
@@ -764,49 +757,17 @@ const accessOf = (readers: SourceReaders): Access => {
 export type Reach = "person" | "teams" | "company";
 
 /**
- * The staff-list team whose claims `personId` reads (GRA-1741): that of
- * the interview they took part in under their own account, while they are
- * on the list in it (the store's `interviewTeamOf`). Asked of the
- * onboarding's object at every read, beside core's own records, so a move
- * or a removal holds from the next question on. A failure there drops only
- * that group, so the onboarding can't take the Brain down with it: the
- * reader then reads less, never more. It has no timeout of its own: a slow
- * onboarding object holds the read up to the platform's own RPC limits,
- * and a throw fails closed as above.
- */
-const interviewTeamOf = async (
-  env: ReaderEnv,
-  personId: string
-): Promise<string | null> => {
-  try {
-    return await inJurisdiction(env, env.ONBOARDING)
-      .getByName(onboardingStoreName)
-      .interviewTeamOf(personId);
-  } catch (error) {
-    log.error("brain.interview_team_failed", {
-      error: error instanceof Error ? error.name : "unknown",
-    });
-    return null;
-  }
-};
-
-/**
  * The member `personId` as the Brain's reader: the person, their teams as
- * core counts them now, the staff-list team whose claims they read
- * (`interviewTeamOf`), and the company. Refused once they have no current
- * membership. Without `interviews`, never the staff-list team: the
- * onboarding's object isn't asked.
+ * core counts them now, the company, and the members reading as
+ * themselves (`membersGroup`). Refused once they have no current
+ * membership.
  */
 const personReaderOf = async (
   env: ReaderEnv,
-  personId: string,
-  { interviews = true }: { interviews?: boolean } = {}
+  personId: string
 ): Promise<PersonReader> => {
   const id = checked(idSchema, personId);
-  const [member, interviewTeam] = await Promise.all([
-    memberOf(env.DB, id),
-    interviews ? interviewTeamOf(env, id) : null,
-  ]);
+  const member = await memberOf(env.DB, id);
   if (member === undefined) {
     throw permissionErrors.create("permission.person_inactive");
   }
@@ -814,8 +775,8 @@ const personReaderOf = async (
     person: member.userId,
     groups: [
       ...member.teams.map(({ id: teamId }) => teamGroup(teamId)),
-      ...(interviewTeam === null ? [] : [interviewsGroup(interviewTeam)]),
       companyGroup,
+      membersGroup,
     ],
   };
 };
@@ -848,17 +809,17 @@ const readerOf = async (
   reach: Reach,
   teams: readonly string[] = []
 ): Promise<Reader> => {
-  // What their interviews' team said (GRA-1741) is read as the person
-  // alone: never by code or an App acting as their teams or the company.
-  const { person, groups } = await personReaderOf(env, personId, {
-    interviews: reach === "person",
-  });
+  const { person, groups } = await personReaderOf(env, personId);
   switch (reach) {
     case "person": {
       return { person, groups };
     }
     case "teams": {
-      return { person: null, groups };
+      // Never what members read as themselves alone (`membersGroup`).
+      return {
+        person: null,
+        groups: groups.filter((group) => group !== membersGroup),
+      };
     }
     case "company": {
       // Of `teams`, those the person is in now: a group of theirs.
@@ -949,10 +910,16 @@ export const addSource = async (
     );
   }
   // What an agent read through a person's own connection is theirs alone
-  // (connection-capture.ts): never in the shared store, so never in a
+  // (connection-capture.ts), and so is their interview (GRA-1790,
+  // onboarding/new-brain.ts): never in the shared store, so never in a
   // recall that doesn't read their own store, such as code's.
-  if (source.producer === "capture" && readers.kind !== "owner") {
-    throw new Error("Refused: a capture is for one person alone");
+  if (
+    (source.producer === "capture" || source.producer === "interview") &&
+    readers.kind !== "owner"
+  ) {
+    throw new Error(
+      `Refused: ${source.producer === "capture" ? "a capture" : "an interview"} is for one person alone`
+    );
   }
   // The store's own rules for a text, here, so a producer is told what is
   // wrong with it by a code, not by trying.
@@ -1821,6 +1788,29 @@ export const removeSource = async (
   const store =
     readers.kind === "owner" ? ownBrain(env, readers.personId) : brain(env);
   await store.removeSources({ sources: [sourceKeyOf(source)] });
+};
+
+const sharedRemovalSchema = z.array(sourceRefSchema);
+
+/**
+ * Takes `sources`, each one the shared store holds, out of use there as
+ * `removeSource` takes one: each batch of up to `removalsMax` (the store's
+ * own bound) in one call and one transaction of the store. Safe to repeat.
+ * For the onboarding's team claims that stop standing, before the change
+ * that drops them commits (GRA-1946).
+ */
+export const removeSharedSources = async (
+  env: BrainEnv,
+  sources: readonly SourceRef[]
+): Promise<void> => {
+  const keys = checked(sharedRemovalSchema, sources).map((source) =>
+    sourceKeyOf(source)
+  );
+  const store = brain(env);
+  for (let at = 0; at < keys.length; at += removalsMax) {
+    // oxlint-disable-next-line no-await-in-loop -- one batch at a time
+    await store.removeSources({ sources: keys.slice(at, at + removalsMax) });
+  }
 };
 
 const ownRemovalSchema = z.strictObject({
@@ -4465,7 +4455,7 @@ export const ownEntityIdAs = async (
   env: BrainEnv & ReaderEnv,
   personId: string
 ): Promise<EntityId | null> => {
-  const reader = await personReaderOf(env, personId, { interviews: false });
+  const reader = await personReaderOf(env, personId);
   return await ownBrain(env, reader.person).ownEntity({ reader });
 };
 
@@ -4483,7 +4473,7 @@ export const profileAs = async (
   personId: string,
   budget: { tokens: number }
 ): Promise<{ memories: RecalledMemory[] }> => {
-  const reader = await personReaderOf(env, personId, { interviews: false });
+  const reader = await personReaderOf(env, personId);
   const { memories } = await ownBrain(env, reader.person).readProfile({
     reader,
     budget,
