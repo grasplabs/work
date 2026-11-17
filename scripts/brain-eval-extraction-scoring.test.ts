@@ -38,6 +38,12 @@ const owner: EvalFact = {
   object: { kind: "person", name: "Jo Bell" },
   quote: "Its account owner is Jo Bell",
 };
+const contact: EvalFact = {
+  about: acme,
+  attribute: "contact",
+  object: { kind: "person", name: "Kim Lee" },
+  quote: "Kim Lee is the contact there",
+};
 const laterRenewal: EvalFact = {
   ...renewal,
   value: "2027-09-01",
@@ -53,8 +59,16 @@ const set: ExtractionEvalSet = {
       language: "en",
       kind: "contract",
       saidAt: "2026-11-01T09:00:00Z",
-      text: "Acme Corp renews on 1 March 2027. Acme Corp is based in Leeds. Its account owner is Jo Bell.",
-      facts: [renewal, location, owner],
+      text: "Acme Corp renews on 1 March 2027. Acme Corp is based in Leeds. Its account owner is Jo Bell. Kim Lee is the contact there.",
+      facts: [renewal, location, owner, contact],
+      alsoTrue: [
+        {
+          about: { kind: "person", name: "Jo Bell" },
+          attribute: "owns",
+          object: acme,
+          quote: "Its account owner is Jo Bell",
+        },
+      ],
       plants: [
         {
           about: acme,
@@ -73,8 +87,8 @@ const set: ExtractionEvalSet = {
       base: "doc",
       second: {
         saidAt: "2026-11-10T09:00:00Z",
-        text: "Acme Corp now renews on 1 September 2027. Acme Corp is based in Leeds. Its account owner is Jo Bell.",
-        facts: [laterRenewal, location, owner],
+        text: "Acme Corp now renews on 1 September 2027. Acme Corp is based in Leeds. Its account owner is Jo Bell. Kim Lee is the contact there.",
+        facts: [laterRenewal, location, owner, contact],
       },
       contested: [],
     },
@@ -108,6 +122,9 @@ const memory = (extra: Partial<ReadMemory>): ReadMemory => ({
 
 const renewalOn = (value: string, extra: Partial<ReadMemory> = {}) =>
   memory({ attribute: "renewal_date", value, ...extra });
+
+/** A person as a reader read them. */
+const person = (name: string) => ({ kind: "person", names: [name] });
 
 const draw = (
   kind: DrawResult["draw"],
@@ -179,7 +196,7 @@ describe("scoring the evaluation of extraction", () => {
     expect(planted).toStrictEqual({ count: 1, of: 1 });
   });
 
-  it("scores the clean draw against the labels: precision of filed memories, recall, another value apart, unfiled counted", async () => {
+  it("scores the clean draw against the labels: precision of filed memories, a fact also true precise but not asked for, recall, another value apart, unfiled counted", async () => {
     const { labelled } = await scoreExtraction(set, {
       draws: [
         draw("clean", [
@@ -191,6 +208,12 @@ describe("scoring the evaluation of extraction", () => {
             object: { kind: "person", names: ["Jo Bell"] },
           }),
           memory({ attribute: "industry", value: "retail" }),
+          // The owner filed on the person too: true, though not asked for.
+          memory({
+            about: { kind: "person", names: ["Jo Bell"] },
+            attribute: "owns",
+            object: { kind: "customer", names: ["Acme Corp"] },
+          }),
           memory({ statement: "Acme Corp is friendly." }),
         ]),
       ],
@@ -198,24 +221,41 @@ describe("scoring the evaluation of extraction", () => {
     });
 
     expect(labelled).toStrictEqual({
-      precision: { count: 2, of: 4 },
-      recall: { count: 2, of: 3 },
+      precision: { count: 3, of: 5 },
+      recall: { count: 2, of: 4 },
       valueDiffers: 1,
       unfiled: 1,
     });
   });
 
-  it("finds a change not applied, and a true fact a newer version ended", async () => {
+  it("tells a true fact a newer version replaced with another value from one it didn't draw again, and finds a change not applied", async () => {
     const before = [
       renewalOn("2027-03-01"),
       memory({ attribute: "location", value: "Leeds" }),
+      memory({ attribute: "account_owner", object: person("Jo Bell") }),
+      memory({ attribute: "contact", object: person("Kim Lee") }),
     ];
     const after = [
-      // The old renewal still current beside the new one; the location
-      // ended and not drawn again.
+      // The old renewal still current beside the new one: a change not
+      // applied.
       renewalOn("2027-03-01"),
       renewalOn("2027-09-01"),
+      // Leeds ended, another place in its slot: replaced.
       memory({ attribute: "location", value: "Leeds", current: false }),
+      memory({ attribute: "location", value: "Manchester" }),
+      // The owner ended and nothing in its slot: not drawn again.
+      memory({
+        attribute: "account_owner",
+        object: person("Jo Bell"),
+        current: false,
+      }),
+      // A contact is one of many: another one beside it replaces nothing.
+      memory({
+        attribute: "contact",
+        object: person("Kim Lee"),
+        current: false,
+      }),
+      memory({ attribute: "contact", object: person("Ann Roe") }),
     ];
 
     const { probes } = await scoreExtraction(
@@ -227,10 +267,12 @@ describe("scoring the evaluation of extraction", () => {
     );
 
     expect({
-      wronglyEnded: probes.wronglyEnded,
+      replaced: probes.replaced,
+      notDrawnAgain: probes.notDrawnAgain,
       changeMissed: probes.changeMissed,
     }).toStrictEqual({
-      wronglyEnded: { count: 1, of: 1 },
+      replaced: { count: 1, of: 3 },
+      notDrawnAgain: { count: 2, of: 3 },
       changeMissed: { count: 1, of: 1 },
     });
   });

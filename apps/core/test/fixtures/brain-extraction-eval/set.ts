@@ -16,9 +16,21 @@ import { nlDocuments, nlProbes } from "./nl.ts";
 // after each is what a later check of new memories against what the Brain
 // holds (a real change, a real disagreement, the same fact restated, an
 // extraction mistake) would be scored on too.
+//
+// The labels: every fact the read call's instructions ask for (facts and
+// decisions about people, teams, customers, suppliers, projects, products,
+// tools, routines and the company's terms) that an attribute of its
+// entity's kind can file, each filed once, the way that holds it most
+// directly (`facts`, which recall is counted against). Beside them, true
+// facts a careful reader may draw as well but needn't: the same fact
+// filed another way (a team's lead as the person's team and role), or
+// one a reader could fairly leave out (who attended a meeting, as its
+// project's members) (`alsoTrue`): a memory that says one counts as
+// precise, and recall doesn't ask for it. A rule of a policy that no
+// attribute files is drawn under none, which isn't scored.
 
 /** The set's version: change it with any document, fact or probe. */
-export const extractionEvalSetVersion = "2026-11-17";
+export const extractionEvalSetVersion = "2026-11-17.2";
 
 export type EvalLanguage = "en" | "nl" | "de";
 
@@ -73,6 +85,8 @@ export interface EvalDocument {
   saidAt: string;
   text: string;
   facts: readonly EvalFact[];
+  /** True facts a careful reader may draw too (above): precise if drawn, never missed. */
+  alsoTrue: readonly EvalFact[];
   plants: readonly EvalPlant[];
 }
 
@@ -175,7 +189,7 @@ export const setProblems = ({
     ids.add(id);
   }
   for (const document of documents) {
-    for (const fact of document.facts) {
+    for (const fact of [...document.facts, ...document.alsoTrue]) {
       problems.push(...factProblems(document.id, document.text, fact));
     }
     for (const plant of document.plants) {

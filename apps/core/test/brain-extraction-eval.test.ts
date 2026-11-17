@@ -1,7 +1,18 @@
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { isReadCall, runExtractionEval } from "./brain-extraction-eval.ts";
+// oxlint-disable-next-line no-restricted-imports -- extraction's own prompts, as above
+import {
+  checkInstructions,
+  proposeInstructions,
+} from "../../../packages/brain-next/src/extraction.ts";
+// oxlint-disable-next-line no-restricted-imports -- the version of extraction's own prompts, as its memories record them
+import { promptVersionOf } from "../../../packages/brain-next/src/extractors.ts";
+import {
+  exportedExtractors,
+  isReadCall,
+  runExtractionEval,
+} from "./brain-extraction-eval.ts";
 import { proposalOf } from "./fixtures/brain-extraction-eval/plan.ts";
 import { scoreExtraction } from "./fixtures/brain-extraction-eval/scoring.ts";
 import type {
@@ -102,7 +113,7 @@ const careful = async (
 const all = (count: number) => ({ count, of: count });
 
 describe("the evaluation of extraction", { timeout: 180_000 }, () => {
-  it("scores a careful model perfectly, whole: two draws alike, every plant refused, every label drawn, every change applied and every disagreement contested", async () => {
+  it("scores a careful model perfectly, whole: two draws alike, every plant refused, every label drawn, every change applied and every disagreement contested; and the export names the model that answered", async () => {
     expect(setProblems(extractionEvalSet)).toStrictEqual([]);
     const draws: DrawResult[] = [];
     const probes: ProbeResult[] = [];
@@ -119,6 +130,9 @@ describe("the evaluation of extraction", { timeout: 180_000 }, () => {
       },
     });
     const score = await scoreExtraction(extractionEvalSet, { draws, probes });
+    // What the company's export says drew them: the prompts as they are,
+    // and the model the gateway says answered, as core hands it on.
+    const extractors = await exportedExtractors();
 
     const facts = extractionEvalSet.documents.flatMap(
       (document) => document.facts
@@ -130,11 +144,13 @@ describe("the evaluation of extraction", { timeout: 180_000 }, () => {
       agreement: score.agreement,
       planted: score.planted,
       labelled: score.labelled,
-      wronglyEnded: score.probes.wronglyEnded.count,
+      replaced: score.probes.replaced.count,
+      notDrawnAgain: score.probes.notDrawnAgain.count,
       changeMissed: score.probes.changeMissed,
       wronglyContested: score.probes.wronglyContested.count,
       contestMissed: score.probes.contestMissed,
       parked: score.parked,
+      extractors,
     }).toStrictEqual({
       agreement: {
         documents: extractionEvalSet.documents.length,
@@ -149,13 +165,26 @@ describe("the evaluation of extraction", { timeout: 180_000 }, () => {
         valueDiffers: 0,
         unfiled: 0,
       },
-      wronglyEnded: 0,
+      replaced: 0,
+      notDrawnAgain: 0,
       // The two changes: a renewal date and a team's lead.
       changeMissed: { count: 0, of: 2 },
       wronglyContested: 0,
       // The two disagreements, each a pair.
       contestMissed: { count: 0, of: 4 },
       parked: 0,
+      extractors: [
+        {
+          read: {
+            prompt: await promptVersionOf(proposeInstructions),
+            model: testModel,
+          },
+          check: {
+            prompt: await promptVersionOf(checkInstructions),
+            model: testModel,
+          },
+        },
+      ],
     });
   });
 });

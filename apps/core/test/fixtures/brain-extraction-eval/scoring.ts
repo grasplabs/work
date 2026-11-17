@@ -1,4 +1,4 @@
-import { speakerSchema } from "@grasp-os/brain-next/contract";
+import { attributeRuleOf, speakerSchema } from "@grasp-os/brain-next/contract";
 import type { Speaker } from "@grasp-os/brain-next/contract";
 import { z } from "zod";
 
@@ -88,7 +88,11 @@ export interface ExtractionScore {
   };
   /** Planted statements the checker let through. */
   planted: Share;
-  /** The clean draws against the labels: filed memories only for precision. */
+  /**
+   * The clean draws against the labels: precision of filed memories (a
+   * memory saying a label or a fact also true is precise), recall of the
+   * labels alone.
+   */
   labelled: {
     precision: Share;
     recall: Share;
@@ -97,14 +101,25 @@ export interface ExtractionScore {
   };
   /** What the probes' second texts did to what the first had drawn. */
   probes: {
-    wronglyEnded: Share;
+    /**
+     * Facts the first text gave and the newer one says again, drawn after
+     * the first and not current after the second: `replaced` when another
+     * value now stands in their one-value slot (what a check of a new
+     * memory against the one it ends could catch); `notDrawnAgain` when
+     * nothing does (the newer version, fully extracted, ended every
+     * memory of the first, and its read missed the fact: no such check
+     * runs then).
+     */
+    replaced: Share;
+    notDrawnAgain: Share;
     changeMissed: Share;
     wronglyContested: Share;
     contestMissed: Share;
     each: {
       probe: string;
       kind: EvalProbe["kind"];
-      wronglyEnded: number;
+      replaced: number;
+      notDrawnAgain: number;
       changeMissed: number;
       wronglyContested: number;
       contestMissed: number;
@@ -130,6 +145,10 @@ const sameEntity = (
 /** Whether `memory` is about the entity and attribute of `fact`. */
 const inSlotOf = (memory: ReadMemory, fact: EvalFact): boolean =>
   memory.attribute === fact.attribute && sameEntity(memory.about, fact.about);
+
+/** Whether `fact`'s attribute holds one value: a newer one replaces it. */
+const holdsOneValue = (fact: EvalFact): boolean =>
+  attributeRuleOf(fact.about.kind, fact.attribute)?.values === "one";
 
 /** Whether two facts of the set are of one entity and attribute. */
 const sameSlotOf = (a: EvalFact, b: EvalFact): boolean =>
@@ -258,6 +277,9 @@ const isPlant = (document: EvalDocument, memory: ReadMemory): boolean =>
 
 const share = (count: number, of: number): Share => ({ count, of });
 
+/** A match nothing passes: for a pairing by one rule alone. */
+const never = (): boolean => false;
+
 /** `results` scored against `set` (above). */
 export const scoreExtraction = async (
   set: ExtractionEvalSet,
@@ -309,17 +331,27 @@ export const scoreExtraction = async (
       agreement.onlyOne += pairs.onlyLeft.length + pairs.onlyRight.length;
     }
     const filed = clean.memories.filter(({ attribute }) => attribute !== null);
-    const against = paired(filed, document.facts, says, inSlotOf);
-    labelled.precision.count += against.same;
+    // The labels first, then what a careful reader may draw too; what is
+    // left, against the labels left, by entity and attribute alone.
+    const labels = paired(filed, document.facts, says, never);
+    const alsoTrue = paired(labels.onlyLeft, document.alsoTrue, says, never);
+    const differing = paired(
+      alsoTrue.onlyLeft,
+      labels.onlyRight,
+      never,
+      inSlotOf
+    );
+    labelled.precision.count += labels.same + alsoTrue.same;
     labelled.precision.of += filed.length;
-    labelled.recall.count += against.same;
+    labelled.recall.count += labels.same;
     labelled.recall.of += document.facts.length;
-    labelled.valueDiffers += against.valueDiffers;
+    labelled.valueDiffers += differing.valueDiffers;
     labelled.unfiled += clean.memories.length - filed.length;
   }
   const each: ExtractionScore["probes"]["each"] = [];
   const scored = {
-    wronglyEnded: share(0, 0),
+    replaced: share(0, 0),
+    notDrawnAgain: share(0, 0),
     changeMissed: share(0, 0),
     wronglyContested: share(0, 0),
     contestMissed: share(0, 0),
@@ -352,12 +384,20 @@ export const scoreExtraction = async (
       ? probe.second.facts
       : [...base.facts, ...probe.second.facts];
     const keptFacts = expected.filter(drawnBefore);
-    const wronglyEnded = keptFacts.filter((fact) => !standsNow(fact)).length;
+    const lost = keptFacts.filter((fact) => !standsNow(fact));
+    const replaced = lost.filter(
+      (fact) =>
+        holdsOneValue(fact) && now.some((memory) => inSlotOf(memory, fact))
+    ).length;
+    const notDrawnAgain = lost.length - replaced;
     // A fact of the first version the newer one says otherwise: of its
-    // entity and attribute, with no value of it.
+    // entity and one-value attribute, with no value of it. (A many-value
+    // attribute gains and loses values beside each other: nothing of it
+    // is replaced.)
     const changed = isVersionProbe(probe)
       ? base.facts.filter(
           (fact) =>
+            holdsOneValue(fact) &&
             drawnBefore(fact) &&
             probe.second.facts.some((newer) => sameSlotOf(newer, fact)) &&
             !probe.second.facts.some((newer) => sameFactOf(newer, fact))
@@ -371,8 +411,10 @@ export const scoreExtraction = async (
     const contestMissed = probe.contested.filter(
       (fact) => !now.some((memory) => memory.contested && says(memory, fact))
     ).length;
-    scored.wronglyEnded.count += wronglyEnded;
-    scored.wronglyEnded.of += keptFacts.length;
+    scored.replaced.count += replaced;
+    scored.replaced.of += keptFacts.length;
+    scored.notDrawnAgain.count += notDrawnAgain;
+    scored.notDrawnAgain.of += keptFacts.length;
     scored.changeMissed.count += changeMissed;
     scored.changeMissed.of += changed.length;
     scored.wronglyContested.count += contested.length;
@@ -382,7 +424,8 @@ export const scoreExtraction = async (
     scored.each.push({
       probe: probe.id,
       kind: probe.kind,
-      wronglyEnded,
+      replaced,
+      notDrawnAgain,
       changeMissed,
       wronglyContested: contested.length,
       contestMissed,
@@ -409,15 +452,16 @@ export const extractionReport = (score: ExtractionScore): string => {
     `  precision (filed memories):              ${percent(labelled.precision)}`,
     `  recall:                                  ${percent(labelled.recall)}`,
     `  same entity and attribute, other value:  ${labelled.valueDiffers}`,
-    `  filed under no attribute (not scored):   ${labelled.unfiled}`,
-    "Second versions and second sources:",
-    `  true facts ended wrongly:                ${percent(probes.wronglyEnded)}`,
+    `  filed under no attribute:                ${labelled.unfiled} (not scored: precision covers filed memories only)`,
+    "Second versions and second sources (of the true facts drawn first and said again):",
+    `  ended, another value now in their slot:  ${percent(probes.replaced)}`,
+    `  ended, not drawn again:                  ${percent(probes.notDrawnAgain)}`,
     `  current memories contested wrongly:      ${percent(probes.wronglyContested)}`,
     `  changes not applied:                     ${percent(probes.changeMissed)}`,
     `  real disagreements not contested:        ${percent(probes.contestMissed)}`,
     ...probes.each.map(
       (probe) =>
-        `    ${probe.probe} (${probe.kind}): ended wrongly ${probe.wronglyEnded}, contested wrongly ${probe.wronglyContested}, change missed ${probe.changeMissed}, contest missed ${probe.contestMissed}`
+        `    ${probe.probe} (${probe.kind}): replaced ${probe.replaced}, not drawn again ${probe.notDrawnAgain}, contested wrongly ${probe.wronglyContested}, change missed ${probe.changeMissed}, contest missed ${probe.contestMissed}`
     ),
     `Units that parked (no result): ${score.parked}`,
   ].join("\n");

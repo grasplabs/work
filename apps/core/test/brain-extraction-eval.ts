@@ -17,7 +17,13 @@ import { z } from "zod";
 // the package exports only its contract and store.
 // oxlint-disable-next-line no-restricted-imports -- extraction's own prompts, see above
 import { proposeInstructions } from "../../../packages/brain-next/src/extraction.ts";
-import { addSource, workBrain } from "../src/brain-next.ts";
+import {
+  addSource,
+  brainExportFile,
+  brainExportStatus,
+  startBrainExport,
+  workBrain,
+} from "../src/brain-next.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import type {
   ReadEntity,
@@ -60,6 +66,12 @@ const ticksPerUnitMax = 200;
 /** The queue's clock across the run: only forward, ten minutes a tick, so a failed attempt's backoff passes. */
 const clock = { at: Date.now() };
 
+/** One tick of the Brain on the run's clock. */
+const tick = async (): Promise<void> => {
+  clock.at = Math.max(clock.at + 10 * 60_000, Date.now());
+  await workBrain(env, new Date(clock.at), noProducers);
+};
+
 /** A unit's source and team: the clean draw's, which its probes add to. */
 interface Placed {
   source: { producer: "upload"; id: string };
@@ -72,10 +84,9 @@ interface Placed {
  */
 const settled = async ({ source }: Placed): Promise<boolean> => {
   const key = `${source.producer}:${source.id}`;
-  for (let tick = 0; tick < ticksPerUnitMax; tick += 1) {
-    clock.at = Math.max(clock.at + 10 * 60_000, Date.now());
+  for (let ticks = 0; ticks < ticksPerUnitMax; ticks += 1) {
     // oxlint-disable-next-line no-await-in-loop -- a tick at a time
-    await workBrain(env, new Date(clock.at), noProducers);
+    await tick();
     // oxlint-disable-next-line no-await-in-loop -- a tick at a time
     const state = await runInDurableObject(store(), (_instance, object) =>
       object.storage.sql
@@ -94,6 +105,59 @@ const settled = async ({ source }: Placed): Promise<boolean> => {
   throw new Error(
     `The extraction of ${key} neither finished nor parked in ${ticksPerUnitMax} ticks`
   );
+};
+
+/** Most ticks an export of the company's Brain is waited for. */
+const exportTicksMax = 50;
+
+/**
+ * Each distinct record of the calls that drew the run's memories (the
+ * sources it added), as an export of the company's Brain holds them: how
+ * the evaluation reads which prompts and models drew what.
+ */
+export const exportedExtractors = async (): Promise<unknown[]> => {
+  const { id } = await startBrainExport(env);
+  let status = await brainExportStatus(env, { id });
+  for (
+    let ticks = 0;
+    ticks < exportTicksMax && status?.state === "writing";
+    ticks += 1
+  ) {
+    // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    await tick();
+    // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    status = await brainExportStatus(env, { id });
+  }
+  if (status?.state !== "done") {
+    throw new Error(`The export ended ${status?.state ?? "unknown"}`);
+  }
+  const { parts } = z
+    .looseObject({ parts: z.array(z.looseObject({ file: z.string() })) })
+    .parse(
+      JSON.parse(
+        (await brainExportFile(env, { id, file: "manifest.json" })) ?? "null"
+      )
+    );
+  const lineSchema = z.looseObject({
+    kind: z.string().optional(),
+    source: z.string().nullable().optional(),
+    extractor: z.unknown().optional(),
+  });
+  const extractors = new Map<string, unknown>();
+  for (const { file } of parts) {
+    // oxlint-disable-next-line no-await-in-loop -- a part at a time
+    const body = (await brainExportFile(env, { id, file })) ?? "";
+    for (const text of body.split("\n").filter(Boolean)) {
+      const line = lineSchema.parse(JSON.parse(text));
+      if (
+        line.kind === "memory" &&
+        line.source?.startsWith("upload:eval-") === true
+      ) {
+        extractors.set(JSON.stringify(line.extractor), line.extractor);
+      }
+    }
+  }
+  return [...extractors.values()];
 };
 
 /** Every page of a read, in order. */
