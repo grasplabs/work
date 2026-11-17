@@ -309,7 +309,13 @@ const ways: {
         { type: "system" }
       );
     },
-    audited: ["brain.records.purged", "onboarding.roster.saved"],
+    // The confirmed teams' sizes changed: handed to the new Brain for the
+    // company's admins (GRA-1748).
+    audited: [
+      "brain.records.purged",
+      "onboarding.roster.brain_source",
+      "onboarding.roster.saved",
+    ],
   },
 ];
 
