@@ -1023,6 +1023,10 @@ msgstr "{query} searches this table, which has no search."
 msgid "{rating} of 5"
 msgstr "{rating} of 5"
 
+#: src/brain/sources-page.tsx
+msgid "{records, plural, one {# record kept} other {# records kept}}"
+msgstr "{records, plural, one {# record kept} other {# records kept}}"
+
 #. A length of time, said short: 21 seconds.
 #: src/chat/thread.tsx
 msgid "{rest}s"
@@ -3455,6 +3459,7 @@ msgstr "Can't offer Run: {unread}"
 #: src/chat/answer-markdown.tsx
 #: src/chat/brain-questions.tsx
 #: src/confirmed.tsx
+#: src/connections/brain-audience.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/http-connections.tsx
 #: src/connections/request-app-dialog.tsx
@@ -3958,6 +3963,7 @@ msgstr "Clear filters"
 #: src/brain/forget.tsx
 #: src/brain/memories-page.tsx
 #: src/chat/chat-panel.tsx
+#: src/connections/brain-audience.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
 #: src/connections/connection-list.tsx
@@ -5344,6 +5350,7 @@ msgid "Erase {who}"
 msgstr "Erase {who}"
 
 #: src/brain/sources-page.tsx
+#: src/connections/brain-audience.tsx
 msgid "Erase for good"
 msgstr "Erase for good"
 
@@ -5358,6 +5365,14 @@ msgstr "Erase this upload for good"
 #: src/brain/sources-page.tsx
 msgid "Erase this upload for good?"
 msgstr "Erase this upload for good?"
+
+#: src/connections/brain-audience.tsx
+msgid "Erase what the Brain kept"
+msgstr "Erase what the Brain kept"
+
+#: src/connections/brain-audience.tsx
+msgid "Erase what the Brain kept from {label}?"
+msgstr "Erase what the Brain kept from {label}?"
 
 #: src/onboarding/forget-teams.tsx
 msgid "Erase your teams from your Brain"
@@ -5523,6 +5538,10 @@ msgstr "Everyone has a link of their own. It opens only once they sign in with y
 msgid "Everyone in {project}"
 msgstr "Everyone in {project}"
 
+#: src/connections/brain-audience.tsx
+msgid "Everyone in {team} will be able to find what agents read through {label}, including what was kept before."
+msgstr "Everyone in {team} will be able to find what agents read through {label}, including what was kept before."
+
 #: src/drafts/sharing.tsx
 msgid "Everyone in a project you aren’t in"
 msgstr "Everyone in a project you aren’t in"
@@ -5532,8 +5551,13 @@ msgid "Everyone in it · {shownRole}"
 msgstr "Everyone in it · {shownRole}"
 
 #: src/chat/agent-draft-card.tsx
+#: src/connections/brain-audience.tsx
 msgid "Everyone in the company"
 msgstr "Everyone in the company"
+
+#: src/connections/brain-audience.tsx
+msgid "Everyone in the company will be able to find what agents read through {label}, including what was kept before. Choose a team if not everyone should see it."
+msgstr "Everyone in the company will be able to find what agents read through {label}, including what was kept before. Choose a team if not everyone should see it."
 
 #: src/settings/team-members-dialog.tsx
 msgid "Everyone in the organization is in this team."
@@ -5610,6 +5634,10 @@ msgstr "Everything I read and every conversation I have runs on an AI model. You
 #: src/connections/connection-list.tsx
 msgid "Everything the Brain kept from it is erased for good."
 msgstr "Everything the Brain kept from it is erased for good."
+
+#: src/connections/brain-audience.tsx
+msgid "Everything the Brain kept of what agents read through it is erased for good, and nobody reads it from now on. This can't be undone. To keep what agents read through it again, choose who may read it once the erasure is done."
+msgstr "Everything the Brain kept of what agents read through it is erased for good, and nobody reads it from now on. This can't be undone. To keep what agents read through it again, choose who may read it once the erasure is done."
 
 #: src/interview/closed.tsx
 msgid "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."
@@ -7736,6 +7764,10 @@ msgstr "Keep holding"
 msgid "Keep it"
 msgstr "Keep it"
 
+#: src/connections/brain-audience.tsx
+msgid "Keep it for them"
+msgstr "Keep it for them"
+
 #: src/workflows/stop-run.tsx
 #: src/workflows/workflow-status.tsx
 msgid "Keep it running"
@@ -7760,6 +7792,14 @@ msgstr "Keep track of the month-end close: who does what, and remind people when
 #: src/make/examples.ts
 msgid "Keep track of the yearly compliance checks: who does each one, by when, and proof that it was done."
 msgstr "Keep track of the yearly compliance checks: who does each one, by when, and proof that it was done."
+
+#: src/connections/brain-audience.tsx
+msgid "Keep what agents read through {label} in the Brain?"
+msgstr "Keep what agents read through {label} in the Brain?"
+
+#: src/connections/brain-audience.tsx
+msgid "Keep what agents read through it for"
+msgstr "Keep what agents read through it for"
 
 #: src/dashboard/signals.tsx
 msgid "Keeps failing"
@@ -9157,6 +9197,7 @@ msgid "No: its hash or its link to the event before it doesn't match."
 msgstr "No: its hash or its link to the event before it doesn't match."
 
 #: src/apps/access-view.tsx
+#: src/connections/brain-audience.tsx
 msgid "Nobody"
 msgstr "Nobody"
 
@@ -11039,9 +11080,17 @@ msgid "Read everyone's calls of unknown outcome"
 msgstr "Read everyone's calls of unknown outcome"
 
 #: src/brain/sources-page.tsx
+msgid "Read from {name} on {readOn}"
+msgstr "Read from {name} on {readOn}"
+
+#: src/brain/sources-page.tsx
 msgctxt "a source of the Brain"
 msgid "Read from a shared connection"
 msgstr "Read from a shared connection"
+
+#: src/brain/sources-page.tsx
+msgid "Read from a shared connection on {readOn}"
+msgstr "Read from a shared connection on {readOn}"
 
 #: src/brain/memories-page.tsx
 msgid "Read from a shared connection, version {version}"
@@ -13653,6 +13702,7 @@ msgstr "Team"
 
 #: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
+#: src/connections/brain-audience.tsx
 msgid "Team {name}"
 msgstr "Team {name}"
 
@@ -14055,6 +14105,10 @@ msgstr "The board has not confirmed the vision yet."
 msgid "The brain"
 msgstr "The brain"
 
+#: src/connections/brain-audience.tsx
+msgid "The Brain"
+msgstr "The Brain"
+
 #: src/routes/_shell.settings.brain.tsx
 msgid "The brain has no teams to group yet."
 msgstr "The brain has no teams to group yet."
@@ -14066,6 +14120,10 @@ msgstr "The Brain hasn't learned anything from this version."
 #: src/brain/own-export.tsx
 msgid "The Brain keeps nothing that only you may read yet, so your export holds nothing."
 msgstr "The Brain keeps nothing that only you may read yet, so your export holds nothing."
+
+#: src/brain/sources-page.tsx
+msgid "The Brain keeps what agents read through these connections an admin shared, for the people the admin chose. It is what each system said when it was read, not kept up to date."
+msgstr "The Brain keeps what agents read through these connections an admin shared, for the people the admin chose. It is what each system said when it was read, not kept up to date."
 
 #: src/brain/sources-page.tsx
 msgid "The Brain may keep, for you alone, some of what an agent reads for you through this connection, while it stays connected."
@@ -16010,6 +16068,10 @@ msgstr "What <0/> changed"
 msgid "What a builder’s chat about this App starts with. Only its builders read and change it."
 msgstr "What a builder’s chat about this App starts with. Only its builders read and change it."
 
+#: src/brain/sources-page.tsx
+msgid "What agents read through shared connections"
+msgstr "What agents read through shared connections"
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "What appears on every invoice."
 msgstr "What appears on every invoice."
@@ -16288,6 +16350,10 @@ msgstr "What the Brain keeps that only they may read"
 #: src/brain/sources-page.tsx
 msgid "What the Brain keeps that you may read, and search through it as your agents recall it."
 msgstr "What the Brain keeps that you may read, and search through it as your agents recall it."
+
+#: src/connections/brain-audience.tsx
+msgid "What the Brain kept from {label} is being erased. You can choose who may read it again once that is done."
+msgstr "What the Brain kept from {label} is being erased. You can choose who may read it again once that is done."
 
 #: src/brain/brain-log.tsx
 msgid "What the brain kept of it"
@@ -16687,6 +16753,14 @@ msgstr "Who may read it"
 msgctxt "a memory shared with others"
 msgid "Who may read it"
 msgstr "Who may read it"
+
+#: src/connections/brain-audience.tsx
+msgid "Who may read it is decided inside Grasp, not by the permissions in {label}: choose a team if not everyone should see it."
+msgstr "Who may read it is decided inside Grasp, not by the permissions in {label}: choose a team if not everyone should see it."
+
+#: src/connections/brain-audience.tsx
+msgid "Who may read what agents read through {label} was changed in the meantime. This is who may read it now: choose again if you still want to change it."
+msgstr "Who may read what agents read through {label} was changed in the meantime. This is who may read it now: choose again if you still want to change it."
 
 #: src/agents/agent-page.tsx
 msgid "Who may use {name}"

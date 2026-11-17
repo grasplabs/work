@@ -4,7 +4,10 @@ import {
   connectionBrainAudienceSchema,
   connectionErrors,
 } from "@grasp-os/shared/connect";
-import type { ConnectionBrainAudienceSetting } from "@grasp-os/shared/connect";
+import type {
+  ConnectionBrainAudience,
+  ConnectionBrainAudienceSetting,
+} from "@grasp-os/shared/connect";
 import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, eq, sql } from "drizzle-orm";
@@ -76,16 +79,51 @@ export const readConnectionAudiences = async (
   identity: Identity
 ): Promise<ConnectionBrainAudienceSetting[]> => {
   requireAdmin(identity);
-  const rows = await drizzle(env.DB)
-    .select()
-    .from(connectionBrainAudiences)
-    .orderBy(connectionBrainAudiences.connectionId);
-  return rows.map(({ connectionId, teamId, changedBy, changedAt }) => ({
-    connectionId,
-    audience: teamId === null ? { kind: "everyone" } : { kind: "team", teamId },
-    changedBy,
-    changedAt: changedAt.toISOString(),
-  }));
+  const db = drizzle(env.DB);
+  // One snapshot: an erasure that starts takes the audience away in the
+  // same batch, so both are read as of one moment.
+  const [rows, erasing] = await db.batch([
+    db
+      .select()
+      .from(connectionBrainAudiences)
+      .orderBy(connectionBrainAudiences.connectionId),
+    db
+      .select({ connectionId: connectionBrainErasures.connectionId })
+      .from(connectionBrainErasures)
+      .where(eq(connectionBrainErasures.erasing, true))
+      .orderBy(connectionBrainErasures.connectionId),
+  ]);
+  const erasingIds = new Set(erasing.map(({ connectionId }) => connectionId));
+  const chosen: ConnectionBrainAudienceSetting[] = rows.map(
+    ({ connectionId, teamId, changedBy, changedAt }) => ({
+      connectionId,
+      audience:
+        teamId === null ? { kind: "everyone" } : { kind: "team", teamId },
+      erasing: erasingIds.has(connectionId),
+      changedBy,
+      changedAt: changedAt.toISOString(),
+    })
+  );
+  const audienced = new Set(rows.map(({ connectionId }) => connectionId));
+  // Being erased, so with no audience: listed all the same, so a page
+  // can say so and offer no choice until it has ended.
+  const beingErased: ConnectionBrainAudienceSetting[] = erasing.flatMap(
+    ({ connectionId }) =>
+      audienced.has(connectionId)
+        ? []
+        : [
+            {
+              connectionId,
+              audience: { kind: "nobody" },
+              erasing: true,
+              changedBy: null,
+              changedAt: null,
+            },
+          ]
+  );
+  return [...chosen, ...beingErased].toSorted((one, other) =>
+    one.connectionId.localeCompare(other.connectionId)
+  );
 };
 
 /**
@@ -138,6 +176,14 @@ const unopenableNow = async (
     return "closed";
   }
   return row?.erasing === true ? "erasing" : undefined;
+};
+
+/** `audience` as a row holds it (`Held`). */
+const heldOf = (audience: ConnectionBrainAudience): Held => {
+  if (audience.kind === "nobody") {
+    return undefined;
+  }
+  return audience.kind === "team" ? audience.teamId : null;
 };
 
 /** The audience `connectionId` holds now. */
@@ -195,12 +241,21 @@ const requireOpenable = async (
  * for an audience that isn't one, and, for one that reads, a team the
  * company doesn't have or a connection that isn't a shared one connect
  * holds and hasn't disconnected. Nobody is taken on any connection.
+ *
+ * `from` is the audience the admin was looking at: the change is made
+ * only while that is still the one held, compared in the statement that
+ * writes, so a page left open never opens access over a change it didn't
+ * see (an erase, another admin's choice) without its confirmation.
+ * Otherwise it throws `connection.brain_audience_changed` and changes
+ * nothing; the page reads the audience again. Choosing what is held
+ * already changes nothing, whatever `from` says.
  */
 export const setConnectionAudience = async (
   env: Env,
   identity: Identity,
   connectionId: unknown,
-  audience: unknown
+  audience: unknown,
+  from: unknown
 ): Promise<void> => {
   requireAdmin(identity);
   if (identity.staff) {
@@ -208,9 +263,11 @@ export const setConnectionAudience = async (
   }
   const id = brainConnectionIdSchema.safeParse(connectionId);
   const chosen = connectionBrainAudienceSchema.safeParse(audience);
-  if (!(id.success && chosen.success)) {
+  const seen = connectionBrainAudienceSchema.safeParse(from);
+  if (!(id.success && chosen.success && seen.success)) {
     throw connectionErrors.create("connection.invalid");
   }
+  const expected = heldOf(seen.data);
   const db = drizzle(env.DB);
   let wanted: Held;
   if (chosen.data.kind === "nobody") {
@@ -219,9 +276,9 @@ export const setConnectionAudience = async (
     wanted = chosen.data.kind === "team" ? chosen.data.teamId : null;
     await requireOpenable(env, db, id.data, wanted);
   }
-  // Written only over the audience read just before, so the event says
-  // what it changed from; read again and written again if another change
-  // landed in between, until it holds what was chosen.
+  // Written only over the audience read just before, which must be the
+  // one the admin saw, so the event says what it changed from; read again
+  // if another change landed in between, which then refuses it.
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- again only after another change
     const [held, unopenable] = await Promise.all([
@@ -230,6 +287,9 @@ export const setConnectionAudience = async (
     ]);
     if (held === wanted) {
       return;
+    }
+    if (held !== expected) {
+      throw connectionErrors.create("connection.brain_audience_changed");
     }
     // Never opened while what the Brain kept of it is being erased, nor
     // once a disconnect closed it, though connect said it was connected a

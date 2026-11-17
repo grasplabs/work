@@ -27,6 +27,8 @@ import { holderName } from "../activity/pending.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDate, formatList } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
+import { BrainAudience, useBrainAudiences } from "./brain-audience.tsx";
+import type { AudiencesRead } from "./brain-audience.tsx";
 import { canReconnect, ConnectDialog } from "./connect-dialog.tsx";
 import type { Integration } from "./integrations.ts";
 import { useChange } from "./use-change.ts";
@@ -343,6 +345,21 @@ const Disconnect = ({
 };
 
 /**
+ * Whether `identity` chooses who may read in the Brain what agents read
+ * through `connection` (brain-audience.tsx): one of the company's own
+ * admins, never Grasp staff, on a shared connection still connected.
+ * Core checks it again.
+ */
+const choosesBrainAudience = (
+  connection: ListedConnection,
+  identity: Identity
+): boolean =>
+  isAdmin(identity.role) &&
+  !identity.staff &&
+  connection.scope === "shared" &&
+  connection.status !== "disconnected";
+
+/**
  * One connection to the integration, as the prototype's Account section
  * shows it: its account, where it stands, who connected it and when, and
  * what can be done with it.
@@ -352,11 +369,17 @@ const ConnectionItem = ({
   integration,
   held,
   identity,
+  audiences,
+  onAudienceChanged,
 }: {
   connection: ListedConnection;
   integration: Integration;
   held: HeldPermissions | undefined;
   identity: Identity;
+  /** Every shared connection's Brain audience, read once for the page. */
+  audiences: AudiencesRead;
+  /** A change or an erase of one was asked for: they are read again. */
+  onAudienceChanged: () => void;
 }) => {
   const { t } = useLingui();
   const admin = isAdmin(identity.role);
@@ -433,6 +456,14 @@ const ConnectionItem = ({
       {connection.source === "composio" ? (
         <ConsentRecord connection={connection} />
       ) : null}
+      {choosesBrainAudience(connection, identity) ? (
+        <BrainAudience
+          audiences={audiences}
+          connection={connection}
+          label={label}
+          onChanged={onAudienceChanged}
+        />
+      ) : null}
       {held === undefined ? null : (
         <Holders
           id={connection.id}
@@ -454,16 +485,26 @@ export const ConnectionList = ({
   /** Undefined for someone who can't list permissions. */
   held: Loaded<HeldPermissions> | undefined;
   identity: Identity;
-}) => (
-  <ul className="flex flex-col gap-3">
-    {integration.connections.map((connection) => (
-      <ConnectionItem
-        connection={connection}
-        held={held?.state === "ready" ? held.data : undefined}
-        identity={identity}
-        integration={integration}
-        key={connection.id}
-      />
-    ))}
-  </ul>
-);
+}) => {
+  // Read once for every card that chooses one, never a read a card.
+  const { read: audiences, onChanged } = useBrainAudiences(
+    integration.connections.some((connection) =>
+      choosesBrainAudience(connection, identity)
+    )
+  );
+  return (
+    <ul className="flex flex-col gap-3">
+      {integration.connections.map((connection) => (
+        <ConnectionItem
+          audiences={audiences}
+          onAudienceChanged={onChanged}
+          connection={connection}
+          held={held?.state === "ready" ? held.data : undefined}
+          identity={identity}
+          integration={integration}
+          key={connection.id}
+        />
+      ))}
+    </ul>
+  );
+};

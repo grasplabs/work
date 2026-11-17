@@ -125,6 +125,79 @@ export const claimSharedRead = async (
     : { producer: "connected", id: named.sourceId };
 };
 
+/** What the Brain keeps of one shared connection now: how many records, and when the last was read. */
+export interface KeptOf {
+  connectionId: string;
+  records: number;
+  lastReadAt: Date;
+}
+
+/**
+ * What the Brain keeps of each of the shared connections `connectionIds`
+ * now, how many records and when the last was read; a connection with
+ * none is left out, and so is one with no audience, being erased or
+ * closed, decided in this statement as the reader's own audience read
+ * decides it (connection-audiences.ts `audiencesRead`): an erasure that
+ * starts after the reader's groups were read, and before this, shows
+ * nothing of what it erases. For connections a reader holds (brain-next.ts
+ * `readableConnectionsOf`). The team is not checked here: a member moved
+ * out of a team audience meanwhile may once see a count and a date, never content.
+ */
+export const keptOf = async (
+  env: Pick<Env, "DB">,
+  connectionIds: readonly string[]
+): Promise<KeptOf[]> => {
+  if (connectionIds.length === 0) {
+    return [];
+  }
+  const rows = await drizzle(env.DB)
+    .select({
+      connectionId: connectionBrainReads.connectionId,
+      records: sql<number>`count(*)`,
+      lastReadAt: sql<number>`max(${connectionBrainReads.readAt})`,
+    })
+    .from(connectionBrainReads)
+    .where(
+      sql`${inList(connectionBrainReads.connectionId, connectionIds)}
+        AND EXISTS (SELECT 1 FROM ${connectionBrainAudiences} WHERE ${connectionBrainAudiences.connectionId} = ${connectionBrainReads.connectionId})
+        AND NOT EXISTS (SELECT 1 FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connectionBrainReads.connectionId} AND (${connectionBrainErasures.erasing} = 1 OR ${connectionBrainErasures.closed} = 1))`
+    )
+    .groupBy(connectionBrainReads.connectionId)
+    .orderBy(asc(connectionBrainReads.connectionId));
+  return rows.map(({ connectionId, records, lastReadAt }) => ({
+    connectionId,
+    records,
+    lastReadAt: new Date(lastReadAt),
+  }));
+};
+
+/**
+ * Which of the shared connections `connectionIds` the Brain may hold
+ * something of: an audience chosen for it, or a record kept. What the
+ * disconnect dialog says it erases by.
+ */
+export const mayHoldReadsOf = async (
+  env: Pick<Env, "DB">,
+  connectionIds: readonly string[]
+): Promise<Set<string>> => {
+  if (connectionIds.length === 0) {
+    return new Set();
+  }
+  const db = drizzle(env.DB);
+  const ids = [...connectionIds];
+  const [audiences, reads] = await db.batch([
+    db
+      .select({ id: connectionBrainAudiences.connectionId })
+      .from(connectionBrainAudiences)
+      .where(inList(connectionBrainAudiences.connectionId, ids)),
+    db
+      .selectDistinct({ id: connectionBrainReads.connectionId })
+      .from(connectionBrainReads)
+      .where(inList(connectionBrainReads.connectionId, ids)),
+  ]);
+  return new Set([...audiences, ...reads].map(({ id }) => id));
+};
+
 /** Who asked for an erasure, and as which request: an audit event's id. */
 interface ErasureRequest {
   connectionId: string;

@@ -125,6 +125,7 @@ export const rpcParamNames: ParamNames = {
     "work": ["id"],
   },
   "BrainSourcesRpc": {
+    "connections": [],
     "deleteUpload": ["uploadId"],
     "learned": ["source","version","next"],
     "list": ["after"],
@@ -215,7 +216,7 @@ export const rpcParamNames: ParamNames = {
     "setAgentToolClass": ["agentId","toolClass","audience"],
     "setAgentWakePaused": ["wakeId","paused"],
     "setAppToolClass": ["app","toolClass","audience"],
-    "setBrainAudience": ["connectionId","audience"],
+    "setBrainAudience": ["connectionId","audience","from"],
     "setOffered": ["source","id","offered"],
     "setStephenPlace": ["place","audience","acts"],
     "setStephenReach": ["on","audience"],
