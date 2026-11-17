@@ -1,4 +1,5 @@
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useSyncExternalStore } from "react";
 
 import type { BrainDots } from "./dot-ink.ts";
@@ -48,6 +49,21 @@ const pageOf = (layer: HTMLCanvasElement): Element =>
 const pageShows = (layer: HTMLCanvasElement): boolean =>
   Boolean(layer.parentElement?.querySelector("article"));
 
+const styles = stylex.create({
+  // Over the brain and the note, never in the way of a press.
+  layer: {
+    position: "absolute",
+    inset: 0,
+    zIndex: 20,
+    width: "100%",
+    height: "100%",
+    pointerEvents: "none",
+  },
+});
+
+/** The canvas takes its look as a class: StyleX's for the layer. */
+const overLayer = { className: stylex.props(styles.layer).className ?? "" };
+
 /** The layer itself. It sits beside the brain and the note, inside what holds them, and covers exactly that. */
 export const NoteReveal = () => {
   const { t } = useLingui();
@@ -63,7 +79,7 @@ export const NoteReveal = () => {
   }
   return (
     <DotsBuild
-      className="pointer-events-none absolute inset-0 z-20 size-full"
+      {...overLayer}
       from={dots}
       label={t`Opening the note`}
       onEnd={endNoteReveal}

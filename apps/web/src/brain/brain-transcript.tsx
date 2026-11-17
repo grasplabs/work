@@ -4,8 +4,15 @@ import type {
   StatementKind,
   Transcript,
 } from "@grasp-os/shared/brain";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { Link } from "@tanstack/react-router";
+import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
+
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -15,31 +22,21 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
+} from "../grasp/dropdown-menu/index.ts";
+import { focus } from "../grasp/focus/focus.ts";
 import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@grasp-os/ui/components/input-group";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
-import {
-  ChevronDownIcon,
-  ChevronUpIcon,
-  HighlighterIcon,
-  SearchIcon,
-  SlidersHorizontalIcon,
-  Trash2Icon,
-  XIcon,
-} from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
-import { createPortal } from "react-dom";
-
-import { tintClass } from "./brain-colors.ts";
+  ChevronDown,
+  ChevronUp,
+  Cross,
+  Search,
+  Sliders,
+  Trash,
+} from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { brainMarks, tintOf } from "./brain-chips.tsx";
 import { statementKindLabel } from "./brain.ts";
-import { KindLabel, kindIcon } from "./statement-kind.tsx";
-import { hoverDelay, ToolbarLabel } from "./toolbar.tsx";
+import { KindLabel } from "./statement-kind.tsx";
 import {
   chapterOfTurns,
   highlightsOf,
@@ -67,12 +64,309 @@ const chapterAnchor = (sourceId: string, chapter: number): string =>
  * the graph's hues, but not the statements' pink, which marks what was tagged in the text.
  */
 const voiceTints = [
-  "bg-graph-teams/20",
-  "bg-graph-tools/20",
-  "bg-graph-vision/25",
-  "bg-graph-candidates/20",
-  "bg-graph-gaps/20",
+  tintOf("team"),
+  tintOf("tool"),
+  tintOf("vision"),
+  tintOf("candidate"),
+  tintOf("gap"),
 ];
+
+const styles = stylex.create({
+  // What was marked in a turn: the statements' soft fill, its ends rounded where it opens and closes.
+  marked: {
+    scrollMarginTop: grasp.space24,
+    boxDecorationBreak: "clone",
+    paddingBlock: 2,
+  },
+  opens: {
+    paddingInlineStart: grasp.space1,
+    borderStartStartRadius: grasp.cornerMark,
+    borderEndStartRadius: grasp.cornerMark,
+  },
+  closes: {
+    paddingInlineEnd: grasp.space1,
+    borderStartEndRadius: grasp.cornerMark,
+    borderEndEndRadius: grasp.cornerMark,
+  },
+  markKind: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: grasp.space1,
+    marginInlineEnd: grasp.space2,
+    verticalAlign: "middle",
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+    fontWeight: grasp.weightMedium,
+  },
+  markRemove: {
+    display: "inline-flex",
+    marginInlineStart: grasp.space1,
+    verticalAlign: "middle",
+  },
+  tools: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: grasp.space2,
+  },
+  search: {
+    width: `calc(3.5 * ${grasp.space16})`,
+    maxWidth: "100%",
+  },
+  matches: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space1,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    color: grasp.muted,
+    fontVariantNumeric: "tabular-nums",
+  },
+  filter: { marginInlineStart: "auto" },
+  transcript: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space3,
+  },
+  turns: {
+    display: "flex",
+    flexDirection: "column",
+  },
+  turnHolder: {
+    display: "flex",
+    flexDirection: "column",
+  },
+  chapter: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space3,
+    scrollMarginTop: grasp.space4,
+    paddingInline: grasp.space3,
+    paddingTop: grasp.space5,
+    paddingBottom: grasp.space2,
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+    color: grasp.muted,
+  },
+  chapterTitle: {
+    fontWeight: grasp.weightMedium,
+    color: grasp.ink,
+  },
+  numbers: { fontVariantNumeric: "tabular-nums" },
+  rule: {
+    flexGrow: 1,
+    height: 1,
+    backgroundColor: grasp.line,
+  },
+  // A turn: when, who, and the words, in three columns that wrap at a phone's width.
+  turn: {
+    display: "grid",
+    gridTemplateColumns: `${grasp.space12} minmax(0, calc(2.25 * ${grasp.space16})) minmax(0, 1fr)`,
+    columnGap: grasp.space4,
+    paddingInline: grasp.space3,
+    paddingTop: grasp.space3,
+    paddingBottom: grasp.space1,
+    borderRadius: grasp.corner,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    color: grasp.text,
+  },
+  // Someone who says several things in a row is named once: the next turn sits close.
+  continues: { paddingTop: 2 },
+  // The turn a link opened.
+  activeTurn: {
+    paddingBlock: grasp.space3,
+    backgroundColor: grasp.paper,
+    boxShadow: `0 0 0 2px ${grasp.ink}`,
+  },
+  at: {
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textSmLine,
+    color: grasp.muted,
+    fontVariantNumeric: "tabular-nums",
+  },
+  speakerCell: {
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textSmLine,
+  },
+  speaker: {
+    boxDecorationBreak: "clone",
+    paddingBlock: 2,
+    paddingInline: grasp.space2,
+    borderRadius: grasp.cornerMark,
+  },
+  grasp: {
+    backgroundColor: grasp.soft,
+    color: grasp.muted,
+  },
+  words: { margin: 0 },
+  nothing: {
+    margin: 0,
+    paddingInline: grasp.space3,
+    paddingBlock: grasp.space6,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    color: grasp.muted,
+  },
+  document: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space3,
+    paddingTop: grasp.space6,
+    borderTopWidth: grasp.hairline,
+    borderTopStyle: "solid",
+    borderTopColor: grasp.line,
+    fontSize: grasp.textSm,
+    lineHeight: 1.75,
+    color: grasp.text,
+  },
+  passageHolder: { display: "contents" },
+  passageHeading: {
+    margin: 0,
+    scrollMarginTop: grasp.space4,
+    fontSize: grasp.textSm,
+    fontWeight: grasp.weightMedium,
+    color: grasp.ink,
+  },
+  passageHeadingLater: { paddingTop: grasp.space3 },
+  passage: { margin: 0 },
+  activePassage: {
+    marginInline: `calc(-1 * ${grasp.space2})`,
+    paddingInline: grasp.space2,
+    borderRadius: grasp.corner,
+    boxShadow: `0 0 0 2px ${grasp.ink}`,
+  },
+  rail: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space5,
+  },
+  topics: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space1,
+  },
+  railHeading: {
+    display: "flex",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    margin: 0,
+    paddingBottom: grasp.space1,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    fontWeight: grasp.weightRegular,
+    color: grasp.muted,
+  },
+  topic: {
+    display: "flex",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    gap: grasp.space3,
+    marginInline: `calc(-1 * ${grasp.space2})`,
+    paddingBlock: grasp.space1,
+    paddingInline: grasp.space2,
+    borderWidth: 0,
+    borderRadius: grasp.cornerMark,
+    backgroundColor: { default: "transparent", ":hover": grasp.ghostFillHover },
+    color: grasp.ink,
+    fontFamily: "inherit",
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    textAlign: "start",
+    cursor: "pointer",
+  },
+  topicAt: {
+    flexShrink: 0,
+    fontSize: grasp.textXs,
+    color: grasp.muted,
+    fontVariantNumeric: "tabular-nums",
+  },
+  said: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+  },
+  saidRow: {
+    display: "flex",
+    gap: grasp.space3,
+  },
+  // Where each highlight falls in the conversation, from the first turn at the top to the last.
+  strip: {
+    position: "relative",
+    flexShrink: 0,
+    width: 6,
+    borderRadius: grasp.cornerPill,
+    backgroundColor: grasp.soft,
+  },
+  stripDrawing: {
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    overflow: "visible",
+  },
+  cards: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    gap: grasp.space2,
+    minWidth: 0,
+  },
+  cardHolder: {
+    position: "relative",
+    display: "flex",
+    flexDirection: "column",
+  },
+  card: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space1,
+    paddingBlock: grasp.space2,
+    paddingInline: grasp.space3,
+    borderRadius: grasp.corner,
+    backgroundColor: grasp.paper,
+    boxShadow: { default: grasp.edge, ":hover": `0 0 0 1px ${grasp.muted}` },
+    color: grasp.ink,
+    textDecorationLine: "none",
+  },
+  activeCard: {
+    boxShadow: `0 0 0 1px ${grasp.ink}`,
+  },
+  cardHead: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: grasp.space2,
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+  },
+  cardKind: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: grasp.space1,
+    paddingBlock: 2,
+    paddingInline: grasp.space2,
+    borderRadius: grasp.cornerMark,
+    fontWeight: grasp.weightMedium,
+  },
+  cardAt: {
+    color: grasp.muted,
+    fontVariantNumeric: "tabular-nums",
+  },
+  cardWords: {
+    display: "-webkit-box",
+    WebkitBoxOrient: "vertical",
+    WebkitLineClamp: 2,
+    overflow: "hidden",
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+  },
+  cardRemove: {
+    position: "absolute",
+    insetInlineEnd: grasp.space1,
+    insetBlockEnd: grasp.space1,
+  },
+});
 
 /** The order kinds are listed in, the ones that hurt first. */
 const kindOrder: StatementKind[] = [
@@ -86,13 +380,11 @@ const kindOrder: StatementKind[] = [
 ];
 
 /** How a run of a turn looks where the search found it: the hit being stepped to stands out. */
-const hitMark = (hit: number | undefined, current: number): string => {
+const hitMark = (hit: number | undefined, current: number) => {
   if (hit === undefined) {
-    return "";
+    return null;
   }
-  return hit === current
-    ? "bg-graph-vision/40 ring-graph-vision rounded-sm ring-1"
-    : "bg-graph-vision/25 rounded-sm";
+  return hit === current ? brainMarks.hitCurrent : brainMarks.hit;
 };
 
 /** A turn's words: highlights in the statements' colour with their kind in front, search hits marked. */
@@ -119,9 +411,11 @@ const TurnText = ({
         const opens =
           part.statement !== undefined &&
           parts[index - 1]?.statement !== part.statement;
-        const hitClass = hitMark(part.hit, current);
         const body = (
-          <span className={hitClass} data-hit={part.hit}>
+          <span
+            data-hit={part.hit}
+            {...stylex.props(hitMark(part.hit, current))}
+          >
             {part.text}
           </span>
         );
@@ -132,30 +426,35 @@ const TurnText = ({
         const closes = parts[index + 1]?.statement !== statement;
         return (
           <span
-            className={`scroll-mt-24 box-decoration-clone py-0.5 ${tintClass("statement")} ${opens ? "rounded-l-sm pl-1" : ""} ${parts[index + 1]?.statement === part.statement ? "" : "rounded-r-sm pr-1"}`}
             data-statement={opens ? part.statement.id : undefined}
             key={index}
+            {...stylex.props(
+              styles.marked,
+              tintOf("statement"),
+              opens && styles.opens,
+              closes && styles.closes
+            )}
           >
             {opens ? (
-              <span className="mr-1.5 inline-flex items-center gap-1 align-middle text-xs font-medium">
+              <span {...stylex.props(styles.markKind)}>
                 <KindLabel kind={part.statement.kind} />
               </span>
             ) : null}
             {body}
             {/* At the end of what was marked: the way to take it out of the brain. */}
             {onRemove !== undefined && closes ? (
-              <Button
-                aria-label={t`Remove this from the brain`}
-                className="ml-1 align-middle"
-                onClick={() => {
-                  onRemove(statement);
-                }}
-                size="icon-xs"
-                title={t`Remove from the brain`}
-                variant="ghost"
-              >
-                <Trash2Icon />
-              </Button>
+              <span {...stylex.props(styles.markRemove)}>
+                <Button
+                  aria-label={t`Remove this from the brain`}
+                  icon={Trash}
+                  onClick={() => {
+                    onRemove(statement);
+                  }}
+                  size="xs"
+                  title={t`Remove from the brain`}
+                  variant="ghost"
+                />
+              </span>
             ) : null}
           </span>
         );
@@ -178,90 +477,79 @@ const TranscriptFilter = ({
   onlyHighlights: boolean;
   onOnlyHighlightsChange: (only: boolean) => void;
 }) => {
-  const { i18n } = useLingui();
+  const { t, i18n } = useLingui();
   const [open, setOpen] = useState(false);
   const said = kindOrder.filter((kind) =>
     highlights.some((highlight) => highlight.statement.kind === kind)
   );
   const active = kinds.length + (onlyHighlights ? 1 : 0);
   return (
-    <DropdownMenu modal={false} onOpenChange={setOpen} open={open}>
-      <DropdownMenuTrigger
-        closeDelay={hoverDelay.close}
-        delay={hoverDelay.open}
-        openOnHover
-        render={<Button size="sm" variant="outline" />}
-      >
-        <SlidersHorizontalIcon data-icon="inline-start" />
-        <ToolbarLabel>
-          <Trans context="open the filters">Filter</Trans>
-        </ToolbarLabel>
-        {active > 0 ? <Badge variant="secondary">{active}</Badge> : null}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-60">
-        <DropdownMenuGroup>
-          <DropdownMenuLabel>
-            <Trans>Kind of statement</Trans>
-          </DropdownMenuLabel>
-          {said.map((kind) => {
-            const Icon = kindIcon[kind];
-            return (
-              <DropdownMenuCheckboxItem
-                checked={kinds.includes(kind)}
-                closeOnClick={false}
-                key={kind}
-                onCheckedChange={(checked) => {
-                  onKindsChange(
-                    checked
-                      ? [...kinds, kind]
-                      : kinds.filter((each) => each !== kind)
-                  );
-                }}
-              >
-                <Icon />
-                <span className="flex-1">
-                  {i18n._(statementKindLabel[kind])}
-                </span>
-                <span className="text-muted-foreground tabular-nums">
-                  {
-                    highlights.filter(
-                      (highlight) => highlight.statement.kind === kind
-                    ).length
-                  }
-                </span>
-              </DropdownMenuCheckboxItem>
-            );
-          })}
-        </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuGroup>
-          <DropdownMenuCheckboxItem
-            checked={onlyHighlights}
-            closeOnClick={false}
-            onCheckedChange={onOnlyHighlightsChange}
-          >
-            <HighlighterIcon />
-            <Trans>Only highlighted turns</Trans>
-          </DropdownMenuCheckboxItem>
-        </DropdownMenuGroup>
-        {active > 0 ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuItem
-                onClick={() => {
-                  onKindsChange([]);
-                  onOnlyHighlightsChange(false);
-                }}
-              >
-                <XIcon />
-                <Trans>Clear filters</Trans>
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-          </>
-        ) : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <span {...stylex.props(styles.tools)}>
+      <DropdownMenu onOpenChange={setOpen} open={open}>
+        <DropdownMenuTrigger icon={Sliders} size="sm">
+          {t({ message: "Filter", context: "open the filters" })}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>{t`Kind of statement`}</DropdownMenuLabel>
+            {said.map((kind) => {
+              const name = i18n._(statementKindLabel[kind]);
+              const count = highlights.filter(
+                (highlight) => highlight.statement.kind === kind
+              ).length;
+              return (
+                <DropdownMenuCheckboxItem
+                  checked={kinds.includes(kind)}
+                  key={kind}
+                  onCheckedChange={(checked) => {
+                    onKindsChange(
+                      checked
+                        ? [...kinds, kind]
+                        : kinds.filter((each) => each !== kind)
+                    );
+                  }}
+                >
+                  {t({
+                    message: `${name} (${count})`,
+                    comment:
+                      "A kind of statement in the transcript's filter, and how many of that kind were said",
+                  })}
+                </DropdownMenuCheckboxItem>
+              );
+            })}
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            <DropdownMenuCheckboxItem
+              checked={onlyHighlights}
+              onCheckedChange={(checked) => {
+                onOnlyHighlightsChange(checked);
+              }}
+            >
+              {t`Only highlighted turns`}
+            </DropdownMenuCheckboxItem>
+          </DropdownMenuGroup>
+          {active > 0 ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuItem
+                  icon={Cross}
+                  onSelect={() => {
+                    onKindsChange([]);
+                    onOnlyHighlightsChange(false);
+                  }}
+                >
+                  {t`Clear filters`}
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {/* How many filters are on, beside the button that sets them. */}
+      {active > 0 ? <Badge size="sm">{active}</Badge> : null}
+    </span>
   );
 };
 
@@ -277,13 +565,11 @@ const placed = (
 };
 
 /** How a turn sits in the transcript: the one a link opened, one by who spoke just before, or a turn of its own. */
-const turnClass = (isActive: boolean, continues: boolean): string => {
+const turnLook = (isActive: boolean, continues: boolean) => {
   if (isActive) {
-    return "bg-background ring-foreground grid grid-cols-[3rem_9rem_1fr] gap-x-4 rounded-lg px-3 py-2.5 text-sm leading-6 ring-2";
+    return styles.activeTurn;
   }
-  return continues
-    ? "grid grid-cols-[3rem_9rem_1fr] gap-x-4 rounded-lg px-3 pt-0.5 pb-1 text-sm leading-6"
-    : "grid grid-cols-[3rem_9rem_1fr] gap-x-4 rounded-lg px-3 pt-2.5 pb-1 text-sm leading-6";
+  return continues ? styles.continues : null;
 };
 
 /**
@@ -341,10 +627,10 @@ export const TranscriptView = ({
     shownHighlights.some((highlight) => highlight.turn === index);
   // Each person keeps one colour behind their name, so who said what reads at a glance; Grasp stays grey.
   const people = voices(turns);
-  const voiceTint = (speaker: string): string =>
+  const voiceTint = (speaker: string) =>
     isGrasp(speaker)
-      ? "bg-muted text-muted-foreground"
-      : (voiceTints[people.indexOf(speaker) % voiceTints.length] ?? "");
+      ? styles.grasp
+      : (voiceTints[people.indexOf(speaker) % voiceTints.length] ?? null);
   // Who spoke in the shown turn before each one. Someone who says several things in a row is named once.
   const speakerBefore: (string | undefined)[] = [];
   for (const [index] of turns.entries()) {
@@ -384,32 +670,27 @@ export const TranscriptView = ({
 
   // Search and filter: above the transcript, or in the row the page made for them.
   const tools = (
-    <div className="flex flex-wrap items-center gap-2">
-      <InputGroup className="h-8 w-56">
-        <InputGroupInput
-          aria-label={search}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setCurrent(0);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              step(event.shiftKey ? -1 : 1);
-            }
-          }}
-          placeholder={search}
-          type="search"
-          value={query}
-        />
-        <InputGroupAddon>
-          <SearchIcon />
-        </InputGroupAddon>
-      </InputGroup>
+    <div {...stylex.props(styles.tools)}>
+      <Input
+        aria-label={search}
+        icon={Search}
+        layout={styles.search}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            step(event.shiftKey ? -1 : 1);
+          }
+        }}
+        onValueChange={(value) => {
+          setQuery(value);
+          setCurrent(0);
+        }}
+        placeholder={search}
+        size="sm"
+        type="search"
+        value={query}
+      />
       {needleLength >= 2 ? (
-        <span
-          aria-live="polite"
-          className="text-muted-foreground flex items-center gap-1 tabular-nums"
-        >
+        <span aria-live="polite" {...stylex.props(styles.matches)}>
           {hits.length === 0 ? (
             <Trans>No matches</Trans>
           ) : (
@@ -419,27 +700,25 @@ export const TranscriptView = ({
           )}
           <Button
             aria-label={t`Previous match`}
+            icon={ChevronUp}
             onClick={() => {
               step(-1);
             }}
-            size="icon-sm"
+            size="sm"
             variant="ghost"
-          >
-            <ChevronUpIcon />
-          </Button>
+          />
           <Button
             aria-label={t`Next match`}
+            icon={ChevronDown}
             onClick={() => {
               step(1);
             }}
-            size="icon-sm"
+            size="sm"
             variant="ghost"
-          >
-            <ChevronDownIcon />
-          </Button>
+          />
         </span>
       ) : null}
-      <div className="ml-auto">
+      <div {...stylex.props(styles.filter)}>
         {/* One button, so no toolbar frame: on its own it stands as tall as the search beside it. */}
         <TranscriptFilter
           highlights={highlights}
@@ -453,10 +732,10 @@ export const TranscriptView = ({
   );
 
   return (
-    <section className="flex flex-col gap-3">
+    <section {...stylex.props(styles.transcript)}>
       {placed(tools, toolbarIn)}
 
-      <div className="flex flex-col" ref={box}>
+      <div ref={box} {...stylex.props(styles.turns)}>
         {turns.map((turn, index) => {
           if (!visible(index)) {
             return null;
@@ -476,37 +755,40 @@ export const TranscriptView = ({
           const continues =
             !opensChapter && speakerBefore[index] === turn.speaker;
           return (
-            <div className="flex flex-col" key={`${turn.at}-${index}`}>
+            <div
+              key={`${turn.at}-${index}`}
+              {...stylex.props(styles.turnHolder)}
+            >
               {opensChapter && chapter ? (
                 <div
-                  className="text-muted-foreground flex scroll-mt-4 items-center gap-3 px-3 pt-5 pb-2 text-xs"
                   id={chapterAnchor(source.id, chapterIndex)}
+                  {...stylex.props(styles.chapter)}
                 >
-                  <span className="text-foreground font-medium">
+                  <span {...stylex.props(styles.chapterTitle)}>
                     {chapter.title}
                   </span>
-                  <span className="tabular-nums">
+                  <span {...stylex.props(styles.numbers)}>
                     {next
                       ? `${label(chapter.at)} – ${label(next.at)}`
                       : label(chapter.at)}
                   </span>
-                  <span className="bg-border h-px flex-1" />
+                  <span aria-hidden="true" {...stylex.props(styles.rule)} />
                 </div>
               ) : null}
-              <div className={turnClass(isActive, continues)}>
-                <span className="text-muted-foreground text-xs leading-6 tabular-nums">
-                  {label(turn.at)}
-                </span>
-                <span className="text-xs leading-6">
+              <div
+                {...stylex.props(styles.turn, turnLook(isActive, continues))}
+              >
+                <span {...stylex.props(styles.at)}>{label(turn.at)}</span>
+                <span {...stylex.props(styles.speakerCell)}>
                   {continues && !isActive ? null : (
                     <span
-                      className={`rounded-md box-decoration-clone px-1.5 py-0.5 ${voiceTint(turn.speaker)}`}
+                      {...stylex.props(styles.speaker, voiceTint(turn.speaker))}
                     >
                       {turn.speaker}
                     </span>
                   )}
                 </span>
-                <p>
+                <p {...stylex.props(styles.words)}>
                   <TurnText
                     current={hit}
                     highlights={own}
@@ -521,7 +803,7 @@ export const TranscriptView = ({
           );
         })}
         {filtering && !turns.some((_, index) => visible(index)) ? (
-          <p className="text-muted-foreground px-3 py-6 text-sm">
+          <p {...stylex.props(styles.nothing)}>
             <Trans>Nothing here matches the filter.</Trans>
           </p>
         ) : null}
@@ -559,10 +841,7 @@ export const DocumentView = ({
   }, [activeId]);
 
   return (
-    <div
-      className="flex flex-col gap-3 border-t pt-6 text-sm leading-7"
-      ref={box}
-    >
+    <div ref={box} {...stylex.props(styles.document)}>
       {turns.map((turn, index) => {
         const chapterIndex = chapterOf[index] ?? 0;
         const opensChapter =
@@ -573,23 +852,26 @@ export const DocumentView = ({
           (highlight) => highlight.statement.id === activeId
         );
         return (
-          <div className="contents" key={`${turn.at}-${index}`}>
+          <div
+            key={`${turn.at}-${index}`}
+            {...stylex.props(styles.passageHolder)}
+          >
             {opensChapter && chapter ? (
               <h2
-                className={
-                  index === 0
-                    ? "scroll-mt-4 font-medium"
-                    : "scroll-mt-4 pt-3 font-medium"
-                }
                 id={chapterAnchor(source.id, chapterIndex)}
+                {...stylex.props(
+                  styles.passageHeading,
+                  index > 0 && styles.passageHeadingLater
+                )}
               >
                 {chapter.title}
               </h2>
             ) : null}
             <p
-              className={
-                isActive ? "ring-foreground -mx-2 rounded-lg px-2 ring-2" : ""
-              }
+              {...stylex.props(
+                styles.passage,
+                isActive && styles.activePassage
+              )}
             >
               <TurnText
                 current={0}
@@ -634,9 +916,9 @@ export const TranscriptRail = ({
     isDocument ? "" : placeLabel(source.transcript, at);
   const highlights = highlightsOf(source, statements);
   return (
-    <div className="flex flex-col gap-5">
-      <section className="flex flex-col gap-1">
-        <h2 className="text-muted-foreground flex items-baseline justify-between pb-1 text-sm">
+    <div {...stylex.props(styles.rail)}>
+      <section {...stylex.props(styles.topics)}>
+        <h2 {...stylex.props(styles.railHeading)}>
           {isDocument ? (
             <Trans context="heading: the headings of a document, as a table of contents">
               Contents
@@ -648,7 +930,6 @@ export const TranscriptRail = ({
         </h2>
         {chapters.map((chapter, index) => (
           <button
-            className="hover:bg-muted -mx-2 flex items-baseline justify-between gap-3 rounded-md px-2 py-1 text-left text-sm"
             key={chapter.at}
             onClick={() => {
               document
@@ -658,36 +939,32 @@ export const TranscriptRail = ({
                 ?.scrollIntoView({ block: "start", behavior: "smooth" });
             }}
             type="button"
+            {...stylex.props(styles.topic, focus.ring)}
           >
             <span>{chapter.title}</span>
-            <span className="text-muted-foreground text-xs tabular-nums">
-              {label(chapter.at)}
-            </span>
+            <span {...stylex.props(styles.topicAt)}>{label(chapter.at)}</span>
           </button>
         ))}
       </section>
       {/* A source nobody said anything tagged in, like a vision talk that backs the goals, has no list to show. */}
       {highlights.length > 0 ? (
-        <section className="flex flex-col gap-2">
-          <h2 className="text-muted-foreground flex items-baseline justify-between text-sm">
+        <section {...stylex.props(styles.said)}>
+          <h2 {...stylex.props(styles.railHeading)}>
             <Trans>Statements</Trans>
             <span>{highlights.length}</span>
           </h2>
-          <div className="flex gap-3">
+          <div {...stylex.props(styles.saidRow)}>
             {/* Where each highlight falls in the conversation, from the first turn at the top to the
                 last: drawn rather than placed, as SVG takes a share of its height as a position. */}
-            <div
-              aria-hidden="true"
-              className="bg-muted relative w-1.5 flex-none rounded-full"
-            >
-              <svg className="absolute inset-0 size-full overflow-visible">
+            <div aria-hidden="true" {...stylex.props(styles.strip)}>
+              <svg {...stylex.props(styles.stripDrawing)}>
                 {highlights.map((highlight) => (
                   <rect
-                    className={
+                    {...stylex.props(
                       highlight.statement.id === activeId
-                        ? "fill-foreground"
-                        : "fill-graph-statements"
-                    }
+                        ? brainMarks.stripMarkActive
+                        : brainMarks.stripMark
+                    )}
                     height="4"
                     key={highlight.statement.id}
                     rx="2"
@@ -698,50 +975,49 @@ export const TranscriptRail = ({
                 ))}
               </svg>
             </div>
-            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <div {...stylex.props(styles.cards)}>
               {highlights.map((highlight) => (
                 <div
-                  className="relative flex flex-col"
                   key={highlight.statement.id}
+                  {...stylex.props(styles.cardHolder)}
                 >
                   <Link
-                    className={
-                      highlight.statement.id === activeId
-                        ? "border-foreground bg-background flex flex-col gap-1 rounded-lg border px-2.5 py-2"
-                        : "bg-background hover:border-foreground/40 flex flex-col gap-1 rounded-lg border px-2.5 py-2"
-                    }
                     hash={highlight.statement.id}
                     hashScrollIntoView={false}
                     params={{ noteId: source.id }}
                     to="/brain/$noteId"
+                    {...stylex.props(
+                      styles.card,
+                      highlight.statement.id === activeId && styles.activeCard,
+                      focus.ring
+                    )}
                   >
-                    <span className="flex items-center justify-between gap-2 text-xs">
+                    <span {...stylex.props(styles.cardHead)}>
                       <span
-                        className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-medium ${tintClass("statement")}`}
+                        {...stylex.props(styles.cardKind, tintOf("statement"))}
                       >
                         <KindLabel kind={highlight.statement.kind} />
                       </span>
-                      <span className="text-muted-foreground tabular-nums">
+                      <span {...stylex.props(styles.cardAt)}>
                         {label(turns[highlight.turn]?.at ?? "")}
                       </span>
                     </span>
-                    <span className="line-clamp-2 text-xs leading-5">
+                    <span {...stylex.props(styles.cardWords)}>
                       {highlight.statement.text}
                     </span>
                   </Link>
                   {onRemove === undefined ? null : (
                     <Button
                       aria-label={t`Remove this from the brain`}
-                      className="absolute right-1 bottom-1"
+                      icon={Trash}
+                      layout={styles.cardRemove}
                       onClick={() => {
                         onRemove(highlight.statement);
                       }}
-                      size="icon-xs"
+                      size="xs"
                       title={t`Remove from the brain`}
                       variant="ghost"
-                    >
-                      <Trash2Icon />
-                    </Button>
+                    />
                   )}
                 </div>
               ))}

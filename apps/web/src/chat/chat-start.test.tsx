@@ -200,6 +200,28 @@ const pick = async (title: string): Promise<void> => {
   await settled();
 };
 
+/** Presses `element` as a pointer does. */
+const pressOn = async (element: Element | undefined): Promise<void> => {
+  if (!(element instanceof HTMLElement)) {
+    throw new TypeError(
+      `Nothing to press among: ${[...document.querySelectorAll("[role]")].map((each) => `${each.getAttribute("role")}:${each.textContent.trim().slice(0, 20)}`).join(" | ")}`
+    );
+  }
+  await act(async () => {
+    element.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, button: 0 })
+    );
+    element.click();
+    await Promise.resolve();
+  });
+  await settled();
+};
+/** A menu row or option by the words it starts with. */
+const byWords = (words: string): Element | undefined =>
+  [...document.querySelectorAll('[role^="menuitem"], [role="option"]')].find(
+    (each) => each.textContent.includes(words)
+  );
+
 describe("Chat's page from Make something", () => {
   afterEach(() => {
     act(() => {
@@ -393,6 +415,32 @@ describe("Chat's page from Make something", () => {
       named: "agent-2",
     });
 
+    await act(async () => {
+      typeIn(box(), "Which invoices are late?");
+      await Promise.resolve();
+    });
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect(asked).toStrictEqual([
+      "create Which invoices are late? null with agent-2",
+      "send chat-1 Which invoices are late?",
+    ]);
+  });
+
+  it("starts the chat with the agent chosen in the box's plus menu, the company's first until then", async () => {
+    const { asked } = await shown(undefined, undefined, {
+      agents: [agent("organization", "Grasp"), agent("agent-2", "Claire")],
+    });
+    await pressOn(
+      // The plus, by the part's own English name (no catalogue here).
+      document.querySelector('[aria-label="Add to message"]') ?? undefined
+    );
+    await pressOn(byWords("Agent"));
+    await pressOn(byWords("Claire"));
     await act(async () => {
       typeIn(box(), "Which invoices are late?");
       await Promise.resolve();

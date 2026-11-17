@@ -1,21 +1,79 @@
 import type { Workspace } from "@grasp-os/shared/brain";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import { AppLogo } from "../../connections/app-logo.tsx";
 import { formatList } from "../../format.ts";
+import { focus } from "../../grasp/focus/focus.ts";
+import { grasp } from "../../grasp/tokens/tokens.stylex.ts";
 import { teamOfWork } from "../brain-atlas.ts";
 import { brainLinks } from "../brain-links.ts";
 import type { BrainLink } from "../brain-links.ts";
 import type { Brain, Note } from "../brain.ts";
 import { Mark } from "../region-marks.tsx";
 import { PartHeading } from "./kern.tsx";
+
+const styles = stylex.create({
+  part: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+  },
+  list: {
+    display: "flex",
+    flexDirection: "column",
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  row: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space3,
+    paddingBlock: grasp.space3,
+    borderTopWidth: { default: grasp.hairline, ":first-child": 0 },
+    borderTopStyle: "solid",
+    borderTopColor: grasp.line,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    color: grasp.text,
+  },
+  // A short line: whole when the link is confirmed, dashed while it is only proposed.
+  stroke: {
+    flexShrink: 0,
+    width: grasp.space4,
+    borderTopWidth: 2,
+    borderTopStyle: "solid",
+    borderTopColor: grasp.muted,
+  },
+  proposedStroke: { borderTopStyle: "dashed" },
+  proposed: {
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+    color: grasp.muted,
+  },
+  grow: { flexGrow: 1, minWidth: 0 },
+  work: {
+    flexGrow: 1,
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    color: "inherit",
+    textDecorationLine: { default: "none", ":hover": "underline" },
+  },
+  systems: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: grasp.space2,
+  },
+  system: {
+    display: "inline-flex",
+    borderRadius: grasp.cornerMark,
+  },
+});
 
 /** A link as a row: a short line, whole when it is confirmed and dashed while it is only proposed, the words, and "Proposed" where it is. */
 const LinkRow = ({
@@ -25,18 +83,14 @@ const LinkRow = ({
   link: BrainLink;
   children: ReactNode;
 }) => (
-  <li className="flex items-center gap-2.5 border-t py-2.5 text-sm first:border-t-0">
+  <li {...stylex.props(styles.row)}>
     <span
       aria-hidden="true"
-      className={
-        link.confirmed
-          ? "border-foreground/60 w-4 flex-none border-t-2"
-          : "border-foreground/60 w-4 flex-none border-t-2 border-dashed"
-      }
+      {...stylex.props(styles.stroke, !link.confirmed && styles.proposedStroke)}
     />
     {children}
     {link.confirmed ? null : (
-      <span className="text-muted-foreground text-xs">
+      <span {...stylex.props(styles.proposed)}>
         <Trans context="a link Grasp proposed that nobody confirmed yet">
           Proposed
         </Trans>
@@ -89,21 +143,18 @@ export const TeamWork = ({
   return (
     <>
       {work.length > 0 ? (
-        <section className="flex flex-col gap-2">
+        <section {...stylex.props(styles.part)}>
           <PartHeading title={t`Its work`} />
-          <ul className="flex flex-col">
+          <ul {...stylex.props(styles.list)}>
             {work.map((note) => (
-              <li
-                className="flex items-center gap-2.5 border-t py-2.5 text-sm first:border-t-0"
-                key={note.id}
-              >
+              <li key={note.id} {...stylex.props(styles.row)}>
                 <Mark
                   state={note.tags.includes("drawn") ? "known" : "waiting"}
                 />
                 <Link
-                  className="min-w-0 flex-1 truncate hover:underline"
                   params={{ noteId: note.id }}
                   to="/brain/$noteId"
+                  {...stylex.props(styles.work, focus.words)}
                 >
                   {note.title}
                 </Link>
@@ -114,15 +165,15 @@ export const TeamWork = ({
       ) : null}
 
       {handovers.length > 0 ? (
-        <section className="flex flex-col gap-2">
+        <section {...stylex.props(styles.part)}>
           <PartHeading title={t`Where the work passes on`} />
-          <ul className="flex flex-col">
+          <ul {...stylex.props(styles.list)}>
             {handovers.map((link) => {
               const name = workName(link.work);
               const teams = formatList(others(link).map(teamName));
               return (
                 <LinkRow key={link.id} link={link}>
-                  <span className="min-w-0 flex-1">
+                  <span {...stylex.props(styles.grow)}>
                     <Trans context="a handover: the work passes between this team and these">
                       {name} · with {teams}
                     </Trans>
@@ -135,15 +186,15 @@ export const TeamWork = ({
       ) : null}
 
       {pains.length > 0 ? (
-        <section className="flex flex-col gap-2">
+        <section {...stylex.props(styles.part)}>
           <PartHeading title={t`The same pain in other teams`} />
-          <ul className="flex flex-col">
+          <ul {...stylex.props(styles.list)}>
             {pains.map((link) => {
               const name = workName(link.work);
               const teams = formatList(others(link).map(teamName));
               return (
                 <LinkRow key={link.id} link={link}>
-                  <span className="min-w-0 flex-1">
+                  <span {...stylex.props(styles.grow)}>
                     <Trans context="the same pain: these teams told it too">
                       {name} · also {teams}
                     </Trans>
@@ -156,25 +207,21 @@ export const TeamWork = ({
       ) : null}
 
       {systems.length > 0 ? (
-        <section className="flex flex-col gap-2">
+        <section {...stylex.props(styles.part)}>
           <PartHeading title={t`Works in`} />
-          <div className="flex flex-wrap gap-2">
+          <div {...stylex.props(styles.systems)}>
             {systems.map((note) => (
-              <Tooltip key={note.id}>
-                <TooltipTrigger
-                  render={
-                    <Link
-                      aria-label={note.title}
-                      className="focus-visible:ring-ring/50 rounded-md outline-none focus-visible:ring-3"
-                      params={{ noteId: note.id }}
-                      to="/brain/$noteId"
-                    />
-                  }
-                >
-                  <AppLogo logo={note.logoSrc} name={note.title} />
-                </TooltipTrigger>
-                <TooltipContent>{note.title}</TooltipContent>
-              </Tooltip>
+              // Its name on the link, and as the pointer's hint over the logo.
+              <Link
+                aria-label={note.title}
+                key={note.id}
+                params={{ noteId: note.id }}
+                title={note.title}
+                to="/brain/$noteId"
+                {...stylex.props(styles.system, focus.ring)}
+              >
+                <AppLogo logo={note.logoSrc} name={note.title} />
+              </Link>
             ))}
           </div>
         </section>

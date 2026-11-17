@@ -1,36 +1,26 @@
 import { failureText } from "@grasp-os/shared/errors";
 import { rememberTextMaxLength } from "@grasp-os/shared/knowledge";
 import type { SharedChat } from "@grasp-os/shared/knowledge";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@grasp-os/ui/components/dialog";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from "@grasp-os/ui/components/field";
-import {
-  RadioGroup,
-  RadioGroupItem,
-} from "@grasp-os/ui/components/radio-group";
-import { Textarea } from "@grasp-os/ui/components/textarea";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { UsersIcon } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useLingui } from "@lingui/react/macro";
+import { useEffect, useRef, useState } from "react";
 
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
+import {
+  Dialog,
+  DialogAction,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogTitle,
+  DialogTrigger,
+} from "../grasp/dialog/index.ts";
+import { Field, FieldDescription, FieldLabel } from "../grasp/field/index.ts";
+import { People } from "../grasp/icons/index.ts";
+import { RadioGroup, RadioGroupItem } from "../grasp/radio-group/index.ts";
+import { Textarea } from "../grasp/textarea/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { keyOf, recordOf } from "./memory-parts.tsx";
@@ -142,8 +132,7 @@ const ShareForm = ({
   onShared: (memoryId: string | undefined) => void;
 }) => {
   const { t } = useLingui();
-  const ids = useId();
-  const { busy, failure, run } = useCoreAction();
+  const { failure, run } = useCoreAction();
   const chats = useSharedChats();
   const targets = shareTargets(
     teams,
@@ -160,12 +149,15 @@ const ShareForm = ({
   const teamName = (teamId: string): string =>
     teams.find(({ id }) => id === teamId)?.name ?? teamId;
 
-  const share = async (to: Target): Promise<void> => {
+  const share = async (): Promise<void> => {
+    if (target === undefined) {
+      throw new Error("Nowhere is chosen.");
+    }
     const receipt = await run(
       async (session) =>
         await session.knowledge.memoriesPublish(
           {
-            ...scopeOf(to),
+            ...scopeOf(target),
             kind: record.kind,
             text: text.trim(),
             // It rests on the person's own record, at the revision shared.
@@ -180,43 +172,28 @@ const ShareForm = ({
           { idempotencyKey: keyOf(idempotencyKey) }
         )
     );
-    if (receipt !== undefined) {
-      onShared(recordOf(receipt));
+    if (receipt === undefined) {
+      // The dialog stays open, with core's reason under the fields.
+      throw new Error("It wasn't shared.");
     }
+    onShared(recordOf(receipt));
   };
 
   return (
-    <form
-      className="flex flex-col gap-5"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (target !== undefined && ready && !busy) {
-          void share(target);
-        }
-      }}
-    >
-      <DialogHeader>
-        <DialogTitle>
-          <Trans>Share this record</Trans>
-        </DialogTitle>
-        <DialogDescription>
-          <Trans>
-            Everyone it is shared with, and their agents, read it as accepted.
-            Yours stays as it is.
-          </Trans>
-        </DialogDescription>
-      </DialogHeader>
-      <FieldSet>
-        <FieldLegend variant="label">
-          <Trans>Share with</Trans>
-        </FieldLegend>
-        <RadioGroup disabled={busy} onValueChange={setChosen} value={chosen}>
-          {targets.map((one) => {
-            const key = targetKey(one);
-            return (
-              <Field key={key} orientation="horizontal">
-                <RadioGroupItem id={`${ids}-${key}`} value={key} />
-                <FieldLabel htmlFor={`${ids}-${key}`}>
+    <>
+      <DialogBody>
+        <Field>
+          <FieldLabel>{t`Share with`}</FieldLabel>
+          <RadioGroup
+            onValueChange={(value) => {
+              setChosen(value ?? "");
+            }}
+            value={chosen}
+          >
+            {targets.map((one) => (
+              <Field key={targetKey(one)} orientation="horizontal">
+                <RadioGroupItem value={targetKey(one)} />
+                <FieldLabel>
                   {one.scope === "company" ? t`The whole company` : null}
                   {one.scope === "team" ? teamName(one.teamId) : null}
                   {one.scope === "session" ? (
@@ -224,55 +201,46 @@ const ShareForm = ({
                   ) : null}
                 </FieldLabel>
               </Field>
-            );
-          })}
-        </RadioGroup>
-        {chats.state === "failed" ? (
-          <ErrorText>{chats.reason}</ErrorText>
-        ) : null}
-        {chats.state === "ready" && targets.length === 0 ? (
+            ))}
+          </RadioGroup>
+          {chats.state === "failed" ? (
+            <ErrorText>{chats.reason}</ErrorText>
+          ) : null}
+          {chats.state === "ready" && targets.length === 0 ? (
+            <FieldDescription>
+              {t`There's nowhere to share it yet: you're in no team, and in no chat others share.`}
+            </FieldDescription>
+          ) : null}
+        </Field>
+        <Field>
+          <FieldLabel>{t`What it says`}</FieldLabel>
+          <Textarea
+            maxLength={rememberTextMaxLength}
+            onValueChange={(value) => {
+              setText(value);
+            }}
+            rows={4}
+            value={text}
+          />
           <FieldDescription>
-            <Trans>
-              There&apos;s nowhere to share it yet: you&apos;re in no team, and
-              in no chat others share.
-            </Trans>
+            {t`Reword it for them if you like. It can't rest on documents they may not read.`}
           </FieldDescription>
-        ) : null}
-      </FieldSet>
-      <Field>
-        <FieldLabel htmlFor={`${ids}-text`}>
-          <Trans>What it says</Trans>
-        </FieldLabel>
-        <Textarea
-          disabled={busy}
-          id={`${ids}-text`}
-          maxLength={rememberTextMaxLength}
-          onChange={(event) => {
-            setText(event.target.value);
-          }}
-          rows={4}
-          value={text}
-        />
-        <FieldDescription>
-          <Trans>
-            Reword it for them if you like. It can&apos;t rest on documents they
-            may not read.
-          </Trans>
-        </FieldDescription>
-      </Field>
-      <ErrorText>{failure}</ErrorText>
+        </Field>
+        <ErrorText>{failure}</ErrorText>
+      </DialogBody>
       <DialogFooter>
-        <DialogClose
-          disabled={busy}
-          render={<Button type="button" variant="outline" />}
+        <DialogAction>{t`Cancel`}</DialogAction>
+        <DialogAction
+          action={share}
+          disabled={!ready}
+          failedLabel={t`Not shared`}
+          variant="ink"
+          workingLabel={t`Sharing`}
         >
-          <Trans>Cancel</Trans>
-        </DialogClose>
-        <Button disabled={!ready || busy} type="submit">
-          <Trans>Share it</Trans>
-        </Button>
+          {t`Share it`}
+        </DialogAction>
       </DialogFooter>
-    </form>
+    </>
   );
 };
 
@@ -295,13 +263,14 @@ export const ShareRecord = ({
   const [open, setOpen] = useState(false);
   return (
     <Dialog onOpenChange={setOpen} open={open}>
-      <div>
-        <DialogTrigger render={<Button variant="outline" />}>
-          <UsersIcon data-icon="inline-start" />
-          <Trans>Share it</Trans>
-        </DialogTrigger>
-      </div>
+      <DialogTrigger icon={People} size="xs">
+        {t`Share it`}
+      </DialogTrigger>
       <DialogContent closeLabel={t`Close`}>
+        <DialogTitle>{t`Share this record`}</DialogTitle>
+        <DialogDescription>
+          {t`Everyone it is shared with, and their agents, read it as accepted. Yours stays as it is.`}
+        </DialogDescription>
         {open ? (
           <ShareForm
             admin={admin}

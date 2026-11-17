@@ -120,16 +120,20 @@ const shown = async (
   return asked;
 };
 
+/** A button's words, as shown: the layer a library Button shows, not the ones it keeps for its width. */
+const shownWords = (each: Element): string =>
+  (each.querySelector("[data-shown]") ?? each).textContent.trim();
+
 /** The button whose text is `text`. */
 const button = (text: string): HTMLButtonElement | undefined =>
   [...document.querySelectorAll("button")].find(
-    (each) => each.textContent.trim() === text
+    (each) => shownWords(each) === text
   );
 
 /** The buttons whose text is `text`. */
 const buttonsNamed = (text: string): HTMLButtonElement[] =>
   [...document.querySelectorAll("button")].filter(
-    (each) => each.textContent.trim() === text
+    (each) => shownWords(each) === text
   );
 
 /** Clicks `element`, and lets what it does settle. */
@@ -153,10 +157,21 @@ const press = async (text: string): Promise<void> => {
   });
 };
 
+/** A label's words, without the mark a required field's label carries. */
+const wordsOf = (label: HTMLLabelElement): string =>
+  [...label.childNodes]
+    .filter(
+      (node) =>
+        !(node instanceof HTMLElement && node.dataset.slot === "required-mark")
+    )
+    .map((node) => node.textContent)
+    .join("")
+    .trim();
+
 /** Types `value` into the field labelled `label`. */
 const type = async (label: string, value: string): Promise<void> => {
   const labelled = [...document.querySelectorAll("label")].find(
-    (each) => each.textContent.trim() === label
+    (each) => wordsOf(each) === label
   );
   const field = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(
     `#${CSS.escape(labelled?.htmlFor ?? "")}`

@@ -5,12 +5,15 @@ import type {
   TraceState,
   WorkflowDiagram,
 } from "@grasp-os/shared/workflow-diagrams";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
 import { cn } from "@grasp-os/ui/lib/utils";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { PencilIcon } from "lucide-react";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
 import type { ReactNode } from "react";
+
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Empty } from "../grasp/empty/index.ts";
+import { Edit } from "../grasp/icons/index.ts";
 
 // A workflow's diagram as core drew it from a definition that passed the
 // profile: every task in order, by its ID, with every case, branch and
@@ -20,7 +23,9 @@ import type { ReactNode } from "react";
 // Showing it runs nothing. Steps are named by their titles, so the
 // drawing has no parts of its own. On the Flow canvas (`workflow-flow.tsx`) the same drawing reads left to right or top
 // to bottom, its own tasks cards joined by dotted lines, and a builder
-// opens one of them to change it (`onStep`).
+// opens one of them to change it (`onStep`). Its marks, buttons and empty
+// state are the library's; the drawing's own layout (its cards, lines and
+// lists) keeps its Tailwind classes until the canvas moves as a whole.
 
 /** Where a task or case goes once done, in words; nothing for "next". */
 const NextText = ({ next }: { next: DiagramNext | null }) => {
@@ -29,13 +34,13 @@ const NextText = ({ next }: { next: DiagramNext | null }) => {
     return null;
   }
   if (next.kind === "end") {
-    return <Badge variant="outline">{t`Ends the workflow`}</Badge>;
+    return <Badge size="sm">{t`Ends the workflow`}</Badge>;
   }
   if (next.kind === "exit") {
-    return <Badge variant="outline">{t`Leaves this list`}</Badge>;
+    return <Badge size="sm">{t`Leaves this list`}</Badge>;
   }
   const { task } = next;
-  return <Badge variant="outline">{t`Then ${task}`}</Badge>;
+  return <Badge size="sm">{t`Then ${task}`}</Badge>;
 };
 
 /** How a run's journal left a task, in words. */
@@ -51,7 +56,7 @@ const StateBadge = ({ state }: { state: TraceState | undefined }) => {
     failed: t`Failed`,
   }[state];
   return (
-    <Badge variant={state === "failed" ? "attention" : "secondary"}>
+    <Badge size="sm" tone={state === "failed" ? "attention" : "neutral"}>
       {label}
     </Badge>
   );
@@ -141,14 +146,14 @@ const TaskId = ({ task, marks }: { task: DiagramTask; marks: Marks }) => {
   return (
     <Button
       aria-label={t`Change step ${id}`}
+      iconEnd={Edit}
       onClick={() => {
         onStep(task);
       }}
       size="xs"
       variant="ghost"
     >
-      <code>{id}</code>
-      <PencilIcon aria-hidden="true" data-icon="inline-end" />
+      {id}
     </Button>
   );
 };
@@ -185,19 +190,19 @@ const TaskItem = ({
       >
         <div className="flex flex-wrap items-center gap-2">
           <TaskId marks={marks} task={task} />
-          <Badge variant="outline">{task.kind}</Badge>
+          <Badge size="sm">{task.kind}</Badge>
           {task.label === null ? null : <span>{task.label}</span>}
           {task.detail === null ? null : (
             <span className="text-muted-foreground">{task.detail}</span>
           )}
           {task.guarded ? (
-            <Badge variant="outline">{t`Only if its condition holds`}</Badge>
+            <Badge size="sm">{t`Only if its condition holds`}</Badge>
           ) : null}
           <NextText next={task.next} />
           <StateBadge state={state} />
           {attempts > 1 ? (
-            <Badge variant="outline">
-              <Plural one="# attempt" other="# attempts" value={attempts} />
+            <Badge size="sm">
+              {t`${plural(attempts, { one: "# attempt", other: "# attempts" })}`}
             </Badge>
           ) : null}
         </div>
@@ -283,6 +288,7 @@ export const WorkflowDiagramView = ({
   label: string;
   canvas?: CanvasOptions;
 }) => {
+  const { t } = useLingui();
   const marks: Marks = {
     states,
     attempts,
@@ -292,9 +298,7 @@ export const WorkflowDiagramView = ({
   return (
     <section aria-label={label} className="flex flex-col gap-2">
       {diagram.tasks.length === 0 ? (
-        <p className="text-muted-foreground">
-          <Trans>It declares no tasks.</Trans>
-        </p>
+        <Empty size="inline">{t`It declares no tasks.`}</Empty>
       ) : null}
       {diagram.tasks.length > 0 && canvas !== undefined ? (
         <CanvasDrawing canvas={canvas} diagram={diagram} marks={marks} />

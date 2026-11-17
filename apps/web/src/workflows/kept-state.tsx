@@ -1,17 +1,23 @@
 import { workflowStateMaxBytes } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowState } from "@grasp-os/shared/workflow-resources";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
+
+import { formatTime } from "../directory.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
-  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button } from "@grasp-os/ui/components/button";
+} from "../grasp/alert-dialog/index.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { Empty } from "../grasp/empty/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   Table,
   TableBody,
@@ -19,13 +25,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { useState } from "react";
-
-import { formatTime } from "../directory.ts";
-import { ErrorText } from "../error-text.tsx";
-import { NotLoadedState } from "../frame/page-states.tsx";
+} from "../grasp/table/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
@@ -34,6 +35,12 @@ import { useCoreAction } from "../use-core-action.ts";
 // and the organization's admins, as its runs' results are. They may empty
 // it; core records who did, and a step that wrote before never writes
 // again.
+
+const styles = stylex.create({
+  // A value is JSON of any length: it breaks anywhere rather than widen the table.
+  value: { overflowWrap: "anywhere", whiteSpace: "normal" },
+  failure: { paddingInline: grasp.space4, paddingBlockEnd: grasp.space4 },
+});
 
 /** Kilobytes, rounded up, as the page says a size. */
 const kilobytes = (bytes: number): number => Math.ceil(bytes / 1024);
@@ -64,39 +71,54 @@ const KeptEntries = ({
     const emptied = await run(
       async (session) => await session.workflowResources.resetState(workflow)
     );
-    if (emptied !== undefined) {
-      setReset({ of: loaded, answer: emptied });
+    if (emptied === undefined) {
+      // The dialog stays open; why is said on the card.
+      throw new Error("It wasn't reset.");
     }
+    setReset({ of: loaded, answer: emptied });
   };
 
   return (
-    <section className="mt-8 flex max-w-3xl flex-col gap-3 border-t pt-6">
-      <h2 className="font-medium">
-        <Trans>Kept between runs</Trans>
-      </h2>
-      <p className="text-muted-foreground">
-        <Trans>
-          What its steps keep for later runs, which each run reads as it starts.
-          It uses {used} KB of {cap} KB.
-        </Trans>
-      </p>
+    <SectionCard
+      actions={
+        editable && state.entries.length > 0 ? (
+          <AlertDialog>
+            <AlertDialogTrigger disabled={busy} size="sm" variant="quiet">
+              {t`Reset what it keeps`}
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogTitle>{t`Reset what it keeps?`}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t`Runs that start after this read nothing kept. Runs already going keep what they read. This can't be undone.`}
+              </AlertDialogDescription>
+              <AlertDialogFooter>
+                <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+                <AlertDialogAction
+                  action={resetAll}
+                  failedLabel={t`Not reset`}
+                  variant="danger"
+                >
+                  {t`Reset`}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        ) : null
+      }
+      density="compact"
+      description={t`What its steps keep for later runs, which each run reads as it starts. It uses ${used} KB of ${cap} KB.`}
+      flush
+      title={t`Kept between runs`}
+    >
       {state.entries.length === 0 ? (
-        <p className="text-muted-foreground">
-          <Trans>Nothing is kept yet.</Trans>
-        </p>
+        <Empty size="inline">{t`Nothing is kept yet.`}</Empty>
       ) : (
-        <Table>
+        <Table aria-label={t`Kept between runs`}>
           <TableHeader>
             <TableRow>
-              <TableHead>
-                <Trans>Key</Trans>
-              </TableHead>
-              <TableHead>
-                <Trans>Value</Trans>
-              </TableHead>
-              <TableHead>
-                <Trans>Set</Trans>
-              </TableHead>
+              <TableHead>{t`Key`}</TableHead>
+              <TableHead>{t`Value`}</TableHead>
+              <TableHead>{t`Set`}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -105,8 +127,10 @@ const KeptEntries = ({
                 <TableCell>
                   <code>{key}</code>
                 </TableCell>
-                <TableCell className="break-all whitespace-normal">
-                  <code>{JSON.stringify(value)}</code>
+                <TableCell>
+                  <code {...stylex.props(styles.value)}>
+                    {JSON.stringify(value)}
+                  </code>
                 </TableCell>
                 <TableCell>{formatTime(updatedAt)}</TableCell>
               </TableRow>
@@ -114,47 +138,12 @@ const KeptEntries = ({
           </TableBody>
         </Table>
       )}
-      {editable && state.entries.length > 0 ? (
-        <div>
-          <AlertDialog>
-            <AlertDialogTrigger
-              disabled={busy}
-              render={<Button size="sm" variant="outline" />}
-            >
-              <Trans>Reset what it keeps</Trans>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>
-                  <Trans>Reset what it keeps?</Trans>
-                </AlertDialogTitle>
-                <AlertDialogDescription>
-                  <Trans>
-                    Runs that start after this read nothing kept. Runs already
-                    going keep what they read. This can&apos;t be undone.
-                  </Trans>
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>
-                  <Trans>Cancel</Trans>
-                </AlertDialogCancel>
-                <AlertDialogAction
-                  disabled={busy}
-                  onClick={() => {
-                    void resetAll();
-                  }}
-                  variant="destructive"
-                >
-                  {t`Reset`}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+      {failure === undefined ? null : (
+        <div {...stylex.props(styles.failure)}>
+          <Alert tone="danger">{failure}</Alert>
         </div>
-      ) : null}
-      <ErrorText>{failure}</ErrorText>
-    </section>
+      )}
+    </SectionCard>
   );
 };
 

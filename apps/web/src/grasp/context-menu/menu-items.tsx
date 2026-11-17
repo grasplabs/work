@@ -26,6 +26,8 @@ import { listStyles } from "../combobox/list.styles";
 import { Icon, Spinner, Tick } from "../icons";
 import type { IconData } from "../icons";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { useWords, withGiven } from "../words/words";
+import { contextMenuWords } from "./words";
 
 /** An action in a menu. */
 export interface MenuAction {
@@ -362,11 +364,15 @@ const entryView = (
 /** The items as parts, in the order they are given. */
 export const MenuEntriesView = ({
   items,
-  failedLabel = "Failed",
+  failedLabel: failedGiven,
 }: {
   items: MenuEntries;
   failedLabel?: string;
 }) => {
+  const { failed: failedLabel } = withGiven(
+    useWords("contextMenu", contextMenuWords),
+    { failed: failedGiven }
+  );
   const slot = hasIcon(items);
   return items.map((entry, index) =>
     entryView(entry, index, failedLabel, slot)
@@ -404,9 +410,9 @@ const settled = async (pending: unknown, fail: () => never) => {
 export const withFailureWords =
   <D,>(
     actions: Map<string, MenuAction>,
-    onAction?: (value: string, details: D) => unknown,
-    say?: (words: string) => void,
-    failedLabel = "Failed"
+    onAction: ((value: string, details: D) => unknown) | undefined,
+    say: ((words: string) => void) | undefined,
+    failedLabel: string
   ) =>
   (value: string, details: D) => {
     const words = actions.get(value)?.failedLabel ?? failedLabel;

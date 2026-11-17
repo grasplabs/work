@@ -284,12 +284,9 @@ const choose = async (label: string, option: string): Promise<void> => {
 const fieldButtons = (): [string, HTMLElement][] =>
   [
     ...document.querySelectorAll<HTMLElement>(
-      '[data-slot="model-field-button"]'
+      '[aria-label="Fields"] [data-row-press]'
     ),
-  ].map((each) => [
-    (each.querySelector("span > span")?.textContent ?? "").trim(),
-    each,
-  ]);
+  ].map((each) => [each.textContent.trim(), each]);
 
 /** The fields the table's Fields view lists, by name. */
 const fieldsShown = (): string[] => fieldButtons().map(([name]) => name);
@@ -320,7 +317,9 @@ const addField = async (
   await press(button("Add field"));
   await press(
     [
-      ...document.querySelectorAll('[data-slot="field-type-gallery"] button'),
+      ...document.querySelectorAll(
+        '[aria-label="Kinds of field"] [data-row-press]'
+      ),
     ].find((each) => each.textContent.startsWith(kind))
   );
   await type("Field name", name);
@@ -381,9 +380,7 @@ describe("an App's data model, changed in its workspace", () => {
     const savedAs = document.body.textContent.includes("Saved as openTasks");
     await choose("Who can see and change its records", "Only the person");
     await press(button("Create table"));
-    const title = document.querySelector(
-      'nav [aria-current="true"]'
-    )?.textContent;
+    const title = document.querySelector("nav [aria-current]")?.textContent;
 
     const kinds: [string, string, (() => Promise<void>)?][] = [
       ["title", "Text"],
@@ -1019,7 +1016,7 @@ describe("an App's data model, changed in its workspace", () => {
       newTable: button("New table")?.hasAttribute("disabled"),
       addField: button("Add field")?.hasAttribute("disabled"),
       rename: labelled("Field name")?.hasAttribute("disabled"),
-      move: labelled("Move title")?.hasAttribute("disabled"),
+      move: labelled("Move title down")?.hasAttribute("disabled"),
     }).toStrictEqual({
       newTable: true,
       addField: true,

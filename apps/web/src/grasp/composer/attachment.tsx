@@ -17,6 +17,7 @@ import { Cross, File, Icon, Image } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { useComposerWords } from "./words";
 
 /** Where a file is. */
 export type ComposerAttachmentStatus =
@@ -71,32 +72,6 @@ export interface ComposerAttachmentProps {
   /** The words, in the page's language. */
   words?: Partial<ComposerAttachmentWords>;
 }
-
-// A size in English, in steps of a thousand: "820 KB", "1.4 MB".
-const englishSize = (bytes: number) => {
-  if (bytes === 0) {
-    return "Empty";
-  }
-  const units = ["B", "KB", "MB", "GB"];
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1000 && unit < units.length - 1) {
-    value /= 1000;
-    unit += 1;
-  }
-  return `${unit === 0 || value >= 10 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
-};
-
-const defaultWords: ComposerAttachmentWords = {
-  uploading: "Uploading",
-  done: "Uploaded",
-  failed: "Could not upload",
-  retry: "Try again",
-  remove: "Remove",
-  size: englishSize,
-  pages: (count) =>
-    count === 0 ? "No pages" : `${count} ${count === 1 ? "page" : "pages"}`,
-};
 
 /** A name cut in the middle: its start, and its last few characters with the extension. */
 const splitName = (name: string) => {
@@ -312,7 +287,8 @@ export const ComposerAttachment = ({
   onOpen,
   words,
 }: ComposerAttachmentProps) => {
-  const say = { ...defaultWords, ...words };
+  // Its words: the caller's where given, else the product's catalogue (GraspWords), else English.
+  const say = { ...useComposerWords("attachment"), ...words };
   // Remove shows while a pointer or focus is on the card (and always on a touch screen).
   const [near, setNear] = useState(false);
   // A picture that cannot load gives way to the file's mark.

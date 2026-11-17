@@ -24,7 +24,6 @@ import {
 import type { Permission } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
-import { Toaster } from "@grasp-os/ui/components/toast";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -47,6 +46,7 @@ import { activeChat, setActiveChat } from "../chat/active-chat.ts";
 import { ChatPanel } from "../chat/chat-panel.tsx";
 import { slotOf } from "../chat/chat-subject.ts";
 import { GlobalChatProvider } from "../chat/global-chat.tsx";
+import { toast, Toaster } from "../grasp/toast/index.ts";
 import { socketsTo } from "../pages/test-socket.ts";
 import { OpenedApp } from "./app-page.tsx";
 import { AppWorkspace } from "./app-workspace.tsx";
@@ -365,12 +365,11 @@ const opened = async (
     beforeLoad: () => ({ identity }),
     component: () => (
       <SidebarProvider>
-        <Toaster>
-          <GlobalChatProvider>
-            <Outlet />
-            <ChatPanel />
-          </GlobalChatProvider>
-        </Toaster>
+        <GlobalChatProvider>
+          <Outlet />
+          <ChatPanel />
+        </GlobalChatProvider>
+        <Toaster aria-label="Notifications" />
       </SidebarProvider>
     ),
   });
@@ -646,8 +645,8 @@ const reachable = (name: string): HTMLButtonElement | undefined =>
 
 /** What the toasts say. */
 const toasts = (): string[] =>
-  [...document.querySelectorAll('[data-slot="toast"]')].map(
-    (each) => each.textContent?.trim() ?? ""
+  [...document.querySelectorAll('[aria-label="Notifications"] li')].map(
+    (each) => (each instanceof HTMLElement ? nameOf(each) : "")
   );
 
 /** The App's status badge, in the bar. */
@@ -757,6 +756,8 @@ describe(AppWorkspace, () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    // The page's toasts are one queue for the tab: none outlives its test.
+    toast.dismiss();
     act(() => {
       root?.unmount();
     });

@@ -1,21 +1,18 @@
 import type { Gap } from "@grasp-os/shared/brain";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button } from "@grasp-os/ui/components/button";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
 import { useRouteContext, useRouter } from "@tanstack/react-router";
 
 import { ErrorText } from "../error-text.tsx";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../grasp/alert-dialog/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useBrainData } from "./brain-data.ts";
 
@@ -41,29 +38,26 @@ const Confirmed = ({
   confirm: string;
   busy: boolean;
   onConfirm: () => void;
-}) => (
-  <AlertDialog>
-    <AlertDialogTrigger
-      render={<Button disabled={busy} size="sm" variant="outline" />}
-    >
-      {label}
-    </AlertDialogTrigger>
-    <AlertDialogContent>
-      <AlertDialogHeader>
+}) => {
+  const { t } = useLingui();
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger disabled={busy} size="sm">
+        {label}
+      </AlertDialogTrigger>
+      <AlertDialogContent>
         <AlertDialogTitle>{title}</AlertDialogTitle>
         <AlertDialogDescription>{description}</AlertDialogDescription>
-      </AlertDialogHeader>
-      <AlertDialogFooter>
-        <AlertDialogCancel>
-          <Trans>Cancel</Trans>
-        </AlertDialogCancel>
-        <AlertDialogAction onClick={onConfirm} variant="destructive">
-          {confirm}
-        </AlertDialogAction>
-      </AlertDialogFooter>
-    </AlertDialogContent>
-  </AlertDialog>
-);
+        <AlertDialogFooter>
+          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogAction onClick={onConfirm} variant="danger">
+            {confirm}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+};
 
 const CloseGap = ({
   busy,

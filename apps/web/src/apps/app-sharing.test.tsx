@@ -180,38 +180,63 @@ const press = async (element: Element | undefined) => {
   await settled();
 };
 
-const button = (name: string) =>
-  [...document.querySelectorAll("button")].find(
-    (each) =>
-      each.textContent?.trim() === name ||
-      each.getAttribute("aria-label") === name
+/** What a button says, without the words it keeps hidden for working or failed. */
+const words = (element: Element): string => {
+  const copy = element.cloneNode(true);
+  if (!(copy instanceof Element)) {
+    return "";
+  }
+  for (const hidden of copy.querySelectorAll("[aria-hidden='true']")) {
+    hidden.remove();
+  }
+  return copy.textContent?.trim() ?? "";
+};
+
+const button = (name: string, within: ParentNode = document) =>
+  [...within.querySelectorAll("button")].find(
+    (each) => words(each) === name || each.getAttribute("aria-label") === name
   );
 
-/** The names offered in the open Share list. */
+/** The open Share dialog. */
+const dialog = (): ParentNode =>
+  document.querySelector("[role=dialog]") ?? document;
+
+/** The candidates the open Share dialog lists, each its label then any note under it. */
+const options = (): HTMLLIElement[] => [
+  ...document.querySelectorAll<HTMLLIElement>("[aria-label='Share with'] li"),
+];
+
+/** The names offered in the open Share dialog. */
 const offered = (): string[] =>
-  [...document.querySelectorAll("[cmdk-item]")].map(
-    (each) => each.querySelector("span.truncate")?.textContent ?? ""
-  );
+  options().map((each) => {
+    const label = each.querySelector("label");
+    return label === null ? "" : words(label);
+  });
 
 /** Each offered option's name, and what it says under it. */
 const optionLines = (): (string | null)[][] =>
-  [...document.querySelectorAll("[cmdk-item]")].map((each) =>
-    [...each.querySelectorAll("span.truncate")].map((line) => line.textContent)
-  );
+  options().map((each) => [
+    ...[...each.querySelectorAll("label")].map(words),
+    ...[...each.querySelectorAll("p")].map((line) => line.textContent),
+  ]);
 
-/** Picks the offered option that says `text`. */
+/** Ticks the offered option that says `text`, and shares with it. */
 const pickOption = async (text: string): Promise<void> => {
   await press(
-    [...document.querySelectorAll("[cmdk-item]")].find((each) =>
-      each.textContent?.includes(text)
-    )
+    options()
+      .find((each) => each.textContent?.includes(text))
+      ?.querySelector("[role=checkbox]") ?? undefined
   );
+  await press(button("Share", dialog()));
 };
 
-/** Who the table lists, as shown. */
+/** Who the list shows it is shared with, by name. */
 const listed = (): string[] =>
-  [...document.querySelectorAll("tbody tr td:first-child")].map(
-    (cell) => cell.textContent?.trim() ?? ""
+  [
+    ...document.querySelectorAll("[aria-label='Shared with'] [data-slot=item]"),
+  ].map(
+    // Its mark, then its words, whose first line is the name.
+    (row) => row.children[1]?.firstElementChild?.textContent?.trim() ?? ""
   );
 
 describe("Sharing an App's App", () => {
@@ -230,23 +255,15 @@ describe("Sharing an App's App", () => {
 
     await press(button("Share"));
     const first = offered();
-    await press(
-      [...document.querySelectorAll("[cmdk-item]")].find((each) =>
-        each.textContent?.includes("Ann")
-      )
-    );
+    await pickOption("Ann");
     await press(button("Share"));
     const second = offered();
-    await press(
-      [...document.querySelectorAll("[cmdk-item]")].find((each) =>
-        each.textContent?.includes("Sales")
-      )
-    );
+    await pickOption("Sales");
 
     expect({ first, second, asked, listed: listed() }).toStrictEqual({
-      // Never the owner, who always opens it.
-      first: ["Ann", "Bo", "Sales"],
-      second: ["Bo", "Sales"],
+      // Never the owner, who always opens it; a team says it is one.
+      first: ["Ann", "Bo", "Sales (team)"],
+      second: ["Bo", "Sales (team)"],
       asked: [
         ["add", "person", "user-ann", "user"],
         ["add", "team", "team-sales", "user"],

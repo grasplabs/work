@@ -28,6 +28,7 @@ import { useStill } from "./still-context";
 import { startVoiceField } from "./voice-field";
 import type { VoiceField, VoiceFieldMode } from "./voice-field";
 import type { VoiceReading } from "./voice-motion";
+import { composerWords, useComposerWords } from "./words";
 
 export type { VoiceReading } from "./voice-motion";
 
@@ -100,32 +101,8 @@ export interface ComposerVoiceProps {
   onRetry: () => void;
 }
 
-export const composerVoiceWords: ComposerVoiceWords = {
-  asking: "Asking for the microphone",
-  listening: "Listening",
-  thinking: "Writing it down",
-  silent: "Paused",
-  muted: "Muted",
-  done: "Done",
-  cancel: "Cancel",
-  mute: "Mute",
-  unmute: "Unmute",
-  retry: "Try again",
-  level: "Level",
-  problems: {
-    blocked:
-      "The microphone is blocked for this site. Allow it in the browser's settings.",
-    missing: "No microphone was found.",
-    unsupported: "This browser can't dictate.",
-    unheard: "A part couldn't be made out. What came before is kept.",
-    failed: "The words couldn't be written down. What you typed is kept.",
-    limited: "That's as long as one dictation can be.",
-  },
-  time: (ms) => {
-    const seconds = Math.floor(ms / 1000);
-    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-  },
-};
+/** The dictation's words in English, as the catalogue (words.ts) holds them. */
+export const composerVoiceWords: ComposerVoiceWords = composerWords.voice;
 
 const breathe = stylex.keyframes({
   "0%": { opacity: 0.45 },
@@ -733,10 +710,16 @@ export const ComposerVoice = ({
   onMute,
   onRetry,
 }: ComposerVoiceProps) => {
+  // Its words: the caller's where given, else the product's catalogue (GraspWords), else English.
+  const catalogue = useComposerWords("voice");
   const say = {
-    ...composerVoiceWords,
+    ...catalogue,
     ...words,
-    problems: { ...composerVoiceWords.problems, ...words?.problems },
+    problems: {
+      ...composerWords.voice.problems,
+      ...catalogue.problems,
+      ...words?.problems,
+    },
   };
   const still = useStill();
   const room = useRef<HTMLDivElement>(null);

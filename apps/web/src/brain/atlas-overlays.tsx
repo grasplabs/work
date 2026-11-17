@@ -1,16 +1,20 @@
-import { Button } from "@grasp-os/ui/components/button";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { Trans, useLingui } from "@lingui/react/macro";
-import {
-  ArrowLeftIcon,
-  ChevronRightIcon,
-  MaximizeIcon,
-  MinusIcon,
-  PlusIcon,
-} from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
+import { Button } from "../grasp/button/index.ts";
+import { focus } from "../grasp/focus/focus.ts";
+import {
+  ArrowLeft,
+  ChevronRight,
+  Fit,
+  Icon,
+  Minus,
+  Plus,
+} from "../grasp/icons/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import type { AtlasView } from "./atlas-canvas.tsx";
 import type { RegionGroup } from "./atlas-map.ts";
 import { Mark } from "./region-marks.tsx";
@@ -29,7 +33,7 @@ export type Spot = "known" | "waiting" | "open";
 /**
  * The corner of the canvas the legend takes, in pixels, with a little air, for the brain to keep
  * clear: how wide it is, and how high, seen whole and in a region, where the small brain sits in
- * its upper part. From the panel's own classes below.
+ * its upper part. From the panel's own styles below.
  */
 export const LEGEND_CORNER = { width: 184, whole: 164, region: 258 };
 
@@ -55,8 +59,183 @@ export interface LegendGroups {
   onSelect: (key: string | undefined) => void;
 }
 
-const rowClass =
-  "flex items-center gap-2 rounded-md px-2 py-1 text-left outline-none transition-colors hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50";
+const PHONE = media.belowTablet;
+const HOVER = media.hover;
+const REDUCED = media.reduced;
+
+// The legend's sizes, which LEGEND_CORNER above counts on: 160 pixels wide, 240 with a region's
+// groups; inside a region its top leaves 100 pixels for the small brain drawn there.
+const LEGEND_WIDTH = `calc(2 * ${grasp.space20})`;
+const LEGEND_WIDE = `calc(3 * ${grasp.space20})`;
+const UNDER_BRAIN = `calc(${grasp.space24} + ${grasp.space1})`;
+// Room on the right of the way back for the chat's bar at the foot of the page.
+const BESIDE_CHAT = `calc(100% - 7.5 * ${grasp.space16})`;
+// The room inside the legend, round its rows and either side of its lines.
+const INSET = `calc(1.5 * ${grasp.space1})`;
+// The room between the steps of the way back.
+const STEP_GAP = `calc(${grasp.space1} / 2)`;
+
+const styles = stylex.create({
+  // One small panel, top left. It lets the pointer through to the brain round its rows.
+  legend: {
+    position: "absolute",
+    top: grasp.space3,
+    left: grasp.space3,
+    display: "flex",
+    flexDirection: "column",
+    boxSizing: "border-box",
+    width: LEGEND_WIDTH,
+    padding: INSET,
+    borderWidth: grasp.hairline,
+    borderStyle: "solid",
+    borderColor: grasp.line,
+    borderRadius: grasp.corner,
+    pointerEvents: "none",
+    transitionProperty: { default: "width, padding", [REDUCED]: "none" },
+    transitionDuration: grasp.durationUi,
+    transitionTimingFunction: grasp.ease,
+  },
+  legendWide: { width: LEGEND_WIDE },
+  legendUnder: { paddingTop: UNDER_BRAIN },
+  // A region's groups, over the marks, a line under them.
+  groups: {
+    display: "flex",
+    flexDirection: "column",
+    margin: 0,
+    marginBottom: INSET,
+    padding: 0,
+    paddingBottom: INSET,
+    borderWidth: 0,
+    borderBottomWidth: grasp.hairline,
+    borderStyle: "solid",
+    borderColor: grasp.line,
+  },
+  row: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space2,
+    minHeight: grasp.controlXs,
+    margin: 0,
+    paddingBlock: 0,
+    paddingInline: grasp.space2,
+    borderWidth: 0,
+    borderRadius: grasp.treeRowCorner,
+    color: grasp.ink,
+    fontFamily: grasp.fontSans,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    fontWeight: grasp.weightRegular,
+    textAlign: "start",
+    cursor: "pointer",
+    pointerEvents: "auto",
+    backgroundColor: {
+      default: "transparent",
+      ":hover": { default: null, [HOVER]: grasp.ghostFillHover },
+    },
+    transitionProperty: "background-color",
+    transitionDuration: grasp.durationHover,
+    transitionTimingFunction: grasp.ease,
+  },
+  // The mark whose dots are lit now.
+  lit: { backgroundColor: grasp.ghostFillHover },
+  // What a click chose, kept lit.
+  chosen: { fontWeight: grasp.weightMedium },
+  groupName: { flexGrow: 1, minWidth: 0 },
+  count: { fontVariantNumeric: "tabular-nums" },
+  zoom: {
+    display: "flex",
+    justifyContent: "space-between",
+    marginTop: INSET,
+    paddingTop: INSET,
+    borderTopWidth: grasp.hairline,
+    borderTopStyle: "solid",
+    borderTopColor: grasp.line,
+    pointerEvents: "auto",
+  },
+  // Bottom left, clear of the chat's bar beside it; on a phone over the chat.
+  trail: {
+    position: "absolute",
+    bottom: { default: grasp.space3, [PHONE]: grasp.space16 },
+    left: grasp.space3,
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space1,
+    minWidth: 0,
+    maxWidth: {
+      default: BESIDE_CHAT,
+      [PHONE]: `calc(100% - ${grasp.space6})`,
+    },
+  },
+  // Beside the open chat there is room for the way back only, and on a phone none.
+  compact: {
+    position: "absolute",
+    bottom: grasp.space3,
+    left: grasp.space3,
+    display: { default: "flex", [PHONE]: "none" },
+    minWidth: 0,
+    maxWidth: BESIDE_CHAT,
+  },
+  steps: {
+    display: "flex",
+    alignItems: "center",
+    gap: STEP_GAP,
+    minWidth: 0,
+    margin: 0,
+    padding: 0,
+    overflow: "hidden",
+    listStyle: "none",
+  },
+  step: {
+    display: { default: "flex", [PHONE]: "none" },
+    alignItems: "center",
+    gap: STEP_GAP,
+    flexShrink: 0,
+  },
+  stepHere: { display: "flex", flexShrink: 1, minWidth: 0 },
+  between: { display: "flex", color: grasp.muted },
+  here: {
+    display: "flex",
+    minWidth: 0,
+    paddingInline: grasp.space2,
+  },
+  shrink: { minWidth: 0, maxWidth: "100%" },
+});
+
+/** A row of the legend, each a button that keeps what it chose pressed. */
+const LegendRow = ({
+  pressed,
+  lit,
+  chosen,
+  label,
+  children,
+  ...handlers
+}: {
+  pressed: boolean;
+  lit: boolean;
+  chosen: boolean;
+  label?: string;
+  children: ReactNode;
+  onClick: () => void;
+  onBlur?: () => void;
+  onFocus?: () => void;
+  onPointerEnter?: () => void;
+  onPointerLeave?: () => void;
+}) => (
+  <button
+    aria-pressed={pressed}
+    title={label}
+    type="button"
+    {...handlers}
+    {...stylex.props(
+      styles.row,
+      lit && styles.lit,
+      chosen && styles.chosen,
+      focus.ring
+    )}
+  >
+    {children}
+  </button>
+);
 
 /**
  * Top left: what a dot says, drawn as the brain draws it: filled where something is known, hollow
@@ -92,55 +271,54 @@ export const AtlasLegend = ({
     { state: "open", label: <Trans>Still open</Trans> },
   ];
   return (
-    // One small panel, top left: inside a region the small brain is drawn in its upper part, to click on; under it the marks, and the zoom.
+    // Inside a region the small brain is drawn in its upper part, to click on; under it the marks, and the zoom.
     <div
-      className={cn(
-        "pointer-events-none absolute top-3 left-3 flex w-40 flex-col rounded-xl border p-1.5 text-sm transition-all duration-300 *:pointer-events-auto",
-        under && "pt-25",
-        groups && "w-60"
+      {...stylex.props(
+        styles.legend,
+        under && styles.legendUnder,
+        groups !== undefined && styles.legendWide
       )}
     >
       {groups ? (
-        <fieldset
-          aria-label={t`Show`}
-          className="mb-1.5 flex flex-col border-b pb-1.5"
-        >
+        <fieldset aria-label={t`Show`} {...stylex.props(styles.groups)}>
           {[
             { key: undefined, label: t`All`, count: groups.total },
             ...groups.items,
           ].map((group) => (
-            <button
-              aria-pressed={groups.selected === group.key}
-              className={cn(
-                rowClass,
-                groups.selected === group.key && "bg-accent font-medium"
-              )}
+            <LegendRow
+              chosen={groups.selected === group.key}
               key={group.key ?? "all"}
+              label={group.label}
+              lit={groups.selected === group.key}
               onClick={() => {
                 groups.onSelect(group.key);
               }}
-              type="button"
+              pressed={groups.selected === group.key}
             >
-              <span className="min-w-0 flex-1 truncate" title={group.label}>
+              <Text
+                element="span"
+                layout={styles.groupName}
+                size="sm"
+                tone="ink"
+                wrap="truncate"
+              >
                 {group.label}
+              </Text>
+              <span {...stylex.props(styles.count)}>
+                <Text element="span" size="sm" tone="muted">
+                  {group.count}
+                </Text>
               </span>
-              <span className="text-muted-foreground tabular-nums">
-                {group.count}
-              </span>
-            </button>
+            </LegendRow>
           ))}
         </fieldset>
       ) : null}
       {marks.map((mark) => (
         // Pointing shows its dots for a moment; a click keeps them lit until it is clicked again, so they can be gone over one by one.
-        <button
-          aria-pressed={picked === mark.state}
-          className={cn(
-            rowClass,
-            spot === mark.state && "bg-accent",
-            picked === mark.state && "font-medium"
-          )}
+        <LegendRow
+          chosen={picked === mark.state}
           key={mark.state}
+          lit={spot === mark.state}
           onBlur={() => {
             onSpot(picked);
           }}
@@ -158,41 +336,38 @@ export const AtlasLegend = ({
           onPointerLeave={() => {
             onSpot(picked);
           }}
-          type="button"
+          pressed={picked === mark.state}
         >
           <Mark state={mark.state} />
           {mark.label}
-        </button>
+        </LegendRow>
       ))}
-      <div className="mt-1.5 flex justify-between border-t pt-1.5">
+      <div {...stylex.props(styles.zoom)}>
         <Button
           aria-label={t`Zoom out`}
+          icon={Minus}
           onClick={() => {
             onZoom(1 / 1.25);
           }}
-          size="icon-sm"
+          size="sm"
           variant="ghost"
-        >
-          <MinusIcon />
-        </Button>
+        />
         <Button
           aria-label={t`Zoom in`}
+          icon={Plus}
           onClick={() => {
             onZoom(1.25);
           }}
-          size="icon-sm"
+          size="sm"
           variant="ghost"
-        >
-          <PlusIcon />
-        </Button>
+        />
         <Button
           aria-label={t`Fit and center`}
+          icon={Fit}
           onClick={onReset}
-          size="icon-sm"
+          size="sm"
           variant="ghost"
-        >
-          <MaximizeIcon />
-        </Button>
+        />
       </div>
     </div>
   );
@@ -228,19 +403,20 @@ export const AtlasTrail = ({
     return (
       <nav
         aria-label={t`Where you are in the brain`}
-        className="absolute bottom-3 left-3 max-w-[calc(100%-30rem)] min-w-0 max-md:hidden"
+        {...stylex.props(styles.compact)}
       >
         <Button
           aria-label={t`Back to ${destination}`}
-          className="max-w-full"
+          icon={ArrowLeft}
+          layout={styles.shrink}
           onClick={() => {
             onGo(previous.view);
           }}
           size="sm"
+          truncate
           variant="ghost"
         >
-          <ArrowLeftIcon />
-          <span className="truncate">{previous.label}</span>
+          {previous.label}
         </Button>
       </nav>
     );
@@ -248,38 +424,42 @@ export const AtlasTrail = ({
   return (
     <nav
       aria-label={t`Where you are in the brain`}
-      className="absolute bottom-3 left-3 flex max-w-[calc(100%-30rem)] min-w-0 items-center gap-1 text-sm max-md:bottom-16 max-md:max-w-[calc(100%-1.5rem)]"
+      {...stylex.props(styles.trail)}
     >
       <Button
+        icon={ArrowLeft}
         onClick={() => {
           onGo(previous.view);
         }}
         size="sm"
         variant="ghost"
       >
-        <ArrowLeftIcon />
         <Trans>Back</Trans>
       </Button>
-      <ol className="flex min-w-0 items-center gap-0.5 overflow-hidden">
+      <ol {...stylex.props(styles.steps)}>
         {steps.map((step, index) => {
           const last = index === steps.length - 1;
           return (
             <li
-              className={cn(
-                "flex items-center gap-0.5",
-                last ? "min-w-0" : "flex-none max-md:hidden"
-              )}
               key={step.label}
+              {...stylex.props(styles.step, last && styles.stepHere)}
             >
               {index > 0 ? (
-                <ChevronRightIcon
-                  aria-hidden="true"
-                  className="text-muted-foreground size-3.5 flex-none"
-                />
+                <span {...stylex.props(styles.between)}>
+                  <Icon icon={ChevronRight} />
+                </span>
               ) : null}
               {last ? (
-                <span aria-current="page" className="truncate px-2 font-medium">
-                  {step.label}
+                <span aria-current="page" {...stylex.props(styles.here)}>
+                  <Text
+                    element="span"
+                    size="sm"
+                    tone="ink"
+                    weight="medium"
+                    wrap="truncate"
+                  >
+                    {step.label}
+                  </Text>
                 </span>
               ) : (
                 <Button
@@ -287,9 +467,10 @@ export const AtlasTrail = ({
                     onGo(step.view);
                   }}
                   size="sm"
+                  truncate
                   variant="ghost"
                 >
-                  <span className="truncate">{step.label}</span>
+                  {step.label}
                 </Button>
               )}
             </li>

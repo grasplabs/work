@@ -1,21 +1,22 @@
 import type { AppRelease } from "@grasp-os/shared/apps";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { Trans, useLingui } from "@lingui/react/macro";
+import { useState } from "react";
+
+import { Alert } from "../grasp/alert/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
 import {
   Dialog,
+  DialogAction,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import { DropdownMenuItem } from "@grasp-os/ui/components/dropdown-menu";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import { Textarea } from "@grasp-os/ui/components/textarea";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { useId, useState } from "react";
-
-import { ErrorText } from "../error-text.tsx";
+} from "../grasp/dialog/index.ts";
+import { DropdownMenuItem } from "../grasp/dropdown-menu/index.ts";
+import { Field, FieldLabel } from "../grasp/field/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import { Textarea } from "../grasp/textarea/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // What the organization's own admins do to an App's sealed releases, on
@@ -34,20 +35,19 @@ export type ReleaseAction =
   | { kind: "lift"; version: number; hold: string };
 
 /** Whether a release was revoked, and its legal holds. */
-export const ReleaseBadges = ({ release }: { release: AppRelease }) => (
-  <>
-    {release.revokedAt === null ? null : (
-      <Badge>
-        <Trans>Revoked</Trans>
-      </Badge>
-    )}
-    {release.holds.map(({ hold }) => (
-      <Badge key={hold} variant="attention">
-        <Trans>Legal hold: {hold}</Trans>
-      </Badge>
-    ))}
-  </>
-);
+export const ReleaseBadges = ({ release }: { release: AppRelease }) => {
+  const { t } = useLingui();
+  return (
+    <>
+      {release.revokedAt === null ? null : <Badge>{t`Revoked`}</Badge>}
+      {release.holds.map(({ hold }) => (
+        <Badge key={hold} tone="attention">
+          {t`Legal hold: ${hold}`}
+        </Badge>
+      ))}
+    </>
+  );
+};
 
 /** A release's actions in its version's menu, for an admin. */
 export const ReleaseMenuItems = ({
@@ -57,6 +57,7 @@ export const ReleaseMenuItems = ({
   release: AppRelease;
   onAsk: (action: ReleaseAction) => void;
 }) => {
+  const { t } = useLingui();
   const { version } = release;
   return (
     <>
@@ -66,7 +67,7 @@ export const ReleaseMenuItems = ({
             onAsk({ kind: "revoke", version });
           }}
         >
-          <Trans>Revoke this version</Trans>
+          {t`Revoke this version`}
         </DropdownMenuItem>
       ) : null}
       <DropdownMenuItem
@@ -74,7 +75,7 @@ export const ReleaseMenuItems = ({
           onAsk({ kind: "hold", version });
         }}
       >
-        <Trans>Place a legal hold</Trans>
+        {t`Place a legal hold`}
       </DropdownMenuItem>
       {release.holds.map(({ hold }) => (
         <DropdownMenuItem
@@ -83,7 +84,7 @@ export const ReleaseMenuItems = ({
             onAsk({ kind: "lift", version, hold });
           }}
         >
-          <Trans>Lift the legal hold {hold}</Trans>
+          {t`Lift the legal hold ${hold}`}
         </DropdownMenuItem>
       ))}
     </>
@@ -162,15 +163,15 @@ const ActionText = ({
   );
 };
 
-/** The confirm button of `action`. */
-const ActionLabel = ({ action }: { action: ReleaseAction }) => {
-  if (action.kind === "revoke") {
-    return <Trans>Revoke</Trans>;
-  }
-  if (action.kind === "hold") {
-    return <Trans>Place hold</Trans>;
-  }
-  return <Trans>Lift hold</Trans>;
+/** The confirm button's words for `action`. */
+const useActionLabel = () => {
+  const { t } = useLingui();
+  return (action: ReleaseAction): string => {
+    if (action.kind === "revoke") {
+      return t`Revoke`;
+    }
+    return action.kind === "hold" ? t`Place hold` : t`Lift hold`;
+  };
 };
 
 /**
@@ -192,11 +193,10 @@ export const ReleaseDialog = ({
   onChanged: (release: AppRelease) => void;
 }) => {
   const { t } = useLingui();
+  const labelOf = useActionLabel();
   const { busy, failure, run } = useCoreAction();
   const [reason, setReason] = useState("");
   const [hold, setHold] = useState("");
-  const reasonId = useId();
-  const holdId = useId();
   const asksReason = action.kind !== "lift";
   const ready =
     action.kind === "lift" ||
@@ -215,10 +215,11 @@ export const ReleaseDialog = ({
       }
       return await session.apps.versions.releaseHold(app, version, action.hold);
     });
-    if (changed !== undefined) {
-      onChanged(changed);
-      onClose();
+    if (changed === undefined) {
+      // The dialog stays, and says why below.
+      throw new Error("The release did not change.");
     }
+    onChanged(changed);
   };
   return (
     <Dialog
@@ -232,55 +233,46 @@ export const ReleaseDialog = ({
       open
     >
       <DialogContent closeLabel={t`Close`}>
-        <header className="flex flex-col gap-1 pr-8">
-          <ActionText action={action} label={label} />
-        </header>
-        {action.kind === "hold" ? (
-          <Field>
-            <FieldLabel htmlFor={holdId}>
-              <Trans>Name of the hold, such as a case reference</Trans>
-            </FieldLabel>
-            <Input
-              id={holdId}
-              maxLength={256}
-              onChange={(event) => {
-                setHold(event.target.value);
-              }}
-              required
-              value={hold}
-            />
-          </Field>
-        ) : null}
-        {asksReason ? (
-          <Field>
-            <FieldLabel htmlFor={reasonId}>
-              <Trans>Why</Trans>
-            </FieldLabel>
-            <Textarea
-              id={reasonId}
-              maxLength={500}
-              onChange={(event) => {
-                setReason(event.target.value);
-              }}
-              required
-              value={reason}
-            />
-          </Field>
-        ) : null}
-        <ErrorText>{failure}</ErrorText>
+        <ActionText action={action} label={label} />
+        {action.kind === "lift" ? null : (
+          <DialogBody>
+            {action.kind === "hold" ? (
+              <Field>
+                <FieldLabel>{t`Name of the hold, such as a case reference`}</FieldLabel>
+                <Input
+                  maxLength={256}
+                  onValueChange={setHold}
+                  required
+                  value={hold}
+                />
+              </Field>
+            ) : null}
+            {asksReason ? (
+              <Field>
+                <FieldLabel>{t`Why`}</FieldLabel>
+                <Textarea
+                  maxLength={500}
+                  onValueChange={setReason}
+                  required
+                  value={reason}
+                />
+              </Field>
+            ) : null}
+          </DialogBody>
+        )}
+        {failure === undefined ? null : (
+          <Alert title={failure} variant="danger" />
+        )}
         <DialogFooter>
-          <Button disabled={busy} onClick={onClose} variant="outline">
-            <Trans>Cancel</Trans>
-          </Button>
-          <Button
-            disabled={busy || !ready}
-            onClick={() => {
-              void confirm();
-            }}
-            variant={action.kind === "revoke" ? "destructive" : "default"}
+          <DialogAction>{t`Cancel`}</DialogAction>
+          <DialogAction
+            action={confirm}
+            disabled={!ready}
+            failedLabel={t`Didn't work`}
+            variant={action.kind === "revoke" ? "danger" : "ink"}
           >
-            <ActionLabel action={action} />
-          </Button>
+            {labelOf(action)}
+          </DialogAction>
         </DialogFooter>
       </DialogContent>
     </Dialog>

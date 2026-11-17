@@ -1,12 +1,17 @@
 import type { DocumentRead, VersionSummary } from "@grasp-os/shared/knowledge";
-import { Button } from "@grasp-os/ui/components/button";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { Link, useNavigate, useRouter } from "@tanstack/react-router";
-import { ChevronRightIcon } from "lucide-react";
+import { plural } from "@lingui/core/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import { useId, useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { ErrorText } from "../error-text.tsx";
+import { RouterLink } from "../frame/router-link.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { ChevronDown, ChevronRight } from "../grasp/icons/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { splitHistory } from "./history.ts";
 
@@ -16,6 +21,48 @@ import { splitHistory } from "./history.ts";
 // shown and older ones folded by month. Each opens for reading; where the
 // person may change the document, an earlier one can be restored, saved
 // again as the next.
+
+const styles = stylex.create({
+  section: { display: "flex", flexDirection: "column", gap: grasp.space4 },
+  heading: {
+    display: "flex",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    gap: grasp.space3,
+    margin: 0,
+  },
+  list: {
+    display: "flex",
+    flexDirection: "column",
+    margin: 0,
+    padding: 0,
+    listStyleType: "none",
+  },
+  version: { display: "flex", gap: grasp.space3 },
+  when: { flexShrink: 0, width: grasp.space24 },
+  // The line down the side, marked where the version shown stands.
+  entry: {
+    display: "flex",
+    flexDirection: "column",
+    flex: 1,
+    gap: grasp.space1,
+    minWidth: 0,
+    paddingBlockEnd: grasp.space3,
+    paddingInlineStart: grasp.space3,
+    borderInlineStartWidth: grasp.tabLineWidth,
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: grasp.line,
+  },
+  shown: { borderInlineStartColor: grasp.ink },
+  title: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: grasp.space2,
+  },
+  month: { marginBlockEnd: grasp.space2 },
+  unfold: { alignSelf: "flex-start", marginBlockEnd: grasp.space2 },
+});
 
 /**
  * One version on the timeline: it opens for reading, and an earlier one
@@ -44,29 +91,23 @@ const Saved = ({
   });
   const who = version.author === me ? t`You` : version.author;
   return (
-    <li aria-label={t`Version ${number}`} className="flex gap-3">
-      <span className="text-muted-foreground w-22 flex-none text-xs leading-5">
+    <li aria-label={t`Version ${number}`} {...stylex.props(styles.version)}>
+      <Text element="span" layout={styles.when} size="xs" tone="muted">
         <time dateTime={version.createdAt}>{when}</time>
-      </span>
-      <div
-        className={
-          shown
-            ? "border-foreground flex min-w-0 flex-1 flex-col gap-0.5 border-l-2 pb-3 pl-3"
-            : "flex min-w-0 flex-1 flex-col gap-0.5 border-l-2 pb-3 pl-3"
-        }
-      >
-        <span className="flex items-center justify-between gap-2">
-          <Link
+      </Text>
+      <div {...stylex.props(styles.entry, shown && styles.shown)}>
+        <span {...stylex.props(styles.title)}>
+          <RouterLink
             aria-current={shown ? "page" : undefined}
-            className="font-medium hover:underline aria-[current=page]:no-underline"
             params={{ collection: doc.collectionId }}
             search={
               current ? { doc: doc.id } : { doc: doc.id, version: number }
             }
             to="/knowledge/$collection"
+            variant="standalone"
           >
             {current ? t`Version ${number}, current` : t`Version ${number}`}
-          </Link>
+          </RouterLink>
           {restore === undefined || current ? null : (
             <Button
               aria-label={t`Restore version ${number}`}
@@ -80,7 +121,7 @@ const Saved = ({
             </Button>
           )}
         </span>
-        <span className="text-muted-foreground text-xs">
+        <Text element="span" size="xs" tone="muted">
           {[
             who,
             restoredFrom === null
@@ -89,7 +130,7 @@ const Saved = ({
           ]
             .filter((part) => part !== null && part !== "")
             .join(" · ")}
-        </span>
+        </Text>
       </div>
     </li>
   );
@@ -152,51 +193,42 @@ export const Timeline = ({
       : undefined;
   const count = versions.length;
   return (
-    <section aria-labelledby={headingId} className="flex flex-col gap-4">
-      <h2
-        className="text-muted-foreground flex items-baseline justify-between text-sm"
-        id={headingId}
-      >
-        <span>
+    <section aria-labelledby={headingId} {...stylex.props(styles.section)}>
+      <h2 id={headingId} {...stylex.props(styles.heading)}>
+        <Text element="span" size="sm" tone="muted">
           <Trans>History</Trans>
-        </span>
-        <span>
-          <Plural one="# version" other="# versions" value={count} />
-        </span>
+        </Text>
+        <Text element="span" size="sm" tone="muted">
+          {plural(count, { one: "# version", other: "# versions" })}
+        </Text>
       </h2>
       <ErrorText>{failure}</ErrorText>
-      <div className="flex flex-col text-sm">
+      <div>
         {folded === 0 ? null : (
           <Button
             aria-expanded={unfolded}
-            className="mb-2 -ml-2 self-start"
+            icon={unfolded ? ChevronDown : ChevronRight}
+            layout={styles.unfold}
             onClick={() => {
               setUnfolded(!unfolded);
             }}
             size="xs"
             variant="ghost"
           >
-            <ChevronRightIcon
-              className={
-                unfolded
-                  ? "rotate-90 transition-transform"
-                  : "transition-transform"
-              }
-            />
-            <Plural one="# earlier" other="# earlier" value={folded} />
+            {plural(folded, { one: "# earlier", other: "# earlier" })}
           </Button>
         )}
-        <ol className="flex flex-col">
+        <ol {...stylex.props(styles.list)}>
           {unfolded
             ? earlier.map((month) => (
-                <li className="flex flex-col" key={month.month}>
-                  <p className="text-muted-foreground pb-2 text-xs">
+                <li key={month.month}>
+                  <Text layout={styles.month} size="xs" tone="muted">
                     {new Date(`${month.month}-01T00:00:00Z`).toLocaleDateString(
                       i18n.locale,
                       { month: "short", year: "numeric", timeZone: "UTC" }
                     )}
-                  </p>
-                  <ol className="flex flex-col">
+                  </Text>
+                  <ol {...stylex.props(styles.list)}>
                     {month.versions.map((version) => (
                       <Saved
                         doc={doc}

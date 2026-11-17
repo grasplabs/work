@@ -195,24 +195,31 @@ const press = async (element: Element | undefined) => {
   await settled();
 };
 
+/** The button named `name`: its words come first, what it says once done or failed follows. */
 const button = (name: string) =>
-  [...document.querySelectorAll("button")].findLast(
-    (each) => each.textContent?.trim() === name
+  [...document.querySelectorAll("button")].findLast((each) =>
+    each.textContent?.trim().startsWith(name)
   );
 
-/** The control of the field labelled `label`. */
-const field = (label: string) => {
+/** A label's words, without the mark a required field shows after them. */
+const words = (label: Element): string =>
+  label.textContent?.trim().replace(/\*$/u, "") ?? "";
+
+/** The control the label reading `label` names. */
+const labelled = (label: string): HTMLElement | undefined => {
   const named = [...document.querySelectorAll("label")].find(
-    (each) => each.textContent?.trim() === label
+    (each) => words(each) === label
   );
-  return [...document.querySelectorAll("input, button")].find(
-    (each) => each.id !== "" && each.id === named?.htmlFor
-  );
+  const control =
+    named === undefined
+      ? null
+      : document.querySelector<HTMLElement>(`[id="${named.htmlFor}"]`);
+  return control ?? undefined;
 };
 
 /** Chooses `option` in the select labelled `label`. */
 const choose = async (label: string, option: string): Promise<void> => {
-  await press(field(label));
+  await press(labelled(label));
   await press(
     [...document.querySelectorAll('[role="option"]')].find(
       (each) => each.textContent?.trim() === option
@@ -220,30 +227,32 @@ const choose = async (label: string, option: string): Promise<void> => {
   );
 };
 
-/** Ticks the tool `name`. */
+/** Ticks the tool `name`, or picks the choice `name`. */
 const tick = async (name: string): Promise<void> => {
-  const label = [...document.querySelectorAll("label")].find((each) =>
-    each.textContent?.startsWith(name)
-  );
-  await press(label?.querySelector('input[type="checkbox"]') ?? undefined);
+  await press(labelled(name));
 };
+
+/** The name of a box, from the label it is labelled by. */
+const nameOf = (box: Element): string =>
+  document.querySelector(`[id="${box.getAttribute("aria-labelledby") ?? ""}"]`)
+    ?.textContent ?? "";
 
 /** The tools offered to tick. */
 const offered = (): string[] =>
-  [...document.querySelectorAll("fieldset label .font-mono")].map(
-    (each) => each.textContent ?? ""
+  [...document.querySelectorAll('[role="checkbox"]')].map((each) =>
+    nameOf(each)
   );
 
-/** Each request listed: what, which actions, under which name. */
+/** Each request listed: what (its row's head), which actions, under which name. */
 const listed = (): string[][] =>
   [...document.querySelectorAll("tbody tr")].map((row) =>
-    [...row.querySelectorAll("td")]
+    [...row.querySelectorAll("th, td")]
       .slice(0, 3)
       .map((cell) => cell.textContent?.trim() ?? "")
   );
 
 const bindingOf = (): string | undefined => {
-  const box = field("Name in the App's code");
+  const box = labelled("Name in the App's code");
   return box instanceof HTMLInputElement ? box.value : undefined;
 };
 
@@ -293,7 +302,7 @@ describe("Asking for access for an App, for its builders", () => {
     await shown(session);
 
     await press(button("Ask for access"));
-    await choose("What it needs", "A collection to read");
+    await tick("A collection to read");
     await choose("Collection", "Sales handbook");
     await press(button("Ask an admin"));
 
@@ -314,7 +323,7 @@ describe("Asking for access for an App, for its builders", () => {
     await shown(session);
 
     await press(button("Ask for access"));
-    await choose("What it needs", "A collection to read");
+    await tick("A collection to read");
     await choose("Collection", "Sales handbook");
     await press(button("Ask an admin"));
 

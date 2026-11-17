@@ -1,12 +1,11 @@
 import { isAdmin } from "@grasp-os/shared/roles";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, Link, useRouteContext } from "@tanstack/react-router";
 
 import { BackButton } from "../brain/back-button.tsx";
-import { tintClass } from "../brain/brain-colors.ts";
 import { useBrainData } from "../brain/brain-data.ts";
-import { Panel, tone } from "../brain/brain-home.tsx";
+import { blockStyles, Panel, tone } from "../brain/brain-home.tsx";
 import {
   brainSections,
   findFolder,
@@ -15,27 +14,80 @@ import {
 } from "../brain/brain-sections.ts";
 import type { BrainSection } from "../brain/brain-sections.ts";
 import { folderTree, groupLabel } from "../brain/brain.ts";
-import type { Note, NoteKind } from "../brain/brain.ts";
+import type { Group, Note } from "../brain/brain.ts";
 import { GoalsEditor } from "../brain/goals-editor.tsx";
 import { AppLogo } from "../connections/app-logo.tsx";
 import { NotFoundState } from "../frame/page-states.tsx";
-import { Brain as BrainMark } from "../grasp/icons/index.ts";
+import { SectionTitle } from "../frame/page.tsx";
+import { Badge } from "../grasp/badge/index.ts";
+import { iconVars } from "../grasp/icons/icon.stylex.ts";
+import {
+  AppWindow,
+  Brain as BrainMark,
+  Company,
+  Doc,
+  Icon,
+  Note as NoteMark,
+  People,
+  Question,
+  Rocket,
+  Workflow,
+} from "../grasp/icons/index.ts";
+import type { IconData } from "../grasp/icons/index.ts";
+import { Link as TextLink } from "../grasp/link/index.ts";
+import { PageHeader } from "../grasp/page-header/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 
 // One part of the brain on its own page, as the prototype has it
 // (`routes/brain/sections.$sectionId.tsx`). On the Vision page, admins
 // also change the board's goals (goals-editor.tsx).
 
-/** The kind whose colour a part's page takes. */
-const sectionKind: Record<BrainSection["group"], NoteKind> = {
-  vision: "vision",
-  teams: "team",
-  candidates: "candidate",
-  tools: "tool",
-  gaps: "gap",
-  sources: "source",
-  company: "company",
-  statements: "statement",
+/**
+ * Each part's mark, from the library's icons. The parts in brain-sections.ts
+ * still carry Lucide's; these stand in for them here.
+ */
+const groupIcon: Record<Group, IconData> = {
+  company: Company,
+  vision: Rocket,
+  teams: People,
+  candidates: Workflow,
+  tools: AppWindow,
+  gaps: Question,
+  sources: Doc,
+  statements: NoteMark,
 };
+
+const styles = stylex.create({
+  scroll: { flex: 1, minHeight: 0, overflowY: "auto" },
+  group: { display: "flex", flexDirection: "column", gap: grasp.space3 },
+  // The part's mark on a white tile in the middle of a note's picture, in the part's colour.
+  tile: {
+    [iconVars.size]: grasp.iconMd,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: `calc(${grasp.space12} + ${grasp.space2})`,
+    height: `calc(${grasp.space12} + ${grasp.space2})`,
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    backgroundColor: grasp.raised,
+    boxShadow: grasp.liftLow,
+  },
+  words: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space1,
+    minWidth: 0,
+  },
+  // A note's sentence, two lines at most.
+  summary: {
+    display: "-webkit-box",
+    overflow: "hidden",
+    WebkitBoxOrient: "vertical",
+    WebkitLineClamp: 2,
+  },
+});
 
 /**
  * A note as a block, in the home's style: its part's pale grid with the note's logo or the part's
@@ -47,34 +99,35 @@ const NoteBlock = ({
 }: {
   note: Note;
   section: BrainSection;
-}) => {
-  const Icon = section.icon;
-  return (
-    <Link
-      className="group flex min-w-0 flex-col gap-3"
-      params={{ noteId: note.id }}
-      to="/brain/$noteId"
-    >
-      <Panel group={section.group} short>
-        {note.kind === "tool" || note.kind === "app" ? (
-          <AppLogo name={note.title} size="lg" />
-        ) : (
-          <span className="bg-card flex size-14 items-center justify-center rounded-2xl border shadow-xs">
-            <Icon className={`size-6 ${tone[section.group].ink}`} />
-          </span>
-        )}
-      </Panel>
-      <span className="flex min-w-0 flex-col gap-1">
-        <span className="truncate text-sm font-medium group-hover:underline">
+}) => (
+  <Link
+    params={{ noteId: note.id }}
+    to="/brain/$noteId"
+    {...stylex.props(blockStyles.block)}
+  >
+    <Panel group={section.group} short>
+      {note.kind === "tool" || note.kind === "app" ? (
+        <AppLogo name={note.title} size="lg" />
+      ) : (
+        <span {...stylex.props(styles.tile, tone[section.group].ink)}>
+          <Icon icon={groupIcon[section.group]} />
+        </span>
+      )}
+    </Panel>
+    <span {...stylex.props(styles.words)}>
+      <span {...stylex.props(blockStyles.name)}>
+        <Text element="span" size="sm" weight="medium" wrap="truncate">
           {note.title}
-        </span>
-        <span className="text-muted-foreground line-clamp-2 text-sm leading-relaxed">
-          {note.summary}
-        </span>
+        </Text>
       </span>
-    </Link>
-  );
-};
+      <span {...stylex.props(styles.summary)}>
+        <Text element="span" size="sm" tone="muted">
+          {note.summary}
+        </Text>
+      </span>
+    </span>
+  </Link>
+);
 
 /**
  * One part of the brain on its own page, such as Teams: what it holds, then a block for each of
@@ -98,49 +151,42 @@ const SectionPage = () => {
     );
   }
 
-  const Icon = section.icon;
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 md:px-12">
-        <header className="flex flex-col gap-2.5">
-          <div className="flex items-center gap-2">
-            <BackButton />
-            <span
-              className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium ${tintClass(sectionKind[section.group])}`}
-            >
-              <Icon className="size-3.5" />
-              {shownCount(folder)}
-            </span>
-          </div>
-          <PageHeaderTitle>{i18n._(groupLabel[section.group])}</PageHeaderTitle>
-          <p className="text-muted-foreground text-sm leading-relaxed">
-            {i18n._(section.description)}
-          </p>
-        </header>
+    <div {...stylex.props(styles.scroll)}>
+      <div {...stylex.props(blockStyles.column)}>
+        <PageHeader
+          aside={
+            <Badge icon={groupIcon[section.group]}>{shownCount(folder)}</Badge>
+          }
+          breadcrumb={<BackButton />}
+          description={i18n._(section.description)}
+          title={i18n._(groupLabel[section.group])}
+        />
         {section.group === "vision" && isAdmin(identity.role) ? (
           <GoalsEditor goals={workspace.goals} />
         ) : null}
         {noteGroups(folder).map((group) => (
-          <section className="flex flex-col gap-3" key={group.key}>
+          <section key={group.key} {...stylex.props(styles.group)}>
             {group.name === undefined ? null : (
-              <h2 className="flex items-baseline gap-2 text-sm font-medium">
+              <SectionTitle count={String(group.notes.length)}>
                 {group.page ? (
-                  <Link
-                    className="hover:underline"
-                    params={{ noteId: group.page.id }}
-                    to="/brain/$noteId"
+                  <TextLink
+                    render={
+                      <Link
+                        params={{ noteId: group.page.id }}
+                        to="/brain/$noteId"
+                      />
+                    }
+                    variant="standalone"
                   >
                     {group.name}
-                  </Link>
+                  </TextLink>
                 ) : (
                   group.name
                 )}
-                <span className="text-muted-foreground font-normal tabular-nums">
-                  {group.notes.length}
-                </span>
-              </h2>
+              </SectionTitle>
             )}
-            <div className="grid grid-cols-1 gap-x-6 gap-y-8 sm:grid-cols-2 xl:grid-cols-3">
+            <div {...stylex.props(blockStyles.blocks)}>
               {group.notes.map((note) => (
                 <NoteBlock key={note.id} note={note} section={section} />
               ))}

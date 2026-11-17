@@ -2,6 +2,7 @@ import type { FileDiff } from "@grasp-os/shared/apps";
 import { registerCustomCSSVariableTheme } from "@pierre/diffs";
 import { File, MultiFileDiff, Virtualizer } from "@pierre/diffs/react";
 import type { FileDiffOptions, FileOptions } from "@pierre/diffs/react";
+import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
 import { Code, Doc, File as FileIcon, Image } from "../grasp/icons/index.ts";
@@ -88,6 +89,11 @@ export const CodeDiff = ({ diff }: { diff: FileDiff }) => {
   );
 };
 
+const look = stylex.create({
+  // The files one under the other.
+  content: { display: "flex", flexDirection: "column" },
+});
+
 /**
  * Where code scrolls: the virtualizer draws only the lines of its files
  * in sight of it.
@@ -99,7 +105,11 @@ export const CodeScroller = ({
   className?: string;
   children: ReactNode;
 }) => (
-  <Virtualizer className={className} contentClassName="flex flex-col">
+  <Virtualizer
+    className={className}
+    // The diffs library takes a class name, not StyleX's props.
+    contentClassName={stylex.props(look.content).className}
+  >
     {children}
   </Virtualizer>
 );

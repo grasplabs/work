@@ -80,11 +80,12 @@ const styles = stylex.create({
     transitionDuration: simply.ui,
     transitionTimingFunction: grasp.ease,
   },
-  // Open, the text stands space-3 under the cards: the card's gap between its parts and the text's
-  // own top room are for a composer with no files, so the strip takes them back (they made 44px).
+  // Open, the text stands space-3 under the cards: the text's own top room is for a composer with no
+  // files, so the strip takes it back. The strip shares one of the card's rows with the text
+  // (composer.tsx, textRoom), so no gap of the card's stands between them, open or closed.
   shellOpen: {
     gridTemplateRows: "1fr",
-    marginBlockEnd: `calc(${grasp.space3} - ${grasp.space1} - ${grasp.space6} - ${grasp.space4})`,
+    marginBlockEnd: `calc(${grasp.space3} - ${grasp.space1} - ${grasp.space4})`,
     // Its foot now lies over the text's empty top room: above it, so a press on a card's lower
     // edge (or its focus ring) is the card's, not the text's.
     position: "relative",

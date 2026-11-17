@@ -19,7 +19,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { RunSheet } from "./run-detail.tsx";
+import { RunBeside } from "./run-detail.tsx";
 
 // What a reader can do with a run opened beside the page, against core's
 // workflowResources as the page reaches them over RPC, faked: a builder
@@ -82,7 +82,7 @@ const opened = async (role: WorkflowRole, files: RunFileListing[] | null) => {
     getParentRoute: () => rootRoute,
     path: "/",
     component: () => (
-      <RunSheet
+      <RunBeside
         admin={false}
         names={{ people: new Map(), me: "ada" }}
         onClose={() => {}}
@@ -114,10 +114,14 @@ const opened = async (role: WorkflowRole, files: RunFileListing[] | null) => {
   return { stopped };
 };
 
+/** A button's words, as shown: the layer a library Button shows, not the ones it keeps for its width. */
+const shownWords = (each: Element): string =>
+  (each.querySelector("[data-shown]") ?? each).textContent.trim();
+
 /** The button whose text is `text`. */
 const button = (text: string): HTMLButtonElement | undefined =>
   [...document.querySelectorAll("button")].find(
-    (each) => each.textContent.trim() === text
+    (each) => shownWords(each) === text
   );
 
 /** Presses the button whose text is `text`, and lets what it does settle. */

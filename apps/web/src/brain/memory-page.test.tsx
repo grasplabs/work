@@ -187,6 +187,25 @@ const press = async (label: string): Promise<void> => {
   await settle();
 };
 
+/** Presses the button in the open dialog of `role` whose text starts with `label`. */
+const pressIn = async (
+  role: "dialog" | "alertdialog",
+  label: string
+): Promise<void> => {
+  const button = [
+    ...(document.querySelector(`[role=${role}]`)?.querySelectorAll("button") ??
+      []),
+  ].find((each) => each.textContent.startsWith(label));
+  if (!button) {
+    throw new TypeError(`No button ${label} in the ${role}`);
+  }
+  await act(async () => {
+    button.click();
+    await Promise.resolve();
+  });
+  await settle();
+};
+
 /** Replaces the correction box's text with `text`. */
 const write = async (text: string): Promise<void> => {
   const box = document.querySelector("textarea");
@@ -221,8 +240,9 @@ describe(MemoryPage, () => {
     await settle();
     await press(own.statement);
     const lineage = document.body.textContent;
+    await press("Correct it");
     await write("Floor 4 is quiet.");
-    await press("Save the correction");
+    await pressIn("dialog", "Save the correction");
 
     expect({
       restsOn: lineage.includes("Office guide"),
@@ -256,6 +276,7 @@ describe(MemoryPage, () => {
     await press("Shared with you");
     await press(shared.statement);
     await press("Retire it");
+    await pressIn("alertdialog", "Retire");
     const afterRetire = buttons();
 
     expect({
@@ -294,14 +315,7 @@ describe(MemoryPage, () => {
       radio?.click();
       await Promise.resolve();
     });
-    const submit = dialog?.querySelector<HTMLButtonElement>(
-      "button[type=submit]"
-    );
-    await act(async () => {
-      submit?.click();
-      await Promise.resolve();
-    });
-    await settle();
+    await pressIn("dialog", "Share it");
 
     expect(
       calls.filter(
@@ -319,8 +333,9 @@ describe(MemoryPage, () => {
     const { calls } = await shown(false, refusal);
     await settle();
     await press(own.statement);
+    await press("Correct it");
     await write("Floor 5.");
-    await press("Save the correction");
+    await pressIn("dialog", "Save the correction");
 
     expect({
       said: document.body.textContent.includes(refusal),

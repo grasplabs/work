@@ -1,19 +1,19 @@
+import { useLingui } from "@lingui/react/macro";
+
 import {
   AlertDialog,
   AlertDialogAction,
-  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Trans } from "@lingui/react/macro";
+} from "../grasp/alert-dialog/index.ts";
 
 /**
  * Asks whether to leave a page whose forms hold unsaved edits, or a
  * change whose outcome isn't known yet: once per leave, in Grasp's own
- * dialog, which the page can't draw over or answer.
+ * dialog, which the page can't draw over or answer. Leaving loses what
+ * isn't saved, so it is the danger answer; Stay is the safe one.
  */
 export const LeaveConfirmDialog = ({
   open,
@@ -23,36 +23,33 @@ export const LeaveConfirmDialog = ({
   open: boolean;
   onLeave: () => void;
   onStay: () => void;
-}) => (
-  <AlertDialog
-    onOpenChange={(next) => {
-      if (!next) {
-        onStay();
-      }
-    }}
-    open={open}
-  >
-    <AlertDialogContent>
-      <AlertDialogHeader>
-        <AlertDialogTitle>
-          <Trans>Leave this page?</Trans>
-        </AlertDialogTitle>
+}) => {
+  const { t } = useLingui();
+  return (
+    <AlertDialog
+      onOpenChange={(next) => {
+        if (!next) {
+          onStay();
+        }
+      }}
+      open={open}
+    >
+      <AlertDialogContent>
+        <AlertDialogTitle>{t`Leave this page?`}</AlertDialogTitle>
         <AlertDialogDescription>
-          <Trans>
-            It has changes that aren&apos;t saved, or a change it hasn&apos;t
-            heard back about. Leaving loses unsaved changes; anything already
-            saved or running stays.
-          </Trans>
+          {t`It has changes that aren't saved, or a change it hasn't heard back about. Leaving loses unsaved changes; anything already saved or running stays.`}
         </AlertDialogDescription>
-      </AlertDialogHeader>
-      <AlertDialogFooter>
-        <AlertDialogCancel>
-          <Trans>Stay</Trans>
-        </AlertDialogCancel>
-        <AlertDialogAction onClick={onLeave}>
-          <Trans>Leave</Trans>
-        </AlertDialogAction>
-      </AlertDialogFooter>
-    </AlertDialogContent>
-  </AlertDialog>
-);
+        <AlertDialogFooter>
+          <AlertDialogAction>{t`Stay`}</AlertDialogAction>
+          <AlertDialogAction
+            action={onLeave}
+            failedLabel={t`Could not finish`}
+            variant="danger"
+          >
+            {t`Leave`}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+};

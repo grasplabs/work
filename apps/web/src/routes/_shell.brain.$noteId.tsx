@@ -1,25 +1,13 @@
 import type { Source, Statement, Workspace } from "@grasp-os/shared/brain";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@grasp-os/ui/components/collapsible";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@grasp-os/ui/components/tabs";
 import { plural } from "@lingui/core/macro";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import {
   createFileRoute,
   Link,
   useLocation,
   useNavigate,
 } from "@tanstack/react-router";
-import { BrainIcon, ChevronRightIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
@@ -32,8 +20,7 @@ import { NoteArticle } from "../brain/brain-article/note-article.tsx";
 import type { SideTab } from "../brain/brain-article/note-article.tsx";
 import { StatementsByKind } from "../brain/brain-article/statements-by-kind.tsx";
 import { TeamWork } from "../brain/brain-article/team-work.tsx";
-import { Capped, NoteChip } from "../brain/brain-chips.tsx";
-import { dotClass, tintClass } from "../brain/brain-colors.ts";
+import { Capped, KindTag, NoteChip } from "../brain/brain-chips.tsx";
 import { useBrainData } from "../brain/brain-data.ts";
 import { HomePage } from "../brain/brain-home.tsx";
 import { noteFileName, noteMarkdown } from "../brain/brain-markdown.ts";
@@ -46,7 +33,6 @@ import {
 import type { TranscribedSource } from "../brain/brain-transcript.tsx";
 import {
   given,
-  kindLabel,
   mentionParts,
   statementWords,
   sourceContents,
@@ -63,7 +49,18 @@ import { AppLogo } from "../connections/app-logo.tsx";
 import { ExportMenu } from "../export/export-menu.tsx";
 import { formatDay, formatMonth } from "../format.ts";
 import { NotFoundState } from "../frame/page-states.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { Collapsible } from "../grasp/collapsible/index.ts";
+import { focus } from "../grasp/focus/focus.ts";
+import { Heading } from "../grasp/heading/index.ts";
 import { Brain as BrainMark } from "../grasp/icons/index.ts";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../grasp/tabs/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 
 // One note, as the prototype has it (`routes/brain/$noteId.tsx`). Where the
@@ -72,13 +69,146 @@ import { NotLoaded } from "../load-from-core.tsx";
 // plain words, and a note's domains are left out, as core gives the brain
 // none (brain-rpc.ts).
 
+const styles = stylex.create({
+  plain: {
+    minWidth: 0,
+    paddingBlock: 2,
+    overflowWrap: "break-word",
+  },
+  article: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space3,
+    paddingTop: grasp.space6,
+    borderTopWidth: grasp.hairline,
+    borderTopStyle: "solid",
+    borderTopColor: grasp.line,
+    fontSize: grasp.textSm,
+    lineHeight: 1.75,
+    color: grasp.text,
+  },
+  paragraph: { margin: 0 },
+  sourceTabs: {
+    paddingTop: grasp.space4,
+    borderTopWidth: grasp.hairline,
+    borderTopStyle: "solid",
+    borderTopColor: grasp.line,
+  },
+  tabRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    columnGap: grasp.space4,
+    rowGap: grasp.space2,
+  },
+  tabRowTabs: { minWidth: 0 },
+  tabRowTools: { marginInlineStart: "auto" },
+  eventTitle: {
+    color: "inherit",
+    textDecorationLine: { default: "none", ":hover": "underline" },
+  },
+  // A moment on the timeline: its day, then a line down the side and what happened.
+  event: {
+    display: "grid",
+    gridTemplateColumns: `calc(1.375 * ${grasp.space16}) minmax(0, 1fr)`,
+    gap: grasp.space3,
+  },
+  day: {
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textSmLine,
+    color: grasp.muted,
+  },
+  happened: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    paddingBottom: grasp.space3,
+    paddingInlineStart: grasp.space3,
+    borderInlineStartWidth: 2,
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: grasp.line,
+  },
+  // A moment the note itself was part of.
+  ownEvent: { borderInlineStartColor: grasp.ink },
+  // What has not happened yet: a dashed line.
+  openEvent: {
+    borderInlineStartStyle: "dashed",
+    color: grasp.muted,
+  },
+  eventDetail: {
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+    color: grasp.muted,
+  },
+  timeline: {
+    display: "flex",
+    flexDirection: "column",
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    color: grasp.text,
+  },
+  month: {
+    display: "flex",
+    flexDirection: "column",
+  },
+  monthName: {
+    margin: 0,
+    paddingBottom: grasp.space2,
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+    color: grasp.muted,
+  },
+  earlier: { paddingBottom: grasp.space2 },
+  count: {
+    marginInlineStart: grasp.space2,
+    color: grasp.muted,
+  },
+  details: {
+    display: "flex",
+    flexDirection: "column",
+  },
+  detail: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+    paddingBlock: grasp.space4,
+    borderTopWidth: grasp.hairline,
+    borderTopStyle: "solid",
+    borderTopColor: grasp.line,
+    ":first-child": { paddingTop: 0, borderTopWidth: 0 },
+  },
+  toolbar: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    columnGap: grasp.space4,
+    rowGap: grasp.space2,
+  },
+  toolbarSide: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: grasp.space2,
+  },
+  workTabs: {
+    boxSizing: "border-box",
+    width: "100%",
+    maxWidth: `calc(16 * ${grasp.space16})`,
+    marginInline: "auto",
+    paddingInline: grasp.space6,
+    paddingTop: grasp.space4,
+  },
+  knowledge: { paddingInline: grasp.space6 },
+});
+
 /** A name in a property: a chip for a note, or plain words. */
 const Ref = ({ value, byId }: { value: NoteRef; byId: Map<string, Note> }) => {
   const target = value.to === undefined ? undefined : byId.get(value.to);
   if (target) {
     return <NoteChip label={value.label} note={target} />;
   }
-  return <span className="min-w-0 py-0.5 wrap-break-word">{value.label}</span>;
+  return <span {...stylex.props(styles.plain)}>{value.label}</span>;
 };
 
 /** Text with the notes it names as chips, each the first time it is named. */
@@ -120,9 +250,9 @@ const Article = ({
     return null;
   }
   return (
-    <section className="flex flex-col gap-3 border-t pt-6 text-sm leading-7">
+    <section {...stylex.props(styles.article)}>
       {paragraphs.map((paragraph) => (
-        <p key={paragraph}>
+        <p key={paragraph} {...stylex.props(styles.paragraph)}>
           <Mentioned byId={byId} nameable={nameable} text={paragraph} />
         </p>
       ))}
@@ -147,6 +277,7 @@ const SourceTabs = ({
   onRemove: ((statement: Statement) => void) | undefined;
   children: ReactNode;
 }) => {
+  const { t } = useLingui();
   const [tab, setTab] = useState("transcript");
   const [opened, setOpened] = useState(activeId);
   // The transcript's search and filter sit in the tab row, beside the tabs.
@@ -159,30 +290,36 @@ const SourceTabs = ({
     }
   }
   return (
-    <div className="border-t pt-4">
+    <div {...stylex.props(styles.sourceTabs)}>
       <Tabs
-        onValueChange={(value: string) => {
-          setTab(value);
+        onValueChange={(value) => {
+          if (value !== null) {
+            setTab(value);
+          }
         }}
         value={tab}
       >
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <TabsList variant="line">
-            <TabsTrigger value="summary">
-              <Trans context="tab: an interview written up short">
-                Summary
-              </Trans>
-            </TabsTrigger>
-            <TabsTrigger value="transcript">
-              <Trans context="tab: the whole conversation word for word">
-                Transcript
-              </Trans>
-            </TabsTrigger>
-          </TabsList>
-          <div className="ml-auto" ref={setToolbar} />
+        <div {...stylex.props(styles.tabRow)}>
+          <div {...stylex.props(styles.tabRowTabs)}>
+            <TabsList>
+              <TabsTrigger value="summary">
+                {t({
+                  message: "Summary",
+                  context: "tab: an interview written up short",
+                })}
+              </TabsTrigger>
+              <TabsTrigger value="transcript">
+                {t({
+                  message: "Transcript",
+                  context: "tab: the whole conversation word for word",
+                })}
+              </TabsTrigger>
+            </TabsList>
+          </div>
+          <div ref={setToolbar} {...stylex.props(styles.tabRowTools)} />
         </div>
         <TabsContent value="summary">{children}</TabsContent>
-        <TabsContent value="transcript">
+        <TabsContent keepMounted value="transcript">
           {/* The transcript stays mounted behind the summary, so its tools only take the row while it shows. */}
           <TranscriptView
             activeId={activeId}
@@ -201,15 +338,15 @@ const EventTitle = ({ entry }: { entry: NoteEvent }) => {
   if (entry.to !== undefined) {
     return (
       <Link
-        className="leading-snug hover:underline"
         params={{ noteId: entry.to }}
         to="/brain/$noteId"
+        {...stylex.props(styles.eventTitle, focus.words)}
       >
         {entry.title}
       </Link>
     );
   }
-  return <span className="leading-snug">{entry.title}</span>;
+  return <span>{entry.title}</span>;
 };
 
 const TimelineEvent = ({ entry }: { entry: NoteEvent }) => {
@@ -217,16 +354,12 @@ const TimelineEvent = ({ entry }: { entry: NoteEvent }) => {
   const own = entry.own || entry.quotes.some((quote) => quote.own);
   const statements = entry.quotes.length;
   return (
-    <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3">
-      <span className="text-muted-foreground text-xs leading-5">
-        {formatDay(entry.date)}
-      </span>
-      <div
-        className={`flex flex-col gap-0.5 border-l-2 pb-3 pl-3 ${own ? "border-foreground" : "border-border"}`}
-      >
+    <div {...stylex.props(styles.event)}>
+      <span {...stylex.props(styles.day)}>{formatDay(entry.date)}</span>
+      <div {...stylex.props(styles.happened, own && styles.ownEvent)}>
         <EventTitle entry={entry} />
         {given(entry.detail) || statements > 0 ? (
-          <span className="text-muted-foreground text-xs">
+          <span {...stylex.props(styles.eventDetail)}>
             {[
               statements > 0
                 ? t`${plural(statements, { one: "# statement", other: "# statements" })}`
@@ -248,27 +381,23 @@ const TimelineEvent = ({ entry }: { entry: NoteEvent }) => {
  * the events before its latest by month.
  */
 const Timeline = ({ note }: { note: Note }) => {
+  const { t } = useLingui();
   const { earlier, recent } = splitTimeline(note.timeline);
   const folded = earlier.reduce((sum, month) => sum + month.events.length, 0);
   return (
-    <div className="flex flex-col text-sm">
+    <div {...stylex.props(styles.timeline)}>
       {earlier.length > 0 ? (
-        <Collapsible>
-          <CollapsibleTrigger
-            render={<Button className="mb-2 -ml-2" size="xs" variant="ghost" />}
+        <div {...stylex.props(styles.earlier)}>
+          <Collapsible
+            fit
+            title={t({
+              message: plural(folded, { one: "# earlier", other: "# earlier" }),
+              comment: "Earlier events on a timeline, folded away",
+            })}
           >
-            <ChevronRightIcon className="transition-transform group-aria-expanded/button:rotate-90" />
-            <Plural
-              comment="Earlier events on a timeline, folded away"
-              one="# earlier"
-              other="# earlier"
-              value={folded}
-            />
-          </CollapsibleTrigger>
-          <CollapsibleContent>
             {earlier.map((month) => (
-              <div className="flex flex-col" key={month.month}>
-                <p className="text-muted-foreground pb-2 text-xs">
+              <div key={month.month} {...stylex.props(styles.month)}>
+                <p {...stylex.props(styles.monthName)}>
                   {formatMonth(month.month)}
                 </p>
                 {month.events.map((entry, index) => (
@@ -276,21 +405,20 @@ const Timeline = ({ note }: { note: Note }) => {
                 ))}
               </div>
             ))}
-          </CollapsibleContent>
-        </Collapsible>
+          </Collapsible>
+        </div>
       ) : null}
       {recent.map((entry, index) => (
         <TimelineEvent entry={entry} key={`${entry.date}-${index}`} />
       ))}
       {note.open.map((item) => (
-        <div
-          className="text-muted-foreground grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3"
-          key={item}
-        >
-          <span className="text-xs leading-5">
-            <Trans context="on a timeline: not happened yet">Open</Trans>
+        <div key={item} {...stylex.props(styles.event)}>
+          <span {...stylex.props(styles.day)}>
+            {t({ message: "Open", context: "on a timeline: not happened yet" })}
           </span>
-          <span className="border-l-2 border-dashed pb-3 pl-3">{item}</span>
+          <span {...stylex.props(styles.happened, styles.openEvent)}>
+            {item}
+          </span>
         </div>
       ))}
     </div>
@@ -307,15 +435,16 @@ const Fold = ({
   count: number;
   children: ReactNode;
 }) => (
-  <Collapsible>
-    <CollapsibleTrigger
-      render={<Button className="-ml-2.5" size="sm" variant="ghost" />}
-    >
-      <ChevronRightIcon className="text-muted-foreground transition-transform group-aria-expanded/button:rotate-90" />
-      {title}
-      <span className="text-muted-foreground">{count}</span>
-    </CollapsibleTrigger>
-    <CollapsibleContent>{children}</CollapsibleContent>
+  <Collapsible
+    fit
+    title={
+      <>
+        {title}
+        <span {...stylex.props(styles.count)}>{count}</span>
+      </>
+    }
+  >
+    {children}
   </Collapsible>
 );
 
@@ -515,13 +644,12 @@ const DetailRows = ({
     rows.filter((row) => row.group === group)
   );
   return (
-    <div className="flex flex-col divide-y text-sm">
+    <div {...stylex.props(styles.details)}>
       {sorted.map((row) => (
-        <section
-          className="flex flex-col gap-1.5 py-3.5 first:pt-0"
-          key={row.label}
-        >
-          <h3 className="font-medium">{row.label}</h3>
+        <section key={row.label} {...stylex.props(styles.detail)}>
+          <Heading level={3} size="ui-sm">
+            {row.label}
+          </Heading>
           <Capped>
             {row.refs.map((ref, at) => {
               const target =
@@ -579,24 +707,19 @@ const NoteToolbar = ({
   /** Takes the source out of the brain, for whoever may. */
   onForget?: (() => void) | undefined;
 }) => {
-  const { t, i18n } = useLingui();
+  const { t } = useLingui();
   const { title } = note;
   return (
     // The row wraps when there is no room for both sides, so nothing runs off the page.
-    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-      <div className="flex items-center gap-2">
+    <div {...stylex.props(styles.toolbar)}>
+      <div {...stylex.props(styles.toolbarSide)}>
         <BackButton />
-        <span
-          className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium ${tintClass(note.kind)}`}
-        >
-          <span className={`size-1.5 rounded-full ${dotClass(note.kind)}`} />
-          {i18n._(kindLabel[note.kind])}
-        </span>
+        <KindTag kind={note.kind} />
       </div>
-      <div className="flex items-center gap-1.5">
+      <div {...stylex.props(styles.toolbarSide)}>
         {/* Back to where this note sits in the brain; the company is the whole brain. */}
         <Button
-          nativeButton={false}
+          icon={BrainMark}
           render={
             <Link
               search={note.kind === "company" ? {} : { note: note.id }}
@@ -604,10 +727,8 @@ const NoteToolbar = ({
             />
           }
           size="sm"
-          variant="outline"
         >
-          <BrainIcon />
-          <Trans>Show in the brain</Trans>
+          {t`Show in the brain`}
         </Button>
         {note.kind === "gap" ? <GapActions noteId={note.id} /> : null}
         <ExportButton note={note} source={source} />
@@ -888,11 +1009,12 @@ const NoteContent = ({
  * does).
  */
 const WorkTabs = ({ note, children }: { note: Note; children: ReactNode }) => {
+  const { t } = useLingui();
   const { knowledge } = Route.useSearch();
   const navigate = useNavigate({ from: "/brain/$noteId" });
   return (
     <Tabs
-      onValueChange={(value: string) => {
+      onValueChange={(value) => {
         void navigate({
           search: value === "knowledge" ? { knowledge: true } : {},
           hash: (previous) => previous ?? "",
@@ -900,23 +1022,25 @@ const WorkTabs = ({ note, children }: { note: Note; children: ReactNode }) => {
       }}
       value={knowledge === true ? "knowledge" : "note"}
     >
-      <div className="mx-auto w-full max-w-5xl px-6 pt-4">
-        <TabsList variant="line">
+      <div {...stylex.props(styles.workTabs)}>
+        <TabsList>
           <TabsTrigger value="note">
-            <Trans context="tab: a piece of work's note in the brain">
-              Note
-            </Trans>
+            {t({
+              message: "Note",
+              context: "tab: a piece of work's note in the brain",
+            })}
           </TabsTrigger>
           <TabsTrigger value="knowledge">
-            <Trans context="tab: what Grasp knows about a piece of work">
-              Knowledge
-            </Trans>
+            {t({
+              message: "Knowledge",
+              context: "tab: what Grasp knows about a piece of work",
+            })}
           </TabsTrigger>
         </TabsList>
       </div>
       <TabsContent value="note">{children}</TabsContent>
       <TabsContent value="knowledge">
-        <div className="px-6">
+        <div {...stylex.props(styles.knowledge)}>
           <WorkKnowledgeTab work={note.id} />
         </div>
       </TabsContent>

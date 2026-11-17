@@ -1,32 +1,37 @@
 import type { AppIntegration } from "@grasp-os/shared/apps";
 import { catalogEntryRefSchema } from "@grasp-os/shared/connect";
 import type { CatalogEntryRef, OfferedCatalog } from "@grasp-os/shared/connect";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { msg } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useRouter } from "@tanstack/react-router";
+import { useState } from "react";
+
+import { changeThenRefresh } from "../change-then-refresh.ts";
+import { integrationKey } from "../connections/integrations.ts";
+import { ProviderMark } from "../connections/provider-mark.tsx";
+import type { Session } from "../core.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Command } from "../grasp/command/index.ts";
+import { Cross, Plus } from "../grasp/icons/index.ts";
 import {
-  Command,
-  CommandEmpty,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@grasp-os/ui/components/command";
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
-import { msg } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { useRouter } from "@tanstack/react-router";
-import { PlusIcon, XIcon } from "lucide-react";
-import { useState } from "react";
-
-import { changeThenRefresh } from "../change-then-refresh.ts";
-import { AppLogo } from "../connections/app-logo.tsx";
-import { integrationKey } from "../connections/integrations.ts";
-import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
-import { SettingsBody, SettingsSection } from "../settings/settings-parts.tsx";
+} from "../grasp/popover/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // An App's integrations, on its settings page (grasplabs/prototype
@@ -75,45 +80,41 @@ const AddPicker = ({
 }) => {
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
+  const byKey = new Map(
+    entries.map((entry) => [integrationKey(entry.source, entry.id), entry])
+  );
   return (
     <Popover onOpenChange={setOpen} open={open}>
-      <PopoverTrigger
-        disabled={disabled}
-        render={<Button size="sm" variant="outline" />}
-      >
-        <PlusIcon data-icon="inline-start" />
-        <Trans>Add an integration</Trans>
+      <PopoverTrigger disabled={disabled} icon={Plus} size="sm">
+        {t`Add an integration`}
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-72" variant="flush">
+      <PopoverContent align="end">
         <Command
-          filter={(value: string, search: string) =>
-            value.toLowerCase().includes(search.trim().toLowerCase()) ? 1 : 0
-          }
-        >
-          <CommandInput placeholder={t`Search integrations`} />
-          <CommandList>
-            <CommandEmpty>
-              <Trans>No integrations match your search.</Trans>
-            </CommandEmpty>
-            {entries.map((entry) => (
-              <CommandItem
-                key={integrationKey(entry.source, entry.id)}
-                onSelect={() => {
-                  setOpen(false);
-                  onAdd(entry);
-                }}
-                value={`${entry.name} ${entry.categories.join(" ")}`}
-              >
-                <AppLogo logo={entry.logo} name={entry.name} size="xs" />
-                <span className="flex-1 truncate">{entry.name}</span>
-              </CommandItem>
-            ))}
-          </CommandList>
-        </Command>
+          aria-label={t`Search integrations`}
+          bare
+          empty={t`No integrations match your search.`}
+          items={entries.map((entry) => ({
+            value: integrationKey(entry.source, entry.id),
+            label: entry.name,
+            keywords: [...entry.categories],
+          }))}
+          onAction={(value) => {
+            const entry = byKey.get(value);
+            setOpen(false);
+            if (entry !== undefined) {
+              onAdd(entry);
+            }
+          }}
+          placeholder={t`Search integrations`}
+        />
       </PopoverContent>
     </Popover>
   );
 };
+
+const styles = stylex.create({
+  body: { display: "flex", flexDirection: "column", gap: grasp.space3 },
+});
 
 /**
  * The App's integrations, and, for its builders, adding one by hand and
@@ -174,8 +175,8 @@ export const AppIntegrations = ({
   };
   const appName = app.name;
   return (
-    <SettingsSection
-      action={
+    <SectionCard
+      actions={
         builds ? (
           <AddPicker
             disabled={busy || catalog === null}
@@ -188,66 +189,65 @@ export const AppIntegrations = ({
           />
         ) : undefined
       }
-      description={t`Where the App’s data comes from. Those its code asks for are here by themselves; add any other it needs. Adding one connects nothing.`}
+      density="compact"
+      headingLevel={3}
+      info={t`Where the App’s data comes from. Those its code asks for are here by themselves; add any other it needs. Adding one connects nothing.`}
       title={t`Integrations`}
     >
-      <SettingsBody>
+      <div {...stylex.props(styles.body)}>
         {lines.length === 0 ? (
-          <p className="text-muted-foreground">
-            <Trans>No integrations yet.</Trans>
-          </p>
+          <Text size="sm" tone="muted">
+            {t`No integrations yet.`}
+          </Text>
         ) : (
-          <ul className="flex flex-col divide-y">
+          <ItemGroup aria-label={t`Integrations`} separated>
             {lines.map((line) => {
               const integrationName = line.name;
               const addedOnly =
                 line.why.length === 1 && line.why[0] === "added";
               return (
-                <li
-                  className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 first:pt-0 last:pb-0"
-                  key={line.key}
-                >
-                  <AppLogo logo={line.logo} name={line.name} size="xs" />
-                  <span className="min-w-0 flex-1 basis-40 truncate font-medium">
-                    {integrationName}
-                  </span>
-                  <span className="flex flex-wrap gap-1">
+                <Item key={line.key} size="xs">
+                  <ItemMedia>
+                    <ProviderMark
+                      id={line.ref.id}
+                      logo={line.logo}
+                      name={line.name}
+                    />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>{integrationName}</ItemTitle>
+                  </ItemContent>
+                  <ItemActions>
                     {line.why.map((why) => (
-                      <Badge key={why} variant="outline">
-                        {i18n._(whyNames[why])}
-                      </Badge>
+                      <Badge key={why}>{i18n._(whyNames[why])}</Badge>
                     ))}
-                  </span>
-                  {builds && addedOnly ? (
-                    <Button
-                      aria-label={t`Take ${integrationName} off ${appName}`}
-                      disabled={busy}
-                      onClick={() => {
-                        change(async (api) => {
-                          await api.remove(app.id, line.ref);
-                        });
-                      }}
-                      size="icon-xs"
-                      variant="ghost"
-                    >
-                      <XIcon />
-                    </Button>
-                  ) : null}
-                </li>
+                    {builds && addedOnly ? (
+                      <Button
+                        aria-label={t`Take ${integrationName} off ${appName}`}
+                        disabled={busy}
+                        icon={Cross}
+                        onClick={() => {
+                          change(async (api) => {
+                            await api.remove(app.id, line.ref);
+                          });
+                        }}
+                        size="xs"
+                        variant="ghost"
+                      />
+                    ) : null}
+                  </ItemActions>
+                </Item>
               );
             })}
-          </ul>
+          </ItemGroup>
         )}
         {builds && catalog === null ? (
-          <p className="text-muted-foreground">
-            <Trans>
-              The catalog can’t be read right now, so nothing can be added. Try
-              again in a moment.
-            </Trans>
-          </p>
+          <Text size="sm" tone="muted">
+            {t`The catalog can’t be read right now, so nothing can be added. Try again in a moment.`}
+          </Text>
         ) : null}
-        <ErrorText>{failure}</ErrorText>
-      </SettingsBody>
-    </SettingsSection>
+        {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
+      </div>
+    </SectionCard>
   );
 };

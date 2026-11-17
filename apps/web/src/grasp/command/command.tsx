@@ -83,9 +83,10 @@ export interface CommandEntry {
   failedLabel?: string;
   /**
    * A second line under the words, quiet and smaller: where a search result comes from, or what it
-   * is ("Project · edited Tuesday"). Typing does not match it; give `keywords` for that.
+   * is ("Project · edited Tuesday"), or where a hit was, with the matched words marked
+   * (`<CommandMatch>`). One line, cut with an ellipsis. Typing does not match it; give `keywords`.
    */
-  description?: string;
+  description?: ReactNode;
   /**
    * What stands at the command's end, before its shortcut: a Badge, an Avatar, a count. Words in it
    * are the caller's, so they can be translated. Gives way to the spinner and the failure.
@@ -97,6 +98,11 @@ export interface CommandEntry {
    * them from the keys. Enter still runs the command itself.
    */
   actions?: CommandRowAction[];
+  /**
+   * The one open now, as Item's `current` (the chat on the page, in a list of chats): the selected
+   * fill and its words at the medium weight while another is highlighted, and said as current.
+   */
+  current?: boolean;
 }
 
 /** One of a command's further actions, in its More menu. */
@@ -332,6 +338,23 @@ const styles = stylex.create({
   failed: {
     color: grasp.danger,
   },
+  // The open one (`current`): Item's selected fill while another is highlighted, its words heavier;
+  // a border in forced colours, where fills drop.
+  current: {
+    backgroundColor: grasp.ghostFillPress,
+    fontWeight: grasp.weightMedium,
+    outlineStyle: { default: "none", [FORCED]: "solid" },
+    outlineWidth: { default: null, [FORCED]: grasp.hairline },
+    outlineOffset: { default: null, [FORCED]: `calc(-1 * ${grasp.hairline})` },
+  },
+  currentHighlighted: { fontWeight: grasp.weightMedium },
+  // The words a search matched, in a result's second line: in ink at the medium weight, no fill, so
+  // the line stays calm (in forced colours, the system's mark).
+  match: {
+    backgroundColor: { default: "transparent", [FORCED]: "Mark" },
+    color: { default: grasp.ink, [FORCED]: "MarkText" },
+    fontWeight: grasp.weightMedium,
+  },
   // A command's words and its second line, stacked; the second line quiet and a size down.
   stack: {
     display: "grid",
@@ -370,9 +393,23 @@ const styles = stylex.create({
       [stylex.when.ancestor(":hover", commandRow)]: "visible",
       [COARSE]: "visible",
     },
+    // Hidden by opacity and pointer events too: the Button inside draws its words' layer with
+    // visibility: visible, which a parent's hidden does not reach, so More showed on every row.
+    opacity: {
+      default: 0,
+      [stylex.when.ancestor(":hover", commandRow)]: 1,
+      [COARSE]: 1,
+    },
+    pointerEvents: {
+      default: "none",
+      [stylex.when.ancestor(":hover", commandRow)]: "auto",
+      [COARSE]: "auto",
+    },
   },
   moreShown: {
     visibility: "visible",
+    opacity: 1,
+    pointerEvents: "auto",
   },
   // The row's own end steps aside while More stands over it.
   endAside: {
@@ -525,6 +562,7 @@ const Entry = ({
   return (
     <CommandItem
       data-command-value={entry.value}
+      aria-current={entry.current === true ? "true" : undefined}
       aria-describedby={withActions ? rows.hintId : undefined}
       value={entry.value}
       label={entry.label}
@@ -534,6 +572,10 @@ const Entry = ({
       className={(state: CommandItemState) =>
         className(
           listStyles.item,
+          entry.current === true && !state.highlighted && styles.current,
+          entry.current === true &&
+            state.highlighted &&
+            styles.currentHighlighted,
           state.highlighted && listStyles.itemHighlighted,
           state.disabled && !state.pending && listStyles.itemDisabled,
           state.pending && styles.pending,
@@ -928,3 +970,8 @@ export const CommandView = ({
 
 /** A search field over a list of actions, on a surface of its own, or bare inside one. */
 export const Command = (props: CommandProps) => <CommandView {...props} />;
+
+/** The words a search matched, marked in a result's second line: `<CommandMatch>invoice</CommandMatch>`. */
+export const CommandMatch = ({ children }: { children: ReactNode }) => (
+  <mark {...stylex.props(styles.match)}>{children}</mark>
+);

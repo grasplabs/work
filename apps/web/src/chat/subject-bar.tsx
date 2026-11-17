@@ -1,5 +1,10 @@
 import type { ChatSubjectKind } from "@grasp-os/shared/chat";
-import { Button } from "@grasp-os/ui/components/button";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import { Link, useNavigate } from "@tanstack/react-router";
+import type { ComponentProps } from "react";
+
+import { ComposerSurface } from "../grasp/composer/index.ts";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -7,18 +12,14 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
-import { Shimmer } from "@grasp-os/ui/components/shimmer";
-import { plural } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
-import type { ComponentProps } from "react";
-
+} from "../grasp/dropdown-menu/index.ts";
+import { AppWindow, Workflow } from "../grasp/icons/index.ts";
+import type { IconData } from "../grasp/icons/index.ts";
+import { Shimmer } from "../grasp/shimmer/index.ts";
 import type { NamedWork } from "./builds.tsx";
-import { useMentionKinds } from "./mentions.tsx";
 
-// What the chat is about and what it worked on, on the bar above its box
-// (`PromptInputSubjectBar`): one line, so the box stays as it is. On a
+// What the chat is about and what it worked on, on the band above its box
+// (Grasp UI's ComposerSurface): one line, so the box stays as it is. On a
 // page about one thing (chat-subject.ts), that thing; elsewhere the App
 // the chat changed last, a way into its workspace, which carries this
 // chat on beside the App (`?chat=`). Anything else it worked on waits
@@ -80,10 +81,66 @@ const WorkedLink = ({
   />
 );
 
+/** Each kind's mark on the band. */
+const kindIcons: Record<ChatSubjectKind, IconData> = {
+  app: AppWindow,
+  workflow: Workflow,
+};
+
+/** What else the chat worked on, behind "+N": each opens where it is built. */
+const AlsoWorkedOn = ({
+  others,
+  chatId,
+  building,
+}: {
+  others: readonly Worked[];
+  chatId: string | undefined;
+  building: (worked: Worked) => boolean;
+}) => {
+  const { t } = useLingui();
+  const navigate = useNavigate();
+  const count = others.length;
+  const buildingName = (name: string): string => t`${name}, building`;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label={t`${plural(count, {
+          one: "# more App this chat worked on",
+          other: "# more Apps this chat worked on",
+        })}`}
+        size="xs"
+        variant="ghost"
+      >
+        {`+${String(count)}`}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>{t`Also worked on`}</DropdownMenuLabel>
+          {others.map((worked) => (
+            <DropdownMenuItem
+              icon={kindIcons[worked.kind]}
+              key={`${worked.kind}:${worked.id}`}
+              onClick={() => {
+                void navigate({
+                  params: { app: worked.id },
+                  search: chatId === undefined ? {} : { chat: chatId },
+                  to: "/apps/$app",
+                });
+              }}
+            >
+              {building(worked) ? buildingName(worked.name) : worked.name}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
+
 /**
- * The bar's line: `subject`, the page's, or else the latest of `work`,
- * and the rest behind "+N"; each building where the running turn, begun
- * at `since`, wrote its draft.
+ * The band's line: `subject`, the page's, or else the latest of `work`,
+ * with the rest behind "+N"; building where the running turn, begun at
+ * `since`, wrote its draft.
  */
 export const SubjectBarContent = ({
   subject,
@@ -98,7 +155,6 @@ export const SubjectBarContent = ({
   since: string | undefined;
 }) => {
   const { t } = useLingui();
-  const kinds = useMentionKinds();
   const shown = subjectBarOf(subject, work);
   if (shown === undefined) {
     return null;
@@ -115,10 +171,15 @@ export const SubjectBarContent = ({
   );
   const building = (worked: Worked): boolean =>
     worked.kind === "app" && written.has(worked.id);
-  const count = others.length;
   return (
-    <>
-      {kinds[lead.kind].icon}
+    <ComposerSurface
+      action={
+        others.length === 0 ? undefined : (
+          <AlsoWorkedOn building={building} chatId={chatId} others={others} />
+        )
+      }
+      icon={kindIcons[lead.kind]}
+    >
       {subject === undefined ? (
         <WorkedLink chatId={chatId} worked={lead}>
           {lead.name}
@@ -126,47 +187,12 @@ export const SubjectBarContent = ({
       ) : (
         <span>{lead.name}</span>
       )}
-      {building(lead) ? <Shimmer as="span">{t`Building…`}</Shimmer> : null}
-      {count === 0 ? null : (
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                aria-label={t`${plural(count, {
-                  one: "# more App this chat worked on",
-                  other: "# more Apps this chat worked on",
-                })}`}
-                className="-my-1 ms-auto"
-                size="xs"
-                variant="ghost"
-              />
-            }
-          >
-            +{count}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>
-                <Trans>Also worked on</Trans>
-              </DropdownMenuLabel>
-              {others.map((worked) => (
-                <DropdownMenuItem
-                  key={`${worked.kind}:${worked.id}`}
-                  render={<WorkedLink chatId={chatId} worked={worked} />}
-                >
-                  {kinds[worked.kind].icon}
-                  <span className="truncate">{worked.name}</span>
-                  {building(worked) ? (
-                    <Shimmer as="span" className="ms-auto">
-                      {t`Building…`}
-                    </Shimmer>
-                  ) : null}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
-    </>
+      {building(lead) ? (
+        <>
+          {" · "}
+          <Shimmer active>{t`Building…`}</Shimmer>
+        </>
+      ) : null}
+    </ComposerSurface>
   );
 };

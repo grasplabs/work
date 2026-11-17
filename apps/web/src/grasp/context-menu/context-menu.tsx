@@ -38,8 +38,10 @@ import { visuallyHidden } from "../hidden/hidden";
 import { scroll } from "../scroll/scroll";
 import { grasp } from "../tokens/tokens.stylex";
 import { popup } from "../tokens/tokens.values";
+import { useWords, withGiven } from "../words/words";
 import { MenuEntriesView, actionsOf, withFailureWords } from "./menu-items";
 import type { MenuEntries } from "./menu-items";
+import { contextMenuWords } from "./words";
 
 /** Every prop a ContextMenu takes. */
 export interface ContextMenuProps {
@@ -122,10 +124,14 @@ export const ContextMenu = ({
   onCheckedChange,
   onValueChange,
   disabled = false,
-  failedLabel = "Failed",
+  failedLabel: failedGiven,
   tabStop = true,
   finalFocus,
 }: ContextMenuProps) => {
+  const { failed: failedLabel } = withGiven(
+    useWords("contextMenu", contextMenuWords),
+    { failed: failedGiven }
+  );
   // A failure is said aloud by a status line beside the menu, as well as shown on the action.
   const [said, setSaid] = useState("");
   const run = withFailureWords(

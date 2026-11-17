@@ -9,13 +9,8 @@ import type {
   WorkflowResourceVersion,
   WorkflowState,
 } from "@grasp-os/shared/workflow-resources";
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@grasp-os/ui/components/alert";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import {
   createFileRoute,
   Link,
@@ -44,8 +39,11 @@ import {
 import { SettingUp, SettingUpBar } from "../frame/setting-up.tsx";
 import type { SetUp } from "../frame/setting-up.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
+import { Alert } from "../grasp/alert/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
 import { Workflow as WorkflowMark } from "../grasp/icons/index.ts";
 import { TabsLink, TabsNav } from "../grasp/tabs/nav.tsx";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { ActivityBar } from "../workflows/activity-bar.tsx";
@@ -97,6 +95,49 @@ import {
 
 /** What the main area shows. */
 type WorkflowView = "flow" | "runs" | "settings";
+
+// The Flow comes in softly as it is shown again.
+const fadeIn = stylex.keyframes({
+  from: { opacity: 0 },
+  to: { opacity: 1 },
+});
+
+const styles = stylex.create({
+  // A view kept while another shows: its state stays.
+  away: { display: "none" },
+  flow: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+    animationName: { default: fadeIn, [media.reduced]: "none" },
+    animationDuration: grasp.durationOpen,
+    animationTimingFunction: grasp.ease,
+  },
+  runs: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+    overflowY: "auto",
+  },
+  column: {
+    width: "100%",
+    maxWidth: "80rem",
+    marginInline: "auto",
+    paddingInline: grasp.space6,
+    paddingBlockStart: grasp.space6,
+    paddingBlockEnd: grasp.space8,
+  },
+  bar: { marginBlockStart: "auto" },
+  waiting: {
+    flexShrink: 0,
+    padding: grasp.space3,
+    borderBlockEndWidth: grasp.hairline,
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: grasp.line,
+  },
+});
 
 /** A view named in an address, or none for anything else. */
 const viewOf = (value: unknown): WorkflowView | undefined =>
@@ -274,14 +315,11 @@ const ViewSwitch = ({
   );
 };
 
-/** Its version, as the bar has it beside its name. */
-/** Its version, once one was published; nothing before. */
-const VersionBadge = ({ version }: { version: number | null }) =>
-  version === null ? null : (
-    <Badge variant="outline">
-      <Trans>Version {version}</Trans>
-    </Badge>
-  );
+/** Its version, as the bar has it beside its name, once one was published; nothing before. */
+const VersionBadge = ({ version }: { version: number | null }) => {
+  const { t } = useLingui();
+  return version === null ? null : <Badge>{t`Version ${version}`}</Badge>;
+};
 
 /** The version waiting to go live, over the page, for whoever decides it. */
 const GoLiveWaiting = ({
@@ -295,28 +333,25 @@ const GoLiveWaiting = ({
   me: string;
   onChange: (next: WorkflowLifecycle) => void;
 }) => {
+  const { t } = useLingui();
   const choice = goLiveChoiceOf(status, me);
   if (choice === null) {
     return null;
   }
   const { version: waiting } = choice;
   return (
-    <div className="flex-none border-b p-3">
-      <Alert variant="attention">
-        <AlertTitle>
-          <Trans>
-            Version {waiting} waits for approval to run for the team
-          </Trans>
-        </AlertTitle>
-        <AlertDescription>
-          <GoLiveDecision
-            lifecycle={status}
-            me={me}
-            name={resource.name}
-            onChange={onChange}
-            workflow={resource.id}
-          />
-        </AlertDescription>
+    <div {...stylex.props(styles.waiting)}>
+      <Alert
+        title={t`Version ${waiting} waits for approval to run for the team`}
+        tone="attention"
+      >
+        <GoLiveDecision
+          lifecycle={status}
+          me={me}
+          name={resource.name}
+          onChange={onChange}
+          workflow={resource.id}
+        />
       </Alert>
     </div>
   );
@@ -335,8 +370,14 @@ const RunsView = ({
   names,
   admin,
   checkpoint,
+  openRun,
+  onCloseRun,
 }: {
   workflow: string;
+  /** The run the address asks to open, by its ID. */
+  openRun: string | undefined;
+  /** Clears the run from the address once it is closed. */
+  onCloseRun: () => void;
   builder: boolean;
   runs: Loaded<WorkflowResourceRun[]>;
   activity: Loaded<WorkflowActivity[]>;
@@ -348,13 +389,15 @@ const RunsView = ({
   const [part, setPart] = useState<TracesPart>("runs");
   if (builder) {
     return (
-      <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
+      <div {...stylex.props(styles.column)}>
         <Traces
           activity={activity}
           admin={admin}
           checkpoint={checkpoint}
           names={names}
+          onCloseRun={onCloseRun}
           onPartChange={setPart}
+          openRun={openRun}
           part={part}
           runs={runs}
           workflow={workflow}
@@ -364,11 +407,13 @@ const RunsView = ({
   }
   return (
     <>
-      <div className="mx-auto w-full max-w-7xl px-6 pt-6 pb-8">
+      <div {...stylex.props(styles.column)}>
         {runs.state === "ready" ? (
           <ResourceRuns
             admin={admin}
             names={names}
+            onCloseRun={onCloseRun}
+            openRun={openRun}
             runs={runs.data}
             workflow={workflow}
           />
@@ -376,7 +421,7 @@ const RunsView = ({
           <NotLoadedState page={runs} />
         )}
       </div>
-      <div className="mt-auto">
+      <div {...stylex.props(styles.bar)}>
         <ActivityBar activity={activity} names={names} onAll={undefined} />
       </div>
     </>
@@ -420,12 +465,15 @@ const WorkflowResourceView = ({
   back,
   view: asked,
   section,
+  run,
   ...read
 }: WorkflowPageRead & {
   back: Crumb;
   /** The view the address asks for, if any. */
   view: WorkflowView | undefined;
   section: WorkflowSettingsSection | undefined;
+  /** On Runs, the run the address asks to open. */
+  run: string | undefined;
 }) => {
   const { resource, draft, runs, activity, names, admin } = read;
   const navigate = useNavigate();
@@ -447,6 +495,18 @@ const WorkflowResourceView = ({
     setSavedHere(next.editedAt);
   };
   const { status, onChange } = useStatus(read.lifecycle);
+  /** Runs, with `id` open beside the list; none closes it. */
+  const runAt = (id?: string): void => {
+    void navigate({
+      to: "/workflows/$workflow",
+      params: { workflow: resource.id },
+      search: (held) => ({
+        project: held.project,
+        view: "runs",
+        ...(id === undefined ? {} : { run: id }),
+      }),
+    });
+  };
   const settingsAt = (at: WorkflowSettingsSection): void => {
     void navigate({
       to: "/workflows/$workflow",
@@ -489,6 +549,9 @@ const WorkflowResourceView = ({
                 onFiles={() => {
                   settingsAt("files");
                 }}
+                onOpenRun={(id) => {
+                  runAt(id);
+                }}
                 workflow={resource.id}
               />
               {builder ? <ShareWorkflow resource={resource} /> : null}
@@ -523,13 +586,7 @@ const WorkflowResourceView = ({
       )}
       {/* Kept while another view shows: its zoom and layout stay. */}
       {draft === undefined ? null : (
-        <div
-          className={
-            view === "flow"
-              ? "animate-in fade-in-0 flex min-h-0 flex-1 flex-col duration-300 motion-reduce:animate-none"
-              : "hidden"
-          }
-        >
+        <div {...stylex.props(view === "flow" ? styles.flow : styles.away)}>
           {draft.state === "ready" ? (
             <WorkflowFlow
               draft={latest ?? draft.data}
@@ -548,19 +605,17 @@ const WorkflowResourceView = ({
         </div>
       )}
       {/* Kept while another view shows: a test going on stays followed. */}
-      <div
-        className={
-          view === "runs"
-            ? "flex min-h-0 flex-1 flex-col overflow-y-auto"
-            : "hidden"
-        }
-      >
+      <div {...stylex.props(view === "runs" ? styles.runs : styles.away)}>
         <RunsView
           activity={activity}
           admin={admin}
           builder={builder}
           checkpoint={checkpointOf(latest)}
           names={names}
+          onCloseRun={() => {
+            runAt();
+          }}
+          openRun={run}
           runs={runs}
           workflow={resource.id}
         />
@@ -621,7 +676,7 @@ const WorkflowResourcePage = () => {
   } = Route.useLoaderData();
   const people = usePeople(peopleRead);
   const { identity } = Route.useRouteContext();
-  const { view, section } = Route.useSearch();
+  const { view, section, run } = Route.useSearch();
   const { t } = useLingui();
   const back = backCrumb({ label: t`Workflows`, to: "/workflows" }, project);
   if (resource.state !== "ready") {
@@ -645,6 +700,7 @@ const WorkflowResourcePage = () => {
       back={back}
       names={{ people, me: identity.userId }}
       resource={resource.data}
+      run={run}
       section={section}
       view={view}
     />
@@ -659,6 +715,8 @@ interface WorkflowSearch {
   section?: WorkflowSettingsSection;
   /** The project it was started or opened from: the way back. */
   project?: string;
+  /** On Runs, the run open beside the list, by its ID. */
+  run?: string;
 }
 
 export const Route = createFileRoute("/_shell/workflows/$workflow")({
@@ -673,6 +731,9 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
       ...(view === undefined ? {} : { view }),
       ...(section === undefined ? {} : { section }),
       ...(project === undefined ? {} : { project }),
+      ...(typeof search.run === "string" && search.run !== ""
+        ? { run: search.run }
+        : {}),
     };
   },
   pendingComponent: PageLoading,

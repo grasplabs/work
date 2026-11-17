@@ -305,11 +305,21 @@ const press = async (element: Element | null | undefined) => {
   await settled();
 };
 
+/** What an element says: its text, without what is hidden from a screen reader. */
+const wordsOf = (element: Element): string => {
+  const copy = element.cloneNode(true);
+  if (!(copy instanceof Element)) {
+    return "";
+  }
+  for (const hidden of copy.querySelectorAll("[aria-hidden='true']")) {
+    hidden.remove();
+  }
+  return copy.textContent.trim();
+};
+
 const buttons = (name: string): HTMLButtonElement[] =>
   [...document.querySelectorAll("button")].filter(
-    (each) =>
-      each.getAttribute("aria-label") === name ||
-      each.textContent.trim() === name
+    (each) => each.getAttribute("aria-label") === name || wordsOf(each) === name
   );
 
 const button = (name: string): HTMLButtonElement | undefined =>
@@ -326,7 +336,11 @@ const listed = (alias: string): string[] | undefined => {
   return row === undefined
     ? undefined
     : [...row.querySelectorAll("*")]
-        .filter((each) => each.children.length === 0)
+        .filter(
+          (each) =>
+            each.children.length === 0 &&
+            each.closest("[aria-hidden='true']") === null
+        )
         .map((each) => each.textContent.trim());
 };
 

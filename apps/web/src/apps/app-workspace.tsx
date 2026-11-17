@@ -141,6 +141,12 @@ const styles = stylex.create({
     flexGrow: 1,
     minHeight: 0,
   },
+  // Where App building stands: the whole room, its own grid inside (a
+  // layout only places it, never sets how it lays itself out).
+  buildingPlace: {
+    flexGrow: 1,
+    minHeight: 0,
+  },
   column: {
     display: "flex",
     flexDirection: "column",
@@ -453,7 +459,7 @@ const FirstBuild = () => {
           data: t({ message: "Data", context: "who builds an app's data" }),
           copy: t({ message: "Words", context: "who writes an app's words" }),
         }}
-        layout={styles.building}
+        layout={styles.buildingPlace}
         step={t`It shows here as soon as there is something to see.`}
       />
     </div>

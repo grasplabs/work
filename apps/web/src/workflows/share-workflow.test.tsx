@@ -15,6 +15,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { toast, Toaster } from "../grasp/toast/index.ts";
 import { ShareWorkflow } from "./share-workflow.tsx";
 
 // The Share dialog of an independent workflow, against core's
@@ -107,15 +108,19 @@ const shown = async (
   const page = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
+    // With the page's toasts, as the frame has them.
     component: () => (
-      <ShareWorkflow
-        resource={{
-          id: "workflow-1",
-          name: "Invoices",
-          owner: "owner",
-          role,
-        }}
-      />
+      <>
+        <ShareWorkflow
+          resource={{
+            id: "workflow-1",
+            name: "Invoices",
+            owner: "owner",
+            role,
+          }}
+        />
+        <Toaster aria-label="Notifications" />
+      </>
     ),
   });
   const router = createRouter({
@@ -138,13 +143,16 @@ const shown = async (
   return asked;
 };
 
+/** A button's words, as shown: the layer a library Button shows, not the ones it keeps for its width. */
+const shownWords = (each: Element): string =>
+  (each.querySelector("[data-shown]") ?? each).textContent.trim();
+
 /** The button named `name`, by its label or its text. */
 const button = (name: string): HTMLButtonElement | undefined =>
   [...document.querySelectorAll("button")].find(
     (each) =>
       each.getAttribute("aria-label") === name ||
-      (each.getAttribute("aria-label") === null &&
-        each.textContent.trim() === name)
+      (each.getAttribute("aria-label") === null && shownWords(each) === name)
   );
 
 /** Presses the button named `name`, and lets what it does settle. */
@@ -155,37 +163,73 @@ const press = async (name: string): Promise<void> => {
   });
 };
 
+/** A label's words, without the mark a required field's label carries. */
+const labelWords = (label: HTMLLabelElement): string =>
+  [...label.childNodes]
+    .filter(
+      (node) =>
+        !(node instanceof HTMLElement && node.dataset.slot === "required-mark")
+    )
+    .map((node) => node.textContent)
+    .join("")
+    .trim();
+
 /** The select named `name`, by its label or its own `aria-label`. */
-const select = (name: string): HTMLSelectElement | null => {
+const select = (name: string): HTMLElement | null => {
   const labelled = [...document.querySelectorAll("label")].find(
-    (each) => each.textContent.trim() === name
+    (each) => labelWords(each) === name
   );
   return labelled === undefined
-    ? document.querySelector<HTMLSelectElement>(
-        `select[aria-label="${CSS.escape(name)}"]`
+    ? document.querySelector<HTMLElement>(
+        `[role="combobox"][aria-label="${CSS.escape(name)}"]`
       )
-    : document.querySelector<HTMLSelectElement>(
-        `#${CSS.escape(labelled.htmlFor)}`
-      );
+    : document.querySelector<HTMLElement>(`#${CSS.escape(labelled.htmlFor)}`);
+};
+
+/** The options of the open list: each one's value, and its words. */
+const openOptions = (): { value: string; text: string }[] =>
+  [...document.querySelectorAll<HTMLElement>('[role="option"]')].map(
+    (option) => ({
+      value: option.id.split("-option-")[1] ?? "",
+      text: option.textContent.trim(),
+    })
+  );
+
+/** What the select named `name` offers, opened and closed again. */
+const options = async (
+  name: string
+): Promise<{ value: string; text: string }[]> => {
+  await act(async () => {
+    select(name)?.click();
+    await settled();
+  });
+  const listed = openOptions();
+  await act(async () => {
+    select(name)?.click();
+    await settled();
+  });
+  return listed;
 };
 
 /** Picks `value` in the select named `name`. */
 const pick = async (name: string, value: string): Promise<void> => {
   await act(async () => {
-    const chosen = select(name);
-    if (chosen !== null) {
-      chosen.value = value;
-      chosen.dispatchEvent(new Event("change", { bubbles: true }));
-    }
+    select(name)?.click();
+    await settled();
+  });
+  await act(async () => {
+    [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+      .find((option) => option.id.endsWith(`-option-${value}`))
+      ?.click();
     await settled();
   });
 };
 
 /** What the select named `name` offers, by value. */
-const offered = (name: string): string[] =>
-  [...(select(name)?.options ?? [])]
-    .map(({ value }) => value)
-    .filter((value) => value !== "");
+const offered = async (name: string): Promise<string[]> => {
+  const listed = await options(name);
+  return listed.map(({ value }) => value);
+};
 
 describe("sharing an independent workflow from its page", () => {
   afterEach(() => {
@@ -193,13 +237,15 @@ describe("sharing an independent workflow from its page", () => {
       root?.unmount();
     });
     root = undefined;
+    // The page's toasts are one queue for the tab: none outlives its test.
+    toast.dismiss();
     document.body.replaceChildren();
   });
 
-  it("shares with exactly whom and as what the builder picks, from those it isn't shared with but its owner, then changes a role and unshares", async () => {
+  it("shares with exactly whom and as what the builder picks, from those it isn't shared with but its owner, then changes a role, unshares and undoes that from the toast", async () => {
     const asked = await shown("builder");
     await press("Share");
-    const choices = offered("Share with");
+    const choices = await offered("Share with");
     await pick("Share with", "person:ada");
     await pick("Role to share with", "builder");
     await act(async () => {
@@ -213,15 +259,22 @@ describe("sharing an independent workflow from its page", () => {
     const listed = document.body.textContent.includes("Ada");
     await pick("Role of Bo", "builder");
     await press("Stop sharing with Ada");
+    const said = [
+      ...document.querySelectorAll('[aria-label="Notifications"] li'),
+    ].map((each) => each.textContent.includes("Stopped sharing with Ada"));
+    await press("Undo");
 
-    expect({ choices, listed, asked }).toStrictEqual({
+    expect({ choices, listed, said, asked }).toStrictEqual({
       // Not its owner, nor Bo, who has it already.
       choices: ["person:ada", "team:team-1"],
       listed: true,
+      said: [true],
       asked: [
         { share: "workflow-1", type: "person", id: "ada", role: "builder" },
         { share: "workflow-1", type: "person", id: "bo", role: "builder" },
         { unshare: "workflow-1", type: "person", id: "ada" },
+        // Undo shares it again, in the role it had.
+        { share: "workflow-1", type: "person", id: "ada", role: "builder" },
       ],
     });
   });
@@ -232,9 +285,10 @@ describe("sharing an independent workflow from its page", () => {
       people: [...candidates.people, { id: "user-bo-222333", name: "Bo" }],
     });
     await press("Share");
-    const labels = [...(select("Share with")?.options ?? [])]
+    const listed = await options("Share with");
+    const labels = listed
       .filter(({ value }) => value.startsWith("person:"))
-      .map(({ textContent }) => textContent);
+      .map(({ text }) => text);
 
     // The Bo it is shared with is the only one it lists, so plainly.
     const sharedBo = button("Stop sharing with Bo") !== undefined;

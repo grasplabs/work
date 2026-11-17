@@ -39,6 +39,7 @@ import { popup } from "../tokens/tokens.values";
 import { useComposerDisabled } from "./context";
 import { controlStyles } from "./control";
 import { stopEscape } from "./escape";
+import { useComposerWords } from "./words";
 
 /** One model a person can choose. */
 export interface ComposerModelOption {
@@ -306,14 +307,21 @@ export const ComposerModel = ({
   onValueChange,
   favourites = noFavourites,
   label: labelDeprecated,
-  "aria-label": label = labelDeprecated ?? "Model",
-  searchLabel = "Search models",
-  makersLabel = "Makers",
-  favouritesLabel = "Favourites",
-  emptyLabel = "No models found",
+  "aria-label": labelGiven,
+  searchLabel: searchGiven,
+  makersLabel: makersGiven,
+  favouritesLabel: favouritesGiven,
+  emptyLabel: emptyGiven,
   connect,
 }: ComposerModelProps) => {
   const disabled = useComposerDisabled();
+  // Its words: the caller's where given, else the product's catalogue (GraspWords), else English.
+  const words = useComposerWords("model");
+  const label = labelGiven ?? labelDeprecated ?? words.label;
+  const searchLabel = searchGiven ?? words.search;
+  const makersLabel = makersGiven ?? words.makers;
+  const favouritesLabel = favouritesGiven ?? words.favourites;
+  const emptyLabel = emptyGiven ?? words.empty;
   const current = models.find((model) => model.value === value);
   const currentMaker = makers.find((maker) => maker.value === current?.maker);
   const [open, setOpen] = useState(false);

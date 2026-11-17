@@ -1,23 +1,19 @@
 import { businessProcesses } from "@grasp-os/shared/business-processes";
 import type { BusinessProcess } from "@grasp-os/shared/business-processes";
-import { Badge } from "@grasp-os/ui/components/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 
 import { ErrorText } from "../error-text.tsx";
+import { Badge } from "../grasp/badge/index.ts";
+import {
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "../grasp/select/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // The business process a workflow serves (GRA-511), as the prototype draws
@@ -51,6 +47,36 @@ export const processCovers: Readonly<
   r2r: msg`Closing the books and producing the numbers leadership looks at.`,
   h2r: msg`Everything around employees, from hiring to leaving.`,
 };
+
+const styles = stylex.create({
+  // An icon's own size, as the library's icons stand beside words.
+  glyph: {
+    flexShrink: 0,
+    width: grasp.iconMd,
+    height: grasp.iconMd,
+  },
+  // A tile the size of a small control, where a line begins.
+  tile: {
+    display: "inline-flex",
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    width: grasp.controlSm,
+    height: grasp.controlSm,
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    backgroundColor: grasp.soft,
+    color: grasp.ink,
+  },
+  badge: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: grasp.space1,
+  },
+  hint: { display: "flex", flexDirection: "column", gap: grasp.space1 },
+  hintName: { fontWeight: grasp.weightMedium },
+  picker: { display: "flex", flexDirection: "column", gap: grasp.space1 },
+});
 
 /**
  * Each process's parts, on Lucide's grid of 24: where the process ends
@@ -119,17 +145,21 @@ const Paths = ({ process }: { process: BusinessProcess }) => {
   }
 };
 
-/** A process's icon alone, sized like a Lucide icon: for lines, menus and badges. */
+/**
+ * A process's icon alone, at an icon's size: for lines, menus and badges.
+ * `className` is for a caller still on the old kit; without it the glyph
+ * takes the library's icon size.
+ */
 export const ProcessGlyph = ({
   process,
-  className = "size-4 flex-none",
+  className,
 }: {
   process: BusinessProcess;
   className?: string;
 }) => (
   <svg
     aria-hidden="true"
-    className={className}
+    {...(className === undefined ? stylex.props(styles.glyph) : { className })}
     data-moves={process}
     fill="none"
     stroke="currentColor"
@@ -145,10 +175,7 @@ export const ProcessGlyph = ({
 
 /** A process's icon on a grey tile, where a line begins. */
 export const ProcessTile = ({ process }: { process: BusinessProcess }) => (
-  <span
-    aria-hidden="true"
-    className="bg-muted text-foreground inline-flex size-7.5 flex-none items-center justify-center rounded-lg"
-  >
+  <span aria-hidden="true" {...stylex.props(styles.tile)}>
     <ProcessGlyph process={process} />
   </span>
 );
@@ -157,26 +184,29 @@ export const ProcessTile = ({ process }: { process: BusinessProcess }) => (
 export const ProcessHint = ({ process }: { process: BusinessProcess }) => {
   const { i18n } = useLingui();
   return (
-    <span className="flex flex-col gap-1 py-0.5">
-      <span className="font-medium">{i18n._(processNames[process])}</span>
+    <span {...stylex.props(styles.hint)}>
+      <span {...stylex.props(styles.hintName)}>
+        {i18n._(processNames[process])}
+      </span>
       <span>{i18n._(processCovers[process])}</span>
     </span>
   );
 };
 
-/** A process as a badge, its icon and name, with what it covers when pointed at. */
+/**
+ * A process as a badge, its icon and name. What it covers goes beside it,
+ * behind the row's info mark (workflow-settings.tsx): the library's Badge
+ * is never a tooltip's trigger.
+ */
 export const ProcessBadge = ({ process }: { process: BusinessProcess }) => {
   const { i18n } = useLingui();
   return (
-    <Tooltip>
-      <TooltipTrigger render={<Badge variant="outline" />}>
-        <ProcessGlyph className="size-3 flex-none" process={process} />
+    <Badge>
+      <span {...stylex.props(styles.badge)}>
+        <ProcessGlyph process={process} />
         {i18n._(processNames[process])}
-      </TooltipTrigger>
-      <TooltipContent className="max-w-64">
-        <ProcessHint process={process} />
-      </TooltipContent>
-    </Tooltip>
+      </span>
+    </Badge>
   );
 };
 
@@ -217,7 +247,7 @@ export const ProcessPicker = ({
     }
   };
   return (
-    <span className="flex flex-col gap-1">
+    <span {...stylex.props(styles.picker)}>
       <Select
         disabled={busy}
         items={items}
@@ -234,16 +264,9 @@ export const ProcessPicker = ({
           aria-label={t`The business process ${name} serves`}
           size="sm"
         >
-          {process === null ? null : <ProcessGlyph process={process} />}
           <SelectValue />
         </SelectTrigger>
-        <SelectContent>
-          {items.map((item) => (
-            <SelectItem key={item.value} value={item.value}>
-              {item.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
+        <SelectContent />
       </Select>
       <ErrorText>{failure}</ErrorText>
     </span>

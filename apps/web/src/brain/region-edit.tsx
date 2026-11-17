@@ -1,7 +1,5 @@
 import type { TeamGroup, Workspace } from "@grasp-os/shared/brain";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
-// The frame mounts this Toaster (frame/app-frame.tsx), not the library's own yet.
-import { toast } from "@grasp-os/ui/components/toast";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useRouteContext, useRouter } from "@tanstack/react-router";
@@ -19,6 +17,7 @@ import {
 } from "../grasp/dropdown-menu/index.ts";
 import { focus } from "../grasp/focus/focus.ts";
 import { Edit, More, Plus } from "../grasp/icons/index.ts";
+import { toast } from "../grasp/toast/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCore } from "../use-core.ts";
 import { LOBES } from "./brain-atlas.ts";
@@ -107,15 +106,13 @@ const saveWithUndo = async (
   try {
     await keep(next);
   } catch {
-    toast.add({ type: "error", title: words.failed });
+    toast.error(words.failed);
     return;
   }
-  toast.add({
-    type: "success",
-    title: words.done,
-    actionProps: {
-      children: words.undo,
-      onClick: () => {
+  toast.success(words.done, {
+    action: {
+      label: words.undo,
+      onAction: () => {
         void keep(before);
       },
     },

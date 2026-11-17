@@ -237,7 +237,16 @@ const fieldLabelled = (label: string): HTMLInputElement | null => {
 
 const nameField = (): HTMLInputElement | null => fieldLabelled("Name");
 
-const nameOf = (element: HTMLElement): string => element.textContent.trim();
+/** What an element says, without a button's hidden words for working or failed. */
+const nameOf = (element: HTMLElement): string => {
+  const copy = element.cloneNode(true);
+  if (copy instanceof HTMLElement) {
+    for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) {
+      hidden.remove();
+    }
+  }
+  return copy.textContent?.trim() ?? "";
+};
 
 const button = (name: string): HTMLButtonElement | undefined =>
   [...document.querySelectorAll("button")].find(

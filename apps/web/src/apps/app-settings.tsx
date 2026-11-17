@@ -195,18 +195,8 @@ export const Read = <T,>({
 };
 
 /** A section's heading and what it is for. */
-const SectionHeading = ({
-  title,
-  description,
-}: {
-  title: string;
-  description?: string | undefined;
-}) => (
-  <PageHeader
-    size="md"
-    title={title}
-    {...(description === undefined ? {} : { description })}
-  />
+const SectionHeading = ({ title }: { title: string }) => (
+  <PageHeader size="md" title={title} />
 );
 
 // How wide a section's column grows: Grasp UI has no token for a
@@ -413,7 +403,8 @@ const ForBuilders = ({
   return (
     <>
       <SectionCard
-        description={t`Its definition to keep or move, and a blueprint others can start from.`}
+        info={t`Its definition to keep or move, and a blueprint others can start from.`}
+        infoLabel={t`More about copies`}
         title={t`Copies`}
       >
         <div {...stylex.props(styles.actions)}>
@@ -434,14 +425,16 @@ const ForBuilders = ({
       </SectionCard>
       {app.archived || identity.staff || !isAdmin(identity.role) ? null : (
         <SectionCard
-          description={t`Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records.`}
+          info={t`Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records.`}
+          infoLabel={t`More about its data`}
           title={t`Its data`}
         >
           <ResetAppData app={app} />
         </SectionCard>
       )}
       <SectionCard
-        description={t`An archived App is kept as it was and goes offline: nobody opens it, its triggers stop and its unfinished runs are cancelled. A builder can restore it, as a draft.`}
+        info={t`An archived App is kept as it was and goes offline: nobody opens it, its triggers stop and its unfinished runs are cancelled. A builder can restore it, as a draft.`}
+        infoLabel={t`More about putting it away`}
         title={t`Putting it away`}
       >
         <PuttingAway app={app} />
@@ -527,11 +520,7 @@ const GeneralForm = ({
           ? t`Made on ${date}.`
           : t`Made by ${person} on ${date}.`}
       </Text>
-      <SectionCard
-        description={t`What the App is called and what it is for.`}
-        flush
-        title={t`About`}
-      >
+      <SectionCard flush title={t`About`}>
         <SettingsRows>
           <SettingRow label={t`Name`}>
             {(field) => (
@@ -575,7 +564,7 @@ const GeneralForm = ({
             </div>
           </FactRow>
           <SettingRow
-            help={t`Shown with the App. It opens the App to nobody: who may use it is who it is shared with.`}
+            info={t`Shown with the App. It opens the App to nobody: who may use it is who it is shared with.`}
             label={t`Made for`}
           >
             {(field) => (
@@ -606,10 +595,7 @@ const GeneralForm = ({
             )}
           </SettingRow>
           {builds && !app.archived ? (
-            <FactRow
-              help={t`Its own address, for whoever may use it while it is live.`}
-              label={t`Link`}
-            >
+            <FactRow label={t`Link`}>
               <OwnLink app={app} />
             </FactRow>
           ) : null}
@@ -619,7 +605,8 @@ const GeneralForm = ({
         </SettingsRows>
       </SectionCard>
       <SectionCard
-        description={t`Who answers for the App: who is asked about it and decides what changes.`}
+        info={t`Who answers for the App: who is asked about it and decides what changes.`}
+        infoLabel={t`More about the owner`}
         title={t({ message: "Owner", context: "who answers for an app" })}
       >
         {/* The platform's one owner control, as a workflow's line has it. */}
@@ -980,14 +967,6 @@ const SectionBody = ({
   return <OptionsSection app={app.id} options={options} />;
 };
 
-const sectionDescriptions = {
-  sharing: msg`Who opens the App besides you, and as what.`,
-  history: msg`What changed, unpublished and published, which version is live, and going back to one.`,
-  connections: msg`The integrations, connections and resources the App uses, and asking for more.`,
-  webhooks: msg`Where Grasp sends the App's events.`,
-  options: msg`The settings the App offers itself.`,
-} satisfies Partial<Record<AppSettingsSection, MessageDescriptor>>;
-
 /** A section's tab: the workspace's address or the settings page's. */
 const SectionLink = ({
   app,
@@ -1059,8 +1038,6 @@ export const AppSettings = ({
   // General.
   const section = asked ?? "general";
   const title = i18n._(sectionLabels[section]);
-  const description =
-    section === "general" ? undefined : i18n._(sectionDescriptions[section]);
   return (
     <div {...stylex.props(styles.settings)}>
       <TabsNav aria-label={t`Settings sections`}>
@@ -1078,7 +1055,7 @@ export const AppSettings = ({
       </TabsNav>
       <div {...stylex.props(styles.scroll)}>
         <div {...stylex.props(styles.column)}>
-          <SectionHeading description={description} title={title} />
+          <SectionHeading title={title} />
           <SectionBody
             app={app}
             builds={builds}

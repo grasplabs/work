@@ -3,6 +3,7 @@ import type { ChatMake } from "@grasp-os/shared/chat";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Await, useLocation, useRouteContext } from "@tanstack/react-router";
+import { useState } from "react";
 
 import type { Session } from "../core.ts";
 import { Button } from "../grasp/button/index.ts";
@@ -20,7 +21,7 @@ import {
   tourOffered,
   useTour,
 } from "../tour/tour-state.ts";
-import { startingAgent } from "./agent-choice.tsx";
+import { agentModelOf, agentOptions, startingAgent } from "./agent-choice.tsx";
 import { useLook } from "./backdrop-look.ts";
 import { ChatComposer } from "./chat-composer.tsx";
 import { useGoToChat } from "./chat-link.ts";
@@ -178,9 +179,10 @@ export const ChatStart = ({
   const { t, i18n } = useLingui();
   const look = useLook(identity.userId);
   const agents = offered?.agents ?? [];
-  // The agent the address names (the Agents page's "Chat"), else the
-  // company's first. The box has no agent picker until Grasp UI's lands.
-  const agentId = startingAgent(agents, agent)?.id;
+  // The agent chosen in the box's plus menu, else the one the address
+  // names (the Agents page's "Chat"), else the company's first.
+  const [picked, setPicked] = useState(agent);
+  const agentId = startingAgent(agents, picked)?.id;
   const goToChat = useGoToChat();
   const { composer } = useAsk(
     undefined,
@@ -223,7 +225,11 @@ export const ChatStart = ({
     >
       <ChatComposer
         {...composer}
+        agent={agentId}
+        agentModel={agentModelOf(agents, agentId)}
+        agents={agentOptions(agents)}
         models={offered?.models}
+        onAgent={setPicked}
         running={false}
         surface="glass"
       />

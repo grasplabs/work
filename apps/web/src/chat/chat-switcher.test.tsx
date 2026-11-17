@@ -56,8 +56,12 @@ const shown = async (
   const asked: string[] = [];
   const archived: string[] = [];
   const chats = {
-    list: async () =>
-      await Promise.resolve(listed.filter(({ id }) => !archived.includes(id))),
+    list: async (options?: { archived?: boolean }) =>
+      await Promise.resolve(
+        listed.filter(
+          ({ id }) => archived.includes(id) === (options?.archived === true)
+        )
+      ),
     archive: async (id: string) => {
       archived.push(id);
       await Promise.resolve();
@@ -116,9 +120,9 @@ const rows = (): string[] =>
     return read.textContent.trim();
   });
 
-/** The chats among the rows: those between "New chat" and "Archived chats". */
+/** The chats among the rows: those between "New chat" and "Archived". */
 const chatRows = (): string[] =>
-  rows().filter((row) => row !== "New chat" && row !== "Archived chats");
+  rows().filter((row) => row !== "New chat" && !row.startsWith("Archived"));
 
 const press = async (init: KeyboardEventInit): Promise<void> => {
   await act(async () => {
@@ -168,7 +172,7 @@ describe("the chats window", () => {
     document.body.replaceChildren();
   });
 
-  it("opens with ⌘K on the person's chats, and narrows them by title, then by what core found was said", async () => {
+  it("opens with ⌘K on the person's chats, and shows what core found was said, where, the words marked", async () => {
     const answer = Promise.withResolvers<ChatSearchHit[]>();
     const { asked } = await shown(async () => await answer.promise);
     expect(dialog()).toBeNull();
@@ -179,15 +183,18 @@ describe("the chats window", () => {
       "Board report",
       "Lease of the office",
       "Trip to Lyon",
-      "Archived chats",
     ]);
 
-    // By title at once, before core has looked through what was said.
+    // Core's results, as it gives them: none while it looks.
     await type("lease");
-    expect(rows()).toStrictEqual(["Lease of the office"]);
-    await vi.waitFor(() => {
-      expect(asked).toStrictEqual(["lease"]);
-    });
+    expect(rows()).toStrictEqual([]);
+    // Once typing rests: allowed longer, as a full run is slower.
+    await vi.waitFor(
+      () => {
+        expect(asked).toStrictEqual(["lease"]);
+      },
+      { timeout: openMs }
+    );
 
     await act(async () => {
       answer.resolve([
@@ -199,10 +206,21 @@ describe("the chats window", () => {
       ]);
       await answer.promise;
     });
-    expect(rows()).toStrictEqual([
-      "Board report…the lease ends in March",
-      "Lease of the office",
-    ]);
+    await vi.waitFor(
+      () => {
+        expect(rows()).toStrictEqual([
+          "Board report…the lease ends in March",
+          "Lease of the office",
+        ]);
+      },
+      { timeout: openMs }
+    );
+    // Where it was found, the words marked.
+    expect(
+      dialog()?.querySelector(
+        '[role="option"] mark, [data-slot="command-match"]'
+      )?.textContent
+    ).toBe("lease");
   });
 
   it("says which chat app a chat came through, and nothing for one started in Grasp", async () => {
@@ -260,9 +278,10 @@ describe("the chats window", () => {
     });
 
     await vi.waitFor(() => {
-      expect({ archived, rows: chatRows() }).toStrictEqual({
+      expect({ archived, rows: rows() }).toStrictEqual({
         archived: ["lease"],
-        rows: ["Board report", "Trip to Lyon"],
+        // "Archived" last, with how many.
+        rows: ["New chat", "Board report", "Trip to Lyon", "Archived1 chat"],
       });
     });
   });

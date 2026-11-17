@@ -1,12 +1,13 @@
 import type { ViewedApp } from "@grasp-os/shared/apps";
+import { failureText } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { Button } from "@grasp-os/ui/components/button";
-import { Trans } from "@lingui/react/macro";
-import { DownloadIcon } from "lucide-react";
+import { useLingui } from "@lingui/react/macro";
 
-import { ErrorText } from "../error-text.tsx";
 import { downloadText } from "../export/export-file.tsx";
-import { useCoreAction } from "../use-core-action.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { Button, useAction } from "../grasp/button/index.ts";
+import { Download } from "../grasp/icons/index.ts";
+import { useCore } from "../use-core.ts";
 import { buildsApp } from "./app-role.ts";
 
 // Exporting an App's definition from its page: its App's current sealed
@@ -43,36 +44,34 @@ export const ExportDefinition = ({
   app: ViewedApp;
   identity: Pick<Identity, "staff">;
 }) => {
-  const { busy, failure, run } = useCoreAction();
-  if (!exportsDefinition(app, identity)) {
-    return null;
-  }
-  const save = async (): Promise<void> => {
-    const definition = await run(
-      async (session) => await session.apps.definition(app.id)
-    );
-    if (definition !== undefined) {
+  const { t } = useLingui();
+  const core = useCore();
+  const save = useAction(
+    async () => {
+      const definition = await core.withSession(
+        async (session) => await session.apps.definition(app.id)
+      );
       downloadText(
         fileName(app.name, definition.app.version),
         JSON.stringify(definition, null, 2),
         "application/json"
       );
-    }
-  };
+    },
+    { working: t`Exporting`, done: t`Exported`, failed: t`Could not export` }
+  );
+  if (!exportsDefinition(app, identity)) {
+    return null;
+  }
+  // The error goes under the buttons of the card it sits in: a whole line
+  // of their row.
   return (
-    <div className="flex flex-col items-end gap-1">
-      <Button
-        disabled={busy}
-        onClick={() => {
-          void save();
-        }}
-        size="sm"
-        variant="outline"
-      >
-        <DownloadIcon data-icon="inline-start" />
-        <Trans>Export definition</Trans>
+    <>
+      <Button icon={Download} {...save.props}>
+        {t`Export definition`}
       </Button>
-      <ErrorText>{failure}</ErrorText>
-    </div>
+      {save.error === undefined ? null : (
+        <Alert tone="danger">{failureText(save.error)}</Alert>
+      )}
+    </>
   );
 };

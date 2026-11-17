@@ -137,6 +137,23 @@ const settle = async (): Promise<void> => {
   });
 };
 
+/** Presses the button in the open alert dialog whose text starts with `label`. */
+const answer = async (label: string): Promise<void> => {
+  const button = [
+    ...(document
+      .querySelector("[role=alertdialog]")
+      ?.querySelectorAll("button") ?? []),
+  ].find((each) => each.textContent.startsWith(label));
+  if (!button) {
+    throw new TypeError(`No button ${label} in the alert dialog`);
+  }
+  await act(async () => {
+    button.click();
+    await Promise.resolve();
+  });
+  await settle();
+};
+
 const press = async (label: string): Promise<void> => {
   const button = [...document.querySelectorAll("button")].find((each) =>
     each.textContent.startsWith(label)
@@ -166,6 +183,7 @@ describe(LessonsView, () => {
     await press("chat.turn failed");
     const text = document.body.textContent;
     await press("Retire this lesson");
+    await answer("Retire");
     const buttons = [...document.querySelectorAll("button")].map(
       (each) => each.textContent
     );
@@ -207,6 +225,7 @@ describe(LessonsView, () => {
     await settle();
     await press("chat.turn failed");
     await press("Retire this lesson");
+    await answer("Retire");
     const buttons = [...document.querySelectorAll("button")].map(
       (each) => each.textContent
     );

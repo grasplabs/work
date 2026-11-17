@@ -45,14 +45,12 @@ const shown = async (
   const router = createRouter({
     routeTree: createRootRoute({
       component: () => (
-        <div data-slot="prompt-input-subject-bar">
-          <SubjectBarContent
-            chatId="chat-1"
-            work={worked}
-            since={since}
-            subject={subject}
-          />
-        </div>
+        <SubjectBarContent
+          chatId="chat-1"
+          work={worked}
+          since={since}
+          subject={subject}
+        />
       ),
     }),
     history: createMemoryHistory(),
@@ -71,26 +69,34 @@ const shown = async (
 };
 
 const bar = (): Element => {
-  const found = document.querySelector(
-    '[data-slot="prompt-input-subject-bar"]'
-  );
+  const found = document.querySelector('[data-slot="composer-surface"]');
   if (found === null) {
-    throw new Error("No bar");
+    throw new Error("No band");
   }
   return found;
 };
 
-/** The bar's line: its link or name, and what it says beside it. */
-const line = () => ({
-  text: [...bar().children]
-    .filter((each) => each.tagName !== "BUTTON" && each.tagName !== "svg")
-    .map((each) => each.textContent),
-  href: bar().querySelector(":scope > a")?.getAttribute("href") ?? null,
-  more: bar().querySelector("button")?.textContent ?? null,
-});
+/** The band's line: its words, where its name goes, and its "+N". */
+const line = () => {
+  const more = bar().querySelector("button");
+  // What is read: hidden copies (a shimmer's light) and "+N" left out.
+  const read = bar().cloneNode(true);
+  if (!(read instanceof Element)) {
+    throw new TypeError("No band");
+  }
+  for (const left of read.querySelectorAll('[aria-hidden="true"], button')) {
+    left.remove();
+  }
+  const words = (read.textContent ?? "").trim();
+  return {
+    words,
+    href: bar().querySelector("a")?.getAttribute("href") ?? null,
+    more: more?.textContent ?? null,
+  };
+};
 
-/** Opens "+N" and reads what it lists: each by name and where it goes. */
-const listed = async () => {
+/** Opens "+N" and reads what it lists. */
+const listed = async (): Promise<string[]> => {
   const more = bar().querySelector("button");
   if (more === null) {
     throw new Error("Nothing more");
@@ -102,10 +108,9 @@ const listed = async () => {
     more.click();
     await Promise.resolve();
   });
-  return [...document.querySelectorAll('[role="menuitem"]')].map((item) => ({
-    name: item.textContent,
-    href: item.getAttribute("href"),
-  }));
+  return [...document.querySelectorAll('[role="menuitem"]')].map(
+    (item) => item.textContent
+  );
 };
 
 describe(SubjectBarContent, () => {
@@ -123,14 +128,11 @@ describe(SubjectBarContent, () => {
 
     expect({ first, rest: await listed() }).toStrictEqual({
       first: {
-        text: ["Intake", "Building…"],
+        words: "Intake · Building…",
         href: "/apps/app-intake?chat=chat-1",
         more: "+2",
       },
-      rest: [
-        { name: "Desk", href: "/apps/app-desk?chat=chat-1" },
-        { name: "Ledger", href: "/apps/app-ledger?chat=chat-1" },
-      ],
+      rest: ["Desk", "Ledger"],
     });
   });
 
@@ -138,7 +140,7 @@ describe(SubjectBarContent, () => {
     await shown(undefined, drafts, "2026-11-08T12:00:00.000Z");
 
     expect(line()).toStrictEqual({
-      text: ["Intake"],
+      words: "Intake",
       href: "/apps/app-intake?chat=chat-1",
       more: "+2",
     });
@@ -149,17 +151,14 @@ describe(SubjectBarContent, () => {
     const first = line();
 
     expect({ first, rest: await listed() }).toStrictEqual({
-      first: { text: ["Desk"], href: null, more: "+2" },
-      rest: [
-        { name: "Intake", href: "/apps/app-intake?chat=chat-1" },
-        { name: "Ledger", href: "/apps/app-ledger?chat=chat-1" },
-      ],
+      first: { words: "Desk", href: null, more: "+2" },
+      rest: ["Intake", "Ledger"],
     });
   });
 
   it("shows the subject alone where the chat worked on nothing else", async () => {
     await shown({ kind: "app", id: "app-desk", name: "Desk" }, []);
 
-    expect(line()).toStrictEqual({ text: ["Desk"], href: null, more: null });
+    expect(line()).toStrictEqual({ words: "Desk", href: null, more: null });
   });
 });

@@ -6,40 +6,48 @@ import type {
   WorkflowResource,
   WorkflowResourceVersion,
 } from "@grasp-os/shared/workflow-resources";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useEffect, useId, useState } from "react";
+
+import { formatDateTime } from "../format.ts";
+import { LoadingLines } from "../frame/page-states.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
-  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button } from "@grasp-os/ui/components/button";
+} from "../grasp/alert-dialog/index.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { Button } from "../grasp/button/index.ts";
 import {
   Dialog,
+  DialogAction,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
-  DialogHeader,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
+} from "../grasp/dialog/index.ts";
 import {
   Field,
   FieldDescription,
   FieldError,
   FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
+} from "../grasp/field/index.ts";
+import { Form } from "../grasp/form/index.ts";
+import { Workflow } from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   Select,
   SelectContent,
-  SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@grasp-os/ui/components/select";
+} from "../grasp/select/index.ts";
 import {
   Table,
   TableBody,
@@ -47,13 +55,9 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { useEffect, useId, useState } from "react";
-
-import { ErrorText } from "../error-text.tsx";
-import { formatDateTime } from "../format.ts";
-import { LoadingLines } from "../frame/page-states.tsx";
+} from "../grasp/table/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -82,6 +86,14 @@ interface Binding {
 const bindable = (workflows: readonly WorkflowResource[]): WorkflowResource[] =>
   workflows.filter((workflow) => workflow.currentVersion !== null);
 
+const styles = stylex.create({
+  actions: {
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: grasp.space2,
+  },
+});
+
 /** Binding an alias to a workflow version, or changing what it binds. */
 const BindDialog = ({
   app,
@@ -99,14 +111,12 @@ const BindDialog = ({
 }) => {
   const { t } = useLingui();
   const core = useCore();
+  const formId = useId();
   const { busy, failure, run } = useCoreAction();
   const [alias, setAlias] = useState(start.alias);
   const [workflow, setWorkflow] = useState(start.workflow);
   const [chosen, setChosen] = useState(start.version);
   const [versions, setVersions] = useState<Loaded<WorkflowResourceVersion[]>>();
-  const aliasId = useId();
-  const workflowId = useId();
-  const versionId = useId();
   const naming = start.alias === "";
   const aliasValid =
     appWorkflowBindingSchema.shape.alias.safeParse(alias).success;
@@ -146,17 +156,19 @@ const BindDialog = ({
           version: chosen,
         })
     );
-    if (bound !== undefined) {
-      onBound();
-      onClose();
+    if (bound === undefined) {
+      // The dialog stays open, with core's reason in it.
+      throw new Error("Not bound");
     }
+    onBound();
+    onClose();
   };
   const workflowItems = workflows.map((each) => ({
     value: each.id,
     label: each.name,
   }));
   const versionItems = published.map((version) => ({
-    value: version,
+    value: String(version),
     label: t`Version ${version}`,
   }));
   return (
@@ -169,121 +181,90 @@ const BindDialog = ({
       open
     >
       <DialogContent closeLabel={t`Close`}>
-        <DialogHeader>
-          <DialogTitle>
+        <DialogTitle>
+          {naming ? t`Bind a workflow` : t`Change what ${alias} starts`}
+        </DialogTitle>
+        <DialogDescription>
+          {t`The App starts this exact version by its name, until a builder binds another. Starting it still takes the App's own permission on the workflow, which an admin grants.`}
+        </DialogDescription>
+        <DialogBody>
+          <Form
+            id={formId}
+            onSubmit={(event) => {
+              event.preventDefault();
+            }}
+          >
             {naming ? (
-              <Trans>Bind a workflow</Trans>
-            ) : (
-              <Trans>Change what {alias} starts</Trans>
+              <Field invalid={alias !== "" && !aliasValid}>
+                <FieldLabel>{t`Name in the App's code`}</FieldLabel>
+                <Input maxLength={64} onValueChange={setAlias} value={alias} />
+                {alias === "" || aliasValid ? (
+                  <FieldDescription>
+                    {t`A letter, then letters, digits or underscores, such as summary.`}
+                  </FieldDescription>
+                ) : (
+                  <FieldError match>
+                    {t`Start with a letter, then use only letters, digits or underscores.`}
+                  </FieldError>
+                )}
+              </Field>
+            ) : null}
+            <Field>
+              <FieldLabel>{t`Workflow`}</FieldLabel>
+              <Select
+                items={workflowItems}
+                onValueChange={(value) => {
+                  if (value !== null) {
+                    setWorkflow(value);
+                    setChosen(null);
+                    setVersions(undefined);
+                  }
+                }}
+                value={workflow}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={t`Choose a workflow`} />
+                </SelectTrigger>
+                <SelectContent />
+              </Select>
+            </Field>
+            <Field>
+              <FieldLabel>{t`Version`}</FieldLabel>
+              <Select
+                disabled={workflow === null || versions?.state !== "ready"}
+                items={versionItems}
+                onValueChange={(value) => {
+                  if (value !== null) {
+                    setChosen(Number(value));
+                  }
+                }}
+                value={chosen === null ? null : String(chosen)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={t`Choose a version`} />
+                </SelectTrigger>
+                <SelectContent />
+              </Select>
+              {versions === undefined || versions.state === "ready" ? null : (
+                <NotLoaded page={versions} />
+              )}
+            </Field>
+            {failure === undefined ? null : (
+              <Alert tone="danger">{failure}</Alert>
             )}
-          </DialogTitle>
-          <DialogDescription>
-            <Trans>
-              The App starts this exact version by its name, until a builder
-              binds another. Starting it still takes the App&apos;s own
-              permission on the workflow, which an admin grants.
-            </Trans>
-          </DialogDescription>
-        </DialogHeader>
-        {naming ? (
-          <Field>
-            <FieldLabel htmlFor={aliasId}>
-              <Trans>Name in the App&apos;s code</Trans>
-            </FieldLabel>
-            <Input
-              id={aliasId}
-              maxLength={64}
-              onChange={(event) => {
-                setAlias(event.target.value);
-              }}
-              value={alias}
-            />
-            {alias === "" || aliasValid ? (
-              <FieldDescription>
-                <Trans>
-                  A letter, then letters, digits or underscores, such as
-                  summary.
-                </Trans>
-              </FieldDescription>
-            ) : (
-              <FieldError>
-                <Trans>
-                  Start with a letter, then use only letters, digits or
-                  underscores.
-                </Trans>
-              </FieldError>
-            )}
-          </Field>
-        ) : null}
-        <Field>
-          <FieldLabel htmlFor={workflowId}>
-            <Trans>Workflow</Trans>
-          </FieldLabel>
-          <Select
-            items={workflowItems}
-            onValueChange={(value: unknown) => {
-              if (typeof value === "string") {
-                setWorkflow(value);
-                setChosen(null);
-                setVersions(undefined);
-              }
-            }}
-            value={workflow}
-          >
-            <SelectTrigger className="w-full" id={workflowId}>
-              <SelectValue placeholder={t`Choose a workflow`} />
-            </SelectTrigger>
-            <SelectContent>
-              {workflowItems.map((item) => (
-                <SelectItem key={item.value} value={item.value}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={versionId}>
-            <Trans>Version</Trans>
-          </FieldLabel>
-          <Select
-            disabled={workflow === null || versions?.state !== "ready"}
-            items={versionItems}
-            onValueChange={(value: unknown) => {
-              if (typeof value === "number") {
-                setChosen(value);
-              }
-            }}
-            value={chosen}
-          >
-            <SelectTrigger className="w-full" id={versionId}>
-              <SelectValue placeholder={t`Choose a version`} />
-            </SelectTrigger>
-            <SelectContent>
-              {versionItems.map((item) => (
-                <SelectItem key={item.value} value={item.value}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {versions === undefined || versions.state === "ready" ? null : (
-            <NotLoaded page={versions} />
-          )}
-        </Field>
-        <ErrorText>{failure}</ErrorText>
+          </Form>
+        </DialogBody>
         <DialogFooter>
-          <Button disabled={busy} onClick={onClose} variant="outline">
-            <Trans>Cancel</Trans>
-          </Button>
-          <Button
+          <DialogAction>{t`Cancel`}</DialogAction>
+          <DialogAction
+            action={bind}
             disabled={busy || !aliasValid || chosen === null}
-            onClick={() => {
-              void bind();
-            }}
+            failedLabel={t`Could not bind`}
+            variant="ink"
+            workingLabel={t`Binding`}
           >
-            <Trans>Bind</Trans>
-          </Button>
+            {t`Bind`}
+          </DialogAction>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -298,6 +279,7 @@ const Unbind = ({
   binding: AppWorkflowBinding;
   onUnbound: () => void;
 }) => {
+  const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
   const { alias } = binding;
   const unbind = async (): Promise<void> => {
@@ -305,48 +287,41 @@ const Unbind = ({
       await session.workflowResources.unbindFromApp(binding.id);
       return true;
     });
-    if (done === true) {
-      onUnbound();
+    if (done !== true) {
+      // It stays open, with core's reason in it.
+      throw new Error("Not unbound");
     }
+    onUnbound();
   };
   return (
-    <div className="flex flex-col items-end gap-1">
-      <AlertDialog>
-        <AlertDialogTrigger
-          disabled={busy}
-          render={<Button size="sm" variant="outline" />}
-        >
-          <Trans>Unbind</Trans>
-        </AlertDialogTrigger>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              <Trans>Unbind {alias}?</Trans>
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              <Trans>
-                The App can no longer start a workflow by this name, until a
-                builder binds it again. Runs already started go on.
-              </Trans>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>
-              <Trans>Cancel</Trans>
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                void unbind();
-              }}
-              variant="destructive"
-            >
-              <Trans>Unbind</Trans>
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <ErrorText>{failure}</ErrorText>
-    </div>
+    <AlertDialog>
+      <AlertDialogTrigger
+        aria-label={t`Unbind ${alias}`}
+        disabled={busy}
+        size="sm"
+        variant="ghost"
+      >
+        {t`Unbind`}
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogTitle>{t`Unbind ${alias}?`}</AlertDialogTitle>
+        <AlertDialogDescription>
+          {t`The App can no longer start a workflow by this name, until a builder binds it again. Runs already started go on.`}
+        </AlertDialogDescription>
+        {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
+        <AlertDialogFooter>
+          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogAction
+            action={unbind}
+            failedLabel={t`Could not unbind`}
+            variant="danger"
+            workingLabel={t`Unbinding`}
+          >
+            {t`Unbind`}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 };
 
@@ -365,100 +340,79 @@ const BindingsView = ({
   changes: boolean;
   onChanged: () => void;
 }) => {
+  const { t } = useLingui();
   const [binding, setBinding] = useState<Binding | null>(null);
   const names = new Map(workflows.map((each) => [each.id, each.name]));
   return (
-    <section className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-medium">
-          <Trans>Workflows the App starts</Trans>
-        </h2>
-        {changes ? (
+    <SectionCard
+      actions={
+        changes ? (
           <Button
+            icon={Workflow}
             onClick={() => {
               setBinding({ alias: "", workflow: null, version: null });
             }}
             size="sm"
-            variant="outline"
           >
-            <Trans>Bind a workflow</Trans>
+            {t`Bind a workflow`}
           </Button>
-        ) : null}
-      </div>
+        ) : undefined
+      }
+      density="compact"
+      flush={bindings.length > 0}
+      headingLevel={3}
+      title={t`Workflows the App starts`}
+    >
       {bindings.length === 0 ? (
-        <p className="text-muted-foreground">
-          <Trans>The App starts no workflow of its own.</Trans>
-        </p>
+        <Text size="sm" tone="muted">
+          {t`The App starts no workflow of its own.`}
+        </Text>
       ) : (
-        <div className="bg-card overflow-hidden rounded-xl border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead variant="card">
-                  <Trans>Name in the App&apos;s code</Trans>
-                </TableHead>
-                <TableHead variant="card">
-                  <Trans>Workflow</Trans>
-                </TableHead>
-                <TableHead className="w-24" variant="card">
-                  <Trans>Version</Trans>
-                </TableHead>
-                <TableHead className="w-44" variant="card">
-                  <Trans>Bound</Trans>
-                </TableHead>
+        <Table aria-label={t`Workflows the App starts`} density="compact">
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t`Name in the App's code`}</TableHead>
+              <TableHead>{t`Workflow`}</TableHead>
+              <TableHead>{t`Version`}</TableHead>
+              <TableHead>{t`Bound`}</TableHead>
+              {changes ? <TableHead aria-label={t`Actions`} /> : null}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {bindings.map((each) => (
+              <TableRow key={each.id}>
+                <TableCell lead>{each.alias}</TableCell>
+                <TableCell>
+                  {names.get(each.workflowId) ?? each.workflowId}
+                </TableCell>
+                <TableCell>{each.version}</TableCell>
+                <TableCell>{formatDateTime(each.boundAt)}</TableCell>
                 {changes ? (
-                  <TableHead className="w-48" variant="card">
-                    <span className="sr-only">
-                      <Trans>Actions</Trans>
-                    </span>
-                  </TableHead>
+                  <TableCell align="end">
+                    <div {...stylex.props(styles.actions)}>
+                      <Button
+                        onClick={() => {
+                          setBinding({
+                            alias: each.alias,
+                            workflow: names.has(each.workflowId)
+                              ? each.workflowId
+                              : null,
+                            version: null,
+                          });
+                        }}
+                        size="sm"
+                        variant="ghost"
+                      >
+                        {t`Change version`}
+                      </Button>
+                      <Unbind binding={each} onUnbound={onChanged} />
+                    </div>
+                  </TableCell>
                 ) : null}
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {bindings.map((each) => (
-                <TableRow key={each.id}>
-                  <TableCell variant="card">
-                    <span className="font-mono text-xs">{each.alias}</span>
-                  </TableCell>
-                  <TableCell variant="card">
-                    {names.get(each.workflowId) ?? (
-                      <span className="font-mono text-xs">
-                        {each.workflowId}
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell variant="card">{each.version}</TableCell>
-                  <TableCell variant="card">
-                    {formatDateTime(each.boundAt)}
-                  </TableCell>
-                  {changes ? (
-                    <TableCell variant="card">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          onClick={() => {
-                            setBinding({
-                              alias: each.alias,
-                              workflow: names.has(each.workflowId)
-                                ? each.workflowId
-                                : null,
-                              version: null,
-                            });
-                          }}
-                          size="sm"
-                          variant="ghost"
-                        >
-                          <Trans>Change version</Trans>
-                        </Button>
-                        <Unbind binding={each} onUnbound={onChanged} />
-                      </div>
-                    </TableCell>
-                  ) : null}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+            ))}
+          </TableBody>
+        </Table>
       )}
       {binding === null ? null : (
         <BindDialog
@@ -471,7 +425,7 @@ const BindingsView = ({
           workflows={bindable(workflows)}
         />
       )}
-    </section>
+    </SectionCard>
   );
 };
 

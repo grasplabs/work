@@ -10,48 +10,47 @@ import type {
   PurgeReason,
   PurgeResult,
 } from "@grasp-os/shared/knowledge";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg, plural } from "@lingui/core/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useRouter } from "@tanstack/react-router";
+import { useId, useState } from "react";
+
+import { ErrorText } from "../error-text.tsx";
+import { formatDateTime } from "../format.ts";
 import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@grasp-os/ui/components/alert";
-import { Button } from "@grasp-os/ui/components/button";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../grasp/alert-dialog/index.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { Button } from "../grasp/button/index.ts";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
-  DialogHeader,
   DialogTitle,
-} from "@grasp-os/ui/components/dialog";
+} from "../grasp/dialog/index.ts";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from "@grasp-os/ui/components/field";
-import {
-  RadioGroup,
-  RadioGroupItem,
-} from "@grasp-os/ui/components/radio-group";
-import { Textarea } from "@grasp-os/ui/components/textarea";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { useRouter } from "@tanstack/react-router";
-import { EllipsisIcon, UserXIcon, TriangleAlertIcon } from "lucide-react";
-import { useId, useState } from "react";
-
-import { ErrorText } from "../error-text.tsx";
-import { formatDateTime } from "../format.ts";
+} from "../grasp/dropdown-menu/index.ts";
+import { Field, FieldDescription, FieldLabel } from "../grasp/field/index.ts";
+import { Form } from "../grasp/form/index.ts";
+import { More, Trash } from "../grasp/icons/index.ts";
+import { RadioGroup, RadioGroupItem } from "../grasp/radio-group/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { Textarea } from "../grasp/textarea/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // Purging personal data from a collection, for an admin: the terms to take
@@ -67,6 +66,18 @@ const reasonLabels: Readonly<Record<PurgeReason, MessageDescriptor>> = {
   erasure_request: msg`Someone asked for their data to be erased`,
   other: msg`Another reason`,
 };
+
+const styles = stylex.create({
+  stack: { display: "flex", flexDirection: "column", gap: grasp.space4 },
+  counts: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space1,
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+});
 
 /** The terms as typed, one a line: each once, in the order typed. */
 const termsOf = (text: string): string[] => [
@@ -95,43 +106,53 @@ const PlanCounts = ({
 }: {
   plan: PurgePlan;
 }) => (
-  <ul className="flex flex-col gap-1 text-sm">
+  <ul {...stylex.props(styles.counts)}>
     <li>
-      <Plural
-        one="# document rewritten"
-        other="# documents rewritten"
-        value={documents}
-      />
+      <Text element="span" size="sm">
+        <Plural
+          one="# document rewritten"
+          other="# documents rewritten"
+          value={documents}
+        />
+      </Text>
     </li>
     <li>
-      <Plural
-        one="# version rewritten"
-        other="# versions rewritten"
-        value={versions}
-      />
+      <Text element="span" size="sm">
+        <Plural
+          one="# version rewritten"
+          other="# versions rewritten"
+          value={versions}
+        />
+      </Text>
     </li>
     <li>
-      <Plural
-        one="# occurrence removed"
-        other="# occurrences removed"
-        value={occurrences}
-      />
+      <Text element="span" size="sm">
+        <Plural
+          one="# occurrence removed"
+          other="# occurrences removed"
+          value={occurrences}
+        />
+      </Text>
     </li>
     {memories === undefined ? null : (
       <li>
-        <Plural
-          one="# memory record redacted or deleted"
-          other="# memory records redacted or deleted"
-          value={memories}
-        />
+        <Text element="span" size="sm">
+          <Plural
+            one="# memory record redacted or deleted"
+            other="# memory records redacted or deleted"
+            value={memories}
+          />
+        </Text>
       </li>
     )}
     <li>
-      <Plural
-        one="# uploaded original deleted"
-        other="# uploaded originals deleted"
-        value={originals}
-      />
+      <Text element="span" size="sm">
+        <Plural
+          one="# uploaded original deleted"
+          other="# uploaded originals deleted"
+          value={originals}
+        />
+      </Text>
     </li>
   </ul>
 );
@@ -152,22 +173,16 @@ const PurgeForm = ({
   onTerms: (terms: string) => void;
   onReason: (reason: PurgeReason) => void;
 }) => {
-  const { i18n } = useLingui();
-  const ids = useId();
+  const { t, i18n } = useLingui();
   const most = purgeMaxTerms;
   const first = purgeMaxDocuments;
   return (
     <>
       <Field>
-        <FieldLabel htmlFor={`${ids}-terms`}>
-          <Trans>What to remove</Trans>
-        </FieldLabel>
+        <FieldLabel>{t`What to remove`}</FieldLabel>
         <Textarea
           disabled={busy}
-          id={`${ids}-terms`}
-          onChange={(event) => {
-            onTerms(event.target.value);
-          }}
+          onValueChange={onTerms}
           rows={5}
           value={terms}
         />
@@ -179,10 +194,8 @@ const PurgeForm = ({
           </Trans>
         </FieldDescription>
       </Field>
-      <FieldSet>
-        <FieldLegend variant="label">
-          <Trans>Why</Trans>
-        </FieldLegend>
+      <Field>
+        <FieldLabel>{t`Why`}</FieldLabel>
         <RadioGroup
           disabled={busy}
           onValueChange={(value) => {
@@ -195,17 +208,13 @@ const PurgeForm = ({
         >
           {purgeReasonSchema.options.map((one) => (
             <Field key={one} orientation="horizontal">
-              <RadioGroupItem id={`${ids}-${one}`} value={one} />
-              <FieldContent>
-                <FieldLabel htmlFor={`${ids}-${one}`}>
-                  {i18n._(reasonLabels[one])}
-                </FieldLabel>
-              </FieldContent>
+              <RadioGroupItem value={one} />
+              <FieldLabel>{i18n._(reasonLabels[one])}</FieldLabel>
             </Field>
           ))}
         </RadioGroup>
-      </FieldSet>
-      <p className="text-muted-foreground text-sm">
+      </Field>
+      <Text size="sm" tone="muted">
         {documents > purgeMaxDocuments ? (
           <Trans>
             From every version of the first {first} files of this collection;
@@ -218,12 +227,12 @@ const PurgeForm = ({
             value={documents}
           />
         )}
-      </p>
+      </Text>
     </>
   );
 };
 
-/** The plan, to confirm before it expires. */
+/** The plan: what the purge would remove, to confirm before it expires. */
 const PlanView = ({
   plan,
   kind,
@@ -231,91 +240,134 @@ const PlanView = ({
   plan: PurgePlan;
   kind: PurgeInput["type"];
 }) => {
-  const until = formatDateTime(plan.expiresAt);
+  const { t } = useLingui();
   const longer = plan.inLongerWords;
   return (
-    <div className="flex flex-col gap-4">
+    <div {...stylex.props(styles.stack)}>
       <PlanCounts plan={plan} />
       {longer > 0 ? (
-        <Alert>
-          <TriangleAlertIcon />
-          <AlertTitle>
-            <Plural
-              one="A term is still in # longer word or address."
-              other="A term is still in # longer words or addresses."
-              value={longer}
-            />
-          </AlertTitle>
-          <AlertDescription>
-            <Trans>
-              A search for part of a word still finds those. Go back and add
-              each such form as a term of its own.
-            </Trans>
-          </AlertDescription>
+        <Alert
+          title={t`${plural(longer, {
+            one: "A term is still in # longer word or address.",
+            other: "A term is still in # longer words or addresses.",
+          })}`}
+          tone="attention"
+        >
+          <Trans>
+            A search for part of a word still finds those. Go back and add each
+            such form as a term of its own.
+          </Trans>
         </Alert>
       ) : null}
       {kind === "content" ? (
         // A content purge's widest effect, said without a number: how many
         // of those hold a term is never counted (it would say what
         // someone's private records hold).
-        <p className="text-sm">
+        <Text size="sm">
           <Trans>
             The terms also go from everyone&apos;s memory records, interviews
             and answers. How many of those hold them isn&apos;t counted or
             shown.
           </Trans>
-        </p>
+        </Text>
       ) : null}
-      <p className="text-muted-foreground text-sm">
-        <Trans>
-          This can&apos;t be undone. Confirm by {until}, or prepare it again.
-        </Trans>
-      </p>
     </div>
   );
 };
 
 /** What the purge removed, and what a search still finds. */
 const ResultView = ({ result }: { result: PurgeResult }) => {
+  const { t } = useLingui();
   const { documents, versions } = result;
   const still = result.stillFound ?? 0;
   return (
-    <div className="flex flex-col gap-4 text-sm">
-      <ul className="flex flex-col gap-1">
+    <div {...stylex.props(styles.stack)}>
+      <ul {...stylex.props(styles.counts)}>
         <li>
-          <Plural
-            one="# document purged"
-            other="# documents purged"
-            value={documents}
-          />
+          <Text element="span" size="sm">
+            <Plural
+              one="# document purged"
+              other="# documents purged"
+              value={documents}
+            />
+          </Text>
         </li>
         <li>
-          <Plural
-            one="# version purged"
-            other="# versions purged"
-            value={versions}
-          />
+          <Text element="span" size="sm">
+            <Plural
+              one="# version purged"
+              other="# versions purged"
+              value={versions}
+            />
+          </Text>
         </li>
       </ul>
       {still > 0 ? (
-        <Alert>
-          <TriangleAlertIcon />
-          <AlertTitle>
-            <Plural
-              one="A search still finds a term in # place."
-              other="A search still finds a term in # places."
-              value={still}
-            />
-          </AlertTitle>
-          <AlertDescription>
-            <Trans>
-              A form spelled otherwise, or part of a longer word or address.
-              Purge again with those forms as terms.
-            </Trans>
-          </AlertDescription>
+        <Alert
+          title={t`${plural(still, {
+            one: "A search still finds a term in # place.",
+            other: "A search still finds a term in # places.",
+          })}`}
+          tone="attention"
+        >
+          <Trans>
+            A form spelled otherwise, or part of a longer word or address. Purge
+            again with those forms as terms.
+          </Trans>
         </Alert>
       ) : null}
     </div>
+  );
+};
+
+/**
+ * The last step, asked first: the purge can't be undone, and its plan
+ * holds until `expiresAt`. `onConfirm` throws when core refused, so the
+ * question stays open and says so.
+ */
+const ConfirmPurge = ({
+  collection,
+  expiresAt,
+  busy,
+  failure,
+  onConfirm,
+}: {
+  collection: string;
+  expiresAt: string;
+  busy: boolean;
+  failure: string | undefined;
+  onConfirm: () => Promise<void>;
+}) => {
+  const { t } = useLingui();
+  const until = formatDateTime(expiresAt);
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger disabled={busy} size="sm" variant="danger">
+        {t`Purge for good`}
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogTitle>
+          {t`Purge personal data from ${collection} for good?`}
+        </AlertDialogTitle>
+        <AlertDialogDescription>
+          <Trans>
+            This can&apos;t be undone. Confirm by {until}, or prepare it again.
+          </Trans>
+        </AlertDialogDescription>
+        <ErrorText>{failure}</ErrorText>
+        <AlertDialogFooter>
+          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogAction
+            action={onConfirm}
+            failedLabel={t`Not purged`}
+            variant="danger"
+            workingLabel={t`Purging`}
+          >
+            {t`Purge for good`}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 };
 
@@ -327,6 +379,8 @@ const PurgeFlow = ({
   collection: string;
   documents: readonly DocumentSummary[];
 }) => {
+  const { t } = useLingui();
+  const formId = useId();
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   const [stage, setStage] = useState<Stage>({ at: "form" });
@@ -355,53 +409,62 @@ const PurgeFlow = ({
     const result = await run(
       async (session) => await session.knowledge.purge(input, token)
     );
-    if (result !== undefined) {
-      setStage({ at: "done", result });
-      // The documents read as they are now.
-      await router.invalidate();
+    // Core refused, as `failure` says: the question stays open.
+    if (result === undefined) {
+      throw new Error("The purge was refused.");
     }
+    setStage({ at: "done", result });
+    // The documents read as they are now.
+    await router.invalidate();
   };
 
   return (
-    <form
-      className="flex flex-col gap-5"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (stage.at === "form" && ready && !busy) {
-          void prepare();
-        }
-      }}
-    >
-      <DialogHeader>
-        <DialogTitle>
-          <Trans>Purge personal data from {collection}</Trans>
-        </DialogTitle>
-        <DialogDescription>
-          <Trans>
-            Takes terms out of every version of the collection&apos;s documents,
-            for good. You see what it would remove first.
-          </Trans>
-        </DialogDescription>
-      </DialogHeader>
-      {stage.at === "form" ? (
-        <PurgeForm
-          busy={busy}
-          documents={documents.length}
-          onReason={setReason}
-          onTerms={setTerms}
-          reason={reason}
-          terms={terms}
-        />
-      ) : null}
-      {stage.at === "plan" ? (
-        <PlanView plan={stage.plan} kind={stage.input.type} />
-      ) : null}
-      {stage.at === "done" ? <ResultView result={stage.result} /> : null}
-      <ErrorText>{failure}</ErrorText>
+    <>
+      <DialogTitle>{t`Purge personal data from ${collection}`}</DialogTitle>
+      <DialogDescription>
+        <Trans>
+          Takes terms out of every version of the collection&apos;s documents,
+          for good. You see what it would remove first.
+        </Trans>
+      </DialogDescription>
+      <DialogBody>
+        <Form
+          aria-label={t`Purge personal data from ${collection}`}
+          id={formId}
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (stage.at === "form" && ready && !busy) {
+              void prepare();
+            }
+          }}
+        >
+          {stage.at === "form" ? (
+            <PurgeForm
+              busy={busy}
+              documents={documents.length}
+              onReason={setReason}
+              onTerms={setTerms}
+              reason={reason}
+              terms={terms}
+            />
+          ) : null}
+          {stage.at === "plan" ? (
+            <PlanView kind={stage.input.type} plan={stage.plan} />
+          ) : null}
+          {stage.at === "done" ? <ResultView result={stage.result} /> : null}
+          <ErrorText>{failure}</ErrorText>
+        </Form>
+      </DialogBody>
       <DialogFooter>
         {stage.at === "form" ? (
-          <Button disabled={!ready || busy} type="submit">
-            <Trans>Preview the purge</Trans>
+          <Button
+            disabled={!ready || busy}
+            form={formId}
+            size="sm"
+            type="submit"
+            variant="ink"
+          >
+            {t`Preview the purge`}
           </Button>
         ) : null}
         {stage.at === "plan" ? (
@@ -411,21 +474,19 @@ const PurgeFlow = ({
               onClick={() => {
                 setStage({ at: "form" });
               }}
-              type="button"
-              variant="outline"
+              size="sm"
             >
-              <Trans>Change the terms</Trans>
+              {t`Change the terms`}
             </Button>
-            <Button
-              disabled={busy}
-              onClick={() => {
-                void confirm(stage.input, stage.plan.token);
+            <ConfirmPurge
+              busy={busy}
+              collection={collection}
+              expiresAt={stage.plan.expiresAt}
+              failure={failure}
+              onConfirm={async () => {
+                await confirm(stage.input, stage.plan.token);
               }}
-              type="button"
-              variant="destructive"
-            >
-              <Trans>Purge for good</Trans>
-            </Button>
+            />
           </>
         ) : null}
         {stage.at === "done" ? (
@@ -433,14 +494,13 @@ const PurgeFlow = ({
             onClick={() => {
               setStage({ at: "form" });
             }}
-            type="button"
-            variant="outline"
+            size="sm"
           >
-            <Trans>Purge more</Trans>
+            {t`Purge more`}
           </Button>
         ) : null}
       </DialogFooter>
-    </form>
+    </>
   );
 };
 
@@ -461,24 +521,20 @@ export const CollectionAdminMenu = ({
     <>
       <DropdownMenu>
         <DropdownMenuTrigger
-          render={
-            <Button
-              aria-label={t`Collection actions`}
-              size="icon-sm"
-              variant="ghost"
-            />
-          }
-        >
-          <EllipsisIcon />
-        </DropdownMenuTrigger>
+          aria-label={t`Collection actions`}
+          icon={More}
+          size="sm"
+          variant="ghost"
+        />
         <DropdownMenuContent align="end">
           <DropdownMenuItem
-            onClick={() => {
+            icon={Trash}
+            onSelect={() => {
               setPurging(true);
             }}
+            variant="danger"
           >
-            <UserXIcon />
-            <Trans>Purge personal data</Trans>
+            {t`Purge personal data`}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

@@ -10,7 +10,6 @@ import type {
   AppMemberRef,
   ShareCandidates,
 } from "@grasp-os/shared/apps";
-import { toast } from "@grasp-os/ui/components/toast";
 import { i18n as pageI18n } from "@lingui/core";
 import type { I18n } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
@@ -43,6 +42,7 @@ import {
 } from "../grasp/sheet/index.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
 import { Text } from "../grasp/text/index.ts";
+import { toast } from "../grasp/toast/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { usePeopleApart } from "../people/people-apart.ts";
 import { useCore } from "../use-core.ts";
@@ -344,7 +344,7 @@ interface UndoTools {
 
 /** Says Undo failed, in the page's words. */
 const undoFailed = (error: unknown): void => {
-  toast.add({ type: "error", title: publishFailureText(error) });
+  toast.error(publishFailureText(error));
 };
 
 /**
@@ -377,7 +377,7 @@ const takeBack = async (
     undoFailed(done.error);
     return;
   }
-  toast.add({ type: "success", title: pageI18n._(msg`Sharing undone`) });
+  toast.success(pageI18n._(msg`Sharing undone`));
 };
 
 /**
@@ -404,7 +404,7 @@ const undoShare = async (
   if (back === undefined) {
     onDone();
     await router.invalidate();
-    toast.add({ type: "success", title: pageI18n._(msg`Sharing undone`) });
+    toast.success(pageI18n._(msg`Sharing undone`));
     return;
   }
   const draft = await settled(
@@ -420,16 +420,15 @@ const undoShare = async (
     await takeBack(tools, app, back, revision);
     return;
   }
-  toast.add({
-    type: "warning",
-    title: pageI18n._(msg`Give your team the version they had before?`),
+  toast.warning(pageI18n._(msg`Give your team the version they had before?`), {
     description: pageI18n._(
       msg`The App changed since you shared it. Going back drops those changes, for everyone who builds this App.`
     ),
-    timeout: 0,
-    actionProps: {
-      children: pageI18n._(msg`Drop them and go back`),
-      onClick: () => {
+    // It stays until it is answered: it asks something.
+    duration: Number.POSITIVE_INFINITY,
+    action: {
+      label: pageI18n._(msg`Drop them and go back`),
+      onAction: () => {
         void takeBack(tools, app, back, revision);
       },
     },
@@ -549,20 +548,19 @@ const useSharing = (
           : { before, made, revision: changes.revision },
     };
     const who = formatList(recipients.map(({ name }) => name));
-    toast.add({
-      type: "success",
-      title:
-        recipients.length === 0
-          ? t`Your changes are shared`
-          : t`Shared with ${who}`,
-      timeout: 10_000,
-      actionProps: {
-        children: t`Undo`,
-        onClick: () => {
-          void undoShare(tools, undoable);
+    toast.success(
+      recipients.length === 0
+        ? t`Your changes are shared`
+        : t`Shared with ${who}`,
+      {
+        action: {
+          label: t`Undo`,
+          onAction: () => {
+            void undoShare(tools, undoable);
+          },
         },
-      },
-    });
+      }
+    );
     return true;
   };
   return {

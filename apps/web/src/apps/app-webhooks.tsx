@@ -4,27 +4,58 @@ import type {
   AppWebhookEvent,
 } from "@grasp-os/shared/app-webhooks";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
 import { i18n } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import { msg, plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { decidesRequests } from "../dashboard/waiting.ts";
-import { ErrorText } from "../error-text.tsx";
+import { formatList } from "../format.ts";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../grasp/alert-dialog/index.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Checkbox, CheckboxGroup } from "../grasp/checkbox/index.ts";
+import {
+  Dialog,
+  DialogAction,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogTitle,
+  DialogTrigger,
+} from "../grasp/dialog/index.ts";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+} from "../grasp/field/index.ts";
+import { Form } from "../grasp/form/index.ts";
+import { Plus, Web } from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { Text } from "../grasp/text/index.ts";
 import { ShownOnceDialog } from "../shown-once.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
@@ -53,7 +84,11 @@ const eventNames = {
 const eventLabel = (event: AppWebhookEvent): string =>
   i18n._(eventNames[event]);
 
-/** Adding a webhook: its address, and the events it is sent. */
+/** Whether `value` is one of the App's webhook events. */
+const isEvent = (value: string): value is AppWebhookEvent =>
+  appWebhookEvents.some((event) => event === value);
+
+/** Adding a webhook, in a dialog: its address, and the events it is sent. */
 const AddWebhook = ({
   app,
   onSecret,
@@ -63,17 +98,21 @@ const AddWebhook = ({
 }) => {
   const { t } = useLingui();
   const router = useRouter();
+  const formId = useId();
   const { busy, failure, run } = useCoreAction();
+  const [open, setOpen] = useState(false);
   const [url, setUrl] = useState("");
   const [events, setEvents] = useState<AppWebhookEvent[]>(["form_sent"]);
-  const handleSubmit = (): void => {
-    void run(async (session) => {
+  const add = async (): Promise<void> => {
+    let added = false;
+    await run(async (session) => {
       await changeThenRefresh(
         async () => {
           const { secret } = await session.apps.webhooks.add(app, {
             url: url.trim(),
             events,
           });
+          added = true;
           setUrl("");
           onSecret(secret);
         },
@@ -82,71 +121,113 @@ const AddWebhook = ({
         }
       );
     });
+    if (!added) {
+      // The dialog stays open, with core's reason in it.
+      throw new Error("Not added");
+    }
   };
   return (
-    <form
-      className="flex flex-col gap-4 rounded-lg border p-4"
-      onSubmit={(event) => {
-        event.preventDefault();
-        handleSubmit();
-      }}
-    >
-      <Field>
-        <FieldLabel htmlFor="webhook-url">
-          <Trans>Address</Trans>
-        </FieldLabel>
-        <Input
-          autoComplete="off"
-          id="webhook-url"
-          inputMode="url"
-          maxLength={2048}
-          onChange={(event) => {
-            setUrl(event.target.value);
-          }}
-          placeholder="https://"
-          spellCheck={false}
-          type="url"
-          value={url}
-        />
-        <FieldDescription>
-          <Trans>
-            An https address on the public internet, with no user name, password
-            or IP address in it.
-          </Trans>
-        </FieldDescription>
-      </Field>
-      <FieldSet>
-        <FieldLegend variant="label">
-          <Trans>Send it when</Trans>
-        </FieldLegend>
-        <ul className="flex flex-col gap-1">
-          {appWebhookEvents.map((event) => (
-            <li key={event}>
-              <label className="flex items-center gap-2">
-                <Checkbox
-                  checked={events.includes(event)}
-                  onCheckedChange={(checked) => {
-                    const rest = events.filter((one) => one !== event);
-                    setEvents(checked ? [...rest, event] : rest);
-                  }}
-                />
-                {eventLabel(event)}
-              </label>
-            </li>
-          ))}
-        </ul>
-      </FieldSet>
-      <ErrorText>{failure}</ErrorText>
-      <div>
-        <Button
-          aria-label={t`Add webhook`}
-          disabled={busy || url.trim() === "" || events.length === 0}
-          type="submit"
-        >
-          <Trans>Add webhook</Trans>
-        </Button>
-      </div>
-    </form>
+    <Dialog onOpenChange={setOpen} open={open}>
+      <DialogTrigger icon={Plus} size="sm">
+        {t`Add webhook`}
+      </DialogTrigger>
+      <DialogContent closeLabel={t`Close`}>
+        <DialogTitle>{t`Add webhook`}</DialogTitle>
+        <DialogBody>
+          <Form
+            id={formId}
+            onSubmit={(event) => {
+              event.preventDefault();
+            }}
+          >
+            <Field>
+              <FieldLabel>{t`Address`}</FieldLabel>
+              <Input
+                autoComplete="off"
+                inputMode="url"
+                maxLength={2048}
+                onValueChange={setUrl}
+                placeholder="https://"
+                spellCheck={false}
+                type="url"
+                value={url}
+              />
+              <FieldDescription>
+                {t`An https address on the public internet, with no user name, password or IP address in it.`}
+              </FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel>{t`Send it when`}</FieldLabel>
+              <CheckboxGroup
+                onValueChange={(value) => {
+                  setEvents(
+                    value.flatMap((each) => (isEvent(each) ? [each] : []))
+                  );
+                }}
+                value={events}
+              >
+                {appWebhookEvents.map((event) => (
+                  <Field key={event} orientation="horizontal">
+                    <Checkbox value={event} />
+                    <FieldContent>
+                      <FieldLabel>{eventLabel(event)}</FieldLabel>
+                    </FieldContent>
+                  </Field>
+                ))}
+              </CheckboxGroup>
+            </Field>
+            {failure === undefined ? null : (
+              <Alert tone="danger">{failure}</Alert>
+            )}
+          </Form>
+        </DialogBody>
+        <DialogFooter>
+          <DialogAction>{t`Cancel`}</DialogAction>
+          <DialogAction
+            action={add}
+            disabled={busy || url.trim() === "" || events.length === 0}
+            failedLabel={t`Could not add`}
+            variant="ink"
+            workingLabel={t`Adding`}
+          >
+            {t`Add webhook`}
+          </DialogAction>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+/** Removing a webhook, once confirmed. */
+const RemoveWebhook = ({
+  webhook,
+  busy,
+  onRemove,
+}: {
+  webhook: AppWebhook;
+  busy: boolean;
+  onRemove: () => void;
+}) => {
+  const { t } = useLingui();
+  const { url } = webhook;
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger disabled={busy} size="sm" variant="ghost">
+        {t`Remove`}
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogTitle>{t`Remove the webhook to ${url}?`}</AlertDialogTitle>
+        <AlertDialogDescription>
+          {t`Grasp stops sending the App's events there. Its secret can't be used again.`}
+        </AlertDialogDescription>
+        <AlertDialogFooter>
+          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogAction onClick={onRemove} variant="danger">
+            {t`Remove`}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 };
 
@@ -158,6 +239,7 @@ const WebhookRow = ({
   webhook: AppWebhook;
   approves: boolean;
 }) => {
+  const { t } = useLingui();
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   const act = (change: "approve" | "remove"): void => {
@@ -171,18 +253,35 @@ const WebhookRow = ({
       );
     });
   };
+  const { dropped } = webhook;
   return (
-    <li className="flex flex-col gap-2 py-3">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <span className="min-w-0 flex-1 truncate font-mono">{webhook.url}</span>
+    <Item size="xs">
+      <ItemMedia icon={Web} iconLook="inline" />
+      <ItemContent>
+        <ItemTitle>{webhook.url}</ItemTitle>
+        <ItemDescription>
+          {formatList(webhook.events.map((event) => eventLabel(event)))}
+        </ItemDescription>
+        {dropped === 0 ? null : (
+          <Alert live="off" quiet tone="danger">
+            {t`${plural(dropped, {
+              one: "# event wasn't sent: too many were waiting for this address.",
+              other:
+                "# events weren't sent: too many were waiting for this address.",
+            })}`}
+          </Alert>
+        )}
+        {failure === undefined ? null : (
+          <Alert quiet tone="danger">
+            {failure}
+          </Alert>
+        )}
+      </ItemContent>
+      <ItemActions>
         {webhook.approved === null ? (
-          <Badge variant="outline">
-            <Trans>Waiting for an admin</Trans>
-          </Badge>
+          <Badge tone="attention">{t`Waiting for an admin`}</Badge>
         ) : (
-          <Badge>
-            <Trans>Approved</Trans>
-          </Badge>
+          <Badge tone="success">{t`Approved`}</Badge>
         )}
         {approves && webhook.approved === null ? (
           <Button
@@ -192,34 +291,18 @@ const WebhookRow = ({
             }}
             size="sm"
           >
-            <Trans>Approve</Trans>
+            {t`Approve`}
           </Button>
         ) : null}
-        <Button
-          disabled={busy}
-          onClick={() => {
+        <RemoveWebhook
+          busy={busy}
+          onRemove={() => {
             act("remove");
           }}
-          size="sm"
-          variant="outline"
-        >
-          <Trans>Remove</Trans>
-        </Button>
-      </div>
-      <p className="text-muted-foreground">
-        {webhook.events.map((event) => eventLabel(event)).join(" · ")}
-      </p>
-      {webhook.dropped === 0 ? null : (
-        <p className="text-destructive">
-          <Plural
-            one="# event wasn't sent: too many were waiting for this address."
-            other="# events weren't sent: too many were waiting for this address."
-            value={webhook.dropped}
-          />
-        </p>
-      )}
-      <ErrorText>{failure}</ErrorText>
-    </li>
+          webhook={webhook}
+        />
+      </ItemActions>
+    </Item>
   );
 };
 
@@ -231,13 +314,18 @@ export const WebhookList = ({
   identity: Pick<Identity, "role" | "staff">;
   webhooks: AppWebhook[];
 }) => {
+  const { t } = useLingui();
   const approves = decidesRequests(identity);
-  return webhooks.length === 0 ? null : (
-    <ul className="divide-y">
+  return webhooks.length === 0 ? (
+    <Text size="sm" tone="muted">
+      {t`No webhooks yet.`}
+    </Text>
+  ) : (
+    <ItemGroup aria-label={t`Webhooks`} separated>
       {webhooks.map((webhook) => (
         <WebhookRow approves={approves} key={webhook.id} webhook={webhook} />
       ))}
-    </ul>
+    </ItemGroup>
   );
 };
 
@@ -254,31 +342,25 @@ export const AppWebhooks = ({
   app: string;
   children: ReactNode;
 }) => {
+  const { t } = useLingui();
   const [secret, setSecret] = useState<string>();
   return (
-    <div className="flex flex-col gap-4">
-      <p className="text-muted-foreground">
-        <Trans>
-          Grasp sends this App&apos;s events to each address, signed with its
-          secret. Until an admin approves an address, it gets IDs and the event
-          only, never what someone sent in a form.
-        </Trans>
-      </p>
+    <SectionCard
+      actions={<AddWebhook app={app} onSecret={setSecret} />}
+      density="compact"
+      headingLevel={3}
+      info={t`Grasp sends this App's events to each address, signed with its secret. Until an admin approves an address, it gets IDs and the event only, never what someone sent in a form.`}
+      title={t`Addresses`}
+    >
       {children}
-      <AddWebhook app={app} onSecret={setSecret} />
       <ShownOnceDialog
-        description={
-          <Trans>
-            Every delivery is signed with it, so the receiver can tell it came
-            from Grasp.
-          </Trans>
-        }
+        description={t`Every delivery is signed with it, so the receiver can tell it came from Grasp.`}
         onClose={() => {
           setSecret(undefined);
         }}
         secret={secret}
-        title={<Trans>The webhook&apos;s secret</Trans>}
+        title={t`The webhook's secret`}
       />
-    </div>
+    </SectionCard>
   );
 };

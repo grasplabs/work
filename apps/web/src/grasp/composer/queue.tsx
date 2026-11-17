@@ -11,6 +11,7 @@ import { Collapsible } from "../collapsible";
 import { ArrowUp, Edit, Trash } from "../icons";
 import type { IconData } from "../icons";
 import { grasp } from "../tokens/tokens.stylex";
+import { useComposerWords } from "./words";
 
 /** One waiting message. */
 export interface ComposerQueued {
@@ -125,24 +126,26 @@ const RowAction = ({
 );
 
 // The default words, in English; each is a prop, so a product can translate it.
-const queued = (count: number) => `${count} queued`;
-const edit = (text: string) => `Edit: ${text}`;
-const sendNow = (text: string) => `Send now: ${text}`;
-const remove = (text: string) => `Remove: ${text}`;
 
 /** Messages waiting their turn, above the card. */
 export const ComposerQueue = ({
   items,
   title,
-  queuedLabel = queued,
-  editLabel = edit,
-  sendNowLabel = sendNow,
-  removeLabel = remove,
+  queuedLabel: queuedGiven,
+  editLabel: editGiven,
+  sendNowLabel: sendNowGiven,
+  removeLabel: removeGiven,
   onSendNow,
   onEdit,
   onRemove,
   defaultOpen = true,
 }: ComposerQueueProps) => {
+  // Its words: the caller's where given, else the product's catalogue (GraspWords), else English.
+  const words = useComposerWords("queue");
+  const queuedLabel = queuedGiven ?? words.queued;
+  const editLabel = editGiven ?? words.edit;
+  const sendNowLabel = sendNowGiven ?? words.sendNow;
+  const removeLabel = removeGiven ?? words.remove;
   if (items.length === 0) {
     return null;
   }

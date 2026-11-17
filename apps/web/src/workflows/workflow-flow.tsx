@@ -2,30 +2,36 @@ import { failureText } from "@grasp-os/shared/errors";
 import type { DiagramTask } from "@grasp-os/shared/workflow-diagrams";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowDraft } from "@grasp-os/shared/workflow-resources";
-import { Button } from "@grasp-os/ui/components/button";
-import { Label } from "@grasp-os/ui/components/label";
+import { cn } from "@grasp-os/ui/lib/utils";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useEffect, useRef, useState } from "react";
+
+import { ErrorText } from "../error-text.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { Empty } from "../grasp/empty/index.ts";
+import { Field, FieldLabel } from "../grasp/field/index.ts";
+import {
+  Code,
+  Fit,
+  Icon,
+  Play,
+  Rows,
+  Split,
+  Tick,
+  ZoomIn,
+  ZoomOut,
+} from "../grasp/icons/index.ts";
 import {
   Sheet,
+  SheetBody,
   SheetContent,
   SheetDescription,
   SheetTitle,
-} from "@grasp-os/ui/components/sheet";
-import { Textarea } from "@grasp-os/ui/components/textarea";
-import { cn } from "@grasp-os/ui/lib/utils";
-import { Trans, useLingui } from "@lingui/react/macro";
-import {
-  BracesIcon,
-  CheckIcon,
-  Columns3Icon,
-  LocateFixedIcon,
-  Rows3Icon,
-  ZapIcon,
-  ZoomInIcon,
-  ZoomOutIcon,
-} from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
-
-import { ErrorText } from "../error-text.tsx";
+} from "../grasp/sheet/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { Textarea } from "../grasp/textarea/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCore } from "../use-core.ts";
 import { withHeldCheckpoint } from "./definition-editor.tsx";
 import { stepFieldsAt } from "./step-body.ts";
@@ -39,7 +45,63 @@ import type { Layout } from "./workflow-diagram.tsx";
 // `workflow-diagram.tsx`), to where it ends. Its builders open a step to
 // change it (core's `editStep`, GRA-514), saved as the draft's next
 // revision and checked like any edit; the JSON behind it stays one click
-// away, in its Settings' Definition.
+// away, in its Settings' Definition. Its toolbar, its sheet and its empty
+// state are the library's; the canvas itself (its dotted ground, its zoom
+// and its nodes' cards) keeps its Tailwind classes until it moves whole.
+
+/** How many lines a step's field shows before its text scrolls. */
+const STEP_ROWS = 16;
+
+const styles = stylex.create({
+  // The toolbar over the canvas, at its top left, and Edit JSON at its top right.
+  controls: {
+    position: "absolute",
+    insetBlockStart: grasp.space3,
+    insetInlineStart: grasp.space3,
+    zIndex: 1,
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space1,
+    padding: grasp.space1,
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    backgroundColor: grasp.raised,
+    boxShadow: grasp.liftLow,
+  },
+  json: {
+    position: "absolute",
+    insetBlockStart: grasp.space3,
+    insetInlineEnd: grasp.space3,
+    zIndex: 1,
+  },
+  empty: { margin: "auto", maxWidth: grasp.emptyMeasure },
+  form: { display: "flex", flexDirection: "column", gap: grasp.space4 },
+  conflict: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: grasp.space2,
+  },
+  attention: { margin: 0, color: grasp.attention },
+  caption: {
+    margin: 0,
+    paddingInline: grasp.space4,
+    paddingBlockEnd: grasp.space3,
+    color: grasp.attention,
+  },
+  muted: { color: grasp.muted },
+  // It fills the room the page gives it; the canvas's controls stand over it.
+  flow: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minHeight: 0,
+  },
+  over: { position: "relative" },
+  done: { color: grasp.success },
+});
 
 /** The zooms the canvas steps through, each a scale of its own. */
 const zooms = [
@@ -87,29 +149,39 @@ const fitting = (
 };
 
 /** Where it starts, at the head of the drawing: its triggers, or by hand. */
-const Starts = ({ onTriggers }: { onTriggers: () => void }) => (
-  <div className="bg-card node-sheet flex w-56 flex-none items-start gap-3 rounded-xl p-3">
-    <ZapIcon aria-hidden="true" className="text-muted-foreground mt-1 size-4" />
-    <div className="flex flex-col items-start gap-1">
-      <span className="text-muted-foreground text-xs">
-        <Trans context="where a workflow starts">Starts</Trans>
+const Starts = ({ onTriggers }: { onTriggers: () => void }) => {
+  const { t } = useLingui();
+  return (
+    <div className="bg-card node-sheet flex w-56 flex-none items-start gap-3 rounded-xl p-3">
+      <span {...stylex.props(styles.muted)}>
+        <Icon icon={Play} />
       </span>
-      <Button onClick={onTriggers} size="inline" variant="hint">
-        <Trans>See what starts it</Trans>
-      </Button>
+      <div className="flex flex-col items-start gap-1">
+        <Text element="span" size="xs" tone="muted">
+          {t({ message: "Starts", context: "where a workflow starts" })}
+        </Text>
+        <Button onClick={onTriggers} size="xs" variant="ghost">
+          {t`See what starts it`}
+        </Button>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 /** Where it ends, at the foot of the drawing. */
-const Done = () => (
-  <div className="bg-card node-sheet flex flex-none items-center gap-2 rounded-xl px-3 py-2">
-    <CheckIcon aria-hidden="true" className="text-status-agreed size-4" />
-    <span className="font-medium">
-      <Trans context="where a workflow ends">Done</Trans>
-    </span>
-  </div>
-);
+const Done = () => {
+  const { t } = useLingui();
+  return (
+    <div className="bg-card node-sheet flex flex-none items-center gap-2 rounded-xl px-3 py-2">
+      <span {...stylex.props(styles.done)}>
+        <Icon icon={Tick} />
+      </span>
+      <Text element="span" size="sm" weight="medium">
+        {t({ message: "Done", context: "where a workflow ends" })}
+      </Text>
+    </div>
+  );
+};
 
 /** What the last change of a step came to, when it didn't simply pass. */
 type Outcome =
@@ -135,7 +207,6 @@ const StepForm = ({
 }) => {
   const core = useCore();
   const { t } = useLingui();
-  const id = useId();
   const [text, setText] = useState(() => JSON.stringify(fields, null, 2));
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>();
@@ -204,37 +275,34 @@ const StepForm = ({
   const savedRevision = outcome?.kind === "failing" ? outcome.revision : null;
   return (
     <form
-      className="flex flex-col gap-4 px-6 py-5"
       onSubmit={(event) => {
         event.preventDefault();
         void save();
       }}
+      {...stylex.props(styles.form)}
     >
-      <div className="flex flex-col gap-2">
-        <Label htmlFor={id}>
-          <Trans>The step, as JSON</Trans>
-        </Label>
+      <Field>
+        <FieldLabel>{t`The step, as JSON`}</FieldLabel>
         <Textarea
-          className="min-h-72"
-          id={id}
-          onChange={(event) => {
-            setText(event.target.value);
-          }}
+          autoResize={false}
+          onValueChange={setText}
+          rows={STEP_ROWS}
           spellCheck={false}
           value={text}
-          variant="code"
         />
+      </Field>
+      <div>
+        <Button disabled={busy} type="submit" variant="ink">
+          {busy ? t`Checking…` : t`Check and save`}
+        </Button>
       </div>
-      <Button className="self-start" disabled={busy} type="submit">
-        {busy ? t`Checking…` : t`Check and save`}
-      </Button>
       {savedRevision === null ? null : (
-        <p className="text-status-attention">
+        <p {...stylex.props(styles.attention)}>
           {t`Saved as revision ${savedRevision}, but it doesn't pass yet: Definition says what to fix.`}
         </p>
       )}
       {outcome?.kind === "conflict" ? (
-        <div className="flex flex-col items-start gap-2">
+        <div {...stylex.props(styles.conflict)}>
           <ErrorText>
             {t`Someone changed this draft since you read it. Read it again, then change the step.`}
           </ErrorText>
@@ -244,9 +312,9 @@ const StepForm = ({
               void reload();
             }}
             size="sm"
-            variant="outline"
+            variant="quiet"
           >
-            <Trans>Read it again</Trans>
+            {t`Read it again`}
           </Button>
         </div>
       ) : null}
@@ -275,6 +343,7 @@ const StepSheet = ({
     task === null || draft.checkpoint === null
       ? undefined
       : stepFieldsAt(draft.checkpoint.source, task.pointer);
+  const { t } = useLingui();
   return (
     <Sheet
       onOpenChange={(open) => {
@@ -284,23 +353,23 @@ const StepSheet = ({
       }}
       open={task !== null}
     >
-      <SheetContent>
-        <div className="flex flex-col gap-1 border-b px-6 py-5 pr-14">
-          <SheetTitle>{task?.id}</SheetTitle>
-          <SheetDescription>{task?.label ?? task?.kind}</SheetDescription>
-        </div>
-        {task === null || fields === undefined ? null : (
-          <StepForm
-            draft={draft}
-            fields={fields}
-            // Each step, and each revision of it, opens afresh.
-            key={`${task.pointer} ${draft.revision}`}
-            onDone={onClose}
-            onDraft={onDraft}
-            task={task}
-            workflow={workflow}
-          />
-        )}
+      <SheetContent closeLabel={t`Close`}>
+        <SheetTitle>{task?.id ?? ""}</SheetTitle>
+        <SheetDescription>{task?.label ?? task?.kind ?? ""}</SheetDescription>
+        <SheetBody>
+          {task === null || fields === undefined ? null : (
+            <StepForm
+              draft={draft}
+              fields={fields}
+              // Each step, and each revision of it, opens afresh.
+              key={`${task.pointer} ${draft.revision}`}
+              onDone={onClose}
+              onDraft={onDraft}
+              task={task}
+              workflow={workflow}
+            />
+          )}
+        </SheetBody>
       </SheetContent>
     </Sheet>
   );
@@ -322,59 +391,54 @@ const Controls = ({
 }) => {
   const { t } = useLingui();
   return (
-    <div className="bg-card node-sheet absolute top-3 left-3 z-10 flex items-center gap-0.5 rounded-lg p-1">
+    <div {...stylex.props(styles.controls)}>
       <Button
         aria-label={t`Fit to view`}
+        icon={Fit}
         onClick={onFit}
-        size="icon-sm"
+        size="sm"
         variant="ghost"
-      >
-        <LocateFixedIcon aria-hidden="true" />
-      </Button>
+      />
       <Button
         aria-label={t`Zoom out`}
         disabled={zoom === 0}
+        icon={ZoomOut}
         onClick={() => {
           onZoom(zoom - 1);
         }}
-        size="icon-sm"
+        size="sm"
         variant="ghost"
-      >
-        <ZoomOutIcon aria-hidden="true" />
-      </Button>
+      />
       <Button
         aria-label={t`Zoom in`}
         disabled={zoom === zooms.length - 1}
+        icon={ZoomIn}
         onClick={() => {
           onZoom(zoom + 1);
         }}
-        size="icon-sm"
+        size="sm"
         variant="ghost"
-      >
-        <ZoomInIcon aria-hidden="true" />
-      </Button>
+      />
       {layout === "side" ? (
         <Button
           aria-label={t`Lay it out top to bottom`}
+          icon={Rows}
           onClick={() => {
             onLayout("stacked");
           }}
-          size="icon-sm"
+          size="sm"
           variant="ghost"
-        >
-          <Rows3Icon aria-hidden="true" />
-        </Button>
+        />
       ) : (
         <Button
           aria-label={t`Lay it out left to right`}
+          icon={Split}
           onClick={() => {
             onLayout("side");
           }}
-          size="icon-sm"
+          size="sm"
           variant="ghost"
-        >
-          <Columns3Icon aria-hidden="true" />
-        </Button>
+        />
       )}
     </div>
   );
@@ -393,7 +457,7 @@ const Caption = ({
   // Said only while the draft's newest revision doesn't pass: the Flow
   // then still draws the last one that did.
   return checkpointRevision === revision ? null : (
-    <p className="text-status-attention px-4 pb-3">
+    <p {...stylex.props(styles.caption)}>
       {t`Revision ${revision} doesn't pass yet: fix it under Definition to change steps here. The Flow shows revision ${checkpointRevision}.`}
     </p>
   );
@@ -443,8 +507,8 @@ export const WorkflowFlow = ({
   // It fills the room the page gives it, edge to edge, the ground taking
   // what its caption leaves.
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="relative flex min-h-0 flex-1 flex-col">
+    <div {...stylex.props(styles.flow)}>
+      <div {...stylex.props(styles.flow, styles.over)}>
         <Controls
           layout={layout}
           onFit={fit}
@@ -453,13 +517,13 @@ export const WorkflowFlow = ({
           zoom={zoom}
         />
         <Button
-          className="absolute top-3 right-3 z-10"
+          icon={Code}
+          layout={styles.json}
           onClick={onDefinition}
           size="sm"
-          variant="outline"
+          variant="quiet"
         >
-          <BracesIcon aria-hidden="true" data-icon="inline-start" />
-          <Trans>Edit JSON</Trans>
+          {t`Edit JSON`}
         </Button>
         <div
           className="dot-ground flex min-h-96 flex-1 flex-col overflow-auto px-8 pt-20 pb-12"
@@ -469,12 +533,9 @@ export const WorkflowFlow = ({
           {checkpoint === null ? (
             // Nothing passed yet, as a new workflow starts: its builders
             // tell Grasp how the work runs, in its chat beside the Flow.
-            <p className="bg-card text-muted-foreground m-auto max-w-sm rounded-xl border px-5 py-4 text-center">
-              <Trans>
-                Nothing is drawn yet. Tell Grasp in the chat how this work runs
-                and its steps come here.
-              </Trans>
-            </p>
+            <Empty layout={styles.empty} size="inline">
+              {t`Nothing is drawn yet. Tell Grasp in the chat how this work runs and its steps come here.`}
+            </Empty>
           ) : (
             // In the middle of the ground while it fits; from its start
             // once it is larger, so all of it scrolls into view.

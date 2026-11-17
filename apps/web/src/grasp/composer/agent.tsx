@@ -34,7 +34,7 @@ import { useComposerDisabled } from "./context";
 import { controlStyles } from "./control";
 import { stopEscape } from "./escape";
 import { tabOutTarget } from "./tab-out";
-import { composerAgentWords } from "./words";
+import { useComposerWords } from "./words";
 
 /** One agent a message can go to. */
 export interface ComposerAgentOption {
@@ -227,7 +227,11 @@ const styles = stylex.create({
 });
 
 /** An agent's mark: its icon, or its picture (its initials until it loads). */
-const AgentMarkOf = ({ agent }: { agent: ComposerAgentOption | undefined }) => {
+export const AgentMarkOf = ({
+  agent,
+}: {
+  agent: ComposerAgentOption | undefined;
+}) => {
   if (agent === undefined) {
     return null;
   }
@@ -246,7 +250,7 @@ const AgentMarkOf = ({ agent }: { agent: ComposerAgentOption | undefined }) => {
 };
 
 /** An agent's row's inside: its mark, its name and its line, and at its end the tick of the chosen one. */
-const RowInside = ({
+export const RowInside = ({
   agent,
   end,
 }: {
@@ -266,6 +270,9 @@ const RowInside = ({
     {end}
   </>
 );
+
+/** The menu's rows, for the plus menu's list of agents (add.tsx), drawn as this menu's are. */
+export const agentMenuStyles = styles;
 
 /** The control in the footer: the chosen agent's mark and name, and the chevron. */
 const Face = ({
@@ -505,11 +512,16 @@ export const ComposerAgent = ({
   value,
   onValueChange,
   all,
-  "aria-label": label = composerAgentWords.agent,
-  searchLabel = composerAgentWords.search,
-  emptyLabel = composerAgentWords.empty,
+  "aria-label": labelGiven,
+  searchLabel: searchGiven,
+  emptyLabel: emptyGiven,
 }: ComposerAgentProps) => {
   const disabled = useComposerDisabled();
+  // Its words: the caller's where given, else the product's catalogue (GraspWords), else English.
+  const words = useComposerWords("agent");
+  const label = labelGiven ?? words.label;
+  const searchLabel = searchGiven ?? words.search;
+  const emptyLabel = emptyGiven ?? words.empty;
   if (agents.length === 0) {
     return null;
   }

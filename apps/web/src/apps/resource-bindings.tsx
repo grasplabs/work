@@ -6,22 +6,41 @@ import type {
   ResourceBinding,
   ResourceBindingsReview,
 } from "@grasp-os/shared/resource-bindings";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useRouter } from "@tanstack/react-router";
+import { useState } from "react";
+
+import { changeThenRefresh } from "../change-then-refresh.ts";
+import type { Session } from "../core.ts";
+import { formatList } from "../format.ts";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@grasp-os/ui/components/dialog";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../grasp/alert-dialog/index.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Field, FieldLabel } from "../grasp/field/index.ts";
+import { Form } from "../grasp/form/index.ts";
+import { KeyValueList } from "../grasp/key-value/index.ts";
+import type { KeyValueItem } from "../grasp/key-value/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { SectionHeader } from "../grasp/section-header/index.ts";
 import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "../grasp/select/index.ts";
+import { Separator } from "../grasp/separator/index.ts";
 import {
   Table,
   TableBody,
@@ -29,18 +48,9 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { useRouter } from "@tanstack/react-router";
-import { useId, useState } from "react";
-import type { ReactNode } from "react";
-
-import { changeThenRefresh } from "../change-then-refresh.ts";
-import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
-import { formatList } from "../format.ts";
+} from "../grasp/table/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import {
   allChosen,
@@ -94,90 +104,80 @@ const stateReasons: Readonly<Partial<Record<BindingState, MessageDescriptor>>> =
     unchecked: msg`The App has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always.`,
   };
 
-/** One term of a definition list and what it says. */
-const Term = ({ term, children }: { term: ReactNode; children: ReactNode }) => (
-  <div className="flex flex-wrap gap-x-2">
-    <dt className="text-muted-foreground">{term}</dt>
-    <dd>{children}</dd>
-  </div>
-);
+const styles = stylex.create({
+  body: { display: "flex", flexDirection: "column", gap: grasp.space4 },
+  resource: { display: "flex", flexDirection: "column", gap: grasp.space3 },
+  badges: { display: "flex", flexWrap: "wrap", gap: grasp.space1 },
+});
 
 /** A change to what core holds, then the page read again. */
 type Decide = (change: (session: Session) => Promise<unknown>) => Promise<void>;
 
 /** What a resource's binding binds it to, named as far as the page can. */
-const BoundTo = ({
-  binding,
-}: {
-  binding: NonNullable<DeclaredResource["binding"]>;
-}) => {
-  const { target, label } = binding;
-  if (target.kind === "model") {
-    return <span className="font-mono">{target.model}</span>;
-  }
-  if (target.kind === "guests" || target.kind === "grasp") {
-    const { permissionId: permission } = target;
-    return <Trans>Permission {permission}</Trans>;
-  }
-  if (target.kind === "connector") {
-    // Core names the bound connection for everyone who reads the review,
-    // while they can see it; its permission otherwise.
-    const { permissionId: permission } = target;
-    if (label.connection === null) {
-      return <Trans>Permission {permission}</Trans>;
+const useBoundTo = () => {
+  const { t } = useLingui();
+  return (binding: NonNullable<DeclaredResource["binding"]>): string => {
+    const { target, label } = binding;
+    if (target.kind === "model") {
+      return target.model;
     }
-    const { provider } = label.connection;
-    const account = label.connection.account ?? provider;
-    return (
-      <Trans>
-        {account} on {provider}
-      </Trans>
-    );
-  }
-  return (
-    <ul className="flex flex-col gap-0.5">
-      {Object.entries(target.collections).map(([collection, permission]) => {
+    if (target.kind === "guests" || target.kind === "grasp") {
+      const { permissionId: permission } = target;
+      return t`Permission ${permission}`;
+    }
+    if (target.kind === "connector") {
+      // Core names the bound connection for everyone who reads the review,
+      // while they can see it; its permission otherwise.
+      const { permissionId: permission } = target;
+      if (label.connection === null) {
+        return t`Permission ${permission}`;
+      }
+      const { provider } = label.connection;
+      const account = label.connection.account ?? provider;
+      return t`${account} on ${provider}`;
+    }
+    return formatList(
+      Object.entries(target.collections).map(([collection, permission]) => {
         const name = label.collections[collection] ?? permission;
-        return (
-          <li key={collection}>
-            <Trans>
-              {collection}: {name}
-            </Trans>
-          </li>
-        );
-      })}
-    </ul>
-  );
+        return t`${collection}: ${name}`;
+      })
+    );
+  };
 };
 
-/** One labelled native select. */
+/** One labelled select, of `items`. */
 const Choice = ({
   label,
+  items,
   value,
   onChange,
-  children,
+  placeholder,
 }: {
   label: string;
-  value: string;
+  items: { value: string; label: string }[];
+  /** The value chosen, or null for none yet. */
+  value: string | null;
   onChange: (value: string) => void;
-  children: ReactNode;
-}) => {
-  const id = useId();
-  return (
-    <Field>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <NativeSelect
-        id={id}
-        onChange={(event) => {
-          onChange(event.target.value);
-        }}
-        value={value}
-      >
-        {children}
-      </NativeSelect>
-    </Field>
-  );
-};
+  placeholder?: string;
+}) => (
+  <Field>
+    <FieldLabel>{label}</FieldLabel>
+    <Select
+      items={items}
+      onValueChange={(chosen) => {
+        if (chosen !== null) {
+          onChange(chosen);
+        }
+      }}
+      value={value}
+    >
+      <SelectTrigger>
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent />
+    </Select>
+  </Field>
+);
 
 /** Why nothing can be chosen for a resource yet, by its kind. */
 const NothingToChoose = ({
@@ -187,49 +187,39 @@ const NothingToChoose = ({
   resource: DeclaredResource;
   truncated: boolean;
 }) => {
+  const { t } = useLingui();
   const { contract } = resource;
   if (truncated) {
     // Some were never checked: that none is listed doesn't mean none exists.
     return (
-      <p className="text-muted-foreground max-w-prose">
-        <Trans>
-          Not every choice could be checked, and none of those checked can serve
-          it. Reload the page to check again.
-        </Trans>
-      </p>
+      <Text size="sm" tone="muted">
+        {t`Not every choice could be checked, and none of those checked can serve it. Reload the page to check again.`}
+      </Text>
     );
   }
-  const reasons: Readonly<Record<DeclaredResource["kind"], ReactNode>> = {
-    model: <Trans>This deployment allows no model.</Trans>,
-    connector: (
-      <Trans>
-        None of the App&apos;s integration permissions serves {contract} with
-        every action it declares. Grant one first.
-      </Trans>
-    ),
-    knowledge: (
-      <Trans>
-        The App has no permission to read a collection. Grant one first.
-      </Trans>
-    ),
-    grasp: (
-      <Trans>
-        The App has no permission to read the platform&apos;s statistics. Grant
-        one first.
-      </Trans>
-    ),
-    guests: (
-      <Trans>
-        The App has no permission to invite guests. Grant one first.
-      </Trans>
-    ),
+  const reasons: Readonly<Record<DeclaredResource["kind"], string>> = {
+    model: t`This deployment allows no model.`,
+    connector: t`None of the App's integration permissions serves ${contract} with every action it declares. Grant one first.`,
+    knowledge: t`The App has no permission to read a collection. Grant one first.`,
+    grasp: t`The App has no permission to read the platform's statistics. Grant one first.`,
+    guests: t`The App has no permission to invite guests. Grant one first.`,
   };
   return (
-    <p className="text-muted-foreground max-w-prose">
+    <Text size="sm" tone="muted">
       {reasons[resource.kind]}
-    </p>
+    </Text>
   );
 };
+
+/** The permissions a choice of the platform's or of guests offers, as a select's items. */
+const permissionItems = (
+  permissions: readonly { permissionId: string }[],
+  name: (permission: string) => string
+) =>
+  permissions.map(({ permissionId }) => ({
+    value: permissionId,
+    label: name(permissionId),
+  }));
 
 /** An admin's choice of what serves `resource`, and the approval of it. */
 const BindForm = ({
@@ -286,96 +276,88 @@ const BindForm = ({
         })
     );
   };
+  const named = (permission: string) => t`Permission ${permission}`;
   return (
-    <form
+    <Form
       aria-label={t`Bind ${alias}`}
-      className="flex flex-col items-start gap-3"
       onSubmit={(event) => {
         event.preventDefault();
         submit();
       }}
     >
       {choices.kind === "model" ? (
-        <Choice label={t`Model`} onChange={setPicked} value={picked}>
-          {choices.models.map((model) => (
-            <NativeSelectOption key={model} value={model}>
-              {model}
-            </NativeSelectOption>
-          ))}
-        </Choice>
+        <Choice
+          items={choices.models.map((model) => ({
+            value: model,
+            label: model,
+          }))}
+          label={t`Model`}
+          onChange={setPicked}
+          value={picked}
+        />
       ) : null}
       {choices.kind === "connector" ? (
-        <Choice label={t`Connection`} onChange={setPicked} value={picked}>
-          {choices.permissions.map(({ permissionId, connectionId }) => (
-            <NativeSelectOption key={permissionId} value={permissionId}>
-              {/* An option holds text only: the name, as text. */}
-              {connections.find(({ id }) => id === connectionId)?.accountName ??
-                t`Connection ${connectionId}`}
-            </NativeSelectOption>
-          ))}
-        </Choice>
+        <Choice
+          items={choices.permissions.map(({ permissionId, connectionId }) => ({
+            value: permissionId,
+            label:
+              connections.find(({ id }) => id === connectionId)?.accountName ??
+              t`Connection ${connectionId}`,
+          }))}
+          label={t`Connection`}
+          onChange={setPicked}
+          value={picked}
+        />
       ) : null}
       {choices.kind === "grasp" ? (
         <Choice
+          items={permissionItems(choices.permissions, named)}
           label={t`Permission for the platform's statistics`}
           onChange={setPicked}
           value={picked}
-        >
-          {choices.permissions.map(({ permissionId: permission }) => (
-            <NativeSelectOption key={permission} value={permission}>
-              {t`Permission ${permission}`}
-            </NativeSelectOption>
-          ))}
-        </Choice>
+        />
       ) : null}
       {choices.kind === "guests" ? (
         <Choice
+          items={permissionItems(choices.permissions, named)}
           label={t`Permission to invite guests`}
           onChange={setPicked}
           value={picked}
-        >
-          {choices.permissions.map(({ permissionId: permission }) => (
-            <NativeSelectOption key={permission} value={permission}>
-              {t`Permission ${permission}`}
-            </NativeSelectOption>
-          ))}
-        </Choice>
+        />
       ) : null}
       {choices.kind === "knowledge"
-        ? resource.collections.map((collection) => (
-            <Choice
-              key={collection}
-              label={t`Collection for ${collection}`}
-              onChange={(permission) => {
-                setCollections({ ...collections, [collection]: permission });
-              }}
-              value={collections[collection] ?? ""}
-            >
-              <NativeSelectOption value="">{t`Choose a collection`}</NativeSelectOption>
-              {choices.permissions.map(({ permissionId, name }) => (
-                <NativeSelectOption key={permissionId} value={permissionId}>
-                  {name ?? permissionId}
-                </NativeSelectOption>
-              ))}
-            </Choice>
-          ))
+        ? resource.collections.map((collection) => {
+            const permission = collections[collection] ?? "";
+            return (
+              <Choice
+                items={choices.permissions.map(({ permissionId, name }) => ({
+                  value: permissionId,
+                  label: name ?? permissionId,
+                }))}
+                key={collection}
+                label={t`Collection for ${collection}`}
+                onChange={(next) => {
+                  setCollections({ ...collections, [collection]: next });
+                }}
+                placeholder={t`Choose a collection`}
+                value={permission === "" ? null : permission}
+              />
+            );
+          })
         : null}
       {choices.truncated ? (
-        <p className="text-muted-foreground max-w-prose">
-          <Trans>
-            Not every choice could be checked: some may be missing from the
-            list.
-          </Trans>
-        </p>
+        <Text size="sm" tone="muted">
+          {t`Not every choice could be checked: some may be missing from the list.`}
+        </Text>
       ) : null}
-      <Button disabled={busy || !chosen} size="sm" type="submit">
-        {binding === null ? (
-          <Trans>Bind {alias}</Trans>
-        ) : (
-          <Trans>Replace the binding of {alias}</Trans>
-        )}
-      </Button>
-    </form>
+      <div>
+        <Button disabled={busy || !chosen} size="sm" type="submit">
+          {binding === null
+            ? t`Bind ${alias}`
+            : t`Replace the binding of ${alias}`}
+        </Button>
+      </div>
+    </Form>
   );
 };
 
@@ -392,84 +374,76 @@ const Revoke = ({
   decide: Decide;
 }) => {
   const { t } = useLingui();
-  const [confirming, setConfirming] = useState(false);
   return (
-    <Dialog onOpenChange={setConfirming} open={confirming}>
-      <DialogTrigger
-        render={
-          <Button
-            aria-label={t`Revoke the binding of ${alias}`}
-            disabled={busy}
-            size="sm"
-            variant="outline"
-          />
-        }
+    <AlertDialog>
+      <AlertDialogTrigger
+        aria-label={t`Revoke the binding of ${alias}`}
+        disabled={busy}
+        size="sm"
       >
-        <Trans>Revoke</Trans>
-      </DialogTrigger>
-      <DialogContent closeLabel={t`Close`}>
-        <DialogHeader>
-          <DialogTitle>
-            <Trans>Revoke the binding of {alias}?</Trans>
-          </DialogTitle>
-          <DialogDescription>
-            <Trans>
-              The App&apos;s next request through it is refused, and actions
-              waiting on it are dropped. Bind it again to use it again.
-            </Trans>
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter closeLabel={t`Close`} showCloseButton>
-          <Button
-            disabled={busy}
+        {t`Revoke`}
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogTitle>{t`Revoke the binding of ${alias}?`}</AlertDialogTitle>
+        <AlertDialogDescription>
+          {t`The App's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again.`}
+        </AlertDialogDescription>
+        <AlertDialogFooter>
+          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogAction
             onClick={() => {
-              setConfirming(false);
               void decide(
                 async (session) =>
                   await session.resourceBindings.revoke(binding.id)
               );
             }}
-            variant="destructive"
+            variant="danger"
           >
-            <Trans>Revoke</Trans>
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+            {t`Revoke`}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 };
 
-/** What `resource` declares, as a list of terms. */
-const Declared = ({ resource }: { resource: DeclaredResource }) => {
-  const { contract, actions, operations, collections } = resource;
-  const tokens = resource.maxOutputTokens;
-  return (
-    <dl className="flex flex-col gap-1">
-      {contract === null ? null : (
-        <Term term={<Trans>Contract</Trans>}>
-          <span className="font-mono">{contract}</span>
-        </Term>
-      )}
-      {actions.length === 0 ? null : (
-        <Term term={<Trans>Actions</Trans>}>{formatList(actions)}</Term>
-      )}
-      {operations.length === 0 ? null : (
-        <Term term={<Trans>Operations</Trans>}>{formatList(operations)}</Term>
-      )}
-      {collections.length === 0 ? null : (
-        <Term term={<Trans>Collections</Trans>}>{formatList(collections)}</Term>
-      )}
-      {tokens === null ? null : (
-        <Term term={<Trans>Output</Trans>}>
-          <Trans>At most {tokens} tokens an answer</Trans>
-        </Term>
-      )}
-    </dl>
-  );
+/** What `resource` declares, and what it is bound to, as facts. */
+const useFacts = () => {
+  const { t } = useLingui();
+  const boundTo = useBoundTo();
+  return (resource: DeclaredResource): KeyValueItem[] => {
+    const { contract, actions, operations, collections, binding } = resource;
+    const tokens = resource.maxOutputTokens;
+    const facts: (KeyValueItem | null)[] = [
+      contract === null
+        ? null
+        : { key: t`Contract`, value: contract, mono: true },
+      actions.length === 0
+        ? null
+        : { key: t`Actions`, value: formatList(actions) },
+      operations.length === 0
+        ? null
+        : { key: t`Operations`, value: formatList(operations) },
+      collections.length === 0
+        ? null
+        : { key: t`Collections`, value: formatList(collections) },
+      tokens === null
+        ? null
+        : { key: t`Output`, value: t`At most ${tokens} tokens an answer` },
+      binding === null
+        ? null
+        : {
+            key: t`Bound to`,
+            value: boundTo(binding),
+            mono: binding.target.kind === "model",
+          },
+    ];
+    return facts.filter((fact) => fact !== null);
+  };
 };
 
 /** One declared resource: what it is, how it is bound, and for admins the controls. */
-const ResourceCard = ({
+const ResourcePart = ({
   app,
   version,
   resource,
@@ -485,44 +459,39 @@ const ResourceCard = ({
   decide: Decide;
 }) => {
   const { i18n } = useLingui();
+  const facts = useFacts();
   const { alias, kind, state, binding, choices } = resource;
   const reason = stateReasons[state];
-  const headingId = useId();
   return (
-    <article
-      aria-labelledby={headingId}
-      className="bg-card flex flex-col gap-4 rounded-xl border p-4"
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 className="font-mono font-medium" id={headingId}>
-          {alias}
-        </h3>
-        <Badge variant="outline">{i18n._(kindLabels[kind])}</Badge>
-        <Badge variant={state === "served" ? "secondary" : "attention"}>
-          {i18n._(stateLabels[state])}
-        </Badge>
-      </div>
-      <Declared resource={resource} />
-      {reason === undefined ? null : (
-        <p className="text-muted-foreground max-w-prose">{i18n._(reason)}</p>
-      )}
-      {binding === null ? null : (
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="flex flex-col gap-0.5">
-            <span className="text-muted-foreground">
-              <Trans>Bound to</Trans>
-            </span>
-            <BoundTo binding={binding} />
-          </div>
-          {choices === null ? null : (
+    <section {...stylex.props(styles.resource)}>
+      <SectionHeader
+        actions={
+          binding === null || choices === null ? undefined : (
             <Revoke
               alias={alias}
               binding={binding}
               busy={busy}
               decide={decide}
             />
-          )}
-        </div>
+          )
+        }
+        aside={
+          <span {...stylex.props(styles.badges)}>
+            <Badge>{i18n._(kindLabels[kind])}</Badge>
+            <Badge tone={state === "served" ? "success" : "attention"}>
+              {i18n._(stateLabels[state])}
+            </Badge>
+          </span>
+        }
+        headingLevel={4}
+        size="sm"
+        title={alias}
+      />
+      <KeyValueList items={facts(resource)} variant="inline" />
+      {reason === undefined ? null : (
+        <Alert live="off" tone="attention">
+          {i18n._(reason)}
+        </Alert>
       )}
       {choices === null ? null : (
         <BindForm
@@ -535,7 +504,7 @@ const ResourceCard = ({
           version={version}
         />
       )}
-    </article>
+    </section>
   );
 };
 
@@ -551,59 +520,43 @@ const Undeclared = ({
   busy: boolean;
   decide: Decide;
 }) => {
-  const { i18n } = useLingui();
+  const { t, i18n } = useLingui();
   return (
-    <section
-      aria-labelledby="app-undeclared-resources"
-      className="flex flex-col gap-3"
+    <SectionCard
+      density="compact"
+      flush
+      headingLevel={3}
+      info={t`The current version doesn't declare these, so they serve nothing until a version declares them again.`}
+      title={t`No longer declared`}
     >
-      <h3 className="text-sm font-medium" id="app-undeclared-resources">
-        <Trans>No longer declared</Trans>
-      </h3>
-      <p className="text-muted-foreground max-w-prose">
-        <Trans>
-          The current version doesn&apos;t declare these, so they serve nothing
-          until a version declares them again.
-        </Trans>
-      </p>
-      <div className="bg-card overflow-hidden rounded-xl border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead variant="card">
-                <Trans>Resource</Trans>
-              </TableHead>
-              <TableHead className="w-40" variant="card">
-                <Trans>Kind</Trans>
-              </TableHead>
-              <TableHead className="w-40" variant="card" />
+      <Table aria-label={t`No longer declared`} density="compact">
+        <TableHeader>
+          <TableRow>
+            <TableHead>{t`Resource`}</TableHead>
+            <TableHead>{t`Kind`}</TableHead>
+            <TableHead aria-label={t`Actions`} />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {bindings.map((binding) => (
+            <TableRow key={binding.id}>
+              <TableCell lead>{binding.alias}</TableCell>
+              <TableCell>{i18n._(kindLabels[binding.kind])}</TableCell>
+              <TableCell align="end">
+                {decides ? (
+                  <Revoke
+                    alias={binding.alias}
+                    binding={binding}
+                    busy={busy}
+                    decide={decide}
+                  />
+                ) : null}
+              </TableCell>
             </TableRow>
-          </TableHeader>
-          <TableBody>
-            {bindings.map((binding) => (
-              <TableRow key={binding.id}>
-                <TableCell variant="card">
-                  <span className="font-mono">{binding.alias}</span>
-                </TableCell>
-                <TableCell variant="card">
-                  {i18n._(kindLabels[binding.kind])}
-                </TableCell>
-                <TableCell className="text-right" variant="card">
-                  {decides ? (
-                    <Revoke
-                      alias={binding.alias}
-                      binding={binding}
-                      busy={busy}
-                      decide={decide}
-                    />
-                  ) : null}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    </section>
+          ))}
+        </TableBody>
+      </Table>
+    </SectionCard>
   );
 };
 
@@ -618,6 +571,7 @@ export const ResourceBindings = ({
   page: ResourcesPage;
   decides: boolean;
 }) => {
+  const { t } = useLingui();
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   const { review, connections } = page;
@@ -635,47 +589,46 @@ export const ResourceBindings = ({
     });
   };
   return (
-    <section aria-labelledby="app-resources" className="flex flex-col gap-4">
-      <h2 className="font-medium" id="app-resources">
-        <Trans>Resources</Trans>
-      </h2>
-      <p className="text-muted-foreground max-w-prose">
-        {decides ? (
-          <Trans>
-            The App&apos;s actions reach a model, an integration or knowledge
-            only through a binding an admin approves here. Declaring one grants
-            nothing, and revoking a binding stops the next request through it.
-          </Trans>
-        ) : (
-          <Trans>
-            The App&apos;s actions reach a model, an integration or knowledge
-            only through a binding an admin of your organization approves.
-          </Trans>
-        )}
-      </p>
-      {version === null || resources.length === 0 ? (
-        <p className="text-muted-foreground">
-          <Trans>
-            The App&apos;s current version declares no resource for its actions.
-          </Trans>
-        </p>
-      ) : (
-        <div className="flex flex-col gap-3">
-          {resources.map((resource) => (
-            <ResourceCard
-              app={app}
-              busy={busy}
-              connections={connections}
-              decide={decide}
-              // Another version, declaration, binding or set of offers
-              // starts its forms afresh, on the newest choice.
-              key={formKey(app, version, resource)}
-              resource={resource}
-              version={version}
-            />
-          ))}
+    <>
+      <SectionCard
+        density="compact"
+        headingLevel={3}
+        info={
+          decides
+            ? t`The App's actions reach a model, an integration or knowledge only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it.`
+            : t`The App's actions reach a model, an integration or knowledge only through a binding an admin of your organization approves.`
+        }
+        title={t`Resources`}
+      >
+        <div {...stylex.props(styles.body)}>
+          {version === null || resources.length === 0 ? (
+            <Text size="sm" tone="muted">
+              {t`The App's current version declares no resource for its actions.`}
+            </Text>
+          ) : (
+            // One part each, with a line between them.
+            resources.flatMap((resource, index) => [
+              index === 0 ? null : (
+                <Separator decorative key={`line-${resource.alias}`} />
+              ),
+              <ResourcePart
+                app={app}
+                busy={busy}
+                connections={connections}
+                decide={decide}
+                // Another version, declaration, binding or set of offers
+                // starts its forms afresh, on the newest choice.
+                key={formKey(app, version, resource)}
+                resource={resource}
+                version={version}
+              />,
+            ])
+          )}
+          {failure === undefined ? null : (
+            <Alert tone="danger">{failure}</Alert>
+          )}
         </div>
-      )}
+      </SectionCard>
       {undeclared.length === 0 ? null : (
         <Undeclared
           bindings={undeclared}
@@ -684,7 +637,6 @@ export const ResourceBindings = ({
           decides={decides}
         />
       )}
-      <ErrorText>{failure}</ErrorText>
-    </section>
+    </>
   );
 };

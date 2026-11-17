@@ -4,56 +4,61 @@ import type {
   RequestTool,
 } from "@grasp-os/shared/stephen-requests";
 import { brainTool, elsewhere } from "@grasp-os/shared/stephen-requests";
-import { Progress } from "@grasp-os/ui/components/progress";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
-import {
-  BrainIcon,
-  ChevronRightIcon,
-  LayoutGridIcon,
-  WorkflowIcon,
-} from "lucide-react";
-import type { ReactNode } from "react";
 
-import { AppLogo } from "../../connections/app-logo.tsx";
 import { formatPercent } from "../../format.ts";
+import { Badge } from "../../grasp/badge/index.ts";
+import { BrandIcon, brands } from "../../grasp/brand-icon/index.ts";
+import type { Brand } from "../../grasp/brand-icon/index.ts";
+import {
+  AppWindow,
+  Brain,
+  Chat,
+  Icon,
+  Tool,
+  Workflow,
+} from "../../grasp/icons/index.ts";
+import type { IconData } from "../../grasp/icons/index.ts";
 
 // The parts every block of Workflows › Requests shares, as the prototype's
 // `components/requests/request-parts.tsx`: names for what the report
-// counts by id, marks for the tools and places, a row that opens what it
-// is about, and what grew.
+// counts by id, marks for the tools and places, and what grew.
 
 /**
- * Logos the deployment serves, by the platform or provider they are of
- * (`apps/web/public/logos`). Where each comes from:
- * - microsoft-teams.svg and slack.svg: the
- *   gilbarbara/logos set, through @iconify-json/logos, CC0, as the
- *   prototype bundles them.
- * - microsoft.svg and google.svg: the marks of Microsoft's and Google's own
- *   sign-in button guidelines, drawn as plain SVG.
- * The trademarks stay with their owners; they are shown only to name the
- * place or provider.
+ * The brand a place or an app is of, where Grasp has its mark: a place by
+ * its platform ("teams"), an app by the part of a tool before its action
+ * ("microsoft" of "microsoft.mail"); none for any other.
  */
-const logos: Readonly<Record<string, string>> = {
-  teams: "/logos/microsoft-teams.svg",
-  slack: "/logos/slack.svg",
-  microsoft: "/logos/microsoft.svg",
-  google: "/logos/google.svg",
-};
+const isBrand = (key: string): key is Brand => Object.hasOwn(brands, key);
 
 /** A place's name, as people know it. */
 export const placeName = (place: string): string => chatPlatformName(place);
 
-/** A place's logo, as a tile beside its name. */
+/**
+ * A place's mark, by size: `xs` and `inline` the mark alone beside words,
+ * `sm` and `default` on its tile, as a row's face. A place Grasp has no
+ * mark for shows a chat's.
+ */
 export const PlaceLogo = ({
   place,
   size = "xs",
 }: {
   place: string;
   size?: "xs" | "inline" | "sm" | "default";
-}) => (
-  <AppLogo logo={logos[place] ?? null} name={placeName(place)} size={size} />
-);
+}) => {
+  if (!isBrand(place)) {
+    return <Icon icon={Chat} label={placeName(place)} />;
+  }
+  return size === "xs" || size === "inline" ? (
+    <BrandIcon brand={place} size="sm" tile={false} />
+  ) : (
+    <BrandIcon brand={place} size={size === "sm" ? "xs" : "sm"} />
+  );
+};
+
+/** A place's mark as an icon, for a row that takes one. */
+export const placeIcon = (place: string): IconData =>
+  isBrand(place) ? brands[place].mark : Chat;
 
 /** The names the page gives what it counts, the folded groups named as such. */
 export const useRequestNames = (
@@ -99,115 +104,32 @@ export const useRequestNames = (
   };
 };
 
-/** A mark for what has no logo, the size of an app's in a row. */
-export const IconMark = ({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) => (
-  <span
-    className="bg-tile text-muted-foreground inline-flex size-5 flex-none items-center justify-center rounded-md border [&_svg]:size-3"
-    title={label}
-  >
-    {children}
-    <span className="sr-only">{label}</span>
-  </span>
-);
+/**
+ * A tool's mark: the brain, a workflow, an App, the mark of the app an
+ * action is in where Grasp has one, or a tool's.
+ */
+export const toolIcon = (tool: RequestTool): IconData => {
+  if (tool === brainTool) {
+    return Brain;
+  }
+  if (tool.startsWith("workflow:")) {
+    return Workflow;
+  }
+  if (tool.startsWith("app:") || tool === elsewhere) {
+    return AppWindow;
+  }
+  const [app = tool] = tool.split(".");
+  return isBrand(app) ? brands[app].mark : Tool;
+};
 
-/** A tool's mark: the brain, a workflow, an App, or the logo of the app an action is in. */
+/** A tool's mark, named for a screen reader. */
 export const ToolMark = ({
   tool,
   label,
 }: {
   tool: RequestTool;
   label: string;
-}) => {
-  if (tool === brainTool) {
-    return (
-      <IconMark label={label}>
-        <BrainIcon />
-      </IconMark>
-    );
-  }
-  if (tool.startsWith("workflow:")) {
-    return (
-      <IconMark label={label}>
-        <WorkflowIcon />
-      </IconMark>
-    );
-  }
-  if (tool.startsWith("app:") || tool === elsewhere) {
-    return (
-      <IconMark label={label}>
-        <LayoutGridIcon />
-      </IconMark>
-    );
-  }
-  const [app = tool] = tool.split(".");
-  return <AppLogo logo={logos[app] ?? null} name={label} size="inline" />;
-};
-
-/**
- * One row of a list on the page: the whole row opens what it is about,
- * with a chevron at its end; a row about a folded group opens nothing and
- * keeps the chevron's room. `className` lays out the row's cells, the
- * chevron's column last.
- */
-export const OpenRow = ({
-  className,
-  onOpen,
-  children,
-}: {
-  className: string;
-  onOpen?: (() => void) | undefined;
-  children: ReactNode;
-}) => {
-  const chevron = (
-    <ChevronRightIcon
-      aria-hidden="true"
-      className={cn(
-        "text-muted-foreground size-4 flex-none justify-self-end",
-        onOpen === undefined && "invisible"
-      )}
-    />
-  );
-  if (onOpen === undefined) {
-    return (
-      <li className={cn("border-t", className)}>
-        {children}
-        {chevron}
-      </li>
-    );
-  }
-  return (
-    <li className="border-t">
-      <button
-        className={cn(
-          "hover:bg-accent focus-visible:bg-accent w-full text-left outline-none",
-          className
-        )}
-        onClick={onOpen}
-        type="button"
-      >
-        {children}
-        {chevron}
-      </button>
-    </li>
-  );
-};
-
-/** A thin bar for a share, as the rows of a table carry it. */
-export const ShareBar = ({
-  share,
-  label,
-}: {
-  share: number;
-  label: string;
-}) => (
-  <Progress aria-label={label} value={Math.min(100, Math.round(share * 100))} />
-);
+}) => <Icon icon={toolIcon(tool)} label={label} />;
 
 /** What is new against the span before, or how much it grew; nothing for what held level or fell. */
 export const Growth = ({ grew }: { grew: "new" | number | null }) => {
@@ -217,10 +139,10 @@ export const Growth = ({ grew }: { grew: "new" | number | null }) => {
   }
   const by = formatPercent(grew === "new" ? 0 : grew);
   return (
-    <span className="text-status-agreed flex-none text-xs tabular-nums">
+    <Badge size="sm" tone="success">
       {grew === "new"
         ? t({ message: "New", context: "asked for the first time this span" })
         : t`+${by}`}
-    </span>
+    </Badge>
   );
 };

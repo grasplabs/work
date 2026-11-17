@@ -46,6 +46,7 @@ import { AskedLine } from "./asked-questions.tsx";
 import { pendingPlan, ThreadPlan } from "./build-progress.tsx";
 import type { ThreadBuild } from "./build-progress.tsx";
 import { FileCards } from "./chat-files.tsx";
+import { timeOfDay } from "./chat-history.ts";
 import { failureMessage } from "./failure.ts";
 import { reading } from "./reading.stylex.ts";
 import { recoveredSteps } from "./recovered.ts";
@@ -684,6 +685,7 @@ const Question = ({
   message: Asked;
   asked: Answer["asked"];
 }) => {
+  const { i18n } = useLingui();
   const answered =
     asked === undefined ? undefined : answeredOf(asked, message.text);
   return (
@@ -691,7 +693,12 @@ const Question = ({
       {message.files === undefined || message.files.length === 0 ? null : (
         <FileCards files={message.files} />
       )}
-      <Message dateTime={message.at} from="person">
+      <Message
+        dateTime={message.at}
+        from="person"
+        // Its day stands over it in the thread: the time of day is enough.
+        time={timeOfDay(message.at, i18n.locale)}
+      >
         {answered === undefined ? (
           message.text
         ) : (
@@ -995,6 +1002,10 @@ const AnswerRow = ({
         from="agent"
         name="Grasp"
         nameHidden
+        // When it was given: once it is, under its actions.
+        {...(live || last?.at === undefined
+          ? {}
+          : { dateTime: last.at, time: timeOfDay(last.at, i18n.locale) })}
         onRetry={ending.providerMissing ? undefined : retry}
         status={ending.providerMissing ? "done" : status}
         thinkingLabel={context.workingLabel}

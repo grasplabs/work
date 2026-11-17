@@ -6,65 +6,72 @@ import type {
   RequestsPage,
   RequestsReport,
 } from "@grasp-os/shared/stephen-requests";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Bar,
-  BarChart,
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  XAxis,
-  chartColor,
-} from "@grasp-os/ui/components/chart";
-import type { ChartConfig } from "@grasp-os/ui/components/chart";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@grasp-os/ui/components/sheet";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
-import { ArrowLeftIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../../core-connection.ts";
-import { ErrorText } from "../../error-text.tsx";
 import { formatIsoDayMonth, formatMonth, formatNumber } from "../../format.ts";
 import { LoadingLines } from "../../frame/page-states.tsx";
+import { Alert } from "../../grasp/alert/index.ts";
+import { Button } from "../../grasp/button/index.ts";
+import {
+  Chart,
+  ChartAxis,
+  ChartBar,
+  ChartTooltip,
+} from "../../grasp/chart/index.ts";
+import type { ChartConfig } from "../../grasp/chart/index.ts";
+import {
+  ArrowLeft,
+  Chat,
+  People,
+  Person,
+  Question,
+} from "../../grasp/icons/index.ts";
+import type { IconData } from "../../grasp/icons/index.ts";
+import { InspectorPanel } from "../../grasp/inspector-panel/index.ts";
+import type {
+  InspectorRow,
+  InspectorSection,
+} from "../../grasp/inspector-panel/index.ts";
+import { grasp } from "../../grasp/tokens/tokens.stylex.ts";
 import { useCore } from "../../use-core.ts";
-import { NeedActions, NeedPart, useAskGrasp } from "./request-needs.tsx";
+import {
+  NeedActions,
+  NeedWhy,
+  needIcon,
+  useAskGrasp,
+  useNeedProposal,
+} from "./request-needs.tsx";
 import {
   Growth,
-  OpenRow,
-  PlaceLogo,
-  ToolMark,
+  placeIcon,
   placeName,
+  toolIcon,
   useRequestNames,
 } from "./request-parts.tsx";
 
 // The panel every row of the table opens, as the prototype's
-// `request-detail.tsx`: its requests over the span, then what it is made
-// of, each part opening its own panel in turn (a team's topics, a topic's
-// questions and teams, a question's teams), and at its foot the one way
-// into the rest of Grasp. What needs someone shows why, where it stands
-// and Grasp's proposal, with "Do it". A person's panel has counts and
-// places only. Each panel is core's report narrowed to what it is about,
-// folded as the page is: one that would point at fewer than five people
-// says so and shows nothing.
+// `request-detail.tsx`, beside the table (in a Sheet on a narrow page):
+// its requests over the span, then what it is made of, each part opening
+// its own panel in turn (a team's topics, a topic's questions and teams, a
+// question's teams), and at its foot the one way into the rest of Grasp.
+// What needs someone shows why, where it stands and Grasp's proposal,
+// with "Do it". A person's panel has counts and places only. Each panel is
+// core's report narrowed to what it is about, folded as the page is: one
+// that would point at fewer than five people says so and shows nothing.
 
-/** What a panel is about. */
+/** What a panel is about, with the name the row that opened it gave it. */
 export type RequestSubject =
-  | { kind: "team" | "topic" | "person" | "question"; id: string }
+  | {
+      kind: "team" | "topic" | "person" | "question";
+      id: string;
+      name: string;
+    }
   | { kind: "need"; need: Need };
-
-/** A row: what it is (`nameCell`), its count, the chevron. */
-const row = "flex items-center gap-x-4 px-4 py-2.5";
-const nameCell = "min-w-0 flex-1";
 
 /** The report narrowed to a subject, as core folds it. */
 type Narrowed =
@@ -80,6 +87,22 @@ interface Narrowing {
   person: string | null;
   question: string | null;
 }
+
+const styles = stylex.create({
+  // A section's card holding a chart or words, in the rows' inset.
+  inset: {
+    paddingBlock: grasp.space3,
+    paddingInline: grasp.inspectorInset,
+  },
+  foot: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+    paddingBlock: grasp.space4,
+    paddingInline: grasp.inspectorInset,
+  },
+  buttons: { display: "flex", flexWrap: "wrap", gap: grasp.space2 },
+});
 
 /** What one subject narrows to. */
 const narrowingOf = (subject: RequestSubject): Partial<Narrowing> => {
@@ -165,286 +188,192 @@ const useNarrowed = (
   return narrowed;
 };
 
-/** A list in the panel, under its name. */
-const Section = ({
-  title,
-  children,
-}: {
-  title: string;
-  children: ReactNode;
-}) => (
-  <section className="flex flex-col">
-    <h3 className="text-muted-foreground px-4 pb-2 text-xs">{title}</h3>
-    <ul className="border-b">{children}</ul>
-  </section>
-);
-
-const Count = ({ value }: { value: number }) => (
-  <span className="text-muted-foreground text-right tabular-nums">
-    {formatNumber(value)}
-  </span>
-);
-
 /** Its requests over the span, a bar a day or a month, as small as a panel holds them. */
 const Over = ({
   report,
   asked,
+  summary,
 }: {
   report: RequestsReport;
   asked: boolean;
+  summary: string;
 }) => {
   const { t } = useLingui();
   const config: ChartConfig = {
-    count: { label: asked ? t`Asked` : t`Billed`, color: "chart-1" },
+    count: { label: asked ? t`Asked` : t`Billed` },
   };
-  const format = (at: string) =>
-    report.by === "day" ? formatIsoDayMonth(at) : formatMonth(at);
+  const format = (at: string | number) =>
+    report.by === "day"
+      ? formatIsoDayMonth(String(at))
+      : formatMonth(String(at));
   return (
-    <div className="px-4">
-      <ChartContainer
+    <div {...stylex.props(styles.inset)}>
+      <Chart
         aria-label={t`Requests over time`}
-        className="aspect-auto h-28 w-full"
         config={config}
+        data={report.bars.map((bar) => ({
+          at: bar.at,
+          // Billed by place, which a person's panel keeps too (it has
+          // no kinds: counts only).
+          count:
+            Object.values(bar.places).reduce((sum, each) => sum + each, 0) +
+            (asked ? bar.notBilled : 0),
+        }))}
+        height={112}
+        summary={summary}
+        xKey="at"
       >
-        <BarChart
-          accessibilityLayer={false}
-          barCategoryGap="20%"
-          data={report.bars.map((bar) => ({
-            at: bar.at,
-            // Billed by place, which a person's panel keeps too (it has
-            // no kinds: counts only).
-            count:
-              Object.values(bar.places).reduce((sum, each) => sum + each, 0) +
-              (asked ? bar.notBilled : 0),
-          }))}
-          margin={{ top: 4, right: 0, bottom: 0, left: 0 }}
-        >
-          <XAxis
-            axisLine={false}
-            dataKey="at"
-            minTickGap={40}
-            tickFormatter={format}
-            tickLine={false}
-          />
-          <ChartTooltip
-            content={
-              <ChartTooltipContent
-                labelFormatter={(value) =>
-                  typeof value === "string" ? format(value) : ""
-                }
-              />
-            }
-            cursor={false}
-          />
-          <Bar
-            dataKey="count"
-            fill={chartColor("chart-1")}
-            isAnimationActive={false}
-            radius={2}
-          />
-        </BarChart>
-      </ChartContainer>
+        <ChartAxis format={format} side="x" />
+        <ChartBar series="count" />
+        <ChartTooltip format={formatNumber} />
+      </Chart>
     </div>
   );
 };
 
 type Names = ReturnType<typeof useRequestNames>;
 
-/** What a topic, team or place row opens, if anything. */
-type Opener = (subject: RequestSubject) => (() => void) | undefined;
+/** What a topic, team or question row opens, if anything: nothing for a folded group. */
+type Opener = (
+  subject: Extract<RequestSubject, { id: string }>
+) => (() => void) | undefined;
 
-/** What they ask: a row per topic. */
-const TopicsPart = ({
-  report,
-  names,
-  opener,
-}: {
-  report: RequestsReport;
-  names: Names;
-  opener: Opener;
-}) => {
-  const { t } = useLingui();
-  return (
-    <Section title={t`What they ask`}>
-      {report.byTopic.map((each) => (
-        <OpenRow
-          className={row}
-          key={each.key}
-          onOpen={opener({ kind: "topic", id: each.key })}
-        >
-          <span className={cn("truncate", nameCell)}>
-            {names.topic(each.key)}
-          </span>
-          <Count value={each.billed} />
-        </OpenRow>
-      ))}
-    </Section>
-  );
-};
+/** A section of rows, or none when it has no row: a panel never offers to add to what it counts. */
+const rowsSection = (
+  id: string,
+  label: string,
+  rows: InspectorRow[]
+): InspectorSection[] => (rows.length === 0 ? [] : [{ id, label, rows }]);
 
-/** The teams it is asked in. */
-const TeamsPart = ({
-  report,
-  names,
-  opener,
-  asked,
-}: {
-  report: RequestsReport;
-  names: Names;
-  opener: Opener;
-  asked: boolean;
-}) => {
-  const { t } = useLingui();
-  const countOf = (each: RequestsReport["byTeam"][number]): number =>
-    asked ? each.requests : each.billed;
-  // Most first by the count it shows, and the teams too small to name last.
-  const teams = report.byTeam.toSorted(
-    (a, b) =>
-      Number(a.key === elsewhere) - Number(b.key === elsewhere) ||
-      countOf(b) - countOf(a)
-  );
-  return (
-    <Section
-      title={t({ message: "Teams", context: "Stephen's requests by team" })}
-    >
-      {teams.map((each) => (
-        <OpenRow
-          className={row}
-          key={each.key}
-          onOpen={opener({ kind: "team", id: each.key })}
-        >
-          <span className={cn("truncate", nameCell)}>
-            {names.team(each.key)}
-          </span>
-          <Count value={countOf(each)} />
-        </OpenRow>
-      ))}
-    </Section>
-  );
-};
-
-/** What he did it with: the five tools he called most. */
-const ToolsPart = ({
-  report,
-  names,
-}: {
-  report: RequestsReport;
-  names: Names;
-}) => {
-  const { t } = useLingui();
-  if (report.byTool.length === 0) {
-    return null;
-  }
-  return (
-    <Section title={t`Done with`}>
-      {report.byTool.slice(0, 5).map((each) => {
-        const name = names.tool(each.key);
-        return (
-          <OpenRow className={row} key={each.key}>
-            <span className={cn("flex items-center gap-2", nameCell)}>
-              <ToolMark label={name} tool={each.key} />
-              <span className="truncate">{name}</span>
-            </span>
-            <Count value={each.calls} />
-          </OpenRow>
-        );
-      })}
-    </Section>
-  );
-};
+/** A row of a part: its name, its count, and what it opens. */
+const countRow = (
+  id: string,
+  name: string,
+  count: number,
+  onPress?: () => void,
+  icon?: IconData
+): InspectorRow => ({
+  id,
+  name,
+  detail: formatNumber(count),
+  ...(onPress === undefined ? {} : { onPress }),
+  ...(icon === undefined ? {} : { icon }),
+});
 
 /** Where they asked: from the bars, which fold no small group away, as a person's panel is one person. */
-const PlacesPart = ({ report }: { report: RequestsReport }) => {
-  const { t } = useLingui();
+const byPlaceOf = (report: RequestsReport): [string, number][] => {
   const byPlace = new Map<string, number>();
   for (const bar of report.bars) {
     for (const [place, count] of Object.entries(bar.places)) {
       byPlace.set(place, (byPlace.get(place) ?? 0) + count);
     }
   }
-  return (
-    <Section
-      title={t({
-        message: "Where",
-        context: "the places people asked Stephen in",
-      })}
-    >
-      {[...byPlace]
-        .toSorted((a, b) => b[1] - a[1])
-        .map(([place, count]) => (
-          <OpenRow className={row} key={place}>
-            <span className={cn("flex items-center gap-2", nameCell)}>
-              <PlaceLogo place={place} />
-              <span className="truncate">{placeName(place)}</span>
-            </span>
-            <Count value={count} />
-          </OpenRow>
-        ))}
-    </Section>
-  );
+  return [...byPlace].toSorted((a, b) => b[1] - a[1]);
 };
 
-/** The questions of a topic many ask, with what grew. */
-const QuestionsPart = ({
-  rows,
-  names,
-  before,
-  opener,
-  title,
-}: {
-  rows: { question: string; people: number }[];
-  names: Names;
-  before: RequestsPage["before"];
-  opener: Opener;
-  title: string;
-}) =>
-  rows.length === 0 ? null : (
-    <Section title={title}>
-      {rows.map((each) => (
-        <OpenRow
-          className={row}
-          key={each.question}
-          onOpen={opener({ kind: "question", id: each.question })}
-        >
-          <span className={cn("flex items-baseline gap-2", nameCell)}>
-            <span className="min-w-0">{names.question(each.question)}</span>
-            {before === null ? null : (
-              <Growth
-                grew={growth(
-                  each.people,
-                  before.questions.find(
-                    (earlier) => earlier.question === each.question
-                  )?.people ?? 0
-                )}
-              />
-            )}
-          </span>
-          <Count value={each.people} />
-        </OpenRow>
-      ))}
-    </Section>
-  );
+/** The teams it is asked in, most first by the count shown, the teams too small to name last. */
+const teamsOf = (report: RequestsReport, asked: boolean) => {
+  const countOf = (each: RequestsReport["byTeam"][number]): number =>
+    asked ? each.requests : each.billed;
+  return report.byTeam
+    .map((each) => ({ key: each.key, count: countOf(each) }))
+    .toSorted(
+      (a, b) =>
+        Number(a.key === elsewhere) - Number(b.key === elsewhere) ||
+        b.count - a.count
+    );
+};
 
-/** The panel's body: what the subject is made of. */
-const Body = ({
-  subject,
-  page,
-  names,
-  opener,
-}: {
-  subject: RequestSubject;
-  page: RequestsPage;
-  names: Names;
-  opener: Opener;
-}) => {
+/** The panel's sections of what the subject is made of. */
+const useBodySections = (
+  subject: RequestSubject,
+  page: RequestsPage,
+  names: Names,
+  opener: Opener
+): InspectorSection[] => {
   const { t } = useLingui();
   const { report, before } = page;
-  const tools = <ToolsPart names={names} report={report} />;
-  const places = <PlacesPart report={report} />;
-  const topics = <TopicsPart names={names} opener={opener} report={report} />;
-  const teams = (asked: boolean) => (
-    <TeamsPart asked={asked} names={names} opener={opener} report={report} />
+  const tools = rowsSection(
+    "tools",
+    t`Done with`,
+    report.byTool
+      .slice(0, 5)
+      .map((each) =>
+        countRow(
+          each.key,
+          names.tool(each.key),
+          each.calls,
+          undefined,
+          toolIcon(each.key)
+        )
+      )
   );
+  const places = rowsSection(
+    "places",
+    t({ message: "Where", context: "the places people asked Stephen in" }),
+    byPlaceOf(report).map(([place, count]) =>
+      countRow(place, placeName(place), count, undefined, placeIcon(place))
+    )
+  );
+  const topics = rowsSection(
+    "topics",
+    t`What they ask`,
+    report.byTopic.map((each) => {
+      const name = names.topic(each.key);
+      return countRow(
+        each.key,
+        name,
+        each.billed,
+        opener({ kind: "topic", id: each.key, name })
+      );
+    })
+  );
+  const teams = (asked: boolean) =>
+    rowsSection(
+      "teams",
+      t({ message: "Teams", context: "Stephen's requests by team" }),
+      teamsOf(report, asked).map((each) => {
+        const name = names.team(each.key);
+        return countRow(
+          each.key,
+          name,
+          each.count,
+          opener({ kind: "team", id: each.key, name })
+        );
+      })
+    );
+  const questions = (
+    rows: { question: string; people: number }[],
+    earlier: RequestsPage["before"],
+    id: string,
+    title: string
+  ) =>
+    rowsSection(
+      id,
+      title,
+      rows.map((each) => {
+        const name = names.question(each.question);
+        const grew =
+          earlier === null
+            ? null
+            : growth(
+                each.people,
+                earlier.questions.find((was) => was.question === each.question)
+                  ?.people ?? 0
+              );
+        const onPress = opener({ kind: "question", id: each.question, name });
+        return {
+          id: each.question,
+          name,
+          detail: (
+            <>
+              <Growth grew={grew} /> {formatNumber(each.people)}
+            </>
+          ),
+          ...(onPress === undefined ? {} : { onPress }),
+        };
+      })
+    );
   const aboutTeam =
     subject.kind === "team" ||
     (subject.kind === "need" && subject.need.teamId !== null);
@@ -452,260 +381,317 @@ const Body = ({
     return places;
   }
   if (aboutTeam) {
-    return (
-      <>
-        {topics}
-        <QuestionsPart
-          before={null}
-          names={names}
-          opener={opener}
-          rows={report.notPossible}
-          title={t`He can't do yet`}
-        />
-        {places}
-      </>
-    );
+    return [
+      ...topics,
+      ...questions(report.notPossible, null, "notPossible", t`He can't do yet`),
+      ...places,
+    ];
   }
   if (subject.kind === "topic") {
-    return (
-      <>
-        <QuestionsPart
-          before={before}
-          names={names}
-          opener={opener}
-          rows={report.questions}
-          title={t`What many ask`}
-        />
-        {tools}
-        {teams(false)}
-      </>
-    );
+    return [
+      ...questions(report.questions, before, "questions", t`What many ask`),
+      ...tools,
+      ...teams(false),
+    ];
   }
-  return (
-    <>
-      {tools}
-      {teams(true)}
-    </>
-  );
+  return [...tools, ...teams(true)];
 };
 
-/** The panel's title, as the page names its subject. */
-const titleOf = (subject: RequestSubject, names: Names): string => {
-  if (subject.kind === "need") {
-    return subject.need.label;
-  }
-  const named: Record<typeof subject.kind, (id: string) => string> = {
-    team: names.team,
-    topic: names.topic,
-    person: names.person,
-    question: names.question,
-  };
-  return named[subject.kind](subject.id);
+/** The panel's title, as the row that opened it named its subject. */
+const titleOf = (subject: RequestSubject): string =>
+  subject.kind === "need" ? subject.need.label : subject.name;
+
+/** The mark at the panel's head: what kind of thing it is about. */
+const iconOf = (subject: RequestSubject): IconData => {
+  const icons = {
+    team: People,
+    topic: Chat,
+    person: Person,
+    question: Question,
+  } as const;
+  return subject.kind === "need" ? needIcon(subject.need) : icons[subject.kind];
 };
 
-/** One panel, its report read. */
-const Panel = ({
-  subject,
-  page,
-  canBack,
-  canManage,
-  onBack,
-  onOpen,
-  onOnlyTeam,
-  onChanged,
-}: {
-  subject: RequestSubject;
-  page: RequestsPage;
-  canBack: boolean;
-  canManage: boolean;
-  onBack: () => void;
-  onOpen: (subject: RequestSubject) => void;
-  onOnlyTeam: ((teamId: string) => void) | null;
-  onChanged: () => Promise<void>;
-}) => {
+/** What the panel says under its title, from its report. */
+const useDescription = (
+  subject: RequestSubject,
+  page: RequestsPage
+): string => {
   const { t } = useLingui();
-  const names = useRequestNames(page);
-  const asking = useAskGrasp();
   const { report } = page;
-  const need = subject.kind === "need" ? subject.need : null;
-  const asked = subject.kind === "question" || need !== null;
+  const asked = subject.kind === "question" || subject.kind === "need";
   const { people } = report.total;
   const times = report.total.requests;
   const { billed } = report.total;
-  let description = asked
+  if (page.tooFew) {
+    return t`Fewer than five people: not shown on its own.`;
+  }
+  if (subject.kind === "person") {
+    return t`${plural(billed, { one: "# request", other: "# requests" })}`;
+  }
+  return asked
     ? t`${plural(times, { one: "Asked once", other: "Asked # times" })} · ${plural(people, { one: "# person", other: "# people" })}`
     : t`${plural(billed, { one: "# request", other: "# requests" })} · ${plural(people, { one: "# person", other: "# people" })}`;
-  if (subject.kind === "person") {
-    description = t`${plural(billed, { one: "# request", other: "# requests" })}`;
-  }
-  if (page.tooFew) {
-    description = t`Fewer than five people: not shown on its own.`;
-  }
+};
+
+/** The panel's sections, its report read. */
+const usePanelSections = (
+  subject: RequestSubject,
+  page: RequestsPage,
+  description: string,
+  onOpen: (subject: RequestSubject) => void
+): InspectorSection[] => {
+  const { t } = useLingui();
+  const names = useRequestNames(page);
+  const need = subject.kind === "need" ? subject.need : null;
+  const proposal = useNeedProposal(need);
   const opener: Opener = (next) =>
-    "id" in next && next.id === elsewhere
+    next.id === elsewhere
       ? undefined
       : () => {
           onOpen(next);
         };
-  const title = titleOf(subject, names);
-  const teamOnly =
-    subject.kind === "team" && onOnlyTeam !== null ? subject.id : null;
-  const makesWorkflow = subject.kind === "topic" || subject.kind === "question";
-  // Only a panel with something to do has a footer: a person's has none.
-  const hasFooter = need !== null || teamOnly !== null || makesWorkflow;
-  return (
-    <>
-      <SheetHeader className="mr-8">
-        {canBack ? (
-          <Button
-            className="-ml-2 self-start"
-            onClick={onBack}
-            size="sm"
-            variant="ghost"
-          >
-            <ArrowLeftIcon data-icon="inline-start" />
-            {t`Back`}
-          </Button>
-        ) : null}
-        <SheetTitle>{title}</SheetTitle>
-        <SheetDescription>{description}</SheetDescription>
-      </SheetHeader>
-      {need === null ? null : <NeedPart need={need} />}
-      {report.total.requests > 0 ? (
-        <Over asked={asked} report={report} />
-      ) : null}
-      {page.tooFew ? null : (
-        <div className="flex flex-col gap-5 pb-4">
-          <Body names={names} opener={opener} page={page} subject={subject} />
-        </div>
-      )}
-      {hasFooter ? (
-        <div className="bg-popover sticky bottom-0 mt-auto border-t">
-          <SheetFooter>
-            {need === null ? null : (
-              <NeedActions
-                canManage={canManage}
-                need={need}
-                onChanged={onChanged}
-              />
-            )}
-            {teamOnly === null ? null : (
-              <Button
-                onClick={() => {
-                  onOnlyTeam?.(teamOnly);
-                }}
-              >
-                {t`Show the page for ${title}`}
-              </Button>
-            )}
-            {makesWorkflow ? (
-              <Button
-                disabled={asking.busy}
-                onClick={() => {
-                  void asking.ask(
-                    title,
-                    t`Many people ask Stephen about “${title}”. Which workflow would do it for them?`
-                  );
-                }}
-              >
-                {t`Make a workflow of it`}
-              </Button>
-            ) : null}
-            <ErrorText>{asking.failure}</ErrorText>
-          </SheetFooter>
-        </div>
-      ) : null}
-    </>
-  );
+  const body = useBodySections(subject, page, names, opener);
+  const { report } = page;
+  const asked = subject.kind === "question" || need !== null;
+  const why: InspectorSection[] =
+    need === null
+      ? []
+      : [{ id: "why", label: t`Why`, content: <NeedWhy need={need} /> }];
+  const proposes: InspectorSection[] =
+    need === null || proposal === null
+      ? []
+      : [{ id: "proposal", label: t`Grasp proposes`, text: proposal }];
+  const over: InspectorSection[] =
+    report.total.requests > 0
+      ? [
+          {
+            id: "over",
+            label: t`Requests over time`,
+            content: (
+              <Over asked={asked} report={report} summary={description} />
+            ),
+          },
+        ]
+      : [];
+  return [...why, ...proposes, ...over, ...(page.tooFew ? [] : body)];
 };
 
-/** The panel, while it reads what it is about. */
-const Loaded = (props: {
+/** The panel's foot: what can be done about its subject. A person's panel has none. */
+const Foot = ({
+  subject,
+  canManage,
+  onOnlyTeam,
+  onChanged,
+}: {
   subject: RequestSubject;
-  narrowing: Narrowing;
-  range: RequestRange;
-  canBack: boolean;
   canManage: boolean;
-  onBack: () => void;
-  onOpen: (subject: RequestSubject) => void;
   onOnlyTeam: ((teamId: string) => void) | null;
   onChanged: () => Promise<void>;
 }) => {
-  const narrowed = useNarrowed(props.range, props.narrowing);
-  if (narrowed.state === "loading") {
-    return (
-      <div className="p-4">
-        <LoadingLines />
-      </div>
-    );
+  const { t } = useLingui();
+  const asking = useAskGrasp();
+  const need = subject.kind === "need" ? subject.need : null;
+  const title = titleOf(subject);
+  const teamOnly =
+    subject.kind === "team" && onOnlyTeam !== null ? subject.id : null;
+  const makesWorkflow = subject.kind === "topic" || subject.kind === "question";
+  if (need === null && teamOnly === null && !makesWorkflow) {
+    return null;
   }
-  if (narrowed.state === "failed") {
-    return (
-      <div className="p-4">
-        <ErrorText>{narrowed.reason}</ErrorText>
+  return (
+    <div {...stylex.props(styles.foot)}>
+      {need === null ? null : (
+        <NeedActions canManage={canManage} need={need} onChanged={onChanged} />
+      )}
+      <div {...stylex.props(styles.buttons)}>
+        {teamOnly === null ? null : (
+          <Button
+            onClick={() => {
+              onOnlyTeam?.(teamOnly);
+            }}
+            size="sm"
+            variant="quiet"
+          >
+            {t`Show the page for ${title}`}
+          </Button>
+        )}
+        {makesWorkflow ? (
+          <Button
+            disabled={asking.busy}
+            onClick={() => {
+              void asking.ask(
+                title,
+                t`Many people ask Stephen about “${title}”. Which workflow would do it for them?`
+              );
+            }}
+            size="sm"
+            variant="quiet"
+          >
+            {t`Make a workflow of it`}
+          </Button>
+        ) : null}
       </div>
-    );
-  }
-  return <Panel {...props} page={narrowed.page} />;
+      {asking.failure === undefined ? null : (
+        <Alert tone="danger">{asking.failure}</Alert>
+      )}
+    </div>
+  );
 };
 
-/** The panel beside the page: the last subject opened on top, with Back to the one before. */
+/** The props every state of a panel takes. */
+interface PanelProps {
+  subject: RequestSubject;
+  canBack: boolean;
+  canManage: boolean;
+  /** On the page beside the table, or in a Sheet. */
+  framed: boolean;
+  onBack: () => void;
+  onClose: () => void;
+  onOpen: (subject: RequestSubject) => void;
+  onOnlyTeam: ((teamId: string) => void) | null;
+  onChanged: () => Promise<void>;
+}
+
+/** The panel's head and foot round `sections`, whatever state its report is in. */
+const Frame = ({
+  props,
+  description,
+  sections,
+  loose,
+}: {
+  props: PanelProps;
+  description?: string;
+  sections: InspectorSection[];
+  /** Under the sections, before the foot: why the report couldn't be read, or lines while it is. */
+  loose?: ReactNode;
+}) => {
+  const { t } = useLingui();
+  const title = titleOf(props.subject);
+  return (
+    <InspectorPanel
+      actions={
+        props.canBack ? (
+          <Button
+            icon={ArrowLeft}
+            onClick={props.onBack}
+            size="sm"
+            variant="ghost"
+          >
+            {t`Back`}
+          </Button>
+        ) : undefined
+      }
+      aria-label={title}
+      {...(description === undefined ? {} : { description })}
+      foot={
+        <>
+          {loose}
+          <Foot
+            canManage={props.canManage}
+            onChanged={props.onChanged}
+            onOnlyTeam={props.onOnlyTeam}
+            subject={props.subject}
+          />
+        </>
+      }
+      framed={props.framed}
+      icon={iconOf(props.subject)}
+      onClose={props.onClose}
+      sections={sections}
+      title={title}
+      words={{ close: t`Close` }}
+    />
+  );
+};
+
+/** One panel, its report read. */
+const Ready = ({ props, page }: { props: PanelProps; page: RequestsPage }) => {
+  const description = useDescription(props.subject, page);
+  const sections = usePanelSections(
+    props.subject,
+    page,
+    description,
+    props.onOpen
+  );
+  return <Frame description={description} props={props} sections={sections} />;
+};
+
+/** The panel, while it reads what it is about. */
+const Loaded = (
+  props: PanelProps & { narrowing: Narrowing; range: RequestRange }
+) => {
+  const narrowed = useNarrowed(props.range, props.narrowing);
+  if (narrowed.state === "ready") {
+    return <Ready page={narrowed.page} props={props} />;
+  }
+  return (
+    <Frame
+      loose={
+        <div {...stylex.props(styles.inset)}>
+          {narrowed.state === "loading" ? (
+            <LoadingLines />
+          ) : (
+            <Alert tone="danger">{narrowed.reason}</Alert>
+          )}
+        </div>
+      }
+      props={props}
+      sections={[]}
+    />
+  );
+};
+
+/** The panel of the last subject opened, with Back to the one before. */
 export const RequestDetail = ({
   trail,
   range,
   place,
   team,
   canManage,
+  framed,
   onTrail,
   onOnlyTeam,
   onChanged,
 }: {
+  /** The subjects opened from one another, the last on top; not empty. */
   trail: RequestSubject[];
   range: RequestRange;
   /** The page's filters, which a panel opened from the page keeps. */
   place: string | null;
   team: string | null;
   canManage: boolean;
+  /** Beside the table, or in a Sheet on a narrow page. */
+  framed: boolean;
   onTrail: (trail: RequestSubject[]) => void;
   onOnlyTeam: ((teamId: string) => void) | null;
   onChanged: () => Promise<void>;
 }) => {
-  const { t } = useLingui();
   const subject = trail.at(-1);
   const narrowing = narrowingFor(trail, { place, team });
+  if (subject === undefined) {
+    return null;
+  }
   return (
-    <Sheet
-      onOpenChange={(open) => {
-        if (!open) {
-          onTrail([]);
-        }
+    <Loaded
+      canBack={trail.length > 1}
+      canManage={canManage}
+      framed={framed}
+      key={JSON.stringify(narrowing)}
+      narrowing={narrowing}
+      onBack={() => {
+        onTrail(trail.slice(0, -1));
       }}
-      open={subject !== undefined}
-    >
-      <SheetContent
-        className="overflow-y-auto"
-        closeLabel={t`Close`}
-        size="wide"
-      >
-        {subject === undefined ? null : (
-          <Loaded
-            canBack={trail.length > 1}
-            canManage={canManage}
-            key={JSON.stringify(narrowing)}
-            narrowing={narrowing}
-            onBack={() => {
-              onTrail(trail.slice(0, -1));
-            }}
-            onChanged={onChanged}
-            onOnlyTeam={onOnlyTeam}
-            onOpen={(next) => {
-              onTrail([...trail, next]);
-            }}
-            range={range}
-            subject={subject}
-          />
-        )}
-      </SheetContent>
-    </Sheet>
+      onChanged={onChanged}
+      onClose={() => {
+        onTrail([]);
+      }}
+      onOnlyTeam={onOnlyTeam}
+      onOpen={(next) => {
+        onTrail([...trail, next]);
+      }}
+      range={range}
+      subject={subject}
+    />
   );
 };

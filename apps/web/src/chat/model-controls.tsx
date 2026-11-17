@@ -89,13 +89,9 @@ export const ModelControls = ({
   return (
     <ComposerModelEffort
       effort={effort ?? ""}
-      effortLabel={t`How hard it thinks`}
-      aria-label={t`Model and effort`}
       makers={makers}
       model={model}
-      modelLabel={t`Model`}
       models={options}
-      noEffortLabel={t`This model has one level of effort.`}
       onEffortChange={(value) => {
         if (isEffort(value)) {
           onEffort?.(value);

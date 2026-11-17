@@ -55,16 +55,21 @@ export interface ChatMessageProps {
   from: "person" | "agent";
   /** The words, or what the message holds. While streaming, what has arrived so far. */
   children?: ReactNode;
-  /** The agent's name over its message ("Assistant"). A person's messages need none. */
+  /** The agent's name ("Assistant"): the message's name for a screen reader. A person's messages need none. */
   name?: string;
   /**
    * Keeps the name off the page while a screen reader still hears who speaks: the message stays
-   * named by `name`, and no name is drawn over it. For a chat with one agent, where its name on
-   * every answer is noise.
-   * @default false
+   * named by `name`, and no name is drawn over it. A chat is drawn so (Ruben, 17 November): its
+   * name on every answer is noise. Set it to `false` only where several agents or people speak in
+   * one conversation, and the name over each message says who.
+   * @default true
    */
   nameHidden?: boolean;
-  /** When it was sent, as people say it ("2 min ago"), small beside the name or under the bubble. */
+  /**
+   * When it was sent, as people say it ("2 min ago"): small and muted at the message's foot, under
+   * its actions, at the message's own edge (the start for the agent, the end for a person). With
+   * none, nothing is drawn and no room is kept.
+   */
   time?: string;
   /** When it was sent, for machines: an ISO date and time ("2026-11-13T14:02"). */
   dateTime?: string;
@@ -216,7 +221,10 @@ const styles = stylex.create({
     lineHeight: grasp.textSmLine,
     fontWeight: grasp.weightMedium,
   },
+  // The time at the message's foot, under its actions, at the message's own edge: small, muted,
+  // and as wide as its words, so it never stretches across the column.
   time: {
+    justifySelf: "start",
     color: grasp.muted,
     fontSize: grasp.textXs,
     lineHeight: grasp.textXsLine,
@@ -296,8 +304,9 @@ const styles = stylex.create({
     // The first button's icon stands under the first letter of the words.
     marginInlineStart: `calc(-1 * (${grasp.controlSm} - ${grasp.iconSm}) / 2)`,
   },
+  // A person's time stands at the bubble's end edge.
   personTime: {
-    paddingInlineEnd: grasp.space2,
+    justifySelf: "end",
   },
   // A person's actions sit under the bubble, at the end, their last icon under its edge.
   personActions: {
@@ -479,17 +488,18 @@ const ActionRow = ({
 interface HeadProps {
   name: string | undefined;
   nameHidden: boolean | undefined;
-  time: string | undefined;
-  dateTime: string | undefined;
 }
 
-const Head = ({ name: given, nameHidden, time, dateTime }: HeadProps) => {
-  // Hidden, the name is still the message's name for a screen reader (the article's), not drawn.
-  const name = nameHidden === true ? undefined : given;
-  return filled(name) || filled(time) ? (
+/**
+ * The name over the message, drawn only where several speak (`nameHidden={false}`). Hidden, the
+ * default, it is still the message's name for a screen reader (the article's). The time is never
+ * here: it stands at the message's foot.
+ */
+const Head = ({ name: given, nameHidden = true }: HeadProps) => {
+  const name = nameHidden ? undefined : given;
+  return filled(name) ? (
     <div {...stylex.props(styles.head)}>
-      {filled(name) && <h3 {...stylex.props(styles.name)}>{name}</h3>}
-      <Stamp time={time} dateTime={dateTime} person={false} />
+      <h3 {...stylex.props(styles.name)}>{name}</h3>
     </div>
   ) : null;
 };
@@ -890,8 +900,8 @@ export const ChatMessage = ({
         {...stylex.props(styles.root, styles.person, layout ?? styleProp)}
       >
         <div {...stylex.props(styles.bubble)}>{children}</div>
-        <Stamp time={time} dateTime={dateTime} person />
         {row}
+        <Stamp time={time} dateTime={dateTime} person />
       </article>
     );
   }
@@ -914,12 +924,7 @@ export const ChatMessage = ({
         focus.words
       )}
     >
-      <Head
-        name={name}
-        nameHidden={nameHidden}
-        time={time}
-        dateTime={dateTime}
-      />
+      <Head name={name} nameHidden={nameHidden} />
       <Thought
         thinking={status === "thinking"}
         thoughts={thoughts}
@@ -954,6 +959,7 @@ export const ChatMessage = ({
         retryLabel={text.retry}
       />
       {row}
+      <Stamp time={time} dateTime={dateTime} person={false} />
       <output {...stylex.props(visuallyHidden)}>{said}</output>
     </article>
   );

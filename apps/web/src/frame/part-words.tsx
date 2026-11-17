@@ -3,7 +3,7 @@ import { useLingui } from "@lingui/react/macro";
 import type { ReactNode } from "react";
 
 import { useApprovalWords } from "../chat/approval-words.ts";
-import { formatList } from "../format.ts";
+import { formatBytes, formatList, formatNumber } from "../format.ts";
 import { agentActivityWords } from "../grasp/agent-activity/words.ts";
 import { alertWords } from "../grasp/alert/words.ts";
 import { appShellPanelWords, appShellWords } from "../grasp/app-shell/words.ts";
@@ -16,6 +16,8 @@ import { chatMessageWords } from "../grasp/chat-message/words.ts";
 import { codeBlockWords } from "../grasp/code-block/words.ts";
 import { comboboxWords } from "../grasp/combobox/words.ts";
 import { commandWords } from "../grasp/command/words.ts";
+import { composerWords } from "../grasp/composer/words.ts";
+import { contextMenuWords } from "../grasp/context-menu/words.ts";
 import { copyFieldWords } from "../grasp/copy-field/words.ts";
 import {
   dataTableWords,
@@ -31,9 +33,11 @@ import { inputWords } from "../grasp/input/words.ts";
 import { languageSwitchWords } from "../grasp/language-switch/words.ts";
 import { linkWords } from "../grasp/link/words.ts";
 import { markdownWords } from "../grasp/markdown/words.ts";
+import { ownerPickerWords } from "../grasp/owner-picker/words.ts";
 import { paginationWords } from "../grasp/pagination/words.ts";
 import { sectionCardWords } from "../grasp/section-card/words.ts";
 import { settingRowWords } from "../grasp/setting-row/words.ts";
+import { shareAccessWords } from "../grasp/share-access/words.ts";
 import { sheetWords } from "../grasp/sheet/words.ts";
 import { sidebarWords } from "../grasp/sidebar/words.ts";
 import { sourcesWords } from "../grasp/sources/words.ts";
@@ -67,6 +71,8 @@ export const englishPartWords: GraspWordsCatalog = {
   calendar: calendarWords,
   combobox: comboboxWords,
   command: commandWords,
+  composer: composerWords,
+  contextMenu: contextMenuWords,
   datePicker: datePickerWords,
   dateRangePicker: dateRangePickerWords,
   languageSwitch: languageSwitchWords,
@@ -85,10 +91,12 @@ export const englishPartWords: GraspWordsCatalog = {
   input: inputWords,
   link: linkWords,
   markdown: markdownWords,
+  ownerPicker: ownerPickerWords,
   pagination: paginationWords,
   rename: renameWords,
   sectionCard: sectionCardWords,
   settingRow: settingRowWords,
+  shareAccess: shareAccessWords,
   sheet: sheetWords,
   sidebar: sidebarWords,
   sources: sourcesWords,
@@ -395,6 +403,128 @@ export const usePartWords = (): GraspWordsCatalog => {
       showPassword: t`Show password`,
       hidePassword: t`Hide password`,
     },
+    composer: {
+      composer: {
+        failed: t`Could not send`,
+        working: t`Grasp is answering`,
+        success: t({ message: "Done", context: "an answer is done" }),
+        send: t({ message: "Send", context: "send the question" }),
+        stop: t({ message: "Stop", context: "stop the answer" }),
+        drop: t`Drop to add`,
+        dictate: t`Dictate`,
+        uploading: t`Sending waits for the files to upload`,
+        attachments: t`Files to send`,
+        commands: t`Commands`,
+        mentions: t({ message: "Mention", context: "the mention menu" }),
+        mentionsEmpty: t`Nothing found`,
+        mentionsLoading: t`Looking`,
+        mentionsFound: (count) =>
+          t`${plural(count, { one: "# result", other: "# results" })}`,
+        count: (length, max) => `${formatNumber(length)}/${formatNumber(max)}`,
+        near: (max) => {
+          const limit = formatNumber(max);
+          return t`Close to the limit of ${limit} characters`;
+        },
+        reached: (max) => {
+          const limit = formatNumber(max);
+          return t`The limit of ${limit} characters is reached`;
+        },
+        cut: (max) => {
+          const limit = formatNumber(max);
+          return t`The pasted text was cut at the limit of ${limit} characters`;
+        },
+      },
+      add: {
+        label: t`Add to the question`,
+        actions: t`This chat`,
+        upload: t`Attach a file`,
+        agent: t({ message: "Agent", context: "who answers a chat" }),
+      },
+      attachment: {
+        uploading: t`Uploading`,
+        done: t({ message: "Uploaded", context: "a file" }),
+        failed: t`Could not upload`,
+        retry: t`Try again`,
+        remove: t`Remove`,
+        size: formatBytes,
+        pages: (count) =>
+          t`${plural(count, { one: "# page", other: "# pages" })}`,
+      },
+      model: {
+        label: t`Model`,
+        search: t`Search models`,
+        makers: t`Makers`,
+        favourites: t`Favourites`,
+        empty: t`No models found`,
+      },
+      modelEffort: {
+        label: t`Model and effort`,
+        model: t`Model`,
+        effort: t`How hard it thinks`,
+        none: t`This model has one level of effort.`,
+      },
+      reasoning: { label: t`How hard it thinks` },
+      agent: {
+        label: t({ message: "Agent", context: "who answers a chat" }),
+        search: t`Search agents`,
+        empty: t`No agents found`,
+        back: (agent) => t`Back to ${agent}`,
+      },
+      queue: {
+        queued: (count) =>
+          t`${plural(count, { one: "# queued", other: "# queued" })}`,
+        edit: (text) => t`Edit: ${text}`,
+        sendNow: (text) => t`Send now: ${text}`,
+        remove: (text) => t`Remove: ${text}`,
+      },
+      voice: {
+        asking: t`Asking for the microphone`,
+        listening: t`Listening`,
+        thinking: t`Writing it down`,
+        silent: t`Paused`,
+        muted: t`Muted`,
+        done: t`Done`,
+        cancel: t`Cancel`,
+        mute: t`Mute`,
+        unmute: t`Unmute`,
+        retry: t`Try again`,
+        level: t`Level`,
+        problems: {
+          blocked: t`The microphone is blocked for this site.`,
+          missing: t`No microphone was found.`,
+          unsupported: t`This browser can't dictate.`,
+          unheard: t`A part couldn't be made out. What came before is kept.`,
+          failed: t`The words couldn't be written down. What you typed is kept.`,
+          limited: t`That's as long as one dictation can be.`,
+        },
+        // Minutes and seconds, as every language here writes them.
+        time: composerWords.voice.time,
+      },
+    },
+    contextMenu: {
+      failed: t({ message: "Failed", context: "a list row's action" }),
+    },
+    ownerPicker: {
+      placeholder: t`Choose an owner`,
+      empty: t`No one has that name`,
+      trigger: t`Show the people`,
+    },
+    shareAccess: {
+      find: t`Add people or groups`,
+      inviteLevel: t`Access for who you add`,
+      invite: t({ message: "Invite", context: "give someone access" }),
+      failedInvite: t`Could not invite`,
+      list: t`People with access`,
+      owner: t({ message: "Owner", context: "who owns what is shared" }),
+      you: t({ message: "(you)", context: "after the person's own name" }),
+      level: (name) => t`Access for ${name}`,
+      remove: t`Remove`,
+      preview: t`What they will see`,
+      copyLink: t`Copy link`,
+      copied: t`Link copied`,
+      copyFailed: t`Could not copy`,
+      done: t({ message: "Done", context: "close the share dialog" }),
+    },
     datePicker: { choose: t`Choose date` },
     dateRangePicker: {
       presets: t`Presets`,
@@ -505,7 +635,14 @@ export const PartWords = ({ children }: { children: ReactNode }) => {
   return (
     <GraspWords
       locale={i18n.locale}
-      words={i18n.locale === "en" ? englishPartWords : translated}
+      // In English the parts speak as the library wrote them, but for the
+      // chat's box, whose words are work's own ("Add to the question",
+      // "Grasp is answering"), as the rest of the chat says them.
+      words={
+        i18n.locale === "en"
+          ? { ...englishPartWords, composer: translated.composer }
+          : translated
+      }
     >
       {children}
     </GraspWords>

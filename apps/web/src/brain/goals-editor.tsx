@@ -1,31 +1,39 @@
 import type { Goal } from "@grasp-os/shared/brain";
 import { brainGoalNoticeMaxLength } from "@grasp-os/shared/brain-records";
 import type { WorkflowSummary } from "@grasp-os/shared/workflows";
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import { Textarea } from "@grasp-os/ui/components/textarea";
 import { plural } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { PencilIcon, PlusIcon, WorkflowIcon } from "lucide-react";
 import { useId, useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { Checkbox } from "../grasp/checkbox/index.ts";
+import {
+  Dialog,
+  DialogAction,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogTitle,
+} from "../grasp/dialog/index.ts";
+import { Field, FieldDescription, FieldLabel } from "../grasp/field/index.ts";
+import { Edit, Plus, Workflow } from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemDetail,
+  ItemGroup,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { Textarea } from "../grasp/textarea/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { listWorkflows } from "../workflows/reads.ts";
 import {
@@ -42,6 +50,12 @@ import type { GoalWording } from "./goal-records.ts";
 // takes from admins alone and audits; the brain is read again after it.
 // Members see the goals as notes, and nothing here.
 
+const styles = stylex.create({
+  form: { display: "flex", flexDirection: "column", gap: grasp.space5 },
+  list: { display: "flex", flexDirection: "column", gap: grasp.space1 },
+  actions: { display: "flex", gap: grasp.space2 },
+});
+
 /** Today in UTC, as the brain's records date a change: `YYYY-MM-DD`. */
 const todayUtc = (): string => new Date().toISOString().slice(0, 10);
 
@@ -57,6 +71,50 @@ const wordingOf = (goal: Goal): GoalWording => {
   };
 };
 
+/** Whether `wording` says what `goal` already says. */
+const sameWording = (goal: Goal | undefined, wording: GoalWording): boolean =>
+  goal !== undefined &&
+  wording.title.trim() === wordingOf(goal).title &&
+  wording.howWeNotice.trim() === wordingOf(goal).howWeNotice;
+
+/** The records that set `wording`: a new goal, or `goal` worded again. */
+const wordingRecords = (goal: Goal | undefined, wording: GoalWording) => {
+  const day = todayUtc();
+  return goal === undefined
+    ? newGoalRecords(wording, day)
+    : rewordedRecords(goal.id, wording, day);
+};
+
+/** The records that link `chosen` of the `workflows` shown to `goal`. */
+const linkRecords = (
+  goal: Goal,
+  workflows: readonly WorkflowSummary[],
+  chosen: ReadonlySet<string>
+) => {
+  const picked = workflows
+    .map(({ workflowId }) => workflowId)
+    .filter((each) => chosen.has(each));
+  // A linked workflow the list doesn't show (deleted since) stays linked.
+  const shown = new Set<string>(workflows.map(({ workflowId }) => workflowId));
+  const kept = goal.workflows.filter((each) => !shown.has(each));
+  return relinkedRecords(goal, [...kept, ...picked], todayUtc());
+};
+
+/** `chosen` with `key` in or out. */
+const toggled = (
+  chosen: ReadonlySet<string>,
+  key: string,
+  checked: boolean
+): ReadonlySet<string> => {
+  const next = new Set(chosen);
+  if (checked) {
+    next.add(key);
+  } else {
+    next.delete(key);
+  }
+  return next;
+};
+
 /** Sets a new goal, or words `goal` again. */
 const WordingDialog = ({
   goal,
@@ -69,104 +127,100 @@ const WordingDialog = ({
   onOpenChange: (open: boolean) => void;
 }) => {
   const { t } = useLingui();
-  const ids = useId();
+  const formId = useId();
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   const [wording, setWording] = useState<GoalWording>(() =>
     goal === undefined ? { title: "", howWeNotice: "" } : wordingOf(goal)
   );
-  const unchanged =
-    goal !== undefined &&
-    wording.title.trim() === wordingOf(goal).title &&
-    wording.howWeNotice.trim() === wordingOf(goal).howWeNotice;
-  const canSave = wording.title.trim() !== "" && !unchanged && !busy;
-  const save = async (): Promise<void> => {
-    const day = todayUtc();
-    const records =
-      goal === undefined
-        ? newGoalRecords(wording, day)
-        : rewordedRecords(goal.id, wording, day);
-    const saved = await run(
+  const canSave =
+    wording.title.trim() !== "" && !sameWording(goal, wording) && !busy;
+  /** Saves the wording; whether it was saved. */
+  const saved = async (): Promise<boolean> => {
+    const records = wordingRecords(goal, wording);
+    const done = await run(
       async (session) => await session.brain.addRecords(records)
     );
-    if (saved !== undefined) {
-      onOpenChange(false);
-      await router.invalidate();
+    if (done === undefined) {
+      return false;
     }
+    await router.invalidate();
+    return true;
   };
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent>
-        <form
-          className="flex flex-col gap-5"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (canSave) {
-              void save();
-            }
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>
-              {goal === undefined ? (
-                <Trans>New board goal</Trans>
-              ) : (
-                <Trans>Reword the goal</Trans>
+      <DialogContent closeLabel={t`Close`}>
+        <DialogTitle>
+          {goal === undefined ? t`New board goal` : t`Reword the goal`}
+        </DialogTitle>
+        <DialogBody>
+          <form
+            id={formId}
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (canSave) {
+                void (async () => {
+                  if (await saved()) {
+                    onOpenChange(false);
+                  }
+                })();
+              }
+            }}
+            {...stylex.props(styles.form)}
+          >
+            <Field>
+              <FieldLabel>{t`Goal`}</FieldLabel>
+              <Input
+                autoComplete="off"
+                data-1p-ignore
+                data-lpignore="true"
+                disabled={busy}
+                maxLength={titleMaxLength}
+                onValueChange={(title) => {
+                  setWording({ ...wording, title });
+                }}
+                placeholder={t`What does the board want to reach?`}
+                value={wording.title}
+              />
+            </Field>
+            <Field>
+              <FieldLabel>{t`How we notice it`}</FieldLabel>
+              <Textarea
+                disabled={busy}
+                maxLength={brainGoalNoticeMaxLength}
+                onValueChange={(howWeNotice) => {
+                  setWording({ ...wording, howWeNotice });
+                }}
+                placeholder={t`How will the company see that it is met?`}
+                rows={3}
+                value={wording.howWeNotice}
+              />
+              {goal === undefined ? null : (
+                <FieldDescription>
+                  {t`The earlier wording stays in the goal's history.`}
+                </FieldDescription>
               )}
-            </DialogTitle>
-          </DialogHeader>
-          <Field>
-            <FieldLabel htmlFor={`${ids}-title`}>
-              <Trans>Goal</Trans>
-            </FieldLabel>
-            <Input
-              autoComplete="off"
-              data-1p-ignore
-              data-lpignore="true"
-              disabled={busy}
-              id={`${ids}-title`}
-              maxLength={titleMaxLength}
-              onChange={(event) => {
-                setWording({ ...wording, title: event.target.value });
-              }}
-              placeholder={t`What does the board want to reach?`}
-              value={wording.title}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${ids}-notice`}>
-              <Trans>How we notice it</Trans>
-            </FieldLabel>
-            <Textarea
-              disabled={busy}
-              id={`${ids}-notice`}
-              maxLength={brainGoalNoticeMaxLength}
-              onChange={(event) => {
-                setWording({ ...wording, howWeNotice: event.target.value });
-              }}
-              placeholder={t`How will the company see that it is met?`}
-              rows={3}
-              value={wording.howWeNotice}
-            />
-            {goal === undefined ? null : (
-              <FieldDescription>
-                <Trans>
-                  The earlier wording stays in the goal&apos;s history.
-                </Trans>
-              </FieldDescription>
-            )}
-          </Field>
-          <ErrorText>{failure}</ErrorText>
-          <DialogFooter>
-            <DialogClose render={<Button type="button" variant="outline" />}>
-              <Trans>Cancel</Trans>
-            </DialogClose>
-            <Button disabled={!canSave} type="submit">
-              {busy ? <Spinner data-icon="inline-start" /> : null}
-              <Trans>Save</Trans>
-            </Button>
-          </DialogFooter>
-        </form>
+            </Field>
+            <ErrorText>{failure}</ErrorText>
+          </form>
+        </DialogBody>
+        <DialogFooter>
+          <DialogAction>{t`Cancel`}</DialogAction>
+          <DialogAction
+            action={async () => {
+              if (!(await saved())) {
+                // The dialog stays open, with core's reason above the buttons.
+                throw new Error("The goal wasn't saved.");
+              }
+            }}
+            disabled={!canSave}
+            failedLabel={t`Not saved`}
+            variant="ink"
+            workingLabel={t`Saving`}
+          >
+            {t`Save`}
+          </DialogAction>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -185,7 +239,7 @@ const WorkflowsDialog = ({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) => {
-  const ids = useId();
+  const { t } = useLingui();
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   const [chosen, setChosen] = useState<ReadonlySet<string>>(
@@ -193,88 +247,59 @@ const WorkflowsDialog = ({
   );
   const { title } = wordingOf(goal);
   const save = async (): Promise<void> => {
-    const picked = workflows
-      .map(({ workflowId }) => workflowId)
-      .filter((each) => chosen.has(each));
-    // A linked workflow the list doesn't show (deleted since) stays linked.
-    const shown = new Set<string>(
-      workflows.map(({ workflowId }) => workflowId)
-    );
-    const kept = goal.workflows.filter((each) => !shown.has(each));
-    const records = relinkedRecords(goal, [...kept, ...picked], todayUtc());
+    const records = linkRecords(goal, workflows, chosen);
     if (records.length === 0) {
-      onOpenChange(false);
       return;
     }
-    const saved = await run(
+    const done = await run(
       async (session) => await session.brain.addRecords(records)
     );
-    if (saved !== undefined) {
-      onOpenChange(false);
-      await router.invalidate();
+    if (done === undefined) {
+      // The dialog stays open, with core's reason above the buttons.
+      throw new Error("The workflows weren't linked.");
     }
+    await router.invalidate();
   };
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent>
-        <form
-          className="flex flex-col gap-5"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (!busy) {
-              void save();
-            }
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>
-              <Trans>Workflows that serve {title}</Trans>
-            </DialogTitle>
-          </DialogHeader>
+      <DialogContent closeLabel={t`Close`}>
+        <DialogTitle>{t`Workflows that serve ${title}`}</DialogTitle>
+        <DialogBody>
           {workflows.length === 0 ? (
-            <p className="text-muted-foreground text-sm">
-              <Trans>There are no workflows to link yet.</Trans>
-            </p>
+            <Text tone="muted">{t`There are no workflows to link yet.`}</Text>
           ) : (
-            <ul className="flex max-h-80 flex-col gap-1 overflow-y-auto">
+            <div {...stylex.props(styles.list)}>
               {workflows.map((each) => {
                 const key = each.workflowId;
-                const id = `${ids}-${key}`;
                 return (
-                  <li className="flex items-center gap-2.5 py-1" key={key}>
+                  <Field key={key} orientation="horizontal">
                     <Checkbox
                       checked={chosen.has(key)}
                       disabled={busy}
-                      id={id}
                       onCheckedChange={(checked) => {
-                        const next = new Set(chosen);
-                        if (checked) {
-                          next.add(key);
-                        } else {
-                          next.delete(key);
-                        }
-                        setChosen(next);
+                        setChosen(toggled(chosen, key, checked === true));
                       }}
                     />
-                    <label className="min-w-0 truncate text-sm" htmlFor={id}>
-                      {each.name}
-                    </label>
-                  </li>
+                    <FieldLabel>{each.name}</FieldLabel>
+                  </Field>
                 );
               })}
-            </ul>
+            </div>
           )}
           <ErrorText>{failure}</ErrorText>
-          <DialogFooter>
-            <DialogClose render={<Button type="button" variant="outline" />}>
-              <Trans>Cancel</Trans>
-            </DialogClose>
-            <Button disabled={busy} type="submit">
-              {busy ? <Spinner data-icon="inline-start" /> : null}
-              <Trans>Save</Trans>
-            </Button>
-          </DialogFooter>
-        </form>
+        </DialogBody>
+        <DialogFooter>
+          <DialogAction>{t`Cancel`}</DialogAction>
+          <DialogAction
+            action={save}
+            disabled={busy}
+            failedLabel={t`Not saved`}
+            variant="ink"
+            workingLabel={t`Saving`}
+          >
+            {t`Save`}
+          </DialogAction>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -297,53 +322,67 @@ const GoalRow = ({
   const { title, howWeNotice } = wordingOf(goal);
   const count = goal.workflows.length;
   return (
-    <li className="flex flex-wrap items-start gap-3 py-3">
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="text-sm font-medium">{title}</span>
+    <Item>
+      <ItemContent>
+        <ItemTitle>
+          {title}
+          <ItemDetail>
+            {plural(count, {
+              one: "# workflow serves it",
+              other: "# workflows serve it",
+            })}
+          </ItemDetail>
+        </ItemTitle>
         {howWeNotice === "" ? null : (
-          <span className="text-muted-foreground text-sm">{howWeNotice}</span>
+          <ItemDescription>{howWeNotice}</ItemDescription>
         )}
-        <span className="text-muted-foreground text-xs">
-          {plural(count, {
-            one: "# workflow serves it",
-            other: "# workflows serve it",
-          })}
-        </span>
-      </span>
-      <span className="flex flex-none gap-1.5">
-        <Button
-          aria-label={t`Reword ${title}`}
-          onClick={() => {
-            onChange({ goal, what: "wording" });
-          }}
-          size="sm"
-          variant="outline"
-        >
-          <PencilIcon data-icon="inline-start" />
-          <Trans>Reword</Trans>
-        </Button>
-        <Button
-          aria-label={t`Workflows of ${title}`}
-          disabled={busy}
-          onClick={() => {
-            onChange({ goal, what: "workflows" });
-          }}
-          size="sm"
-          variant="outline"
-        >
-          <WorkflowIcon data-icon="inline-start" />
-          <Trans>Workflows</Trans>
-        </Button>
-      </span>
-    </li>
+      </ItemContent>
+      <ItemActions>
+        <div {...stylex.props(styles.actions)}>
+          <Button
+            aria-label={t`Reword ${title}`}
+            icon={Edit}
+            onClick={() => {
+              onChange({ goal, what: "wording" });
+            }}
+            size="sm"
+            variant="quiet"
+          >
+            {t`Reword`}
+          </Button>
+          <Button
+            aria-label={t`Workflows of ${title}`}
+            disabled={busy}
+            icon={Workflow}
+            onClick={() => {
+              onChange({ goal, what: "workflows" });
+            }}
+            size="sm"
+            variant="quiet"
+          >
+            {t`Workflows`}
+          </Button>
+        </div>
+      </ItemActions>
+    </Item>
   );
 };
+
+/** Whether `change` is the given goal's change of `what`. */
+const changeOf = (
+  change: Change | undefined,
+  what: "wording" | "workflows"
+): Goal | undefined =>
+  change !== undefined && change !== "new" && change.what === what
+    ? change.goal
+    : undefined;
 
 /**
  * The board's goals as an admin changes them: each goal's row, and a new
  * goal. For admins only: core refuses anyone else's change.
  */
 export const GoalsEditor = ({ goals }: { goals: readonly Goal[] }) => {
+  const { t } = useLingui();
   const [change, setChange] = useState<Change>();
   const [workflows, setWorkflows] = useState<readonly WorkflowSummary[]>();
   const { busy, failure, run } = useCoreAction();
@@ -368,28 +407,30 @@ export const GoalsEditor = ({ goals }: { goals: readonly Goal[] }) => {
       setWorkflows(undefined);
     }
   };
+  const rewording = changeOf(change, "wording");
+  const linking = changeOf(change, "workflows");
   return (
-    <section aria-labelledby="board-goals" className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <h2 className="flex-1 text-sm font-medium" id="board-goals">
-          <Trans>Board goals</Trans>
-        </h2>
+    <SectionCard
+      actions={
         <Button
+          icon={Plus}
           onClick={() => {
             void open("new");
           }}
           size="sm"
+          variant="ink"
         >
-          <PlusIcon data-icon="inline-start" />
-          <Trans>Add a goal</Trans>
+          {t`Add a goal`}
         </Button>
-      </div>
+      }
+      density="compact"
+      flush={goals.length > 0}
+      title={t`Board goals`}
+    >
       {goals.length === 0 ? (
-        <p className="text-muted-foreground text-sm">
-          <Trans>No goals yet.</Trans>
-        </p>
+        <Text tone="muted">{t`No goals yet.`}</Text>
       ) : (
-        <ul className="flex flex-col divide-y rounded-lg border px-4">
+        <ItemGroup aria-label={t`Board goals`} separated>
           {goals.map((goal) => (
             <GoalRow
               busy={busy}
@@ -400,30 +441,27 @@ export const GoalsEditor = ({ goals }: { goals: readonly Goal[] }) => {
               }}
             />
           ))}
-        </ul>
+        </ItemGroup>
       )}
       <ErrorText>{failure}</ErrorText>
       {change === "new" ? <WordingDialog onOpenChange={close} open /> : null}
-      {change !== undefined && change !== "new" && change.what === "wording" ? (
+      {rewording === undefined ? null : (
         <WordingDialog
-          goal={change.goal}
-          key={change.goal.id}
+          goal={rewording}
+          key={rewording.id}
           onOpenChange={close}
           open
         />
-      ) : null}
-      {change !== undefined &&
-      change !== "new" &&
-      change.what === "workflows" &&
-      workflows !== undefined ? (
+      )}
+      {linking === undefined || workflows === undefined ? null : (
         <WorkflowsDialog
-          goal={change.goal}
-          key={change.goal.id}
+          goal={linking}
+          key={linking.id}
           onOpenChange={close}
           open
           workflows={workflows}
         />
-      ) : null}
-    </section>
+      )}
+    </SectionCard>
   );
 };

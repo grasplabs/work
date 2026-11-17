@@ -1,4 +1,4 @@
-export { Command } from "./command";
+export { Command, CommandMatch } from "./command";
 export type {
   CommandEntry,
   CommandGroupEntry,

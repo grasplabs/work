@@ -8,7 +8,7 @@ import {
   Dialog as DialogPrimitive,
   DialogTitle,
 } from "@ui-sdk/react/dialog";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { DialogTrigger } from "../dialog";
 import { dialogStyles } from "../dialog/styles";
@@ -18,25 +18,49 @@ import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { useWords } from "../words/words";
 import { CommandView } from "./command";
-import type { CommandItems } from "./command";
+import type { CommandItems, CommandProps } from "./command";
 import { commandWords } from "./words";
 
+/** What CommandDialog passes on to its Command list as given: a server's search, row actions, labels. */
+type Passed = Pick<
+  CommandProps,
+  | "query"
+  | "defaultQuery"
+  | "onQueryChange"
+  | "filter"
+  | "loading"
+  | "loadingLabel"
+  | "onRowAction"
+  | "moreLabel"
+  | "moreHint"
+  | "failedLabel"
+>;
+
 /** Every prop a CommandDialog takes. */
-export interface CommandDialogProps {
+export interface CommandDialogProps extends Passed {
   /** The commands, as Command takes them: commands, groups and separators. */
   items: CommandItems;
   /**
    * Runs the command with this value. The palette closes once it has run; when it returns a
-   * Promise, once that settles, and it stays open showing the `failedLabel` if it rejects.
+   * Promise, once that settles, and it stays open showing the `failedLabel` if it rejects. Return
+   * `false` to keep it open (a command that changes what the list shows, as Try the search again).
    */
   onAction?: (value: string, details: CommandActionDetails) => unknown;
   /** The search field's name, and the palette's, as a screen reader and an agent say it ("Search actions"). */
   "aria-label": string;
   /**
-   * The words on the trigger.
+   * The words on the trigger. `null` draws no trigger: the page opens it (`open`), from its own
+   * button, a Sidebar row or its shortcut. Given `open` and no `trigger`, there is none either.
    * @default "Search"
    */
-  trigger?: string;
+  trigger?: string | null;
+  /**
+   * Whether it is open, when the page holds it (with `onOpenChange`): opened from anywhere, closed
+   * by Escape, a press outside, or a command run.
+   */
+  open?: boolean;
+  /** Called when it opens or closes: by its trigger, its shortcut, Escape, or a command run. */
+  onOpenChange?: (open: boolean) => void;
   /**
    * The keys that open it from anywhere on the page: `mod` is Command on a Mac and Control
    * elsewhere. Pass `null` for none.
@@ -101,6 +125,52 @@ const waitThenClose = async (
   return done;
 };
 
+/** Whether a key press is the shortcut: "mod+k" is Command+K on a Mac and Control+K elsewhere. */
+const isShortcut = (event: KeyboardEvent, shortcut: string) => {
+  const parts = shortcut.toLowerCase().split("+");
+  const key = parts.at(-1);
+  const mac = /mac|iphone|ipad/iu.test(navigator.platform);
+  const wants = (name: string) => parts.includes(name);
+  const modKey = mac ? event.metaKey : event.ctrlKey;
+  const mod = !wants("mod") || modKey;
+  return (
+    event.key.toLowerCase() === key &&
+    mod &&
+    wants("shift") === event.shiftKey &&
+    wants("alt") === event.altKey
+  );
+};
+
+/** Opens on the shortcut, from anywhere on the page, unless something there already took the keys. */
+const listenFor = (keys: string, toOpen: { current: () => void }) => {
+  const press = (event: KeyboardEvent) => {
+    if (!event.defaultPrevented && isShortcut(event, keys)) {
+      event.preventDefault();
+      toOpen.current();
+    }
+  };
+  document.addEventListener("keydown", press);
+  return () => {
+    document.removeEventListener("keydown", press);
+  };
+};
+
+/** With no trigger to carry it, the shortcut opens the palette from anywhere on the page; it only opens. */
+const useOpenByShortcut = (
+  keys: string | null,
+  on: boolean,
+  whenPressed: () => void
+) => {
+  const latest = useRef(whenPressed);
+  useEffect(() => {
+    latest.current = whenPressed;
+  });
+  useEffect(
+    () => (on && keys !== null ? listenFor(keys, latest) : undefined),
+    [on, keys]
+  );
+};
+
 /** The trigger and the palette it opens. */
 export const CommandDialog = ({
   items,
@@ -110,9 +180,23 @@ export const CommandDialog = ({
   shortcut = "mod+k",
   placeholder,
   empty,
+  open: openGiven,
+  onOpenChange,
+  ...passed
 }: CommandDialogProps) => {
   const words = useWords("command", commandWords);
-  const [open, setOpen] = useState(false);
+  const [openHere, setOpenHere] = useState(false);
+  const open = openGiven ?? openHere;
+  const setOpen = (next: boolean) => {
+    setOpenHere(next);
+    onOpenChange?.(next);
+  };
+  // No trigger of its own: when the page says so, or holds it open and names none.
+  const triggerless =
+    trigger === null || (openGiven !== undefined && trigger === undefined);
+  useOpenByShortcut(shortcut, triggerless, () => {
+    setOpen(true);
+  });
   // While a command works, nothing closes the palette: its outcome is shown where it ran.
   const pending = useRef(false);
   // Close once the command has run; a failure keeps it open, showing why (Command does that).
@@ -120,6 +204,10 @@ export const CommandDialog = ({
     const result = onAction?.(value, details);
     const thenable =
       result !== null && typeof result === "object" && "then" in result;
+    // A command that returns `false` keeps the palette open (Try the search again).
+    if (result === false) {
+      return result;
+    }
     if (!thenable) {
       setOpen(false);
       return result;
@@ -140,9 +228,11 @@ export const CommandDialog = ({
         setOpen(next);
       }}
     >
-      <DialogTrigger icon={Search} shortcut={shortcut ?? undefined}>
-        {trigger ?? words.dialogTrigger}
-      </DialogTrigger>
+      {triggerless ? null : (
+        <DialogTrigger icon={Search} shortcut={shortcut ?? undefined}>
+          {trigger ?? words.dialogTrigger}
+        </DialogTrigger>
+      )}
       <DialogBackdrop {...stylex.props(dialogStyles.scrim, styles.fade)} />
       <DialogContent
         {...stylex.props(
@@ -154,6 +244,7 @@ export const CommandDialog = ({
       >
         <DialogTitle {...stylex.props(visuallyHidden)}>{ariaLabel}</DialogTitle>
         <CommandView
+          {...passed}
           bare
           items={items}
           onAction={run}

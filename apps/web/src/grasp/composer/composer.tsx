@@ -44,6 +44,8 @@ import { Shimmer } from "../shimmer";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { ComposerAction } from "./action";
 import type { ComposerKind } from "./add";
+import { ChosenAgentContext, ComposerAgentChip } from "./agent-chip";
+import type { ComposerChosenAgent } from "./agent-chip";
 import type { ComposerAttachmentWords } from "./attachment";
 import { ComposerAttachments } from "./attachments";
 import type { ComposerFile } from "./attachments";
@@ -62,6 +64,8 @@ import type { ComposerMentionItem, MentionRow } from "./mention";
 import { ComposerSend } from "./send";
 import { ComposerVoice } from "./voice";
 import type { ComposerVoiceProps } from "./voice";
+import { useComposerWords } from "./words";
+import type { ComposerWords } from "./words";
 
 /** The field's name by its new name, else its deprecated old one (the breaking release's step 1). */
 const nameOf = (props: { "aria-label"?: string; label?: string }) =>
@@ -88,8 +92,11 @@ export interface ComposerProps {
    * failure it stays and `failedLabel` shows under the card.
    */
   onSend: (text: string) => unknown;
-  /** The words when a send failed, shown under the card and given to an agent ("Could not send"). */
-  failedLabel: string;
+  /**
+   * The words when a send failed, shown under the card and given to an agent.
+   * @default "Could not send"
+   */
+  failedLabel?: string;
   /**
    * Whether the last send failed, set from outside: for a failure learned after `onSend` settled,
    * or a failed draft brought back (with its text in `value` or `defaultValue`). It shows as a send
@@ -503,13 +510,21 @@ const styles = stylex.create({
     // Its corner less its room, 8px (corner.ts, F71).
     "--grasp-composer-nested": `calc(min(${grasp.corner}, calc((${grasp.controlSm} + 2 * ${grasp.space2}) / 2)) - ${grasp.space2})`,
   },
+  // The strip, the row above the text and the text: one row of the card, with no gap of its own.
+  textRoom: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    minWidth: 0,
+  },
+  // A row given nothing to hold (an empty fragment) takes no room at all.
   above: {
-    display: "flex",
+    display: { default: "flex", ":empty": "none" },
     flexWrap: "wrap",
     gap: grasp.space2,
     paddingInline: grasp.space4,
     paddingBlockStart: grasp.space4,
-    marginBlockEnd: `calc(-1 * ${grasp.space4})`,
+    // The text stands the card's gap under it, as before, now inside one row.
+    marginBlockEnd: `calc(${grasp.space6} - ${grasp.space4})`,
   },
   text: {
     display: "block",
@@ -1141,12 +1156,6 @@ const menuStatus = (
 };
 
 // The limit's words, in English.
-const englishCount = (length: number, max: number) => `${length}/${max}`;
-const englishNear = (max: number) => `Close to the limit of ${max} characters`;
-const englishReached = (max: number) =>
-  `The limit of ${max} characters is reached`;
-const englishCut = (max: number) =>
-  `The pasted text was cut at the limit of ${max} characters`;
 
 /** Where the text stands against its limit: under 90%, near it, or at it. */
 const stageOf = (length: number, max: number | undefined) => {
@@ -1249,8 +1258,6 @@ const ComposerLimitSaid = ({
   );
 
 // How many the menu found, in English.
-const englishFound = (count: number) =>
-  `${count} ${count === 1 ? "result" : "results"}`;
 
 interface MentionsInput {
   text: string;
@@ -1707,6 +1714,7 @@ interface InsideProps {
   editor: ReactNode;
   controls: ReactNode;
   above: ReactNode;
+  chosenAgent: ComposerChosenAgent | null;
   attachments: ComposerFile[];
   onAttach: ComposerProps["onAttach"];
   onRemoveAttachment: ComposerProps["onRemoveAttachment"];
@@ -1729,6 +1737,7 @@ const ComposerInside = ({
   editor,
   controls,
   above,
+  chosenAgent,
   attachments,
   onAttach,
   onRemoveAttachment,
@@ -1758,18 +1767,29 @@ const ComposerInside = ({
   }
   return (
     <>
-      {onAttach !== undefined || attachments.length > 0 ? (
-        <ComposerAttachments
-          files={attachments}
-          onRemove={onRemoveAttachment}
-          onRetry={onRetryAttachment}
-          onOpen={onOpenAttachment}
-          words={attachmentWords}
-          label={attachmentsLabel}
-        />
-      ) : null}
-      {Boolean(above) && <div {...stylex.props(styles.above)}>{above}</div>}
-      {editor}
+      {/* The files, the row above the text and the text, as one of the card's rows: the card's gap
+          never stands above an empty strip or an empty row, so the text starts where it would with
+          neither; the strip carries its own room as it opens. */}
+      <div {...stylex.props(styles.textRoom)}>
+        {onAttach !== undefined || attachments.length > 0 ? (
+          <ComposerAttachments
+            files={attachments}
+            onRemove={onRemoveAttachment}
+            onRetry={onRetryAttachment}
+            onOpen={onOpenAttachment}
+            words={attachmentWords}
+            label={attachmentsLabel}
+          />
+        ) : null}
+        {/* The agent chosen in the plus menu, when it is not the default, stands first in the row. */}
+        {(Boolean(above) || chosenAgent !== null) && (
+          <div {...stylex.props(styles.above)}>
+            {chosenAgent !== null && <ComposerAgentChip chosen={chosenAgent} />}
+            {above}
+          </div>
+        )}
+        {editor}
+      </div>
       <div
         data-slot="composer-footer"
         onPointerDown={focusText}
@@ -1878,26 +1898,30 @@ const lookDefaults = (props: ComposerProps) => ({
   mentionsLoading: props.mentionsLoading ?? false,
 });
 
-const wordDefaults = (props: ComposerProps) => ({
-  workingLabel: props.workingLabel ?? "Working",
+// Its words: the caller's text prop where given, else the product's catalogue (GraspWords), else English.
+const wordDefaults = (
+  props: ComposerProps,
+  words: ComposerWords["composer"]
+) => ({
+  failedLabel: props.failedLabel ?? words.failed,
+  workingLabel: props.workingLabel ?? words.working,
   showWorking: props.showWorking ?? false,
-  successLabel: props.successLabel ?? "Done",
-  sendLabel: props.sendLabel ?? "Send",
-  stopLabel: props.stopLabel ?? "Stop",
-  dropLabel: props.dropLabel ?? "Drop to add",
-  mentionsEmptyLabel: props.mentionsEmptyLabel ?? "Nothing found",
-  mentionsLoadingLabel: props.mentionsLoadingLabel ?? "Looking",
-  maxLengthCountLabel: props.maxLengthCountLabel ?? englishCount,
-  maxLengthNearLabel: props.maxLengthNearLabel ?? englishNear,
-  maxLengthReachedLabel: props.maxLengthReachedLabel ?? englishReached,
-  maxLengthCutLabel: props.maxLengthCutLabel ?? englishCut,
-  mentionsLabel: props.mentionsLabel ?? "Mention",
-  mentionsFoundLabel: props.mentionsFoundLabel ?? englishFound,
-  commandsLabel: props.commandsLabel ?? "Commands",
-  uploadingLabel:
-    props.uploadingLabel ?? "Sending waits for the files to upload",
-  attachmentsLabel: props.attachmentsLabel ?? "Files to send",
-  dictateLabel: props.dictateLabel ?? "Dictate",
+  successLabel: props.successLabel ?? words.success,
+  sendLabel: props.sendLabel ?? words.send,
+  stopLabel: props.stopLabel ?? words.stop,
+  dropLabel: props.dropLabel ?? words.drop,
+  mentionsEmptyLabel: props.mentionsEmptyLabel ?? words.mentionsEmpty,
+  mentionsLoadingLabel: props.mentionsLoadingLabel ?? words.mentionsLoading,
+  maxLengthCountLabel: props.maxLengthCountLabel ?? words.count,
+  maxLengthNearLabel: props.maxLengthNearLabel ?? words.near,
+  maxLengthReachedLabel: props.maxLengthReachedLabel ?? words.reached,
+  maxLengthCutLabel: props.maxLengthCutLabel ?? words.cut,
+  mentionsLabel: props.mentionsLabel ?? words.mentions,
+  mentionsFoundLabel: props.mentionsFoundLabel ?? words.mentionsFound,
+  commandsLabel: props.commandsLabel ?? words.commands,
+  uploadingLabel: props.uploadingLabel ?? words.uploading,
+  attachmentsLabel: props.attachmentsLabel ?? words.attachments,
+  dictateLabel: props.dictateLabel ?? words.dictate,
 });
 
 type Resolved = ComposerProps &
@@ -1957,6 +1981,10 @@ const ComposerForm = (props: Resolved) => {
   const invalid = validation !== undefined && validation !== "";
   // A dictation in the takeover hands the card its level, so the dithered edge listens with it.
   const [listener, setListener] = useState<ComposerListener | null>(null);
+  // The agent the plus menu chose, while it is not the default: its chip stands above the text.
+  const [chosenAgent, setChosenAgent] = useState<ComposerChosenAgent | null>(
+    null
+  );
 
   const files = useFileDrop(props.onAttach, disabled);
   const success = useSuccessCount(activity);
@@ -2174,32 +2202,35 @@ const ComposerForm = (props: Resolved) => {
               </span>
             )}
             <ListenContext.Provider value={setListener}>
-              <DisabledContext.Provider value={disabled}>
-                <MentionContext.Provider
-                  value={mentions.on ? mentions.openMentions : null}
-                >
-                  <ComposerInside
-                    takeover={takeover}
-                    compact={compact}
-                    start={props.start}
-                    end={props.end}
-                    last={last}
-                    after={props.after}
-                    footer={props.footer}
-                    editor={editor}
-                    controls={props.controls}
-                    above={props.above}
-                    attachments={attachments}
-                    onAttach={props.onAttach}
-                    onRemoveAttachment={props.onRemoveAttachment}
-                    onRetryAttachment={props.onRetryAttachment}
-                    onOpenAttachment={props.onOpenAttachment}
-                    attachmentWords={props.attachmentWords}
-                    attachmentsLabel={props.attachmentsLabel}
-                    focusText={focusText}
-                  />
-                </MentionContext.Provider>
-              </DisabledContext.Provider>
+              <ChosenAgentContext.Provider value={setChosenAgent}>
+                <DisabledContext.Provider value={disabled}>
+                  <MentionContext.Provider
+                    value={mentions.on ? mentions.openMentions : null}
+                  >
+                    <ComposerInside
+                      takeover={takeover}
+                      compact={compact}
+                      start={props.start}
+                      end={props.end}
+                      last={last}
+                      after={props.after}
+                      footer={props.footer}
+                      editor={editor}
+                      controls={props.controls}
+                      above={props.above}
+                      chosenAgent={chosenAgent}
+                      attachments={attachments}
+                      onAttach={props.onAttach}
+                      onRemoveAttachment={props.onRemoveAttachment}
+                      onRetryAttachment={props.onRetryAttachment}
+                      onOpenAttachment={props.onOpenAttachment}
+                      attachmentWords={props.attachmentWords}
+                      attachmentsLabel={props.attachmentsLabel}
+                      focusText={focusText}
+                    />
+                  </MentionContext.Provider>
+                </DisabledContext.Provider>
+              </ChosenAgentContext.Provider>
             </ListenContext.Provider>
           </fieldset>
         </div>
@@ -2229,6 +2260,13 @@ const ComposerForm = (props: Resolved) => {
 };
 
 /** Where a person writes to an assistant: the text, its actions, and send. */
-export const Composer = (props: ComposerProps) => (
-  <ComposerForm {...props} {...lookDefaults(props)} {...wordDefaults(props)} />
-);
+export const Composer = (props: ComposerProps) => {
+  const words = useComposerWords("composer");
+  return (
+    <ComposerForm
+      {...props}
+      {...lookDefaults(props)}
+      {...wordDefaults(props, words)}
+    />
+  );
+};

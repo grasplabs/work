@@ -24,6 +24,7 @@ import type { ComposerModelMaker, ComposerModelOption } from "./model";
 import { LitEdge } from "./reasoning";
 import type { ComposerReasoningOption } from "./reasoning";
 import { tabOutTarget } from "./tab-out";
+import { useComposerWords } from "./words";
 
 /** One model, with the levels of effort it offers. */
 export interface ComposerModelEffortOption extends ComposerModelOption {
@@ -585,14 +586,20 @@ export const ComposerModelEffort = ({
   effort,
   onEffortChange,
   label: labelDeprecated,
-  "aria-label": label = labelDeprecated ?? "Model and effort",
-  modelLabel = "Model",
-  effortLabel = "Effort",
-  noEffortLabel = "This model has one level of effort.",
+  "aria-label": labelGiven,
+  modelLabel: modelGiven,
+  effortLabel: effortGiven,
+  noEffortLabel: noEffortGiven,
   effortLook = "rows",
   topLight = false,
 }: ComposerModelEffortProps) => {
   const disabled = useComposerDisabled();
+  // Its words: the caller's where given, else the product's catalogue (GraspWords), else English.
+  const words = useComposerWords("modelEffort");
+  const label = labelGiven ?? labelDeprecated ?? words.label;
+  const modelLabel = modelGiven ?? words.model;
+  const effortLabel = effortGiven ?? words.effort;
+  const noEffortLabel = noEffortGiven ?? words.none;
   const [open, setOpen] = useState(false);
   const [listing, setListing] = useState(false);
   const header = useRef<HTMLButtonElement | null>(null);

@@ -144,7 +144,8 @@ describe("a team's claim, wherever the Brain names it", () => {
     const preview = document.querySelector('[data-slot="hover-card-content"]');
     expect({
       open: preview !== null,
-      title: preview?.querySelector(".font-medium")?.textContent,
+      // The card's title, its first paragraph, above the summary.
+      title: preview?.querySelector("p")?.textContent,
     }).toStrictEqual({ open: true, title: claimText });
   });
 

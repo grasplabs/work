@@ -22,6 +22,34 @@ import { AppData } from "./app-data.tsx";
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
+/**
+ * The page's window, which lays out nothing: whatever the table watches
+ * (the mark under its last row) is in view as soon as it's watched, until
+ * it's let go. The table reads only whether an entry is in view.
+ */
+class InView {
+  readonly #heard: (entries: { isIntersecting: boolean }[]) => void;
+  #watching = false;
+
+  constructor(heard: (entries: { isIntersecting: boolean }[]) => void) {
+    this.#heard = heard;
+  }
+
+  observe(): void {
+    this.#watching = true;
+    queueMicrotask(() => {
+      if (this.#watching) {
+        this.#heard([{ isIntersecting: true }]);
+      }
+    });
+  }
+
+  disconnect(): void {
+    this.#watching = false;
+  }
+}
+Reflect.set(globalThis, "IntersectionObserver", InView);
+
 let root: Root | undefined;
 
 /** Takes the page down. */
@@ -243,7 +271,7 @@ describe("an App's data page", () => {
     expect({
       first: document.body.textContent.includes("first's notes"),
       second: document.body.textContent.includes("first's second notes"),
-      rows: document.querySelectorAll('[role="table"] [role="row"]').length,
+      rows: document.querySelectorAll("table tr").length,
     }).toStrictEqual({ first: true, second: true, rows: 3 });
   });
 

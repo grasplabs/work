@@ -1,23 +1,22 @@
 import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
+import { useLingui } from "@lingui/react/macro";
+import { useRouter } from "@tanstack/react-router";
+import { useState } from "react";
+
+import { ErrorText } from "../error-text.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
-  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
-import { Label } from "@grasp-os/ui/components/label";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { useRouter } from "@tanstack/react-router";
-import { useId, useState } from "react";
-
-import { ErrorText } from "../error-text.tsx";
+} from "../grasp/alert-dialog/index.ts";
+import { Checkbox } from "../grasp/checkbox/index.ts";
+import { Field, FieldLabel } from "../grasp/field/index.ts";
+import { Trash } from "../grasp/icons/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // Deleting an independent workflow (GRA-1329), for its builders, asked
@@ -41,9 +40,8 @@ export const DeleteWorkflow = ({
   admin: boolean;
 }) => {
   const { t } = useLingui();
-  const ids = useId();
   const router = useRouter();
-  const { busy, failure, run } = useCoreAction();
+  const { failure, run } = useCoreAction();
   const [release, setRelease] = useState(false);
   const [releaseFailure, setReleaseFailure] = useState<string>();
   const { name } = resource;
@@ -60,11 +58,12 @@ export const DeleteWorkflow = ({
       return true;
     });
     if (deleted !== true) {
-      return;
+      // The question stays open, with core's reason in it.
+      throw new Error("It wasn't deleted.");
     }
     if (release) {
-      // Deleted already: a refused release is said here, and the name can
-      // be released later in Settings.
+      // Deleted already: a refused release is said on the page, and the
+      // name can be released later in Settings.
       const released = await run(async (session) => {
         await session.workflowResources.releaseName(name);
         return true;
@@ -77,77 +76,53 @@ export const DeleteWorkflow = ({
   };
 
   return (
-    <section className="mt-8 flex flex-col gap-3 border-t pt-6">
-      <h2 className="font-medium">
-        <Trans>Delete this workflow</Trans>
-      </h2>
-      <p className="text-muted-foreground">
-        <Trans>
-          It can be deleted once nothing uses it: no other workflow calls it, no
-          trigger or app starts it, and none of its runs is still going.
-        </Trans>
-      </p>
-      <div>
+    <SectionCard
+      actions={
         <AlertDialog>
-          <AlertDialogTrigger
-            disabled={busy}
-            render={<Button size="sm" variant="outline" />}
-          >
-            <Trans>Delete the workflow</Trans>
+          <AlertDialogTrigger icon={Trash} size="sm" variant="danger">
+            {t`Delete the workflow`}
           </AlertDialogTrigger>
           <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>
-                <Trans>Delete {name}?</Trans>
-              </AlertDialogTitle>
-              <AlertDialogDescription>
-                <Trans>
-                  Nobody can open or start it again. Its versions are kept but
-                  never served. This can&apos;t be undone.
-                </Trans>
-              </AlertDialogDescription>
-            </AlertDialogHeader>
+            <AlertDialogTitle>{t`Delete ${name}?`}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t`Nobody can open or start it again. Its versions are kept but never served. This can't be undone.`}
+            </AlertDialogDescription>
             {admin ? (
-              <div className="flex items-start gap-2">
+              <Field orientation="horizontal">
                 <Checkbox
                   checked={release}
-                  id={`${ids}-release`}
                   onCheckedChange={(checked) => {
-                    setRelease(checked);
+                    setRelease(checked === true);
                   }}
                 />
-                <Label htmlFor={`${ids}-release`}>
-                  <Trans>
-                    Also release its name, so a new workflow can take it.
-                  </Trans>
-                </Label>
-              </div>
+                <FieldLabel>
+                  {t`Also release its name, so a new workflow can take it.`}
+                </FieldLabel>
+              </Field>
             ) : null}
+            <ErrorText>{failure}</ErrorText>
             <AlertDialogFooter>
-              <AlertDialogCancel>
-                <Trans>Cancel</Trans>
-              </AlertDialogCancel>
+              <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
               <AlertDialogAction
-                disabled={busy}
-                onClick={() => {
-                  void remove();
-                }}
-                variant="destructive"
+                action={remove}
+                failedLabel={t`Not deleted`}
+                variant="danger"
               >
                 {t`Delete the workflow`}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-      </div>
-      <ErrorText>{failure}</ErrorText>
+      }
+      density="compact"
+      info={t`It can be deleted once nothing uses it: no other workflow calls it, no trigger or app starts it, and none of its runs is still going.`}
+      title={t`Delete this workflow`}
+    >
       {reason === undefined ? null : (
-        <p className="text-destructive text-sm" role="alert">
-          <Trans>
-            The workflow is deleted, but its name wasn&apos;t released: {reason}
-          </Trans>
-        </p>
+        <ErrorText>
+          {t`The workflow is deleted, but its name wasn't released: ${reason}`}
+        </ErrorText>
       )}
-    </section>
+    </SectionCard>
   );
 };

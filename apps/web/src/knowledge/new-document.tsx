@@ -4,31 +4,32 @@ import {
   linkPath,
 } from "@grasp-os/shared/knowledge";
 import type { DocumentSummary } from "@grasp-os/shared/knowledge";
-import { Button } from "@grasp-os/ui/components/button";
+import { Trans, useLingui } from "@lingui/react/macro";
+import { useNavigate } from "@tanstack/react-router";
+import { useId, useState } from "react";
+
+import type { Session } from "../core.ts";
+import { ErrorText } from "../error-text.tsx";
+import { Button } from "../grasp/button/index.ts";
 import {
   Dialog,
-  DialogClose,
+  DialogAction,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
-  DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@grasp-os/ui/components/dialog";
+} from "../grasp/dialog/index.ts";
 import {
   Field,
   FieldDescription,
   FieldError,
   FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { useNavigate } from "@tanstack/react-router";
-import { FilePlusIcon } from "lucide-react";
-import { useId, useState } from "react";
-
-import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
+} from "../grasp/field/index.ts";
+import { Form } from "../grasp/form/index.ts";
+import { File as FileMark } from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // A new document in a collection: the person names it, folders first if
@@ -69,7 +70,7 @@ const saveNew = async (
 
 /** Why the name can't be used: the collection has a document at `path`. */
 const TakenPath = ({ path }: { path: string }) => (
-  <FieldError>
+  <FieldError match>
     <Trans>This collection has a document at {path} already.</Trans>
   </FieldError>
 );
@@ -83,7 +84,7 @@ const DocumentForm = ({
   onCreated: () => void;
 }) => {
   const { t } = useLingui();
-  const ids = useId();
+  const formId = useId();
   const navigate = useNavigate();
   const { busy, failure, run } = useCoreAction();
   const [name, setName] = useState("");
@@ -115,67 +116,59 @@ const DocumentForm = ({
   };
 
   return (
-    <form
-      className="flex flex-col gap-5"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (path !== undefined && !busy) {
-          void create(path);
-        }
-      }}
-    >
-      <DialogHeader>
-        <DialogTitle>
-          <Trans>New document</Trans>
-        </DialogTitle>
-        <DialogDescription>
-          <Trans>
-            It starts with its name as a heading; write the rest in the editor.
-          </Trans>
-        </DialogDescription>
-      </DialogHeader>
-      <Field data-invalid={invalid || taken !== undefined}>
-        <FieldLabel htmlFor={`${ids}-name`}>
-          <Trans>Name</Trans>
-        </FieldLabel>
-        <Input
-          aria-invalid={invalid || taken !== undefined}
-          autoComplete="off"
-          data-1p-ignore
-          data-lpignore="true"
-          disabled={busy}
-          id={`${ids}-name`}
-          maxLength={documentPathMaxLength}
-          onChange={(event) => {
-            setName(event.target.value);
-            setTaken(undefined);
+    <>
+      <DialogBody>
+        <Form
+          aria-label={t`New document`}
+          id={formId}
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (path !== undefined && !busy) {
+              void create(path);
+            }
           }}
-          placeholder={t`handbook/leave`}
-          value={name}
-        />
-        <FieldDescription>
-          <Trans>Put it in folders with a slash, as in handbook/leave.</Trans>
-        </FieldDescription>
-        {invalid ? (
-          <FieldError>
-            <Trans>A name has no [, ], # or |, and no empty folders.</Trans>
-          </FieldError>
-        ) : null}
-        {taken === undefined ? null : <TakenPath path={taken} />}
-      </Field>
-      <ErrorText>{failure}</ErrorText>
-      <DialogFooter>
-        <DialogClose
-          disabled={busy}
-          render={<Button type="button" variant="outline" />}
         >
-          <Trans>Cancel</Trans>
-        </DialogClose>
-        <Button disabled={path === undefined || busy} type="submit">
-          <Trans>Create document</Trans>
+          <Field invalid={invalid || taken !== undefined}>
+            <FieldLabel>{t`Name`}</FieldLabel>
+            <Input
+              autoComplete="off"
+              data-1p-ignore
+              data-lpignore="true"
+              disabled={busy}
+              maxLength={documentPathMaxLength}
+              onValueChange={(value) => {
+                setName(value);
+                setTaken(undefined);
+              }}
+              placeholder={t`handbook/leave`}
+              value={name}
+            />
+            <FieldDescription>
+              {t`Put it in folders with a slash, as in handbook/leave.`}
+            </FieldDescription>
+            {invalid ? (
+              <FieldError match>
+                {t`A name has no [, ], # or |, and no empty folders.`}
+              </FieldError>
+            ) : null}
+            {taken === undefined ? null : <TakenPath path={taken} />}
+          </Field>
+          <ErrorText>{failure}</ErrorText>
+        </Form>
+      </DialogBody>
+      <DialogFooter>
+        <DialogAction disabled={busy}>{t`Cancel`}</DialogAction>
+        <Button
+          disabled={path === undefined || busy}
+          form={formId}
+          size="sm"
+          type="submit"
+          variant="ink"
+        >
+          {t`Create document`}
         </Button>
       </DialogFooter>
-    </form>
+    </>
   );
 };
 
@@ -185,11 +178,14 @@ export const NewDocument = ({ collectionId }: { collectionId: string }) => {
   const [open, setOpen] = useState(false);
   return (
     <Dialog onOpenChange={setOpen} open={open}>
-      <DialogTrigger render={<Button size="sm" variant="outline" />}>
-        <FilePlusIcon data-icon="inline-start" />
-        <Trans>New document</Trans>
+      <DialogTrigger icon={FileMark} size="sm">
+        {t`New document`}
       </DialogTrigger>
       <DialogContent closeLabel={t`Close`}>
+        <DialogTitle>{t`New document`}</DialogTitle>
+        <DialogDescription>
+          {t`It starts with its name as a heading; write the rest in the editor.`}
+        </DialogDescription>
         {open ? (
           <DocumentForm
             collectionId={collectionId}

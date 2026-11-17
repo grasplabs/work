@@ -3,34 +3,24 @@ import {
   rememberTextMaxLength,
 } from "@grasp-os/shared/knowledge";
 import type { MemoryKind } from "@grasp-os/shared/knowledge";
-import { Button } from "@grasp-os/ui/components/button";
+import { useLingui } from "@lingui/react/macro";
+import { useRef, useState } from "react";
+
+import { ErrorText } from "../error-text.tsx";
 import {
   Dialog,
-  DialogClose,
+  DialogAction,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
-  DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@grasp-os/ui/components/dialog";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from "@grasp-os/ui/components/field";
-import {
-  RadioGroup,
-  RadioGroupItem,
-} from "@grasp-os/ui/components/radio-group";
-import { Textarea } from "@grasp-os/ui/components/textarea";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { PlusIcon } from "lucide-react";
-import { useId, useRef, useState } from "react";
-
-import { ErrorText } from "../error-text.tsx";
+} from "../grasp/dialog/index.ts";
+import { Field, FieldDescription, FieldLabel } from "../grasp/field/index.ts";
+import { Plus } from "../grasp/icons/index.ts";
+import { RadioGroup, RadioGroupItem } from "../grasp/radio-group/index.ts";
+import { Textarea } from "../grasp/textarea/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { KindLabel, keyOf, recordOf } from "./memory-parts.tsx";
 
@@ -46,8 +36,8 @@ const RememberForm = ({
 }: {
   onRemembered: (memoryId: string | undefined) => void;
 }) => {
-  const ids = useId();
-  const { busy, failure, run } = useCoreAction();
+  const { t } = useLingui();
+  const { failure, run } = useCoreAction();
   const [kind, setKind] = useState<MemoryKind>("fact");
   const [text, setText] = useState("");
   const idempotencyKey = useRef<string>(null);
@@ -61,88 +51,66 @@ const RememberForm = ({
           { idempotencyKey: keyOf(idempotencyKey) }
         )
     );
-    if (receipt !== undefined) {
-      onRemembered(recordOf(receipt));
+    if (receipt === undefined) {
+      // The dialog stays open, with core's reason under the fields.
+      throw new Error("It wasn't remembered.");
     }
+    onRemembered(recordOf(receipt));
   };
 
   return (
-    <form
-      className="flex flex-col gap-5"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (ready && !busy) {
-          void remember();
-        }
-      }}
-    >
-      <DialogHeader>
-        <DialogTitle>
-          <Trans>Remember something</Trans>
-        </DialogTitle>
-        <DialogDescription>
-          <Trans>Only you and your agents read it, until you share it.</Trans>
-        </DialogDescription>
-      </DialogHeader>
-      <FieldSet>
-        <FieldLegend variant="label">
-          <Trans>What it is</Trans>
-        </FieldLegend>
-        <RadioGroup
-          className="grid-cols-2"
-          disabled={busy}
-          onValueChange={(value) => {
-            const parsed = memoryKindSchema.safeParse(value);
-            if (parsed.success) {
-              setKind(parsed.data);
-            }
-          }}
-          value={kind}
-        >
-          {memoryKindSchema.options.map((one) => (
-            <Field key={one} orientation="horizontal">
-              <RadioGroupItem id={`${ids}-${one}`} value={one} />
-              <FieldLabel htmlFor={`${ids}-${one}`}>
-                <KindLabel kind={one} />
-              </FieldLabel>
-            </Field>
-          ))}
-        </RadioGroup>
-      </FieldSet>
-      <Field>
-        <FieldLabel htmlFor={`${ids}-text`}>
-          <Trans>What to remember</Trans>
-        </FieldLabel>
-        <Textarea
-          disabled={busy}
-          id={`${ids}-text`}
-          maxLength={rememberTextMaxLength}
-          onChange={(event) => {
-            setText(event.target.value);
-          }}
-          rows={4}
-          value={text}
-        />
-        <FieldDescription>
-          <Trans>
-            It starts as proposed: Grasp uses it, and you can correct or retire
-            it here.
-          </Trans>
-        </FieldDescription>
-      </Field>
-      <ErrorText>{failure}</ErrorText>
+    <>
+      <DialogBody>
+        <Field>
+          <FieldLabel>{t`What it is`}</FieldLabel>
+          <RadioGroup
+            onValueChange={(value) => {
+              const parsed = memoryKindSchema.safeParse(value);
+              if (parsed.success) {
+                setKind(parsed.data);
+              }
+            }}
+            value={kind}
+          >
+            {memoryKindSchema.options.map((one) => (
+              <Field key={one} orientation="horizontal">
+                <RadioGroupItem value={one} />
+                <FieldLabel>
+                  <KindLabel kind={one} />
+                </FieldLabel>
+              </Field>
+            ))}
+          </RadioGroup>
+        </Field>
+        <Field>
+          <FieldLabel>{t`What to remember`}</FieldLabel>
+          <Textarea
+            maxLength={rememberTextMaxLength}
+            onValueChange={(value) => {
+              setText(value);
+            }}
+            rows={4}
+            value={text}
+          />
+          <FieldDescription>
+            {t`It starts as proposed: Grasp uses it, and you can correct or retire it here.`}
+          </FieldDescription>
+        </Field>
+        <ErrorText>{failure}</ErrorText>
+      </DialogBody>
       <DialogFooter>
-        <DialogClose
-          disabled={busy}
-          render={<Button type="button" variant="outline" />}
+        <DialogAction>{t`Cancel`}</DialogAction>
+        <DialogAction
+          action={remember}
+          disabled={!ready}
+          failedLabel={t`Not remembered`}
+          variant="ink"
+          workingLabel={t`Remembering`}
         >
-          <Trans>Cancel</Trans>
-        </DialogClose>
-        <Button disabled={!ready || busy} type="submit">
-          <Trans>Remember it</Trans>
-        </Button>
+          {t`Remember it`}
+        </DialogAction>
       </DialogFooter>
-    </form>
+    </>
   );
 };
 
@@ -156,11 +124,12 @@ export const RememberDialog = ({
   const [open, setOpen] = useState(false);
   return (
     <Dialog onOpenChange={setOpen} open={open}>
-      <DialogTrigger render={<Button size="sm" variant="outline" />}>
-        <PlusIcon data-icon="inline-start" />
-        <Trans>Remember something</Trans>
-      </DialogTrigger>
+      <DialogTrigger icon={Plus}>{t`Remember something`}</DialogTrigger>
       <DialogContent closeLabel={t`Close`}>
+        <DialogTitle>{t`Remember something`}</DialogTitle>
+        <DialogDescription>
+          {t`Only you and your agents read it, until you share it.`}
+        </DialogDescription>
         {open ? (
           <RememberForm
             onRemembered={(memoryId) => {
