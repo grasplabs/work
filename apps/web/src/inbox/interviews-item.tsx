@@ -59,8 +59,8 @@ const styles = stylex.create({
     display: "flex",
     alignItems: "center",
     gap: grasp.space3,
-    minWidth: "10rem",
   },
+  teamBar: { width: "6rem", flexShrink: 0 },
 });
 
 /** A date as the page's language writes it, from an ISO day. */
@@ -82,11 +82,14 @@ const TeamRow = ({ team }: { team: TeamProgress }) => {
       <span {...stylex.props(styles.teamFigure)}>
         <Progress
           label={team.name}
+          layout={styles.teamBar}
           max={Math.max(asked, 1)}
+          showLabel={false}
           size="sm"
           value={talked}
+          valueText={() => t`${talked} of ${asked}`}
         />
-        <Text element="span" size="xs" tone="muted">
+        <Text element="span" size="xs" tone="muted" wrap="truncate">
           {t`${talked} of ${asked}`}
         </Text>
       </span>
@@ -107,21 +110,6 @@ const TeamRow = ({ team }: { team: TeamProgress }) => {
       <ItemActions>{figure}</ItemActions>
     </Item>
   );
-};
-
-/** What a link's row says of it, under its owner's name. */
-const linkState = (
-  link: LinkToSend,
-  t: ReturnType<typeof useLingui>["t"]
-): string => {
-  const { team } = link;
-  if (link.mailFailed) {
-    return t`${team} · our email didn’t reach them`;
-  }
-  if (link.fresh) {
-    return t`${team} · new`;
-  }
-  return link.path === null ? t`${team} · not out yet` : team;
 };
 
 /**
@@ -147,6 +135,17 @@ const LinksToSend = ({ links }: { links: LinkToSend[] }) => {
   };
   const freshCount = fresh.length;
   const outCount = out.length;
+  /** What a link's row says of it, under its owner's name. */
+  const stateOf = (link: LinkToSend): string => {
+    const { team } = link;
+    if (link.mailFailed) {
+      return t`${team} · our email didn’t reach them`;
+    }
+    if (link.fresh) {
+      return t`${team} · new`;
+    }
+    return link.path === null ? t`${team} · not out yet` : team;
+  };
   const copy = async (link: LinkToSend) => {
     if (link.path === null || !(await copyText(fullLink(link.path, origin)))) {
       return;
@@ -199,7 +198,7 @@ const LinksToSend = ({ links }: { links: LinkToSend[] }) => {
               </ItemMedia>
               <ItemContent>
                 <ItemTitle>{name}</ItemTitle>
-                <ItemDescription>{linkState(link, t)}</ItemDescription>
+                <ItemDescription>{stateOf(link)}</ItemDescription>
               </ItemContent>
               <ItemActions>
                 <Button
@@ -290,7 +289,13 @@ const Days = ({
   return (
     <>
       <div {...stylex.props(styles.days)}>
-        <Progress label={dayLine} max={days} value={day} />
+        <Progress
+          label={dayLine}
+          max={days}
+          showLabel={false}
+          value={day}
+          valueText={() => dayLine}
+        />
         <Text element="span" size="xs" tone="muted">
           {dayLine}
         </Text>

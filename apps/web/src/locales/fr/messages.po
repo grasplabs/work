@@ -1234,14 +1234,17 @@ msgstr "{talked} sur {asked}"
 msgid "{talked} of {of}"
 msgstr "{talked} sur {of}"
 
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "{team} · new"
 msgstr "{team} · nouveau"
 
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "{team} · not out yet"
 msgstr "{team} · pas encore disponible"
 
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "{team} · our email didn’t reach them"
 msgstr "{team} · notre e-mail ne leur est pas parvenu"
