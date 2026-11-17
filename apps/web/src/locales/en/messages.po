@@ -1447,6 +1447,10 @@ msgstr "A change"
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 msgstr "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 
+#: src/chat/agent-change-card.tsx
+msgid "A change to {name}"
+msgstr "A change to {name}"
+
 #: src/apps/app-access-requests.tsx
 #: src/apps/draft-changes.tsx
 msgid "A connection"
@@ -2059,6 +2063,10 @@ msgstr "Added on"
 msgid "Added someone to a team"
 msgstr "Added someone to a team"
 
+#: src/chat/agent-change-card.tsx
+msgid "Added to its instructions"
+msgstr "Added to its instructions"
+
 #: src/brain/skills-page.tsx
 msgid "Added to the company's skills, and since taken out of use."
 msgstr "Added to the company's skills, and since taken out of use."
@@ -2291,6 +2299,10 @@ msgstr "Also release its name, so a new workflow can take it."
 #: src/chat/subject-bar.tsx
 msgid "Also worked on"
 msgstr "Also worked on"
+
+#: src/chat/agent-change-card.tsx
+msgid "Also works on its own"
+msgstr "Also works on its own"
 
 #: src/workflows/resource-params.tsx
 msgid "Amount"
@@ -2552,6 +2564,10 @@ msgstr "Answers nobody anywhere"
 msgid "Answers the people it is for"
 msgstr "Answers the people it is for"
 
+#: src/chat/agent-draft-card.tsx
+msgid "Any app its kinds of work allow"
+msgstr "Any app its kinds of work allow"
+
 #: src/workflows/binding-approvals.tsx
 msgid "Any event its webhook source sends of the types its contract admits"
 msgstr "Any event its webhook source sends of the types its contract admits"
@@ -2787,9 +2803,21 @@ msgstr "Apps and workflows"
 msgid "Apps and workflows grouped by process, team or goal. Putting something in a project shares it with nobody."
 msgstr "Apps and workflows grouped by process, team or goal. Putting something in a project shares it with nobody."
 
+#: src/chat/agent-change-card.tsx
+msgid "Apps it gets"
+msgstr "Apps it gets"
+
+#: src/chat/agent-draft-card.tsx
+msgid "Apps it uses"
+msgstr "Apps it uses"
+
 #: src/workflows/files-and-apps.tsx
 msgid "Apps it works in"
 msgstr "Apps it works in"
+
+#: src/chat/agent-change-card.tsx
+msgid "Apps taken off"
+msgstr "Apps taken off"
 
 #: src/apps/app-settings.tsx
 #: src/apps/app-status.tsx
@@ -3490,6 +3518,7 @@ msgid "Change “{was}” to “{now}”."
 msgstr "Change “{was}” to “{now}”."
 
 #: src/apps/app-data-model.tsx
+#: src/chat/agent-change-card.tsx
 msgid "Change {name}"
 msgstr "Change {name}"
 
@@ -3500,6 +3529,10 @@ msgstr "Change {title}"
 #: src/apps/app-workflows.tsx
 msgid "Change in the draft"
 msgstr "Change in the draft"
+
+#: src/chat/agent-draft-card.tsx
+msgid "Change it"
+msgstr "Change it"
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Change plan"
@@ -9196,6 +9229,10 @@ msgstr "None."
 msgid "Not added yet"
 msgstr "Not added yet"
 
+#: src/chat/agent-draft-card.tsx
+msgid "Not all of it could be set, so the agent is paused. <0>Finish it on its page</0>."
+msgstr "Not all of it could be set, so the agent is paused. <0>Finish it on its page</0>."
+
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Not allowed"
@@ -9399,6 +9436,10 @@ msgstr "Noted: {name}. We’ll connect it with you. Meanwhile, check who leads w
 #: src/onboarding/connect-steps.tsx
 msgid "Noted. We’ll get in touch to put it on the laptops with you."
 msgstr "Noted. We’ll get in touch to put it on the laptops with you."
+
+#: src/chat/agent-change-card.tsx
+msgid "Nothing changes until you say Change it. You can change any of it first."
+msgstr "Nothing changes until you say Change it. You can change any of it first."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing connected yet."
@@ -14011,6 +14052,7 @@ msgctxt "a source of the Brain"
 msgid "The company's teams"
 msgstr "The company's teams"
 
+#: src/chat/agent-change-card.tsx
 #: src/chat/agent-draft-card.tsx
 msgid "the company's time zone"
 msgstr "the company's time zone"
@@ -16022,6 +16064,7 @@ msgid "What it is bound to has changed since the binding was approved. Bind it a
 msgstr "What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits."
 
 #: src/agents/agent-form.tsx
+#: src/chat/agent-change-card.tsx
 #: src/chat/agent-draft-card.tsx
 msgid "What it is for"
 msgstr "What it is for"
@@ -16030,6 +16073,10 @@ msgstr "What it is for"
 msgctxt "what an app is for, in a sentence"
 msgid "What it is for"
 msgstr "What it is for"
+
+#: src/chat/agent-change-card.tsx
+msgid "What it may also do"
+msgstr "What it may also do"
 
 #: src/agents/agent-page.tsx
 #: src/chat/agent-draft-card.tsx
@@ -16517,6 +16564,7 @@ msgstr "Who it is for"
 msgid "Who leads it?"
 msgstr "Who leads it?"
 
+#: src/chat/agent-change-card.tsx
 #: src/chat/agent-draft-card.tsx
 msgid "Who may ask it"
 msgstr "Who may ask it"

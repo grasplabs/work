@@ -11,7 +11,8 @@ import {
   CardTitle,
 } from "@grasp-os/ui/components/card";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { useCoreRead } from "../apps/use-core-read.ts";
@@ -54,8 +55,45 @@ const TeamsWords = ({ teams }: { teams: readonly string[] }) => {
   return <Trans>People in these teams: {named}</Trans>;
 };
 
+/**
+ * The apps a card names, each by what it grants: the company's own name
+ * for it (Google Workspace for Gmail), beside the model's words for it
+ * where they differ, and by the model's words alone while the catalog
+ * isn't read.
+ */
+export const AppNames = ({
+  apps,
+}: {
+  apps: readonly { source: string; provider: string; name: string }[];
+}) => {
+  const key = apps
+    .map(({ source, provider }) => `${source}:${provider}`)
+    .join(",");
+  const read = useCoreRead(
+    key,
+    async (session) => await session.connections.catalog(),
+    key
+  );
+  const named = new Map(
+    read?.state === "ready"
+      ? read.data.entries.map(({ source, id, name }) => [
+          `${source}:${id}`,
+          name,
+        ])
+      : []
+  );
+  return apps
+    .map(({ source, provider, name }) => {
+      const granted = named.get(`${source}:${provider}`);
+      return granted === undefined || granted === name
+        ? name
+        : `${granted} (${name})`;
+    })
+    .join(", ");
+};
+
 /** Who may ask it, as the card says it. */
-const AudienceWords = ({
+export const AudienceWords = ({
   audience,
 }: {
   audience: ToolClassAudience | undefined;
@@ -70,7 +108,13 @@ const AudienceWords = ({
 };
 
 /** One line of the card: what it says, and of what. */
-const Line = ({ label, children }: { label: string; children: ReactNode }) => (
+export const Line = ({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) => (
   <div className="flex flex-col gap-0.5">
     <dt className="text-muted-foreground text-xs">{label}</dt>
     <dd className="text-sm">{children}</dd>
@@ -86,7 +130,15 @@ export const AgentDraftCard = ({
   actions?: ReactNode;
 }) => {
   const { t, i18n } = useLingui();
-  const { name, job, instructions, whose, classes = [], schedule } = draft;
+  const {
+    name,
+    job,
+    instructions,
+    whose,
+    classes = [],
+    schedule,
+    apps = [],
+  } = draft;
   const company = whose === "company";
   return (
     <Card aria-label={t`An agent to make: ${name}`} render={<section />}>
@@ -116,6 +168,13 @@ export const AgentDraftCard = ({
               <AudienceWords audience={draft.audience} />
             </Line>
           ) : null}
+          <Line label={t`Apps it uses`}>
+            {apps.length === 0 ? (
+              <Trans>Any app its kinds of work allow</Trans>
+            ) : (
+              <AppNames apps={apps} />
+            )}
+          </Line>
           {company ? (
             <Line label={t`What it may do`}>
               {classes.length === 0 ? (
@@ -147,18 +206,27 @@ export const AgentDraftCard = ({
   );
 };
 
-/** Make it, which lands the person on the agent made, and Change something. */
-const DraftActions = ({
+/** Which press a card waits on: Make it for a drafted agent, Change it for a change. */
+export type DraftPress = "make" | "change";
+
+/** Make it or Change it, which lands the person on the agent, and Change something. */
+export const DraftActions = ({
   chatId,
-  draft,
+  callId,
+  press,
   build,
 }: {
   chatId: string;
-  draft: AgentDrafted;
+  callId: string;
+  press: DraftPress;
   build: ThreadBuild;
 }) => {
   const { t } = useLingui();
   const navigate = useNavigate();
+  const label = press === "make" ? t`Make it` : t`Change it`;
+  // Made or changed, but not all of the card could be set: it is paused,
+  // and its page says what it has.
+  const [unfinished, setUnfinished] = useState<string>();
   const { busy, failure, run } = useCoreAction();
   const { model, effort } = build;
   return (
@@ -171,16 +239,20 @@ const DraftActions = ({
               return;
             }
             void (async () => {
-              const agent = await run(
-                async (session) =>
-                  await session.chats.makeDraftedAgent(chatId, {
-                    draft: draft.callId,
-                    text: t`Make it`,
-                    model,
-                    ...(effort === undefined ? {} : { effort }),
-                  })
+              const asked = {
+                draft: callId,
+                text: label,
+                model,
+                ...(effort === undefined ? {} : { effort }),
+              };
+              const agent = await run(async (session) =>
+                press === "make"
+                  ? await session.chats.makeDraftedAgent(chatId, asked)
+                  : await session.chats.changeDraftedAgent(chatId, asked)
               );
-              if (agent !== undefined) {
+              if (agent?.unfinished === true) {
+                setUnfinished(agent.id);
+              } else if (agent !== undefined) {
                 void navigate({
                   to: "/agents/$agent",
                   params: { agent: agent.id },
@@ -190,7 +262,7 @@ const DraftActions = ({
           }}
           variant="highlight"
         >
-          <Trans>Make it</Trans>
+          {label}
         </Button>
         <Button
           onClick={() => {
@@ -202,6 +274,17 @@ const DraftActions = ({
         </Button>
       </div>
       <ErrorText>{failure}</ErrorText>
+      {unfinished === undefined ? null : (
+        <p className="text-sm">
+          <Trans>
+            Not all of it could be set, so the agent is paused.{" "}
+            <Link params={{ agent: unfinished }} to="/agents/$agent">
+              Finish it on its page
+            </Link>
+            .
+          </Trans>
+        </p>
+      )}
     </div>
   );
 };
@@ -224,7 +307,12 @@ export const ThreadAgentDraft = ({
   <AgentDraftCard
     actions={
       waiting && build !== undefined ? (
-        <DraftActions build={build} chatId={chatId} draft={draft} />
+        <DraftActions
+          build={build}
+          callId={draft.callId}
+          chatId={chatId}
+          press="make"
+        />
       ) : undefined
     }
     draft={draft}

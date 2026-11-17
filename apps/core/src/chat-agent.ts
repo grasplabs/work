@@ -39,6 +39,7 @@ import {
   filesNoteText,
   makeQuestionsLeft,
   draftAgent,
+  draftAgentChange,
   proposePlan,
   readApi,
   resultRunId,
@@ -652,7 +653,10 @@ export const chatAgent = (agent: ChatAgent): Extension => {
     // their own chat in Grasp (`TurnContext.drafts`).
     ...(agent.context.drafts === undefined
       ? []
-      : [draftAgent(agent.context.drafts)]),
+      : [
+          draftAgent(agent.context.drafts),
+          draftAgentChange(agent.context.drafts),
+        ]),
   ];
   return defineExtension({
     name: chatAgentName(scope.chatId),
