@@ -56,6 +56,7 @@ import type { ThinkingOf } from "../brain/thinking/play.ts";
 import { useCopy } from "../copy.ts";
 import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
 import { useMemberAdmin } from "../use-member-admin.ts";
+import { pendingAgentChange, ThreadAgentChange } from "./agent-change-card.tsx";
 import { pendingAgentDraft, ThreadAgentDraft } from "./agent-draft-card.tsx";
 import { AnswerMarkdown } from "./answer-markdown.tsx";
 import {
@@ -1233,6 +1234,7 @@ export const ChatThread = ({
   const writtenGoesOn = written !== null && items.at(-1)?.kind === "answer";
   const waiting = pendingPlan(messages, running);
   const drafted = pendingAgentDraft(messages, running);
+  const changing = pendingAgentChange(messages, running);
   const reading =
     doing === "reading" ? (
       <div aria-busy="true">
@@ -1283,6 +1285,14 @@ export const ChatThread = ({
             chatId={chatId}
             draft={message.agentDraft}
             waiting={drafted?.callId === message.agentDraft.callId}
+          />
+        )}
+        {message.agentChange === undefined ? null : (
+          <ThreadAgentChange
+            build={build}
+            change={message.agentChange}
+            chatId={chatId}
+            waiting={changing?.callId === message.agentChange.callId}
           />
         )}
       </Fragment>
