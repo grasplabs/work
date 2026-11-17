@@ -1,6 +1,6 @@
 import type { RosterInput } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import type { SourceRef } from "../src/brain-next.ts";
 import {
@@ -18,7 +18,7 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { allEvents } from "./audit-events.ts";
 import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import { mockIdp } from "./idp.ts";
-import { answering, onLink } from "./interview-link.ts";
+import { answering, holdAlarm, onLink } from "./interview-link.ts";
 import { agree, fact, openLink, team } from "./onboarding-team.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
@@ -167,6 +167,11 @@ const markers = () => ({
 });
 
 describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
+  // The tests draw the maps themselves, each with the model's answer it
+  // gives: the store's own alarm drawing one first, with no answer to
+  // give, would put it off.
+  beforeEach(holdAlarm);
+
   it("never gives anyone what a lead's map says a team does, nor times a drawing in the audit log, and takes it from staff too when the lead deletes their interview", async () => {
     const [admin, member] = await Promise.all([
       signedInApi(idp, "admin"),
