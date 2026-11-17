@@ -79,7 +79,7 @@ describe("out memories against twins and the oracle, three groups", () => {
     }
 
     expect(differ).toStrictEqual([]);
-  }, 60_000);
+  });
 
   it("finds by the oracle a late add left unjudged on both sides alike, which the twins can't see", async () => {
     const groups = [unique("ga")];

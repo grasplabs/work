@@ -3,7 +3,7 @@
 // not in the store (the store lost, a restore given up or failed) is still
 // whole once the export comes back, as the restore finds her cards in the
 // export by the identifiers erasures closed before it writes any line.
-// Each test restores the store from empty.
+// Each test starts from a Brain no earlier test touched (`brainAsNew`).
 import type {
   Identifier,
   NewEntity,
@@ -13,7 +13,14 @@ import type {
 import { restoringNow } from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import {
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
 import { identifierSubjectOf } from "../src/people.ts";
 import type { BrainStore } from "../src/store.ts";
@@ -714,11 +721,42 @@ const failedAtHerAddress = async (
   }
 };
 
+/**
+ * The store put back as `empty` and every file of the bucket deleted: a
+ * Brain no earlier test of the file touched. The bucket outlives a
+ * restore of the store: without this, it kept every earlier test's
+ * exports and erasure ledger, which each restore replays, and the
+ * file's later tests took three times as long as alone (0.8 s against
+ * 0.24 s locally), past 5 s on a loaded CI runner. And a
+ * test cut at its timeout left its restore running for the next test,
+ * and for its own retry, to be refused by.
+ */
+const brainAsNew = async (empty: Copy): Promise<void> => {
+  await restore(shared(), empty);
+  const bucket = env.BRAIN_OBJECTS;
+  let listed = await bucket.list();
+  for (;;) {
+    const keys = listed.objects.map(({ key }) => key);
+    if (keys.length > 0) {
+      // oxlint-disable-next-line no-await-in-loop -- a page at a time
+      await bucket.delete(keys);
+    }
+    if (!listed.truncated) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a page at a time
+    listed = await bucket.list({ cursor: listed.cursor });
+  }
+};
+
 describe("a person's erasure and restores", () => {
   /** The shared store before any test of this file added to it: empty. */
   let empty: Copy = { tables: [], others: [] };
   beforeAll(async () => {
     empty = await copyOf(shared());
+  });
+  beforeEach(async () => {
+    await brainAsNew(empty);
   });
 
   describe("a person's erasure and a restore of a company export", () => {

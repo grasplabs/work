@@ -682,6 +682,38 @@ msgstr "{live} van {count}"
 msgid "{mapped, plural, one {One piece of work is mapped and ready for you.} other {# pieces of work are mapped and ready for you.}}"
 msgstr "{mapped, plural, one {Eén stuk werk is in kaart gebracht en staat voor je klaar.} other {# stukken werk zijn in kaart gebracht en staan voor je klaar.}}"
 
+#: src/brain/learned-section.tsx
+msgid "{memories, plural, one {# memory from an earlier version is no longer in this source.} other {# memories from earlier versions are no longer in this source.}}"
+msgstr "{memories, plural, one {# herinnering uit een eerdere versie staat niet meer in deze bron.} other {# herinneringen uit eerdere versies staan niet meer in deze bron.}}"
+
+#: src/brain/learned-section.tsx
+msgid "{memories, plural, one {# memory this version added is contradicted elsewhere.} other {# memories this version added are contradicted elsewhere.}}"
+msgstr "{memories, plural, one {# herinnering die deze versie toevoegde, wordt elders tegengesproken.} other {# herinneringen die deze versie toevoegde, worden elders tegengesproken.}}"
+
+#: src/brain/learned-section.tsx
+msgid "{memories, plural, one {So far, # memory from an earlier version is no longer in this source.} other {So far, # memories from earlier versions are no longer in this source.}}"
+msgstr "{memories, plural, one {Tot nu toe staat # herinnering uit een eerdere versie niet meer in deze bron.} other {Tot nu toe staan # herinneringen uit eerdere versies niet meer in deze bron.}}"
+
+#: src/brain/learned-section.tsx
+msgid "{memories, plural, one {So far, # memory this version added is contradicted elsewhere.} other {So far, # memories this version added are contradicted elsewhere.}}"
+msgstr "{memories, plural, one {Tot nu toe wordt # herinnering die deze versie toevoegde, elders tegengesproken.} other {Tot nu toe worden # herinneringen die deze versie toevoegde, elders tegengesproken.}}"
+
+#: src/brain/learned-section.tsx
+msgid "{memories, plural, one {So far, this version added # memory.} other {So far, this version added # memories.}}"
+msgstr "{memories, plural, one {Tot nu toe voegde deze versie # herinnering toe.} other {Tot nu toe voegde deze versie # herinneringen toe.}}"
+
+#: src/brain/learned-section.tsx
+msgid "{memories, plural, one {So far, this version replaced # memory from an earlier version.} other {So far, this version replaced # memories from earlier versions.}}"
+msgstr "{memories, plural, one {Tot nu toe verving deze versie # herinnering uit een eerdere versie.} other {Tot nu toe verving deze versie # herinneringen uit eerdere versies.}}"
+
+#: src/brain/learned-section.tsx
+msgid "{memories, plural, one {This version added # memory.} other {This version added # memories.}}"
+msgstr "{memories, plural, one {Deze versie voegde # herinnering toe.} other {Deze versie voegde # herinneringen toe.}}"
+
+#: src/brain/learned-section.tsx
+msgid "{memories, plural, one {This version replaced # memory from an earlier version.} other {This version replaced # memories from earlier versions.}}"
+msgstr "{memories, plural, one {Deze versie verving # herinnering uit een eerdere versie.} other {Deze versie verving # herinneringen uit eerdere versies.}}"
+
 #: src/workflows/saved-ago.tsx
 msgid "{minutes, plural, one {Saved # min ago} other {Saved # min ago}}"
 msgstr "{minutes, plural, one {# min geleden opgeslagen} other {# min geleden opgeslagen}}"
@@ -4341,6 +4373,10 @@ msgstr "Einde contract"
 msgctxt "what the Brain remembers about something"
 msgid "Contract value"
 msgstr "Contractwaarde"
+
+#: src/brain/learned-section.tsx
+msgid "Contradicted by: {said}"
+msgstr "Tegengesproken door: {said}"
 
 #. Folder of the sources that are conversations: the vision talk and the interviews by voice or chat
 #: src/brain/brain.ts
@@ -8460,6 +8496,10 @@ msgstr "Meer voor {title}"
 msgid "More for this chat"
 msgstr "Meer voor deze chat"
 
+#: src/brain/learned-section.tsx
+msgid "More memories contradict it."
+msgstr "Meer herinneringen spreken het tegen."
+
 #: src/interview/words.ts
 msgid "More of the steps."
 msgstr "Nog meer stappen."
@@ -8665,6 +8705,11 @@ msgstr "Nooit"
 #: src/workflows/item-test.tsx
 msgid "Never started: {refusal}"
 msgstr "Nooit gestart: {refusal}"
+
+#: src/brain/learned-section.tsx
+msgctxt "an entity the Brain first saw in this version"
+msgid "New"
+msgstr "Nieuw"
 
 #: src/workflows/requests/request-parts.tsx
 msgctxt "asked for the first time this span"
@@ -12659,6 +12704,7 @@ msgstr "Zijn definitie tonen"
 msgid "Show less"
 msgstr "Minder tonen"
 
+#: src/brain/learned-section.tsx
 #: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
 #: src/onboarding/connect-steps.tsx
@@ -13972,6 +14018,10 @@ msgstr "Brain"
 #: src/routes/_shell.settings.brain.tsx
 msgid "The brain has no teams to group yet."
 msgstr "Het Brain heeft nog geen teams om te groeperen."
+
+#: src/brain/learned-section.tsx
+msgid "The Brain hasn't learned anything from this version."
+msgstr "Het Brain heeft nog niets uit deze versie geleerd."
 
 #: src/brain/own-export.tsx
 msgid "The Brain keeps nothing that only you may read yet, so your export holds nothing."
@@ -16210,6 +16260,10 @@ msgstr "Wat het brein ervan bewaarde"
 msgid "What the Brain learned about them under the address they signed in with, and what they said, where others may read it"
 msgstr "Wat het Brain onder het adres waarmee zij zich aanmeldden over hen leerde en wat zij zeiden, waar anderen het mogen lezen"
 
+#: src/brain/learned-section.tsx
+msgid "What the Brain learned from this version"
+msgstr "Wat het Brain uit deze versie leerde"
+
 #: src/brain/memories-page.tsx
 msgid "What the Brain learns from sources and from what you tell it shows here."
 msgstr "Wat het Brain leert uit bronnen en uit wat jij het vertelt, staat hier."
@@ -17033,6 +17087,10 @@ msgstr "Je kunt deze pagina nu sluiten. Kom hier terug om te zien hoe ver ik ben
 #: src/brain/memories-page.tsx
 msgid "You can no longer read this memory."
 msgstr "Je kunt deze herinnering niet meer lezen."
+
+#: src/brain/learned-section.tsx
+msgid "You can no longer read what the Brain learned from this version."
+msgstr "Je kunt niet meer lezen wat het Brain uit deze versie leerde."
 
 #: src/brain/memories-page.tsx
 msgid "You can share with a team of yours, or with everyone, once it has three people or more."

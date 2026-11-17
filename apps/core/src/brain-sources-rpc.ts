@@ -1,5 +1,7 @@
+import type { BrainStoreCursor } from "@grasp-os/shared/brain-memories";
 import { brainSearchBudget } from "@grasp-os/shared/brain-sources";
 import type {
+  BrainLearned,
   BrainSearchMemory,
   BrainSearchPack,
   BrainSourceListed,
@@ -17,12 +19,24 @@ import type {
 } from "@grasp-os/shared/brain-sources";
 
 import {
+  cursorIn,
+  cursorOut,
+  entityOut,
+  memoryOut,
+} from "./brain-memories-rpc.ts";
+import {
   listSourcesAs,
   listVersionsAs,
   readSourceVersionAs,
   recallAs,
+  versionChangeAs,
 } from "./brain-next.ts";
-import type { ListedSource, RecalledMemory, SourceRef } from "./brain-next.ts";
+import type {
+  ListedSource,
+  RecalledMemory,
+  SourceRef,
+  StoredMemory,
+} from "./brain-next.ts";
 import {
   brainUploadOf,
   deleteBrainUpload,
@@ -173,6 +187,41 @@ export class BrainSourcesRpc extends CoreRpcTarget implements BrainSourcesApi {
             addedAt: read.addedAt.toISOString(),
             text: read.text,
           };
+    });
+  }
+
+  async learned(
+    source: BrainSourceRef,
+    version: number,
+    next?: BrainStoreCursor | null
+  ): Promise<BrainLearned | null> {
+    return await withPerson(this.#check, async (person) => {
+      // Shown as the Memories page shows memories (brain-memories-rpc.ts):
+      // whether it is their own word, never whose.
+      const page = await versionChangeAs(this.#env, person.userId, {
+        source: refOf(source),
+        version,
+        ...(next === undefined || next === null
+          ? {}
+          : { after: cursorIn(next) }),
+      });
+      if (page === null) {
+        return null;
+      }
+      const shown = (memory: StoredMemory) => memoryOut(person.userId, memory);
+      return {
+        memories: page.memories.map(({ part, memory, rivals, moreRivals }) => ({
+          part,
+          memory: shown(memory),
+          rivals: rivals.map(shown),
+          moreRivals,
+        })),
+        entities: page.entities.map((entity) => ({
+          ...entityOut(entity),
+          firstSeen: entity.firstSeen,
+        })),
+        next: page.next === null ? null : cursorOut(page.next),
+      };
     });
   }
 
