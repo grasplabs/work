@@ -25,7 +25,7 @@ const takeOut = async (
       // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
       await eraseSource(env, {
         source: claimSource(source),
-        readers: { kind: "everyone" },
+        readers: { kind: "members" },
         reason: "deleted",
       });
       erased.push(source);

@@ -140,9 +140,10 @@ const brainGrant = (
 /** A source in the Brain that `readers` may read. */
 const added = async (
   text: string,
-  readers: SourceReaders
+  readers: SourceReaders,
+  producer: "upload" | "claim" = "upload"
 ): Promise<SourceRef> => {
-  const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+  const source: SourceRef = { producer, id: crypto.randomUUID() };
   await addSource(env, {
     source,
     change: crypto.randomUUID(),
@@ -154,23 +155,25 @@ const added = async (
 
 /**
  * A source everyone in the company may read, added to the shared store
- * as an upload shared with everyone is (brain-uploads.ts), or, as
- * `claim`, as a team's claim from the onboarding's interviews is
- * (onboarding/new-brain.ts).
+ * as an upload shared with everyone is (brain-uploads.ts).
  */
-const forEveryone = async (
-  text: string,
-  producer: "upload" | "claim" = "upload"
-): Promise<SourceRef> => {
-  const source: SourceRef = { producer, id: crypto.randomUUID() };
+const forEveryone = async (text: string): Promise<SourceRef> => {
+  const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
   await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addSource({
-    source: `${producer}:${source.id}`,
+    source: `upload:${source.id}`,
     change: crypto.randomUUID(),
     text,
     access: { kind: "audience", group: "company" },
   });
   return source;
 };
+
+/**
+ * A team's claim from the onboarding's interviews, as core hands one over
+ * (onboarding/new-brain.ts): for every member reading as themselves.
+ */
+const claimed = async (text: string): Promise<SourceRef> =>
+  await added(text, { kind: "members" }, "claim");
 
 /** A WebVTT file saying `text`, as a person uploads one. */
 const vttFile = (text: string) => ({
@@ -500,7 +503,7 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     // does in her own chat, but code is never handed one, which it could
     // keep past the claim's fall (GRA-1946).
     const claimNote = `Five of a team said ${word} is planned after the review.`;
-    await forEveryone(claimNote, "claim");
+    await claimed(claimNote);
     const request = requestOf(word);
     // The App.
     const app = await askOf(ada, []);
@@ -571,6 +574,70 @@ describe("recall, as an App, a workflow and a chat reach it", setUpTime, () => {
     // Each audited for her, with what it found counted, never said.
     const events = await recallEvents(ada.userId, 3);
     expect(JSON.stringify(events)).not.toContain(word);
+  });
+
+  it("answers an App, a workflow and a chat's code exactly as before any team claim, however many match and however small the budget, while the member reads them", async () => {
+    const { word, admin, ada } = await company();
+    // A budget that holds one passage: whatever takes a place shows.
+    const request = { question: `${word} rota`, budget: { tokens: 40 } };
+    const app = await askOf(ada, []);
+    const appGrant = await granted(
+      ada,
+      admin,
+      brainGrant({ type: "app", appId: app.app }),
+      app.release.manifest.resourceVersion
+    );
+    await approveResourceBinding(env, admin, {
+      app: app.app,
+      alias: "brain",
+      target: { kind: "brain", permissionId: appGrant },
+      reviewed: { version: 1 },
+    });
+    const { workflow } = await recallingWorkflow(ada, admin);
+    const { stub, chat, ask, agent } = await chatOf(
+      ada.userId,
+      recallCode(request),
+      says("Done."),
+      recallCode(request),
+      says("Done.")
+    );
+    await granted(ada, admin, brainGrant(agent));
+    const asked = { question: request.question, tokens: request.budget.tokens };
+    const codeRecalls = async () => ({
+      app: await askedOf(app, ada, asked),
+      run: await ranOf(ada, workflow.id, asked),
+    });
+    const before = await codeRecalls();
+    await ask("What about leave?");
+    // Claims that match the question better than anything code may read,
+    // shorter, newer and many: each would take the one place, change what
+    // is not found and whether the budget cut something, if code's recall
+    // so much as counted it.
+    const claims = Array.from(
+      { length: 12 },
+      (_, at) => `${word} rota ${at}: five said so.`
+    );
+    for (const text of claims) {
+      // oxlint-disable-next-line no-await-in-loop -- one claim at a time
+      await claimed(text);
+    }
+    const after = await codeRecalls();
+    await ask("And now?");
+    const [chatBefore, chatAfter] = await codeResults(stub, chat.id);
+    const own = await recallAs(env, ada.userId, {
+      question: request.question,
+      budget: { tokens: 2000 },
+      personal: true,
+    });
+    expect({
+      after,
+      chat: returnedOf(chatAfter?.text),
+      ownFindsClaims: own.items.some(({ text }) => claims.includes(text)),
+    }).toStrictEqual({
+      after: before,
+      chat: returnedOf(chatBefore?.text),
+      ownFindsClaims: true,
+    });
   });
 
   it("finds an upload for everyone at an App's recall, and never one for a team or for its uploader alone", async () => {

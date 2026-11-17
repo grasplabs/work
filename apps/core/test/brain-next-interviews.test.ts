@@ -1816,6 +1816,49 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     });
   });
 
+  it("leave a claim handed over before for its team's group alone read by nobody, and still take it out of the Brain when it falls", async () => {
+    const { ids, max } = await drawnTeam({ eight: true });
+    await intakeOf(ids, [zendeskClaim]);
+    // Not handed over now: added as an earlier head did, for the team's
+    // group (`interviews:<team>`), which no reader is given any more.
+    const [held] = await runInDurableObject(onboardingStore(env), (_, state) =>
+      state.storage.sql
+        .exec<{ source: string; text: string }>(
+          "SELECT source, text FROM brain_claims WHERE team = ? AND erase = 0",
+          ids.team
+        )
+        .toArray()
+    );
+    if (held === undefined) {
+      throw new Error("The intake noted no claim.");
+    }
+    await brainOf(inJurisdiction(env, env.BRAIN_STORE)).addSource({
+      source: `claim:${held.source}`,
+      change: held.source,
+      text: held.text,
+      access: { kind: "audience", group: `interviews:${ids.team}` },
+    });
+    const before = await recalled(max, "Zendesk", "claim");
+    // Pim backs it, and withdraws: four are left behind it.
+    const answer = await onLink({
+      action: "withdraw",
+      ...(await openLink(ids.pim)),
+    });
+    const owed = await onboardingStore(env).owedErasures({ claims: true });
+    const { shared } = await keptIn(`claim:${held.source}`, max);
+    expect({
+      before,
+      withdrew: answer.ok,
+      shared,
+      owed: owed.some(({ source }) => source === held.source),
+    }).toStrictEqual({
+      before: [],
+      withdrew: true,
+      shared: "erased",
+      owed: false,
+    });
+  });
+
   it("are read without asking the onboarding: a person's recall makes no call to it, out of reach, and finds their team's claim", async () => {
     const { ids, max } = await drawnTeam();
     await intakeOf(ids, [zendeskClaim]);

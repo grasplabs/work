@@ -205,6 +205,17 @@ const teamPrefix = "team:";
  */
 const companyGroup = "company";
 
+/**
+ * Every current member reading as themselves is in this group
+ * (`personReaderOf`), never code, an App or a workflow acting for them
+ * (`readerOf` at `teams` or `company`): what every member may read and
+ * nothing may copy elsewhere, as a team's claim from the onboarding's
+ * interviews (GRA-1946). Being a reader set of its own, it is left out
+ * by every statement that reads for code, before anything is ranked,
+ * counted or packed, so code's recall answers as if it weren't there.
+ */
+const membersGroup = "members";
+
 /** What reading as a member needs: core's records. */
 type ReaderEnv = Pick<Env, "DB">;
 
@@ -217,6 +228,7 @@ const sourceReadersSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("owner"), personId: idSchema }),
   z.strictObject({ kind: z.literal("team"), teamId: idSchema }),
   z.strictObject({ kind: z.literal("everyone") }),
+  z.strictObject({ kind: z.literal("members") }),
   z.strictObject({ kind: z.literal("none") }),
 ]);
 
@@ -714,6 +726,9 @@ const accessOf = (readers: SourceReaders): Access => {
     case "everyone": {
       return { kind: "audience", group: companyGroup };
     }
+    case "members": {
+      return { kind: "audience", group: membersGroup };
+    }
     case "none": {
       return { kind: "none" };
     }
@@ -735,8 +750,9 @@ export type Reach = "person" | "teams" | "company";
 
 /**
  * The member `personId` as the Brain's reader: the person, their teams as
- * core counts them now, and the company. Refused once they have no
- * current membership.
+ * core counts them now, the company, and the members reading as
+ * themselves (`membersGroup`). Refused once they have no current
+ * membership.
  */
 const personReaderOf = async (
   env: ReaderEnv,
@@ -752,6 +768,7 @@ const personReaderOf = async (
     groups: [
       ...member.teams.map(({ id: teamId }) => teamGroup(teamId)),
       companyGroup,
+      membersGroup,
     ],
   };
 };
@@ -790,7 +807,11 @@ const readerOf = async (
       return { person, groups };
     }
     case "teams": {
-      return { person: null, groups };
+      // Never what members read as themselves alone (`membersGroup`).
+      return {
+        person: null,
+        groups: groups.filter((group) => group !== membersGroup),
+      };
     }
     case "company": {
       // Of `teams`, those the person is in now: a group of theirs.

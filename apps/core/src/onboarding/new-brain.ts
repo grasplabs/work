@@ -21,9 +21,11 @@ import { claimSource } from "./team-claims.ts";
 //   of anyone's interview may reach that log, not even that it is in their
 //   Brain. Only the onboarding's own log, which staff read, notes it.
 // - A team's claim (`claim:<id>`): its sentence alone (no names, no
-//   quotes), readable by everyone in the company (GRA-1748, decided on 16
-//   November), only while five or more back it and seven or more of the
-//   team were interviewed
+//   quotes), readable by every member of the company reading as themselves
+//   (GRA-1748, decided on 16 November; `members`: never code, an App or a
+//   workflow, which could keep a copy past its fall, until the owner says
+//   whether code may copy claims), only while five or more back it and
+//   seven or more of the team were interviewed
 //   (counted by the store, never in the Brain). Noted by an audit event
 //   for the hand-over (brain-hand-overs.ts), which reads it here
 //   (`claimOf`) when it runs: a team's, never a person's.
@@ -100,7 +102,7 @@ export const claimOf = async (env: Env, id: string): Promise<Handed> => {
         change: id,
         text: held.text,
         whenTooLarge: "A claim of the team's too large to keep.",
-        readers: { kind: "everyone" },
+        readers: { kind: "members" },
       };
 };
 
@@ -116,7 +118,7 @@ const erase = async (env: Env, owed: OwedErasure): Promise<void> => {
   }
   await eraseSource(env, {
     source: claimSource(owed.source),
-    readers: { kind: "everyone" },
+    readers: { kind: "members" },
     reason: "deleted",
   });
 };

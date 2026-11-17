@@ -970,12 +970,12 @@ describe(
         kind: "none",
       });
       // A claim five or more of a staff-list team made in their interviews
-      // (GRA-1741): everyone in the company reads it (GRA-1748), nobody
-      // outside it.
+      // (GRA-1741): every member reads it as themselves (GRA-1748), nobody
+      // outside the company, and never code (GRA-1946).
       const claimText = `Team claim ${sharedWord} ${claimMarker}`;
       const claimId = await add(
         claimText,
-        { kind: "everyone" },
+        { kind: "members" },
         { producer: "claim", id: crypto.randomUUID() }
       );
       // The holder's interview (GRA-1790): what they approved in it, theirs
@@ -1910,12 +1910,14 @@ describe(
             world.teamMarker,
             world.noneMarker,
             world.narrowedMarker,
+            world.claimMarker,
             ...holdersOwnProduced(world).markers,
           ],
           hiddenVersions: everyVersionOf(
             ...world.ownerIds,
             world.teamId,
             world.noneId,
+            world.claimId,
             ...holdersOwnProduced(world).sources
           ),
           hiddenInstructionFiles: [world.agentFile, world.appFile],
@@ -1928,6 +1930,8 @@ describe(
           "a team's source, though the holder is in the team": world.teamMarker,
           "a source nobody is known to read": world.noneMarker,
           "a source narrowed away from the outsider": world.narrowedMarker,
+          "a team's claim from the interviews, which code never gets":
+            world.claimMarker,
           ...holdersOwnProduced(world).forbidden,
         },
         {
@@ -1974,12 +1978,14 @@ describe(
             world.teamMarker,
             world.noneMarker,
             world.narrowedMarker,
+            world.claimMarker,
             ...holdersOwnProduced(world).markers,
           ],
           hiddenVersions: everyVersionOf(
             ...world.ownerIds,
             world.teamId,
             world.noneId,
+            world.claimId,
             ...holdersOwnProduced(world).sources
           ),
           hiddenInstructionFiles: [world.agentFile, world.appFile],
@@ -1994,6 +2000,8 @@ describe(
             world.teamMarker,
           "a source nobody is known to read": world.noneMarker,
           "a source narrowed away from the outsider": world.narrowedMarker,
+          "a team's claim from the interviews, which code never gets":
+            world.claimMarker,
           ...holdersOwnProduced(world).forbidden,
         },
         {

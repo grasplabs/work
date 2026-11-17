@@ -213,11 +213,10 @@ export const recallFor = async (
     });
     // A capture and an interview are one person's own, kept only in their
     // own store (core's addSource refuses them anywhere else), which this
-    // recall never reads: none can be here. A team's claim from the
-    // onboarding's interviews is read by every member (GRA-1748), but never
-    // handed to code, which could keep a copy past its fall (App data, a
-    // run's journal, a code result): dropped here until the owner decides
-    // whether code may copy claims. Narrowed for the SDK's type, never
+    // recall never reads; a team's claim from the onboarding's interviews
+    // is read by members as themselves alone (brain-next.ts `membersGroup`),
+    // which code never reads as, so no statement of this recall ever ranks
+    // or counts one: none can be here. Narrowed for the SDK's type, never
     // thrown over.
     const pack: BrainPack = {
       ...recalled,
