@@ -1148,6 +1148,9 @@ export class Onboarding extends DurableObject<Env> {
    */
   readonly #takenOut = new Set<string>();
 
+  /** Whether arming the alarm is asked for already, once the change that asked is done (`#armSoon`). */
+  #arming = false;
+
   /**
    * How claims and drawings that stop standing are taken out of use in the
    * Brain (`#fallenFirst`): given by core's subclass, the object the
@@ -6069,6 +6072,30 @@ export class Onboarding extends DurableObject<Env> {
       .values({ team, dueAt: at })
       .onConflictDoUpdate({ target: brainTeams.team, set: { dueAt: at } })
       .run();
+    this.#armSoon();
+  }
+
+  /**
+   * Arms the alarm that draws and gives teams to the brain
+   * (`#armDrawing`), once the change that asked for it is done: its
+   * transaction committed (or rolled back, which leaves nothing new to
+   * arm for). Whatever marks a team due asks it (`#brainDue`), so no
+   * caller can leave due work with no alarm to do it, as after the
+   * onboarding closed and every link went out. Asked again before it ran,
+   * it arms once.
+   */
+  #armSoon(): void {
+    if (this.#arming) {
+      return;
+    }
+    this.#arming = true;
+    this.ctx.waitUntil(
+      (async () => {
+        await Promise.resolve();
+        this.#arming = false;
+        await this.#armDrawing();
+      })()
+    );
   }
 
   /** Notes a team given to the brain as it was at `dueAt`: unless something new came since. */

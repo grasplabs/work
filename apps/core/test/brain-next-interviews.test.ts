@@ -28,7 +28,7 @@ import {
   eraseOwedOnboardingSources,
   settleOnboardingBrain,
 } from "../src/onboarding/new-brain.ts";
-import { onboardingStore } from "../src/onboarding/store.ts";
+import { Onboarding, onboardingStore } from "../src/onboarding/store.ts";
 import { teamMayClaim } from "../src/onboarding/team-claims.ts";
 import { retryErasures } from "../src/person-erasure.ts";
 import { adminCommands } from "./admin-command.ts";
@@ -341,6 +341,52 @@ const intakeOf = async (
     }
   }
   throw new Error(`The team wasn't given within ${teamsDueMax} teams due.`);
+};
+
+/** Whether the onboarding's alarm is set. */
+const alarmSet = async (): Promise<boolean> => {
+  const at = await runInDurableObject(
+    onboardingStore(env),
+    async (_instance, state) => await state.storage.getAlarm()
+  );
+  return at !== null;
+};
+
+/** The onboarding closed (its plan ended a fortnight ago), every link out, and no alarm set: nothing would set one again by itself. */
+const noAlarm = async (): Promise<void> => {
+  const ended = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+  await onboardingStore(env).savePlan(
+    { start: ended, days: 14 },
+    { type: "system" }
+  );
+  await runInDurableObject(onboardingStore(env), async (_instance, state) => {
+    await state.storage.deleteAlarm();
+  });
+};
+
+/**
+ * Runs the onboarding's alarm as its timer would, each run a model
+ * answering any team's claims, and hands over what it noted, until `done`
+ * says so: never an intake asked for directly. Earlier tests of this file
+ * leave their teams due too.
+ */
+const byTheAlarm = async (done: () => Promise<boolean>): Promise<void> => {
+  for (let run = 0; run < teamsDueMax; run += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one run at a time, as the timer runs it
+    await answeringWith(claimsReply([zendeskClaim]), async () => {
+      await runInDurableObject(onboardingStore(env), async (instance) => {
+        await Onboarding.prototype.alarm.call(instance);
+      });
+    });
+    // oxlint-disable-next-line no-await-in-loop -- one run at a time
+    await handOverNow();
+    // oxlint-disable-next-line no-await-in-loop -- one run at a time
+    if (await done()) {
+      return;
+    }
+  }
 };
 
 /** What `userId` recalls of `word`, of sources of `producer` or any: the texts found. */
@@ -2505,15 +2551,21 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     await handOverNow();
     const keys: Key[] = [...everyone, "sam", "ada"];
     await savedRoster(ids, keys, movedToBilling(ids, [ids.max]));
+    await noAlarm();
     await savedRoster(ids, keys, movedToBilling(ids, []));
-    await intakeOf(ids, [zendeskClaim]);
-    await handOverNow();
+    const armed = await alarmSet();
+    await byTheAlarm(async () => {
+      const drawn = await recalled(max, "ticket", "drawing");
+      return drawn.length > 0;
+    });
     const drawings = await recalled(max, "ticket", "drawing");
     expect({
+      armed,
       claims: await recalled(max, "Zendesk", "claim"),
       drawings: drawings.length,
       page: await workOnPage(ids),
     }).toStrictEqual({
+      armed: true,
       claims: [zendeskClaim.text],
       drawings: 1,
       page: [["handling new tickets", 1]],
@@ -2561,17 +2613,22 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     const off = await readNow();
     // Taking part again, confirmed, and nobody agreeing anew: the next
     // intake.
+    await noAlarm();
     await savedRoster(ids, keys, (roster) => roster);
-    await intakeOf(ids, [zendeskClaim]);
-    await handOverNow();
+    const armed = await alarmSet();
+    await byTheAlarm(async () => {
+      const drawn = await recalled(max, "ticket", "drawing");
+      return drawn.length > 0;
+    });
     const again = await readNow();
-    expect({ before, off, again }).toStrictEqual({
+    expect({ before, off, armed, again }).toStrictEqual({
       before: {
         claims: [zendeskClaim.text],
         drawings: 1,
         page: [["handling new tickets", 1]],
       },
       off: { claims: [], drawings: 0, page: [] },
+      armed: true,
       again: {
         claims: [zendeskClaim.text],
         drawings: 1,
@@ -2630,11 +2687,16 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     const unconfirmed = await readNow();
     // The admin confirms it, and nothing else changes: the clock's next
     // intake notes the team's results.
+    await noAlarm();
     await onboardingStore(env).saveRoster(listOf(), { type: "system" });
-    await intakeOf(ids, [zendeskClaim]);
-    await handOverNow();
-    expect({ unconfirmed, confirmed: await readNow() }).toStrictEqual({
+    const armed = await alarmSet();
+    await byTheAlarm(async () => {
+      const drawn = await recalled(max, "ticket", "drawing");
+      return drawn.length > 0;
+    });
+    expect({ unconfirmed, armed, confirmed: await readNow() }).toStrictEqual({
       unconfirmed: { claims: [], drawings: 0, page: [] },
+      armed: true,
       confirmed: {
         claims: [zendeskClaim.text],
         drawings: 1,
@@ -2667,25 +2729,31 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
         Date.now()
       );
     });
+    await noAlarm();
     const refused = await outcome(
       savedRoster(ids, keys, (roster) => ({
         ...roster,
         teams: roster.teams.map((each) => ({ ...each, off: true })),
       }))
     );
+    const armed = await alarmSet();
     const { roster } = await onboardingStore(env).view();
     const off = roster?.teams.find(({ id }) => id === ids.team)?.off;
     await runInDurableObject(shared, (_, state) => {
       state.storage.sql.exec("DELETE FROM restores WHERE export = ?", restore);
     });
-    await intakeOf(ids, [zendeskClaim]);
-    await handOverNow();
+    await byTheAlarm(async () => {
+      const drawn = await recalled(max, "ticket", "drawing");
+      return drawn.length > 0;
+    });
     expect({
       refused: refused === "ok" ? "saved" : "refused",
+      armed,
       off,
       again: await readNow(),
     }).toStrictEqual({
       refused: "refused",
+      armed: true,
       off: false,
       again: {
         claims: [zendeskClaim.text],
