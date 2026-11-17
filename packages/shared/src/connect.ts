@@ -515,14 +515,16 @@ export const canSignInAgain = (
 
 /**
  * An account at a suite a person connected as their own: the provider,
- * the company's tenant there and the account's stable subject, as the
- * provider's verified ID token said when it was connected (an Entra object
- * ID in the tenant, a Google `sub` under its hosted domain).
+ * the company's tenant there, the account's stable subject (an Entra
+ * object ID in the tenant, a Google `sub` under its hosted domain) and
+ * its address where the provider's ID token marked it verified (Google's;
+ * null otherwise), as connect took them when it was connected.
  */
 export interface PersonalAccount {
   provider: string;
   tenant: string;
   accountId: string;
+  verifiedEmail: string | null;
 }
 
 /** Most connections one `connectionOwners` call takes. */

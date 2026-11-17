@@ -643,31 +643,54 @@ const startSession = async <T extends { expiresAt: Date; userId: string }>(
     : false;
 };
 
-const idTokenClaimsSchema = z.looseObject({ oid: z.string().optional() });
+const idTokenClaimsSchema = z.looseObject({
+  oid: z.string().optional(),
+  email: z.string().optional(),
+  email_verified: z.boolean().optional(),
+});
 
-/** The `oid` claim of an ID token the SSO plugin verified in this request. */
-const oidOf = (idToken: unknown): string | null => {
+/** The claims of an ID token the SSO plugin verified in this request, as far as core keeps them. */
+const claimsOf = (idToken: unknown): z.infer<typeof idTokenClaimsSchema> => {
   const payload = typeof idToken === "string" ? idToken.split(".")[1] : "";
   if (payload === undefined || payload === "") {
-    return null;
+    return {};
   }
   try {
     const json = new TextDecoder().decode(fromBase64Url(payload));
-    return idTokenClaimsSchema.parse(JSON.parse(json)).oid ?? null;
+    return idTokenClaimsSchema.parse(JSON.parse(json));
   } catch {
-    return null;
+    return {};
   }
 };
 
 /**
+ * What a sign-in keeps of its verified ID token: the Entra object ID
+ * (`oid`), and the address only where the provider marks it verified
+ * (`email_verified`, as Google's tokens do; a Google sign-in is refused
+ * without it, claims.ts), which an item's reader list may name its
+ * account by (source-readers.ts). Entra's `email` is never verified, so
+ * none of Entra's is kept.
+ */
+const keptClaimsOf = (
+  idToken: unknown
+): { oid: string | null; verifiedEmail: string | null } => {
+  const claims = claimsOf(idToken);
+  return {
+    oid: claims.oid ?? null,
+    verifiedEmail:
+      claims.email_verified === true ? (claims.email ?? null) : null,
+  };
+};
+
+/**
  * What is kept of an account from a sign-in: no IdP tokens (core never
- * holds provider tokens, R1), only the Entra object id taken from the ID
- * token before it is dropped.
+ * holds provider tokens, R1), only the Entra object id and a verified
+ * address taken from the ID token before it is dropped (`keptClaimsOf`).
  */
 const withoutTokens = <T extends Record<string, unknown>>(account: T) => ({
   data: {
     ...account,
-    ...(account.idToken === undefined ? {} : { oid: oidOf(account.idToken) }),
+    ...(account.idToken === undefined ? {} : keptClaimsOf(account.idToken)),
     accessToken: null,
     refreshToken: null,
     idToken: null,
@@ -774,6 +797,7 @@ const createAuth = (
       accountLinking: { enabled: false },
       additionalFields: {
         oid: { type: "string", required: false, input: false },
+        verifiedEmail: { type: "string", required: false, input: false },
       },
     },
     advanced: {
