@@ -128,24 +128,19 @@ describe("Settings › Workspace › Sign-in", () => {
     const { session } = fakeOrgSettings(both);
     await shown(session);
 
-    expect({
-      microsoft: text().includes(
-        "Only accounts of the tenant 7f9a2c1e-0000-4000-8000-000000000001."
-      ),
-      google: text().includes(
-        "Only accounts of the Google Workspace acme.test."
-      ),
-      offered: text().includes("On the sign-in page"),
-      missing: text().includes("Not offered: its secret isn’t set"),
-      noSecret:
-        text().includes("client-ms") || text().includes("client-google"),
-    }).toStrictEqual({
-      microsoft: true,
-      google: true,
-      offered: true,
-      missing: true,
-      noSecret: false,
-    });
+    // Each way to sign in is a row of the section's list; only the one
+    // the sign-in page doesn't offer says so.
+    const rows = [
+      ...(document.querySelector('[role="list"][aria-label="Sign-in"]')
+        ?.children ?? []),
+    ].map((row) => row.textContent ?? "");
+    expect(rows).toStrictEqual([
+      "Microsoft 365Only work accounts from Noordkade Finance’s Microsoft 365.",
+      "Google WorkspaceOnly work accounts from Noordkade Finance’s Google Workspace (acme.test).Not on the sign-in page yet",
+    ]);
+    expect(
+      text().includes("client-ms") || text().includes("client-google")
+    ).toBeFalsy();
   });
 
   it("says when sign-in isn't set up yet", async () => {
