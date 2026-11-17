@@ -590,7 +590,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // SHA-256 of the identifiers of the person cards a restore's export
   // gives: a person's erasure deletes the rows of theirs, after taking the
   // cards by them (people.ts `applyPerson`); the rest go once the restore
-  // is done or given up.
+  // is done, or, given up, with each card the store holds (forget.ts).
   "brainStore.restore_cards": { erased: "brain_shared" },
   "brainStore.person_erasure_memories": {
     kept: "the memories a person's erasure hides until the tick deletes them, by row",

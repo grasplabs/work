@@ -393,6 +393,8 @@ const lateWorld = async () => {
   const local = word();
   const name = `Anna ${word()}`;
   const gretaName = `Greta ${word()}`;
+  const doraName = `Dora ${word()}`;
+  const doraLocal = word();
   const filler = `Filler ${word()}`;
   const mark = (): string => `mk${word()}`;
   const marker = {
@@ -402,6 +404,8 @@ const lateWorld = async () => {
     address: mark(),
     gretaDesk: mark(),
     bobChess: mark(),
+    doraNameOnly: mark(),
+    doraAddress: mark(),
   };
   const add = async (entities: NewEntity[], memories: NewMemory[]) =>
     await shared().addMemories({
@@ -411,6 +415,10 @@ const lateWorld = async () => {
       entities,
       memories,
     });
+  const dora = await add(
+    [{ key: "d", kind: "person", names: [doraName] }],
+    [fromApp("d", `${doraName} works in legal ${marker.doraNameOnly}`)]
+  );
   const her = await add(
     [{ key: "a", kind: "person", names: [name] }],
     [fromApp("a", `${name} is on leave ${marker.nameOnly}`)]
@@ -461,6 +469,29 @@ const lateWorld = async () => {
   await add(
     [
       {
+        key: "d",
+        id: dora.entities.d ?? "",
+        kind: "person",
+        identifiers: [email(doraLocal)],
+      },
+    ],
+    [fromApp("d", `${doraName} signs ${marker.doraAddress}`)]
+  );
+  // Erik, whose card is only in that late part: never written if it fails.
+  await add(
+    [
+      {
+        key: "e",
+        kind: "person",
+        names: [`Erik ${word()}`],
+        identifiers: [email(word())],
+      },
+    ],
+    [fromApp("e", `Erik joins finance ${word()}`)]
+  );
+  await add(
+    [
+      {
         key: "g",
         kind: "person",
         names: [gretaName],
@@ -477,6 +508,12 @@ const lateWorld = async () => {
     marker,
     cards: [card, bob.entities.b ?? "", project.entities.f ?? ""],
     group,
+    dora: {
+      person: unique("dora-"),
+      local: doraLocal,
+      name: doraName,
+      card: dora.entities.d ?? "",
+    },
   };
 };
 type LateWorld = Awaited<ReturnType<typeof lateWorld>>;
@@ -496,6 +533,48 @@ const cardsKept = async (identifier?: Identifier): Promise<number> => {
         .toArray().length
   );
 };
+
+/** What of Dora any read or raw row of the store shows. */
+const doraLeft = async (w: LateWorld): Promise<string[]> => {
+  const store = shared();
+  const { reader } = w;
+  const seen = JSON.stringify(
+    await Promise.all([
+      store.readMemories({ entity: w.dora.card, reader, history: true }),
+      store.readEntityNames({ entity: w.dora.card, reader }),
+      store.findEntities({ reader, name: w.dora.name }),
+      store.findEntities({ reader, kind: "person" }),
+      store.recall({ question: w.dora.name, reader, budget: { tokens: 4000 } }),
+    ])
+  );
+  const raw = await runInDurableObject(shared(), (_instance, state) =>
+    JSON.stringify([
+      ...state.storage.sql.exec("SELECT * FROM memories").toArray(),
+      ...state.storage.sql.exec("SELECT * FROM entity_names").toArray(),
+    ])
+  );
+  const needles = [
+    w.dora.name,
+    w.dora.local,
+    w.marker.doraNameOnly,
+    w.marker.doraAddress,
+  ];
+  return needles.filter(
+    (needle) => seen.includes(needle) || raw.includes(needle)
+  );
+};
+
+/** How many rows of `restore_cards` name a card the store holds nothing of. */
+const cardsNotHeld = async (): Promise<number> =>
+  await runInDurableObject(
+    shared(),
+    (_instance, state) =>
+      state.storage.sql
+        .exec(
+          "SELECT 1 FROM restore_cards WHERE entity NOT IN (SELECT id FROM entities)"
+        )
+        .toArray().length
+  );
 
 /** What of her any read or raw row of the store shows. */
 const herLeft = async (w: LateWorld): Promise<string[]> => {
@@ -757,8 +836,8 @@ describe("a person's erasure and restores", () => {
         memories: [fromApp("x", `A new project ${word()}`)],
       });
       await tick(shared());
-      // Given up for good: no card it recorded is kept.
-      const keptUsed = await cardsKept();
+      // Given up for good: no row is kept for a card the store doesn't hold.
+      const keptUsed = await cardsNotHeld();
 
       expect({
         failed,
@@ -779,6 +858,82 @@ describe("a person's erasure and restores", () => {
         after: [],
         used: [],
       });
+    });
+
+    it("takes the cards of two people the restore wrote by name only, erased after the restore was given up for good", async () => {
+      const w = await lateWorld();
+      const id = await exportNow();
+      await restore(shared(), empty);
+      const failed = await failedAtHerAddress(id, w.local);
+      // Something unrelated is added: the tick gives the restore up.
+      await shared().addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group: w.group },
+        reader: w.reader,
+        entities: [{ key: "x", kind: "project", names: [`New ${word()}`] }],
+        memories: [fromApp("x", `A new project ${word()}`)],
+      });
+      await tick(shared());
+      const status = await shared().restoreStatus(id);
+      // Kept for the cards the store holds (hers and Dora's), none other.
+      const kept = await cardsKept();
+      const notHeld = await cardsNotHeld();
+      const before = { her: await herLeft(w), dora: await doraLeft(w) };
+      const anna = await erased(w.anna, [email(w.local)]);
+      const dora = await erased(w.dora.person, [email(w.dora.local)]);
+      await tick(shared());
+      await tick(shared());
+
+      expect({
+        failed,
+        given: status?.state,
+        kept: kept > 0,
+        notHeld,
+        before: before.her.length > 0 && before.dora.length > 0,
+        anna,
+        dora,
+        her: await herLeft(w),
+        doraLeft: await doraLeft(w),
+      }).toStrictEqual({
+        failed: "failed",
+        given: "abandoned",
+        kept: true,
+        notHeld: 0,
+        before: true,
+        anna: "erased",
+        dora: "erased",
+        her: [],
+        doraLeft: [],
+      });
+    });
+
+    it("lets what a restore given up recorded of a card go with the card", async () => {
+      const w = await lateWorld();
+      const id = await exportNow();
+      await restore(shared(), empty);
+      await failedAtHerAddress(id, w.local);
+      await shared().addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "audience", group: w.group },
+        reader: w.reader,
+        entities: [{ key: "x", kind: "project", names: [`New ${word()}`] }],
+        memories: [fromApp("x", `A new project ${word()}`)],
+      });
+      await tick(shared());
+      const kept = await cardsKept(email(w.dora.local));
+      // The App that wrote Dora's card has its data reset: her card goes.
+      await shared().eraseWriter({
+        writer: "app:hr",
+        reason: "deleted",
+        change: crypto.randomUUID(),
+      });
+      await tick(shared());
+      await tick(shared());
+
+      expect({
+        kept,
+        after: await cardsKept(email(w.dora.local)),
+      }).toStrictEqual({ kept: 1, after: 0 });
     });
 
     it("leaves her out of the failed restore started again after her erasure on the half-filled store", async () => {

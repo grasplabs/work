@@ -1322,7 +1322,9 @@ export const personErasureSubjects = sqliteTable(
  * again) takes their card by its id, though the store holds the lines
  * with their address yet (people.ts `applyPerson`), and it deletes the rows
  * of their identifiers. Written by the restore's check, again on every
- * start (the same rows); gone once a restore is done or given up.
+ * start (the same rows). All gone once the restore is done; given up, those
+ * of a card the store holds nothing of go, and the rest stay as long as
+ * their card (forget.ts) or until an erasure takes it.
  */
 export const restoreCards = sqliteTable(
   "restore_cards",
