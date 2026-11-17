@@ -32,6 +32,7 @@ import {
   exportPartBytes,
   manifestSchema as storeManifestSchema,
 } from "../src/exports.ts";
+import { checkInstructions, proposeInstructions } from "../src/extraction.ts";
 import type { BrainStore } from "../src/store.ts";
 import { workParksMax } from "../src/work.ts";
 
@@ -43,7 +44,7 @@ const own = (person: string): Store =>
 
 const quietAsk: AskModel = async () => {
   await Promise.resolve();
-  return { kind: "answer", text: "" };
+  return { kind: "answer", text: "", model: "test/model" };
 };
 
 /** No hand-overs: these tests hand nothing over. */
@@ -2483,6 +2484,127 @@ describe("exports and restores", () => {
         stampKept: true,
         held: 5,
         contested: 1,
+      });
+    });
+
+    it("carries which prompts and models drew each memory through an export and a restore", async () => {
+      await putBack(shared(), emptyShared);
+      const source = `test:${unique()}`;
+      const text = "Acme renews its contract on 1 March.";
+      // The host's model: a careful read and a quick check, each named.
+      const drawing: AskModel = async ({ purpose, role, input }) => {
+        await Promise.resolve();
+        const answer =
+          purpose === "brain.extract"
+            ? {
+                entities: [{ key: "c", kind: "customer", names: ["Acme"] }],
+                memories: [
+                  {
+                    about: "c",
+                    type: "fact",
+                    statement: text,
+                    quote: "Acme renews its contract on 1 March",
+                  },
+                ],
+              }
+            : {
+                supported: z
+                  .object({ statements: z.array(z.object({ index: z.int() })) })
+                  .parse(JSON.parse(input))
+                  .statements.map(({ index }) => index),
+              };
+        return {
+          kind: "answer",
+          text: JSON.stringify(answer),
+          model: `test/${role}`,
+        };
+      };
+      await shared().addSource({
+        source,
+        change: unique(),
+        text,
+        access: team(`team:${unique()}`),
+        extract: {
+          speaker: { kind: "outside" },
+          saidAt: new Date(),
+          timeZone: "Europe/Amsterdam",
+          priority: "conversation",
+        },
+      });
+      await shared().work({
+        ask: drawing,
+        at: new Date(),
+        embedders: noEmbedders,
+        handOvers: noHandOvers,
+        contextTokens: null,
+      });
+      /** What a done export `id` holds of the memories drawn from `source`. */
+      const drawnIn = async (id: string) => {
+        const { parts } = z
+          .looseObject({ parts: z.array(z.looseObject({ file: z.string() })) })
+          .parse(
+            JSON.parse(
+              (await shared().exportFile({ id, file: "manifest.json" })) ??
+                "null"
+            )
+          );
+        const lines: unknown[] = [];
+        for (const { file } of parts) {
+          // oxlint-disable-next-line no-await-in-loop -- a part at a time
+          const body = await shared().exportFile({ id, file });
+          lines.push(
+            ...(body ?? "")
+              .split("\n")
+              .filter(Boolean)
+              .map((line): unknown => JSON.parse(line))
+          );
+        }
+        return z
+          .array(
+            z.looseObject({
+              kind: z.string().optional(),
+              source: z.string().nullable().optional(),
+              statement: z.string().optional(),
+              extractor: z.unknown().optional(),
+            })
+          )
+          .parse(lines)
+          .filter((line) => line.kind === "memory" && line.source === source)
+          .map(({ statement, extractor }) => ({ statement, extractor }));
+      };
+
+      const { id } = await shared().startExport("test");
+      await expect(settled(shared(), id)).resolves.toMatchObject({
+        state: "done",
+      });
+      const exported = await drawnIn(id);
+      await putBack(shared(), emptyShared);
+      await shared().startRestore(id, "test");
+      await expect(restoreSettled(id)).resolves.toMatchObject({
+        state: "done",
+      });
+      const { id: again } = await shared().startExport("test");
+      await expect(settled(shared(), again)).resolves.toMatchObject({
+        state: "done",
+      });
+
+      expect({ exported, restored: await drawnIn(again) }).toStrictEqual({
+        exported: [
+          {
+            statement: text,
+            extractor: {
+              read: {
+                prompt: await sha256(proposeInstructions),
+                model: "test/careful",
+              },
+              check: {
+                prompt: await sha256(checkInstructions),
+                model: "test/quick",
+              },
+            },
+          },
+        ],
+        restored: exported,
       });
     });
 

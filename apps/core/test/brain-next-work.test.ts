@@ -1181,7 +1181,11 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
     behaviours.set(asking, async ({ ask }) => {
       for (let call = 0; call < calls; call += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one call after another
-        answers.push(await ask({ system: "Say something.", input: asking }));
+        const { text } = await ask({
+          system: "Say something.",
+          input: asking,
+        });
+        answers.push(text);
       }
     });
     await enqueue({ key: asking, priority: "upload" });
@@ -1539,7 +1543,11 @@ describe("the Brain's work queue", { timeout: 60_000 }, () => {
       if (mine === 2) {
         return { kind: "busy" as const, reason: "unavailable" as const };
       }
-      return { kind: "answer" as const, text: "An answer." };
+      return {
+        kind: "answer" as const,
+        text: "An answer.",
+        model: "test/model",
+      };
     };
     const at = later(1000);
     await store().work({

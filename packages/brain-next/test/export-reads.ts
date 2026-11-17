@@ -18,7 +18,7 @@ export type Store = DurableObjectStub<BrainStore>;
 
 const quietAsk: AskModel = async () => {
   await Promise.resolve();
-  return { kind: "answer", text: "" };
+  return { kind: "answer", text: "", model: "test/model" };
 };
 
 const noHandOvers: HandOvers = {
