@@ -12,7 +12,7 @@ export const agentErrors = defineErrorFamily({
   "agent.held_call_not_found":
     "Nothing like this waits for you in this chat: it was decided already, or waited past its day.",
   "agent.held_call_in_chat_app":
-    "This chat used something only its person can read, so a write to an App waits for them to confirm it, and this chat app can't show them that yet. Nothing was written: tell them they can do it from a chat in Grasp.",
+    "This chat used something only its person can read, so a write to an App waits for them to confirm it, which they can do only in a chat in Grasp or in their direct message with you. Nothing was written: tell them they can do it there.",
   "agent.held_call_failed":
     "The App refused or failed this write, so it may not have been done. It no longer waits for you.",
   "agent.private_shared_request":
@@ -26,6 +26,8 @@ export const agentErrors = defineErrorFamily({
   "agent.unknown": "The company has no such agent.",
   "agent.name_taken": "Another agent already has that name.",
   "agent.too_many_own": `You have ${ownAgentsMax} agents of your own, the most a person keeps. Delete one to make another.`,
+  "agent.not_offered":
+    "This agent isn't offered to the company, or its owner took the offer back.",
   "agent.own_off":
     "Your company has turned off agents of people's own. An admin can turn them back on.",
   "agent.app_unknown": "That isn't an app your company offers.",
