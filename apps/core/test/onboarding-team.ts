@@ -554,6 +554,19 @@ const dataOf = (request: SentRequest | undefined, tag: string): unknown => {
   return typeof text === "string" ? JSON.parse(text) : undefined;
 };
 
+/** Each check of one claim against one fact the quick model was asked in `requests`. */
+export const checksIn = (
+  requests: readonly SentRequest[]
+): { claim: string; fact: string }[] =>
+  requests.flatMap((request) => {
+    const check = checkSchema.safeParse(dataOf(request, "data"));
+    return check.success ? [check.data] : [];
+  });
+
+/** The claims the quick model was asked to check against a fact in `requests`, each once, sorted. */
+export const checkedClaimsIn = (requests: readonly SentRequest[]): string[] =>
+  [...new Set(checksIn(requests).map(({ claim }) => claim))].toSorted();
+
 /** The facts a claims request showed the model, by label. */
 const shownIn = (request: SentRequest | undefined) =>
   shownSchema

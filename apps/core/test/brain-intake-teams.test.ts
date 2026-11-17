@@ -22,6 +22,8 @@ import {
 import { keyChanger } from "./model-provider.ts";
 import {
   agree,
+  checkedClaimsIn,
+  checksIn,
   claimsReply,
   fact,
   intake,
@@ -139,12 +141,14 @@ const drawnTeam = async () => {
   return ids;
 };
 
-// What a team said reaches the brain only put together, as claims five or
-// more of its people made (GRA-1084, src/onboarding/team-claims.ts), and
-// Grasp's staff read none of it. The ways it can fail, tried here:
+// What a team said reaches the brain only put together, as claims of how
+// its work runs, from the first person who told it (GRA-1084, GRA-1987,
+// src/onboarding/team-claims.ts), and Grasp's staff read none of it. The
+// ways it can fail, tried here:
 //
-// - A claim resting on fewer than five people, on one person cited five
-//   times, on facts that don't exist or on facts of another kind.
+// - A claim resting on facts that don't say it, on facts that don't exist
+//   or on facts of another kind, or of a kind that doesn't describe the
+//   work (a wish, a wait).
 // - A name, a person's id or their title reaching the model or the brain.
 // - A claim kept once fewer than five of the people behind it still
 //   agree, or kept after the team's claims were put together anew.
@@ -155,24 +159,24 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
   // faked: the store's own alarm, which has none, would try first.
   beforeEach(holdAlarm);
 
-  it("keeps only claims five or more distinct people made, of facts of their kind, without a name, and shows the model no one", async () => {
+  it("keeps only claims of the kinds that describe the work, of facts of their kind that say them, without a name, and shows the model no one", async () => {
     const ids = await drawnTeam();
     const [, ...fourOfThem] = zendeskSaid;
     const { requests } = await intake(ids, [
       zendeskClaim,
-      // Four people: Mia, Mo, Noor and Pim, but not Max's words alone.
+      // Two people's words.
       {
         kind: "tool",
         text: "Zendesk sends the tickets on.",
         cites: ["Tickets arrive in Zendesk.", ...fourOfThem.slice(0, 1)],
       },
-      // One person cited five times.
+      // Cited by a label whose fact doesn't say it.
       {
         kind: "tool",
         text: "Someone answers in Zendesk.",
         cites: ["F1", "F1", "F1", "F1", "F1"],
       },
-      // Facts that don't exist, with three that do.
+      // Facts that don't exist, with some that do: those are its own.
       {
         kind: "tool",
         text: "Ghosts use Zendesk.",
@@ -196,10 +200,11 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     ]);
     const member = await signedInApi(idp, "user");
     const prompt = JSON.stringify(requests.map(({ body }) => body));
+    const claimsPrompt = JSON.stringify(requests[0]?.body ?? null);
     const records = await kept(ids);
     expect({
       statements: await statementsFor(member.api, ids),
-      calls: requests.length,
+      checked: checkedClaimsIn(requests),
       shown: {
         people: prompt.includes("Person 5") && !prompt.includes("Person 6"),
         ids: Object.values(ids).filter((id) => prompt.includes(id)),
@@ -209,26 +214,41 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
         titles: ["Agent", "Team lead"].filter((title) =>
           prompt.includes(`(${title})`)
         ),
-        // Kinds fewer than five spoke to aren't shown at all.
-        alone: ["billing", "customer number", "customer's reply"].filter(
-          (words) => prompt.includes(words)
+        // Kinds that don't describe the work (a wish, a wait) aren't
+        // shown to the claims model at all; a handover, said by one, is.
+        kinds: ["billing", "customer number", "customer's reply"].filter(
+          (words) => claimsPrompt.includes(words)
         ),
       },
       named: namedIn(records, ids),
     }).toStrictEqual({
       statements: [
+        "Ghosts use Zendesk.",
         "Someone and someone someone keep the tickets in Zendesk.",
         "Tickets come in through Zendesk.",
+        "Zendesk sends the tickets on.",
       ],
-      // Putting them together, then a check of each fact cited for the
-      // two claims five people's facts were cited for.
-      calls: 1 + 5 + 5,
-      shown: { people: true, ids: [], names: [], titles: [], alone: [] },
+      // Each claim of a kind that describes the work, citing a fact of its
+      // kind that exists, is checked against what it cites.
+      checked: [
+        "Ghosts use Zendesk.",
+        "Someone and someone someone keep the tickets in Zendesk.",
+        "Someone answers in Zendesk.",
+        "Tickets come in through Zendesk.",
+        "Zendesk sends the tickets on.",
+      ],
+      shown: {
+        people: true,
+        ids: [],
+        names: [],
+        titles: [],
+        kinds: ["billing"],
+      },
       named: { ids: [], names: [], words: false, lead: false },
     });
   });
 
-  it("drops a claim a fact steered the model into citing others' facts for: each fact is checked against it apart", async () => {
+  it("drops a claim a fact steered the model into citing others' facts for: each fact is checked against it apart, and the steering fact's own check answers no", async () => {
     const ids = await sevenTeam();
     await mapped(ids);
     await sevenTold(ids);
@@ -251,23 +271,31 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
         kind: "tool",
         text: "The spare laptops are kept at home.",
         cites: [...zendeskSaid, steer],
-        // Checked one at a time, only Rik's own fact says it.
-        says: [steer],
+        // Checked one at a time: none of the others' facts says it, and
+        // Rik's own speaks to the checker, which answers no to that.
+        says: [],
       },
     ]);
     const member = await signedInApi(idp, "user");
     const claimsPrompt = JSON.stringify(requests[0]?.body ?? null);
+    const laptops = checksIn(requests).filter(
+      ({ claim }) => claim === "The spare laptops are kept at home."
+    );
     expect({
       statements: await statementsFor(member.api, ids),
       // The facts went to the model as data, between tags.
       asData: claimsPrompt.includes("<facts>"),
-      // One call to put them together, then a check for each fact cited
-      // of each claim five or more people's facts were cited for.
-      calls: requests.length,
+      // A check for each fact it cites, each with that fact alone.
+      checked: laptops.map(({ fact: one }) => one).toSorted(),
     }).toStrictEqual({
       statements: ["Tickets come in through Zendesk."],
       asData: true,
-      calls: 1 + 5 + 6,
+      checked: [
+        ...zendeskSaid,
+        ...zendeskSaid.slice(0, 1),
+        ...zendeskSaid.slice(0, 1),
+        steer,
+      ].toSorted(),
     });
   });
 
@@ -322,11 +350,11 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     const member = await signedInApi(idp, "user");
     expect({
       statements: await statementsFor(member.api, ids),
-      // Only the plain claim is checked, and only until five said it.
-      calls: requests.length,
+      // Only the plain claims are checked.
+      checked: checkedClaimsIn(requests),
     }).toStrictEqual({
       statements: [accented, "Tickets come in through Zendesk."].toSorted(),
-      calls: 1 + 5 + 5,
+      checked: [accented, "Tickets come in through Zendesk."].toSorted(),
     });
   });
 

@@ -204,19 +204,19 @@ interface CameIn {
 
 /**
  * Each team's interviews while its results may show, as the one source
- * its claims and drawings name (onboarding/brain-intake.ts): how many of
- * its people agreed, and the week the first did, never who.
+ * its claims and drawings name (onboarding/brain-intake.ts): the week the
+ * first agreed, never who, nor how many: a team's work shows from the
+ * first person who told it (GRA-1987), so a count would say whose it is.
  */
 const teamInterviews = async (env: Env): Promise<CameIn[]> => {
   const teams = await onboardingStore(env).interviewSources();
   return await Promise.all(
-    teams.map(async ({ team, name, people, since }) => ({
+    teams.map(async ({ team, name, since }) => ({
       source: {
         id: await intakeIds.interviews(team),
         kind: "interview",
         title: `Interviews with ${name}`,
         date: mondayOf(since),
-        how: people === 1 ? "1 person" : `${people} people`,
         step: 2,
         interviewee: "employee",
         teamIds: [ids.rosterTeam(team)],

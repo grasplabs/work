@@ -2636,14 +2636,13 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * Each team whose interviews its claims and drawings cite: one source
-   * for all of them (brain-intake.ts), with how many of its people agreed
-   * and the day the first of them did, never who. Only while its results
+   * for all of them (brain-intake.ts), with the day the first of its
+   * people agreed, never who nor how many. Only while its results
    * may be shown (`#teamsShowingResults`), in the order of that day.
    */
   interviewSources(): {
     team: string;
     name: string;
-    people: number;
     since: string;
   }[] {
     const roster = this.#roster();
@@ -2664,7 +2663,7 @@ export class Onboarding extends DurableObject<Env> {
           .toSorted();
         return team === undefined || since === undefined
           ? []
-          : [{ team: id, name: team.name, people: agreed.length, since }];
+          : [{ team: id, name: team.name, since }];
       })
       .toSorted(
         (a, b) => a.since.localeCompare(b.since) || a.team.localeCompare(b.team)
