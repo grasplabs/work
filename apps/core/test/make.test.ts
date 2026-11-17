@@ -679,4 +679,16 @@ describe("Make something", { timeout: 120_000 }, () => {
       made: before,
     });
   });
+
+  it("never offers a plan in a turn nobody asked for", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { stub, provider, newChat } = await personalChatsOf(
+      builder.userId,
+      says("Done.")
+    );
+    const { chat } = await newChat();
+    await stub.askUnattended(chat.id, { text: "Weekly check.", model });
+
+    expect(offered(provider, 0).has("proposePlan")).toBeFalsy();
+  });
 });
