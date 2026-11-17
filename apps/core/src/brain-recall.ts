@@ -269,7 +269,8 @@ export const recallFor = async (
 // - A person is taken to know about what their document doesn't answer.
 //   Nothing here judges relevance: each person comes with the passage
 //   that matched, as recall found it for this reader (`found` as recall
-//   says it, common words alone included), and the caller (the chat's
+//   labels it: only the first way it found the passage, never whether it
+//   answers), and the caller (the chat's
 //   model, which reads the text) judges, as with every other recall. No
 //   threshold of our own, and no passage the reader may not read: each is
 //   one of recall's own items for them.

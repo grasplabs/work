@@ -387,7 +387,7 @@ interface BrainPack {
   truncated: boolean;
 }
 
-/** A person whose upload a recall for the topic found for your person: their member ID and name, and the one passage of theirs it found first, exactly as \`recall\` hands it over (its text, and how it was \`found\`). */
+/** A person whose upload a recall for the topic found for your person: their member ID and name, and the one passage of theirs it found first, exactly as \`recall\` hands it over (its text, and \`found\`: the first way recall found it, never whether it answers). */
 interface BrainPersonWhoKnows {
   id: string;
   name: string;
@@ -452,7 +452,7 @@ const brainDeclaration = `/** The company's brain: the organization's own knowle
 brain: {
   /** What your person may read that answers \`question\` (at most 2,000 characters), within \`budget.tokens\` (1 to 32,000), cited by source, version and place: needs the brain permission. \`asOf\`, an ISO 8601 date-time with its offset, reads each source as it was then (for "on a day", that day's last millisecond). Quote the passages you answer from, with their sources. */
   recall(input: { question: string; budget: { tokens: number }; asOf?: string }): Promise<BrainPack>;
-  /** Who may know about \`question\`: the people whose uploads \`recall\` finds for it, as your person may read them, within \`budget.tokens\`, each with the one passage of theirs that matched. Judge from that passage whether the person really knows about the topic before you name them: a passage found by common words alone (\`found: "stop words"\`) is no evidence, and a passage that doesn't speak to the topic means they don't. Say only what the passage shows, and cite it. Needs the brain permission. */
+  /** Who may know about \`question\`: the people whose uploads \`recall\` finds for it, as your person may read them, within \`budget.tokens\`, each with the one passage of theirs it found first; a person is named only while they are a member, and for a team's upload only while they are still in that team. Judge from the passage's text whether the person really knows about the topic before you name them: a passage that doesn't speak to the topic is no evidence, whatever its \`found\` says (\`found\` names only the first way recall found the passage, and a real match can say \`"stop words"\` while an unrelated one says \`"meaning"\`). Say only what the passage shows, and cite it. Needs the brain permission. */
   whoKnows(input: { question: string; budget: { tokens: number } }): Promise<BrainWhoKnows>;
   /** The entities it remembers things about (people, customers, projects and other things) that match: of a \`kind\`, by a whole \`name\` (case and accents aside), or an exact \`identifier\` (an email, or a reference such as \`crm:ACME-1\`); at least one. \`next\`, while more follow, is the \`after\` of the next page. Needs the brain permission. In your person's own chat (in Grasp, or their direct message on a chat app), what their teams and the whole company may read, never what only they may; in a turn nobody started, what the whole company may read alone. */
   findEntities(input: { kind?: BrainEntityKind; name?: string; identifier?: { type: "email" | "ref"; value: string }; after?: string }): Promise<{ entities: BrainEntity[]; next: string | null }>;

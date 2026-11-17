@@ -534,10 +534,34 @@ describe("a chat's code asking who knows about a topic", setUpTime, () => {
     const topic = word();
     const long = (title: string) =>
       `${title} on ${topic}: ${Array.from({ length: 60 }, (_, at) => `point ${at} of the plan`).join(", ")}.`;
-    await uploaded(first, long("Notes"), { kind: "everyone" });
-    await uploaded(second, long("Minutes"), { kind: "everyone" });
-    // Room for about one passage of either.
-    const tokens = 120;
+    const uploads = new Set([
+      await uploaded(first, long("Notes"), { kind: "everyone" }),
+      await uploaded(second, long("Minutes"), { kind: "everyone" }),
+    ]);
+    /** Of the two uploads, those recall's own pack holds within `budget`. */
+    const packedAt = async (budget: number): Promise<string[]> => {
+      const { items } = await recallPassagesAs(env, asker.userId, {
+        question: topic,
+        budget: { tokens: budget },
+        personal: false,
+      });
+      return [...uploads].filter((id) =>
+        items.some(
+          ({ source }) => source.producer === "upload" && source.id === id
+        )
+      );
+    };
+    // The smallest budget, in steps of five, at which recall packs one of
+    // them and not the other: what recall itself fits, never our guess.
+    let tokens = 0;
+    for (let budget = 5; budget <= defaultTokens; budget += 5) {
+      // oxlint-disable-next-line no-await-in-loop -- one budget at a time
+      const packed = await packedAt(budget);
+      if (packed.length === 1) {
+        tokens = budget;
+        break;
+      }
+    }
     const answer = await askedInOwnChat(admin, asker, topic, tokens);
     const { pack, eachRecalls, truncated } = await recallsAs(
       asker,
@@ -547,18 +571,29 @@ describe("a chat's code asking who knows about a topic", setUpTime, () => {
     );
     const named = peopleIn(answer).filter(
       ({ id }) => id === first.userId || id === second.userId
-    ).length;
+    );
+    /** The uploads recall's pack holds a passage of. */
+    const recalled = new Set(
+      pack.items.flatMap(({ source }) =>
+        source.producer === "upload" ? [source.id] : []
+      )
+    );
 
     expect({
       eachRecalls,
       truncated,
       cut: pack.truncated,
-      named: named < 2,
+      // A budget holding one of them: that one named, never both.
+      fits: tokens > 0,
+      named: named.length,
+      fromPack: named.every(({ passage }) => recalled.has(passage.source.id)),
     }).toStrictEqual({
       eachRecalls: true,
       truncated: true,
       cut: true,
-      named: true,
+      fits: true,
+      named: 1,
+      fromPack: true,
     });
   });
 
