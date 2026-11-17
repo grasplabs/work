@@ -363,6 +363,9 @@ export interface AgentsApi {
   deleteAgentWake: (wakeId: string) => Promise<void>;
 }
 
+/** Most apps a drafted agent names. */
+export const agentDraftAppsMax = 20;
+
 /**
  * An agent Grasp's chat drafted for the person (`draftAgent`), shown as a
  * card: nothing is made until they press Make it on it
@@ -396,6 +399,21 @@ export const agentDraftSchema = z
       .optional(),
     schedule: agentWakeInputSchema
       .pick({ cron: true, timeZone: true, opening: true })
+      .optional(),
+    /**
+     * The apps it uses, each as `env.connections.available` lists it and
+     * by the name the person knows it by; none, and it uses any app its
+     * kinds of work allow. Only apps the company offers are made.
+     */
+    apps: z
+      .array(
+        z.strictObject({
+          source: z.enum(["native", "composio"]),
+          provider: z.string().trim().min(1).max(100),
+          name: z.string().trim().min(1).max(100),
+        })
+      )
+      .max(agentDraftAppsMax)
       .optional(),
   })
   .refine(

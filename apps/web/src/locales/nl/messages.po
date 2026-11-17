@@ -2544,6 +2544,10 @@ msgstr "Antwoordt nergens iemand"
 msgid "Answers the people it is for"
 msgstr "Antwoordt de mensen voor wie hij er is"
 
+#: src/chat/agent-draft-card.tsx
+msgid "Any app its kinds of work allow"
+msgstr "Elke app die zijn soorten werk toestaan"
+
 #: src/workflows/binding-approvals.tsx
 msgid "Any event its webhook source sends of the types its contract admits"
 msgstr "Elke gebeurtenis die de webhookbron stuurt, van de typen die het contract toelaat"
@@ -2778,6 +2782,10 @@ msgstr "Apps en workflows"
 #: src/routes/_shell.projects.index.tsx
 msgid "Apps and workflows grouped by process, team or goal. Putting something in a project shares it with nobody."
 msgstr "Apps en workflows, gegroepeerd per proces, team of doel. Iets in een project zetten deelt het met niemand."
+
+#: src/chat/agent-draft-card.tsx
+msgid "Apps it uses"
+msgstr "Apps die het gebruikt"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Apps it works in"
