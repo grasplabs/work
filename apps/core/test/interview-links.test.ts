@@ -1258,8 +1258,13 @@ describe("taking part, approving and withdrawing", () => {
     });
   });
 
-  it("records nothing new on a link whose taking part was agreed to an older notice, as a turn refuses, yet takes out, withdraws and deletes (GRA-1987)", async () => {
+  it("records nothing new on a link whose taking part was agreed to an older notice, never agreed to, or withdrawn, as a turn refuses, yet takes out, withdraws and deletes (GRA-1987)", async () => {
     const { ids, secrets, me } = await running();
+    // Their lead never agreed to take part: what she says isn't kept either.
+    const lea = await signedInAs(emailOf(ids.lead));
+    await opened(secrets.lead, lea);
+    const unagreed = await save(secrets.lead, lea, 0);
+    const leaKept = await opened(secrets.lead, lea);
     await opened(secrets.oli, me);
     await takePart(secrets.oli, me);
     await save(secrets.oli, me, 0);
@@ -1292,6 +1297,7 @@ describe("taking part, approving and withdrawing", () => {
         },
       ],
     });
+    const rated = await save(secrets.oli, me, 1, { ...progress(), rating: 2 });
     const kept = await opened(secrets.oli, me);
     const takenOut = await save(secrets.oli, me, 1, {
       ...progress(),
@@ -1300,21 +1306,35 @@ describe("taking part, approving and withdrawing", () => {
       ],
     });
     const withdrew = await withdraw(secrets.oli, me);
+    const afterWithdrawing = await save(secrets.oli, me, 2, more);
+    const withdrawnKept = await opened(secrets.oli, me);
     const deleted = await remove(secrets.oli, me);
     expect({
+      unagreed: [unagreed.status, await codeOf(unagreed)],
+      leaKept: leaKept.progress,
       recorded: [recorded.status, await codeOf(recorded)],
       moved: await codeOf(moved),
+      rated: await codeOf(rated),
       kept: kept.progress?.lines.map(({ text }) => text),
+      rating: kept.progress?.rating,
       takenOut: takenOut.status,
       withdrew: withdrew.status,
+      afterWithdrawing: await codeOf(afterWithdrawing),
+      withdrawnKept: withdrawnKept.progress?.lines.map(({ text }) => text),
       deleted: deleted.status,
     }).toStrictEqual({
       // As a turn or an approval refuses it (`#participating`).
+      unagreed: [403, "interview.not_participating"],
+      leaKept: null,
       recorded: [409, "interview.notice_changed"],
       moved: "interview.notice_changed",
+      rated: "interview.notice_changed",
       kept: ["What did you do this morning?", sentinel],
+      rating: undefined,
       takenOut: 200,
       withdrew: 200,
+      afterWithdrawing: "interview.withdrawn",
+      withdrawnKept: ["What did you do this morning?", sentinel],
       deleted: 200,
     });
   });
