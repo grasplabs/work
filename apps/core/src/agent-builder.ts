@@ -874,8 +874,10 @@ const requireOffered = async (env: Env, agentId: unknown): Promise<Agent> => {
  * Takes on the agent `agentId` its owner offered the company: it becomes
  * one of the company's, under its name, which must be free among the
  * company's (`agent.name_taken`), on, reaching nobody and with every class
- * for nobody, as one an admin makes, with its instructions and documents
- * as its owner left them. Throws `agent.not_offered` for one that isn't
+ * for nobody, as one an admin makes, with its documents as its owner
+ * left them. What its owner told it (their instruction file, in their own
+ * store) doesn't go with it: it starts told nothing until an admin writes
+ * its file (GRA-1833). Throws `agent.not_offered` for one that isn't
  * offered now. The company's own admins only, never Grasp's staff.
  *
  * The batch holds what was read: the agent is taken on only while it is

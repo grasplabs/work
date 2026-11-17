@@ -53,6 +53,9 @@ describe("a person's own agent offered to the company", slow, () => {
     };
     await ann.api.connections.offerOwnAgent(mine.id, true);
     const offered = await admin.api.connections.offeredAgents();
+    // When it was offered and last changed, as its owner reads it.
+    const owned = await ann.api.connections.ownAgents();
+    const asOwned = owned.find(({ id }) => id === mine.id);
     const events = await allEvents();
     const recorded = events.filter(({ target }) => target?.id === mine.id);
     const companys = await admin.api.connections.agents();
@@ -60,7 +63,8 @@ describe("a person's own agent offered to the company", slow, () => {
     expect({
       listedBefore,
       refused,
-      offered: offered.map(({ id, name, ownerId }) => [id, name, ownerId]),
+      // Whole: nothing of what its owner told it among it.
+      offered,
       // What it is told stays its owner's alone, offered or not.
       adminReads: await outcome(admin.api.instructions.read(told)),
       byUser: await outcome(ben.api.connections.offeredAgents()),
@@ -71,7 +75,21 @@ describe("a person's own agent offered to the company", slow, () => {
     }).toStrictEqual({
       listedBefore: [],
       refused: { ben: "role.forbidden", admin: "agent.unknown" },
-      offered: [[mine.id, "Scribe", ann.userId]],
+      offered: [
+        {
+          id: mine.id,
+          name: "Scribe",
+          face: "pen",
+          job: "Drafts weekly client notes.",
+          modelRole: null,
+          model: null,
+          state: "on",
+          ownerId: ann.userId,
+          offeredAt: asOwned?.offeredAt,
+          changedBy: ann.userId,
+          changedAt: asOwned?.changedAt,
+        },
+      ],
       adminReads: "agent.unknown",
       byUser: "role.forbidden",
       companys: false,

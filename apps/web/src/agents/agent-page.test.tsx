@@ -865,7 +865,7 @@ describe("an agent's page", () => {
     await shown(fake, { agent: "Claire" });
     await press(button("Offer to the company"));
     const offered = document.body.textContent.includes(
-      "Your company's admins may take Claire on. What you told it stays yours alone"
+      "Your company's admins may take Claire on. What you told it doesn't go with it"
     );
     await press(button("Take the offer back"));
     expect({ offered, asked }).toStrictEqual({

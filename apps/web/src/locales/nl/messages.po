@@ -9565,8 +9565,8 @@ msgid "Offer to the company"
 msgstr "Aan het bedrijf aanbieden"
 
 #: src/agents/agent-share.tsx
-msgid "Offered on {since}. Your company's admins may take {name} on. What you told it stays yours alone and doesn't go with it."
-msgstr "Aangeboden op {since}. De beheerders van jullie bedrijf kunnen {name} overnemen. Wat je het hebt verteld, blijft alleen van jou en gaat niet mee."
+msgid "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
+msgstr "Aangeboden op {since}. De beheerders van jullie bedrijf kunnen {name} overnemen. Wat je het hebt verteld, gaat niet mee, en zodra ze het hebben overgenomen, kun je het niet meer openen."
 
 #: src/agents/agent-share.tsx
 msgid "Offered to the company"

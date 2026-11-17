@@ -68,7 +68,7 @@ export const ShareAgent = ({
       }
       description={
         offered
-          ? t`Offered on ${since}. Your company's admins may take ${name} on. What you told it stays yours alone and doesn't go with it.`
+          ? t`Offered on ${since}. Your company's admins may take ${name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it.`
           : t`Offer ${name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it.`
       }
       title={t`Share with the company`}

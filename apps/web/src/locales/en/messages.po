@@ -9565,8 +9565,8 @@ msgid "Offer to the company"
 msgstr "Offer to the company"
 
 #: src/agents/agent-share.tsx
-msgid "Offered on {since}. Your company's admins may take {name} on. What you told it stays yours alone and doesn't go with it."
-msgstr "Offered on {since}. Your company's admins may take {name} on. What you told it stays yours alone and doesn't go with it."
+msgid "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
+msgstr "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
 
 #: src/agents/agent-share.tsx
 msgid "Offered to the company"
