@@ -17,6 +17,7 @@ import { reset } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import type { BrainStore } from "../src/store.ts";
 import { audience, readerOf } from "./entity-helpers.ts";
 import { countRowsRead } from "./rows-read.ts";
 
@@ -29,6 +30,45 @@ const perVersion = 10;
  * more for each of its memories: hundreds here).
  */
 const seekMargin = 8;
+
+/**
+ * Another document whose second version no longer holds its first's
+ * quote: an out row (`memory_outs`) that isn't the read source's, so a
+ * read that walked the source's memories asking each whether it is out
+ * would pay for every one of them (with no out row at all, SQLite skips
+ * that walk, and it would cost nothing here).
+ */
+const outOnAnotherSource = async (
+  stub: DurableObjectStub<BrainStore>,
+  group: string
+): Promise<void> => {
+  const first = await stub.addSource({
+    source: "other",
+    change: crypto.randomUUID(),
+    text: "Beta is fine.",
+    access: audience(group),
+  });
+  await stub.addMemories({
+    change: crypto.randomUUID(),
+    access: audience(group),
+    entities: [{ key: "b", kind: "customer", names: ["Beta"] }],
+    memories: [
+      {
+        about: "b",
+        type: "fact",
+        statement: "Beta is fine",
+        speaker: { kind: "system" },
+        basis: { kind: "source", ...first, quote: "Beta is fine" },
+      },
+    ],
+  });
+  await stub.addSource({
+    source: "other",
+    change: crypto.randomUUID(),
+    text: "Beta moved on.",
+    access: audience(group),
+  });
+};
 
 /**
  * Rows one page of the latest version's change reads, after `versions`
@@ -47,6 +87,7 @@ const rowsOfLatest = async (
   const rowsReadBy = await countRowsRead(stub);
   const group = "finance";
   const reader = readerOf("reader", group);
+  await outOnAnotherSource(stub, group);
   let entity: string | undefined;
   let latest = { source: "doc", version: 1 };
   const kept: string[] = [];
@@ -90,10 +131,12 @@ const rowsOfLatest = async (
 };
 
 describe("the cost of a version's change", () => {
-  // Measured at 3, 40 and 120 earlier versions: marked, 1,321 rows each
-  // time (before the bound: 1,827, 112,827 and 914,427); unmarked, 537
+  // Measured at 3, 40 and 120 earlier versions: marked, 1,327 rows each
+  // time (before the bound: 1,827, 112,827 and 914,427); unmarked, 549
   // each time. Reading the source's whole history instead fails both
-  // (unmarked: 1,054 to 10,296 rows from 3 to 40 versions).
+  // (unmarked: 1,054 to 10,296 rows from 3 to 40 versions), and so does
+  // walking its memories to ask each whether it is out (unmarked: 590 to
+  // 1,330).
   it.each([
     ["each marked fully extracted", true],
     ["none marked", false],

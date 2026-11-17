@@ -42,19 +42,22 @@ const afterEverything = Number.MAX_SAFE_INTEGER;
  * memory can still be this version's to replace (`since`), as the reader
  * sees it as of `?4`: the latest earlier version of the source marked
  * fully extracted that they may read (memories.ts `extractedSql`) and
- * that was written before anything of this version that could replace a
- * memory, since that mark then ended every memory before it first; 0 for a
+ * that was written no later than anything of this version that could
+ * replace a memory, since that mark then ended every memory before it
+ * first (in the same add, it is credited first); 0 for a
  * thread, whose marks end nothing, and for a source with no such mark.
  */
 const sinceSql = `since AS MATERIALIZED (
   SELECT coalesce((
     SELECT mark.version FROM memory_extractions AS mark
     WHERE mark.source = ?1 AND mark.version < ?6 AND mark.at <= ?4
-      -- Written before anything of this version that could replace a
-      -- memory (its memories, its own mark), by the store's stamps: a mark
-      -- written after (an add may mark any version it holds) ended nothing
-      -- before this version did, so it cuts nothing off.
-      AND mark.at < min(
+      -- Written no later than anything of this version that could replace
+      -- a memory (its memories, its own mark), by the store's stamps: a
+      -- mark written after (an add may mark any version it holds) ended
+      -- nothing before this version did, so it cuts nothing off. One add
+      -- stamps its memories and its mark alike: an earlier version's mark
+      -- in the same add as this version's memories is credited first.
+      AND mark.at <= min(
         coalesce((
           SELECT min(mine.learned_at) FROM memories AS mine
           WHERE mine.source = ?1 AND mine.version = ?6

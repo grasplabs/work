@@ -476,6 +476,52 @@ describe("what a version changed", () => {
     }).toStrictEqual({ second: [], third: ["Acme is active"] });
   });
 
+  // One add writes a version's memory and an earlier version's mark with
+  // the same moment: both end the earlier memory at once. Exactly one
+  // version is credited: the second, whose mark ends everything before it,
+  // as an earlier mark is credited over what a later version did at the
+  // same moment or after.
+  it("credits a replacement to one version alone when one add holds a later version's memory and an earlier version's mark", async () => {
+    const group = unique("group");
+    const source = unique("doc");
+    const reader = readerOf(unique("reader"), group);
+    const text = "Acme is Active. Acme is Churning.";
+    const first = await addVersion(source, text, audience(group));
+    const { entities } = await remember(
+      audience(group),
+      [customer("c", "Acme")],
+      [
+        drawn("c", first, "Acme is Active", "Acme is active", {
+          attribute: "status",
+          value: "Active",
+        }),
+      ]
+    );
+    const second = await addVersion(source, `${text} Second.`, audience(group));
+    const third = await addVersion(source, `${text} Third.`, audience(group));
+    await shared().addMemories({
+      change: crypto.randomUUID(),
+      access: audience(group),
+      entities: [customer("c", "Acme", { id: entities.c ?? "" })],
+      memories: [
+        drawn("c", third, "Acme is Churning", "Acme is churning", {
+          attribute: "status",
+          value: "Churning",
+        }),
+      ],
+      extracted: second,
+    });
+
+    const [bySecond, byThird] = await Promise.all([
+      changeOf(second, reader),
+      changeOf(third, reader),
+    ]);
+    expect({ second: bySecond?.ended, third: byThird?.ended }).toStrictEqual({
+      second: ["Acme is active"],
+      third: [],
+    });
+  });
+
   // Threat 10: paged by the store's paging, nothing repeated or skipped.
   it("pages through what a version changed, one memory at a time", async () => {
     const group = unique("group");
