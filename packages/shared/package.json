@@ -172,6 +172,7 @@
     "./shared-runs": "./src/shared-runs.ts",
     "./sign-in": "./src/sign-in.ts",
     "./signals": "./src/signals.ts",
+    "./source-readers": "./src/source-readers.ts",
     "./statistics": "./src/statistics.ts",
     "./stephen-reach": "./src/stephen-reach.ts",
     "./stephen-requests": "./src/stephen-requests.ts",

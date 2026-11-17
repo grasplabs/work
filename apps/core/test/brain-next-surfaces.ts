@@ -2246,6 +2246,117 @@ export const coreProbes = {
       ...(await groupedAdds(markers, text)),
     ];
   },
+  // Readers copied from where an item lives (GRA-1761): a source of its
+  // own, marked, given other readers; never a hidden one, whose readers
+  // the passes after this one count on.
+  changeSourceReaders: async ({ markers }) => {
+    const text = markedText(markers);
+    const strangersAccount = (): SourceReaders => ({
+      kind: "readers",
+      readers: [
+        {
+          kind: "account",
+          provider: "microsoft",
+          tenant: stranger(),
+          account: stranger(),
+        },
+      ],
+    });
+    const change = async (
+      name: string,
+      readers: SourceReaders,
+      source: SourceRef = missingSource(),
+      key = crypto.randomUUID()
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await coreBrain.changeSourceReaders(env, {
+            source,
+            change: key,
+            readers,
+          })
+      );
+    const source = missingSource();
+    const narrowing = crypto.randomUUID();
+    return [
+      await change("a source no one added", strangersAccount()),
+      await change("for someone else alone", {
+        kind: "owner",
+        personId: stranger(),
+      }),
+      await change("an unknown kind", unchecked({ kind: "anyone" })),
+      await change(
+        "a reader's ID of the markers and a colon",
+        unchecked({
+          kind: "readers",
+          readers: [
+            {
+              kind: "account",
+              provider: "google",
+              tenant: "acme.test",
+              account: markers.join(":"),
+            },
+          ],
+        })
+      ),
+      await change(
+        "a reader of another system named by the markers",
+        unchecked({
+          kind: "readers",
+          readers: [
+            { kind: "tenant", provider: markers.join(""), tenant: "x" },
+          ],
+        })
+      ),
+      await change(
+        "too long a reader's ID",
+        unchecked({
+          kind: "readers",
+          readers: [
+            {
+              kind: "group",
+              provider: "google",
+              tenant: "acme.test",
+              group: text.repeat(30),
+            },
+          ],
+        })
+      ),
+      await change(
+        "a shared connection's readers for another producer",
+        { kind: "connection", connectionId: stranger() },
+        source
+      ),
+      await answer("a marked source, first", async () => {
+        await coreBrain.addSource(env, {
+          source,
+          change: crypto.randomUUID(),
+          text,
+          readers: strangersAccount(),
+        });
+      }),
+      await change(
+        "narrowed to a link",
+        { kind: "readers", readers: [{ kind: "link" }] },
+        source,
+        narrowing
+      ),
+      await change(
+        "the same narrowing again",
+        { kind: "readers", readers: [{ kind: "link" }] },
+        source,
+        narrowing
+      ),
+      await change(
+        "the same change with other readers",
+        strangersAccount(),
+        source,
+        narrowing
+      ),
+      await change("readers it already has", { kind: "none" }, source),
+    ];
+  },
   listSourcesAs: async ({ personId, hiddenVersions, markers }) => {
     const list = async (
       name: string,
@@ -8518,6 +8629,75 @@ export const storeProbes = {
         text.repeat(300)
       ),
       await add("no change", strangers(), text, keyOf(missingSource()), ""),
+    ];
+  },
+  // Its own marked source alone: a hidden one's readers are the world
+  // the passes after this one read.
+  changeReaders: async ({ markers }) => {
+    const text = markedText(markers);
+    const change = async (
+      name: string,
+      access: Access,
+      source = keyOf(missingSource()),
+      key = crypto.randomUUID()
+    ) =>
+      await answer(
+        name,
+        async () => await store().changeReaders({ source, change: key, access })
+      );
+    const source = keyOf(missingSource());
+    const narrowing = crypto.randomUUID();
+    const otherStrangers: Access = {
+      kind: "readers",
+      groups: [stranger(), stranger()],
+    };
+    return [
+      await change("a source no one added", strangers()),
+      await change("for someone else alone, which the shared store refuses", {
+        kind: "owner",
+        person: stranger(),
+      }),
+      await change("an unknown kind", unchecked({ kind: "everyone" })),
+      await change("no groups", unchecked({ kind: "readers", groups: [] })),
+      await change(
+        "a group of the markers twice",
+        unchecked({
+          kind: "readers",
+          groups: [markers.join(""), markers.join("")],
+        })
+      ),
+      await change(
+        "an instruction file's key named by the markers",
+        strangers(),
+        `instructions:${markers.join("")}`
+      ),
+      await answer("a marked source, first", async () => {
+        await store().addSource({
+          source,
+          change: crypto.randomUUID(),
+          text,
+          access: strangers(),
+        });
+      }),
+      await change(
+        "narrowed to other strangers",
+        otherStrangers,
+        source,
+        narrowing
+      ),
+      await change(
+        "the same narrowing again",
+        otherStrangers,
+        source,
+        narrowing
+      ),
+      await change(
+        "the same change with other readers",
+        { kind: "none" },
+        source,
+        narrowing
+      ),
+      await change("readers it already has", otherStrangers, source),
     ];
   },
   // A number, never text: a change the reader may not read answers as

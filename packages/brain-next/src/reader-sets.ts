@@ -20,6 +20,12 @@ const principalsOf = (access: Access): Principal[] => {
     case "audience": {
       return [{ kind: "group", principal: access.group }];
     }
+    case "readers": {
+      return access.groups.map((group) => ({
+        kind: "group",
+        principal: group,
+      }));
+    }
     case "none": {
       return [];
     }
@@ -52,9 +58,35 @@ export const readerSetKeyOf = (access: Access): string =>
   keyOf(principalsOf(access));
 
 /** A key's principals as {@link keyOf} writes them, before they are checked to be one. */
-const keyPrincipalsSchema = z
-  .array(z.tuple([z.enum(["person", "group"]), z.string()]))
-  .max(1);
+const keyPrincipalsSchema = z.array(
+  z.tuple([z.enum(["person", "group"]), z.string()])
+);
+
+/**
+ * The access `principals` names, as `principalsOf` makes them: none, one
+ * person, or groups alone (one group's audience, or readers of several).
+ * Undefined for any other mix, which no access names.
+ */
+const accessOfPrincipals = (
+  principals: readonly (readonly ["person" | "group", string])[]
+): Access | undefined => {
+  const [first, ...rest] = principals;
+  if (first === undefined) {
+    return { kind: "none" };
+  }
+  if (first[0] === "person") {
+    return rest.length === 0 ? { kind: "owner", person: first[1] } : undefined;
+  }
+  if (rest.length === 0) {
+    return { kind: "audience", group: first[1] };
+  }
+  const groups = principals.flatMap(([kind, principal]) =>
+    kind === "group" ? [principal] : []
+  );
+  return groups.length === principals.length
+    ? { kind: "readers", groups }
+    : undefined;
+};
 
 /**
  * The access a set of readers' key names: the inverse of
@@ -73,14 +105,10 @@ export const accessOfKey = (key: string): Access | undefined => {
   if (!principals.success) {
     return undefined;
   }
-  const [principal] = principals.data;
-  let access: Access = { kind: "none" };
-  if (principal?.[0] === "person") {
-    access = { kind: "owner", person: principal[1] };
-  } else if (principal?.[0] === "group") {
-    access = { kind: "audience", group: principal[1] };
-  }
-  return readerSetKeyOf(access) === key ? access : undefined;
+  const access = accessOfPrincipals(principals.data);
+  return access !== undefined && readerSetKeyOf(access) === key
+    ? access
+    : undefined;
 };
 
 /**

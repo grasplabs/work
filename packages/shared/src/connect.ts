@@ -513,6 +513,18 @@ export const canSignInAgain = (
   (connection.scope === "personal" || isAdmin(person.role)) &&
   !person.staff;
 
+/**
+ * An account at a suite a person connected as their own: the provider,
+ * the company's tenant there and the account's stable subject, as the
+ * provider's verified ID token said when it was connected (an Entra object
+ * ID in the tenant, a Google `sub` under its hosted domain).
+ */
+export interface PersonalAccount {
+  provider: string;
+  tenant: string;
+  accountId: string;
+}
+
 /** Most connections one `connectionOwners` call takes. */
 export const connectionOwnersMax = 100;
 
@@ -1958,6 +1970,13 @@ export interface ConnectApi
   connectionOwners: (
     connectionIds: readonly string[]
   ) => Promise<ConnectionOwner[]>;
+  /**
+   * The suite accounts the person `userId` connected as their own and
+   * hasn't disconnected, as connect verified them (`PersonalAccount`):
+   * what core counts them as a reader of where it copies who may read an
+   * item (GRA-1761).
+   */
+  personalAccounts: (userId: string) => Promise<PersonalAccount[]>;
   /**
    * Asks the connections whose grant lacks the rights of `classes`, those
    * an admin just turned on, to be connected again (`needs_reauth`), in
