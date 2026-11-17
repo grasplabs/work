@@ -80,6 +80,7 @@ const listedOf = ({
   firstLine,
   personal,
   versions,
+  readAt,
 }: ListedSource): BrainSourceListed => ({
   source,
   version,
@@ -87,6 +88,7 @@ const listedOf = ({
   firstLine,
   personal,
   versions,
+  ...(readAt === undefined ? {} : { readAt: readAt.toISOString() }),
 });
 
 /** `memory` of a pack as the page shows it. */

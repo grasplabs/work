@@ -15,10 +15,10 @@ import type { ContentBlock } from "@modelcontextprotocol/sdk/types.js";
 // Nothing is read deeper than the list of blocks, however deep an answer
 // nests: structured content stays the JSON text connect gave.
 
-/** What an answer is kept as: its text, and how many blocks were left out. */
+/** What an answer is kept as: its texts, and how many blocks were left out. */
 export interface AnswerText {
-  /** Empty when nothing in it is text. */
-  text: string;
+  /** Each text it holds, in order; none when nothing in it is text. */
+  texts: string[];
   leftOut: number;
 }
 
@@ -46,14 +46,14 @@ const textOf = (block: ContentBlock): string | undefined => {
   }
 };
 
-/** The text `output` (a tool's answer, as connect gives it) is kept as. */
+/** The texts `output` (a tool's answer, as connect gives it) is kept as. */
 export const answerText = (output: string): AnswerText => {
   const answer: unknown = JSON.parse(output);
   if (typeof answer === "string") {
-    return { text: answer, leftOut: 0 };
+    return { texts: [answer], leftOut: 0 };
   }
   if (!Array.isArray(answer)) {
-    return { text: output, leftOut: 0 };
+    return { texts: [output], leftOut: 0 };
   }
   const texts: string[] = [];
   for (const each of answer) {
@@ -63,5 +63,5 @@ export const answerText = (output: string): AnswerText => {
       texts.push(text);
     }
   }
-  return { text: texts.join("\n\n"), leftOut: answer.length - texts.length };
+  return { texts, leftOut: answer.length - texts.length };
 };

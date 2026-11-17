@@ -81,12 +81,20 @@ const allOf = <T extends FoundPassage>(
 
 /** `passage` as an entry of a way's list (pack.ts), found by `how`. */
 const foundAs = (
-  { row, source, version, position, text }: FoundPassage,
+  { row, source, version, position, text, readAt }: FoundPassage,
   how: FoundBy
 ): Entry => ({
   kind: "passage",
   key: `passage ${row}`,
-  passage: { row, source, version, position, text, found: how },
+  passage: {
+    row,
+    source,
+    version,
+    position,
+    text,
+    found: how,
+    ...(readAt === undefined ? {} : { readAt }),
+  },
 });
 
 /** The words way's list, best first, and the telling terms it found. */

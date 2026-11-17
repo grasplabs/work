@@ -5,6 +5,7 @@ import type {
   VersionList,
   VersionListRequest,
 } from "./contract.ts";
+import { readAtOf } from "./read-at.ts";
 import { readableSql } from "./reader-sets.ts";
 
 // Listings: which sources a reader may read, and which versions of one.
@@ -51,7 +52,7 @@ listed AS (
   LIMIT ?6
 )
 SELECT listed.source AS source, listed.version AS version,
-  listed.added_at AS added_at,
+  listed.added_at AS added_at, ${readAtOf("listed.row")} AS read_at,
   coalesce((
     SELECT substr(chunks.text, 1, ?7) FROM chunks
     WHERE chunks.version_row = listed.row AND chunks.position = 0
@@ -80,6 +81,7 @@ export const listSources = (
       source: string;
       version: number;
       added_at: number;
+      read_at: number | null;
       opening: string;
       versions: number;
     }>(
@@ -102,6 +104,7 @@ export const listSources = (
       opening: row.opening,
       personal,
       versions: row.versions,
+      ...(row.read_at === null ? {} : { readAt: new Date(row.read_at) }),
     })),
     more: rows.length > limit,
   };

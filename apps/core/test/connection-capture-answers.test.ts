@@ -1,6 +1,7 @@
 import { personalBrainOf } from "@grasp-os/brain-next/contract";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { chatIdSchema } from "@grasp-os/shared/ids";
+import { redact } from "@grasp-os/shared/redact";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -23,11 +24,11 @@ import { signedInApi } from "./sign-in.ts";
 // it is, in their own store. Through the real connect, with only the
 // toolkit's MCP server faked (test/mail-server.ts). These start from the
 // ways it can fail (the threat model on GRA-1845): someone else recalls
-// it; a write, an error answer or a read of the company's things is
-// kept; two calls share a key, or the same call again isn't its next
-// version; a disconnect or the person's erasure leaves it; a hostile
-// answer is kept live, whole past the Brain's limit, or with its
-// credentials.
+// it; a write, an error answer or a read of others' things is kept; two
+// calls share a key, or the same call again isn't its next version; a
+// disconnect or the person's erasure leaves it; a hostile answer is kept
+// live, whole past the Brain's limit, or with its credentials; the person
+// can't tell when it was read.
 
 const idp = mockIdp();
 
@@ -55,7 +56,7 @@ const step = (...calls: string[]) =>
     `export default async (self, env) => { let last; ${calls.map((call) => `last = ${call};`).join(" ")} return last; };`
   );
 
-/** The toolkit's tools as its server lists them: a write and two reads. */
+/** The toolkit's tools as its server lists them: a write and three reads. */
 const listed = [
   { name: "mail.send", inputSchema: { type: "object" } },
   {
@@ -72,13 +73,21 @@ const listed = [
       properties: { message: { type: "string" } },
     },
   },
+  {
+    name: "mail.others",
+    inputSchema: {
+      type: "object",
+      properties: { mailbox: { type: "string" } },
+    },
+  },
 ];
 
-/** What the admin allowed: the write, and both reads marked as reads. */
+/** What the admin allowed: the write, and every read marked as a read. */
 const allowed = [
   "mail.send",
   { name: "mail.search", read: true },
   { name: "mail.read", read: true },
+  { name: "mail.others", read: true },
 ];
 
 /**
@@ -113,6 +122,9 @@ const grant = async (
     binding,
   });
 };
+
+/** The day (UTC) of `date`. */
+const day = (date: Date): string => date.toISOString().slice(0, 10);
 
 /** A toolkit's answer as structured content, its text beside it. */
 const structured = (content: Record<string, unknown>) => ({
@@ -304,6 +316,73 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
     expect(JSON.stringify(events)).not.toContain(found);
   });
 
+  it("keeps an answer of mixed blocks redacted once over the text it keeps, so a credential split across blocks is gone", async () => {
+    const person = await signedInApi(idp, "user");
+    const own = await ownToolkit(person);
+    const image = { type: "image", data: pixel, mimeType: "image/png" };
+    const secret = ["hunt", "er2", crypto.randomUUID().slice(0, 8)].join("");
+    const token = [
+      "abcd",
+      "efgh",
+      crypto.randomUUID().replaceAll("-", ""),
+    ].join("");
+    // Each answer's text blocks, and the image between them that keeps
+    // connect from joining them itself: a credential split across blocks,
+    // and a block of JSON next to one of prose.
+    const answers = [
+      ["password:", secret],
+      ["Authorization: Bearer", token],
+      [JSON.stringify({ password: secret }), `and token=${token}`],
+    ];
+    const chat = await chatOf(
+      person.userId,
+      ...answers.flatMap((_, index) => [
+        step(calling("MAIL", "mail.read", { message: `m${index}` })),
+        says("Read it."),
+      ])
+    );
+    await grant(chat, own.id, "MAIL", ["mail.read"]);
+
+    const stored: string[] = [];
+    for (const [index, [first = "", second = ""]] of answers.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one answer at a time
+      await own.answer(
+        "mail.read",
+        blocks({ type: "text", text: first }, image, {
+          type: "text",
+          text: second,
+        })
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one turn at a time
+      await chat.ask("Read it.");
+      // oxlint-disable-next-line no-await-in-loop -- its capture first
+      await captures(own.id, index + 1);
+      // oxlint-disable-next-line no-await-in-loop -- one answer at a time
+      const id = await answerCaptureIdOf(own.id, person.userId, "mail.read", {
+        message: `m${index}`,
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one answer at a time
+      const read = await person.api.brainSources.read(
+        { producer: "capture", id },
+        1
+      );
+      stored.push(read?.text ?? "");
+    }
+    // The text an answer's blocks make, a blank line between them.
+    const joined = answers.map((texts) => texts.join("\n\n"));
+
+    expect({
+      stored,
+      secrets: stored.map(
+        (text) => text.includes(secret) || text.includes(token)
+      ),
+    }).toStrictEqual({
+      // Redacted once, over exactly the text kept.
+      stored: joined.map((text) => redact(text)),
+      secrets: [false, false, false],
+    });
+  });
+
   it("keeps nothing of an answer with no text in it, and counts the blocks it left out", async () => {
     const person = await signedInApi(idp, "user");
     const own = await ownToolkit(person);
@@ -395,9 +474,12 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
     });
   });
 
-  it("keeps nothing of a write, an error answer or a read of the company's things", async () => {
-    const person = await signedInApi(idp, "user");
-    const [sent, failed, company, witness] = [
+  it("keeps a read of the company's things through the person's own connection for them alone, and nothing of others' things, a write or an error answer", async () => {
+    const [person, colleague] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const [sent, failed, others, company] = [
       markerOf(),
       markerOf(),
       markerOf(),
@@ -405,12 +487,19 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
     ];
     const own = await ownToolkit(person);
     const companys = await ownToolkit(person, "mail");
+    // Reading others' things turned on for everyone, so connect carries
+    // the call out and capture decides what to keep of it.
+    await env.DB.prepare(
+      "INSERT OR REPLACE INTO tool_class_settings (tool_class, who, teams, changed_by, changed_at) VALUES ('read-others', 'everyone', '[]', 'test-admin', ?)"
+    )
+      .bind(Date.now())
+      .run();
     await own.answers({
       "mail.search": {
         content: [{ type: "text", text: `No such folder ${failed}` }],
         isError: true,
       },
-      "mail.read": structured({ message: witness }),
+      "mail.others": structured({ messages: [`Ben's mail ${others}`] }),
     });
     await companys.answer(
       "mail.search",
@@ -421,13 +510,17 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
       step(
         calling("OWN", "mail.send", { to: "ben@acme.test", subject: sent }),
         tryCalling("OWN", "mail.search", { query: failed }),
-        calling("COMPANY", "mail.search", { query: company }),
+        calling("OWN", "mail.others", { mailbox: "ben@acme.test" }),
         // Its capture last: once it is in, the calls before it ended.
-        calling("OWN", "mail.read", { message: witness })
+        calling("COMPANY", "mail.search", { query: company })
       ),
       says("Done.")
     );
-    await grant(chat, own.id, "OWN", ["mail.send", "mail.search", "mail.read"]);
+    await grant(chat, own.id, "OWN", [
+      "mail.send",
+      "mail.search",
+      "mail.others",
+    ]);
     await grant(chat, companys.id, "COMPANY", ["mail.search"]);
 
     await chat.ask("Do it.");
@@ -435,36 +528,233 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
       captures(own.id),
       captures(companys.id),
     ]);
+    const companyKey = await answerCaptureIdOf(
+      companys.id,
+      person.userId,
+      "mail.search",
+      { query: company }
+    );
 
     expect({
       own: ownEvents.map(shown),
       company: companyEvents.map(shown),
-      recalled: await Promise.all(
-        [sent, failed, company].map(
+      kept: idsOf(await recalled(person.userId, company)),
+      colleague: await recalled(colleague.userId, company),
+      asApp: await recalled(person.userId, company, false),
+      nothing: await Promise.all(
+        [sent, failed, others].map(
           async (marker) => await recalled(person.userId, marker)
         )
       ),
       keepsReads: await keepsReads(person, companys.id),
     }).toStrictEqual({
+      // The read of others' mail: reaches beyond theirs and the company's.
       own: [
-        {
-          action: "brain.capture.kept",
-          onBehalfOf: person.userId,
-          detail: { items: 1, kept: 1, failed: 0, skipped: 0 },
-        },
-      ],
-      company: [
         {
           action: "brain.capture.skipped",
           onBehalfOf: person.userId,
           detail: { reason: "reach", items: 1, kept: 0, failed: 0, skipped: 1 },
         },
       ],
-      recalled: [[], [], []],
-      // Their own toolkit connection may hold captures, whatever its tools
-      // are classed now (an admin may have reclassed one since), so the
-      // page and the disconnect dialog say so.
+      company: [
+        {
+          action: "brain.capture.kept",
+          onBehalfOf: person.userId,
+          detail: { items: 1, kept: 1, failed: 0, skipped: 0 },
+        },
+      ],
+      kept: [companyKey],
+      colleague: [],
+      asApp: [],
+      nothing: [[], [], []],
       keepsReads: true,
+    });
+  });
+
+  it("keeps a company read without its credentials, and a read again of it unchanged on a later day adds that read time and no version", async () => {
+    const person = await signedInApi(idp, "user");
+    const marker = markerOf();
+    const own = await ownToolkit(person, "mail");
+    const answer = { body: `Quote ${marker}`, password: "hunter2" };
+    await own.answer("mail.search", structured(answer));
+    const input = { query: marker };
+    const chat = await chatOf(
+      person.userId,
+      step(calling("MAIL", "mail.search", input)),
+      says("Found it.")
+    );
+    await grant(chat, own.id, "MAIL", ["mail.search"]);
+    const id = await answerCaptureIdOf(
+      own.id,
+      person.userId,
+      "mail.search",
+      input
+    );
+    /** The source as the person's Sources page lists it. */
+    const onSourcesPage = async () => {
+      const { sources } = await person.api.brainSources.list();
+      return sources
+        .filter(({ source }) => source.id === id)
+        .map(({ firstLine, versions, readAt }) => ({
+          readOn: readAt?.slice(0, 10),
+          versions,
+          firstLine,
+        }));
+    };
+    /** Captures `output` of the same call, as read at `readAt`. */
+    const readAgain = async (output: unknown, readAt: Date) => {
+      await captureRead(
+        env,
+        {
+          workspaceId: personalWorkspaceId(person.userId),
+          agentId: chatAgentId,
+          chatId: chatIdSchema.parse(crypto.randomUUID()),
+          personId: person.userId,
+          runId: crypto.randomUUID(),
+        },
+        own.id,
+        "mail.search",
+        input,
+        {
+          result: {
+            output: JSON.stringify(output),
+            provenance: [],
+            keep: true,
+          },
+          readAt,
+        }
+      );
+    };
+    const now = Date.now();
+    const tomorrow = new Date(now + 86_400_000);
+    const later = new Date(now + 2 * 86_400_000);
+
+    await chat.ask("Find it.");
+    await captures(own.id);
+    const first = await onSourcesPage();
+    const kept = await recalled(person.userId, marker);
+    // The same answer, read again the next day.
+    await readAgain(answer, tomorrow);
+    const unchanged = await onSourcesPage();
+    const recalledUnchanged = await recallAs(env, person.userId, {
+      personal: true,
+      question: marker,
+      budget: { tokens: 4000 },
+    });
+    // A changed answer, the day after.
+    await readAgain({ body: `Quote ${marker}, signed` }, later);
+
+    expect({
+      first,
+      kept: kept.map(({ text }) => ({
+        password: text.includes('"password":"[redacted]"'),
+        secret: text.includes("hunter2"),
+      })),
+      unchanged,
+      // The model gets when it was last read, beside the passage.
+      readAt: recalledUnchanged.items
+        .filter(({ source }) => source.id === id)
+        .map(({ readAt }) =>
+          readAt === undefined ? undefined : day(new Date(readAt))
+        ),
+      changed: await onSourcesPage(),
+    }).toStrictEqual({
+      first: [
+        {
+          readOn: day(new Date(now)),
+          versions: 1,
+          firstLine: `{"body":"Quote ${marker}","password":"[redacted]"}`,
+        },
+      ],
+      kept: [{ password: true, secret: false }],
+      unchanged: [
+        { readOn: day(tomorrow), versions: 1, firstLine: first[0]?.firstLine },
+      ],
+      readAt: [day(tomorrow)],
+      changed: [
+        {
+          readOn: day(later),
+          versions: 2,
+          firstLine: `{"body":"Quote ${marker}, signed"}`,
+        },
+      ],
+    });
+  });
+
+  it("keeps nothing of a shared connection of the same toolkit beside the person's own, and takes nothing of it when their own is disconnected", async () => {
+    const person = await signedInApi(idp, "user");
+    const [mine, shared] = [markerOf(), markerOf()];
+    const own = await ownToolkit(person, "mail");
+    const company = await mailConnection([], allowed, { provider: "mail" });
+    await company.serves(listed);
+    await own.answer("mail.search", structured({ messages: [`Mine ${mine}`] }));
+    await company.answer(
+      "mail.search",
+      structured({ messages: [`Shared ${shared}`] })
+    );
+    const read = step(
+      calling("SHARED", "mail.search", { query: shared }),
+      calling("OWN", "mail.search", { query: mine })
+    );
+    const chat = await chatOf(
+      person.userId,
+      read,
+      says("Read both."),
+      step(calling("SHARED", "mail.search", { query: shared })),
+      says("Read it again.")
+    );
+    await grant(chat, own.id, "OWN", ["mail.search"]);
+    await grant(chat, company.id, "SHARED", ["mail.search"]);
+
+    await chat.ask("Read both.");
+    const [sharedEvents] = await Promise.all([
+      captures(company.id),
+      captures(own.id),
+    ]);
+    const kept = idsOf(await recalled(person.userId, mine));
+    await person.api.connections.disconnect(own.id);
+    await vi.waitFor(
+      async () => {
+        await expect(recalled(person.userId, mine)).resolves.toStrictEqual([]);
+      },
+      { timeout: 10_000, interval: 50 }
+    );
+    // The shared connection is still there and still answers.
+    await chat.ask("Read it again.");
+    const sharedAfter = await captures(company.id, 2);
+    const listedAfter = await person.api.connections.list();
+
+    expect({
+      shared: sharedEvents.map(shown),
+      kept,
+      sharedAfter: sharedAfter.map(({ detail }) => detail.reason),
+      sharedRecalled: await recalled(person.userId, shared),
+      sharedStatus: listedAfter.find(({ id }) => id === company.id)?.status,
+      sharedKeepsReads: listedAfter.find(({ id }) => id === company.id)
+        ?.keepsReads,
+    }).toStrictEqual({
+      shared: [
+        {
+          action: "brain.capture.skipped",
+          onBehalfOf: person.userId,
+          detail: {
+            reason: "shared",
+            items: 1,
+            kept: 0,
+            failed: 0,
+            skipped: 1,
+          },
+        },
+      ],
+      kept: [
+        await answerCaptureIdOf(own.id, person.userId, "mail.search", {
+          query: mine,
+        }),
+      ],
+      sharedAfter: ["shared", "shared"],
+      sharedRecalled: [],
+      sharedStatus: "active",
+      sharedKeepsReads: undefined,
     });
   });
 
