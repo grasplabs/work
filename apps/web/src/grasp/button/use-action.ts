@@ -16,6 +16,7 @@
 //   </form>
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import { useEffect, useRef, useState } from "react";
 
 import { ms } from "../tokens/tokens.values";
@@ -40,6 +41,9 @@ export type ActionResult<Result> =
 
 /** The state and words a Button needs to show the life of an action. */
 export interface ActionStatus {
+  /** Where the action is, as a Button's `status` takes it. */
+  status: ActionState;
+  /** @deprecated Use `status`. */
   state: ActionState;
   workingLabel?: string;
   doneLabel: string;
@@ -134,6 +138,7 @@ export const useAction = <Args extends unknown[], Result>(
   };
 
   const status: ActionStatus = {
+    status: state,
     state,
     workingLabel: words.working,
     doneLabel: words.done,

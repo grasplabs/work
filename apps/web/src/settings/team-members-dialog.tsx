@@ -10,13 +10,20 @@ import {
   Dialog,
   DialogBody,
   DialogDescription,
-  DialogPanel,
+  DialogContent,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
 import { Field, FieldError, FieldLabel } from "../grasp/field/index.ts";
 import { Form, FormActions } from "../grasp/form/index.ts";
 import { Minus } from "../grasp/icons/index.ts";
-import { Item, ItemGroup } from "../grasp/item/index.ts";
+import {
+  Item,
+  ItemGroup,
+  ItemContent,
+  ItemTitle,
+  ItemDescription,
+  ItemActions,
+} from "../grasp/item/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { addTeamMember, removeTeamMember } from "./team-changes.ts";
@@ -108,7 +115,7 @@ export const TeamMembersDialog = ({
   };
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogPanel closeLabel={t`Close`}>
+      <DialogContent closeLabel={t`Close`}>
         <DialogTitle>{t`Members of ${name}`}</DialogTitle>
         <DialogDescription>
           {t`What is shared with ${name} is shared with each of them.`}
@@ -151,7 +158,7 @@ export const TeamMembersDialog = ({
               </Form>
             )}
             {takingOff.failure === undefined ? null : (
-              <Alert variant="danger">{takingOff.failure}</Alert>
+              <Alert tone="danger">{takingOff.failure}</Alert>
             )}
             {people.length === 0 ? (
               <Text tone="muted">{t`Nobody is in this team yet.`}</Text>
@@ -160,31 +167,31 @@ export const TeamMembersDialog = ({
                 {people.map((person) => {
                   const who = person.name;
                   return (
-                    <Item
-                      actions={
+                    <Item key={person.userId} size="sm">
+                      <ItemContent>
+                        <ItemTitle>{person.name}</ItemTitle>
+                        <ItemDescription>{person.email}</ItemDescription>
+                      </ItemContent>
+                      <ItemActions>
                         <Button
                           disabled={busy}
                           icon={Minus}
-                          label={t`Take ${who} off ${name}`}
+                          aria-label={t`Take ${who} off ${name}`}
                           onClick={() => {
                             void remove(person);
                           }}
                           size="sm"
                           variant="ghost"
                         />
-                      }
-                      description={person.email}
-                      key={person.userId}
-                      size="sm"
-                      title={person.name}
-                    />
+                      </ItemActions>
+                    </Item>
                   );
                 })}
               </ItemGroup>
             )}
           </div>
         </DialogBody>
-      </DialogPanel>
+      </DialogContent>
     </Dialog>
   );
 };

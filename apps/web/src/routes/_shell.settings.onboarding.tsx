@@ -3,7 +3,14 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 
 import { Button } from "../grasp/button/index.ts";
 import { ArrowRight, Checklist } from "../grasp/icons/index.ts";
-import { Item } from "../grasp/item/index.ts";
+import {
+  Item,
+  ItemMedia,
+  ItemContent,
+  ItemTitle,
+  ItemDescription,
+  ItemActions,
+} from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -62,8 +69,13 @@ const OnboardingPage = () => {
     >
       <SettingsStack>
         {linksToDo ? (
-          <Item
-            actions={
+          <Item variant="outline">
+            <ItemMedia icon={Checklist} />
+            <ItemContent>
+              <ItemTitle>{t`To do: let your team know, and send the interview links`}</ItemTitle>
+              <ItemDescription>{t`Stephen talks to nobody until you pick the day the interviews start.`}</ItemDescription>
+            </ItemContent>
+            <ItemActions>
               <Button
                 render={<Link search={{ step: "team" }} to="/setup" />}
                 size="sm"
@@ -71,12 +83,8 @@ const OnboardingPage = () => {
               >
                 {t`Do it now`}
               </Button>
-            }
-            description={t`Stephen talks to nobody until you pick the day the interviews start.`}
-            icon={Checklist}
-            title={t`To do: let your team know, and send the interview links`}
-            variant="outline"
-          />
+            </ItemActions>
+          </Item>
         ) : null}
         {view.plan === null && !linksToDo ? (
           <Text tone="muted">{t`The interviews aren’t planned yet. You plan them at the end of your onboarding.`}</Text>

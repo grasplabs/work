@@ -16,6 +16,7 @@
 // colours. Every value is a token (src/tokens).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import type { ChangeDetails } from "@ui-sdk/core";
 import {
@@ -63,9 +64,9 @@ export interface TabsProps {
    * @default "line"
    */
   variant?: "line" | "segmented";
-  /** Layout only: margins, alignment and width. */
+  /** @deprecated Use `layout`. */
   style?: TabsLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: margins, alignment and width. */
   layout?: TabsLayoutStyle;
 }
 
@@ -79,7 +80,7 @@ export interface TabsListProps extends Omit<
 }
 
 /** Every prop a TabsTab takes. */
-export interface TabsTabProps extends Omit<
+export interface TabsTriggerProps extends Omit<
   ComponentProps<typeof TabsTabPrimitive>,
   "className" | "style" | "render" | "value" | "disabled" | "children"
 > {
@@ -95,7 +96,7 @@ export interface TabsTabProps extends Omit<
 }
 
 /** Every prop a TabsPanel takes. */
-export interface TabsPanelProps extends Omit<
+export interface TabsContentProps extends Omit<
   ComponentProps<typeof TabsPanelPrimitive>,
   "className" | "style" | "render" | "value"
 > {
@@ -493,7 +494,7 @@ export const TabsList = ({ children, ...rest }: TabsListProps) => {
 };
 
 /** One tab: a short noun for its view ("Activity"). */
-export const TabsTab = ({ children, ...rest }: TabsTabProps) => {
+export const TabsTrigger = ({ children, ...rest }: TabsTriggerProps) => {
   const segmented = useContext(Variant) === "segmented";
   return (
     <TabsTabPrimitive
@@ -527,9 +528,19 @@ export const TabsTab = ({ children, ...rest }: TabsTabProps) => {
 };
 
 /** The view of one tab. It takes keyboard focus after the list, as the tabs pattern asks. */
-export const TabsPanel = (props: TabsPanelProps) => (
+export const TabsContent = (props: TabsContentProps) => (
   <TabsPanelPrimitive
     {...props}
     className={className(styles.panel, focus.ring)}
   />
 );
+
+/** @deprecated Use `TabsTrigger`. */
+export const TabsTab = TabsTrigger;
+/** @deprecated Use `TabsTriggerProps`. */
+export type TabsTabProps = TabsTriggerProps;
+
+/** @deprecated Use `TabsContent`. */
+export const TabsPanel = TabsContent;
+/** @deprecated Use `TabsContentProps`. */
+export type TabsPanelProps = TabsContentProps;

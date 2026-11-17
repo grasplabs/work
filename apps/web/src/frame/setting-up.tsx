@@ -5,7 +5,14 @@ import { useId } from "react";
 import { useGlobalChat } from "../chat/global-chat.tsx";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+  EmptyDescription,
+  EmptyContent,
+} from "../grasp/empty/index.ts";
 import { People, Spinner } from "../grasp/icons/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -94,8 +101,13 @@ export const SettingUp = ({
   return (
     <div {...stylex.props(styles.place)}>
       {failed ? (
-        <Empty
-          action={
+        <Empty tone="danger">
+          <EmptyHeader>
+            <EmptyMedia />
+            <EmptyTitle>{t`${name} isn't ready yet`}</EmptyTitle>
+            <EmptyDescription>{t`Grasp couldn't finish setting it up this time.`}</EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
             <Button
               onClick={() => {
                 void chat.ask(t`Try again to set up ${name}.`);
@@ -103,15 +115,15 @@ export const SettingUp = ({
             >
               {t`Try again`}
             </Button>
-          }
-          kind="error"
-          title={t`${name} isn't ready yet`}
-        >
-          {t`Grasp couldn't finish setting it up this time.`}
+          </EmptyContent>
         </Empty>
       ) : (
-        <Empty icon={Spinner} title={t`Setting up ${name}…`}>
-          {t`Grasp is building it. This takes a minute or two.`}
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia icon={Spinner} />
+            <EmptyTitle>{t`Setting up ${name}…`}</EmptyTitle>
+            <EmptyDescription>{t`Grasp is building it. This takes a minute or two.`}</EmptyDescription>
+          </EmptyHeader>
         </Empty>
       )}
     </div>
@@ -126,8 +138,12 @@ export const Updating = ({ name }: { name: string }) => {
   const { t } = useLingui();
   return (
     <div {...stylex.props(styles.place)}>
-      <Empty icon={Spinner} title={t`Updating ${name}…`}>
-        {t`Grasp is still working on it.`}
+      <Empty>
+        <EmptyHeader>
+          <EmptyMedia icon={Spinner} />
+          <EmptyTitle>{t`Updating ${name}…`}</EmptyTitle>
+          <EmptyDescription>{t`Grasp is still working on it.`}</EmptyDescription>
+        </EmptyHeader>
       </Empty>
     </div>
   );

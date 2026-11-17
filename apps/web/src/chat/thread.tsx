@@ -914,7 +914,7 @@ const AnswerBody = ({
           duration={live || seconds === undefined ? undefined : seconds * 1000}
           steps={steps}
           words={activityWords}
-          working={live}
+          loading={live}
           workingLabel={context.workingLabel}
         />
       ) : null}
@@ -1017,7 +1017,7 @@ const AnswerRow = ({
         retry === undefined || failed ? undefined : (
           <ChatMessageAction
             icon={Retry}
-            label={t`Ask again`}
+            aria-label={t`Ask again`}
             onClick={() => {
               retry();
             }}
@@ -1208,7 +1208,7 @@ export const ChatThread = ({
   if (!loaded) {
     return (
       <div {...stylex.props(styles.centre)}>
-        <Spinner label={t`Loading…`} />
+        <Spinner aria-label={t`Loading…`} />
       </div>
     );
   }

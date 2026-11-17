@@ -9,6 +9,7 @@
 // button's size. Button loads this file only for a Button with `hold`, so a plain one ships no Popover.
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import {
   PopoverClose as ClosePrimitive,
   PopoverTrigger as TriggerPrimitive,
@@ -21,13 +22,13 @@ import {
   Popover,
   PopoverAction,
   PopoverFooter,
-  PopoverPanel,
+  PopoverContent,
   PopoverTitle,
   createPopoverController,
 } from "../popover";
 import { Button } from "./button";
 import type { ButtonProps } from "./button";
-import { HoldContext, englishHoldLabels, holdTime, useHold } from "./use-hold";
+import { HoldContext, holdTime, useHold, useHoldLabels } from "./use-hold";
 
 /** The words of a button, however they are written: `Delete {name}` reads "Delete Weekly notes". */
 const textOf = (node: ReactNode): string => {
@@ -55,7 +56,7 @@ const wordsOf = (children: ReactNode, label: string | undefined) => {
 /** A Button with `hold`: the trigger of its confirmation, holding the Button that is pressed. */
 export const HoldButton = (props: ButtonProps) => {
   const { hold, holdLabels, onClick, ref: callerRef, ...rest } = props;
-  const labels = { ...englishHoldLabels, ...holdLabels };
+  const labels = useHoldLabels(holdLabels);
   const { variant = "quiet", disabled = false } = rest;
   const words = wordsOf(rest.children, rest.label);
   const busy = rest.state !== undefined && rest.state !== "idle";
@@ -81,7 +82,7 @@ export const HoldButton = (props: ButtonProps) => {
   // ink otherwise, and an agent always needs the person's yes to press it.
   const confirm =
     variant === "danger" || variant === "approve" ? variant : "ink";
-  const said = words ?? "Confirm";
+  const said = words ?? labels.confirm;
   return (
     <Popover controller={controller}>
       {/* oxlint-disable-next-line react/jsx-no-constructed-context-values -- compiled */}
@@ -103,7 +104,7 @@ export const HoldButton = (props: ButtonProps) => {
           }}
         />
       </HoldContext.Provider>
-      <PopoverPanel>
+      <PopoverContent>
         <PopoverTitle>
           {words === undefined ? labels.confirm : labels.ask(words)}
         </PopoverTitle>
@@ -124,7 +125,7 @@ export const HoldButton = (props: ButtonProps) => {
             )}
           />
         </PopoverFooter>
-      </PopoverPanel>
+      </PopoverContent>
     </Popover>
   );
 };

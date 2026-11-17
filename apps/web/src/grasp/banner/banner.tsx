@@ -1,38 +1,17 @@
-// Banner: a message across the top of a page or the app: a notice, a warning, an outage. It runs
-// the full width of what holds it, in the same tints as Alert, with its actions and, when the
-// message can be put away, a dismiss button at the end. After Palermo's Banner: the corner, a soft
-// edge, 12px all round and 8px between the parts. Its tints, icons and how a screen reader hears it
-// follow Grasp's Alert.
-//
-//   <Banner tone="attention" title="Scheduled maintenance" action={<Button size="xs">Details</Button>}>
-//     Reports pause on Sunday from 02:00 to 04:00.
-//   </Banner>
-//
-// Not the inline Alert: a banner is about the whole page or the app, an alert about the part it
-// sits in. Every value is a token (src/tokens). A caller may set layout only (the `style` prop).
-"use client";
-
-import * as stylex from "@stylexjs/stylex";
-import { useState } from "react";
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 3: Banner stays a wrapper over Alert's banner look until step 9 removes it (handover/audit/RELEASE.md §7). */
 import type { ReactNode } from "react";
 
-import { Button } from "../button";
-import { Alert as Warning, Cross, Done, Failed, Icon, Info } from "../icons";
+import { Alert } from "../alert";
+import type { AlertLayoutStyle, AlertVariant } from "../alert";
 import type { IconData } from "../icons";
-import { iconVars } from "../icons/icon.stylex";
-import type { LayoutStyle } from "../layout/layout";
-import { grasp, media } from "../tokens/tokens.stylex";
 
-/**
- * What the message is: a `neutral` notice, `success` when something went well, an `attention`
- * warning, or `danger`, something down. The same tones as Alert.
- */
-export type BannerTone = "neutral" | "success" | "attention" | "danger";
+/** @deprecated Use `AlertVariant` (Alert's `tone`). */
+export type BannerTone = AlertVariant;
 
-/** What a caller may style: where the banner sits. Never its look. */
-export type BannerLayoutStyle = LayoutStyle;
+/** @deprecated Use `AlertLayoutStyle`. */
+export type BannerLayoutStyle = AlertLayoutStyle;
 
-/** Every prop a Banner takes. */
+/** @deprecated Use `AlertProps`, with `variant="banner"`. */
 export interface BannerProps {
   /** The message, in a sentence, on its own line under the title ("Reports pause on Sunday."). */
   children?: ReactNode;
@@ -62,179 +41,13 @@ export interface BannerProps {
    * @default "Dismiss"
    */
   dismissLabel?: string;
-  /** Layout only: where it sits (for example, kept at the top as the page scrolls). */
+  /** @deprecated Use `layout`. */
   style?: BannerLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: where it sits (for example, kept at the top as the page scrolls). */
   layout?: BannerLayoutStyle;
 }
 
-const styles = stylex.create({
-  banner: {
-    [iconVars.size]: grasp.iconSm,
-    [iconVars.stroke]: grasp.iconStroke,
-    // Three columns: the icon, the message with its actions, and the dismiss button in the corner,
-    // which stays there however the message wraps.
-    display: "grid",
-    gridTemplateColumns: "auto minmax(0, 1fr) auto",
-    alignItems: "start",
-    boxSizing: "border-box",
-    width: "100%",
-    minWidth: 0,
-    padding: grasp.space3,
-    // Across the top of App shell's card (its `banner` row) it is a band: no corners of its own, so it
-    // takes the card's at its top (the card clips it) and meets the bar under it square, never a
-    // rounder corner inside the card's (App shell FRESH.md F71).
-    borderRadius: {
-      default: grasp.corner,
-      [stylex.when.ancestor('[data-slot="app-shell-banner"]')]: 0,
-    },
-    cornerShape: grasp.cornerShape,
-    // The system's soft edge, as Palermo's 1px edge. In forced colours a real border draws it.
-    boxShadow: grasp.edge,
-    borderWidth: { default: 0, [media.forced]: 1 },
-    borderStyle: "solid",
-    borderColor: "CanvasText",
-    fontFamily: grasp.fontSans,
-    fontSize: grasp.textSm,
-    lineHeight: grasp.textSmLine,
-    color: grasp.text,
-    overflowWrap: "anywhere",
-  },
-  neutral: { backgroundColor: grasp.alertFillNeutral },
-  success: { backgroundColor: grasp.successSoft },
-  attention: { backgroundColor: grasp.attentionSoft },
-  danger: { backgroundColor: grasp.dangerSoft },
-  // Level with the title's line, however many lines the message takes.
-  icon: {
-    display: "inline-flex",
-    flexShrink: 0,
-    alignSelf: "flex-start",
-    // The room to the words is the icon's own, so a banner without a dismiss button keeps no gap at its end.
-    marginInlineEnd: grasp.space2,
-    marginBlockStart: `calc(${grasp.space1} + (${grasp.textSmLine} - ${grasp.iconSm}) / 2)`,
-  },
-  iconNeutral: { color: grasp.muted },
-  iconSuccess: { color: grasp.success },
-  iconAttention: { color: grasp.attention },
-  iconDanger: { color: grasp.danger },
-  // The title on the first line, the message under it, as Palermo's.
-  // The words take the line and give way down to 12rem, so the buttons stay beside them on a wide
-  // line; under that the buttons move to the next line instead of squeezing them.
-  words: {
-    flexGrow: 1,
-    flexShrink: 1,
-    flexBasis: "min(100%, 12rem)",
-    display: "grid",
-    rowGap: grasp.space1,
-    minWidth: 0,
-    margin: 0,
-    paddingBlock: grasp.space1,
-    textWrap: "pretty",
-  },
-  title: {
-    fontWeight: grasp.weightMedium,
-    color: grasp.ink,
-  },
-  // The words and the actions on one line when they fit. When they do not, the buttons go to the
-  // next line, so a title never breaks word by word on a phone, and start there on the words'
-  // edge: a line holding one item stands at its start (space-between), a line holding both puts
-  // the buttons at its end.
-  body: {
-    display: "flex",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    alignItems: "start",
-    columnGap: grasp.space2,
-    rowGap: grasp.space2,
-    minWidth: 0,
-  },
-  // The actions 8px apart. On a very narrow screen they wrap among themselves rather than push the
-  // page wider.
-  actions: {
-    display: "flex",
-    flexWrap: "wrap",
-    alignItems: "center",
-    gap: grasp.space2,
-    minWidth: 0,
-  },
-  // 16px between the actions and the dismiss button, as Palermo's.
-  dismiss: { display: "flex", marginInlineStart: grasp.space4 },
-});
-
-const icons: Record<BannerTone, IconData> = {
-  neutral: Info,
-  success: Done,
-  attention: Warning,
-  danger: Failed,
-};
-const iconColours = {
-  neutral: styles.iconNeutral,
-  success: styles.iconSuccess,
-  attention: styles.iconAttention,
-  danger: styles.iconDanger,
-} as const;
-// A warning or an outage is said at once; a notice when the reader is free.
-const roles: Record<BannerTone, "alert" | "status"> = {
-  neutral: "status",
-  success: "status",
-  attention: "alert",
-  danger: "alert",
-};
-
-export const Banner = ({
-  children,
-  title,
-  tone = "neutral",
-  icon,
-  action,
-  onDismiss,
-  dismissLabel = "Dismiss",
-  style: styleProp,
-  layout,
-}: BannerProps) => {
-  const [dismissed, setDismissed] = useState(false);
-  if (dismissed) {
-    return null;
-  }
-  const dismiss = () => {
-    setDismissed(true);
-    onDismiss?.();
-  };
-  return (
-    <div
-      data-slot="banner"
-      data-tone={tone}
-      role={roles[tone]}
-      {...stylex.props(styles.banner, styles[tone], layout ?? styleProp)}
-    >
-      <span
-        aria-hidden="true"
-        {...stylex.props(styles.icon, iconColours[tone])}
-      >
-        <Icon icon={icon ?? icons[tone]} />
-      </span>
-      <div {...stylex.props(styles.body)}>
-        <p {...stylex.props(styles.words)}>
-          {title !== undefined && title !== "" && (
-            <span {...stylex.props(styles.title)}>{title}</span>
-          )}
-          {children !== undefined && <span>{children}</span>}
-        </p>
-        {action !== undefined && (
-          <span {...stylex.props(styles.actions)}>{action}</span>
-        )}
-      </div>
-      {onDismiss && (
-        <span {...stylex.props(styles.dismiss)}>
-          <Button
-            variant="ghost"
-            size="xs"
-            icon={Cross}
-            label={dismissLabel}
-            onClick={dismiss}
-          />
-        </span>
-      )}
-    </div>
-  );
-};
+/** @deprecated Use `Alert` with `variant="banner"`: `<Alert variant="banner" tone="attention" title="…">…</Alert>`. */
+export const Banner = ({ style, layout = style, ...props }: BannerProps) => (
+  <Alert variant="banner" layout={layout} {...props} />
+);

@@ -13,23 +13,26 @@ import type { ComponentProps, ReactNode } from "react";
 
 import { Button } from "../button";
 import { Cross } from "../icons";
+import { useWords } from "../words/words";
 import { panelMarker } from "./dialog.stylex";
 import { useSize } from "./size-context";
 import { useStill } from "./still-context";
 import { dialogStyles as styles } from "./styles";
 import { sureClose } from "./sure-close";
+import { dialogWords } from "./words";
 
 type ContentPrimitiveProps = ComponentProps<typeof ContentPrimitive>;
 
 /** Every prop a DialogPanel takes: these, and the rest of UI SDK's DialogContent. */
-export interface DialogPanelProps extends Omit<
+export interface DialogContentProps extends Omit<
   ContentPrimitiveProps,
   "children" | "className" | "style" | "render"
 > {
   /** The title, the description, the body and the footer, in that order. */
   children: ReactNode;
   /**
-   * The name of the close button in the corner, in the page's language.
+   * The name of the close button in the corner, in the page's language. Left out, GraspWords
+   * gives it (src/words), else "Close".
    * @default "Close"
    */
   closeLabel?: string;
@@ -40,15 +43,17 @@ export interface DialogPanelProps extends Omit<
  * middle of the window, `dialog-width` wide or `dialog-width-full` when the dialog is full; a sheet
  * along the bottom under 640px.
  */
-export const DialogPanel = ({
+export const DialogContent = ({
   children,
-  closeLabel = "Close",
+  closeLabel: given,
   ...rest
-}: DialogPanelProps) => {
+}: DialogContentProps) => {
+  const words = useWords("dialog", dialogWords);
+  const closeLabel = given ?? words.close;
   const still = useStill();
   const full = useSize() === "full";
   const cross = (
-    <Button variant="ghost" size="sm" icon={Cross} label={closeLabel} />
+    <Button variant="ghost" size="sm" icon={Cross} aria-label={closeLabel} />
   );
   if (still) {
     if (still.phase === "closed") {
@@ -97,7 +102,7 @@ export const DialogPanel = ({
                 variant="ghost"
                 size="sm"
                 icon={Cross}
-                label={closeLabel}
+                aria-label={closeLabel}
               />
             )}
           />
@@ -106,3 +111,8 @@ export const DialogPanel = ({
     </>
   );
 };
+
+/** @deprecated Use `DialogContent`. */
+export const DialogPanel = DialogContent;
+/** @deprecated Use `DialogContentProps`. */
+export type DialogPanelProps = DialogContentProps;

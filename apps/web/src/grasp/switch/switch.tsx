@@ -18,6 +18,7 @@
 // Every value is a token (src/tokens). A caller may set layout only (the `style` prop).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import {
   Switch as SwitchPrimitive,
@@ -34,8 +35,10 @@ import type {
 
 import { announce } from "../announce/announce";
 import { ChoiceRow, reachStyles } from "../choice/choice";
+import type { ChoiceWiring } from "../choice/choice";
 import { choiceMarker } from "../choice/choice.stylex";
 import { focus } from "../focus/focus";
+import { visuallyHidden } from "../hidden/hidden";
 import { Icon, Spinner } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
@@ -60,6 +63,13 @@ interface SwitchBase {
    * summary"). A screen reader and an agent find it by these words.
    */
   label: ReactNode;
+  /**
+   * Draws the switch alone, its label not shown: where something beside it already names it, as a
+   * Setting row does. A screen reader still hears its name once: from the caller's `<label for>`
+   * when an `id` is given (a Setting row's `field`), else from the label, kept as hidden words.
+   * @default false
+   */
+  labelHidden?: boolean;
   /** One sentence under the label: what turning it on does. A screen reader says it after the name. */
   description?: ReactNode;
   /** On now, for a switch your code holds. Pass `onCheckedChange` with it. */
@@ -84,9 +94,9 @@ interface SwitchBase {
    * @default false
    */
   readOnly?: boolean;
-  /** Layout only: margins and alignment. The look belongs to the switch. */
+  /** @deprecated Use `layout`. */
   style?: SwitchLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: margins and alignment. The look belongs to the switch. */
   layout?: SwitchLayoutStyle;
 }
 
@@ -94,6 +104,8 @@ interface SwitchBase {
 interface WithoutSave {
   onSave?: undefined;
   failedLabel?: never;
+  status?: never;
+  /** @deprecated Use `status`. */
   state?: never;
 }
 
@@ -110,6 +122,8 @@ interface WithSave {
    * Where the save is: `idle`, `working` or `failed`. Leave it out: `onSave` keeps it. Set it to
    * show one state standing still.
    */
+  status?: SaveState;
+  /** @deprecated Use `status`. */
   state?: SaveState;
 }
 
@@ -148,6 +162,12 @@ const breathe = stylex.keyframes({
 });
 
 const styles = stylex.create({
+  // The switch alone (labelHidden): only its control, on the line it stands in.
+  alone: {
+    display: "inline-flex",
+    alignItems: "center",
+    verticalAlign: "middle",
+  },
   control: {
     appearance: "none",
     display: "grid",
@@ -719,13 +739,15 @@ export const Switch = (allProps: SwitchProps) => {
   // read the save props, which are undefined in the branch without a save.
   const {
     label,
+    labelHidden = false,
     description,
     style: styleProp,
     layout,
     id,
     onSave,
     failedLabel,
-    state,
+    status,
+    state: stateDeprecated,
     onCheckedChange,
     controller: given,
     ...rest
@@ -736,8 +758,11 @@ export const Switch = (allProps: SwitchProps) => {
     > & {
       onSave?: (checked: boolean) => Promise<unknown>;
       failedLabel?: string;
+      status?: SaveState;
       state?: SaveState;
     };
+  // The new name wins over the old one (the breaking release's step 1).
+  const state = status ?? stateDeprecated;
   const own = useId();
   const box = id ?? `switch${own}`;
   const [made] = useReducer(keepController, undefined, createSwitchController);
@@ -808,6 +833,72 @@ export const Switch = (allProps: SwitchProps) => {
     void save(onSave, next);
   };
 
+  // The control itself: in the choice row with its words, or alone with labelHidden.
+  const control = (wiring: Partial<ChoiceWiring>) => (
+    <SwitchPrimitive
+      {...rest}
+      {...wiring}
+      id={box}
+      aria-busy={life === "working" || undefined}
+      data-state={life === "idle" ? undefined : life}
+      controller={controller}
+      onCheckedChange={handleCheckedChange}
+      onClickCapture={handleClickCapture}
+      className={(on) => {
+        const still = on.readOnly && !on.disabled;
+        const busy = life === "working" && !on.disabled;
+        const look = stylex.props(
+          styles.control,
+          on.disabled && styles.disabled,
+          still && styles.still,
+          busy && styles.busy,
+          focus.mark
+        );
+        return look.className ?? "";
+      }}
+    >
+      {(on) => (
+        <>
+          <span
+            aria-hidden="true"
+            data-slot="switch-reach"
+            {...stylex.props(reachStyles.reach)}
+          />
+          <Track
+            checked={on.checked}
+            live={!(on.disabled || on.readOnly || life === "working")}
+            working={life === "working"}
+            failed={life === "failed"}
+            drag={drag}
+          />
+        </>
+      )}
+    </SwitchPrimitive>
+  );
+
+  if (labelHidden) {
+    // Named by the caller's <label for={id}> when it gives the id, else by the label as hidden words.
+    const nameId = `${box}-name`;
+    const named = id === undefined;
+    return (
+      <span
+        data-slot="switch"
+        data-label="hidden"
+        {...stylex.props(styles.alone, layout ?? styleProp)}
+      >
+        {named && (
+          <span id={nameId} {...stylex.props(visuallyHidden)}>
+            {label}
+          </span>
+        )}
+        {control({
+          ...(named ? { "aria-labelledby": nameId } : {}),
+          ...(life === "failed" ? { "aria-invalid": true } : {}),
+        })}
+      </span>
+    );
+  }
+
   return (
     // A failed save makes the field wrong, so the words under the label describe the switch and
     // it says `aria-invalid`, for a screen reader and an agent alike.
@@ -821,47 +912,7 @@ export const Switch = (allProps: SwitchProps) => {
       end
       layout={[layout ?? styleProp]}
     >
-      {(wiring) => (
-        <SwitchPrimitive
-          {...rest}
-          {...wiring}
-          id={box}
-          aria-busy={life === "working" || undefined}
-          data-state={life === "idle" ? undefined : life}
-          controller={controller}
-          onCheckedChange={handleCheckedChange}
-          onClickCapture={handleClickCapture}
-          className={(on) => {
-            const still = on.readOnly && !on.disabled;
-            const busy = life === "working" && !on.disabled;
-            const look = stylex.props(
-              styles.control,
-              on.disabled && styles.disabled,
-              still && styles.still,
-              busy && styles.busy,
-              focus.mark
-            );
-            return look.className ?? "";
-          }}
-        >
-          {(on) => (
-            <>
-              <span
-                aria-hidden="true"
-                data-slot="switch-reach"
-                {...stylex.props(reachStyles.reach)}
-              />
-              <Track
-                checked={on.checked}
-                live={!(on.disabled || on.readOnly || life === "working")}
-                working={life === "working"}
-                failed={life === "failed"}
-                drag={drag}
-              />
-            </>
-          )}
-        </SwitchPrimitive>
-      )}
+      {control}
     </ChoiceRow>
   );
 };

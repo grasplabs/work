@@ -7,8 +7,15 @@
 //   <Badge tone="success" icon={Tick}>Ready</Badge>
 //   <Badge tone="danger" size="sm">Failed</Badge>
 //   <Badge pending={sending} icon={Tick}>{sending ? "Sending" : "Invited"}</Badge>   working on it
+//   <Badge variant="dot" tone="danger">3 errors</Badge>         how serious, as a dot (once Severity)
+//
+// `variant="dot"` is how serious something is, as a small dot in the tone's colour beside neutral
+// words, as the Grasp product marks captured logs: a page full of errors is not painted red. Alone
+// (no words), the dot is named for a screen reader. In forced colours each tone keeps its own shape:
+// danger and success a full dot, attention a ring, neutral and info a dash.
 //
 // Every value is a token (src/tokens). A caller may set layout only (the `style` prop).
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
@@ -17,17 +24,35 @@ import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { Dot } from "./dot";
 
 export type BadgeTone = "neutral" | "success" | "attention" | "danger" | "info";
 export type BadgeSize = "sm" | "md";
+/** `pill` the status in a tinted pill; `dot` how serious, as a dot beside neutral words (once Severity). */
+export type BadgeVariant = "pill" | "dot";
 
 /** What a caller may style: where the badge sits. Never its look. */
 export type BadgeLayoutStyle = LayoutStyle;
 
 /** Every prop a Badge takes. */
 export interface BadgeProps {
-  /** The status, in a word or two, in sentence case ("Needs review"). It says it, never the colour alone. */
-  children: ReactNode;
+  /**
+   * The status, in a word or two, in sentence case ("Needs review"). It says it, never the colour
+   * alone. With `variant="dot"`, what happened or how many ("3 errors"); leave it out for the dot alone.
+   */
+  children?: ReactNode;
+  /**
+   * `pill` a status in a tinted pill. `dot` how serious something is: a dot in the tone's colour
+   * beside words in the text's colour, for a page full of them (captured logs).
+   * @default "pill"
+   */
+  variant?: BadgeVariant;
+  /**
+   * The dot's name when it stands alone (`variant="dot"`, no words), in the page's language. With
+   * words it is not said.
+   * @default "Error", "Warning", "Info", "Done" or "Note", by tone
+   */
+  "aria-label"?: string;
   /**
    * How it stands: `neutral` for a plain fact, `success` when it is done or fine, `attention` when
    * someone should look, `danger` when it failed or is blocked, `info` for a note.
@@ -46,10 +71,12 @@ export interface BadgeProps {
    * reduced motion. A badge given `pending`, true or false, says its words politely as they
    * change (a status), once each. Give it an icon for when it settles, and its width stays put.
    */
+  loading?: boolean;
+  /** @deprecated Use `loading`. */
   pending?: boolean;
-  /** Layout only: margins and alignment. The look belongs to the badge. */
+  /** @deprecated Use `layout`. */
   style?: BadgeLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: margins and alignment. The look belongs to the badge. */
   layout?: BadgeLayoutStyle;
 }
 
@@ -164,28 +191,36 @@ export const Badge = ({
   tone = "neutral",
   size = "md",
   icon,
-  pending,
+  variant = "pill",
+  "aria-label": named,
+  pending: pendingDeprecated,
+  loading: pending = pendingDeprecated,
   style: styleProp,
   layout,
-}: BadgeProps) => (
-  <span
-    data-slot="badge"
-    data-tone={tone}
-    data-pending={pending === true ? "" : undefined}
-    {...stylex.props(
-      styles.badge,
-      styles[size],
-      styles[tone],
-      layout ?? styleProp
-    )}
-  >
-    <Mark icon={icon} pending={pending === true} />
-    {/* A badge that may be pending is a polite status: its words are said as they change. */}
-    <span
-      role={pending === undefined ? undefined : "status"}
-      {...stylex.props(styles.words)}
-    >
+}: BadgeProps) =>
+  variant === "dot" ? (
+    <Dot tone={tone} named={named} layout={layout ?? styleProp}>
       {children}
+    </Dot>
+  ) : (
+    <span
+      data-slot="badge"
+      data-tone={tone}
+      data-pending={pending === true ? "" : undefined}
+      {...stylex.props(
+        styles.badge,
+        styles[size],
+        styles[tone],
+        layout ?? styleProp
+      )}
+    >
+      <Mark icon={icon} pending={pending === true} />
+      {/* A badge that may be pending is a polite status: its words are said as they change. */}
+      <span
+        role={pending === undefined ? undefined : "status"}
+        {...stylex.props(styles.words)}
+      >
+        {children}
+      </span>
     </span>
-  </span>
-);
+  );

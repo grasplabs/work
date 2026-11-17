@@ -18,7 +18,7 @@ import {
   SheetBody,
   SheetDescription,
   SheetFooter,
-  SheetPanel,
+  SheetContent,
   SheetTitle,
 } from "../grasp/sheet/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -93,7 +93,7 @@ const ReportSheet = ({
   return (
     <>
       <SheetBody>
-        <Card element="article" ground="soft">
+        <Card element="article" variant="soft">
           <div aria-label={t`Report`} {...stylex.props(styles.report)}>
             <FigureTiles figures={figures} />
             <PlainMarkdown text={body} />
@@ -148,8 +148,8 @@ export const ReportDialog = ({
   const { week } = next;
   const title = reportTitle(next, i18n);
   return (
-    <Sheet onOpenChange={onOpenChange} open={open} size="wide">
-      <SheetPanel closeLabel={t`Close`}>
+    <Sheet onOpenChange={onOpenChange} open={open} size="lg">
+      <SheetContent closeLabel={t`Close`}>
         <SheetTitle>{title}</SheetTitle>
         <SheetDescription>
           {t`What ran, the decisions it asked for, every workflow and what could be better. Keep it as Markdown, or save it as a PDF from the print window.`}
@@ -171,7 +171,7 @@ export const ReportDialog = ({
             )}
           </Await>
         ) : null}
-      </SheetPanel>
+      </SheetContent>
     </Sheet>
   );
 };

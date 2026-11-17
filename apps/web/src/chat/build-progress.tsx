@@ -142,7 +142,7 @@ const PlanActions = ({
           {t`Change the plan`}
         </Button>
       </div>
-      {failure === undefined ? null : <Alert variant="danger">{failure}</Alert>}
+      {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
     </div>
   );
 };

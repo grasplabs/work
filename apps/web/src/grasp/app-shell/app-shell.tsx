@@ -1,5 +1,6 @@
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { DrawerClose as ClosePrimitive } from "@ui-sdk/react/drawer";
 import {
@@ -19,11 +20,13 @@ import { focus } from "../focus/focus";
 import { Cross, Icon, PanelToggle, SidebarToggle } from "../icons";
 import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
-import { Sheet, SheetPanel, SheetTitle, SheetTrigger } from "../sheet";
+import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "../sheet";
 import { SidebarShellProvider } from "../sidebar/shell";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { PageBar } from "./bar";
 import type { AppShellCrumb } from "./bar";
+import { CardLine } from "./card-line";
+import { cardLine } from "./card-line.stylex";
 import { FOCUSABLE, placeOf } from "./focus-place";
 import { Panels, ShellCoverContext } from "./panels";
 import type { Cover } from "./panels";
@@ -68,6 +71,8 @@ export interface AppShellProps {
    * In the frame's page bar after the crumbs: where the page's subject stands, such as a status.
    * Where the page's name would be cut beside it, it gives way first, so the name is cut last.
    */
+  end?: ReactNode;
+  /** @deprecated Use `end`. */
   trailing?: ReactNode;
   /** At the end of the frame's page bar: the page's own buttons. */
   actions?: ReactNode;
@@ -84,10 +89,14 @@ export interface AppShellProps {
    * Banner. The page's bar, or its floating Menu button, stands under it.
    */
   banner?: ReactNode;
-  /** At the start of the frame's page bar, before the crumbs: the product's mark and name. */
+  /**
+   * At the start of the frame's page bar, before the crumbs: the product's mark and name. Where the
+   * Menu button leads the bar (a narrow shell with a sidebar), it stands in the menu's head instead.
+   */
   brand?: ReactNode;
   /**
-   * Where `brand` stands: `bar`, always in the bar; `sidebar`, only at the start of the sidebar's
+   * Where `brand` stands: `bar`, in the bar, and in the menu's head where the Menu button leads the
+   * bar; `sidebar`, only at the start of the sidebar's
    * head: pinned, peeking, and in the menu's head on a narrow shell. Never in the bar, at any width:
    * the bar's start keeps only the fold or the Menu button (Ruben, 15 November).
    * @default "bar"
@@ -197,6 +206,13 @@ export interface AppShellProps {
    * @default "Resize the panel"
    */
   panelResizeLabel?: string;
+  /**
+   * A 1px line at the foot of the panels' head row, one bar's height down, level with the line under
+   * the page's bar, so the two read as one bar across the top. Off for panels that do not start with
+   * a head row of the bar's height.
+   * @default true
+   */
+  panelsHeadLine?: boolean;
   /** Over the card's foot, centred: what stays at hand as the page scrolls, such as the chat's idle bar. */
   dock?: ReactNode;
   /**
@@ -222,12 +238,12 @@ export interface AppShellProps {
    * @default false
    */
   inert?: boolean;
+  /** @deprecated Use `layout`. */
+  style?: AppShellLayoutStyle;
   /**
    * Layout only: its size and where it sits. It fills the width and height it is given; in a
    * parent that shrinks to fit its content (a flex item, a float), give it a width.
    */
-  style?: AppShellLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
   layout?: AppShellLayoutStyle;
 }
 
@@ -291,8 +307,12 @@ const styles = stylex.create({
     display: { default: "flex", [NARROW]: "none" },
     minHeight: 0,
   },
-  // The page's card: a hair off the window's edges, lifted by a hair. On a phone the card is the
-  // whole window. In forced colours the lift is dropped, so a line draws its edge.
+  // The page's card: a hair off the window's edges, its edge a line inside it, round all four corners
+  // (FRESH.md F89: a lift drawn outside the card was cut where the card meets the panels' side, and
+  // its shadow left the gutter a lighter ground than the frame). The line is a layer of its own, last in
+  // the card and over what it holds (card-line.tsx), so no bar's ground covers it; the card says how
+  // wide it is. On a phone the card is the whole window, with no line. In forced colours the line is
+  // the system's ink.
   card: {
     // The card's width, which the bar inside it reads to know when to wrap (bar.tsx CARD_NARROW).
     containerType: "inline-size",
@@ -307,11 +327,10 @@ const styles = stylex.create({
     overflow: "clip",
     borderRadius: { default: grasp.shellCardCorner, [NARROW]: 0 },
     backgroundColor: grasp.shellCard,
-    boxShadow: { default: grasp.shellCardShadow, [NARROW]: "none" },
-    outlineWidth: { default: 0, [FORCED]: grasp.hairline },
-    outlineStyle: "solid",
-    outlineColor: "CanvasText",
-    outlineOffset: `calc(-1 * ${grasp.hairline})`,
+    [cardLine.width]: {
+      default: grasp.hairline,
+      [NARROW]: { default: "0px", [FORCED]: grasp.hairline },
+    },
   },
   // No bar from the frame: the page has the card from its top.
   cardNoBar: { gridTemplateRows: "minmax(0, 1fr)" },
@@ -817,7 +836,7 @@ const AsleepMenu = ({
         variant="ghost"
         size="xs"
         icon={SidebarToggle}
-        label={label}
+        aria-label={label}
         render={
           <button
             type="button"
@@ -1101,7 +1120,7 @@ const ShellMenu = ({
           />
           {/* One head (Ruben, 15 November): the sidebar's own. The sheet's title names the layer for a
               screen reader only, and its close button stands in the sidebar's head, after search. */}
-          <SheetPanel
+          <SheetContent
             close="none"
             corner="shell"
             bounds="shell"
@@ -1123,7 +1142,7 @@ const ShellMenu = ({
                 headBelow={sheetTop}
               />
             </div>
-          </SheetPanel>
+          </SheetContent>
         </Sheet>
       ) : (
         <AsleepMenu sidebar={sidebar} brand={brand} label={label} top={top} />
@@ -1163,7 +1182,7 @@ const PanelsToggle = ({
       variant="ghost"
       size="xs"
       icon={PanelToggle}
-      label={label}
+      aria-label={label}
       aria-expanded={!aside}
       onClick={() => {
         setAside(!aside);
@@ -1181,6 +1200,7 @@ type CardProps = Pick<
   | "crumbs"
   | "phoneCrumbs"
   | "trailing"
+  | "end"
   | "actions"
   | "brand"
   | "brandIn"
@@ -1213,6 +1233,8 @@ type CardProps = Pick<
    * the column is measured. Full screen by the host's word, its side takes the column instead, so
    * the change is a movement (F13). */
   spans: boolean;
+  /** The panels lie over the card for want of room, as their own card with its own line. */
+  crowded: boolean;
   /** On a phone, the panels set aside for the page, and the button that does it. */
   aside: boolean;
   setAside: (aside: boolean) => void;
@@ -1259,6 +1281,11 @@ const fadesOf = ({
     ],
   };
 };
+
+/** Whether the page card's line goes under the panels' card: it lies over this one with a line of its
+ * own, crowded or on its way to full screen and back. */
+const lineUnder = (crowded: boolean, cover: Cover) =>
+  crowded || cover === "lifting" || cover === "covering" || cover === "docking";
 
 /** Notes where focus stands in the card, or the last thing pressed in it, as the card goes. */
 const notePlace = (card: HTMLElement, keep: RefObject<number>) => {
@@ -1412,12 +1439,14 @@ const ShellCard = ({
   under,
   covered,
   spans,
+  crowded,
   aside,
   setAside,
   panelsToggleLabel,
   crumbs,
   phoneCrumbs,
-  trailing,
+  trailing: trailingDeprecated,
+  end: trailing = trailingDeprecated,
   actions,
   brand,
   brandIn,
@@ -1515,11 +1544,11 @@ const ShellCard = ({
         <div {...stylex.props(barFading)}>
           <PageBar
             look="frame"
-            start={menuButton}
-            end={toggle}
+            barStart={menuButton}
+            barEnd={toggle}
             crumbs={crumbs}
             phoneCrumbs={phoneCrumbs}
-            trailing={trailing}
+            end={trailing}
             brand={brandIn === "sidebar" ? undefined : brand}
             middle={middle}
             phoneMiddle={phoneMiddle}
@@ -1560,6 +1589,9 @@ const ShellCard = ({
           fading={fading}
         />
       )}
+      {/* Under the panels' card while it lies over this one with its own line, crowded or on its way
+          to full screen and back; over it once it lies there at rest, as it has no line then. */}
+      <CardLine under={lineUnder(crowded, cover)} />
     </div>
   );
 };
@@ -1619,6 +1651,8 @@ const usePanelsPlace = ({
     phone,
     inertCard: over && !phone,
     under: phone ? !aside : over,
+    // Panels over the page for want of room, as their own card with its own line.
+    crowdedOver: paneled && crowded === true,
   };
 };
 
@@ -1634,6 +1668,7 @@ export const AppShell = ({
   minPanelWidth = 340,
   maxPanelWidth = 720,
   panelResizeLabel,
+  panelsHeadLine,
   onPanelsClose,
   panelsCloseLabel = "Close the panel",
   panelsToggleLabel = "Show or hide the panel",
@@ -1668,8 +1703,8 @@ export const AppShell = ({
   const keep = useRef(-1);
 
   const paneled = hasPanels(panels, panelsOpen);
-  const { aside, setAside, over, guessing, phone, inertCard, under } =
-    usePanelsPlace({ paneled, covered, crowded, narrow });
+  const place = usePanelsPlace({ paneled, covered, crowded, narrow });
+  const { aside, setAside, over, guessing, phone, inertCard, under } = place;
 
   const card = (
     <ShellCard
@@ -1684,6 +1719,7 @@ export const AppShell = ({
       under={under}
       covered={over}
       spans={over && !(covered && crowded === false)}
+      crowded={place.crowdedOver}
       aside={phone && aside}
       setAside={setAside}
       panelsToggleLabel={panelsToggleLabel}
@@ -1705,6 +1741,9 @@ export const AppShell = ({
         // While the sidebar peeks over the page: the bar fades what the peek covers (F76).
         data-sidebar-peeking={presence(sidebarPeeking)}
         data-shell-panels={paneled ? "" : undefined}
+        // A sidebar to put in the phone's menu: where the shell is narrow the Menu button leads the
+        // bar, and the bar leaves the brand to the menu's head (bar.tsx `brand`, F88).
+        data-shell-menu={sidebar === false ? undefined : ""}
         {...stylex.props(...look.grid, stylex.defaultMarker())}
       >
         {sidebar !== false && (
@@ -1737,6 +1776,7 @@ export const AppShell = ({
           onClose={onPanelsClose}
           keep={keep}
           closeLabel={panelsCloseLabel}
+          headLine={panelsHeadLine}
         />
       </div>
     </div>

@@ -10,10 +10,12 @@
 //   </RadioGroup>
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { RadioGroup as RadioGroupPrimitive } from "@ui-sdk/react/radio";
 import type { ComponentProps, ReactNode } from "react";
 
+import { ChoiceGrouped, ChoiceOff } from "../choice/row";
 import { Field, FieldDescription, FieldError, FieldLabel } from "../field";
 import { visuallyHidden } from "../hidden/hidden";
 import { grasp } from "../tokens/tokens.stylex";
@@ -26,17 +28,18 @@ type RadioGroupPrimitiveProps<T extends string> = ComponentProps<
 
 /** What a group takes, besides UI SDK's own options. */
 interface RadioGroupOwnProps {
-  /** The group's name, above it: the question its choices answer ("Summary email"). */
-  label: ReactNode;
-  /**
-   * Hides the name, but keeps it for a screen reader and an agent: only where the words around
-   * the group already name it, like a table's column.
-   * @default false
-   */
+  /** @deprecated Use `FieldLabel`, in a Field around the group. */
+  label?: ReactNode;
+  /** @deprecated Use `aria-label` on the group, where the words around it already name it. */
   labelHidden?: boolean;
-  /** One sentence under the group's name. */
+  /**
+   * Its name, when no FieldLabel shows one: only where the words around the group already name it,
+   * like a table's column. A screen reader and an agent say it.
+   */
+  "aria-label"?: string;
+  /** @deprecated Use `FieldDescription`, in the Field around the group. */
   description?: ReactNode;
-  /** What is wrong and how to put it right ("Choose how often to hear from us"). */
+  /** @deprecated Use `FieldError`, in the Field around the group. */
   error?: string;
   /** Shows the group as wrong now, for an error your code decides. Give it an `error` too. */
   invalid?: boolean;
@@ -73,9 +76,9 @@ interface RadioGroupOwnProps {
   readOnly?: boolean;
   /** Its radios, in the order they are read. */
   children: ReactNode;
-  /** Layout only: margins and alignment. The look belongs to the group. */
+  /** @deprecated Use `layout`. */
   style?: RadioLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: margins and alignment. The look belongs to the group. */
   layout?: RadioLayoutStyle;
 }
 
@@ -114,28 +117,52 @@ export const RadioGroup = ({
   layout,
   disabled,
   ...rest
-}: RadioGroupProps) => (
-  <Field invalid={invalid} disabled={disabled} layout={layout ?? styleProp}>
-    {labelHidden ? (
-      <span {...stylex.props(visuallyHidden)}>
-        <FieldLabel>{label}</FieldLabel>
-      </span>
-    ) : (
-      <FieldLabel>{label}</FieldLabel>
-    )}
-    {description !== undefined && (
-      <FieldDescription>{description}</FieldDescription>
-    )}
+}: RadioGroupProps) =>
+  // The parts shape: the radios only. The Field around the group names it and says its error.
+  label === undefined ? (
     <RadioGroupPrimitive
       {...rest}
       disabled={disabled}
-      {...stylex.props(styles.list, labelHidden && styles.flush)}
+      {...stylex.props(
+        styles.list,
+        rest["aria-label"] !== undefined && styles.flush,
+        layout ?? styleProp
+      )}
     >
-      <RadioGroupContext value={{ disabled, invalid }}>
-        {children}
-      </RadioGroupContext>
+      <ChoiceGrouped value>
+        <ChoiceOff value={disabled === true}>
+          <RadioGroupContext value={{ disabled, invalid }}>
+            {children}
+          </RadioGroupContext>
+        </ChoiceOff>
+      </ChoiceGrouped>
     </RadioGroupPrimitive>
-    {/* Only when there is something to say: an empty error would still take its gap. */}
-    {error !== undefined && error !== "" && <FieldError>{error}</FieldError>}
-  </Field>
-);
+  ) : (
+    <Field invalid={invalid} disabled={disabled} layout={layout ?? styleProp}>
+      {labelHidden ? (
+        <span {...stylex.props(visuallyHidden)}>
+          <FieldLabel>{label}</FieldLabel>
+        </span>
+      ) : (
+        <FieldLabel>{label}</FieldLabel>
+      )}
+      {description !== undefined && (
+        <FieldDescription>{description}</FieldDescription>
+      )}
+      <RadioGroupPrimitive
+        {...rest}
+        disabled={disabled}
+        {...stylex.props(styles.list, labelHidden && styles.flush)}
+      >
+        <ChoiceGrouped value>
+          <ChoiceOff value={disabled === true}>
+            <RadioGroupContext value={{ disabled, invalid }}>
+              {children}
+            </RadioGroupContext>
+          </ChoiceOff>
+        </ChoiceGrouped>
+      </RadioGroupPrimitive>
+      {/* Only when there is something to say: an empty error would still take its gap. */}
+      {error !== undefined && error !== "" && <FieldError>{error}</FieldError>}
+    </Field>
+  );

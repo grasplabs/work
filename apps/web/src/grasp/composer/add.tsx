@@ -12,6 +12,7 @@
 // Built from Grasp's Dropdown menu. Every value is a token (src/tokens).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 import type { RefObject } from "react";
@@ -21,7 +22,7 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuPanel,
+  DropdownMenuContent,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../dropdown-menu";
@@ -82,6 +83,8 @@ export interface ComposerAddProps {
    * The plus button's name.
    * @default "Add to message"
    */
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
   label?: string;
   /**
    * The upload item's words.
@@ -125,7 +128,8 @@ export const ComposerAdd = ({
   onAction,
   actionsLabel = "This chat",
   accept,
-  label = "Add to message",
+  label: labelDeprecated,
+  "aria-label": label = labelDeprecated ?? "Add to message",
   uploadLabel = "Upload attachment",
 }: ComposerAddProps) => {
   const disabled = useComposerDisabled();
@@ -165,13 +169,13 @@ export const ComposerAdd = ({
         )}
         <DropdownMenuTrigger
           icon={Plus}
-          label={label}
+          aria-label={label}
           variant="quiet"
           size="sm"
           disabled={disabled}
         />
       </span>
-      <DropdownMenuPanel side="top" align="start" onKeyDown={stopEscape}>
+      <DropdownMenuContent side="top" align="start" onKeyDown={stopEscape}>
         {onAttach && (
           <DropdownMenuItem
             icon={Attach}
@@ -216,7 +220,7 @@ export const ComposerAdd = ({
             ))}
           </DropdownMenuGroup>
         )}
-      </DropdownMenuPanel>
+      </DropdownMenuContent>
     </DropdownMenu>
   );
 };

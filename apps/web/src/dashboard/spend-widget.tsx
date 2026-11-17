@@ -6,7 +6,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { ChevronRightIcon } from "lucide-react";
 
-import { Highlight } from "../grasp/highlights/index.ts";
+import { Stat } from "../grasp/stats/index.ts";
 import { dollars } from "../settings/money.ts";
 import { costPerRun, spendShown } from "./spend.ts";
 import { useFull, WidgetBlock } from "./widget-block.tsx";
@@ -75,7 +75,7 @@ const SpendView = ({ spend }: { spend: ModelMonthSpend }) => {
   const shown = full ? spend.workflows : spend.workflows.slice(0, spendShown);
   return (
     <>
-      <Highlight title={t`For every model call this month`} value={total} />
+      <Stat title={t`For every model call this month`} value={total} />
       {shown.length === 0 ? (
         <p className="text-muted-foreground">
           <Trans>No workflow has called a model this month.</Trans>

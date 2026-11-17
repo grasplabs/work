@@ -15,18 +15,19 @@
 // to an agent, and to typing on the closed control. Every value is a token (src/tokens).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import type { ChangeDetails } from "@ui-sdk/core";
 import {
   Select as SelectPrimitive,
-  SelectContent,
-  SelectGroup,
+  SelectContent as ContentPrimitive,
+  SelectGroup as GroupPrimitive,
   SelectGroupLabel,
-  SelectItem,
+  SelectItem as ItemPrimitive,
   SelectItemIndicator,
-  SelectSeparator,
-  SelectTrigger,
-  SelectValue,
+  SelectSeparator as SeparatorPrimitive,
+  SelectTrigger as TriggerPrimitive,
+  SelectValue as ValuePrimitive,
 } from "@ui-sdk/react/select";
 import type {
   ListData,
@@ -36,7 +37,8 @@ import type {
   SelectValueChangeReason,
   SelectValueState,
 } from "@ui-sdk/react/select";
-import { useEffect, useRef } from "react";
+import { createContext, useContext, useEffect, useRef } from "react";
+import type { ReactNode } from "react";
 
 import { focus } from "../focus/focus";
 import { ChevronDown, Icon, Tick } from "../icons";
@@ -89,10 +91,16 @@ export type SelectLayoutStyle = LayoutStyle;
 /** Every prop a Select takes. */
 export interface SelectProps {
   /**
-   * What can be chosen: strings (each is its own value and label), `{ value, label, disabled }`,
-   * groups and separators. In the order they are read.
+   * The parts: a SelectTrigger with its SelectValue, and a SelectContent. Leave it out only in the
+   * older shape, where the Select draws its own trigger and list.
    */
-  items: SelectItems;
+  children?: ReactNode;
+  /**
+   * What can be chosen, as data: strings (each is its own value and label), `{ value, label,
+   * disabled }`, groups and separators. A SelectContent with no children draws them. With hand-written
+   * SelectItems, still pass them: the trigger then knows a value's words before the list has opened.
+   */
+  items?: SelectItems;
   /** The value chosen at first. A form reset returns here. Leave it out to start with nothing. */
   defaultValue?: string | null;
   /** The value, when you keep it in state. `null` is nothing chosen. Pair it with `onValueChange`. */
@@ -106,21 +114,6 @@ export interface SelectProps {
     value: string | null,
     details: ChangeDetails<SelectValueChangeReason>
   ) => void;
-  /** What it says while nothing is chosen: a verb and the thing ("Choose a role"). */
-  placeholder?: string;
-  /**
-   * The height, the same as Input's and Button's: `sm` 32px, `md` 36px, `lg` 44px. On a touch
-   * screen every size has a 44px target, and every item in the list is 44px tall.
-   * @default "md"
-   */
-  size?: SelectSize;
-  /**
-   * How the closed control reads. `field` is a field's box, for a form. `text` is its words and a
-   * small chevron with no box, at a ghost button's height and with its hover, for a choice inside a
-   * sentence or a row ("Can use" beside a person in a share list). Same keys, list and items.
-   * @default "field"
-   */
-  variant?: SelectVariant;
   /** The name the value is sent under in a form. Inside a Field, the Field's `name` serves. */
   name?: string;
   /**
@@ -139,18 +132,93 @@ export interface SelectProps {
    * @default false
    */
   disabled?: boolean;
-  /** Its name when no FieldLabel names it, as a screen reader and an agent say it ("Sort by"). */
-  "aria-label"?: string;
   /** The `id` of a form it belongs to, when it stands outside that form. */
   form?: string;
   /** A hint for the browser's autofill, like `"country"`. */
   autoComplete?: string;
+  /** @deprecated Use `SelectValue.placeholder`. */
+  placeholder?: string;
+  /** @deprecated Use `SelectTrigger.size`. */
+  size?: SelectSize;
+  /** @deprecated Use `SelectTrigger.variant`. */
+  variant?: SelectVariant;
+  /** @deprecated Use `SelectTrigger.aria-label`. */
+  "aria-label"?: string;
+  /** @deprecated Use `SelectTrigger.id`. */
+  id?: string;
+  /** @deprecated Use `layout`. */
+  style?: SelectLayoutStyle;
+  /**
+   * Layout only: margins, alignment and width, on the trigger. With `SelectTrigger`'s too, both
+   * apply, and the trigger's wins where they set the same thing.
+   */
+  layout?: SelectLayoutStyle;
+}
+
+/** Every prop a SelectTrigger takes: the closed control. */
+export interface SelectTriggerProps {
+  /** What it shows: a SelectValue. The chevron is drawn for you. */
+  children?: ReactNode;
+  /**
+   * The height, the same as Input's and Button's: `sm` 32px, `md` 36px, `lg` 44px. On a touch
+   * screen every size has a 44px target, and every item in the list is 44px tall.
+   * @default "md"
+   */
+  size?: SelectSize;
+  /**
+   * How the closed control reads. `field` is a field's box, for a form. `text` is its words and a
+   * small chevron with no box, at a ghost button's height and with its hover, for a choice inside a
+   * sentence or a row ("Can use" beside a person in a share list). Same keys, list and items.
+   * @default "field"
+   */
+  variant?: SelectVariant;
+  /** Its name when no FieldLabel names it, as a screen reader and an agent say it ("Sort by"). */
+  "aria-label"?: string;
   /** The `id` of the control, for a Label outside a Field (`htmlFor`). */
   id?: string;
+  /** The `id` of the words that describe it, when no FieldDescription does (a Setting row's help). */
+  "aria-describedby"?: string;
   /** Layout only: margins, alignment and width. Colours, heights and corners belong to the select. */
-  style?: SelectLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
   layout?: SelectLayoutStyle;
+}
+
+/** Every prop a SelectValue takes: the chosen value's words, or the placeholder. */
+export interface SelectValueProps {
+  /** What it says while nothing is chosen: a verb and the thing ("Choose a role"). */
+  placeholder?: string;
+}
+
+/** Every prop a SelectContent takes: the list that opens below the trigger. */
+export interface SelectContentProps {
+  /** SelectItem, SelectGroup, SelectLabel and SelectSeparator. Leave it out to draw the root's `items`. */
+  children?: ReactNode;
+}
+
+/** Every prop a SelectItem takes: one choice in the list. */
+export interface SelectItemProps {
+  /** What the value becomes when this item is chosen. */
+  value: string;
+  /** Its words, as the list shows them. */
+  children?: ReactNode;
+  /** The words the trigger shows and typing finds, when `children` is not plain text. */
+  label?: string;
+  /**
+   * Cannot be chosen: the keyboard and the pointer skip it.
+   * @default false
+   */
+  disabled?: boolean;
+}
+
+/** Every prop a SelectGroup takes: a run of items under one SelectLabel. */
+export interface SelectGroupProps {
+  /** A SelectLabel, then its SelectItems. */
+  children?: ReactNode;
+}
+
+/** Every prop a SelectLabel takes: a group's name, small and quiet, above its items. */
+export interface SelectLabelProps {
+  /** The group's name ("Europe"). */
+  children?: ReactNode;
 }
 
 // ---- The look --------------------------------------------------------------------------------------
@@ -580,10 +648,109 @@ const className = (...parts: (stylex.StyleXStyles | false)[]) =>
 const asItem = (entry: ListItem | string): ListItem =>
   typeof entry === "string" ? { value: entry, label: entry } : entry;
 
-const Option = ({ item }: { item: ListItem }) => (
-  <SelectItem
-    value={item.value}
-    disabled={item.disabled}
+// The root's `items`, for a SelectContent with no children of its own.
+const ItemsContext = createContext<SelectItems | undefined>(undefined);
+// The root's `layout`, for the trigger: it lands there in the parts form as in the older one.
+const RootLayout = createContext<SelectLayoutStyle | undefined>(undefined);
+
+// In development, say so when nothing names the control: no Field label, no aria-label.
+const warnUnnamed = (control: HTMLButtonElement | null) => {
+  if (!(import.meta.env?.DEV && control)) {
+    return;
+  }
+  const named =
+    Boolean(control.getAttribute("aria-label")?.trim()) ||
+    Boolean(control.getAttribute("aria-labelledby")) ||
+    (control.labels?.length ?? 0) > 0;
+  if (!named) {
+    console.error(
+      "Select: nothing names it. Put it in a Field with a FieldLabel, or give it an aria-label."
+    );
+  }
+};
+
+/** The closed control: a field's box (or words, for `variant="text"`) with the chevron at its end. */
+export const SelectTrigger = ({
+  children,
+  size = "md",
+  variant = "field",
+  "aria-label": ariaLabel,
+  "aria-describedby": describedBy,
+  id,
+  layout,
+}: SelectTriggerProps) => {
+  const trigger = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    warnUnnamed(trigger.current);
+  }, []);
+  const rootLayout = useContext(RootLayout);
+
+  return (
+    <TriggerPrimitive
+      ref={trigger}
+      id={id}
+      aria-label={ariaLabel}
+      aria-describedby={describedBy}
+      render={(props: Record<string, unknown>, state: SelectTriggerState) => (
+        <button
+          type="button"
+          {...props}
+          {...stylex.props(
+            styles.trigger,
+            sizeStyles[size],
+            !(state.disabled || state.readOnly) && styles.live,
+            state.open && styles.open,
+            state.readOnly && styles.readOnly,
+            state.disabled && styles.disabled,
+            variantLook(variant, state),
+            isInvalid(props["aria-invalid"]) && styles.invalid,
+            variantFocus[variant],
+            rootLayout,
+            layout
+          )}
+        />
+      )}
+    >
+      {(state: SelectTriggerState) => (
+        <>
+          <span
+            aria-hidden="true"
+            {...stylex.props(styles.target, targetStyles[size])}
+          />
+          {children}
+          <span
+            aria-hidden="true"
+            {...stylex.props(styles.chevron, state.open && styles.chevronOpen)}
+          >
+            <Icon icon={ChevronDown} />
+          </span>
+        </>
+      )}
+    </TriggerPrimitive>
+  );
+};
+
+/** The chosen value's words, or the placeholder while nothing is chosen. */
+export const SelectValue = ({ placeholder }: SelectValueProps) => (
+  <ValuePrimitive
+    placeholder={placeholder}
+    className={(value: SelectValueState) =>
+      className(styles.value, value.placeholder && styles.placeholder)
+    }
+  />
+);
+
+/** One choice: its words, and the tick at the end when it is the chosen one. */
+export const SelectItem = ({
+  value,
+  children,
+  label,
+  disabled,
+}: SelectItemProps) => (
+  <ItemPrimitive
+    value={value}
+    label={label}
+    disabled={disabled}
     className={(state: SelectItemState) =>
       className(
         styles.item,
@@ -593,11 +760,28 @@ const Option = ({ item }: { item: ListItem }) => (
       )
     }
   >
-    <span {...stylex.props(styles.itemWords)}>{item.label}</span>
+    <span {...stylex.props(styles.itemWords)}>{children}</span>
     <SelectItemIndicator {...stylex.props(styles.tick)}>
       <Icon icon={Tick} />
     </SelectItemIndicator>
-  </SelectItem>
+  </ItemPrimitive>
+);
+
+/** A run of items, named by the SelectLabel at its head. */
+export const SelectGroup = ({ children }: SelectGroupProps) => (
+  <GroupPrimitive>{children}</GroupPrimitive>
+);
+
+/** A group's name: small and quiet, above its items. */
+export const SelectLabel = ({ children }: SelectLabelProps) => (
+  <SelectGroupLabel {...stylex.props(styles.groupLabel, styles.cut)}>
+    {children}
+  </SelectGroupLabel>
+);
+
+/** A line that sets the items after it apart. */
+export const SelectSeparator = () => (
+  <SeparatorPrimitive {...stylex.props(styles.separator)} />
 );
 
 /** The items as parts, in the order they are given: items, groups with their names, separators. */
@@ -609,12 +793,7 @@ const Options = ({ items }: { items: SelectItems }) =>
       entry.type === "separator"
     ) {
       // A separator has no value; its place in the list is its key.
-      return (
-        <SelectSeparator
-          key={`separator-${index}`}
-          {...stylex.props(styles.separator)}
-        />
-      );
+      return <SelectSeparator key={`separator-${index}`} />;
     }
     if (
       typeof entry !== "string" &&
@@ -624,113 +803,92 @@ const Options = ({ items }: { items: SelectItems }) =>
       return (
         <SelectGroup key={`group-${index}`}>
           {entry.label !== undefined && entry.label !== "" && (
-            <SelectGroupLabel {...stylex.props(styles.groupLabel, styles.cut)}>
-              {entry.label}
-            </SelectGroupLabel>
+            <SelectLabel>{entry.label}</SelectLabel>
           )}
           {entry.items.map((inner) => {
             const item = asItem(inner);
-            return <Option key={item.value} item={item} />;
+            return (
+              <SelectItem
+                key={item.value}
+                value={item.value}
+                disabled={item.disabled}
+              >
+                {item.label}
+              </SelectItem>
+            );
           })}
         </SelectGroup>
       );
     }
     const item = asItem(entry);
-    return <Option key={item.value} item={item} />;
+    return (
+      <SelectItem key={item.value} value={item.value} disabled={item.disabled}>
+        {item.label}
+      </SelectItem>
+    );
   });
 
+/** The list that opens below the trigger, on the raised ground. With no children, it draws the root's `items`. */
+export const SelectContent = ({ children }: SelectContentProps) => {
+  const items = useContext(ItemsContext);
+  return (
+    <ContentPrimitive
+      ref={centreChosen}
+      sideOffset={popup.gap}
+      collisionPadding={popup.gutter}
+      {...stylex.props(selectPopupMarker, styles.content, scroll.bar)}
+    >
+      <span aria-hidden="true" {...stylex.props(styles.moreAbove)} />
+      {children ?? (items === undefined ? null : <Options items={items} />)}
+      <span aria-hidden="true" {...stylex.props(styles.more)} />
+    </ContentPrimitive>
+  );
+};
+
+/**
+ * Choose one value from a list. Holds the value; its parts draw the control and the list.
+ * Without children, it draws both itself from its older props (until release step 9).
+ */
 export const Select = ({
+  children,
   items,
-  size = "md",
-  variant = "field",
+  placeholder,
+  size,
+  variant,
   style: styleProp,
   layout,
   "aria-label": ariaLabel,
   id,
   ...options
 }: SelectProps) => {
-  // In development, say so when nothing names it: no Field label, no aria-label.
-  const trigger = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => {
-    const control = trigger.current;
-    if (!(import.meta.env?.DEV && control)) {
-      return;
-    }
-    const named =
-      Boolean(control.getAttribute("aria-label")?.trim()) ||
-      Boolean(control.getAttribute("aria-labelledby")) ||
-      (control.labels?.length ?? 0) > 0;
-    if (!named) {
-      console.error(
-        "Select: nothing names it. Put it in a Field with a FieldLabel, or give it an aria-label."
-      );
-    }
-  }, []);
-
+  // Where the caller places it: on the trigger, its first element, in either shape.
+  const placed = layout ?? styleProp;
   return (
     // Read-only shows its value and does not open (its promise above): the list it would show is
     // all choices that cannot be chosen.
     <SelectPrimitive
       items={items}
+      placeholder={placeholder}
       {...options}
       {...(options.readOnly === true ? { open: false } : {})}
     >
-      <SelectTrigger
-        ref={trigger}
-        id={id}
-        aria-label={ariaLabel}
-        render={(props: Record<string, unknown>, state: SelectTriggerState) => (
-          <button
-            type="button"
-            {...props}
-            {...stylex.props(
-              styles.trigger,
-              sizeStyles[size],
-              !(state.disabled || state.readOnly) && styles.live,
-              state.open && styles.open,
-              state.readOnly && styles.readOnly,
-              state.disabled && styles.disabled,
-              variantLook(variant, state),
-              isInvalid(props["aria-invalid"]) && styles.invalid,
-              variantFocus[variant],
-              layout ?? styleProp
-            )}
-          />
-        )}
-      >
-        {(state: SelectTriggerState) => (
-          <>
-            <span
-              aria-hidden="true"
-              {...stylex.props(styles.target, targetStyles[size])}
-            />
-            <SelectValue
-              className={(value: SelectValueState) =>
-                className(styles.value, value.placeholder && styles.placeholder)
-              }
-            />
-            <span
-              aria-hidden="true"
-              {...stylex.props(
-                styles.chevron,
-                state.open && styles.chevronOpen
-              )}
-            >
-              <Icon icon={ChevronDown} />
-            </span>
-          </>
-        )}
-      </SelectTrigger>
-      <SelectContent
-        ref={centreChosen}
-        sideOffset={popup.gap}
-        collisionPadding={popup.gutter}
-        {...stylex.props(selectPopupMarker, styles.content, scroll.bar)}
-      >
-        <span aria-hidden="true" {...stylex.props(styles.moreAbove)} />
-        <Options items={items} />
-        <span aria-hidden="true" {...stylex.props(styles.more)} />
-      </SelectContent>
+      <ItemsContext value={items}>
+        <RootLayout value={placed}>
+          {children ?? (
+            <>
+              <SelectTrigger
+                size={size}
+                variant={variant}
+                aria-label={ariaLabel}
+                id={id}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent />
+            </>
+          )}
+        </RootLayout>
+      </ItemsContext>
     </SelectPrimitive>
   );
 };

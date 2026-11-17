@@ -26,7 +26,7 @@ import {
   AlertDialogAction,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogPanel,
+  AlertDialogContent,
   AlertDialogTitle,
 } from "../grasp/alert-dialog/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
@@ -36,13 +36,13 @@ import {
   DialogAction,
   DialogBody,
   DialogFooter,
-  DialogPanel,
+  DialogContent,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
 import {
   DropdownMenu,
   DropdownMenuItem,
-  DropdownMenuPanel,
+  DropdownMenuContent,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../grasp/dropdown-menu/index.ts";
@@ -64,9 +64,22 @@ import {
   Trash,
 } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
-import { Item, ItemGroup } from "../grasp/item/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import { Select } from "../grasp/select/index.ts";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+} from "../grasp/select/index.ts";
 import type { SelectItems } from "../grasp/select/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -258,7 +271,7 @@ const ReplaceKeyDialog = ({
       }}
       open={open}
     >
-      <DialogPanel closeLabel={t`Close`}>
+      <DialogContent closeLabel={t`Close`}>
         <DialogTitle>{t`Replace the key for ${label}`}</DialogTitle>
         <DialogBody>
           <Form
@@ -287,7 +300,7 @@ const ReplaceKeyDialog = ({
             {t`Save key`}
           </Button>
         </DialogFooter>
-      </DialogPanel>
+      </DialogContent>
     </Dialog>
   );
 };
@@ -321,81 +334,81 @@ const ProviderRow = ({
   const { label, whereItRuns, mask } = provider;
   const status = statusOf(provider.status);
   return (
-    <Item
-      {...(editable
-        ? {
-            actions: (
-              <>
-                <Button
-                  aria-label={t`Test ${label}`}
-                  disabled={busy || testModel === null}
-                  onClick={onTest}
-                  size="sm"
+    <Item>
+      <ItemMedia icon={Key} />
+      <ItemContent>
+        <ItemTitle>
+          <span {...stylex.props(styles.title)}>
+            {label}
+            <Badge size="sm" tone={status.tone}>
+              {status.word}
+            </Badge>
+          </span>
+        </ItemTitle>
+        <ItemDescription>
+          <span {...stylex.props(styles.lines)}>
+            <span>{t`Key ${mask} · ${whereItRuns}`}</span>
+            {tested === undefined && status.detail !== undefined ? (
+              <span>{status.detail}</span>
+            ) : null}
+            {tested === undefined ? null : (
+              <TestOutcome outcome={tested} providers={providers} />
+            )}
+            {editable && testModel === null ? (
+              <span>{t`Name a model this endpoint serves, then test it.`}</span>
+            ) : null}
+          </span>
+        </ItemDescription>
+      </ItemContent>
+      {editable ? (
+        <ItemActions>
+          <>
+            <Button
+              aria-label={t`Test ${label}`}
+              disabled={busy || testModel === null}
+              onClick={onTest}
+              size="sm"
+            >
+              {t`Test`}
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                icon={More}
+                aria-label={t`Actions for ${label}`}
+                size="sm"
+                variant="ghost"
+              />
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  disabled={busy}
+                  icon={Edit}
+                  onSelect={() => {
+                    setReplacing(true);
+                  }}
                 >
-                  {t`Test`}
-                </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    icon={More}
-                    label={t`Actions for ${label}`}
-                    size="sm"
-                    variant="ghost"
-                  />
-                  <DropdownMenuPanel align="end">
-                    <DropdownMenuItem
-                      disabled={busy}
-                      icon={Edit}
-                      onSelect={() => {
-                        setReplacing(true);
-                      }}
-                    >
-                      {t`Replace key`}
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      danger
-                      disabled={busy}
-                      icon={Trash}
-                      onSelect={onRemove}
-                    >
-                      {t`Remove`}
-                    </DropdownMenuItem>
-                  </DropdownMenuPanel>
-                </DropdownMenu>
-                <ReplaceKeyDialog
-                  onOpenChange={setReplacing}
-                  onReplace={onReplace}
-                  open={replacing}
-                  provider={provider}
-                />
-              </>
-            ),
-          }
-        : {})}
-      icon={Key}
-      description={
-        <span {...stylex.props(styles.lines)}>
-          <span>{t`Key ${mask} · ${whereItRuns}`}</span>
-          {tested === undefined && status.detail !== undefined ? (
-            <span>{status.detail}</span>
-          ) : null}
-          {tested === undefined ? null : (
-            <TestOutcome outcome={tested} providers={providers} />
-          )}
-          {editable && testModel === null ? (
-            <span>{t`Name a model this endpoint serves, then test it.`}</span>
-          ) : null}
-        </span>
-      }
-      title={
-        <span {...stylex.props(styles.title)}>
-          {label}
-          <Badge size="sm" tone={status.tone}>
-            {status.word}
-          </Badge>
-        </span>
-      }
-    />
+                  {t`Replace key`}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  variant="danger"
+                  disabled={busy}
+                  icon={Trash}
+                  onSelect={onRemove}
+                >
+                  {t`Remove`}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <ReplaceKeyDialog
+              onOpenChange={setReplacing}
+              onReplace={onReplace}
+              open={replacing}
+              provider={provider}
+            />
+          </>
+        </ItemActions>
+      ) : null}
+    </Item>
   );
 };
 
@@ -452,7 +465,7 @@ const AddProviderDialog = ({
         }}
         open={open}
       >
-        <DialogPanel closeLabel={t`Close`}>
+        <DialogContent closeLabel={t`Close`}>
           <DialogTitle>{t`Add a provider`}</DialogTitle>
           <DialogBody>
             <Form
@@ -481,7 +494,12 @@ const AddProviderDialog = ({
                     );
                   }}
                   value={provider.provider}
-                />
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent />
+                </Select>
                 <FieldDescription>{t`Runs at: ${whereItRuns}`}</FieldDescription>
               </Field>
               {custom ? (
@@ -518,7 +536,7 @@ const AddProviderDialog = ({
               {t`Save key`}
             </Button>
           </DialogFooter>
-        </DialogPanel>
+        </DialogContent>
       </Dialog>
     </>
   );
@@ -643,7 +661,7 @@ const Fallbacks = ({
                     <Button
                       disabled={frozen || at === 0}
                       icon={ChevronUp}
-                      label={t`Move ${name} up`}
+                      aria-label={t`Move ${name} up`}
                       onClick={() => {
                         onChange(move(at, at - 1));
                       }}
@@ -653,7 +671,7 @@ const Fallbacks = ({
                     <Button
                       disabled={frozen || at === fallbacks.length - 1}
                       icon={ChevronDown}
-                      label={t`Move ${name} down`}
+                      aria-label={t`Move ${name} down`}
                       onClick={() => {
                         onChange(move(at, at + 1));
                       }}
@@ -663,7 +681,7 @@ const Fallbacks = ({
                     <Button
                       disabled={frozen}
                       icon={Cross}
-                      label={t`Remove ${name} from the fallbacks`}
+                      aria-label={t`Remove ${name} from the fallbacks`}
                       onClick={() => {
                         onChange(fallbacks.filter((each) => each !== model));
                       }}
@@ -705,7 +723,6 @@ const AddFallback = ({
     >
       {(field) => (
         <Select
-          {...field}
           disabled={frozen}
           items={items}
           onValueChange={(model) => {
@@ -713,9 +730,13 @@ const AddFallback = ({
               onAdd(model);
             }
           }}
-          placeholder={t`Choose a model`}
           value={null}
-        />
+        >
+          <SelectTrigger {...field}>
+            <SelectValue placeholder={t`Choose a model`} />
+          </SelectTrigger>
+          <SelectContent />
+        </Select>
       )}
     </SettingRow>
   );
@@ -788,7 +809,6 @@ const Models = ({
           >
             {(field) => (
               <Select
-                {...field}
                 disabled={busy}
                 items={modelItems(providers, named, [])}
                 onValueChange={(model) => {
@@ -799,9 +819,13 @@ const Models = ({
                     });
                   }
                 }}
-                placeholder={t`Choose a model`}
                 value={defaultModel}
-              />
+              >
+                <SelectTrigger {...field}>
+                  <SelectValue placeholder={t`Choose a model`} />
+                </SelectTrigger>
+                <SelectContent />
+              </Select>
             )}
           </SettingRow>
         ) : (
@@ -857,7 +881,7 @@ const RemoveDialog = ({
       }}
       open={provider !== null}
     >
-      <AlertDialogPanel>
+      <AlertDialogContent>
         <AlertDialogTitle>{t`Remove ${label}?`}</AlertDialogTitle>
         <AlertDialogDescription>
           {t`Its key is deleted, and calls stop using it at once. Models of this provider are no longer used, even as a fallback.`}
@@ -876,7 +900,7 @@ const RemoveDialog = ({
             {t`Remove`}
           </AlertDialogAction>
         </AlertDialogFooter>
-      </AlertDialogPanel>
+      </AlertDialogContent>
     </AlertDialog>
   );
 };

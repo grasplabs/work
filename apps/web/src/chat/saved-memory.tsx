@@ -125,7 +125,7 @@ export const SavedMemoryLine = ({ saved }: { saved: ChatSavedMemory }) => {
           </Button>
         </>
       ) : null}
-      {failure === undefined ? null : <Alert variant="danger">{failure}</Alert>}
+      {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
     </div>
   );
 };

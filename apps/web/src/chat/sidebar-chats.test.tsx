@@ -19,8 +19,9 @@ import { Sidebar } from "../grasp/sidebar/index.ts";
 import { useRecentChats } from "./sidebar-chats.tsx";
 
 // The sidebar's recent chats against core's list as the page reaches it
-// over RPC, faked, in Grasp UI's own Sidebar: the most recent few, each
-// with when it was last used, read again once a page resolves, each a link
+// over RPC, faked, in Grasp UI's own Sidebar: the most recent few, by
+// title, read again once a page resolves, each with its menu (archive) and
+// renamed in place (F2 or a double-click, Enter saves, Escape keeps), each a link
 // to its chat's page, marked there; none for someone who has no chats to
 // see.
 
@@ -59,7 +60,19 @@ const shown = async ({
   listed: () => ChatSummary[];
   enabled?: boolean;
 }) => {
-  const chats = { list: async () => await Promise.resolve(listed()) };
+  const renamed = vi.fn<(chatId: string, title: string) => Promise<void>>(
+    async () => {
+      await Promise.resolve();
+    }
+  );
+  const archived = vi.fn<(chatId: string) => Promise<void>>(async () => {
+    await Promise.resolve();
+  });
+  const chats = {
+    list: async () => await Promise.resolve(listed()),
+    rename: renamed,
+    archive: archived,
+  };
   const core = {
     withSession: async <T,>(
       action: (session: { chats: typeof chats }) => Promise<T>
@@ -70,7 +83,7 @@ const shown = async ({
     return (
       <Sidebar
         groups={[{ id: "chats", label: "Chats", rows: recent }]}
-        label="Sidebar"
+        aria-label="Sidebar"
       />
     );
   };
@@ -98,7 +111,7 @@ const shown = async ({
     );
     await router.load();
   });
-  return { router };
+  return { router, renamed, archived };
 };
 
 /** The chats' rows: links to their pages. */
@@ -106,9 +119,8 @@ const recentRows = (): HTMLElement[] => [
   ...document.querySelectorAll<HTMLElement>('nav a[href^="/chats/"]'),
 ];
 
-/** Each row's name, without when it was used. */
-const titles = (): string[] =>
-  recentRows().map((row) => row.firstElementChild?.textContent ?? "");
+/** Each row's name. */
+const titles = (): string[] => recentRows().map((row) => row.textContent);
 
 describe("recent chats in the sidebar", () => {
   afterEach(() => {
@@ -141,34 +153,6 @@ describe("recent chats in the sidebar", () => {
     });
   });
 
-  it("says when each chat was last used: short at the row's end, whole to a screen reader", async () => {
-    await shown({
-      listed: () => [
-        chat("old", "Lease of the office", "2025-03-04T10:00:00Z"),
-      ],
-    });
-    await vi.waitFor(() => {
-      expect(recentRows()).toHaveLength(1);
-    });
-    const [row] = recentRows();
-    const shownEnd = row?.querySelector('[aria-hidden="true"]')?.textContent;
-    expect(shownEnd).toMatch(/4/u);
-    expect(shownEnd).not.toMatch(/2025/u);
-    expect(row?.textContent).toMatch(/2025/u);
-  });
-
-  it("says how long ago a chat used today was, not the clock", async () => {
-    const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
-    await shown({ listed: () => [chat("new", "Board report", twoMinutesAgo)] });
-    await vi.waitFor(() => {
-      expect(recentRows()).toHaveLength(1);
-    });
-    const shownEnd = recentRows()[0]?.querySelector(
-      '[aria-hidden="true"]'
-    )?.textContent;
-    expect(shownEnd).toMatch(/^2\s?m/u);
-  });
-
   it("opens a chat's page from its row, and marks it there", async () => {
     const { router } = await shown({ listed: () => ten.slice(0, 3) });
     await vi.waitFor(() => {
@@ -182,6 +166,112 @@ describe("recent chats in the sidebar", () => {
     expect(
       recentRows().map((row) => row.getAttribute("aria-current"))
     ).toStrictEqual([null, "page", null]);
+  });
+
+  it("gives each row its menu, named for its chat", async () => {
+    await shown({ listed: () => ten.slice(0, 2) });
+    await vi.waitFor(() => {
+      expect(recentRows()).toHaveLength(2);
+    });
+    expect(
+      [...document.querySelectorAll("nav button[aria-label^='More for']")].map(
+        (button) => button.getAttribute("aria-label")
+      )
+    ).toStrictEqual(["More for Chat number 0", "More for Chat number 1"]);
+  });
+
+  it("archives a chat from its menu", async () => {
+    const { archived } = await shown({ listed: () => ten.slice(0, 2) });
+    await vi.waitFor(() => {
+      expect(recentRows()).toHaveLength(2);
+    });
+    await act(async () => {
+      document
+        .querySelector<HTMLElement>(
+          "nav button[aria-label='More for Chat number 1']"
+        )
+        ?.click();
+      await Promise.resolve();
+    });
+    const archive = await vi.waitFor(() => {
+      const item = [
+        ...document.querySelectorAll<HTMLElement>("[role=menuitem]"),
+      ].find((each) => each.textContent.includes("Archive"));
+      expect(item).toBeDefined();
+      return item;
+    });
+    await act(async () => {
+      archive?.click();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(archived).toHaveBeenCalledWith("chat-1");
+    });
+  });
+
+  it("renames a chat in place: F2 on its row, a new name, Enter", async () => {
+    const { renamed } = await shown({ listed: () => ten.slice(0, 2) });
+    await vi.waitFor(() => {
+      expect(recentRows()).toHaveLength(2);
+    });
+    const [row] = recentRows();
+    act(() => {
+      row?.focus();
+      row?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "F2", bubbles: true })
+      );
+    });
+    const field = await vi.waitFor(() => {
+      const found = document.querySelector<HTMLInputElement>(
+        "nav input[aria-label='Rename Chat number 0']"
+      );
+      expect(found).not.toBeNull();
+      return found;
+    });
+    act(() => {
+      if (field !== null) {
+        field.value = "Board report";
+        field.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Enter", bubbles: true })
+        );
+      }
+    });
+    await vi.waitFor(() => {
+      expect(renamed).toHaveBeenCalledWith("chat-0", "Board report");
+    });
+    // A screen reader hears the new name.
+    await vi.waitFor(() => {
+      expect(document.querySelector("[data-announce]")?.textContent).toBe(
+        "Renamed to Board report"
+      );
+    });
+  });
+
+  it("keeps the name when renaming is left with Escape", async () => {
+    const { renamed } = await shown({ listed: () => ten.slice(0, 1) });
+    await vi.waitFor(() => {
+      expect(recentRows()).toHaveLength(1);
+    });
+    act(() => {
+      recentRows()[0]?.dispatchEvent(
+        new MouseEvent("dblclick", { bubbles: true })
+      );
+    });
+    const field = await vi.waitFor(() => {
+      const found = document.querySelector<HTMLInputElement>("nav input");
+      expect(found).not.toBeNull();
+      return found;
+    });
+    act(() => {
+      if (field !== null) {
+        field.value = "Something else";
+        field.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+        );
+      }
+    });
+    expect(renamed).not.toHaveBeenCalled();
+    expect(titles()).toStrictEqual(["Chat number 0"]);
   });
 
   it("lists nothing when it is off, as for someone in onboarding only", async () => {

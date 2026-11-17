@@ -195,7 +195,7 @@ const ViewSwitch = ({ app, view }: { app: string; view: WorkspaceView }) => {
     settings: t({ message: "Settings", context: "an app's workspace view" }),
   };
   return (
-    <TabsNav label={t`Workspace views`} variant="segmented">
+    <TabsNav aria-label={t`Workspace views`} variant="segmented">
       {views.map((each) => (
         <TabsLink
           current={each === view}

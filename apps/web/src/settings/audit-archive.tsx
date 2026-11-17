@@ -11,7 +11,7 @@ import {
   Dialog,
   DialogBody,
   DialogDescription,
-  DialogPanel,
+  DialogContent,
   DialogTitle,
   DialogTrigger,
 } from "../grasp/dialog/index.ts";
@@ -123,7 +123,7 @@ export const ArchiveSearch = ({
       <DialogTrigger size="sm" variant="ghost">
         {t`Search the archive`}
       </DialogTrigger>
-      <DialogPanel closeLabel={t`Close`}>
+      <DialogContent closeLabel={t`Close`}>
         <DialogTitle>{t`Archived events`}</DialogTitle>
         <DialogDescription>
           {t`Older events, searched with the filters on the page.`}
@@ -131,7 +131,7 @@ export const ArchiveSearch = ({
         <DialogBody>
           {busy && first === undefined ? <LoadingLines lines={5} /> : null}
           {failure === undefined ? null : (
-            <Alert variant="danger">{failure}</Alert>
+            <Alert tone="danger">{failure}</Alert>
           )}
           {first === undefined ? null : (
             <LogRecords
@@ -142,7 +142,7 @@ export const ArchiveSearch = ({
             />
           )}
         </DialogBody>
-      </DialogPanel>
+      </DialogContent>
     </Dialog>
   );
 };

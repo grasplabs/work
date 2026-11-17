@@ -62,7 +62,7 @@ export const DateTrigger = ({
         variant="ghost"
         size={buttonSize[size]}
         icon={CalendarIcon}
-        label={nameOf(props, label, fallbackLabel)}
+        aria-label={nameOf(props, label, fallbackLabel)}
       />
     )}
   />

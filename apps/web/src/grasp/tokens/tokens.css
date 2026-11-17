@@ -248,6 +248,8 @@
   --grasp-corner: 20px;
   /* Always written after corner, so the curve meets the edge without a seam. */
   --grasp-corner-shape: squircle;
+  /* The Composer's card: a button's corner at its size (16px at 32px tall) plus the footer's inset (8px), so the card nests round its buttons. */
+  --grasp-composer-corner: 24px;
   /* Marks under 24px tall: a key, inline code. */
   --grasp-corner-mark: 6px;
   /* A pill: a chip, a tag, a toggle track. */
@@ -1498,6 +1500,8 @@
   --grasp-shell-card-shadow:
     0 4px 4px 0 oklch(0 0 0 / 0.02), 0 4px 80px 8px oklch(0 0 0 / 0.02),
     0 0 0 1px light-dark(oklch(0 0 0 / 0.05), oklch(1 0 0 / 0.08));
+  /* The edge line inside the page's card and the panels' card, round every corner. */
+  --grasp-shell-card-line: light-dark(oklch(0 0 0 / 0.1), oklch(1 0 0 / 0.1));
   /* The peeking sidebar's ground: the sidebar's in light, a step above the card in dark. */
   --grasp-shell-peek: light-dark(
     var(--grasp-shell-ground),
@@ -1522,6 +1526,7 @@
   /* The room above the sidebar's first row. */
   --grasp-shell-head: 16px;
   /* The height of a sidebar row. */
+  --grasp-picker-tile: 8rem;
   --grasp-shell-row: 32px;
   /* The room between two rows. */
   --grasp-shell-row-gap: 2px;
@@ -1573,6 +1578,8 @@
   --grasp-shell-page-room-chat: 96px;
   /* The width of a page's centred column inside the shell's card. */
   --grasp-page-measure: 64rem;
+  /* The width of a page column at the page's start: a settings page's groups of rows (Page column). */
+  --grasp-page-column-measure: 45rem;
   /* The width of a wide page's centred column, such as a table or a board. */
   --grasp-page-measure-wide: 80rem;
   /* Carousel: carousel. */
@@ -1988,6 +1995,8 @@
   );
   /* Between the question and the box to ask in, where a chat starts. */
   --grasp-chat-start-gap: var(--grasp-space-8);
+  /* The widest the question and the box to ask in run, where a chat starts: the product's Chat page. */
+  --grasp-chat-start-width: 48rem;
   /* Inspector panel: inspector panel. */
   /* The width of an inspector panel beside a page, as Profound's 421px. */
   --grasp-inspector-width: 420px;

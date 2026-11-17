@@ -1,6 +1,8 @@
+import type { SignInOption } from "@grasp-os/shared/rpc";
 import type { OwnSession, SessionDevice } from "@grasp-os/shared/sign-in";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
@@ -8,39 +10,96 @@ import type { CoreConnection } from "../core-connection.ts";
 import { deadline, unlessAborted } from "../core.ts";
 import { formatDateTime } from "../format.ts";
 import { Badge } from "../grasp/badge/index.ts";
+import { BrandIcon, brands } from "../grasp/brand-icon/index.ts";
+import type { Brand } from "../grasp/brand-icon/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Item, ItemGroup } from "../grasp/item/index.ts";
+import { Desktop, Phone } from "../grasp/icons/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
+import { FactRow, SettingsRows } from "../grasp/setting-row/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { ChatAccountsSection } from "../settings/chat-accounts.tsx";
 import type { ChatAccounts } from "../settings/chat-accounts.tsx";
 import { pendingChatLink } from "../settings/chat-link.ts";
 import {
-  FactRow,
   RowNote,
   SectionNotLoaded,
   SettingsError,
   SettingsLoading,
-  SettingsRows,
   TitleLine,
 } from "../settings/section.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
-// Settings → Security: how the person gets into Grasp, and the devices
-// they are signed in on. Each device but this one can be signed out here;
-// this one signs out from the person menu. Core names no place a session
-// signed in from. Then the chat apps where Grasp knows them
-// (settings/chat-accounts.tsx), since Grasp answers a linked account as
-// them; never for Grasp staff, who aren't the company's people.
+// Settings › Security, as the library's Settings pattern has it (like
+// Profile): one compact card that says what the person signs in with, the
+// provider's mark and their organization's name; and one with the devices
+// they are signed in on, each with its kind's icon, this one marked. Each
+// device but this one can be signed out here; this one signs out from the
+// person menu. Core names no place a session signed in from.
+//
+// The chat apps where Grasp knows the person (settings/chat-accounts.tsx)
+// are not listed here any more. A link a chat app sent still lands here
+// (routes/chat-link.tsx), so while one waits in this tab the chat apps card
+// shows, to confirm or turn it down; never for Grasp staff, who aren't the
+// company's people.
 
-/** The way people sign in here, when there is just the one; core's own name for it. */
-const useSignedInWith = (labels: string[]): string => {
+const styles = stylex.create({
+  // The provider's mark beside the organization's name.
+  signedInWith: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: grasp.space2,
+    minWidth: 0,
+  },
+});
+
+/** Whether a sign-in provider has a mark of its own: core's ids are the brands' ("microsoft", "google"). */
+const isBrand = (id: string): id is Brand => Object.hasOwn(brands, id);
+
+/** The staff's own way in (core's `providerIds.staff`): not the organization's. */
+const staffProvider = "grasp-staff";
+
+/**
+ * What the person signed in with: the organization's one way in, with its
+ * mark, and the organization's name; for Grasp staff, Grasp's own. With
+ * more than one way in, core can't say which they used, so no mark.
+ */
+const SignedInWith = ({
+  options,
+  organization,
+  staff,
+}: {
+  options: SignInOption[];
+  organization: string | undefined;
+  staff: boolean;
+}) => {
   const { t } = useLingui();
-  const [only] = labels;
-  return labels.length === 1 && only !== undefined
-    ? only
-    : t`Your organization’s account`;
+  const own = options.filter(
+    ({ providerId }) => (providerId === staffProvider) === staff
+  );
+  const [only] = own;
+  const provider = own.length === 1 ? only : undefined;
+  const name = staff
+    ? (provider?.label ?? "Grasp")
+    : (organization ?? provider?.label ?? t`Your organization’s account`);
+  return (
+    <span {...stylex.props(styles.signedInWith)}>
+      {provider !== undefined && isBrand(provider.providerId) ? (
+        <BrandIcon brand={provider.providerId} tile={false} />
+      ) : null}
+      {name}
+    </span>
+  );
 };
 
 /** What a session signed in on, in the page's language: "Chrome on macOS". */
@@ -72,44 +131,55 @@ const DeviceRow = ({ session }: { session: OwnSession }) => {
     });
   };
   return (
-    <Item
-      {...(session.current
-        ? {}
-        : {
-            actions: (
-              // Plain words: a Button with a result reserves the width of its longest words, which leaves a phone's row no room.
-              <Button
-                aria-label={t`Sign out ${device}, signed in ${time}`}
-                disabled={busy}
-                onClick={() => {
-                  void signOut();
-                }}
-                size="sm"
-                variant="ghost"
-              >
-                {t`Sign out`}
-              </Button>
-            ),
-          })}
-      size="sm"
-      title={
-        <TitleLine
-          detail={<RowNote failure={failure}>{t`Signed in ${time}`}</RowNote>}
-        >
-          {device}
-          {session.current ? <Badge size="sm">{t`This device`}</Badge> : null}
-        </TitleLine>
-      }
-    />
+    <Item size="xs">
+      <ItemMedia
+        icon={session.device.mobile ? Phone : Desktop}
+        iconLook="inline"
+      />
+      <ItemContent>
+        <ItemTitle>
+          <TitleLine>
+            {device}
+            {session.current ? <Badge size="sm">{t`This device`}</Badge> : null}
+          </TitleLine>
+        </ItemTitle>
+        <ItemDescription>
+          <RowNote failure={failure}>{t`Signed in ${time}`}</RowNote>
+        </ItemDescription>
+      </ItemContent>
+      {session.current ? null : (
+        <ItemActions>
+          <Button
+            aria-label={t`Sign out ${device}, signed in ${time}`}
+            disabled={busy}
+            onClick={() => {
+              void signOut();
+            }}
+            size="sm"
+            variant="ghost"
+          >
+            {t`Sign out`}
+          </Button>
+        </ItemActions>
+      )}
+    </Item>
   );
 };
 
 /** The devices the person is signed in on, latest active first, this one marked. */
-const Devices = ({ sessions }: { sessions: OwnSession[] }) => {
+const Devices = ({ sessions }: { sessions: Loaded<OwnSession[]> }) => {
   const { t } = useLingui();
-  const devices = sessions.length;
+  if (sessions.state !== "ready") {
+    return (
+      <SectionCard density="compact" title={t`Devices`}>
+        <SectionNotLoaded page={sessions} />
+      </SectionCard>
+    );
+  }
+  const devices = sessions.data.length;
   return (
     <SectionCard
+      density="compact"
       description={t`${plural(devices, {
         one: "Signed in on # device. Sign out any you do not recognise.",
         other: "Signed in on # devices. Sign out any you do not recognise.",
@@ -118,7 +188,7 @@ const Devices = ({ sessions }: { sessions: OwnSession[] }) => {
       title={t`Devices`}
     >
       <ItemGroup aria-label={t`Devices`} separated>
-        {sessions.map((session) => (
+        {sessions.data.map((session) => (
           <DeviceRow key={session.id} session={session} />
         ))}
       </ItemGroup>
@@ -129,89 +199,82 @@ const Devices = ({ sessions }: { sessions: OwnSession[] }) => {
 const Security = () => {
   const { t } = useLingui();
   const { identity } = Route.useRouteContext();
-  const { labels, sessions, chat } = Route.useLoaderData();
-  const signedInWith = useSignedInWith(labels);
+  const { options, organization, sessions, chat } = Route.useLoaderData();
   return (
     <>
-      <SectionCard
-        description={t`Passwords and two-step sign-in live with your organization’s account.`}
-        flush
-        title={t`Sign-in`}
-      >
+      <SectionCard density="compact" flush title={t`Sign-in`}>
         <SettingsRows>
           <FactRow
-            help={t`Leaving the company stops new sign-ins.`}
+            help={t`Passwords and two-step sign-in live with your organization’s account.`}
             label={t`Signed in with`}
           >
-            {signedInWith}
+            <SignedInWith
+              options={options}
+              organization={organization}
+              staff={identity.staff}
+            />
           </FactRow>
-          <FactRow label={t`Email`}>{identity.email}</FactRow>
         </SettingsRows>
       </SectionCard>
-
-      {sessions.state === "ready" ? (
-        <Devices sessions={sessions.data} />
-      ) : (
-        <SectionCard title={t`Devices`}>
-          <SectionNotLoaded page={sessions} />
-        </SectionCard>
-      )}
-
+      <Devices sessions={sessions} />
       {chat === undefined ? null : <ChatAccountsSection chat={chat} />}
     </>
   );
 };
 
 /** How people sign in here; none when core doesn't say in time. */
-const signInLabels = async (
+const signInOptions = async (
   core: Pick<CoreConnection, "api">
-): Promise<string[]> => {
+): Promise<SignInOption[]> => {
   try {
     const signal = deadline();
     const api = await core.api(signal);
-    const options = await unlessAborted(
-      Promise.resolve(api.signInOptions()),
-      signal
-    );
-    return options.map(({ label }) => label);
+    return await unlessAborted(Promise.resolve(api.signInOptions()), signal);
   } catch {
     return [];
   }
 };
 
-/** The person's linked chat accounts, and the link they opened in this tab, if any. */
-const chatAccounts = async (
+/** The organization's name; none when it has none or core doesn't say in time. */
+const organizationName = async (
   core: Pick<CoreConnection, "withSession">
-): Promise<Loaded<ChatAccounts>> => {
-  const secret = pendingChatLink();
-  return await loadFromCore(core, async (session) => {
+): Promise<string | undefined> => {
+  const read = await loadFromCore(
+    core,
+    async (session) => await session.organization.get()
+  );
+  const name = read.state === "ready" ? read.data.name.trim() : "";
+  return name === "" ? undefined : name;
+};
+
+/** The person's linked chat accounts and the link a chat app sent them, while one waits in this tab. */
+const chatAccounts = async (
+  core: Pick<CoreConnection, "withSession">,
+  secret: string
+): Promise<Loaded<ChatAccounts>> =>
+  await loadFromCore(core, async (session) => {
     const [reach, accounts, preview] = await Promise.all([
       session.channelAccounts.reach(),
       session.channelAccounts.list(),
-      secret === undefined
-        ? undefined
-        : session.channelAccounts.preview(secret),
+      session.channelAccounts.preview(secret),
     ]);
-    return {
-      reach,
-      accounts,
-      ...(secret === undefined || preview === undefined
-        ? {}
-        : { pending: { secret, preview } }),
-    };
+    return { reach, accounts, pending: { secret, preview } };
   });
-};
 
 export const Route = createFileRoute("/_shell/settings/security")({
   pendingComponent: SettingsLoading,
   errorComponent: SettingsError,
   component: Security,
   loader: async ({ context: { core, identity } }) => {
-    const [labels, sessions, chat] = await Promise.all([
-      signInLabels(core),
+    const secret = pendingChatLink();
+    const [options, organization, sessions, chat] = await Promise.all([
+      signInOptions(core),
+      organizationName(core),
       loadFromCore(core, async (session) => await session.sessions.list()),
-      identity.staff ? undefined : chatAccounts(core),
+      identity.staff || secret === undefined
+        ? undefined
+        : chatAccounts(core, secret),
     ]);
-    return { labels, sessions, chat };
+    return { options, organization, sessions, chat };
   },
 });

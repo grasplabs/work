@@ -14,6 +14,7 @@
 // announced to a screen reader without taking focus. Every value is a token (src/tokens).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import {
   Toast as ToastPrimitive,
@@ -43,8 +44,10 @@ import {
   Alert as Warning,
 } from "../icons";
 import type { IconData } from "../icons";
+import { useWords, withGiven } from "../words/words";
 import { queueOf, toast } from "./queue";
 import { toastStyles as styles } from "./styles";
+import { toasterWords } from "./words";
 
 /** Every prop a Toaster takes. */
 export interface ToasterProps {
@@ -65,6 +68,8 @@ export interface ToasterProps {
    */
   maxVisible?: number;
   /** Keep the stack open, each toast whole. Otherwise it opens under a pointer or focus. */
+  open?: boolean;
+  /** @deprecated Use `open`. */
   expanded?: boolean;
   /** The queue it shows, from `createToaster()`. Leave it out for the page's own `toast`. */
   toaster?: ToasterQueue<ReactNode>;
@@ -72,6 +77,8 @@ export interface ToasterProps {
    * The region's name for a screen reader, in the page's language.
    * @default "Notifications"
    */
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
   label?: string;
   /**
    * What a toast's action says when its work failed, in the page's language. The toast stays.
@@ -146,129 +153,144 @@ export const Toaster = ({
   side = "bottom",
   align = "end",
   maxVisible = 3,
-  expanded,
+  expanded: expandedDeprecated,
+  open: expanded = expandedDeprecated,
   toaster,
-  label = "Notifications",
-  failedLabel = "Could not finish",
+  label: labelDeprecated,
+  "aria-label": named,
+  failedLabel: failedGiven,
   shortcut = "F6",
-  pendingLabel = "Still working",
-  closeLabel = "Close",
-}: ToasterProps) => (
-  <RegionPrimitive
-    toaster={queueOf(toaster ?? toast)}
-    shortcut={shortcut}
-    pendingAnnouncement={pendingLabel}
-    side={side}
-    align={align}
-    maxVisible={maxVisible}
-    expanded={expanded}
-    aria-label={label}
-    {...stylex.props(styles.region, styles[side], styles[align])}
-  >
-    {(data) => {
-      const type = data.type ?? "default";
-      // A toast's own icon first (`data.icon`), `null` for none; otherwise its type's.
-      // SAFETY: a toast's data is what the page gave toast(), which the types call a ToastLook.
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      const own = (data.data as ToastLook | undefined)?.icon;
-      const mark = markOf(type, own);
-      const top = side === "top";
-      // A toast with no time of its own goes only when someone puts it away: it shows how.
-      const stays =
-        data.duration === Number.POSITIVE_INFINITY &&
-        data.dismissible !== false;
-      return (
-        <ToastPrimitive
-          {...stylex.props(
-            styles.toast,
-            top ? styles.atTop : styles.atBottom,
-            top ? styles.leavingTop : styles.leavingBottom,
-            !mark && styles.noIcon,
-            stays && (mark ? styles.closable : styles.closableNoIcon)
-          )}
-          // A quiet card behind the front, or one on its way out, cannot be reached or read.
-          render={(props: Record<string, unknown>, state: ToastState) => (
-            <li
-              {...props}
-              inert={
-                state.leaving ||
-                (!state.expanded && state.index > 0) ||
-                undefined
-              }
-            />
-          )}
-        >
-          {mark && (
-            // Keyed by type, so when a promise settles the result arrives in the spinner's place.
-            <span
-              key={type}
-              aria-hidden="true"
-              {...stylex.props(styles.icon, styles.content, styles[type])}
-            >
-              {/* The arrival runs inside, so a quiet card behind the front stays quiet. */}
-              <span {...stylex.props(styles.arrive)}>
-                <Icon icon={mark} />
-              </span>
-            </span>
-          )}
-          <div {...stylex.props(styles.words, styles.content)}>
-            <TitlePrimitive {...stylex.props(styles.title)} />
-            {hasWords(data.description) ? (
-              <DescriptionPrimitive {...stylex.props(styles.description)} />
-            ) : null}
-            {data.action !== undefined || data.cancel !== undefined ? (
-              <div {...stylex.props(styles.actions)}>
-                {data.cancel ? (
-                  <ClosePrimitive
-                    action={data.cancel.onCancel}
-                    render={(props: Record<string, unknown>) => (
-                      <Button {...props} variant="ghost" size="sm">
-                        {wordsOf(data.cancel?.label)}
-                      </Button>
-                    )}
-                  />
-                ) : null}
-                {data.action ? (
-                  <ActionPrimitive
-                    render={(props, state: ToastButtonState) => {
-                      const words = textOf(data.action?.label);
-                      // A Promise from the action shows its work, and a failure says so, as a Button does.
-                      const current = actionState(state);
-                      return (
-                        <Button
-                          {...props}
-                          variant="quiet"
-                          size="sm"
-                          state={current}
-                          doneLabel={words}
-                          failedLabel={failedLabel}
-                        >
-                          {wordsOf(data.action?.label)}
-                        </Button>
-                      );
-                    }}
-                  />
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-          {stays ? (
-            <span {...stylex.props(styles.close, styles.content)}>
-              <ClosePrimitive
-                render={(props: Record<string, unknown>) => (
-                  <Button
-                    {...props}
-                    variant="ghost"
-                    size="xs"
-                    icon={Cross}
-                    label={closeLabel}
-                  />
-                )}
+  pendingLabel: pendingGiven,
+  closeLabel: closeGiven,
+}: ToasterProps) => {
+  const {
+    name: label,
+    failed: failedLabel,
+    pending: pendingLabel,
+    close: closeLabel,
+  } = withGiven(useWords("toaster", toasterWords), {
+    name: named ?? labelDeprecated,
+    failed: failedGiven,
+    pending: pendingGiven,
+    close: closeGiven,
+  });
+  return (
+    <RegionPrimitive
+      toaster={queueOf(toaster ?? toast)}
+      shortcut={shortcut}
+      pendingAnnouncement={pendingLabel}
+      side={side}
+      align={align}
+      maxVisible={maxVisible}
+      expanded={expanded}
+      aria-label={label}
+      {...stylex.props(styles.region, styles[side], styles[align])}
+    >
+      {(data) => {
+        const type = data.type ?? "default";
+        // A toast's own icon first (`data.icon`), `null` for none; otherwise its type's.
+        // SAFETY: a toast's data is what the page gave toast(), which the types call a ToastLook.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+        const own = (data.data as ToastLook | undefined)?.icon;
+        const mark = markOf(type, own);
+        const top = side === "top";
+        // A toast with no time of its own goes only when someone puts it away: it shows how.
+        const stays =
+          data.duration === Number.POSITIVE_INFINITY &&
+          data.dismissible !== false;
+        return (
+          <ToastPrimitive
+            {...stylex.props(
+              styles.toast,
+              top ? styles.atTop : styles.atBottom,
+              top ? styles.leavingTop : styles.leavingBottom,
+              !mark && styles.noIcon,
+              stays && (mark ? styles.closable : styles.closableNoIcon)
+            )}
+            // A quiet card behind the front, or one on its way out, cannot be reached or read.
+            render={(props: Record<string, unknown>, state: ToastState) => (
+              <li
+                {...props}
+                inert={
+                  state.leaving ||
+                  (!state.expanded && state.index > 0) ||
+                  undefined
+                }
               />
-            </span>
-          ) : null}
-        </ToastPrimitive>
-      );
-    }}
-  </RegionPrimitive>
-);
+            )}
+          >
+            {mark && (
+              // Keyed by type, so when a promise settles the result arrives in the spinner's place.
+              <span
+                key={type}
+                aria-hidden="true"
+                {...stylex.props(styles.icon, styles.content, styles[type])}
+              >
+                {/* The arrival runs inside, so a quiet card behind the front stays quiet. */}
+                <span {...stylex.props(styles.arrive)}>
+                  <Icon icon={mark} />
+                </span>
+              </span>
+            )}
+            <div {...stylex.props(styles.words, styles.content)}>
+              <TitlePrimitive {...stylex.props(styles.title)} />
+              {hasWords(data.description) ? (
+                <DescriptionPrimitive {...stylex.props(styles.description)} />
+              ) : null}
+              {data.action !== undefined || data.cancel !== undefined ? (
+                <div {...stylex.props(styles.actions)}>
+                  {data.cancel ? (
+                    <ClosePrimitive
+                      action={data.cancel.onCancel}
+                      render={(props: Record<string, unknown>) => (
+                        <Button {...props} variant="ghost" size="sm">
+                          {wordsOf(data.cancel?.label)}
+                        </Button>
+                      )}
+                    />
+                  ) : null}
+                  {data.action ? (
+                    <ActionPrimitive
+                      render={(props, state: ToastButtonState) => {
+                        const words = textOf(data.action?.label);
+                        // A Promise from the action shows its work, and a failure says so, as a Button does.
+                        const current = actionState(state);
+                        return (
+                          <Button
+                            {...props}
+                            variant="quiet"
+                            size="sm"
+                            status={current}
+                            doneLabel={words}
+                            failedLabel={failedLabel}
+                          >
+                            {wordsOf(data.action?.label)}
+                          </Button>
+                        );
+                      }}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+            {stays ? (
+              <span {...stylex.props(styles.close, styles.content)}>
+                <ClosePrimitive
+                  render={(props: Record<string, unknown>) => (
+                    <Button
+                      {...props}
+                      variant="ghost"
+                      size="xs"
+                      icon={Cross}
+                      aria-label={closeLabel}
+                    />
+                  )}
+                />
+              </span>
+            ) : null}
+          </ToastPrimitive>
+        );
+      }}
+    </RegionPrimitive>
+  );
+};

@@ -16,6 +16,7 @@
 // keys can scroll it. Every value is a token (src/tokens).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -38,6 +39,8 @@ export interface TableProps {
    */
   caption?: ReactNode;
   /** The table's name when it has no caption, for a screen reader and an agent. */
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
   label?: string;
   /**
    * How much room a row has: `compact` 32px, `default` 42px (Palermo's), `roomy` 50px.
@@ -134,7 +137,8 @@ const SeenCaption = ({ caption }: { caption: ReactNode }) =>
 export const Table = ({
   children,
   caption,
-  label,
+  label: labelDeprecated,
+  "aria-label": label = labelDeprecated,
   density = "default",
   height,
   width,

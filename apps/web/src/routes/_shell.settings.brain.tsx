@@ -10,9 +10,20 @@ import { Button } from "../grasp/button/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import { Agent, Plus } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
-import { Item, ItemGroup } from "../grasp/item/index.ts";
+import {
+  Item,
+  ItemGroup,
+  ItemContent,
+  ItemTitle,
+  ItemActions,
+} from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import { Select } from "../grasp/select/index.ts";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+} from "../grasp/select/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -87,11 +98,13 @@ const TeamRow = ({
   const inGroup =
     groups.find(({ teamIds }) => teamIds.includes(team.id))?.id ?? none;
   return (
-    <Item
-      actions={
+    <Item size="sm">
+      <ItemContent>
+        <ItemTitle>{name}</ItemTitle>
+      </ItemContent>
+      <ItemActions>
         <div {...stylex.props(styles.choice)}>
           <Select
-            aria-label={t`Group of ${name}`}
             disabled={disabled}
             items={[
               ...groups.map(({ id, name: group }) => ({
@@ -105,14 +118,16 @@ const TeamRow = ({
                 onMove(value);
               }
             }}
-            size="sm"
             value={inGroup}
-          />
+          >
+            <SelectTrigger size="sm" aria-label={t`Group of ${name}`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent />
+          </Select>
         </div>
-      }
-      size="sm"
-      title={name}
-    />
+      </ItemActions>
+    </Item>
   );
 };
 
@@ -239,7 +254,7 @@ const TeamGroups = ({
             </ItemGroup>
           </div>
           {failure === undefined ? null : (
-            <Alert variant="danger">{failure}</Alert>
+            <Alert tone="danger">{failure}</Alert>
           )}
           <div {...stylex.props(styles.foot)}>
             {proposed ? (

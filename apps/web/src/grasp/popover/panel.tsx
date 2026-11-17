@@ -17,7 +17,7 @@ import { popoverStyles as styles } from "./styles";
 type ContentPrimitiveProps = ComponentProps<typeof ContentPrimitive>;
 
 /** Every prop a PopoverPanel takes: these, and the rest of UI SDK's PopoverContent. */
-export interface PopoverPanelProps extends Omit<
+export interface PopoverContentProps extends Omit<
   ContentPrimitiveProps,
   | "children"
   | "className"
@@ -77,7 +77,7 @@ const watchBody = (
   };
 };
 
-export const PopoverPanel = ({ children, ...rest }: PopoverPanelProps) => {
+export const PopoverContent = ({ children, ...rest }: PopoverContentProps) => {
   const still = useStill();
   // When the body holds more than it shows, it joins the Tab order as a region named by the title,
   // so the keys can scroll it (WCAG 2.1.1), as a Dialog's body does.
@@ -124,3 +124,8 @@ export const PopoverPanel = ({ children, ...rest }: PopoverPanelProps) => {
     </ContentPrimitive>
   );
 };
+
+/** @deprecated Use `PopoverContent`. */
+export const PopoverPanel = PopoverContent;
+/** @deprecated Use `PopoverContentProps`. */
+export type PopoverPanelProps = PopoverContentProps;

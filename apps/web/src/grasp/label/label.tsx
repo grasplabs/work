@@ -9,6 +9,7 @@
 // description and error, and it shows the required mark by itself.
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { Label as LabelPrimitive } from "@ui-sdk/react/label";
 import type { ComponentProps, ReactNode } from "react";
@@ -19,7 +20,7 @@ import { grasp } from "../tokens/tokens.stylex";
 /** What a caller may style: where the label sits. Never its type or colour. */
 export type LabelLayoutStyle = LayoutStyle;
 
-// The look of every label in Grasp UI. FieldLabel uses the same styles, so a label is one thing.
+// The look of every label in Damsko. FieldLabel uses the same styles, so a label is one thing.
 export const labelStyles = stylex.create({
   label: {
     display: "block",
@@ -74,9 +75,9 @@ export interface LabelProps extends Omit<
    * @default false
    */
   required?: boolean;
-  /** Layout only: margins and alignment. Type and colour belong to the label. */
+  /** @deprecated Use `layout`. */
   style?: LabelLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: margins and alignment. Type and colour belong to the label. */
   layout?: LabelLayoutStyle;
 }
 

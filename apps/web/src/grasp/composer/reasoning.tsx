@@ -12,6 +12,7 @@
 // Every value is a token (src/tokens).
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import {
   MenuItemIndicator,
@@ -24,7 +25,7 @@ import {
   DropdownMenu,
   DropdownMenuGroup,
   DropdownMenuLabel,
-  DropdownMenuPanel,
+  DropdownMenuContent,
   DropdownMenuRadioGroup,
 } from "../dropdown-menu";
 import { menuStyles } from "../dropdown-menu/styles";
@@ -205,6 +206,8 @@ export interface ComposerReasoningProps {
    * The control's name for a screen reader, and the levels' group name in the menu.
    * @default "Reasoning"
    */
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
   label?: string;
 }
 
@@ -213,7 +216,8 @@ export const ComposerReasoning = ({
   levels,
   value,
   onValueChange,
-  label = "Reasoning",
+  label: labelDeprecated,
+  "aria-label": label = labelDeprecated ?? "Reasoning",
 }: ComposerReasoningProps) => {
   const disabled = useComposerDisabled();
   const at = levels.findIndex((level) => level.value === value);
@@ -251,7 +255,7 @@ export const ComposerReasoning = ({
           </button>
         )}
       />
-      <DropdownMenuPanel side="top" align="start" onKeyDown={stopEscape}>
+      <DropdownMenuContent side="top" align="start" onKeyDown={stopEscape}>
         <DropdownMenuGroup>
           <DropdownMenuLabel>{label}</DropdownMenuLabel>
           <DropdownMenuRadioGroup
@@ -290,7 +294,7 @@ export const ComposerReasoning = ({
             ))}
           </DropdownMenuRadioGroup>
         </DropdownMenuGroup>
-      </DropdownMenuPanel>
+      </DropdownMenuContent>
     </DropdownMenu>
   );
 };

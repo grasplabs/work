@@ -15,6 +15,7 @@
 // in chart-patterns.tsx, as SVG attributes take numbers. A caller sets its height and layout.
 "use client";
 
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { useId, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
@@ -52,7 +53,9 @@ export type ChartLayoutStyle = stylex.StyleXStyles<{
 /** Every prop a Chart takes. */
 export interface ChartProps {
   /** What the chart shows, as a screen reader and an agent say it ("Tickets solved by month"). */
-  label: string;
+  "aria-label"?: string;
+  /** @deprecated Use `aria-label`. */
+  label?: string;
   /** One sentence that says what the numbers mean ("Up from 40 in January to 72 in June"). */
   summary: string;
   /** The rows: one object per point along the bottom. */
@@ -69,6 +72,8 @@ export interface ChartProps {
    */
   height?: number;
   /** Its width and where it sits. */
+  layout?: ChartLayoutStyle;
+  /** @deprecated Use `layout`. */
   style?: ChartLayoutStyle;
 }
 
@@ -157,14 +162,16 @@ const marginOf = (room: number) => ({
 });
 
 export const Chart = ({
-  label,
+  label: labelDeprecated,
+  "aria-label": label = labelDeprecated ?? "",
   summary,
   data,
   xKey,
   config,
   children,
   height = 240,
-  style,
+  style: styleDeprecated,
+  layout: style = styleDeprecated,
 }: ChartProps) => {
   const id = `chart-${useId().replaceAll(/[^a-zA-Z0-9-]/gu, "")}`;
   const keys = Object.keys(config);

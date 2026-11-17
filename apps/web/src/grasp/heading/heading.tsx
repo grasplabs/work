@@ -10,6 +10,7 @@
 // Titles from title-sm up are Geist Serif at 400, drawn closer (tracking-title); `ui` is the
 // sans at 500, as a card's title, and `ui-sm` the same at the interface's own size (text-sm). Every value is a token (src/tokens). A caller may set layout
 // only (the `style` prop).
+/* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
@@ -37,9 +38,9 @@ export interface HeadingProps {
   size?: HeadingSize;
   /** An id, so a link or `aria-labelledby` can point at it. */
   id?: string;
-  /** Layout only: margins, alignment and width. The type belongs to the heading. */
+  /** @deprecated Use `layout`. */
   style?: HeadingLayoutStyle;
-  /** The same as `style`, by a name a style lint does not take for an inline style attribute. */
+  /** Layout only: margins, alignment and width. The type belongs to the heading. */
   layout?: HeadingLayoutStyle;
 }
 
