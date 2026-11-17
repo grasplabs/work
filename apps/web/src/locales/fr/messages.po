@@ -4538,6 +4538,7 @@ msgstr "Impossible de supprimer"
 msgid "Could not end access"
 msgstr "Impossible de mettre fin à l'accès"
 
+#: src/apps/app-history.tsx
 #: src/frame/app-frame.tsx
 msgid "Could not finish"
 msgstr "N'a pas pu aboutir"

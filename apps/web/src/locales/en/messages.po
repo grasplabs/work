@@ -4538,6 +4538,7 @@ msgstr "Could not delete"
 msgid "Could not end access"
 msgstr "Could not end access"
 
+#: src/apps/app-history.tsx
 #: src/frame/app-frame.tsx
 msgid "Could not finish"
 msgstr "Could not finish"

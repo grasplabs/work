@@ -295,6 +295,12 @@ const shown = async (
   return router;
 };
 
+/** The asking dialog's confirming action: its last, after Cancel. */
+const confirmation = (): HTMLElement | undefined =>
+  [...document.querySelectorAll<HTMLElement>('[role="alertdialog"] button')].at(
+    -1
+  );
+
 const press = async (element: Element | undefined) => {
   if (!(element instanceof HTMLElement)) {
     throw new TypeError("Nothing to press");
@@ -382,12 +388,7 @@ describe("An App's History", () => {
     ).length;
 
     await press(button("Restore", unpublished));
-    await press(
-      button(
-        "Restore",
-        document.querySelector('[role="alertdialog"]') ?? document
-      )
-    );
+    await press(confirmation());
 
     expect({
       heading: unpublished.querySelector("h3")?.textContent,
@@ -417,19 +418,9 @@ describe("An App's History", () => {
     await press(button("Cancel"));
     const afterCancel = [...asked];
     await press(button("Restore", unpublished));
-    await press(
-      button(
-        "Restore",
-        document.querySelector('[role="alertdialog"]') ?? document
-      )
-    );
+    await press(confirmation());
     await press(button("Undo changes"));
-    await press(
-      button(
-        "Undo changes",
-        document.querySelector('[role="alertdialog"]') ?? document
-      )
-    );
+    await press(confirmation());
 
     expect({ afterCancel, asked }).toStrictEqual({
       afterCancel: [],

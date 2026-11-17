@@ -557,6 +557,17 @@ const tick = async (name: string): Promise<void> => {
   await press(box);
 };
 
+/** The asking dialog's confirming action: its last, after Cancel. */
+const confirmation = (): HTMLElement => {
+  const found = [
+    ...document.querySelectorAll<HTMLElement>('[role="alertdialog"] button'),
+  ].at(-1);
+  if (found === undefined) {
+    throw new Error("No dialog asking");
+  }
+  return found;
+};
+
 /** Whether `element` is the page's main action. */
 const lime = (element: HTMLElement): boolean =>
   element.dataset.variant === "ink";
@@ -2170,7 +2181,7 @@ describe(AppWorkspace, () => {
     await press(button("Undo"));
     const asked = says("Undo the changes only you see?");
     const before = [...fake.calls];
-    await press(button("Undo changes"));
+    await press(confirmation());
 
     expect({ asked, before, calls: fake.calls }).toStrictEqual({
       asked: true,

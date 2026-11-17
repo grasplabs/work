@@ -4538,6 +4538,7 @@ msgstr "Löschen fehlgeschlagen"
 msgid "Could not end access"
 msgstr "Zugriff konnte nicht beendet werden"
 
+#: src/apps/app-history.tsx
 #: src/frame/app-frame.tsx
 msgid "Could not finish"
 msgstr "Konnte nicht abgeschlossen werden"
