@@ -1,4 +1,4 @@
-import { neverShared } from "@grasp-os/shared/interview-links";
+import { onlyForAsking } from "@grasp-os/shared/interview-links";
 import type { InterviewFact } from "@grasp-os/shared/interview-links";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -21,13 +21,15 @@ import {
   saveAgainNow,
   update,
   useHeld,
+  useKind,
   useSaveState,
 } from "./kept.ts";
 import type { SaveState } from "./kept.ts";
 import { withShares } from "./progress.ts";
 
 // Where each line of an interview goes (GRA-1987), the person's to choose:
-// shared with their team as how they work, or only counted anonymously.
+// shared in their company as how their team works (every member reads a
+// team's claims and drawings), or only counted anonymously.
 // Under each line of the read-back, and once they agreed, in "Where your
 // lines go". Approving binds where a line goes, so a line moved after
 // they agreed counts again only once it is approved where it goes now.
@@ -37,9 +39,10 @@ const moved = (share: InterviewFact["share"]): InterviewFact["share"] =>
   share === "team" ? undefined : "team";
 
 /**
- * Where one line goes, under it: a press moves it. Who does the work is
- * only used to know whom to ask, and has no choice. `of` is the id of the
- * line's words, which describe the button.
+ * Where one line goes, under it: a press moves it. A line only used to
+ * know whom to ask (`onlyForAsking`: who does the work, and in their own
+ * interview the work someone says they do instead) has no choice, and
+ * says so. `of` is the id of the line's words, which describe the button.
  */
 export const Destination = ({
   tag,
@@ -53,7 +56,8 @@ export const Destination = ({
   disabled?: boolean;
 }) => {
   const { t } = useLingui();
-  if (tag === neverShared) {
+  const kind = useKind();
+  if (onlyForAsking(tag, kind)) {
     return (
       <p className="text-muted-foreground text-xs">{t`Only used to know whom to ask`}</p>
     );
@@ -72,9 +76,7 @@ export const Destination = ({
       ) : (
         <EyeOffIcon data-icon="inline-start" />
       )}
-      {team
-        ? t`Shared with your team as how you work`
-        : t`Only counted anonymously`}
+      {team ? t`Shared as how your team works` : t`Only counted anonymously`}
     </Button>
   );
 };
@@ -259,7 +261,8 @@ export const WhereLinesGo = () => {
               changed.map((fact) => [fact.id, shareOf(fact)] as const)
             );
             update((now) => withShares(now, chosen));
-            approveWhenKept();
+            // Approves the lines it shows, as they go now: nothing else.
+            approveWhenKept(lines.map(({ id }) => id));
             setSent(true);
           }}
           refusal={save.state === "refused" ? save.message : null}

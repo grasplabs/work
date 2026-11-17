@@ -1195,6 +1195,19 @@ const askedOf = async (person: string): Promise<string | undefined> => {
   return context?.work;
 };
 
+/** What a turn of `person`'s interview knows already (`TurnContext.known`). */
+const knownTo = async (person: string): Promise<string> => {
+  const context = await onboardingStore(env).contextOf(person);
+  return context?.known ?? "";
+};
+
+/** What the tickets' drawing left open, as staff read it; null without a drawing. */
+const openOfTickets = async (teamId: string): Promise<string[] | null> => {
+  const pieces = await onboardingStore(env).teamWorks(teamId);
+  const tickets = pieces.find(({ name }) => name === "handling new tickets");
+  return tickets?.drawn?.open ?? null;
+};
+
 /** The names of a team's pieces of work, as Grasp's staff read them. */
 const piecesOf = async (teamId: string): Promise<string[]> => {
   const pieces = await onboardingStore(env).teamWorks(teamId);
@@ -2131,6 +2144,9 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     await handOverNow();
     const store = onboardingStore(env);
     const before = await askedOf(ids.mia);
+    // The old drawing of the tickets, with what it left open (staff read
+    // it; the next interviewer is told only what nobody said yet).
+    const drawnBefore = await openOfTickets(ids.team);
     // The store as this release finds it: its map was drawn from every line
     // Lea approved, none of which had a destination.
     await runInDurableObject(store, (_, state) => {
@@ -2158,8 +2174,12 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     );
     const given = await intake(ids, [zendeskClaim]);
     await handOverNow();
+    const known = await knownTo(ids.mia);
     expect({
       before,
+      drawnBefore,
+      drawnAfter: await openOfTickets(ids.team),
+      toldToAsk: known.includes("Nobody has said yet"),
       prompts: [...drawn.requests, ...given.requests].some(({ body }) =>
         holdsMapWords(JSON.stringify(body))
       ),
@@ -2168,6 +2188,9 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
       recalled: await recalled(max, "tickets", "drawing"),
     }).toStrictEqual({
       before: "nieuwe tickets afhandelen",
+      drawnBefore: ["Why do some ask Noor?"],
+      drawnAfter: null,
+      toldToAsk: false,
       prompts: false,
       results: false,
       asked: "",

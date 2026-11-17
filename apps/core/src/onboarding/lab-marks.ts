@@ -20,34 +20,34 @@ export const labMarks: Record<
 > = {
   stephen: {
     own: {
-      en: "34a742c98863a6c87689be4f3881e12495a8f34f2de56c2d56401c5e284b813a",
-      nl: "f522ab263b8a067e5ec1c830686f44e9322a0edc1049d8a4864015d1ba1737d0",
-      de: "e3601c0dd80506be2859aabade62e2b68580369c5fc11e6b2fe3b30893741bfe",
-      fr: "450be45d5a78be5b9126497a9a357f48bd7e80b3b3eb4bfae8bfbe02946afcfa",
-      es: "df3406ccceb67983ba2c54d4f858019a565494ec922cafe2d9d2a414083c780e",
+      en: "0a48c0d373f75127d6fd0cf56f12b51e1d7f9df19dbd4b9ba39b9a72320f39c9",
+      nl: "c739a767f5e8943a84bd9a2d346b97dff2de69733a2d334672d4706dde4522a2",
+      de: "d6baf10798c8c909c36eeca5c1490aa04c0f195b64dd276712a5be4e324b4820",
+      fr: "f715f13f983a149fa37c4a4aa906890960790465866ad289b5f267a190f0dda1",
+      es: "d8ae32cc0493abdac23d5d21d6abfb14319e6acb12dc1f0ad8c9b22f7c0fce73",
     },
     lead: {
-      en: "688b5a772acd26200c01993d1c65f5d6700c44f5d0fbc733718ab59ae02082a8",
-      nl: "454b9ddb5a2e16ced3a09a30c6f9de4fac34d7de33a71e59d50e10da0ec26306",
-      de: "2da379a7384b7315f965231e9081602d807f95f7821072a24be514e0b76486ef",
-      fr: "b3abd9540d312c1ebcbbeaac41d6474a5ac1ca661949f9c01e7c7c5b8f846004",
-      es: "601c5b08c830fec2d1837abe8d98160be957677929b0aa9108cd4978da2c20c3",
+      en: "c19156e24d2f53c686c07cce92a71b06b2cce99c137ccb26911b8329216b5cc0",
+      nl: "4ec6c724f71e8cfa4c5b9490ed90304378d41246958dc938d55b189f75536e57",
+      de: "4741e21e28e4880fd5a9d44d566b4c10d1af7fe42730d7cbbe3cff42985c15ab",
+      fr: "408cf81707d1f9257abb9456ad03934b0ad5515c13e0a37d37d959723a39fd13",
+      es: "49b47acbb06fe5199a7a6707f12b78d91c4d4bce9eb0678ab6ce7f91690de756",
     },
   },
   claire: {
     own: {
-      en: "4208572e18f3d658a47a147cfa3bb9317d2bf9bf99e1f5fd239527ad183ebb8d",
-      nl: "70a3efb0e9b8ae39e75a7292efa3e962c28e2e9b70d8693b2daa6b2f83bbc73c",
-      de: "6a29e5a3075c061ca10376657b85f0c76e68c6b5e69659e198bfd959cf768f3f",
-      fr: "9446784eecdb9119cdfae77960a629160914a29b9e088dc74b3337b7d17b0de5",
-      es: "58868a14b4e4787d53bf629ce6b3dad4dbd2ca12973f2cbb635036c4baa7d138",
+      en: "8e070ad25a7336c910e51e9a34e739787b0ee3a3be9f2c2ed6609aaf78186a49",
+      nl: "bcc4f7754be4bcbe152224f0c1c60967012096a70429c4e7b877917e8607781a",
+      de: "e40ad75afd22f61643078fcb1842f684a6955cc43ae494fa11650f3b71513012",
+      fr: "3bdb80d666f140e3040e06caabf1f9aac20622a1fb6a4d721333109364c59ff4",
+      es: "acb2750cb6ec559bb3e56901086487b31888ec63885ad271a83df133ba0c6224",
     },
     lead: {
-      en: "7d60f6862f4c8cc07d2454c87f3dac02c07ae23443cd678440e06b3f0d2b234b",
-      nl: "abeefad85440fcd8336a1f2ca4bf68ce45b617c75d33fb6288d60e4163c6f86a",
-      de: "97d811841b44b6010ca5d410ee8ac11a4144b227d4bad97e1d749f5b8e5e4606",
-      fr: "3191ba304ac8c266a6c7c4cb839fb9beb0c8a45b864bca4358d742e7828318b9",
-      es: "b1195164a2f2c264be45976dcb12f1ae7f95448db472b78e36c0434a89cddd8a",
+      en: "7b3f118716f6686fd4ec378a571f0d5e62dd90214ca87a777d8c2ed808a05e79",
+      nl: "c15066f84dceec94f526f7e0d39337a8673d6bf39789ad63d10753061f15911e",
+      de: "2e2fffb42cf5a9c96a321ca90f15f71a9a97bdd9d1248d055086089cbd2fd2e5",
+      fr: "b66baff73cbce1ae5db0cc95c0367bb593f52415970427c97c90786114bd4d56",
+      es: "cbe850ede2ee917680ad8bf5feb80f899a32c1e0d0497ad036c731b874afccd9",
     },
   },
 };
@@ -58,7 +58,7 @@ export const labMarks: Record<
 // that keeps it says which texts held it, in whatever language it ran, and
 // the Stephen Lab sets the interviews of one version beside its runs. A
 // test holds it to the marks.
-export const stephenVersion = "866527574350";
+export const stephenVersion = "adbc69f1429e";
 
 /** Every mark above, in the order they stand: what `stephenVersion` is taken over. */
 export const everyLabMark = (): string[] =>

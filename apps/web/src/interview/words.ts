@@ -80,13 +80,13 @@ export const useLoopWords = (locale: Locale): LoopWords => {
 /**
  * The promise about their words (GRA-1286, GRA-1987), as the first screen,
  * the read-back's last part and the thanks say it, and as Stephen says it
- * when asked: the lines they share go to their team as how it works, the
- * rest are only counted anonymously (core's onboarding/store.ts
+ * when asked: the lines they share go to everyone in their company as how
+ * their team works, the rest are only counted anonymously (core's onboarding/store.ts
  * `drawInput`, `participationNotice`).
  */
 export const usePromise = (): string => {
   const { t } = useLingui();
-  return t`How you do the work is shared with your team as how the team works, never as what you said. What you think of it is only counted anonymously: it shows once five or more people across the company say the same, never with your name or your team.`;
+  return t`How you do the work is shared in your company as how your team works, never as what you said. What you think of it is only counted anonymously: it shows once five or more people across the company say the same, never with your name or your team.`;
 };
 
 export const useInterviewWords = () => {

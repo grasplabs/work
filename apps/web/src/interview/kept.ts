@@ -1,6 +1,6 @@
 import { factRevision } from "@grasp-os/shared/interview-links";
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
-import type { Interviewer } from "@grasp-os/shared/onboarding";
+import type { InterviewKind, Interviewer } from "@grasp-os/shared/onboarding";
 import { useSyncExternalStore } from "react";
 
 import { approveFacts, isRefused, saveProgress } from "./api.ts";
@@ -30,6 +30,8 @@ export type SaveState =
 
 interface Kept {
   secret: string;
+  /** Whose interview it is: their own work, or a lead's about their team. */
+  kind: InterviewKind;
   version: number;
   progress: InterviewProgress;
   /**
@@ -56,6 +58,11 @@ interface Kept {
   gone: boolean;
   /** They agreed to the read-back, and core is to be told once it is kept. */
   approving: boolean;
+  /**
+   * The facts to approve then, by id: those they agreed to just now. Null
+   * for every fact not taken out, as agreeing to the read-back does.
+   */
+  approvingOnly: ReadonlySet<string> | null;
 }
 
 /** How soon after a change it is kept: changes close together are kept together. */
@@ -165,9 +172,10 @@ const saveOnce = async (mine: Kept): Promise<void> => {
 /** Tells core they approve the facts read back, as kept now: each at its revision. */
 const approveOnce = async (mine: Kept): Promise<void> => {
   const approving = mine.progress;
+  const only = mine.approvingOnly;
   const facts = await Promise.all(
     mine.progress.facts
-      .filter(({ out }) => out !== true)
+      .filter(({ id, out }) => out !== true && (only === null || only.has(id)))
       .map(async (fact) => ({
         id: fact.id,
         revision: await factRevision(fact),
@@ -278,13 +286,17 @@ export const saveAgainNow = (): void => {
 };
 
 /** They agreed to the read-back: core is told, once what was read back is kept. */
-export const approveWhenKept = (): void => {
+export const approveWhenKept = (only?: readonly string[]): void => {
   if (kept === null || kept.gone) {
     return;
   }
   kept.approving = true;
+  kept.approvingOnly = only === undefined ? null : new Set(only);
   void save(kept);
 };
+
+/** Whose interview the page holds: their own work's, or a lead's; theirs before one is held. */
+export const kindNow = (): InterviewKind => kept?.kind ?? "own";
 
 /** The page goes: what is not kept yet goes with it, however it closes. */
 const onPageHide = (): void => {
@@ -313,10 +325,12 @@ const onPageHide = (): void => {
 /** The interview core holds for this link, from now on held here. */
 export const holdInterview = ({
   secret,
+  kind,
   version,
   progress,
 }: {
   secret: string;
+  kind: InterviewKind;
   version: number;
   progress: InterviewProgress | null;
 }): void => {
@@ -325,6 +339,7 @@ export const holdInterview = ({
   }
   kept = {
     secret,
+    kind,
     version,
     progress: progress ?? freshProgress,
     held: progress ?? freshProgress,
@@ -336,6 +351,7 @@ export const holdInterview = ({
     failed: 0,
     gone: false,
     approving: false,
+    approvingOnly: null,
   };
   saveState = { state: "saved" };
   window.removeEventListener("pagehide", onPageHide);
@@ -401,6 +417,10 @@ export const onTaken = (taker: () => void): (() => void) => {
 /** The interview, as the page shows it. */
 export const useProgress = (): InterviewProgress =>
   useSyncExternalStore(subscribe, progressNow);
+
+/** Whose interview the page holds (`kindNow`). */
+export const useKind = (): InterviewKind =>
+  useSyncExternalStore(subscribe, kindNow);
 
 /** The interview as core is known to hold it (`Kept.held`). */
 export const useHeld = (): InterviewProgress =>

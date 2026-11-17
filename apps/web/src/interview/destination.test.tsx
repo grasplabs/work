@@ -14,6 +14,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import type { OpenSession } from "./api.ts";
 import { holdInterview, releaseInterview } from "./kept.ts";
@@ -54,6 +55,14 @@ const finished: InterviewProgress = {
       record: "Wishes the number were filled in.",
       agreed: true,
     },
+    // Said after they agreed, and not agreed to (yet): not in the sheet.
+    {
+      id: "f3",
+      tag: "step",
+      text: "You file the ticket.",
+      record: "Files the ticket.",
+      share: "team",
+    },
   ],
   phase: "result",
   wants: "end",
@@ -77,10 +86,19 @@ const session: OpenSession = {
   removing: false,
 };
 
-/** How the faked core answers: keeping, unreachable, or refusing. */
-const core: { answers: "keeps" | "unreachable" | "refuses" } = {
+/** How the faked core answers: keeping, unreachable, or refusing; and the facts each approval named. */
+const core: {
+  answers: "keeps" | "unreachable" | "refuses";
+  approved: string[][];
+} = {
   answers: "keeps",
+  approved: [],
 };
+
+const approvedSchema = z.object({
+  action: z.literal("approve"),
+  facts: z.array(z.object({ id: z.string() })),
+});
 
 /** A refusal as core sends it. */
 const refusal = {
@@ -97,13 +115,11 @@ const answered = async (init?: RequestInit): Promise<Response> => {
     return Response.json(refusal, { status: 403 });
   }
   const sent = typeof init?.body === "string" ? init.body : "{}";
-  const body: unknown = JSON.parse(sent);
-  const approving =
-    typeof body === "object" &&
-    body !== null &&
-    "action" in body &&
-    body.action === "approve";
-  return approving
+  const approval = approvedSchema.safeParse(JSON.parse(sent));
+  if (approval.success) {
+    core.approved.push(approval.data.facts.map(({ id }) => id));
+  }
+  return approval.success
     ? Response.json({
         approved: true,
         receipt: "rb-1",
@@ -158,7 +174,12 @@ const sheetOpen = async (): Promise<void> => {
       async (_input, init) => await answered(init)
     )
   );
-  holdInterview({ secret: "s".repeat(43), version: 1, progress: finished });
+  holdInterview({
+    secret: "s".repeat(43),
+    kind: "own",
+    version: 1,
+    progress: finished,
+  });
   const rootRoute = createRootRoute({ component: Outlet });
   const page = createRoute({
     getParentRoute: () => rootRoute,
@@ -184,7 +205,7 @@ const sheetOpen = async (): Promise<void> => {
   await until(() => stepGoes() !== null, "the sheet");
 };
 
-const shared = "Shared with your team as how you work";
+const shared = "Shared as how your team works";
 const anonymous = "Only counted anonymously";
 
 describe("moving a line after agreeing to it", () => {
@@ -197,6 +218,15 @@ describe("moving a line after agreeing to it", () => {
     document.body.replaceChildren();
     vi.unstubAllGlobals();
     core.answers = "keeps";
+    core.approved = [];
+  });
+
+  it("approves only the lines the sheet shows, as they go now", async () => {
+    await sheetOpen();
+    await press(shared);
+    await press("Save where they go");
+    await until(() => stepGoes() === anonymous, "the move kept");
+    expect(core.approved).toStrictEqual([["f1", "f2"]]);
   });
 
   it("shows a move whose save is lost as not done, the line where core holds it, and keeps it once tried again", async () => {

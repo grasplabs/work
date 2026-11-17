@@ -1058,7 +1058,7 @@ interface InterviewCounts {
   rating: number | null;
   typed: boolean;
   interviewer: NonNullable<InterviewProgress["interviewer"]> | null;
-  /** Of the facts kept in, those they chose to share with their team (GRA-1987). */
+  /** Of the facts kept in, those they marked as shared as how their team works (GRA-1987). */
   shared: number;
 }
 
@@ -1110,7 +1110,7 @@ const countsOf = (progress: InterviewProgress): InterviewCounts => ({
   phase: progress.phase,
   facts: progress.facts.filter(({ out }) => out !== true).length,
   shared: progress.facts.filter(
-    (fact) => fact.out !== true && sharedWithTeam(fact)
+    ({ out, share }) => out !== true && share === "team"
   ).length,
   // One erased counts nowhere.
   out: takenOut(progress).length,
@@ -2429,7 +2429,7 @@ export class Onboarding extends DurableObject<Env> {
    * What the drawing gets from someone's interview: only the facts they
    * agreed to, as the record keeps them. Nothing before they agreed, and
    * nothing they added after until they agreed to that too. Only the lines
-   * they chose to share with their team as how they work (GRA-1987): one
+   * they chose to share as how their team works (GRA-1987): one
    * only counted anonymously never reaches the team's map, its drawings or
    * its claims, and someone with none to share tells their team nothing.
    * This is the one way facts leave the store for any of those.
@@ -2440,8 +2440,13 @@ export class Onboarding extends DurableObject<Env> {
       .from(interviewStates)
       .where(eq(interviewStates.person, person))
       .all();
-    const facts = this.#admitted(person).filter(sharedWithTeam);
-    if (state === undefined || state.agreedAt === null || facts.length === 0) {
+    if (state === undefined) {
+      return null;
+    }
+    const facts = this.#admitted(person).filter((fact) =>
+      sharedWithTeam(fact, state.kind)
+    );
+    if (state.agreedAt === null || facts.length === 0) {
       return null;
     }
     return {
@@ -2450,9 +2455,9 @@ export class Onboarding extends DurableObject<Env> {
       agreedAt: state.agreedAt,
       generation: `${state.agreedAt}|${state.revocations}`,
       admission: `${state.startedAt ?? ""}|${state.revocations}`,
-      // Who does the work they were asked about names a colleague: it is
-      // for putting right who is asked what (`#referOne`), never shared
-      // (`sharedWithTeam` leaves it out).
+      // Who does the work they were asked about, and the work someone
+      // says they do instead, are for putting right who is asked what
+      // (`#referOne`), never shared (`sharedWithTeam` leaves them out).
       facts: facts.map(({ tag, record }) => ({ tag, record })),
     };
   }

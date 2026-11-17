@@ -61,7 +61,12 @@ describe("what the interview page keeps", () => {
       sent.push({ body: bodyOf(init), keepalive: init.keepalive === true });
       return await never;
     });
-    holdInterview({ secret: "s".repeat(43), version: 3, progress: said });
+    holdInterview({
+      secret: "s".repeat(43),
+      kind: "own",
+      version: 3,
+      progress: said,
+    });
 
     update((now) => ({ ...now, phase: "readback" }));
     await vi.advanceTimersByTimeAsync(1000);
@@ -106,7 +111,12 @@ describe("what the interview page keeps", () => {
       }
       return await never;
     });
-    holdInterview({ secret: "s".repeat(43), version: 3, progress: said });
+    holdInterview({
+      secret: "s".repeat(43),
+      kind: "own",
+      version: 3,
+      progress: said,
+    });
 
     update((now) => ({ ...now, phase: "readback" }));
     await vi.advanceTimersByTimeAsync(1000);
@@ -148,7 +158,12 @@ describe("what the interview page keeps", () => {
       sent.push({ body: bodyOf(init), keepalive: init.keepalive === true });
       return await never;
     });
-    holdInterview({ secret: "s".repeat(43), version: 3, progress: said });
+    holdInterview({
+      secret: "s".repeat(43),
+      kind: "own",
+      version: 3,
+      progress: said,
+    });
 
     update((now) => withoutLine(now, 1));
     window.dispatchEvent(new Event("pagehide"));

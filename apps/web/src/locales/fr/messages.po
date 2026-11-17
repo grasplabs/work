@@ -6843,8 +6843,8 @@ msgid "How you appear in Grasp: on workflows you own, and in the audit trail."
 msgstr "Comment vous apparaissez dans Grasp : sur les workflows dont vous êtes responsable, et dans le journal d’audit."
 
 #: src/interview/words.ts
-msgid "How you do the work is shared with your team as how the team works, never as what you said. What you think of it is only counted anonymously: it shows once five or more people across the company say the same, never with your name or your team."
-msgstr "La façon dont vous faites le travail est partagée avec votre équipe comme la façon dont l’équipe travaille, jamais comme ce que vous avez dit. Ce que vous en pensez compte seulement de façon anonyme : cela n’apparaît que lorsque cinq personnes ou plus dans toute l’entreprise disent la même chose, jamais avec votre nom ni votre équipe."
+msgid "How you do the work is shared in your company as how your team works, never as what you said. What you think of it is only counted anonymously: it shows once five or more people across the company say the same, never with your name or your team."
+msgstr "La façon dont vous faites le travail est partagée dans votre entreprise comme la façon dont votre équipe travaille, jamais comme ce que vous avez dit. Ce que vous en pensez compte seulement de façon anonyme : cela n’apparaît que lorsque cinq personnes ou plus dans toute l’entreprise disent la même chose, jamais avec votre nom ni votre équipe."
 
 #: src/routes/_shell.settings.security.tsx
 msgid "How you get into Grasp. Passwords and two-step sign-in live with your organization’s account."
@@ -12548,6 +12548,10 @@ msgstr "Partager…"
 msgid "Shared {when}"
 msgstr "Partagé le {when}"
 
+#: src/interview/destination.tsx
+msgid "Shared as how your team works"
+msgstr "Partagé comme la façon de travailler de votre équipe"
+
 #: src/settings/stephen-settings.tsx
 msgid "Shared mailboxes, colleagues' calendars and the company's files."
 msgstr "Boîtes partagées, agendas des collègues et fichiers de l'entreprise."
@@ -12579,10 +12583,6 @@ msgstr "Partagé avec tout le monde."
 #: src/brain/memories-page.tsx
 msgid "Shared with team {team}."
 msgstr "Partagé avec l’équipe {team}."
-
-#: src/interview/destination.tsx
-msgid "Shared with your team as how you work"
-msgstr "Partagé avec votre équipe comme votre façon de travailler"
 
 #: src/brain/memories-page.tsx
 msgid "Shared. It shows under the same name for those you shared it with."

@@ -1,5 +1,6 @@
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import type {
+  InterviewFact,
   InterviewProgress,
   InterviewSaved,
   InterviewSession,
@@ -293,6 +294,13 @@ const approveFact = async (secret: string, cookie: string) =>
     },
     cookie
   );
+
+/** A line marked as shared as how the team works, its words read back and kept the same. */
+const sharedLine = (
+  id: string,
+  tag: InterviewFact["tag"],
+  words: string
+): InterviewFact => ({ id, tag, text: words, record: words, share: "team" });
 
 /** Every value in the store's tables, as text. */
 const storeText = async (): Promise<string> =>
@@ -1199,6 +1207,41 @@ describe("taking part, approving and withdrawing", () => {
       afterForged: null,
       honest: 200,
       drawn: null,
+    });
+  });
+
+  it("never shares a line only used to know whom to ask: in someone's own interview, who does the work and the work they say they do instead reach no team result, whatever the line says (GRA-1987)", async () => {
+    const { ids, store, secrets, me } = await running();
+    await opened(secrets.oli, me);
+    await takePart(secrets.oli, me);
+    const facts = [
+      sharedLine("f1", "step", "Opens the ticket."),
+      sharedLine("f2", "who", "Sam does the billing."),
+      sharedLine("f3", "work", "Handles the billing instead."),
+    ];
+    const saved = await save(secrets.oli, me, 0, { ...progress(), facts });
+    const approved = await post(
+      {
+        action: "approve",
+        secret: secrets.oli,
+        facts: await Promise.all(
+          facts.map(async (fact) => ({
+            id: fact.id,
+            revision: await factRevision(fact),
+          }))
+        ),
+      },
+      me
+    );
+    const drawn = await store.drawInput(ids.oli);
+    expect({
+      saved: saved.status,
+      approved: approved.status,
+      drawn: drawn?.facts,
+    }).toStrictEqual({
+      saved: 200,
+      approved: 200,
+      drawn: [{ tag: "step", record: "Opens the ticket." }],
     });
   });
 

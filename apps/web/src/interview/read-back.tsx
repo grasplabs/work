@@ -75,6 +75,10 @@ const ReadBackLine = ({
   };
   return (
     <div className="flex flex-col items-start gap-0.5 py-1">
+      {/* What describes where the line goes, there also while the line is being put right. */}
+      <span className="sr-only" id={words}>
+        {text}
+      </span>
       <div className="flex w-full items-center gap-3">
         <span className="min-w-0 flex-1">
           {draft === null ? (
@@ -87,10 +91,7 @@ const ReadBackLine = ({
               }}
               type="button"
             >
-              <span
-                className={told === null ? undefined : toldLooks[told]}
-                id={words}
-              >
+              <span className={told === null ? undefined : toldLooks[told]}>
                 {text}
               </span>
             </button>
