@@ -1,6 +1,7 @@
 import { log } from "@grasp-os/shared/log";
 
 import { eraseSource, removeSharedSources } from "../brain-next.ts";
+import { eraseOpportunitiesOn } from "../opportunities.ts";
 import type { FallingSource } from "./sources-fall.ts";
 import { Onboarding as OnboardingStore } from "./store.ts";
 
@@ -25,6 +26,12 @@ const takeOut = async (
         readers: { kind: "members" },
         reason: "deleted",
       });
+      // What an opportunity keeps of a drawing goes with it (GRA-1750): if
+      // this fails, the drawing stays owed, and core's clock erases both.
+      if (source.producer === "drawing") {
+        // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
+        await eraseOpportunitiesOn(env, source.id);
+      }
       erased.push(source);
     } catch (error) {
       log.error("onboarding.brain_erasure_failed", {
