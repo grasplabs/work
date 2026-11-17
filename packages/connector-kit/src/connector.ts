@@ -28,6 +28,8 @@ import {
   resourceMetaKey,
   stampMetaKey,
   stampPattern,
+  syncMethod,
+  syncParamsSchema,
 } from "./manifest.ts";
 import type {
   ActionManifest,
@@ -36,6 +38,7 @@ import type {
   Route,
 } from "./manifest.ts";
 import type { SignInInput } from "./sign-in.ts";
+import type { Sync } from "./sync.ts";
 
 // How a native connector is written: its tools, each with what connect
 // decides by (read-only or not, the one resource it acts on, the requests
@@ -872,6 +875,8 @@ export interface ConnectorDefinition {
   scopes: readonly string[];
   hosts: readonly string[];
   tools: readonly Tool[];
+  /** Its syncs (sync.ts), for native sync; none by default. */
+  syncs?: readonly Sync[];
 }
 
 /** A connector: what connect knows of it, and its MCP server. */
@@ -920,6 +925,13 @@ export const defineConnector = (definition: ConnectorDefinition): Connector => {
     }
     tools.set(tool.name, tool);
   }
+  const syncs = new Map<string, Sync>();
+  for (const sync of definition.syncs ?? []) {
+    if (syncs.has(sync.name)) {
+      throw new Error(`Two syncs are named ${sync.name}`);
+    }
+    syncs.set(sync.name, sync);
+  }
   const manifest = connectorManifestSchema.parse({
     name: definition.name,
     version: definition.version,
@@ -930,6 +942,16 @@ export const defineConnector = (definition: ConnectorDefinition): Connector => {
     actions: Object.fromEntries(
       definition.tools.map(({ name, action }) => [name, action])
     ),
+    ...(syncs.size === 0
+      ? {}
+      : {
+          syncs: Object.fromEntries(
+            [...syncs.values()].map(({ name, manifest: declared }) => [
+              name,
+              declared,
+            ])
+          ),
+        }),
   });
 
   const respond = async (
@@ -964,6 +986,14 @@ export const defineConnector = (definition: ConnectorDefinition): Connector => {
           id,
           await tool.call(call.data?.arguments ?? {}, call.data?._meta)
         );
+      }
+      case syncMethod: {
+        const sync = syncParamsSchema.safeParse(params);
+        const found = sync.success ? syncs.get(sync.data.name) : undefined;
+        if (found === undefined) {
+          return refusal(id, invalidParams, "No such sync");
+        }
+        return answer(id, await found.call(params));
       }
       default: {
         return refusal(id, methodNotFound, "No such method");
