@@ -61,7 +61,10 @@ import { removeLostRunSources } from "../src/brain-run-sources.ts";
 import { selectSkillsFor } from "../src/brain-skills.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
-import { captureIdOf } from "../src/connection-capture-key.ts";
+import {
+  answerCaptureIdOf,
+  captureIdOf,
+} from "../src/connection-capture-key.ts";
 import { captureRead } from "../src/connection-capture.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
@@ -632,11 +635,13 @@ const asIfNeverAdded = async (
 interface HoldersProduced {
   ownUploadMarker: string;
   captureMarker: string;
+  toolkitCaptureMarker: string;
   runMarker: string;
   askedMarker: string;
   answerMarker: string;
   ownUpload: SourceRef;
   captureId: SourceRef;
+  toolkitCaptureId: SourceRef;
   runSource: SourceRef;
   turnSource: SourceRef;
 }
@@ -652,6 +657,8 @@ const holdersOwnProduced = (world: HoldersProduced) => {
   const forbidden = {
     "the holder's upload for only them": world.ownUploadMarker,
     "what the holder's agent fetched through a connection": world.captureMarker,
+    "what the holder's agent fetched through a toolkit":
+      world.toolkitCaptureMarker,
     "the holder's run": world.runMarker,
     "a question in the holder's chat": world.askedMarker,
     "an answer in the holder's chat": world.answerMarker,
@@ -662,6 +669,7 @@ const holdersOwnProduced = (world: HoldersProduced) => {
     sources: [
       world.ownUpload,
       world.captureId,
+      world.toolkitCaptureId,
       world.runSource,
       world.turnSource,
     ],
@@ -759,6 +767,7 @@ describe(
         "the holder's upload for only them": markerWord(),
         "an upload for a team the outsider isn't in": markerWord(),
         "what the holder's agent fetched through a connection": markerWord(),
+        "what the holder's agent fetched through a toolkit": markerWord(),
         "the holder's own skill": markerWord(),
         "a team's skill the outsider isn't in": markerWord(),
         "the holder's run": markerWord(),
@@ -788,6 +797,8 @@ describe(
         "the holder's upload for only them": ownUploadMarker,
         "an upload for a team the outsider isn't in": teamUploadMarker,
         "what the holder's agent fetched through a connection": captureMarker,
+        "what the holder's agent fetched through a toolkit":
+          toolkitCaptureMarker,
         "the holder's own skill": holderSkillMarker,
         "a team's skill the outsider isn't in": teamSkillMarker,
         "the holder's run": runMarker,
@@ -959,6 +970,56 @@ describe(
           holder,
           "mail.get",
           capturedItem
+        ),
+      };
+      // Read in the holder's chat through their own toolkit connection,
+      // whose server names no item: its whole answer one source, keyed by
+      // the call (connection-capture.ts, GRA-1845), theirs alone, its
+      // connection's ID holding a marker too.
+      const toolkitConnection = `connection-${toolkitCaptureMarker}`;
+      await connectDb()
+        .prepare(
+          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tools, created_at, updated_at) VALUES (?, 'mail_own', 'personal', ?, 'active', 'composio', 'https://mail.test/mcp', ?, ?, ?)"
+        )
+        .bind(
+          toolkitConnection,
+          holder,
+          JSON.stringify([{ name: "mail.search", read: true }]),
+          readAtNow,
+          readAtNow
+        )
+        .run();
+      const toolkitCall = { query: `notes ${toolkitCaptureMarker}` };
+      await captureRead(
+        env,
+        {
+          workspaceId: personalWorkspaceId(holder),
+          agentId: chatAgentId,
+          chatId: chatIdSchema.parse(crypto.randomUUID()),
+          personId: holder,
+          runId: crypto.randomUUID(),
+        },
+        toolkitConnection,
+        "mail.search",
+        toolkitCall,
+        {
+          result: {
+            output: JSON.stringify(
+              `Supplier notes ${sharedWord} ${toolkitCaptureMarker}`
+            ),
+            provenance: ["mail_own/mail.search"],
+            keep: true,
+          },
+          readAt: new Date(readAtNow),
+        }
+      );
+      const toolkitCaptureId: SourceRef = {
+        producer: "capture",
+        id: await answerCaptureIdOf(
+          toolkitConnection,
+          holder,
+          "mail.search",
+          toolkitCall
         ),
       };
       const teamSource = `Board minutes ${sharedWord} ${teamMarker}`;
@@ -1182,6 +1243,17 @@ describe(
       const holderFindsCapture = holderTexts.some((text) =>
         text.includes(captureMarker)
       );
+      // And what their toolkit's answer was kept as, by its own key.
+      const { items: toolkitItems } = await recallAs(env, holder, {
+        personal: true,
+        question: `notes ${toolkitCaptureMarker}`,
+        budget: { tokens: recallBudgetMax },
+      });
+      const holderFindsToolkitCapture = toolkitItems.some(
+        ({ source, text }) =>
+          source.id === toolkitCaptureId.id &&
+          text.includes(toolkitCaptureMarker)
+      );
       // And by the ID the hidden copies share: their own chunk, as exact.
       const { items: cappedItems } = await recallAs(env, outsider, {
         personal: true,
@@ -1205,6 +1277,7 @@ describe(
           noneMarker,
           narrowedMarker,
           captureMarker,
+          toolkitCaptureMarker,
           toHolderMarker,
           ...instructionMarkers,
           ownUploadMarker,
@@ -1223,6 +1296,7 @@ describe(
           ownUpload,
           teamUpload,
           captureId,
+          toolkitCaptureId,
           runSource,
           turnSource
         ),
@@ -1340,6 +1414,8 @@ describe(
         narrowedMarker,
         captureMarker,
         captureId,
+        toolkitCaptureMarker,
+        toolkitCaptureId,
         runMarker,
         askedMarker,
         answerMarker,
@@ -1377,6 +1453,7 @@ describe(
           narrowedToHolder,
           outsiderFinds: outsiderFinds.toSorted(),
           holderFindsCapture,
+          holderFindsToolkitCapture,
           cappedFinds,
           teamSkillSelected,
           holderAppFile: holderAppFiles.some(
@@ -1478,6 +1555,7 @@ describe(
         // A member, so the team's claim from the interviews too (GRA-1748).
         outsiderFinds: [handbook, claimText].toSorted(),
         holderFindsCapture: true,
+        holderFindsToolkitCapture: true,
         cappedFinds: [{ text: capped, found: "exact" }],
         teamSkillSelected: {
           byTheHolder: [`${secretTeam}:${teamSkillMarker}`],
@@ -1737,6 +1815,7 @@ describe(
             world.noneMarker,
             world.narrowedMarker,
             world.captureMarker,
+            world.toolkitCaptureMarker,
             world.toHolderMarker,
             ...world.instructionMarkers,
             world.ownUploadMarker,
@@ -1750,6 +1829,7 @@ describe(
             world.narrowedId,
             world.ownUpload,
             world.captureId,
+            world.toolkitCaptureId,
             world.runSource,
             world.turnSource
           ),

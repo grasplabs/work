@@ -648,21 +648,22 @@ const requireAllowedEffect = (
 
 /**
  * Whether core may keep what a read answered as sources in the Brain
- * (`ConnectResult.keep`): only when its server named the items it read
- * (a name `withProvenance` makes up from the tool is no item), and never
- * from a toolkit whose provider's terms forbid copies.
+ * (`ConnectResult.keep`): never anything from a toolkit whose provider's
+ * terms forbid copies. A native connector's or an HTTP connection's only
+ * when its server named the items it read (a name `withProvenance` makes
+ * up from the tool is no item); a toolkit's whatever it named, as core
+ * keeps its whole answer as one source, keyed by the call (GRA-1845). An
+ * error answer goes back as `connect.action_failed`, never as a result.
  */
 const keepOf = (
   connection: Pick<Connection, "serverKind" | "provider">,
   answered: McpToolResult
-): ConnectResult["keep"] =>
-  answered.provenance.length > 0 &&
-  !(
-    connection.serverKind === "composio" &&
-    toolkitsWithoutCopies.has(connection.provider)
-  )
-    ? true
-    : undefined;
+): ConnectResult["keep"] => {
+  if (connection.serverKind === "composio") {
+    return toolkitsWithoutCopies.has(connection.provider) ? undefined : true;
+  }
+  return answered.provenance.length > 0 ? true : undefined;
+};
 
 /** One call of a read, its answer as the tool gave it. */
 const readOnce = async (

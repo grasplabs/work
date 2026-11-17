@@ -1,5 +1,5 @@
 diff --git a/dist/src/workers/workflows/binding.worker.js b/dist/src/workers/workflows/binding.worker.js
-index 8916829..e58d5aa 100644
+index 89168292de5587cb9f1efdeba4ccbe2196d8e6b1..e58d5aa05cbd123c9bdac0787061845a5bbd87e1 100644
 --- a/dist/src/workers/workflows/binding.worker.js
 +++ b/dist/src/workers/workflows/binding.worker.js
 @@ -2494,7 +2494,21 @@ var defaultConfig = {
