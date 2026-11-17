@@ -1433,6 +1433,8 @@ export class Workspace extends DurableObject<Env> {
       | "chat.renamed"
       | "chat.archived"
       | "chat.unarchived"
+      | "chat.filed"
+      | "chat.unfiled"
       | "chat.deleted"
       | "chat.moved"
       | "chat.draft_restored"
@@ -3317,9 +3319,9 @@ export class Workspace extends DurableObject<Env> {
   /**
    * `personId`'s chats, the most recently active first: at most
    * {@link listedChats}. Those they archived only with `archived`, and then
-   * only those.
+   * only those; with `project`, only those they filed in it.
    */
-  chats(personId: string, archived = false): ChatSummary[] {
+  chats(personId: string, archived = false, project?: string): ChatSummary[] {
     return this.#db
       .select({
         id: chats.id,
@@ -3337,7 +3339,8 @@ export class Workspace extends DurableObject<Env> {
       .where(
         and(
           eq(chats.personId, personId),
-          archived ? isNotNull(chats.archivedAt) : isNull(chats.archivedAt)
+          archived ? isNotNull(chats.archivedAt) : isNull(chats.archivedAt),
+          project === undefined ? undefined : eq(chats.projectId, project)
         )
       )
       .orderBy(desc(chats.lastAt))
@@ -3812,6 +3815,38 @@ export class Workspace extends DurableObject<Env> {
     this.ctx.storage.transactionSync(() => {
       this.#db.update(chats).set({ title }).where(eq(chats.id, id)).run();
       this.#outboxed(by, "chat.renamed", id);
+    });
+    this.#deliverAudit();
+  }
+
+  /**
+   * Files `personId`'s own chat in project `project`, or takes it out of
+   * the one it is in (`null`), audited as `by`'s; nothing, and no event,
+   * where it is so already. Whether they may put it in that project is
+   * the caller's to check (`ChatsRpc.setProject`).
+   */
+  setChatProject(
+    chatId: unknown,
+    personId: string,
+    project: string | null,
+    by: AuditActor
+  ): void {
+    const chat = this.#ownChat(chatId, personId);
+    if (chat.projectId === project) {
+      return;
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(chats)
+        .set({ projectId: project })
+        .where(eq(chats.id, chat.id))
+        .run();
+      this.#outboxed(
+        by,
+        project === null ? "chat.unfiled" : "chat.filed",
+        chat.id,
+        { project: project ?? chat.projectId }
+      );
     });
     this.#deliverAudit();
   }

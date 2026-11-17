@@ -304,6 +304,96 @@ describe("chats", () => {
     );
   });
 
+  it("are filed in a project by their person alone, listed there for them only, and taken out again, each recorded once", async () => {
+    const owner = await signedInApi(idp, "builder");
+    const ann = await person();
+    const ben = await person();
+    const cy = await person();
+    const { id: project } = await owner.api.projects.create({
+      name: "Year-end close",
+      description: "",
+      icon: "folder",
+    });
+    for (const { userId } of [ann, ben]) {
+      // oxlint-disable-next-line no-await-in-loop -- one member at a time
+      await owner.api.projects.addMember(project, {
+        type: "person",
+        id: userId,
+        role: "user",
+      });
+    }
+    const filed = await ann.chats.create("Accruals");
+    const kept = await ann.chats.create("Lunch");
+    const cys = await cy.chats.create("Elsewhere");
+
+    await ann.chats.setProject(filed.id, project);
+    // Filing it again changes nothing, and records nothing more.
+    await ann.chats.setProject(filed.id, project);
+    const refused = await Promise.all([
+      // Someone else in the project can't file, or take out, her chat.
+      outcome(ben.chats.setProject(filed.id, null)),
+      outcome(ben.chats.setProject(kept.id, project)),
+      // Someone outside it can neither file in it nor list it.
+      outcome(cy.chats.setProject(cys.id, project)),
+      outcome(cy.chats.list({ project })),
+    ]);
+    const listed = {
+      ann: await ann.chats.list({ project }),
+      ben: await ben.chats.list({ project }),
+      annAll: await ann.chats.list(),
+    };
+    await ann.chats.setProject(filed.id, null);
+    const after = await ann.chats.list({ project });
+
+    expect({
+      refused,
+      ann: listed.ann.map(({ id }) => id),
+      ben: listed.ben.map(({ id }) => id),
+      annAll: listed.annAll.map(({ id }) => id),
+      after: after.map(({ id }) => id),
+    }).toStrictEqual({
+      refused: [
+        "agent.chat_not_found",
+        "agent.chat_not_found",
+        "project.not_found",
+        "project.not_found",
+      ],
+      ann: [filed.id],
+      ben: [],
+      annAll: [kept.id, filed.id],
+      after: [],
+    });
+    await vi.waitFor(
+      async () => {
+        const events = await allEvents();
+        expect(
+          events
+            .filter(
+              ({ target, action }) =>
+                target?.id === filed.id && action !== "chat.created"
+            )
+            .map(({ action, actor, detail }) => ({
+              action,
+              actor,
+              project: detail?.project,
+            }))
+        ).toStrictEqual([
+          {
+            action: "chat.filed",
+            actor: { type: "person", userId: ann.userId },
+            project,
+          },
+          {
+            action: "chat.unfiled",
+            actor: { type: "person", userId: ann.userId },
+            project,
+          },
+        ]);
+      },
+      { timeout: 10_000 }
+    );
+  });
+
   it("are listed by their latest message: a chat just continued comes first", async () => {
     const ann = await person();
     const older = await ann.chats.create("Invoices");

@@ -89,11 +89,19 @@ export const chats = sqliteTable(
      * a chat in the list.
      */
     archivedAt: integer("archived_at", { mode: "timestamp_ms" }),
+    /**
+     * The project its person filed it in (`ChatsApi.setProject`), for them
+     * alone to find it there; null for a chat in none. Kept here, in the
+     * person's own object, so nobody else in the project sees it. A project
+     * deleted since leaves it pointing at nothing, which lists nowhere.
+     */
+    projectId: text("project_id"),
   },
   // A person's list, most recently active first.
   (table) => [
     index("chats_person").on(table.personId, table.lastAt),
     index("chats_app").on(table.personId, table.appId),
+    index("chats_project").on(table.personId, table.projectId),
   ]
 );
 

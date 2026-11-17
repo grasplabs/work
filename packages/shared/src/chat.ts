@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type { ChatSavedMemory } from "./brain-memories.ts";
 import type { DependencyRequest } from "./dependencies.ts";
+import { identifierSchema } from "./ids.ts";
 import type { AppId } from "./ids.ts";
 import type { ModelEffort, ModelEfforts, ModelErrorCode } from "./models.ts";
 import type { PageBundle } from "./pages.ts";
@@ -172,6 +173,8 @@ export const chatListOptionsSchema = z
   .object({
     /** Only those the person archived (`ChatsApi.archive`); else only the rest. */
     archived: z.boolean().optional(),
+    /** Only those the person filed in this project (`ChatsApi.setProject`). */
+    project: identifierSchema.optional(),
   })
   .strict();
 
@@ -1236,6 +1239,13 @@ export interface ChatsApi {
   archive: (chatId: string) => Promise<void>;
   /** Brings an archived chat of the person's back into `list`. */
   unarchive: (chatId: string) => Promise<void>;
+  /**
+   * Files one of the person's chats in `project`, a project they are in,
+   * or takes it out of the one it is in (`null`). It stays theirs alone:
+   * only they find it there (`list({ project })`), nobody else in the
+   * project. A project they aren't in is `project.not_found`.
+   */
+  setProject: (chatId: string, project: string | null) => Promise<void>;
   /**
    * Deletes the chat and its messages, rejecting every write its agent
    * holds; refused while its agent works.
