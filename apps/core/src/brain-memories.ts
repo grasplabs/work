@@ -1,11 +1,22 @@
+import type { BrainMemoryOutcome } from "@grasp-os/shared/brain-memories";
+
 import { auditedIdOf } from "./audit-outbox.ts";
 import { audited } from "./brain-audited.ts";
 import type { MemoryCaller } from "./brain-audited.ts";
-import { confirmAs, correctAs, forgetAs, rememberAs } from "./brain-next.ts";
+import {
+  confirmAs,
+  correctAs,
+  forgetAs,
+  publishAs,
+  rememberAs,
+  unpublishAs,
+} from "./brain-next.ts";
 import type {
   Correction,
   Remembered,
   RememberedMemory,
+  Share,
+  Shared,
   StoredMemoryPlace,
 } from "./brain-next.ts";
 
@@ -13,7 +24,9 @@ import type {
 // on the issue): their own chat saving what they said (agent-remember.ts)
 // and their undo (brain-memories-rpc.ts), and on the Brain's Memories page
 // (GRA-1746) their confirmation of a memory and their correction of one. What is saved is the person's
-// own word, readable by them alone (brain-next.ts says why). Core sets
+// own word, readable by them alone (brain-next.ts says why), unless they
+// share it with a team of theirs or the company themselves (GRA-1815):
+// a new memory in the shared store, theirs staying as it is. Core sets
 // the caller, never the input.
 //
 // Audited in two steps: the attempt, with the person and the change, is
@@ -140,3 +153,87 @@ export const correctFor = async (
         ? { result: "nothing" }
         : { result: "done", saved: saved.memory, entity: saved.entity }
   );
+
+/**
+ * The audience of a share as the audit log may name it: `company`, a
+ * `team`, or null for anything else; and the team's id only once
+ * `publishAs` answered, which checked they are in it: never an id a
+ * caller sent that names no team of theirs.
+ */
+const audienceOf = (share: unknown, checkedTeam: boolean): Detail => {
+  const audience = fieldOf(share, "audience");
+  if (audience === "company") {
+    return { audience: "company" };
+  }
+  const team = stringOf(fieldOf(audience, "team"));
+  if (team === null) {
+    return { audience: null };
+  }
+  return checkedTeam ? { audience: "team", team } : { audience: "team" };
+};
+
+/**
+ * `caller`'s person shares a fact or decision of their own store with a
+ * team they are in or the company, as they were shown it (`publishAs`):
+ * a new memory in their own word in the shared store; null alike for one
+ * not theirs to share and one that no longer says what they were shown.
+ * Audited as `brain.memory.published`: the memory shared, the audience
+ * and the change, then the memory made, or `nothing`. Ids alone, never
+ * what it says. A share repeated keeps one outcome: the event of its
+ * change, at the time the copy was made (`doneOnce`).
+ */
+export const publishFor = async (
+  env: Env,
+  caller: MemoryCaller,
+  share: Share | Readonly<Record<string, unknown>>
+): Promise<Shared | null> =>
+  await audited(
+    env,
+    caller,
+    "brain.memory.published",
+    {
+      memory: auditedIdOf(fieldOf(fieldOf(share, "memory"), "memory")),
+      change: auditedIdOf(fieldOf(share, "change")),
+      ...audienceOf(share, false),
+    },
+    async () => await publishAs(env, caller.person, share),
+    (shared): Detail =>
+      shared === null
+        ? { result: "nothing" }
+        : {
+            result: "done",
+            published: shared.memory,
+            entity: shared.entity,
+            ...audienceOf(share, true),
+          },
+    { doneOnce: (shared) => shared?.once }
+  );
+
+/**
+ * `caller`'s person takes back a memory they shared (`unpublishAs`):
+ * `done`, again for one taken back before; `nothing` alike for none and
+ * one not theirs. Audited as `brain.memory.unpublished`, one outcome per
+ * take-back however often it is repeated: the event of its change, at
+ * the time it was taken back (`doneOnce`).
+ */
+export const unpublishFor = async (
+  env: Env,
+  caller: MemoryCaller,
+  memory: string
+): Promise<BrainMemoryOutcome> => {
+  const retired = await audited(
+    env,
+    caller,
+    "brain.memory.unpublished",
+    { memory: auditedIdOf(memory) },
+    async () => await unpublishAs(env, caller.person, memory),
+    (taken): Detail => ({ result: taken === null ? "nothing" : "done" }),
+    {
+      doneOnce: (taken) =>
+        taken?.change === null || taken === null
+          ? undefined
+          : { change: taken.change, at: taken.retiredAt },
+    }
+  );
+  return retired === null ? "nothing" : "done";
+};

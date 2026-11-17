@@ -32,7 +32,10 @@ import { MemoriesPage } from "./memories-page.tsx";
 // longer open, or for a list read again since, is dropped; the box is
 // locked while a correction saves; focus stays where the person was; a
 // page of no facts that has more still offers them; and the person's own
-// word not yet confirmed can be confirmed.
+// word not yet confirmed can be confirmed. A fact of their own is shared
+// exactly as the dialog shows it, with the audience they pick; one that
+// changed meanwhile says so; what they may not share offers no share; and
+// one they shared they can take back.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -43,6 +46,7 @@ const entity = (id: string, name: string): BrainEntityListed => ({
   kind: "customer",
   name,
   unreadable: false,
+  borrowed: false,
 });
 const acme = entity("e-acme", "Acme");
 const globex = entity("e-globex", "Globex");
@@ -69,6 +73,8 @@ const memory = (
   endedAt: null,
   confirmed: null,
   contested: false,
+  validFrom: null,
+  validUntil: null,
   ...more,
 });
 
@@ -114,18 +120,28 @@ const settle = async (): Promise<void> => {
   });
 };
 
-/** Shows the page on a faked core answering with `api`. */
-const shown = async (api: Readonly<Record<string, unknown>>) => {
+/** Shows the page on a faked core answering with `api`, for a person in `teams`. */
+const shown = async (
+  api: Readonly<Record<string, unknown>>,
+  teams: { id: string; name: string }[] = []
+) => {
+  // Nothing shared, unless the test says otherwise.
+  const memories = {
+    shared: async () => await Promise.resolve({ memories: [], next: null }),
+    // The teams it offers: those the page names, unless the test says otherwise.
+    shareAudiences: async () => await Promise.resolve({ company: true, teams }),
+    ...api,
+  };
   const core = {
     withSession: async <T,>(
-      action: (session: { brainMemories: typeof api }) => Promise<T>
-    ): Promise<T> => await action({ brainMemories: api }),
+      action: (session: { brainMemories: typeof memories }) => Promise<T>
+    ): Promise<T> => await action({ brainMemories: memories }),
   };
   const rootRoute = createRootRoute({ component: Outlet });
   const page = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: MemoriesPage,
+    component: () => <MemoriesPage teams={teams} />,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
@@ -410,6 +426,7 @@ describe("the Memories page's actions", () => {
       kind: "customer",
       name: "Acme",
       unreadable: false,
+      borrowed: false,
     };
     await shown({
       contested: async () => await Promise.resolve({ facts: [], next: null }),
@@ -716,6 +733,7 @@ describe("the Memories page's actions", () => {
       kind: "customer",
       name: null,
       unreadable: true,
+      borrowed: true,
     };
     const confirmedOwn: string[] = [];
     await shown({
@@ -996,4 +1014,487 @@ describe("the Memories page's paged lists, read again", () => {
       });
     }
   );
+
+  /** The person's own entity, Initech, and an own fact of it with `more`. */
+  const initech: BrainEntityListed = {
+    entity: { store: "own", id: "e-initech" },
+    kind: "customer",
+    name: "Initech",
+    unreadable: false,
+    borrowed: false,
+  };
+  const ownFact = (
+    id: string,
+    more: Partial<BrainMemoryShown> = {}
+  ): BrainMemoryShown =>
+    memory(id, "e-initech", "Renewing", {
+      store: "own",
+      statement: "Initech renews in March",
+      source: null,
+      yours: true,
+      ...more,
+    });
+
+  /** Shows the page with Initech open, its memories `memories`, on `api` besides. */
+  const initechOpen = async (
+    memories: BrainMemoryShown[],
+    api: Readonly<Record<string, unknown>> = {},
+    teams = [{ id: "t-sales", name: "Sales" }]
+  ) => {
+    await shown(
+      {
+        contested: async () => await Promise.resolve({ facts: [], next: null }),
+        entities: async () =>
+          await Promise.resolve({ entities: [initech], next: null }),
+        memories: async () =>
+          await Promise.resolve({ entity: initech, memories, next: null }),
+        ...api,
+      },
+      teams
+    );
+    await press(buttons("Initech")[0]);
+  };
+
+  /** Picks `value` in the dialog's audience and shares. */
+  const shareWith = async (value: string): Promise<void> => {
+    // The audience's own select: the page's kind of entity is another.
+    const select = document
+      .querySelector("option[value=everyone]")
+      ?.closest("select");
+    const form = select?.closest("form");
+    if (!(select instanceof HTMLSelectElement) || !form) {
+      throw new TypeError("No share dialog");
+    }
+    await act(async () => {
+      select.value = value;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      form.requestSubmit();
+      await Promise.resolve();
+    });
+    await settle();
+  };
+
+  it("shares a fact of the person's own exactly as the dialog shows it, with the audience they pick, and reads the page again", async () => {
+    const sent: Readonly<Record<string, unknown>>[] = [];
+    let reads = 0;
+    await initechOpen([ownFact("m-own")], {
+      memories: async () => {
+        reads += 1;
+        return await Promise.resolve({
+          entity: initech,
+          memories: [ownFact("m-own")],
+          next: null,
+        });
+      },
+      publish: async (share: Readonly<Record<string, unknown>>) => {
+        sent.push(share);
+        return await Promise.resolve({ memory: "m-copy", entity: "e-copy" });
+      },
+    });
+    const before = reads;
+    await press(buttons("Share…")[0]);
+    const dialog = document
+      .querySelector("option[value=everyone]")
+      ?.closest("form");
+    const options = [...(dialog?.querySelectorAll("option") ?? [])].map(
+      (each) => [each.value, each.textContent]
+    );
+    const dialogText = dialog?.textContent ?? "";
+    await shareWith("everyone");
+    const [share] = sent;
+    expect({
+      shows: [
+        "About Initech",
+        "Status: Renewing",
+        "Initech renews in March",
+      ].map((text) => dialogText.includes(text)),
+      options,
+      // Its id is the opening's own: any text.
+      share: { ...share, change: typeof share?.change },
+      sharedOnce: sent.length,
+      closed: document.querySelector("option[value=everyone]") === null,
+      readAgain: reads > before,
+      said: document.body.textContent.includes("Shared."),
+    }).toStrictEqual({
+      shows: [true, true, true],
+      options: [
+        ["t-sales", "Team Sales"],
+        ["everyone", "Everyone"],
+      ],
+      share: {
+        memory: { entity: "e-initech", memory: "m-own" },
+        shown: {
+          about: "Initech",
+          attribute: "status",
+          type: "fact",
+          value: "Renewing",
+          statement: "Initech renews in March",
+          validFrom: null,
+          validUntil: null,
+        },
+        audience: "company",
+        change: "string",
+      },
+      sharedOnce: 1,
+      closed: true,
+      readAgain: true,
+      said: true,
+    });
+  });
+
+  it("says so when a share finds the memory changed, and shares again under a new id with another audience after a failure", async () => {
+    const changes: string[] = [];
+    let tries = 0;
+    await initechOpen([ownFact("m-own")], {
+      publish: async ({ change }: { change: string }) => {
+        changes.push(change);
+        tries += 1;
+        if (tries === 1) {
+          throw Object.assign(new Error("The store failed"), {
+            code: "brain.store_failed",
+          });
+        }
+        return await Promise.resolve(null);
+      },
+    });
+    await press(buttons("Share…")[0]);
+    await shareWith("t-sales");
+    const failed = document.body.textContent.includes("The store failed");
+    await shareWith("everyone");
+    expect({
+      failed,
+      newId: changes.length === 2 && changes[0] !== changes[1],
+      said: document.body.textContent.includes(
+        "This memory has changed or is no longer yours to share. Look at it again first."
+      ),
+      closed: document.querySelector("option[value=everyone]") === null,
+    }).toStrictEqual({ failed: true, newId: true, said: true, closed: true });
+  });
+
+  it("offers no share of what the person may not share, and takes back one they shared", async () => {
+    const takenBack: string[] = [];
+    await initechOpen(
+      [
+        ownFact("m-pref", {
+          type: "preference",
+          statement: "I call on Mondays",
+        }),
+        ownFact("m-instr", { type: "instruction", statement: "Copy me in" }),
+        ownFact("m-ended", { endedAt: "2026-11-12T09:00:00.000Z" }),
+        memory("m-team", "e-initech", "Paused", { store: "shared" }),
+        memory("m-copy", "e-initech", "Renewing", {
+          store: "shared",
+          source: null,
+          yours: true,
+        }),
+      ],
+      {
+        unpublish: async (id: string) => {
+          takenBack.push(id);
+          return await Promise.resolve("done");
+        },
+      }
+    );
+    const offered = buttons("Share…").length;
+    await press(buttons("Take back")[0]);
+    expect({
+      offered,
+      takeBacks: buttons("Take back").length,
+      takenBack,
+    }).toStrictEqual({ offered: 0, takeBacks: 1, takenBack: ["m-copy"] });
+  });
+
+  it("shows the dates a time-bound fact is true as part of what is shared, and sends them back as shown", async () => {
+    const sent: Readonly<Record<string, unknown>>[] = [];
+    const until = "2026-11-21T17:00:00.000Z";
+    await initechOpen([ownFact("m-leave", { validUntil: until })], {
+      publish: async (share: Readonly<Record<string, unknown>>) => {
+        sent.push(share);
+        return await Promise.resolve({ memory: "m-copy", entity: "e-copy" });
+      },
+    });
+    await press(buttons("Share…")[0]);
+    const dialogText =
+      document.querySelector("option[value=everyone]")?.closest("form")
+        ?.textContent ?? "";
+    await shareWith("everyone");
+    expect({
+      showsUntil: dialogText.includes("True until"),
+      shown: sent[0]?.shown,
+    }).toStrictEqual({
+      showsUntil: true,
+      shown: {
+        about: "Initech",
+        attribute: "status",
+        type: "fact",
+        value: "Renewing",
+        statement: "Initech renews in March",
+        validFrom: null,
+        validUntil: until,
+      },
+    });
+  });
+
+  it("offers no share of a memory about a person or about something without a name", async () => {
+    const shareOffers = async (open: BrainEntityListed) => {
+      await shown({
+        contested: async () => await Promise.resolve({ facts: [], next: null }),
+        entities: async () =>
+          await Promise.resolve({ entities: [open], next: null }),
+        memories: async () =>
+          await Promise.resolve({
+            entity: open,
+            memories: [ownFact("m-own", { about: open.entity.id })],
+            next: null,
+          }),
+      });
+      await press(
+        [...document.querySelectorAll("section ul button")].find(
+          (each): each is HTMLButtonElement => each instanceof HTMLButtonElement
+        )
+      );
+      const offered = buttons("Share…").length;
+      act(() => {
+        root?.unmount();
+      });
+      document.body.replaceChildren();
+      return offered;
+    };
+    expect([
+      await shareOffers({ ...initech, kind: "person", name: "Ben Jansen" }),
+      await shareOffers({ ...initech, name: null }),
+      // Named by the shared entity it stands for (a correction made it).
+      await shareOffers({ ...initech, borrowed: true }),
+      await shareOffers(initech),
+    ]).toStrictEqual([0, 0, 0, 1]);
+  });
+
+  it("lists what the person shared, saying nothing of one they can no longer read, and takes it back", async () => {
+    const takenBack: string[] = [];
+    await shown(
+      {
+        contested: async () => await Promise.resolve({ facts: [], next: null }),
+        entities: async () =>
+          await Promise.resolve({ entities: [], next: null }),
+        shared: async () =>
+          await Promise.resolve({
+            memories: [
+              {
+                id: "m-left",
+                audience: { team: "t-gone" },
+                sharedAt: "2026-11-15T09:00:00.000Z",
+                memory: null,
+              },
+              {
+                id: "m-sales",
+                audience: { team: "t-sales" },
+                sharedAt: "2026-11-16T09:00:00.000Z",
+                memory: memory("m-sales", "e-copy", "Renewing", {
+                  source: null,
+                  yours: true,
+                }),
+              },
+            ],
+            next: null,
+          }),
+        unpublish: async (id: string) => {
+          takenBack.push(id);
+          return await Promise.resolve("done");
+        },
+      },
+      [{ id: "t-sales", name: "Sales" }]
+    );
+    const text = document.body.textContent;
+    await press(buttons("Take back")[0]);
+    expect({
+      lines: [
+        "You can no longer read this memory.",
+        "Shared with a team you are no longer in.",
+        "e-copy is Renewing",
+        "Shared with team Sales.",
+      ].map((line) => text.includes(line)),
+      takenBack,
+    }).toStrictEqual({
+      lines: [true, true, true, true],
+      takenBack: ["m-left"],
+    });
+  });
+
+  it("shows every character nobody sees in what is shared as an escape, and sends the text as stored", async () => {
+    const sent: Readonly<Record<string, unknown>>[] = [];
+    const hidden = "Initech renews\u200B in March";
+    await initechOpen([ownFact("m-own", { statement: hidden })], {
+      publish: async (share: Readonly<Record<string, unknown>>) => {
+        sent.push(share);
+        return await Promise.resolve({ memory: "m-copy", entity: "e-copy" });
+      },
+    });
+    await press(buttons("Share…")[0]);
+    const dialogText =
+      document.querySelector("option[value=everyone]")?.closest("form")
+        ?.textContent ?? "";
+    await shareWith("everyone");
+    expect({
+      escaped: dialogText.includes("Initech renews\\u{200B} in March"),
+      raw: dialogText.includes(hidden),
+      sent: JSON.stringify(sent[0]?.shown).includes(JSON.stringify(hidden)),
+    }).toStrictEqual({ escaped: true, raw: false, sent: true });
+  });
+
+  it("offers only the teams core lets the person share with, never a team of two", async () => {
+    await initechOpen(
+      [ownFact("m-own")],
+      {
+        shareAudiences: async () =>
+          await Promise.resolve({
+            company: true,
+            teams: [{ id: "t-sales", name: "Sales" }],
+          }),
+      },
+      [
+        { id: "t-sales", name: "Sales" },
+        { id: "t-pair", name: "Pair" },
+      ]
+    );
+    await press(buttons("Share…")[0]);
+    const options = [
+      ...(document
+        .querySelector("option[value=everyone]")
+        ?.closest("select")
+        ?.querySelectorAll("option") ?? []),
+    ].map((each) => each.value);
+    expect(options).toStrictEqual(["t-sales", "everyone"]);
+  });
+
+  /** The audiences the open share dialog offers, by value, and whether Share can be pressed. */
+  const dialogState = () => {
+    const share = buttons("Share").find(
+      (each) => each.textContent === "Share" && each.type === "submit"
+    );
+    const select = share?.closest("form")?.querySelector("select");
+    return {
+      options: [...(select?.querySelectorAll("option") ?? [])].map(
+        (each) => each.value
+      ),
+      shareDisabled: share?.disabled,
+    };
+  };
+
+  it("offers nobody and keeps Share off, saying why, when it can't read whom the person may share with", async () => {
+    let asked = 0;
+    await initechOpen([ownFact("m-own")], {
+      shareAudiences: async () => {
+        await Promise.resolve();
+        throw Object.assign(new Error("The connection dropped"), {
+          code: "internal.unexpected",
+        });
+      },
+      publish: async () => {
+        asked += 1;
+        return await Promise.resolve(null);
+      },
+    });
+    await press(buttons("Share…")[0]);
+    expect({
+      ...dialogState(),
+      said: document.body.textContent.includes("The connection dropped"),
+      asked,
+    }).toStrictEqual({
+      options: [],
+      shareDisabled: true,
+      said: true,
+      asked: 0,
+    });
+  });
+
+  it("offers no Everyone in a company too small to share with, and says so when there is nobody", async () => {
+    await initechOpen([ownFact("m-own")], {
+      shareAudiences: async () =>
+        await Promise.resolve({ company: false, teams: [] }),
+    });
+    await press(buttons("Share…")[0]);
+    expect({
+      ...dialogState(),
+      hint: document.body.textContent.includes(
+        "once it has three people or more"
+      ),
+    }).toStrictEqual({ options: [], shareDisabled: true, hint: true });
+  });
+
+  /** Takes the page down, as each test's end does. */
+  const closePage = () => {
+    act(() => {
+      root?.unmount();
+    });
+    root = undefined;
+    document.body.replaceChildren();
+  };
+
+  it("shows in the dialog every text a share copies, in every combination the store allows, escaped as it shows them", async () => {
+    // What `publishAs` copies of a memory: its entity's name, its
+    // attribute, value and statement, and its dates (never its quote).
+    // Each text holds a character nobody sees, which the dialog must show
+    // as its escape (`shownVisibly`).
+    const hidden = "\u200B";
+    const statementText = `Initech renews${hidden} in March`;
+    const valueText = `Renewing${hidden} soon`;
+    const values = [null, valueText, statementText] as const;
+    const attributes = [null, "status"] as const;
+    const datings = [
+      { validFrom: null, validUntil: null },
+      {
+        validFrom: "2026-11-02T09:00:00.000Z",
+        validUntil: "2026-11-30T17:00:00.000Z",
+      },
+    ] as const;
+    const missing: string[] = [];
+    for (const attribute of attributes) {
+      for (const value of values) {
+        for (const dates of datings) {
+          const memoryShown = ownFact("m-own", {
+            attribute,
+            value,
+            statement: statementText,
+            quote: `what she said${hidden}`,
+            ...dates,
+          });
+          // oxlint-disable-next-line no-await-in-loop -- one dialog at a time
+          await initechOpen([memoryShown]);
+          // oxlint-disable-next-line no-await-in-loop -- one dialog at a time
+          await press(buttons("Share…")[0]);
+          const dialog =
+            document.querySelector("option[value=everyone]")?.closest("form")
+              ?.textContent ?? "";
+          const escaped = (text: string) =>
+            text.replaceAll(hidden, "\\u{200B}");
+          const copied = [
+            ["name", "About Initech"],
+            ["statement", escaped(statementText)],
+            ...(value === null ? [] : [["value", escaped(value)]]),
+            ...(attribute === null ? [] : [["attribute", "Status"]]),
+            ...(dates.validFrom === null ? [] : [["start", "True from"]]),
+            ...(dates.validUntil === null ? [] : [["end", "True until"]]),
+          ];
+          for (const [field, text] of copied) {
+            if (!dialog.includes(text ?? "")) {
+              missing.push(
+                `${field} of ${JSON.stringify({ attribute, value, dates })}`
+              );
+            }
+          }
+          // Nothing it doesn't copy, and nothing unescaped.
+          if (dialog.includes("what she said") || dialog.includes(hidden)) {
+            missing.push(
+              `more than copied: ${JSON.stringify({ attribute, value })}`
+            );
+          }
+          closePage();
+        }
+      }
+    }
+    expect(missing).toStrictEqual([]);
+  });
 });
