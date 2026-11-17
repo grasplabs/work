@@ -4,8 +4,11 @@ import type {
   ToolResultMessage,
   Usage,
 } from "@earendil-works/pi-ai";
-import { agentDraftSchema } from "@grasp-os/shared/agents";
-import type { AgentDrafted } from "@grasp-os/shared/agents";
+import {
+  agentChangeDraftSchema,
+  agentDraftSchema,
+} from "@grasp-os/shared/agents";
+import type { AgentChangeDrafted, AgentDrafted } from "@grasp-os/shared/agents";
 import { chatSavedMemorySchema } from "@grasp-os/shared/brain-memories";
 import type { ChatSavedMemory } from "@grasp-os/shared/brain-memories";
 import {
@@ -194,6 +197,43 @@ const draftedOf = (message: AssistantMessage): AgentDrafted | undefined => {
   return undefined;
 };
 
+/** The change to an agent a response drafted (`draftAgentChange`), as the tool took it. */
+const changeDraftedOf = (
+  message: AssistantMessage
+): AgentChangeDrafted | undefined => {
+  for (const part of message.content) {
+    if (part.type === "toolCall" && part.name === "draftAgentChange") {
+      const change = agentChangeDraftSchema.safeParse(part.arguments);
+      if (change.success) {
+        return { callId: part.id, ...change.data };
+      }
+    }
+  }
+  return undefined;
+};
+
+/**
+ * What a response ended on for the person to answer: questions, a plan,
+ * a drafted agent or a change to one; each only where it was offered.
+ */
+const cardsOf = (
+  message: AssistantMessage
+): Pick<
+  Extract<ChatMessage, { role: "assistant" }>,
+  "asked" | "planned" | "agentDraft" | "agentChange"
+> => {
+  const asked = askedOf(message);
+  const planned = plannedOf(message);
+  const agentDraft = draftedOf(message);
+  const agentChange = changeDraftedOf(message);
+  return {
+    ...(asked === undefined ? {} : { asked }),
+    ...(planned === undefined ? {} : { planned }),
+    ...(agentDraft === undefined ? {} : { agentDraft }),
+    ...(agentChange === undefined ? {} : { agentChange }),
+  };
+};
+
 /**
  * What a response thought, as far as it has streamed in: each thinking
  * part the provider showed, joined. A redacted part holds only pi's own
@@ -304,9 +344,6 @@ export const chatMessageOf = (
     const usage = usageOf(message);
     const text = textOf(message.content);
     const reasoning = reasoningOf(message, thinkingMs);
-    const asked = asking ? askedOf(message) : undefined;
-    const planned = asking ? plannedOf(message) : undefined;
-    const agentDraft = asking ? draftedOf(message) : undefined;
     return {
       id,
       role: "assistant",
@@ -315,9 +352,7 @@ export const chatMessageOf = (
       code: codeOf(message),
       tools: toolsOf(message),
       ...(reasoning === undefined ? {} : { reasoning }),
-      ...(asked === undefined ? {} : { asked }),
-      ...(planned === undefined ? {} : { planned }),
-      ...(agentDraft === undefined ? {} : { agentDraft }),
+      ...(asking ? cardsOf(message) : {}),
       end: ends[message.stopReason],
       ...(message.stopReason === "error"
         ? { failure: modelFailureOf(message.errorMessage) }

@@ -1435,6 +1435,10 @@ msgstr "Une modification"
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 msgstr "Une modification s’applique aux exécutions qui démarrent ensuite : celles déjà en cours gardent les valeurs de leur démarrage. Chaque modification est enregistrée, sans sa valeur."
 
+#: src/chat/agent-change-card.tsx
+msgid "A change to {name}"
+msgstr "Une modification de {name}"
+
 #: src/apps/app-access-requests.tsx
 #: src/apps/draft-changes.tsx
 msgid "A connection"
@@ -2047,6 +2051,10 @@ msgstr "Ajoutée le"
 msgid "Added someone to a team"
 msgstr "A ajouté quelqu’un à une équipe"
 
+#: src/chat/agent-change-card.tsx
+msgid "Added to its instructions"
+msgstr "Ajouté à ses instructions"
+
 #: src/brain/skills-page.tsx
 msgid "Added to the company's skills, and since taken out of use."
 msgstr "Ajouté aux skills de l'entreprise, puis retiré depuis."
@@ -2279,6 +2287,10 @@ msgstr "Libérer aussi son nom, pour qu’un nouveau workflow puisse le prendre.
 #: src/chat/subject-bar.tsx
 msgid "Also worked on"
 msgstr "A aussi travaillé sur"
+
+#: src/chat/agent-change-card.tsx
+msgid "Also works on its own"
+msgstr "Travaille aussi de lui-même"
 
 #: src/workflows/resource-params.tsx
 msgid "Amount"
@@ -2775,6 +2787,10 @@ msgstr "Apps et workflows"
 msgid "Apps and workflows grouped by process, team or goal. Putting something in a project shares it with nobody."
 msgstr "Des apps et des workflows regroupés par processus, équipe ou objectif. Placer quelque chose dans un projet ne le partage avec personne."
 
+#: src/chat/agent-change-card.tsx
+msgid "Apps it gets"
+msgstr "Apps qu’il reçoit"
+
 #: src/chat/agent-draft-card.tsx
 msgid "Apps it uses"
 msgstr "Apps qu’il utilise"
@@ -2782,6 +2798,10 @@ msgstr "Apps qu’il utilise"
 #: src/workflows/files-and-apps.tsx
 msgid "Apps it works in"
 msgstr "Applications dans lesquelles il travaille"
+
+#: src/chat/agent-change-card.tsx
+msgid "Apps taken off"
+msgstr "Apps retirées"
 
 #: src/apps/app-settings.tsx
 #: src/apps/app-status.tsx
@@ -3483,6 +3503,7 @@ msgid "Change “{was}” to “{now}”."
 msgstr "Remplacer « {was} » par « {now} »."
 
 #: src/apps/app-data-model.tsx
+#: src/chat/agent-change-card.tsx
 msgid "Change {name}"
 msgstr "Modifier {name}"
 
@@ -3493,6 +3514,10 @@ msgstr "Modifier {title}"
 #: src/apps/app-workflows.tsx
 msgid "Change in the draft"
 msgstr "Modifier dans le brouillon"
+
+#: src/chat/agent-draft-card.tsx
+msgid "Change it"
+msgstr "Le modifier"
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Change plan"
@@ -9196,6 +9221,10 @@ msgstr "Aucun."
 msgid "Not added yet"
 msgstr "Pas encore ajouté"
 
+#: src/chat/agent-draft-card.tsx
+msgid "Not all of it could be set, so the agent is paused. <0>Finish it on its page</0>."
+msgstr "Tout n’a pas pu être appliqué, l’agent est donc en pause. <0>Terminez-le sur sa page</0>."
+
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/workflows/workflow-triggers.tsx
 msgid "Not allowed"
@@ -9399,6 +9428,10 @@ msgstr "Noté : {name}. Nous la connecterons avec vous. En attendant, vérifiez 
 #: src/onboarding/connect-steps.tsx
 msgid "Noted. We’ll get in touch to put it on the laptops with you."
 msgstr "Noté. Nous vous contacterons pour l’installer avec vous sur les ordinateurs."
+
+#: src/chat/agent-change-card.tsx
+msgid "Nothing changes until you say Change it. You can change any of it first."
+msgstr "Rien ne change avant que vous cliquiez sur Le modifier. Vous pouvez tout ajuster avant."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing connected yet."
@@ -14015,6 +14048,7 @@ msgctxt "a source of the Brain"
 msgid "The company's teams"
 msgstr "Les équipes de l’entreprise"
 
+#: src/chat/agent-change-card.tsx
 #: src/chat/agent-draft-card.tsx
 msgid "the company's time zone"
 msgstr "fuseau horaire de l’entreprise"
@@ -16026,6 +16060,7 @@ msgid "What it is bound to has changed since the binding was approved. Bind it a
 msgstr "Ce à quoi elle est liée a changé depuis l'approbation de la liaison. Liez-la à nouveau une fois que vous avez vérifié que cela convient toujours."
 
 #: src/agents/agent-form.tsx
+#: src/chat/agent-change-card.tsx
 #: src/chat/agent-draft-card.tsx
 msgid "What it is for"
 msgstr "À quoi il sert"
@@ -16034,6 +16069,10 @@ msgstr "À quoi il sert"
 msgctxt "what an app is for, in a sentence"
 msgid "What it is for"
 msgstr "À quoi elle sert"
+
+#: src/chat/agent-change-card.tsx
+msgid "What it may also do"
+msgstr "Ce qu’il peut aussi faire"
 
 #: src/agents/agent-page.tsx
 #: src/chat/agent-draft-card.tsx
@@ -16521,6 +16560,7 @@ msgstr "À qui il est destiné"
 msgid "Who leads it?"
 msgstr "Qui la dirige ?"
 
+#: src/chat/agent-change-card.tsx
 #: src/chat/agent-draft-card.tsx
 msgid "Who may ask it"
 msgstr "Qui peut lui demander"

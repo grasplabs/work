@@ -123,7 +123,14 @@ const agreedFact = (
   id: string,
   tag: InterviewFact["tag"],
   record: string
-): InterviewFact => ({ id, tag, text: record, record, agreed: true });
+): InterviewFact => ({
+  id,
+  tag,
+  text: record,
+  record,
+  agreed: true,
+  ...(tag === "who" ? {} : { share: "team" as const }),
+});
 
 /** Opens someone's link signed in as them and saves their interview as agreed to, with `facts`, approved. */
 const agree = async (person: string, facts: InterviewFact[]): Promise<void> => {
