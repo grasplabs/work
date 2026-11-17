@@ -365,9 +365,20 @@ export const applyPerson = (
 };
 
 /**
+ * Most hashes one step of a replay makes for its person entries
+ * (`foundForReplay`), where the clock can't bound it: it moves only on
+ * I/O. A step holds every call while it runs, so its hashing is kept to
+ * a small share of the step's 10 s (erasure.ts `replayStepMs`), as a page
+ * of the ledger is. Measured in workerd: about 3 µs a candidate with its
+ * rows read (111 ms for 40,000), so this many take about 0.15 s. A replay
+ * past it goes on in the next step from the hashes made.
+ */
+export const replayHashesPerStep = 50_000;
+
+/**
  * How a replay hashes for `foundForReplay`: each text's SHA-256 made so
  * far in this replay, kept for its next steps (`hashed`), and `due`,
- * which throws once the step is out of time.
+ * which counts each new one and throws once the step made its share.
  */
 export interface ReplayHashing {
   hashed: Map<string, string>;
@@ -382,7 +393,8 @@ export interface ReplayHashing {
  * identifier a name holds), as the entry keeps no plain value. Run while
  * the store takes nothing else (a replay), so nothing lands in between.
  * Each hash is made once in a replay (`hashed`); before each new one
- * `due` may stop the step, and the next step goes on from what it made.
+ * `due` may stop the step (`replayHashesPerStep`), and the next step goes
+ * on from what it made.
  */
 export const foundForReplay = async (
   sql: SqlStorage,

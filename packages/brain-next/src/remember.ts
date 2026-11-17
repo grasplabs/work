@@ -286,7 +286,7 @@ interface Into {
   subjects: ReadonlyMap<string, string>;
   /** Each writer the add names, by the SHA-256 of its lineage, as the ledger names it. */
   writers: ReadonlyMap<string, string>;
-  /** Each memory's restatement key, by its place in the add (`restatementOf`). */
+  /** Each memory's restatement key, by its place in the add as asked (`restatementOf`). */
   restatements: readonly string[];
   learnedAt: number;
   memo: WordMemo;
@@ -417,8 +417,7 @@ const subjectOfWriter = (
 /** Where a memory's basis puts it: its version, writer, lineage and place in that lineage. */
 const basisOf = (
   into: Into,
-  basis: NewMemory["basis"],
-  index: number
+  basis: NewMemory["basis"]
 ): {
   source: string | null;
   version: number | null;
@@ -439,12 +438,7 @@ const basisOf = (
       order: 0,
     };
   }
-  holdVersion(
-    into,
-    basis.source,
-    basis.version,
-    `memory ${index} rests on a version this store doesn't hold`
-  );
+  // Its version held: checked for the add as asked (`writeAdd`).
   return {
     source: basis.source,
     version: basis.version,
@@ -485,7 +479,7 @@ const writeMemory = (
   if (plan === undefined || aboutRow === undefined) {
     throw refused(`memory ${index} names an entity the add doesn't give`);
   }
-  const based = basisOf(into, memory.basis, index);
+  const based = basisOf(into, memory.basis);
   const id = crypto.randomUUID();
   const { row } = sql
     .exec<{ row: number }>(
@@ -673,6 +667,18 @@ export const writeAdd = (
     if (naming.speakers.some((person) => isErasedPerson(sql, person))) {
       throw refused("it is in the word of a person an erasure took");
     }
+    // Every version a memory rests on is checked as asked, by its place
+    // in it: whether an add is refused never depends on who was erased.
+    for (const [index, { basis }] of asked.memories.entries()) {
+      if (basis.kind === "source") {
+        holdVersion(
+          { sql, shared },
+          basis.source,
+          basis.version,
+          `memory ${index} rests on a version this store doesn't hold`
+        );
+      }
+    }
     const drawn =
       asked.extracted !== undefined ||
       asked.memories.some(({ basis }) => basis.kind === "source");
@@ -717,15 +723,14 @@ export const writeAdd = (
       shared,
       subjects,
       writers,
-      // Each kept memory's own (the add's hash is of the add as asked).
-      restatements: adding.memories.map(
-        (memory) => restatements[asked.memories.indexOf(memory)] ?? ""
-      ),
+      restatements,
       learnedAt: stampWrite(sql),
       memo: new Map(),
     };
+    // Each memory by its place in the add as asked: its restatement, and
+    // what a refusal names.
     const made = adding.memories.map((memory, index) =>
-      writeMemory(into, memory, planned[index], index)
+      writeMemory(into, memory, planned[index], asked.memories.indexOf(memory))
     );
     const written = made.map((memory) => memory.written);
     judgeLate(sql, written, texts);

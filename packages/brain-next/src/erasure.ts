@@ -24,6 +24,7 @@ import {
 import {
   applyPerson,
   foundForReplay,
+  replayHashesPerStep,
   identifierSubjectOf,
   personSubjectOf,
 } from "./people.ts";
@@ -1668,13 +1669,16 @@ interface EntryRead {
  * `OutOfTimeError` once it is past): a writer's change and count; for a
  * person's, what it names in this copy, found by hashing what the copy
  * holds (people.ts `foundForReplay`: nothing lands meanwhile, as a replay
- * runs while the store takes nothing else); a source's mark of a group.
+ * runs while the store takes nothing else), within the step's share of
+ * hashes (`step`, throws `OutOfTimeError` past it); a source's mark of a
+ * group.
  */
 const readEntry = async (
   { storage, bucket }: Pick<ErasureStore, "storage" | "bucket">,
   key: string,
   entry: LedgerEntry,
-  stopAt: number
+  stopAt: number,
+  step: { hashes: number }
 ): Promise<EntryRead> => {
   if (entry.kind === "writer") {
     return { writer: await readWriterBody(bucket, key, stopAt) };
@@ -1689,10 +1693,13 @@ const readEntry = async (
           "subjects" in body
             ? await foundForReplay(storage.sql, entry.subject, body.subjects, {
                 hashed,
+                // Bounded by the hashes the step made, not the clock: it
+                // moves only on I/O, never while it hashes.
                 due: () => {
-                  if (Date.now() >= stopAt) {
+                  if (step.hashes >= replayHashesPerStep) {
                     throw new OutOfTimeError();
                   }
+                  step.hashes += 1;
                 },
               })
             : undefined,
@@ -1729,6 +1736,7 @@ export const replayStep = async ({
 }: ErasureStore): Promise<Replayed> => {
   const { sql } = storage;
   const stopAt = Date.now() + replayStepMs;
+  const step = { hashes: 0 };
   const stopped: string[] = [];
   let reads = 0;
   // Where the listing goes on, in memory only: past a page that held no
@@ -1763,7 +1771,13 @@ export const replayStep = async ({
         if (readsEntry(entry, groups)) {
           try {
             // oxlint-disable-next-line no-await-in-loop -- in order, one entry at a time
-            read = await readEntry({ storage, bucket }, key, entry, stopAt);
+            read = await readEntry(
+              { storage, bucket },
+              key,
+              entry,
+              stopAt,
+              step
+            );
           } catch (error) {
             if (error instanceof OutOfTimeError) {
               return { stopped, more: true };

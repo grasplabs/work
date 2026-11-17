@@ -14,8 +14,9 @@ import type {
 } from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
 
+import { replayHashesPerStep } from "../src/people.ts";
 import type { BrainStore } from "../src/store.ts";
 import { exportSettled, restoredAfterLoss, tick } from "./export-reads.ts";
 import { copyOf, restore } from "./store-copy.ts";
@@ -72,6 +73,10 @@ const document = async (group: string, text: string) => {
   });
   return { source, version };
 };
+
+/** How an add is refused for its memory at `place` resting on a version the store doesn't hold. */
+const missingMemory = (place: number): string =>
+  `memory ${place} rests on a version this store doesn't hold`;
 
 /** When a read was answered, as its answer says it. */
 const readAt = /"at":"[^"]*"/gu;
@@ -792,15 +797,38 @@ describe("a person's erasure in the shared store", () => {
     ]);
   });
 
-  it("stops a replay's step at its time, and the next steps go on to the same end as one never stopped", async () => {
+  it("stops a replay's step at its share of hashes, and the next steps go on to the same end as one never stopped", async () => {
     const at = await annaAndBob();
     const before = await copyOf(shared());
     await erase(at.anna, [email(at.local)]);
     await tick(shared());
     const after = await copyOf(shared());
-    /** How many calls the store refused while it caught up with its ledger. */
-    const caughtUp = async (): Promise<number> => {
-      let waits = 0;
+    // The same copy, its names holding one identifier more than a step
+    // hashes: so its replay takes more than one step.
+    const names = before.tables.find(({ name }) => name === "entity_names");
+    const [some] = names?.rows ?? [];
+    const big: Copy = {
+      ...before,
+      tables: before.tables.map((table) =>
+        table.name === "entity_names" && some !== undefined
+          ? {
+              ...table,
+              rows: [
+                ...table.rows,
+                ...Array.from({ length: replayHashesPerStep + 1 }, (_, n) => ({
+                  ...some,
+                  type: "ref",
+                  value: `test:${n}`,
+                  folded: `test:${n}`,
+                })),
+              ],
+            }
+          : table
+      ),
+    };
+    /** Calls until the store answers: whether it was replaying after its first step. */
+    const replayed = async () => {
+      const { ledgerReplay } = await shared().workOverview();
       for (;;) {
         try {
           // oxlint-disable-next-line no-await-in-loop -- one call at a time, as the replay goes on
@@ -808,61 +836,41 @@ describe("a person's erasure in the shared store", () => {
             entity: at.entities.atlas,
             reader: at.reader,
           });
-          return waits;
+          break;
         } catch (error) {
           if (!String(error).includes("applying its erasure ledger")) {
             throw error;
           }
-          waits += 1;
         }
       }
-    };
-    /** What a teammate reads of her, but when it was read. */
-    const seen = async () => {
       const read = await everything(
         at.reader,
         [at.entities.anna],
         [at.name],
         [email(at.local)]
       );
-      return read.replaceAll(readAt, "");
+      return { ledgerReplay, seen: read.replaceAll(readAt, "") };
     };
 
     await restore(shared(), before);
-    const straight = { refused: await caughtUp(), seen: await seen() };
-    // Each hash takes 11 s, past a step's 10 s: a step makes one, and the
-    // next goes on from it.
-    await restore(shared(), before);
-    let offset = 0;
-    const realNow = Date.now.bind(Date);
-    const realDigest = crypto.subtle.digest.bind(crypto.subtle);
-    const clock = vi
-      .spyOn(Date, "now")
-      .mockImplementation(() => realNow() + offset);
-    const digest = vi
-      .spyOn(crypto.subtle, "digest")
-      .mockImplementation(async (algorithm, data) => {
-        offset += 11_000;
-        return await realDigest(algorithm, data);
-      });
-    let waited = 0;
-    try {
-      waited = await caughtUp();
-    } finally {
-      clock.mockRestore();
-      digest.mockRestore();
-    }
-    const stepped = await seen();
+    const straight = await replayed();
+    await restore(shared(), big);
+    const stepped = await replayed();
     await restore(shared(), after);
 
     expect({
-      straight: straight.refused,
-      stopped: waited > 0,
-      same: stepped === straight.seen,
+      straight: straight.ledgerReplay,
+      stepped: stepped.ledgerReplay,
+      same: stepped.seen === straight.seen,
       her: [at.name, `${at.local}@acme.test`].filter((needle) =>
-        stepped.includes(needle)
+        stepped.seen.includes(needle)
       ),
-    }).toStrictEqual({ straight: 0, stopped: true, same: true, her: [] });
+    }).toStrictEqual({
+      straight: "through",
+      stepped: "replaying",
+      same: true,
+      her: [],
+    });
   });
 
   it("fails while its ledger entry can't be written, hiding meanwhile, and the retry writes that same erasure", async () => {
@@ -1157,6 +1165,65 @@ describe("a person's erasure in the shared store", () => {
     expect(memories.map(({ statement }) => statement).toSorted()).toStrictEqual(
       [`${project} ends in May`, `${project} starts in June`].toSorted()
     );
+  });
+
+  it("refuses a write resting on a version it doesn't hold as it would without her erasure, naming the memory by its place as asked", async () => {
+    const group = unique("g");
+    const bob = unique("bob-");
+    const local = word();
+    const name = `Anna ${word()}`;
+    const project = `Audit ${word()}`;
+    const note = await document(
+      group,
+      `${name} (${local}@acme.test) leads the audit. ${project} starts in June.`
+    );
+    const missing = { ...note, version: note.version + 50 };
+    /** Her card's memory on `hers`, then the project's on `projects`: refused with what, or added. */
+    const added = async (
+      hers: typeof note,
+      projects: typeof note
+    ): Promise<string> =>
+      await remember(
+        group,
+        [
+          {
+            key: "a",
+            kind: "person",
+            names: [name],
+            identifiers: [email(local)],
+          },
+          { key: "p", kind: "project", names: [project] },
+        ],
+        [
+          said(
+            "a",
+            `${name} leads the audit`,
+            bob,
+            on(hers, "leads the audit")
+          ),
+          said(
+            "p",
+            `${project} starts in June`,
+            bob,
+            on(projects, "starts in June")
+          ),
+        ]
+      ).then(() => "added", String);
+    const cases = async () => ({
+      secondMissing: await added(note, missing),
+      hersMissing: await added(missing, note),
+    });
+    const before = await cases();
+    await erase(unique("anna-"), [email(local)]);
+    const after = await cases();
+
+    expect({
+      refused: [
+        before.secondMissing.includes(missingMemory(1)),
+        before.hersMissing.includes(missingMemory(0)),
+      ],
+      after,
+    }).toStrictEqual({ refused: [true, true], after: before });
   });
 
   it("answers a write resting on a document tried again with the same change as it was made, whether her erasure came before it or in between", async () => {
