@@ -38,6 +38,8 @@ import { signedInApi, unique } from "./sign-in.ts";
 //    document they may no longer read themselves: never.
 // 4. Monitoring: one citation a person, never how much they uploaded,
 //    and people in the order of their names, never ranked.
+// 4b. A person is named for a document that matched only the question's
+//    commonest words, which recall says are no answer by themselves.
 // 5. It reads wider than its recall: in Grasp and in a chat app's direct
 //    message, their teams and the company; in a turn nobody started, the
 //    company alone.
@@ -132,7 +134,7 @@ const answerSchema = z.union([
           id: z.string(),
         }),
         version: z.number(),
-        found: z.enum(["exact", "words", "stop words", "meaning"]),
+        found: z.enum(["exact", "words", "meaning"]),
       })
     ),
     notFound: z.array(z.string()),
@@ -390,6 +392,52 @@ describe("a chat's code asking who knows about a topic", setUpTime, () => {
     expect(
       peopleIn(answer).find(({ id }) => id === mate.userId)?.name
     ).toStrictEqual(String(mate.person.name));
+  });
+
+  it("names nobody for a document that matched only the question's common words, which are no answer by themselves", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const [asker, expert, bystander] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const topic = word();
+    // The expert's upload holds the question's one telling word; the
+    // bystander's, on something else, only its commonest words.
+    const expertsUpload = await uploaded(
+      expert,
+      `Pricing for ${topic} in the north`,
+      { kind: "everyone" }
+    );
+    const bystandersUpload = await uploaded(
+      bystander,
+      `The minutes of the meeting, and the plan for the office`,
+      { kind: "everyone" }
+    );
+    const telling = await askedInOwnChat(
+      admin,
+      asker,
+      `the ${topic} of the north`
+    );
+    // A question of common words alone is all telling, as recall reads
+    // such a question (a quoted line of a play, say): a passage holding
+    // them answers it, found by its words.
+    const common = await askedInOwnChat(
+      admin,
+      asker,
+      "the minutes of the meeting"
+    );
+    const bystanderIn = peopleIn(common).find(
+      ({ id }) => id === bystander.userId
+    );
+
+    expect({
+      telling: of(telling, { expert, bystander }),
+      common: { source: bystanderIn?.source.id, found: bystanderIn?.found },
+    }).toStrictEqual({
+      telling: { expert: expertsUpload, bystander: null },
+      common: { source: bystandersUpload, found: "words" },
+    });
   });
 
   it("lists people in the order of their names, never by how well their documents answer", async () => {

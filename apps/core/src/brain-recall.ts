@@ -265,6 +265,9 @@ export const recallFor = async (
 // - An erased or removed person is named, or one named for a team's
 //   document they may no longer read themselves: only an uploader who is
 //   an active member now, in that team still.
+// - A person is named for what doesn't answer the question: never for a
+//   passage found by its commonest words alone (`stop words`), which
+//   recall says is no answer by itself.
 // - Monitoring of individuals: people one at a time, in the order of
 //   their names, never ranked, scored or counted (one citation each,
 //   never how many of their documents answer), and never two related to
@@ -291,7 +294,7 @@ export interface UploadVersion {
 export interface PersonWhoKnows extends UploadVersion {
   id: string;
   name: string;
-  found: BrainPack["items"][number]["found"];
+  found: Exclude<BrainPack["items"][number]["found"], "stop words">;
 }
 
 /**
@@ -372,8 +375,15 @@ export const whoKnowsFor = async (
       personal: false,
       company: !reachesTeams,
     });
+    // Only what answers the question names anyone: never a passage
+    // found by the question's commonest words alone, which recall says is
+    // no answer by itself, and whose text code never sees here to judge.
+    // Every other way recall finds a passage (an exact part, its telling
+    // words, or by meaning) is an answer as recall's own pack gives it.
     const uploads = passages.items.flatMap(({ source, version, found }) =>
-      source.producer === "upload" ? [{ id: source.id, version, found }] : []
+      source.producer === "upload" && found !== "stop words"
+        ? [{ id: source.id, version, found }]
+        : []
     );
     // A team's upload as the person reads it now, in the same statement
     // as its uploader (`uploadersOf`); none as the company alone.

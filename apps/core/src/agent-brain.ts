@@ -375,13 +375,13 @@ interface BrainPack {
   truncated: boolean;
 }
 
-/** A person who uploaded documents about the topic that your person may read: their member ID and name, the one version of theirs that answers best, and how its passage was found (as \`BrainPackItem\`'s \`found\`). */
+/** A person who uploaded documents about the topic that your person may read: their member ID and name, the one version of theirs that answers best, and how its passage was found (as \`BrainPackItem\`'s \`found\`; never by its commonest words alone, which answer nothing). */
 interface BrainPersonWhoKnows {
   id: string;
   name: string;
   source: { producer: "upload"; id: string };
   version: number;
-  found: "exact" | "words" | "stop words" | "meaning";
+  found: "exact" | "words" | "meaning";
 }
 
 /** Who knows about a topic: the people, by name (never a ranking), the parts of the question nothing they may read holds, and whether the budget left a passage out. */
