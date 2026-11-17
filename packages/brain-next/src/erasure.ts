@@ -266,6 +266,25 @@ class OutOfTimeError extends Error {
   }
 }
 
+/**
+ * The hashes a replay of person entries made so far, by the store's
+ * storage, until it is through (people.ts `foundForReplay`): a step out of
+ * time leaves them to the next, so a long one goes on, never starts over.
+ */
+const replayHashes = new WeakMap<DurableObjectStorage, Map<string, string>>();
+
+/** A step's end: once the replay is through, its hashes go. */
+const stepEnded = (
+  storage: DurableObjectStorage,
+  stopped: string[],
+  more: boolean
+): Replayed => {
+  if (!more) {
+    replayHashes.delete(storage);
+  }
+  return { stopped, more };
+};
+
 const encoder = new TextEncoder();
 
 /** The ledger's name for a source's key. */
@@ -1662,11 +1681,20 @@ const readEntry = async (
   }
   if (entry.kind === "person") {
     const body = await readPersonBody(bucket, key, stopAt);
+    const hashed = replayHashes.get(storage) ?? new Map<string, string>();
+    replayHashes.set(storage, hashed);
     return {
       person: {
         found:
           "subjects" in body
-            ? await foundForReplay(storage.sql, entry.subject, body.subjects)
+            ? await foundForReplay(storage.sql, entry.subject, body.subjects, {
+                hashed,
+                due: () => {
+                  if (Date.now() >= stopAt) {
+                    throw new OutOfTimeError();
+                  }
+                },
+              })
             : undefined,
       },
     };
@@ -1764,7 +1792,7 @@ export const replayStep = async ({
     }
     const last = page.objects.at(-1)?.key;
     if (applied > 0 || !page.truncated || last === undefined) {
-      return { stopped, more: page.truncated };
+      return stepEnded(storage, stopped, page.truncated);
     }
     startAfter = last;
   }

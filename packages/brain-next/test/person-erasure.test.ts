@@ -14,7 +14,7 @@ import type {
 } from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { beforeAll, describe, expect, it } from "vite-plus/test";
+import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
 import type { BrainStore } from "../src/store.ts";
 import { exportSettled, restoredAfterLoss, tick } from "./export-reads.ts";
@@ -72,6 +72,9 @@ const document = async (group: string, text: string) => {
   });
   return { source, version };
 };
+
+/** When a read was answered, as its answer says it. */
+const readAt = /"at":"[^"]*"/gu;
 
 /** A fact `statement` about `about`, in an App's own word. */
 const fromApp = (about: string, statement: string): NewMemory => ({
@@ -694,6 +697,174 @@ describe("a person's erasure in the shared store", () => {
     await restore(shared(), after);
   });
 
+  it("hides her card on a replay into an older copy taken before her address was on it, by the card the erasure closed", async () => {
+    const group = unique("g");
+    const reader: Reader = { person: unique("bob-"), groups: [group] };
+    const local = word();
+    const name = `Anna ${word()}`;
+    const { entities } = await remember(
+      group,
+      [{ key: "a", kind: "person", names: [name] }],
+      [fromApp("a", `${name} leads finance`)]
+    );
+    const card = entities.a ?? "";
+    const before = await copyOf(shared());
+    // Her address reaches the card later.
+    await shared().addMemories({
+      change: crypto.randomUUID(),
+      access: { kind: "audience", group },
+      reader,
+      entities: [
+        {
+          key: "a",
+          id: card,
+          kind: "person",
+          names: [name],
+          identifiers: [email(local)],
+        },
+      ],
+      memories: [fromApp("a", `${name} works from Utrecht`)],
+    });
+    await erase(unique("anna-"), [email(local)]);
+    await tick(shared());
+    const after = await copyOf(shared());
+
+    await restore(shared(), before);
+    const seen = await everything(reader, [card], [name], []);
+    await restore(shared(), after);
+
+    expect(
+      [name, "leads finance", "works from Utrecht"].filter((needle) =>
+        seen.includes(needle)
+      )
+    ).toStrictEqual([]);
+  });
+
+  it("keeps a fact she confirmed over her own conflicting one current and confirmed, by no one named, once she is erased", async () => {
+    const group = unique("g");
+    const anna = unique("anna-");
+    const bob = unique("bob-");
+    const reader: Reader = { person: bob, groups: [group] };
+    const project = `Audit ${word()}`;
+    const { entities, memories } = await remember(
+      group,
+      [{ key: "p", kind: "project", names: [project] }],
+      [
+        said(
+          "p",
+          `${project} is on track`,
+          bob,
+          { kind: "writer", writer: "app:plan" },
+          { attribute: "status", value: "on track" }
+        ),
+        said(
+          "p",
+          `${project} is late`,
+          anna,
+          { kind: "writer", writer: "app:sheet" },
+          { attribute: "status", value: "late" }
+        ),
+      ]
+    );
+    await shared().confirmMemory({
+      memory: memories[0] ?? "",
+      reader: { person: anna, groups: [group] },
+    });
+    await erase(anna, []);
+    await tick(shared());
+    const read = await shared().readMemories({
+      entity: entities.p ?? "",
+      reader,
+    });
+
+    expect(
+      read.memories.map(({ statement, confirmed, contested }) => ({
+        statement,
+        by: confirmed?.by ?? null,
+        contested,
+      }))
+    ).toStrictEqual([
+      {
+        statement: `${project} is on track`,
+        by: erasedConfirmer,
+        contested: false,
+      },
+    ]);
+  });
+
+  it("stops a replay's step at its time, and the next steps go on to the same end as one never stopped", async () => {
+    const at = await annaAndBob();
+    const before = await copyOf(shared());
+    await erase(at.anna, [email(at.local)]);
+    await tick(shared());
+    const after = await copyOf(shared());
+    /** How many calls the store refused while it caught up with its ledger. */
+    const caughtUp = async (): Promise<number> => {
+      let waits = 0;
+      for (;;) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- one call at a time, as the replay goes on
+          await shared().readEntityNames({
+            entity: at.entities.atlas,
+            reader: at.reader,
+          });
+          return waits;
+        } catch (error) {
+          if (!String(error).includes("applying its erasure ledger")) {
+            throw error;
+          }
+          waits += 1;
+        }
+      }
+    };
+    /** What a teammate reads of her, but when it was read. */
+    const seen = async () => {
+      const read = await everything(
+        at.reader,
+        [at.entities.anna],
+        [at.name],
+        [email(at.local)]
+      );
+      return read.replaceAll(readAt, "");
+    };
+
+    await restore(shared(), before);
+    const straight = { refused: await caughtUp(), seen: await seen() };
+    // Each hash takes 11 s, past a step's 10 s: a step makes one, and the
+    // next goes on from it.
+    await restore(shared(), before);
+    let offset = 0;
+    const realNow = Date.now.bind(Date);
+    const realDigest = crypto.subtle.digest.bind(crypto.subtle);
+    const clock = vi
+      .spyOn(Date, "now")
+      .mockImplementation(() => realNow() + offset);
+    const digest = vi
+      .spyOn(crypto.subtle, "digest")
+      .mockImplementation(async (algorithm, data) => {
+        offset += 11_000;
+        return await realDigest(algorithm, data);
+      });
+    let waited = 0;
+    try {
+      waited = await caughtUp();
+    } finally {
+      clock.mockRestore();
+      digest.mockRestore();
+    }
+    const stepped = await seen();
+    await restore(shared(), after);
+
+    expect({
+      straight: straight.refused,
+      stopped: waited > 0,
+      same: stepped === straight.seen,
+      her: [at.name, `${at.local}@acme.test`].filter((needle) =>
+        stepped.includes(needle)
+      ),
+    }).toStrictEqual({ straight: 0, stopped: true, same: true, her: [] });
+  });
+
   it("fails while its ledger entry can't be written, hiding meanwhile, and the retry writes that same erasure", async () => {
     const at = await annaAndBob();
     const bucket = env.BRAIN_OBJECTS;
@@ -913,6 +1084,79 @@ describe("a person's erasure in the shared store", () => {
       project: [`${project} starts in June`],
       seen: [],
     });
+  });
+
+  it("keeps each fact's own restatement once her card is left out before it, so a new version restates the right facts", async () => {
+    const group = unique("g");
+    const bob = unique("bob-");
+    const reader: Reader = { person: bob, groups: [group] };
+    const local = word();
+    const name = `Anna ${word()}`;
+    const project = `Audit ${word()}`;
+    const source = unique("upload:");
+    const version = async (text: string) => {
+      const added = await shared().addSource({
+        source,
+        change: crypto.randomUUID(),
+        text,
+        access: { kind: "audience", group },
+      });
+      return { source, version: added.version };
+    };
+    await erase(unique("anna-"), [email(local)]);
+    /** Her card's fact first, if `her`, then two of the project's, on `doc`. */
+    const drawnFrom = async (
+      doc: { source: string; version: number },
+      her: boolean
+    ) => {
+      const card: NewEntity = {
+        key: "a",
+        kind: "person",
+        names: [name],
+        identifiers: [email(local)],
+      };
+      return await remember(
+        group,
+        [
+          ...(her ? [card] : []),
+          { key: "p", kind: "project", names: [project] },
+        ],
+        [
+          ...(her
+            ? [
+                said(
+                  "a",
+                  `${name} leads the audit`,
+                  bob,
+                  on(doc, "leads the audit")
+                ),
+              ]
+            : []),
+          said(
+            "p",
+            `${project} starts in June`,
+            bob,
+            on(doc, "starts in June")
+          ),
+          said("p", `${project} ends in May`, bob, on(doc, "ends in May")),
+        ]
+      );
+    };
+    const text = `${name} (${local}@acme.test) leads the audit. ${project} starts in June and ends in May.`;
+    const first = await drawnFrom(await version(text), true);
+    // The next version no longer names her.
+    await drawnFrom(
+      await version(`${project} starts in June and ends in May.`),
+      false
+    );
+    const { memories } = await shared().readMemories({
+      entity: first.entities.p ?? "",
+      reader,
+    });
+
+    expect(memories.map(({ statement }) => statement).toSorted()).toStrictEqual(
+      [`${project} ends in May`, `${project} starts in June`].toSorted()
+    );
   });
 
   it("answers a write resting on a document tried again with the same change as it was made, whether her erasure came before it or in between", async () => {

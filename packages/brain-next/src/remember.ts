@@ -717,7 +717,10 @@ export const writeAdd = (
       shared,
       subjects,
       writers,
-      restatements,
+      // Each kept memory's own (the add's hash is of the add as asked).
+      restatements: adding.memories.map(
+        (memory) => restatements[asked.memories.indexOf(memory)] ?? ""
+      ),
       learnedAt: stampWrite(sql),
       memo: new Map(),
     };

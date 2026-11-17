@@ -54,13 +54,14 @@ const subjectOfText = async (text: string): Promise<string> =>
 export const personSubjectOf = async (person: string): Promise<string> =>
   await subjectOfText(person);
 
+/** The text a person's erasure hashes an identifier from. */
+const identifierTextOf = (identifier: Identifier): string =>
+  `identifier:${identifier.type}:${foldIdentifier(identifier)}`;
+
 /** The SHA-256 a person's erasure closes an identifier by. */
 export const identifierSubjectOf = async (
   identifier: Identifier
-): Promise<string> =>
-  await subjectOfText(
-    `identifier:${identifier.type}:${foldIdentifier(identifier)}`
-  );
+): Promise<string> => await subjectOfText(identifierTextOf(identifier));
 
 /** What a person's erasure closes an entity by: its id. */
 export const entityClosureOf = (id: string): string => `entity:${id}`;
@@ -260,10 +261,10 @@ export interface PersonFound {
 /**
  * Applies a person's erasure `key` to what `found` names, in the caller's
  * transaction (above): what it closes recorded; on each entity of theirs
- * alone, every memory about it or relating to it hidden and the entity
- * closed; on any other entity, their identifiers' names deleted; the
- * memories in their word hidden; their confirmations' confirmer
- * replaced; and, when any of that changed something, every export started
+ * alone (holding one of their identifiers, or closed by its id), every
+ * memory about it or relating to it hidden and the entity closed; on any other entity, their identifiers' names deleted; the
+ * memories in their word hidden; a confirmation made over a memory it
+ * hides kept over the rest; their confirmations' confirmer replaced; and, when any of that changed something, every export started
  * before it made stale (exports.ts `namedSql`, by a row naming the
  * erasure's subject). Each statement seeks by an index: the names by
  * identifier, the memories by entity, by object and by the person whose
@@ -276,7 +277,21 @@ export const applyPerson = (
   { people, identifiers, subjects }: PersonFound
 ): number => {
   let changed = 0;
-  const entities = entitiesHolding(sql, identifiers);
+  const holding = entitiesHolding(sql, identifiers);
+  // And each card the erasure closed by its id (a ledger entry's): in a
+  // copy of the store from before her address reached it, it holds none.
+  // An id is the store's own UUID, so it names that card and no other.
+  const byId = sql
+    .exec<{ row: number; id: string }>(
+      `SELECT row, id FROM entities
+      WHERE id IN (SELECT substr(value, 8) FROM json_each(?1)
+        WHERE value LIKE 'entity:%')`,
+      JSON.stringify(subjects)
+    )
+    .toArray()
+    .filter(({ row }) => !holding.some((entity) => entity.row === row))
+    .map(({ row, id }) => ({ row, id, alone: true }));
+  const entities = [...holding, ...byId];
   for (const closed of [
     ...subjects,
     ...entities.flatMap(({ id, alone }) =>
@@ -322,6 +337,17 @@ export const applyPerson = (
     theirs,
     key
   ).rowsWritten;
+  // A confirmation made over a memory it hides stands over the rest: the
+  // memory it overruled goes, the confirmed one stays confirmed (the
+  // tick's delete would take every confirmation made over what it
+  // deletes).
+  changed += sql.exec(
+    `DELETE FROM memory_confirmed_over
+    WHERE memory IN (
+      SELECT memory FROM person_erasure_memories WHERE erasure = ?1
+    )`,
+    key
+  ).rowsWritten;
   changed += sql.exec(
     `UPDATE memory_confirmations SET person = ?2
     WHERE person IN (SELECT value FROM json_each(?1))`,
@@ -339,18 +365,41 @@ export const applyPerson = (
 };
 
 /**
+ * How a replay hashes for `foundForReplay`: each text's SHA-256 made so
+ * far in this replay, kept for its next steps (`hashed`), and `due`,
+ * which throws once the step is out of time.
+ */
+export interface ReplayHashing {
+  hashed: Map<string, string>;
+  due: () => void;
+}
+
+/**
  * What a replay of the ledger entry naming `subject` (a person) and
  * closing `subjects` applies to this copy of the store: their ids and
  * identifiers as it holds them, found by hashing the candidates (each
  * person a memory is in the word of or a confirmation names, each
  * identifier a name holds), as the entry keeps no plain value. Run while
  * the store takes nothing else (a replay), so nothing lands in between.
+ * Each hash is made once in a replay (`hashed`); before each new one
+ * `due` may stop the step, and the next step goes on from what it made.
  */
 export const foundForReplay = async (
   sql: SqlStorage,
   subject: string,
-  subjects: readonly string[]
+  subjects: readonly string[],
+  { hashed, due }: ReplayHashing
 ): Promise<PersonFound> => {
+  const hashOfText = async (text: string): Promise<string> => {
+    const known = hashed.get(text);
+    if (known !== undefined) {
+      return known;
+    }
+    due();
+    const made = await subjectOfText(text);
+    hashed.set(text, made);
+    return made;
+  };
   const closed = new Set(subjects);
   const candidates = sql
     .exec<{ person: string }>(
@@ -362,7 +411,7 @@ export const foundForReplay = async (
   const people: string[] = [];
   for (const { person } of candidates) {
     // oxlint-disable-next-line no-await-in-loop -- one hash at a time
-    if ((await personSubjectOf(person)) === subject) {
+    if ((await hashOfText(person)) === subject) {
       people.push(person);
     }
   }
@@ -373,8 +422,9 @@ export const foundForReplay = async (
     .toArray();
   const identifiers: HeldIdentifier[] = [];
   for (const { type, folded } of named) {
+    const text = identifierTextOf({ type, value: folded });
     // oxlint-disable-next-line no-await-in-loop -- one hash at a time
-    if (closed.has(await identifierSubjectOf({ type, value: folded }))) {
+    if (closed.has(await hashOfText(text))) {
       identifiers.push([type, folded]);
     }
   }
