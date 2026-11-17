@@ -96,6 +96,53 @@ const hr = (name: string) => ({
   instructions: "Every Monday, read HR's new mail and sum it up.",
 });
 
+/** Change it, on the change `callId` drafted in `chatId`. */
+const pressChange = async (person: Person, chatId: string, callId?: string) =>
+  await person.api.chats.changeDraftedAgent(chatId, {
+    draft: callId ?? "",
+    text: "Change it",
+    model,
+  });
+
+/**
+ * An agent made as its page makes it, one of the company's or `person`'s
+ * own, with its instructions saved as its instruction file's first version.
+ */
+const madeAgent = async (
+  person: Person,
+  name: string,
+  own = false
+): Promise<{ id: string }> => {
+  const said = {
+    name,
+    job: hr(name).job,
+    face: "pen",
+    modelRole: null,
+  };
+  const made = own
+    ? await person.api.connections.makeOwnAgent(said)
+    : await person.api.connections.makeAgent(said);
+  await person.api.instructions.save({
+    file: { scope: "agent", agentId: made.id },
+    change: crypto.randomUUID(),
+    text: hr(name).instructions,
+    after: 0,
+  });
+  return made;
+};
+
+/** What the agent `agentId` is told, as its instruction file says now. */
+const toldTo = async (person: Person, agentId: string) => {
+  const file = await person.api.instructions.read({ scope: "agent", agentId });
+  return file?.text;
+};
+
+/** The company's agent `id`, as an admin lists it. */
+const companyAgent = async (admin: Person, id: string) => {
+  const listed = await admin.api.connections.agents();
+  return listed.find((agent) => agent.id === id);
+};
+
 describe("an agent made from the chat", { timeout: 120_000 }, () => {
   it("is made for an admin as the card shows it, only once they press Make it, and only once", async () => {
     const admin = await signedInApi(idp, "admin");
@@ -469,6 +516,201 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
       drafted: true,
       made: false,
       requests: 2,
+    });
+  });
+
+  describe("a change to an agent drafted in the chat", () => {
+    /** A chat of `person`'s whose agent drafted `change`, answering on after. */
+    const changedChat = async (
+      person: Person,
+      change: Record<string, unknown>
+    ) => {
+      const chats = await personalChatsOf(
+        person.userId,
+        toolStep("draftAgentChange", change),
+        says("It's changed.")
+      );
+      const chat = await person.api.chats.create("A change");
+      await person.api.chats.send(chat.id, {
+        text: "Give it the calendar.",
+        model,
+      });
+      await idle(person, chat.id);
+      const messages = await messagesOf(chats.stub, chat.id, person.userId);
+      const drafted = messages.findLast(
+        (message) =>
+          message.role === "assistant" && message.agentChange !== undefined
+      );
+      const callId =
+        drafted?.role === "assistant" ? drafted.agentChange?.callId : undefined;
+      return { ...chats, chat, callId };
+    };
+
+    it("changes the company's agent for an admin as the card shows it, only on Change it, and only once", async () => {
+      const admin = await signedInApi(idp, "admin");
+      const name = `Claire ${unique()}`;
+      const made = await madeAgent(admin, name);
+      const { chat, callId } = await changedChat(admin, {
+        agent: name,
+        whose: "company",
+        addInstructions: "Also keep the HR calendar.",
+        addApps: [{ source: "native", provider: "google", name: "Google" }],
+        turnOn: ["read-own"],
+      });
+      const before = await toldTo(admin, made.id);
+
+      await pressChange(admin, chat.id, callId);
+      await idle(admin, chat.id);
+      const again = await outcome(pressChange(admin, chat.id, callId));
+      const after = await companyAgent(admin, made.id);
+      const told = await toldTo(admin, made.id);
+      const apps = await admin.api.connections.agentApps(made.id);
+      const settings = await admin.api.connections.agentSettings(made.id);
+
+      expect({
+        before,
+        after: [told, after?.job],
+        apps: apps.map(({ app, state }) => [app, state]),
+        on: settings.classes
+          .filter(({ audience: { who } }) => who !== "nobody")
+          .map(({ toolClass }) => toolClass),
+        // Who may ask it was on no card: unchanged.
+        audience: settings.audience,
+        again,
+      }).toStrictEqual({
+        before: hr(name).instructions,
+        after: [
+          `${hr(name).instructions}\n\nAlso keep the HR calendar.`,
+          hr(name).job,
+        ],
+        apps: [["native:google", "on"]],
+        on: ["read-own"],
+        audience: { who: "nobody" },
+        again: "agent.draft_not_found",
+      });
+    });
+
+    it("changes nothing of an agent changed since the chat drafted the change", async () => {
+      const admin = await signedInApi(idp, "admin");
+      const name = `Stale ${unique()}`;
+      const made = await madeAgent(admin, name);
+      const { chat, callId } = await changedChat(admin, {
+        agent: name,
+        whose: "company",
+        addInstructions: "Drafted on what it was.",
+      });
+      await admin.api.connections.changeAgent(made.id, {
+        name,
+        job: "Changed on its page meanwhile.",
+        face: "pen",
+        modelRole: null,
+      });
+
+      const tried = await outcome(pressChange(admin, chat.id, callId));
+      const told = await toldTo(admin, made.id);
+
+      expect({ tried, told }).toStrictEqual({
+        tried: "agent.draft_stale",
+        // Nothing of the card was added.
+        told: hr(name).instructions,
+      });
+    });
+
+    it("changes only an agent the person may change: their own, never another's or the company's", async () => {
+      const ann = await signedInApi(idp, "user");
+      const ben = await signedInApi(idp, "user");
+      const admin = await signedInApi(idp, "admin");
+      const bens = `Bens ${unique()}`;
+      const bensAgent = await madeAgent(ben, bens, true);
+      const companys = `Company ${unique()}`;
+      await madeAgent(admin, companys);
+      const others = await changedChat(ann, {
+        agent: bens,
+        whose: "own",
+        addInstructions: "Mine now.",
+      });
+      const company = await changedChat(ann, {
+        agent: companys,
+        whose: "company",
+        addInstructions: "Mine now.",
+      });
+
+      const triedOthers = await outcome(
+        pressChange(ann, others.chat.id, others.callId)
+      );
+      const triedCompany = await outcome(
+        pressChange(ann, company.chat.id, company.callId)
+      );
+      const bensNow = await toldTo(ben, bensAgent.id);
+
+      expect({
+        others: triedOthers,
+        // The tool refused it back to the model: no change the chat holds.
+        company: triedCompany,
+        bens: bensNow,
+      }).toStrictEqual({
+        others: "agent.unknown",
+        company: "agent.draft_not_found",
+        bens: hr(bens).instructions,
+      });
+    });
+
+    it("changes nothing on a card older than a change to the agent's apps, and keeps whether it answers at all as it is", async () => {
+      const admin = await signedInApi(idp, "admin");
+      const name = `Settings ${unique()}`;
+      const made = await madeAgent(admin, name);
+      await admin.api.connections.setAgentReach(made.id, false, {
+        who: "nobody",
+      });
+      const stale = await changedChat(admin, {
+        agent: name,
+        whose: "company",
+        addApps: [{ source: "native", provider: "google", name: "Google" }],
+      });
+      // Taken off on its page after the card was drafted.
+      await admin.api.connections.setAgentApp(made.id, "native:google", false);
+      const tried = await outcome(
+        pressChange(admin, stale.chat.id, stale.callId)
+      );
+      const reach = await changedChat(admin, {
+        agent: name,
+        whose: "company",
+        audience: { who: "everyone" },
+      });
+      await pressChange(admin, reach.chat.id, reach.callId);
+      await idle(admin, reach.chat.id);
+      const apps = await admin.api.connections.agentApps(made.id);
+      const settings = await admin.api.connections.agentSettings(made.id);
+
+      expect({
+        tried,
+        apps: apps.map(({ app, state }) => [app, state]),
+        reach: [settings.on, settings.audience],
+      }).toStrictEqual({
+        tried: "agent.draft_stale",
+        apps: [["native:google", "removed"]],
+        // Whom it reaches changed; that it answers nobody stayed.
+        reach: [false, { who: "everyone" }],
+      });
+    });
+
+    it("refuses a change to the first agent's apps or access before anything changes, leaving the card to press again", async () => {
+      const admin = await signedInApi(idp, "admin");
+      const listed = await admin.api.connections.agents();
+      const first = listed.at(0);
+      const { chat, callId } = await changedChat(admin, {
+        agent: first?.name ?? "",
+        whose: "company",
+        addApps: [{ source: "native", provider: "google", name: "Google" }],
+      });
+
+      const tried = await outcome(pressChange(admin, chat.id, callId));
+      const again = await outcome(pressChange(admin, chat.id, callId));
+
+      expect({ tried, again }).toStrictEqual({
+        tried: "agent.settings_elsewhere",
+        again: "agent.settings_elsewhere",
+      });
     });
   });
 });
