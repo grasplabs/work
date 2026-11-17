@@ -53,7 +53,12 @@ const readFor = (
     const waiting = await readWaiting(core, identity, {
       markShownRead: false,
     });
-    const items = inboxItems(waiting, identity, new Date().toISOString());
+    // What is only to follow (the interviews while nothing waits on the admin) isn't counted here.
+    const items = inboxItems(
+      waiting,
+      identity,
+      new Date().toISOString()
+    ).filter(({ calm }) => calm !== true);
     return items.length === 0 && unread(waiting).length > 0 ? undefined : items;
   };
   reads.set(identity, read);

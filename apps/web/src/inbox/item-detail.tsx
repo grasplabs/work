@@ -40,6 +40,7 @@ import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { PendingBindingList } from "../workflows/binding-approvals.tsx";
 import { kindLabel, kindMark } from "./inbox-kind.tsx";
+import { InterviewsDetail } from "./interviews-item.tsx";
 import type { InboxItem, InboxSource, Target } from "./items.ts";
 import { TargetLink } from "./target-link.tsx";
 
@@ -802,9 +803,40 @@ const ElsewhereItem = ({ frame }: { frame: Frame }) => {
   );
 };
 
+/** The interviews, with the way back to the list where they take its place. */
+const InterviewsFrame = ({
+  frame,
+  source,
+}: {
+  frame: Frame;
+  source: Extract<InboxSource, { type: "interviews" }>;
+}) => {
+  const { t } = useLingui();
+  const { onBack } = frame;
+  return (
+    <div {...stylex.props(styles.item)}>
+      {onBack === undefined ? null : (
+        <Button
+          icon={ArrowLeft}
+          layout={styles.back}
+          onClick={onBack}
+          size="sm"
+          variant="ghost"
+        >
+          {t`All items`}
+        </Button>
+      )}
+      <InterviewsDetail interviews={source.interviews} today={source.today} />
+    </div>
+  );
+};
+
 /** The item, by what it was made from. */
 export const ItemDetail = (frame: Frame) => {
   const { source } = frame.item;
+  if (source.type === "interviews") {
+    return <InterviewsFrame frame={frame} source={source} />;
+  }
   if (source.type === "held") {
     return <HeldItem frame={frame} source={source} />;
   }

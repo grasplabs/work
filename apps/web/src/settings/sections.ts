@@ -6,7 +6,6 @@ import { msg } from "@lingui/core/macro";
 import {
   AppRecord,
   Cable,
-  Checklist,
   Clock,
   Company,
   Contrast,
@@ -29,7 +28,6 @@ export type SettingsHref =
   | "/settings/workspace"
   | "/settings/members"
   | "/settings/ai-providers"
-  | "/settings/onboarding"
   | "/settings/audit"
   | "/settings/webhooks"
   | "/settings/outcomes"
@@ -121,14 +119,6 @@ export const settingsSections: readonly SettingsSection[] = [
     href: "/settings/ai-providers",
     group: "workspace",
     icon: Cable,
-    audience: "admins",
-  },
-  {
-    id: "onboarding",
-    label: msg`Onboarding`,
-    href: "/settings/onboarding",
-    group: "workspace",
-    icon: Checklist,
     audience: "admins",
   },
   {

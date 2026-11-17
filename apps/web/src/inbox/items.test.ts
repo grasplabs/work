@@ -1,4 +1,3 @@
-// @vitest-environment happy-dom
 import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
 import {
   appIdSchema,
@@ -10,6 +9,9 @@ import {
   workflowIdSchema,
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
+// @vitest-environment happy-dom
+import type { LinkToSend, OnboardingView } from "@grasp-os/shared/onboarding";
+import { noContext } from "@grasp-os/shared/onboarding-context";
 import type { Permission } from "@grasp-os/shared/permissions";
 import type {
   BindingApprovalItem,
@@ -285,6 +287,17 @@ const waiting = (ranOut = true) =>
 
 const admin = { role: "admin", staff: false, name: "Ada Admin" } as const;
 
+/** Someone's interview link, out, and new since the admin last took links when `fresh`. */
+const link = (person: string, fresh: boolean): LinkToSend => ({
+  person,
+  name: person,
+  team: "Finance",
+  email: "",
+  path: `/talk#${person}`,
+  fresh,
+  mailFailed: false,
+});
+
 /** An open question the Brain has for the Head of finance, asked on `askedAt`, if at all. */
 const gap = (id: string, askedAt?: string) => ({
   id,
@@ -348,6 +361,49 @@ describe(inboxItems, () => {
         { id: "gap:gap-open", group: "brain" },
       ],
       member: [{ id: "asked:asked-1", group: "asked" }],
+    });
+  });
+
+  it("pins the interviews first while they run, counted only while something waits on the admin, and drops them once the gate opens", () => {
+    const plan = { start: "2026-10-06", days: 14 };
+    const view: OnboardingView = {
+      roster: null,
+      plan,
+      progress: null,
+      agreed: true,
+      paused: false,
+      sponsor: null,
+      context: noContext,
+      waiting: 0,
+      mailSends: true,
+      mailDomain: null,
+    };
+    const interviewsOf = (
+      links: LinkToSend[],
+      stage: "interviews" | "open"
+    ) => {
+      const [first] = inboxItems(
+        {
+          ...waiting(),
+          interviews: { state: "ready", data: { view, links, stage } },
+        },
+        admin,
+        readAt
+      );
+      return first?.id === "interviews"
+        ? { calm: first.calm, summary: first.summary }
+        : first?.id;
+    };
+
+    expect({
+      quiet: interviewsOf([link("ann", false)], "interviews"),
+      fresh: interviewsOf([link("ann", true), link("bo", true)], "interviews"),
+      open: interviewsOf([link("ann", true)], "open"),
+    }).toStrictEqual({
+      quiet: { calm: true, summary: "Day 9 of 14" },
+      fresh: { calm: false, summary: "2 new links to send" },
+      // Once Grasp opens the gate nothing of them is left: the first item is another's.
+      open: inboxItems(waiting(), admin, readAt)[0]?.id,
     });
   });
 

@@ -19,9 +19,12 @@ import type { PendingRequests } from "../activity/pending.tsx";
 import { integrationKey } from "../connections/integrations.ts";
 import type { NotificationsPage } from "../dashboard/notifications-page.ts";
 import { decidesRequests } from "../dashboard/waiting.ts";
-import type { Viewer, Waiting } from "../dashboard/waiting.ts";
+import type { Interviews, Viewer, Waiting } from "../dashboard/waiting.ts";
 import { formatDate, formatDateTime, formatList } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
+import { quietTeamOf } from "../onboarding/interviews-progress.tsx";
+import { linksOf } from "../onboarding/links-to-send.ts";
+import { listeningOf } from "../onboarding/setup.ts";
 
 // The inbox, as the prototype derives it (`lib/inbox.ts`): what waits on a
 // person to decide, each item made from what core says waits now, so an
@@ -43,6 +46,7 @@ export type InboxKind =
   | "conflict"
   | "openQuestion"
   | "brainQuestion"
+  | "interviews"
   | "unknownAiTool"
   | "signInAgain"
   | "externalDomain"
@@ -85,6 +89,7 @@ export type InboxSource =
   | { type: "reconnect"; integration: string }
   | { type: "asked"; notification: GapAskedNotification }
   | { type: "gap"; gap: Gap }
+  | { type: "interviews"; interviews: Interviews; today: string }
   | { type: "stopped"; notification: TriggerStoppedNotification }
   | { type: "packageNotice"; notification: PackageNotification }
   | { type: "stoppedEvents"; notification: EventsStoppedNotification }
@@ -112,6 +117,12 @@ export interface InboxItem {
   date: string;
   /** Something waits or stops until this is decided. */
   urgent: boolean;
+  /** Stands at the top of the list whatever else waits: the onboarding's interviews. */
+  pinned?: boolean;
+  /** Nothing to do yet, only to follow: it isn't counted where the inbox is counted. */
+  calm?: boolean;
+  /** What the list says under its name, in place of its kind and date. */
+  summary?: string;
   source: InboxSource;
 }
 
@@ -127,6 +138,7 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   conflict: "brain",
   openQuestion: "asked",
   brainQuestion: "brain",
+  interviews: "brain",
   unknownAiTool: "apps",
   signInAgain: "apps",
   externalDomain: "apps",
@@ -146,6 +158,7 @@ export type Sort = "urgent" | "newest" | "oldest";
 
 /** Urgent first, then the newest, then by title: the inbox's own order. */
 const order = (a: InboxItem, b: InboxItem): number =>
+  Number(b.pinned === true) - Number(a.pinned === true) ||
   Number(b.urgent) - Number(a.urgent) ||
   b.date.localeCompare(a.date) ||
   a.title.localeCompare(b.title);
@@ -455,6 +468,78 @@ const gapItems = (
       };
     });
 
+/**
+ * Whether the onboarding's interviews are the admin's to follow: from the
+ * moment who works where is in, until Grasp opens the gate. Then nothing
+ * of them is left for the company's admin: a new round starts from
+ * Grasp's side. Settings, Onboarding sends here while this holds.
+ */
+export const interviewsRunning = ({
+  view,
+  stage,
+}: Pick<Interviews, "view" | "stage">): boolean =>
+  stage !== "open" && (view.plan !== null || view.roster !== null);
+
+/**
+ * The onboarding's interviews as one item, pinned at the top while they
+ * run: what most wants the admin, in a few words, under its name. Counted
+ * where the inbox is counted only while it has something to do: the links
+ * to plan and send, a new link, an email that didn't reach someone, or a
+ * team gone quiet.
+ */
+const interviewsItems = (
+  interviews: Interviews | undefined,
+  readAt: string
+): InboxItem[] => {
+  if (interviews === undefined || !interviewsRunning(interviews)) {
+    return [];
+  }
+  const { view, links } = interviews;
+  const today = readAt.slice(0, 10);
+  const listening = listeningOf(view, today);
+  const planned = view.plan !== null;
+  const fresh = linksOf(links).fresh.length;
+  const failed = links.filter(({ mailFailed }) => mailFailed).length;
+  const quiet = quietTeamOf(view, listening)?.team.name;
+  const { day, days } = listening;
+  let summary = t`Day ${day} of ${days}`;
+  if (!planned) {
+    summary = t`Plan the interviews and send the links`;
+  } else if (failed > 0) {
+    summary = plural(failed, {
+      one: "An email didn’t reach someone",
+      other: "# emails didn’t reach their people",
+    });
+  } else if (fresh > 0) {
+    summary = plural(fresh, {
+      one: "# new link to send",
+      other: "# new links to send",
+    });
+  } else if (quiet !== undefined) {
+    summary = t`${quiet} is quiet`;
+  } else if (view.plan !== null && view.plan.start > today) {
+    const starts = formatDate(`${view.plan.start}T12:00:00Z`);
+    summary = t`Starts ${starts}`;
+  }
+  const title = t`Interviews`;
+  return [
+    {
+      id: "interviews",
+      kind: "interviews",
+      title,
+      context: title,
+      summary,
+      body: [],
+      facts: [],
+      date: view.plan?.start ?? "",
+      urgent: false,
+      pinned: true,
+      calm: planned && failed === 0 && fresh === 0 && quiet === undefined,
+      source: { type: "interviews", interviews, today },
+    },
+  ];
+};
+
 /** What core's rescan found of an App's approved packages. */
 type PackageNotification = Extract<
   NotificationsPage["page"]["notifications"][number],
@@ -742,6 +827,7 @@ export const inboxItems = (
     ...bindingItems(bindings, readAt),
     ...(notifications === undefined ? [] : askedItems(notifications, me)),
     ...gapItems(gaps, askedGaps),
+    ...interviewsItems(readyOf(waiting.interviews), readAt),
     ...(notifications === undefined ? [] : stoppedItems(notifications, me)),
     ...(notifications === undefined
       ? []
@@ -767,6 +853,7 @@ export const unread = (waiting: Waiting): Loaded<unknown>[] => {
     waiting.heldStarts,
     waiting.bindings,
     waiting.gaps,
+    waiting.interviews,
   ];
   return parts.filter(
     (part): part is Loaded<unknown> =>

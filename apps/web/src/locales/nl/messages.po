@@ -569,6 +569,10 @@ msgstr "{failed, plural, one {# mislukt in de afgelopen {days} dagen} other {# m
 msgid "{failed, plural, one {# failed run} other {# failed runs}} of {name}"
 msgstr "{failed, plural, one {# mislukte run} other {# mislukte runs}} van {name}"
 
+#: src/inbox/items.ts
+msgid "{failed, plural, one {An email didn’t reach someone} other {# emails didn’t reach their people}}"
+msgstr "{failed, plural, one {Een e-mail heeft iemand niet bereikt} other {# e-mails hebben hun ontvangers niet bereikt}}"
+
 #: src/apps/data-model-changes.tsx
 msgid "{field} in {table} needs a change in code before this can be published."
 msgstr "{field} in {table} heeft een wijziging in code nodig voordat dit gepubliceerd kan worden."
@@ -595,6 +599,10 @@ msgstr "{found} is gemeld als malware, dus Grasp heeft de pakketten die ermee zi
 msgid "{found}, approved for {name}, has an advisory it didn't have when it was approved. The approval stands: decide whether to update or remove the package."
 msgstr "Voor {found}, goedgekeurd voor {name}, is er een beveiligingsadvies dat er bij de goedkeuring nog niet was. De goedkeuring blijft staan: beslis of je het pakket bijwerkt of verwijdert."
 
+#: src/inbox/items.ts
+msgid "{fresh, plural, one {# new link to send} other {# new links to send}}"
+msgstr "{fresh, plural, one {# nieuwe link om te sturen} other {# nieuwe links om te sturen}}"
+
 #: src/onboarding/interviews-progress.tsx
 msgid "{fresh, plural, one {One new link is ready to send, under “Links to send”.} other {# new links are ready to send, under “Links to send”.}}"
 msgstr "{fresh, plural, one {Er staat één nieuwe link klaar om te versturen, onder “Links om te versturen”.} other {Er staan # nieuwe links klaar om te versturen, onder “Links om te versturen”.}}"
@@ -602,6 +610,10 @@ msgstr "{fresh, plural, one {Er staat één nieuwe link klaar om te versturen, o
 #: src/onboarding/interviews-progress.tsx
 msgid "{freshCount, plural, one {# new link to send} other {# new links to send}}"
 msgstr "{freshCount, plural, one {# nieuwe link om te versturen} other {# nieuwe links om te versturen}}"
+
+#: src/inbox/interviews-item.tsx
+msgid "{freshCount, plural, one {# new, as a list} other {# new, as a list}}"
+msgstr "{freshCount, plural, one {# nieuwe, als lijst} other {# nieuwe, als lijst}}"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "{freshCount, plural, one {The new link, as a list} other {The # new links, as a list}}"
@@ -712,6 +724,7 @@ msgstr "{label}:"
 msgid "{leads, plural, one {Thank you. I’ll start with this lead.} other {Thank you. I’ll start with these # leads.}}"
 msgstr "{leads, plural, one {Dank je. Ik begin met deze teamleider.} other {Dank je. Ik begin met deze # teamleiders.}}"
 
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "{leadsHeard} of {leads}"
 msgstr "{leadsHeard} van {leads}"
@@ -978,6 +991,10 @@ msgstr "{openCount, plural, =0 {Niets wacht op jou} =1 {Nog maar één ding voor
 msgid "{originals, plural, one {# uploaded original deleted} other {# uploaded originals deleted}}"
 msgstr "{originals, plural, one {# geüpload origineel verwijderd} other {# geüploade originelen verwijderd}}"
 
+#: src/inbox/interviews-item.tsx
+msgid "{outCount, plural, one {# out, as a list} other {# out, as a list}}"
+msgstr "{outCount, plural, one {# verstuurd, als lijst} other {# verstuurd, als lijst}}"
+
 #: src/onboarding/interviews-progress.tsx
 msgid "{outCount, plural, one {The link that is out, as a list} other {The # links that are out, as a list}}"
 msgstr "{outCount, plural, one {De beschikbare link, als lijst} other {De # beschikbare links, als lijst}}"
@@ -1039,6 +1056,14 @@ msgstr "{query} leest de index {index}, die deze tabel niet heeft."
 #: src/apps/indexes-view.tsx
 msgid "{query} searches this table, which has no search."
 msgstr "{query} doorzoekt deze tabel, die geen zoekfunctie heeft."
+
+#: src/inbox/items.ts
+msgid "{quiet} is quiet"
+msgstr "{quiet} is stil"
+
+#: src/inbox/interviews-item.tsx
+msgid "{quietTeam} is quiet. A word from {quietLead}, their lead, usually helps."
+msgstr "{quietTeam} is stil. Een woord van {quietLead}, hun leidinggevende, helpt meestal."
 
 #: src/interview/closed.tsx
 msgid "{rating} of 5"
@@ -1200,6 +1225,10 @@ msgstr "{table} heeft een wijziging in code nodig voordat dit gepubliceerd kan w
 #: src/onboarding/setup-steps.tsx
 msgid "{talked, plural, one {I talked with # person.} other {I talked with # people.}}"
 msgstr "{talked, plural, one {Ik sprak met # persoon.} other {Ik sprak met # mensen.}}"
+
+#: src/inbox/interviews-item.tsx
+msgid "{talked} of {asked}"
+msgstr "{talked} van {asked}"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "{talked} of {of}"
@@ -3418,6 +3447,7 @@ msgctxt "how search found a passage"
 msgid "By meaning"
 msgstr "Via de betekenis"
 
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "By team"
 msgstr "Per team"
@@ -4050,6 +4080,7 @@ msgstr "Bijna aan de grens van {limit} tekens"
 msgid "Close without an answer"
 msgstr "Sluiten zonder antwoord"
 
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "Closes {closes}"
 msgstr "Sluit op {closes}"
@@ -4078,6 +4109,10 @@ msgstr "Munten"
 #: src/onboarding/interviews-progress.tsx
 msgid "colleagues talked"
 msgstr "collega’s gesproken"
+
+#: src/inbox/interviews-item.tsx
+msgid "Colleagues talked"
+msgstr "Collega’s gesproken"
 
 #: src/apps/app-access-requests.tsx
 #: src/knowledge/document.tsx
@@ -4509,6 +4544,7 @@ msgstr "Gebeurtenis kopiëren"
 msgid "Copy the hash"
 msgstr "Hash kopiëren"
 
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "Copy the link for {name}"
 msgstr "Kopieer de link voor {name}"
@@ -4748,6 +4784,8 @@ msgstr "Datum"
 msgid "Day"
 msgstr "Dag"
 
+#: src/inbox/interviews-item.tsx
+#: src/inbox/items.ts
 #: src/onboarding/interviews-progress.tsx
 msgid "Day {day} of {days}"
 msgstr "Dag {day} van {days}"
@@ -5091,10 +5129,6 @@ msgstr "Een kennissignaal genegeerd"
 msgid "Do it"
 msgstr "Doen"
 
-#: src/routes/_shell.settings.onboarding.tsx
-msgid "Do it now"
-msgstr "Nu doen"
-
 #: src/onboarding/setup-steps.tsx
 msgid "Do this later"
 msgstr "Later doen"
@@ -5333,6 +5367,10 @@ msgstr "Elke factuur als pdf, zodra die is opgemaakt."
 msgid "Each kind of work as the company has it, or for fewer people. Never for more."
 msgstr "Elke soort werk zoals het bedrijf die heeft, of voor minder mensen. Nooit voor meer."
 
+#: src/inbox/interviews-item.tsx
+msgid "Each link is its owner's own: send it only to them."
+msgstr "Elke link hoort bij één persoon: stuur hem alleen naar die persoon."
+
 #: src/workflows/workflow-settings.tsx
 msgid "Each of the workflow's model tasks is taken to reach every call the workflow makes."
 msgstr "Van elke modeltaak van de workflow wordt aangenomen dat die elke aanroep van de workflow bereikt."
@@ -5375,6 +5413,7 @@ msgstr "{path} bewerken"
 msgid "Editing a workflow"
 msgstr "Een workflow bewerken"
 
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/invitations.tsx
@@ -5834,6 +5873,10 @@ msgstr "Mislukt: {failed}"
 #: src/settings/ai-providers.tsx
 msgid "Fallbacks"
 msgstr "Reservemodellen"
+
+#: src/inbox/interviews-item.tsx
+msgid "Fewer than {least} of {asked}"
+msgstr "Minder dan {least} van {asked}"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Fewer than {least} of {of}"
@@ -6448,6 +6491,10 @@ msgstr "Grasp maakt hem…"
 #: src/dashboard/widget-progress.tsx
 msgid "Grasp is starting on the widget…"
 msgstr "Grasp begint aan de widget…"
+
+#: src/inbox/interviews-item.tsx
+msgid "Grasp is still putting the agreements in place. The links go out once that is done."
+msgstr "Grasp regelt de afspraken nog. De links gaan eruit zodra dat klaar is."
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Grasp is still putting the agreements in place. Your people’s links go out once that is done."
@@ -7128,6 +7175,13 @@ msgstr "Geïnterviewd: de {role}"
 
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
+#: src/inbox/interviews-item.tsx
+#: src/inbox/items.ts
+msgid "Interviews"
+msgstr "Interviews"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
 msgid "Interviews"
 msgstr "Interviews"
 
@@ -7804,6 +7858,7 @@ msgstr "Van links naar rechts schikken"
 msgid "Lay it out top to bottom"
 msgstr "Van boven naar beneden schikken"
 
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "Lead not yet"
 msgstr "Teamleider nog niet"
@@ -7812,6 +7867,7 @@ msgstr "Teamleider nog niet"
 msgid "Lead of {name}"
 msgstr "Teamleider van {name}"
 
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "Lead talked"
 msgstr "Teamleider sprak"
@@ -7963,6 +8019,7 @@ msgstr "Lijnen"
 #: src/apps/app-own-link.tsx
 #: src/apps/app-settings.tsx
 #: src/apps/app-workspace.tsx
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/settings/chat-accounts.tsx
 msgid "Link"
@@ -8004,6 +8061,7 @@ msgstr "Links kunnen hier niet worden geopend."
 msgid "Links to"
 msgstr "Linkt naar"
 
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "Links to send"
 msgstr "Links om te versturen"
@@ -8523,6 +8581,7 @@ msgstr "Mijn versie van de App startte niet. Zoek uit waarom en los het op:"
 #: src/apps/app-settings.tsx
 #: src/apps/field-editor.tsx
 #: src/connections/http-connections.tsx
+#: src/inbox/interviews-item.tsx
 #: src/knowledge/new-collection.tsx
 #: src/knowledge/new-document.tsx
 #: src/onboarding/interviews-progress.tsx
@@ -9699,11 +9758,6 @@ msgstr "Een nieuwe collega inwerken"
 msgid "Onboard a new hire: laptop, accounts and a first-week plan."
 msgstr "Een nieuwe collega inwerken: laptop, accounts en een plan voor de eerste week."
 
-#: src/routes/_shell.settings.onboarding.tsx
-#: src/settings/sections.ts
-msgid "Onboarding"
-msgstr "Onboarding"
-
 #: src/settings/erasures.tsx
 msgid "Onboarding interview"
 msgstr "Onboardinginterview"
@@ -10028,7 +10082,7 @@ msgstr "Open tot"
 msgid "Open until {until}"
 msgstr "Open tot {until}"
 
-#: src/routes/_shell.settings.onboarding.tsx
+#: src/inbox/interviews-item.tsx
 msgid "Open your onboarding"
 msgstr "Open je onboarding"
 
@@ -10149,6 +10203,10 @@ msgstr "Anders"
 #: src/onboarding/failed-mail.tsx
 msgid "Our email didn’t reach {names}. Send them their link yourself from Links to send, or ask Grasp to check their address."
 msgstr "Onze e-mail kwam niet aan bij {names}. Stuur hun link zelf via Links om te versturen, of vraag Grasp hun adres te controleren."
+
+#: src/inbox/interviews-item.tsx
+msgid "Our email didn’t reach {unreached}. Copy their link below and send it yourself."
+msgstr "Onze e-mail heeft {unreached} niet bereikt. Kopieer de link hieronder en stuur hem zelf."
 
 #: src/onboarding/about-story.tsx
 msgid "Our first conversation gave me the big picture. Now I need the details."
@@ -10366,6 +10424,10 @@ msgstr "Gepauzeerd"
 msgid "Paused outside Grasp"
 msgstr "Gepauzeerd buiten Grasp"
 
+#: src/inbox/interviews-item.tsx
+msgid "Paused: no link opens and none goes out."
+msgstr "Gepauzeerd: geen link opent en er gaat er geen uit."
+
 #: src/onboarding/interviews-progress.tsx
 msgid "Paused: no link opens and none goes out. The links that are due go out once they run again."
 msgstr "Gepauzeerd: geen link gaat open en er gaat er geen uit. De links die aan de beurt zijn, gaan uit zodra de interviews weer lopen."
@@ -10557,6 +10619,10 @@ msgstr "Plekken"
 #: src/routes/_shell.settings.billing.tsx
 msgid "Plan"
 msgstr "Abonnement"
+
+#: src/inbox/items.ts
+msgid "Plan the interviews and send the links"
+msgstr "Plan de interviews en stuur de links"
 
 #: src/brain/brain-atlas.ts
 msgid "Plans and goals"
@@ -13105,6 +13171,8 @@ msgctxt "where a workflow starts"
 msgid "Starts"
 msgstr "Start"
 
+#: src/inbox/interviews-item.tsx
+#: src/inbox/items.ts
 #: src/onboarding/interviews-progress.tsx
 msgid "Starts {starts}"
 msgstr "Begint {starts}"
@@ -13196,7 +13264,7 @@ msgstr "Stephen kan het in Microsoft Teams sturen zodra je daar met hem hebt gec
 msgid "Stephen outside Grasp"
 msgstr "Stephen buiten Grasp"
 
-#: src/routes/_shell.settings.onboarding.tsx
+#: src/inbox/interviews-item.tsx
 msgid "Stephen talks to nobody until you pick the day the interviews start."
 msgstr "Stephen praat met niemand totdat je de dag kiest waarop de interviews beginnen."
 
@@ -13469,6 +13537,7 @@ msgstr "taken"
 
 #: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
+#: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
 msgid "Team"
 msgstr "Team"
@@ -13491,6 +13560,10 @@ msgstr "Team"
 #: src/onboarding/interviews-progress.tsx
 msgid "team leads talked"
 msgstr "teamleiders gesproken"
+
+#: src/inbox/interviews-item.tsx
+msgid "Team leads talked"
+msgstr "Teamleiders gesproken"
 
 #: src/dashboard/report.ts
 msgid "Team leads: {leadsTalked} of {leads}"
@@ -13535,6 +13608,10 @@ msgstr "Teams voor {label}"
 #: src/onboarding/interviews-progress.tsx
 msgid "Teams under five people show only whether their lead talked, so nobody can be singled out."
 msgstr "Teams van minder dan vijf mensen laten alleen zien of hun teamleider heeft gepraat, zodat niemand eruit te pikken is."
+
+#: src/inbox/interviews-item.tsx
+msgid "Teams under five show only their lead."
+msgstr "Teams onder de vijf tonen alleen hun leidinggevende."
 
 #: src/pages/frame-failure.tsx
 msgid "Technical details"
@@ -14031,10 +14108,6 @@ msgstr "De integraties, verbindingen en resources die de App gebruikt, en om mee
 #: src/interview/page.tsx
 msgid "The interviews are over."
 msgstr "De gesprekken zijn voorbij."
-
-#: src/routes/_shell.settings.onboarding.tsx
-msgid "The interviews aren’t planned yet. You plan them at the end of your onboarding."
-msgstr "De interviews zijn nog niet gepland. Je plant ze aan het eind van je onboarding."
 
 #: src/workflows/resource-runs.tsx
 #: src/workflows/traces.tsx
@@ -14830,10 +14903,6 @@ msgstr "Te doen"
 msgctxt "inbox tab: what waits on you"
 msgid "To do"
 msgstr "Te doen"
-
-#: src/routes/_shell.settings.onboarding.tsx
-msgid "To do: let your team know, and send the interview links"
-msgstr "Te doen: laat je team het weten en verstuur de interviewlinks"
 
 #: src/onboarding/setup-steps.tsx
 msgid "To everyone"
@@ -16299,10 +16368,6 @@ msgstr "Welke tools gebruiken mensen echt?"
 msgid "Which workflows failed most this month?"
 msgstr "Welke workflows mislukten deze maand het vaakst?"
 
-#: src/routes/_shell.settings.onboarding.tsx
-msgid "While Stephen talks to your team: how far the interviews are, team by team, and everyone’s own link to send."
-msgstr "Terwijl Stephen met je team praat: hoe ver de interviews zijn, team voor team, en ieders eigen link om te versturen."
-
 #: src/chat/agent-choice.tsx
 msgid "Who answers"
 msgstr "Wie antwoordt"
@@ -16387,6 +16452,10 @@ msgstr "Wie hem bereikt in {name}"
 #: src/apps/draft-changes.tsx
 msgid "Who sees which rows"
 msgstr "Wie welke rijen ziet"
+
+#: src/inbox/interviews-item.tsx
+msgid "Who talked"
+msgstr "Wie er sprak"
 
 #: src/connections/connect-dialog.tsx
 msgid "Who uses it"

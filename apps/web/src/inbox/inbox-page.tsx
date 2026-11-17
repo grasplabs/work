@@ -126,6 +126,14 @@ const groupOrder = ["asked", "brain", "workflows", "apps"] as const;
 const isGroup = (value: string | null): value is Group =>
   value === "all" || groupOrder.some((each) => each === value);
 
+/** What a row says under its name: its own words, or its kind and date when it has one. */
+const rowLine = (item: InboxItem, kind: string): string => {
+  if (item.summary !== undefined) {
+    return item.summary;
+  }
+  return item.date === "" ? kind : `${kind} · ${formatDayMonth(item.date)}`;
+};
+
 /** Where a row of the list leads: the inbox, with the item open. */
 const itemHref = (router: ReturnType<typeof useRouter>, id: string): string =>
   router.buildLocation({ to: "/inbox", search: { item: id } }).href;
@@ -229,9 +237,7 @@ const ItemList = ({
                 ) : null}
               </ItemTitle>
               <ItemDescription>
-                {item.date === ""
-                  ? i18n._(kindLabel[item.kind])
-                  : `${i18n._(kindLabel[item.kind])} · ${formatDayMonth(item.date)}`}
+                {rowLine(item, i18n._(kindLabel[item.kind]))}
               </ItemDescription>
             </ItemContent>
           </Item>

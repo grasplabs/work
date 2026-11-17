@@ -136,7 +136,19 @@ export const readWaiting = async (
           )
         : asked;
   }
+  // The onboarding, for the admins Settings, Onboarding was for, Grasp's staff included.
+  const interviews = isAdmin(identity.role)
+    ? await loadFromCore(core, async (session) => {
+        const [view, links, programme] = await Promise.all([
+          session.onboarding.view(),
+          session.onboarding.links(),
+          session.onboarding.programme(),
+        ]);
+        return { view, links, stage: programme?.stage ?? null };
+      })
+    : undefined;
   return {
+    ...(interviews === undefined ? {} : { interviews }),
     held: partOf(feed, "held", (read) =>
       ofKind(read, "heldWrite").map(({ action }) => action)
     ),
