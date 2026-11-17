@@ -4,24 +4,23 @@ import type {
   ProjectRole,
   ProjectShareCandidates,
 } from "@grasp-os/shared/projects";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button } from "@grasp-os/ui/components/button";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { ErrorText } from "../error-text.tsx";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../grasp/alert-dialog/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Minus } from "../grasp/icons/index.ts";
 import { roleLabel } from "../labels.ts";
 import { usePeopleApart } from "../people/people-apart.ts";
 import type { Named, PeopleApart } from "../people/people-apart.ts";
@@ -149,67 +148,55 @@ const RemovePerson = ({
 }) => {
   const { t } = useLingui();
   const router = useRouter();
-  const { busy, failure, run } = useCoreAction();
+  const { failure, run } = useCoreAction();
   const projectName = project.name;
+  const takeOut = async (): Promise<void> => {
+    const done = await run(async (session) => {
+      await changeThenRefresh(
+        async () => {
+          await session.projects.removeMember(project.id, {
+            type: member.type,
+            id: member.id,
+          });
+        },
+        async () => {
+          await router.invalidate({ sync: true });
+        }
+      );
+      return true;
+    });
+    if (done !== true) {
+      // The dialog stays open, and core's reason shows under the row.
+      throw new Error("They weren't taken out.");
+    }
+  };
   return (
     <>
       <AlertDialog>
         <AlertDialogTrigger
-          disabled={busy}
-          render={
-            <Button
-              aria-label={t`Take ${name} out of the project`}
-              size="sm"
-              variant="ghost"
-            />
-          }
+          aria-label={t`Take ${name} out of the project`}
+          icon={Minus}
+          size="sm"
+          variant="ghost"
         >
-          <Trans context="take out of a project">Remove</Trans>
+          {t({ message: "Remove", context: "take out of a project" })}
         </AlertDialogTrigger>
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              <Trans>
-                Take {name} out of {projectName}?
-              </Trans>
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {project.shared === 0 ? (
-                <Trans>
-                  Nothing is shared with the project, so they lose no access.
-                </Trans>
-              ) : (
-                <Trans>
-                  They lose access to what is shared with everyone in the
-                  project, unless it is also shared with them another way. Their
-                  open pages of it stop within seconds.
-                </Trans>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+          <AlertDialogTitle>{t`Take ${name} out of ${projectName}?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {project.shared === 0
+              ? t`Nothing is shared with the project, so they lose no access.`
+              : t`They lose access to what is shared with everyone in the project, unless it is also shared with them another way. Their open pages of it stop within seconds.`}
+          </AlertDialogDescription>
           <AlertDialogFooter>
-            <AlertDialogCancel>
-              <Trans>Cancel</Trans>
-            </AlertDialogCancel>
+            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
             <AlertDialogAction
-              onClick={() => {
-                void run(async (session) => {
-                  await changeThenRefresh(
-                    async () => {
-                      await session.projects.removeMember(project.id, {
-                        type: member.type,
-                        id: member.id,
-                      });
-                    },
-                    async () => {
-                      await router.invalidate({ sync: true });
-                    }
-                  );
-                });
-              }}
-              variant="destructive"
+              action={takeOut}
+              failedLabel={t`Couldn't take it out`}
+              variant="danger"
+              workingLabel={t`Taking it out`}
             >
-              <Trans>Take out</Trans>
+              {t`Take out`}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -275,7 +262,7 @@ export const ProjectPeople = ({ project }: { project: Project }) => {
             void pages.readMore();
           }}
           size="sm"
-          variant="outline"
+          variant="quiet"
         >
           <Trans>Show more</Trans>
         </Button>

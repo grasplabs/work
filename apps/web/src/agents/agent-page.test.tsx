@@ -497,7 +497,9 @@ const field = (label: string): HTMLInputElement | HTMLTextAreaElement => {
   const byLabel = (): Element | null | undefined => {
     if (named === undefined) {
       // A field alone in its card is named by the card, not a label.
-      return document.querySelector(`[aria-label="${label}"]`);
+      return document.querySelector(
+        `input[aria-label="${label}"], textarea[aria-label="${label}"]`
+      );
     }
     return named.htmlFor === ""
       ? named.parentElement?.querySelector("input, textarea")
@@ -766,7 +768,7 @@ describe("an agent's page", () => {
     expect(document.body.textContent).toContain("That isn't a wake-up.");
   });
 
-  it("shows the time zone a wake-up was made in", async () => {
+  it("shows the time zone a wake-up was made in, by its name", async () => {
     const { connections } = fakeConnections();
     await shown(connections, { agent: "Stephen", tab: "schedule" });
     await press(button("Add a time"));
@@ -775,7 +777,8 @@ describe("an agent's page", () => {
     const row = [...document.querySelectorAll("li")].find((each) =>
       each.textContent?.includes("Every weekday at 09:00")
     );
-    expect(row?.textContent).toContain("Europe/Amsterdam");
+    // Europe/Amsterdam, as the page's language names it.
+    expect(row?.textContent).toContain("Central European Time");
   });
 
   it("saves each card's own fields over the agent as core has it now, never undoing what another card saved", async () => {
@@ -803,6 +806,8 @@ describe("an agent's page", () => {
     );
     const listed = document.body.textContent;
     await press(button("Remove Close checklist.md"));
+    // It asks first: a removed document can't be put back without its file.
+    await press(button("Remove"));
     expect({
       asked,
       listed: [

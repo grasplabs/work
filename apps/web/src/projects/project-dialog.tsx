@@ -83,9 +83,12 @@ const ProjectForm = ({
   return (
     <DialogContent>
       <DialogTitle>{title}</DialogTitle>
-      <DialogDescription>
-        {t`A project groups apps and workflows for a process, a team or a goal. Putting something in it shares it with nobody.`}
-      </DialogDescription>
+      {/* What a project is, said once, as one is made; changing it, the person knows. */}
+      {editing === undefined ? (
+        <DialogDescription>
+          {t`A project groups apps and workflows for a process, a team or a goal. Putting something in it shares it with nobody.`}
+        </DialogDescription>
+      ) : null}
       <DialogBody>
         <Form
           aria-label={title}
@@ -113,7 +116,9 @@ const ProjectForm = ({
             />
           </Field>
           <Field>
-            <FieldLabel>{t`What is it for?`}</FieldLabel>
+            <FieldLabel>
+              {t({ message: "What it is for", context: "a project" })}
+            </FieldLabel>
             <Textarea
               disabled={busy}
               maxLength={projectDescriptionMaxLength}

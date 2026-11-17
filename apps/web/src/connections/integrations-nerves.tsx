@@ -1,3 +1,4 @@
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 
 import {
@@ -17,6 +18,18 @@ import { seeded } from "../brain/reveal-motion.ts";
 // components/integrations-nerves.tsx). The numbers, the seeds and the order
 // the random numbers are drawn in are the prototype's, so the fibres lie
 // where they lie there.
+
+const look = stylex.create({
+  // Over the whole of what holds it, never in the way of the pointer: the
+  // drawing reads the pointer from what holds it.
+  canvas: {
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    pointerEvents: "none",
+  },
+});
 
 const TAU = Math.PI * 2;
 /** How many fibres the brain takes at most: a connection past that gets none. */
@@ -773,7 +786,7 @@ const animate = (
     const holding = nearest?.id ?? (overHelp ? over : null);
     if (holding !== held) {
       held = holding;
-      host.classList.toggle("cursor-pointer", held !== null);
+      host.style.cursor = held === null ? "" : "pointer";
       latest.current.onHold(
         held,
         nearest ? { x: nearestAt.x, y: nearestAt.y } : undefined
@@ -1002,10 +1015,6 @@ export const IntegrationsNerves = ({
   }, []);
 
   return (
-    <canvas
-      aria-hidden="true"
-      className="pointer-events-none absolute inset-0 size-full"
-      ref={canvas}
-    />
+    <canvas aria-hidden="true" {...stylex.props(look.canvas)} ref={canvas} />
   );
 };

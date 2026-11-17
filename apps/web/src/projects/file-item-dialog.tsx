@@ -1,38 +1,58 @@
 import type { Project, ProjectItemCandidate } from "@grasp-os/shared/projects";
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@grasp-os/ui/components/dialog";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
-import {
-  NativeSelect,
-  NativeSelectOptGroup,
-  NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
-import { Button as GraspButton } from "../grasp/button/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Checkbox } from "../grasp/checkbox/index.ts";
+import { Combobox } from "../grasp/combobox/index.ts";
+import type { ComboboxItems } from "../grasp/combobox/index.ts";
+import {
+  Dialog,
+  DialogAction,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogTitle,
+} from "../grasp/dialog/index.ts";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+} from "../grasp/field/index.ts";
 import { Plus } from "../grasp/icons/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { namesInProject } from "./project-people-names.ts";
 
-// Putting an App or workflow the person can open in a project. Filing
-// shares nothing: "Also give the N people in X access?" is off unless
-// they tick it, says who gains access, and is offered only for what they
-// build, since only a builder shares.
+// Putting an App or workflow the person can open in a project, in the
+// library's Dialog: one field to find it by name (a Combobox, grouped into
+// Apps and Workflows, so a long list is never unsearched). Filing shares
+// nothing: "Also give the N people in X access?" is off unless they tick
+// it, says who gains access, and is offered only for what they build,
+// since only a builder shares.
+
+/** What a candidate is called in the field: its type and ID. */
+const keyOf = ({ type, id }: ProjectItemCandidate): string => `${type}:${id}`;
+
+/** The candidates as the field lists them: Apps, then workflows. */
+const itemsOf = (
+  candidates: readonly ProjectItemCandidate[],
+  words: { apps: string; workflows: string }
+): ComboboxItems => {
+  const group = (type: ProjectItemCandidate["type"], label: string) => {
+    const items = candidates
+      .filter((candidate) => candidate.type === type)
+      .map((candidate) => ({ value: keyOf(candidate), label: candidate.name }));
+    return items.length === 0 ? [] : [{ type: "group" as const, label, items }];
+  };
+  return [...group("app", words.apps), ...group("workflow", words.workflows)];
+};
 
 /** The form, a fresh one for each opening. */
 const FileForm = ({
@@ -46,18 +66,17 @@ const FileForm = ({
   onDone: () => void;
 }) => {
   const { t } = useLingui();
-  const ids = useId();
   const router = useRouter();
-  const { busy, failure, run } = useCoreAction();
-  const [chosen, setChosen] = useState("");
+  const { failure, run } = useCoreAction();
+  const [chosen, setChosen] = useState<string | null>(null);
   const [share, setShare] = useState(false);
-  const picked = candidates?.find(({ type, id }) => `${type}:${id}` === chosen);
+  const picked = candidates?.find((candidate) => keyOf(candidate) === chosen);
   const { people } = project;
   const projectName = project.name;
   const who = formatList(namesInProject(project));
   const file = async (): Promise<void> => {
     if (picked === undefined) {
-      return;
+      throw new Error("Nothing is chosen.");
     }
     const done = await run(async (session) => {
       await changeThenRefresh(
@@ -73,109 +92,66 @@ const FileForm = ({
       );
       return true;
     });
-    if (done === true) {
-      onDone();
+    if (done !== true) {
+      // The dialog stays open, with core's reason under the field.
+      throw new Error("It wasn't added.");
     }
+    onDone();
   };
-  const apps = (candidates ?? []).filter(({ type }) => type === "app");
-  const workflows = (candidates ?? []).filter(
-    ({ type }) => type === "workflow"
-  );
   return (
-    <form
-      className="flex flex-col gap-5"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (picked !== undefined && !busy) {
-          void file();
-        }
-      }}
-    >
-      <DialogHeader>
-        <DialogTitle>
-          <Trans>Add to {projectName}</Trans>
-        </DialogTitle>
-        <DialogDescription>
-          <Trans>
-            Adding an app or workflow shares it with nobody. Only those it is
-            shared with see it here.
-          </Trans>
-        </DialogDescription>
-      </DialogHeader>
-      <Field>
-        <FieldLabel htmlFor={`${ids}-item`}>
-          <Trans>App or workflow</Trans>
-        </FieldLabel>
-        <NativeSelect
-          disabled={busy || candidates === undefined}
-          id={`${ids}-item`}
-          onChange={(event) => {
-            setChosen(event.target.value);
-            setShare(false);
-          }}
-          value={chosen}
-        >
-          <NativeSelectOption value="">{t`Choose…`}</NativeSelectOption>
-          {apps.length === 0 ? null : (
-            <NativeSelectOptGroup label={t`Apps`}>
-              {apps.map((app) => (
-                <NativeSelectOption key={app.id} value={`app:${app.id}`}>
-                  {app.name}
-                </NativeSelectOption>
-              ))}
-            </NativeSelectOptGroup>
-          )}
-          {workflows.length === 0 ? null : (
-            <NativeSelectOptGroup label={t`Workflows`}>
-              {workflows.map((workflow) => (
-                <NativeSelectOption
-                  key={workflow.id}
-                  value={`workflow:${workflow.id}`}
-                >
-                  {workflow.name}
-                </NativeSelectOption>
-              ))}
-            </NativeSelectOptGroup>
-          )}
-        </NativeSelect>
-      </Field>
-      {picked?.builds === true ? (
-        <Field orientation="horizontal">
-          <Checkbox
-            checked={share}
-            disabled={busy}
-            id={`${ids}-share`}
-            onCheckedChange={(checked) => {
-              setShare(checked);
+    <>
+      <DialogBody>
+        <Field name="project-item">
+          <FieldLabel>{t`App or workflow`}</FieldLabel>
+          <Combobox
+            disabled={candidates === undefined}
+            items={itemsOf(candidates ?? [], {
+              apps: t`Apps`,
+              workflows: t`Workflows`,
+            })}
+            onValueChange={(value) => {
+              setChosen(value);
+              setShare(false);
             }}
+            placeholder={t`Find an app or workflow`}
+            triggerLabel={t`Show the apps and workflows`}
+            value={chosen}
           />
-          <FieldLabel htmlFor={`${ids}-share`}>
-            <span>
-              <Plural
-                one={`Also give the # person in ${projectName} access?`}
-                other={`Also give the # people in ${projectName} access?`}
-                value={people}
-              />{" "}
-              <span className="text-muted-foreground">
-                <Trans>That is {who}.</Trans>
-              </span>
-            </span>
-          </FieldLabel>
         </Field>
-      ) : null}
-      <ErrorText>{failure}</ErrorText>
+        {picked?.builds === true ? (
+          <Field orientation="horizontal">
+            <Checkbox
+              checked={share}
+              onCheckedChange={(checked) => {
+                setShare(checked === true);
+              }}
+            />
+            <FieldContent>
+              <FieldLabel>
+                {t`${plural(people, {
+                  one: `Also give the # person in ${projectName} access?`,
+                  other: `Also give the # people in ${projectName} access?`,
+                })}`}
+              </FieldLabel>
+              <FieldDescription>{t`That is ${who}.`}</FieldDescription>
+            </FieldContent>
+          </Field>
+        ) : null}
+        <ErrorText>{failure}</ErrorText>
+      </DialogBody>
       <DialogFooter>
-        <DialogClose
-          disabled={busy}
-          render={<Button type="button" variant="outline" />}
+        <DialogAction>{t`Cancel`}</DialogAction>
+        <DialogAction
+          action={file}
+          disabled={picked === undefined}
+          failedLabel={t`Not added`}
+          variant="ink"
+          workingLabel={t`Adding`}
         >
-          <Trans>Cancel</Trans>
-        </DialogClose>
-        <Button disabled={picked === undefined || busy} type="submit">
-          <Trans context="put in a project">Add</Trans>
-        </Button>
+          {t({ message: "Add", context: "put in a project" })}
+        </DialogAction>
       </DialogFooter>
-    </form>
+    </>
   );
 };
 
@@ -192,26 +168,27 @@ export const FileItemDialog = ({ project }: { project: Project }) => {
     );
     setCandidates(listed ?? []);
   };
+  const projectName = project.name;
   return (
-    <Dialog
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (next) {
+    <>
+      <Button
+        icon={Plus}
+        onClick={() => {
+          setOpen(true);
           void read();
-        }
-      }}
-      open={open}
-    >
-      <DialogTrigger
-        render={
-          <GraspButton icon={Plus} variant="quiet">
-            {t({ message: "Add", context: "put in a project" })}
-          </GraspButton>
-        }
-      />
-      <DialogContent>
-        {open ? (
-          <>
+        }}
+        variant="quiet"
+      >
+        {t({ message: "Add", context: "put in a project" })}
+      </Button>
+      <Dialog onOpenChange={setOpen} open={open}>
+        <DialogContent closeLabel={t`Close`}>
+          <DialogTitle>{t`Add to ${projectName}`}</DialogTitle>
+          {/* Said here, as one might think adding shares: it doesn't. */}
+          <DialogDescription>
+            {t`Adding an app or workflow shares it with nobody. Only those it is shared with see it here.`}
+          </DialogDescription>
+          {open ? (
             <FileForm
               candidates={candidates}
               onDone={() => {
@@ -219,10 +196,10 @@ export const FileItemDialog = ({ project }: { project: Project }) => {
               }}
               project={project}
             />
-            <ErrorText>{failure}</ErrorText>
-          </>
-        ) : null}
-      </DialogContent>
-    </Dialog>
+          ) : null}
+          <ErrorText>{failure}</ErrorText>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 };

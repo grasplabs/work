@@ -59,10 +59,15 @@ import {
 } from "../grasp/item/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
+import {
+  FactRow,
+  SettingRow,
+  SettingsRows,
+} from "../grasp/setting-row/index.ts";
 import { Switch } from "../grasp/switch/index.ts";
+import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { dollars } from "../settings/money.ts";
-import { FactRow, SettingRow, SettingsRows } from "../settings/section.tsx";
 import {
   AudienceControl,
   appAudienceOf,
@@ -123,6 +128,13 @@ export const agentTabOf = (value: unknown): AgentTab =>
   agentTabs.find((tab) => tab === value) ?? "overview";
 
 const styles = stylex.create({
+  // A card's foot: a quiet line at the start, its button at the end.
+  foot: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: grasp.space3,
+  },
   actions: {
     display: "flex",
     flexWrap: "wrap",
@@ -194,7 +206,7 @@ const UsageRow = ({ usage }: { usage: AgentUsage }) => {
   const before = dollars(usage.spentBefore);
   return (
     <FactRow
-      help={[
+      info={[
         plural(requests, {
           one: "# request to a model",
           other: "# requests to a model",
@@ -357,7 +369,7 @@ const Access = ({
       <SectionCard density="compact" flush title={t`Who may use it`}>
         <SettingsRows>
           <SettingRow
-            help={t`Nobody outside it can ask it anything, in Grasp or a chat app.`}
+            info={t`Nobody outside it can ask it anything, in Grasp or a chat app.`}
             label={t`${name} answers`}
           >
             {() => (
@@ -384,8 +396,8 @@ const Access = ({
       </SectionCard>
       <SectionCard
         density="compact"
-        description={t`Each as the company has it, or for fewer people. Never more.`}
         flush
+        info={t`Each as the company has it, or for fewer people. Never more.`}
         title={t`What it may do`}
       >
         <SettingsRows>
@@ -675,9 +687,9 @@ export const AgentPage = ({
             ) : null}
           </div>
         }
-        // The part shown, as Settings names its page: the agent's mark and
-        // name stand above it in the sidebar, and in the crumbs.
-        size="sm"
+        // The part shown, as Settings names its page, in the same title:
+        // the agent's mark and name stand above it in the sidebar, and in
+        // the crumbs.
         title={partNames[tab]}
       />
       <AgentFailure>{failure}</AgentFailure>
@@ -702,21 +714,26 @@ export const AgentPage = ({
         hidden={tab !== "instructions"}
         {...stylex.props(styles.stack, tab !== "instructions" && styles.hidden)}
       >
+        {/* No title: the page's is "Instructions" already. */}
         <SectionCard
+          aria-label={t`Instructions`}
           density="compact"
-          actions={
-            <Button
-              disabled={!can}
-              form={instructionsId}
-              size="sm"
-              type="submit"
-              variant="ink"
-            >
-              {t`Save`}
-            </Button>
+          footer={
+            <div {...stylex.props(styles.foot)}>
+              <Text size="sm" tone="muted">
+                {t`Grasp's own rules always hold over these.`}
+              </Text>
+              <Button
+                disabled={!can}
+                form={instructionsId}
+                size="sm"
+                type="submit"
+                variant="ink"
+              >
+                {t`Save`}
+              </Button>
+            </div>
           }
-          description={t`Grasp's own rules always hold over these.`}
-          title={t`Instructions`}
         >
           <AgentForm
             can={can}

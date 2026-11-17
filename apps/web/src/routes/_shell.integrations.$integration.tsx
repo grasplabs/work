@@ -1,7 +1,6 @@
 import type { CatalogTool, ListedConnection } from "@grasp-os/shared/connect";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { msg, plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Await, createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -15,6 +14,14 @@ import {
 import { ConnectedDialog } from "../connections/connected-dialog.tsx";
 import { ConnectionList } from "../connections/connection-list.tsx";
 import type { HeldPermissions } from "../connections/connection-list.tsx";
+import {
+  aboutOf,
+  allowedToolsOf,
+  newestOf,
+  toolGroups,
+  useReaches,
+  useWhyNoConnect,
+} from "../connections/integration-facts.ts";
 import { loadIntegrations } from "../connections/integrations-data.ts";
 import {
   integrationsOf,
@@ -31,6 +38,7 @@ import {
   changeableConnectionOf,
   ToolPermissions,
 } from "../connections/tool-permissions.tsx";
+import { ToolRows } from "../connections/tool-rows.tsx";
 import { WorkflowsUsing } from "../connections/workflows-using.tsx";
 import { formatDate, formatDayMonth } from "../format.ts";
 import {
@@ -46,14 +54,6 @@ import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Empty } from "../grasp/empty/index.ts";
 import { Cable } from "../grasp/icons/index.ts";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemTitle,
-} from "../grasp/item/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { SectionHeader } from "../grasp/section-header/index.ts";
@@ -113,59 +113,6 @@ const HeldNotLoaded = ({
   );
 };
 
-/** One tool: its name and what it does; marked where a connection doesn't allow it. */
-const ToolRow = ({
-  tool,
-  allowed,
-}: {
-  tool: CatalogTool;
-  allowed: boolean;
-}) => {
-  const { t } = useLingui();
-  return (
-    <Item size="xs">
-      <ItemContent>
-        <ItemTitle>{tool.name}</ItemTitle>
-        {tool.description === null ? null : (
-          <ItemDescription>{tool.description}</ItemDescription>
-        )}
-      </ItemContent>
-      {allowed ? null : (
-        <ItemActions>
-          <Badge>{t`Not allowed`}</Badge>
-        </ItemActions>
-      )}
-    </Item>
-  );
-};
-
-// The prototype's groups: what only reads, then what creates or changes.
-const toolGroups = [
-  {
-    id: "read",
-    readOnly: true,
-    title: msg({ message: "Read", context: "permission group" }),
-  },
-  {
-    id: "change",
-    readOnly: false,
-    title: msg({ message: "Create and change", context: "permission group" }),
-  },
-] as const;
-
-/**
- * The tools a Composio connection allows, as the admin who connected it
- * chose them; none to go by for a native one, whose every tool is there.
- */
-const allowedToolsOf = (
-  integration: Integration
-): ReadonlySet<string> | undefined => {
-  const chosen = integration.connections.flatMap(({ tools }) => tools ?? []);
-  return integration.source === "composio" && integration.connections.length > 0
-    ? new Set(chosen)
-    : undefined;
-};
-
 /** The connection whose tools the person may change here, and whether they are staff. */
 interface Changeable {
   connection: ListedConnection;
@@ -180,11 +127,14 @@ interface Changeable {
 const ToolList = ({
   tools,
   app,
+  slug,
   allowed,
   changeable,
 }: {
   tools: Loaded<CatalogTool[]>;
   app: string;
+  /** The app's id in the catalog, which a Composio tool's name starts with. */
+  slug: string;
   allowed: ReadonlySet<string> | undefined;
   changeable: Changeable | undefined;
 }) => {
@@ -214,17 +164,9 @@ const ToolList = ({
     );
     const title = i18n._(group.title);
     return inGroup.length === 0 ? null : (
-      <section key={group.id}>
+      <section key={group.id} {...stylex.props(styles.group)}>
         <SectionHeader layout={styles.groupHead} size="sm" title={title} />
-        <ItemGroup aria-label={title} separated>
-          {inGroup.map((tool) => (
-            <ToolRow
-              allowed={allowed?.has(tool.name) ?? true}
-              key={tool.name}
-              tool={tool}
-            />
-          ))}
-        </ItemGroup>
+        <ToolRows allowed={allowed} label={title} slug={slug} tools={inGroup} />
       </section>
     );
   });
@@ -239,12 +181,14 @@ const Tools = ({
   tools,
   catalog,
   app,
+  slug,
   allowed,
   changeable,
 }: {
   tools: Promise<Loaded<CatalogTool[]>> | undefined;
   catalog: Loaded<unknown>;
   app: string;
+  slug: string;
   allowed: ReadonlySet<string> | undefined;
   changeable: Changeable | undefined;
 }) => {
@@ -269,32 +213,13 @@ const Tools = ({
         <ToolList
           allowed={allowed}
           app={app}
+          slug={slug}
           changeable={changeable}
           tools={loaded}
         />
       )}
     </Await>
   );
-};
-
-/**
- * What its connections reach: the tools a Composio connection's admin
- * allowed, or, for a native one, every tool, as Apps and agents are
- * granted them.
- */
-const useReaches = () => {
-  const { t } = useLingui();
-  return (integration: Integration): string => {
-    const allowed = allowedToolsOf(integration);
-    if (allowed === undefined) {
-      return t`Every tool it has: Apps and agents use only what they are granted.`;
-    }
-    const total = integration.toolCount;
-    const count = allowed.size;
-    return total === undefined
-      ? t`${plural(count, { one: "# tool allowed", other: "# tools allowed" })}`
-      : t`${plural(total, { one: `${count} of its # tool allowed`, other: `${count} of its # tools allowed` })}`;
-  };
 };
 
 /**
@@ -377,13 +302,6 @@ const changeableOf = (
     : { connection, staff: identity.staff };
 };
 
-/** What the app is for, under its name: in a sentence where the catalog says, else its kind. */
-const aboutOf = (integration: Integration): string | undefined =>
-  integration.description ?? integration.categories[0];
-
-/** The connection that says who connected the app and when: its newest. */
-const newestOf = (integration: Integration) => integration.connections[0];
-
 /** What the app is for and, once it is connected, since when: "Accounting · connected 3 Oct". */
 const useSubtitle = () => {
   const { t } = useLingui();
@@ -404,39 +322,17 @@ const useSubtitle = () => {
   };
 };
 
-/** Why this person can't connect it, where they can't: staff, an entry not offered, one that needs the organization's own sign-in app, or a toolkit only admins connect. */
-const useWhyNoConnect = () => {
-  const { t } = useLingui();
-  return (integration: Integration, identity: Identity): string | undefined => {
-    if (canConnect(integration, identity)) {
-      return undefined;
-    }
-    if (identity.staff) {
-      return t`Grasp staff can't connect accounts or change what is offered here: that is for the organization's own people.`;
-    }
-    if (!integration.offered) {
-      return isAdmin(identity.role)
-        ? t`It isn't offered to your organization: offer it below before connecting it.`
-        : t`It isn't offered to your organization.`;
-    }
-    if (integration.auth === "own") {
-      return t`Connecting it needs your organization's own sign-in app, which Grasp can't use yet.`;
-    }
-    return integration.source === "composio" &&
-      integration.connections.length === 0
-      ? t`An admin connects this for everyone.`
-      : undefined;
-  };
-};
-
 const styles = stylex.create({
   title: { display: "flex", alignItems: "center", gap: grasp.space3 },
-  // A group's name in the card's flush rows, on their inset.
-  groupHead: {
-    marginInline: grasp.space4,
-    marginBlockStart: grasp.space3,
-    marginBlockEnd: grasp.space1,
+  // A group of tools in the card's flush rows: its name and its rows'
+  // words on the card's inset (the rows bring 12px of their own).
+  group: {
+    display: "grid",
+    gap: grasp.space1,
+    paddingInline: grasp.space1,
+    paddingBlock: grasp.space3,
   },
+  groupHead: { marginInline: grasp.space3 },
 });
 
 /**
@@ -528,13 +424,15 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
         )}
         <SectionCard
           density="compact"
-          description={t`What its tools do, as its provider declares them. Apps and agents use only what they are granted, and a tool that changes something waits for its person to confirm it.`}
           flush
+          info={t`What its tools do, as its provider declares them. Apps and agents use only what they are granted, and a tool that changes something waits for its person to confirm it.`}
+          infoLabel={t`More about what Grasp may do`}
           title={t`What Grasp may do`}
         >
           <Tools
             allowed={allowedToolsOf(integration)}
             app={integration.name}
+            slug={integration.id}
             catalog={catalog}
             changeable={changeableOf(integration, identity)}
             tools={integration.listed ? tools : undefined}

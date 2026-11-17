@@ -283,7 +283,7 @@ const SignInAgain = ({
 };
 
 /** Disconnecting, once confirmed: its tokens go, and everything that used it loses it. */
-const Disconnect = ({
+export const Disconnect = ({
   connection,
   label,
   last,

@@ -540,15 +540,16 @@ export const HttpConnections = ({
     <SectionCard
       actions={manages ? <AddHttpConnection /> : undefined}
       aside={
-        connections === undefined ? undefined : (
+        shown.length === 0 ? undefined : (
           <Text element="span" size="sm" tone="muted">
             {formatNumber(shown.length)}
           </Text>
         )
       }
       density="compact"
-      description={t`Outside APIs an admin approved, by origin, methods and paths. Apps and workflows call them only with a permission.`}
       flush
+      info={t`Outside APIs an admin approved, by origin, methods and paths. Apps and workflows call them only with a permission.`}
+      infoLabel={t`More about HTTP connections`}
       title={t`HTTP connections`}
     >
       {shown.length === 0 ? null : (

@@ -7,19 +7,8 @@ import type {
 } from "@grasp-os/shared/projects";
 import { canBuild } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button as KitButton } from "@grasp-os/ui/components/button";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import type { ReactNode } from "react";
@@ -30,6 +19,15 @@ import { formatList } from "../format.ts";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { RouterLink } from "../frame/router-link.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../grasp/alert-dialog/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import {
   DropdownMenu,
@@ -39,12 +37,14 @@ import {
   DropdownMenuTrigger,
 } from "../grasp/dropdown-menu/index.ts";
 import { Empty } from "../grasp/empty/index.ts";
+import { IconTile } from "../grasp/icon-tile/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
 import {
   AppPanels,
   Cable,
   Chat,
   Edit,
+  Minus,
   More,
   Plus,
   Trash,
@@ -60,12 +60,14 @@ import {
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { roleLabel } from "../labels.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { FileItemDialog } from "./file-item-dialog.tsx";
 import { AddChat, ProjectChatList } from "./project-chats.tsx";
 import { ProjectConnectionList } from "./project-connections.tsx";
 import { ProjectDialog } from "./project-dialog.tsx";
+import { projectIconShapes } from "./project-icon.tsx";
 import { usePages } from "./project-pages.ts";
 import { namesInProject } from "./project-people-names.ts";
 import { ProjectPeopleStack } from "./project-people-stack.tsx";
@@ -89,6 +91,11 @@ const ItemLink = ({ item }: { item: ProjectItem }) =>
     </RouterLink>
   );
 
+const styles = stylex.create({
+  // The icon and the name on one line, centred on each other.
+  named: { display: "inline-flex", alignItems: "center", gap: grasp.space3 },
+});
+
 /** Taking an item out, after naming who loses it. */
 const RemoveItem = ({
   project,
@@ -99,70 +106,59 @@ const RemoveItem = ({
 }) => {
   const { t } = useLingui();
   const router = useRouter();
-  const { busy, failure, run } = useCoreAction();
+  const { failure, run } = useCoreAction();
   const itemName = item.name;
   const projectName = project.name;
   const who = formatList(namesInProject(project));
+  const takeOut = async (): Promise<void> => {
+    const done = await run(async (session) => {
+      await changeThenRefresh(
+        async () => {
+          await session.projects.unfile(project.id, {
+            type: item.type,
+            id: item.id,
+          });
+        },
+        async () => {
+          await router.invalidate({ sync: true });
+        }
+      );
+      return true;
+    });
+    if (done !== true) {
+      // The dialog stays open, and core's reason shows under the row.
+      throw new Error("It wasn't taken out.");
+    }
+  };
   return (
     <>
       <AlertDialog>
         <AlertDialogTrigger
-          disabled={busy}
-          render={
-            <KitButton
-              aria-label={t`Take ${itemName} out of the project`}
-              size="sm"
-              variant="ghost"
-            />
-          }
+          aria-label={t`Take ${itemName} out of the project`}
+          icon={Minus}
+          size="sm"
+          variant="ghost"
         >
-          <Trans context="take out of a project">Remove</Trans>
+          {t({ message: "Remove", context: "take out of a project" })}
         </AlertDialogTrigger>
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              <Trans>
-                Take {itemName} out of {projectName}?
-              </Trans>
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {item.sharedAs === null ? (
-                <Trans>
-                  It isn’t shared with the project, so nobody loses access. It
-                  isn’t deleted.
-                </Trans>
-              ) : (
-                <Trans>
-                  It stops being shared with everyone in the project: {who} lose
-                  access, unless it is shared with them another way. It isn’t
-                  deleted.
-                </Trans>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+          <AlertDialogTitle>
+            {t`Take ${itemName} out of ${projectName}?`}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {item.sharedAs === null
+              ? t`It isn’t shared with the project, so nobody loses access. It isn’t deleted.`
+              : t`It stops being shared with everyone in the project: ${who} lose access, unless it is shared with them another way. It isn’t deleted.`}
+          </AlertDialogDescription>
           <AlertDialogFooter>
-            <AlertDialogCancel>
-              <Trans>Cancel</Trans>
-            </AlertDialogCancel>
+            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
             <AlertDialogAction
-              onClick={() => {
-                void run(async (session) => {
-                  await changeThenRefresh(
-                    async () => {
-                      await session.projects.unfile(project.id, {
-                        type: item.type,
-                        id: item.id,
-                      });
-                    },
-                    async () => {
-                      await router.invalidate({ sync: true });
-                    }
-                  );
-                });
-              }}
-              variant="destructive"
+              action={takeOut}
+              failedLabel={t`Couldn't take it out`}
+              variant="danger"
+              workingLabel={t`Taking it out`}
             >
-              <Trans>Take out</Trans>
+              {t`Take out`}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -267,47 +263,40 @@ const DeleteProject = ({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) => {
+  const { t } = useLingui();
   const navigate = useNavigate();
   const { failure, run } = useCoreAction();
   const projectName = project.name;
   const who = formatList(namesInProject(project));
+  const remove = async (): Promise<void> => {
+    const done = await run(async (session) => {
+      await session.projects.remove(project.id);
+      return true;
+    });
+    if (done !== true) {
+      throw new Error("The project wasn't deleted.");
+    }
+    await navigate({ to: "/projects" });
+  };
   return (
     <AlertDialog onOpenChange={onOpenChange} open={open}>
       <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>
-            <Trans>Delete {projectName}?</Trans>
-          </AlertDialogTitle>
-          <AlertDialogDescription>
-            {project.shared === 0 ? (
-              <Trans>
-                Its apps and workflows aren’t deleted, and nothing in it is
-                shared with the project, so nobody loses access.
-              </Trans>
-            ) : (
-              <Trans>
-                Its apps and workflows aren’t deleted, but they stop being
-                shared with everyone in it: {who} lose access to them, unless
-                they are shared with them another way.
-              </Trans>
-            )}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
+        <AlertDialogTitle>{t`Delete ${projectName}?`}</AlertDialogTitle>
+        <AlertDialogDescription>
+          {project.shared === 0
+            ? t`Its apps and workflows aren’t deleted, and nothing in it is shared with the project, so nobody loses access.`
+            : t`Its apps and workflows aren’t deleted, but they stop being shared with everyone in it: ${who} lose access to them, unless they are shared with them another way.`}
+        </AlertDialogDescription>
         <ErrorText>{failure}</ErrorText>
         <AlertDialogFooter>
-          <AlertDialogCancel>
-            <Trans>Cancel</Trans>
-          </AlertDialogCancel>
+          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
           <AlertDialogAction
-            onClick={() => {
-              void run(async (session) => {
-                await session.projects.remove(project.id);
-                await navigate({ to: "/projects" });
-              });
-            }}
-            variant="destructive"
+            action={remove}
+            failedLabel={t`Couldn't delete`}
+            variant="danger"
+            workingLabel={t`Deleting`}
           >
-            <Trans>Delete project</Trans>
+            {t`Delete project`}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -328,8 +317,9 @@ const QuietKind = ({
   children: string;
   action?: ReactNode;
 }) => (
-  <Item size="sm" variant="soft">
-    <ItemMedia icon={icon} iconLook="inline" />
+  // Outlined, so it shows in dark as in light; its icon level with its sentence.
+  <Item size="sm" variant="outline">
+    <ItemMedia align="center" icon={icon} iconLook="inline" />
     <ItemContent>
       <ItemDescription>{children}</ItemDescription>
     </ItemContent>
@@ -354,7 +344,7 @@ const ProjectMenu = ({
       <DropdownMenuTrigger aria-label={t`More for ${title}`} icon={More} />
       <DropdownMenuContent align="end">
         <DropdownMenuItem icon={Edit} onSelect={onChange}>
-          {t`Change`}
+          {t({ message: "Change", context: "change the project: a menu item" })}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem icon={Trash} onSelect={onDelete} variant="danger">
@@ -433,7 +423,13 @@ export const ProjectView = ({
           description={
             project.description === "" ? undefined : project.description
           }
-          title={project.name}
+          title={
+            // The project's own icon before its name, as its row in the list has it.
+            <span {...stylex.props(styles.named)}>
+              <IconTile icon={projectIconShapes[project.icon]} variant="tint" />
+              {project.name}
+            </span>
+          }
         />
         {apps === 0 ? (
           <QuietKind

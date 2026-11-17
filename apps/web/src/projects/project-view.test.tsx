@@ -293,16 +293,6 @@ const offered = (name: string) =>
     (each) => each.querySelector("span.truncate")?.textContent === name
   );
 
-const choose = async (select: HTMLSelectElement, value: string) => {
-  await act(async () => {
-    // Through the element's own setter, as a person's choice reaches React.
-    Reflect.set(HTMLSelectElement.prototype, "value", value, select);
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-    await Promise.resolve();
-  });
-  await settled();
-};
-
 describe("A project's page", () => {
   afterEach(() => {
     act(() => {
@@ -334,28 +324,36 @@ describe("A project's page", () => {
     await shown(session, project("builder"));
 
     await press(button("Add"));
-    const select = document.querySelector('[role="dialog"] select');
-    if (!(select instanceof HTMLSelectElement)) {
-      throw new TypeError("No list of what to add");
-    }
-    await choose(select, "workflow:wf-quotes");
-    const share = document.querySelector('[role="checkbox"]');
+    // Found by name in the list, as a person picks it.
+    await press(
+      document.querySelector(
+        '[role="dialog"] [aria-label="Show the apps and workflows"]'
+      )
+    );
+    await press(
+      [...document.querySelectorAll('[role="option"]')].find(
+        (each) => each.textContent?.trim() === "Quotes"
+      )
+    );
+    const share = document.querySelector('[role="dialog"] [role="checkbox"]');
     const offer = document.body.textContent ?? "";
     await press(
-      [...document.querySelectorAll('[role="dialog"] button')].find(
-        (each) => each.textContent?.trim() === "Add"
+      [...document.querySelectorAll('[role="dialog"] button')].find((each) =>
+        each.textContent?.trim().startsWith("Add")
       )
     );
 
     expect({
       checked: share?.getAttribute("aria-checked"),
-      offer: offer.includes(
-        "Also give the 2 people in Sell & get paid access? That is Olga and Ada."
-      ),
+      // The question, and who that is under it.
+      offer: [
+        offer.includes("Also give the 2 people in Sell & get paid access?"),
+        offer.includes("That is Olga and Ada."),
+      ],
       asked,
     }).toStrictEqual({
       checked: "false",
-      offer: true,
+      offer: [true, true],
       asked: [["file", "wf-quotes", false]],
     });
   });
@@ -441,7 +439,11 @@ describe("A project's page", () => {
     await press(button("Take Invoices out of the project"));
     const warning =
       document.querySelector('[role="alertdialog"]')?.textContent ?? "";
-    await press(button("Take out"));
+    await press(
+      [...document.querySelectorAll('[role="alertdialog"] button')].find(
+        (each) => each.textContent?.trim().startsWith("Take out")
+      )
+    );
 
     expect({
       named: warning.includes("Olga and Ada lose access"),

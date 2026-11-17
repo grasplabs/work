@@ -43,8 +43,11 @@ export const useAgentSection = (): SidebarSection | undefined => {
     icon,
     render: (
       <Link
+        // The Overview has no `tab`: counted as absent, so the router
+        // doesn't mark it as the page on every other tab too.
+        activeOptions={{ explicitUndefined: true }}
         params={{ agent: agent.id }}
-        search={value === "overview" ? {} : { tab: value }}
+        search={{ tab: value === "overview" ? undefined : value }}
         to="/agents/$agent"
       />
     ),

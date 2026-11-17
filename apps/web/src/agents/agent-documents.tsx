@@ -10,9 +10,15 @@ import { useLingui } from "@lingui/react/macro";
 
 import type { Session } from "../core.ts";
 import { formatBytes } from "../format.ts";
-import { Button } from "../grasp/button/index.ts";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../grasp/alert-dialog/index.ts";
 import { Empty } from "../grasp/empty/index.ts";
-import { Field, FieldLabel } from "../grasp/field/index.ts";
 import { FileUpload } from "../grasp/file-upload/index.ts";
 import { File as FileIcon, Trash } from "../grasp/icons/index.ts";
 import {
@@ -32,9 +38,9 @@ import { SectionCard } from "../grasp/section-card/index.ts";
 // keeps only that (agent-documents.ts); the agent is told its documents
 // by name and reads one when a question needs it. Whoever may ask the
 // agent may learn what a document says, and the card says so where one
-// is added. A card of Grasp UI's Items, and its File upload at the foot:
-// each file is sent to core as it is dropped or chosen, and once core
-// keeps it, it is a row above.
+// is added (behind the card's info mark). A card of Grasp UI's Items, and
+// its File upload at the foot: each file is sent to core as it is dropped
+// or chosen, said on its own row, and once core keeps it, it is a row above.
 
 /** What a page change asks of core, then the page read again. */
 type Change = (action: (session: Session) => Promise<unknown>) => Promise<void>;
@@ -95,45 +101,46 @@ export const AgentDocuments = ({
   return (
     <SectionCard
       density="compact"
-      description={t`Files ${name} reads when a question needs them. Anyone who may ask it can learn what they say.`}
       flush
+      // Behind the info mark: who may learn what a document says.
+      info={t`Files ${name} reads when a question needs them. Anyone who may ask it can learn what they say.`}
       footer={
         editing && kept < most ? (
-          <Field disabled={!can}>
-            <FieldLabel>{t`Add documents`}</FieldLabel>
-            <FileUpload
-              accept={accepted}
-              // Each file a new list: those core kept are rows above.
-              key={kept}
-              maxFiles={most - kept}
-              maxSize={chatFileMaxBytes}
-              multiple
-              hint={t`PDF, Word, Excel, Markdown, text, CSV or JSON, up to 10 MB each. At most ${most} documents.`}
-              upload={send}
-              words={{
-                drop: t`Drop files here, or`,
-                choose: t`Choose files`,
-                uploading: t`Adding`,
-                done: t`Added`,
-                failed: t`Not added`,
-                retry: t`Try again`,
-                files: t`Files`,
-                doneLine: (size) => t`${size}, added`,
-                sent: (file) => t`${file} added.`,
-                notSent: (file) => t`${file} wasn't added.`,
-                remove: (file) => t`Remove ${file}`,
-                refused: (file, reason) => {
-                  if (reason === "file-too-large") {
-                    return t`${file} is larger than 10 MB.`;
-                  }
-                  if (reason === "too-many-files") {
-                    return t`${file} is one more than ${most} documents.`;
-                  }
-                  return t`${file} isn't a kind of file an agent reads.`;
-                },
-              }}
-            />
-          </Field>
+          // No label of its own: the card's title says what it adds to,
+          // and its button names it ("Choose files").
+          <FileUpload
+            accept={accepted}
+            disabled={!can}
+            // Each file a new list: those core kept are rows above.
+            key={kept}
+            maxFiles={most - kept}
+            maxSize={chatFileMaxBytes}
+            multiple
+            hint={t`PDF, Word, Excel, Markdown, text, CSV or JSON, up to 10 MB each. At most ${most} documents.`}
+            upload={send}
+            words={{
+              drop: t`Drop files here, or`,
+              choose: t`Choose files`,
+              uploading: t`Adding`,
+              done: t`Added`,
+              failed: t`Not added`,
+              retry: t`Try again`,
+              files: t`Files`,
+              doneLine: (size) => t`${size}, added`,
+              sent: (file) => t`${file} added.`,
+              notSent: (file) => t`${file} wasn't added.`,
+              remove: (file) => t`Remove ${file}`,
+              refused: (file, reason) => {
+                if (reason === "file-too-large") {
+                  return t`${file} is larger than 10 MB.`;
+                }
+                if (reason === "too-many-files") {
+                  return t`${file} is one more than ${most} documents.`;
+                }
+                return t`${file} isn't a kind of file an agent reads.`;
+              },
+            }}
+          />
         ) : undefined
       }
       title={t`Documents`}
@@ -167,21 +174,36 @@ export const AgentDocuments = ({
                 </ItemContent>
                 {editable ? (
                   <ItemActions>
-                    <Button
-                      aria-label={t`Remove ${file}`}
-                      disabled={!can}
-                      icon={Trash}
-                      onClick={() => {
-                        void change(async (session) => {
-                          await session.connections.removeAgentDocument(
-                            agent.id,
-                            document.id
-                          );
-                        });
-                      }}
-                      size="sm"
-                      variant="ghost"
-                    />
+                    {/* Asks first: a removed document can't be put back without its file. */}
+                    <AlertDialog>
+                      <AlertDialogTrigger
+                        aria-label={t`Remove ${file}`}
+                        disabled={!can}
+                        icon={Trash}
+                        size="sm"
+                        variant="ghost"
+                      />
+                      <AlertDialogContent>
+                        <AlertDialogTitle>{t`Remove ${file}?`}</AlertDialogTitle>
+                        <AlertDialogFooter>
+                          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+                          <AlertDialogAction
+                            action={async () => {
+                              await change(async (session) => {
+                                await session.connections.removeAgentDocument(
+                                  agent.id,
+                                  document.id
+                                );
+                              });
+                            }}
+                            failedLabel={t`Couldn't remove`}
+                            variant="danger"
+                          >
+                            {t`Remove`}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   </ItemActions>
                 ) : null}
               </Item>

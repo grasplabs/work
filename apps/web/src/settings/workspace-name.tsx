@@ -315,9 +315,12 @@ export const LogoField = ({
             failed: t`Could not save`,
             retry: t`Try again`,
             how: t`Click or drop a picture.`,
-            // One short line under the well, with the limit in it: the
-            // file's own name only makes the line wrap.
-            refused: (_file, reason) =>
+            refused: (file, reason) =>
+              reason === "file-too-large"
+                ? t`${file} is too large.`
+                : t`${file} is not a kind of picture this takes.`,
+            // The row's own line, under its name: short, with the limit.
+            refusedInRow: (reason) =>
               reason === "file-too-large"
                 ? t`Too large: at most ${most}`
                 : t`Not a PNG, JPEG or WebP picture`,

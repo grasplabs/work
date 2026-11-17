@@ -151,9 +151,6 @@ export const AgentForm = ({
             }}
             value={typed.model ?? askersOwn}
           />
-          <FieldDescription>
-            {t`If your organization stops using its model, it answers with the asker's.`}
-          </FieldDescription>
         </Field>
       ) : null}
       {/* Alone, the card it stands in names it: its label and help are

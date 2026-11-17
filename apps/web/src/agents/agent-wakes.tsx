@@ -1,10 +1,13 @@
 import type { Agent, AgentWake } from "@grasp-os/shared/agents";
 import { agentWakeOpeningMax } from "@grasp-os/shared/agents";
 import type { Member } from "@grasp-os/shared/members";
+import { toast } from "@grasp-os/ui/components/toast";
 import { useLingui } from "@lingui/react/macro";
+import { useRouteContext } from "@tanstack/react-router";
 import { useId, useState } from "react";
 
 import type { Session } from "../core.ts";
+import { formatZone } from "../format.ts";
 import { Button } from "../grasp/button/index.ts";
 import {
   Dialog,
@@ -18,7 +21,7 @@ import {
 import { Empty } from "../grasp/empty/index.ts";
 import { Field, FieldDescription, FieldLabel } from "../grasp/field/index.ts";
 import { Form, FormRow } from "../grasp/form/index.ts";
-import { Plus, Trash } from "../grasp/icons/index.ts";
+import { CalendarIcon, Plus, Trash } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
 import {
   Item,
@@ -27,6 +30,7 @@ import {
   ItemDescription,
   ItemDetail,
   ItemGroup,
+  ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
@@ -130,6 +134,45 @@ const useLast = () => {
   };
 };
 
+/**
+ * Removes `wake` at once and offers Undo in a toast, as the library's
+ * Confirmations pattern has an undoable removal: Undo makes it again, as
+ * it was (paused again if it was), through the same call as Add a time.
+ */
+const removeWithUndo = async (
+  wake: AgentWake,
+  change: Change,
+  words: { done: string; undo: string }
+): Promise<void> => {
+  let removed = false;
+  await change(async (session) => {
+    await session.connections.deleteAgentWake(wake.id);
+    removed = true;
+  });
+  if (!removed) {
+    return;
+  }
+  toast.add({
+    type: "success",
+    title: words.done,
+    actionProps: {
+      children: words.undo,
+      onClick: () => {
+        void change(async (session) => {
+          const made = await session.connections.makeAgentWake(wake.agentId, {
+            cron: wake.cron,
+            personId: wake.personId,
+            opening: wake.opening,
+          });
+          if (wake.state === "paused") {
+            await session.connections.setAgentWakePaused(made.id, true);
+          }
+        });
+      },
+    },
+  });
+};
+
 /** Add a time: its button, and the dialog that asks when, for whom and what. */
 const NewWake = ({
   agent,
@@ -147,7 +190,13 @@ const NewWake = ({
   const [open, setOpen] = useState(false);
   const [rhythm, setRhythm] = useState<Rhythm>("weekdays");
   const [time, setTime] = useState("09:00");
-  const [person, setPerson] = useState(people[0]?.userId ?? "");
+  // For the admin adding it, when they are among the people; else the first.
+  const me = useRouteContext({ strict: false }).identity?.userId;
+  const [person, setPerson] = useState(
+    people.find(({ userId }) => userId === me)?.userId ??
+      people[0]?.userId ??
+      ""
+  );
   const [opening, setOpening] = useState("");
   const cron = cronOf(rhythm, time);
   const ready = cron !== undefined && person !== "" && opening.trim() !== "";
@@ -293,16 +342,23 @@ export const AgentWakes = ({
     return found.name === "" ? found.email : found.name;
   };
   return (
+    // No title: the page's is "Schedule" already; Add a time at its foot.
     <SectionCard
+      aria-label={t`Schedule`}
       density="compact"
-      actions={
-        editable ? (
-          <NewWake agent={agent} can={can} change={change} people={people} />
-        ) : undefined
-      }
-      description={t`Times ${name} looks into something without being asked.`}
       flush
-      title={t`Schedule`}
+      {...(editable
+        ? {
+            footer: (
+              <NewWake
+                agent={agent}
+                can={can}
+                change={change}
+                people={people}
+              />
+            ),
+          }
+        : {})}
     >
       {wakes.length === 0 ? (
         <Empty size="inline">{t`${name} only works when asked.`}</Empty>
@@ -315,12 +371,13 @@ export const AgentWakes = ({
             const { opening } = wake;
             return (
               <Item key={wake.id} size="sm">
+                <ItemMedia icon={CalendarIcon} iconLook="inline" />
                 <ItemContent>
                   <ItemTitle>
                     {when}
                     {/* With the zone it was made in: the company's then,
                         which it keeps if the company's changes. */}
-                    <ItemDetail>{wake.timeZone}</ItemDetail>
+                    <ItemDetail>{formatZone(wake.timeZone)}</ItemDetail>
                   </ItemTitle>
                   <ItemDescription>
                     {last === undefined
@@ -348,8 +405,9 @@ export const AgentWakes = ({
                       disabled={!can}
                       icon={Trash}
                       onClick={() => {
-                        void change(async (session) => {
-                          await session.connections.deleteAgentWake(wake.id);
+                        void removeWithUndo(wake, change, {
+                          done: t`Time removed`,
+                          undo: t`Undo`,
                         });
                       }}
                       size="sm"

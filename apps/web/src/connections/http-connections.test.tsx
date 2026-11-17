@@ -162,10 +162,11 @@ const shown = async (
 };
 
 /** The names of the buttons on the page, dialogs included. */
+/** The buttons that act, by their words: not the card's info mark, which only explains. */
 const buttons = (): string[] =>
-  [...document.querySelectorAll("button")].map((each) =>
-    each.textContent.trim()
-  );
+  [...document.querySelectorAll("button")]
+    .map((each) => each.textContent.trim())
+    .filter((words) => words !== "");
 
 const press = async (name: string): Promise<void> => {
   // A dialog's action also holds the words it shows while working or

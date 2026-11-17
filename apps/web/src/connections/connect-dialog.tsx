@@ -35,7 +35,7 @@ import {
   FieldDescription,
   FieldLabel,
 } from "../grasp/field/index.ts";
-import { Heading } from "../grasp/heading/index.ts";
+import { visuallyHidden } from "../grasp/hidden/hidden.ts";
 import {
   Item,
   ItemContent,
@@ -140,10 +140,12 @@ const styles = stylex.create({
 });
 
 /**
- * A step's part of the dialog: its name, the one to act on in ink and the
- * others quiet, and what it asks. Grasp UI's Stepper above says where the
- * steps stand; it takes a line under each name, not its controls, so each
- * step's controls stand here, in order.
+ * A step's part of the dialog: what it asks. Grasp UI's Stepper above names
+ * the steps and says where they stand, and the dialog's title names a flow
+ * of one, so the step's own name is said only to a screen reader, as the
+ * heading its part sits under: shown, it would say the Stepper's words
+ * again. The Stepper takes a line under each name, not its controls, so
+ * each step's controls stand here, in order.
  */
 const Step = ({
   title,
@@ -155,15 +157,7 @@ const Step = ({
   children: ReactNode;
 }) => (
   <section data-state={state} {...stylex.props(styles.part)}>
-    <Heading level={3} size="ui">
-      <Text
-        element="span"
-        size="sm"
-        tone={state === "active" ? "ink" : "muted"}
-      >
-        {title}
-      </Text>
-    </Heading>
+    <h3 {...stylex.props(visuallyHidden)}>{title}</h3>
     {children}
   </section>
 );
