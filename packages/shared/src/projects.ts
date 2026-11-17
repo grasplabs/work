@@ -197,6 +197,27 @@ export interface ProjectShareCandidates {
   teams: { id: string; name: string }[];
 }
 
+/**
+ * A connection a project's Apps and workflows use, as the person may see
+ * it: never grouped by hand, only read from what its items hold a grant on.
+ */
+export interface ProjectConnection {
+  id: string;
+  /** A native provider (`microsoft`), or a Composio toolkit's slug. */
+  provider: string;
+  /** The account at the provider, such as its email address. */
+  accountName: string | null;
+  status: "active" | "needs_reauth" | "disconnected";
+}
+
+/** The connections a project's items use (`ProjectsApi.connections`). */
+export interface ProjectConnections {
+  /** Those among the connections the person may see, by provider. */
+  connections: ProjectConnection[];
+  /** How many more its items use that the person may not see. */
+  unseen: number;
+}
+
 /** A signed-in person's projects (`session.projects`). */
 export interface ProjectsApi {
   /** The projects the person is in, newest first; every one for an admin. */
@@ -206,6 +227,11 @@ export interface ProjectsApi {
   items: (id: string, after: ProjectCursor) => Promise<ProjectItemsPage>;
   /** The page of a project's members after `after`, as `get` lists them. */
   members: (id: string, after: ProjectCursor) => Promise<ProjectMembersPage>;
+  /**
+   * The connections the Apps and workflows in a project that the person
+   * may open hold a grant on, as `counts.connections` counts them.
+   */
+  connections: (id: string) => Promise<ProjectConnections>;
   /**
    * Makes a project, with the person as its owner and nothing in it, for
    * someone whose organization role builds.

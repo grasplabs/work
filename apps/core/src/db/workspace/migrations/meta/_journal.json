@@ -253,6 +253,13 @@
       "when": 1794913313314,
       "tag": "0035_chat_archived",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1794922152058,
+      "tag": "0036_chat_project",
+      "breakpoints": true
     }
   ]
 }

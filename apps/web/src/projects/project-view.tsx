@@ -1,5 +1,7 @@
+import type { ChatSummary } from "@grasp-os/shared/chat";
 import type {
   Project,
+  ProjectConnections as ProjectConnectionsList,
   ProjectItem,
   ProjectRole,
 } from "@grasp-os/shared/projects";
@@ -16,28 +18,57 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@grasp-os/ui/components/alert-dialog";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button as KitButton } from "@grasp-os/ui/components/button";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
-import { LayoutGridIcon, WorkflowIcon } from "lucide-react";
 import { useState } from "react";
+import type { ReactNode } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
-import { EmptyCard, Page, PageHeading, SectionTitle } from "../frame/page.tsx";
+import { Page, PageHeading } from "../frame/page.tsx";
+import { RouterLink } from "../frame/router-link.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { Button } from "../grasp/button/index.ts";
+import {
+  DropdownMenu,
+  DropdownMenuItem,
+  DropdownMenuContent,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../grasp/dropdown-menu/index.ts";
+import { Empty } from "../grasp/empty/index.ts";
+import type { IconData } from "../grasp/icons/index.ts";
+import {
+  AppPanels,
+  Cable,
+  Chat,
+  Edit,
+  More,
+  Plus,
+  Trash,
+  Workflow,
+} from "../grasp/icons/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import { roleLabel } from "../labels.ts";
-import { MakeSomethingLink } from "../make/make-link.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { FileItemDialog } from "./file-item-dialog.tsx";
-import { ProjectCountsLine } from "./project-counts.tsx";
+import { AddChat, ProjectChatList } from "./project-chats.tsx";
+import { ProjectConnectionList } from "./project-connections.tsx";
 import { ProjectDialog } from "./project-dialog.tsx";
-import { ProjectIcon } from "./project-icon.tsx";
 import { usePages } from "./project-pages.ts";
 import { namesInProject } from "./project-people-names.ts";
-import { ProjectPeople } from "./project-people.tsx";
+import { ProjectPeopleStack } from "./project-people-stack.tsx";
 
 // A project's page (GRA-1458): its icon, name and what it is for, its
 // hours and counts, then the Apps and workflows in it that the person may
@@ -49,21 +80,13 @@ import { ProjectPeople } from "./project-people.tsx";
 /** An item's link: to its App or workflow page. */
 const ItemLink = ({ item }: { item: ProjectItem }) =>
   item.type === "app" ? (
-    <Link
-      className="truncate font-medium"
-      params={{ app: item.id }}
-      to="/apps/$app"
-    >
+    <RouterLink params={{ app: item.id }} to="/apps/$app">
       {item.name}
-    </Link>
+    </RouterLink>
   ) : (
-    <Link
-      className="truncate font-medium"
-      params={{ workflow: item.id }}
-      to="/workflows/$workflow"
-    >
+    <RouterLink params={{ workflow: item.id }} to="/workflows/$workflow">
       {item.name}
-    </Link>
+    </RouterLink>
   );
 
 /** Taking an item out, after naming who loses it. */
@@ -86,7 +109,7 @@ const RemoveItem = ({
         <AlertDialogTrigger
           disabled={busy}
           render={
-            <Button
+            <KitButton
               aria-label={t`Take ${itemName} out of the project`}
               size="sm"
               variant="ghost"
@@ -149,24 +172,18 @@ const RemoveItem = ({
   );
 };
 
-/** That everyone in the project has an item, and in which role. */
-const SharedBadge = ({ role }: { role: ProjectRole }) => {
+/** Whether everyone in the project has an item, and in which role. */
+const SharedWords = ({ role }: { role: ProjectRole | null }) => {
+  if (role === null) {
+    return <Trans>Not shared with the project</Trans>;
+  }
   const shownRole = roleLabel(role);
-  return (
-    <Badge variant="secondary">
-      <Trans>Everyone in it · {shownRole}</Trans>
-    </Badge>
-  );
+  return <Trans>Everyone in it · {shownRole}</Trans>;
 };
 
-/**
- * What is in the project that the person may open, a page at a time, or a
- * line saying there is nothing.
- */
-const Items = ({ project }: { project: Project }) => {
-  const { t } = useLingui();
-  const builds = project.role === "builder";
-  const pages = usePages(
+/** The project's items, read a page at a time, shared by its tabs. */
+const useItemPages = (project: Project) =>
+  usePages(
     project,
     project.items,
     project.moreItems,
@@ -175,42 +192,51 @@ const Items = ({ project }: { project: Project }) => {
       return { list: page.items, more: page.more };
     }
   );
-  const items = pages.all;
-  if (items.length === 0) {
-    return <EmptyCard>{t`Nothing in it that you can open.`}</EmptyCard>;
+type ItemPages = ReturnType<typeof useItemPages>;
+
+/**
+ * What of one kind is in the project that the person may open, a page at
+ * a time, or a line saying there is nothing. Core pages Apps and
+ * workflows together: each tab shows its own kind of what is read so far,
+ * and Show more reads on.
+ */
+const Items = ({
+  project,
+  kind,
+  pages,
+}: {
+  project: Project;
+  kind: ProjectItem["type"];
+  pages: ItemPages;
+}) => {
+  const { t } = useLingui();
+  const builds = project.role === "builder";
+  const items = pages.all.filter(({ type }) => type === kind);
+  if (items.length === 0 && !pages.more) {
+    return <Empty size="inline">{t`Nothing in it that you can open.`}</Empty>;
   }
   return (
-    <div className="flex flex-col gap-2">
-      <ul className="flex flex-col divide-y rounded-md border">
+    <>
+      <ItemGroup separated>
         {items.map((item) => (
-          <li
-            className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
-            key={`${item.type}:${item.id}`}
-          >
-            <span className="flex min-w-0 items-center gap-2">
-              {item.type === "app" ? (
-                <LayoutGridIcon
-                  aria-hidden="true"
-                  className="size-4 flex-none"
-                />
-              ) : (
-                <WorkflowIcon aria-hidden="true" className="size-4 flex-none" />
-              )}
-              <ItemLink item={item} />
-            </span>
-            <span className="flex items-center gap-2">
-              {item.sharedAs === null ? (
-                <Badge variant="outline">
-                  <Trans>Not shared with the project</Trans>
-                </Badge>
-              ) : (
-                <SharedBadge role={item.sharedAs} />
-              )}
-              {builds ? <RemoveItem item={item} project={project} /> : null}
-            </span>
-          </li>
+          <Item key={`${item.type}:${item.id}`} size="sm">
+            <ItemMedia icon={item.type === "app" ? AppPanels : Workflow} />
+            <ItemContent>
+              <ItemTitle>
+                <ItemLink item={item} />
+              </ItemTitle>
+              <ItemDescription>
+                <SharedWords role={item.sharedAs} />
+              </ItemDescription>
+            </ItemContent>
+            {builds ? (
+              <ItemActions>
+                <RemoveItem item={item} project={project} />
+              </ItemActions>
+            ) : null}
+          </Item>
         ))}
-      </ul>
+      </ItemGroup>
       {pages.more ? (
         <Button
           disabled={pages.busy}
@@ -218,86 +244,150 @@ const Items = ({ project }: { project: Project }) => {
             void pages.readMore();
           }}
           size="sm"
-          variant="outline"
+          variant="quiet"
         >
-          <Trans>Show more</Trans>
+          {t`Show more`}
         </Button>
       ) : null}
       <ErrorText>{pages.failure}</ErrorText>
-    </div>
+    </>
   );
 };
 
-/** Deleting the project, after naming who loses what is shared with it. */
-const DeleteProject = ({ project }: { project: Project }) => {
+/**
+ * Deleting the project, after naming who loses what is shared with it;
+ * opened from the page's menu.
+ */
+const DeleteProject = ({
+  project,
+  open,
+  onOpenChange,
+}: {
+  project: Project;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) => {
   const navigate = useNavigate();
-  const { busy, failure, run } = useCoreAction();
+  const { failure, run } = useCoreAction();
   const projectName = project.name;
   const who = formatList(namesInProject(project));
   return (
-    <>
-      <AlertDialog>
-        <AlertDialogTrigger
-          disabled={busy}
-          render={<Button variant="outline" />}
-        >
-          <Trans>Delete</Trans>
-        </AlertDialogTrigger>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              <Trans>Delete {projectName}?</Trans>
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {project.shared === 0 ? (
-                <Trans>
-                  Its apps and workflows aren’t deleted, and nothing in it is
-                  shared with the project, so nobody loses access.
-                </Trans>
-              ) : (
-                <Trans>
-                  Its apps and workflows aren’t deleted, but they stop being
-                  shared with everyone in it: {who} lose access to them, unless
-                  they are shared with them another way.
-                </Trans>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>
-              <Trans>Cancel</Trans>
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                void run(async (session) => {
-                  await session.projects.remove(project.id);
-                  await navigate({ to: "/projects" });
-                });
-              }}
-              variant="destructive"
-            >
-              <Trans>Delete project</Trans>
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <ErrorText>{failure}</ErrorText>
-    </>
+    <AlertDialog onOpenChange={onOpenChange} open={open}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            <Trans>Delete {projectName}?</Trans>
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {project.shared === 0 ? (
+              <Trans>
+                Its apps and workflows aren’t deleted, and nothing in it is
+                shared with the project, so nobody loses access.
+              </Trans>
+            ) : (
+              <Trans>
+                Its apps and workflows aren’t deleted, but they stop being
+                shared with everyone in it: {who} lose access to them, unless
+                they are shared with them another way.
+              </Trans>
+            )}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <ErrorText>{failure}</ErrorText>
+        <AlertDialogFooter>
+          <AlertDialogCancel>
+            <Trans>Cancel</Trans>
+          </AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => {
+              void run(async (session) => {
+                await session.projects.remove(project.id);
+                await navigate({ to: "/projects" });
+              });
+            }}
+            variant="destructive"
+          >
+            <Trans>Delete project</Trans>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+};
+
+/**
+ * A kind the project has nothing of yet: one quiet row inviting the first
+ * one, in place of an empty card.
+ */
+const QuietKind = ({
+  icon,
+  children,
+  action,
+}: {
+  icon: IconData;
+  children: string;
+  action?: ReactNode;
+}) => (
+  <Item size="sm" variant="soft">
+    <ItemMedia icon={icon} iconLook="inline" />
+    <ItemContent>
+      <ItemDescription>{children}</ItemDescription>
+    </ItemContent>
+    {action === undefined ? null : <ItemActions>{action}</ItemActions>}
+  </Item>
+);
+
+/** The page's menu, for the project's builders: change it, or delete it. */
+const ProjectMenu = ({
+  project,
+  onChange,
+  onDelete,
+}: {
+  project: Project;
+  onChange: () => void;
+  onDelete: () => void;
+}) => {
+  const { t } = useLingui();
+  const title = project.name;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger aria-label={t`More for ${title}`} icon={More} />
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem icon={Edit} onSelect={onChange}>
+          {t`Change`}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem icon={Trash} onSelect={onDelete} variant="danger">
+          {t`Delete`}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 };
 
 /** A project's page, for someone in it. */
 export const ProjectView = ({
   project,
+  chats,
+  connections,
   identity,
 }: {
   project: Project;
+  /** The person's own chats in it. */
+  chats: readonly ChatSummary[];
+  connections: ProjectConnectionsList;
   identity: Pick<Identity, "role">;
 }) => {
   const { t } = useLingui();
   const router = useRouter();
   const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const builds = project.role === "builder";
+  const makes = builds && canBuild(identity.role);
+  const { apps, workflows } = project.counts;
+  const pages = useItemPages(project);
+  const connectionsUsed =
+    connections.connections.length > 0 || connections.unseen > 0;
   return (
     <>
       <SiteHeader
@@ -310,53 +400,101 @@ export const ProjectView = ({
         <PageHeading
           action={
             builds ? (
-              <div className="flex flex-wrap gap-2">
-                {canBuild(identity.role) ? (
-                  <MakeSomethingLink kind="app" project={project.id} />
-                ) : null}
-                <FileItemDialog project={project} />
-                <Button
-                  onClick={() => {
+              <>
+                <ProjectPeopleStack project={project} />
+                <ProjectMenu
+                  onChange={() => {
                     setEditing(true);
                   }}
-                  variant="outline"
-                >
-                  <Trans>Change</Trans>
-                </Button>
-                <DeleteProject project={project} />
-              </div>
-            ) : undefined
+                  onDelete={() => {
+                    setDeleting(true);
+                  }}
+                  project={project}
+                />
+                {makes ? (
+                  <Button
+                    icon={Plus}
+                    render={
+                      <Link
+                        search={{ make: "app", project: project.id }}
+                        to="/"
+                      />
+                    }
+                  >
+                    {t`Make something`}
+                  </Button>
+                ) : null}
+              </>
+            ) : (
+              <ProjectPeopleStack project={project} />
+            )
           }
           clamp
           description={
             project.description === "" ? undefined : project.description
           }
-          meta={<ProjectCountsLine counts={project.counts} />}
-          title={
-            <span className="inline-flex items-center gap-3">
-              <ProjectIcon icon={project.icon} />
-              {project.name}
-            </span>
-          }
+          title={project.name}
         />
-        <section className="flex flex-col gap-2">
-          <SectionTitle>
-            <Trans>Apps and workflows</Trans>
-          </SectionTitle>
-          <Items project={project} />
-        </section>
-        <section className="flex flex-col gap-2">
-          <SectionTitle>
-            <Trans>People</Trans>
-          </SectionTitle>
-          <p className="text-muted-foreground">
-            <Trans>
-              Being in the project reaches only what is shared with everyone in
-              it.
-            </Trans>
-          </p>
-          <ProjectPeople project={project} />
-        </section>
+        {apps === 0 ? (
+          <QuietKind
+            action={builds ? <FileItemDialog project={project} /> : undefined}
+            icon={AppPanels}
+          >
+            {t`No Apps in it yet.`}
+          </QuietKind>
+        ) : (
+          <SectionCard
+            actions={builds ? <FileItemDialog project={project} /> : undefined}
+            density="compact"
+            flush
+            title={t`Apps`}
+          >
+            <Items kind="app" pages={pages} project={project} />
+          </SectionCard>
+        )}
+        {workflows === 0 ? (
+          <QuietKind
+            action={builds ? <FileItemDialog project={project} /> : undefined}
+            icon={Workflow}
+          >
+            {t`No workflows in it yet.`}
+          </QuietKind>
+        ) : (
+          <SectionCard
+            actions={builds ? <FileItemDialog project={project} /> : undefined}
+            density="compact"
+            flush
+            title={t`Workflows`}
+          >
+            <Items kind="workflow" pages={pages} project={project} />
+          </SectionCard>
+        )}
+        {chats.length === 0 ? (
+          <QuietKind
+            action={<AddChat filed={chats} project={project} />}
+            icon={Chat}
+          >
+            {t`None of your chats are in it. Only you see the chats you put here.`}
+          </QuietKind>
+        ) : (
+          <SectionCard
+            actions={<AddChat filed={chats} project={project} />}
+            density="compact"
+            flush
+            title={t`Your chats`}
+          >
+            <ProjectChatList chats={chats} />
+          </SectionCard>
+        )}
+        {connectionsUsed ? (
+          <SectionCard density="compact" flush title={t`Connections`}>
+            <ProjectConnectionList connections={connections} />
+          </SectionCard>
+        ) : (
+          <QuietKind icon={Cable}>
+            {t`Its apps and workflows use no connections.`}
+          </QuietKind>
+        )}
       </Page>
       <ProjectDialog
         editing={project}
@@ -366,6 +504,13 @@ export const ProjectView = ({
         onOpenChange={setEditing}
         open={editing}
       />
+      {builds ? (
+        <DeleteProject
+          onOpenChange={setDeleting}
+          open={deleting}
+          project={project}
+        />
+      ) : null}
     </>
   );
 };

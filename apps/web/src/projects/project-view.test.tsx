@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { ChatSummary } from "@grasp-os/shared/chat";
 import type {
   FileItem,
   NewProjectMember,
@@ -92,6 +93,22 @@ const invoicesMoved: ProjectItemsPage["items"][number] = {
   addedAt: "2026-11-01T12:00:00.000Z",
 };
 
+/** A chat of the person's, as their list gives it. */
+const chatOf = (id: string, title: string): ChatSummary => ({
+  id,
+  title,
+  agentId: "grasp",
+  createdAt: "2026-11-01T10:00:00.000Z",
+  lastAt: "2026-11-01T10:00:00.000Z",
+  running: false,
+  appId: null,
+  via: "web",
+  make: null,
+  archived: false,
+});
+
+const accruals = chatOf("chat-accruals", "Accruals");
+
 const fakeProjects = (
   pages: ProjectItemsPage[] = [{ items: [desk], more: false }],
   /** The people core offers to add. */
@@ -147,7 +164,18 @@ const fakeProjects = (
       return left.shift() ?? { items: [], more: false };
     },
   };
-  return { session: { projects, workflowResources }, asked };
+  const chats = {
+    // The person's chats: Lunch, and Accruals, which is in the project.
+    list: async (): Promise<ChatSummary[]> => {
+      await Promise.resolve();
+      return [chatOf("chat-lunch", "Lunch"), accruals];
+    },
+    setProject: async (chatId: string, inProject: string | null) => {
+      await Promise.resolve();
+      asked.push(["setProject", chatId, inProject]);
+    },
+  };
+  return { session: { projects, workflowResources, chats }, asked };
 };
 
 let root: Root | undefined;
@@ -165,7 +193,8 @@ const settled = async (): Promise<void> => {
 /** The page of `shownProject`, on what `session` holds. */
 const shown = async (
   session: ReturnType<typeof fakeProjects>["session"],
-  shownProject: Project
+  shownProject: Project,
+  chatsInIt: ChatSummary[] = []
 ) => {
   const core = {
     withSession: async <T,>(
@@ -174,7 +203,12 @@ const shown = async (
   };
   const rootRoute = createRootRoute({
     component: () => (
-      <ProjectView identity={{ role: "builder" }} project={shownProject} />
+      <ProjectView
+        chats={chatsInIt}
+        connections={{ connections: [], unseen: 0 }}
+        identity={{ role: "builder" }}
+        project={shownProject}
+      />
     ),
   });
   const router = createRouter({
@@ -215,6 +249,19 @@ const button = (name: string) =>
     (each) =>
       each.textContent?.trim() === name ||
       each.getAttribute("aria-label") === name
+  );
+
+/** The faces in the header, which open the project's people. */
+const peopleButton = () =>
+  [...document.querySelectorAll("button")].find(
+    (each) =>
+      each.getAttribute("aria-label")?.startsWith("People in it") === true
+  );
+
+/** A button inside the open dialog, by its words. */
+const inDialog = (name: string) =>
+  [...document.querySelectorAll('[role="dialog"] button')].find(
+    (each) => each.textContent?.trim() === name
   );
 
 const link = (name: string) =>
@@ -316,6 +363,7 @@ describe("A project's page", () => {
   it("adds someone as a user, from who core offers when the list opens, and says why an add was refused", async () => {
     const { session, asked } = fakeProjects();
     await shown(session, project("builder"));
+    await press(peopleButton());
 
     const before = [...asked];
     await press(button("Add someone"));
@@ -349,6 +397,7 @@ describe("A project's page", () => {
       { id: "user-bo", name: "Bo" },
     ]);
     await shown(session, project("builder"));
+    await press(peopleButton());
 
     await press(button("Add someone"));
     const options = [...document.querySelectorAll("[cmdk-item]")].map((each) =>
@@ -377,6 +426,7 @@ describe("A project's page", () => {
       ...project("builder"),
       members: [ada, { ...ada, id: "user-ada-222222" }],
     });
+    await press(peopleButton());
 
     expect([
       button("Take Ada (ID …er-ada) out of the project") !== undefined,
@@ -420,7 +470,11 @@ describe("A project's page", () => {
 
   it("shows a project bigger than one page a page at a time, reading the next after the last shown", async () => {
     const { session, asked } = fakeProjects();
-    await shown(session, { ...project("user"), moreItems: true });
+    await shown(session, {
+      ...project("user"),
+      moreItems: true,
+      counts: { apps: 1, workflows: 1, connections: 0 },
+    });
 
     const before = document.body.textContent?.includes("Desk");
     await press(button("Show more"));
@@ -443,13 +497,18 @@ describe("A project's page", () => {
       { items: [invoicesMoved], more: true },
       { items: [desk], more: false },
     ]);
-    await shown(session, { ...project("user"), moreItems: true });
+    await shown(session, {
+      ...project("user"),
+      moreItems: true,
+      counts: { apps: 1, workflows: 1, connections: 0 },
+    });
 
     await press(button("Show more"));
     await press(button("Show more"));
+    const deskShown = document.body.textContent?.includes("Desk");
 
     expect({
-      desk: document.body.textContent?.includes("Desk"),
+      desk: deskShown,
       invoicesShown: [...document.querySelectorAll("li")].filter((row) =>
         row.textContent?.includes("Invoices")
       ).length,
@@ -460,6 +519,28 @@ describe("A project's page", () => {
       asked: [
         ["items", "workflow", "wf-invoices", "2026-11-01T10:00:00.000Z"],
         ["items", "workflow", "wf-invoices", "2026-11-01T12:00:00.000Z"],
+      ],
+    });
+  });
+
+  it("lists only the person's own chats in it, adds one of theirs not in it yet, and takes one out", async () => {
+    const { session, asked } = fakeProjects();
+    await shown(session, project("user"), [accruals]);
+
+    const listed = document.body.textContent?.includes("Accruals");
+    await press(button("Add a chat"));
+    const choices = [...document.querySelectorAll('[role="dialog"] li')].map(
+      (row) => row.textContent?.trim()
+    );
+    await press(inDialog("Add"));
+    await press(button("Take out"));
+
+    expect({ listed, choices, asked }).toStrictEqual({
+      listed: true,
+      choices: ["LunchAdd"],
+      asked: [
+        ["setProject", "chat-lunch", "project-1"],
+        ["setProject", "chat-accruals", null],
       ],
     });
   });

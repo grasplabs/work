@@ -1496,6 +1496,10 @@ msgstr "{unnamed} von {total} im Einsatz gesehen, nie genannt"
 msgid "{unseen, plural, one {# more run today, of a workflow you can't see} other {# more runs today, of workflows you can't see}}"
 msgstr "{unseen, plural, one {# weiterer Lauf heute, eines Workflows, den Sie nicht sehen können} other {# weitere Läufe heute, von Workflows, die Sie nicht sehen können}}"
 
+#: src/projects/project-connections.tsx
+msgid "{unseen, plural, one {# more that you can't see} other {# more that you can't see}}"
+msgstr "{unseen, plural, one {# weitere, die Sie nicht sehen können} other {# weitere, die Sie nicht sehen können}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{unseen} of {total} named, not seen in use"
 msgstr "{unseen} von {total} genannt, nicht im Einsatz gesehen"
@@ -2163,6 +2167,7 @@ msgid "Add"
 msgstr "Hinzufügen"
 
 #: src/projects/file-item-dialog.tsx
+#: src/projects/project-chats.tsx
 msgctxt "put in a project"
 msgid "Add"
 msgstr "Hinzufügen"
@@ -2170,6 +2175,10 @@ msgstr "Hinzufügen"
 #: src/activity/audit-event.tsx
 msgid "Add {section}"
 msgstr "{section} hinzufügen"
+
+#: src/projects/project-chats.tsx
+msgid "Add a chat"
+msgstr "Chat hinzufügen"
 
 #: src/settings/ai-providers.tsx
 msgid "Add a fallback"
@@ -2254,6 +2263,10 @@ msgstr "npm-Pakete zu {subject} hinzufügen"
 #: src/apps/field-editor.tsx
 msgid "Add option"
 msgstr "Option hinzufügen"
+
+#: src/projects/project-people-stack.tsx
+msgid "Add people"
+msgstr "Personen hinzufügen"
 
 #: src/settings/ai-providers.tsx
 msgid "Add provider"
@@ -3025,6 +3038,7 @@ msgstr "Wird genehmigt"
 #: src/dashboard/widget-board.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/projects/file-item-dialog.tsx
+#: src/projects/project-view.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.apps.index.tsx
@@ -3040,14 +3054,6 @@ msgstr "Apps"
 #: src/connections/connection-list.tsx
 msgid "Apps and agents with a permission"
 msgstr "Apps und Agenten mit einer Berechtigung"
-
-#: src/projects/project-view.tsx
-msgid "Apps and workflows"
-msgstr "Apps und Workflows"
-
-#: src/routes/_shell.projects.index.tsx
-msgid "Apps and workflows grouped by process, team or goal. Putting something in a project shares it with nobody."
-msgstr "Apps und Workflows, gebündelt nach Prozess, Team oder Ziel. Was in einem Projekt liegt, wird mit niemandem geteilt."
 
 #: src/workflows/files-and-apps.tsx
 msgid "Apps it works in"
@@ -3475,10 +3481,6 @@ msgstr "Bevor wir anfangen: Welche Sprache ist Ihnen lieber?"
 #: src/apps/data-model-changes.tsx
 msgid "Before you make this change"
 msgstr "Bevor Sie diese Änderung vornehmen"
-
-#: src/projects/project-view.tsx
-msgid "Being in the project reaches only what is shared with everyone in it."
-msgstr "Wer im Projekt ist, erreicht nur, was mit allen darin geteilt ist."
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -4359,6 +4361,8 @@ msgstr "Klippen"
 #: src/knowledge/new-document.tsx
 #: src/knowledge/purge.tsx
 #: src/onboarding/place-picker.tsx
+#: src/projects/project-chats.tsx
+#: src/projects/project-people-stack.tsx
 #: src/routes/_shell.settings.audit.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/audit-chain.tsx
@@ -4766,6 +4770,8 @@ msgstr "Verbindungsauslöser"
 
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
+#: src/projects/project-connections.tsx
+#: src/projects/project-view.tsx
 msgid "Connections"
 msgstr "Verbindungen"
 
@@ -8209,6 +8215,10 @@ msgstr "Seine Apps und Workflows werden nicht gelöscht, und nichts darin ist mi
 msgid "Its apps and workflows aren’t deleted, but they stop being shared with everyone in it: {who} lose access to them, unless they are shared with them another way."
 msgstr "Seine Apps und Workflows werden nicht gelöscht, aber nicht mehr mit allen darin geteilt: {who} verlieren den Zugriff darauf, sofern sie nicht anders mit ihnen geteilt sind."
 
+#: src/projects/project-view.tsx
+msgid "Its apps and workflows use no connections."
+msgstr "Seine Apps und Workflows nutzen keine Verbindungen."
+
 #: src/workflows/binding-approvals.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Its bindings"
@@ -8972,6 +8982,7 @@ msgid "Make project"
 msgstr "Projekt erstellen"
 
 #: src/make/make-link.tsx
+#: src/projects/project-view.tsx
 msgid "Make something"
 msgstr "Etwas erstellen"
 
@@ -9227,6 +9238,7 @@ msgid "More for {name}"
 msgstr "Mehr zu {name}"
 
 #: src/chat/sidebar-chats.tsx
+#: src/projects/project-view.tsx
 msgid "More for {title}"
 msgstr "Mehr zu {title}"
 
@@ -9638,8 +9650,11 @@ msgstr "Noch keine App dafür"
 msgid "No App is called “{asked}”"
 msgstr "Keine App heißt „{asked}“"
 
+#: src/projects/project-view.tsx
+msgid "No Apps in it yet."
+msgstr "Noch keine Apps darin."
+
 #: src/apps/apps-overview.tsx
-#: src/projects/project-counts.tsx
 msgid "No Apps yet"
 msgstr "Noch keine Apps"
 
@@ -9901,7 +9916,10 @@ msgstr "Hier noch kein Workflow mit gezählten Stunden."
 msgid "No workflow yet"
 msgstr "Noch kein Workflow"
 
-#: src/projects/project-counts.tsx
+#: src/projects/project-view.tsx
+msgid "No workflows in it yet."
+msgstr "Noch keine Workflows darin."
+
 #: src/workflows/workflows-table.tsx
 msgid "No workflows yet"
 msgstr "Noch keine Workflows"
@@ -10005,6 +10023,10 @@ msgstr "Keine Integrationsberechtigung der App bedient {contract} mit allen dekl
 #: src/interview/read-back.tsx
 msgid "None of this is right"
 msgstr "Davon stimmt nichts"
+
+#: src/projects/project-view.tsx
+msgid "None of your chats are in it. Only you see the chats you put here."
+msgstr "Keiner Ihrer Chats ist darin. Nur Sie sehen die Chats, die Sie hier ablegen."
 
 #: src/apps/app-settings.tsx
 #: src/brain/brain.ts
@@ -11327,7 +11349,7 @@ msgstr "Ausstehend"
 #: src/people/people-teams-picker.tsx
 #: src/people/share-picker.tsx
 #: src/projects/project-dialog.tsx
-#: src/projects/project-view.tsx
+#: src/projects/project-people-stack.tsx
 #: src/settings/team-members-dialog.tsx
 #: src/workflows/share-workflow.tsx
 msgid "People"
@@ -11368,6 +11390,10 @@ msgstr "Gehörte Personen"
 #: src/settings/teams.tsx
 msgid "People in {name}"
 msgstr "Personen in {name}"
+
+#: src/projects/project-people-stack.tsx
+msgid "People in it: {count}"
+msgstr "Personen darin: {count}"
 
 #: src/workflows/requests/request-who.tsx
 msgid "People one by one are off"
@@ -14562,6 +14588,7 @@ msgstr "{name} aus dem Projekt nehmen"
 msgid "Take off the dashboard"
 msgstr "Vom Dashboard nehmen"
 
+#: src/projects/project-chats.tsx
 #: src/projects/project-people.tsx
 #: src/projects/project-view.tsx
 msgid "Take out"
@@ -17842,6 +17869,7 @@ msgstr "workflow.json"
 #: src/dashboard/widget-board.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/projects/file-item-dialog.tsx
+#: src/projects/project-view.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
@@ -18150,6 +18178,10 @@ msgstr "Sie haben keinen Zugang zu dieser Organisation. Fragen Sie einen Admin."
 msgid "You finished this chat. Thank you for your time."
 msgstr "Sie haben diesen Chat beendet. Vielen Dank für Ihre Zeit."
 
+#: src/projects/project-chats.tsx
+msgid "You have no chats to add."
+msgstr "Sie haben keine Chats, die Sie hinzufügen können."
+
 #: src/brain/sources-page.tsx
 msgid "You have no connections yet."
 msgstr "Sie haben noch keine Verbindungen."
@@ -18253,6 +18285,11 @@ msgstr "Ihre Änderungen gehen auf den damaligen Stand zurück, für alle, die a
 #: src/inbox/items.ts
 msgid "Your chat's agent asked to start this workflow for you. Nothing runs until you confirm it, with exactly the input shown."
 msgstr "Der Agent Ihres Chats möchte diesen Workflow für Sie starten. Nichts läuft, bis Sie es bestätigen, mit genau der gezeigten Eingabe."
+
+#: src/projects/project-chats.tsx
+#: src/projects/project-view.tsx
+msgid "Your chats"
+msgstr "Ihre Chats"
 
 #: src/interview/before.tsx
 msgid "Your choice"
