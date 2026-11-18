@@ -331,8 +331,8 @@ export interface SidebarProps {
   empty?: string;
   /**
    * The tree guide on nested rows (a row's own rows, and a folding group's): a stem from the head
-   * with a rounded branch into each row. `false` for none.
-   * @default true
+   * with a rounded branch into each row. Opt-in: off unless `true` (Ruben, 18 November).
+   * @default false
    */
   guides?: boolean;
   /** @deprecated Use `layout`. */
@@ -1401,8 +1401,8 @@ const Guide = ({
   </>
 );
 
-// Whether the Sidebar draws its tree guide (`guides`).
-const GuidesOn = createContext(true);
+// Whether the Sidebar draws its tree guide (`guides`): off unless asked for.
+const GuidesOn = createContext(false);
 
 /** A folding group's row: its li holds its place in the tree guide, under the group's label. */
 const groupLook = (place: GuidePlace | undefined, icon: boolean) =>
@@ -2318,7 +2318,7 @@ export const Sidebar = (props: SidebarProps) => {
   // Its data, or the parts written in it.
   const groups = props.groups ?? groupsOf(props.children);
   return (
-    <GuidesOn.Provider value={props.guides !== false}>
+    <GuidesOn.Provider value={props.guides === true}>
       <SidebarDrawn {...props} groups={groups} {...shellParts(props, shell)} />
     </GuidesOn.Provider>
   );
