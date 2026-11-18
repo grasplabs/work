@@ -24,6 +24,7 @@ import {
 import type { FailingProvider } from "./ai-key-banner.tsx";
 import { InFrame } from "./in-frame.ts";
 import { usePageFills, usePageWhole } from "./page-fill.ts";
+import { PagePanelProvider, usePagePanelSlot } from "./page-panel.tsx";
 import { PersonTheme } from "./person-theme.tsx";
 
 const styles = stylex.create({
@@ -160,6 +161,8 @@ export const AppFrame = ({
   // over its foot: the chat is the page.
   const chatPage = useMatchRoute()({ to: "/chats/$chatId" }) !== false;
   const whole = usePageWhole();
+  // A page's own side panel, which the shell seats (frame/page-panel.tsx).
+  const pagePanel = usePagePanelSlot();
   const sidebar = useGraspSidebar({
     core,
     identity,
@@ -190,6 +193,7 @@ export const AppFrame = ({
           dockShown={dockShown}
           {...(dockShown ? {} : { roomBelow: "page" as const })}
           {...shellPanelsOf(panels)}
+          {...pagePanel.shell}
           menuCloseLabel={t`Close the menu`}
           menuLabel={t`Menu`}
           menuOpen={menuOpen}
@@ -201,7 +205,9 @@ export const AppFrame = ({
           sidebar={<Sidebar {...sidebar} />}
         >
           <div {...stylex.props(styles.page, fills && styles.fill)}>
-            <InFrame value>{children}</InFrame>
+            <PagePanelProvider value={pagePanel.frame}>
+              <InFrame value>{children}</InFrame>
+            </PagePanelProvider>
           </div>
         </AppShell>
       </div>

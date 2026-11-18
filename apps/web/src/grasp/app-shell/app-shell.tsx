@@ -276,6 +276,23 @@ export interface AppShellProps {
    */
   dockAlign?: "center" | "end";
   /**
+   * The page's own panel (an inspector, a note's details): inside the page's card at its end, under
+   * the bar, flush with the card's end and foot. The page and the dock keep to the column beside it, so
+   * the dock never stands over it. While the chat's `panels` stand docked beside the card it gives way
+   * (closed, through `onPagePanelOpenChange`); opened again, the chat floats instead (through
+   * `onPanelPlacementChange`). On a narrow card it is a sheet.
+   */
+  pagePanel?: ReactNode;
+  /**
+   * Whether the page's panel is open. Keep it in your own state with `onPagePanelOpenChange`. Unset,
+   * it stands open beside a wide page and closed on a narrow card.
+   */
+  pagePanelOpen?: boolean;
+  /** The page's panel opens or closes: its sheet closed, or it gave way to the docked chat. */
+  onPagePanelOpenChange?: (open: boolean) => void;
+  /** The page panel's name, for a screen reader and its sheet. @default "Details" */
+  pagePanelLabel?: string;
+  /**
    * A panel lies over the whole page: the panels, or one of your own. The page fades out and takes
    * no presses or keys.
    * @default false
@@ -566,6 +583,30 @@ const styles = stylex.create({
   // No bar: the page has the whole card, edge to edge, such as a backdrop.
   mainWhole: { paddingBlockStart: 0, paddingBlockEnd: 0, paddingInline: 0 },
   roomForChat: { paddingBlockEnd: grasp.shellPageRoomChat },
+  // Beside the page's own panel: the page's words keep to the column before it.
+  mainBesidePanel: {
+    paddingInlineEnd: `calc(${grasp.inspectorWidth} + ${grasp.shellPageInline})`,
+  },
+  mainWholeBesidePanel: { paddingInlineEnd: grasp.inspectorWidth },
+  // The page's own panel: in the page's row, at the card's end, under the bar and flush with the card's
+  // end and foot, over the room the page keeps for it (mainBesidePanel). It scrolls on its own.
+  pagePanel: {
+    gridRow: "-2 / -1",
+    gridColumn: "1",
+    justifySelf: "end",
+    zIndex: 1,
+    boxSizing: "border-box",
+    width: grasp.inspectorWidth,
+    maxWidth: "100%",
+    minHeight: 0,
+    overflowY: "auto",
+    overscrollBehavior: "contain",
+    scrollbarWidth: "none",
+    borderInlineStartWidth: grasp.hairline,
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: grasp.shellRule,
+    backgroundColor: grasp.shellCard,
+  },
   // The dock: over the card's foot, centred, its sides the page's room in from the card's (FLAWS.md
   // F36: at a phone's width it stood 8px wider than the words each side). It lets presses through
   // where it has nothing.
@@ -580,11 +621,14 @@ const styles = stylex.create({
   },
   // At the foot's end (dockAlign="end"): a chat box floating there, its end where the words end (F37).
   dockEnd: { justifyContent: "flex-end" },
+  // Beside the page's own panel: the dock centres on the page's column, never over the panel.
+  dockBesidePanel: {
+    insetInlineEnd: `calc(${grasp.inspectorWidth} + ${grasp.shellPageInline})`,
+  },
   // The dock's own box has the width (shell-dock-width), and what it holds fills it: the one-row
   // Composer, or a host's plain wrapper round it, which shrank to the Composer's least width when the
   // dock centred it. At the foot's end (dockHeldEnd), a box of its own width keeps to the end.
   dockHeld: {
-    position: "relative",
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr)",
     justifyItems: "stretch",
@@ -604,21 +648,6 @@ const styles = stylex.create({
     visibility: "hidden",
     transitionDuration: simply.leave,
   },
-  dockVeil: {
-    position: "absolute",
-    insetInline: 0,
-    insetBlockStart: `calc(-1 * ${grasp.space4})`,
-    insetBlockEnd: 0,
-    zIndex: -1,
-    pointerEvents: "none",
-    backgroundImage: `linear-gradient(to bottom, transparent, ${grasp.shellCard} ${grasp.space4})`,
-    opacity: 0,
-    transitionProperty: "opacity",
-    transitionDuration: simply.ui,
-    transitionTimingFunction: grasp.ease,
-    display: { default: "block", [FORCED]: "none" },
-  },
-  dockVeilShown: { opacity: 1 },
   // In the sheet the sidebar runs the rest of the panel, on its own ground from edge to edge, so
   // the sheet reads as the sidebar itself, and scrolls when the links outrun the window.
   sheetSidebar: {
@@ -1300,7 +1329,15 @@ type CardProps = Pick<
   | "dockShown"
   | "dockAlign"
   | "banner"
+  | "pagePanel"
+  | "onPagePanelOpenChange"
 > & {
+  /** The page's panel stands beside the page: given, open and not given way to the docked chat. */
+  pagePanelShown: boolean;
+  /** On a narrow card its sheet is open: only when the host asked for it open. */
+  pagePanelSheet: boolean;
+  /** Its name, the shell's word unless given. */
+  pagePanelName: string;
   sidebar: ReactNode;
   bar: "frame" | "page" | "none";
   shell: RefObject<HTMLDivElement | null>;
@@ -1398,90 +1435,48 @@ const notePlace = (card: HTMLElement, keep: RefObject<number>) => {
   };
 };
 
-/** What an effect with nothing to undo returns. */
-const holdNothing = () => {
-  // Nothing was started.
-};
-
 /**
- * Whether the page has something scrolled under the dock: more of it below the window. At the page's
- * end its room below (roomBelow) keeps the last row clear of the dock, and a page that does not scroll
- * never reaches it.
+ * The dock over the card's foot: it sinks away while it is not shown. Nothing veils the page round it
+ * (Ruben, 18 November): the page shows to the card's foot either side of the bar.
  */
-const useScrollsUnder = (dock: RefObject<HTMLDivElement | null>) => {
-  const [scrollsUnder, setScrollsUnder] = useState(false);
-  useEffect(() => {
-    const page = dock.current
-      ?.closest("[data-slot=app-shell-card]")
-      ?.querySelector<HTMLElement>("[data-slot=app-shell-page]");
-    if (page === null || page === undefined) {
-      return holdNothing;
-    }
-    const read = () => {
-      setScrollsUnder(
-        page.scrollHeight - page.scrollTop - page.clientHeight > 1
-      );
-    };
-    read();
-    page.addEventListener("scroll", read, { passive: true });
-    const observer = new ResizeObserver(read);
-    observer.observe(page);
-    for (const child of page.children) {
-      observer.observe(child);
-    }
-    return () => {
-      page.removeEventListener("scroll", read);
-      observer.disconnect();
-    };
-  }, [dock]);
-  return scrollsUnder;
-};
-
-/** The dock over the card's foot, with its own veil behind it: it sinks away while it is not shown. */
 const ShellDock = ({
   dock,
   shown = true,
   align = "center",
   inert,
+  beside,
   fading,
 }: {
   dock: ReactNode;
   shown?: boolean;
   align?: "center" | "end";
   inert: boolean;
+  beside: boolean;
   fading: ReturnType<typeof fadesOf>["fading"];
-}) => {
-  const held = useRef<HTMLDivElement>(null);
-  const scrollsUnder = useScrollsUnder(held);
-  return (
+}) => (
+  <div
+    data-slot="app-shell-dock"
+    data-shown={shown ? "" : undefined}
+    inert={inert || !shown}
+    {...stylex.props(
+      styles.dock,
+      align === "end" && styles.dockEnd,
+      beside && styles.dockBesidePanel,
+      fading
+    )}
+  >
     <div
-      data-slot="app-shell-dock"
-      data-shown={shown ? "" : undefined}
-      inert={inert || !shown}
-      {...stylex.props(styles.dock, align === "end" && styles.dockEnd, fading)}
+      {...stylex.props(
+        styles.dockHeld,
+        align === "end" && styles.dockHeldEnd,
+        styles.dockMoves,
+        !shown && styles.dockAway
+      )}
     >
-      <div
-        ref={held}
-        {...stylex.props(
-          styles.dockHeld,
-          align === "end" && styles.dockHeldEnd,
-          styles.dockMoves,
-          !shown && styles.dockAway
-        )}
-      >
-        <span
-          aria-hidden="true"
-          data-slot="app-shell-dock-veil"
-          {...stylex.props(
-            styles.dockVeil,
-            scrollsUnder && styles.dockVeilShown
-          )}
-        />
-        {dock}
-      </div>
+      {dock}
     </div>
-  );
-};
+  </div>
+);
 
 /** Whether there are panels to stand beside the page: given, and not turned off. */
 const hasPanels = (panels: ReactNode, open: boolean | undefined) =>
@@ -1569,6 +1564,122 @@ const handlePageScroll = (event: UIEvent<HTMLElement>) => {
   }
 };
 
+/** The width under which the page's own panel is a sheet: a phone's, as the shell's narrow rule. */
+const PANEL_SHEET_BELOW_REM = 40;
+
+/** What an effect with nothing to undo returns. */
+const holdNothing = () => {
+  // Nothing was started.
+};
+
+/** Whether the page's card is narrower than a phone's width, read from the card itself. */
+const useCardNarrow = (card: RefObject<HTMLDivElement | null>) => {
+  const [narrow, setNarrow] = useState(false);
+  useLayoutEffect(() => {
+    const element = card.current;
+    if (element === null) {
+      return holdNothing;
+    }
+    const read = () => {
+      // The root's font size reads "16px": the unit off, it is a number.
+      const rem =
+        Number(
+          getComputedStyle(document.documentElement).fontSize.replace("px", "")
+        ) || 16;
+      setNarrow(
+        element.getBoundingClientRect().width < PANEL_SHEET_BELOW_REM * rem
+      );
+    };
+    read();
+    const observer = new ResizeObserver(read);
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+    };
+  }, [card]);
+  return narrow;
+};
+
+/**
+ * Whether the page panel's sheet is open on a narrow card: only once it is asked open there. A panel
+ * open beside a wide page does not cover the page as a sheet when the card narrows, or on a phone's
+ * first look.
+ */
+const useAskedOpen = (open: boolean, narrow: boolean) => {
+  const [seen, setSeen] = useState({ open, narrow, asked: false });
+  if (seen.open !== open || seen.narrow !== narrow) {
+    setSeen({
+      open,
+      narrow,
+      asked: open && narrow && !seen.open && seen.narrow,
+    });
+  }
+  return seen.asked && open && narrow;
+};
+
+/** Where the page's own panel stands: beside the page on a wide card, else in a sheet once asked. */
+const usePagePanelPlace = (
+  card: RefObject<HTMLDivElement | null>,
+  shown: boolean,
+  sheet: boolean,
+  whole: boolean
+) => {
+  const narrow = useCardNarrow(card);
+  const sheetOpen = useAskedOpen(sheet, narrow);
+  const beside = shown && !narrow;
+  const besideLook =
+    beside && (whole ? styles.mainWholeBesidePanel : styles.mainBesidePanel);
+  return { beside, sheetOpen, besideLook };
+};
+
+/** The page's own panel: beside the page in the card, or a sheet on a narrow card. */
+const PagePanel = ({
+  panel,
+  beside,
+  sheet,
+  name,
+  inert,
+  fading,
+  onOpenChange,
+}: {
+  panel: ReactNode;
+  beside: boolean;
+  sheet: boolean;
+  name: string;
+  inert: boolean;
+  fading: ReturnType<typeof fadesOf>["fading"];
+  onOpenChange: AppShellProps["onPagePanelOpenChange"];
+}) => {
+  if (isNone(panel)) {
+    return null;
+  }
+  if (beside) {
+    return (
+      <aside
+        data-slot="app-shell-page-panel"
+        aria-label={name}
+        inert={inert}
+        {...stylex.props(styles.pagePanel, fading)}
+      >
+        {panel}
+      </aside>
+    );
+  }
+  return (
+    <Sheet
+      open={sheet}
+      onOpenChange={(next: boolean) => {
+        onOpenChange?.(next);
+      }}
+    >
+      <SheetContent corner="shell" bounds="shell">
+        <SheetTitle>{name}</SheetTitle>
+        {panel}
+      </SheetContent>
+    </Sheet>
+  );
+};
+
 /** The white card: the frame's bar or the floating Menu button, the page, and the dock. */
 const ShellCard = ({
   sidebar,
@@ -1610,6 +1721,11 @@ const ShellCard = ({
   menuOpen,
   setMenuOpen,
   banner,
+  pagePanel,
+  pagePanelShown,
+  pagePanelSheet,
+  pagePanelName,
+  onPagePanelOpenChange,
 }: CardProps) => {
   const menuWords = withGiven(useWords("appShell", appShellWords), {
     menu: menuLabel,
@@ -1671,6 +1787,12 @@ const ShellCard = ({
       />
     ) : undefined;
   const own = useRef<HTMLDivElement>(null);
+  const { beside, sheetOpen, besideLook } = usePagePanelPlace(
+    own,
+    pagePanelShown,
+    pagePanelSheet,
+    whole
+  );
 
   // Note where focus stands in the card, so panels that come to cover it can take focus from there
   // and give it back there. (The card itself stays the same element: panels.tsx.)
@@ -1730,18 +1852,29 @@ const ShellCard = ({
           room === "chat" && styles.roomForChat,
           bar === "page" && styles.mainUnderOwnBar,
           whole && styles.mainWhole,
+          besideLook,
           fading,
           stylex.defaultMarker()
         )}
       >
         {children}
       </main>
+      <PagePanel
+        panel={pagePanel}
+        beside={beside}
+        sheet={sheetOpen}
+        name={pagePanelName}
+        inert={pageInert}
+        fading={fading}
+        onOpenChange={onPagePanelOpenChange}
+      />
       {dock !== undefined && (
         <ShellDock
           dock={dock}
           shown={dockShown}
           align={dockAlign}
           inert={pageInert}
+          beside={beside}
           fading={fading}
         />
       )}
@@ -1812,6 +1945,61 @@ const usePanelsPlace = ({
   };
 };
 
+/**
+ * The page's own panel and the chat docked beside the card never stand together. The chat docking
+ * closes the page's panel; the page's panel opened again sends the chat floating. Unset, the panel is
+ * open, and the docked chat still wins.
+ */
+const usePagePanelRule = ({
+  panel,
+  open,
+  chat,
+  onPagePanelOpenChange,
+  onPanelPlacementChange,
+}: {
+  panel: ReactNode;
+  open: boolean | undefined;
+  /** The chat's panels: open, on a narrow shell, covering the card, and where they stand. */
+  chat: {
+    paneled: boolean;
+    narrow: boolean;
+    over: boolean;
+    placement: AppShellProps["panelPlacement"];
+  };
+  onPagePanelOpenChange: AppShellProps["onPagePanelOpenChange"];
+  onPanelPlacementChange: AppShellProps["onPanelPlacementChange"];
+}) => {
+  const given = !isNone(panel);
+  const chatDocked =
+    chat.paneled &&
+    !chat.narrow &&
+    !chat.over &&
+    (chat.placement ?? "docked") === "docked";
+  const wanted = open ?? true;
+  const was = useRef({ wanted, chatDocked });
+  useEffect(() => {
+    const before = was.current;
+    was.current = { wanted, chatDocked };
+    if (!given) {
+      return;
+    }
+    if (chatDocked && !before.chatDocked && wanted) {
+      onPagePanelOpenChange?.(false);
+    } else if (wanted && !before.wanted && chatDocked) {
+      onPanelPlacementChange?.("floating");
+    }
+  }, [
+    given,
+    wanted,
+    chatDocked,
+    onPagePanelOpenChange,
+    onPanelPlacementChange,
+  ]);
+  const shown = given && wanted && !chatDocked;
+  // Its sheet on a narrow card opens only for a panel the host asked open.
+  return { shown, sheet: shown && open === true };
+};
+
 export const AppShell = ({
   sidebar: given,
   bar = "frame",
@@ -1842,12 +2030,15 @@ export const AppShell = ({
   layout,
   menuOpen: menuOpenGiven,
   onMenuOpenChange,
+  pagePanelOpen,
+  pagePanelLabel,
   ...page
 }: AppShellProps) => {
   const sidebar = given;
   const said = withGiven(useWords("appShell", appShellWords), {
     closePanel: panelsCloseLabel,
     togglePanel: panelsToggleLabel,
+    pagePanel: pagePanelLabel,
   });
   const [sidebarOpen, setSidebarOpen] = useSidebarOpen(sidebar);
   const [sidebarPeeking, setSidebarPeeking] = useState(false);
@@ -1872,6 +2063,13 @@ export const AppShell = ({
   const paneled = hasPanels(panels, panelsOpen);
   const place = usePanelsPlace({ paneled, covered, crowded, narrow });
   const { aside, setAside, over, guessing, phone, inertCard, under } = place;
+  const pagePanelRule = usePagePanelRule({
+    panel: page.pagePanel,
+    open: pagePanelOpen,
+    chat: { paneled, narrow, over, placement: panelPlacement },
+    onPagePanelOpenChange: page.onPagePanelOpenChange,
+    onPanelPlacementChange,
+  });
   // On a phone the panels are a sheet over the page: Escape closes them through the host when it
   // gave `onPanelsOpenChange`, else sets them aside; focus goes to their button.
   useEffect(() => {
@@ -1909,6 +2107,9 @@ export const AppShell = ({
       onPanelsOpenChange={onPanelsOpenChange}
       menuOpen={menuOpen}
       setMenuOpen={setMenuOpen}
+      pagePanelShown={pagePanelRule.shown}
+      pagePanelSheet={pagePanelRule.sheet}
+      pagePanelName={said.pagePanel}
     />
   );
 

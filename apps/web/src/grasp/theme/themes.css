@@ -638,6 +638,9 @@
     oklch(0.243 0.028 169.36)
   );
   --grasp-shell-popup-line: var(--grasp-shell-rule);
+  --grasp-shell-panel-composer-corner: calc(
+    var(--grasp-shell-card-corner) * 1.84
+  );
   --grasp-shell-window-corner: calc(
     var(--grasp-shell-card-corner) + var(--grasp-shell-inset)
   );
@@ -1484,6 +1487,9 @@
     oklch(0.285 0.058 178)
   );
   --grasp-shell-popup-line: var(--grasp-shell-rule);
+  --grasp-shell-panel-composer-corner: calc(
+    var(--grasp-shell-card-corner) * 1.84
+  );
   --grasp-shell-window-corner: calc(
     var(--grasp-shell-card-corner) + var(--grasp-shell-inset)
   );
@@ -2324,6 +2330,9 @@
     0 0 0 1px light-dark(oklch(0 0 0 / 0.05), oklch(1 0 0 / 0.1));
   --grasp-shell-popup: light-dark(oklch(0.982 0.007 85), oklch(0.275 0.006 75));
   --grasp-shell-popup-line: var(--grasp-shell-rule);
+  --grasp-shell-panel-composer-corner: calc(
+    var(--grasp-shell-card-corner) * 1.84
+  );
   --grasp-shell-window-corner: calc(
     var(--grasp-shell-card-corner) + var(--grasp-shell-inset)
   );

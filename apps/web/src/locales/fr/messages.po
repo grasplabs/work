@@ -5464,6 +5464,11 @@ msgstr "Ordinateur"
 msgid "Details"
 msgstr "Détails"
 
+#: src/frame/part-words.tsx
+msgctxt "a page's side panel"
+msgid "Details"
+msgstr "Détails"
+
 #: src/decision-confirmation.tsx
 msgctxt "what else an answer to a decision says"
 msgid "Details"

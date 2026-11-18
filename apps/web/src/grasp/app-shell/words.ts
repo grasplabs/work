@@ -16,6 +16,8 @@ export const appShellWords = {
   togglePanel: "Show or hide the panel",
   /** The bar's More button, once its `actionItems` fold into it for want of room. */
   more: "More actions",
+  /** The name of the page's own panel (`pagePanel`), and of its sheet on a narrow card. */
+  pagePanel: "Details",
 };
 
 export type AppShellWords = typeof appShellWords;

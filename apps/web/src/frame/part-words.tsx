@@ -324,6 +324,7 @@ export const usePartWords = (): GraspWordsCatalog => {
     },
     appShell: {
       resize: t`Resize the panel`,
+      pagePanel: t({ message: "Details", context: "a page's side panel" }),
       breadcrumb: t`Breadcrumb`,
       menu: t`Menu`,
       closeMenu: t`Close the menu`,
