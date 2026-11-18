@@ -187,11 +187,13 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         roster
       );
       const by = actorOf(person);
-      // The list names the members' teams (GRA-2055): they are made and
-      // renamed first, so the store keeps their ids; empty, a team made
-      // here gives nobody anything. People join their team only once the
-      // admin confirms the list.
-      const named = await intoMembersTeams(this.#env, parsed, by);
+      // The list names the members' teams (GRA-2055): on a confirm they
+      // are made and renamed first, so the store keeps their ids, and
+      // people join them after; a draft keeps a team new on it in the
+      // store alone.
+      const named = await intoMembersTeams(this.#env, parsed, by, {
+        make: confirmed,
+      });
       const view = await onboardingStore(this.#env).saveRoster(named, by, {
         confirmed,
       });

@@ -543,11 +543,11 @@ export const teamMembers = sqliteTable(
 
 /**
  * Each member's primary team (GRA-2055): the one the onboarding's staff
- * list puts them in, beside Better Auth's `team_members`, whose rows carry
- * no fields of ours. One per member, by the key; a primary is always a
- * `team_members` row too, which the staff list alone adds and takes away
- * (staff-list-teams.ts). Teams an admin added someone to by hand have no
- * row here, and the staff list never touches them.
+ * list last gave them, beside Better Auth's `team_members`, whose rows
+ * carry no fields of ours. One per member, by the key. The row stays when
+ * an admin takes the membership away by hand, the marker that they did:
+ * the list adds it again only when it gives them another team
+ * (staff-list-teams.ts `placementOf`).
  */
 export const teamPrimaries = sqliteTable(
   "team_primaries",
@@ -559,6 +559,12 @@ export const teamPrimaries = sqliteTable(
       .notNull()
       .references(() => teams.id, { onDelete: "cascade" }),
     placedAt: timestamp("placed_at").notNull(),
+    /**
+     * Whether the list made the membership itself: only then does it take
+     * it away when it moves them (staff-list-teams.ts `placementOf`), never
+     * one an admin added by hand, before the list or since.
+     */
+    made: integer({ mode: "boolean" }).notNull(),
   },
   (table) => [index("team_primaries_team_id_idx").on(table.teamId)]
 );

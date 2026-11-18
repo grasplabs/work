@@ -49,6 +49,7 @@ import {
 import { mayComeIn, staffMayStay } from "../onboarding/gate.ts";
 import { onboardingStore } from "../onboarding/store.ts";
 import { keepSignInAddress } from "../source-readers.ts";
+import { addedByHand } from "../staff-list-teams.ts";
 import { checkClaims } from "./claims.ts";
 import {
   devIdpOrigin,
@@ -999,6 +1000,12 @@ const createAuth = (
         // App shared with it away: their hosts tell the open pages to
         // look again (access-revocations.ts).
         organizationHooks: {
+          // A membership an admin adds by hand is theirs, though the staff
+          // list once made it: the list never takes it away (GRA-2055,
+          // staff-list-teams.ts `placementOf`).
+          afterAddTeamMember: async ({ teamMember }) => {
+            await addedByHand(env, teamMember.teamId, teamMember.userId);
+          },
           afterRemoveTeamMember: async ({ teamMember }) => {
             await teamAccessMayHaveDropped(env, teamMember.teamId, [
               teamMember.userId,

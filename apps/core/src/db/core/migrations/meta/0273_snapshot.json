@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "edb63248-e76d-4dca-ae85-98a6e7674732",
+  "id": "06dce764-4a08-4f10-a53b-4b3459a4bc4b",
   "prevId": "c02bf4dd-71af-425a-a16e-8b972d8f5430",
   "tables": {
     "access_revocations": {
@@ -12479,6 +12479,13 @@
         },
         "placed_at": {
           "name": "placed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "made": {
+          "name": "made",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
