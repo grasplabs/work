@@ -13,11 +13,20 @@ describe("reading a set of readers' key", () => {
       { kind: "owner", person: "person-1" },
       { kind: "audience", group: "team:sales" },
       { kind: "owner", person: 'a "quoted", [bracketed] person' },
+      { kind: "readers", groups: ["account:a", "group:b", "tenant:c"] },
     ];
 
     expect(
       accesses.map((access) => accessOfKey(readerSetKeyOf(access)))
     ).toStrictEqual(accesses);
+  });
+
+  it("names readers of one group as that group's audience, and of several in any order as one set", () => {
+    expect([
+      accessOfKey(readerSetKeyOf({ kind: "readers", groups: ["team:sales"] })),
+      readerSetKeyOf({ kind: "readers", groups: ["b", "a"] }) ===
+        readerSetKeyOf({ kind: "readers", groups: ["a", "b"] }),
+    ]).toStrictEqual([{ kind: "audience", group: "team:sales" }, true]);
   });
 
   it("names no one for a key the Brain doesn't write", () => {
@@ -31,6 +40,8 @@ describe("reading a set of readers' key", () => {
       '[["person","a","b"]]',
       '[["robot","a"]]',
       '[["person","a"],["group","b"]]',
+      '[["group","a"],["person","b"]]',
+      '[["group","b"],["group","a"]]',
       '[ ["person","a"] ]',
       '[["person","a"]] ',
     ];

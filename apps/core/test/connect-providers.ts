@@ -133,6 +133,24 @@ export const stephenGraphUrl = "https://graph-control.test/stephen";
  */
 export const stephenGoogleUrl = "https://google-control.test/stephen";
 
+/**
+ * Where tests change the address Google gives an account from then on:
+ * `{ subject, email }`, as an admin renaming it in Workspace does. A
+ * renewal of that account's tokens is answered with it; with \`email\`
+ * null, without an ID token, and no userinfo endpoint answers here.
+ */
+export const googleAddressUrl = "https://google-control.test/address";
+
+/**
+ * Where tests hold a call to Google mid-way: POST \`{ hold: true, prefix? }\`
+ * holds the next request whose URL starts with \`prefix\` until POST
+ * \`{ hold: false }\`, and then answers it as ever; GET answers
+ * \`{ reached }\`, whether a held one is waiting. By default the look-up of an account's addresses (connect's
+ * account-addresses.ts, which goes on without them): a connection's
+ * finishing, after Google's code exchange and before connect stores it.
+ */
+export const googleHoldUrl = "https://google-control.test/hold";
+
 /** Where tests read how many drafts Graph made for `?mailbox=`: `{ drafts }`. */
 export const graphDraftsUrl = "https://graph-control.test/drafts";
 
@@ -310,6 +328,38 @@ const base64Url = (bytes) =>
     .replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
 const encoded = (value) =>
   base64Url(new TextEncoder().encode(JSON.stringify(value)));
+/** Each Google account's Workspace domain and address now, by its subject. */
+const googleAccounts = new Map();
+/** A hold on the next look-up of a Google account's addresses, while a test asks for one. */
+let googleHold = null;
+/**
+ * Google's token endpoint renewing an account's tokens, as Google does for
+ * a grant with \`openid\`: with an ID token for the account as it is now.
+ */
+const googleRefresh = async (request) => {
+  const form = new URLSearchParams(await request.text());
+  const subject = (form.get("refresh_token") ?? "").replace(/^refresh./u, "");
+  const account = googleAccounts.get(subject);
+  if (form.get("grant_type") !== "refresh_token" || account === undefined) {
+    return undefined;
+  }
+  const claims = {
+    iss: "https://accounts.google.com",
+    aud: ${JSON.stringify(clients.google.id)},
+    sub: subject,
+    hd: account.domain,
+    email: account.email,
+    email_verified: true,
+  };
+  return Response.json({
+    token_type: "Bearer",
+    access_token: "access." + subject + "." + crypto.randomUUID(),
+    expires_in: 3599,
+    ...(account.email === null
+      ? {}
+      : { id_token: [encoded({ alg: "RS256" }), encoded(claims), "signature"].join(".") }),
+  });
+};
 /**
  * Google's token endpoint redeeming a code \`consentCode\` made for Grasp's
  * Google client, with what was granted: the account it names, in the
@@ -340,6 +390,7 @@ const googleConsent = async (request) => {
     email: subject + "@" + domain,
     email_verified: true,
   };
+  googleAccounts.set(subject, { domain, email: claims.email });
   return Response.json({
     token_type: "Bearer",
     access_token: "access." + subject,
@@ -735,15 +786,51 @@ export default {
     if (url.href === ${JSON.stringify(stephenGoogleUrl)}) {
       return await stephenGoogle.control(request);
     }
+    if (googleHold !== null && url.href.startsWith(googleHold.prefix)) {
+      // Polls the flag: workerd refuses to wait on a promise another request made.
+      googleHold.reached = true;
+      while (googleHold?.held === true) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
     const fromStephenGoogle = await stephenGoogle.answer(request, url);
     if (fromStephenGoogle !== undefined) {
       return fromStephenGoogle;
     }
+    if (request.method === "POST" && url.href === "https://oauth2.googleapis.com/revoke") {
+      // Google takes back the grant a disconnect revokes, as it does.
+      return new Response(null, { status: 200 });
+    }
     if (request.method === "POST" && url.href === "https://oauth2.googleapis.com/token") {
-      const answered = await googleConsent(request.clone());
+      const answered =
+        (await googleConsent(request.clone())) ??
+        (await googleRefresh(request.clone()));
       if (answered !== undefined) {
         return answered;
       }
+    }
+    if (url.href === ${JSON.stringify(googleHoldUrl)}) {
+      if (request.method === "GET") {
+        return Response.json({ reached: googleHold?.reached === true });
+      }
+      const { hold, prefix } = await request.json();
+      if (hold) {
+        googleHold = {
+          reached: false,
+          held: true,
+          prefix: prefix ?? "https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs",
+        };
+      } else if (googleHold !== null) {
+        googleHold.held = false;
+        googleHold = null;
+      }
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(googleAddressUrl)}) {
+      const { subject, email } = await request.json();
+      const account = googleAccounts.get(subject);
+      googleAccounts.set(subject, { domain: account?.domain ?? "acme.test", email });
+      return new Response(null, { status: 204 });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkKeysUrl)}) {
       // Added to the keys other test files published: files run at once,
