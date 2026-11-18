@@ -10830,6 +10830,7 @@ msgstr "Versiones anteriores"
 
 #: src/agents/agent-page.tsx
 #: src/agents/agent-wakes.tsx
+#: src/settings/stephen-card.tsx
 #: src/settings/stephen-settings.tsx
 msgid "On"
 msgstr "Activado"
@@ -10885,10 +10886,6 @@ msgstr "Activado en {name}"
 #: src/agents/new-agent.tsx
 msgid "On its own"
 msgstr "Por su cuenta"
-
-#: src/settings/stephen-card.tsx
-msgid "On outside Grasp"
-msgstr "Activo fuera de Grasp"
 
 #: src/workflows/trigger-description.ts
 msgid "On the schedule {cron}, in {zone}"
@@ -11399,6 +11396,10 @@ msgstr "Salida"
 msgid "Outside APIs an admin approved, by origin, methods and paths. Apps and workflows call them only with a permission."
 msgstr "API externas que un administrador aprobó, por origen, métodos y rutas. Las aplicaciones y los workflows solo las llaman con un permiso."
 
+#: src/settings/stephen-card.tsx
+msgid "Outside Grasp"
+msgstr "Fuera de Grasp"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Over the next two weeks you’ll get a short personal link to talk with Stephen, Grasp’s AI interviewer: leads for about 20 minutes, everyone else for 10 to 15. By voice or by typing."
 msgstr "En las próximas dos semanas recibirás un enlace personal breve para hablar con Stephen, el entrevistador de IA de Grasp: los responsables unos 20 minutos, los demás de 10 a 15. Hablando o escribiendo."
@@ -11621,6 +11622,7 @@ msgstr "¿Pausar a Stephen fuera de Grasp?"
 #: src/agents/agents-overview.tsx
 #: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
+#: src/settings/stephen-card.tsx
 #: src/workflows/runs.tsx
 msgid "Paused"
 msgstr "En pausa"
@@ -11634,10 +11636,6 @@ msgstr "En pausa"
 msgctxt "status of a workflow run"
 msgid "Paused"
 msgstr "En pausa"
-
-#: src/settings/stephen-card.tsx
-msgid "Paused outside Grasp"
-msgstr "En pausa fuera de Grasp"
 
 #: src/inbox/interviews-item.tsx
 msgid "Paused: no link opens and none goes out."
