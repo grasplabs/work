@@ -86,10 +86,14 @@ type Asked = Extract<ChatMessage, { role: "user" }>;
 
 const styles = stylex.create({
   // The thread takes the room the chat gives it; the library's Thread is as tall as its box.
+  // Until the library's chat-text tokens land (build/chat-text-14), a chat reads in 14px, as the
+  // sidebar does: its body size is set smaller here, for the thread alone.
   room: {
     display: "grid",
     flexGrow: 1,
     minHeight: 0,
+    "--grasp-text-md": "0.875rem",
+    "--grasp-text-md-line": "1.375rem",
   },
   // Full screen, the conversation reads as one column in the middle.
   column: {
