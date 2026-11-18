@@ -108,7 +108,8 @@ export interface FieldProps extends Omit<
   /**
    * How its parts stand. `vertical`: label, control, description and error, one under the other.
    * `horizontal`: a Checkbox or a Radio first, then its words (a FieldContent), on one row at least
-   * 44px tall that a press anywhere on works.
+   * 44px tall that a press anywhere on works; or the words first and a Switch at the end, as in a
+   * list of settings.
    * @default "vertical"
    */
   orientation?: FieldOrientation;
@@ -143,11 +144,12 @@ const ChoiceField = ({
   const groupOff = useContext(ChoiceOff);
   const own = useId();
   const box = `choice${own}`;
+  // The control first, or, holding a switch, the words first and the switch at the end.
   const row = stylex.props(
     choiceMarker,
     fieldMarker,
     rowStyles.row,
-    rowStyles.start,
+    rowStyles.either,
     layout
   );
   if (grouped) {

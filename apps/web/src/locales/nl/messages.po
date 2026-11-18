@@ -4375,6 +4375,10 @@ msgstr "Deze vraag zonder antwoord sluiten?"
 msgid "Close to the limit of {limit} characters"
 msgstr "Bijna aan de grens van {limit} tekens"
 
+#: src/frame/part-words.tsx
+msgid "Close voice"
+msgstr "Spraak sluiten"
+
 #: src/brain/gap-actions.tsx
 #: src/chat/brain-questions.tsx
 msgid "Close without an answer"
@@ -14190,6 +14194,10 @@ msgstr "Sterretjes"
 #: src/frame/part-words.tsx
 msgid "Speakers"
 msgstr "Sprekers"
+
+#: src/frame/part-words.tsx
+msgid "Speaking"
+msgstr "Aan het spreken"
 
 #: src/settings/ai-spend.tsx
 msgid "Spend"

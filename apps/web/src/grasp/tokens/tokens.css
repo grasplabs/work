@@ -206,8 +206,10 @@
   /* Type: weights and tracking. */
   /* Every serif title and all running text. */
   --grasp-weight-regular: 400;
-  /* Labels, buttons and small titles in the sans. Nothing heavier exists. */
+  /* Labels, buttons and small titles in the sans. Nothing heavier but weight-semibold's one use. */
   --grasp-weight-medium: 500;
+  /* A group's name standing on the page's ground over its card of rows (a grouped Section card), so it reads apart from the rows' own labels. Nothing else until a second use is argued. */
+  --grasp-weight-semibold: 600;
   /* Serif titles from title-sm up. */
   --grasp-tracking-title: -0.02em;
   /* A component's own words, its small titles included: set here, never inherited from the page around it. */
@@ -731,6 +733,10 @@
   --grasp-popover-gap: var(--grasp-space-2);
   /* The width of a popover: a title, a sentence or two, and two actions that keep their width while they work. */
   --grasp-popover-width: 20rem;
+  /* The least width of a hover card sized to what it holds: a name and a short line still read as a card, not a tooltip. */
+  --grasp-hover-card-min-width: 12rem;
+  /* The most width of a hover card sized to what it holds: past it a long line wraps, so the card stays a preview. */
+  --grasp-hover-card-max-width: 24rem;
   /* The ground of a tooltip: night at 90% in light, a lighter raised night in dark, so it separates from either page. */
   --grasp-tooltip-fill: light-dark(
     oklch(0.173 0.028 169.36 / 0.9),
@@ -1408,6 +1414,10 @@
   --grasp-composer-width: 36rem;
   /* The tallest a composer's text grows before it scrolls inside. */
   --grasp-composer-height: 12rem;
+  /* The least width of the one-row composer (compact), whoever holds it: in a holder that sizes to what it holds, the row is this wide, or the holder's width when that is less. */
+  --grasp-composer-row-least: 20rem;
+  /* The least width of the one row's text: narrower, the model's level folds to its mark, then the controls drop under the text. The text never gives. */
+  --grasp-composer-field-least: 8rem;
   /* The working light: lime, sea and mint in beams with dark gaps between, ending as it starts so it loops without a seam. */
   --grasp-composer-light: linear-gradient(
     90deg,
@@ -1586,6 +1596,8 @@
   --grasp-shell-page-inline: var(--grasp-space-6);
   /* The layer a page's own bar and the dock stand on, above what scrolls in the page's card. */
   --grasp-shell-page-layer: 30;
+  /* The width the dock gives what it holds (the chat's idle bar), or the dock's whole width when that is less. */
+  --grasp-shell-dock-width: 26rem;
   /* The room under the last thing on a page. */
   --grasp-shell-page-room-below: 32px;
   /* The room under a page with a chat box floating over its foot, so its last row scrolls clear. */

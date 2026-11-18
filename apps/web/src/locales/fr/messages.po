@@ -4375,6 +4375,10 @@ msgstr "Fermer cette question sans réponse ?"
 msgid "Close to the limit of {limit} characters"
 msgstr "Proche de la limite de {limit} caractères"
 
+#: src/frame/part-words.tsx
+msgid "Close voice"
+msgstr "Fermer la voix"
+
 #: src/brain/gap-actions.tsx
 #: src/chat/brain-questions.tsx
 msgid "Close without an answer"
@@ -14190,6 +14194,10 @@ msgstr "Étincelles"
 #: src/frame/part-words.tsx
 msgid "Speakers"
 msgstr "Intervenants"
+
+#: src/frame/part-words.tsx
+msgid "Speaking"
+msgstr "En train de parler"
 
 #: src/settings/ai-spend.tsx
 msgid "Spend"
