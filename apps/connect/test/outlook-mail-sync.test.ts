@@ -541,6 +541,9 @@ const inThisTest =
     if ("failure" in answer) {
       throw new Error(`The listing failed: ${answer.failure.code}`);
     }
+    if (!("places" in answer)) {
+      throw new Error("The listing answered places to pick");
+    }
     return answer;
   };
 

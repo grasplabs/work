@@ -1392,7 +1392,8 @@ export const personErasureMemories = sqliteTable("person_erasure_memories", {
  * compute. Never a person's name or ID, and never read: no member of the
  * contract answers a row of it, so recall, exports and restores never
  * hold one. Each is deleted once it is older than `eventsKeptMs`, or when
- * its tag's person is erased (`eraseEvents`).
+ * its tag's person is erased (erasure.ts `erasePersonShared`, events.ts
+ * `eraseEventsIn`).
  */
 export const events = sqliteTable(
   "events",
@@ -1440,7 +1441,7 @@ export const events = sqliteTable(
 
 /**
  * The tags of who took events (`events.who`) that an erasure closed
- * (events.ts `eraseEvents`): an add of an event under one is refused, so a
+ * (events.ts `eraseEventsIn`): an add of an event under one is refused, so a
  * drain that read a person's teams before their erasure can't bring their
  * events back after it. Each is kept only as long as an event could live
  * (`eventsKeptMs` from `at`), then the expiry deletes it. Opaque without
@@ -1454,6 +1455,25 @@ export const closedEventTags = sqliteTable(
     at: integer().notNull(),
   },
   (table) => [index("closed_event_tags_at_idx").on(table.at)]
+);
+
+/**
+ * The events a person's erasure in the shared store erased (erasure.ts
+ * `erasePersonShared`): each of their tags, and the host's key they were
+ * made under, by the erasure (`erasures.key`). Its ledger entry's body is
+ * written from these, so a replay after a restore of the store's storage
+ * erases their events again (events.ts `eraseEventsIn`). Kept only until
+ * that entry is written (erasure.ts `confirm`), and never by a replay,
+ * whose entry already holds them. Opaque without the host's key.
+ */
+export const personErasureEvents = sqliteTable(
+  "person_erasure_events",
+  {
+    erasure: text().notNull(),
+    who: text().notNull(),
+    keyId: text("key_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.erasure, table.who] })]
 );
 
 /**

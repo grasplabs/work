@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "34666754-7e81-428b-a336-19da8c0d7601",
+  "id": "68bb1344-e782-4869-90c2-c2c715428675",
   "prevId": "86e9b0d0-0fef-4e73-9aa8-baf0d9cdcd62",
   "tables": {
     "chunk_blocks": {
@@ -804,20 +804,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "system": {
-          "name": "system",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "writes": {
-          "name": "writes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "item": {
           "name": "item",
           "type": "text",
@@ -860,16 +846,6 @@
           "name": "events_who_idx",
           "columns": [
             "who"
-          ],
-          "isUnique": false
-        },
-        "events_trail_idx": {
-          "name": "events_trail_idx",
-          "columns": [
-            "team",
-            "who",
-            "at",
-            "row"
           ],
           "isUnique": false
         }
@@ -2193,6 +2169,45 @@
           "value": "id = 1"
         }
       }
+    },
+    "person_erasure_events": {
+      "name": "person_erasure_events",
+      "columns": {
+        "erasure": {
+          "name": "erasure",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "who": {
+          "name": "who",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "key_id": {
+          "name": "key_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "person_erasure_events_erasure_who_pk": {
+          "columns": [
+            "erasure",
+            "who"
+          ],
+          "name": "person_erasure_events_erasure_who_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
     },
     "person_erasure_memories": {
       "name": "person_erasure_memories",

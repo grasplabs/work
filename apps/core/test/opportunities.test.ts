@@ -4,7 +4,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { eraseEventsOf, recordEvents } from "../src/brain-next.ts";
+import { recordEvents } from "../src/brain-next.ts";
 import { eraseOwedOnboardingSources } from "../src/onboarding/new-brain.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { proposerOf } from "../src/opportunities.ts";
@@ -224,14 +224,27 @@ const keptAt = async (evidence: string): Promise<number> => {
   return row?.kept ?? 0;
 };
 
+/** Each member `membersOf` made, by user ID: their name, which erasing them confirms. */
+const namesOf = new Map<string, string>();
+
 /** `count` new members of the company, by their user IDs. */
 const membersOf = async (count: number): Promise<string[]> =>
   await Promise.all(
     Array.from({ length: count }, async () => {
-      const { userId } = await signedInWithRole(idp, "user");
+      const { userId, person } = await signedInWithRole(idp, "user");
+      namesOf.set(userId, String(person.name));
       return userId;
     })
   );
+
+/** `userId` removed and erased by `admin`, as a person's erasure does it: their events with them. */
+const erasedBy = async (
+  admin: Awaited<ReturnType<typeof signedInApi>>,
+  userId: string
+): Promise<void> => {
+  await admin.api.members.remove(userId);
+  await admin.api.members.erase(userId, namesOf.get(userId) ?? "");
+};
 
 /** A step as a producer hands it to the Brain: its kind, its system and whether it writes. */
 interface Step {
@@ -737,8 +750,8 @@ describe("opportunities", { timeout: 120_000 }, () => {
     };
     const both = await seenOf();
     // One of each team erased: what rests on four falls at the next list.
-    await eraseEventsOf(env, ops[0] ?? "");
-    await eraseEventsOf(env, finance[0] ?? "");
+    await erasedBy(admin, ops[0] ?? "");
+    await erasedBy(admin, finance[0] ?? "");
 
     expect({ both, after: await seenOf() }).toStrictEqual({
       // The described one first: it has hours a week to rank by.
@@ -825,7 +838,7 @@ describe("opportunities", { timeout: 120_000 }, () => {
     // What was seen goes with its people, so no later test meets it.
     for (const person of ops) {
       // oxlint-disable-next-line no-await-in-loop -- one person at a time
-      await eraseEventsOf(env, person);
+      await erasedBy(admin, person);
     }
 
     expect({ before, after }).toStrictEqual({

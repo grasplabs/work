@@ -75,6 +75,16 @@ const peopleTake = async (
   return tags;
 };
 
+/** Erases a person whose tags are `who` from the shared store, their events with them. */
+const erased = async (who: string[]): Promise<void> => {
+  await shared().erasePersonShared({
+    person: `person-${crypto.randomUUID()}`,
+    identifiers: [],
+    reason: "person_erased",
+    events: { keyId, who },
+  });
+};
+
 /** Each routine's steps, by kind alone. */
 const stepsOf = (routines: readonly ObservedRoutine[]) =>
   routines.map(({ steps }) => steps.map(({ step }) => step));
@@ -133,7 +143,7 @@ describe("routines seen in activity", () => {
     ]);
     const both = await routinesOf(team);
     // And gone again: the five others erased.
-    await shared().eraseEvents({ keyId, who: others });
+    await erased(others);
     const again = await routinesOf(team);
 
     expect({ alone: stepsOf(alone), both: stepsOf(both) }).toStrictEqual({
@@ -247,7 +257,7 @@ describe("routines seen in activity", () => {
     const team = `team:${crypto.randomUUID()}`;
     const tags = await peopleTake(team, 5, () => dealThenMail(0));
     const before = await routinesOf(team);
-    await shared().eraseEvents({ keyId, who: [tags[0] ?? ""] });
+    await erased([tags[0] ?? ""]);
 
     expect({
       shown: before.length,
