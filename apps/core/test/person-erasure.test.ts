@@ -29,6 +29,7 @@ import { testApp } from "./app-definitions.ts";
 import { allEvents, eventsAfter, logHead } from "./audit-events.ts";
 import { finishedByTheClock } from "./brain-next-own-store.ts";
 import { consentCode } from "./connect-providers.ts";
+import { landingAt } from "./d1-landing.ts";
 import { mockIdp } from "./idp.ts";
 import { aloneInTheStore, answering, answeringWith } from "./interview-link.ts";
 import { runMinuteTasks } from "./maintenance.ts";
@@ -1973,37 +1974,59 @@ describe("erasing a person", () => {
     });
   });
 
-  it("keeps the interview from a link sent to their entry after their erasure was asked for, as one sent to whoever the address went to", async () => {
+  it("keeps the interview from a link sent to their entry after an admin released the address as the erasure ran, as one sent to whoever the address went to", async () => {
     const { admin, person } = await removedPerson();
-    const { theirs, theirSecret } = await onTheList(
-      String(person.person.email)
-    );
+    const email = String(person.person.email);
+    const { theirs, theirSecret } = await onTheList(email);
     await onList(
       "INSERT INTO interview_settings (person, mark, interviewer, locale) VALUES (?, 'what the new owner heard', 'stephen', 'en')",
       theirs
     );
-    // The address released and a link sent to the entry again while the
-    // erasure ran: sent after the erasure was asked for.
+    // A link sent to the entry again while the erasure ran: sent after
+    // the erasure was asked for. Just before the erasure takes the address
+    // out of the onboarding's store, an admin releases it: the address is
+    // someone else's now.
     await onList(
       "UPDATE links SET sent_at = ? WHERE person = ?",
       new Date(Date.now() + 60_000).toISOString(),
       theirs
     );
-
-    const erased = await admin.api.members.erase(
-      person.userId,
-      String(person.person.name)
+    const landing = landingAt(
+      /^select "email_hash" from "person_erasures"/iu,
+      "before",
+      async () => {
+        await admin.api.members.releaseAddress(email);
+      }
     );
+    const { core } = await openRpc(admin.session, {
+      coreEnv: landing.coreEnv,
+    });
+    let erased: Awaited<ReturnType<typeof admin.api.members.erase>>;
+    try {
+      using session = core.authenticate();
+      erased = await session.members.erase(
+        person.userId,
+        String(person.person.name)
+      );
+    } finally {
+      core[Symbol.dispose]();
+    }
 
     const settings = await onList(
       "SELECT person FROM interview_settings WHERE person = ?",
       theirs
     );
     expect({
+      landed: landing.landed(),
       interview: erased.areas.find(({ area }) => area === "interview")?.state,
       settings: settings.length,
-      link: await sessionWith(theirSecret, String(person.person.email)),
-    }).toStrictEqual({ interview: "complete", settings: 1, link: "open" });
+      link: await sessionWith(theirSecret, email),
+    }).toStrictEqual({
+      landed: true,
+      interview: "complete",
+      settings: 1,
+      link: "open",
+    });
   });
 
   it("takes out how they were reached: their chat accounts and links, conversations, offers, invitations to their old address, notifications, teams, and what they asked Stephen", async () => {

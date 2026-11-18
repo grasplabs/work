@@ -9,6 +9,7 @@ import {
   directoryUser as user,
 } from "./directory.ts";
 import { mockIdp } from "./idp.ts";
+import { acmeTenant } from "./sign-in-config.ts";
 import {
   auditedDuring,
   openRpc,
@@ -109,6 +110,8 @@ describe("the onboarding's directory", () => {
       directory: { suite: "microsoft", status: "active" },
       read: {
         suite: "microsoft",
+        // The tenant its people's object ids are in (GRA-2055).
+        tenant: acmeTenant,
         people: [
           {
             id: lead,

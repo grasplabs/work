@@ -539,6 +539,7 @@ const identifiersOf = async (
  */
 const eraseIdentifiersOf = async (
   env: Env,
+  userId: string,
   isTheirs: Awaited<ReturnType<typeof identifiersOf>>,
   found: { emails: Set<string>; oids: Set<string> }
 ): Promise<void> => {
@@ -560,12 +561,17 @@ const eraseIdentifiersOf = async (
       found.oids.add(entra.oid);
     }
   }
+  // An address an admin released since this area read it is someone
+  // else's now, and so is a link sent to it since: it stays. Read again
+  // just before the store's transaction.
+  const [still] = await drizzle(env.DB)
+    .select({ emailHash: personErasures.emailHash })
+    .from(personErasures)
+    .where(eq(personErasures.userId, userId));
+  const emails = still?.emailHash === null ? [] : [...found.emails];
   if (
-    (found.emails.size > 0 || found.oids.size > 0) &&
-    (await store.eraseIdentifiers({
-      emails: [...found.emails],
-      oids: [...found.oids],
-    }))
+    (emails.length > 0 || found.oids.size > 0) &&
+    (await store.eraseIdentifiers({ emails, oids: [...found.oids] }))
   ) {
     await placePrimaries(env, { type: "system" });
   }
@@ -652,7 +658,7 @@ const interview: ErasureStep = {
         oids.add(oid);
       }
     }
-    await eraseIdentifiersOf(env, isTheirs, { emails, oids });
+    await eraseIdentifiersOf(env, userId, isTheirs, { emails, oids });
     if (!isTheirs.byEmail) {
       // Their address released, or hashed under an older key: they can't
       // be found on the list by it, and an interview of theirs under it is
