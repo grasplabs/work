@@ -190,6 +190,7 @@ import {
   chatDrafts,
   chatFiles,
   chatMessages,
+  chatRequestKeys,
   chatRunSources,
   chatSearchText,
   chatSources,
@@ -269,6 +270,12 @@ interface LiveTurn {
  * an update about once a second, and each is a call back to the door.
  */
 const textEveryMs = 300;
+
+/**
+ * How long a request's key is kept (`chatRequestKeys`): a page sends a
+ * repeat within seconds, or when its connection is back.
+ */
+const requestKeyMs = 24 * 60 * 60 * 1000;
 
 /**
  * `tell`, called with the latest text at most every {@link textEveryMs},
@@ -1078,6 +1085,8 @@ export class Workspace extends DurableObject<Env> {
    * waiting on a call.
    */
   readonly #sent = new Set<Promise<unknown>>();
+  /** The questions sent with a key whose turn is still starting, by key (`send`). */
+  readonly #starting = new Map<string, Promise<boolean>>();
 
   /**
    * Set once its person's erasure began (`erasePerson`): from then on
@@ -1424,8 +1433,16 @@ export class Workspace extends DurableObject<Env> {
     by?: AuditActor,
     via: ChatChannel = "web",
     thread?: string,
-    make?: ChatMake
+    make?: ChatMake,
+    /** The page's key for this chat: a repeat finds the chat it made. */
+    key?: string
   ): Chat {
+    const repeated =
+      key === undefined ? undefined : this.#requested("create", key);
+    if (repeated !== undefined) {
+      // The person's own chat, as the first call made it.
+      return this.#graspChat(repeated, personId);
+    }
     const agent = workspaceAgentIdSchema.safeParse(agentId);
     if (!agent.success) {
       // No agent core names: nowhere an agent can work.
@@ -1457,10 +1474,41 @@ export class Workspace extends DurableObject<Env> {
         })
         .returning()
         .get();
+      if (key !== undefined) {
+        this.#keepRequest("create", key, id);
+      }
       return made;
     });
     this.#deliverAudit();
     return chat;
+  }
+
+  /** The chat a request with `key` was kept for, if one was within a day. */
+  #requested(kind: "create" | "send", key: string): ChatId | undefined {
+    return this.#db
+      .select({ chatId: chatRequestKeys.chatId })
+      .from(chatRequestKeys)
+      .where(
+        and(
+          eq(chatRequestKeys.kind, kind),
+          eq(chatRequestKeys.key, key),
+          gt(chatRequestKeys.at, new Date(Date.now() - requestKeyMs))
+        )
+      )
+      .get()?.chatId;
+  }
+
+  /** Keeps `key` for what `chatId` just took, and drops the keys past their day. */
+  #keepRequest(kind: "create" | "send", key: string, chatId: ChatId): void {
+    const now = Date.now();
+    this.#db
+      .delete(chatRequestKeys)
+      .where(lte(chatRequestKeys.at, new Date(now - requestKeyMs)))
+      .run();
+    this.#db
+      .insert(chatRequestKeys)
+      .values({ kind, key, chatId, at: new Date(now) })
+      .run();
   }
 
   /**
@@ -2712,14 +2760,49 @@ export class Workspace extends DurableObject<Env> {
   async send(
     chatId: unknown,
     personId: string,
-    question: Question
+    question: Question,
+    /**
+     * The page's key for this question (`ChatQuestion.key`): a repeat is
+     * the same question, taken once. One that comes while the first is
+     * still starting waits on that start and resolves or is refused with
+     * it; one after resolves at once. A question refused before it
+     * started keeps no key, so the page may send it again.
+     */
+    key?: string
   ): Promise<void> {
     const chat = this.#graspChat(chatId, personId);
+    if (key !== undefined) {
+      const starting = this.#starting.get(key);
+      if (starting !== undefined) {
+        await starting;
+        return;
+      }
+      const taken = this.#requested("send", key);
+      if (taken !== undefined) {
+        // Another chat's key says nothing of this question.
+        if (taken !== chat.id) {
+          throw agentErrors.create("agent.invalid_question");
+        }
+        return;
+      }
+    }
     const started = Promise.withResolvers<boolean>();
+    if (key !== undefined) {
+      this.#starting.set(key, started.promise);
+    }
     const ended = this.#sentTurns(chat, question, started);
     this.#sent.add(ended);
     void this.#forget(ended);
-    await started.promise;
+    try {
+      await started.promise;
+      if (key !== undefined) {
+        this.#keepRequest("send", key, chat.id);
+      }
+    } finally {
+      if (key !== undefined) {
+        this.#starting.delete(key);
+      }
+    }
     // The alarm keeps the object up until the turn ends (`alarm`).
     await this.#alarmBy(Date.now());
   }
@@ -4922,6 +5005,10 @@ export class Workspace extends DurableObject<Env> {
         // What an earlier release kept of the chat's own drafts (schema.ts):
         // rows that name it, which go with it.
         this.#dropChatDrafts(id);
+        this.#db
+          .delete(chatRequestKeys)
+          .where(eq(chatRequestKeys.chatId, id))
+          .run();
         this.#db.delete(chats).where(eq(chats.id, id)).run();
         this.ctx.storage.kv.delete(`${traceKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${builtKeyPrefix}${id}`);

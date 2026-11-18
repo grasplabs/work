@@ -773,3 +773,27 @@ export const previewStores = sqliteTable("preview_stores", {
   appId: text("app_id").notNull(),
   revision: integer().notNull(),
 });
+
+/**
+ * The keys the person's page gave what it asked for once (`ChatsApi.create`
+ * and `ChatsApi.send`): the chat a `create` made, and each question a chat
+ * took. A repeat with the same key, as a page sends when it never heard
+ * the answer, finds the row and makes or asks nothing again. Kept a day
+ * (`requestKeyMs`), far longer than a page retries; a chat's go with it.
+ */
+export const chatRequestKeys = sqliteTable(
+  "chat_request_keys",
+  {
+    kind: text({ enum: ["create", "send"] }).notNull(),
+    key: text().notNull(),
+    chatId: text("chat_id")
+      .$type<ChatId>()
+      .notNull()
+      .references(() => chats.id),
+    at: integer({ mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.kind, table.key] }),
+    index("chat_request_keys_at").on(table.at),
+  ]
+);

@@ -1035,6 +1035,73 @@ describe("chats", () => {
     });
   });
 
+  it("take a question sent again with its key once, and one refused before it started again", async () => {
+    const ann = await person();
+    await answering(ann, says("Noted."), says("Again."));
+    const chat = await ann.chats.create("Repeated");
+    const follower = await follow(ann.chats, chat.id);
+    const key = crypto.randomUUID();
+    const refusedKey = crypto.randomUUID();
+
+    // A model the company doesn't offer refuses it before it starts, and
+    // its key stays free for the same question sent right.
+    await expect(
+      outcome(
+        ann.chats.send(chat.id, {
+          key: refusedKey,
+          text: "Any news?",
+          model: "openai/not-a-model",
+        })
+      )
+    ).resolves.not.toBe("resolved");
+
+    // Twice at once, as a page that retries early, and once more after
+    // the answer: one question, one answer.
+    const question = { key, text: "Any news?", model };
+    await Promise.all([
+      ann.chats.send(chat.id, question),
+      ann.chats.send(chat.id, question),
+    ]);
+    await settled(follower);
+    await ann.chats.send(chat.id, question);
+    expect(
+      follower.messages().map(({ role, text }) => ({ role, text }))
+    ).toStrictEqual([
+      { role: "user", text: "Any news?" },
+      { role: "assistant", text: "Noted." },
+    ]);
+
+    await ann.chats.send(chat.id, { ...question, key: refusedKey });
+    await vi.waitFor(() => {
+      expect(follower.messages().at(-1)?.text).toBe("Again.");
+    });
+    // A malformed key is no key.
+    await expect(
+      outcome(ann.chats.send(chat.id, { ...question, key: "again" }))
+    ).resolves.toBe("agent.invalid_question");
+  });
+
+  it("are made once for a key, however often the page asks", async () => {
+    const ann = await person();
+    const ben = await person();
+    const key = crypto.randomUUID();
+    const made = await ann.chats.create("Travel", undefined, undefined, key);
+    await expect(
+      ann.chats.create("Travel", undefined, undefined, key)
+    ).resolves.toStrictEqual(made);
+    await expect(ann.chats.list()).resolves.toHaveLength(1);
+    // Someone else's same key is their own chat.
+    const other = await ben.chats.create("Travel", undefined, undefined, key);
+    expect(other.id).not.toBe(made.id);
+    // Deleted, its key is free again.
+    await ann.chats.remove(made.id);
+    const next = await ann.chats.create("Travel", undefined, undefined, key);
+    expect(next.id).not.toBe(made.id);
+    await expect(
+      outcome(ann.chats.create("Travel", undefined, undefined, "again"))
+    ).resolves.toBe("agent.invalid_request");
+  });
+
   it("take one question at a time, and aren't deleted under their agent", async () => {
     const ann = await person();
     await answering(ann, { hang: true });

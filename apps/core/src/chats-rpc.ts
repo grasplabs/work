@@ -104,9 +104,13 @@ import type { Chat } from "./workspace.ts";
  * mentions, named by ID alone. What Build it made is core's to say
  * (`build`), never the page's.
  */
+/** The page's key for a request it may repeat (`ChatQuestion.key`). */
+const requestKeySchema = z.uuid();
+
 const askedSchema = questionSchema.omit({ built: true }).extend({
   subject: subjectSchema.optional(),
   mentions: chatMentionsSchema.optional(),
+  key: requestKeySchema.optional(),
 });
 
 /** Build it as the page sends it (`ChatBuild`). */
@@ -364,14 +368,16 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   async create(
     title: string,
     agentId?: string,
-    make?: ChatMake
+    make?: ChatMake,
+    key?: string
   ): Promise<ChatSummary> {
     return await withPerson(this.#check, async (person) => {
       const { userId } = person;
       const parsed = chatTitleSchema.safeParse(title);
       const making =
         make === undefined ? undefined : chatMakeSchema.safeParse(make);
-      if (!parsed.success || making?.success === false) {
+      const keyed = requestKeySchema.optional().safeParse(key);
+      if (!parsed.success || making?.success === false || !keyed.success) {
         throw agentErrors.create(
           parsed.success ? "agent.invalid_request" : "agent.invalid_title"
         );
@@ -397,7 +403,8 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         actorOf(person),
         "web",
         undefined,
-        making?.data
+        making?.data,
+        keyed.data
       );
       return summaryOfMade(chat);
     });
@@ -502,18 +509,23 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       if (!parsed.success) {
         throw agentErrors.create("agent.invalid_question");
       }
-      const { subject: named, mentions: picked, ...asked } = parsed.data;
+      const { subject: named, mentions: picked, key, ...asked } = parsed.data;
       const [subject, mentions] = await Promise.all([
         named === undefined ? undefined : this.#subjectOf(person, named),
         picked === undefined || picked.length === 0
           ? undefined
           : mentionsOf(this.#env, person, picked),
       ]);
-      await this.#chatsOf(person.userId).send(id, person.userId, {
-        ...asked,
-        ...(subject === undefined ? {} : { subject }),
-        ...(mentions === undefined ? {} : { mentions }),
-      });
+      await this.#chatsOf(person.userId).send(
+        id,
+        person.userId,
+        {
+          ...asked,
+          ...(subject === undefined ? {} : { subject }),
+          ...(mentions === undefined ? {} : { mentions }),
+        },
+        key
+      );
     });
   }
 
