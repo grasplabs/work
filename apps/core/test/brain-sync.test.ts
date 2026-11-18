@@ -279,6 +279,12 @@ const overlappingRun = async (): Promise<void> => {
 /** The hold of a removal for a move (`hold`), as its statement starts. */
 const holdStatement = /^update "brain_sync_items" set "held_since" = \?/u;
 
+/** An item claimed by a page (`claim`). */
+const claimStatement = /^insert into "brain_sync_items"/u;
+
+/** The end of a dropped place's erase: its source deleted (`eraseDroppedPlace`). */
+const placeGoneStatement = /^delete from "brain_sync_sources"/u;
+
 /** An item taken out (`leave`): the key it leaves named. */
 const leaveStatement = /^update "brain_sync_items" set .*"leaving" = \?/u;
 
@@ -1683,34 +1689,40 @@ describe("native sync", () => {
   );
 
   it(
-    "keeps each synced change as one event for each of the owner's teams of five or more, once however often its page is applied",
+    "keeps each synced change as one event for each of the owner's teams of five or more, two teammates' identical copies apart, once however often its page is applied",
     setUpTime,
     async () => {
       const owner = await signedInApi(idp, "user");
+      const teammate = await signedInApi(idp, "user");
       const others = await Promise.all(
-        Array.from({ length: minTeamShown - 1 }, async () => {
+        Array.from({ length: minTeamShown - 2 }, async () => {
           const { userId } = await signedInWithRole(idp, "user");
           return userId;
         })
       );
-      // Five with the owner, and four.
+      // Five with both of them, and four with the owner alone.
       const [five, four] = await Promise.all([
+        newTeam(owner.userId, teammate.userId, ...others),
         newTeam(owner.userId, ...others),
-        newTeam(owner.userId, ...others.slice(1)),
       ]);
       const note = markerOf();
-      const { connectionId } = await connectSampleFeed(owner, {
+      // Each with a copy of the same file: same ID, title, text, version.
+      const feed = {
         "": feedPage(
           [mailItem("note", `Note ${note}`, { kind: "file" })],
           "p1"
         ),
         p1: feedPage([], "p1"),
-      });
+      };
+      const connections = [
+        await connectSampleFeed(owner, feed),
+        await connectSampleFeed(teammate, feed),
+      ];
       const eventsOf = async () =>
         await inStoreOf("brain", (sql) =>
           sql
             .exec<Record<string, SqlStorageValue>>(
-              "SELECT team, step, system, writes, item FROM events WHERE team IN (?, ?) ORDER BY team",
+              "SELECT team, step, system, writes, item FROM events WHERE team IN (?, ?) ORDER BY team, key",
               `team:${five}`,
               `team:${four}`
             )
@@ -1719,12 +1731,15 @@ describe("native sync", () => {
       later(pollMs);
       await sync();
       const kept = await eventsOf();
-      // The same page applied again, from the start.
-      await env.DB.prepare(
-        "UPDATE brain_sync_sources SET cursor = NULL WHERE connection_id = ?"
-      )
-        .bind(connectionId)
-        .run();
+      // The same pages applied again, from the start.
+      for (const { connectionId } of connections) {
+        // oxlint-disable-next-line no-await-in-loop -- one connection at a time
+        await env.DB.prepare(
+          "UPDATE brain_sync_sources SET cursor = NULL WHERE connection_id = ?"
+        )
+          .bind(connectionId)
+          .run();
+      }
       later(pollMs);
       await sync();
 
@@ -1738,7 +1753,10 @@ describe("native sync", () => {
         itemNamed: kept.every(
           ({ item }) => typeof item === "string" && item !== "note"
         ),
-        found: await finds(owner.userId, note),
+        found: [
+          await finds(owner.userId, note),
+          await finds(teammate.userId, note),
+        ],
         again: await eventsOf(),
       }).toStrictEqual({
         kept: [
@@ -1748,11 +1766,266 @@ describe("native sync", () => {
             system: "microsoft",
             writes: 0,
           },
+          {
+            team: `team:${five}`,
+            step: "file.added",
+            system: "microsoft",
+            writes: 0,
+          },
         ],
         itemNamed: true,
-        found: true,
+        found: [true, true],
         again: kept,
       });
+    }
+  );
+
+  it(
+    "relists mail in full from a connector that reads no names or IDs: refreshes what changed past its first page, and asks nothing by ID",
+    setUpTime,
+    async () => {
+      const owner = await signedInApi(idp, "user");
+      const marks = {
+        kept: markerOf(),
+        draft: markerOf(),
+        final: markerOf(),
+        went: markerOf(),
+      };
+      const quiet = { changes: [], next: "q", more: false };
+      const { world, fetchedOf } = await connectSampleFeed(owner, {
+        "": quiet,
+        q: quiet,
+      });
+      const changes: Record<string, unknown> = {
+        "": feedPage(
+          [
+            mailItem("a/kept", `Kept ${marks.kept}`),
+            mailItem("a/changed", `Draft ${marks.draft}`),
+            mailItem("a/went", `Gone ${marks.went}`),
+          ],
+          "c1"
+        ),
+        c1: feedPage([], "c1"),
+      };
+      const set = async () => {
+        await world({
+          places: ["a"],
+          folders: { a: { changes, ignores: true } },
+        });
+      };
+      await set();
+      later(pollMs);
+      await sync();
+      // The mailbox's listing now: two pages, the change on the second,
+      // the message that went in neither.
+      changes[""] = {
+        changes: [mailItem("a/kept", `Kept ${marks.kept}`)],
+        next: "p2",
+        more: true,
+      };
+      changes.p2 = feedPage(
+        [mailItem("a/changed", `Final ${marks.final}`, { version: "2" })],
+        "c1"
+      );
+      await set();
+      later(24 * 60 * 60 * 1000);
+      for (let run = 0; run < 4; run += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one run after another
+        await sync();
+        later(pollMs);
+      }
+
+      expect({
+        kept: await finds(owner.userId, marks.kept),
+        draft: await finds(owner.userId, marks.draft),
+        final: await finds(owner.userId, marks.final),
+        went: await finds(owner.userId, marks.went),
+        askedById: await fetchedOf("a"),
+      }).toStrictEqual({
+        kept: true,
+        draft: false,
+        final: true,
+        went: false,
+        askedById: [],
+      });
+    }
+  );
+
+  it(
+    "fetches by ID only what an answer covers: asks again what a partial answer left, and ends the day's catch-up when an answer covers none of it",
+    setUpTime,
+    async () => {
+      const owner = await signedInApi(idp, "user");
+      const marks = { x: markerOf(), y: markerOf(), z: markerOf() };
+      const quiet = { changes: [], next: "q", more: false };
+      const { world, fetchedOf } = await connectSampleFeed(owner, {
+        "": quiet,
+        q: quiet,
+      });
+      const named = (id: string) => mailItem(id, null);
+      const day = async () => {
+        later(24 * 60 * 60 * 1000);
+        for (let run = 0; run < 5; run += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- one run after another
+          await sync();
+          later(pollMs);
+        }
+      };
+      await world({
+        places: ["a", "b"],
+        folders: {
+          // Answers by ID, one at a time.
+          a: {
+            changes: {
+              "": feedPage([mailItem("a/x", `Mail ${marks.x}`)], "c1"),
+              c1: feedPage([], "c1"),
+            },
+            names: {
+              "": feedPage([named("a/x"), named("a/y"), named("a/z")], "n"),
+            },
+            items: {
+              "a/y": mailItem("a/y", `Mail ${marks.y}`),
+              "a/z": mailItem("a/z", `Mail ${marks.z}`),
+            },
+            itemsMax: 1,
+          },
+          // Reads no IDs, and passes its messages over: its listing names
+          // `b/later` on a second page, which an ID read never reaches.
+          b: {
+            changes: {
+              "": {
+                changes: [named("b/first")],
+                next: "p2",
+                more: true,
+              },
+              p2: feedPage([named("b/later")], "p2"),
+            },
+            ignores: true,
+          },
+        },
+      });
+      later(pollMs);
+      await sync();
+      later(pollMs);
+      await sync();
+      await day();
+      const askedFirstDay = await fetchedOf("b");
+      await day();
+
+      expect({
+        a: await fetchedOf("a"),
+        found: [
+          await finds(owner.userId, marks.y),
+          await finds(owner.userId, marks.z),
+        ],
+        // Within a day, never again once an answer covers nothing; still
+        // owed the next day.
+        bFirstDay: askedFirstDay,
+        b: await fetchedOf("b"),
+      }).toStrictEqual({
+        a: [["a/y", "a/z"], ["a/z"]],
+        found: [true, true],
+        // Neither held (passed over from the start): both asked; its first
+        // page covers `b/first`, so `b/later` is asked again, covered by
+        // nothing, and left owed until the next day's.
+        bFirstDay: [["b/first", "b/later"], ["b/later"]],
+        b: [
+          ["b/first", "b/later"],
+          ["b/later"],
+          ["b/first", "b/later"],
+          ["b/later"],
+        ],
+      });
+    }
+  );
+
+  it(
+    "keeps nothing of a folder dropped while a page of it is under way, the drop landing between the page's read and its claim and the erase ending after it",
+    setUpTime,
+    async () => {
+      const owner = await signedInApi(idp, "user");
+      const marks = { old: markerOf(), late: markerOf(), other: markerOf() };
+      const quiet = { changes: [], next: "q", more: false };
+      const { connectionId, world } = await connectSampleFeed(owner, {
+        "": quiet,
+        q: quiet,
+      });
+      const a: Record<string, unknown> = {
+        "": feedPage([mailItem("a/old", `Mail ${marks.old}`)], "a1"),
+        a1: feedPage([], "a1"),
+      };
+      const b = {
+        "": feedPage([mailItem("b/other", `Mail ${marks.other}`)], "b1"),
+        b1: feedPage([], "b1"),
+      };
+      const set = async (places: string[]) => {
+        await world({
+          places,
+          folders: { a: { changes: a }, b: { changes: b } },
+        });
+      };
+      await set(["a", "b"]);
+      later(pollMs);
+      await sync();
+      later(pollMs);
+      await sync();
+      // a's next page brings `late`; the folder is deleted meanwhile.
+      a.a1 = feedPage([mailItem("a/late", `Mail ${marks.late}`)], "a2");
+      a.a2 = feedPage([], "a2");
+      await set(["b"]);
+      // The page may claim once the erase has found nothing left; the
+      // erase goes on once the claim has run.
+      const claimMay = Promise.withResolvers<null>();
+      const claimDone = Promise.withResolvers<null>();
+      let erasing: Promise<void> = Promise.resolve();
+      later(pollMs);
+      await syncOn(
+        interleaving(
+          claimStatement,
+          async () => {
+            // The folder list read without a, as its daily listing does:
+            // a dropped.
+            await env.DB.prepare(
+              "UPDATE brain_sync_sources SET due_at = 0 WHERE connection_id = ? AND place = ':places'"
+            )
+              .bind(connectionId)
+              .run();
+            await runSync(env);
+            // a's erase, up to its last step: the page's claim lands
+            // after it found nothing left, before it deletes the source.
+            erasing = runSync(
+              interleaving(placeGoneStatement, async () => {
+                claimMay.resolve(null);
+                await claimDone.promise;
+              })
+            ).finally(() => {
+              claimMay.resolve(null);
+            });
+            await claimMay.promise;
+          },
+          () => {
+            claimDone.resolve(null);
+          }
+        )
+      );
+      await erasing;
+      for (let run = 0; run < 3; run += 1) {
+        later(pollMs);
+        // oxlint-disable-next-line no-await-in-loop -- one run after another
+        await sync();
+      }
+      const { results } = await env.DB.prepare(
+        "SELECT count(*) AS count FROM brain_sync_items WHERE connection_id = ? AND place = 'a'"
+      )
+        .bind(connectionId)
+        .all<{ count: number }>();
+
+      expect({
+        late: await finds(owner.userId, marks.late),
+        old: await finds(owner.userId, marks.old),
+        other: await finds(owner.userId, marks.other),
+        rowsOfA: results[0]?.count,
+      }).toStrictEqual({ late: false, old: false, other: true, rowsOfA: 0 });
     }
   );
 

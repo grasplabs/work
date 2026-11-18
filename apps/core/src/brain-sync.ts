@@ -447,21 +447,30 @@ interface Applying {
 const isListing = ({ source, stream }: Applying): boolean =>
   stream === "relist" || source.listingOpen;
 
-/** That `applying`'s run still holds its source, as SQL. */
+/**
+ * That `applying`'s run still holds its source, and the source is not
+ * dropped (its place no longer listed, `listPlaces`), as SQL: the one
+ * condition every statement of a page that claims, records, holds or
+ * leaves an item carries, in the statement itself. A drop takes the lease
+ * in the same statement, so a page under way when its place goes writes
+ * nothing more: no item lands in a place whose erase (`eraseDroppedPlace`)
+ * may already have passed it.
+ */
 const stillHeld = ({ source, leaseId }: Applying): SQL =>
-  sql`EXISTS (SELECT 1 FROM ${brainSyncSources} WHERE ${brainSyncSources.connectionId} = ${source.connectionId} AND ${brainSyncSources.feed} = ${source.feed} AND ${brainSyncSources.place} = ${source.place} AND ${brainSyncSources.leaseId} = ${leaseId})`;
+  sql`EXISTS (SELECT 1 FROM ${brainSyncSources} WHERE ${brainSyncSources.connectionId} = ${source.connectionId} AND ${brainSyncSources.feed} = ${source.feed} AND ${brainSyncSources.place} = ${source.place} AND ${brainSyncSources.leaseId} = ${leaseId} AND ${brainSyncSources.dropped} = 0)`;
 
 /** That a disconnect closed `connectionId` for the sync, as SQL. */
 const closed = (connectionId: SQL | string): SQL =>
   sql`EXISTS (SELECT 1 FROM ${brainSyncDisconnects} WHERE ${brainSyncDisconnects.connectionId} = ${connectionId})`;
 
-/** The source's row, while `applying`'s run holds it, as SQL. */
+/** The source's row, while `applying`'s run holds it and it isn't dropped (`stillHeld`), as SQL. */
 const heldSource = (applying: Applying) =>
   and(
     eq(brainSyncSources.connectionId, applying.source.connectionId),
     eq(brainSyncSources.feed, applying.source.feed),
     eq(brainSyncSources.place, applying.source.place),
-    eq(brainSyncSources.leaseId, applying.leaseId)
+    eq(brainSyncSources.leaseId, applying.leaseId),
+    eq(brainSyncSources.dropped, false)
   );
 
 /**
@@ -513,21 +522,24 @@ const heldAfter = (counter: readonly unknown[]): void => {
 /**
  * One step of the connection's owner for a change this read counted: the
  * sync's kind and what happened (`file.added`, `mail.removed`), keyed by
- * the change (the same on every repeat, so a page applied twice keeps it
- * once), on the provider's item, when the provider says it changed. Its
+ * the item's key in the Brain (its connection, feed, item and generation:
+ * `keyOf`) and the change, hashed to stay within a key's length, so a
+ * page applied twice keeps it once and two items never share a key (two
+ * teammates' copies of one file), on the
+ * provider's item, when the provider says it changed. Its
  * system is the connection's provider, as a call's is (brain-events.ts).
  * It writes nothing: the sync saw the change in that system, and who made
  * it there (the owner, a colleague, a sender) it doesn't know.
  */
-const stepped = (
+const stepped = async (
   applying: Applying,
   counter: "added" | "changed" | "removed",
-  key: string,
+  { key, change }: { key: string; change: string },
   item: string,
   at: Date
-): void => {
+): Promise<void> => {
   applying.steps.push({
-    key,
+    key: await sha256Hex(JSON.stringify([key, change])),
     personId: applying.source.personId,
     step: `${applying.source.kind}.${counter}`,
     system: applying.source.provider,
@@ -646,7 +658,13 @@ const leave = async (
     return undefined;
   }
   countedIn(applying, "removed", counter);
-  stepped(applying, "removed", row.key, row.itemId, applying.readAt);
+  await stepped(
+    applying,
+    "removed",
+    { key: row.key, change: "removed" },
+    row.itemId,
+    applying.readAt
+  );
   return await finishLeaving(applying, { ...row, ...left });
 };
 
@@ -880,7 +898,13 @@ const changeReaders = async (
   ]);
   countedIn(applying, "changed", counter);
   // A sharing change moves no time at the provider: as of the read.
-  stepped(applying, "changed", change, row.itemId, readAt);
+  await stepped(
+    applying,
+    "changed",
+    { key: row.key, change },
+    row.itemId,
+    readAt
+  );
   return { ...row, version: made.version };
 };
 
@@ -1052,7 +1076,13 @@ const add = async (
     claimed.version === null && version === 1 ? "added" : "changed";
   const [, stored] = await db.batch([recorded, counted(applying, counter)]);
   countedIn(applying, counter, stored);
-  stepped(applying, counter, change, item.id, changedOf(item, readAt));
+  await stepped(
+    applying,
+    counter,
+    { key: claimed.key, change },
+    item.id,
+    changedOf(item, readAt)
+  );
 };
 
 /**
@@ -1376,11 +1406,33 @@ const endedRelist = async (
 });
 
 /**
+ * The IDs a catch-up asked for that `page` answers: there, or gone. Only
+ * these are fetched; what it doesn't answer stays owed. A connector that
+ * reads no IDs answers its ordinary first page, which may answer some of
+ * them, or none.
+ */
+const coveredOf = (applying: Applying, page: SyncPage): string[] => {
+  const answered = new Set(page.items.map(({ id }) => id));
+  return applying.asked.filter((id) => answered.has(id));
+};
+
+/**
+ * Whether `page` is a names-only answer: nothing in it with content. A
+ * connector that reads no names answers its ordinary page, in full, which
+ * is then applied as a full listing's page is: never taken for names,
+ * whose items would all be fetched again by ID.
+ */
+const namesOnly = (page: SyncPage): boolean =>
+  page.items.every((item) => item.gone || item.content === null);
+
+/**
  * Where a relist's page moves it: on while there is more; a names-only
  * listing that ended goes on to fetch what it noted (`relistCatchUp`), at
  * once; a full listing that ended ends the relist until its next day. A
- * catch-up page stays due at once: the next read finds what is left to
- * fetch, or ends the relist (`syncPage`).
+ * catch-up page that answered some of what it asked stays due at once:
+ * the next read asks what is left, or ends the relist (`syncPage`). One
+ * that answered none of it (a connector that reads no IDs) ends the relist
+ * for the day: what it asked stays owed, noted again by the next day's.
  */
 const relistMoved = async (
   applying: Applying,
@@ -1389,12 +1441,22 @@ const relistMoved = async (
 ): Promise<Partial<typeof brainSyncSources.$inferInsert>> => {
   const { mode, source } = applying;
   if (mode === "catchUp") {
-    return { relistAt: new Date(now) };
+    if (coveredOf(applying, page).length > 0) {
+      return { relistAt: new Date(now) };
+    }
+    log.warn("brain.sync.catch_up_unanswered", {
+      connectionId: source.connectionId,
+      feed: source.feed,
+      asked: applying.asked.length,
+    });
+    return await endedRelist(source, now);
   }
   if (page.more) {
     return { relistCursor: page.cursor, relistAt: new Date(now) };
   }
-  if (mode === "names") {
+  // A relist that asked for names (every one but files'), whichever way
+  // its last page answered, fetches what its names-only pages noted.
+  if (source.kind !== "file") {
     return {
       relistCursor: page.cursor,
       relistCatchUp: true,
@@ -1474,7 +1536,7 @@ const commit = async (applying: Applying, page: SyncPage): Promise<void> => {
                 eq(brainSyncCatchUps.connectionId, source.connectionId),
                 eq(brainSyncCatchUps.feed, source.feed),
                 eq(brainSyncCatchUps.place, source.place),
-                inList(brainSyncCatchUps.itemId, applying.asked)
+                inList(brainSyncCatchUps.itemId, coveredOf(applying, page))
               )
             ),
         ]
@@ -1782,6 +1844,9 @@ const syncPage = async (
     );
     return;
   }
+  if (applying.mode === "names" && !namesOnly(page)) {
+    applying.mode = "page";
+  }
   await apply(applying, page);
   await commit(applying, page);
 };
@@ -1955,9 +2020,11 @@ const listPlaces = async (
   // What the listing no longer names, once it has ended: in the batch
   // that moves its cursor, before that gives up the lease the statement
   // checks.
+  // The lease goes with it: a page of that place under way writes nothing
+  // more (`stillHeld`).
   const drop = db
     .update(brainSyncSources)
-    .set({ dropped: true })
+    .set({ dropped: true, leaseId: null, leaseUntil: null })
     .where(
       sql`${brainSyncSources.connectionId} = ${listing.connectionId} AND ${brainSyncSources.feed} = ${listing.feed} AND ${brainSyncSources.place} <> ${placesListing} AND ${brainSyncSources.dropped} = 0 AND (${brainSyncSources.seenIn} IS NULL OR ${brainSyncSources.seenIn} < ${number}) AND ${held}`
     );
