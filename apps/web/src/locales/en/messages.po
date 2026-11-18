@@ -414,6 +414,10 @@ msgstr "{count, plural, one {From your last run of {workflow}, version {version}
 msgid "{count, plural, one {It can't be shared yet: # problem} other {It can't be shared yet: # problems}}"
 msgstr "{count, plural, one {It can't be shared yet: # problem} other {It can't be shared yet: # problems}}"
 
+#: src/workflows/run-detail.tsx
+msgid "{count, plural, one {It started without # kept value: the run that kept it read something that is no longer there to read.} other {It started without # kept values: the runs that kept them read something that is no longer there to read.}}"
+msgstr "{count, plural, one {It started without # kept value: the run that kept it read something that is no longer there to read.} other {It started without # kept values: the runs that kept them read something that is no longer there to read.}}"
+
 #: src/brain/thinking/use-thinking.ts
 msgid "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
 msgstr "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
@@ -936,6 +940,10 @@ msgstr "{needs, plural, one {# needs you} other {# need you}}"
 #: src/chat/asked-questions.tsx
 msgid "{number} of {total}"
 msgstr "{number} of {total}"
+
+#: src/brain/opportunity-drafts.ts
+msgid "{number}. {step} (a person approves this step)"
+msgstr "{number}. {step} (a person approves this step)"
 
 #: src/brain/brain-atlas.ts
 msgid "{one} and {other} both name the same handover, each from their own side."
@@ -3585,6 +3593,10 @@ msgstr "Carry on now"
 msgid "Cases a week"
 msgstr "Cases a week"
 
+#: src/brain/opportunity-drafts.ts
+msgid "Cases a week: {cases}."
+msgstr "Cases a week: {cases}."
+
 #: src/settings/audit-chain.tsx
 msgid "Chain check"
 msgstr "Chain check"
@@ -4269,6 +4281,7 @@ msgid "Connect another account"
 msgstr "Connect another account"
 
 #: src/brain/opportunities-page.tsx
+#: src/brain/opportunity-drafts.ts
 msgid "Connect first: {systems}."
 msgstr "Connect first: {systems}."
 
@@ -5198,6 +5211,24 @@ msgstr "Download table as Markdown"
 #: src/workflows/workflows-table.tsx
 msgid "Draft"
 msgstr "Draft"
+
+#: src/brain/opportunity-drafts.ts
+msgid "Draft a workflow for the opportunity “{title}”."
+msgstr "Draft a workflow for the opportunity “{title}”."
+
+#: src/brain/opportunity-drafts.ts
+msgid "Draft an App for the opportunity “{title}”."
+msgstr "Draft an App for the opportunity “{title}”."
+
+#: src/brain/opportunities-page.tsx
+msgctxt "drafts what an opportunity proposes"
+msgid "Draft it"
+msgstr "Draft it"
+
+#: src/brain/opportunities-page.tsx
+msgctxt "drafts what an opportunity proposes, named for it"
+msgid "Draft it for “{title}”"
+msgstr "Draft it for “{title}”"
 
 #: src/brain/skills-page.tsx
 msgid "Drafted from your own runs of a workflow that keep succeeding. Only you see them, and none is used until you add it to your skills."
@@ -6954,6 +6985,10 @@ msgstr "Hold for 4 seconds"
 msgid "Hours a week"
 msgstr "Hours a week"
 
+#: src/brain/opportunity-drafts.ts
+msgid "Hours a week by hand: {hours}."
+msgstr "Hours a week by hand: {hours}."
+
 #: src/brain/thinking/work-hours.tsx
 msgid "Hours not known yet"
 msgstr "Hours not known yet"
@@ -6999,6 +7034,10 @@ msgstr "How often"
 msgid "How sure"
 msgstr "How sure"
 
+#: src/brain/opportunity-drafts.ts
+msgid "How the team does it today:"
+msgstr "How the team does it today:"
+
 #. Under a statement put together from the interviews
 #. Under a statement put together from the interviews
 #: src/brain/aggregate.tsx
@@ -7029,6 +7068,10 @@ msgstr "How this App is built and what to keep in mind when changing it."
 #: src/interview/closed.tsx
 msgid "How was talking to {who}?"
 msgstr "How was talking to {who}?"
+
+#: src/brain/opportunity-drafts.ts
+msgid "How we handle “{title}”, step by step."
+msgstr "How we handle “{title}”, step by step."
 
 #: src/brain/goals-editor.tsx
 msgid "How we notice it"

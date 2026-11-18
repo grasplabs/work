@@ -6,6 +6,7 @@ import {
   SheetDescription,
   SheetTitle,
 } from "@grasp-os/ui/components/sheet";
+import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
@@ -57,6 +58,28 @@ const Fact = ({ label, children }: { label: string; children: ReactNode }) => (
     <dd>{children}</dd>
   </div>
 );
+
+/**
+ * How many kept values a run started without, if any: core withheld them
+ * as the runs that kept them read something no longer there to read, and
+ * the run read them as unset (core's workflow-state.ts).
+ */
+export const StartedWithout = ({ run }: { run: WorkflowResourceRun }) => {
+  const { t } = useLingui();
+  const count = run.stateWithheld;
+  if (count === undefined) {
+    return null;
+  }
+  return (
+    <p className="text-muted-foreground">
+      {t`${plural(count, {
+        one: "It started without # kept value: the run that kept it read something that is no longer there to read.",
+        other:
+          "It started without # kept values: the runs that kept them read something that is no longer there to read.",
+      })}`}
+    </p>
+  );
+};
 
 /** What an ended run returned, or why it failed, as far as the reader may see. */
 /**
@@ -245,6 +268,7 @@ const RunFacts = ({
         </Fact>
         <Fact label={t`Version`}>{run.version}</Fact>
       </dl>
+      <StartedWithout run={run} />
       {builder && !ended(run) ? <StopRun stop={stop} /> : null}
       <RunResultView run={run} seesResult={seesResult} />
       <RunFiles

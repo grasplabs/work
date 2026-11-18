@@ -246,7 +246,9 @@ const frozenState = async (
  * unchecked in the run, so the start is refused, and the next freezes the
  * state anew (GRA-1996).
  */
-const writersHeldSql = (state: { writers: readonly string[] } | null): SQL =>
+export const writersHeldSql = (
+  state: { writers: readonly string[] } | null
+): SQL =>
   sql`NOT EXISTS (SELECT 1 FROM json_each(${JSON.stringify(state?.writers ?? [])}) AS writer
     WHERE writer.value NOT IN (SELECT ${keptRunEvidence.runId} FROM ${keptRunEvidence})
       AND EXISTS (SELECT 1 FROM ${workflowStartReceipts} AS done
@@ -257,7 +259,7 @@ const writersHeldSql = (state: { writers: readonly string[] } | null): SQL =>
  * `runId` started from (`runStateWriters`), for the batch that admits it,
  * under `admitted`. None for no writers, or no state.
  */
-const writersAdmitted = (
+export const writersAdmitted = (
   env: Env,
   runId: string,
   state: { writers: readonly string[] } | null,
@@ -1533,6 +1535,9 @@ export const admitWorkflowStart = async (
     null,
     authorization.restricted ? 1 : 0,
     stateHashOf(authorization),
+    authorization.state !== null && authorization.state.withheld > 0
+      ? authorization.state.withheld
+      : null,
   ].map((value) => (value === null ? sql`NULL` : sql`${value}`));
   const detail = {
     ...noted,
