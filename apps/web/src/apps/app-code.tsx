@@ -179,7 +179,12 @@ const PathCrumbs = ({ path }: { path: string }) => {
         {path.split("/").map((label, at, all) => (
           // A path's folders can repeat a name: its place tells them apart.
           <BreadcrumbItem key={all.slice(0, at + 1).join("/")}>
-            <BreadcrumbPage>{label}</BreadcrumbPage>
+            {/* Only the file itself is the current page; its folders are words. */}
+            {at === all.length - 1 ? (
+              <BreadcrumbPage>{label}</BreadcrumbPage>
+            ) : (
+              label
+            )}
           </BreadcrumbItem>
         ))}
       </BreadcrumbList>
