@@ -362,6 +362,12 @@ export interface Connection {
    * the person themselves. Absent for every other.
    */
   keepsReads?: true;
+  /**
+   * Connected, but it can't tell Grasp what changed in it (GRA-1763):
+   * only what is done there through Grasp is seen. Absent for one that
+   * can (core's brain-rpc.ts), and for one not connected.
+   */
+  activityGap?: true;
 }
 
 /** Everything the brain is built from. */
