@@ -783,6 +783,10 @@ msgstr "{idle, plural, one {# autre workflow n’a pas été exécuté pendant c
 msgid "{inDays, plural, one {Your next report is ready tomorrow} other {Your next report is ready in # days}}"
 msgstr "{inDays, plural, one {Votre prochain rapport est prêt demain} other {Votre prochain rapport est prêt dans # jours}}"
 
+#: src/frame/part-words.tsx
+msgid "{index} of {count}"
+msgstr "{index} sur {count}"
+
 #: src/activity/audit-event.tsx
 msgid "{input} in, {output} out"
 msgstr "{input} en entrée, {output} en sortie"
@@ -802,6 +806,10 @@ msgstr "{jump}, nouveaux messages"
 #: src/activity/pending.tsx
 msgid "{kind} ({what})"
 msgstr "{kind} ({what})"
+
+#: src/frame/part-words.tsx
+msgid "{kind} at {time}"
+msgstr "{kind} à {time}"
 
 #: src/workflows/binding-approvals.tsx
 msgid "{kind}: {contractId}"
@@ -901,6 +909,10 @@ msgstr "{memories, plural, one {# souvenir caviardé ou supprimé} other {# souv
 #: src/workflows/saved-ago.tsx
 msgid "{minutes, plural, one {Saved # min ago} other {Saved # min ago}}"
 msgstr "{minutes, plural, one {Enregistré il y a # min} other {Enregistré il y a # min}}"
+
+#: src/frame/part-words.tsx
+msgid "{minutes} min"
+msgstr "{minutes} min"
 
 #: src/apps/app-history.tsx
 msgid "{more, plural, one {# more file} other {# more files}}"
@@ -1169,6 +1181,10 @@ msgstr "{outCount, plural, one {# envoyé, en liste} other {# envoyés, en liste
 #: src/onboarding/interviews-progress.tsx
 msgid "{outCount, plural, one {The link that is out, as a list} other {The # links that are out, as a list}}"
 msgstr "{outCount, plural, one {Le lien disponible, sous forme de liste} other {Les # liens disponibles, sous forme de liste}}"
+
+#: src/frame/part-words.tsx
+msgid "{page} of {total}"
+msgstr "{page} sur {total}"
 
 #: src/brain/brain.ts
 msgid "{people, plural, one {{sector}, # person.} other {{sector}, # people.}}"
@@ -1541,6 +1557,10 @@ msgstr "{title} sur {connection}"
 msgid "{title} removed from the dashboard."
 msgstr "{title} a été retiré du tableau de bord."
 
+#: src/frame/part-words.tsx
+msgid "{total, plural, one {{count} of # interview} other {{count} of # interviews}}"
+msgstr "{total, plural, one {{count} sur # entretien} other {{count} sur # entretiens}}"
+
 #: src/connections/integration-facts.ts
 msgid "{total, plural, one {{count} of its # tool allowed} other {{count} of its # tools allowed}}"
 msgstr "{total, plural, one {{count} sur # outil autorisé} other {{count} sur # outils autorisés}}"
@@ -1617,6 +1637,10 @@ msgstr "{waiting, plural, one {Il utilise # nouveau type d’accès. Un administ
 msgid "{what}, as {binding} in its code: {actions}"
 msgstr "{what}, sous le nom {binding} dans son code : {actions}"
 
+#: src/frame/part-words.tsx
+msgid "{who} at {time}"
+msgstr "{who} à {time}"
+
 #: src/dashboard/pile-cards.tsx
 msgid "{who} can't be granted later: it has to ask again."
 msgstr "{who} ne pourra pas être accordé plus tard : il faudra le redemander."
@@ -1629,6 +1653,10 @@ msgstr "{who} y a consenti avant de le connecter"
 #: src/interview/voice-bar.tsx
 msgid "{who} is talking"
 msgstr "{who} parle"
+
+#: src/frame/part-words.tsx
+msgid "{who}, {from} to {to}"
+msgstr "{who}, de {from} à {to}"
 
 #: src/apps/app-data.tsx
 msgid "{who}, {when}"
@@ -4201,6 +4229,10 @@ msgstr "Change qui peut voir et modifier les enregistrements de {table}."
 msgid "Changing the App's definition"
 msgstr "Modification de la définition de l'App"
 
+#: src/frame/part-words.tsx
+msgid "Chapters"
+msgstr "Chapitres"
+
 #: src/projects/project-dialog.tsx
 msgid "Chart"
 msgstr "Graphique"
@@ -4971,6 +5003,10 @@ msgstr "Continuer avec {signIn}"
 msgid "Contract"
 msgstr "Contrat"
 
+#: src/frame/part-words.tsx
+msgid "Conversation timeline"
+msgstr "Chronologie de la conversation"
+
 #. Folder of the sources that are conversations: the vision talk and the interviews by voice or chat
 #: src/brain/brain.ts
 msgid "Conversations"
@@ -5161,6 +5197,10 @@ msgstr "N'a pas pu aboutir"
 #: src/frame/part-words.tsx
 msgid "Could not invite"
 msgstr "Impossible d’inviter"
+
+#: src/frame/part-words.tsx
+msgid "Could not play this file"
+msgstr "Impossible de lire ce fichier"
 
 #: src/apps/app-reset.tsx
 #: src/apps/reset-test-data.tsx
@@ -7153,6 +7193,10 @@ msgstr "Mise en production"
 msgid "Go on without sound"
 msgstr "Continuer sans le son"
 
+#: src/frame/part-words.tsx
+msgid "Go to {time}, {who}"
+msgstr "Aller à {time}, {who}"
+
 #: src/frame/connect-ai-provider.tsx
 msgid "Go to AI providers"
 msgstr "Aller aux fournisseurs d'IA"
@@ -7659,6 +7703,11 @@ msgstr "Élevé"
 msgid "Highest"
 msgstr "Maximum"
 
+#: src/frame/part-words.tsx
+msgctxt "a marked moment"
+msgid "Highlight"
+msgstr "Moment marquant"
+
 #: src/workflows/business-process.tsx
 msgctxt "business process"
 msgid "Hire-to-Retire"
@@ -8062,6 +8111,15 @@ msgstr "Intégrité"
 #: src/settings/audit-chain.tsx
 msgid "Integrity and archive"
 msgstr "Intégrité et archives"
+
+#: src/frame/part-words.tsx
+msgctxt "where a quote comes from"
+msgid "Interview"
+msgstr "Entretien"
+
+#: src/frame/part-words.tsx
+msgid "Interview sound"
+msgstr "Son de l’entretien"
 
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts
@@ -8719,6 +8777,10 @@ msgstr "Type de propos"
 msgid "Kinds of field"
 msgstr "Types de champ"
 
+#: src/frame/part-words.tsx
+msgid "Kinds of highlight"
+msgstr "Types de moments marquants"
+
 #: src/knowledge/frame.tsx
 #: src/knowledge/nav.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
@@ -9106,6 +9168,10 @@ msgstr "Chargement de la conversation"
 #: src/frame/part-words.tsx
 msgid "Loading the page"
 msgstr "Chargement de la page"
+
+#: src/frame/part-words.tsx
+msgid "Loading the sound"
+msgstr "Chargement du son"
 
 #: src/frame/part-words.tsx
 msgid "Loading the value"
@@ -9873,12 +9939,14 @@ msgid "Newer"
 msgstr "Plus récents"
 
 #: src/chat/asked-questions.tsx
+#: src/frame/part-words.tsx
 #: src/settings/event-sources.tsx
 #: src/tour/tour-layer.tsx
 msgid "Next"
 msgstr "Suivante"
 
 #: src/brain/brain-transcript.tsx
+#: src/frame/part-words.tsx
 msgid "Next match"
 msgstr "Résultat suivant"
 
@@ -10079,6 +10147,7 @@ msgid "No longer where it was"
 msgstr "N’est plus là où il était"
 
 #: src/brain/brain-transcript.tsx
+#: src/frame/part-words.tsx
 msgid "No matches"
 msgstr "Aucun résultat"
 
@@ -11655,6 +11724,11 @@ msgid "Packages of {name} were revoked as malware"
 msgstr "Des paquets de {name} ont été révoqués comme logiciels malveillants"
 
 #: src/frame/part-words.tsx
+msgctxt "one page of a form"
+msgid "Page"
+msgstr "Page"
+
+#: src/frame/part-words.tsx
 msgid "Page {current} of {count}"
 msgstr "Page {current} sur {count}"
 
@@ -11713,6 +11787,10 @@ msgstr "Une partie de ce qui sera envoyé est tronquée ci-dessus. Affichez tout
 #: src/inbox/item-detail.tsx
 msgid "Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm."
 msgstr "Une partie de ce qui sera envoyé est tronquée. Ouvrez Détails et affichez tout, ou exactement ce qui sera envoyé, pour confirmer."
+
+#: src/frame/part-words.tsx
+msgid "passage {number}"
+msgstr "passage {number}"
 
 #: src/interview/words.ts
 msgid "Passing it on"
@@ -12080,6 +12158,7 @@ msgid "Previous hash"
 msgstr "Hachage précédent"
 
 #: src/brain/brain-transcript.tsx
+#: src/frame/part-words.tsx
 msgid "Previous match"
 msgstr "Résultat précédent"
 
@@ -13834,6 +13913,7 @@ msgid "Search the Brain"
 msgstr "Chercher dans le cerveau"
 
 #: src/brain/brain-transcript.tsx
+#: src/frame/part-words.tsx
 msgid "Search the transcript"
 msgstr "Chercher dans la transcription"
 
@@ -13959,6 +14039,7 @@ msgid "Self-approved: nobody else could approve it"
 msgstr "Auto-approuvée : personne d’autre ne pouvait l’approuver"
 
 #: src/chat/asked-questions.tsx
+#: src/frame/part-words.tsx
 #: src/inbox/item-detail.tsx
 #: src/interview/composer.tsx
 msgid "Send"
@@ -14736,6 +14817,10 @@ msgstr "Sources que vous pouvez lire"
 #: src/projects/project-dialog.tsx
 msgid "Sparkles"
 msgstr "Étincelles"
+
+#: src/frame/part-words.tsx
+msgid "Speakers"
+msgstr "Intervenants"
 
 #: src/settings/ai-spend.tsx
 msgid "Spend"
@@ -16805,6 +16890,7 @@ msgid "Track the month-end close"
 msgstr "Suivre la clôture mensuelle"
 
 #: src/brain/brain-markdown.ts
+#: src/frame/part-words.tsx
 #: src/interview/page.tsx
 #: src/interview/transcript.tsx
 msgid "Transcript"
@@ -18275,6 +18361,10 @@ msgstr "Qui le joint dans {name}"
 #: src/apps/draft-changes.tsx
 msgid "Who sees which rows"
 msgstr "Qui voit quelles lignes"
+
+#: src/frame/part-words.tsx
+msgid "Who spoke when"
+msgstr "Qui a parlé quand"
 
 #: src/inbox/interviews-item.tsx
 msgid "Who talked"

@@ -783,6 +783,10 @@ msgstr "{idle, plural, one {# andere workflow liep in deze tijd niet.} other {# 
 msgid "{inDays, plural, one {Your next report is ready tomorrow} other {Your next report is ready in # days}}"
 msgstr "{inDays, plural, one {Je volgende rapport is morgen klaar} other {Je volgende rapport is over # dagen klaar}}"
 
+#: src/frame/part-words.tsx
+msgid "{index} of {count}"
+msgstr "{index} van {count}"
+
 #: src/activity/audit-event.tsx
 msgid "{input} in, {output} out"
 msgstr "{input} in, {output} uit"
@@ -802,6 +806,10 @@ msgstr "{jump}, nieuwe berichten"
 #: src/activity/pending.tsx
 msgid "{kind} ({what})"
 msgstr "{kind} ({what})"
+
+#: src/frame/part-words.tsx
+msgid "{kind} at {time}"
+msgstr "{kind} op {time}"
 
 #: src/workflows/binding-approvals.tsx
 msgid "{kind}: {contractId}"
@@ -901,6 +909,10 @@ msgstr "{memories, plural, one {# herinnering geredigeerd of verwijderd} other {
 #: src/workflows/saved-ago.tsx
 msgid "{minutes, plural, one {Saved # min ago} other {Saved # min ago}}"
 msgstr "{minutes, plural, one {# min geleden opgeslagen} other {# min geleden opgeslagen}}"
+
+#: src/frame/part-words.tsx
+msgid "{minutes} min"
+msgstr "{minutes} min"
 
 #: src/apps/app-history.tsx
 msgid "{more, plural, one {# more file} other {# more files}}"
@@ -1169,6 +1181,10 @@ msgstr "{outCount, plural, one {# verstuurd, als lijst} other {# verstuurd, als 
 #: src/onboarding/interviews-progress.tsx
 msgid "{outCount, plural, one {The link that is out, as a list} other {The # links that are out, as a list}}"
 msgstr "{outCount, plural, one {De beschikbare link, als lijst} other {De # beschikbare links, als lijst}}"
+
+#: src/frame/part-words.tsx
+msgid "{page} of {total}"
+msgstr "{page} van {total}"
 
 #: src/brain/brain.ts
 msgid "{people, plural, one {{sector}, # person.} other {{sector}, # people.}}"
@@ -1541,6 +1557,10 @@ msgstr "{title} op {connection}"
 msgid "{title} removed from the dashboard."
 msgstr "{title} is van het dashboard verwijderd."
 
+#: src/frame/part-words.tsx
+msgid "{total, plural, one {{count} of # interview} other {{count} of # interviews}}"
+msgstr "{total, plural, one {{count} van # interview} other {{count} van # interviews}}"
+
 #: src/connections/integration-facts.ts
 msgid "{total, plural, one {{count} of its # tool allowed} other {{count} of its # tools allowed}}"
 msgstr "{total, plural, one {{count} van # tool toegestaan} other {{count} van # tools toegestaan}}"
@@ -1617,6 +1637,10 @@ msgstr "{waiting, plural, one {Het gebruikt # nieuw soort toegang. Een beheerder
 msgid "{what}, as {binding} in its code: {actions}"
 msgstr "{what}, als {binding} in de code: {actions}"
 
+#: src/frame/part-words.tsx
+msgid "{who} at {time}"
+msgstr "{who} op {time}"
+
 #: src/dashboard/pile-cards.tsx
 msgid "{who} can't be granted later: it has to ask again."
 msgstr "{who} kan later niet meer worden toegekend: er moet opnieuw om worden gevraagd."
@@ -1629,6 +1653,10 @@ msgstr "{who} heeft hiermee ingestemd voor het verbinden"
 #: src/interview/voice-bar.tsx
 msgid "{who} is talking"
 msgstr "{who} praat"
+
+#: src/frame/part-words.tsx
+msgid "{who}, {from} to {to}"
+msgstr "{who}, {from} tot {to}"
 
 #: src/apps/app-data.tsx
 msgid "{who}, {when}"
@@ -4201,6 +4229,10 @@ msgstr "Wijzigt wie de records van {table} kan zien en wijzigen."
 msgid "Changing the App's definition"
 msgstr "Wijzigt de definitie van de App"
 
+#: src/frame/part-words.tsx
+msgid "Chapters"
+msgstr "Hoofdstukken"
+
 #: src/projects/project-dialog.tsx
 msgid "Chart"
 msgstr "Grafiek"
@@ -4971,6 +5003,10 @@ msgstr "Doorgaan met {signIn}"
 msgid "Contract"
 msgstr "Contract"
 
+#: src/frame/part-words.tsx
+msgid "Conversation timeline"
+msgstr "Tijdlijn van het gesprek"
+
 #. Folder of the sources that are conversations: the vision talk and the interviews by voice or chat
 #: src/brain/brain.ts
 msgid "Conversations"
@@ -5161,6 +5197,10 @@ msgstr "Kon niet worden afgerond"
 #: src/frame/part-words.tsx
 msgid "Could not invite"
 msgstr "Kon niet uitnodigen"
+
+#: src/frame/part-words.tsx
+msgid "Could not play this file"
+msgstr "Dit bestand kon niet worden afgespeeld"
 
 #: src/apps/app-reset.tsx
 #: src/apps/reset-test-data.tsx
@@ -7153,6 +7193,10 @@ msgstr "Livegang"
 msgid "Go on without sound"
 msgstr "Verder zonder geluid"
 
+#: src/frame/part-words.tsx
+msgid "Go to {time}, {who}"
+msgstr "Ga naar {time}, {who}"
+
 #: src/frame/connect-ai-provider.tsx
 msgid "Go to AI providers"
 msgstr "Naar AI-aanbieders"
@@ -7659,6 +7703,11 @@ msgstr "Hoog"
 msgid "Highest"
 msgstr "Hoogste"
 
+#: src/frame/part-words.tsx
+msgctxt "a marked moment"
+msgid "Highlight"
+msgstr "Markering"
+
 #: src/workflows/business-process.tsx
 msgctxt "business process"
 msgid "Hire-to-Retire"
@@ -8062,6 +8111,15 @@ msgstr "Integriteit"
 #: src/settings/audit-chain.tsx
 msgid "Integrity and archive"
 msgstr "Integriteit en archief"
+
+#: src/frame/part-words.tsx
+msgctxt "where a quote comes from"
+msgid "Interview"
+msgstr "Interview"
+
+#: src/frame/part-words.tsx
+msgid "Interview sound"
+msgstr "Geluid van het interview"
 
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts
@@ -8719,6 +8777,10 @@ msgstr "Soort uitspraak"
 msgid "Kinds of field"
 msgstr "Soorten velden"
 
+#: src/frame/part-words.tsx
+msgid "Kinds of highlight"
+msgstr "Soorten markeringen"
+
 #: src/knowledge/frame.tsx
 #: src/knowledge/nav.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
@@ -9106,6 +9168,10 @@ msgstr "Het gesprek laden"
 #: src/frame/part-words.tsx
 msgid "Loading the page"
 msgstr "Pagina laden"
+
+#: src/frame/part-words.tsx
+msgid "Loading the sound"
+msgstr "Geluid wordt geladen"
 
 #: src/frame/part-words.tsx
 msgid "Loading the value"
@@ -9873,12 +9939,14 @@ msgid "Newer"
 msgstr "Nieuwer"
 
 #: src/chat/asked-questions.tsx
+#: src/frame/part-words.tsx
 #: src/settings/event-sources.tsx
 #: src/tour/tour-layer.tsx
 msgid "Next"
 msgstr "Volgende"
 
 #: src/brain/brain-transcript.tsx
+#: src/frame/part-words.tsx
 msgid "Next match"
 msgstr "Volgende treffer"
 
@@ -10079,6 +10147,7 @@ msgid "No longer where it was"
 msgstr "Staat niet meer waar het stond"
 
 #: src/brain/brain-transcript.tsx
+#: src/frame/part-words.tsx
 msgid "No matches"
 msgstr "Geen treffers"
 
@@ -11655,6 +11724,11 @@ msgid "Packages of {name} were revoked as malware"
 msgstr "Pakketten van {name} zijn ingetrokken als malware"
 
 #: src/frame/part-words.tsx
+msgctxt "one page of a form"
+msgid "Page"
+msgstr "Pagina"
+
+#: src/frame/part-words.tsx
 msgid "Page {current} of {count}"
 msgstr "Pagina {current} van {count}"
 
@@ -11713,6 +11787,10 @@ msgstr "Een deel van wat wordt verstuurd, is hierboven ingekort. Toon alles, of 
 #: src/inbox/item-detail.tsx
 msgid "Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm."
 msgstr "Een deel van wat er verstuurd wordt is ingekort. Open Details en toon alles, of precies wat er verstuurd wordt, om te bevestigen."
+
+#: src/frame/part-words.tsx
+msgid "passage {number}"
+msgstr "passage {number}"
 
 #: src/interview/words.ts
 msgid "Passing it on"
@@ -12080,6 +12158,7 @@ msgid "Previous hash"
 msgstr "Vorige hash"
 
 #: src/brain/brain-transcript.tsx
+#: src/frame/part-words.tsx
 msgid "Previous match"
 msgstr "Vorige treffer"
 
@@ -13834,6 +13913,7 @@ msgid "Search the Brain"
 msgstr "Het brein doorzoeken"
 
 #: src/brain/brain-transcript.tsx
+#: src/frame/part-words.tsx
 msgid "Search the transcript"
 msgstr "Zoek in het transcript"
 
@@ -13959,6 +14039,7 @@ msgid "Self-approved: nobody else could approve it"
 msgstr "Zelf goedgekeurd: niemand anders kon het goedkeuren"
 
 #: src/chat/asked-questions.tsx
+#: src/frame/part-words.tsx
 #: src/inbox/item-detail.tsx
 #: src/interview/composer.tsx
 msgid "Send"
@@ -14736,6 +14817,10 @@ msgstr "Bronnen die je mag lezen"
 #: src/projects/project-dialog.tsx
 msgid "Sparkles"
 msgstr "Sterretjes"
+
+#: src/frame/part-words.tsx
+msgid "Speakers"
+msgstr "Sprekers"
 
 #: src/settings/ai-spend.tsx
 msgid "Spend"
@@ -16805,6 +16890,7 @@ msgid "Track the month-end close"
 msgstr "De maandafsluiting bijhouden"
 
 #: src/brain/brain-markdown.ts
+#: src/frame/part-words.tsx
 #: src/interview/page.tsx
 #: src/interview/transcript.tsx
 msgid "Transcript"
@@ -18275,6 +18361,10 @@ msgstr "Wie hem bereikt in {name}"
 #: src/apps/draft-changes.tsx
 msgid "Who sees which rows"
 msgstr "Wie welke rijen ziet"
+
+#: src/frame/part-words.tsx
+msgid "Who spoke when"
+msgstr "Wie wanneer sprak"
 
 #: src/inbox/interviews-item.tsx
 msgid "Who talked"
