@@ -70,24 +70,79 @@ const picks = (selector: string, page: HTMLElement): boolean => {
   // State the snapshot never shows (hover, focus) is dropped with its selector.
   const plain = selector.replaceAll(/::?[a-z-]+(?:\([^)]*\))?/gu, "");
   try {
-    return plain.trim() === "" || page.querySelector(plain) !== null;
+    return (
+      plain.trim() === "" ||
+      page.matches(plain) ||
+      page.querySelector(plain) !== null
+    );
   } catch {
     return true;
   }
 };
 
+/** The typeface families the page's text is set in. */
+const familiesOf = (page: HTMLElement): Set<string> => {
+  const families = new Set<string>();
+  for (const element of [page, ...page.querySelectorAll("*")]) {
+    for (const family of getComputedStyle(element).fontFamily.split(",")) {
+      families.add(family.trim().replaceAll(/^["']|["']$/gu, ""));
+    }
+  }
+  return families;
+};
+
+/** One `U+a-b` or `U+a` range of a font's unicode-range. */
+const unicodeSpan = /U\+(?<from>[0-9a-f?]+)(?:-(?<to>[0-9a-f]+))?/giu;
+
+/** Whether a font's unicode-range covers any character of the page's text. */
+const coversText = (range: string, text: ReadonlySet<number>): boolean => {
+  if (range === "") {
+    return true;
+  }
+  for (const { groups } of range.matchAll(unicodeSpan)) {
+    const from = Number.parseInt(groups?.from?.replaceAll("?", "0") ?? "0", 16);
+    const to = Number.parseInt(
+      groups?.to ?? groups?.from?.replaceAll("?", "f") ?? "0",
+      16
+    );
+    for (const point of text) {
+      if (point >= from && point <= to) {
+        return true;
+      }
+    }
+  }
+  return false;
+};
+
+/** What the page needs to draw its text: the families it uses and the characters it holds. */
+interface Need {
+  families: ReadonlySet<string>;
+  text: ReadonlySet<number>;
+}
+
 /**
  * A style rule as the page needs it: kept when it picks something in the
- * page, or styles the document; an at-rule with only its rules that do;
- * fonts, animations and custom properties whole. Empty when none is needed.
+ * page, or styles the document; an at-rule with only its rules that do; a
+ * font only in a family the page uses, for characters its text holds;
+ * animations and custom properties whole. Empty when none is needed.
  */
-const usedRule = (rule: CSSRule, page: HTMLElement): string => {
+const usedRule = (rule: CSSRule, page: HTMLElement, need: Need): string => {
+  if (rule instanceof CSSFontFaceRule) {
+    const family = rule.style
+      .getPropertyValue("font-family")
+      .trim()
+      .replaceAll(/^["']|["']$/gu, "");
+    const range = rule.style.getPropertyValue("unicode-range");
+    return need.families.has(family) && coversText(range, need.text)
+      ? rule.cssText
+      : "";
+  }
   if (rule instanceof CSSStyleRule) {
     return picks(rule.selectorText, page) ? rule.cssText : "";
   }
   if (rule instanceof CSSGroupingRule) {
     const inner = [...rule.cssRules]
-      .map((each) => usedRule(each, page))
+      .map((each) => usedRule(each, page, need))
       .filter((css) => css !== "");
     if (inner.length === 0) {
       return "";
@@ -103,10 +158,16 @@ const usedRule = (rule: CSSRule, page: HTMLElement): string => {
  * written in and its fonts carried as data, so it opens the same offline.
  */
 const snapshot = async (page: HTMLElement, title: string): Promise<string> => {
+  // The characters the page shows, by code point: the fonts' ranges are in them.
+  const shown = new Set<number>();
+  for (const character of page.textContent ?? "") {
+    shown.add(character.codePointAt(0) ?? 0);
+  }
+  const need: Need = { families: familiesOf(page), text: shown };
   const sheets = [...document.styleSheets].flatMap((sheet) => {
     try {
       return [...sheet.cssRules].flatMap((rule) => {
-        const css = usedRule(rule, page);
+        const css = usedRule(rule, page, need);
         return css === "" ? [] : [{ css, base: sheet.href ?? location.href }];
       });
     } catch {
