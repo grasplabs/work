@@ -1,5 +1,4 @@
 import { agentErrors } from "@grasp-os/shared/agent";
-import { agentDocumentsMax } from "@grasp-os/shared/agents";
 import type { AgentDocument } from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -7,12 +6,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import {
-  changeableAgent,
-  firstAgentId,
-  readAgent,
-  readableAgent,
-} from "./agents.ts";
+import { changeableAgent, firstAgentId, readableAgent } from "./agents.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { readChatFile } from "./chat-files.ts";
 import { agentDocuments, agents } from "./db/core/schema.ts";
@@ -43,8 +37,12 @@ import type { LocalExtractorEnv } from "./files/extract.ts";
 // The ways it can fail, which the tests start from: someone who isn't
 // the company's own admin adding or removing one; a document read in a
 // chat another agent answers; a document added to an agent that was
-// deleted meanwhile, or past the most an agent keeps; a deleted agent's
-// documents left behind; a change left unaudited.
+// deleted meanwhile; a deleted agent's documents left behind; a change
+// left unaudited.
+//
+// An agent keeps as many documents as it is given. What bounds them is
+// each file's size, as a chat's file (chat-files.ts), and how many a turn
+// names (agent.ts): the agent's code lists the rest.
 
 /** A document's ID, as core makes them. */
 const documentIdSchema = z.uuid();
@@ -130,6 +128,22 @@ export const readAgentDocument = async (
   return row === undefined ? undefined : { ...documentOf(row), text: row.text };
 };
 
+/** The agent's document called `name`, without its text, if it has one. */
+const documentNamed = async (
+  env: Pick<Env, "DB">,
+  agentId: string,
+  name: string
+): Promise<AgentDocument | undefined> => {
+  const row = await drizzle(env.DB)
+    .select(card)
+    .from(agentDocuments)
+    .where(
+      and(eq(agentDocuments.agentId, agentId), eq(agentDocuments.name, name))
+    )
+    .get();
+  return row === undefined ? undefined : documentOf(row);
+};
+
 /** A chat file's refusals, as they are said of a document. */
 const asDocument = {
   "agent.file_unsupported": "agent.document_unsupported",
@@ -170,23 +184,21 @@ const sameOrNamed = async (
   if (kept?.text !== text) {
     throw agentErrors.create("agent.document_named");
   }
-  // Its card alone, as an add answers.
-  const { id, name, type, bytes, addedAt } = named;
-  return { id, name, type, bytes, addedAt };
+  return named;
 };
 
 /**
  * Gives the agent `agentId` the file `file` as a document, read as a
  * chat's file is. Throws `agent.unknown`, why a file can't be read in a
  * document's words (`agent.document_unsupported`, `_too_large`, `_busy`),
- * `agent.document_named` when the agent has another file by that name,
- * and `agent.too_many_documents` past {@link agentDocumentsMax}. The same
- * file added again is answered with the document it already is.
+ * and `agent.document_named` when the agent has another file by that
+ * name. The same file added again is answered with the document it
+ * already is.
  *
  * The insert itself holds what was checked before the file was read: the
- * agent wasn't deleted, is still whose it was (never one erased with its
- * owner meanwhile, whose row is gone), and has room. Reading a file takes a while, and
- * either may have changed since.
+ * agent wasn't deleted and is still whose it was (never one erased with
+ * its owner meanwhile, whose row is gone). Reading a file takes a while,
+ * and either may have changed since.
  */
 export const addAgentDocument = async (
   env: Env & LocalExtractorEnv,
@@ -196,13 +208,9 @@ export const addAgentDocument = async (
 ): Promise<AgentDocument> => {
   const { id, ownerId } = await changeableAgent(env, identity, agentId);
   const read = await readAsDocument(env, file);
-  const before = await documentsOf(env, id);
-  const named = before.find(({ name }) => name === read.name);
+  const named = await documentNamed(env, id, read.name);
   if (named !== undefined) {
     return await sameOrNamed(env, id, named, read.text);
-  }
-  if (before.length >= agentDocumentsMax) {
-    throw agentErrors.create("agent.too_many_documents");
   }
   const document = {
     id: crypto.randomUUID(),
@@ -212,8 +220,7 @@ export const addAgentDocument = async (
     addedAt: new Date(),
   };
   const db = drizzle(env.DB);
-  const holds = sql`(SELECT count(*) FROM ${agentDocuments} WHERE ${agentDocuments.agentId} = ${id}) < ${agentDocumentsMax}
-    AND NOT EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${id} AND ${agents.state} = 'deleted')
+  const holds = sql`NOT EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${id} AND ${agents.state} = 'deleted')
     AND (${id} = ${firstAgentId} OR EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${id} AND ${agents.ownerId} IS ${ownerId}))`;
   try {
     await auditedBatch(env, db, [
@@ -238,8 +245,7 @@ export const addAgentDocument = async (
     if (!String(error).includes("UNIQUE constraint failed")) {
       throw error;
     }
-    const after = await documentsOf(env, id);
-    const now = after.find(({ name }) => name === read.name);
+    const now = await documentNamed(env, id, read.name);
     if (now === undefined) {
       throw agentErrors.create("agent.document_named");
     }
@@ -247,18 +253,9 @@ export const addAgentDocument = async (
   }
   const kept = await readAgentDocument(env, id, document.id);
   if (kept === undefined) {
-    // The insert's condition failed: deleted, or full, since the checks.
-    if ((await readAgent(env, id)) === undefined) {
-      throw agentErrors.create("agent.unknown");
-    }
-    // Full with this very file, added at once by another call: the same
-    // answer as that call got.
-    const after = await documentsOf(env, id);
-    const now = after.find(({ name }) => name === read.name);
-    if (now !== undefined) {
-      return await sameOrNamed(env, id, now, read.text);
-    }
-    throw agentErrors.create("agent.too_many_documents");
+    // The insert's condition failed: deleted, or no longer whose it was,
+    // since the checks.
+    throw agentErrors.create("agent.unknown");
   }
   return documentOf({ ...document });
 };

@@ -110,9 +110,6 @@ export interface AgentSettings {
 /** Most agents of their own one person keeps. */
 export const ownAgentsMax = 10;
 
-/** Most documents one agent keeps. */
-export const agentDocumentsMax = 10;
-
 /**
  * A document an admin gave an agent to answer from: a file whose text
  * core read once and keeps, never the file itself. The agent reads it in
@@ -330,8 +327,8 @@ export interface AgentsApi {
   agentDocuments: (agentId: string) => Promise<AgentDocument[]>;
   /**
    * Gives an agent a document: a file of one of a chat file's types and
-   * sizes, up to {@link agentDocumentsMax} an agent. Resolves once its
-   * text is read, and is refused with why when it can't be.
+   * sizes. Resolves once its text is read, and is refused with why when
+   * it can't be.
    */
   addAgentDocument: (
     agentId: string,

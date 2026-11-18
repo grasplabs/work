@@ -1,4 +1,4 @@
-import { agentDocumentsMax, ownAgentsMax } from "./agents.ts";
+import { ownAgentsMax } from "./agents.ts";
 import {
   chatFileMaxBytes,
   chatFilesMax,
@@ -38,7 +38,6 @@ export const agentErrors = defineErrorFamily({
   "agent.model_unknown":
     "That isn't a model your organization has chosen. Pick one in Settings › Models.",
   // An agent's documents (core's agent-documents.ts).
-  "agent.too_many_documents": `An agent keeps at most ${agentDocumentsMax} documents. Remove one to add another.`,
   "agent.document_unsupported":
     "A document is a PDF, Word (.docx), Excel (.xlsx), Markdown, text, CSV or JSON file, with a name that ends in .pdf, .docx, .xlsx, .md, .txt, .csv or .json.",
   "agent.document_too_large": `A document is at most ${chatFileMaxBytes / 1024 / 1024} MB, and its text at most 1 MB.`,
