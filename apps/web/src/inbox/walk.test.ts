@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { orderOf, placeIn, skip, stepFrom, turn, untouched } from "./pile.ts";
-import type { Turned } from "./pile.ts";
+import { orderOf, placeIn, skip, stepFrom, turn, untouched } from "./walk.ts";
+import type { Turned } from "./walk.ts";
 
 // Going through the dashboard's pile (pile.ts): which card is on top, and
 // where a skipped one goes.

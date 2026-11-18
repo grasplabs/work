@@ -38,8 +38,8 @@ const styles = stylex.create({
   prompt: {
     margin: 0,
     color: grasp.ink,
-    fontSize: grasp.textMd,
-    lineHeight: grasp.textMdLine,
+    fontSize: grasp.chatText,
+    lineHeight: grasp.chatTextLine,
     overflowWrap: "anywhere",
   },
   choices: {

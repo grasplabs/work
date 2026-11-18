@@ -4,6 +4,7 @@ import type {
   Invitation,
   Member,
   RemovedPeoplePage,
+  RemovedPerson,
 } from "@grasp-os/shared/members";
 import { isMemberAdmin, roleSchema } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
@@ -11,9 +12,10 @@ import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
+import { formatDate } from "../format.ts";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,9 +25,10 @@ import {
   AlertDialogTitle,
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
-import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
+import { DataTable, DataTablePerson } from "../grasp/data-table/index.ts";
+import type { DataTableColumn } from "../grasp/data-table/index.ts";
 import {
   DropdownMenu,
   DropdownMenuItem,
@@ -47,17 +50,6 @@ import {
   InputGroupText,
 } from "../grasp/input-group/index.ts";
 import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemDetail,
-  ItemGroup,
-  ItemMedia,
-  ItemRevealButton,
-  ItemTitle,
-} from "../grasp/item/index.ts";
-import {
   Popover,
   PopoverContent,
   PopoverTitle,
@@ -71,13 +63,13 @@ import {
   SelectContent,
 } from "../grasp/select/index.ts";
 import { Text } from "../grasp/text/index.ts";
-import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
-import { RemovedRow, useRemovedPeople } from "../settings/erasures.tsx";
+import { RemovedActions, useRemovedPeople } from "../settings/erasures.tsx";
 import {
   copyEmail,
-  InvitationRow,
+  InvitationActions,
   InviteButton,
 } from "../settings/invitations.tsx";
 import { roleItems, roleLines } from "../settings/roles.ts";
@@ -104,9 +96,18 @@ import { useCore } from "../use-core.ts";
 
 const styles = stylex.create({
   page: { display: "flex", flexDirection: "column", gap: grasp.space5 },
-  // Narrower on a phone: Section card's actions never shrink, so Invite would run past its edge.
-  search: { width: { default: "14rem", [media.belowPhone]: "8rem" } },
+  // As wide as the header's own search, on a phone too: beside the Roles
+  // mark and Invite it still fits the card's line (its actions never shrink).
+  search: { width: grasp.frameSearch },
   notice: { padding: grasp.space4 },
+  // Older removed people, asked for under the ones shown.
+  older: {
+    display: "grid",
+    justifyItems: "start",
+    gap: grasp.space2,
+    paddingBlock: grasp.space2,
+    paddingInline: grasp.tableCellInline,
+  },
   rowEnd: { display: "flex", alignItems: "center", gap: grasp.space1 },
   // Your own row has no menu: its room is kept, so every role stands on one edge.
   menuRoom: { width: grasp.controlXs, flexShrink: 0 },
@@ -116,24 +117,17 @@ const styles = stylex.create({
     gap: grasp.space3,
     margin: 0,
     padding: 0,
-    maxWidth: "20rem",
+    maxWidth: grasp.controlColumn,
   },
   roleName: { margin: 0, fontWeight: grasp.weightMedium, color: grasp.ink },
   roleText: { margin: 0, color: grasp.muted },
-  // Removed people: the list's foot, under a quiet name.
-  removedLabel: {
-    margin: 0,
-    paddingBlock: grasp.space2,
-    paddingInline: grasp.tableCellInline,
-    borderTopStyle: "solid",
-    borderTopWidth: grasp.hairline,
-    borderTopColor: grasp.line,
-    fontSize: grasp.textXs,
-    lineHeight: grasp.textXsLine,
-    fontWeight: grasp.weightMedium,
-    color: grasp.muted,
-  },
 });
+
+/** The table's head: the column names muted on the card's own ground, a hairline under them. */
+const HEAD = "plain" as const;
+
+/** How many people a page of the table holds: the rest are a page further. */
+const pageSize = 20;
 
 /** What a change did, or why it failed. */
 interface Notice {
@@ -144,10 +138,13 @@ interface Notice {
 /** A member's role and the menu of what else may be done to them. */
 const MemberActions = ({
   member,
+  part,
   onNotice,
   onRemoved,
 }: {
   member: Member;
+  /** Which of the row's cells: the role chosen, or the menu of what else may be done. */
+  part: "role" | "menu";
   onNotice: (notice: Notice) => void;
   /** Once they are removed: their row, and what had the focus in it, is gone. */
   onRemoved: () => void;
@@ -224,118 +221,129 @@ const MemberActions = ({
   };
   return (
     <div {...stylex.props(styles.rowEnd)}>
-      <Select
-        disabled={busy}
-        items={roleItems()}
-        onValueChange={(role) => {
-          if (role === "admin") {
-            setAsking("promote");
-          } else if (roleSchema.safeParse(role).success && role !== null) {
-            void setRole(roleSchema.parse(role));
-          }
-        }}
-        value={member.role}
-      >
-        <SelectTrigger aria-label={t`Role of ${who}`} size="sm" variant="text">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent />
-      </Select>
-      <DropdownMenu>
-        {/* Off while a role change is sent and the list read again, as the
-            role is: nothing acts on a row that is about to change. */}
-        <DropdownMenuTrigger
-          disabled={busy}
-          icon={More}
-          aria-label={t`Actions for ${who}`}
-          size="xs"
-          variant="ghost"
-        />
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem
-            icon={Copy}
-            onSelect={() => {
-              void copyEmail(member.email, {
-                copied: t`Copied`,
-                failed: t`Copying didn't work`,
-              });
+      {part === "role" ? (
+        <>
+          <Select
+            disabled={busy}
+            items={roleItems()}
+            onValueChange={(role) => {
+              if (role === "admin") {
+                setAsking("promote");
+              } else if (roleSchema.safeParse(role).success && role !== null) {
+                void setRole(roleSchema.parse(role));
+              }
             }}
+            value={member.role}
           >
-            {t`Copy email`}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            action={signOutEverywhere}
-            failedLabel={t`Not signed out`}
-            icon={SignOut}
-            mirrorIcon
-          >
-            {t`Sign out everywhere`}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            variant="danger"
-            icon={Trash}
-            onSelect={() => {
-              setAsking("remove");
+            <SelectTrigger
+              aria-label={t`Role of ${who}`}
+              size="sm"
+              variant="text"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent />
+          </Select>
+          <AlertDialog
+            onOpenChange={(open) => {
+              if (!open) {
+                setAsking(undefined);
+              }
             }}
+            open={asking === "promote"}
           >
-            {t`Remove`}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <AlertDialog
-        onOpenChange={(open) => {
-          if (!open) {
-            setAsking(undefined);
-          }
-        }}
-        open={asking === "promote"}
-      >
-        <AlertDialogContent>
-          <AlertDialogTitle>{t`Make ${name} an admin?`}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {t`Admins can change anyone's role, end their sessions and remove them, other admins included.`}
-          </AlertDialogDescription>
-          <AlertDialogFooter>
-            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
-            <AlertDialogAction
-              action={async () => {
-                await setRole("admin");
-              }}
-              failedLabel={t`Not changed`}
-              variant="ink"
-            >
-              {t`Make admin`}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <AlertDialog
-        onOpenChange={(open) => {
-          if (!open) {
-            setAsking(undefined);
-          }
-        }}
-        open={asking === "remove"}
-      >
-        <AlertDialogContent>
-          <AlertDialogTitle>{t`Remove ${name}?`}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {t`They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again.`}
-          </AlertDialogDescription>
-          <AlertDialogFooter>
-            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
-            <AlertDialogAction
-              action={remove}
-              failedLabel={t`Not removed`}
-              variant="danger"
-              workingLabel={t`Removing`}
-            >
-              {t`Remove`}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            <AlertDialogContent>
+              <AlertDialogTitle>{t`Make ${name} an admin?`}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t`Admins can change anyone's role, end their sessions and remove them, other admins included.`}
+              </AlertDialogDescription>
+              <AlertDialogFooter>
+                <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+                <AlertDialogAction
+                  action={async () => {
+                    await setRole("admin");
+                  }}
+                  failedLabel={t`Not changed`}
+                  variant="ink"
+                >
+                  {t`Make admin`}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </>
+      ) : (
+        <>
+          <DropdownMenu>
+            {/* Off while a role change is sent and the list read again, as the
+              role is: nothing acts on a row that is about to change. */}
+            <DropdownMenuTrigger
+              disabled={busy}
+              icon={More}
+              aria-label={t`Actions for ${who}`}
+              size="xs"
+              variant="ghost"
+            />
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                icon={Copy}
+                onSelect={() => {
+                  void copyEmail(member.email, {
+                    copied: t`Copied`,
+                    failed: t`Copying didn't work`,
+                  });
+                }}
+              >
+                {t`Copy email`}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                action={signOutEverywhere}
+                failedLabel={t`Not signed out`}
+                icon={SignOut}
+                mirrorIcon
+              >
+                {t`Sign out everywhere`}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="danger"
+                icon={Trash}
+                onSelect={() => {
+                  setAsking("remove");
+                }}
+              >
+                {t`Remove`}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <AlertDialog
+            onOpenChange={(open) => {
+              if (!open) {
+                setAsking(undefined);
+              }
+            }}
+            open={asking === "remove"}
+          >
+            <AlertDialogContent>
+              <AlertDialogTitle>{t`Remove ${name}?`}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t`They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again.`}
+              </AlertDialogDescription>
+              <AlertDialogFooter>
+                <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+                <AlertDialogAction
+                  action={remove}
+                  failedLabel={t`Not removed`}
+                  variant="danger"
+                  workingLabel={t`Removing`}
+                >
+                  {t`Remove`}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </>
+      )}
     </div>
   );
 };
@@ -345,9 +353,12 @@ const RolesButton = () => {
   const { t, i18n: lingui } = useLingui();
   return (
     <Popover>
-      <PopoverTrigger icon={Info} size="sm" variant="ghost">
-        {t`Roles`}
-      </PopoverTrigger>
+      <PopoverTrigger
+        aria-label={t`Roles`}
+        icon={Info}
+        size="xs"
+        variant="ghost"
+      />
       {/* It only explains: focus stays on the button, so no ring frames the panel. */}
       <PopoverContent initialFocus="none">
         <PopoverTitle>{t`Roles`}</PopoverTitle>
@@ -366,99 +377,215 @@ const RolesButton = () => {
   );
 };
 
-/** Whether `person` is what the search names: in their name or email. */
-const matches = (
-  person: { name?: string; email: string },
-  search: string
-): boolean => {
-  const words = search.trim().toLocaleLowerCase();
-  return (
-    words === "" ||
-    (person.name ?? "").toLocaleLowerCase().includes(words) ||
-    person.email.toLocaleLowerCase().includes(words)
-  );
-};
-
 /**
  * One's own role, which one doesn't change here (core allows it while
  * another admin exists, but nobody should lose this page by accident): on
  * the same edge as the others', with the room their menu takes.
  */
-const OwnRole = ({ role }: { role: Role }) => {
-  const { t } = useLingui();
-  return (
-    <div {...stylex.props(styles.rowEnd)}>
-      <Select disabled items={roleItems()} value={role}>
-        <SelectTrigger aria-label={t`Your role`} size="sm" variant="text">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent />
-      </Select>
-      <span {...stylex.props(styles.menuRoom)} />
-    </div>
-  );
+const OwnRole = ({ role, label }: { role: Role; label: string }) => (
+  <Select disabled items={roleItems()} value={role}>
+    <SelectTrigger aria-label={label} size="sm" variant="text">
+      <SelectValue />
+    </SelectTrigger>
+    <SelectContent />
+  </Select>
+);
+
+/** One row of the people's table: a member, an invitation or someone removed, with its date. */
+interface PersonRow {
+  key: string;
+  kind: "member" | "invited" | "removed";
+  name: string;
+  email: string;
+  /** When they joined, were invited or were removed. */
+  at: string;
+  invitedBy?: string;
+  member?: Member;
+  invitation?: Invitation;
+  removed?: RemovedPerson;
+}
+
+/** The table's words, in the page's language. */
+interface PeopleWords {
+  name: string;
+  since: string;
+  role: string;
+  invited: string;
+  yourRole: string;
+  roleOf: (name: string) => string;
+  /** On a phone, in place of an invited person's second line. */
+  invitedShort: (date: string) => string;
+  invitedOn: (date: string, by: string) => string;
+  removedOn: (date: string) => string;
+}
+
+/** The role a row's person has or would join as, in words: for search and sorting. */
+const roleOf = (row: PersonRow): string => {
+  const role = row.member?.role ?? row.invitation?.role;
+  return role === undefined ? "" : roleLabel(role);
 };
 
-/** One member: their face, their name (a quiet "You" on one's own), their email, their role and their menu. */
-const MemberRow = ({
-  member,
+/** The people's columns: who, since when, and their role with what can be done. */
+const peopleColumns = ({
+  words,
   me,
+  narrow,
   onNotice,
-  onRemoved,
 }: {
-  member: Member;
-  me: boolean;
+  words: PeopleWords;
+  me: string;
+  /** Below the phone's width, Since steps aside so Name and Role fit. */
+  narrow: boolean;
   onNotice: (notice: Notice) => void;
-  onRemoved: () => void;
-}) => {
-  const { t } = useLingui();
-  const { name } = member;
-  return (
-    <Item size="xs">
-      <ItemMedia align="center">
-        <Avatar decorative name={member.name} size="xs">
-          <AvatarFallback />
-        </Avatar>
-      </ItemMedia>
-      <ItemContent>
-        <ItemTitle>
-          {member.name}
-          {me ? <ItemDetail>{t`You`}</ItemDetail> : null}
-        </ItemTitle>
-        <ItemDescription>
-          {member.email}
-          <ItemRevealButton
-            aria-label={t`Copy email of ${name}`}
-            icon={Copy}
-            onClick={() => {
-              void copyEmail(member.email, {
-                copied: t`Copied`,
-                failed: t`Copying didn't work`,
-              });
-            }}
+}): DataTableColumn<PersonRow>[] => {
+  const columns: DataTableColumn<PersonRow>[] = [
+    {
+      key: "name",
+      header: words.name,
+      value: (row) => `${row.name} ${row.email}`,
+      cell: (row) => {
+        const date = formatDate(row.at);
+        // On a phone Since steps aside: an invited or removed person's state stands under the name.
+        if (narrow && row.kind === "invited") {
+          return (
+            <DataTablePerson
+              detail={words.invitedShort(date)}
+              name={row.name}
+            />
+          );
+        }
+        if (narrow && row.kind === "removed") {
+          return (
+            <DataTablePerson detail={words.removedOn(date)} name={row.name} />
+          );
+        }
+        return (
+          <DataTablePerson
+            name={row.name}
+            {...(row.kind === "invited" || row.email === ""
+              ? {}
+              : { detail: row.email })}
           />
-        </ItemDescription>
-      </ItemContent>
-      <ItemActions>
-        {me ? (
-          <OwnRole role={member.role} />
+        );
+      },
+    },
+    {
+      key: "since",
+      header: words.since,
+      value: (row) => row.at,
+      cell: (row) => {
+        const date = formatDate(row.at);
+        if (row.kind === "invited") {
+          return (
+            <span {...stylex.props(styles.rowEnd)}>
+              <Badge size="sm" tone="info">
+                {words.invited}
+              </Badge>
+              {words.invitedOn(date, row.invitedBy ?? "")}
+            </span>
+          );
+        }
+        if (row.kind === "removed") {
+          return (
+            <Text element="span" size="sm" tone="muted">
+              {words.removedOn(date)}
+            </Text>
+          );
+        }
+        // Joined is what Since means: a member's cell is the date alone.
+        return date;
+      },
+    },
+    {
+      key: "role",
+      header: words.role,
+      align: "end",
+      control: true,
+      value: (row) => roleOf(row),
+      cell: (row) => {
+        if (row.invitation !== undefined) {
+          // What they join as, which nobody changes here: as one's own role reads.
+          return (
+            <OwnRole
+              label={words.roleOf(row.name)}
+              role={row.invitation.role}
+            />
+          );
+        }
+        if (row.member === undefined) {
+          return null;
+        }
+        return row.member.userId === me ? (
+          <OwnRole label={words.yourRole} role={row.member.role} />
         ) : (
           <MemberActions
-            member={member}
+            member={row.member}
             onNotice={onNotice}
-            onRemoved={onRemoved}
+            onRemoved={() => {
+              // The table reads again, without their row.
+            }}
+            part="role"
           />
-        )}
-      </ItemActions>
-    </Item>
-  );
+        );
+      },
+    },
+    {
+      key: "actions",
+      header: "",
+      align: "end",
+      control: true,
+      value: () => "",
+      cell: (row) => {
+        if (row.invitation !== undefined) {
+          return <InvitationActions invitation={row.invitation} />;
+        }
+        if (row.removed !== undefined) {
+          return <RemovedActions person={row.removed} />;
+        }
+        if (row.member === undefined || row.member.userId === me) {
+          return null;
+        }
+        return (
+          <MemberActions
+            member={row.member}
+            onNotice={onNotice}
+            onRemoved={() => {
+              // The table reads again, without their row.
+            }}
+            part="menu"
+          />
+        );
+      },
+    },
+  ];
+  return narrow ? columns.filter((column) => column.key !== "since") : columns;
 };
 
+/** Whether the window is narrower than a phone's: the library's own breakpoint (media.belowPhone). */
+const belowPhone = "(width < 40rem)";
+const onWidth = (changed: () => void): (() => void) => {
+  const query = matchMedia(belowPhone);
+  query.addEventListener("change", changed);
+  return () => {
+    query.removeEventListener("change", changed);
+  };
+};
+const useNarrow = (): boolean =>
+  useSyncExternalStore(
+    onWidth,
+    () => matchMedia(belowPhone).matches,
+    () => false
+  );
+
 /**
- * The members, the invitations not yet taken up and, at the foot, the
- * people removed, in one list found by name or email.
+ * The people as one table, the library's Members pattern as Ruben chose it
+ * (with headers): Name with the face and email, Since with the date each
+ * joined, was invited (and by whom) or was removed, and Role with what can
+ * be done; the count, the search and Invite on the head's one line; paged
+ * twenty at a time, the search over everyone. Invited and removed people
+ * are states of a row.
  */
-const MembersList = ({
+const PeopleTable = ({
   members,
   invitations,
   removed,
@@ -472,20 +599,42 @@ const MembersList = ({
   const { t } = useLingui();
   const [notice, setNotice] = useState<Notice>({});
   const [search, setSearch] = useState("");
-  const searchField = useRef<HTMLInputElement>(null);
   const gone = useRemovedPeople(removed);
+  const narrow = useNarrow();
+  // What the head counts: the members, and apart from them who is invited.
   const people = members.length;
-  const shown = members.filter((member) => matches(member, search));
-  const invited = invitations.filter((invitation) =>
-    matches(invitation, search)
-  );
-  const left = gone.people.filter((person) =>
-    matches({ name: person.name, email: person.email ?? "" }, search)
-  );
-  const nobody =
-    shown.length === 0 && invited.length === 0 && left.length === 0;
+  const invited = invitations.length;
+  const rows: PersonRow[] = [
+    ...members.map((member) => ({
+      key: member.userId,
+      kind: "member" as const,
+      name: member.name,
+      email: member.email,
+      at: member.joinedAt,
+      member,
+    })),
+    ...invitations.map((invitation) => ({
+      key: invitation.id,
+      kind: "invited" as const,
+      name: invitation.email,
+      email: invitation.email,
+      at: invitation.invitedAt,
+      invitedBy: invitation.invitedBy,
+      invitation,
+    })),
+    ...gone.people.map((person) => ({
+      key: person.userId,
+      kind: "removed" as const,
+      name: person.name,
+      email: person.email ?? "",
+      at: person.removedAt,
+      removed: person,
+    })),
+  ];
   return (
     <SectionCard
+      variant="grouped"
+      density="compact"
       actions={
         <>
           <RolesButton />
@@ -495,7 +644,6 @@ const MembersList = ({
               aria-label={t`Search members`}
               onValueChange={setSearch}
               placeholder={t`Search members`}
-              ref={searchField}
               type="search"
               value={search}
             />
@@ -503,8 +651,6 @@ const MembersList = ({
           <InviteButton />
         </>
       }
-      aside={<Badge size="sm">{people}</Badge>}
-      density="compact"
       flush
       footer={
         gone.more ? (
@@ -525,7 +671,11 @@ const MembersList = ({
           </>
         ) : undefined
       }
-      title={t`Members`}
+      title={
+        invited === 0
+          ? plural(people, { one: "# person", other: "# people" })
+          : t`${plural(people, { one: "# person", other: "# people" })} · ${plural(invited, { one: "# invited", other: "# invited" })}`
+      }
     >
       {notice.failure === undefined && notice.done === undefined ? null : (
         <div {...stylex.props(styles.notice)}>
@@ -536,39 +686,34 @@ const MembersList = ({
           )}
         </div>
       )}
-      {nobody ? (
-        <div {...stylex.props(styles.notice)}>
-          <Text tone="muted">{t`Nobody matches.`}</Text>
-        </div>
-      ) : (
-        <ItemGroup aria-label={t`Members`} separated>
-          {shown.map((member) => (
-            <MemberRow
-              key={member.userId}
-              me={member.userId === me}
-              member={member}
-              onNotice={setNotice}
-              onRemoved={() => {
-                searchField.current?.focus();
-              }}
-            />
-          ))}
-          {invited.map((invitation) => (
-            <InvitationRow invitation={invitation} key={invitation.id} />
-          ))}
-        </ItemGroup>
-      )}
-      {/* Removed people: the list's foot, under a quiet name, a step back. */}
-      {left.length === 0 ? null : (
-        <>
-          <p {...stylex.props(styles.removedLabel)}>{t`Removed`}</p>
-          <ItemGroup aria-label={t`Removed`} separated>
-            {left.map((person) => (
-              <RemovedRow key={person.userId} person={person} />
-            ))}
-          </ItemGroup>
-        </>
-      )}
+      {/* A column's being hidden is read as the table starts: it starts again when the width crosses the phone's. */}
+      <DataTable
+        appearance={{ head: HEAD }}
+        key={narrow ? "narrow" : "wide"}
+        columns={peopleColumns({
+          words: {
+            name: t`Name`,
+            since: t`Since`,
+            role: t`Role`,
+            invited: t`Invited`,
+            yourRole: t`Your role`,
+            roleOf: (name) => t`Role of ${name}`,
+            invitedShort: (date) => t`Invited ${date}`,
+            invitedOn: (date, by) => t`${date} by ${by}`,
+            removedOn: (date) => t`Removed ${date}`,
+          },
+          me,
+          narrow,
+          onNotice: setNotice,
+        })}
+        label={t`Members`}
+        onQueryChange={setSearch}
+        pageSize={pageSize}
+        query={search}
+        rowKey={(row) => row.key}
+        rows={rows}
+        unit={{ one: t`person`, other: t`people` }}
+      />
     </SectionCard>
   );
 };
@@ -585,14 +730,14 @@ const MembersPage = () => {
   return (
     <div {...stylex.props(styles.page)}>
       {page.state === "ready" ? (
-        <MembersList
+        <PeopleTable
           invitations={page.data.invitations}
           me={identity.userId}
           members={page.data.members}
           removed={page.data.removed}
         />
       ) : (
-        <SectionCard density="compact" title={t`Members`}>
+        <SectionCard variant="grouped" density="compact" title={t`Members`}>
           <SectionNotLoaded page={page} />
         </SectionCard>
       )}

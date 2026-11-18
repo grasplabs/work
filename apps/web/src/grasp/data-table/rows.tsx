@@ -6,6 +6,7 @@ import * as stylex from "@stylexjs/stylex";
 import type { RowData } from "@tanstack/react-table";
 import type { ReactNode } from "react";
 
+import { Badge } from "../badge";
 import { Button } from "../button";
 import {
   DropdownMenu,
@@ -13,6 +14,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "../dropdown-menu";
+import { visuallyHidden } from "../hidden/hidden";
 import { ChevronDown, ChevronRight, More } from "../icons";
 import { Skeleton } from "../skeleton";
 import { TableCell, TableRow } from "../table";
@@ -62,21 +64,24 @@ interface GroupRowProps<Row extends RowData> {
   row: TableRowOf<Row>;
   groupBy: string;
   words: DataTableWords;
+  /** The group asks for attention: its count takes the tone, and it is said. */
+  tone?: "attention";
 }
 
-/** A group's heading: its toggle, the value its rows share, and how many they are. */
+/** A group's heading: its toggle, the value its rows share as a heading, and how many they are. */
 export const GroupRow = <Row extends RowData>({
   model,
   row,
   groupBy,
   words,
+  tone,
 }: GroupRowProps<Row>) => {
   const value = String(row.getGroupingValue(groupBy));
   const header = model.metaOf(groupBy)?.header ?? groupBy;
   return (
     <TableRow>
-      <TableCell colSpan={model.span} lead>
-        <span {...stylex.props(styles.group)}>
+      <TableCell colSpan={model.span} lead sticky>
+        <span data-slot="data-table-group" {...stylex.props(styles.group)}>
           <Toggle
             row={row}
             open={model.isOpen(row.id)}
@@ -84,9 +89,16 @@ export const GroupRow = <Row extends RowData>({
             words={words}
           />
           <span>{value}</span>
-          <span {...stylex.props(styles.groupCount)}>
-            {row.getLeafRows().length}
-          </span>
+          <Badge tone={tone ?? "neutral"} size="sm">
+            <span {...stylex.props(styles.groupCount)}>
+              {row.getLeafRows().length}
+            </span>
+          </Badge>
+          {tone === "attention" && (
+            <span
+              {...stylex.props(visuallyHidden)}
+            >{`, ${words.groupAttention}`}</span>
+          )}
         </span>
       </TableCell>
     </TableRow>
@@ -196,9 +208,11 @@ export const DataRow = <Row extends RowData>({
             : meta.cell(row.original);
         const lead = column.id === model.flags.lead;
         // The lead cell steps in for a deeper row, and holds a toggle in a table whose rows open.
+        // A group's rows stand on the columns' own lines: the group's toggle is in its heading.
         const opener =
           lead &&
-          ((model.flags.expanding && !model.flags.grouping) || row.depth > 0);
+          !model.flags.grouping &&
+          (model.flags.expanding || row.depth > 0);
         // A control in the cell stands in a box one line tall, as the row's menu does: the row keeps its height.
         const shown =
           meta.control === true ? (
@@ -215,6 +229,7 @@ export const DataRow = <Row extends RowData>({
             pin={model.pinOf(column.id)}
             clip={model.sized}
             title={String(meta.value(row.original))}
+            hideBelow={model.hideOf(column.id)}
           >
             {opener ? (
               <Lead
@@ -279,6 +294,7 @@ export const Placeholders = <Row extends RowData>({
           key={column.id}
           pin={model.pinOf(column.id)}
           align={model.metaOf(column.id)?.align}
+          hideBelow={model.hideOf(column.id)}
         >
           <span
             {...stylex.props(at === 0 ? styles.waitingLead : styles.waiting)}

@@ -22,6 +22,7 @@ import { stopEscape } from "./escape";
 import type { ComposerModelMaker, ComposerModelOption } from "./model";
 import { LitEdge } from "./reasoning";
 import type { ComposerReasoningOption } from "./reasoning";
+import { rowMarker } from "./row.stylex";
 import { tabOutTarget } from "./tab-out";
 import { useComposerWords } from "./words";
 
@@ -73,6 +74,13 @@ export interface ComposerModelEffortProps {
    * @default false
    */
   topLight?: boolean;
+  /**
+   * The chip says the model's name before its level, as it did before 18 November. Without it the
+   * chip is the maker's mark and the level alone, the name in its tooltip; a model with one level
+   * says its name, which is then its only word.
+   * @default false
+   */
+  showName?: boolean;
 }
 
 const noMakers: ComposerModelMaker[] = [];
@@ -253,6 +261,16 @@ const styles = stylex.create({
   // Gone for want of room: the chip closes up on the name (useChipRoom).
   chipLevelGone: {
     display: "none",
+  },
+  // In a narrow one row (a phone), the level folds to the maker's mark, so the text keeps its room;
+  // the tooltip and the chip's name still say both.
+  effortFolds: {
+    // And wherever the row says so (data-fold): with this row's controls the text would go under its least width.
+    display: {
+      default: "inline",
+      "@container composer-row (width < 24rem)": "none",
+      [stylex.when.ancestor(":is([data-fold])", rowMarker)]: "none",
+    },
   },
   chipShrinks: {
     flexShrink: 1,
@@ -512,6 +530,50 @@ const Chip = ({
   );
 };
 
+/** The chip at rest: the maker's mark, the level in a word, the chevron. The name is in its tooltip. */
+const EffortChip = ({
+  props,
+  mark,
+  level,
+  lit,
+  value,
+}: {
+  props: Record<string, unknown>;
+  mark: IconData | undefined;
+  level: string;
+  lit: boolean;
+  value: string;
+}) => (
+  <button
+    {...props}
+    type="button"
+    data-slot="composer-model-effort"
+    data-top={lit || undefined}
+    {...stylex.props(
+      controlStyles.control,
+      styles.chipShrinks,
+      focus.ring,
+      lit && styles.lit
+    )}
+  >
+    <span aria-hidden="true" {...stylex.props(controlStyles.reach)} />
+    {lit ? <LitEdge /> : null}
+    <span key={value} {...stylex.props(controlStyles.value, styles.chipValue)}>
+      {mark === undefined ? null : <Icon icon={mark} />}
+      <span
+        data-slot="composer-model-effort-level"
+        {...stylex.props(
+          controlStyles.words,
+          mark !== undefined && styles.effortFolds
+        )}
+      >
+        {level}
+      </span>
+    </span>
+    <Icon icon={ChevronDown} />
+  </button>
+);
+
 /** What the chip and the surface show for the chosen model and level. */
 const readChoice = (
   models: ComposerModelEffortOption[],
@@ -581,6 +643,7 @@ export const ComposerModelEffort = ({
   effortLabel: effortGiven,
   noEffortLabel: noEffortGiven,
   topLight = false,
+  showName = false,
 }: ComposerModelEffortProps) => {
   const disabled = useComposerDisabled();
   // Its words: the caller's where given, else the product's catalogue (GraspWords), else English.
@@ -646,22 +709,39 @@ export const ComposerModelEffort = ({
       <PopoverTrigger
         disabled={disabled}
         aria-label={`${label}: ${said}`}
-        // Too narrow for its words, the chip shows them whole in a tooltip.
-        render={(props: Record<string, unknown>) => (
-          <ChipTip
-            label={said}
-            render={(tip) => (
-              <Chip
-                props={mergeProps(props, tip)}
-                mark={mark}
-                name={name}
-                level={level}
-                lit={lit}
-                value={`${model} ${effort}`}
-              />
-            )}
-          />
-        )}
+        // The name in the chip: too narrow for its words, it shows them whole in a tooltip. The level
+        // alone: the tooltip always says the model and its level.
+        render={(props: Record<string, unknown>) =>
+          showName || level === undefined ? (
+            <ChipTip
+              label={said}
+              render={(tip) => (
+                <Chip
+                  props={mergeProps(props, tip)}
+                  mark={mark}
+                  name={name}
+                  level={level}
+                  lit={lit}
+                  value={`${model} ${effort}`}
+                />
+              )}
+            />
+          ) : (
+            <ChipTip
+              always
+              label={said}
+              render={(tip) => (
+                <EffortChip
+                  props={mergeProps(props, tip)}
+                  mark={mark}
+                  level={level}
+                  lit={lit}
+                  value={`${model} ${effort}`}
+                />
+              )}
+            />
+          )
+        }
       />
       <PopoverContent
         onKeyDown={keys}

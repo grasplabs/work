@@ -145,4 +145,20 @@ export const treeStyles = stylex.create({
     lineHeight: grasp.textXsLine,
     fontVariantNumeric: "tabular-nums",
   },
+  // A tree with its filter: the field over the tree, a step apart.
+  filtered: {
+    display: "grid",
+    gap: grasp.space2,
+    minWidth: 0,
+  },
+  // Nothing matches: one quiet line in the tree's place.
+  none: {
+    margin: 0,
+    paddingBlock: grasp.space1,
+    paddingInline: grasp.space2,
+    fontFamily: grasp.fontSans,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    color: grasp.muted,
+  },
 });

@@ -49,18 +49,13 @@ import type { ComposerChosenAgent } from "./agent-chip";
 import type { ComposerAttachmentWords } from "./attachment";
 import { ComposerAttachments } from "./attachments";
 import type { ComposerFile } from "./attachments";
-import {
-  DisabledContext,
-  ListenContext,
-  MentionContext,
-  VoiceBesideContext,
-  VoiceContext,
-} from "./context";
+import { DisabledContext, ListenContext, MentionContext } from "./context";
 import type { ComposerListener } from "./context";
 import { ComposerGlow } from "./glow";
 import type { ComposerAccent, ComposerEdge } from "./glow";
 import { MentionMenu, caretPoint, mentionRows } from "./mention";
 import type { ComposerMentionItem, MentionRow } from "./mention";
+import { rowMarker } from "./row.stylex";
 import { ComposerSend } from "./send";
 import { ComposerVoice } from "./voice";
 import type { ComposerVoiceProps } from "./voice";
@@ -164,9 +159,9 @@ export interface ComposerProps {
    */
   controls?: ReactNode;
   /**
-   * Voice input, at the end beside send: a ComposerAction (Dictate). With nothing written it stands
-   * alone, filled, in send's place; once there is text it goes quiet and send appears. While it
-   * listens, give it `pressed` and the Listening icon, so the press shows even when it stands alone.
+   * Voice input, at the end just before send: a ComposerAction (Dictate), quiet (bare) whether or not
+   * anything is written. Send always stands last, off while there is nothing to send (Ruben,
+   * 18 November). While it listens, give it `pressed` and the Listening icon.
    */
   voice?: ReactNode;
   /**
@@ -305,7 +300,10 @@ export interface ComposerProps {
   /** A short line under the card, such as a note that answers can be wrong. */
   note?: ReactNode;
   /**
-   * One row: the actions and the text side by side, for a narrow panel or a reply.
+   * One row, as a chat's box at rest: the plus (`start`), the text, then `controls` (the model and
+   * effort), `end`, dictation and send, one control tall. As the text no longer fits its line, the
+   * text takes the whole width and the controls drop to a row under it. Files, the chosen agent and
+   * `above` stand over the row, inside the card. For a chat's foot, a narrow panel or a reply.
    * @default false
    */
   compact?: boolean;
@@ -394,10 +392,10 @@ const styles = stylex.create({
     position: "relative",
     zIndex: 1,
   },
-  // The card's own box, which the light is placed against. No stacking context of its own, so
-  // the light (0), the band (1) and the card (2) share the stack's.
   cardRoom: {
     position: "relative",
+    borderRadius: grasp.composerCorner,
+    cornerShape: grasp.cornerShape,
   },
   card: {
     position: "relative",
@@ -502,13 +500,50 @@ const styles = stylex.create({
     cursor: "default",
   },
   compactCard: {
+    // The row answers to its own width: narrow, the level folds to the maker's mark (model-effort.tsx).
+    containerType: "inline-size",
+    containerName: "composer-row",
+    // That makes its own width zero to whoever sizes to it (a centred flex row, an inline-flex): it
+    // stood 24px wide there. It counts as composer-row-least instead; a holder narrower still gives
+    // it the holder's width, as nothing sets a least.
+    containIntrinsicInlineSize: `calc(${grasp.composerRowLeast} - 2 * ${grasp.space3})`,
     gridTemplateColumns: "auto minmax(0, 1fr) auto",
+    gridTemplateAreas: '"above above above" "start field end"',
     alignItems: "center",
-    gap: grasp.space2,
-    padding: grasp.space2,
-    borderRadius: `min(${grasp.corner}, calc((${grasp.controlSm} + 2 * ${grasp.space2}) / 2))`,
-    // Its corner less its room, 8px (corner.ts, F71).
-    "--grasp-composer-nested": `calc(min(${grasp.corner}, calc((${grasp.controlSm} + 2 * ${grasp.space2}) / 2)) - ${grasp.space2})`,
+    columnGap: grasp.space2,
+    rowGap: 0,
+    padding: grasp.space3,
+  },
+  // The text no longer fits its line: it takes the row, and the controls drop under it.
+  compactTall: {
+    gridTemplateAreas: '"above above above" "field field field" "start . end"',
+  },
+  compactAbove: {
+    gridArea: "above",
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    minWidth: 0,
+    // The strip and the row above the text keep their own inset; the card's 12px is already round them.
+    marginInline: `calc(-1 * ${grasp.space3})`,
+    marginBlockStart: `calc(-1 * ${grasp.space3})`,
+    marginBlockEnd: { default: grasp.space1, ":empty": 0 },
+  },
+  compactStart: {
+    gridArea: "start",
+  },
+  compactField: {
+    gridArea: "field",
+    // The text never gives: narrower, the level folds, then the row goes tall (useRowFit).
+    minWidth: grasp.composerFieldLeast,
+  },
+  compactFieldTall: {
+    // Its words stand where they stood in the row's text, over the foot row.
+    paddingBlockStart: grasp.space1,
+    paddingBlockEnd: grasp.space2,
+  },
+  compactEnd: {
+    gridArea: "end",
+    justifySelf: "end",
   },
   // The strip, the row above the text and the text: one row of the card, with no gap of its own.
   textRoom: {
@@ -549,8 +584,8 @@ const styles = stylex.create({
     caretColor: grasp.ink,
     fontFamily: grasp.fontSans,
     // 16px on a phone or a touch screen (media.typing), or Safari zooms the page in when the text takes focus.
-    fontSize: { default: grasp.textMd, [media.typing]: grasp.fieldTextTouch },
-    lineHeight: grasp.textMdLine,
+    fontSize: { default: grasp.chatText, [media.typing]: grasp.fieldTextTouch },
+    lineHeight: grasp.chatTextLine,
     letterSpacing: "normal",
     overflowWrap: "anywhere",
     cursor: { default: "text", ":disabled": "not-allowed" },
@@ -618,6 +653,10 @@ const styles = stylex.create({
     alignItems: "center",
     gap: grasp.space1,
     marginInlineStart: `calc(${grasp.space1} - ${grasp.space2})`,
+  },
+  afterRow: {
+    gap: grasp.space2,
+    marginInlineStart: 0,
   },
   afterLine: {
     flexShrink: 0,
@@ -907,6 +946,143 @@ const useFileDrop = (
   };
 };
 
+/** A length in pixels as computed ("8px"), or 0 for one that is not ("normal"). */
+// oxlint-disable-next-line unicorn/prefer-number-coercion -- a length reads "8px", which Number() makes NaN
+const px = (value: string) => Number.parseFloat(value) || 0;
+
+/** What an effect with nothing to undo returns. */
+const holdNothing = () => {
+  // Nothing was started.
+};
+
+/**
+ * How the one row fits its room. `tall`: the text has outgrown its line (a line break, or words wider
+ * than the room between the plus and the controls), or the field would go under its least width
+ * (composer-field-least) even with the level folded; the text then takes the row and the controls drop
+ * under it. `fold`: the model's level folds to its maker's mark, first, because with it the field would
+ * go under that least width. The text never gives. Every width is read from the card and its two
+ * sides, which stand alike in both forms, so the answer never depends on the form it changes: nothing
+ * flickers at the edge. Read before paint as the text changes, and again as the card or a side changes
+ * width (a chip laid out late, a level folded).
+ */
+const useRowFit = (
+  on: boolean,
+  text: string,
+  card: RefObject<HTMLFieldSetElement | null>,
+  area: RefObject<HTMLTextAreaElement | null>
+) => {
+  const [tall, setTall] = useState(false);
+  const [fold, setFold] = useState(false);
+  // The end side's width while the level shows: what unfolding would need again.
+  const wideEnd = useRef(0);
+  useLayoutEffect(() => {
+    const box = card.current;
+    if (!on || box === null) {
+      // oxlint-disable-next-line react/set-state-in-effect -- the row is read from the laid-out card, which only an effect can see
+      setTall(false);
+      setFold(false);
+      return holdNothing;
+    }
+    const pen = document.createElement("canvas").getContext("2d");
+    const start = box.querySelector<HTMLElement>(
+      ":scope > [data-slot=composer-start]"
+    );
+    const end = box.querySelector<HTMLElement>(
+      ":scope > [data-slot=composer-end]"
+    );
+    const slot = box.querySelector<HTMLElement>(
+      ":scope > [data-slot=composer-field]"
+    );
+    const read = () => {
+      const field = area.current;
+      if (field === null || start === null || end === null || slot === null) {
+        return;
+      }
+      const look = getComputedStyle(box);
+      const own = getComputedStyle(field);
+      const level = end.querySelector<HTMLElement>(
+        "[data-slot=composer-model-effort-level]"
+      );
+      const endWidth = end.getBoundingClientRect().width;
+      if (!fold && level !== null && level.getClientRects().length > 0) {
+        wideEnd.current = endWidth;
+      }
+      const inner =
+        box.clientWidth -
+        px(look.paddingInlineStart) -
+        px(look.paddingInlineEnd);
+      const sides =
+        start.getBoundingClientRect().width + 2 * px(look.columnGap);
+      const least = px(getComputedStyle(slot).minWidth);
+      // Folded only while the level would leave the field under its least width.
+      const folding =
+        level !== null &&
+        inner - sides - Math.max(wideEnd.current, endWidth) < least;
+      setFold(folding);
+      if (folding !== fold) {
+        // The sides change width with the fold: read again once it is drawn.
+        return;
+      }
+      const room = inner - sides - endWidth;
+      const words = text;
+      if (room < least || words.includes("\n")) {
+        setTall(true);
+        return;
+      }
+      if (words === "") {
+        setTall(false);
+        return;
+      }
+      if (pen !== null) {
+        pen.font = own.font;
+      }
+      // A caret's width to spare, so the last letter is never under the controls.
+      setTall(
+        (pen?.measureText(words).width ?? 0) + 2 >
+          room - px(own.paddingInlineStart) - px(own.paddingInlineEnd)
+      );
+    };
+    read();
+    const observer = new ResizeObserver(read);
+    observer.observe(box);
+    for (const side of [start, end]) {
+      if (side !== null) {
+        observer.observe(side);
+      }
+    }
+    return () => {
+      observer.disconnect();
+    };
+  }, [on, text, card, area, fold]);
+  return { tall, fold };
+};
+
+/** The card's look: its surface, the one row (and tall in it), a takeover, a file dragged over. */
+const cardLook = ({
+  glass,
+  row,
+  tall,
+  taken,
+  dragging,
+  over,
+}: {
+  glass: boolean;
+  row: boolean;
+  tall: boolean;
+  taken: boolean;
+  dragging: boolean;
+  over: boolean;
+}) => [
+  styles.card,
+  glass && styles.glass,
+  row && styles.compactCard,
+  row && rowMarker,
+  row && tall && styles.compactTall,
+  taken && styles.taken,
+  dragging && styles.target,
+  over && styles.targetOver,
+];
+
 /** How many times the composer has arrived at success: each arrival plays the halo once more. */
 const useSuccessCount = (activity: ComposerActivity) => {
   const [success, setSuccess] = useState(activity === "success" ? 1 : 0);
@@ -1193,6 +1369,12 @@ const ComposerCount = ({
     return null;
   }
   const stage = stageOf(length, max);
+  // Work's change (.context/library-changes.md, 14): far under the limit the
+  // count is not drawn at all. Its kept room (113px for "100,000/100,000")
+  // made the one row's end side so wide that the bar always went tall.
+  if (stage === "under") {
+    return null;
+  }
   return (
     <span
       aria-hidden="true"
@@ -1204,11 +1386,7 @@ const ComposerCount = ({
         {words.count(max, max)}
       </span>
       <span
-        {...stylex.props(
-          styles.countLayer,
-          stage === "under" && styles.countUnseen,
-          stage === "at" && styles.countAt
-        )}
+        {...stylex.props(styles.countLayer, stage === "at" && styles.countAt)}
       >
         {words.count(Math.min(length, max), max)}
       </span>
@@ -1659,7 +1837,10 @@ interface EndProps {
   stopLabel: string;
 }
 
-/** With nothing written, voice stands alone in send's place, filled; with text, both show. */
+/**
+ * Voice, bare, then send, always last: bare and off with nothing to send, the strong ink with text. Send
+ * never trades places with voice (Ruben, 18 November: "at most right side a grey out send button").
+ */
 const ComposerEnd = ({
   voice,
   empty,
@@ -1669,33 +1850,38 @@ const ComposerEnd = ({
   onStop,
   sendLabel,
   stopLabel,
-}: EndProps) => {
-  if (Boolean(voice) && empty && !working) {
-    return <VoiceContext.Provider value>{voice}</VoiceContext.Provider>;
-  }
-  return (
-    <>
-      <VoiceBesideContext.Provider value>{voice}</VoiceBesideContext.Provider>
-      <ComposerSend
-        working={working}
-        empty={empty}
-        disabled={disabled}
-        onSend={onSend}
-        onStop={onStop}
-        sendLabel={sendLabel}
-        stopLabel={stopLabel}
-      />
-    </>
-  );
-};
+}: EndProps) => (
+  <>
+    {voice}
+    <ComposerSend
+      working={working}
+      empty={empty}
+      disabled={disabled}
+      onSend={onSend}
+      onStop={onStop}
+      sendLabel={sendLabel}
+      stopLabel={stopLabel}
+    />
+  </>
+);
 
 /** After send: a short hairline, then the control. Nothing at all without one. */
-const ComposerAfter = ({ after }: { after: ReactNode }) => {
+const ComposerAfter = ({
+  after,
+  row = false,
+}: {
+  after: ReactNode;
+  row?: boolean;
+}) => {
   if (after === undefined || after === null || after === false) {
     return null;
   }
+  // A short line sets it apart from Send; in the one row, the row's own gap stands either side.
   return (
-    <div data-slot="composer-after" {...stylex.props(styles.after)}>
+    <div
+      data-slot="composer-after"
+      {...stylex.props(styles.after, row && styles.afterRow)}
+    >
       <span aria-hidden="true" {...stylex.props(styles.afterLine)} />
       {after}
     </div>
@@ -1705,6 +1891,8 @@ const ComposerAfter = ({ after }: { after: ReactNode }) => {
 interface InsideProps {
   takeover: ReactNode;
   compact: boolean;
+  /** In the one row, the text no longer fits its line: it takes the row, the controls go under it. */
+  tall: boolean;
   start: ReactNode;
   end: ReactNode;
   last: ReactNode;
@@ -1729,6 +1917,7 @@ interface InsideProps {
 const ComposerInside = ({
   takeover,
   compact,
+  tall,
   start,
   end,
   last,
@@ -1752,15 +1941,65 @@ const ComposerInside = ({
   if (taken) {
     return <div data-slot="composer-takeover-room">{takeover}</div>;
   }
+  const strip =
+    onAttach !== undefined || attachments.length > 0 ? (
+      <ComposerAttachments
+        files={attachments}
+        onRemove={onRemoveAttachment}
+        onRetry={onRetryAttachment}
+        onOpen={onOpenAttachment}
+        words={attachmentWords}
+        label={attachmentsLabel}
+      />
+    ) : null;
+  // The agent chosen in the plus menu, when it is not the default, stands first in the row.
+  const aboveRow = (Boolean(above) || chosenAgent !== null) && (
+    <div {...stylex.props(styles.above)}>
+      {chosenAgent !== null && <ComposerAgentChip chosen={chosenAgent} />}
+      {above}
+    </div>
+  );
   if (compact) {
+    // In the DOM as it is read and tabbed: plus, text, controls, dictation, send. The grid places
+    // the text over the controls once it no longer fits its line (compactTall).
     return (
       <>
-        <div {...stylex.props(styles.side)}>{start}</div>
-        {editor}
-        <div {...stylex.props(styles.side)}>
+        <div {...stylex.props(styles.compactAbove)}>
+          {strip}
+          {aboveRow}
+        </div>
+        <div
+          data-slot="composer-start"
+          onPointerDown={focusText}
+          {...stylex.props(styles.side, styles.compactStart)}
+        >
+          {start}
+        </div>
+        <div
+          data-slot="composer-field"
+          {...stylex.props(
+            styles.compactField,
+            tall && styles.compactFieldTall
+          )}
+        >
+          {editor}
+        </div>
+        <div
+          data-slot="composer-end"
+          onPointerDown={focusText}
+          {...stylex.props(styles.side, styles.compactEnd)}
+        >
+          {Boolean(controls) && (
+            <div
+              data-slot="composer-controls"
+              {...stylex.props(styles.controls)}
+            >
+              {controls}
+            </div>
+          )}
           {end}
           {last}
-          <ComposerAfter after={after} />
+          <ComposerAfter after={after} row />
         </div>
       </>
     );
@@ -1771,23 +2010,8 @@ const ComposerInside = ({
           never stands above an empty strip or an empty row, so the text starts where it would with
           neither; the strip carries its own room as it opens. */}
       <div {...stylex.props(styles.textRoom)}>
-        {onAttach !== undefined || attachments.length > 0 ? (
-          <ComposerAttachments
-            files={attachments}
-            onRemove={onRemoveAttachment}
-            onRetry={onRetryAttachment}
-            onOpen={onOpenAttachment}
-            words={attachmentWords}
-            label={attachmentsLabel}
-          />
-        ) : null}
-        {/* The agent chosen in the plus menu, when it is not the default, stands first in the row. */}
-        {(Boolean(above) || chosenAgent !== null) && (
-          <div {...stylex.props(styles.above)}>
-            {chosenAgent !== null && <ComposerAgentChip chosen={chosenAgent} />}
-            {above}
-          </div>
-        )}
+        {strip}
+        {aboveRow}
         {editor}
       </div>
       <div
@@ -1945,7 +2169,11 @@ const dictationParts = (props: Resolved, text: string) => ({
   takeover:
     props.takeover ??
     (props.dictation === undefined ? undefined : (
-      <ComposerVoice typed={text} {...props.dictation} />
+      <ComposerVoice
+        typed={text}
+        compact={props.compact}
+        {...props.dictation}
+      />
     )),
   dismiss: props.onTakeoverDismiss ?? props.dictation?.onCancel,
 });
@@ -1978,6 +2206,8 @@ const ComposerForm = (props: Resolved) => {
   const working = activity === "working";
   const disabled = activity === "disabled";
   const taken = Boolean(takeover);
+  // The one row, while no takeover has the card.
+  const row = compact && !taken;
   const invalid = validation !== undefined && validation !== "";
   // A dictation in the takeover hands the card its level, so the dithered edge listens with it.
   const [listener, setListener] = useState<ComposerListener | null>(null);
@@ -1986,6 +2216,7 @@ const ComposerForm = (props: Resolved) => {
     null
   );
 
+  const { tall, fold } = useRowFit(row, text, card, area);
   const files = useFileDrop(props.onAttach, disabled);
   const success = useSuccessCount(activity);
   const focusWatch = useTakeoverFocus(taken, card, area);
@@ -2173,7 +2404,7 @@ const ComposerForm = (props: Resolved) => {
         {Boolean(props.top) && (
           <div {...stylex.props(styles.top)}>{props.top}</div>
         )}
-        <div {...stylex.props(styles.cardRoom)}>
+        <div data-slot="composer-card-room" {...stylex.props(styles.cardRoom)}>
           {!disabled && (
             <ComposerGlow
               edge={props.edge}
@@ -2186,14 +2417,18 @@ const ComposerForm = (props: Resolved) => {
           <fieldset
             ref={card}
             disabled={disabled}
+            data-tall={row ? tall : undefined}
+            data-fold={row && fold ? "" : undefined}
             onPointerDown={focusText}
             {...stylex.props(
-              styles.card,
-              props.surface === "glass" && styles.glass,
-              compact && !taken && styles.compactCard,
-              taken && styles.taken,
-              files.dragging && styles.target,
-              files.over && styles.targetOver
+              ...cardLook({
+                glass: props.surface === "glass",
+                row,
+                tall,
+                taken,
+                dragging: files.dragging,
+                over: files.over,
+              })
             )}
           >
             {files.dragging && (
@@ -2210,6 +2445,7 @@ const ComposerForm = (props: Resolved) => {
                     <ComposerInside
                       takeover={takeover}
                       compact={compact}
+                      tall={tall}
                       start={props.start}
                       end={props.end}
                       last={last}

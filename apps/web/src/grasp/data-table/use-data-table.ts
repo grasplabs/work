@@ -572,6 +572,10 @@ export const useDataTable = <Row extends RowData>(
 
   const metaOf = (key: string) =>
     props.columns.find((column) => column.key === key);
+  // The breakpoint of the table's box a column goes below, if any (its head and cells).
+  const hideOf = (key: string) => metaOf(key)?.hideBelow;
+  // A column's info, if any, for the mark beside its name.
+  const infoOf = (key: string) => metaOf(key)?.info;
   const [first] = props.columns;
   // State is read from here, never through a row's or a column's own methods: TanStack keeps those
   // objects as they are while their state changes, so a component given one would not know.
@@ -619,6 +623,8 @@ export const useDataTable = <Row extends RowData>(
     move,
     drop,
     metaOf,
+    hideOf,
+    infoOf,
     name,
     filtered,
     pageNow,

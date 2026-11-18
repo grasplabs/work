@@ -28,11 +28,10 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it } from "vite-plus/test";
 
-import { inInbox } from "../dashboard/in-inbox.tsx";
-import type { Waiting } from "../dashboard/waiting.ts";
 import { groupOf, inboxItems, listed, unread } from "./items.ts";
 import type { Target } from "./items.ts";
 import { TargetLink } from "./target-link.tsx";
+import type { Waiting } from "./waiting.ts";
 
 // The inbox's items (items.ts), as the prototype derives them
 // (`lib/inbox.test.ts`): each made from what core says waits now, in the
@@ -649,31 +648,6 @@ describe(inboxItems, () => {
     expect(kinds).not.toContain("heldWrite");
     expect(unread(offline)).toStrictEqual([{ state: "offline" }]);
     expect(unread(waiting())).toStrictEqual([]);
-  });
-});
-
-describe(inInbox, () => {
-  it("leads the dashboard to every item it has no card or row of its own for", () => {
-    // The pile settles changes, lost answers and requests; rows
-    // under it lead to connections.
-    const onDashboard = new Set(["held", "outcome", "request", "reconnect"]);
-    const all = inboxItems(waiting(), admin, readAt);
-    const elsewhere = all.filter(({ source }) => !onDashboard.has(source.type));
-    expect(
-      inInbox(waiting(), admin, readAt)
-        .map(({ id }) => id)
-        .toSorted()
-    ).toStrictEqual(elsewhere.map(({ id }) => id).toSorted());
-    expect(elsewhere.map(({ id }) => id).toSorted()).toStrictEqual([
-      "asked:asked-1",
-      "bindingApproval:workflow-quotes:2",
-      "decision:decision-1",
-      "heldStart:held-start-1",
-      "packageNotice:revoked-1",
-      "stopped:stopped-1",
-      "stoppedEvents:deaf-1",
-      "workflowGoLive:workflow-quotes:2",
-    ]);
   });
 });
 

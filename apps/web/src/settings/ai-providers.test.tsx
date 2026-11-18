@@ -384,7 +384,12 @@ const replaceKey = async (label: string, key: string): Promise<void> => {
 };
 
 /** The page's text, without its markup. */
-const text = (): string => document.body.textContent ?? "";
+/** What the page shows: its words, and the values in its fields that only read. */
+const text = (): string =>
+  [
+    document.body.textContent ?? "",
+    ...[...document.querySelectorAll("input")].map((input) => input.value),
+  ].join(" ");
 
 describe("Settings › AI providers", () => {
   afterEach(() => {
@@ -750,7 +755,10 @@ describe("Settings › AI providers", () => {
     expect(text()).toContain("•••• 0000");
     expect(text()).toContain("GPT-5.4");
     expect(text()).toContain("GPT-5 mini");
-    expect(document.querySelectorAll("input, select")).toHaveLength(0);
+    // A field that only reads is no way to change it.
+    expect(
+      document.querySelectorAll("input:not([readonly]), select")
+    ).toHaveLength(0);
     // Only the info marks that say more: nothing that manages, tests or changes.
     expect(
       [...document.querySelectorAll("button")].filter(

@@ -19,6 +19,8 @@ export interface DataTableView {
   order?: string[];
   /** The columns held at the start and at the end, by key. */
   pinned?: { start: string[]; end: string[] };
+  /** The groups closed, by their value, with the `grouping` piece. */
+  closed?: string[];
 }
 
 /** Reads and writes a table's view. */
@@ -48,7 +50,8 @@ const sortOf = (each: string) =>
 /**
  * The view in the query string: `?<prefix>-sort=owner,-pages&<prefix>-q=plan&<prefix>-filter=owner.is.Sam%20Patel`,
  * `<prefix>-page=2`, `<prefix>-hide=words`, `<prefix>-order=name,team,owner`,
- * `<prefix>-pin=name|status` (start, then end).
+ * `<prefix>-pin=name|status` (start, then end), `<prefix>-closed=Running,Sketched` (each value
+ * encoded, so a value may hold a comma).
  */
 export const queryLocation = (prefix = "table"): DataTableLocation => {
   const key = (name: string) => `${prefix}-${name}`;
@@ -91,6 +94,10 @@ export const queryLocation = (prefix = "table"): DataTableLocation => {
         const [start, end] = pin.split("|");
         view.pinned = { start: list(start) ?? [], end: list(end) ?? [] };
       }
+      const closed = list(params.get(key("closed")));
+      if (closed !== undefined) {
+        view.closed = closed.map((each) => decodeURIComponent(each));
+      }
       return view;
     },
     write: (view) => {
@@ -129,6 +136,10 @@ export const queryLocation = (prefix = "table"): DataTableLocation => {
         pinned === undefined || pinned.start.length + pinned.end.length === 0
           ? undefined
           : `${pinned.start.join(",")}|${pinned.end.join(",")}`
+      );
+      set(
+        "closed",
+        view.closed?.map((each) => encodeURIComponent(each)).join(",")
       );
       if (url.href !== window.location.href) {
         window.history.replaceState(window.history.state, "", url);

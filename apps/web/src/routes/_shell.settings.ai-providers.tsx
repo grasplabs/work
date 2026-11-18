@@ -25,7 +25,7 @@ const AiProvidersPage = () => {
   const { identity } = Route.useRouteContext();
   if (page.state !== "ready") {
     return (
-      <SectionCard title={t`AI and spend`}>
+      <SectionCard variant="grouped" density="compact" title={t`AI and spend`}>
         <SectionNotLoaded page={page} />
       </SectionCard>
     );

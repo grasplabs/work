@@ -14,6 +14,13 @@
 // still line that steps with the level at most four times a second, and words simply appear. In
 // forced colours the field hides and a level meter stands in its place. The level is never the only
 // signal: "Listening", the time and the polite announcements say it too.
+//
+// `variant="conversation"`: a spoken conversation that turns by itself (the product's voice
+// interview). There is no Done and no Cancel; the turns pass between `listening` (the person) and
+// `speaking` (the other voice, its level given as the person's is, its light a stop quieter, said
+// once as "Speaking", and its mark, `speaker`, standing in the time's place so the turn reads
+// without colour), and the footer ends with a small close (`onClose`: the voice ends, the host
+// gives the text back). The time starts on the words' start edge, as there is no Cancel before it. Left out, the variant is `dictation`: everything above, exactly as before.
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
@@ -42,20 +49,31 @@ export type ComposerVoiceProblem =
   | "failed"
   | "limited";
 
-/** Where a dictation is: asking for the microphone, listening, writing it down after Done, or stopped by a problem. */
+/**
+ * Where a dictation is: asking for the microphone, listening, writing it down after Done, or
+ * stopped by a problem. In a conversation, `speaking` is the other voice's turn.
+ */
 export type ComposerVoicePhase =
   | "asking"
   | "listening"
+  | "speaking"
   | "thinking"
   | "problem";
+
+/** A dictation the person ends with Done or Cancel, or a conversation that turns by itself. */
+export type ComposerVoiceVariant = "dictation" | "conversation";
 
 /** Every word ComposerVoice shows or says; the host translates them. */
 export interface ComposerVoiceWords {
   asking: string;
   listening: string;
+  /** The other voice's turn, in a conversation: said once as it starts. */
+  speaking: string;
   thinking: string;
   silent: string;
   muted: string;
+  /** The close that ends a conversation's voice. */
+  close: string;
   done: string;
   cancel: string;
   mute: string;
@@ -70,6 +88,12 @@ export interface ComposerVoiceWords {
 
 /** Every prop a ComposerVoice takes. */
 export interface ComposerVoiceProps {
+  /**
+   * `dictation` (the default): the person speaks and ends it with Done or Cancel. `conversation`:
+   * the turns pass between `listening` and `speaking` by themselves, with no Done and no Cancel,
+   * and a small close at the end (`onClose`).
+   */
+  variant?: ComposerVoiceVariant;
   phase: ComposerVoicePhase;
   /** What was typed before dictating: kept, in muted ink, before the dictation's words. */
   typed?: string;
@@ -95,11 +119,27 @@ export interface ComposerVoiceProps {
   /** The bands' energy now, low to high, 0 to 1 each, with `level`. */
   bands?: readonly number[];
   words?: Partial<ComposerVoiceWords>;
-  onDone: () => void;
-  /** Runs once this dictation's words have dissolved (at once under reduced motion). */
-  onCancel: () => void;
+  /**
+   * The other voice's mark, in a conversation: shown in the time's place while it speaks, so whose
+   * turn it is reads without colour. An AgentMark with `size="xs"` and no name of its own (the
+   * turn is said as "Speaking"). Give it with `variant="conversation"`.
+   */
+  speaker?: ReactNode;
+  /** A conversation's close, at the footer's end: the voice ends (the interview goes on typed). A dictation has Cancel instead. */
+  onClose?: () => void;
+  /** Done, in a dictation. A conversation has no Done. */
+  onDone?: () => void;
+  /** Cancel, in a dictation: runs once its words have dissolved (at once under reduced motion). A conversation has no Cancel. */
+  onCancel?: () => void;
   onMute: () => void;
   onRetry: () => void;
+  /**
+   * One row, for a one-row composer (its `compact`, which passes it): Cancel, the time, the band and
+   * the ways out stand in the row's own height, the words written inside the band, its latest
+   * words in view; nothing changes size as dictation starts or ends.
+   * @default false
+   */
+  compact?: boolean;
 }
 
 /** The dictation's words in English, as the catalogue (words.ts) holds them. */
@@ -127,8 +167,8 @@ const styles = stylex.create({
     position: "relative",
     zIndex: 1,
     margin: 0,
-    fontSize: grasp.textMd,
-    lineHeight: grasp.textMdLine,
+    fontSize: grasp.chatText,
+    lineHeight: grasp.chatTextLine,
     color: grasp.ink,
     overflowWrap: "anywhere",
   },
@@ -211,6 +251,10 @@ const styles = stylex.create({
     minWidth: 0,
     marginInline: `calc(${grasp.space2} - ${grasp.space4})`,
   },
+  // A conversation has no Cancel before the time: it starts on the words' start edge instead.
+  aligned: { marginInlineStart: `calc(${grasp.space4} - ${grasp.space2})` },
+  // The other voice's mark, in the time's place while it speaks.
+  speaker: { flexShrink: 0, display: "flex", alignItems: "center" },
   time: {
     flexShrink: 0,
     margin: 0,
@@ -249,6 +293,43 @@ const styles = stylex.create({
     clipPath: "inset(50%)",
     whiteSpace: "nowrap",
   },
+  // ---- One row (compact): the row's own inset, 12px round 32px controls, as the one-row composer ----
+  surfaceRow: { gap: 0, padding: grasp.space3, paddingBlockEnd: grasp.space3 },
+  footRow: { marginInline: 0 },
+  // The words beside the light, after the time: one line from the start, as typed words stand; once
+  // they run past their room, its latest words stay in view (scrolled there) and the start fades.
+  wordsRow: {
+    position: "relative",
+    flexGrow: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    alignSelf: "stretch",
+    display: "flex",
+    alignItems: "center",
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+    maskImage: {
+      default: "none",
+      ":is([data-over])": {
+        default: `linear-gradient(to right, transparent, black ${grasp.space8})`,
+        ":dir(rtl)": `linear-gradient(to left, transparent, black ${grasp.space8})`,
+      },
+    },
+  },
+  wordsRowLine: {
+    flexShrink: 0,
+    margin: 0,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    color: grasp.ink,
+  },
+  // The light in one row: the whole room while nothing is heard yet, then a short band of its own
+  // beside the words, so a word never stands on the light.
+  bandRow: {
+    flexBasis: grasp.composerVoiceRowBand,
+    transitionProperty: "padding-block-end, flex-grow",
+  },
+  bandRowWritten: { flexGrow: 0 },
 });
 
 /** What an effect with nothing to undo returns. */
@@ -362,6 +443,9 @@ const modeOf = (
   if (phase === "thinking") {
     return "thinking";
   }
+  if (phase === "speaking") {
+    return "speaking";
+  }
   if (phase !== "listening") {
     return "off";
   }
@@ -393,11 +477,23 @@ const saidOf = (
   if (phase === "thinking") {
     return say.thinking;
   }
+  if (phase === "speaking") {
+    return say.speaking;
+  }
   if (muted) {
     return say.muted;
   }
   return say.listening;
 };
+
+/** The modes the band stands open in: a turn of either voice, and listening's quiet states. */
+const OPEN_MODES = new Set<VoiceFieldMode>([
+  "listening",
+  "speaking",
+  "silent",
+  "unheard",
+  "muted",
+]);
 
 /** The band the light lies in: the footer row's height, controlSm, 32px. */
 const BAND = 32;
@@ -581,6 +677,9 @@ interface BandProps {
   open: boolean;
   words: string;
   say: ComposerVoiceWords;
+  /** In one row: short beside the words once there are any. */
+  row: boolean;
+  written: boolean;
 }
 
 const VoiceBand = ({
@@ -591,6 +690,8 @@ const VoiceBand = ({
   open,
   words,
   say,
+  row,
+  written,
 }: BandProps) => {
   const meterId = useId();
   const worded = words !== "";
@@ -598,7 +699,12 @@ const VoiceBand = ({
     <div
       ref={band}
       data-slot="composer-voice-band"
-      {...stylex.props(styles.band, open && !worded && styles.bandOpen)}
+      {...stylex.props(
+        styles.band,
+        open && !worded && styles.bandOpen,
+        row && styles.bandRow,
+        row && written && styles.bandRowWritten
+      )}
     >
       {showField ? (
         <>
@@ -633,67 +739,196 @@ const VoiceBand = ({
   );
 };
 
-/** The ways out: Cancel, the time, the band, then Mute and Done, or Try again after a problem. */
+/** What the footer is given. */
+interface FootProps {
+  conversation: boolean;
+  phase: ComposerVoicePhase;
+  muted: boolean;
+  elapsedMs: number;
+  say: ComposerVoiceWords;
+  /** The band, between the time and the controls. */
+  children: ReactNode;
+  /** The other voice's mark, in the time's place while it speaks. */
+  speaker: ReactNode;
+  onCancel: () => void;
+  onMute: () => void;
+  onDone: (() => void) | undefined;
+  onClose: (() => void) | undefined;
+  onRetry: () => void;
+  /** One row, for a one-row composer. */
+  row: boolean;
+}
+
+/**
+ * The ways out. A dictation: Cancel, the time, the band, then Mute and Done. A conversation: the
+ * time (the other voice's mark while it speaks) on the words' start edge, the band, Mute (on in
+ * either turn), then the close. Try again after a problem.
+ */
 const VoiceFoot = ({
+  conversation,
   phase,
   muted,
   elapsedMs,
   say,
   children,
+  speaker,
   onCancel,
   onMute,
   onDone,
+  onClose,
   onRetry,
-}: {
-  phase: ComposerVoicePhase;
-  muted: boolean;
-  elapsedMs: number;
-  say: ComposerVoiceWords;
-  children: ReactNode;
-  onCancel: () => void;
-  onMute: () => void;
-  onDone: () => void;
-  onRetry: () => void;
-}) => (
-  <div data-slot="composer-voice-foot" {...stylex.props(styles.foot)}>
-    <Button
-      variant="ghost"
-      size="sm"
-      icon={Cross}
-      aria-label={say.cancel}
-      onClick={onCancel}
-    />
-    <p {...stylex.props(styles.time)}>{say.time(elapsedMs)}</p>
-    {children}
-    {phase === "problem" ? (
-      <Button variant="quiet" size="sm" icon={Retry} onClick={onRetry}>
-        {say.retry}
-      </Button>
-    ) : (
-      <>
+  row,
+}: FootProps) => {
+  const turn = phase === "listening" || (conversation && phase === "speaking");
+  const marked =
+    conversation &&
+    phase === "speaking" &&
+    speaker !== undefined &&
+    speaker !== null;
+  return (
+    <div
+      data-slot="composer-voice-foot"
+      {...stylex.props(styles.foot, row && styles.footRow)}
+    >
+      {conversation ? null : (
         <Button
           variant="ghost"
           size="sm"
-          icon={muted ? MicOff : Mic}
-          aria-label={muted ? say.unmute : say.mute}
-          onClick={onMute}
-          disabled={phase !== "listening"}
+          icon={Cross}
+          aria-label={say.cancel}
+          onClick={onCancel}
         />
+      )}
+      {marked ? (
+        <span
+          data-slot="composer-voice-speaker"
+          {...stylex.props(styles.speaker, styles.aligned)}
+        >
+          {speaker}
+        </span>
+      ) : (
+        <p
+          data-slot="composer-voice-time"
+          {...stylex.props(styles.time, conversation && styles.aligned)}
+        >
+          {say.time(elapsedMs)}
+        </p>
+      )}
+      {children}
+      {phase === "problem" ? (
+        <Button variant="quiet" size="sm" icon={Retry} onClick={onRetry}>
+          {say.retry}
+        </Button>
+      ) : (
+        <>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={muted ? MicOff : Mic}
+            aria-label={muted ? say.unmute : say.mute}
+            onClick={onMute}
+            disabled={!turn}
+          />
+          {conversation ? null : (
+            <Button
+              variant="ink"
+              size="sm"
+              icon={Tick}
+              aria-label={say.done}
+              onClick={onDone}
+              disabled={phase !== "listening"}
+            />
+          )}
+        </>
+      )}
+      {conversation ? (
         <Button
-          variant="ink"
+          variant="ghost"
           size="sm"
-          icon={Tick}
-          aria-label={say.done}
-          onClick={onDone}
-          disabled={phase !== "listening"}
+          icon={Cross}
+          aria-label={say.close}
+          onClick={onClose}
         />
-      </>
+      ) : null}
+    </div>
+  );
+};
+
+/** The words written: what was typed before, in muted ink, then each word as it resolves, and the caret. */
+const VoiceWords = ({
+  before,
+  words,
+  still,
+  live,
+  row,
+}: {
+  before: string;
+  words: readonly { text: string; settled: boolean }[];
+  still: boolean;
+  live: boolean;
+  row: boolean;
+}) => (
+  <p
+    data-slot="composer-voice-words"
+    {...stylex.props(row ? styles.wordsRowLine : styles.words)}
+  >
+    {before === "" ? null : (
+      <span {...stylex.props(styles.typed)}>{before}</span>
     )}
-  </div>
+    {words.map((word, index) => (
+      <span key={`${index}-${word.text}`}>
+        {index === 0 ? "" : " "}
+        <Word text={word.text} settled={word.settled} still={still} />
+      </span>
+    ))}
+    <span
+      aria-hidden="true"
+      {...stylex.props(styles.caret, !live && styles.caretQuiet)}
+    />
+  </p>
 );
+
+/** In one row, the latest words stay in view, and the start fades once they run past their room. */
+const useRowInView = (room: RefObject<HTMLDivElement | null>, row: boolean) => {
+  // After every render: the words may have grown.
+  useEffect(() => {
+    const box = room.current;
+    if (!row || box === null) {
+      return;
+    }
+    box.toggleAttribute("data-over", box.scrollWidth > box.clientWidth + 1);
+    box.scrollTo({
+      left:
+        getComputedStyle(box).direction === "rtl"
+          ? -box.scrollWidth
+          : box.scrollWidth,
+    });
+  });
+};
+
+/** What the band says in its place: in one row, a stretch unheard or a problem too, so the row keeps its height. */
+const bandSays = (
+  row: boolean,
+  phase: ComposerVoicePhase,
+  muted: boolean,
+  silent: boolean,
+  problem: ComposerVoiceProblem | undefined,
+  say: ComposerVoiceWords
+) =>
+  row && problem !== undefined
+    ? say.problems[problem]
+    : bandWordsOf(phase, muted, silent, problem, say);
+
+/** The words to show: as they were when cancelled, else as the host gives them. */
+const heardOf = (
+  kept: { settled: string; interim: string } | null,
+  settled: string,
+  interim: string
+) => wordsOf(kept?.settled ?? settled, kept?.interim ?? interim);
 
 /** Dictation in a composer's place: the words arriving out of the light, the time, and the ways out. */
 export const ComposerVoice = ({
+  variant = "dictation",
   phase,
   typed = "",
   settled,
@@ -706,11 +941,15 @@ export const ComposerVoice = ({
   level,
   bands,
   words,
+  speaker,
   onDone,
   onCancel,
+  onClose,
   onMute,
   onRetry,
+  compact = false,
 }: ComposerVoiceProps) => {
+  const conversation = variant === "conversation";
   // Its words: the caller's where given, else the product's catalogue (GraspWords), else English.
   const catalogue = useComposerWords("voice");
   const say = {
@@ -726,7 +965,6 @@ export const ComposerVoice = ({
   const room = useRef<HTMLDivElement>(null);
   const band = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
-  const caret = useRef<HTMLSpanElement>(null);
   const meter = useRef<HTMLMeterElement>(null);
   // The latest of what the host gives, for the frame loop to read: kept in a ref by an effect.
   const reading = useRef<Reading>({});
@@ -736,7 +974,8 @@ export const ComposerVoice = ({
     null
   );
   // The field is there while it listens and while it writes it down; a problem shows none.
-  const showField = phase === "listening" || phase === "thinking";
+  const showField =
+    phase === "listening" || phase === "speaking" || phase === "thinking";
   const mode = modeOf(phase, muted, silent, problem, leaving);
 
   useEffect(() => {
@@ -745,71 +984,85 @@ export const ComposerVoice = ({
 
   useVoiceField({ band, canvas, meter }, reading, mode, showField, still);
 
+  useRowInView(room, compact);
+
   const cancel = () => {
     const box = room.current;
     if (box === null || still || reduced()) {
-      onCancel();
+      onCancel?.();
       return;
     }
     setLeaving(true);
     setKept({ settled, interim });
-    window.setTimeout(onCancel, dissolve(box) ? DISSOLVE_MS : 160);
+    window.setTimeout(
+      () => {
+        onCancel?.();
+      },
+      dissolve(box) ? DISSOLVE_MS : 160
+    );
   };
 
   const before = typed.trim() === "" ? "" : `${typed.trimEnd()} `;
-  const bandOpen =
-    mode === "listening" ||
-    mode === "silent" ||
-    mode === "unheard" ||
-    mode === "muted";
+  const bandOpen = OPEN_MODES.has(mode);
   const live = phase === "listening" && !muted && !leaving;
+
+  const heard = heardOf(kept, settled, interim);
+  const written = (
+    <VoiceWords
+      before={before}
+      words={heard}
+      still={still}
+      live={live}
+      row={compact}
+    />
+  );
 
   return (
     <div
       data-slot="composer-voice"
+      data-variant={variant}
       data-phase={phase}
       data-mode={mode}
-      {...stylex.props(styles.surface)}
+      data-compact={compact ? "" : undefined}
+      {...stylex.props(styles.surface, compact && styles.surfaceRow)}
     >
-      <div ref={room} {...stylex.props(styles.room)}>
-        <p data-slot="composer-voice-words" {...stylex.props(styles.words)}>
-          {before === "" ? null : (
-            <span {...stylex.props(styles.typed)}>{before}</span>
-          )}
-          {wordsOf(kept?.settled ?? settled, kept?.interim ?? interim).map(
-            (word, index) => (
-              <span key={`${index}-${word.text}`}>
-                {index === 0 ? "" : " "}
-                <Word text={word.text} settled={word.settled} still={still} />
-              </span>
-            )
-          )}
-          <span
-            ref={caret}
-            aria-hidden="true"
-            {...stylex.props(styles.caret, !live && styles.caretQuiet)}
-          />
-        </p>
-      </div>
-      <VoiceNotes phase={phase} problem={problem} say={say} />
+      {compact ? null : (
+        <div ref={room} {...stylex.props(styles.room)}>
+          {written}
+        </div>
+      )}
+      {compact ? null : (
+        <VoiceNotes phase={phase} problem={problem} say={say} />
+      )}
       <VoiceFoot
+        conversation={conversation}
         phase={phase}
         muted={muted}
         elapsedMs={elapsedMs}
         say={say}
+        speaker={speaker}
+        row={compact}
         onCancel={cancel}
         onMute={onMute}
         onDone={onDone}
+        onClose={onClose}
         onRetry={onRetry}
       >
+        {compact ? (
+          <div ref={room} {...stylex.props(styles.wordsRow)}>
+            {written}
+          </div>
+        ) : null}
         <VoiceBand
           band={band}
           canvas={canvas}
           meter={meter}
           showField={showField}
           open={bandOpen}
-          words={bandWordsOf(phase, muted, silent, problem, say)}
+          words={bandSays(compact, phase, muted, silent, problem, say)}
           say={say}
+          row={compact}
+          written={before !== "" || heard.length > 0}
         />
       </VoiceFoot>
       <p aria-live="polite" {...stylex.props(styles.unseen)}>

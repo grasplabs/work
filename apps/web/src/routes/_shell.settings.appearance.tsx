@@ -18,7 +18,7 @@ import { SettingsError } from "../settings/section.tsx";
 const Theme = () => {
   const { t } = useLingui();
   return (
-    <SectionCard title={t`Theme`}>
+    <SectionCard variant="grouped" density="compact" title={t`Theme`}>
       <ThemeSwitch
         variant="picker"
         label={t`Mode`}

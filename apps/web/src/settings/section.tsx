@@ -102,10 +102,13 @@ const styles = stylex.create({
   single: { gridTemplateColumns: "minmax(0, 1fr)" },
   value: { display: "flex", alignItems: "center", minWidth: 0 },
   // As wide as a form of Grasp UI's stands: a line of text stays readable.
+  // Never wider than the box it is in (a dialog): a code block's long
+  // lines scroll inside it rather than push it past the box's edge.
   stack: {
     display: "flex",
     flexDirection: "column",
     gap: grasp.space5,
+    minWidth: 0,
     maxWidth: grasp.formWidth,
   },
   lines: { display: "flex", flexDirection: "column", gap: grasp.space3 },

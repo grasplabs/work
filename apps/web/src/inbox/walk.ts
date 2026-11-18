@@ -1,9 +1,8 @@
-// The dashboard's pile of what waits on the person (`todo-pile.tsx`), as
-// the prototype goes through it (`lib/todo.ts`, `data/todo-pile.ts`): one
-// card on top at a time, in core's order, with the arrows going one on or
-// one back, round and round. Skipping puts a card at the back of the pile
-// for this visit to the app: it is given to nobody and put off to no date,
-// and core never hears of it. Pure.
+// The Inbox's walk through what waits on the person (inbox-page.tsx): one
+// item at a time, in the list's order, the arrows going one on or one
+// back, round and round. Skipping puts an item at the back for this visit
+// to the page: it is given to nobody and put off to no date, and core
+// never hears of it. Pure.
 
 /** The card someone has on top: which item it is, and its place in the pile, for when that item is no longer there. */
 export interface Place {

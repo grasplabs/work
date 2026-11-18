@@ -23,8 +23,8 @@ import { useCore } from "../use-core.ts";
 import { LOBES } from "./brain-atlas.ts";
 import { useBrainData } from "./brain-data.ts";
 
-// The brain's regions as an admin arranges them, right on the Brain's map
-// (brain-nav.tsx): an admin renames a region in place, or moves a team to
+// The brain's regions as an admin arranges them, in the sidebar's Brain
+// section (brain-section.tsx): an admin renames a region in place, or moves a team to
 // another region or to a new one of its own. Each change is saved as it is
 // made, the regions whole (core's `brain.saveTeamGroups`), and a toast
 // offers to put back the regions as they were. A team in no region stands
@@ -51,10 +51,10 @@ export const keptRegions = (ws: Workspace): Kept[] => {
 };
 
 /** The regions the Brain's map has room for: its four lobes. */
-const regionsMax = LOBES.length;
+export const regionsMax = LOBES.length;
 
 /** `regions` with `teamId` moved into `regionId`; a region left empty goes. */
-const movedTo = (
+export const movedTo = (
   regions: readonly Kept[],
   teamId: string,
   regionId: string
@@ -70,9 +70,10 @@ const movedTo = (
     .filter((region) => region.teamIds.length > 0);
 
 /** A new region's id: a short random one, as a region's id may be. */
-const newRegionId = (): string => `group-${crypto.randomUUID().slice(0, 8)}`;
+export const newRegionId = (): string =>
+  `group-${crypto.randomUUID().slice(0, 8)}`;
 
-interface Arranging {
+export interface Arranging {
   regions: Kept[];
   /** Each team's name, for the menus' words. */
   teamName: (teamId: string) => string;
@@ -119,14 +120,15 @@ const saveWithUndo = async (
   });
 };
 
-/** What an admin may change on the map, from the brain as read; none for anyone else. */
-export const useArranging = (): Arranging | undefined => {
+/** The same, for a part of the frame that holds the brain only while it is open (the sidebar). */
+export const useArrangingIn = (
+  workspace: Workspace | undefined
+): Arranging | undefined => {
   const { t } = useLingui();
   const { identity } = useRouteContext({ from: "/_shell" });
-  const { workspace } = useBrainData();
   const core = useCore();
   const router = useRouter();
-  if (!isMemberAdmin(identity)) {
+  if (workspace === undefined || !isMemberAdmin(identity)) {
     return undefined;
   }
   const regions = keptRegions(workspace);
@@ -144,6 +146,10 @@ export const useArranging = (): Arranging | undefined => {
     workspace.teams.find(({ id }) => id === teamId)?.name ?? teamId;
   return { regions, teamName, save };
 };
+
+/** What an admin may change on the map, from the brain as read; none for anyone else. */
+export const useArranging = (): Arranging | undefined =>
+  useArrangingIn(useBrainData().workspace);
 
 /**
  * The menu of a team on the map: move it to another region, or to a new

@@ -3,11 +3,11 @@ import { readFile } from "node:fs/promises";
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
+import { saidOf, toItem } from "./inbox.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
-import { toCard } from "./pile.ts";
 
-// The Activity page: an admin approves one App's permission request and
-// rejects another, finds the approval in the audit log with its details,
+// An admin grants one App's permission request in the Inbox and declines
+// another, finds the approval in the audit log with its details,
 // and exports what the log's filters match. Search, export and the grant
 // themselves are core's tests.
 
@@ -56,35 +56,29 @@ test("an admin approves a permission request, finds it in the audit log, and exp
     core[Symbol.dispose]();
   }
   const page = await pageOf(admin);
-  // An admin's permission requests wait on the dashboard.
-  await page.goto("/dashboard");
-  // Other tests' requests wait in the pile too: it is gone through to this
-  // App's cards.
-  const reading = await toCard(
+  // An admin's permission requests wait in the Inbox, among other tests'.
+  await page.goto("/inbox");
+  const reading = await toItem(
     page,
-    `${appName}: read on Collection ${collectionId}`
+    new RegExp(`^${appName} may read`, "u"),
+    new RegExp(`^Grant ${appName}: read on `, "u")
   );
-  await expect(reading).toContainText("as BOARD_PACK");
+  await reading.getByRole("button", { name: "Details" }).click();
   await expect(reading).toContainText("Version to review: None live");
-  await reading.getByRole("button", { name: /^Approve /u }).click();
+  await reading.getByRole("button", { name: "Grant it" }).click();
   await expect(
-    page.getByRole("status").filter({
-      hasText: `Approved: ${appName}: read on Collection ${collectionId}.`,
-    })
+    saidOf(page).filter({ hasText: `Approved: Grant ${appName}: read on ` })
   ).toHaveCount(1);
   await expect(reading).toHaveCount(0);
 
-  const inviting = await toCard(
+  const inviting = await toItem(
     page,
-    new RegExp(`^${appName}: guests on Guest chats\\.`, "u")
+    new RegExp(`^${appName}$`, "u"),
+    new RegExp(`^Grant ${appName}: guests on Guest chats\\.`, "u")
   );
-  await inviting.getByRole("button", { name: /^Reject /u }).click();
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "Reject", exact: true })
-    .click();
+  await inviting.getByRole("button", { name: "Decline" }).click();
   await expect(
-    page.getByRole("status").filter({ hasText: `Rejected: ${appName}` })
+    saidOf(page).filter({ hasText: `Declined: Grant ${appName}` })
   ).toHaveCount(1);
   await expect(inviting).toHaveCount(0);
 
@@ -193,33 +187,31 @@ test("an admin sees a grant asked for again after a new version, and approves on
 
   try {
     const page = await pageOf(admin);
-    await page.goto("/dashboard");
-    const card = await toCard(
+    await page.goto("/inbox");
+    const card = await toItem(
       page,
-      new RegExp(`^${appName}: guests on Guest chats\\.`, "u")
+      new RegExp(`^${appName}$`, "u"),
+      new RegExp(`^Grant ${appName}: guests on Guest chats\\.`, "u")
     );
+    await card.getByRole("button", { name: "Details" }).click();
     await expect(card).toContainText(
       /Asked again after \d{2}\.\d{2}\.2 was published \(previously granted by .+ on .+\)/u
     );
     // Versions as people know them: YY.MM.N, the second this month.
     await expect(card).toContainText(/Version to review: \d{2}\.\d{2}\.2/u);
 
-    // Another version is published while the admin looks at version 2.
+    // Another version is published while the admin looks at version 2: the
+    // grant is refused, and the card shows the version there is now.
     await release(builds.api, appId, { "README.md": "Three" }, "Third");
-    await card.getByRole("button", { name: /^Approve /u }).click();
-    await expect(card.getByRole("alert")).toHaveText(
-      "Another version of this App was published since this list was read. The list now shows it: review that version, then approve again."
-    );
+    await card.getByRole("button", { name: "Grant it" }).click();
+    await expect(saidOf(page).filter({ hasText: "Approved:" })).toHaveCount(0);
     await expect(card).toContainText(/Version to review: \d{2}\.\d{2}\.3/u);
     await expect(card).toContainText(/Asked again after \d{2}\.\d{2}\.3/u);
-    await expect(
-      page.getByRole("status").filter({ hasText: "Approved:" })
-    ).toHaveCount(0);
 
-    await card.getByRole("button", { name: /^Approve /u }).click();
+    await card.getByRole("button", { name: "Grant it" }).click();
     await expect(
-      page.getByRole("status").filter({
-        hasText: `Approved: ${appName}: guests on Guest chats.`,
+      saidOf(page).filter({
+        hasText: `Approved: Grant ${appName}: guests on Guest chats.`,
       })
     ).toHaveCount(1);
     await expect(card).toHaveCount(0);

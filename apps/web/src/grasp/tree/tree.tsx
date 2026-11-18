@@ -24,14 +24,23 @@ import {
   TreeItemLabel as LabelPrimitive,
 } from "@ui-sdk/react/tree";
 import type { TreeItemData } from "@ui-sdk/react/tree";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 
+import { listStyles } from "../combobox/list.styles";
 import { focus } from "../focus/focus";
-import { ChevronRight, Failed, Icon } from "../icons";
+import { ChevronRight, Failed, Icon, Search } from "../icons";
 import type { IconData } from "../icons";
+import {
+  InputGroup,
+  InputGroupClear,
+  InputGroupInput,
+  InputGroupText,
+} from "../input-group";
 import { Spinner } from "../spinner";
+import { useWords } from "../words/words";
 import { treeStyles as styles } from "./styles";
+import { treeWords } from "./words";
 
 /** One item of a tree. */
 export interface TreeNode {
@@ -105,6 +114,20 @@ export interface TreeProps {
   expandOnPress?: boolean;
   /** Nothing can be chosen, opened or run. */
   disabled?: boolean;
+  /**
+   * A filter field over the tree: what is typed narrows the items to those whose words hold it, each
+   * with the branches above it, opened; the matched words are marked. Emptied, the tree's folds come
+   * back as they were. Escape clears it, and ↓ moves into the tree. A branch whose children have not
+   * loaded yet is matched by its own words only.
+   * @default false
+   */
+  filterable?: boolean;
+  /** The filter's words. Pass it with `onFilterChange` to hold them yourself. */
+  filter?: string;
+  /** The filter's words at first. @default "" */
+  defaultFilter?: string;
+  /** Runs as the filter's words change. */
+  onFilterChange?: (filter: string) => void;
 }
 
 /** UI SDK's items, from ours: the whole shape, for the keys and type-ahead. */
@@ -137,6 +160,62 @@ const withLoaded = (
     return { ...node, children: withLoaded(node.children, loaded) };
   });
 
+/** Whether words hold the filter, whatever the case. */
+const holds = (words: string, query: string) =>
+  words.toLocaleLowerCase().includes(query);
+
+/**
+ * The nodes the filter keeps: each one whose words hold it, with its children as they are, and each
+ * branch above one, with only the children that lead to one.
+ */
+const narrowed = (nodes: TreeNode[], query: string): TreeNode[] =>
+  nodes.flatMap((node) => {
+    if (holds(node.label, query)) {
+      return [node];
+    }
+    const kept = node.children ? narrowed(node.children, query) : [];
+    return kept.length > 0 ? [{ ...node, children: kept }] : [];
+  });
+
+/** The branches above every match: they open while the filter stands. */
+const opened = (nodes: TreeNode[], query: string): string[] =>
+  nodes.flatMap((node) => {
+    if (!node.children || holds(node.label, query)) {
+      return [];
+    }
+    const below = opened(node.children, query);
+    return node.children.some((child) => holds(child.label, query)) ||
+      below.length > 0
+      ? [node.value, ...below]
+      : below;
+  });
+
+/** Words with each place they hold the filter marked, as Command marks its matches. */
+const Marked = ({ words, query }: { words: string; query: string }) => {
+  if (query === "") {
+    return words;
+  }
+  const lower = words.toLocaleLowerCase();
+  const parts: ReactNode[] = [];
+  let from = 0;
+  for (
+    let at = lower.indexOf(query);
+    at !== -1;
+    at = lower.indexOf(query, at + query.length)
+  ) {
+    parts.push(
+      words.slice(from, at),
+      // A match has no id of its own; its place in the words is its key.
+      <mark key={at} {...stylex.props(listStyles.mark)}>
+        {words.slice(at, at + query.length)}
+      </mark>
+    );
+    from = at + query.length;
+  }
+  parts.push(words.slice(from));
+  return parts;
+};
+
 /** Whether a node's row is a link. */
 const isLinked = (node: TreeNode) =>
   (node.href !== undefined && node.href !== "") || node.render !== undefined;
@@ -145,7 +224,15 @@ const isLinked = (node: TreeNode) =>
  * The row's icon, words and end; in a link when the node leads somewhere. The link takes no Tab
  * stop of its own: the tree's item holds focus, and Enter on it follows the link (Tree, below).
  */
-const RowInside = ({ node, current }: { node: TreeNode; current: boolean }) => {
+const RowInside = ({
+  node,
+  current,
+  query,
+}: {
+  node: TreeNode;
+  current: boolean;
+  query: string;
+}) => {
   const inside = (
     <>
       {node.icon && (
@@ -153,7 +240,9 @@ const RowInside = ({ node, current }: { node: TreeNode; current: boolean }) => {
           <Icon icon={node.icon} />
         </span>
       )}
-      <span {...stylex.props(styles.words)}>{node.label}</span>
+      <span {...stylex.props(styles.words)}>
+        <Marked words={node.label} query={query} />
+      </span>
       {node.end !== undefined && node.end !== null && node.end !== false && (
         <span {...stylex.props(styles.end)}>{node.end}</span>
       )}
@@ -191,9 +280,11 @@ const handleTreeKeyDown = (event: KeyboardEvent<HTMLElement>) => {
 const Items = ({
   nodes,
   current,
+  query,
 }: {
   nodes: TreeNode[];
   current: string | null | undefined;
+  query: string;
 }) =>
   nodes.map((node) => {
     const branch = node.children !== undefined;
@@ -233,16 +324,116 @@ const Items = ({
           ) : (
             <span aria-hidden="true" {...stylex.props(styles.spacer)} />
           )}
-          <RowInside node={node} current={current === node.value} />
+          <RowInside
+            node={node}
+            current={current === node.value}
+            query={query}
+          />
         </LabelPrimitive>
         {branch && (
           <GroupPrimitive {...stylex.props(styles.group)}>
-            <Items nodes={node.children ?? []} current={current} />
+            <Items
+              nodes={node.children ?? []}
+              current={current}
+              query={query}
+            />
           </GroupPrimitive>
         )}
       </ItemPrimitive>
     );
   });
+
+/** The filter field, the system's own (InputGroup), as Sidebar's: Escape clears it, ↓ moves into the tree. */
+const FilterField = ({
+  text,
+  onText,
+  onDown,
+}: {
+  text: string;
+  onText: (text: string) => void;
+  onDown: () => void;
+}) => {
+  const words = useWords("tree", treeWords);
+  return (
+    <InputGroup>
+      <InputGroupText icon={Search} />
+      <InputGroupInput
+        type="search"
+        aria-label={words.filter}
+        placeholder={words.filter}
+        value={text}
+        onValueChange={(value: string) => {
+          onText(value);
+        }}
+        onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+          if (event.key === "Escape" && text !== "") {
+            event.preventDefault();
+            event.stopPropagation();
+            onText("");
+          } else if (event.key === "ArrowDown") {
+            event.preventDefault();
+            onDown();
+          }
+        }}
+      />
+      <InputGroupClear aria-label={words.clear} />
+    </InputGroup>
+  );
+};
+
+/** Where the tree's keys are: the item that takes its Tab stop, else its first. */
+const treeStop = (box: HTMLElement | null) =>
+  box?.querySelector<HTMLElement>('[role=treeitem][tabindex="0"]') ??
+  box?.querySelector<HTMLElement>("[role=treeitem]") ??
+  null;
+
+/** The filter's words: the caller's when it holds them, else the tree's own. */
+const useFilterText = (
+  filter: string | undefined,
+  defaultFilter: string,
+  onFilterChange: ((filter: string) => void) | undefined
+) => {
+  const [own, setOwn] = useState(defaultFilter);
+  const change = (next: string) => {
+    if (filter === undefined) {
+      setOwn(next);
+    }
+    onFilterChange?.(next);
+  };
+  return { text: filter ?? own, change };
+};
+
+/**
+ * The folds of a tree with a filter, which the tree holds: while the filter stands, the branches
+ * above each match are open (and can be folded); emptied, the folds from before it come back, the
+ * caller's when it holds them, else the tree's own.
+ */
+const useFilterFolds = (
+  nodes: TreeNode[],
+  query: string,
+  props: Pick<TreeProps, "expanded" | "defaultExpanded" | "onExpandedChange">
+) => {
+  const [own, setOwn] = useState<string[]>(props.defaultExpanded ?? []);
+  const [folds, setFolds] = useState<{ query: string; open: string[] } | null>(
+    null
+  );
+  const filtering = query !== "";
+  const kept = folds?.query === query ? folds.open : undefined;
+  const now = filtering
+    ? (kept ?? opened(nodes, query))
+    : (props.expanded ?? own);
+  const change = (next: string[]) => {
+    if (filtering) {
+      setFolds({ query, open: next });
+      return;
+    }
+    if (props.expanded === undefined) {
+      setOwn(next);
+    }
+    props.onExpandedChange?.(next);
+  };
+  return { now, change };
+};
 
 /** Nested items that open and close. */
 export const Tree = ({
@@ -261,12 +452,25 @@ export const Tree = ({
   current,
   expandOnPress = true,
   disabled,
+  filterable = false,
+  filter,
+  defaultFilter = "",
+  onFilterChange,
 }: TreeProps) => {
+  const words = useWords("tree", treeWords);
   // Children that loaded are kept here, so the tree knows them from then on.
   const [loaded, setLoaded] = useState<Record<string, TreeNode[]>>({});
+  const box = useRef<HTMLDivElement>(null);
+  const { text, change: changeText } = useFilterText(
+    filter,
+    defaultFilter,
+    onFilterChange
+  );
+  const query = filterable ? text.trim().toLocaleLowerCase() : "";
   // The React Compiler keeps these between renders while their inputs stay the same.
   const nodes = withLoaded(items, loaded);
-  const data = toData(nodes);
+  const shown = query === "" ? nodes : narrowed(nodes, query);
+  const data = toData(shown);
   const load = async (branch: string, details: { signal: AbortSignal }) => {
     // A branch loads once: one that loaded empty stays empty, and is not asked again.
     if (!loadChildren || branch in loaded) {
@@ -279,7 +483,25 @@ export const Tree = ({
     }
     setLoaded((now) => ({ ...now, [branch]: children }));
   };
-  return (
+  // Without a filter the folds are the caller's or the tree's own, as they always were. With one,
+  // the tree holds them (useFilterFolds).
+  const folds = useFilterFolds(nodes, query, {
+    expanded,
+    defaultExpanded,
+    onExpandedChange,
+  });
+  const foldProps = filterable
+    ? { expanded: folds.now, onExpandedChange: folds.change }
+    : {
+        expanded,
+        defaultExpanded,
+        onExpandedChange:
+          onExpandedChange &&
+          ((next: string[]) => {
+            onExpandedChange(next);
+          }),
+      };
+  const tree = (
     <TreePrimitive
       aria-label={label}
       items={data}
@@ -293,15 +515,7 @@ export const Tree = ({
             }
           : undefined
       }
-      expanded={expanded}
-      defaultExpanded={defaultExpanded}
-      onExpandedChange={
-        onExpandedChange
-          ? (next: string[]) => {
-              onExpandedChange(next);
-            }
-          : undefined
-      }
+      {...foldProps}
       loadChildren={loadChildren ? load : undefined}
       onAction={
         onAction
@@ -316,7 +530,26 @@ export const Tree = ({
       onKeyDown={handleTreeKeyDown}
       {...stylex.props(styles.tree)}
     >
-      <Items nodes={nodes} current={current} />
+      <Items nodes={shown} current={current} query={query} />
     </TreePrimitive>
+  );
+  if (!filterable) {
+    return tree;
+  }
+  return (
+    <div ref={box} data-slot="tree-filtered" {...stylex.props(styles.filtered)}>
+      <FilterField
+        text={text}
+        onText={changeText}
+        onDown={() => {
+          treeStop(box.current)?.focus();
+        }}
+      />
+      {query !== "" && shown.length === 0 ? (
+        <output {...stylex.props(styles.none)}>{words.noMatches}</output>
+      ) : (
+        tree
+      )}
+    </div>
   );
 };

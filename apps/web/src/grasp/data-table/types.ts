@@ -42,6 +42,18 @@ export interface DataTableColumn<Row> {
   /** It starts held at the start or the end, with the `pinning` piece. */
   pin?: "start" | "end";
   /**
+   * It goes when the table's own box is narrower than the library's phone (40rem) or tablet (48rem)
+   * breakpoint, its head and its cells: measured on the table's box, not the window. Never the
+   * column a fact lives in alone: what it says must also be elsewhere in the row or on the row's
+   * own page. Not for the first column, which names the row.
+   */
+  hideBelow?: "phone" | "tablet";
+  /**
+   * More about the column behind an info mark beside its name ("What each role may do"): a
+   * sentence or two, in a tooltip. Its name stays `header`, which sorting and the menu say.
+   */
+  info?: string;
+  /**
    * How the Filter builder filters by it, with `filterable`: words it holds, a figure it is at
    * least or at most, or one of a few values; `false` leaves it out.
    * @default "text"
@@ -227,6 +239,11 @@ export interface DataTableProps<Row> {
   subRows?: (row: Row) => readonly Row[] | undefined;
   /** With the `grouping` piece: the column whose values gather the rows, each group counted. */
   groupBy?: string;
+  /**
+   * With the `grouping` piece: a group that asks for attention, by its value ("Needs you"). It tints
+   * the group's count, and nothing else, and is said in words with the group's name.
+   */
+  groupTone?: (value: string) => "attention" | undefined;
   /**
    * Where its toasts go (what an action did, with Undo). Leave it out and they go to the page's
    * shared `toast`, which the page's one `<Toaster />` draws: the page needs that Toaster, at its

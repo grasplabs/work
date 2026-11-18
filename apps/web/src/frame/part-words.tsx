@@ -66,12 +66,14 @@ import { sidebarWords } from "../grasp/sidebar/words.ts";
 import { signInWords } from "../grasp/sign-in/words.ts";
 import { sourcesWords } from "../grasp/sources/words.ts";
 import { stepperWords } from "../grasp/stepper/words.ts";
+import { tabsWords } from "../grasp/tabs/words.ts";
 import { tagInputWords } from "../grasp/tag-input/words.ts";
 import { tagWords } from "../grasp/tag/words.ts";
 import { themeSwitchWords } from "../grasp/theme-switch/words.ts";
 import { dayWritten } from "../grasp/thread/rows.ts";
 import { threadWords } from "../grasp/thread/words.ts";
 import { toasterWords } from "../grasp/toast/words.ts";
+import { treeWords } from "../grasp/tree/words.ts";
 import { renameWords } from "../grasp/words/rename.ts";
 import { GraspWords } from "../grasp/words/words.tsx";
 import type { GraspWordsCatalog } from "../grasp/words/words.tsx";
@@ -112,7 +114,9 @@ export const englishPartWords: GraspWordsCatalog = {
   datePicker: datePickerWords,
   dateRangePicker: dateRangePickerWords,
   languageSwitch: languageSwitchWords,
+  tabs: tabsWords,
   tagInput: tagInputWords,
+  tree: treeWords,
   button: buttonWords,
   chatMessage: chatMessageWords,
   codeBlock: codeBlockWords,
@@ -246,6 +250,8 @@ export const usePartWords = (): GraspWordsCatalog => {
         one: t({ message: "row", context: "a table's rows, counted" }),
         other: t({ message: "rows", context: "a table's rows, counted" }),
       },
+      columnInfo: (header) => t`More about ${header}`,
+      groupAttention: t`needs attention`,
     },
     dataTableFilters: {
       contains: t({ message: "contains", context: "a filter's operator" }),
@@ -588,9 +594,11 @@ export const usePartWords = (): GraspWordsCatalog => {
       voice: {
         asking: t`Asking for the microphone`,
         listening: t`Listening`,
+        speaking: t`Speaking`,
         thinking: t`Writing it down`,
         silent: t`Paused`,
         muted: t`Muted`,
+        close: t`Close voice`,
         done: t`Done`,
         cancel: t`Cancel`,
         mute: t`Mute`,
@@ -812,6 +820,12 @@ export const usePartWords = (): GraspWordsCatalog => {
       empty: t`No language found`,
       helpTranslate: t`Help translate`,
       button: (label, current) => t`${label}, ${current}`,
+    },
+    tabs: { close: (name) => t`Close ${name}` },
+    tree: {
+      filter: t`Filter`,
+      clear: t`Clear the filter`,
+      noMatches: t`No matches`,
     },
     tagInput: {
       duplicate: (word) => t`“${word}” is already added.`,

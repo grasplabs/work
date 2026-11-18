@@ -171,7 +171,12 @@ const onPage = (): string | null =>
     (each) => each.closest('[role="dialog"]') === null
   )?.textContent ?? null;
 
-const text = (): string => document.body.textContent ?? "";
+/** What the page shows: its words, and the values in its fields that only read. */
+const text = (): string =>
+  [
+    document.body.textContent ?? "",
+    ...[...document.querySelectorAll("input")].map((input) => input.value),
+  ].join(" ");
 
 describe("Settings › Audit trail › Integrity and archive", () => {
   afterEach(() => {

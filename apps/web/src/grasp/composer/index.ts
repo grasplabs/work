@@ -44,6 +44,7 @@ export type {
   ComposerVoicePhase,
   ComposerVoiceProblem,
   ComposerVoiceProps,
+  ComposerVoiceVariant,
   ComposerVoiceWords,
   VoiceReading,
 } from "./voice";

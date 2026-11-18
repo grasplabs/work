@@ -15,13 +15,19 @@
 
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
-import { renderElement } from "@ui-sdk/react/primitive";
+import { mergeProps, renderElement } from "@ui-sdk/react/primitive";
 import type { RenderProp } from "@ui-sdk/react/primitive";
 import { createContext, useContext } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 
 import { focus } from "../focus/focus";
 import { focusMarker } from "../focus/focus.stylex";
+import { Icon } from "../icons";
+import type { IconData } from "../icons";
+import { iconVars } from "../icons/icon.stylex";
+import { simply } from "../motion/simply.stylex";
+import { grasp, media } from "../tokens/tokens.stylex";
+import { WithTip } from "../tooltip/lazy-tip";
 import { Fold, MenuLink } from "./fold";
 import { PlaceContext } from "./place";
 import { tabStyles, watchRow, watchSides } from "./tabs";
@@ -40,6 +46,13 @@ export interface TabsNavProps {
    * @default "line"
    */
   variant?: "line" | "segmented";
+  /**
+   * Only the current link shows its words; every other link with an `icon` shows the icon alone,
+   * its words its tooltip and still its name. For a view switch in a narrow bar (Preview, Code, Data,
+   * Settings). The words ease in and out as the current view changes.
+   * @default false
+   */
+  compact?: boolean;
   /** Its links: TabsLink. */
   children: ReactNode;
   /** Layout only: where it sits and how wide it is. */
@@ -50,6 +63,8 @@ export interface TabsNavProps {
 export interface TabsLinkProps {
   /** Its words: a short noun for its view ("Runs"). */
   children: ReactNode;
+  /** An icon before the words. Import it from the icons entry (`@/components/grasp/icons`). */
+  icon?: IconData;
   /** Where it goes. Leave it out when `render` is a router's own link that carries it. */
   href?: string;
   /**
@@ -84,6 +99,54 @@ const styles = stylex.create({
   // A link's own underline and colour give way to the tab's.
   link: {
     textDecorationLine: "none",
+  },
+  // The icon and the words, side by side (on the line, the focus ring goes round both).
+  inside: {
+    display: "inline-flex",
+    alignItems: "center",
+  },
+  icon: {
+    [iconVars.size]: grasp.iconSm,
+    [iconVars.stroke]: grasp.iconStroke,
+    display: "inline-flex",
+    flexShrink: 0,
+  },
+  // The words in a column that eases between their width and none, fading as they go, so a compact
+  // link's words come and go without a jump or a cut letter left standing; at once under reduced
+  // motion.
+  words: {
+    display: "inline-grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    opacity: 1,
+    transitionProperty: "grid-template-columns, opacity",
+    transitionDuration: simply.mark,
+    transitionTimingFunction: grasp.ease,
+  },
+  wordsAway: {
+    gridTemplateColumns: "minmax(0, 0fr)",
+    opacity: 0,
+  },
+  wordsInner: {
+    minWidth: 0,
+    overflow: "hidden",
+  },
+  // An icon alone is narrower than a finger: on a touch screen its unseen target reaches 44px wide,
+  // the look unchanged (a line tab's target already reaches half the gap past each side).
+  targetIcon: {
+    insetInline: {
+      default: null,
+      [media.coarse]: `min(calc(-1 * ${grasp.tabGap} / 2), calc((100% - ${grasp.tap}) / 2))`,
+    },
+  },
+  targetIconSegment: {
+    insetInline: {
+      default: null,
+      [media.coarse]: `min(0px, calc((100% - ${grasp.tap}) / 2))`,
+    },
+  },
+  // After an icon, the words stand a step off it; the step goes with them when they go.
+  wordsAfterIcon: {
+    paddingInlineStart: grasp.space2,
   },
   // The words of every link, unseen and with no height: they give the nav its natural width, which
   // the box (a container) cannot give.
@@ -129,6 +192,7 @@ const styles = stylex.create({
 });
 
 const Variant = createContext<"line" | "segmented">("line");
+const Compact = createContext(false);
 
 const KEYS = new Set(["ArrowLeft", "ArrowRight", "Home", "End"]);
 
@@ -209,6 +273,7 @@ export const TabsNav = ({
   label: labelDeprecated,
   "aria-label": label = labelDeprecated ?? "",
   variant = "line",
+  compact = false,
   children,
   layout,
 }: TabsNavProps) => {
@@ -220,57 +285,77 @@ export const TabsNav = ({
   );
   return (
     <Variant.Provider value={variant}>
-      <nav
-        aria-label={label}
-        data-slot="tabs-nav"
-        {...stylex.props(tabStyles.root, layout)}
-      >
-        <div aria-hidden="true" inert {...stylex.props(styles.ghost)}>
-          <div className={list.className}>
-            <PlaceContext.Provider value="ghost">
-              {children}
-            </PlaceContext.Provider>
-          </div>
-        </div>
-        <div ref={watchFold} {...stylex.props(styles.box)}>
-          <div data-tabs-wide="" {...stylex.props(styles.wide)}>
-            <div
-              ref={segmented ? watchSides : watchRow}
-              data-tabs-row=""
-              className={list.className}
-            >
-              {children}
-              {!segmented && (
-                <span
-                  aria-hidden="true"
-                  data-tab-glide=""
-                  {...stylex.props(tabStyles.glide)}
-                />
-              )}
+      <Compact.Provider value={compact}>
+        <nav
+          aria-label={label}
+          data-slot="tabs-nav"
+          {...stylex.props(tabStyles.root, layout)}
+        >
+          <div aria-hidden="true" inert {...stylex.props(styles.ghost)}>
+            <div className={list.className}>
+              <PlaceContext.Provider value="ghost">
+                {children}
+              </PlaceContext.Provider>
             </div>
-            <div data-tabs-fold="" {...stylex.props(styles.fold)}>
-              <div {...stylex.props(styles.foldStart)}>
-                <Fold label={label} segmented={segmented}>
-                  {children}
-                </Fold>
+          </div>
+          <div ref={watchFold} {...stylex.props(styles.box)}>
+            <div data-tabs-wide="" {...stylex.props(styles.wide)}>
+              <div
+                ref={segmented ? watchSides : watchRow}
+                data-tabs-row=""
+                className={list.className}
+              >
+                {children}
+                {!segmented && (
+                  <span
+                    aria-hidden="true"
+                    data-tab-glide=""
+                    {...stylex.props(tabStyles.glide)}
+                  />
+                )}
+              </div>
+              <div data-tabs-fold="" {...stylex.props(styles.fold)}>
+                <div {...stylex.props(styles.foldStart)}>
+                  <Fold label={label} segmented={segmented}>
+                    {children}
+                  </Fold>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </nav>
+        </nav>
+      </Compact.Provider>
     </Variant.Provider>
   );
 };
 
-/** A view in the row: drawn as a tab, the current one chosen. */
-const RowLink = ({
+/** A link's icon and words; with `away`, the words gone to the icon alone. */
+const Inside = ({
+  icon,
+  away,
   children,
-  href,
-  render,
-  current = false,
-  segmented,
-}: TabsLinkProps & { segmented: boolean }) => {
-  const look = stylex.props(
+}: {
+  icon: IconData;
+  away: boolean;
+  children: ReactNode;
+}) => (
+  <>
+    <span aria-hidden="true" {...stylex.props(styles.icon)}>
+      <Icon icon={icon} />
+    </span>
+    <span {...stylex.props(styles.words, away && styles.wordsAway)}>
+      <span {...stylex.props(styles.wordsInner)}>
+        <span {...stylex.props(styles.inside, styles.wordsAfterIcon)}>
+          {children}
+        </span>
+      </span>
+    </span>
+  </>
+);
+
+/** A link's look in the row: a tab or a segment, chosen when current. */
+const lookOf = (segmented: boolean, current: boolean) =>
+  stylex.props(
     tabStyles.tab,
     styles.link,
     segmented && tabStyles.segment,
@@ -279,34 +364,81 @@ const RowLink = ({
     current && (segmented ? tabStyles.segmentChosen : tabStyles.chosen),
     segmented ? focus.inside : [focusMarker, focus.carrier]
   );
+
+/** A view in the row: drawn as a tab, the current one chosen. */
+const RowLink = ({
+  children,
+  href,
+  render,
+  icon,
+  current = false,
+  segmented,
+  compact,
+}: TabsLinkProps & { segmented: boolean; compact: boolean }) => {
+  const look = lookOf(segmented, current);
+  // Compact, a link that is not current shows its icon alone, its words its tooltip.
+  const away = compact && !current && icon !== undefined;
+  const inside =
+    icon === undefined ? (
+      children
+    ) : (
+      <Inside icon={icon} away={away}>
+        {children}
+      </Inside>
+    );
   const words = segmented ? (
-    children
+    inside
   ) : (
-    <span {...stylex.props(focus.label, tabStyles.label)}>{children}</span>
+    <span
+      {...stylex.props(
+        focus.label,
+        tabStyles.label,
+        icon !== undefined && styles.inside
+      )}
+    >
+      {inside}
+    </span>
   );
-  return renderElement(
-    "a",
-    {
-      href,
-      "aria-current": current ? "page" : undefined,
-      "data-slot": "tabs-link",
-      // On each link, not the row: a nav is not a control and takes no key handler of its own.
-      onKeyDown: moveFocus,
-      className: look.className,
-      children: (
-        <>
-          <span
-            aria-hidden="true"
-            {...stylex.props(
-              tabStyles.target,
-              segmented && tabStyles.targetSegment
-            )}
-          />
-          {words}
-        </>
-      ),
-    },
-    render
+  const own = {
+    href,
+    "aria-current": current ? "page" : undefined,
+    "data-slot": "tabs-link",
+    // On each link, not the row: a nav is not a control and takes no key handler of its own.
+    onKeyDown: moveFocus,
+    className: look.className,
+    children: (
+      <>
+        <span
+          aria-hidden="true"
+          {...stylex.props(
+            tabStyles.target,
+            segmented && tabStyles.targetSegment,
+            away && (segmented ? styles.targetIconSegment : styles.targetIcon)
+          )}
+        />
+        {words}
+      </>
+    ),
+  };
+  return (
+    <WithTip
+      // Kept on every compact link with an icon, and opened only while its words are away, so a link
+      // stays one element as it becomes current and its words ease in.
+      tooltip={
+        compact && icon !== undefined && typeof children === "string"
+          ? children
+          : undefined
+      }
+      off={!away}
+      // The tooltip shows the link's own name, so it is not also its description ("Data, Data").
+      render={(tipProps: Record<string, unknown>) =>
+        renderElement(
+          "a",
+          { ...mergeProps(tipProps, own), "aria-describedby": undefined },
+          render
+        )
+      }
+    />
   );
 };
 
@@ -314,6 +446,7 @@ const RowLink = ({
 export const TabsLink = (props: TabsLinkProps) => {
   const place = useContext(PlaceContext);
   const segmented = useContext(Variant) === "segmented";
+  const compact = useContext(Compact);
   if (place === "menu") {
     return <MenuLink {...props} />;
   }
@@ -321,11 +454,18 @@ export const TabsLink = (props: TabsLinkProps) => {
     return props.current === true ? <span>{props.children}</span> : null;
   }
   if (place === "ghost") {
+    const away = compact && props.current !== true && props.icon !== undefined;
     return (
       <span {...stylex.props(tabStyles.tab, segmented && tabStyles.segment)}>
-        {props.children}
+        {props.icon === undefined ? (
+          props.children
+        ) : (
+          <Inside icon={props.icon} away={away}>
+            {props.children}
+          </Inside>
+        )}
       </span>
     );
   }
-  return <RowLink {...props} segmented={segmented} />;
+  return <RowLink {...props} segmented={segmented} compact={compact} />;
 };

@@ -580,7 +580,18 @@ const styles = stylex.create({
   },
   // At the foot's end (dockAlign="end"): a chat box floating there, its end where the words end (F37).
   dockEnd: { justifyContent: "flex-end" },
-  dockHeld: { maxWidth: "100%", pointerEvents: "auto" },
+  // What the dock holds has a width of its own: a row that sizes to its holder (the one-row
+  // Composer) measured 24px in a holder that sizes to it. It stands centred in that width, or at its
+  // end (dockHeldEnd), so a narrower box keeps its place.
+  dockHeld: {
+    position: "relative",
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    justifyItems: "center",
+    width: `min(100%, ${grasp.shellDockWidth})`,
+    pointerEvents: "auto",
+  },
+  dockHeldEnd: { justifyItems: "end" },
   // The dock comes up and sinks away as a movement; away, nothing in it can be seen or reached.
   dockMoves: {
     transitionProperty: "opacity, translate, visibility",
@@ -593,6 +604,21 @@ const styles = stylex.create({
     visibility: "hidden",
     transitionDuration: simply.leave,
   },
+  dockVeil: {
+    position: "absolute",
+    insetInline: 0,
+    insetBlockStart: `calc(-1 * ${grasp.space4})`,
+    insetBlockEnd: 0,
+    zIndex: -1,
+    pointerEvents: "none",
+    backgroundImage: `linear-gradient(to bottom, transparent, ${grasp.shellCard} ${grasp.space4})`,
+    opacity: 0,
+    transitionProperty: "opacity",
+    transitionDuration: simply.ui,
+    transitionTimingFunction: grasp.ease,
+    display: { default: "block", [FORCED]: "none" },
+  },
+  dockVeilShown: { opacity: 1 },
   // In the sheet the sidebar runs the rest of the panel, on its own ground from edge to edge, so
   // the sheet reads as the sidebar itself, and scrolls when the links outrun the window.
   sheetSidebar: {
@@ -1372,10 +1398,46 @@ const notePlace = (card: HTMLElement, keep: RefObject<number>) => {
   };
 };
 
+/** What an effect with nothing to undo returns. */
+const holdNothing = () => {
+  // Nothing was started.
+};
+
 /**
- * The dock over the card's foot: it sinks away while it is not shown. No fade lies behind it (work
- * removed the library's F36 fade on the owner's word: it hid the page's foot across the card).
+ * Whether the page has something scrolled under the dock: more of it below the window. At the page's
+ * end its room below (roomBelow) keeps the last row clear of the dock, and a page that does not scroll
+ * never reaches it.
  */
+const useScrollsUnder = (dock: RefObject<HTMLDivElement | null>) => {
+  const [scrollsUnder, setScrollsUnder] = useState(false);
+  useEffect(() => {
+    const page = dock.current
+      ?.closest("[data-slot=app-shell-card]")
+      ?.querySelector<HTMLElement>("[data-slot=app-shell-page]");
+    if (page === null || page === undefined) {
+      return holdNothing;
+    }
+    const read = () => {
+      setScrollsUnder(
+        page.scrollHeight - page.scrollTop - page.clientHeight > 1
+      );
+    };
+    read();
+    page.addEventListener("scroll", read, { passive: true });
+    const observer = new ResizeObserver(read);
+    observer.observe(page);
+    for (const child of page.children) {
+      observer.observe(child);
+    }
+    return () => {
+      page.removeEventListener("scroll", read);
+      observer.disconnect();
+    };
+  }, [dock]);
+  return scrollsUnder;
+};
+
+/** The dock over the card's foot, with its own veil behind it: it sinks away while it is not shown. */
 const ShellDock = ({
   dock,
   shown = true,
@@ -1388,24 +1450,38 @@ const ShellDock = ({
   align?: "center" | "end";
   inert: boolean;
   fading: ReturnType<typeof fadesOf>["fading"];
-}) => (
-  <div
-    data-slot="app-shell-dock"
-    data-shown={shown ? "" : undefined}
-    inert={inert || !shown}
-    {...stylex.props(styles.dock, align === "end" && styles.dockEnd, fading)}
-  >
+}) => {
+  const held = useRef<HTMLDivElement>(null);
+  const scrollsUnder = useScrollsUnder(held);
+  return (
     <div
-      {...stylex.props(
-        styles.dockHeld,
-        styles.dockMoves,
-        !shown && styles.dockAway
-      )}
+      data-slot="app-shell-dock"
+      data-shown={shown ? "" : undefined}
+      inert={inert || !shown}
+      {...stylex.props(styles.dock, align === "end" && styles.dockEnd, fading)}
     >
-      {dock}
+      <div
+        ref={held}
+        {...stylex.props(
+          styles.dockHeld,
+          align === "end" && styles.dockHeldEnd,
+          styles.dockMoves,
+          !shown && styles.dockAway
+        )}
+      >
+        <span
+          aria-hidden="true"
+          data-slot="app-shell-dock-veil"
+          {...stylex.props(
+            styles.dockVeil,
+            scrollsUnder && styles.dockVeilShown
+          )}
+        />
+        {dock}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 /** Whether there are panels to stand beside the page: given, and not turned off. */
 const hasPanels = (panels: ReactNode, open: boolean | undefined) =>

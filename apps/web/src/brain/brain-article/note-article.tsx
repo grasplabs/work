@@ -8,6 +8,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "../../grasp/tabs/index.ts";
+import { Text } from "../../grasp/text/index.ts";
 import { grasp, media } from "../../grasp/tokens/tokens.stylex.ts";
 import { Fold } from "./kern.tsx";
 
@@ -82,10 +83,6 @@ const styles = stylex.create({
     borderInlineStartStyle: "solid",
     borderInlineStartColor: grasp.line,
   },
-  count: {
-    marginInlineStart: grasp.space2,
-    color: grasp.muted,
-  },
 });
 
 /**
@@ -130,32 +127,41 @@ export const NoteArticle = ({
           )}
         </div>
       </article>
-      <aside {...stylex.props(styles.side)}>
-        <Tabs
-          onValueChange={(value) => {
-            if (value !== null) {
-              setSide(value);
+      {tabs.length === 0 ? null : (
+        <aside {...stylex.props(styles.side)}>
+          <Tabs
+            onValueChange={(value) => {
+              if (value !== null) {
+                setSide(value);
+              }
+            }}
+            value={
+              tabs.some((tab) => tab.value === side) ? side : tabs[0]?.value
             }
-          }}
-          value={tabs.some((tab) => tab.value === side) ? side : tabs[0]?.value}
-        >
-          <TabsList>
+          >
+            <TabsList>
+              {tabs.map((tab) => (
+                <TabsTrigger key={tab.value} value={tab.value}>
+                  {tab.label}
+                  {tab.count === undefined ? null : (
+                    <>
+                      {" "}
+                      <Text element="span" size="sm" tone="quiet">
+                        {tab.count}
+                      </Text>
+                    </>
+                  )}
+                </TabsTrigger>
+              ))}
+            </TabsList>
             {tabs.map((tab) => (
-              <TabsTrigger key={tab.value} value={tab.value}>
-                {tab.label}
-                {tab.count === undefined ? null : (
-                  <span {...stylex.props(styles.count)}>{tab.count}</span>
-                )}
-              </TabsTrigger>
+              <TabsContent key={tab.value} value={tab.value}>
+                {tab.content}
+              </TabsContent>
             ))}
-          </TabsList>
-          {tabs.map((tab) => (
-            <TabsContent key={tab.value} value={tab.value}>
-              {tab.content}
-            </TabsContent>
-          ))}
-        </Tabs>
-      </aside>
+          </Tabs>
+        </aside>
+      )}
     </div>
   );
 };

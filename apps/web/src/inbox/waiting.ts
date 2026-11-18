@@ -42,6 +42,8 @@ export interface Waiting {
   decisions: Loaded<DecisionView[]>;
   /** Versions of workflows asked to go live that the person may approve or send back. */
   workflowGoLives: Loaded<WorkflowGoLiveItem[]>;
+  /** The names of who asked for each go-live, as far as the person may list them. */
+  goLivePeople?: ReadonlyMap<string, string>;
   /** Starts of workflows the person's chats' agents asked for, held for them to confirm. */
   heldStarts: Loaded<HeldStart[]>;
   /** Versions of workflows whose bindings no admin approved, so their starts are refused. Admins only. */

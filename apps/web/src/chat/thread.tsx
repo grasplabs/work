@@ -413,7 +413,7 @@ const useWorkingLabel = (): ((
   };
 };
 
-/** Under a code step's answer: each widget it made or changed on the dashboard, with the way there. */
+/** Under a code step's answer: each widget it made or changed. */
 const WidgetLines = ({
   tools,
   callIds,
@@ -429,10 +429,7 @@ const WidgetLines = ({
           <Trans>Grasp added a widget to your dashboard.</Trans>
         ) : (
           <Trans>Grasp changed a widget on your dashboard.</Trans>
-        )}{" "}
-        <RouterLink to="/dashboard">
-          <Trans>Open the dashboard</Trans>
-        </RouterLink>
+        )}
       </Text>
     ));
 

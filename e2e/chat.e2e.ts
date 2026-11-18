@@ -599,7 +599,6 @@ test("the chat on every other page carries on the open chat, which opens as its 
   await expect(messages.getByRole("article").first()).toHaveText(question);
   await chat.getByRole("button", { name: "New chat" }).click();
   await expect(messages).toHaveCount(0);
-  await expect(chat).toContainText("Ask anything, or describe a process");
   const second = `Another from another page ${tag}?`;
   await box.fill(second);
   // A page load reads the models again.

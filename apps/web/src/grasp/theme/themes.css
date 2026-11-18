@@ -846,6 +846,7 @@
   --grasp-inspector-inset: var(--grasp-space-3);
   --grasp-inspector-row: var(--grasp-tap);
   --grasp-inspector-kind: var(--grasp-mint-deep);
+  --grasp-inspector-tile-sm: var(--grasp-avatar-xs);
   --grasp-inspector-tile-tint: light-dark(
     oklch(0.8005 0.1625 165.25 / 0.14),
     oklch(0.8005 0.1625 165.25 / 0.16)
@@ -1691,6 +1692,7 @@
   --grasp-inspector-inset: var(--grasp-space-3);
   --grasp-inspector-row: var(--grasp-tap);
   --grasp-inspector-kind: var(--grasp-mint-deep);
+  --grasp-inspector-tile-sm: var(--grasp-avatar-xs);
   --grasp-inspector-tile-tint: light-dark(
     oklch(0.8005 0.1625 165.25 / 0.14),
     oklch(0.8005 0.1625 165.25 / 0.16)
@@ -2524,6 +2526,7 @@
   --grasp-inspector-inset: var(--grasp-space-3);
   --grasp-inspector-row: var(--grasp-tap);
   --grasp-inspector-kind: var(--grasp-mint-deep);
+  --grasp-inspector-tile-sm: var(--grasp-avatar-xs);
   --grasp-inspector-tile-tint: light-dark(
     oklch(0.8005 0.1625 165.25 / 0.14),
     oklch(0.8005 0.1625 165.25 / 0.16)
