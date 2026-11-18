@@ -26,14 +26,14 @@ import {
 } from "../activity/pending.tsx";
 import type { PendingRequests } from "../activity/pending.tsx";
 import { integrationKey } from "../connections/integrations.ts";
-import type { NotificationsPage } from "../dashboard/notifications-page.ts";
-import { decidesRequests } from "../dashboard/waiting.ts";
-import type { Interviews, Viewer, Waiting } from "../dashboard/waiting.ts";
 import { formatDate, formatDateTime } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { quietTeamOf } from "../onboarding/interviews-progress.tsx";
 import { linksOf } from "../onboarding/links-to-send.ts";
 import { listeningOf } from "../onboarding/setup.ts";
+import type { NotificationsPage } from "./notifications-page.ts";
+import { decidesRequests } from "./waiting.ts";
+import type { Interviews, Viewer, Waiting } from "./waiting.ts";
 
 // The inbox, as the prototype derives it (`lib/inbox.ts`): what waits on a
 // person to decide, each item made from what core says waits now, so an

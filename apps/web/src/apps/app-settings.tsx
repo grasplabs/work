@@ -28,7 +28,6 @@ import {
 import type { HttpListed, Integration } from "../connections/integrations.ts";
 import { timeoutMs, withTimeout } from "../core.ts";
 import type { Session } from "../core.ts";
-import { decidesRequests } from "../dashboard/waiting.ts";
 import { readPeople } from "../directory.ts";
 import { formatDateTime } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
@@ -52,6 +51,7 @@ import {
 import { TabsLink, TabsNav } from "../grasp/tabs/nav.tsx";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { decidesRequests } from "../inbox/waiting.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { PageFrame } from "../pages/page-frame.tsx";

@@ -16,9 +16,9 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import type { Waiting } from "../dashboard/waiting.ts";
 import { ItemDetail } from "./item-detail.tsx";
 import { inboxItems } from "./items.ts";
+import type { Waiting } from "./waiting.ts";
 
 // A question the brain asked the person, in the inbox: answered there, in
 // their own words, through core's brain as the page reaches it over RPC,

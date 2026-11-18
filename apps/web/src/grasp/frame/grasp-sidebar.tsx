@@ -66,7 +66,7 @@ const styles = stylex.create({
 // App shell stands it beside the page, folded as the person left it in this
 // browser (the frame keeps that), and on a phone in its menu's sheet.
 
-/** The Dashboard's count in words, for a screen reader: the badge shows the number alone. */
+/** The Inbox's count in words, for a screen reader: the badge shows the number alone. */
 const thingsWaiting = (waiting: number): string =>
   plural(waiting, { one: "# thing waiting", other: "# things waiting" });
 
@@ -113,10 +113,10 @@ const useGroups = (
         current: at("/", false),
       },
       {
-        label: t`Dashboard`,
+        label: t`Inbox`,
         icon: Inbox,
-        render: <Link to="/dashboard" />,
-        current: at("/dashboard", false),
+        render: <Link to="/inbox" />,
+        current: at("/inbox", false),
         count: waiting,
         countLabel: thingsWaiting(waiting ?? 0),
       },
@@ -385,7 +385,7 @@ export const useGraspSidebar = ({
   const openChats = useChatsWindow();
   const [tab, setTab] = useState<SidebarView>("home");
   // What waits on the person: the Inbox view's list, and so the bell's
-  // dot and the Dashboard's count.
+  // dot and the Inbox's count.
   const waitingItems = useWaitingItems(
     identity,
     identity.onboardingOnly !== true

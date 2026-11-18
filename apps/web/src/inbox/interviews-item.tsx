@@ -8,7 +8,6 @@ import { useState } from "react";
 
 import { copyText } from "../copy.ts";
 import { downloadCsv } from "../csv.ts";
-import type { Interviews } from "../dashboard/waiting.ts";
 import { formatDate, formatList } from "../format.ts";
 import { Alert } from "../grasp/alert/index.ts";
 import { Avatar } from "../grasp/avatar/index.ts";
@@ -34,6 +33,7 @@ import { fullLink, linksCsv, linksOf } from "../onboarding/links-to-send.ts";
 import { closesOn, listeningOf, teamNumbersOf } from "../onboarding/setup.ts";
 import type { Listening } from "../onboarding/setup.ts";
 import { useCoreAction } from "../use-core-action.ts";
+import type { Interviews } from "./waiting.ts";
 
 // The onboarding's interviews as the inbox's pinned item, for the admins
 // Settings, Onboarding was for: what keeps the links from going out, how

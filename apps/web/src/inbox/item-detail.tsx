@@ -14,8 +14,6 @@ import {
   useShown,
 } from "../chat/held-writes.tsx";
 import type { Session } from "../core.ts";
-import { isUnresolvable, OutcomeDetails } from "../dashboard/outcome-card.tsx";
-import { RequestDetails } from "../dashboard/pile-cards.tsx";
 import { formatDate, formatDateTime } from "../format.ts";
 import {
   AlertDialog,
@@ -44,6 +42,8 @@ import { PendingBindingList } from "../workflows/binding-approvals.tsx";
 import { kindLabel, kindMark } from "./inbox-kind.tsx";
 import { InterviewsDetail } from "./interviews-item.tsx";
 import type { InboxItem, InboxSource, Target } from "./items.ts";
+import { isUnresolvable, OutcomeDetails } from "./outcome-details.tsx";
+import { RequestDetails } from "./request-details.tsx";
 import { TargetLink } from "./target-link.tsx";
 
 // An item of the inbox, on Grasp UI: what it is and what happened, what

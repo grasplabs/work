@@ -1,10 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 
-import { readWaiting } from "../dashboard/read-dashboard.ts";
 import { PageLoading } from "../frame/page-states.tsx";
 import { InboxPage, groupOrder } from "../inbox/inbox-page.tsx";
 import { inboxItems, unread } from "../inbox/items.ts";
+import { readWaiting } from "../inbox/read-waiting.ts";
 import { ReportItem } from "../inbox/report-row.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 
