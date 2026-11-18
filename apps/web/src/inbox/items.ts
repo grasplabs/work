@@ -18,7 +18,7 @@ import type {
 } from "@grasp-os/shared/waiting";
 import { plural, t } from "@lingui/core/macro";
 
-import { requestAsker, requestWords } from "../activity/pending.tsx";
+import { requestRow, requestWords } from "../activity/pending.tsx";
 import type { PendingRequests } from "../activity/pending.tsx";
 import { integrationKey } from "../connections/integrations.ts";
 import type { NotificationsPage } from "../dashboard/notifications-page.ts";
@@ -315,15 +315,14 @@ const outcomeItems = (
 const requestItems = (pending: PendingRequests): InboxItem[] =>
   pending.requests.map((request) => {
     const { directory } = pending;
-    const subject = requestAsker(request, directory);
     const who = requestWords(request, directory);
     const { binding } = request;
     return {
       id: `request:${request.id}`,
       kind: "permissionRequest",
       title: t`Grant ${who}?`,
-      // The row names who asks; the title says what.
-      context: subject,
+      // The row says who asks and, where the request says it plainly, what.
+      context: requestRow(request, directory),
       body: [],
       facts: [
         { label: t`Binding`, value: binding },

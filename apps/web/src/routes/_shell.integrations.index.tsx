@@ -49,7 +49,7 @@ import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import { Empty, EmptyDescription, EmptyHeader } from "../grasp/empty/index.ts";
 import { visuallyHidden } from "../grasp/hidden/hidden.ts";
 import { ArrowLeft, Plus, Search as SearchIcon } from "../grasp/icons/index.ts";
 import {
@@ -265,33 +265,43 @@ const Connected = ({
       density="compact"
       title={title}
     >
-      <div {...stylex.props(styles.nerves)}>
-        <IntegrationsNerves
-          lines={lines}
-          onHold={() => {
-            // The app's tile says its name: nothing to show over the drawing.
-          }}
-          onOpen={(id) => {
-            void navigate({
-              resetScroll: false,
-              search: (last) => ({ ...last, app: id }),
-            });
-          }}
-        />
-      </div>
       {shown.length === 0 ? (
-        <Empty size="inline">{t`Nothing connected yet. Choose an app below to connect it.`}</Empty>
+        // Nothing connected: one quiet line, as small as the library's
+        // empty gets in a card; the brain shows once it has a nerve to draw.
+        <Empty size="sm">
+          <EmptyHeader>
+            <EmptyDescription>
+              {t`Nothing connected yet. Choose an app below to connect it.`}
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
-        <TileGrid label={title}>
-          {shown.map((integration) => (
-            <IntegrationTile
-              integration={integration}
-              key={integration.key}
-              open={integration.key === open}
-              uses={uses}
+        <>
+          <div {...stylex.props(styles.nerves)}>
+            <IntegrationsNerves
+              lines={lines}
+              onHold={() => {
+                // The app's tile says its name: nothing to show over the drawing.
+              }}
+              onOpen={(id) => {
+                void navigate({
+                  resetScroll: false,
+                  search: (last) => ({ ...last, app: id }),
+                });
+              }}
             />
-          ))}
-        </TileGrid>
+          </div>
+          <TileGrid label={title}>
+            {shown.map((integration) => (
+              <IntegrationTile
+                integration={integration}
+                key={integration.key}
+                open={integration.key === open}
+                uses={uses}
+              />
+            ))}
+          </TileGrid>
+        </>
       )}
     </SectionCard>
   );

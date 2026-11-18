@@ -351,3 +351,41 @@ export const requestWords = (
     msg`${ph({ subject })}: ${ph({ actions })} on ${ph({ object })}`
   );
 };
+
+/**
+ * A request in a list's row: who asks and what, where the request's own
+ * fields say it plainly. A collection is named as the directory knows it,
+ * else "a collection" (the request carries its ID only, never its name);
+ * a schedule as `requestAsker` has it; any other by who asks.
+ */
+export const requestRow = (
+  request: Permission,
+  directory: Directory,
+  now: Date = new Date()
+): string => {
+  const asker = requestAsker(request, directory, now);
+  const { object, actions } = request;
+  if (object.type !== "collection") {
+    return asker;
+  }
+  const reads = actions.includes("read");
+  const writes = actions.includes("write");
+  const named = directory.collections?.get(object.collectionId);
+  if (named === undefined) {
+    if (reads && writes) {
+      return i18n._(msg`${ph({ asker })} may read and change a collection`);
+    }
+    return writes
+      ? i18n._(msg`${ph({ asker })} may change a collection`)
+      : i18n._(msg`${ph({ asker })} may read a collection`);
+  }
+  const collection = named;
+  if (reads && writes) {
+    return i18n._(
+      msg`${ph({ asker })} may read and change ${ph({ collection })}`
+    );
+  }
+  return writes
+    ? i18n._(msg`${ph({ asker })} may change ${ph({ collection })}`)
+    : i18n._(msg`${ph({ asker })} may read ${ph({ collection })}`);
+};

@@ -45,6 +45,8 @@ const styles = stylex.create({
     gap: grasp.space2,
     fontWeight: grasp.weightMedium,
   },
+  // The mark at the head, as tall as a line of its words.
+  mark: { height: grasp.iconSm, width: "auto" },
   // The frame it prints from: on the page, never seen nor pressed.
   frame: {
     position: "fixed",
@@ -128,7 +130,7 @@ const PrintPage = ({
   // `page-export` (styles.css): the A4 page and its headings, for print.
   <main className={`page-export ${stylex.props(styles.page).className ?? ""}`}>
     <header {...stylex.props(styles.head)}>
-      <GraspMark className="h-4 w-auto" />
+      <GraspMark {...stylex.props(styles.mark)} />
       Grasp
     </header>
     <Heading level={1}>{title}</Heading>

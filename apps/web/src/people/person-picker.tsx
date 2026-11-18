@@ -1,12 +1,6 @@
-import {
-  Avatar as KitAvatar,
-  AvatarFallback as KitAvatarFallback,
-} from "@grasp-os/ui/components/avatar";
-import { CommandItem } from "@grasp-os/ui/components/command";
 import { useLingui } from "@lingui/react/macro";
 import { useState } from "react";
 
-import { initials } from "../frame/person-menu.tsx";
 import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Command } from "../grasp/command/index.ts";
 import type { CommandEntry } from "../grasp/command/index.ts";
@@ -55,46 +49,6 @@ export const PersonAvatar = ({ name }: { name: string }) => (
   <Avatar decorative name={name} size="xs">
     <AvatarFallback />
   </Avatar>
-);
-
-/**
- * One person in a list of people to pick from: their portrait and name,
- * found by either their name or their email as typed, and under it what
- * tells them apart from someone of the same name (`usePeopleApart`).
- *
- * Still the old kit's row: the sharing picker (`share-picker.tsx`) lists it
- * in its own old list until sharing moves onto the library, and this
- * pickers' lists are the library's Command (`personEntry`).
- */
-export const PersonOption = ({
-  person,
-  checked = false,
-  hint,
-  onSelect,
-}: {
-  person: Pickable;
-  checked?: boolean;
-  /** What tells them apart from a namesake (`PeopleApart`'s `hint`). */
-  hint?: string;
-  onSelect: () => void;
-}) => (
-  <CommandItem
-    data-checked={checked}
-    onSelect={onSelect}
-    keywords={[person.name, person.email ?? "", hint ?? ""]}
-    // Their ID keeps two people of the same name apart.
-    value={`person:${person.id}`}
-  >
-    <KitAvatar size="sm">
-      <KitAvatarFallback>{initials(person.name)}</KitAvatarFallback>
-    </KitAvatar>
-    <span className="flex min-w-0 flex-1 flex-col">
-      <span className="truncate">{person.name}</span>
-      {hint === undefined ? null : (
-        <span className="text-muted-foreground truncate text-xs">{hint}</span>
-      )}
-    </span>
-  </CommandItem>
 );
 
 /**

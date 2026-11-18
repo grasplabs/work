@@ -358,8 +358,10 @@ const CollectionBlocks = ({
               {collection.description === "" ? null : (
                 <CardDescription>{collection.description}</CardDescription>
               )}
+              {/* Who may read it, at the card's foot: badges say, they do
+                  nothing when pressed, so they may stand in the one link. */}
+              <CollectionMarkers collection={collection} />
             </CardLink>
-            <CollectionMarkers collection={collection} />
             {documents === undefined ? null : (
               <LatestDocuments documents={documents} />
             )}

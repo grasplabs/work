@@ -188,6 +188,30 @@ msgstr "{asked} sur {reach} lui ont posé une question cette semaine"
 msgid "{asker} already asked for it on {askedOn}."
 msgstr "{asker} l’a déjà demandée le {askedOn}."
 
+#: src/activity/pending.tsx
+msgid "{asker} may change {collection}"
+msgstr "{asker} peut modifier {collection}"
+
+#: src/activity/pending.tsx
+msgid "{asker} may change a collection"
+msgstr "{asker} peut modifier une collection"
+
+#: src/activity/pending.tsx
+msgid "{asker} may read {collection}"
+msgstr "{asker} peut lire {collection}"
+
+#: src/activity/pending.tsx
+msgid "{asker} may read a collection"
+msgstr "{asker} peut lire une collection"
+
+#: src/activity/pending.tsx
+msgid "{asker} may read and change {collection}"
+msgstr "{asker} peut lire et modifier {collection}"
+
+#: src/activity/pending.tsx
+msgid "{asker} may read and change a collection"
+msgstr "{asker} peut lire et modifier une collection"
+
 #: src/workflows/traces.tsx
 #: src/workflows/workflow-diagram.tsx
 msgid "{attempts, plural, one {# attempt} other {# attempts}}"
@@ -2295,10 +2319,6 @@ msgstr "Ajouter un index"
 msgid "Add an integration"
 msgstr "Ajouter une intégration"
 
-#: src/projects/project-people.tsx
-msgid "Add as"
-msgstr "Ajouter en tant que"
-
 #: src/agents/agent-documents.tsx
 msgid "Add documents"
 msgstr "Ajouter des documents"
@@ -2347,10 +2367,6 @@ msgstr "Ajouter le fournisseur"
 #: src/apps/indexes-view.tsx
 msgid "Add search"
 msgstr "Ajouter la recherche"
-
-#: src/projects/project-people.tsx
-msgid "Add someone"
-msgstr "Ajouter quelqu’un"
 
 #: src/interview/closed.tsx
 msgid "Add something"
@@ -6333,7 +6349,6 @@ msgid "Everyone has a link of their own: whoever has it is them, so send each on
 msgstr "Chacun a son propre lien : qui l’a est cette personne, alors envoyez chaque lien uniquement à son titulaire. Les liens pas encore disponibles s’ouvrent le jour prévu, ou dès que le responsable a parlé."
 
 #: src/apps/app-sharing.tsx
-#: src/people/share-picker.tsx
 #: src/workflows/share-workflow.tsx
 msgid "Everyone in {project}"
 msgstr "Tout le monde dans {project}"
@@ -10233,7 +10248,6 @@ msgid "Nobody changes the records in {table}, Sam included."
 msgstr "Personne ne modifie les enregistrements de {table}, pas même Sam."
 
 #: src/people/people-teams-picker.tsx
-#: src/projects/project-people.tsx
 msgid "Nobody else to add."
 msgstr "Personne d'autre à ajouter."
 
@@ -10333,6 +10347,7 @@ msgstr "Pas une image PNG, JPEG ou WebP"
 
 #: src/agents/agent-documents.tsx
 #: src/projects/file-item-dialog.tsx
+#: src/projects/project-people.tsx
 msgid "Not added"
 msgstr "Non ajouté"
 
@@ -11751,9 +11766,9 @@ msgstr "En attente"
 
 #: src/chat/mentions.tsx
 #: src/people/people-teams-picker.tsx
-#: src/people/share-picker.tsx
 #: src/projects/project-dialog.tsx
 #: src/projects/project-people-stack.tsx
+#: src/projects/project-people.tsx
 #: src/settings/team-members-dialog.tsx
 #: src/workflows/share-workflow.tsx
 msgid "People"
@@ -12037,7 +12052,6 @@ msgid "Project"
 msgstr "Projet"
 
 #: src/grasp/frame/grasp-sidebar.tsx
-#: src/people/share-picker.tsx
 #: src/projects/project-view.tsx
 #: src/routes/_shell.projects.$projectId.tsx
 #: src/routes/_shell.projects.index.tsx
@@ -12359,7 +12373,6 @@ msgid "Reading it kept failing, so your triggers there start nothing new for now
 msgstr "La lecture a échoué à répétition, vos déclencheurs n'y lancent donc plus rien de nouveau pour l'instant. Grasp continue d'essayer ; si cela ne revient pas, vérifiez la connexion."
 
 #: src/people/people-teams-picker.tsx
-#: src/people/share-picker.tsx
 msgid "Reading people and teams…"
 msgstr "Lecture des personnes et des équipes…"
 
@@ -12591,7 +12604,6 @@ msgstr "Mémorisation"
 msgid "Remove"
 msgstr "Retirer"
 
-#: src/projects/project-people.tsx
 #: src/projects/project-view.tsx
 msgctxt "take out of a project"
 msgid "Remove"
@@ -13746,7 +13758,7 @@ msgid "Search people"
 msgstr "Rechercher des personnes"
 
 #: src/people/people-teams-picker.tsx
-#: src/people/share-picker.tsx
+#: src/projects/project-people.tsx
 msgid "Search people and teams"
 msgstr "Rechercher des personnes et des équipes"
 
@@ -15087,6 +15099,10 @@ msgstr "Tables"
 msgid "Tablet"
 msgstr "Tablette"
 
+#: src/projects/project-people.tsx
+msgid "Take {gone} out of {projectName}?"
+msgstr "Retirer {gone} de {projectName} ?"
+
 #: src/apps/app-integrations.tsx
 msgid "Take {integrationName} off {appName}"
 msgstr "Retirer {integrationName} de {appName}"
@@ -15098,14 +15114,6 @@ msgstr "Retirer {itemName} de {projectName} ?"
 #: src/projects/project-view.tsx
 msgid "Take {itemName} out of the project"
 msgstr "Retirer {itemName} du projet"
-
-#: src/projects/project-people.tsx
-msgid "Take {name} out of {projectName}?"
-msgstr "Retirer {name} de {projectName} ?"
-
-#: src/projects/project-people.tsx
-msgid "Take {name} out of the project"
-msgstr "Retirer {name} du projet"
 
 #: src/dashboard/widget-board.tsx
 msgid "Take off the dashboard"
@@ -15217,7 +15225,6 @@ msgstr "Taille de l’équipe inconnue."
 #: src/knowledge/collection-markers.tsx
 #: src/knowledge/new-collection.tsx
 #: src/people/people-teams-picker.tsx
-#: src/people/share-picker.tsx
 #: src/settings/teams.tsx
 #: src/workflows/share-workflow.tsx
 msgid "Teams"
@@ -18205,6 +18212,7 @@ msgid "Who talked"
 msgstr "Qui a parlé"
 
 #: src/apps/app-sharing.tsx
+#: src/projects/project-people.tsx
 msgid "Who to share with couldn't be read. Try again in a moment."
 msgstr "Impossible de lire avec qui partager. Réessayez dans un instant."
 

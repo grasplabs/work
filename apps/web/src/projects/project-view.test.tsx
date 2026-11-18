@@ -8,6 +8,7 @@ import type {
   ProjectItemCandidate,
   ProjectItemsPage,
   ProjectItemRef,
+  ProjectMemberRef,
   ProjectShareCandidates,
 } from "@grasp-os/shared/projects";
 import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
@@ -141,6 +142,13 @@ const fakeProjects = (
         throw new Error("Cy can't be added.");
       }
       asked.push(["addMember", member.type, member.id, member.role]);
+    },
+    removeMember: async (
+      _id: string,
+      member: ProjectMemberRef
+    ): Promise<void> => {
+      await Promise.resolve();
+      asked.push(["removeMember", member.type, member.id]);
     },
     itemCandidates: async (): Promise<ProjectItemCandidate[]> => {
       await Promise.resolve();
@@ -281,17 +289,61 @@ const type = async (input: Element | null, value: string) => {
   });
 };
 
-/** The names the open list of people and teams shows. */
-const shownNames = () =>
-  [...document.querySelectorAll("[cmdk-item]")].map(
-    (each) => each.querySelector("span.truncate")?.textContent
+/** What an element says, without the words it keeps hidden for working or failed. */
+const words = (element: Element): string => {
+  const copy = element.cloneNode(true);
+  if (!(copy instanceof Element)) {
+    return "";
+  }
+  for (const hidden of copy.querySelectorAll("[aria-hidden='true']")) {
+    hidden.remove();
+  }
+  return copy.textContent?.trim() ?? "";
+};
+
+/** The field of the picker of people and teams to add. */
+const field = (): HTMLInputElement | null =>
+  document.querySelector<HTMLInputElement>(
+    "input[aria-label='Search people and teams']"
   );
 
-/** Who is offered as `name` in the open list of people and teams. */
-const offered = (name: string) =>
-  [...document.querySelectorAll("[cmdk-item]")].find(
-    (each) => each.querySelector("span.truncate")?.textContent === name
+/** Opens the picker's list, as the person does from its field. */
+const openPicker = async (): Promise<void> => {
+  const box = field();
+  if (box === null) {
+    throw new TypeError("No picker");
+  }
+  await act(async () => {
+    box.focus();
+    box.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })
+    );
+    await Promise.resolve();
+  });
+  await settled();
+};
+
+/** The options the open picker shows, each as its lines read. */
+const optionLines = (): string[] =>
+  [...document.querySelectorAll("[role=option]")].map(words);
+
+/** Picks the option whose first line is `name`. */
+const pickOption = async (name: string): Promise<void> => {
+  await press(
+    [...document.querySelectorAll("[role=option]")].find(
+      (each) => each.getAttribute("aria-label") === name
+    )
   );
+};
+
+/** Chooses `choice` in the open list of a Select. */
+const choose = async (choice: string): Promise<void> => {
+  await press(
+    [...document.querySelectorAll("[role=option]")].find(
+      (each) => words(each) === choice
+    )
+  );
+};
 
 describe("A project's page", () => {
   afterEach(() => {
@@ -358,21 +410,26 @@ describe("A project's page", () => {
     });
   });
 
-  it("adds someone as a user, from who core offers when the list opens, and says why an add was refused", async () => {
+  it("adds people and teams in a role, from who core offers when the people open, and says why an add was refused", async () => {
     const { session, asked } = fakeProjects();
     await shown(session, project("builder"));
-    await press(peopleButton());
 
     const before = [...asked];
-    await press(button("Add someone"));
-    const names = shownNames();
+    await press(peopleButton());
+    await openPicker();
+    const names = optionLines();
     // Every ID holds an "s" ("user-…", "team-…"): only names are searched.
-    await type(document.querySelector("[cmdk-input]"), "s");
-    const found = shownNames();
-    await type(document.querySelector("[cmdk-input]"), "");
-    await press(offered("Bo"));
-    await press(button("Add someone"));
-    await press(offered("Cy"));
+    await type(field(), "s");
+    const found = optionLines();
+    await type(field(), "");
+    await pickOption("Bo");
+    await pickOption("Sales (team)");
+    await press(button("Role in the project"));
+    await choose("Builder");
+    await press(inDialog("Add"));
+    await openPicker();
+    await pickOption("Cy");
+    await press(inDialog("Add"));
 
     expect({
       before,
@@ -382,9 +439,17 @@ describe("A project's page", () => {
       refused: document.body.textContent?.includes("Cy can't be added."),
     }).toStrictEqual({
       before: [],
-      names: ["Bo", "Cy", "Sales"],
-      found: ["Sales"],
-      asked: [["shareCandidates"], ["addMember", "person", "user-bo", "user"]],
+      names: ["Bo", "Cy", "Sales (team)"],
+      found: ["Sales (team)"],
+      asked: [
+        ["shareCandidates"],
+        ["addMember", "person", "user-bo", "builder"],
+        ["addMember", "team", "team-sales", "builder"],
+        // Whom to offer is read again after each change, so who was just
+        // added isn't offered again.
+        ["shareCandidates"],
+        ["shareCandidates"],
+      ],
       refused: true,
     });
   });
@@ -397,24 +462,20 @@ describe("A project's page", () => {
     await shown(session, project("builder"));
     await press(peopleButton());
 
-    await press(button("Add someone"));
-    const options = [...document.querySelectorAll("[cmdk-item]")].map((each) =>
-      [...each.querySelectorAll("span.truncate")].map(
-        (line) => line.textContent
-      )
-    );
+    await openPicker();
+    const options = optionLines();
 
     // The Ada in it is the only one it lists, so it names her as before.
     expect({
       options,
-      inIt: button("Take Ada out of the project") !== undefined,
+      inIt: button("Access for Ada") !== undefined,
     }).toStrictEqual({
-      options: [["Ada", "ID …222222"], ["Bo"], ["Sales"]],
+      options: ["AdaID …222222", "Bo", "Sales (team)"],
       inIt: true,
     });
   });
 
-  it("names members of the same name apart, to take out", async () => {
+  it("names members of the same name apart, to change or take out", async () => {
     const { session } = fakeProjects();
     const [ada] = project("builder").members;
     if (ada === undefined) {
@@ -427,9 +488,47 @@ describe("A project's page", () => {
     await press(peopleButton());
 
     expect([
-      button("Take Ada (ID …er-ada) out of the project") !== undefined,
-      button("Take Ada (ID …222222) out of the project") !== undefined,
+      button("Access for Ada (ID …er-ada)") !== undefined,
+      button("Access for Ada (ID …222222)") !== undefined,
     ]).toStrictEqual([true, true]);
+  });
+
+  it("changes someone's role, and takes them out only once they confirm, naming what they lose", async () => {
+    const { session, asked } = fakeProjects();
+    await shown(session, project("builder"));
+    await press(peopleButton());
+
+    await press(button("Access for Ada"));
+    await choose("Builder");
+    const takeOut = async (): Promise<void> => {
+      await press(button("Access for Ada"));
+      await choose("Remove");
+    };
+    await takeOut();
+    const warning =
+      document.querySelector('[role="alertdialog"]')?.textContent ?? "";
+    await press(button("Cancel"));
+    const changes = () => asked.filter(([call]) => call !== "shareCandidates");
+    const afterCancel = changes();
+    await takeOut();
+    await press(
+      [...document.querySelectorAll('[role="alertdialog"] button')].find(
+        (each) => words(each) === "Take out"
+      )
+    );
+
+    expect({
+      warned: warning.includes("Take Ada out of Sell & get paid?"),
+      afterCancel,
+      asked: changes(),
+    }).toStrictEqual({
+      warned: true,
+      afterCancel: [["addMember", "person", "user-ada", "builder"]],
+      asked: [
+        ["addMember", "person", "user-ada", "builder"],
+        ["removeMember", "person", "user-ada"],
+      ],
+    });
   });
 
   it("names who loses access before taking a shared workflow out", async () => {
@@ -452,16 +551,33 @@ describe("A project's page", () => {
   });
 
   it("lets someone who only uses the project change nothing", async () => {
-    const { session } = fakeProjects();
+    const { session, asked } = fakeProjects();
     await shown(session, project("user"));
+    await press(peopleButton());
+    const people = {
+      picker: field(),
+      roles: button("Access for Ada"),
+      listed: [
+        ...document.querySelectorAll("[aria-label='People'] [data-slot=item]"),
+      ].map(words),
+      asked: [...asked],
+    };
+    await press(button("Close"));
 
     expect({
+      people,
       add: button("Add"),
       remove: button("Take Invoices out of the project"),
       change: button("Change"),
       delete: button("Delete"),
       listed: document.body.textContent?.includes("Invoices"),
     }).toStrictEqual({
+      people: {
+        picker: null,
+        roles: undefined,
+        listed: ["OlgaOwner", "AdaUser"],
+        asked: [],
+      },
       add: undefined,
       remove: undefined,
       change: undefined,

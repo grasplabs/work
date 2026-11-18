@@ -27,15 +27,19 @@ test("loads the frontend from core, reaches core over RPC, and asks whoever isn'
   expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/");
 });
 
-test("shows only its own words for a refused sign-in, never the link's", async ({
+test("shows only its own words for a refused sign-in, never the link's, and comes back to the page without them", async ({
   page,
 }) => {
-  const planted = "Your account is locked. Call +1 555 0100";
-  await page.goto(`/?error=${encodeURIComponent(planted)}`);
+  const planted = encodeURIComponent(
+    "Your account is locked. Call +1 555 0100"
+  );
+  // OAuth's pair, as a refused sign-in comes back with.
+  await page.goto(`/?error=${planted}&error_description=${planted}`);
   await expect(page.getByRole("alert")).toHaveText(
     "Sign-in didn't work. Try again, or ask an admin."
   );
-  await expect(page.getByText(planted)).toHaveCount(0);
+  await expect(page.getByText(decodeURIComponent(planted))).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/");
 });
 
 test("shows a refusal with the request ID core answered it under, for the person to quote", async ({

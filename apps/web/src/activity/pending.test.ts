@@ -9,7 +9,13 @@ import {
 import type { Permission } from "@grasp-os/shared/permissions";
 import { describe, expect, it } from "vite-plus/test";
 
-import { objectOf, requestAsker, requestWords, subjectOf } from "./pending.tsx";
+import {
+  objectOf,
+  requestAsker,
+  requestRow,
+  requestWords,
+  subjectOf,
+} from "./pending.tsx";
 
 const app = "11111111-1111-4111-8111-111111111111";
 
@@ -176,6 +182,29 @@ describe("a schedule trigger asking to start its workflow", () => {
       other: true,
       asker: "Schedule for invoice-approval",
       otherAsker: true,
+    });
+  });
+});
+
+describe("a pending request in a list's row", () => {
+  it("says what a collection request asks, by the collection's name where the page knows it, and any other by who asks", () => {
+    const reads = onCollection();
+    const both: Permission = { ...reads, actions: ["read", "write"] };
+    const { object } = reads;
+    const id = object.type === "collection" ? object.collectionId : "";
+    const named = { ...directory, collections: new Map([[id, "Finance"]]) };
+    const asker = subjectOf(reads, directory);
+
+    expect({
+      named: requestRow(reads, named),
+      both: requestRow(both, named),
+      unnamed: requestRow(reads, directory),
+      other: requestRow(onApp(["read"]), directory),
+    }).toStrictEqual({
+      named: `${asker} may read Finance`,
+      both: `${asker} may read and change Finance`,
+      unnamed: `${asker} may read a collection`,
+      other: subjectOf(onApp(["read"]), directory),
     });
   });
 });

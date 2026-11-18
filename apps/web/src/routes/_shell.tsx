@@ -73,11 +73,13 @@ const Shell = () => {
 
 /**
  * The page to come back to after signing in: its path and search, less
- * `error`, which a refused sign-in adds and the sign-in page shows itself.
+ * `error` and `error_description`, which a refused sign-in adds (OAuth's
+ * pair) and the sign-in page shows itself.
  */
 const returnPathOf = (pathname: string, searchStr: string): string => {
   const search = new URLSearchParams(searchStr);
   search.delete("error");
+  search.delete("error_description");
   const rest = search.toString();
   return rest === "" ? pathname : `${pathname}?${rest}`;
 };
