@@ -1,7 +1,7 @@
 import type { AppOverview } from "@grasp-os/shared/apps";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { Page, PageHeading } from "../frame/page.tsx";
@@ -37,7 +37,6 @@ const styles = stylex.create({
 /** One App: its card. */
 const OneApp = ({ overview: { app } }: { overview: AppOverview }) => {
   const { t } = useLingui();
-  const navigate = useNavigate();
   const status = statusOf(app);
   const metaOf = {
     live: t`Your team uses it`,
@@ -50,12 +49,8 @@ const OneApp = ({ overview: { app } }: { overview: AppOverview }) => {
         {
           label: t`Settings`,
           icon: Settings,
-          onSelect: () => {
-            void navigate({
-              to: "/apps/$app/settings",
-              params: { app: app.id },
-            });
-          },
+          // A link, so it also opens in a new tab.
+          render: <Link params={{ app: app.id }} to="/apps/$app/settings" />,
         },
       ]}
       render={<Link params={{ app: app.id }} to="/apps/$app" />}

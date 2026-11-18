@@ -141,6 +141,29 @@ describe(AppsOverview, () => {
     });
   });
 
+  it("leads from a card's menu to the App's settings by a link, so it opens in a new tab too", async () => {
+    const invoices = overview("Invoices", "2026-10-01T08:00:00.000Z", true);
+    await shown([invoices]);
+    const more = document.querySelector<HTMLButtonElement>(
+      '[data-slot="app-card"] button'
+    );
+    await act(async () => {
+      more?.click();
+      await Promise.resolve();
+    });
+    const settings = [
+      ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+    ].find((item) => item.textContent.trim() === "Settings");
+
+    expect({
+      tag: settings?.tagName,
+      href: settings?.getAttribute("href"),
+    }).toStrictEqual({
+      tag: "A",
+      href: `/apps/${invoices.app.id}/settings`,
+    });
+  });
+
   it("narrows the Apps to those whose name has what is searched, and says when none has", async () => {
     await shown([
       overview("Invoices", "2026-10-01T08:00:00.000Z", true),

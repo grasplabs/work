@@ -45,6 +45,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { activeChat, setActiveChat } from "../chat/active-chat.ts";
 import { ChatBar } from "../chat/chat-bar.tsx";
 import { ChatPanel } from "../chat/chat-panel.tsx";
+import { chatPresence } from "../chat/chat-presence.ts";
 import { slotOf } from "../chat/chat-subject.ts";
 import { GlobalChatProvider } from "../chat/global-chat.tsx";
 import { toast, Toaster } from "../grasp/toast/index.ts";
@@ -379,6 +380,8 @@ const opened = async (
     getParentRoute: () => shell,
     path: "/",
     loader: async () => await apps.get(),
+    // As the App's own route says: no chat but the App's own, docked.
+    staticData: { chat: chatPresence.hidden },
   });
   const Page = () => {
     // This test's own router, never the app's registered route tree.

@@ -1,7 +1,9 @@
 import { useMatches } from "@tanstack/react-router";
 
+import { useShownSlot } from "./active-chat.ts";
 import { chatPlacement, openChat } from "./chat-layout.ts";
 import type { ChatPlacement } from "./chat-layout.ts";
+import { subjectOf } from "./chat-subject.ts";
 
 // Where Grasp's one chat may show on a page (global-chat.tsx): a page
 // says so on its route, in TanStack Router's own static data, and the
@@ -76,7 +78,10 @@ export const placementOn = (
  * page that allows it nowhere.
  */
 export const useOpenChat = (): ((wanted?: ChatPlacement) => void) => {
-  const presence = useChatPresence();
+  const routed = useChatPresence();
+  // A page about a subject has it docked, whatever its route says.
+  const presence =
+    subjectOf(useShownSlot()) === undefined ? routed : chatPresence.docked;
   return (wanted) => {
     const placement = placementOn(presence, wanted ?? chatPlacement());
     if (placement !== undefined) {
