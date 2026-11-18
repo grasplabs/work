@@ -749,7 +749,8 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
           action: "brain.capture.skipped",
           onBehalfOf: person.userId,
           detail: {
-            reason: "shared",
+            // No Brain audience chosen for it (GRA-1831): kept for nobody.
+            reason: "no_audience",
             items: 1,
             kept: 0,
             failed: 0,
@@ -762,7 +763,7 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
           query: mine,
         }),
       ],
-      sharedAfter: ["shared", "shared"],
+      sharedAfter: ["no_audience", "no_audience"],
       sharedRecalled: [],
       sharedStatus: "active",
       sharedKeepsReads: undefined,
