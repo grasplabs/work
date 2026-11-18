@@ -6696,3 +6696,19 @@ export const brainOwnStores = sqliteTable("brain_own_stores", {
   /** Whether its SQLite is near what one object holds (`storeNearLimit`). */
   nearLimit: integer("near_limit", { mode: "boolean" }).notNull(),
 });
+
+/**
+ * The token the Brain knows each account on a copied reader list by
+ * (source-readers.ts, GRA-1761), so the Brain never holds an address or an
+ * object ID: `key` is the account as reader lists name it
+ * (`<provider>:<tenant>:<account>`, compared form), `token` random, minted
+ * the first time a list or a reader needs it. Erasing a person deletes the
+ * rows of their accounts (person-erasure.ts `identity`), so lists made
+ * before name a token nobody holds again; a later list naming the address
+ * mints a new one.
+ */
+export const sourceReaderTokens = sqliteTable("source_reader_tokens", {
+  key: text().primaryKey(),
+  token: text().notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});

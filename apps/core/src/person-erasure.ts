@@ -87,6 +87,7 @@ import { eraseUploadsOf, uploadsOf } from "./knowledge-uploads.ts";
 import { eraseOnboardingAccount } from "./onboarding/new-brain.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import type { ErasureAreaName } from "./person-erasure-inventory.ts";
+import { forgetTokens } from "./source-readers.ts";
 import { stopRunsFor } from "./workflows/resource-runs.ts";
 
 // Erasing a person (GRA-903), from its threat model (person-erasure.test.ts):
@@ -191,6 +192,10 @@ const erasedEmail = (userId: string): string =>
  * keeps them out. Only the accounts whose subjects were hashed go: one
  * linked between the read and the batch stays, and so does the area,
  * pending, until the clock's next try hashes and deletes it too.
+ * In the same batch, the tokens the Brain knows their accounts by on
+ * copied reader lists (source-readers.ts, GRA-1761), their connections'
+ * accounts too, as connect has them still: every list naming them names a
+ * token nobody holds from then on.
  */
 const identity: ErasureStep = {
   area: "identity",
@@ -200,15 +205,19 @@ const identity: ErasureStep = {
   after: "brain_shared",
   erase: async (env, userId) => {
     const db = drizzle(env.DB);
-    const held = await db
-      .select({
-        id: accounts.id,
-        providerId: accounts.providerId,
-        accountId: accounts.accountId,
-        oid: accounts.oid,
-      })
-      .from(accounts)
-      .where(eq(accounts.userId, userId));
+    const [held, connected] = await Promise.all([
+      db
+        .select({
+          id: accounts.id,
+          providerId: accounts.providerId,
+          accountId: accounts.accountId,
+          oid: accounts.oid,
+          verifiedEmail: accounts.verifiedEmail,
+        })
+        .from(accounts)
+        .where(eq(accounts.userId, userId)),
+      env.CONNECT.personalAccounts(userId),
+    ]);
     const subjects = new Set(
       held.flatMap((account) => subjectsOf(account, directoryProviderId))
     );
@@ -249,6 +258,7 @@ const identity: ErasureStep = {
           )
         )
       ),
+      forgetTokens(env, db, held, connected),
       db.delete(sessions).where(eq(sessions.userId, userId)),
       completed(
         db,

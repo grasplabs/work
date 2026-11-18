@@ -60,6 +60,12 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.users": { erased: "identity" },
   "core.sessions": { erased: "identity" },
   "core.accounts": { erased: "identity" },
+  // The token the Brain knows each account on a copied reader list by
+  // (source-readers.ts): a person's accounts' rows go with their accounts.
+  // An outsider's stay, the company's record of who its documents were
+  // shared with: telling whether a stored list still names one would take
+  // a read of the Brain's sets.
+  "core.source_reader_tokens": { erased: "identity" },
   "core.members": { erased: "removal" },
   "core.member_removals": { kept: "keeps someone removed out" },
   "core.person_erasures": { kept: "the erasure's own record, by ID" },
