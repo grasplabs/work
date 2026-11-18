@@ -1247,21 +1247,28 @@ describe("native sync", () => {
         await finds(owner.userId, inboxed),
         await finds(owner.userId, archived),
       ];
-      // A folder made since: a new source, read from the start.
+      // A folder made since: seen at the next listing of the folders, a
+      // day on (`relistMs`), a new source read from the start.
       await world({ places: ["inbox", "archive"] });
+      later(24 * 60 * 60 * 1000);
+      await sync();
       later(pollMs);
       await sync();
       const added = await finds(owner.userId, archived);
-      // The folders couldn't be listed: nothing changes.
+      // The folders couldn't be listed at the next day's listing: nothing
+      // changes.
       await world({ places: null });
-      later(pollMs);
+      later(24 * 60 * 60 * 1000);
       await sync();
       const failed = [
         await finds(owner.userId, inboxed),
         await finds(owner.userId, archived),
       ];
-      // The folder deleted: its source and every copy it made go.
+      // The folder deleted: the listing, tried again at the next run, drops
+      // its source, and the clock erases every copy it made.
       await world({ places: ["inbox"] });
+      later(pollMs);
+      await sync();
       later(pollMs);
       await sync();
 
