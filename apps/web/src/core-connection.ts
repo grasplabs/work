@@ -15,6 +15,7 @@ import {
   withTimeout,
 } from "./core.ts";
 import type { Session } from "./core.ts";
+import { forgetSignedIn } from "./frame/signed-in-here.ts";
 
 /** Why the person's session ended under the page. */
 export type SessionEnded = "signed-out" | "principal-changed";
@@ -314,8 +315,10 @@ export class CoreConnection {
       }
     }
     // The open chats were this person's: whoever signs in next starts
-    // without them, however the session ended.
+    // without them, however the session ended; and the reload paints no
+    // frame before core says who is in (frame/signed-in-here.ts).
     forgetActiveChats();
+    forgetSignedIn();
     this.#onSessionEnded();
     if (failures.length > 0) {
       throw new AggregateError(failures, "Stopping a frame failed.");
@@ -633,6 +636,23 @@ const remember = (core: CoreConnection, status: CoreStatus): void => {
   }
 };
 
+/** The ask under way while nothing is known yet, per connection. */
+const firstAsks = new WeakMap<CoreConnection, Promise<CoreStatus>>();
+
+/** Asks core while nothing is known, keeping an answer with someone in it. */
+const askFirst = async (core: CoreConnection): Promise<CoreStatus> => {
+  try {
+    const status = await loadCoreStatus(core);
+    if (status.connected && status.identity !== undefined) {
+      remember(core, status);
+    }
+    return status;
+  } finally {
+    // Asked again next time unless remembered: nobody in, or core away.
+    firstAsks.delete(core);
+  }
+};
+
 /**
  * The shell's `loadCoreStatus`, asked on every way to a page: core is
  * asked the first time, and every time until it answered with someone
@@ -654,11 +674,14 @@ export const shellStatus = async (
 ): Promise<CoreStatus> => {
   const known = knownStatuses.get(core);
   if (known === undefined) {
-    const status = await loadCoreStatus(core);
-    if (status.connected && status.identity !== undefined) {
-      remember(core, status);
+    // One ask at a time: the tab starts it as it loads (main.tsx), and the
+    // shell, asking meanwhile, waits for the same answer.
+    let asking = firstAsks.get(core);
+    if (asking === undefined) {
+      asking = askFirst(core);
+      firstAsks.set(core, asking);
     }
-    return status;
+    return await asking;
   }
   if (Date.now() - known.at >= frameReadMs) {
     askNowBehind(core);
