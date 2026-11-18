@@ -26,12 +26,19 @@ import { fakeProviders } from "./oauth-provider.ts";
 
 const providers = fakeProviders();
 
-/** What the sample provider answers, for each test to set. */
-const provider: { folders: unknown } = { folders: ["inbox", "archive"] };
+/**
+ * What the sample provider answers, for each test to set: its folders, a
+ * page of them a read, by where the last page ended.
+ */
+const provider: { folders: Record<string, unknown> } = {
+  folders: { "": { folders: ["inbox", "archive"] } },
+};
 
 const internet = fakeInternet((_request, url) => {
   if (url.pathname === "/v1/me/folders") {
-    return Response.json({ folders: provider.folders });
+    return Response.json(
+      provider.folders[url.searchParams.get("from") ?? ""] ?? {}
+    );
   }
   return Response.json({ changes: [], next: "1", more: false });
 });
@@ -44,7 +51,7 @@ const sentToProvider = () =>
 
 /** A person's own Microsoft account, connected to the sample sync. */
 const ownConnection = async (): Promise<string> => {
-  provider.folders = ["inbox", "archive"];
+  provider.folders = { "": { folders: ["inbox", "archive"] } };
   const person = someone();
   const id = await connectAccount(providers, person, ownAccount(person));
   await drizzle(env.DB)
@@ -74,12 +81,12 @@ describe("a sync's own places", () => {
   it("lists the places a sync reads, and the whole account for a sync of it", async () => {
     const connectionId = await ownConnection();
     await expect(
-      places({ connectionId, feed: "folders" })
-    ).resolves.toStrictEqual({ places: ["inbox", "archive"] });
+      places({ connectionId, feed: "folders", cursor: null })
+    ).resolves.toStrictEqual({ places: ["inbox", "archive"], cursor: null });
     // A sync of the whole account is one source: the account.
     await expect(
-      places({ connectionId, feed: "files" })
-    ).resolves.toStrictEqual({ places: ["own"] });
+      places({ connectionId, feed: "files", cursor: null })
+    ).resolves.toStrictEqual({ places: ["own"], cursor: null });
     expect(sentToProvider()).toStrictEqual(["/v1/me/folders"]);
   });
 
@@ -113,11 +120,53 @@ describe("a sync's own places", () => {
     });
   });
 
+  it("goes on with a list longer than one read from where the last read ended", async () => {
+    const connectionId = await ownConnection();
+    provider.folders = {
+      "": { folders: ["inbox"], next: "2" },
+      "2": { folders: ["archive"] },
+    };
+    const first = await places({ connectionId, feed: "folders", cursor: null });
+    const second = await places({
+      connectionId,
+      feed: "folders",
+      cursor: first.cursor,
+    });
+    expect({ first, second }).toStrictEqual({
+      first: { places: ["inbox"], cursor: "2" },
+      second: { places: ["archive"], cursor: null },
+    });
+  });
+
+  it("reads no place of a shared connection's own account, through any sync", async () => {
+    const shared = await addConnection({
+      provider: "microsoft",
+      serverKind: "native",
+      server: "sample-sync",
+      tenant: "acme",
+    });
+    await expect(
+      outcomeOf(
+        async () =>
+          await read({
+            connectionId: shared,
+            feed: "folders",
+            place: "inbox",
+            cursor: null,
+          })
+      )
+    ).resolves.toBe("sync.place_refused");
+    expect(sentToProvider()).toStrictEqual([]);
+  });
+
   it("refuses a list with one place that isn't one, whole", async () => {
     const connectionId = await ownConnection();
-    provider.folders = ["inbox", "../admin"];
+    provider.folders = { "": { folders: ["inbox", "../admin"] } };
     await expect(
-      outcomeOf(async () => await places({ connectionId, feed: "folders" }))
+      outcomeOf(
+        async () =>
+          await places({ connectionId, feed: "folders", cursor: null })
+      )
     ).resolves.toBe("sync.provider_failed");
   });
 
@@ -130,11 +179,12 @@ describe("a sync's own places", () => {
     });
     const own = await ownConnection();
     await expect(
-      places({ connectionId: shared, feed: "folders" })
-    ).resolves.toStrictEqual({ places: [] });
+      places({ connectionId: shared, feed: "folders", cursor: null })
+    ).resolves.toStrictEqual({ places: [], cursor: null });
     await expect(
       outcomeOf(
-        async () => await places({ connectionId: own, feed: "nothing" })
+        async () =>
+          await places({ connectionId: own, feed: "nothing", cursor: null })
       )
     ).resolves.toBe("sync.not_found");
     expect(sentToProvider()).toStrictEqual([]);

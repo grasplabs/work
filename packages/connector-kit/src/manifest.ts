@@ -428,6 +428,13 @@ export const syncManifestSchema = z.strictObject({
 });
 export type SyncManifest = z.infer<typeof syncManifestSchema>;
 
+/**
+ * Requests a connector's isolate may send per call, every one through
+ * connect's egress: the limit connect loads each isolate with
+ * (connect's connector-isolate.ts).
+ */
+export const connectorIsolateRequests = 50;
+
 /** The JSON-RPC method connect asks a connector for a sync page by. */
 export const syncMethod = "grasp-os/sync";
 
@@ -435,7 +442,11 @@ export const syncMethod = "grasp-os/sync";
 export const syncPlacesMethod = "grasp-os/sync-places";
 
 /** What connect asks a connector for its sync's places. */
-export const syncPlacesParamsSchema = z.strictObject({ name: syncNameSchema });
+export const syncPlacesParamsSchema = z.strictObject({
+  name: syncNameSchema,
+  /** Where a listing too long for one read goes on; null from the start. */
+  cursor: syncCursorSchema.nullable(),
+});
 
 /** What connect asks a connector's sync for. */
 export const syncParamsSchema = z.strictObject({
