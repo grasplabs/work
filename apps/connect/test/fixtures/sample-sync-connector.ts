@@ -69,5 +69,42 @@ export default defineConnector({
         return { items: feed.changes, cursor: feed.next, more: feed.more };
       },
     }),
+    // Places of the account it lists itself (a mailbox's folders), each
+    // read from its own feed, the route's `{place}` bound to it.
+    defineSync({
+      name: "folders",
+      kind: "mail",
+      routes: [
+        { method: "GET", host: sampleHost, path: "/v1/me/folders" },
+        {
+          method: "GET",
+          host: sampleHost,
+          path: "/v1/me/folders/{place}/changes",
+        },
+      ],
+      places: async () => {
+        const response = await fetch(`${api}/v1/me/folders`);
+        if (!response.ok) {
+          throw new Error(`The provider answered ${response.status}`);
+        }
+        return z
+          .object({ folders: z.array(z.string()) })
+          .parse(await response.json()).folders;
+      },
+      read: async ({ place, cursor }) => {
+        const url = new URL(
+          `${api}/v1/me/folders/${encodeURIComponent(place)}/changes`
+        );
+        if (cursor !== null) {
+          url.searchParams.set("from", cursor);
+        }
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`The provider answered ${response.status}`);
+        }
+        const feed = feedSchema.parse(await response.json());
+        return { items: feed.changes, cursor: feed.next, more: feed.more };
+      },
+    }),
   ],
 });
