@@ -15,10 +15,16 @@ import { useWords } from "../words/words";
 import { BrandIcon, brands } from "./brand-icon";
 import type { Brand, BrandIconSize, BrandIconTone } from "./brand-icon";
 
+/** One brand in a group: a key of the set, or a brand with no mark by its name. */
+export type BrandIconGroupEntry = Brand | { name: string };
+
 /** Every prop a BrandIconGroup takes. */
 export interface BrandIconGroupProps {
-  /** The brands, in the order their tiles stand. */
-  brands: readonly Brand[];
+  /**
+   * The brands, in the order their tiles stand: a brand in the set by its key (`"slack"`), or one with
+   * no mark by its name (`{ name: "Acme CRM" }`), which shows its first letter on the tile.
+   */
+  brands: readonly BrandIconGroupEntry[];
   /**
    * How many tiles show before "+N" stands for the rest.
    * @default 3
@@ -97,7 +103,9 @@ export const BrandIconGroup = ({
   const name =
     label ??
     words.name(
-      shown.map((brand) => brands[brand].name),
+      shown.map((entry) =>
+        typeof entry === "string" ? brands[entry].name : entry.name
+      ),
       rest
     );
   // BrandIcon's corner for the size: the mark corner under 32px, else the one corner capped at half.
@@ -114,15 +122,24 @@ export const BrandIconGroup = ({
       data-slot="brand-icon-group"
       {...stylex.props(styles.group)}
     >
-      {shown.map((brand, index) => (
-        <BrandIcon
-          key={`${brand}-${index}`}
-          brand={brand}
-          size={size}
-          tone={tone}
-          decorative
-        />
-      ))}
+      {shown.map((entry, index) =>
+        typeof entry === "string" ? (
+          <BrandIcon
+            key={`${entry}-${index}`}
+            brand={entry}
+            size={size}
+            tone={tone}
+            decorative
+          />
+        ) : (
+          <BrandIcon
+            key={`${entry.name}-${index}`}
+            name={entry.name}
+            size={size}
+            decorative
+          />
+        )
+      )}
       {rest > 0 && (
         <span
           aria-hidden="true"

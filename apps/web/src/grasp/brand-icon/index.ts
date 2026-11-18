@@ -6,4 +6,4 @@ export type {
   BrandIconTone,
 } from "./brand-icon";
 export { BrandIconGroup } from "./group";
-export type { BrandIconGroupProps } from "./group";
+export type { BrandIconGroupEntry, BrandIconGroupProps } from "./group";
