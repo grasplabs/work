@@ -6,6 +6,7 @@ import type {
 } from "@grasp-os/shared/dashboard";
 import type { ModelMonthSpend } from "@grasp-os/shared/models";
 import type { CustomWidget, WidgetProgress } from "@grasp-os/shared/widgets";
+import { workflowLabel } from "@grasp-os/shared/workflow-resources";
 import type { RunActivity, WorkflowSummary } from "@grasp-os/shared/workflows";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import {
@@ -279,7 +280,7 @@ const WorkflowTabsView = ({ rows }: { rows: readonly WorkflowSummary[] }) => {
                     params={{ workflow: workflow.workflowId }}
                     to="/workflows/$workflow"
                   >
-                    {workflow.name}
+                    {workflowLabel(workflow)}
                   </Link>
                   <span className="text-muted-foreground hidden flex-none tabular-nums @md:block">
                     <LastRun workflow={workflow} />

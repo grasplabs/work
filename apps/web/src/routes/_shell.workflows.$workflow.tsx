@@ -2,6 +2,7 @@ import type { Draft } from "@grasp-os/shared/drafts";
 import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { SubjectMember } from "@grasp-os/shared/subject-members";
+import { workflowLabel } from "@grasp-os/shared/workflow-resources";
 import type {
   WorkflowActivity,
   WorkflowDraft,
@@ -380,6 +381,7 @@ const WorkflowBar = ({
   onShared: () => void;
 }) => {
   const live = resource.currentVersion;
+  const label = workflowLabel(resource);
   return (
     <ItemBar
       actions={
@@ -400,7 +402,7 @@ const WorkflowBar = ({
           {pauses ? (
             <PauseControl
               live={live}
-              name={resource.name}
+              name={label}
               onChange={onChange}
               paused={paused}
               workflow={resource.id}
@@ -415,7 +417,7 @@ const WorkflowBar = ({
               running={running}
               shared={{
                 subject: { kind: "workflow", id: resource.id },
-                name: resource.name,
+                name: label,
                 owner: resource.owner,
                 live,
               }}
@@ -424,7 +426,7 @@ const WorkflowBar = ({
         </>
       }
       back={back}
-      name={resource.name}
+      name={label}
       state={
         builder && members === undefined ? undefined : (
           <WorkflowStatus
@@ -460,8 +462,9 @@ const WorkflowResourceView = ({
     ? ({ kind: "workflow", id: resource.id } as const)
     : undefined;
   const view = shownView(asked, draft !== undefined);
+  const label = workflowLabel(resource);
   // Grasp's chat about it, docked beside it for its builders, draws it.
-  const chat = useChatAbout(built, resource.name);
+  const chat = useChatAbout(built, label);
   const { draft: shared, reread } = useDraft(built, chat.worked);
   const { draft: latest, onDraft } = useWorkflowDraft(
     resource.id,
@@ -498,13 +501,10 @@ const WorkflowResourceView = ({
   const setUp = useSetUp(resource, latest, chat);
   if (setUp !== "ready") {
     return (
-      <ItemShell bar={<SettingUpBar back={back} name={resource.name} />}>
+      <ItemShell bar={<SettingUpBar back={back} name={label} />}>
         {/* What the person calls it: its chat's title, which the plan
           named, as its own name is one for good, in core's letters. */}
-        <SettingUp
-          failed={setUp === "failed"}
-          name={chat.title ?? resource.name}
-        />
+        <SettingUp failed={setUp === "failed"} name={chat.title ?? label} />
       </ItemShell>
     );
   }

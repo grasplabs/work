@@ -1,4 +1,5 @@
 import type { BusinessProcess } from "@grasp-os/shared/business-processes";
+import { workflowLabel } from "@grasp-os/shared/workflow-resources";
 import { failedRunDays } from "@grasp-os/shared/workflows";
 import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 import { buttonVariants } from "@grasp-os/ui/components/button";
@@ -82,7 +83,8 @@ const RunCount = ({
  */
 const Status = ({ workflow }: { workflow: WorkflowSummary }) => {
   const { t } = useLingui();
-  const { name, waiting, failed } = workflow;
+  const { waiting, failed } = workflow;
+  const name = workflowLabel(workflow);
   const days = failedRunDays;
   return (
     <div className="flex flex-col items-start gap-0.5">
@@ -174,7 +176,7 @@ const WorkflowLink = ({ workflow }: { workflow: WorkflowSummary }) => (
     params={{ workflow: workflow.workflowId }}
     to="/workflows/$workflow"
   >
-    {workflow.name}
+    {workflowLabel(workflow)}
   </Link>
 );
 

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { BusinessProcess } from "./business-processes.ts";
+import { askLine } from "./chat.ts";
 import { connectorContractIdSchema } from "./connect.ts";
 import { defineErrorFamily } from "./errors.ts";
 import type { EventSourcesApi } from "./event-sources.ts";
@@ -43,6 +44,27 @@ export const workflowNameSchema = z
     /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u,
     "Lowercase letters, digits and dashes, starting and ending with a letter or digit"
   );
+
+export const workflowTitleMaxLength = 100;
+
+/**
+ * The name people give a workflow, shown where its `name` would be:
+ * trimmed, then one line a person reads as what it is, by the rule for
+ * what the agent asks (`askLine`): something that shows, and nothing drawn
+ * as nothing outside a standard emoji, so it never reads as empty or as
+ * another text than it is. Nothing references a workflow by it; `name`
+ * stays the key.
+ */
+export const workflowTitleSchema = z
+  .string()
+  .trim()
+  .pipe(askLine(workflowTitleMaxLength));
+
+/** What a workflow is called where people read it: its title, or its name. */
+export const workflowLabel = (workflow: {
+  name: string;
+  title: string | null;
+}): string => workflow.title ?? workflow.name;
 
 export const workflowResourceErrors = defineErrorFamily({
   "workflow.resource_invalid": "That isn't a valid request for a workflow.",
@@ -739,6 +761,8 @@ export interface WorkflowResource {
   id: string;
   namespace: string;
   name: string;
+  /** The name people gave it (`workflowTitleSchema`); null for none. */
+  title: string | null;
   owner: string;
   /** The live version; null before the first is published. */
   currentVersion: number | null;
@@ -1141,8 +1165,13 @@ export interface WorkflowResourcesApi {
    * Creates a workflow the caller owns, named `name`; for builders. With
    * `project`, it is made in that project, shared with everyone in it:
    * only for a builder of the project, checked before anything is made.
+   * `title` (`workflowTitleSchema`) is the name people see, if given.
    */
-  create: (name: string, project?: string) => Promise<WorkflowResource>;
+  create: (
+    name: string,
+    project?: string,
+    title?: string
+  ) => Promise<WorkflowResource>;
   /** The workflows the caller has a role in, by name. */
   list: () => Promise<WorkflowResource[]>;
   get: (id: string) => Promise<WorkflowResource>;
@@ -1151,6 +1180,12 @@ export interface WorkflowResourcesApi {
    * clears it with null; for its builders, audited.
    */
   setProcess: (id: string, process: unknown) => Promise<WorkflowResource>;
+  /**
+   * Sets the name people see for it (`workflowTitleSchema`), or clears it
+   * with null or an empty one; for its builders, audited with the title
+   * and the one before. Its `name` stays.
+   */
+  setTitle: (id: string, title: unknown) => Promise<WorkflowResource>;
   /** Its draft, for its builders (`WorkflowDraft`). */
   draft: (id: string) => Promise<WorkflowDraft>;
   /**

@@ -43,6 +43,7 @@ import { requireBuilder } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { subjectSchema } from "@grasp-os/shared/subject";
 import type { Subject, SubjectKind } from "@grasp-os/shared/subject";
+import { workflowTitleSchema } from "@grasp-os/shared/workflow-resources";
 import { z } from "zod";
 
 import { setAgentApp } from "./agent-app-access.ts";
@@ -672,10 +673,14 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
             project,
             "workflow",
             async () => {
+              // Called what the plan named it, where that is a title;
+              // a name that isn't one leaves it by its own name.
+              const title = workflowTitleSchema.safeParse(workflowPart.name);
               const workflow = await createWorkflowResource(
                 this.#env,
                 person,
-                workflowNameOf(workflowPart.name)
+                workflowNameOf(workflowPart.name),
+                title.success ? title.data : undefined
               );
               made.workflow = { id: workflow.id, name: workflowPart.name };
               await keptInChat(
