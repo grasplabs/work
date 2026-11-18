@@ -1114,10 +1114,6 @@ msgstr "{name} : {started} lancées, {completed} terminées, {failed} en échec"
 msgid "{name}: agents search it live when you ask. The Brain keeps nothing from it."
 msgstr "{name} : les agents y cherchent en direct quand vous demandez. Le cerveau n'en garde rien."
 
-#: src/settings/ai-spend.tsx
-msgid "{name}: share of this month"
-msgstr "{name} : part de ce mois-ci"
-
 #: src/agents/agent-section.tsx
 msgid "{name}'s pages"
 msgstr "Pages de {name}"
@@ -1556,6 +1552,10 @@ msgstr "{title} sur {connection}"
 #: src/dashboard/widget-board.tsx
 msgid "{title} removed from the dashboard."
 msgstr "{title} a été retiré du tableau de bord."
+
+#: src/settings/ai-spend.tsx
+msgid "{top} spent the most this month."
+msgstr "{top} a le plus dépensé ce mois-ci."
 
 #: src/frame/part-words.tsx
 msgid "{total, plural, one {{count} of # interview} other {{count} of # interviews}}"
@@ -10861,10 +10861,6 @@ msgstr "Rien n’a encore été dit."
 msgid "Nothing shared yet: the first time you share it shows here."
 msgstr "Rien n’est encore partagé : la première fois que vous le partagez, cela s’affiche ici."
 
-#: src/settings/ai-spend.tsx
-msgid "Nothing spent on AI this month yet."
-msgstr "Rien dépensé en IA ce mois-ci pour l’instant."
-
 #: src/workflows/workflow-triggers.tsx
 msgid "Nothing starts it on its own yet."
 msgstr "Rien ne le démarre encore de lui-même."
@@ -14166,11 +14162,6 @@ msgstr "Configuration"
 #: src/workflows/share-workflow.tsx
 msgid "Share"
 msgstr "Partager"
-
-#: src/settings/ai-spend.tsx
-msgctxt "a part of the whole month's spend, as a percentage"
-msgid "Share"
-msgstr "Part"
 
 #: src/workflows/share-workflow.tsx
 msgctxt "share a workflow with someone"
@@ -18128,10 +18119,6 @@ msgstr "Où le travail est-il écrit ?"
 msgctxt "the card that follows one item across workflows"
 msgid "Where is it"
 msgstr "Où en est-il"
-
-#: src/settings/ai-spend.tsx
-msgid "Where it went"
-msgstr "Où c’est allé"
 
 #: src/settings/ai-spend.tsx
 msgid "Where it went this month"

@@ -13,21 +13,13 @@ import {
   Chart,
   ChartArea,
   ChartAxis,
+  ChartBarList,
   ChartGrid,
   ChartTooltip,
 } from "../grasp/chart/index.ts";
-import { Progress } from "../grasp/progress/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { RowAlert } from "../grasp/setting-row/index.ts";
 import { Stat } from "../grasp/stats/index.ts";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../grasp/table/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
@@ -48,13 +40,6 @@ const styles = stylex.create({
     gap: grasp.space4,
   },
   chart: { width: "100%" },
-  share: { width: "100%", minWidth: "6rem" },
-  // The bar, then its percentage, on one line.
-  shareCell: {
-    display: "flex",
-    alignItems: "center",
-    gap: grasp.space3,
-  },
 });
 
 /** The value axis's width: room for its longest label, "$0.075" (Grasp UI's spend card). */
@@ -73,13 +58,6 @@ const axisDollars = (value: string | number): string => {
     maximumFractionDigits: amount < 1 ? 3 : 1,
   }).format(amount);
 };
-
-/** A share as a percentage in the page's language: "84%". */
-const percent = (share: number): string =>
-  new Intl.NumberFormat(active.locale, {
-    style: "percent",
-    maximumFractionDigits: 0,
-  }).format(share);
 
 /** A workflow's name, with its App's for an App's workflow. */
 const workflowName = (of: SpendingWorkflow, i18n: I18n): string => {
@@ -160,20 +138,19 @@ export const SpendSummary = ({ spend }: { spend: ModelMonthSpend }) => {
   return (
     <>
       {/* Bare: the figure at the card's start edge, as Grasp UI's spend card. */}
+      {/* Nothing spent yet: the figure says it, with no pace to tell. */}
       <Stat
         bare
         change={
-          ending === null ? "" : t`About ${ending} by the end of the month`
+          ending === null || spend.total === 0
+            ? ""
+            : t`About ${ending} by the end of the month`
         }
         title={t`Spent this month`}
         tone="neutral"
         value={total}
       />
-      {spend.total === 0 ? (
-        <Text size="sm" tone="muted">
-          {t`Nothing spent on AI this month yet.`}
-        </Text>
-      ) : (
+      {spend.total === 0 ? null : (
         <Chart
           aria-label={t`Spend so far this month, day by day`}
           config={{ spend: { label: t`Spend` } }}
@@ -216,6 +193,7 @@ export const SpendCard = ({
     chat: t`Chat`,
     other: t`Other`,
   });
+  const top = rows[0]?.name ?? "";
   // An App's binding whose target can't be read serves nothing: worth a look.
   const unreadable = (bound?.bindings.listed ?? []).filter(
     ({ model }) => model === null
@@ -226,44 +204,14 @@ export const SpendCard = ({
         <SpendSummary spend={month} />
         {month.total === 0 ? null : (
           <>
-            <Table aria-label={t`Where it went this month`} density="compact">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t`Where it went`}</TableHead>
-                  <TableHead>
-                    {t({
-                      message: "Share",
-                      context:
-                        "a part of the whole month's spend, as a percentage",
-                    })}
-                  </TableHead>
-                  <TableHead align="end">{t`This month`}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map(({ name, spend: amount }) => (
-                  <TableRow key={name}>
-                    <TableCell lead>{name}</TableCell>
-                    <TableCell>
-                      <span {...stylex.props(styles.shareCell)}>
-                        {/* The column's head names it: the bar says only its row, to a screen reader. */}
-                        <Progress
-                          label={t`${name}: share of this month`}
-                          layout={styles.share}
-                          showLabel={false}
-                          size="sm"
-                          value={Math.round((amount / month.total) * 100)}
-                        />
-                        <Text element="span" size="sm" tone="muted">
-                          {percent(amount / month.total)}
-                        </Text>
-                      </span>
-                    </TableCell>
-                    <TableCell align="end">{dollars(amount)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <ChartBarList
+              aria-label={t`Where it went this month`}
+              config={{ spend: { label: t`This month` } }}
+              data={rows}
+              format={dollars}
+              nameKey="name"
+              summary={t`${top} spent the most this month.`}
+            />
             {month.more ? (
               <Text size="xs" tone="muted">
                 {t`More workflows spent less.`}
