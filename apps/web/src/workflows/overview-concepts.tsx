@@ -27,7 +27,6 @@ import {
   Workflow,
 } from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
-import { Link as TextLink } from "../grasp/link/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 
@@ -347,6 +346,10 @@ const styles = stylex.create({
     },
   },
   rowName: { flexGrow: 1, minWidth: 0 },
+  nameLink: {
+    color: "inherit",
+    textDecoration: { default: "none", ":hover": "underline" },
+  },
   // The table's workflow cell.
   lead: {
     display: "flex",
@@ -444,19 +447,22 @@ const WorkflowCell = ({
         <Icon icon={glyph} />
       </span>
       <span {...stylex.props(styles.rowName)}>
+        {/* One style for every name: a real workflow's is a link to it, set
+            as the samples' words are. */}
         {row.sample ? (
           <Text element="span" size="sm" weight="medium">
             {row.name}
           </Text>
         ) : (
-          <TextLink
-            render={
-              <Link params={{ workflow: row.id }} to="/workflows/$workflow" />
-            }
-            variant="standalone"
+          <Link
+            params={{ workflow: row.id }}
+            to="/workflows/$workflow"
+            {...stylex.props(styles.nameLink)}
           >
-            {row.name}
-          </TextLink>
+            <Text element="span" size="sm" weight="medium">
+              {row.name}
+            </Text>
+          </Link>
         )}
       </span>
       {face ? (
