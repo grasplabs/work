@@ -1297,6 +1297,8 @@ describe(SourcesPage, () => {
       }
     );
     await press("Erase for good");
+    const told =
+      document.querySelector('[role="alertdialog"]')?.textContent ?? "";
     // The dialog's own button, after the row's of the same words.
     const confirm = [...document.querySelectorAll("button")].findLast(
       (button) => button.textContent.trim() === "Erase for good"
@@ -1321,6 +1323,11 @@ describe(SourcesPage, () => {
       // The one in use isn't marked removed.
       removedMarks: sharedText.split("Removed by its uploader").length - 1,
       labels,
+      // What it erases, and that a workflow's kept state stays unread.
+      told: [
+        "Every version of it is erased from the Brain",
+        "What a workflow kept from it between its runs isn't erased, but it is never shown or used again.",
+      ].map((text) => told.includes(text)),
       after: ["Payroll.vtt", "An upload"].map((text) =>
         section("Shared uploads").includes(text)
       ),
@@ -1331,6 +1338,7 @@ describe(SourcesPage, () => {
       listed: [true, true, true, true, true, true, true],
       removedMarks: 1,
       labels: ["Erase Payroll.vtt for good", "Erase this upload for good"],
+      told: [true, true],
       after: [false, true],
       calls: ["sharedUploads", "deleteUpload u-3", "sharedUploads"],
     });

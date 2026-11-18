@@ -5508,8 +5508,8 @@ msgid "Every tool it has: Apps and agents use only what they are granted."
 msgstr "Tous ses outils : les applications et les agents n'utilisent que ce qui leur est accordé."
 
 #: src/brain/sources-page.tsx
-msgid "Every version of it is erased from the Brain for everyone who could read it. This can't be undone."
-msgstr "Chaque version est effacée du Brain pour tous ceux qui pouvaient la lire. Cette action est irréversible."
+msgid "Every version of it is erased from the Brain for everyone who could read it. This can't be undone. What a workflow kept from it between its runs isn't erased, but it is never shown or used again."
+msgstr "Chaque version est effacée du Brain pour tous ceux qui pouvaient la lire. Cette action est irréversible. Ce qu'un workflow en a conservé entre ses exécutions n'est pas effacé, mais n'est plus jamais affiché ni utilisé."
 
 #: src/agents/agent-wakes.tsx
 msgid "Every weekday"

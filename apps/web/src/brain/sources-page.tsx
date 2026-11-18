@@ -714,7 +714,7 @@ const UploadActions = ({
           confirm={deletes === "erase" ? t`Delete for good` : t`Delete`}
           description={
             deletes === "erase"
-              ? t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone.`
+              ? t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone. What a workflow kept from it between its runs isn't erased, but it is never shown or used again.`
               : t`Nobody can find or read it from then on, you included, and it can't be brought back. The Brain keeps its history until an admin erases it.`
           }
           label={t`Delete this upload`}
@@ -1419,7 +1419,7 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
                     busy={busy}
                     button={t`Erase for good`}
                     confirm={t`Erase for good`}
-                    description={t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone.`}
+                    description={t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone. What a workflow kept from it between its runs isn't erased, but it is never shown or used again.`}
                     label={
                       name === null
                         ? t`Erase this upload for good`
