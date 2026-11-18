@@ -1121,6 +1121,7 @@ msgstr "{page} van {total}"
 msgid "{people, plural, one {{sector}, # person.} other {{sector}, # people.}}"
 msgstr "{people, plural, one {{sector}, # persoon.} other {{sector}, # mensen.}}"
 
+#: src/agents/agents-overview.tsx
 #: src/brain/brain.ts
 #: src/workflows/requests/request-table.tsx
 msgid "{people, plural, one {# person} other {# people}}"
@@ -1202,6 +1203,10 @@ msgstr "{rating} van 5"
 #: src/agents/agent-page.tsx
 msgid "{requests, plural, one {# request to a model} other {# requests to a model}}"
 msgstr "{requests, plural, one {# verzoek aan een model} other {# verzoeken aan een model}}"
+
+#: src/agents/agents-overview.tsx
+msgid "{requests, plural, one {# request} other {# requests}}"
+msgstr "{requests, plural, one {# verzoek} other {# verzoeken}}"
 
 #: src/frame/part-words.tsx
 msgid "{rest, plural, one {# other} other {# others}}"
@@ -1312,8 +1317,8 @@ msgid "{sources, plural, one {Time-consuming work that could be automated, raise
 msgstr "{sources, plural, one {Tijdrovend werk dat geautomatiseerd kan worden, genoemd in # bron, nog door geen team.} other {Tijdrovend werk dat geautomatiseerd kan worden, genoemd in # bronnen, nog door geen team.}}"
 
 #: src/agents/agents-overview.tsx
-msgid "{spent} this month"
-msgstr "{spent} deze maand"
+msgid "{spent} · {count} · {reach}"
+msgstr "{spent} · {count} · {reach}"
 
 #: src/onboarding/about-story.tsx
 msgid "{sponsor} gave me the big picture. Now I need the details."
@@ -2807,6 +2812,7 @@ msgid "Answering"
 msgstr "Bezig met antwoorden"
 
 #: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
 msgid "Answers"
 msgstr "Antwoordt"
 
@@ -8624,6 +8630,10 @@ msgstr "Laatste 30 dagen"
 msgid "Last 7 days"
 msgstr "Laatste 7 dagen"
 
+#: src/agents/agents-overview.tsx
+msgid "Last asked"
+msgstr "Laatst gevraagd"
+
 #: src/agents/agent-page.tsx
 msgid "Last asked in a chat"
 msgstr "Laatst gevraagd in een chat"
@@ -8644,9 +8654,14 @@ msgstr "Vorige maand"
 msgid "Last ran {when}"
 msgstr "Laatst uitgevoerd op {when}"
 
+#: src/agents/agents-overview.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Last run"
 msgstr "Laatste run"
+
+#: src/agents/agents-overview.tsx
+msgid "Last run failed"
+msgstr "Laatste run mislukt"
 
 #: src/frame/part-words.tsx
 msgid "Last used"
@@ -9192,12 +9207,9 @@ msgid "Max"
 msgstr "Maximaal"
 
 #: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
 msgid "May do"
 msgstr "Mag doen"
-
-#: src/agents/agents-overview.tsx
-msgid "May do nothing yet"
-msgstr "Mag nog niets doen"
 
 #: src/agents/new-agent.tsx
 msgid "Meadow"
@@ -9754,6 +9766,10 @@ msgstr "Nieuwer"
 #: src/settings/event-sources.tsx
 msgid "Next"
 msgstr "Volgende"
+
+#: src/agents/agents-overview.tsx
+msgid "Next {nextMoment}"
+msgstr "Volgende {nextMoment}"
 
 #: src/brain/brain-transcript.tsx
 #: src/frame/part-words.tsx
@@ -10705,6 +10721,7 @@ msgid "Nothing was added. Fix these rows and try again."
 msgstr "Er is niets toegevoegd. Corrigeer deze rijen en probeer het opnieuw."
 
 #: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
 #: src/brain/brain.ts
 msgid "Nothing yet"
 msgstr "Nog niets"
@@ -10865,6 +10882,7 @@ msgid "On in {name}"
 msgstr "Aan in {name}"
 
 #: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
 #: src/agents/new-agent.tsx
 msgid "On its own"
 msgstr "Uit zichzelf"
@@ -11020,6 +11038,7 @@ msgid "Only the workflow's builders can change these."
 msgstr "Alleen de bouwers van de workflow kunnen deze wijzigen."
 
 #: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
 #: src/agents/new-agent.tsx
 msgid "Only when asked"
 msgstr "Alleen als het gevraagd wordt"
@@ -16296,6 +16315,7 @@ msgstr "Dit model kan geen antwoord geven dat zo lang is. Kies een ander model, 
 msgid "This model has one level of effort."
 msgstr "Dit model heeft één niveau van inspanning."
 
+#: src/agents/agents-overview.tsx
 #: src/frame/part-words.tsx
 #: src/settings/ai-spend.tsx
 #: src/workflows/requests/request-plan.tsx

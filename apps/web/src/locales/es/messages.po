@@ -1121,6 +1121,7 @@ msgstr "{page} de {total}"
 msgid "{people, plural, one {{sector}, # person.} other {{sector}, # people.}}"
 msgstr "{people, plural, one {{sector}, # persona.} other {{sector}, # personas.}}"
 
+#: src/agents/agents-overview.tsx
 #: src/brain/brain.ts
 #: src/workflows/requests/request-table.tsx
 msgid "{people, plural, one {# person} other {# people}}"
@@ -1202,6 +1203,10 @@ msgstr "{rating} de 5"
 #: src/agents/agent-page.tsx
 msgid "{requests, plural, one {# request to a model} other {# requests to a model}}"
 msgstr "{requests, plural, one {# solicitud a un modelo} other {# solicitudes a un modelo}}"
+
+#: src/agents/agents-overview.tsx
+msgid "{requests, plural, one {# request} other {# requests}}"
+msgstr "{requests, plural, one {# solicitud} other {# solicitudes}}"
 
 #: src/frame/part-words.tsx
 msgid "{rest, plural, one {# other} other {# others}}"
@@ -1312,8 +1317,8 @@ msgid "{sources, plural, one {Time-consuming work that could be automated, raise
 msgstr "{sources, plural, one {Trabajo que lleva mucho tiempo y podría automatizarse, mencionado en # fuente, aún por ningún equipo.} other {Trabajo que lleva mucho tiempo y podría automatizarse, mencionado en # fuentes, aún por ningún equipo.}}"
 
 #: src/agents/agents-overview.tsx
-msgid "{spent} this month"
-msgstr "{spent} este mes"
+msgid "{spent} · {count} · {reach}"
+msgstr "{spent} · {count} · {reach}"
 
 #: src/onboarding/about-story.tsx
 msgid "{sponsor} gave me the big picture. Now I need the details."
@@ -2807,6 +2812,7 @@ msgid "Answering"
 msgstr "Respondiendo"
 
 #: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
 msgid "Answers"
 msgstr "Responde a"
 
@@ -8624,6 +8630,10 @@ msgstr "Últimos 30 días"
 msgid "Last 7 days"
 msgstr "Últimos 7 días"
 
+#: src/agents/agents-overview.tsx
+msgid "Last asked"
+msgstr "Última consulta"
+
 #: src/agents/agent-page.tsx
 msgid "Last asked in a chat"
 msgstr "Última pregunta en un chat"
@@ -8644,9 +8654,14 @@ msgstr "El mes pasado"
 msgid "Last ran {when}"
 msgstr "Última ejecución: {when}"
 
+#: src/agents/agents-overview.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Last run"
 msgstr "Última ejecución"
+
+#: src/agents/agents-overview.tsx
+msgid "Last run failed"
+msgstr "La última ejecución falló"
 
 #: src/frame/part-words.tsx
 msgid "Last used"
@@ -9192,12 +9207,9 @@ msgid "Max"
 msgstr "Máximo"
 
 #: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
 msgid "May do"
 msgstr "Puede hacer"
-
-#: src/agents/agents-overview.tsx
-msgid "May do nothing yet"
-msgstr "Aún no puede hacer nada"
 
 #: src/agents/new-agent.tsx
 msgid "Meadow"
@@ -9754,6 +9766,10 @@ msgstr "Más recientes"
 #: src/settings/event-sources.tsx
 msgid "Next"
 msgstr "Siguiente"
+
+#: src/agents/agents-overview.tsx
+msgid "Next {nextMoment}"
+msgstr "Próxima {nextMoment}"
 
 #: src/brain/brain-transcript.tsx
 #: src/frame/part-words.tsx
@@ -10705,6 +10721,7 @@ msgid "Nothing was added. Fix these rows and try again."
 msgstr "No se ha añadido nada. Corrige estas filas e inténtalo de nuevo."
 
 #: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
 #: src/brain/brain.ts
 msgid "Nothing yet"
 msgstr "Nada aún"
@@ -10865,6 +10882,7 @@ msgid "On in {name}"
 msgstr "Activado en {name}"
 
 #: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
 #: src/agents/new-agent.tsx
 msgid "On its own"
 msgstr "Por su cuenta"
@@ -11020,6 +11038,7 @@ msgid "Only the workflow's builders can change these."
 msgstr "Solo los creadores del flujo de trabajo pueden cambiarlos."
 
 #: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
 #: src/agents/new-agent.tsx
 msgid "Only when asked"
 msgstr "Solo cuando se le pregunta"
@@ -16296,6 +16315,7 @@ msgstr "Este modelo no puede dar una respuesta tan larga. Elige otro modelo o pi
 msgid "This model has one level of effort."
 msgstr "Este modelo tiene un solo nivel de esfuerzo."
 
+#: src/agents/agents-overview.tsx
 #: src/frame/part-words.tsx
 #: src/settings/ai-spend.tsx
 #: src/workflows/requests/request-plan.tsx

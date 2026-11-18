@@ -106,7 +106,7 @@ export const useWhen = () => {
 };
 
 /** How a wake-up's last one went, in words; undefined before its first. */
-const useLast = () => {
+export const useLast = () => {
   const { t, i18n } = useLingui();
   return ({ lastAt, lastOutcome }: AgentWake): string | undefined => {
     if (lastAt === null || lastOutcome === null) {

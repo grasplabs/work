@@ -83,6 +83,17 @@ const wake: AgentWake = {
   lastOutcome: null,
 };
 
+/** A wake-up whose last run didn't start: no AI provider was connected. */
+const failedWake: AgentWake = {
+  ...wake,
+  id: "wake-2",
+  agentId: stephen.id,
+  nextAt: null,
+  state: "paused",
+  lastAt: "2026-11-12T06:30:00.000Z",
+  lastOutcome: "model.no_provider",
+};
+
 const managed: ManagedAgents = {
   agents: [stephen, claire, milan],
   settings: {
@@ -195,6 +206,15 @@ const settled = async (): Promise<void> => {
   });
 };
 
+/** Waits `ms` of real time: a hover card opens only after the pointer rests. */
+const waited = async (ms: number): Promise<void> => {
+  const { promise, resolve } = Promise.withResolvers<boolean>();
+  setTimeout(() => {
+    resolve(true);
+  }, ms);
+  await promise;
+};
+
 const press = async (element: Element | null | undefined) => {
   if (!(element instanceof HTMLElement)) {
     throw new TypeError("Nothing to press");
@@ -289,11 +309,14 @@ describe("the company's agents, on pages of their own", () => {
       }).toStrictEqual({ newAgent: false, says: false });
     });
 
-    it("shows an admin every agent, each card opening its page", async () => {
+    it("shows an admin every agent, each card opening its page with one fact at its foot", async () => {
       await mounted(
         <AgentsOverview
           makes
-          managed={managed}
+          managed={{
+            ...managed,
+            wakes: { ...managed.wakes, [stephen.id]: [failedWake] },
+          }}
           // The admin isn't in Claire's teams; Milan is paused.
           usable={[chatAgent(stephen)]}
         />
@@ -305,28 +328,53 @@ describe("the company's agents, on pages of their own", () => {
         { name: "Claire", to: "/agents/agent-claire", chat: [] },
         { name: "Milan", to: "/agents/agent-milan", chat: [] },
       ]);
-      const [, clairesCard, milansCard] = cards();
+      const [stephensCard, clairesCard, milansCard] = cards();
       expect({
-        claire: [
-          "Finance",
-          "3 of 6 kinds of work",
-          "1 schedule",
-          "$12.50 this month",
-        ].map((words) => clairesCard?.text.includes(words)),
-        // Never asked this month: nothing about what it cost.
-        milanCost: milansCard?.text.includes("this month"),
-        milan: ["Nobody yet", "May do nothing yet"].map((words) =>
-          milansCard?.text.includes(words)
+        // Its next run at its foot, and whom it answers for a touch screen.
+        claire: ["Next", "Finance"].map((words) =>
+          clairesCard?.text.includes(words)
+        ),
+        stephen: ["Everyone with Grasp", "Last run failed"].map((words) =>
+          stephensCard?.text.includes(words)
         ),
         milanPaused: milansCard?.text.includes("Paused"),
         newAgent: document.querySelector("a[href='/agents/new']") !== null,
       }).toStrictEqual({
-        claire: [true, true, true, true],
-        milanCost: false,
-        milan: [true, true],
+        claire: [true, true],
+        stephen: [true, true],
         milanPaused: true,
         newAgent: true,
       });
+    });
+
+    it("tells an admin resting on a card what is worth knowing before opening it", async () => {
+      await mounted(
+        <AgentsOverview makes managed={managed} usable={[chatAgent(stephen)]} />
+      );
+      const card = document.querySelector("a[href='/agents/agent-claire']");
+      await act(async () => {
+        card?.dispatchEvent(
+          new PointerEvent("pointerenter", {
+            bubbles: true,
+            pointerType: "mouse",
+          })
+        );
+        card?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+        card?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+        await waited(800);
+      });
+      const said = document.body.textContent ?? "";
+      expect(
+        [
+          "Answers",
+          "Finance",
+          "3 of 6 kinds of work",
+          "$12.50 · 40 requests · 4 people",
+          "Last asked",
+        ].map((words) => said.includes(words))
+      ).toStrictEqual([true, true, true, true, true]);
+      // Milan was never asked this month: nothing about what it cost.
+      expect(said).not.toContain("$0.00");
     });
   });
 
