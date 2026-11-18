@@ -13960,7 +13960,6 @@ msgstr "Selbst freigegeben: Niemand sonst konnte sie freigeben"
 
 #: src/chat/asked-questions.tsx
 #: src/inbox/item-detail.tsx
-#: src/interview/composer.tsx
 msgid "Send"
 msgstr "Senden"
 
@@ -15430,10 +15429,6 @@ msgstr "Mit dieser E-Mail-Adresse wird bereits ein anderes Konto angemeldet."
 #: src/projects/file-item-dialog.tsx
 msgid "That is {who}."
 msgstr "Das sind {who}."
-
-#: src/interview/composer.tsx
-msgid "That is too long to send in one go. Send it in two parts."
-msgstr "Das ist zu lang für eine Nachricht. Senden Sie es in zwei Teilen."
 
 #: src/pages/page-files.ts
 msgid "That isn't a file call."

@@ -13960,7 +13960,6 @@ msgstr "Self-approved: nobody else could approve it"
 
 #: src/chat/asked-questions.tsx
 #: src/inbox/item-detail.tsx
-#: src/interview/composer.tsx
 msgid "Send"
 msgstr "Send"
 
@@ -15430,10 +15429,6 @@ msgstr "That email address already signs in with another account."
 #: src/projects/file-item-dialog.tsx
 msgid "That is {who}."
 msgstr "That is {who}."
-
-#: src/interview/composer.tsx
-msgid "That is too long to send in one go. Send it in two parts."
-msgstr "That is too long to send in one go. Send it in two parts."
 
 #: src/pages/page-files.ts
 msgid "That isn't a file call."

@@ -172,7 +172,7 @@ const MicStep = ({
   }
   return (
     <div {...stylex.props(looks.actions)}>
-      {check === "mic" ? <VoiceBar doing={doing} /> : null}
+      {check === "mic" ? <VoiceBar doing={doing} framed /> : null}
       {check === "mic" && mic === "asking" ? (
         <Text tone="muted">
           {t`Allow the microphone when your browser asks.`}

@@ -13960,7 +13960,6 @@ msgstr "Auto-approuvée : personne d’autre ne pouvait l’approuver"
 
 #: src/chat/asked-questions.tsx
 #: src/inbox/item-detail.tsx
-#: src/interview/composer.tsx
 msgid "Send"
 msgstr "Envoyer"
 
@@ -15430,10 +15429,6 @@ msgstr "Cette adresse e-mail se connecte déjà avec un autre compte."
 #: src/projects/file-item-dialog.tsx
 msgid "That is {who}."
 msgstr "C’est-à-dire {who}."
-
-#: src/interview/composer.tsx
-msgid "That is too long to send in one go. Send it in two parts."
-msgstr "C’est trop long pour un seul envoi. Envoyez-le en deux parties."
 
 #: src/pages/page-files.ts
 msgid "That isn't a file call."

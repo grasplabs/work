@@ -1,113 +1,108 @@
 import { turnAnswerMax } from "@grasp-os/shared/interview-turn";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupTextarea,
-} from "@grasp-os/ui/components/input-group";
-import { Spinner } from "@grasp-os/ui/components/spinner";
 import { useLingui } from "@lingui/react/macro";
-import { ArrowUpIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
+import { Button } from "../grasp/button/index.ts";
+import { ChatMessage } from "../grasp/chat-message/index.ts";
+import { Composer as Box } from "../grasp/composer/index.ts";
+import { arrive } from "../grasp/motion/arrive.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useSaveState } from "./kept.ts";
 import type { LoopState, Said } from "./loop.ts";
-import { Marked, Own } from "./talk.tsx";
+import { Marked } from "./talk.tsx";
 import { VoiceBar } from "./voice-bar.tsx";
 import type { BarDoing } from "./voice-bar.tsx";
 
 // The box at the bottom (prototype `interview-view.tsx`, `Composer` and
-// `ChatBox`): as in any chat, only larger and rounder. Enter sends,
-// Shift+Enter starts a new line. For whoever chose to talk, it is a voice
-// bar: while Stephen talks or thinks, and while he listens, with the way
-// to mute themselves for a moment; "Type instead" brings the box back at
-// once, for the rest of his line. What they just said shows over it, as
-// their side of the chat, with what Stephen marked in it; when it is long,
-// its newest words stay and its top fades out under the stage.
+// `ChatBox`): Grasp UI's Composer, as in any chat. Enter sends,
+// Shift+Enter starts a new line, and an answer stops at the most one turn
+// takes. For whoever chose to talk, a voice bar takes the card over: while
+// Stephen talks or thinks, and while he listens, with the way to mute
+// themselves for a moment; "Type instead" brings the box back at once, for
+// the rest of his line. What they just said shows over it, as their side
+// of the chat, with what Stephen marked in it; when it is long, its newest
+// words stay and its top fades out under the stage.
 
-/** The box to type in: one line at rest, growing with what is typed. */
+const styles = stylex.create({
+  root: { position: "relative", display: "flex", flexDirection: "column" },
+  over: {
+    position: "absolute",
+    insetInline: 0,
+    bottom: "100%",
+    display: "flex",
+    justifyContent: "flex-end",
+    marginBlockEnd: grasp.space4,
+    pointerEvents: "none",
+  },
+  // It grows upward to the room kept over the box, newest words at its foot; its top fades out under the stage.
+  said: {
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "flex-end",
+    width: "100%",
+    maxHeight: "5rem",
+    overflow: "hidden",
+    maskImage: "linear-gradient(to bottom, transparent 0, black 3.5rem)",
+  },
+  box: { width: "100%", maxWidth: "none" },
+  trouble: {
+    paddingInline: grasp.space5,
+    paddingBlockEnd: grasp.space2,
+    textAlign: "center",
+    textWrap: "balance",
+    color: grasp.attention,
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+  },
+});
+
+/** The box to type in, its text kept by the caller so it outlasts the bar; the cursor in it from the start. */
 const ChatBox = ({
   text,
   setText,
   placeholder,
-  thinking,
+  bar,
   onSend,
 }: {
-  /** What is typed: kept by the composer, so it outlasts the bar. */
   text: string;
   setText: (text: string) => void;
   placeholder: string;
-  thinking: boolean;
+  /** The voice bar, in the text's place while they talk. */
+  bar: ReactNode;
   onSend: (text: string) => void;
 }) => {
   const { t } = useLingui();
-  const field = useRef<HTMLTextAreaElement>(null);
+  const room = useRef<HTMLDivElement>(null);
   // The cursor is in the box, so typing is all it takes.
   useEffect(() => {
-    field.current?.focus({ preventScroll: true });
+    room.current?.querySelector("textarea")?.focus({ preventScroll: true });
   }, []);
-  // Longer than one answer may be: said before it is sent, so nothing is cut without them knowing.
-  const tooLong = text.trim().length > turnAnswerMax;
-  const ready = text.trim() !== "" && !tooLong;
-  const send = (): void => {
-    if (ready) {
-      onSend(text.trim());
-      setText("");
-    }
-  };
   return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        send();
-      }}
-    >
-      <InputGroup size="lg">
-        <InputGroupTextarea
-          aria-invalid={tooLong || undefined}
-          aria-label={t`Your answer`}
-          className="max-h-40 min-h-0"
-          onChange={(event) => {
-            setText(event.target.value);
-          }}
-          onKeyDown={(event) => {
-            if (
-              event.key === "Enter" &&
-              !event.shiftKey &&
-              !event.nativeEvent.isComposing
-            ) {
-              event.preventDefault();
-              send();
-            }
-          }}
-          placeholder={placeholder}
-          ref={field}
-          rows={1}
-          value={text}
-        />
-        <InputGroupAddon align="inline-end" className="self-end">
-          <InputGroupButton
-            aria-label={t`Send`}
-            disabled={!ready}
-            size="icon-lg"
-            type="submit"
-            variant={ready ? "default" : "secondary"}
-          >
-            {thinking && !ready ? <Spinner /> : <ArrowUpIcon />}
-          </InputGroupButton>
-        </InputGroupAddon>
-      </InputGroup>
-      {tooLong ? (
-        <p
-          aria-live="polite"
-          className="text-muted-foreground px-5 pt-2 text-xs"
-        >
-          {t`That is too long to send in one go. Send it in two parts.`}
-        </p>
-      ) : null}
-    </form>
+    <div ref={room}>
+      <Box
+        aria-label={t`Your answer`}
+        compact
+        layout={styles.box}
+        maxLength={turnAnswerMax}
+        onSend={(sent: string) => {
+          const trimmed = sent.trim();
+          if (trimmed !== "") {
+            onSend(trimmed);
+            setText("");
+          }
+        }}
+        onValueChange={(value: string) => {
+          setText(value);
+        }}
+        placeholder={placeholder}
+        takeover={bar}
+        value={text}
+      />
+    </div>
   );
 };
 
@@ -140,54 +135,43 @@ export const Composer = ({
     barDoing = doing;
   }
   return (
-    <div className="relative flex flex-col">
-      <div className="pointer-events-none absolute inset-x-0 bottom-full mb-4 flex justify-end">
+    <div {...stylex.props(styles.root)}>
+      <div {...stylex.props(styles.over)}>
         {said === null ? null : (
-          // It grows upward to the room kept over the box, newest words at its foot; its top fades out under the stage.
-          <div
-            className="animate-in fade-in slide-in-from-bottom-2 flex max-h-20 w-full flex-col justify-end overflow-hidden mask-t-from-14 mask-t-to-20 duration-300 motion-reduce:animate-none"
-            key={said.text}
-          >
-            <Own>
+          <div key={said.text} {...stylex.props(styles.said, arrive.in)}>
+            <ChatMessage from="person">
               <Marked marks={said.marks} names={names} text={said.text} />
               {said.waiting ? (
-                <span className="text-muted-foreground"> …</span>
+                <Text element="span" tone="muted">
+                  {" "}
+                  …
+                </Text>
               ) : null}
-            </Own>
+            </ChatMessage>
           </div>
         )}
       </div>
-      {bar ? (
-        <div
-          className="animate-in fade-in slide-in-from-bottom-1 duration-300 motion-reduce:animate-none"
-          key="bar"
-        >
-          <VoiceBar doing={barDoing} mute>
-            <Button
-              onClick={() => {
-                setTyping(line);
-              }}
-              size="lg"
-              variant="ghost"
-            >
-              {t`Type instead`}
-            </Button>
-          </VoiceBar>
-        </div>
-      ) : (
-        <div
-          className="animate-in fade-in slide-in-from-bottom-1 duration-300 motion-reduce:animate-none"
-          key="box"
-        >
-          <ChatBox
-            onSend={onSend}
-            placeholder={placeholder}
-            setText={setText}
-            text={text}
-            thinking={doing === "thinking"}
-          />
-        </div>
-      )}
+      <ChatBox
+        bar={
+          bar ? (
+            <VoiceBar doing={barDoing} mute>
+              <Button
+                onClick={() => {
+                  setTyping(line);
+                }}
+                size="md"
+                variant="ghost"
+              >
+                {t`Type instead`}
+              </Button>
+            </VoiceBar>
+          ) : undefined
+        }
+        onSend={onSend}
+        placeholder={placeholder}
+        setText={setText}
+        text={text}
+      />
     </div>
   );
 };
@@ -200,8 +184,10 @@ export const SaveNote = () => {
     return null;
   }
   return (
-    <span aria-live="polite" className="text-muted-foreground text-xs">
-      {state === "saved" ? t`Saved` : t`Saving…`}
+    <span aria-live="polite">
+      <Text element="span" size="xs" tone="muted">
+        {state === "saved" ? t`Saved` : t`Saving…`}
+      </Text>
     </span>
   );
 };
@@ -219,10 +205,7 @@ export const SaveTrouble = () => {
     text = save.message;
   }
   return text === null ? null : (
-    <p
-      aria-live="polite"
-      className="text-status-attention px-5 pb-2 text-center text-xs text-balance"
-    >
+    <p aria-live="polite" {...stylex.props(styles.trouble)}>
       {text}
     </p>
   );

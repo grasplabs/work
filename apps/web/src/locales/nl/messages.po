@@ -13960,7 +13960,6 @@ msgstr "Zelf goedgekeurd: niemand anders kon het goedkeuren"
 
 #: src/chat/asked-questions.tsx
 #: src/inbox/item-detail.tsx
-#: src/interview/composer.tsx
 msgid "Send"
 msgstr "Versturen"
 
@@ -15430,10 +15429,6 @@ msgstr "Met dat e-mailadres wordt al ingelogd met een ander account."
 #: src/projects/file-item-dialog.tsx
 msgid "That is {who}."
 msgstr "Dat zijn {who}."
-
-#: src/interview/composer.tsx
-msgid "That is too long to send in one go. Send it in two parts."
-msgstr "Dat is te lang om in één keer te sturen. Stuur het in twee delen."
 
 #: src/pages/page-files.ts
 msgid "That isn't a file call."

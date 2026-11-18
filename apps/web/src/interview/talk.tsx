@@ -1,13 +1,17 @@
 import { interviewPhases } from "@grasp-os/shared/interview-links";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
+import { arrive } from "../grasp/motion/arrive.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { Head, headSizes, useHead } from "./head.tsx";
 import { useInterviewer } from "./kept.ts";
+import { looks } from "./looks.ts";
 import { useLoop } from "./loop.ts";
 import { markedPieces } from "./progress.ts";
 import { useSaidOf, voiceLevel } from "./speech.ts";
@@ -19,6 +23,33 @@ import { shownAs, SpokenText } from "./spoken.tsx";
 // him a small sign of what he is doing. A line still being written grows
 // in place as it comes. Then he waits for what they type in the box at the
 // bottom.
+
+const styles = stylex.create({
+  // Room kept for his line, so the head doesn't move as it comes.
+  room: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: grasp.space5,
+    width: "100%",
+    minHeight: "9rem",
+  },
+  line: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+    maxWidth: "32rem",
+  },
+  // What he marked in their words: underlined in the colour of what is agreed.
+  mark: {
+    color: "inherit",
+    backgroundColor: "transparent",
+    textDecorationLine: "underline",
+    textDecorationColor: grasp.success,
+    textDecorationThickness: "2px",
+    textUnderlineOffset: "0.2em",
+  },
+});
 
 /** How full he is printed: fuller as the interview goes on. */
 export const fillOf = (phase: (typeof interviewPhases)[number]): number =>
@@ -47,7 +78,7 @@ export const Talk = ({
     label = t`${who}, thinking.`;
   }
   return (
-    <div className="flex w-full max-w-xl flex-col items-center gap-6 text-center">
+    <div {...stylex.props(looks.screen)}>
       <Head
         fill={fillOf(phase)}
         label={label}
@@ -56,23 +87,16 @@ export const Talk = ({
         voice={voiceLevel}
         who={interviewer}
       />
-      <div
-        aria-live="polite"
-        className="flex min-h-36 w-full flex-col items-center gap-5"
-        ref={body}
-      >
+      <div aria-live="polite" ref={body} {...stylex.props(styles.room)}>
         {loop.line === "" ? null : (
-          <div
-            className="animate-in fade-in slide-in-from-bottom-2 flex max-w-lg flex-col gap-2 duration-500 motion-reduce:animate-none"
-            key={loop.saying}
-          >
-            <PageHeaderTitle render={<p />}>
+          <div key={loop.saying} {...stylex.props(styles.line, arrive.in)}>
+            <p {...stylex.props(looks.said)}>
               <SpokenText said={said} text={title} />
-            </PageHeaderTitle>
+            </p>
             {rest === "" ? null : (
-              <p className="text-muted-foreground text-balance">
+              <Text tone="muted">
                 <SpokenText from={title.length + 1} said={said} text={rest} />
-              </p>
+              </Text>
             )}
           </div>
         )}
@@ -97,9 +121,9 @@ export const Marked = ({
         <span key={piece.at}>{piece.text}</span>
       ) : (
         <mark
-          className="line-under text-inherit"
           key={piece.at}
           title={names[piece.tag]}
+          {...stylex.props(styles.mark)}
         >
           {piece.text}
         </mark>
