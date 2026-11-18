@@ -702,7 +702,8 @@ const recordColumns = (
     {
       key: "_id",
       header: words.record,
-      control: true,
+      // The row's name: it wraps in whole words where the row is narrow,
+      // as a table's first column does, so it stands in no control's box.
       value: (record) => recordName(record),
       cell: (record) => (
         <Button
