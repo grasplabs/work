@@ -336,6 +336,9 @@ const kindsWithoutColon = <const K extends string>(
 // `drawing`: a drawing of a staff-list team's piece of work, only what
 // its people are checked to have told, readable by every member as
 // themselves (onboarding/new-brain.ts, GRA-1748).
+// `opinion`: what five or more people across the company say, from what
+// they left only counted anonymously, readable by every member as
+// themselves; never a team's (onboarding/new-brain.ts, GRA-1987).
 // `kickoff`: what every member reads of the onboarding's kickoff, readable
 // by everyone (onboarding/new-brain.ts, GRA-1748).
 // `roster`: the company's confirmed teams, as the admin described them,
@@ -352,6 +355,7 @@ const producerKinds = kindsWithoutColon([
   "interview",
   "claim",
   "drawing",
+  "opinion",
   "kickoff",
   "roster",
   "connected",

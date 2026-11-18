@@ -77,6 +77,13 @@ export const handOverProducers = {
     actions: ["onboarding.drawing.brain_source"],
     target: "onboarding_drawing",
   },
+  // An opinion of the company's, as the onboarding decides it stands
+  // (onboarding/store.ts `#noteOpinions`): what five or more people across
+  // the company say, never a team's nor a person's (GRA-1987).
+  opinion: {
+    actions: ["onboarding.opinion.brain_source"],
+    target: "onboarding_opinion",
+  },
   // What every member reads of the kickoff (onboarding/kickoff-company.ts),
   // as the onboarding's store notes each save and answer of it
   // (`#kickoffChanged`): the company's, never a person's.

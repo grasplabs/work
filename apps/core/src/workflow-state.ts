@@ -16,12 +16,14 @@ import { runOfStepKey } from "@grasp-os/shared/workflows";
 import { asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
 import { auditedBatch, outboxed, outboxedWhere } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
   runChatSources,
+  runStateWriters,
   workflowResourceRuns,
   workflowState,
   workflowStateWrites,
@@ -136,16 +138,27 @@ const checkedRowsOf = async (
   reader: string
 ): Promise<(StateRow & { evidence: EvidenceState })[]> => {
   const db = drizzle(env.DB);
+  // The runs that set its keys, and the runs whose kept state those
+  // started from (`runStateWriters`, one hop): all their evidence, as one
+  // read.
   const writers = sql`(SELECT ${workflowState.runId} FROM ${workflowState}
     WHERE ${workflowState.workflowResourceId} = ${workflowId})`;
-  const [rows, pins, versions, memories] = await db.batch([
+  const startedFrom = sql`(SELECT ${runStateWriters.writerRunId} FROM ${runStateWriters}
+    WHERE ${runStateWriters.runId} IN ${writers})`;
+  const either = (runId: SQLiteColumn) =>
+    sql`(${runId} IN ${writers} OR ${runId} IN ${startedFrom})`;
+  const [rows, pins, versions, memories, startedFromRows] = await db.batch([
     rowsQuery(db, workflowId),
+    db.select().from(runChatSources).where(either(runChatSources.runId)),
+    versionEvidenceQuery(db, either),
+    memoryEvidenceQuery(db, either),
     db
-      .select()
-      .from(runChatSources)
-      .where(sql`${runChatSources.runId} IN ${writers}`),
-    versionEvidenceQuery(db, (runId) => sql`${runId} IN ${writers}`),
-    memoryEvidenceQuery(db, (runId) => sql`${runId} IN ${writers}`),
+      .select({
+        runId: runStateWriters.runId,
+        writerRunId: runStateWriters.writerRunId,
+      })
+      .from(runStateWriters)
+      .where(sql`${runStateWriters.runId} IN ${writers}`),
   ]);
   const evidence = await copiesEvidence(
     env,
@@ -154,7 +167,7 @@ const checkedRowsOf = async (
       workflowId,
     })),
     reader,
-    { pins, versions, memories }
+    { pins, versions, memories, writers: startedFromRows }
   );
   return rows.map((row) => ({
     ...row,
@@ -168,13 +181,19 @@ const checkedRowsOf = async (
  * starts, and keeps for every activation after. A key whose run read what
  * the company may no longer read is left out, read as unset, and counted
  * (`withheld`); one that can't be checked now fails the start, which
- * would otherwise read it as unset and may write over it.
+ * would otherwise read it as unset and may write over it. With the runs
+ * that set the keys it reads (`writers`), whose evidence the run's own
+ * checks then cover (`runStateWriters`, one hop).
  */
 export const readableStateOf = async (
   env: Env,
   workflowId: string,
   reader: string
-): Promise<{ values: Record<string, Json>; withheld: number }> => {
+): Promise<{
+  values: Record<string, Json>;
+  withheld: number;
+  writers: string[];
+}> => {
   const rows = await checkedRowsOf(env, workflowId, reader);
   if (rows.some(({ evidence }) => evidence === "unchecked")) {
     throw workflowResourceErrors.create("workflow.state_unchecked");
@@ -185,6 +204,7 @@ export const readableStateOf = async (
       kept.map(({ key, value }) => [key, z.json().parse(JSON.parse(value))])
     ),
     withheld: rows.length - kept.length,
+    writers: [...new Set(kept.map(({ runId }) => runId))],
   };
 };
 
