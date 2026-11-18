@@ -60,6 +60,7 @@ import {
   personErasureAreas,
   personErasures,
   sessions,
+  signInAddresses,
   stephenRequestCards,
   stephenRequests,
   skillDecisions,
@@ -207,7 +208,7 @@ const identity: ErasureStep = {
   after: "brain_shared",
   erase: async (env, userId) => {
     const db = drizzle(env.DB);
-    const [held, [user]] = await db.batch([
+    const [held, [user], signedInAs] = await db.batch([
       db
         .select({
           id: accounts.id,
@@ -219,6 +220,10 @@ const identity: ErasureStep = {
         .from(accounts)
         .where(eq(accounts.userId, userId)),
       db.select({ email: users.email }).from(users).where(eq(users.id, userId)),
+      db
+        .select({ address: signInAddresses.address })
+        .from(signInAddresses)
+        .where(eq(signInAddresses.userId, userId)),
     ]);
     // Their connections' accounts too, disconnected or not, as connect
     // still has them: its own erasure waits for this one (`connect`).
@@ -234,9 +239,13 @@ const identity: ErasureStep = {
         ...held.flatMap(({ verifiedEmail }) =>
           verifiedEmail === null ? [] : [verifiedEmail]
         ),
-        ...connected.flatMap(({ verifiedEmail }) =>
-          verifiedEmail === null ? [] : [verifiedEmail]
-        ),
+        // Every address their sign-ins and connections ever proved, not
+        // only the latest: each may name a token someone else could claim.
+        ...signedInAs.map(({ address }) => address),
+        ...connected.flatMap(({ verifiedEmail, pastVerifiedEmails }) => [
+          ...(verifiedEmail === null ? [] : [verifiedEmail]),
+          ...pastVerifiedEmails,
+        ]),
         ...(user === undefined ? [] : [user.email]),
       ],
     });
@@ -281,6 +290,7 @@ const identity: ErasureStep = {
         )
       ),
       forgetTokens(db, userId, keptKeys),
+      db.delete(signInAddresses).where(eq(signInAddresses.userId, userId)),
       db.delete(sessions).where(eq(sessions.userId, userId)),
       completed(
         db,

@@ -68,6 +68,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // company's record of who its documents were shared with, naming nobody
   // readable.
   "core.source_reader_tokens": { erased: "identity" },
+  // Every address a person's sign-ins proved, for their erasure alone
+  // (source-readers.ts): forgotten with their accounts.
+  "core.sign_in_addresses": { erased: "identity" },
   "core.members": { erased: "removal" },
   "core.member_removals": { kept: "keeps someone removed out" },
   "core.person_erasures": { kept: "the erasure's own record, by ID" },
@@ -714,6 +717,7 @@ export const reviewedPersonColumns: Readonly<
   "core.access_revocations": ["user_ids"],
   "core.accounts": ["user_id", "verified_email", "verified_email_at"],
   "core.source_reader_tokens": ["person"],
+  "core.sign_in_addresses": ["user_id"],
   "core.action_invocations": ["person_id"],
   "core.agent_held_starts": ["person_id"],
   "core.agents": ["changed_by", "made_by", "owner_id"],

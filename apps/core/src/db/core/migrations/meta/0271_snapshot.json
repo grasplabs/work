@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d2cf021e-2fc9-4f3e-a49a-17e56ff045ef",
+  "id": "7fbe65d5-77b5-4465-9a11-551aa09bf1e4",
   "prevId": "3a97c266-3dce-4bf2-bb30-6b0e4b19eefb",
   "tables": {
     "access_revocations": {
@@ -11418,6 +11418,38 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "sign_in_addresses": {
+      "name": "sign_in_addresses",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "address": {
+          "name": "address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "sign_in_addresses_user_id_address_pk": {
+          "columns": [
+            "user_id",
+            "address"
+          ],
+          "name": "sign_in_addresses_user_id_address_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

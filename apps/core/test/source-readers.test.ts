@@ -1277,6 +1277,135 @@ describe("readers copied from the source", () => {
     }
   );
 
+  it(
+    "forgets the token of an address a connection confirmed and then lost, though the person never read by it",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      const alice = await microsoftMember();
+      const { id: connectionId } = await connectedGoogle(alice);
+      const [local = ""] = alice.email.split("@");
+      const [renamed, renamedAgain] = [
+        `${local}-b@acme.test`,
+        `${local}-c@acme.test`,
+      ];
+      // Renamed to B, then a list names B; renamed again to C, and
+      // another to whom the cleared case leaves no address at all.
+      await googleGives(local, renamed);
+      await renewed(connectionId);
+      const marker = uniqueWord();
+      const list = await sharedItem(
+        marker,
+        readersOf({
+          kind: "account",
+          provider: "google",
+          tenant: "acme.test",
+          account: renamed,
+        })
+      );
+      await googleGives(local, renamedAgain);
+      await renewed(connectionId);
+      await admin.api.members.remove(alice.userId);
+      await admin.api.members.erase(alice.userId, alice.name);
+      await runMinuteTasks();
+      const { userId: newcomer } = await whoami(
+        await signedIn(idp, "google", googlePerson({ email: renamed }))
+      );
+
+      await expect(finds(newcomer, list, marker)).resolves.toBeFalsy();
+    }
+  );
+
+  it(
+    "forgets the token of an address a connection confirmed before a renewal couldn't confirm any",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      const alice = await microsoftMember();
+      const { id: connectionId } = await connectedGoogle(alice);
+      const [local = ""] = alice.email.split("@");
+      const renamed = `${local}-b@acme.test`;
+      await googleGives(local, renamed);
+      await renewed(connectionId);
+      const marker = uniqueWord();
+      const list = await sharedItem(
+        marker,
+        readersOf({
+          kind: "account",
+          provider: "google",
+          tenant: "acme.test",
+          account: renamed,
+        })
+      );
+      await googleGives(local, null);
+      await renewed(connectionId);
+      await admin.api.members.remove(alice.userId);
+      await admin.api.members.erase(alice.userId, alice.name);
+      await runMinuteTasks();
+      const { userId: newcomer } = await whoami(
+        await signedIn(idp, "google", googlePerson({ email: renamed }))
+      );
+
+      await expect(finds(newcomer, list, marker)).resolves.toBeFalsy();
+    }
+  );
+
+  it(
+    "forgets the tokens of every address a person signed in with, though they never read by them",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      const local = `signs-${unique()}`;
+      const [first, second, third] = [
+        `${local}-a@acme.test`,
+        `${local}-b@acme.test`,
+        `${local}-c@acme.test`,
+      ];
+      const claims = googlePerson({ email: first });
+      const { userId } = await whoami(await signedIn(idp, "google", claims));
+      const markers = [uniqueWord(), uniqueWord()];
+      const lists = await Promise.all(
+        [first, second].map(
+          async (address, index) =>
+            await sharedItem(
+              markers[index] ?? "",
+              readersOf({
+                kind: "account",
+                provider: "google",
+                tenant: "acme.test",
+                account: address,
+              })
+            )
+        )
+      );
+      // Their Google account renamed twice, each time signed in again.
+      await signedIn(idp, "google", { ...claims, email: second });
+      await signedIn(idp, "google", { ...claims, email: third });
+      await admin.api.members.remove(userId);
+      await admin.api.members.erase(userId, String(claims.name));
+      await runMinuteTasks();
+      await admin.api.members.releaseAddress(first);
+      const signedInAt = async (address: string): Promise<string> => {
+        const { userId: newcomer } = await whoami(
+          await signedIn(idp, "google", googlePerson({ email: address }))
+        );
+        return newcomer;
+      };
+      const [firstList, secondList] = lists;
+      const [firstMarker = "", secondMarker = ""] = markers;
+      if (firstList === undefined || secondList === undefined) {
+        throw new Error("Expected two lists");
+      }
+      const atFirst = await signedInAt(first);
+      const atSecond = await signedInAt(second);
+
+      expect({
+        first: await finds(atFirst, firstList, firstMarker),
+        second: await finds(atSecond, secondList, secondMarker),
+      }).toStrictEqual({ first: false, second: false });
+    }
+  );
+
   it("refuses a reader's ID that could name another, and other readers for one person's own source", async () => {
     const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
     const colon = await outcome(

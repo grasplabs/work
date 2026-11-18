@@ -80,6 +80,16 @@ export const connections = sqliteTable(
      */
     verifiedEmailAt: timestamp("verified_email_at"),
     /**
+     * The addresses `verified_email` held before a renewal or reconnect
+     * replaced or cleared it (`pastAddressesAfter`), kept until its
+     * person's erasure, which forgets the reader tokens of each (core's
+     * person-erasure.ts `identity`). Nothing reads them for access: a past
+     * address proves nothing.
+     */
+    pastVerifiedEmails: text("past_verified_emails", { mode: "json" }).$type<
+      string[]
+    >(),
+    /**
      * The other addresses the account's mailbox receives mail at (its
      * primary address and SMTP aliases), as its provider said when it was
      * connected (account-addresses.ts); null when never read.

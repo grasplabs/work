@@ -1,3 +1,9 @@
+CREATE TABLE `sign_in_addresses` (
+	`user_id` text NOT NULL,
+	`address` text NOT NULL,
+	PRIMARY KEY(`user_id`, `address`)
+);
+--> statement-breakpoint
 CREATE TABLE `source_reader_tokens` (
 	`key` text PRIMARY KEY NOT NULL,
 	`person` text,

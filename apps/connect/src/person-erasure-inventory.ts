@@ -72,6 +72,7 @@ export const reviewedPersonColumns: Readonly<
     "account_senders",
     "connected_by",
     "owner_user_id",
+    "past_verified_emails",
     "verified_email",
     "verified_email_at",
   ],

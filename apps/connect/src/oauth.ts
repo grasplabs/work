@@ -48,6 +48,7 @@ import {
 import {
   allowedToolNames,
   offeredToolNames,
+  pastAddressesAfter,
   readToolNames,
   toolResourcesOf,
 } from "./connections.ts";
@@ -555,6 +556,9 @@ const reconnect = async (
           tenant: tenantOf(flow),
           accountName: account.name,
           accountEmail: account.email?.toLowerCase() ?? null,
+          pastVerifiedEmails: pastAddressesAfter(
+            confirmedAddressOf(provider, account)
+          ),
           verifiedEmail: confirmedAddressOf(provider, account),
           verifiedEmailAt:
             confirmedAddressOf(provider, account) === null ? null : new Date(),
@@ -914,6 +918,9 @@ const replaceKey = async (
         .set({
           accountName: account.name,
           accountEmail: account.email?.toLowerCase() ?? null,
+          pastVerifiedEmails: pastAddressesAfter(
+            confirmedAddressOf(provider, account)
+          ),
           verifiedEmail: confirmedAddressOf(provider, account),
           verifiedEmailAt:
             confirmedAddressOf(provider, account) === null ? null : new Date(),

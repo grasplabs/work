@@ -6763,6 +6763,22 @@ export const brainOwnStores = sqliteTable("brain_own_stores", {
 });
 
 /**
+ * Every address a person's sign-ins proved (`accounts.verified_email`),
+ * the current one and those a later sign-in replaced (auth.ts): for their
+ * erasure alone, which forgets the reader tokens of each and then these
+ * rows (person-erasure.ts `identity`, source-readers.ts). Nothing reads
+ * it for access: a past address proves nothing.
+ */
+export const signInAddresses = sqliteTable(
+  "sign_in_addresses",
+  {
+    userId: text("user_id").notNull(),
+    address: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.address] })]
+);
+
+/**
  * The token the Brain knows each account on a copied reader list by
  * (source-readers.ts, GRA-1761), so the Brain never holds an address or an
  * object ID, and nor does this table: `key` is a keyed hash of the account
