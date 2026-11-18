@@ -618,6 +618,22 @@ const aTag = (): string =>
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 
+/**
+ * The id of core's key the shared store's events are under, or a new one
+ * while it has none: so a probe's add or erasure never drops the events
+ * a later pass hunts for, as a call under another key would.
+ */
+const eventKeyId = async (): Promise<string> =>
+  await runInDurableObject(
+    inJurisdiction(env, env.BRAIN_STORE).getByName("brain"),
+    (_store, state) => {
+      const [kept] = state.storage.sql
+        .exec<{ id: string }>("SELECT id FROM event_key WHERE row = 1")
+        .toArray();
+      return kept?.id ?? aTag();
+    }
+  );
+
 /** An event of `team` now, as the store's `addEvents` takes it. */
 const eventOf = (team: string, step: string) => ({
   key: crypto.randomUUID(),
@@ -10866,6 +10882,7 @@ export const storeProbes = {
   // As core's (above), through the contract itself: no reader, and no
   // answer but a refusal that names nothing of what it was given.
   addEvents: async ({ personId, markers }) => {
+    const keyId = await eventKeyId();
     const add = async (
       name: string,
       request: unknown,
@@ -10880,6 +10897,7 @@ export const storeProbes = {
         about
       );
     const marked = {
+      keyId,
       events: markers.map((marker) =>
         eventOf(`team:${marker}`, `Sent ${marker}`)
       ),
@@ -10889,14 +10907,20 @@ export const storeProbes = {
       await add("the same events again", marked, "hidden"),
       await add(
         "an event of a team no one is in",
-        { events: [eventOf(`team:${crypto.randomUUID()}`, "Sent")] },
+        { keyId, events: [eventOf(`team:${crypto.randomUUID()}`, "Sent")] },
         "nothing"
       ),
       await add("an event whose item is readable", {
+        keyId,
         events: [{ ...eventOf("team:x", "Sent"), item: markers.join(" ") }],
       }),
-      await add("no events", { events: [] }),
+      await add("no events", { keyId, events: [] }),
+      await add("an event under a key id that is the markers", {
+        keyId: markers.join(" "),
+        events: [eventOf("team:x", "Sent")],
+      }),
       await add("more events than one add takes", {
+        keyId,
         events: Array.from({ length: eventsPerAddMax + 1 }, () =>
           eventOf("team:x", markers.join(" "))
         ),
@@ -10909,20 +10933,25 @@ export const storeProbes = {
       ),
     ];
   },
-  eraseEvents: async ({ personId, markers }) => [
-    await answer("tags no event has", async () => {
-      await store().eraseEvents({ who: [aTag(), aTag()] });
-    }),
-    await answer("no tags", async () => {
-      await store().eraseEvents({ who: [] });
-    }),
-    await answer("a tag that is the markers", async () => {
-      await store().eraseEvents(unchecked({ who: [markers.join(" ")] }));
-    }),
-    await answer("tags, from the reader's own store", async () => {
-      await personalStore(personId).eraseEvents({ who: [aTag()] });
-    }),
-  ],
+  eraseEvents: async ({ personId, markers }) => {
+    const keyId = await eventKeyId();
+    return [
+      await answer("tags no event has", async () => {
+        await store().eraseEvents({ keyId, who: [aTag(), aTag()] });
+      }),
+      await answer("no tags", async () => {
+        await store().eraseEvents({ keyId, who: [] });
+      }),
+      await answer("a tag that is the markers", async () => {
+        await store().eraseEvents(
+          unchecked({ keyId, who: [markers.join(" ")] })
+        );
+      }),
+      await answer("tags, from the reader's own store", async () => {
+        await personalStore(personId).eraseEvents({ keyId, who: [aTag()] });
+      }),
+    ];
+  },
   expireEvents: async ({ personId }) => [
     await answer("an expiry", async () => {
       await store().expireEvents();

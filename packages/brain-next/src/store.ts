@@ -1355,22 +1355,22 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * team, never one person. Nothing in the store reads them back.
    */
   async addEvents(request: NewEvents): Promise<void> {
-    const { events } = checked(newEventsSchema, request);
+    const { keyId, events } = checked(newEventsSchema, request);
     if (this.#kind.kind === "person") {
       throw new Error(sharedOnly);
     }
     await this.#readyToWrite();
-    addEvents(this.ctx.storage, events, Date.now());
+    addEvents(this.ctx.storage, keyId, events, Date.now());
   }
 
   /** Deletes the events of a person's tags (events.ts): their erasure. */
   async eraseEvents(request: EventErasure): Promise<void> {
-    const { who } = checked(eventErasureSchema, request);
+    const { keyId, who } = checked(eventErasureSchema, request);
     if (this.#kind.kind === "person") {
       throw new Error(sharedOnly);
     }
     await this.#readyToWrite();
-    eraseEvents(this.ctx.storage.sql, who);
+    eraseEvents(this.ctx.storage, keyId, who, Date.now());
   }
 
   /** Deletes every event past its time (events.ts), by the store's clock. */

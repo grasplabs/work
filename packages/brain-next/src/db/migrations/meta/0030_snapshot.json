@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a470283f-04eb-44d8-bc0b-bd2150a66259",
+  "id": "86e9b0d0-0fef-4e73-9aa8-baf0d9cdcd62",
   "prevId": "477af347-89b4-40c6-903b-eb9161b1fe60",
   "tables": {
     "chunk_blocks": {
@@ -185,6 +185,38 @@
           "onUpdate": "no action"
         }
       },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "closed_event_tags": {
+      "name": "closed_event_tags",
+      "columns": {
+        "who": {
+          "name": "who",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "at": {
+          "name": "at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "closed_event_tags_at_idx": {
+          "name": "closed_event_tags_at_idx",
+          "columns": [
+            "at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
@@ -709,6 +741,35 @@
         "erasures_kind": {
           "name": "erasures_kind",
           "value": "\"erasures\".\"kind\" IN ('source', 'person', 'writer')"
+        }
+      }
+    },
+    "event_key": {
+      "name": "event_key",
+      "columns": {
+        "row": {
+          "name": "row",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "event_key_one_row": {
+          "name": "event_key_one_row",
+          "value": "\"event_key\".\"row\" = 1"
         }
       }
     },

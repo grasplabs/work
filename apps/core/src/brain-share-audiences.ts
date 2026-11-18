@@ -1,9 +1,10 @@
-import { and, count, eq, inArray } from "drizzle-orm";
+import { and, count, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { organizationId } from "./auth/auth.ts";
 import { notRemoved } from "./auth/membership-sql.ts";
 import { members, teamMembers } from "./db/core/schema.ts";
+import { inList } from "./db/d1.ts";
 
 // Whom a person may share a memory with (GRA-1815, brain-next.ts
 // `publishAs`): their teams and the company, each only with enough people
@@ -32,7 +33,8 @@ export const teamsOfAtLeast = async (
     .from(teamMembers)
     .where(
       and(
-        inArray(teamMembers.teamId, [...teamIds]),
+        // One bound value however many teams: D1 binds 100 a statement.
+        inList(teamMembers.teamId, teamIds),
         notRemoved(teamMembers.userId)
       )
     )
