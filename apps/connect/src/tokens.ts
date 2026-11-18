@@ -1,6 +1,6 @@
 import { connectErrors, connectionErrors } from "@grasp-os/shared/connect";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, eq, exists, isNull, like, lte, or, sql } from "drizzle-orm";
+import { and, eq, exists, isNull, like, lte, not, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -12,6 +12,7 @@ import {
   connectionTokens,
   tokenRevocations,
 } from "./db/schema.ts";
+import { ownerErased } from "./erased-people.ts";
 import { isInvalidGrant, refreshTokens, revokeToken } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
 import { oweRevoke, revocable } from "./owed-revokes.ts";
@@ -436,7 +437,10 @@ const storeRefreshed = async (
               .select()
               .from(connectionTokens)
               .where(and(unchanged(row), notDisconnected(row)))
-          )
+          ),
+          // Nothing of a person whose erasure began, though the renewal
+          // started before it: their address stays as their erasure read it.
+          not(ownerErased(row.connectionId))
         )
       );
     if (address.now === address.before) {

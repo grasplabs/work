@@ -142,11 +142,12 @@ export const stephenGoogleUrl = "https://google-control.test/stephen";
 export const googleAddressUrl = "https://google-control.test/address";
 
 /**
- * Where tests hold a connection's finishing mid-way, after Google's code
- * exchange and before connect stores it: POST \`{ hold: true }\` holds the
- * next look-up of the account's addresses (connect's account-addresses.ts,
- * which goes on without them) until POST \`{ hold: false }\`; GET answers
- * \`{ reached }\`, whether a held look-up is waiting.
+ * Where tests hold a call to Google mid-way: POST \`{ hold: true, prefix? }\`
+ * holds the next request whose URL starts with \`prefix\` until POST
+ * \`{ hold: false }\`, and then answers it as ever; GET answers
+ * \`{ reached }\`, whether a held one is waiting. By default the look-up of an account's addresses (connect's
+ * account-addresses.ts, which goes on without them): a connection's
+ * finishing, after Google's code exchange and before connect stores it.
  */
 export const googleHoldUrl = "https://google-control.test/hold";
 
@@ -785,13 +786,12 @@ export default {
     if (url.href === ${JSON.stringify(stephenGoogleUrl)}) {
       return await stephenGoogle.control(request);
     }
-    if (googleHold !== null && url.href.startsWith("https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs")) {
+    if (googleHold !== null && url.href.startsWith(googleHold.prefix)) {
       // Polls the flag: workerd refuses to wait on a promise another request made.
       googleHold.reached = true;
       while (googleHold?.held === true) {
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
-      return new Response(null, { status: 404 });
     }
     const fromStephenGoogle = await stephenGoogle.answer(request, url);
     if (fromStephenGoogle !== undefined) {
@@ -813,9 +813,13 @@ export default {
       if (request.method === "GET") {
         return Response.json({ reached: googleHold?.reached === true });
       }
-      const { hold } = await request.json();
+      const { hold, prefix } = await request.json();
       if (hold) {
-        googleHold = { reached: false, held: true };
+        googleHold = {
+          reached: false,
+          held: true,
+          prefix: prefix ?? "https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs",
+        };
       } else if (googleHold !== null) {
         googleHold.held = false;
         googleHold = null;

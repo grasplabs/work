@@ -35,7 +35,6 @@ import {
   members,
   organizations,
   sessions,
-  signInAddresses,
   ssoProviders,
   teamMembers,
   teams,
@@ -49,6 +48,7 @@ import {
 } from "../erased-people.ts";
 import { mayComeIn, staffMayStay } from "../onboarding/gate.ts";
 import { onboardingStore } from "../onboarding/store.ts";
+import { keepSignInAddress } from "../source-readers.ts";
 import { checkClaims } from "./claims.ts";
 import {
   devIdpOrigin,
@@ -695,25 +695,15 @@ const keptClaimsOf = (
   };
 };
 
-/**
- * Keeps the address a sign-in proved (`account.verifiedEmail`) among every
- * address its person proved (`sign_in_addresses`), for their erasure
- * alone (source-readers.ts `forgetTokens`): an address replaced at a later
- * sign-in still names reader tokens to forget. Nothing reads it for
- * access.
- */
-const keepSignInAddress = async (
+/** Keeps the address a sign-in proved, if any (source-readers.ts). */
+const keepSignInAddressOf = async (
   env: Env,
   account: Record<string, unknown>
 ): Promise<void> => {
   const { userId, verifiedEmail } = account;
-  if (typeof userId !== "string" || typeof verifiedEmail !== "string") {
-    return;
+  if (typeof userId === "string" && typeof verifiedEmail === "string") {
+    await keepSignInAddress(env, userId, verifiedEmail);
   }
-  await drizzle(env.DB)
-    .insert(signInAddresses)
-    .values({ userId, address: verifiedEmail.toLowerCase() })
-    .onConflictDoNothing();
 };
 
 /**
@@ -910,14 +900,14 @@ const createAuth = (
           // oxlint-disable-next-line require-await
           before: async (account) => withoutTokens(account),
           after: async (account) => {
-            await keepSignInAddress(env, account);
+            await keepSignInAddressOf(env, account);
           },
         },
         update: {
           // oxlint-disable-next-line require-await
           before: async (account) => withoutTokens(account),
           after: async (account) => {
-            await keepSignInAddress(env, account);
+            await keepSignInAddressOf(env, account);
           },
         },
       },

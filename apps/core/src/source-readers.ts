@@ -2,12 +2,18 @@ import type { PersonalAccount } from "@grasp-os/shared/connect";
 import { toHex } from "@grasp-os/shared/encoding";
 import { readerProofMaxAgeMs } from "@grasp-os/shared/source-readers";
 import type { SourceReader } from "@grasp-os/shared/source-readers";
-import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, not, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { providerIds, signInConfig } from "./auth/config.ts";
-import { accounts, sourceReaderTokens } from "./db/core/schema.ts";
+import {
+  accounts,
+  personErasures,
+  signInAddresses,
+  sourceReaderTokens,
+} from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { derivedHmacKey } from "./derived-keys.ts";
 
@@ -123,6 +129,38 @@ export const plainPrincipalOf = (reader: SourceReader): string | undefined => {
       throw new Error("Unknown reader");
     }
   }
+};
+
+/**
+ * That the erasure of the person `userId` began (`person_erasures`, kept
+ * from the request on), as SQL. Every write that names a person, or an
+ * address or account of theirs, carries `NOT` it in its own statement:
+ * computed from what was read before the erasure, it writes nothing once
+ * the erasure began, and nothing is left after its `identity` area ran
+ * (person-erasure.ts). Better Auth's own writes of `accounts` carry it in
+ * a trigger (migration 0272).
+ */
+export const erasureBegan = (userId: string): SQL =>
+  sql`EXISTS (SELECT 1 FROM ${personErasures} WHERE ${personErasures.userId} = ${userId})`;
+
+/**
+ * Keeps the address a sign-in proved among every address the person
+ * `userId` proved (`sign_in_addresses`), for their erasure alone
+ * (`forgetTokens`): an address replaced at a later sign-in still names
+ * reader tokens to forget. Nothing reads it for access. None once their
+ * erasure began.
+ */
+export const keepSignInAddress = async (
+  env: Pick<Env, "DB">,
+  userId: string,
+  address: string
+): Promise<void> => {
+  await drizzle(env.DB)
+    .insert(signInAddresses)
+    .select(
+      sql`SELECT ${userId}, ${address.toLowerCase()} WHERE NOT ${erasureBegan(userId)}`
+    )
+    .onConflictDoNothing();
 };
 
 /**
@@ -319,7 +357,8 @@ export const heldPrincipalsOf = async (
           or(
             isNull(sourceReaderTokens.person),
             ne(sourceReaderTokens.person, userId)
-          )
+          ),
+          not(erasureBegan(userId))
         )
       ),
     db
@@ -361,7 +400,7 @@ export const claimConnectedTokens = async (
     .insert(sourceReaderTokens)
     .select(
       sql`SELECT json_extract(value, '$[0]'), ${userId}, json_extract(value, '$[1]'), ${Date.now()}
-        FROM json_each(${claimed}) WHERE true`
+        FROM json_each(${claimed}) WHERE NOT ${erasureBegan(userId)}`
     )
     .onConflictDoUpdate({
       target: sourceReaderTokens.key,
