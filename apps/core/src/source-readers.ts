@@ -87,6 +87,21 @@ import { derivedHmacKey } from "./derived-keys.ts";
  */
 export const readerGroupRequestsPerTick = 1000;
 
+/**
+ * How many D1 queries one run of connect's reads of people's groups may
+ * make before it starts no other turn, counted all told (the due list,
+ * each connection's token, each write). The platform's limit is D1's
+ * queries per Worker invocation: 1,000 on Workers Paid, a batch counting
+ * as one, as Cloudflare's D1 limits page states it (checked 18 November
+ * 2026; past it a query fails). The run is connect's own invocation:
+ * Cloudflare's service bindings page counts each call to a service binding
+ * as a Worker invocation. Half of it: the other half is room for the one
+ * turn under way when the share is reached, whose worst case is a token
+ * renewal waiting out another's lease (connect's tokens.ts `refreshed`:
+ * three queries every 100 ms for 15 s, about 460 with the turn's own).
+ */
+export const readerGroupQueriesPerTick = 500;
+
 /** `part` as two names of it are compared: Unicode NFC, lowercase. */
 const comparable = (part: string): string =>
   part.normalize("NFC").toLowerCase();

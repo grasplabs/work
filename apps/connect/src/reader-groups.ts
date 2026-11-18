@@ -21,6 +21,7 @@ import { emailOf } from "./directory.ts";
 import { ownerErased } from "./erased-people.ts";
 import { SourceError, readFromProvider, requestBudget } from "./event-kinds.ts";
 import type { ProviderAccess, RequestBudget } from "./event-kinds.ts";
+import { googleUserinfoAddress } from "./providers.ts";
 import { accessTokenFor } from "./tokens.ts";
 
 // The groups each person's own suite account is in, nested ones included
@@ -79,9 +80,10 @@ const cloudIdentity = readFromProvider({
 });
 
 /**
- * What one turn costs besides the reads, counted in the run's budget: the
- * connection's token (a renewal asks the token endpoint and, without an
- * ID token, the userinfo endpoint) and the write of what the turn found.
+ * What one turn sends besides the pages, counted in the run's requests:
+ * a renewal of the connection's token (the token endpoint and, without an
+ * ID token, Google's userinfo endpoint) and, on Google, the proof that the
+ * address the turn asked about is still the account's (`proved`).
  */
 const turnRequests = 3;
 
@@ -105,8 +107,15 @@ const readingSchema = z.strictObject({
   page: z.string().nullable(),
 });
 
-/** The request of a run: how many requests it may send, all told. */
-const runSchema = z.strictObject({ requests: z.number().int().positive() });
+/**
+ * The request of a run: how many requests it may send to the providers,
+ * and how many D1 queries it may make (connect's own invocation's, every
+ * one counted: the token's and the writes too), all told.
+ */
+const runSchema = z.strictObject({
+  requests: z.number().int().positive(),
+  queries: z.number().int().positive(),
+});
 
 const graphPageSchema = z.object({
   value: z.array(
@@ -300,6 +309,77 @@ const goOn = async (
   return { reading: now(), whole: true };
 };
 
+/**
+ * `db`, counting each query it runs into `counter` (a batch is one, as D1
+ * counts it): the D1 queries a run makes, whoever makes them.
+ */
+const countedDatabase = (
+  db: D1Database,
+  counter: { queries: number }
+): D1Database => {
+  const counted = new WeakMap<object, D1PreparedStatement>();
+  const statement = (prepared: D1PreparedStatement): D1PreparedStatement => {
+    const proxy = new Proxy(prepared, {
+      get: (target, key) => {
+        const value: unknown = Reflect.get(target, key, target);
+        if (typeof value !== "function") {
+          return value;
+        }
+        if (key === "bind") {
+          return (...values: unknown[]) => statement(target.bind(...values));
+        }
+        return (...args: unknown[]): unknown => {
+          if (["first", "run", "all", "raw"].includes(String(key))) {
+            counter.queries += 1;
+          }
+          return Reflect.apply(value, target, args);
+        };
+      },
+    });
+    counted.set(proxy, prepared);
+    return proxy;
+  };
+  return new Proxy(db, {
+    get: (target, key) => {
+      const value: unknown = Reflect.get(target, key, target);
+      if (typeof value !== "function") {
+        return value;
+      }
+      if (key === "prepare") {
+        return (query: string) => statement(target.prepare(query));
+      }
+      if (key === "batch") {
+        return (statements: D1PreparedStatement[]): unknown => {
+          counter.queries += 1;
+          return target.batch(
+            statements.map((each) => counted.get(each) ?? each)
+          );
+        };
+      }
+      return (...args: unknown[]): unknown => {
+        counter.queries += 1;
+        return Reflect.apply(value, target, args);
+      };
+    },
+  });
+};
+
+/**
+ * Whether Google says, for `token`, that `address` is still the address of
+ * the account `accountId` under `tenant`: the token's own userinfo, so an
+ * address given to someone else since the turn's address was confirmed
+ * keeps nothing of what was asked about it.
+ */
+const proved = async (
+  token: string,
+  tenant: string,
+  accountId: string,
+  address: string | null
+): Promise<boolean> => {
+  const now = await googleUserinfoAddress(token, tenant, accountId);
+  return now !== null && address !== null && keyOf(now) === keyOf(address);
+};
+
 /** Spends `count` of the run's requests at once; false when it has fewer. */
 const spendAll = (budget: RequestBudget, count: number): boolean => {
   if (budget.left < count) {
@@ -314,28 +394,29 @@ const spendAll = (budget: RequestBudget, count: number): boolean => {
 /**
  * Reads the groups of the personal suite connections that are due, the
  * longest untried first, each turn going on from where the last stopped,
- * within the `requests` the caller gives the whole run (core's clock, from
- * its invocation's subrequests: source-readers.ts). How many reads became
- * whole.
+ * within the `requests` and the D1 `queries` the caller gives the whole run
+ * (core's clock: source-readers.ts). A turn starts only while queries are
+ * left, so the run stops one turn past its share at most; what is left is
+ * due next run. How many reads became whole.
  */
 export const readReaderGroups = async (
   env: Env,
   request: unknown
 ): Promise<number> => {
-  const { requests } = connectErrors.parse(
+  const { requests, queries } = connectErrors.parse(
     "connect.invalid",
     runSchema,
     request
   );
-  const db = drizzle(env.DB);
+  const counter = { queries: 0 };
+  const counted: Env = { ...env, DB: countedDatabase(env.DB, counter) };
+  const db = drizzle(counted.DB);
   const budget = requestBudget(requests);
-  if (!spendAll(budget, 1)) {
-    return 0;
-  }
   const due = await db
     .select({
       id: connections.id,
       provider: connections.provider,
+      tenant: connections.tenant,
       accountId: connections.accountId,
       verifiedEmail: connections.verifiedEmail,
       reading: connections.readerGroupsReading,
@@ -365,9 +446,14 @@ export const readReaderGroups = async (
     .limit(Math.ceil(requests / turnRequests));
   let whole = 0;
   for (const row of due) {
-    const { id, accountId, verifiedEmail } = row;
+    const { id, tenant, accountId, verifiedEmail } = row;
     const provider = groupProviderSchema.parse(row.provider);
-    if (accountId === null || !spendAll(budget, turnRequests)) {
+    if (
+      tenant === null ||
+      accountId === null ||
+      counter.queries >= queries ||
+      !spendAll(budget, turnRequests)
+    ) {
       break;
     }
     // Where the last turn stopped, if it read the same account at the
@@ -387,9 +473,20 @@ export const readReaderGroups = async (
         throw new SourceError("No confirmed address to read the groups of");
       }
       // oxlint-disable-next-line no-await-in-loop -- one connection at a time, in one budget
-      const token = await accessTokenFor(env, id);
+      const token = await accessTokenFor(counted, id);
       // oxlint-disable-next-line no-await-in-loop -- one connection at a time, in one budget
       const turn = await goOn(provider, { token, budget }, reading);
+      // Google is asked about an address: nothing it said is kept unless
+      // Google says, for the same token, the address is still this
+      // account's. Microsoft is asked about the token's own account (`/me`),
+      // which no one else's can become.
+      if (
+        provider === "google" &&
+        // oxlint-disable-next-line no-await-in-loop -- one connection at a time
+        !(await proved(token, tenant, accountId, reading.address))
+      ) {
+        throw new SourceError("The address asked about isn't the account's");
+      }
       if (turn.whole) {
         whole += 1;
         set = {

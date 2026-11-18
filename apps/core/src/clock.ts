@@ -36,7 +36,10 @@ import { recordPlatformUpdate } from "./platform-updates.ts";
 import { sweepReleases } from "./release-retention.ts";
 import { completeOwedErasures } from "./shared-reads.ts";
 import { reconcileSkills } from "./skill-shares.ts";
-import { readerGroupRequestsPerTick } from "./source-readers.ts";
+import {
+  readerGroupQueriesPerTick,
+  readerGroupRequestsPerTick,
+} from "./source-readers.ts";
 import { sweepSpokenLines } from "./speech-cache.ts";
 import { sendStephenSummaries } from "./stephen-summary.ts";
 import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
@@ -205,6 +208,7 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: async (env) => {
       await env.CONNECT.readReaderGroups({
         requests: readerGroupRequestsPerTick,
+        queries: readerGroupQueriesPerTick,
       });
     },
   },

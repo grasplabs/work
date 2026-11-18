@@ -136,8 +136,9 @@ export const stephenGoogleUrl = "https://google-control.test/stephen";
 /**
  * Where tests change the address Google gives an account from then on:
  * `{ subject, email }`, as an admin renaming it in Workspace does. A
- * renewal of that account's tokens is answered with it; with \`email\`
- * null, without an ID token, and no userinfo endpoint answers here.
+ * renewal of that account's tokens is answered with it, and so is Google's
+ * userinfo endpoint; with \`email\` null, a renewal comes without an ID
+ * token, and the userinfo endpoint names no address.
  */
 export const googleAddressUrl = "https://google-control.test/address";
 
@@ -699,6 +700,15 @@ export default {
     }
     if (url.hostname === "graph.microsoft.com" && request.method === "GET" && url.pathname === "/v1.0/me/transitiveMemberOf") {
       return graphMemberOf(request, url);
+    }
+    if (request.method === "GET" && url.href === "https://openidconnect.googleapis.com/v1/userinfo") {
+      // Google's userinfo endpoint: the token's account as it is now.
+      const subject = subjectOf(request);
+      const account = googleAccounts.get(subject);
+      if (account === undefined || account.email === null) {
+        return Response.json({ error: "invalid_token" }, { status: 401 });
+      }
+      return Response.json({ sub: subject, email: account.email, email_verified: true, hd: account.domain });
     }
     if (url.hostname === "cloudidentity.googleapis.com" && request.method === "GET" && url.pathname === "/v1/groups/-/memberships:searchDirectGroups") {
       if (googleHold !== null && url.href.startsWith(googleHold.prefix)) {

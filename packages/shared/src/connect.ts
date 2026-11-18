@@ -2024,11 +2024,13 @@ export interface ConnectApi
    * Reads, with each person's own token, the groups of the personal suite
    * connections whose token was minted since their last read, or whose
    * read is under way (connect's reader-groups.ts), sending at most
-   * `requests` requests in all: core's clock asks every minute, with its
-   * share of its invocation's subrequests. How many reads became whole.
+   * `requests` requests to the providers and starting no turn once it made
+   * `queries` D1 queries: core's clock asks every minute, with its shares
+   * of the platform's limits. How many reads became whole.
    */
   readReaderGroups: (request: {
     requests: number;
+    queries: number;
   }) => Promise<{ read: number }>;
   /**
    * Asks the connections whose grant lacks the rights of `classes`, those

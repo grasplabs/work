@@ -25,6 +25,7 @@ import {
   claimConnectedTokens,
   heldPrincipalsOf,
   keepSignInAddress,
+  readerGroupQueriesPerTick,
   readerGroupRequestsPerTick,
 } from "../src/source-readers.ts";
 import { says } from "./agent-chat.ts";
@@ -467,7 +468,10 @@ const groupReadsFail = async (
 
 /** One run of connect's reads of people's groups, as core's clock asks it. */
 const readGroupsOnce = async (): Promise<void> => {
-  await env.CONNECT.readReaderGroups({ requests: readerGroupRequestsPerTick });
+  await env.CONNECT.readReaderGroups({
+    requests: readerGroupRequestsPerTick,
+    queries: readerGroupQueriesPerTick,
+  });
 };
 
 /**
@@ -2398,7 +2402,10 @@ describe("groups copied from the source", () => {
       // Runs too small to ask anything: his read stops with his address
       // still to be asked about.
       const stopped = await eventually(async () => {
-        await env.CONNECT.readReaderGroups({ requests: 4 });
+        await env.CONNECT.readReaderGroups({
+          requests: 3,
+          queries: readerGroupQueriesPerTick,
+        });
         const row = await connectDb()
           .prepare(
             "SELECT reader_groups_reading IS NOT NULL AS stopped FROM connections WHERE id = ?"
@@ -2410,17 +2417,109 @@ describe("groups copied from the source", () => {
       // Google renames his account, his old address goes to a new hire,
       // whose groups a read by it now finds, and his token is renewed.
       const hiresGroup = `hire-${unique()}@acme.test`;
+      const bobsGroup = `bob-${unique()}@acme.test`;
       await inGroups(bob.email, [hiresGroup]);
+      await inGroups(`${local}-renamed@acme.test`, [bobsGroup]);
       await googleGives(local, `${local}-renamed@acme.test`);
       await renewedOnly(connectionId);
       await groupsRead(connectionId);
       const marker = uniqueWord();
       const item = await sharedItem(marker, readersOf(googleGroup(hiresGroup)));
+      const ownMarker = uniqueWord();
+      const own = await sharedItem(
+        ownMarker,
+        readersOf(googleGroup(bobsGroup))
+      );
 
+      // His read starts over for his new address in the same turn.
       expect({
         stopped,
-        bob: await finds(bob.userId, item, marker),
-      }).toStrictEqual({ stopped: true, bob: false });
+        hires: await finds(bob.userId, item, marker),
+        his: await finds(bob.userId, own, ownMarker),
+      }).toStrictEqual({ stopped: true, hires: false, his: true });
+    }
+  );
+
+  it(
+    "keeps nothing of a read for an address Google gave someone else while the account's token was still fresh",
+    setUpTime,
+    async () => {
+      const bob = await microsoftMember();
+      const [local = ""] = bob.email.split("@");
+      const { id: connectionId } = await connectedGoogle(bob);
+      // Google renames his account and his old address goes to a new hire,
+      // whose groups a read by it now finds; his token is still fresh, so
+      // nothing renews it before the read.
+      const hiresGroup = `hire-${unique()}@acme.test`;
+      await inGroups(bob.email, [hiresGroup]);
+      await googleGives(local, `${local}-renamed@acme.test`);
+      await groupsRead(connectionId);
+      const marker = uniqueWord();
+      const item = await sharedItem(marker, readersOf(googleGroup(hiresGroup)));
+
+      await expect(finds(bob.userId, item, marker)).resolves.toBeFalsy();
+    }
+  );
+
+  it(
+    "starts no turn past a run's share of D1 queries, and reads the rest in the next runs",
+    setUpTime,
+    async () => {
+      // Six people whose tokens all ran out: each turn renews one, the
+      // costliest turn in D1 queries.
+      const people = await Promise.all(
+        Array.from({ length: 6 }, async () => await microsoftMember())
+      );
+      const groups = people.map(() => `team-${unique()}@acme.test`);
+      const connectionIds: string[] = [];
+      for (const [index, person] of people.entries()) {
+        // oxlint-disable-next-line no-await-in-loop -- one consent at a time
+        await inGroups(person.email, [groups[index] ?? ""]);
+        // oxlint-disable-next-line no-await-in-loop -- one consent at a time
+        const { id } = await connectedGoogle(person);
+        connectionIds.push(id);
+      }
+      await connectDb()
+        .prepare(
+          `UPDATE connection_tokens SET access_expires_at = 0 WHERE connection_id IN (SELECT value FROM json_each(?))`
+        )
+        .bind(JSON.stringify(connectionIds))
+        .run();
+      // A share a few renewals spend.
+      const first = await env.CONNECT.readReaderGroups({
+        requests: readerGroupRequestsPerTick,
+        queries: 30,
+      });
+      for (const id of connectionIds) {
+        // oxlint-disable-next-line no-await-in-loop -- each in turn
+        await groupsRead(id);
+      }
+      const items = await Promise.all(
+        groups.map(async (group) => {
+          const marker = uniqueWord();
+          return {
+            marker,
+            item: await sharedItem(marker, readersOf(googleGroup(group))),
+          };
+        })
+      );
+      const read = await Promise.all(
+        people.map(async ({ userId }, index) => {
+          const { marker, item } = items[index] ?? {
+            marker: "",
+            item: { producer: "upload" as const, id: "" },
+          };
+          return await finds(userId, item, marker);
+        })
+      );
+
+      expect({
+        firstRunStopped: first.read < people.length,
+        read,
+      }).toStrictEqual({
+        firstRunStopped: true,
+        read: people.map(() => true),
+      });
     }
   );
 
@@ -2483,7 +2582,10 @@ describe("groups copied from the source", () => {
       const runs = (async () => {
         for (let run = 0; run < 100; run += 1) {
           // oxlint-disable-next-line no-await-in-loop -- one run after another
-          await env.CONNECT.readReaderGroups({ requests: 40 });
+          await env.CONNECT.readReaderGroups({
+            requests: 40,
+            queries: readerGroupQueriesPerTick,
+          });
           // oxlint-disable-next-line no-await-in-loop -- until hers is whole
           if (await aliceWhole()) {
             return true;
