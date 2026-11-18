@@ -99,6 +99,10 @@ export default defineConnector({
           url.searchParams.set("from", cursor);
         }
         const response = await fetch(url);
+        // A folder list's position the provider no longer knows.
+        if (response.status === 410) {
+          throw new RestartSyncError();
+        }
         if (!response.ok) {
           throw new Error(`The provider answered ${response.status}`);
         }

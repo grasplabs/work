@@ -18,8 +18,11 @@ export const sampleSyncControlUrl = "https://sample-sync-control.test/feed";
  * sends; a position with no page answers 410, which the connector takes
  * as "restart"; an item asked by ID that isn't there comes as gone.
  *
- * A test POSTs `{ subject, pages?, places?, folders?, failing? }` to the
+ * A test POSTs `{ subject, pages?, places?, placePages?, folders?,
+ * failing? }` to the
  * control URL: what it names replaces that part of the account's world;
+ * `placePages` pages the folder list by position (`{ folders, next }`,
+ * 410 for a position it has none for), in place of `places`;
  * `folders` maps each folder to `{ changes, names, items }`, its pages by
  * position and its items by ID; a folder in `failing` answers 500, and so
  * does the `files` feed while `failing` names `files`. Every
@@ -89,7 +92,13 @@ export const sampleSyncFake = () => {
         return new Response(null, { status: 400 });
       }
       const world = worlds.get(subject) ?? {};
-      for (const part of ["pages", "places", "folders", "failing"]) {
+      for (const part of [
+        "pages",
+        "places",
+        "placePages",
+        "folders",
+        "failing",
+      ]) {
         const value = field(posted, part);
         if (value !== undefined) {
           world[part] = value;
@@ -119,6 +128,12 @@ export const sampleSyncFake = () => {
         );
       }
       if (url.pathname === "/v1/me/folders") {
+        const placePages = field(world, "placePages");
+        if (placePages !== undefined) {
+          return pageOr410(
+            field(placePages, url.searchParams.get("from") ?? "")
+          );
+        }
         const places = field(world, "places");
         return Array.isArray(places)
           ? Response.json({ folders: places })

@@ -1290,6 +1290,71 @@ describe("native sync", () => {
   );
 
   it(
+    "lists the folders again from the start when the connector no longer knows the listing's position, dropping nothing for the abandoned one",
+    setUpTime,
+    async () => {
+      const owner = await signedInApi(idp, "user");
+      const marks = { a: markerOf(), b: markerOf(), c: markerOf() };
+      const quiet = feedPage([], "q");
+      const { world } = await connectSampleFeed(owner, { "": quiet, q: quiet });
+      const folder = (name: keyof typeof marks) => ({
+        changes: {
+          "": feedPage([mailItem(`${name}/x`, `Mail ${marks[name]}`)], "f1"),
+          f1: feedPage([], "f1"),
+        },
+      });
+      const folders = { a: folder("a"), b: folder("b"), c: folder("c") };
+      // The folders listed over two reads.
+      await world({
+        placePages: {
+          "": { folders: ["a"], next: "t1" },
+          t1: { folders: ["b"] },
+        },
+        folders,
+      });
+      later(pollMs);
+      await sync();
+      later(pollMs);
+      await sync();
+      const first = [
+        await finds(owner.userId, marks.a),
+        await finds(owner.userId, marks.b),
+      ];
+      // A day on, the listing gets partway and then the folder list's
+      // position is gone: the connector answers "restart".
+      await world({
+        placePages: { "": { folders: ["a"], next: "t2" } },
+      });
+      later(24 * 60 * 60 * 1000);
+      await sync();
+      const abandoned = [
+        await finds(owner.userId, marks.a),
+        await finds(owner.userId, marks.b),
+      ];
+      // The next run lists from the start, and finishes: c made, b gone.
+      await world({ placePages: { "": { folders: ["a", "c"] } } });
+      later(pollMs);
+      await sync();
+      later(pollMs);
+      await sync();
+
+      expect({
+        first,
+        abandoned,
+        after: [
+          await finds(owner.userId, marks.a),
+          await finds(owner.userId, marks.b),
+          await finds(owner.userId, marks.c),
+        ],
+      }).toStrictEqual({
+        first: [true, true],
+        abandoned: [true, true],
+        after: [true, false, true],
+      });
+    }
+  );
+
+  it(
     "never loses a message moved between two folders for a run, read in either order, and lets a deleted one go",
     setUpTime,
     async () => {

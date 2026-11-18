@@ -1598,13 +1598,14 @@ const sourceStatement = (
   place: string,
   relistAt: number,
   now: number,
-  seenIn: number | null = null
+  seenIn: number | null = null,
+  held: SQL = sql`1 = 1`
 ) =>
   db
     .insert(brainSyncSources)
     .select(
       sql`SELECT ${of.connectionId}, ${of.feed}, ${place}, ${of.personId}, ${of.provider}, ${of.tenant}, ${of.account}, NULL, 1, 1, ${now}, NULL, NULL, NULL, NULL, 0, 0, 0, NULL, 0, ${relistAt}, NULL, 0, ${of.kind}, 0, 0, ${seenIn}
-        WHERE NOT ${closed(of.connectionId)}`
+        WHERE NOT ${closed(of.connectionId)} AND ${held}`
     )
     .onConflictDoUpdate({
       target: [
@@ -1700,13 +1701,19 @@ const listPlaces = async (
       cursor: listing.cursor,
     });
   } catch (error) {
+    const code = syncErrors.codeOf(error);
     log.warn("brain.sync.places_failed", {
       connectionId: listing.connectionId,
       errorName: errorName(error),
     });
     spend(budget, 1);
+    // The connector no longer knows the cursor (an expired folder-list
+    // token): the listing starts over from no cursor at the next run,
+    // under a new number, as a page read does. What the abandoned listing
+    // named stays; only a listing that ends drops anything.
     await release(applying, Date.now() + pollMs, {
-      lastError: syncErrors.codeOf(error) ?? "sync.failed",
+      lastError: code ?? "sync.failed",
+      ...(code === "sync.restart" ? { cursor: null } : {}),
     });
     return;
   }
@@ -1719,6 +1726,9 @@ const listPlaces = async (
       async (place) => await nextRelistAt({ ...listing, place }, now)
     )
   );
+  // Only while this run still holds the listing, in the statement that
+  // keeps or drops: a run that lost it changes nothing.
+  const held = sql`EXISTS (SELECT 1 FROM ${brainSyncSources} AS held WHERE held.connection_id = ${listing.connectionId} AND held.feed = ${listing.feed} AND held.place = ${placesListing} AND held.lease_id = ${leaseId})`;
   const kept = read.places.map((place, index) =>
     sourceStatement(
       db,
@@ -1726,19 +1736,19 @@ const listPlaces = async (
       place,
       relists[index] ?? now + relistMs,
       now,
-      number
+      number,
+      held
     )
   );
-  const dropped = ended
-    ? [
-        db
-          .update(brainSyncSources)
-          .set({ dropped: true })
-          .where(
-            sql`${brainSyncSources.connectionId} = ${listing.connectionId} AND ${brainSyncSources.feed} = ${listing.feed} AND ${brainSyncSources.place} <> ${placesListing} AND ${brainSyncSources.dropped} = 0 AND (${brainSyncSources.seenIn} IS NULL OR ${brainSyncSources.seenIn} < ${number})`
-          ),
-      ]
-    : [];
+  // What the listing no longer names, once it has ended: in the batch
+  // that moves its cursor, before that gives up the lease the statement
+  // checks.
+  const drop = db
+    .update(brainSyncSources)
+    .set({ dropped: true })
+    .where(
+      sql`${brainSyncSources.connectionId} = ${listing.connectionId} AND ${brainSyncSources.feed} = ${listing.feed} AND ${brainSyncSources.place} <> ${placesListing} AND ${brainSyncSources.dropped} = 0 AND (${brainSyncSources.seenIn} IS NULL OR ${brainSyncSources.seenIn} < ${number}) AND ${held}`
+    );
   // The places first, then the cursor with what the listing drops: a run
   // stopped between the two reads the same places again, which changes
   // nothing.
@@ -1747,31 +1757,33 @@ const listPlaces = async (
     spend(budget, 1);
     await db.batch([first, ...rest]);
   }
-  spend(budget, 1);
-  const [moved] = await db.batch([
-    db
-      .update(brainSyncSources)
-      .set({
-        cursor: read.cursor,
-        listing: number,
-        dueAt: new Date(ended ? await nextRelistAt(listing, now) : now),
-        leaseId: null,
-        leaseUntil: null,
-        lastSuccessAt: new Date(now),
-        lastError: null,
-      })
-      .where(
-        and(
-          eq(brainSyncSources.connectionId, listing.connectionId),
-          eq(brainSyncSources.feed, listing.feed),
-          eq(brainSyncSources.place, placesListing),
-          eq(brainSyncSources.leaseId, leaseId)
-        )
+  const move = db
+    .update(brainSyncSources)
+    .set({
+      cursor: read.cursor,
+      listing: number,
+      dueAt: new Date(ended ? await nextRelistAt(listing, now) : now),
+      leaseId: null,
+      leaseUntil: null,
+      lastSuccessAt: new Date(now),
+      lastError: null,
+    })
+    .where(
+      and(
+        eq(brainSyncSources.connectionId, listing.connectionId),
+        eq(brainSyncSources.feed, listing.feed),
+        eq(brainSyncSources.place, placesListing),
+        eq(brainSyncSources.leaseId, leaseId)
       )
-      .returning({ place: brainSyncSources.place }),
-    ...dropped,
-  ]);
-  heldAfter(moved);
+    )
+    .returning({ place: brainSyncSources.place });
+  spend(budget, 1);
+  if (ended) {
+    const [, moved] = await db.batch([drop, move]);
+    heldAfter(moved);
+    return;
+  }
+  heldAfter(await move);
 };
 
 /** The readers `source`'s person's own store adds with, or the shared store's. */
