@@ -300,14 +300,16 @@ describe("skill proposals", () => {
     await own().eraseSource({ source: second, reason: "deleted" });
     held.resolve(true);
     await ticking;
-    // One drawn from the third, which is erased once it was read, while the
-    // draft waits for a turn at the model (the queue's bucket emptied).
+    // One drawn from the third, which is erased while the draft waits for a
+    // turn at the model: the queue's bucket empty, and refilling only from
+    // an hour ahead, so no token comes during the test and the turn waits
+    // until the erasure stops it.
     await runInDurableObject(own(), (_store, state) => {
       state.storage.sql.exec(
         `INSERT INTO work_model_bucket (id, tokens, at, paused_until)
         VALUES (1, 0, ?1, 0)
         ON CONFLICT (id) DO UPDATE SET tokens = 0, at = ?1, paused_until = 0`,
-        Date.now()
+        Date.now() + 60 * 60_000
       );
     });
     await own().proposeSkill({
@@ -330,7 +332,9 @@ describe("skill proposals", () => {
       },
     });
     await picked.promise;
-    // Its read is done well before a token comes back (one every 2 s).
+    // Whenever the erasure lands, the model is never asked: before the
+    // read, the run can't be read; after it, the draft is stopped. The
+    // pause only makes the second, which the stop covers, the likely one.
     await scheduler.wait(500);
     await own().eraseSource({ source: third, reason: "deleted" });
     await drawing;

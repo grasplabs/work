@@ -1042,9 +1042,6 @@ const askWithin = async (
   }
   attempt.calls += 1;
   await takeTurn(storage, state, attempt);
-  // Stopped while it waited its turn (an erasure of what it read): nothing
-  // is sent.
-  signal.throwIfAborted();
   const left = deadline - Date.now();
   let reply: unknown = undefined;
   try {
