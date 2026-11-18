@@ -113,7 +113,7 @@ const flip = (before: ReadonlySet<string>, key: string): Set<string> => {
 };
 
 /** Search, in the navigation's top row: core's search, on the home page. */
-const SearchField = () => {
+export const SearchField = () => {
   const navigate = useNavigate();
   // On the results, the box starts from what was searched.
   const { q: searched } = useSearch({ strict: false });
