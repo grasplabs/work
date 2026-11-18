@@ -111,6 +111,9 @@ const typeRules: readonly {
   { action: "connection.app.pointed", type: "config" },
   // A connection's tokens stopped working: it needs signing in again.
   { action: "connection.needs_reauth", type: "config" },
+  // A renewal of a connection's tokens found its account's address changed,
+  // or no longer confirmed (connect's tokens.ts, GRA-1761).
+  { action: "connection.account_changed", type: "config" },
   // Connect reading what changed at a connection for workflows' event
   // triggers, dropping an event it couldn't deliver, and starting or
   // stopping listening there, being refused it, or failing to read it.

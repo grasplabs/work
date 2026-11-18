@@ -581,4 +581,76 @@ describe("a company's export, round trip", () => {
       current: [[true], [false]],
     });
   });
+
+  it("keeps a source several groups read, its narrowing and what was drawn from it, through an export", async () => {
+    await restore(shared(), empty);
+    const [kept, taken] = ["team:kept", "team:taken"];
+    const both: Access = { kind: "readers", groups: [kept, taken] };
+    const narrowed: Access = { kind: "readers", groups: [kept, "team:new"] };
+    const line = "The lease ends in March";
+    await shared().addSource({
+      source: "lease",
+      change: "1",
+      text: `${line}.`,
+      access: both,
+    });
+    const narrowedTo = await shared().changeReaders({
+      source: "lease",
+      change: "2",
+      access: narrowed,
+    });
+    const added = await shared().addMemories({
+      change: crypto.randomUUID(),
+      access: narrowed,
+      entities: [{ key: "l", kind: "supplier", names: ["Lease Holdings"] }],
+      memories: [
+        {
+          about: "l",
+          type: "fact",
+          statement: `${line}.`,
+          speaker: { kind: "outside" },
+          basis: {
+            kind: "source",
+            source: "lease",
+            version: narrowedTo?.version ?? 0,
+            quote: line,
+          },
+        },
+      ],
+    });
+    const reads = async () => {
+      const readsOf = async (group: string) => {
+        const reader: PersonReader = { person: `in-${group}`, groups: [group] };
+        const [current, first, memories] = await Promise.all([
+          shared().readCurrent({ sources: ["lease"], reader }),
+          shared().readVersion({ source: "lease", version: 1, reader }),
+          shared().readMemories({ entity: added.entities.l ?? "", reader }),
+        ]);
+        return {
+          current: current.map(({ version, text }) => ({ version, text })),
+          first: first?.text ?? null,
+          memories: memories.memories.length,
+        };
+      };
+      return { kept: await readsOf(kept), taken: await readsOf(taken) };
+    };
+    const before = await reads();
+    const { id } = await shared().startExport("test");
+    const exported = await exportSettled(shared, id);
+    const restored = await restoredAfterLoss(shared, id, empty);
+
+    expect({ before, exported, restored, after: await reads() }).toStrictEqual({
+      before: {
+        kept: {
+          current: [{ version: 2, text: `${line}.` }],
+          first: `${line}.`,
+          memories: 1,
+        },
+        taken: { current: [], first: null, memories: 0 },
+      },
+      exported: "done",
+      restored: "done",
+      after: before,
+    });
+  });
 });
