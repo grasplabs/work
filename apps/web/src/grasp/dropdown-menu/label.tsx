@@ -5,7 +5,7 @@
 import * as stylex from "@stylexjs/stylex";
 import { MenuGroupLabel as LabelPrimitive } from "@ui-sdk/react/menu";
 
-import { menuStyles as styles } from "./styles";
+import { useMenuLook } from "./look";
 
 /** Every prop a DropdownMenuLabel takes. */
 export interface DropdownMenuLabelProps {
@@ -14,6 +14,9 @@ export interface DropdownMenuLabelProps {
 }
 
 /** A group's name, above its items. */
-export const DropdownMenuLabel = ({ children }: DropdownMenuLabelProps) => (
-  <LabelPrimitive {...stylex.props(styles.label)}>{children}</LabelPrimitive>
-);
+export const DropdownMenuLabel = ({ children }: DropdownMenuLabelProps) => {
+  const styles = useMenuLook();
+  return (
+    <LabelPrimitive {...stylex.props(styles.label)}>{children}</LabelPrimitive>
+  );
+};

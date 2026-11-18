@@ -3563,6 +3563,10 @@ msgstr "Revenir à {agent}"
 msgid "Back to {destination}"
 msgstr "Retour à {destination}"
 
+#: src/frame/part-words.tsx
+msgid "Back to Grasp"
+msgstr "Retour à Grasp"
+
 #: src/dashboard/widget-board.tsx
 msgid "Back to how it began"
 msgstr "Revenir comme au début"
@@ -4987,9 +4991,17 @@ msgstr "Contestée"
 msgid "Continue"
 msgstr "Continuer"
 
+#: src/frame/part-words.tsx
+msgid "Continue with {provider}"
+msgstr "Continuer avec {provider}"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Continue with {signIn}"
 msgstr "Continuer avec {signIn}"
+
+#: src/frame/part-words.tsx
+msgid "Continue with Grasp staff"
+msgstr "Continuer en tant qu’équipe Grasp"
 
 #: src/apps/resource-bindings.tsx
 msgid "Contract"
@@ -5725,6 +5737,10 @@ msgstr "Dicter"
 #: src/chat/use-dictation.ts
 msgid "Dictation isn't set up here yet. What you typed is kept."
 msgstr "La dictée n'est pas encore configurée ici. Ce que vous avez tapé est conservé."
+
+#: src/frame/part-words.tsx
+msgid "Did not open"
+msgstr "Ne s’est pas ouvert"
 
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/items.ts
@@ -7248,6 +7264,10 @@ msgstr "Grasp demande"
 msgid "Grasp can be reached"
 msgstr "Grasp est disponible"
 
+#: src/frame/part-words.tsx
+msgid "Grasp can't be reached right now. Try again in a minute."
+msgstr "Grasp est injoignable pour le moment. Réessayez dans une minute."
+
 #: src/chat/cited-note.tsx
 #: src/chat/global-chat.tsx
 #: src/core.ts
@@ -7410,6 +7430,10 @@ msgstr "Grasp a remarqué qu’il ne le savait pas"
 msgid "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
 msgstr "Grasp ouvre bientôt à tout le monde, dès que Stephen aura parlé avec les équipes. Si vous avez un lien d’entretien, il se trouve dans votre e-mail."
 
+#: src/frame/part-words.tsx
+msgid "Grasp opens for everyone soon. If you have an interview link, it is in your email."
+msgstr "Grasp ouvre bientôt à tout le monde. Si vous avez un lien d’entretien, il est dans votre e-mail."
+
 #: src/workflows/requests/request-detail.tsx
 msgid "Grasp proposes"
 msgstr "Grasp propose"
@@ -7440,6 +7464,7 @@ msgid "Grasp sent this, but its answer was lost: nobody can tell whether it took
 msgstr "Grasp a envoyé ceci, mais sa réponse s'est perdue : personne ne sait s'il a pris effet. Vérifiez sur {connection} avant de répondre."
 
 #: src/activity/audit-event.tsx
+#: src/frame/part-words.tsx
 msgid "Grasp staff"
 msgstr "Équipe Grasp"
 
@@ -7522,6 +7547,10 @@ msgstr "Grille"
 #: src/activity/audit-event.tsx
 msgid "Guest"
 msgstr "Invité"
+
+#: src/frame/part-words.tsx
+msgid "Guest accounts can't sign in."
+msgstr "Les comptes invités ne peuvent pas se connecter."
 
 #: src/sign-in-errors.ts
 msgid "Guest accounts can't sign in. Use your organization's own account."
@@ -8813,6 +8842,10 @@ msgstr "Dernière exécution : {when}"
 msgid "Last run"
 msgstr "Dernière exécution"
 
+#: src/frame/part-words.tsx
+msgid "Last used"
+msgstr "Dernier utilisé"
+
 #: src/interview/words.ts
 msgid "Last, the numbers and the result."
 msgstr "Enfin, les chiffres et le résultat."
@@ -9157,6 +9190,10 @@ msgstr "Chargement de la valeur"
 #: src/settings/section.tsx
 msgid "Loading…"
 msgstr "Chargement…"
+
+#: src/frame/part-words.tsx
+msgid "Log in"
+msgstr "Se connecter"
 
 #: src/settings/org-card.tsx
 msgid "Logo"
@@ -9900,6 +9937,10 @@ msgstr "Nouvelle table"
 #: src/settings/teams.tsx
 msgid "New team"
 msgstr "Nouvelle équipe"
+
+#: src/frame/part-words.tsx
+msgid "New to Grasp?"
+msgstr "Nouveau sur Grasp ?"
 
 #: src/workflows/requests/request-summary.tsx
 msgid "New: “{label}”"
@@ -10715,6 +10756,7 @@ msgstr "non valide"
 msgid "Not verified"
 msgstr "Non vérifié"
 
+#: src/frame/part-words.tsx
 #: src/settings/ai-providers.tsx
 msgid "Not working"
 msgstr "Ne fonctionne pas"
@@ -11446,6 +11488,14 @@ msgstr "Ouvertes : {open}"
 msgid "OpenAI-compatible endpoint"
 msgstr "Point de terminaison compatible OpenAI"
 
+#: src/frame/part-words.tsx
+msgid "Opened"
+msgstr "Ouvert"
+
+#: src/frame/part-words.tsx
+msgid "Opening {provider}"
+msgstr "Ouverture de {provider}"
+
 #: src/onboarding/platform-reveal.tsx
 msgid "Opening Grasp"
 msgstr "Grasp s’ouvre"
@@ -11686,10 +11736,18 @@ msgstr "Page"
 msgid "Page {current} of {count}"
 msgstr "Page {current} sur {count}"
 
+#: src/frame/part-words.tsx
+msgid "Page {page}"
+msgstr "Page {page}"
+
 #: src/apps/draft-changes.tsx
 msgctxt "files of an App"
 msgid "Pages"
 msgstr "Pages"
+
+#: src/frame/part-words.tsx
+msgid "Pages of {label}"
+msgstr "Pages de {label}"
 
 #: src/frame/part-words.tsx
 msgid "Pages of {name}"
@@ -12098,6 +12156,10 @@ msgstr "Prévisualiser la purge"
 #: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
 msgstr "Aperçu : ne modifie rien, ne lit aucune donnée réelle"
+
+#: src/frame/part-words.tsx
+msgid "Previous"
+msgstr "Précédent"
 
 #: src/activity/audit-event.tsx
 msgid "Previous hash"
@@ -14524,6 +14586,10 @@ msgstr "La connexion montre les applications où les gens se connectent."
 msgid "Sign-in timed out or was started elsewhere. Try again."
 msgstr "La connexion a expiré ou a été lancée ailleurs. Réessayez."
 
+#: src/frame/part-words.tsx
+msgid "Sign-in timed out. Try again."
+msgstr "La connexion a pris trop de temps. Réessayez."
+
 #: src/dashboard/signals.tsx
 msgid "Signals by kind"
 msgstr "Signaux par type"
@@ -15241,6 +15307,14 @@ msgstr "Retrait en cours"
 msgid "Taking you to the Microsoft sign-in…"
 msgstr "Redirection vers la connexion Microsoft…"
 
+#: src/frame/part-words.tsx
+msgid "Talk to Grasp"
+msgstr "Parler à Grasp"
+
+#: src/frame/part-words.tsx
+msgid "Talk to us"
+msgstr "Parlez-nous"
+
 #: src/brain/brain.ts
 msgid "Talked about in {source}"
 msgstr "Abordé dans {source}"
@@ -15424,6 +15498,10 @@ msgstr "Merci. J’ai demandé à notre équipe d’ajouter {asked}. Pour l’in
 #: src/onboarding/connect-steps.tsx
 msgid "Thank you. I’ve asked our team to connect {name}. For now, check who leads which team."
 msgstr "Merci. J’ai demandé à notre équipe de connecter {name}. Pour l’instant, vérifiez qui dirige quelle équipe."
+
+#: src/frame/part-words.tsx
+msgid "That account isn't part of your organisation."
+msgstr "Ce compte ne fait pas partie de votre organisation."
 
 #: src/sign-in-errors.ts
 msgid "That account isn't part of your organization."
@@ -18228,6 +18306,10 @@ msgstr "Qui peut répondre"
 msgid "Who can change them?"
 msgstr "Qui peut les modifier ?"
 
+#: src/frame/part-words.tsx
+msgid "Who can fix this"
+msgstr "Qui peut corriger cela"
+
 #: src/apps/app-data-model.tsx
 msgid "Who can see and change its records"
 msgstr "Qui peut voir et modifier ses enregistrements"
@@ -18786,6 +18868,10 @@ msgstr "Vous revenez ici sur la page de {app}."
 msgid "You decide. You can stop when you want, skip any question, and delete everything for 7 days afterwards."
 msgstr "C’est vous qui décidez. Vous pouvez arrêter quand vous voulez, passer n’importe quelle question, et tout supprimer pendant 7 jours après."
 
+#: src/frame/part-words.tsx
+msgid "You don't have access to this organisation. Ask an admin."
+msgstr "Vous n’avez pas accès à cette organisation. Demandez à un administrateur."
+
 #: src/sign-in-errors.ts
 msgid "You don't have access to this organization. Ask an admin."
 msgstr "Vous n’avez pas accès à cette organisation. Demandez à un admin."
@@ -18826,6 +18912,10 @@ msgstr "Vous vous êtes retiré. Rien de ce que vous avez dit n’est utilisé �
 #: src/interview/transcript.tsx
 msgid "You:"
 msgstr "Vous :"
+
+#: src/frame/part-words.tsx
+msgid "You're offline. Log in when you're back online."
+msgstr "Vous êtes hors ligne. Connectez-vous une fois de retour en ligne."
 
 #: src/knowledge/document.tsx
 msgid "You're reading version {number}, saved {saved}. The current version is {current}."
@@ -18987,6 +19077,10 @@ msgstr "Votre rôle"
 #: src/workflows/activity-bar.tsx
 msgid "Your run of version {version} ended: {status}"
 msgstr "Votre exécution de la version {version} est terminée : {status}"
+
+#: src/frame/part-words.tsx
+msgid "Your session ended. Log in to carry on."
+msgstr "Votre session est terminée. Connectez-vous pour continuer."
 
 #: src/pages/frame-failure.tsx
 msgid "Your session has ended"

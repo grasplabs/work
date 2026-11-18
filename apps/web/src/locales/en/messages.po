@@ -3563,6 +3563,10 @@ msgstr "Back to {agent}"
 msgid "Back to {destination}"
 msgstr "Back to {destination}"
 
+#: src/frame/part-words.tsx
+msgid "Back to Grasp"
+msgstr "Back to Grasp"
+
 #: src/dashboard/widget-board.tsx
 msgid "Back to how it began"
 msgstr "Back to how it began"
@@ -4987,9 +4991,17 @@ msgstr "Contested"
 msgid "Continue"
 msgstr "Continue"
 
+#: src/frame/part-words.tsx
+msgid "Continue with {provider}"
+msgstr "Continue with {provider}"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Continue with {signIn}"
 msgstr "Continue with {signIn}"
+
+#: src/frame/part-words.tsx
+msgid "Continue with Grasp staff"
+msgstr "Continue with Grasp staff"
 
 #: src/apps/resource-bindings.tsx
 msgid "Contract"
@@ -5725,6 +5737,10 @@ msgstr "Dictate"
 #: src/chat/use-dictation.ts
 msgid "Dictation isn't set up here yet. What you typed is kept."
 msgstr "Dictation isn't set up here yet. What you typed is kept."
+
+#: src/frame/part-words.tsx
+msgid "Did not open"
+msgstr "Did not open"
 
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/items.ts
@@ -7248,6 +7264,10 @@ msgstr "Grasp asks"
 msgid "Grasp can be reached"
 msgstr "Grasp can be reached"
 
+#: src/frame/part-words.tsx
+msgid "Grasp can't be reached right now. Try again in a minute."
+msgstr "Grasp can't be reached right now. Try again in a minute."
+
 #: src/chat/cited-note.tsx
 #: src/chat/global-chat.tsx
 #: src/core.ts
@@ -7410,6 +7430,10 @@ msgstr "Grasp noticed it did not know"
 msgid "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
 msgstr "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
 
+#: src/frame/part-words.tsx
+msgid "Grasp opens for everyone soon. If you have an interview link, it is in your email."
+msgstr "Grasp opens for everyone soon. If you have an interview link, it is in your email."
+
 #: src/workflows/requests/request-detail.tsx
 msgid "Grasp proposes"
 msgstr "Grasp proposes"
@@ -7440,6 +7464,7 @@ msgid "Grasp sent this, but its answer was lost: nobody can tell whether it took
 msgstr "Grasp sent this, but its answer was lost: nobody can tell whether it took effect. Check on {connection} before you say."
 
 #: src/activity/audit-event.tsx
+#: src/frame/part-words.tsx
 msgid "Grasp staff"
 msgstr "Grasp staff"
 
@@ -7522,6 +7547,10 @@ msgstr "Grid"
 #: src/activity/audit-event.tsx
 msgid "Guest"
 msgstr "Guest"
+
+#: src/frame/part-words.tsx
+msgid "Guest accounts can't sign in."
+msgstr "Guest accounts can't sign in."
 
 #: src/sign-in-errors.ts
 msgid "Guest accounts can't sign in. Use your organization's own account."
@@ -8813,6 +8842,10 @@ msgstr "Last ran {when}"
 msgid "Last run"
 msgstr "Last run"
 
+#: src/frame/part-words.tsx
+msgid "Last used"
+msgstr "Last used"
+
 #: src/interview/words.ts
 msgid "Last, the numbers and the result."
 msgstr "Last, the numbers and the result."
@@ -9157,6 +9190,10 @@ msgstr "Loading the value"
 #: src/settings/section.tsx
 msgid "Loading…"
 msgstr "Loading…"
+
+#: src/frame/part-words.tsx
+msgid "Log in"
+msgstr "Log in"
 
 #: src/settings/org-card.tsx
 msgid "Logo"
@@ -9900,6 +9937,10 @@ msgstr "New table"
 #: src/settings/teams.tsx
 msgid "New team"
 msgstr "New team"
+
+#: src/frame/part-words.tsx
+msgid "New to Grasp?"
+msgstr "New to Grasp?"
 
 #: src/workflows/requests/request-summary.tsx
 msgid "New: “{label}”"
@@ -10715,6 +10756,7 @@ msgstr "not valid"
 msgid "Not verified"
 msgstr "Not verified"
 
+#: src/frame/part-words.tsx
 #: src/settings/ai-providers.tsx
 msgid "Not working"
 msgstr "Not working"
@@ -11446,6 +11488,14 @@ msgstr "Open: {open}"
 msgid "OpenAI-compatible endpoint"
 msgstr "OpenAI-compatible endpoint"
 
+#: src/frame/part-words.tsx
+msgid "Opened"
+msgstr "Opened"
+
+#: src/frame/part-words.tsx
+msgid "Opening {provider}"
+msgstr "Opening {provider}"
+
 #: src/onboarding/platform-reveal.tsx
 msgid "Opening Grasp"
 msgstr "Opening Grasp"
@@ -11686,10 +11736,18 @@ msgstr "Page"
 msgid "Page {current} of {count}"
 msgstr "Page {current} of {count}"
 
+#: src/frame/part-words.tsx
+msgid "Page {page}"
+msgstr "Page {page}"
+
 #: src/apps/draft-changes.tsx
 msgctxt "files of an App"
 msgid "Pages"
 msgstr "Pages"
+
+#: src/frame/part-words.tsx
+msgid "Pages of {label}"
+msgstr "Pages of {label}"
 
 #: src/frame/part-words.tsx
 msgid "Pages of {name}"
@@ -12098,6 +12156,10 @@ msgstr "Preview the purge"
 #: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
 msgstr "Preview: changes nothing, reads no real data"
+
+#: src/frame/part-words.tsx
+msgid "Previous"
+msgstr "Previous"
 
 #: src/activity/audit-event.tsx
 msgid "Previous hash"
@@ -14524,6 +14586,10 @@ msgstr "Sign-in shows the applications people log in to."
 msgid "Sign-in timed out or was started elsewhere. Try again."
 msgstr "Sign-in timed out or was started elsewhere. Try again."
 
+#: src/frame/part-words.tsx
+msgid "Sign-in timed out. Try again."
+msgstr "Sign-in timed out. Try again."
+
 #: src/dashboard/signals.tsx
 msgid "Signals by kind"
 msgstr "Signals by kind"
@@ -15241,6 +15307,14 @@ msgstr "Taking out"
 msgid "Taking you to the Microsoft sign-in…"
 msgstr "Taking you to the Microsoft sign-in…"
 
+#: src/frame/part-words.tsx
+msgid "Talk to Grasp"
+msgstr "Talk to Grasp"
+
+#: src/frame/part-words.tsx
+msgid "Talk to us"
+msgstr "Talk to us"
+
 #: src/brain/brain.ts
 msgid "Talked about in {source}"
 msgstr "Talked about in {source}"
@@ -15424,6 +15498,10 @@ msgstr "Thank you. I’ve asked our team to add {asked}. For now, add those docu
 #: src/onboarding/connect-steps.tsx
 msgid "Thank you. I’ve asked our team to connect {name}. For now, check who leads which team."
 msgstr "Thank you. I’ve asked our team to connect {name}. For now, check who leads which team."
+
+#: src/frame/part-words.tsx
+msgid "That account isn't part of your organisation."
+msgstr "That account isn't part of your organisation."
 
 #: src/sign-in-errors.ts
 msgid "That account isn't part of your organization."
@@ -18228,6 +18306,10 @@ msgstr "Who can answer"
 msgid "Who can change them?"
 msgstr "Who can change them?"
 
+#: src/frame/part-words.tsx
+msgid "Who can fix this"
+msgstr "Who can fix this"
+
 #: src/apps/app-data-model.tsx
 msgid "Who can see and change its records"
 msgstr "Who can see and change its records"
@@ -18786,6 +18868,10 @@ msgstr "You come back to {app}’s page here."
 msgid "You decide. You can stop when you want, skip any question, and delete everything for 7 days afterwards."
 msgstr "You decide. You can stop when you want, skip any question, and delete everything for 7 days afterwards."
 
+#: src/frame/part-words.tsx
+msgid "You don't have access to this organisation. Ask an admin."
+msgstr "You don't have access to this organisation. Ask an admin."
+
 #: src/sign-in-errors.ts
 msgid "You don't have access to this organization. Ask an admin."
 msgstr "You don't have access to this organization. Ask an admin."
@@ -18826,6 +18912,10 @@ msgstr "You withdrew. Nothing you said is used from now on."
 #: src/interview/transcript.tsx
 msgid "You:"
 msgstr "You:"
+
+#: src/frame/part-words.tsx
+msgid "You're offline. Log in when you're back online."
+msgstr "You're offline. Log in when you're back online."
 
 #: src/knowledge/document.tsx
 msgid "You're reading version {number}, saved {saved}. The current version is {current}."
@@ -18987,6 +19077,10 @@ msgstr "Your role"
 #: src/workflows/activity-bar.tsx
 msgid "Your run of version {version} ended: {status}"
 msgstr "Your run of version {version} ended: {status}"
+
+#: src/frame/part-words.tsx
+msgid "Your session ended. Log in to carry on."
+msgstr "Your session ended. Log in to carry on."
 
 #: src/pages/frame-failure.tsx
 msgid "Your session has ended"
