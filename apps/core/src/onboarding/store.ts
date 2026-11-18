@@ -1486,10 +1486,17 @@ export class Onboarding extends DurableObject<Env> {
   async saveRoster(
     roster: Roster,
     by: AuditActor,
-    { confirmed = true }: { confirmed?: boolean } = {}
+    {
+      confirmed = true,
+      minted = new Set(),
+    }: {
+      confirmed?: boolean;
+      /** The ids of `roster`'s teams core made for the list (`teams.minted`). */
+      minted?: ReadonlySet<string>;
+    } = {}
   ): Promise<OnboardingView> {
     return await this.#fallenFirst(
-      async () => await this.#saveRosterOnce(roster, by, { confirmed })
+      async () => await this.#saveRosterOnce(roster, by, { confirmed, minted })
     );
   }
 
@@ -1497,13 +1504,14 @@ export class Onboarding extends DurableObject<Env> {
   async #saveRosterOnce(
     roster: Roster,
     by: AuditActor,
-    { confirmed }: { confirmed: boolean }
+    { confirmed, minted }: { confirmed: boolean; minted: ReadonlySet<string> }
   ): Promise<OnboardingView> {
     const fresh = await this.#freshCodes(roster);
     const said = this.ctx.storage.transactionSync(() => {
       const before = this.#roster();
       const { removed, erased } = this.#writeRoster(roster, fresh, {
         late: false,
+        minted,
       });
       this.#dueAgain(teamsBack(before, roster, { confirmed }));
       if (confirmed) {
@@ -1649,7 +1657,7 @@ export class Onboarding extends DurableObject<Env> {
   #writeRoster(
     roster: Roster,
     fresh: readonly { person: string; linkId: string; mark: string }[],
-    { late }: { late: boolean },
+    { late, minted }: { late: boolean; minted: ReadonlySet<string> },
     now: string = new Date().toISOString()
   ): { removed: number; erased: string[] } {
     const kept = new Set(roster.people.map((person) => person.id));
@@ -1682,6 +1690,7 @@ export class Onboarding extends DurableObject<Env> {
         .values({
           ...team,
           position,
+          minted: minted.has(team.id),
           mappedAt: was?.mappedAt ?? null,
           // What its map drew, kept apart from what the admin wrote (GRA-1748).
           mappedDoes: was?.mappedDoes ?? null,
@@ -4894,6 +4903,17 @@ export class Onboarding extends DurableObject<Env> {
       );
     });
     this.#deliverAudit();
+  }
+
+  /**
+   * The staff list's teams as the store holds them (GRA-2055): their ids,
+   * names, and whether core made each id for the list (`teams.minted`).
+   */
+  heldTeams(): { id: string; name: string; minted: boolean }[] {
+    return this.#db
+      .select({ id: teams.id, name: teams.name, minted: teams.minted })
+      .from(teams)
+      .all();
   }
 
   /** Whether the staff list has the members' team `id` (GRA-2055). */

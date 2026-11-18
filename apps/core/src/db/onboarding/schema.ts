@@ -92,6 +92,13 @@ export const teams = sqliteTable("teams", {
   mappedDoes: text("mapped_does"),
   off: integer({ mode: "boolean" }).notNull(),
   /**
+   * Whether core made its id for the list (GRA-2055, staff-list-teams.ts
+   * `intoMembersTeams`): only under such an id does a confirm make a
+   * members' team, so a team deleted in Settings never comes back under
+   * its old id, with what was shared with it.
+   */
+  minted: integer({ mode: "boolean" }).notNull().default(false),
+  /**
    * When its lead's map of the team's work was drawn (ISO 8601): its links
    * wait for that, or for `leadWaitWorkingDays`.
    */

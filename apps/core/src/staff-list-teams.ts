@@ -1,3 +1,4 @@
+import { createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { and, eq, sql } from "drizzle-orm";
@@ -8,6 +9,7 @@ import { teamAccessMayHaveDropped } from "./access-revocations.ts";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember, organizationId } from "./auth/membership-sql.ts";
 import {
+  auditOutbox,
   staffListPlaces,
   teamMembers,
   teamPrimaries,
@@ -34,11 +36,11 @@ import { teamNameKey } from "./onboarding/kickoff-company.ts";
 // - Nothing automatic overrides what an admin did by hand (`placementOf`):
 //   the list adds a membership only when the team it gives someone
 //   changes, and takes away only one it made itself.
-// - A deleted team's id coming back with someone's history: a team's id
-//   is a members' team's, one the store holds, or core's own
-//   (`crypto.randomUUID`), never one a request sent; and a team the store
-//   holds can't be deleted (auth.ts `beforeDeleteTeam`), so a held id is
-//   never a deleted team's.
+// - A deleted team's id coming back with what was shared with it: a team's
+//   id is a members' team's, or one core made for the list
+//   (`crypto.randomUUID`, marked `minted` in the store), never one a
+//   request sent; a confirm makes a members' team only under a minted id,
+//   so an id whose team was deleted while a save ran is never made again.
 // - A rename or a confirm splitting what one team holds: a team keeps one
 //   id from the first save that names it, and everything keys by it.
 // - A team the admin only drafted: made at the confirm, never before, so a
@@ -53,41 +55,46 @@ const peoplePerBatch = 50;
 /** What a staff-list change records as how it was made. */
 const via = "staffList";
 
-/** A team of the staff list the onboarding's store holds now: its id and name. */
+/** A team of the staff list the onboarding's store holds now. */
 export interface HeldTeam {
   id: string;
   name: string;
+  /** Whether core made its id for the list (`teams.minted`). */
+  minted: boolean;
 }
 
 /**
  * `roster` with each of its teams under the one id it keeps for good
- * (GRA-2055): a members' team's, or one the onboarding's store holds for
- * the company already (`held`), by its id, else by its name (trimmed, any
- * case) where one alone has it and no other team on the list took it;
- * else a new id core makes, never the one the request sent, so no id a
- * deleted team had comes back. The id never changes after: a team new on a
- * draft is kept under it in the store, and with `make` (the admin
- * confirmed the list) its members' team is made under that same id, and
- * the members' teams are renamed to the names the list gives. A draft
- * writes nothing here, so a draft put right before the confirm leaves no
- * team in Settings › Members. None is ever deleted here, as one may hold
- * what was shared with it. Answers the roster as the store keeps it.
+ * (GRA-2055): a members' team's, or one core made for the list (`minted`)
+ * that the onboarding's store holds (`held`), by its id, else by its name
+ * (trimmed, any case) where one alone has it and no other team on the list
+ * took it; else a new id core makes, never the one the request sent. A held
+ * id that is neither (a members' team deleted while a save ran) is never
+ * kept: no deleted team's id comes back, with what was shared with it. The
+ * id never changes after: a team new on a draft is kept under it in the
+ * store, and with `make` (the admin confirmed the list) its members' team
+ * is made under that same id, and the members' teams are renamed to the
+ * names the list gives. A draft writes nothing here, so a draft put right
+ * before the confirm leaves no team in Settings › Members. None is ever
+ * deleted here, as one may hold what was shared with it. Answers the
+ * roster as the store keeps it, and the ids core made for it (`minted`).
  */
 export const intoMembersTeams = async (
   env: Env,
   roster: Roster,
   actor: AuditActor,
   { make, held }: { make: boolean; held: readonly HeldTeam[] }
-): Promise<Roster> => {
+): Promise<{ roster: Roster; minted: Set<string> }> => {
   const db = drizzle(env.DB);
   const existing = await db
     .select({ id: teams.id, name: teams.name })
     .from(teams)
     .where(eq(teams.organizationId, organizationId));
   const known = new Map(existing.map(({ id, name }) => [id, name]));
-  const kept = new Set([...known.keys(), ...held.map(({ id }) => id)]);
+  const mintedHeld = held.filter(({ id, minted }) => minted && !known.has(id));
+  const kept = new Set([...known.keys(), ...mintedHeld.map(({ id }) => id)]);
   const byName = new Map<string, Set<string>>();
-  for (const { id, name } of [...existing, ...held]) {
+  for (const { id, name } of [...existing, ...mintedHeld]) {
     const key = teamNameKey(name);
     byName.set(key, (byName.get(key) ?? new Set()).add(id));
   }
@@ -97,6 +104,7 @@ export const intoMembersTeams = async (
     roster.teams.flatMap(({ id }) => (kept.has(id) ? [id] : []))
   );
   const idOf = new Map<string, string>();
+  const mintedNow = new Set<string>();
   for (const team of roster.teams) {
     if (kept.has(team.id)) {
       idOf.set(team.id, team.id);
@@ -107,6 +115,9 @@ export const intoMembersTeams = async (
     ].filter((id) => !taken.has(id));
     const id =
       named !== undefined && others.length === 0 ? named : crypto.randomUUID();
+    if (id !== named) {
+      mintedNow.add(id);
+    }
     taken.add(id);
     idOf.set(team.id, id);
   }
@@ -158,12 +169,20 @@ export const intoMembersTeams = async (
       await auditedBatch(env, db, [first, ...rest]);
     }
   }
+  const wasMinted = new Set(mintedHeld.map(({ id }) => id));
   return {
-    teams: listed,
-    people: roster.people.map((person) => ({
-      ...person,
-      team: idOf.get(person.team) ?? person.team,
-    })),
+    roster: {
+      teams: listed,
+      people: roster.people.map((person) => ({
+        ...person,
+        team: idOf.get(person.team) ?? person.team,
+      })),
+    },
+    minted: new Set(
+      listed.flatMap(({ id }) =>
+        mintedNow.has(id) || wasMinted.has(id) ? [id] : []
+      )
+    ),
   };
 };
 
@@ -207,14 +226,17 @@ interface Placement {
 /**
  * The staff list's rule for one person (GRA-2055), decided here alone:
  * nothing automatic overrides what an admin did by hand. The list touches
- * someone's memberships only when the team it gives them changes, from
- * `before` to `after`: then it takes away the old one only if it made that
- * membership itself, never one an admin added by hand, and adds the new
- * one, recording whether it made it (an admin may have added it already).
+ * someone's memberships only when the team it gives them changes, to
+ * `after`: then it takes away the one its primary row says it made itself
+ * (`made`), never one an admin added by hand, and adds the new one,
+ * recording whether it made it (an admin may have added it already).
  * While the list gives the same team, it does nothing: a membership an
  * admin took away by hand stays away, its primary row the marker of that.
+ * Every decision is made in the statement that writes, from the rows as
+ * they are then, never from what was read before: a confirm landing in
+ * between is built on, so two at once leave one primary, rightly marked.
  * The statements of one person go in one batch, the leave and the join of
- * a move together. None when nothing changed.
+ * a move together. None when the read saw no change.
  */
 export const placementOf = (
   db: DrizzleD1Database,
@@ -234,24 +256,34 @@ export const placementOf = (
     target: { type: "team", id: teamId },
     detail: { userId, via },
   });
-  const isPrimary = (teamId: string) =>
-    and(eq(teamPrimaries.userId, userId), eq(teamPrimaries.teamId, teamId));
-  const leave =
-    before === undefined
-      ? []
-      : [
-          db
-            .delete(teamMembers)
-            .where(
-              and(
-                eq(teamMembers.userId, userId),
-                eq(teamMembers.teamId, before.teamId),
-                sql`EXISTS (SELECT 1 FROM ${teamPrimaries} WHERE ${isPrimary(before.teamId)} AND ${teamPrimaries.made} = 1)`
-              )
-            ),
-          outboxedIfChanged(db, entry("team.member.removed", before.teamId)),
-          db.delete(teamPrimaries).where(isPrimary(before.teamId)),
-        ];
+  // The team whose membership the list made, as its primary row says now,
+  // when it is not the one the list gives them.
+  const listMade = sql`(SELECT ${teamPrimaries.teamId} FROM ${teamPrimaries}
+    WHERE ${teamPrimaries.userId} = ${userId} AND ${teamPrimaries.made} = 1
+      ${after === undefined ? sql`` : sql`AND ${teamPrimaries.teamId} <> ${after}`})`;
+  // Its team is set by the statement that keeps it (`json_set` below).
+  const removed = createAuditEvent(
+    entry("team.member.removed", before?.teamId ?? after ?? userId),
+    "core"
+  );
+  const leave = [
+    db
+      .delete(teamMembers)
+      .where(
+        and(
+          eq(teamMembers.userId, userId),
+          sql`${teamMembers.teamId} = ${listMade}`
+        )
+      ),
+    // Its event names the team the statement above left, as it was then.
+    db.insert(auditOutbox).select(
+      sql`SELECT ${removed.id}, json_set(${JSON.stringify(removed)}, '$.target.id', ${listMade}), ${now.getTime()}
+          WHERE changes() > 0`
+    ),
+    ...(after === undefined
+      ? [db.delete(teamPrimaries).where(eq(teamPrimaries.userId, userId))]
+      : []),
+  ];
   if (after === undefined || key === undefined) {
     return leave;
   }
@@ -272,6 +304,8 @@ export const placementOf = (
       )
       .onConflictDoNothing(),
     outboxedIfChanged(db, entry("team.member.added", after)),
+    // Made by the list only if its own insert made the row; a primary row
+    // already on this team keeps what it says (a confirm in between made it).
     db
       .insert(teamPrimaries)
       .select(
@@ -282,9 +316,9 @@ export const placementOf = (
       .onConflictDoUpdate({
         target: teamPrimaries.userId,
         set: {
+          made: sql`CASE WHEN ${teamPrimaries.teamId} = excluded.team_id THEN ${teamPrimaries.made} ELSE excluded.made END`,
           teamId: sql`excluded.team_id`,
           placedAt: sql`excluded.placed_at`,
-          made: sql`excluded.made`,
         },
       }),
   ];
