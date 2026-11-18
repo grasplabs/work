@@ -23,7 +23,7 @@ export const sampleSyncControlUrl = "https://sample-sync-control.test/feed";
  * sites?, siteFeeds?, failing? }` to the
  * control URL: what it names replaces that part of the account's world;
  * `sites` lists the sites to pick (`{ id, name }`), `siteFeeds` maps each
- * site to its feed's pages by position;
+ * site to its feed's pages by position (a site in `failing` answers 500);
  * `placePages` pages the folder list by position (`{ folders, next }`,
  * 410 for a position it has none for), in place of `places`;
  * `folders` maps each folder to `{ changes, names, items }`, its pages by
@@ -107,14 +107,19 @@ export const sampleSyncFake = () => {
         : new Response(null, { status: 500 });
     }
     const site = sitePattern.exec(url.pathname)?.groups?.site;
-    return site === undefined
-      ? undefined
-      : pageOr410(
-          field(
-            field(field(world, "siteFeeds"), decodeURIComponent(site)),
-            url.searchParams.get("from") ?? ""
-          )
-        );
+    if (site === undefined) {
+      return undefined;
+    }
+    const failing = field(world, "failing");
+    if (Array.isArray(failing) && failing.includes(decodeURIComponent(site))) {
+      return new Response(null, { status: 500 });
+    }
+    return pageOr410(
+      field(
+        field(field(world, "siteFeeds"), decodeURIComponent(site)),
+        url.searchParams.get("from") ?? ""
+      )
+    );
   };
   return {
     control: async (request: Request): Promise<Response> => {

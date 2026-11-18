@@ -1,3 +1,4 @@
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { env } from "cloudflare:workers";
 import {
   afterEach,
@@ -12,6 +13,7 @@ import {
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { addSource } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
+import { syncForStaff } from "../src/brain-sync.ts";
 import { completeOwedErasures } from "../src/shared-reads.ts";
 import { allEvents } from "./audit-events.ts";
 import { chooseAudience } from "./brain-audiences.ts";
@@ -29,6 +31,7 @@ import {
   parkWorkerSources,
   pollMs,
   setUpTime,
+  sitesFailing,
   sitesHeld,
   syncOn,
 } from "./brain-sync-world.ts";
@@ -206,6 +209,70 @@ describe("native sync of a shared connection's picked places", () => {
         atSave: [false, true],
         after: [false, true],
         kept: { [two]: 1 },
+      });
+    }
+  );
+
+  it(
+    "shows staff a shared connection's sync as any other, and a failing place it un-picks leaves the view",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      const [one, two] = [`site-${unique()}`, `site-${unique()}`];
+      const { connectionId, subject } = await connectSharedSites(admin, {
+        [one]: markerOf(),
+        [two]: markerOf(),
+      });
+      await chooseAudience(admin.api, connectionId, { kind: "everyone" });
+      await pick(admin, connectionId, [one, two]);
+      await syncAll();
+      // The second place's reads fail from now on.
+      await sitesFailing(subject, [two]);
+      await sync();
+      const hashed = await sha256Hex(connectionId);
+      const hash = hashed.slice(0, 12);
+      const rowOf = async () => {
+        const { connections } = await syncForStaff(env);
+        const row = connections.find(({ connection }) => connection === hash);
+        return row === undefined
+          ? undefined
+          : {
+              provider: row.provider,
+              feed: row.feed,
+              items: row.items,
+              failing: row.failing,
+              error: row.error?.code ?? null,
+            };
+      };
+      const failing = await rowOf();
+
+      await pick(admin, connectionId, [one]);
+      const unpicked = await rowOf();
+      await sync();
+
+      expect({ failing, unpicked, erased: await rowOf() }).toStrictEqual({
+        failing: {
+          provider: "microsoft",
+          feed,
+          items: 2,
+          failing: true,
+          error: "sync.provider_failed",
+        },
+        // Dropped at the save: read no more, so neither failing nor late.
+        unpicked: {
+          provider: "microsoft",
+          feed,
+          items: 2,
+          failing: false,
+          error: null,
+        },
+        erased: {
+          provider: "microsoft",
+          feed,
+          items: 1,
+          failing: false,
+          error: null,
+        },
       });
     }
   );

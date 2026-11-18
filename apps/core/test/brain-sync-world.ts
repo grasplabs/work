@@ -221,6 +221,21 @@ export const sitesHeld = async (
   });
 };
 
+/** Has the account `subject`'s sites `sites` fail every read (500), and the others answer. */
+export const sitesFailing = async (
+  subject: string,
+  sites: readonly string[]
+): Promise<void> => {
+  const providers = testBinding("CONNECT_PROVIDERS");
+  if (!isFetcher(providers)) {
+    throw new TypeError("Expected the providers Worker");
+  }
+  await providers.fetch(sampleSyncControlUrl, {
+    method: "POST",
+    body: JSON.stringify({ subject, failing: sites }),
+  });
+};
+
 /**
  * A Microsoft 365 account `admin` connects for the company (GRA-1719),
  * read by the sample sync connector, whose sites to pick are `sites`
