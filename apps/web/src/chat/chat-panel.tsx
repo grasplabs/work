@@ -41,7 +41,7 @@ import {
 } from "./chat-layout.ts";
 import { chatLink } from "./chat-link.ts";
 import { ChatMoreMenu, ChatPanelTitle } from "./chat-more.tsx";
-import { allows } from "./chat-presence.ts";
+import { allows, useOpenChat } from "./chat-presence.ts";
 import { chatKey, useGlobalChat } from "./global-chat.tsx";
 import { reading } from "./reading.stylex.ts";
 
@@ -303,8 +303,16 @@ export const ChatPanel = () => {
 
 /** What App shell needs of Grasp's chat for its panels. */
 export interface ChatPanels {
-  /** The chat, while it is open; null otherwise. */
+  /** The chat, wherever it may show on this page, open or not; null where it may not. */
   panels: ReactNode;
+  /** Whether it is open beside or over the page. */
+  open: boolean;
+  /**
+   * Opens and closes it from App shell's own button, at the bar's end at
+   * every width; none where it stays open (about the page's subject), where
+   * a button that can't close it would do nothing.
+   */
+  onOpenChange: ((open: boolean) => void) | undefined;
   /** How wide the chat is, in pixels. */
   width: number;
   onWidthChange: (width: number) => void;
@@ -328,13 +336,26 @@ export interface ChatPanels {
 
 /** Grasp's chat for App shell's panels: where it is, how large, and how to move, size and close it. */
 export const useChatPanels = (): ChatPanels => {
-  const { stage, keptOpen, presence, roomBeside } = useGlobalChat();
+  const { stage, keptOpen, presence, roomBeside, available } = useGlobalChat();
   const layout = useChatLayout();
+  const openHere = useOpenChat();
   // Where the page allows both, and there is room beside it (not a phone).
   const movable =
     roomBeside && allows(presence, "docked") && allows(presence, "floating");
   return {
-    panels: stage.card ? <ChatPanel /> : null,
+    // Given wherever it may show, so the shell's own button stands there
+    // open or closed, a way back to a closed chat at every width.
+    panels: available ? <ChatPanel /> : null,
+    open: stage.card,
+    onOpenChange: keptOpen
+      ? undefined
+      : (open) => {
+          if (open) {
+            openHere();
+          } else {
+            closeChat();
+          }
+        },
     width: layout.width,
     onWidthChange: resizeChat,
     minWidth: chatWidth.min,

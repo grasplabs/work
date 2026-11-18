@@ -91,6 +91,10 @@ const shellPanelsOf = (
     ? {}
     : {
         panels: panels.panels,
+        panelsOpen: panels.open,
+        ...(panels.onOpenChange === undefined
+          ? {}
+          : { onPanelsOpenChange: panels.onOpenChange }),
         covered: panels.covered,
         panelWidth: panels.width,
         onPanelWidthChange: panels.onWidthChange,

@@ -215,6 +215,25 @@ test("the chat beside a page floats, moves, docks again, goes full screen and ba
   await expect(head).not.toHaveAttribute("data-floating", "");
 });
 
+test("the shell's own button opens and closes the chat at every width, open or closed", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chatPanel");
+  // 1024: where the button once measured nothing with the chat closed.
+  const page = await pageOf(user, { viewport: { width: 1024, height: 800 } });
+  await page.goto("/apps");
+  const toggle = page.getByRole("button", { name: "Show or hide the chat" });
+  const head = page.locator("[data-slot=app-shell-panel-head]");
+
+  await expect(toggle).toBeVisible();
+  const box = await toggle.boundingBox();
+  expect([box?.width, box?.height]).toStrictEqual([28, 28]);
+  await toggle.click();
+  await expect(head).toBeVisible();
+  await toggle.click();
+  await expect(head).toHaveCount(0);
+});
+
 test("a person renames a chat where its name stands: in the page's bar, and in the chat beside a page", async ({
   pageOf,
 }) => {

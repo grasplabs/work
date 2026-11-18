@@ -983,14 +983,18 @@ const AnswerRow = ({
     <>
       <Message
         // An answer with no words (its turn asked the person instead) has
-        // nothing to act on.
+        // nothing to act on. Its foot is given from the start, while it is
+        // written too: Grasp UI keeps the foot's room from the first word
+        // and draws it once the answer is done, so the end moves nothing.
         actions={
-          retry === undefined || failed || copyText === "" ? undefined : (
+          (retry === undefined && !live) ||
+          failed ||
+          copyText === "" ? undefined : (
             <ChatMessageAction
               icon={Retry}
               aria-label={t`Ask again`}
               onClick={() => {
-                retry();
+                retry?.();
               }}
             />
           )
@@ -1001,7 +1005,7 @@ const AnswerRow = ({
           copied: t`Copied`,
           failed: t`Not copied`,
         }}
-        copyText={live || copyText === "" ? undefined : copyText}
+        copyText={copyText === "" ? undefined : copyText}
         failedLabel={
           ending.keyFailedForAdmin
             ? t`Your AI provider is refusing your key.`
@@ -1010,8 +1014,8 @@ const AnswerRow = ({
         from="agent"
         name="Grasp"
         nameHidden
-        // When it was given: once it is, under its actions.
-        {...(live || last?.at === undefined
+        // When it was given, under its actions: from its first stored reply.
+        {...(last?.at === undefined
           ? {}
           : { dateTime: last.at, time: timeOfDay(last.at, i18n.locale) })}
         onRetry={ending.providerMissing ? undefined : retry}
