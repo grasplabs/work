@@ -2022,11 +2022,14 @@ export interface ConnectApi
   personalAccounts: (userId: string) => Promise<PersonalAccount[]>;
   /**
    * Reads, with each person's own token, the groups of the personal suite
-   * connections whose token was minted since their last read (connect's
-   * reader-groups.ts), within one run's request budget: core's clock asks
-   * every minute. How many reads were whole.
+   * connections whose token was minted since their last read, or whose
+   * read is under way (connect's reader-groups.ts), sending at most
+   * `requests` requests in all: core's clock asks every minute, with its
+   * share of its invocation's subrequests. How many reads became whole.
    */
-  readReaderGroups: () => Promise<{ read: number }>;
+  readReaderGroups: (request: {
+    requests: number;
+  }) => Promise<{ read: number }>;
   /**
    * Asks the connections whose grant lacks the rights of `classes`, those
    * an admin just turned on, to be connected again (`needs_reauth`), in

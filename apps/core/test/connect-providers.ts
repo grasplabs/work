@@ -155,8 +155,10 @@ export const googleHoldUrl = "https://google-control.test/hold";
  * Where tests set the groups a member is directly in, at Microsoft or
  * Google alike: POST `{ member, groups }`, the member a Microsoft object
  * ID, a Google address or a group's ID, each lower case; or `{ member,
- * failing }`, which makes every read of that account's groups fail (503)
- * while true. Graph's `/me/transitiveMemberOf` answers the token's own
+ * failing }`, which makes every read of that member's groups fail (503)
+ * while true: on Microsoft the account's, on Google each query naming the
+ * member. A Google group whose ID starts with `mapped-` comes back mapped
+ * from another identity source, with a namespace. Graph's `/me/transitiveMemberOf` answers the token's own
  * account's groups through every nesting, Cloud Identity's
  * `searchDirectGroups` a member's direct ones, as each documents.
  */
@@ -429,7 +431,7 @@ const searchDirectGroups = (request, url) => {
   if (account === undefined || !(account.scope ?? "").split(" ").includes("https://www.googleapis.com/auth/cloud-identity.groups.readonly")) {
     return Response.json({ error: { code: 403, status: "PERMISSION_DENIED" } }, { status: 403 });
   }
-  if (failingGroups.has(account.email)) {
+  if (failingGroups.has(member)) {
     return Response.json({ error: { code: 503, status: "UNAVAILABLE" } }, { status: 503 });
   }
   const groups = directGroups.get(member) ?? [];
@@ -437,7 +439,8 @@ const searchDirectGroups = (request, url) => {
   return Response.json({
     memberships: groups.slice(start, start + pageSize).map((id) => ({
       group: "groups/" + id.replace(/[^a-z0-9]/gu, ""),
-      groupKey: { id },
+      // A group mapped from another identity source carries its namespace.
+      groupKey: id.startsWith("mapped-") ? { id, namespace: "identitysources/acme" } : { id },
       roles: [{ name: "MEMBER" }],
     })),
     ...(start + pageSize < groups.length ? { nextPageToken: String(start + pageSize) } : {}),

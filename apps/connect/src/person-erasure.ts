@@ -184,6 +184,7 @@ export const erasePersonal = async (
           readerGroups: null,
           readerGroupsAt: null,
           readerGroupsTriedAt: null,
+          readerGroupsReading: null,
           accountAddresses: null,
           accountSenders: null,
           updatedAt: new Date(),

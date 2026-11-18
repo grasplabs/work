@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b3a6590e-17e6-43c9-bf45-1b23a6d48b02",
+  "id": "abc617fb-6bda-40e6-9dbf-335d60070a98",
   "prevId": "c7051666-2272-40b8-8dbf-1e7833674546",
   "tables": {
     "ai_provider_keys": {
@@ -621,6 +621,13 @@
         "reader_groups_tried_at": {
           "name": "reader_groups_tried_at",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reader_groups_reading": {
+          "name": "reader_groups_reading",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

@@ -415,8 +415,8 @@ export default class Connect
     return await personalAccounts(this.env.DB, userId);
   }
 
-  async readReaderGroups(): Promise<{ read: number }> {
-    return { read: await readReaderGroups(this.env) };
+  async readReaderGroups(request: unknown): Promise<{ read: number }> {
+    return { read: await readReaderGroups(this.env, request) };
   }
 
   async requireClassRights(
