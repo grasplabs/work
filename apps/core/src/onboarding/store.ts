@@ -224,6 +224,7 @@ import {
 } from "./kickoff.ts";
 import { linkSecretOf } from "./link-secret.ts";
 import { linkMail, reminderMail, updateMail } from "./mail-text.ts";
+import type { Proposer } from "./proposals.ts";
 import { referralOf, referred } from "./referral.ts";
 import {
   agreementsIn,
@@ -607,6 +608,10 @@ const linkCheckMs = 60 * 60 * 1000;
 const drawAfterMs = 15_000;
 /** How long a drawing that failed waits before it's tried again, each time; then it's given up. */
 const drawRetryMs = [60_000, 5 * 60_000, 30 * 60_000] as const;
+/** How long a proposal asked is claimed: past the 3 minutes the gateway gives a call. */
+const proposeClaimMs = 5 * 60_000;
+/** When a proposal given up is due: never. */
+const givenUpAt = "9999-12-31T00:00:00.000Z";
 /** What a run of the company's opinions is noted as among the failures (`draw_failures`). */
 const opinionsItem = "opinions";
 /** And how soon the alarm goes on drawing the next thing. */
@@ -1310,9 +1315,21 @@ export class Onboarding extends DurableObject<Env> {
    */
   readonly #removeFallen: SourceRemover | undefined;
 
-  constructor(ctx: DurableObjectState, env: Env, removeFallen?: SourceRemover) {
+  /**
+   * How what Grasp proposes for a routine is asked (proposals.ts): given
+   * by the Worker (onboarding/object.ts); without one, nothing is asked.
+   */
+  readonly #proposer: Proposer | undefined;
+
+  constructor(
+    ctx: DurableObjectState,
+    env: Env,
+    removeFallen?: SourceRemover,
+    proposer?: Proposer
+  ) {
     super(ctx, env);
     this.#removeFallen = removeFallen;
+    this.#proposer = proposer;
     migrateOnWake(ctx, migrations);
     // The one row everything else updates, there before anything asks. As
     // it is first made it takes the flow staff chose when they added the
@@ -2746,6 +2763,189 @@ export class Onboarding extends DurableObject<Env> {
    */
   async intakeNext(now: number = Date.now()): Promise<string | null> {
     return await this.#withBrain(async () => await this.#intakeDue(now));
+  }
+
+  /**
+   * Asks what Grasp proposes for each drawing that stands with none kept
+   * (proposals.ts), one at a time: each claimed first (its row in
+   * `draw_failures` says not before a while from now, so no second run asks
+   * it meanwhile), then asked. What fails is tried again after a minute,
+   * five and thirty, as a drawing is; then it's given up and logged, until
+   * its evidence changes (a drawing drawn anew is another) or an admin
+   * lists (`proposalsWanted`). First, a row whose drawing fell erases what
+   * may have been written for it (`#proposalsSwept`). Returns how many it
+   * asked.
+   */
+  async proposeNext(now: number = Date.now()): Promise<number> {
+    const proposer = this.#proposer;
+    if (proposer === undefined) {
+      return 0;
+    }
+    // The time from `now` on, read again at each step, as a call may take
+    // minutes: what is claimed, and when a failure is tried again, count
+    // from when that happens. `now` is a test's to move.
+    const started = Date.now();
+    const clock = (): number => now + Date.now() - started;
+    const owed = await proposer.owed(
+      this.standingDrawings().map(({ source }) => source)
+    );
+    await this.#proposalsSwept(proposer, new Set(owed), clock);
+    let asked = 0;
+    for (const source of owed) {
+      const item = `propose:${source}`;
+      const [failed] = this.#db
+        .select()
+        .from(drawFailures)
+        .where(eq(drawFailures.item, item))
+        .all();
+      const claiming = clock();
+      const due =
+        failed === undefined ||
+        failed.after <= new Date(claiming).toISOString();
+      const drawing = this.drawingToHand(source);
+      if (!due || drawing === null) {
+        continue;
+      }
+      // Claimed before it is asked, past the longest a model call takes:
+      // stored before the call goes out, so a store stopped meanwhile finds
+      // it claimed, and once the claim runs out asks it again, or erases
+      // what it wrote when its drawing fell (`#proposalsSwept`).
+      const claimed = new Date(claiming + proposeClaimMs).toISOString();
+      this.#db
+        .insert(drawFailures)
+        .values({ item, tries: failed?.tries ?? 0, after: claimed })
+        .onConflictDoUpdate({
+          target: drawFailures.item,
+          set: { after: claimed },
+        })
+        .run();
+      asked += 1;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one call at a time
+        await proposer.propose(drawing, () => this.#isStanding(source));
+        this.#db.delete(drawFailures).where(eq(drawFailures.item, item)).run();
+      } catch (error) {
+        this.#proposeFailed(source, failed?.tries ?? 0, error, clock());
+      }
+    }
+    return asked;
+  }
+
+  /**
+   * Of the proposals asked (`propose:` rows in `draw_failures`), those due
+   * and no longer owed: kept since (a store stopped before the row went),
+   * or their drawing fell, perhaps after the answer was written. The
+   * proposal lives in core's D1 and the drawing here, so no transaction
+   * holds both: what was written for a fallen drawing is erased here, its
+   * row kept until that succeeds, as nothing derived from a withdrawn
+   * interview may stay.
+   */
+  async #proposalsSwept(
+    proposer: Proposer,
+    owed: ReadonlySet<string>,
+    clock: () => number
+  ): Promise<void> {
+    const due = this.#db
+      .select({ item: drawFailures.item, tries: drawFailures.tries })
+      .from(drawFailures)
+      .where(
+        and(
+          like(drawFailures.item, "propose:%"),
+          lte(drawFailures.after, new Date(clock()).toISOString())
+        )
+      )
+      .all();
+    for (const { item, tries } of due) {
+      const source = item.slice("propose:".length);
+      if (!owed.has(source)) {
+        try {
+          if (!this.#isStanding(source)) {
+            // oxlint-disable-next-line no-await-in-loop -- one at a time
+            await proposer.forget(source);
+          }
+          this.#db
+            .delete(drawFailures)
+            .where(eq(drawFailures.item, item))
+            .run();
+        } catch (error) {
+          this.#proposeFailed(source, tries, error, clock());
+        }
+      }
+    }
+  }
+
+  /**
+   * Notes that asking `source`'s proposal, or erasing it, failed for the
+   * `tries`+1st time, `at` the time it failed: tried again after a minute,
+   * five and thirty from then. Then given up while its drawing stands; one
+   * fallen never is, as what was written for it must go, however long
+   * that takes.
+   */
+  #proposeFailed(
+    source: string,
+    tries: number,
+    error: unknown,
+    at: number
+  ): void {
+    const failures = tries + 1;
+    log.error("onboarding.propose_failed", {
+      tries: failures,
+      error: error instanceof Error ? error.name : "unknown",
+    });
+    const wait =
+      drawRetryMs[failures - 1] ??
+      (this.#isStanding(source) ? undefined : drawRetryMs[2]);
+    const after =
+      wait === undefined ? givenUpAt : new Date(at + wait).toISOString();
+    this.#db
+      .insert(drawFailures)
+      .values({ item: `propose:${source}`, tries: failures, after })
+      .onConflictDoUpdate({
+        target: drawFailures.item,
+        set: { tries: failures, after },
+      })
+      .run();
+  }
+
+  /** Whether the drawing `source` stands (`standingDrawing`). */
+  #isStanding(source: string): boolean {
+    return (
+      this.#db
+        .select({ source: brainDrawings.source })
+        .from(brainDrawings)
+        .where(and(eq(brainDrawings.source, source), standingDrawing))
+        .limit(1)
+        .all().length > 0
+    );
+  }
+
+  /**
+   * For an admin opening the opportunities: makes every proposal given up
+   * (`proposeNext`) owed again, as a provider that was down when routines
+   * were noted may answer now, and sets the alarm when any standing
+   * drawing is owed one, given up or never asked. Asked with the same
+   * back-off as before, by the alarm, never by the caller.
+   */
+  async proposalsWanted(): Promise<void> {
+    const proposer = this.#proposer;
+    if (proposer === undefined) {
+      return;
+    }
+    this.#db
+      .delete(drawFailures)
+      .where(
+        and(
+          like(drawFailures.item, "propose:%"),
+          eq(drawFailures.after, givenUpAt)
+        )
+      )
+      .run();
+    const owed = await proposer.owed(
+      this.standingDrawings().map(({ source }) => source)
+    );
+    if (owed.length > 0) {
+      await this.#alarmBy(Date.now() + drawNextMs);
+    }
   }
 
   async #intakeDue(now: number): Promise<string | null> {
@@ -5395,6 +5595,9 @@ export class Onboarding extends DurableObject<Env> {
       // mail never wait behind it, and read nothing it writes. The
       // company's opinions follow it: one team's step or the merge a run.
       await this.intakeNext();
+      // What Grasp proposes for each routine standing with none yet
+      // (GRA-1750): after the intake that notes it, never in a request.
+      await this.proposeNext();
       await this.opinionsNext();
     } finally {
       // Set again whatever failed above, so what is left is tried again.
@@ -8025,6 +8228,9 @@ export class Onboarding extends DurableObject<Env> {
             and(eq(brainDrawings.source, source), eq(brainDrawings.erase, true))
           )
           .run();
+        // Its row of asking a proposal (`proposeNext`), if any, stays: a
+        // call still out may write the answer after this, and the row
+        // erases it once due (`#proposalsSwept`).
       }
     });
     if (kind !== "interview") {
@@ -8882,8 +9088,21 @@ export class Onboarding extends DurableObject<Env> {
     const drawn = new Set(drawing.map(({ id, work }) => work?.team ?? id));
     // A team still being drawn goes to the brain once it is drawn.
     const forgettable = this.#toForget().length > 0;
+    // A proposal asked or failed, until it is given up (`proposeNext`).
+    const proposing = this.#db
+      .select({ after: drawFailures.after })
+      .from(drawFailures)
+      .where(
+        and(
+          like(drawFailures.item, "propose:%"),
+          ne(drawFailures.after, givenUpAt)
+        )
+      )
+      .all()
+      .map(({ after }) => Date.parse(after));
     const afters = [
       ...drawing.map(({ after }) => after),
+      ...proposing,
       ...this.#brainDueAt(now).flatMap(({ team, after }) =>
         drawn.has(team) ? [] : [after]
       ),

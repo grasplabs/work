@@ -618,6 +618,15 @@ jobs:
           # of Grasp's go: on one stack, the onboarding's 13 tests took
           # 120-145 s and ended the e2e run; these 5 were about 60 s of
           # them locally, and need nothing of the others (November 2026).
+          # The Brain found by meaning (e2e/brain-meaning.e2e.ts), the one
+          # stack that runs the model core ships: its loads held the
+          # stack's one thread long enough to fail tests beside them
+          # (playwright.config.ts).
+          - {
+              part: brain-meaning,
+              project: brain-meaning,
+              artifact: brain-meaning,
+            }
           - {
               part: onboarding-flow,
               project: onboarding-flow,
@@ -652,23 +661,12 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: e2e-stack
-      # The part that runs the Brain's test by meaning
-      # (e2e/brain-meaning.e2e.ts) gets the model files main keeps
-      # (.github/workflows/model-files.yml), which its stack puts in its
-      # state as it starts (playwright.config.ts). Only that part: on every
-      # part's stack, loading the model took 20 to 45 s of the part and
-      # failed both onboarding stacks (November 2026).
-      - id: meaning
-        run: |
-          if [ "$GRASP_E2E_PART" = parallel ] && grep -q ' › brain-meaning\.e2e\.ts › ' "e2e/dist/parts/$PART.txt"; then
-            echo "runs=true" >> "$GITHUB_OUTPUT"
-          fi
-        env:
-          GRASP_E2E_PART: ${{ matrix.project }}
-          PART: ${{ matrix.artifact }}
+      # The brain-meaning part's stack runs the model files main keeps
+      # (.github/workflows/model-files.yml), which it puts in its state as
+      # it starts (playwright.config.ts); no other part loads the model.
       # No cache main kept (evicted, or never filled): fail here, naming
       # it, rather than minutes later as a test that found nothing.
-      - if: steps.meaning.outputs.runs == 'true'
+      - if: matrix.project == 'brain-meaning'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/grasp-os/model-files
