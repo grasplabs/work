@@ -94,13 +94,18 @@ const styles = stylex.create({
   // enough; under it on a narrow one.
   split: {
     display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    gap: grasp.space6,
+    alignItems: "start",
+    minWidth: 0,
+  },
+  // Room for the record beside the list only while one is in hand: an empty
+  // column would push the list and its empty state off the middle.
+  splitPicked: {
     gridTemplateColumns: {
       default: "minmax(0, 1fr)",
       [media.fromSidebar]: `minmax(0, 1fr) ${grasp.inspectorWidth}`,
     },
-    gap: grasp.space6,
-    alignItems: "start",
-    minWidth: 0,
   },
   list: { display: "grid", gap: grasp.space2, minWidth: 0 },
 });
@@ -661,7 +666,12 @@ export const MemoryPage = ({
         {tab === "lessons" ? (
           <LessonsView admin={admin} />
         ) : (
-          <div {...stylex.props(styles.split)}>
+          <div
+            {...stylex.props(
+              styles.split,
+              picked !== undefined && styles.splitPicked
+            )}
+          >
             <div {...stylex.props(styles.list)}>
               <RecordList
                 among={tab}

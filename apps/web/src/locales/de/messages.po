@@ -1090,6 +1090,10 @@ msgstr "{only} nutzt es"
 msgid "{open, plural, one {# open question} other {# open questions}}"
 msgstr "{open, plural, one {# offene Frage} other {# offene Fragen}}"
 
+#: src/brain/brain-section.tsx
+msgid "{open} still open"
+msgstr "{open} noch offen"
+
 #: src/onboarding/setup-steps.tsx
 msgid "{openCount, plural, =0 {Nothing needs you} =1 {Just one thing for you} other {# things for you}}"
 msgstr "{openCount, plural, =0 {Nichts wartet auf Sie} =1 {Nur eine Sache für Sie} other {# Dinge für Sie}}"
@@ -1400,6 +1404,7 @@ msgstr "{team} · unsere E-Mail hat sie nicht erreicht"
 msgid "{team} (team)"
 msgstr "{team} (Team)"
 
+#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 msgid "{team} has a region of its own"
 msgstr "{team} hat eine eigene Region"
@@ -1411,6 +1416,10 @@ msgstr "{team} ist bisher still. Eine kurze Nachricht von {lead}, der Teamleitun
 #: src/brain/brain.ts
 msgid "{team} interviewed"
 msgstr "{team} interviewt"
+
+#: src/brain/brain-section.tsx
+msgid "{team} moved to {name}"
+msgstr "{team} nach {name} verschoben"
 
 #: src/brain/region-edit.tsx
 msgid "{team} moved to {to}"
@@ -2113,7 +2122,7 @@ msgid "Active, only for you"
 msgstr "Aktiv, nur für Sie"
 
 #: src/brain/brain-log.tsx
-#: src/brain/brain-nav.tsx
+#: src/brain/brain-section.tsx
 #: src/routes/_shell.brain.tsx
 msgctxt "the brain's log"
 msgid "Activity"
@@ -3060,6 +3069,10 @@ msgstr "Bereiche abgeschlossen"
 msgid "Arrange {name}"
 msgstr "{name} einordnen"
 
+#: src/brain/brain-section.tsx
+msgid "Arrange {team}"
+msgstr "{team} einordnen"
+
 #: src/frame/part-words.tsx
 msgid "Arrow keys move it, Shift for a longer step, End docks it beside the page, Escape goes back to the page"
 msgstr "Pfeiltasten verschieben es, Umschalt für einen größeren Schritt, Ende dockt es neben der Seite an, Escape geht zurück zur Seite"
@@ -3127,7 +3140,6 @@ msgid "Ask an admin"
 msgstr "Einen Admin fragen"
 
 #: src/chat/chat-composer.tsx
-#: src/chat/global-chat.tsx
 #: src/frame/part-words.tsx
 msgid "Ask anything, or describe a process"
 msgstr "Etwas fragen oder einen Prozess beschreiben"
@@ -3360,6 +3372,7 @@ msgstr "Verfügbar, über Composio"
 
 #: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
+#: src/brain/brain-section.tsx
 #: src/chat/approval-words.ts
 #: src/chat/asked-questions.tsx
 #: src/frame/part-words.tsx
@@ -3541,7 +3554,7 @@ msgid "Bound to"
 msgstr "Gebunden an"
 
 #: src/apps/resource-bindings.tsx
-#: src/brain/brain-nav.tsx
+#: src/brain/brain-section.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.brain.index.tsx
 #: src/routes/_shell.brain.tsx
@@ -4351,7 +4364,6 @@ msgctxt "put away the card of one item"
 msgid "Close"
 msgstr "Schließen"
 
-#: src/brain/brain-nav.tsx
 #: src/frame/part-words.tsx
 msgid "Close {name}"
 msgstr "{name} schließen"
@@ -6248,7 +6260,6 @@ msgstr "Genau so, wie es hier steht."
 msgid "Example"
 msgstr "Beispiel"
 
-#: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
 msgid "Expand the navigation"
 msgstr "Navigation ausklappen"
@@ -6609,7 +6620,6 @@ msgctxt "a workflow's view"
 msgid "Flow"
 msgstr "Ablauf"
 
-#: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
 msgid "Fold the navigation"
 msgstr "Navigation einklappen"
@@ -7660,6 +7670,7 @@ msgstr "Nur in einem Chat, für {requester}"
 msgid "In progress"
 msgstr "Läuft"
 
+#: src/brain/brain-section.tsx
 #: src/brain/brain.ts
 msgid "In the brain"
 msgstr "Im Gehirn"
@@ -9037,7 +9048,7 @@ msgstr "Mitglieder und Rollen"
 msgid "members of the team in {field}"
 msgstr "Mitgliedern des Teams in {field}"
 
-#: src/brain/brain-nav.tsx
+#: src/brain/brain-section.tsx
 #: src/brain/memory-page.tsx
 #: src/labels.ts
 #: src/routes/_shell.brain.tsx
@@ -9312,6 +9323,7 @@ msgstr "Nach hinten"
 msgid "Move the panel"
 msgstr "Bereich verschieben"
 
+#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 msgid "Move to"
 msgstr "Verschieben nach"
@@ -9513,6 +9525,7 @@ msgstr "Neue Option"
 msgid "New project"
 msgstr "Neues Projekt"
 
+#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 msgid "New region"
 msgstr "Neue Region"
@@ -10871,7 +10884,6 @@ msgctxt "open one run of a workflow"
 msgid "Open"
 msgstr "Öffnen"
 
-#: src/brain/brain-nav.tsx
 #: src/frame/part-words.tsx
 #: src/knowledge/uploads.tsx
 msgid "Open {name}"
@@ -11148,6 +11160,7 @@ msgid "Over the next two weeks you’ll get a short personal link to talk with S
 msgstr "In den nächsten zwei Wochen erhalten Sie einen kurzen persönlichen Link, um mit Stephen zu sprechen, dem KI-Interviewer von Grasp: Teamleitungen etwa 20 Minuten, alle anderen 10 bis 15. Per Sprache oder per Tippen."
 
 #: src/agents/agent-section.tsx
+#: src/brain/brain-section.tsx
 msgid "Overview"
 msgstr "Übersicht"
 
@@ -12346,6 +12359,7 @@ msgstr "Chat umbenennen"
 msgid "Renamed the organization"
 msgstr "Hat die Organisation umbenannt"
 
+#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 #: src/chat/sidebar-chats.tsx
 #: src/frame/part-words.tsx
@@ -13173,14 +13187,6 @@ msgstr "Sagen Sie es so, wie Sie es einer Kollegin erzählen würden. Grasp übe
 #: src/frame/part-words.tsx
 msgid "Say what should change"
 msgstr "Sagen Sie, was sich ändern soll"
-
-#: src/chat/chat-subject.ts
-msgid "Say what to change. Only you see the changes until you share them with your team."
-msgstr "Sagen Sie, was sich ändern soll. Nur Sie sehen die Änderungen, bis Sie sie mit Ihrem Team teilen."
-
-#: src/chat/chat-subject.ts
-msgid "Say what to change. Only you see the changes, in the Flow: its runs go on as they are until a new version runs for your team."
-msgstr "Sagen Sie, was sich ändern soll. Nur Sie sehen die Änderungen, im Flow: Seine Läufe gehen weiter wie bisher, bis eine neue Version für Ihr Team läuft."
 
 #: src/apps/apps-overview.tsx
 msgid "Say what you want to build, and Grasp builds it."
@@ -14180,7 +14186,7 @@ msgstr "Quelle {number}"
 msgid "Sources"
 msgstr "Quellen"
 
-#: src/brain/brain-nav.tsx
+#: src/brain/brain-section.tsx
 #: src/brain/sources-page.tsx
 #: src/routes/_shell.brain.tsx
 msgctxt "the Brain's sources page"
@@ -15100,10 +15106,13 @@ msgstr "Die Geschäftsleitung hat die Vision bestätigt."
 msgid "The board has not confirmed the vision yet."
 msgstr "Die Geschäftsleitung hat die Vision noch nicht bestätigt."
 
-#: src/brain/brain-nav.tsx
 #: src/workflows/requests/request-parts.tsx
 msgid "The brain"
 msgstr "Das Gehirn"
+
+#: src/brain/brain-section.tsx
+msgid "The Brain's pages"
+msgstr "Die Seiten des Gehirns"
 
 #: src/workflows/business-process.tsx
 msgid "The business process {name} serves"
@@ -18079,10 +18088,6 @@ msgstr "Sie haben diesen Chat beendet. Vielen Dank für Ihre Zeit."
 #: src/projects/project-chats.tsx
 msgid "You have no chats to add."
 msgstr "Sie haben keine Chats, die Sie hinzufügen können."
-
-#: src/brain/sources-page.tsx
-msgid "You have no connections yet."
-msgstr "Sie haben noch keine Verbindungen."
 
 #: src/workflows/item-test.tsx
 msgid "You have no recent runs whose input is still kept, so there was nothing to test on."

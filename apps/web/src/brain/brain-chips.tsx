@@ -24,8 +24,7 @@ import type { Group, Note, NoteKind } from "./brain.ts";
 // (`components/brain-chips.tsx`).
 
 /**
- * The brain's own hue for each group: the `--graph-*` colours the map draws with (brain-colors.ts,
- * the atlas). The library has no token for them, as they are the brain's alone; the page reads the
+ * The brain's own hue for each group: the `--graph-*` colours the atlas draws with. The library has no token for them, as they are the brain's alone; the page reads the
  * same variables, so a name on a page has the colour of its part on the map, light and dark.
  */
 const hue = {
@@ -58,10 +57,10 @@ const dots = stylex.create({
   tools: { backgroundColor: hue.tools },
   statements: { backgroundColor: hue.statements },
   candidates: { backgroundColor: hue.candidates },
-  gaps: { boxShadow: `inset 0 0 0 1px ${hue.gaps}` },
+  gaps: { boxShadow: `inset 0 0 0 ${grasp.hairline} ${hue.gaps}` },
   sources: { backgroundColor: hue.sources },
   // An application nobody named is hollow too.
-  app: { boxShadow: `inset 0 0 0 1px ${hue.tools}` },
+  app: { boxShadow: `inset 0 0 0 ${grasp.hairline} ${hue.tools}` },
 });
 
 /** The same hue as a soft fill, for a kind's label and for what was marked in a transcript. */
@@ -86,7 +85,7 @@ export const brainMarks = stylex.create({
   hitCurrent: {
     borderRadius: grasp.cornerMark,
     backgroundColor: soft(hue.vision, "40%"),
-    boxShadow: `0 0 0 1px ${hue.vision}`,
+    boxShadow: `0 0 0 ${grasp.hairline} ${hue.vision}`,
   },
   stripMark: { fill: hue.statements },
   stripMarkActive: { fill: grasp.ink },
