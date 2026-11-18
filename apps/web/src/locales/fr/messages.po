@@ -949,6 +949,14 @@ msgstr "{number} sur {total}"
 msgid "{number}. {step} (a person approves this step)"
 msgstr "{number}. {step} (une personne valide cette étape)"
 
+#: src/brain/opportunity-drafts.ts
+msgid "{number}. {system}: {step}"
+msgstr "{number}. {system} : {step}"
+
+#: src/brain/opportunity-drafts.ts
+msgid "{number}. {system}: {step} (copied from another system)"
+msgstr "{number}. {system} : {step} (copié depuis un autre système)"
+
 #: src/brain/brain-atlas.ts
 msgid "{one} and {other} both name the same handover, each from their own side."
 msgstr "{one} et {other} citent le même passage de relais, chacun de son côté."
@@ -16354,6 +16362,10 @@ msgstr "Ce que chaque agent doit savoir sur l’entreprise."
 #: src/routes/_shell.settings.instructions.tsx
 msgid "What every chat in the company starts with. Only admins change them."
 msgstr "Ce par quoi commence chaque conversation de l’entreprise. Seuls les administrateurs les modifient."
+
+#: src/brain/opportunity-drafts.ts
+msgid "What five or more of the team were seen doing:"
+msgstr "Ce que cinq personnes ou plus de l'équipe ont été vues faire :"
 
 #: src/brain/work-knowledge.tsx
 msgid "What gets in the way"

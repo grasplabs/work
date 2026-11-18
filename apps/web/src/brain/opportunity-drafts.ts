@@ -1,5 +1,5 @@
 import type { ChatPlanKind } from "@grasp-os/shared/chat";
-import type { Opportunity } from "@grasp-os/shared/opportunities";
+import type { Opportunity, SeenRoutine } from "@grasp-os/shared/opportunities";
 import type { I18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useEffect, useRef } from "react";
@@ -17,6 +17,9 @@ import type { Loaded } from "../load-from-core.tsx";
 // asked of a model until the admin sends the brief, and the brief holds
 // only what the opportunity's card shows them: its name, steps and the
 // ones a person approves, its figures and the systems to connect first.
+// For a routine only seen in activity (GRA-1764), its steps are the ones
+// seen, each with its system and the steps that copy data marked, as the
+// card shows them.
 
 /** The opportunity `routine`, as the admin reads it now; none when it is gone. */
 export const opportunityOf = async (
@@ -77,8 +80,8 @@ export const titleOf = (
   return local === undefined ? title : `${title} (${local})`;
 };
 
-/** Its steps, a line each, numbered, with the ones a person approves marked. */
-const stepLinesOf = (
+/** Its steps as described, a line each, numbered, with the ones a person approves marked. */
+const describedLinesOf = (
   { steps, personApproves }: Opportunity,
   i18n: I18n
 ): string[] => {
@@ -90,6 +93,27 @@ const stepLinesOf = (
       : `${number}. ${step}`;
   });
 };
+
+/** Its steps as seen in activity, a line each, numbered: each with its system, the ones that copy data marked. */
+const seenLinesOf = (seen: SeenRoutine, i18n: I18n): string[] =>
+  seen.steps.map(({ system, step, copied }, at) => {
+    const number = at + 1;
+    return copied
+      ? i18n._(msg`${number}. ${system}: ${step} (copied from another system)`)
+      : i18n._(msg`${number}. ${system}: ${step}`);
+  });
+
+/** Whether `opportunity` was only seen in activity: its steps are the ones seen. */
+const onlySeen = (
+  opportunity: Opportunity
+): opportunity is Opportunity & { seen: SeenRoutine } =>
+  opportunity.basis === "observed" && opportunity.seen !== null;
+
+/** Its steps, a line each, numbered: as described, or as seen for one only seen. */
+const stepLinesOf = (opportunity: Opportunity, i18n: I18n): string[] =>
+  onlySeen(opportunity)
+    ? seenLinesOf(opportunity.seen, i18n)
+    : describedLinesOf(opportunity, i18n);
 
 /** Its figures and what to connect first, a line each: only those it has. */
 const figureLinesOf = (opportunity: Opportunity, i18n: I18n): string[] => {
@@ -126,7 +150,9 @@ export const briefOf = (
       : i18n._(msg`Draft a workflow for the opportunity “${title}”.`);
   return [
     opening,
-    i18n._(msg`How the team does it today:`),
+    onlySeen(opportunity)
+      ? i18n._(msg`What five or more of the team were seen doing:`)
+      : i18n._(msg`How the team does it today:`),
     ...stepLinesOf(opportunity, i18n),
     ...figureLinesOf(opportunity, i18n),
   ].join("\n");

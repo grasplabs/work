@@ -298,6 +298,54 @@ describe("Chat's page from Make something", () => {
     });
   });
 
+  it("starts the brief of an opportunity only seen in activity with the steps seen, the ones that copy data marked", async () => {
+    const { asked } = await shown({ kind: "workflow" }, undefined, {
+      from: {
+        ...opportunity,
+        name: "Exact invoices.read → Google Sheets rows.add",
+        local: undefined,
+        steps: [],
+        casesPerWeek: null,
+        hoursPerWeek: null,
+        basis: "observed",
+        seen: {
+          steps: [
+            {
+              system: "Exact",
+              step: "invoices.read",
+              hoursAfter: null,
+              copied: false,
+            },
+            {
+              system: "Google Sheets",
+              step: "rows.add",
+              hoursAfter: 1,
+              copied: true,
+            },
+          ],
+          variants: [],
+        },
+        setup: [],
+        personApproves: [],
+      },
+    });
+
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect(asked.at(-1)).toBe(
+      `send chat-1 ${[
+        "Draft a workflow for the opportunity “Exact invoices.read → Google Sheets rows.add”.",
+        "What five or more of the team were seen doing:",
+        "1. Exact: invoices.read",
+        "2. Google Sheets: rows.add (copied from another system)",
+      ].join("\n")}`
+    );
+  });
+
   it("makes the chat with what to make, which it keeps, on the first question", async () => {
     const { asked } = await shown({
       kind: "app",

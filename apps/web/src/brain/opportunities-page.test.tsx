@@ -150,6 +150,34 @@ describe("Opportunities", () => {
     });
   });
 
+  it("offers no Draft it on an opportunity only seen in activity while nothing is proposed for it", async () => {
+    await shown([
+      {
+        ...proposed(1, "exact invoices.read → sheets rows.add", null, 0),
+        steps: [],
+        casesPerWeek: null,
+        hoursPerWeek: null,
+        basis: "observed",
+        seen: {
+          steps: [
+            {
+              system: "exact",
+              step: "invoices.read",
+              hoursAfter: null,
+              copied: false,
+            },
+            { system: "sheets", step: "rows.add", hoursAfter: 1, copied: true },
+          ],
+          variants: [],
+        },
+      },
+    ]);
+
+    expect(drafts()).toStrictEqual({
+      "Exact invoices.read → sheets rows.add": null,
+    });
+  });
+
   it("names each Draft it for its opportunity, so a list of links tells them apart", async () => {
     await shown([
       proposed(1, "closing the month", "workflow", 9),
