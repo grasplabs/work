@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5831fe4f-bab0-4dca-8fdb-ad54966e3bd0",
+  "id": "d0da1ede-103f-4167-8345-b0b7de4c2318",
   "prevId": "d0fb311d-a8d4-478d-8561-f59e2a7eb166",
   "tables": {
     "access_revocations": {
@@ -169,20 +169,6 @@
         },
         "oid": {
           "name": "oid",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "verified_email": {
-          "name": "verified_email",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "verified_tenant": {
-          "name": "verified_tenant",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -10571,6 +10557,46 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "run_state_writers": {
+      "name": "run_state_writers",
+      "columns": {
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "writer_run_id": {
+          "name": "writer_run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "run_state_writers_writer_idx": {
+          "name": "run_state_writers_writer_idx",
+          "columns": [
+            "writer_run_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "run_state_writers_run_id_writer_run_id_pk": {
+          "columns": [
+            "run_id",
+            "writer_run_id"
+          ],
+          "name": "run_state_writers_run_id_writer_run_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "sdk_artifact_candidates": {
       "name": "sdk_artifact_candidates",
       "columns": {
@@ -11510,52 +11536,6 @@
           "columns": [
             "status",
             "requested_at"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "source_reader_tokens": {
-      "name": "source_reader_tokens",
-      "columns": {
-        "key": {
-          "name": "key",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "person": {
-          "name": "person",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "token": {
-          "name": "token",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "source_reader_tokens_person_idx": {
-          "name": "source_reader_tokens_person_idx",
-          "columns": [
-            "person"
           ],
           "isUnique": false
         }

@@ -19,7 +19,11 @@ import { readableSources } from "../history-access.ts";
 import { authorize } from "../permissions.ts";
 import { runAuthority, runContext } from "./resource-authority.ts";
 import type { CallingRun } from "./resource-authority.ts";
-import { evidenceOfRuns, memoryEvidenceOfRuns } from "./run-evidence.ts";
+import {
+  evidenceOfRuns,
+  memoryEvidenceOfRuns,
+  stateWritersOfRuns,
+} from "./run-evidence.ts";
 
 // What a run read, checked before anything of the run leaves it: the
 // Brain's versions its recalls pinned (run-evidence.ts) and what the chat
@@ -83,13 +87,19 @@ const groupedBy = <T>(
 
 /**
  * What runs read, as their evidence keeps it: the pins of the chats that
- * started them (`runChatSources`), the versions their recalls were handed
- * and the memories their entity reads rested on (run-evidence.ts).
+ * started them (`runChatSources`), the versions their recalls were handed,
+ * the memories their entity reads rested on (run-evidence.ts), and the
+ * runs whose kept state they started from.
  */
 export interface EvidenceRead {
   readonly pins: readonly (typeof runChatSources.$inferSelect)[];
   readonly versions: Awaited<ReturnType<typeof evidenceOfRuns>>;
   readonly memories: Awaited<ReturnType<typeof memoryEvidenceOfRuns>>;
+  /**
+   * The runs whose keys each started from (`runStateWriters`), whose own
+   * evidence the read holds too.
+   */
+  readonly writers: Awaited<ReturnType<typeof stateWritersOfRuns>>;
 }
 
 /** What runs `runIds` read, as their evidence keeps it: a read of each kind. */
@@ -105,7 +115,7 @@ const evidenceReadOf = async (
     evidenceOfRuns(env, runIds),
     memoryEvidenceOfRuns(env, runIds),
   ]);
-  return { pins, versions, memories };
+  return { pins, versions, memories, writers: [] };
 };
 
 /** Of `read`, what runs `runIds` read alone. */
@@ -118,6 +128,7 @@ const readOf = (
     pins: read.pins.filter(({ runId }) => ids.has(runId)),
     versions: read.versions.filter(({ runId }) => ids.has(runId)),
     memories: read.memories.filter(({ runId }) => ids.has(runId)),
+    writers: read.writers.filter(({ runId }) => ids.has(runId)),
   };
 };
 
@@ -195,7 +206,7 @@ const versionKey = (
  * through (`copiesEvidence`). Given `read`, what they read as a caller
  * read it, never read again (`EvidenceRead`).
  */
-const evidenceChecked = async (
+const ownEvidenceChecked = async (
   env: Env,
   runs: readonly EvidenceRun[],
   grants: boolean,
@@ -320,6 +331,80 @@ const evidenceChecked = async (
         }
       }
     )
+  );
+  return checked;
+};
+
+/**
+ * `ownEvidenceChecked` for `runs`, and for the runs whose keys of their
+ * workflow's state each started from (`stateWritersOfRuns`, GRA-1996):
+ * a copy a run carries from that state follows what its writer read, so
+ * a writer refused refuses the run, and a writer's check failing fails
+ * the run's. Each writer's own evidence alone (one hop: not the runs
+ * whose keys it started from), read as copies are (`copiesEvidence`): as
+ * the run's person reads the company, never the writer's grants. Its
+ * writers are read in one statement, and checked together for each of
+ * the runs' persons. Given `read`, the writers and their evidence as it
+ * holds them (`EvidenceRead`).
+ */
+const evidenceChecked = async (
+  env: Env,
+  runs: readonly EvidenceRun[],
+  grants: boolean,
+  read?: EvidenceRead
+): Promise<Checked> => {
+  const ids = runs.map(({ runId }) => runId);
+  const [checked, writers] = await Promise.all([
+    ownEvidenceChecked(env, runs, grants, read),
+    read === undefined
+      ? stateWritersOfRuns(env, ids)
+      : readOf(read, ids).writers,
+  ]);
+  const byId = new Map(runs.map((run) => [run.runId, run]));
+  const byPerson = groupedBy(
+    writers.flatMap((pair) => {
+      const run = byId.get(pair.runId);
+      return run === undefined ? [] : [{ ...pair, run }];
+    }),
+    ({ run }) => run.principal
+  );
+  await Promise.all(
+    [...byPerson.values()].map(async (pairs) => {
+      const [first] = pairs;
+      if (first === undefined) {
+        return;
+      }
+      let ofWriters: Checked;
+      try {
+        ofWriters = await ownEvidenceChecked(
+          env,
+          [...new Set(pairs.map(({ writerRunId }) => writerRunId))].map(
+            (writerRunId) => ({
+              runId: writerRunId,
+              workflowId: first.run.workflowId,
+              principal: first.run.principal,
+            })
+          ),
+          false,
+          read
+        );
+      } catch (error) {
+        settled(
+          checked,
+          pairs.map(({ runId }) => runId),
+          error
+        );
+        return;
+      }
+      for (const { runId, writerRunId } of pairs) {
+        const failure = ofWriters.failed.get(writerRunId);
+        if (ofWriters.refused.has(writerRunId)) {
+          checked.refused.add(runId);
+        } else if (failure !== undefined && !checked.failed.has(runId)) {
+          checked.failed.set(runId, failure);
+        }
+      }
+    })
   );
   return checked;
 };

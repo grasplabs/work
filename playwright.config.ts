@@ -265,6 +265,10 @@ export default defineConfig({
           ? [
               'rm -rf "$DEV_PERSIST_TO" &&',
               'cp -R "$E2E_MIGRATED_STATE" "$DEV_PERSIST_TO" &&',
+              // The model core ships, when this machine holds its files: in
+              // CI only the part that runs the test by meaning does
+              // (.github/workflows/ci.yml), so no other stack loads it.
+              'node scripts/local-model-files.ts --persist-to "$DEV_PERSIST_TO" -c apps/core/wrangler.jsonc &&',
               "cd apps/core &&",
               coreDevStart,
             ]

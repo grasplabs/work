@@ -6250,6 +6250,10 @@ msgid "From the company's vision, version {version}"
 msgstr "From the company's vision, version {version}"
 
 #: src/brain/memories-page.tsx
+msgid "From what people across the company say, version {version}"
+msgstr "From what people across the company say, version {version}"
+
+#: src/brain/memories-page.tsx
 msgid "From what your team said, version {version}"
 msgstr "From what your team said, version {version}"
 
@@ -12102,6 +12106,13 @@ msgctxt "what something known rests on: people said it"
 msgid "Said"
 msgstr "Said"
 
+#. Under a statement put together from what people across the company told, only counted anonymously
+#. Under a statement put together from what people across the company told, only counted anonymously
+#: src/brain/aggregate.tsx
+#: src/brain/brain.ts
+msgid "Said by five or more people across the company"
+msgstr "Said by five or more people across the company"
+
 #: src/brain/work-knowledge.tsx
 msgid "Said in an interview"
 msgstr "Said in an interview"
@@ -16324,6 +16335,15 @@ msgstr "What needs you"
 #: src/workflows/requests/request-table.tsx
 msgid "What needs you can't be read right now."
 msgstr "What needs you can't be read right now."
+
+#: src/brain/brain.ts
+msgid "What people across the company say"
+msgstr "What people across the company say"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "What people across the company say"
+msgstr "What people across the company say"
 
 #: src/workflows/requests/request-table.tsx
 msgid "What people ask"
