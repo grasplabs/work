@@ -6653,7 +6653,7 @@ msgstr "Moins de cinq sur {reach} l’ont sollicité"
 msgid "Fewer than five people: not shown on its own."
 msgstr "Moins de cinq personnes : pas affiché à part."
 
-#: src/routes/_shell.workflows.requests.tsx
+#: src/workflows/requests/request-plan.tsx
 msgid "Fewer than five people: this isn't shown on its own."
 msgstr "Moins de cinq personnes : ce n’est pas affiché à part."
 
@@ -10201,11 +10201,11 @@ msgstr "Aucun enregistrement"
 msgid "No records yet"
 msgstr "Aucun souvenir pour l'instant"
 
-#: src/routes/_shell.workflows.requests.tsx
+#: src/workflows/requests/request-plan.tsx
 msgid "No requests in {month}"
 msgstr "Aucune demande en {month}"
 
-#: src/routes/_shell.workflows.requests.tsx
+#: src/workflows/requests/request-plan.tsx
 msgid "No requests in the last twelve months"
 msgstr "Aucune demande ces douze derniers mois"
 

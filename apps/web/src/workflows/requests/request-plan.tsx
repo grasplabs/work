@@ -30,6 +30,11 @@ import {
   ChartTooltip,
 } from "../../grasp/chart/index.ts";
 import type { ChartConfig } from "../../grasp/chart/index.ts";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+} from "../../grasp/empty/index.ts";
 import { Input } from "../../grasp/input/index.ts";
 import {
   Popover,
@@ -230,6 +235,80 @@ const rowsOf = (page: RequestsPage, included: number | null): Row[] => {
   }));
 };
 
+/** The plan's chart: billed over the span, its pace, and the plan's line where it is drawn. */
+const PlanChart = ({
+  page,
+  included,
+  billed,
+}: {
+  page: RequestsPage;
+  /** The requests the plan includes, or null where its line isn't drawn. */
+  included: number | null;
+  /** What was billed, formatted as the figure over it shows it. */
+  billed: string;
+}) => {
+  const { t } = useLingui();
+  const { report, range } = page;
+  const of = included === null ? "" : formatNumber(included);
+  const daily = report.by === "day";
+  const format = (at: string | number) =>
+    daily ? formatIsoDayMonth(String(at)) : formatMonth(String(at));
+  const planLabel = t`Your plan · ${of}`;
+  const config: ChartConfig = {
+    ...(daily
+      ? {
+          total: { label: t`Billed so far` },
+          pace: { label: t`At this pace` },
+        }
+      : { billed: { label: t`Billed` } }),
+    ...(included === null ? {} : { plan: { label: planLabel } }),
+  };
+  return (
+    <Chart
+      aria-label={t`Billed requests over time`}
+      config={config}
+      data={rowsOf(page, included)}
+      height={224}
+      summary={
+        included === null || range === "year" ? billed : t`${billed} of ${of}`
+      }
+      xKey="at"
+    >
+      <ChartGrid />
+      <ChartAxis format={format} side="x" />
+      <ChartAxis
+        format={(value) => formatNumber(Number(value))}
+        side="y"
+        width={48}
+      />
+      {daily ? <ChartArea series="total" /> : <ChartBar series="billed" />}
+      {daily ? <ChartLine series="pace" variant="dotted" /> : null}
+      {included === null ? null : <ChartLine series="plan" variant="quiet" />}
+      <ChartLabels />
+      <ChartTooltip format={formatNumber} />
+    </Chart>
+  );
+};
+
+/** Why the plan has no chart: too few people, or no request in the span. */
+const NothingDrawn = ({
+  tooFew,
+  range,
+  month,
+}: {
+  tooFew: boolean;
+  range: RequestRange;
+  month: string;
+}) => {
+  const { t } = useLingui();
+  if (tooFew) {
+    return t`Fewer than five people: this isn't shown on its own.`;
+  }
+  return range === "year"
+    ? t`No requests in the last twelve months`
+    : t`No requests in ${month}`;
+};
+
 /** The month against the plan, the time saved, and how far back. */
 export const RequestPlan = ({
   page,
@@ -259,19 +338,7 @@ export const RequestPlan = ({
   const end = formatIsoDayMonth(report.to);
   const over =
     range === "month" && included !== null && pace !== null && pace > included;
-  const daily = report.by === "day";
-  const format = (at: string | number) =>
-    daily ? formatIsoDayMonth(String(at)) : formatMonth(String(at));
-  const planLabel = t`Your plan · ${of}`;
-  const config: ChartConfig = {
-    ...(daily
-      ? {
-          total: { label: t`Billed so far` },
-          pace: { label: t`At this pace` },
-        }
-      : { billed: { label: t`Billed` } }),
-    ...(included === null ? {} : { plan: { label: planLabel } }),
-  };
+  const month = formatMonth(report.from);
   const shown =
     included !== null && range !== "year" ? `${billed} / ${of}` : billed;
   return (
@@ -317,33 +384,24 @@ export const RequestPlan = ({
             ))}
           </ToggleGroup>
         </div>
-        <Chart
-          aria-label={t`Billed requests over time`}
-          config={config}
-          data={rowsOf(page, included)}
-          height={224}
-          summary={
-            included === null || range === "year"
-              ? billed
-              : t`${billed} of ${of}`
-          }
-          xKey="at"
-        >
-          <ChartGrid />
-          <ChartAxis format={format} side="x" />
-          <ChartAxis
-            format={(value) => formatNumber(Number(value))}
-            side="y"
-            width={48}
-          />
-          {daily ? <ChartArea series="total" /> : <ChartBar series="billed" />}
-          {daily ? <ChartLine series="pace" variant="dotted" /> : null}
-          {included === null ? null : (
-            <ChartLine series="plan" variant="quiet" />
-          )}
-          <ChartLabels />
-          <ChartTooltip format={formatNumber} />
-        </Chart>
+        {/* Nothing to draw (no request in the span, or fewer than five
+            people, who show nothing on their own): a chart of zeros says
+            nothing, so it says why instead. */}
+        {page.tooFew || report.total.requests === 0 ? (
+          <Empty size="section">
+            <EmptyHeader>
+              <EmptyDescription>
+                <NothingDrawn
+                  month={month}
+                  range={range}
+                  tooFew={page.tooFew}
+                />
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <PlanChart billed={billed} included={included} page={page} />
+        )}
       </div>
     </Card>
   );
