@@ -125,12 +125,57 @@ export type SyncPage = z.infer<typeof syncPageSchema>;
 /** The connection's own account: its mailbox, its own drive, its calendars. */
 export const ownPlace = "own";
 
+/**
+ * One path segment's characters: none that can step out of it, and no
+ * control character (`\p{Cc}`).
+ */
+const placePattern = /^[^/\\?#%;:\p{Cc}]+$/u;
+
+/**
+ * A place a sync reads of the connection's own account, as its connector
+ * lists it (a mail folder's ID): one path segment, nothing that can step
+ * out of one (`/ \ ? # % ; :` or a control character, `.` or `..`), and
+ * never `own`, which names the whole account.
+ */
+export const syncPlaceSchema = z
+  .string()
+  .min(1)
+  .max(256)
+  .regex(placePattern, "Not a place")
+  .refine(
+    (place) => place !== "." && place !== ".." && place !== ownPlace,
+    "Not a place"
+  );
+
+/**
+ * Places of a sync to read, each its own source with its own cursor, and
+ * where the listing goes on (`cursor`): null once it is whole. Core puts
+ * the reads of one listing together before it adds or drops a source.
+ */
+export const syncPlacesSchema = z.strictObject({
+  places: z.array(syncPlaceSchema),
+  cursor: syncCursorSchema.nullable(),
+});
+export type SyncPlaces = z.infer<typeof syncPlacesSchema>;
+
+/** What core asks connect for: the places of one connection's sync. */
+export const syncPlacesRequestSchema = z.strictObject({
+  connectionId: z.string().min(1).max(128),
+  feed: z.string().regex(/^[a-z][a-z\d-]{0,63}$/u, "Not a sync's name"),
+  /** Where the listing goes on, from the last read's answer; null from the start. */
+  cursor: syncCursorSchema.nullable(),
+});
+export type SyncPlacesRequest = z.input<typeof syncPlacesRequestSchema>;
+
 /** What core asks connect for: one page of one source, from `cursor` on. */
 export const syncPageRequestSchema = z.strictObject({
   connectionId: z.string().min(1).max(128),
   /** Which of the connector's syncs: `drive`, `gmail`, `calendar`. */
   feed: z.string().regex(/^[a-z][a-z\d-]{0,63}$/u, "Not a sync's name"),
-  /** `own`, or a place someone picked on a shared connection. */
+  /**
+   * `own`; a place the connection's sync lists of its own account
+   * (`listSyncPlaces`); or a place someone picked on a shared connection.
+   */
   place: z.string().min(1).max(256),
   /** Null for the first listing. */
   cursor: syncCursorSchema.nullable(),
