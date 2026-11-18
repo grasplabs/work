@@ -87,9 +87,7 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   // Its Overview's account card: where it stands, what it reaches, and
   // signing in again to the connection whose access ran out.
   const account = page.getByRole("region", { name: "Account" });
-  await expect(account.getByRole("definition").first()).toHaveText(
-    "Needs someone to sign in again"
-  );
+  await expect(account).toContainText("Needs someone to sign in again");
   await expect(
     account.getByText(
       "Every tool it has: Apps and agents use only what they are granted."
@@ -101,14 +99,12 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   ).toBeVisible();
   await page.keyboard.press("Escape");
 
-  await page.getByRole("tab", { name: /^Account/u }).click();
+  // Each account is on the integration's one page, under its Overview.
   const mineCard = cardOf(page, "Microsoft 365", mine);
-  await expect(mineCard.getByRole("definition")).toHaveText([
-    "Active, only for you",
-    mine.account,
-    "You",
-    /\S/u,
-  ]);
+  // Where it stands, its account, and who connected it.
+  await expect(mineCard).toContainText("Active, only for you");
+  await expect(mineCard).toContainText(`Account ${mine.account}`);
+  await expect(mineCard).toContainText("Connected by You");
 
   // Its access ran out: it offers to sign in again, in the connect dialog,
   // which starts the provider's flow again. The test stack has no Microsoft
@@ -252,7 +248,6 @@ test("a person reaches their account on an integration's page while the catalog 
       "Grasp can't be reached right now. Try again in a moment."
     )
   ).toBeVisible();
-  await slowCatalog.getByRole("tab", { name: /^Account/u }).click();
   await expect(
     cardOf(slowCatalog, "microsoft", mine).getByRole("button", {
       name: `Disconnect microsoft (${mine.account})`,
@@ -307,9 +302,7 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
 
   await accountOf(page, "native:microsoft");
   const mailboxCard = cardOf(page, "Microsoft 365", mailbox);
-  await expect(mailboxCard.getByRole("definition").first()).toHaveText(
-    "Active, for the whole company"
-  );
+  await expect(mailboxCard).toContainText("Active, for the whole company");
   const holder = mailboxCard.getByRole("listitem").filter({ hasText: appName });
   await expect(holder).toContainText(
     `App ${appName}: mail.read on the whole connection`

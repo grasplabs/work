@@ -53,13 +53,11 @@ test("a person opens the source an uploaded meeting became in the brain, and rea
   const row = uploads
     .getByRole("listitem")
     .filter({ hasText: "budget-meeting.vtt" });
-  await expect(row.getByRole("status")).toHaveText("Ready", ready);
-  const href = await row
-    .getByRole("link", { name: "Open budget-meeting.vtt" })
-    .getAttribute("href");
-  const documentId = new URL(href ?? "", "http://grasp.test").searchParams.get(
-    "doc"
-  );
+  await expect(row).toContainText("Ready", ready);
+  // Opened, the address names the document it became.
+  await row.getByRole("button", { name: "Open budget-meeting.vtt" }).click();
+  await expect(page).toHaveURL(/[?&]doc=/u);
+  const documentId = new URL(page.url()).searchParams.get("doc");
   expect(documentId).not.toBeNull();
 
   await page.goto(`/brain/src.knowledge-${documentId}`);

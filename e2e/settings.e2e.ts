@@ -38,8 +38,9 @@ test("an admin opens Settings on the workspace, and each section from the sideba
 
   await nav.getByRole("link", { name: "Billing" }).click();
   await expect(page).toHaveURL(/\/settings\/billing$/u);
-  await expect(page.getByText("Stripe is not linked yet")).toBeVisible();
+  // No plan while Stripe isn't linked.
   await expect(sectionOf(page, "Plan")).toContainText("Current plan");
+  await expect(sectionOf(page, "Plan")).toContainText("None yet");
   // The billing details are the admin's to keep, as each field is left.
   const details = sectionOf(page, "Billing details");
   await details.getByLabel("VAT number").fill("nl123456789b01");

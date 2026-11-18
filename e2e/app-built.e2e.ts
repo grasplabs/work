@@ -73,7 +73,7 @@ test("a builder makes an App from what they want done, shares it with their team
   // Its steps fold under what it did, once its turn ends.
   await chat
     .getByRole("region", { name: "What Grasp did" })
-    .getByRole("button", { name: /^Took \d+ steps/u })
+    .getByRole("button", { expanded: false })
     .click();
   await expect(
     chat.getByText("Read /guides/project in the docs")

@@ -101,7 +101,9 @@ test("a builder writes a workflow's definition, fixes what core finds, publishes
   const page = await pageOf(builder);
   const reads = await callGate(page, '["workflowResources","draft"]');
   await create(page, builder);
-  await expect(page.getByText("Only you see this")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /^Only you see this\./u })
+  ).toBeVisible();
 
   // A key the format doesn't know: refused at its pointer.
   await save(page, definition("done", { unknown: true }));

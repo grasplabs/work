@@ -76,9 +76,10 @@ test("a builder creates a table and its fields in the Data view, and sees them i
   // text, then a choice whose options are put in order from the keyboard,
   // as the field itself is put before the first.
   await page.getByRole("button", { name: "Fields", exact: true }).click();
+  // Each kind is a card, chosen by a press anywhere on it.
   const kinds = page.getByRole("list", { name: "Kinds of field" });
   const fields = page.getByRole("list", { name: "Fields" });
-  await kinds.getByRole("button", { name: /^Text/u }).click();
+  await kinds.getByRole("listitem").filter({ hasText: /^Text/u }).click();
   await page.getByLabel("Field name").fill("title");
   await page.getByRole("switch", { name: "Required" }).click();
   await page.getByRole("button", { name: "Add field" }).last().click();
@@ -86,7 +87,10 @@ test("a builder creates a table and its fields in the Data view, and sees them i
     read
   );
   await page.getByRole("button", { name: "Add field" }).first().click();
-  await kinds.getByRole("button", { name: /^Choice/u }).click();
+  await kinds
+    .getByRole("listitem")
+    .filter({ hasText: /^Choice/u })
+    .click();
   await page.getByLabel("Field name").fill("status");
   await page.getByLabel("New option").fill("Open");
   await page.getByLabel("New option").press("Enter");
