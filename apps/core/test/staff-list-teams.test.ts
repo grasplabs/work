@@ -1,5 +1,6 @@
 import { rosterSchema } from "@grasp-os/shared/onboarding";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -10,7 +11,13 @@ import { adminCommands } from "./admin-command.ts";
 import { add, markerWord, textsFor } from "./brain-next-leaks-harness.ts";
 import { landingAt } from "./d1-landing.ts";
 import { mockIdp } from "./idp.ts";
-import { agree, fact, team as teamOnTheList } from "./onboarding-team.ts";
+import { aloneInTheStore } from "./interview-link.ts";
+import {
+  agree,
+  fact,
+  mapped,
+  team as teamOnTheList,
+} from "./onboarding-team.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import {
   auditedDuring,
@@ -116,6 +123,19 @@ const confirmOn = async (
   }
 };
 
+/** How many pieces of work the store holds for `team`. */
+const worksOf = async (team: string): Promise<number> =>
+  await runInDurableObject(
+    onboardingStore(env),
+    (_instance, state) =>
+      state.storage.sql
+        .exec<{ n: number }>(
+          "SELECT count(*) AS n FROM works WHERE team = ?",
+          team
+        )
+        .one().n
+  );
+
 /** `userId`'s primary rows (`team_primaries`), as the database has them. */
 const primariesOf = async (userId: string) => {
   const { results } = await env.DB.prepare(
@@ -132,6 +152,36 @@ const rejectedCount = async (): Promise<number> => {
     "SELECT count(*) AS n FROM audit_outbox_rejected"
   ).first<{ n: number }>();
   return row?.n ?? 0;
+};
+
+/**
+ * Writes the store's team rows again as a release from before
+ * `teams.minted` wrote them, or an older one after a rollback: without
+ * the column, so its default fills it.
+ */
+const asAnEarlierReleaseWrote = async (): Promise<void> => {
+  await runInDurableObject(onboardingStore(env), (_instance, state) => {
+    const columns =
+      "id, position, name, lead, does, mapped_does, off, mapped_at, mapped_from";
+    const rows = state.storage.sql
+      .exec(`SELECT ${columns} FROM teams`)
+      .toArray();
+    state.storage.sql.exec("DELETE FROM teams");
+    for (const row of rows) {
+      state.storage.sql.exec(
+        `INSERT INTO teams (${columns}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        row.id,
+        row.position,
+        row.name,
+        row.lead,
+        row.does,
+        row.mapped_does,
+        row.off,
+        row.mapped_at,
+        row.mapped_from
+      );
+    }
+  });
 };
 
 describe("the staff list's teams", { timeout: 120_000 }, () => {
@@ -1214,5 +1264,55 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
       inB: teams.get(`B ${tag}`)?.memberIds.includes(ann.userId),
       inA: teams.get(`A ${tag}`)?.memberIds.includes(ann.userId),
     }).toStrictEqual({ landed: true, inB: false, inA: false });
+  });
+
+  it("keep a team an earlier release wrote, its interviews, map, works and held start, at the first confirm of the unchanged list", async () => {
+    await aloneInTheStore();
+    const admin = await signedInApi(idp, "admin");
+    const store = onboardingStore(env);
+    const ids = await teamOnTheList(["lea", "max", "mia"]);
+    // Lea's map draws the team's works; Max tells his own work.
+    await mapped(ids);
+    await store.releaseDue(new Date(Date.now() + 10 * dayMs).toISOString());
+    await agree(ids.max, [
+      fact("f1", "system", "We log every ticket in Zendesk first."),
+    ]);
+    // Held to start later, as the admin set it.
+    const { plan } = await store.view();
+    const startsAt = new Date(Date.now() + 20 * dayMs).toISOString();
+    if (plan === null) {
+      throw new Error("No plan");
+    }
+    await store.savePlan(
+      { ...plan, later: { [ids.team]: startsAt } },
+      { type: "system" }
+    );
+    await asAnEarlierReleaseWrote();
+    /** What the store holds of the team: whose interviews show, its map, its works. */
+    const held = async () => {
+      const sources = await store.interviewSources();
+      const mappedRoster = await store.rosterAsMapped();
+      return {
+        sources: sources.map(({ team: of }) => of),
+        does: mappedRoster?.teams[0]?.does,
+        works: await worksOf(ids.team),
+      };
+    };
+    const before = await held();
+
+    const { roster } = await store.view();
+    if (roster === null) {
+      throw new Error("No staff list");
+    }
+    const { roster: kept, plan: after } =
+      await admin.api.onboarding.confirmRoster(roster);
+
+    expect({
+      id: kept?.teams[0]?.id,
+      ...(await held()),
+      later: after?.later?.[ids.team],
+    }).toStrictEqual({ id: ids.team, ...before, later: startsAt });
+    expect(before.sources).toStrictEqual([ids.team]);
+    expect(before.works).toBeGreaterThan(0);
   });
 });

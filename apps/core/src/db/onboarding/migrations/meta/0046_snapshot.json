@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a2147b2e-8df3-4dd6-a763-4a7db326a847",
+  "id": "58a72173-efdc-41cf-94fc-bace806ccaf5",
   "prevId": "e9ee386a-d727-4e34-986a-81a05a49b878",
   "tables": {
     "approvals": {
@@ -1920,7 +1920,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": false
+          "default": true
         },
         "mapped_at": {
           "name": "mapped_at",
