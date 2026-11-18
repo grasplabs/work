@@ -534,8 +534,10 @@ export const withLeadsFrom = (
   roster: StaffList["roster"],
   saved: Roster | null
 ): StaffList["roster"] => {
-  const kept = withSaved(roster, saved);
-  const named = new Map(roster.teams.map((team) => [team.id, team.lead]));
+  // The platform's leads by the ids the saved list has its teams under.
+  const read = saved === null ? roster : underSavedIds(roster, saved);
+  const kept = withSaved(read, saved);
+  const named = new Map(read.teams.map((team) => [team.id, team.lead]));
   return {
     ...kept,
     teams: kept.teams.map((team) => ({

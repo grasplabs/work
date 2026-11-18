@@ -410,4 +410,41 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
       rows: after.length,
     }).toStrictEqual({ byList: byBetterAuth, again: true, rows: 1 });
   });
+
+  it("keep what the admin set for a team on the draft once the confirm gives it its id: held for later, it stays held", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const tag = unique();
+    const roster: RosterInput = {
+      teams: [
+        { id: "ops", name: `Ops ${tag}`, lead: null },
+        { id: "later", name: `Later ${tag}`, lead: null, does: "Plans it" },
+      ],
+      people: [
+        { id: `oli-${tag}`, name: "Oli", team: "ops" },
+        { id: `lou-${tag}`, name: "Lou", team: "later" },
+      ],
+    };
+    await admin.api.onboarding.saveRoster(roster);
+    // Held for later while it is a draft's team, under the draft's id.
+    await admin.api.onboarding.savePlan({
+      start: new Date().toISOString().slice(0, 10),
+      later: { later: null },
+    });
+
+    const { roster: kept, plan } =
+      await admin.api.onboarding.confirmRoster(roster);
+    const later = kept?.teams.find(({ name }) => name === `Later ${tag}`);
+
+    expect({
+      moved: later !== undefined && later.id !== "later",
+      does: later?.does,
+      lou: kept?.people.find(({ name }) => name === "Lou")?.team,
+      held: plan?.later,
+    }).toStrictEqual({
+      moved: true,
+      does: "Plans it",
+      lou: later?.id,
+      held: { [later?.id ?? ""]: null },
+    });
+  });
 });
