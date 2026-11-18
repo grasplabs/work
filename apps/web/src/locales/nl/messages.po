@@ -1475,6 +1475,11 @@ msgstr "Een wijziging geldt voor runs die daarna starten: runs die al bezig zijn
 msgid "A change to {name}"
 msgstr "Een wijziging aan {name}"
 
+#: src/brain/opportunities-page.tsx
+msgctxt "what an opportunity could become"
+msgid "A change to an existing App"
+msgstr "Een wijziging van een bestaande App"
+
 #: src/apps/app-access-requests.tsx
 #: src/apps/draft-changes.tsx
 msgid "A connection"
@@ -1483,6 +1488,11 @@ msgstr "Een verbinding"
 #: src/activity/audit-words.ts
 msgid "A connection needs signing in again"
 msgstr "Een verbinding moet opnieuw worden aangemeld"
+
+#: src/brain/opportunities-page.tsx
+msgctxt "what an opportunity could become"
+msgid "A connection only"
+msgstr "Alleen een koppeling"
 
 #: src/activity/audit-words.ts
 msgid "A connection refused to say what changed"
@@ -1615,6 +1625,10 @@ msgstr "Aan een pagina zijn de gegevens van de app geweigerd"
 msgid "A page your team opens"
 msgstr "Een pagina die je team opent"
 
+#: src/brain/opportunities-page.tsx
+msgid "A person approves"
+msgstr "Een persoon keurt goed"
+
 #: src/pages/page-files.ts
 msgid "A preview keeps no files."
 msgstr "Een voorbeeld bewaart geen bestanden."
@@ -1675,6 +1689,11 @@ msgstr "Een schema"
 #: src/connections/http-connections.tsx
 msgid "A secret in a header"
 msgstr "Een geheim in een header"
+
+#: src/brain/opportunities-page.tsx
+msgctxt "what an opportunity could become"
+msgid "A skill"
+msgstr "Een skill"
 
 #: src/brain/skills-page.tsx
 msgid "A SKILL.md: a name of lowercase letters, digits and hyphens, and a description of when to use it, then the steps. Saving a skill of a name you have already makes its next version."
@@ -1743,6 +1762,11 @@ msgstr "Een widget van Grasp"
 
 #: src/apps/draft-changes.tsx
 #: src/workflows/requests/request-parts.tsx
+msgid "A workflow"
+msgstr "Een workflow"
+
+#: src/brain/opportunities-page.tsx
+msgctxt "what an opportunity could become"
 msgid "A workflow"
 msgstr "Een workflow"
 
@@ -2307,6 +2331,10 @@ msgstr "Bijna klaar: is dit je organisatie?"
 msgid "Almost there"
 msgstr "Bijna klaar"
 
+#: src/brain/opportunities-page.tsx
+msgid "Already covered by <0>{app}</0>: a change to it, nothing new."
+msgstr "Al gedekt door <0>{app}</0>: een wijziging daarvan, niets nieuws."
+
 #: src/connections/request-app-dialog.tsx
 msgid "Already here, in case you mean one of these"
 msgstr "Staat er al, voor het geval je een van deze bedoelt"
@@ -2410,6 +2438,11 @@ msgid "An answer"
 msgstr "Een antwoord"
 
 #: src/workflows/requests/request-parts.tsx
+msgid "An App"
+msgstr "Een App"
+
+#: src/brain/opportunities-page.tsx
+msgctxt "what an opportunity could become"
 msgid "An App"
 msgstr "Een App"
 
@@ -3528,6 +3561,10 @@ msgstr "Een bevestigde wijziging in een app uitgevoerd, of daarin gefaald"
 msgid "Carry on now"
 msgstr "Nu verdergaan"
 
+#: src/brain/opportunities-page.tsx
+msgid "Cases a week"
+msgstr "Gevallen per week"
+
 #: src/settings/audit-chain.tsx
 msgid "Chain check"
 msgstr "Ketencontrole"
@@ -4211,6 +4248,10 @@ msgstr "Koppel een AI-provider om vragen te stellen"
 msgid "Connect another account"
 msgstr "Nog een account koppelen"
 
+#: src/brain/opportunities-page.tsx
+msgid "Connect first: {systems}."
+msgstr "Koppel eerst: {systems}."
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Connect shared accounts and decide what Apps may do"
 msgstr "Gedeelde accounts koppelen en bepalen wat apps mogen"
@@ -4863,6 +4904,10 @@ msgstr "Pakketten voor {subject} weigeren"
 msgid "Describe the App"
 msgstr "Beschrijf de App"
 
+#: src/brain/opportunities-page.tsx
+msgid "Described in the team's interviews."
+msgstr "Beschreven in de interviews van het team."
+
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Description"
@@ -4979,6 +5024,7 @@ msgstr "Een account ontkoppeld"
 msgid "Disconnected on {since}."
 msgstr "Ontkoppeld op {since}."
 
+#: src/brain/opportunities-page.tsx
 #: src/settings/chat-accounts.tsx
 msgid "Dismiss"
 msgstr "Sluiten"
@@ -6857,6 +6903,10 @@ msgstr "Geschiedenis"
 #: src/interview/closed.tsx
 msgid "Hold for 4 seconds"
 msgstr "Houd 4 seconden vast"
+
+#: src/brain/opportunities-page.tsx
+msgid "Hours a week"
+msgstr "Uren per week"
 
 #: src/brain/thinking/work-hours.tsx
 msgid "Hours not known yet"
@@ -9073,6 +9123,10 @@ msgstr "Er is nog geen model ingesteld voor deze omgeving."
 msgid "No new app from its instructions."
 msgstr "Geen nieuwe app uit zijn instructies."
 
+#: src/brain/opportunities-page.tsx
+msgid "No opportunities yet"
+msgstr "Nog geen kansen"
+
 #: src/people/person-picker.tsx
 msgid "No owner yet"
 msgstr "Nog geen eigenaar"
@@ -10286,6 +10340,13 @@ msgstr "Opent de app voor de leden van de workspace die hem mogen gebruiken, zol
 #: src/apps/resource-bindings.tsx
 msgid "Operations"
 msgstr "Bewerkingen"
+
+#: src/brain/brain-nav.tsx
+#: src/brain/opportunities-page.tsx
+#: src/routes/_shell.brain.tsx
+msgctxt "the Brain's opportunities page"
+msgid "Opportunities"
+msgstr "Kansen"
 
 #: src/workflows/business-process.tsx
 msgctxt "business process"
@@ -14713,6 +14774,10 @@ msgstr "Deze notities rusten nergens anders op en gaan ook mee: {named} en nog {
 msgid "These notes rest on nothing else and go too: {named}."
 msgstr "Deze notities rusten nergens anders op en gaan ook mee: {named}."
 
+#: src/brain/opportunities-page.tsx
+msgid "They appear once your teams' interviews describe how their work runs."
+msgstr "Ze verschijnen zodra de interviews van je teams beschrijven hoe hun werk loopt."
+
 #: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
 msgstr "Ze worden overal uitgelogd, hun persoonlijke koppelingen worden ontkoppeld en ze kunnen niet meer inloggen."
@@ -16146,6 +16211,10 @@ msgstr "Wat in de weg zit"
 #: src/inbox/inbox-page.tsx
 msgid "What Grasp and its agents do by themselves is under Activity."
 msgstr "Wat Grasp en zijn agents zelf doen, staat onder Activiteit."
+
+#: src/brain/opportunities-page.tsx
+msgid "What Grasp could automate or improve, from how your teams describe their work, the largest first. A dismissed one comes back when its evidence changes."
+msgstr "Wat Grasp zou kunnen automatiseren of verbeteren, op basis van hoe je teams hun werk beschrijven, de grootste eerst. Een weggezette kans komt terug zodra het bewijs ervoor verandert."
 
 #: src/brain/brain-sections.ts
 msgid "What Grasp does not know yet, and who can answer it."

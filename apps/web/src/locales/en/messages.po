@@ -1475,6 +1475,11 @@ msgstr "A change applies to runs that start after it: runs already going keep th
 msgid "A change to {name}"
 msgstr "A change to {name}"
 
+#: src/brain/opportunities-page.tsx
+msgctxt "what an opportunity could become"
+msgid "A change to an existing App"
+msgstr "A change to an existing App"
+
 #: src/apps/app-access-requests.tsx
 #: src/apps/draft-changes.tsx
 msgid "A connection"
@@ -1483,6 +1488,11 @@ msgstr "A connection"
 #: src/activity/audit-words.ts
 msgid "A connection needs signing in again"
 msgstr "A connection needs signing in again"
+
+#: src/brain/opportunities-page.tsx
+msgctxt "what an opportunity could become"
+msgid "A connection only"
+msgstr "A connection only"
 
 #: src/activity/audit-words.ts
 msgid "A connection refused to say what changed"
@@ -1615,6 +1625,10 @@ msgstr "A page was refused the App's data"
 msgid "A page your team opens"
 msgstr "A page your team opens"
 
+#: src/brain/opportunities-page.tsx
+msgid "A person approves"
+msgstr "A person approves"
+
 #: src/pages/page-files.ts
 msgid "A preview keeps no files."
 msgstr "A preview keeps no files."
@@ -1675,6 +1689,11 @@ msgstr "A schedule"
 #: src/connections/http-connections.tsx
 msgid "A secret in a header"
 msgstr "A secret in a header"
+
+#: src/brain/opportunities-page.tsx
+msgctxt "what an opportunity could become"
+msgid "A skill"
+msgstr "A skill"
 
 #: src/brain/skills-page.tsx
 msgid "A SKILL.md: a name of lowercase letters, digits and hyphens, and a description of when to use it, then the steps. Saving a skill of a name you have already makes its next version."
@@ -1743,6 +1762,11 @@ msgstr "A widget Grasp made"
 
 #: src/apps/draft-changes.tsx
 #: src/workflows/requests/request-parts.tsx
+msgid "A workflow"
+msgstr "A workflow"
+
+#: src/brain/opportunities-page.tsx
+msgctxt "what an opportunity could become"
 msgid "A workflow"
 msgstr "A workflow"
 
@@ -2307,6 +2331,10 @@ msgstr "Almost done: is this your organization?"
 msgid "Almost there"
 msgstr "Almost there"
 
+#: src/brain/opportunities-page.tsx
+msgid "Already covered by <0>{app}</0>: a change to it, nothing new."
+msgstr "Already covered by <0>{app}</0>: a change to it, nothing new."
+
 #: src/connections/request-app-dialog.tsx
 msgid "Already here, in case you mean one of these"
 msgstr "Already here, in case you mean one of these"
@@ -2410,6 +2438,11 @@ msgid "An answer"
 msgstr "An answer"
 
 #: src/workflows/requests/request-parts.tsx
+msgid "An App"
+msgstr "An App"
+
+#: src/brain/opportunities-page.tsx
+msgctxt "what an opportunity could become"
 msgid "An App"
 msgstr "An App"
 
@@ -3528,6 +3561,10 @@ msgstr "Carried out a confirmed write to an App, or failed to"
 msgid "Carry on now"
 msgstr "Carry on now"
 
+#: src/brain/opportunities-page.tsx
+msgid "Cases a week"
+msgstr "Cases a week"
+
 #: src/settings/audit-chain.tsx
 msgid "Chain check"
 msgstr "Chain check"
@@ -4211,6 +4248,10 @@ msgstr "Connect an AI provider to start asking"
 msgid "Connect another account"
 msgstr "Connect another account"
 
+#: src/brain/opportunities-page.tsx
+msgid "Connect first: {systems}."
+msgstr "Connect first: {systems}."
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Connect shared accounts and decide what Apps may do"
 msgstr "Connect shared accounts and decide what Apps may do"
@@ -4863,6 +4904,10 @@ msgstr "Deny the packages for {subject}"
 msgid "Describe the App"
 msgstr "Describe the App"
 
+#: src/brain/opportunities-page.tsx
+msgid "Described in the team's interviews."
+msgstr "Described in the team's interviews."
+
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Description"
@@ -4979,6 +5024,7 @@ msgstr "Disconnected an account"
 msgid "Disconnected on {since}."
 msgstr "Disconnected on {since}."
 
+#: src/brain/opportunities-page.tsx
 #: src/settings/chat-accounts.tsx
 msgid "Dismiss"
 msgstr "Dismiss"
@@ -6857,6 +6903,10 @@ msgstr "History"
 #: src/interview/closed.tsx
 msgid "Hold for 4 seconds"
 msgstr "Hold for 4 seconds"
+
+#: src/brain/opportunities-page.tsx
+msgid "Hours a week"
+msgstr "Hours a week"
 
 #: src/brain/thinking/work-hours.tsx
 msgid "Hours not known yet"
@@ -9073,6 +9123,10 @@ msgstr "No model is set up for this deployment yet."
 msgid "No new app from its instructions."
 msgstr "No new app from its instructions."
 
+#: src/brain/opportunities-page.tsx
+msgid "No opportunities yet"
+msgstr "No opportunities yet"
+
 #: src/people/person-picker.tsx
 msgid "No owner yet"
 msgstr "No owner yet"
@@ -10286,6 +10340,13 @@ msgstr "Opens the App for the workspace's members who may use it, while it is pu
 #: src/apps/resource-bindings.tsx
 msgid "Operations"
 msgstr "Operations"
+
+#: src/brain/brain-nav.tsx
+#: src/brain/opportunities-page.tsx
+#: src/routes/_shell.brain.tsx
+msgctxt "the Brain's opportunities page"
+msgid "Opportunities"
+msgstr "Opportunities"
 
 #: src/workflows/business-process.tsx
 msgctxt "business process"
@@ -14713,6 +14774,10 @@ msgstr "These notes rest on nothing else and go too: {named} and {more} more."
 msgid "These notes rest on nothing else and go too: {named}."
 msgstr "These notes rest on nothing else and go too: {named}."
 
+#: src/brain/opportunities-page.tsx
+msgid "They appear once your teams' interviews describe how their work runs."
+msgstr "They appear once your teams' interviews describe how their work runs."
+
 #: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
 msgstr "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
@@ -16146,6 +16211,10 @@ msgstr "What gets in the way"
 #: src/inbox/inbox-page.tsx
 msgid "What Grasp and its agents do by themselves is under Activity."
 msgstr "What Grasp and its agents do by themselves is under Activity."
+
+#: src/brain/opportunities-page.tsx
+msgid "What Grasp could automate or improve, from how your teams describe their work, the largest first. A dismissed one comes back when its evidence changes."
+msgstr "What Grasp could automate or improve, from how your teams describe their work, the largest first. A dismissed one comes back when its evidence changes."
 
 #: src/brain/brain-sections.ts
 msgid "What Grasp does not know yet, and who can answer it."
