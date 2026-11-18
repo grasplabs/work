@@ -26,10 +26,13 @@ import { teamNameKey } from "./onboarding/kickoff-company.ts";
 // - Nothing automatic overrides what an admin did by hand (`placementOf`):
 //   the list adds a membership only when the team it gives someone
 //   changes, and takes away only one it made itself.
-// - A deleted team's id coming back with someone's history: a new team's
-//   id is always core's own (`crypto.randomUUID`), never one a request
-//   sent.
-// - A rename splitting what one team holds: everything keys by the id.
+// - A deleted team's id coming back with someone's history: a team's id
+//   is a members' team's, one the store holds, or core's own
+//   (`crypto.randomUUID`), never one a request sent; and a team the store
+//   holds can't be deleted (auth.ts `beforeDeleteTeam`), so a held id is
+//   never a deleted team's.
+// - A rename or a confirm splitting what one team holds: a team keeps one
+//   id from the first save that names it, and everything keys by it.
 // - A team the admin only drafted: made at the confirm, never before, so a
 //   draft fixed before it leaves no team behind.
 
@@ -42,21 +45,31 @@ const peoplePerBatch = 50;
 /** What a staff-list change records as how it was made. */
 const via = "staffList";
 
+/** A team of the staff list the onboarding's store holds now: its id and name. */
+export interface HeldTeam {
+  id: string;
+  name: string;
+}
+
 /**
- * `roster` with each of its teams as a members' team: the one with its id,
- * else the one with its name (trimmed, any case) no other team on it took,
- * else, with `make` (the admin confirmed it), a new one, made now, and the
- * members' teams renamed to the names the list gives. A draft (`make`
- * false) writes nothing: a team new on it keeps the id it came with, in
- * the onboarding's store alone, until a confirm makes it. None is ever
- * deleted here, as one may hold what was shared with it. Answers the
- * roster as the store keeps it.
+ * `roster` with each of its teams under the one id it keeps for good
+ * (GRA-2055): a members' team's, or one the onboarding's store holds for
+ * the company already (`held`), by its id, else by its name (trimmed, any
+ * case) where one alone has it and no other team on the list took it;
+ * else a new id core makes, never the one the request sent, so no id a
+ * deleted team had comes back. The id never changes after: a team new on a
+ * draft is kept under it in the store, and with `make` (the admin
+ * confirmed the list) its members' team is made under that same id, and
+ * the members' teams are renamed to the names the list gives. A draft
+ * writes nothing here, so a draft put right before the confirm leaves no
+ * team in Settings › Members. None is ever deleted here, as one may hold
+ * what was shared with it. Answers the roster as the store keeps it.
  */
 export const intoMembersTeams = async (
   env: Env,
   roster: Roster,
   actor: AuditActor,
-  { make }: { make: boolean }
+  { make, held }: { make: boolean; held: readonly HeldTeam[] }
 ): Promise<Roster> => {
   const db = drizzle(env.DB);
   const existing = await db
@@ -64,82 +77,81 @@ export const intoMembersTeams = async (
     .from(teams)
     .where(eq(teams.organizationId, organizationId));
   const known = new Map(existing.map(({ id, name }) => [id, name]));
-  const byName = new Map<string, string[]>();
-  for (const { id, name } of existing) {
+  const kept = new Set([...known.keys(), ...held.map(({ id }) => id)]);
+  const byName = new Map<string, Set<string>>();
+  for (const { id, name } of [...existing, ...held]) {
     const key = teamNameKey(name);
-    byName.set(key, [...(byName.get(key) ?? []), id]);
+    byName.set(key, (byName.get(key) ?? new Set()).add(id));
   }
   // Ids first, then names, so a team the list holds by its id is never
   // taken by another of the list's teams through its name.
   const taken = new Set(
-    roster.teams.flatMap(({ id }) => (known.has(id) ? [id] : []))
+    roster.teams.flatMap(({ id }) => (kept.has(id) ? [id] : []))
   );
   const idOf = new Map<string, string>();
-  const made: { id: string; name: string }[] = [];
   for (const team of roster.teams) {
-    if (known.has(team.id)) {
+    if (kept.has(team.id)) {
       idOf.set(team.id, team.id);
       continue;
     }
-    const [named, ...others] = (
-      byName.get(teamNameKey(team.name)) ?? []
-    ).filter((id) => !taken.has(id));
-    if (named !== undefined && others.length === 0) {
-      taken.add(named);
-      idOf.set(team.id, named);
-    } else if (make) {
-      const id = crypto.randomUUID();
-      made.push({ id, name: team.name });
-      taken.add(id);
-      idOf.set(team.id, id);
+    const [named, ...others] = [
+      ...(byName.get(teamNameKey(team.name)) ?? []),
+    ].filter((id) => !taken.has(id));
+    const id =
+      named !== undefined && others.length === 0 ? named : crypto.randomUUID();
+    taken.add(id);
+    idOf.set(team.id, id);
+  }
+  const listed = roster.teams.map((team) => ({
+    ...team,
+    id: idOf.get(team.id) ?? team.id,
+  }));
+  const made = listed.filter(({ id }) => !known.has(id));
+  const renamed = listed.filter(({ id, name }) => {
+    const was = known.get(id);
+    return was !== undefined && was !== name;
+  });
+  if (make && (made.length > 0 || renamed.length > 0)) {
+    const now = new Date();
+    const entry = (action: string, id: string): AuditEntry => ({
+      actor,
+      action,
+      target: { type: "team", id },
+      detail: { via },
+    });
+    const [first, ...rest] = [
+      // As Better Auth's own create-team makes a team, under the id kept.
+      ...(made.length === 0
+        ? []
+        : statementsWithin(made, (part) =>
+            db.insert(teams).values(
+              part.map(({ id, name }) => ({
+                id,
+                name,
+                organizationId,
+                memberCount: 0,
+                createdAt: now,
+                updatedAt: now,
+              }))
+            )
+          )),
+      ...made.map(({ id }) => outboxed(db, entry("team.created", id))),
+      ...renamed.flatMap(({ id, name }) => [
+        db
+          .update(teams)
+          .set({ name, updatedAt: now })
+          .where(
+            and(eq(teams.id, id), eq(teams.organizationId, organizationId))
+          ),
+        outboxedIfChanged(db, entry("team.updated", id)),
+      ]),
+    ];
+    if (first !== undefined) {
+      await auditedBatch(env, db, [first, ...rest]);
     }
   }
-  const renamed = roster.teams.flatMap((team) => {
-    const id = idOf.get(team.id) ?? team.id;
-    const was = known.get(id);
-    return was !== undefined && was !== team.name
-      ? [{ id, name: team.name }]
-      : [];
-  });
-  const now = new Date();
-  const entry = (
-    action: string,
-    id: string
-  ): Pick<AuditEntry, "action" | "target" | "detail"> & {
-    actor: AuditActor;
-  } => ({ actor, action, target: { type: "team", id }, detail: { via } });
-  const writes = [
-    ...(made.length === 0
-      ? []
-      : statementsWithin(made, (part) =>
-          db.insert(teams).values(
-            part.map(({ id, name }) => ({
-              id,
-              name,
-              organizationId,
-              createdAt: now,
-              updatedAt: now,
-            }))
-          )
-        )),
-    ...made.map(({ id }) => outboxed(db, entry("team.created", id))),
-    ...renamed.flatMap(({ id, name }) => [
-      db
-        .update(teams)
-        .set({ name, updatedAt: now })
-        .where(and(eq(teams.id, id), eq(teams.organizationId, organizationId))),
-      outboxedIfChanged(db, entry("team.updated", id)),
-    ]),
-  ];
-  const [first, ...rest] = writes;
-  if (make && first !== undefined) {
-    await auditedBatch(env, db, [first, ...rest]);
-  }
   return {
-    teams: roster.teams.map((team) => ({
-      ...team,
-      id: idOf.get(team.id) ?? team.id,
-    })),
+    teams: listed,
     people: roster.people.map((person) => ({
       ...person,
       team: idOf.get(person.team) ?? person.team,
