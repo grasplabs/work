@@ -5,11 +5,23 @@ import { useId } from "react";
 import type { ReactNode } from "react";
 
 import { CardLink, CardMedia, CardTitle } from "../grasp/card/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "../grasp/item/index.ts";
 import { Link as TextLink } from "../grasp/link/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import { Separator } from "../grasp/separator/index.ts";
+import { StatsGrid } from "../grasp/stats/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import { atlasOf } from "./brain-atlas.ts";
+import type { Atlas, OpenItem } from "./brain-atlas.ts";
+import { useBrainData } from "./brain-data.ts";
 import { brainSections, findFolder, shownCount } from "./brain-sections.ts";
 import { folderTree, groupLabel } from "./brain.ts";
 import type { Brain, Group } from "./brain.ts";
@@ -637,6 +649,71 @@ export const BrainHome = ({ brain }: { brain: Brain }) => {
   );
 };
 
+/** What is still open in the brain, each once. */
+const openOf = (atlas: Atlas): OpenItem[] => {
+  const seen = new Set<string>();
+  return atlas.regions
+    .flatMap((region) => region.open)
+    .filter((item) => !seen.has(item.id) && Boolean(seen.add(item.id)));
+};
+
+/** Concept B: the company in figures, in place of the cards. */
+const CompanyFigures = ({ brain }: { brain: Brain }) => {
+  const { t, i18n } = useLingui();
+  const { workspace } = useBrainData();
+  const tree = folderTree(brain.notes);
+  const open = openOf(atlasOf(workspace, brain));
+  return (
+    <StatsGrid
+      aria-label={t`The company in figures`}
+      columns={4}
+      items={[
+        ...brainSections.flatMap((section) => {
+          const folder = findFolder(tree, section.key);
+          return folder
+            ? [
+                {
+                  title: i18n._(groupLabel[section.group]),
+                  value: String(shownCount(folder)),
+                },
+              ]
+            : [];
+        }),
+        { title: t`Still open`, value: String(open.length), tone: "attention" },
+      ]}
+    />
+  );
+};
+
+/** Concept C: what is still open, in place of the cards. */
+const CompanyOpen = ({ brain }: { brain: Brain }) => {
+  const { t } = useLingui();
+  const { workspace } = useBrainData();
+  const open = openOf(atlasOf(workspace, brain));
+  return (
+    <SectionCard density="compact" title={t`Still open`}>
+      <ItemGroup separated>
+        {open.map((item) => (
+          <Item
+            key={item.id}
+            render={
+              <Link params={{ noteId: item.noteId }} to="/brain/$noteId" />
+            }
+            size="xs"
+          >
+            <ItemContent>
+              <ItemTitle>{item.question}</ItemTitle>
+              {item.who === undefined ? null : (
+                <ItemDescription>{item.who}</ItemDescription>
+              )}
+            </ItemContent>
+          </Item>
+        ))}
+      </ItemGroup>
+    </SectionCard>
+  );
+};
+
 /**
  * The brain's home as a page, as the prototype shows the company note: the company's name, how the
  * brain works in a few sentences, then a block for each part of it, to go on from. Under them, the
@@ -646,7 +723,10 @@ export const BrainHome = ({ brain }: { brain: Brain }) => {
 export const HomePage = ({
   brain,
   toolbar,
+  concept,
 }: {
+  /** Concepts for Ruben (concept branch only). */
+  concept?: string | undefined;
   brain: Brain;
   toolbar?: ReactNode;
 }) => {
@@ -665,8 +745,13 @@ export const HomePage = ({
               </Text>
             ))}
           </header>
-          <BrainHome brain={brain} />
-          <footer {...stylex.props(styles.footer)}>
+          {concept === "b" ? <CompanyFigures brain={brain} /> : null}
+          {concept === "c" ? <CompanyOpen brain={brain} /> : null}
+          {concept === undefined ? <BrainHome brain={brain} /> : null}
+          <footer
+            hidden={concept !== undefined}
+            {...stylex.props(styles.footer)}
+          >
             <Separator />
             <Text size="sm" tone="muted">
               <Trans>

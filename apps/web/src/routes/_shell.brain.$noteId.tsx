@@ -1061,6 +1061,8 @@ const NotePage = () => {
   const { noteId } = Route.useParams();
   const { brain, workspace: read } = useBrainData();
   const { transcript } = Route.useLoaderData();
+  // Concepts for Ruben (concept branch only): ?concept=b or ?concept=c.
+  const { concept } = Route.useSearch();
   const workspace = withTranscript(read, noteId, transcript);
   // The statement a link opened: its id is the address's hash.
   const hash = useLocation({ select: (location) => location.hash });
@@ -1077,6 +1079,7 @@ const NotePage = () => {
     return (
       <HomePage
         brain={brain}
+        concept={concept}
         toolbar={<NoteToolbar note={note} source={source} />}
       />
     );
@@ -1105,10 +1108,14 @@ const NotePage = () => {
 
 export const Route = createFileRoute("/_shell/brain/$noteId")({
   // `?knowledge` opens a piece of work on what Grasp knows about it.
-  validateSearch: (search: Record<string, unknown>): { knowledge?: true } =>
-    search.knowledge === true || search.knowledge === "true"
-      ? { knowledge: true }
-      : {},
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { knowledge?: true; concept?: string } => ({
+    ...(search.knowledge === true || search.knowledge === "true"
+      ? { knowledge: true as const }
+      : {}),
+    ...(typeof search.concept === "string" ? { concept: search.concept } : {}),
+  }),
   // The note's transcript, when its source has one: `brain.read`, which the
   // layout read, says only how many turns it has.
   loader: async ({
