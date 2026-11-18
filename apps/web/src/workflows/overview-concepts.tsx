@@ -6,18 +6,17 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
+import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { formatNumber } from "../format.ts";
-import { RouterLink } from "../frame/router-link.tsx";
 import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
-import type { BadgeTone } from "../grasp/badge/index.ts";
 import { BrandIcon } from "../grasp/brand-icon/index.ts";
 import type { Brand } from "../grasp/brand-icon/index.ts";
 import { Card } from "../grasp/card/index.ts";
-import { DataTable } from "../grasp/data-table/index.ts";
+import { DataTable, grouping } from "../grasp/data-table/index.ts";
 import type { DataTableColumn } from "../grasp/data-table/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import { IconTile } from "../grasp/icon-tile/index.ts";
@@ -25,12 +24,14 @@ import {
   AppRecord,
   Chart,
   Conversation,
+  Icon,
   Money,
   People,
   Scale,
   Workflow,
 } from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
+import { Link as TextLink } from "../grasp/link/index.ts";
 import { Tabs, TabsList, TabsTrigger } from "../grasp/tabs/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -58,14 +59,6 @@ const phaseNames: Readonly<Record<Phase, MessageDescriptor>> = {
   building: msg({ message: "Building", context: "workflow phase" }),
   running: msg({ message: "Running", context: "workflow phase" }),
   needsYou: msg({ message: "Needs you", context: "workflow phase" }),
-};
-
-const phaseTones: Readonly<Record<Phase, BadgeTone>> = {
-  sketched: "neutral",
-  toBuild: "neutral",
-  building: "info",
-  running: "success",
-  needsYou: "attention",
 };
 
 /** How a workflow is started: its type's mark. */
@@ -275,6 +268,7 @@ const styles = stylex.create({
     borderBlockEndColor: grasp.line,
   },
   laneHeadNeeds: { borderBlockEndColor: grasp.attention },
+  laneBare: { display: "grid", alignContent: "start", gap: grasp.space2 },
   laneBody: {
     display: "grid",
     alignContent: "start",
@@ -287,9 +281,17 @@ const styles = stylex.create({
   },
   laneBodyNeeds: { backgroundColor: grasp.attentionSoft },
   // A card's own room: smaller than a Card's own padding.
+  cardLink: {
+    display: "block",
+    color: "inherit",
+    textDecoration: "none",
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+  },
   card: {
     display: "grid",
-    gridTemplateRows: "auto 1fr",
+    gridTemplateRows: "minmax(0, 1fr) auto",
+    overflow: "hidden",
     gap: grasp.space2,
     padding: grasp.space3,
   },
@@ -303,6 +305,8 @@ const styles = stylex.create({
   },
   // A name on one or two lines, never three.
   name: {
+    hyphens: "none",
+    overflowWrap: "normal",
     display: "-webkit-box",
     WebkitBoxOrient: "vertical",
     WebkitLineClamp: 2,
@@ -356,37 +360,57 @@ const styles = stylex.create({
     minWidth: 0,
   },
   stack: { display: "grid", gap: grasp.space4 },
+  cellIcon: { display: "inline-flex", color: grasp.muted, flexShrink: 0 },
+  // Room under the table, so the chat bar never covers its last row.
+  tableFoot: { paddingBlockEnd: grasp.space20 },
 });
 
 /** The tools it uses, as small marks. */
-const Tools = ({ tools }: { tools: readonly Brand[] }) => (
-  <span {...stylex.props(styles.tools)}>
-    {tools.map((tool) => (
-      <BrandIcon brand={tool} key={tool} size="xs" tile={false} />
-    ))}
-  </span>
-);
-
-const PhaseBadge = ({ phase }: { phase: Phase }) => (
-  <Badge size="sm" tone={phaseTones[phase]}>
-    {i18n._(phaseNames[phase])}
-  </Badge>
-);
+const Tools = ({ tools }: { tools: readonly Brand[] }) => {
+  const shown = tools.slice(0, 3);
+  const more = tools.length - shown.length;
+  return (
+    <span {...stylex.props(styles.tools)}>
+      {shown.map((tool) => (
+        <BrandIcon brand={tool} key={tool} size="md" tile={false} />
+      ))}
+      {more > 0 ? (
+        <Text element="span" size="xs" tone="muted">
+          {`+${formatNumber(more)}`}
+        </Text>
+      ) : null}
+    </span>
+  );
+};
 
 /** Its name, on one or two lines: a link for a real workflow. */
 const CardName = ({ row }: { row: ConceptRow }) => (
   <span {...stylex.props(styles.name)}>
-    {row.sample ? (
-      <Text element="span" size="sm" weight="medium">
-        {row.name}
-      </Text>
-    ) : (
-      <RouterLink params={{ workflow: row.id }} to="/workflows/$workflow">
-        {row.name}
-      </RouterLink>
-    )}
+    <Text element="span" size="sm" weight="medium">
+      {row.name}
+    </Text>
   </span>
 );
+
+/** The whole card as one link to the workflow; a sample opens nothing. */
+const CardLink = ({
+  row,
+  children,
+}: {
+  row: ConceptRow;
+  children: ReactNode;
+}) =>
+  row.sample ? (
+    <div {...stylex.props(styles.cardLink)}>{children}</div>
+  ) : (
+    <Link
+      params={{ workflow: row.id }}
+      to="/workflows/$workflow"
+      {...stylex.props(styles.cardLink)}
+    >
+      {children}
+    </Link>
+  );
 
 /** Its runs, one quiet number. */
 const RunCount = ({ runs }: { runs: number }) => {
@@ -407,25 +431,42 @@ const ProcessMark = ({ row }: { row: ConceptRow }) => (
 );
 
 /** B1: the least a card can be: icon, name, the owner's face; tools and runs on one quiet line. */
-const MinimalCard = ({ row }: { row: ConceptRow }) => (
-  <Card padding="none">
-    <div {...stylex.props(styles.card, styles.cardMinimal)}>
-      <span {...stylex.props(styles.top)}>
-        <ProcessMark row={row} />
-        <CardName row={row} />
-      </span>
-      <span {...stylex.props(styles.foot)}>
-        <span {...stylex.props(styles.meta)}>
-          <Tools tools={row.tools} />
-          <RunCount runs={row.runs} />
-        </span>
-        <Avatar name={row.owner} size="xs">
-          <AvatarFallback />
-        </Avatar>
-      </span>
-    </div>
-  </Card>
-);
+const MinimalCard = ({ row }: { row: ConceptRow }) => {
+  const { t } = useLingui();
+  return (
+    <CardLink row={row}>
+      <Card padding="none">
+        <div {...stylex.props(styles.card, styles.cardMinimal)}>
+          <span {...stylex.props(styles.top)}>
+            <ProcessMark row={row} />
+            <CardName row={row} />
+          </span>
+          <span {...stylex.props(styles.foot)}>
+            <span {...stylex.props(styles.meta)}>
+              <Tools tools={row.tools} />
+              <RunCount runs={row.runs} />
+            </span>
+            <span {...stylex.props(styles.meta)}>
+              {row.phase === "needsYou" ? (
+                <Badge
+                  aria-label={t({
+                    message: "Needs you",
+                    context: "workflow phase",
+                  })}
+                  tone="attention"
+                  variant="dot"
+                />
+              ) : null}
+              <Avatar name={row.owner} size="xs">
+                <AvatarFallback />
+              </Avatar>
+            </span>
+          </span>
+        </div>
+      </Card>
+    </CardLink>
+  );
+};
 
 /** B2: a little richer: the owner by name, the team, tools and runs, still compact. */
 const RichCard = ({ row }: { row: ConceptRow }) => (
@@ -497,7 +538,7 @@ const LaneHead = ({ phase, count }: { phase: Phase; count: number }) => (
   </span>
 );
 
-type CardLook = "minimal" | "rich" | "rows";
+type CardLook = "minimal" | "bare" | "rich" | "rows";
 
 /** A lane's workflows, as the concept draws them. */
 const LaneBody = ({
@@ -509,6 +550,15 @@ const LaneBody = ({
   rows: readonly ConceptRow[];
   look: CardLook;
 }) => {
+  if (look === "bare") {
+    return (
+      <div {...stylex.props(styles.laneBare)}>
+        {rows.map((row) => (
+          <MinimalCard key={row.id} row={row} />
+        ))}
+      </div>
+    );
+  }
   if (look === "rows") {
     return rows.length === 0 ? null : (
       <Card padding="none">
@@ -584,34 +634,53 @@ const Board = ({
   );
 };
 
-/** T: the workflow cell, its process's tile and its name. */
+/** T: the workflow cell, the process's icon and its name, a link for a real workflow. */
 const WorkflowCell = ({ row }: { row: ConceptRow }) => (
   <span {...stylex.props(styles.lead)}>
-    <ProcessMark row={row} />
-    <CardName row={row} />
+    <span {...stylex.props(styles.cellIcon)}>
+      <Icon
+        icon={row.process === null ? Workflow : processIcons[row.process]}
+      />
+    </span>
+    {row.sample ? (
+      <Text element="span" size="sm" weight="medium">
+        {row.name}
+      </Text>
+    ) : (
+      <TextLink
+        render={
+          <Link params={{ workflow: row.id }} to="/workflows/$workflow" />
+        }
+        variant="standalone"
+      >
+        {row.name}
+      </TextLink>
+    )}
   </span>
 );
 
-/** T: the owner, a face and a name. */
-const OwnerCell = ({ name }: { name: string }) => (
+/** T: the owner, a face and a name, as the library's avatar beside a name. */
+const OwnerCell = ({ name, face }: { name: string; face?: boolean }) => (
   <span {...stylex.props(styles.owner)}>
-    <Avatar decorative name={name} size="xs">
+    <Avatar decorative={face !== true} name={name} size="xs">
       <AvatarFallback />
     </Avatar>
-    <Text element="span" size="sm">
-      {name}
-    </Text>
+    {face === true ? null : (
+      <Text element="span" size="sm">
+        {name}
+      </Text>
+    )}
   </span>
 );
 
-/** T: the table's columns, under their headers' words. */
+/** T: the table's columns, under their headers' words; on a phone, the workflow and the owner's face. */
 const tableColumns = (words: {
   workflow: string;
-  phase: string;
   owner: string;
   team: string;
   tools: string;
   runs: string;
+  phone: boolean;
 }): DataTableColumn<ConceptRow>[] => [
   {
     key: "workflow",
@@ -619,69 +688,101 @@ const tableColumns = (words: {
     value: (row) => row.name,
     cell: (row) => <WorkflowCell row={row} />,
   },
+  // What the rows are gathered by: its value heads each group, so its own
+  // cells stay empty (the library hides a column only with its View menu).
   {
     key: "phase",
-    header: words.phase,
-    value: (row) => readingOrder.indexOf(row.phase),
-    cell: (row) => <PhaseBadge phase={row.phase} />,
-    sortable: true,
+    header: "",
+    value: (row) => i18n._(phaseNames[row.phase]),
+    cell: () => "",
   },
   {
     key: "owner",
     header: words.owner,
     value: (row) => row.owner,
-    cell: (row) => <OwnerCell name={row.owner} />,
+    cell: (row) => <OwnerCell face={words.phone} name={row.owner} />,
+    ...(words.phone ? { align: "end" as const } : {}),
   },
-  { key: "team", header: words.team, value: (row) => row.team },
-  {
-    key: "tools",
-    header: words.tools,
-    value: (row) => row.tools.join(" "),
-    cell: (row) => <Tools tools={row.tools} />,
-  },
-  {
-    key: "runs",
-    header: words.runs,
-    value: (row) => row.runs,
-    cell: (row) => (row.runs === 0 ? "" : formatNumber(row.runs)),
-    align: "end",
-  },
+  ...(words.phone
+    ? []
+    : [
+        {
+          key: "team",
+          header: words.team,
+          value: (row: ConceptRow) => row.team,
+        },
+        {
+          key: "tools",
+          header: words.tools,
+          value: (row: ConceptRow) => row.tools.join(" "),
+          cell: (row: ConceptRow) => <Tools tools={row.tools} />,
+        },
+        {
+          key: "runs",
+          header: words.runs,
+          value: (row: ConceptRow) => row.runs,
+          cell: (row: ConceptRow) =>
+            row.runs === 0 ? "" : formatNumber(row.runs),
+          align: "end" as const,
+        },
+      ]),
 ];
 
-/** T: one aligned table of every workflow, Needs you first. */
-const TableConcept = ({ rows }: { rows: readonly ConceptRow[] }) => {
+/** T: one table, its rows gathered by phase, Needs you first. */
+const PhaseTable = ({
+  rows,
+  phone,
+}: {
+  rows: readonly ConceptRow[];
+  phone: boolean;
+}) => {
   const { t } = useLingui();
   return (
     <DataTable
       columns={tableColumns({
         workflow: t`Workflow`,
-        phase: t`Phase`,
         owner: t({ message: "Owner", context: "column: who owns a workflow" }),
         team: t`Team`,
         tools: t`Tools`,
         runs: t`Runs`,
+        phone,
       })}
-      defaultSort={{ key: "phase", order: "ascending" }}
       density="compact"
+      groupBy="phase"
       label={t`Workflows`}
+      pieces={[grouping]}
       rowKey={(row) => row.id}
-      rows={rows}
+      rows={rows.toSorted(
+        (a, b) => readingOrder.indexOf(a.phase) - readingOrder.indexOf(b.phase)
+      )}
       unit={{ one: t`workflow`, other: t`workflows` }}
     />
   );
 };
+
+/** T: the wide table, or the phone's. */
+const TableConcept = ({ rows }: { rows: readonly ConceptRow[] }) => (
+  <div {...stylex.props(styles.measured, styles.tableFoot)}>
+    <div {...stylex.props(styles.wide)}>
+      <PhaseTable phone={false} rows={rows} />
+    </div>
+    <div {...stylex.props(styles.narrow)}>
+      <PhaseTable phone rows={rows} />
+    </div>
+  </div>
+);
 
 /** The concept's own content under the page's heading. */
 export const OverviewConcept = ({
   concept,
   rows,
 }: {
-  concept: "b1" | "b2" | "b3" | "t";
+  concept: "b1" | "b1n" | "t";
   rows: readonly ConceptRow[];
 }): ReactNode => {
   if (concept === "t") {
     return <TableConcept rows={rows} />;
   }
-  const looks = { b1: "minimal", b2: "rich", b3: "rows" } as const;
+  const looks = { b1: "minimal", b1n: "bare" } as const;
   return <Board look={looks[concept]} rows={rows} />;
 };
