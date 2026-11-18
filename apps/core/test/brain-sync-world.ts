@@ -4,6 +4,7 @@ import { vi } from "vite-plus/test";
 
 import { recallAs } from "../src/brain-next.ts";
 import { runSync } from "../src/brain-sync.ts";
+import type { Budget } from "../src/brain-sync.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode } from "./connect-providers.ts";
 import { driveSyncControlUrl } from "./drive-sync-fake.ts";
@@ -452,6 +453,21 @@ export const placeGoneStatement = /^delete from "brain_sync_sources"/u;
 /** An item taken out (`leave`): the key it leaves named. */
 export const leaveStatement =
   /^update "brain_sync_items" set .*"leaving" = \?/u;
+
+/**
+ * Runs the sync as the clock does at `time`, a time of the test's own
+ * rather than the shared clock's, with `given` to spend: the test's own
+ * sources alone.
+ */
+export const syncAt = async (time: number, given?: Budget): Promise<void> => {
+  await parkOthers();
+  vi.useFakeTimers({ toFake: ["Date"], now: time });
+  try {
+    await runSync(env, given);
+  } finally {
+    vi.useRealTimers();
+  }
+};
 
 /** Runs the sync as the clock does, at the fake clock's time. */
 export const sync = async (): Promise<void> => {

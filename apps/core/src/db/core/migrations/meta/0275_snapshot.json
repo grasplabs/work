@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "6437da76-bbe8-45ff-af9a-021231dfbbb8",
+  "id": "be859107-9b5b-4dd8-b861-350f19167227",
   "prevId": "7c83f101-f451-4b73-81f7-db4f8290c3ff",
   "tables": {
     "access_revocations": {
@@ -4875,7 +4875,7 @@
           "name": "person_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "provider": {
@@ -5038,6 +5038,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "last_error_at": {
+          "name": "last_error_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -5045,14 +5052,6 @@
           "name": "brain_sync_sources_due_idx",
           "columns": [
             "due_at"
-          ],
-          "isUnique": false
-        },
-        "brain_sync_sources_person_idx": {
-          "name": "brain_sync_sources_person_idx",
-          "columns": [
-            "person_id",
-            "dropped"
           ],
           "isUnique": false
         }
