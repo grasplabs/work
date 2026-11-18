@@ -1041,7 +1041,7 @@ describe("chats", () => {
 
   it("take a question sent again with its key once, and one refused before it started again", async () => {
     const ann = await person();
-    await answering(ann, says("Noted."), says("Again."));
+    await answering(ann, says("Noted."), says("Again."), says("Here."));
     const chat = await ann.chats.create("Repeated");
     const follower = await follow(ann.chats, chat.id);
     const key = crypto.randomUUID();
@@ -1084,6 +1084,21 @@ describe("chats", () => {
     await expect(outcome(ann.chats.send(other.id, question))).resolves.toBe(
       "agent.invalid_question"
     );
+    // A key kept for a question a restart then lost, before anything of
+    // it was kept: sent again, it is asked, not answered for.
+    const lost = crypto.randomUUID();
+    await runInDurableObject(objectOf(ann), (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO chat_request_keys (kind, key, chat_id, at) VALUES ('send', ?, ?, ?)",
+        lost,
+        other.id,
+        Date.now()
+      );
+    });
+    const elsewhere = await follow(ann.chats, other.id);
+    await ann.chats.send(other.id, { key: lost, text: "Still there?", model });
+    await settled(elsewhere);
+    expect(elsewhere.messages().at(-1)?.text).toBe("Here.");
     // A malformed key is no key.
     await expect(
       outcome(ann.chats.send(chat.id, { ...question, key: "again" }))
