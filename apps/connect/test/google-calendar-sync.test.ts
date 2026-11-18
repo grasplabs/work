@@ -172,6 +172,37 @@ describe("syncing a person's own calendar", () => {
     });
   });
 
+  it("keeps a repeating event's zone, which places its times after a daylight saving change", async () => {
+    const connectionId = await connected();
+    // Weekly at 09:00 in Amsterdam from 19 October 2026: summer time ends on
+    // 25 October, so later weeks are 09:00 at +01:00, not 07:00 UTC.
+    const weekly = {
+      ...review,
+      id: "weekly",
+      start: {
+        dateTime: "2026-10-19T09:00:00+02:00",
+        timeZone: "Europe/Amsterdam",
+      },
+      end: {
+        dateTime: "2026-10-19T09:30:00+02:00",
+        timeZone: "Europe/Amsterdam",
+      },
+      recurrence: ["RRULE:FREQ=WEEKLY;COUNT=4"],
+    };
+    calendar.pages = { "/": { items: [weekly], nextSyncToken: "sync-1" } };
+    const { items } = await read(connectionId, null);
+    const [item] = items;
+    const text =
+      item?.gone === false && item.content?.type === "text"
+        ? item.content.text
+        : "";
+    expect(text.split("\n").slice(1, 4)).toStrictEqual([
+      "Start: 2026-10-19T09:00:00+02:00 (Europe/Amsterdam)",
+      "End: 2026-10-19T09:30:00+02:00 (Europe/Amsterdam)",
+      "Repeats: RRULE:FREQ=WEEKLY;COUNT=4",
+    ]);
+  });
+
   it("lists again when Calendar no longer has the sync token", async () => {
     const connectionId = await connected();
     calendar.pages = { "/": { items: [], nextSyncToken: "sync-1" } };

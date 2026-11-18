@@ -55,10 +55,18 @@ const calendarPageSize = 250;
 
 const calendarSchema = z.object({ id: z.string().min(1) });
 
+/**
+ * When an event starts or ends (Calendar's Events resource): a time with
+ * its offset, or a whole day, and the IANA zone it is kept in. The zone
+ * says when a repeating event's later times fall: a weekly 09:00 in
+ * Europe/Amsterdam stays 09:00 there when its offset changes for daylight
+ * saving.
+ */
 const timeSchema = z
   .object({
     dateTime: z.string().nullish(),
     date: z.string().nullish(),
+    timeZone: z.string().nullish(),
   })
   .nullish();
 
@@ -143,9 +151,12 @@ const getJson = async <Schema extends z.ZodType>(
   return schema.parse(await response.json());
 };
 
-/** When an event is, as its text says it. */
-const whenOf = (time: z.output<typeof timeSchema>): string =>
-  time?.dateTime ?? time?.date ?? "";
+/** When an event is, as its text says it, in its zone when Google names one. */
+const whenOf = (time: z.output<typeof timeSchema>): string => {
+  const when = time?.dateTime ?? time?.date ?? "";
+  const zone = time?.timeZone ?? "";
+  return zone === "" ? when : `${when} (${zone})`;
+};
 
 /** A person as an event names them. */
 const personOf = (person: z.output<typeof personSchema>): string => {
