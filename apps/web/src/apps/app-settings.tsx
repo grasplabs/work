@@ -193,9 +193,6 @@ export const Read = <T,>({
   );
 };
 
-// How wide a section's column grows: Grasp UI has no token for a
-// settings page's measure.
-const SETTINGS_MEASURE = "56rem";
 const INTEGRATION_MIN = "20rem";
 // How tall the App's own settings stand at least, so its page has room.
 const OPTIONS_TALL = "24rem";
@@ -214,11 +211,9 @@ const styles = stylex.create({
     display: "flex",
     flexDirection: "column",
     gap: grasp.space4,
+    // As wide as its card, edge to edge with the tabs above it.
     width: "100%",
-    maxWidth: SETTINGS_MEASURE,
-    marginInline: "auto",
     paddingBlock: grasp.space6,
-    paddingInline: grasp.space4,
     boxSizing: "border-box",
   },
   actions: {
@@ -509,11 +504,6 @@ const GeneralForm = ({
   const date = formatDateTime(app.createdAt);
   return (
     <>
-      <Text size="sm" tone="muted">
-        {person === undefined
-          ? t`Made on ${date}.`
-          : t`Made by ${person} on ${date}.`}
-      </Text>
       <SectionCard flush title={t`About`}>
         <SettingsRows>
           <SettingRow label={t`Name`}>
@@ -556,6 +546,11 @@ const GeneralForm = ({
               <StatusBadge app={app} />
               <StatusNote app={app} />
             </div>
+          </FactRow>
+          <FactRow label={t`Made`}>
+            <Text size="sm">
+              {person === undefined ? date : t`${person}, ${date}`}
+            </Text>
           </FactRow>
           <SettingRow
             info={t`Shown with the App. It opens the App to nobody: who may use it is who it is shared with.`}
