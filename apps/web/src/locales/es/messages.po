@@ -11639,6 +11639,11 @@ msgstr "En las próximas dos semanas recibirás un enlace personal breve para ha
 msgid "Overview"
 msgstr "Resumen"
 
+#: src/routes/_shell.workflows.$workflow.tsx
+msgctxt "a workflow's view"
+msgid "Overview"
+msgstr "Resumen"
+
 #: src/interview/words.ts
 msgid "Own list or tool"
 msgstr "Lista o herramienta propia"

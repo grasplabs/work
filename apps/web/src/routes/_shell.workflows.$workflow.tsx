@@ -264,37 +264,55 @@ const ViewSwitch = ({
   view,
   flow,
   runs,
+  together = false,
 }: {
   workflow: string;
   view: WorkflowView;
+  /** Concept C: the Flow and its runs are one view, beside Settings. */
+  together?: boolean;
   /** Whether the reader has its Flow: its draft. */
   flow: boolean;
   /** How many runs it has, beside their view once read. */
   runs: number | undefined;
 }) => {
   const { t } = useLingui();
-  const views = [
-    ...(flow
-      ? [
-          {
-            view: "flow",
-            label: t({ message: "Flow", context: "a workflow's view" }),
-          } as const,
-        ]
-      : []),
-    {
-      view: "runs",
-      label: t({ message: "Runs", context: "a workflow's view" }),
-    },
-    {
-      view: "settings",
-      label: t({ message: "Settings", context: "a workflow's view" }),
-    },
-  ] as const;
+  const views = together
+    ? ([
+        {
+          view: "flow",
+          label: t({ message: "Overview", context: "a workflow's view" }),
+        },
+        {
+          view: "settings",
+          label: t({ message: "Settings", context: "a workflow's view" }),
+        },
+      ] as const)
+    : ([
+        ...(flow
+          ? [
+              {
+                view: "flow",
+                label: t({ message: "Flow", context: "a workflow's view" }),
+              } as const,
+            ]
+          : []),
+        {
+          view: "runs",
+          label: t({ message: "Runs", context: "a workflow's view" }),
+        },
+        {
+          view: "settings",
+          label: t({ message: "Settings", context: "a workflow's view" }),
+        },
+      ] as const);
   const label = t`Workflow views`;
   const links = views.map(({ view: each, label: words }) => (
     <TabsLink
-      current={each === view}
+      current={
+        together
+          ? (each === "settings") === (view === "settings")
+          : each === view
+      }
       key={each}
       render={
         <Link
@@ -598,6 +616,7 @@ const WorkflowResourceView = ({
           views={
             <ViewSwitch
               flow={draft !== undefined}
+              together={concept === "c"}
               runs={runs.state === "ready" ? runs.data.length : undefined}
               view={view}
               workflow={resource.id}
