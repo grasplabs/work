@@ -385,6 +385,17 @@ export const isStaleRefusal = (error: unknown): boolean =>
   typeof error === "object" && error !== null && staleRefusals.has(error);
 
 /**
+ * Whether `error` refused a start for now only: what the workflow keeps
+ * between its runs couldn't be checked (workflow-state.ts
+ * `readableStateOf`: a database or the Brain away), so the same start may
+ * go through later (GRA-1996). Every way a start is made backs off on it,
+ * or lets its person try again, and none counts it toward stopping or
+ * settles it for good.
+ */
+export const refusedForNow = (error: unknown): boolean =>
+  workflowResourceErrors.codeOf(error) === "workflow.state_unchecked";
+
+/**
  * The refusal of `invoker`'s start of a version that isn't the live one:
  * only the live version starts, for everyone. Stale, for a caller that
  * decides again, as a publish between reading the version and deciding
