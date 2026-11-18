@@ -1407,25 +1407,34 @@ export const eventsKeptMs = 90 * 24 * 60 * 60 * 1000;
 /** Most events one add takes (`Brain.addEvents`); a host with more sends a page after the other. */
 export const eventsPerAddMax = 500;
 
+/** A MAC the host makes under a key of its own (HMAC-SHA256), in hex. */
+const macSchema = z.string().regex(/^[0-9a-f]{64}$/u);
+
 /**
  * One thing that happened (`Brain.addEvents`): which team's (a group, as
  * the host names it, never a person), what kind of step, on which item,
- * and when. The item is a MAC of the host's ID for it, in hex, so the
- * Brain keeps nothing readable of it; null when the step was on none.
- * `key` is the host's for the event and its team, the same on every
- * retry: one event a key and team. `at` is kept to the hour, rounded down
- * (events.ts), so no stored time pins one call. The step's own bound is
- * the host's (core takes it as connect's action, `permissionActionSchema`);
- * here it is any identifier's (`identifierMaxLength`).
+ * who took it, and when. The item is a MAC of the host's ID for it, so
+ * the Brain keeps nothing readable of it; null when the step was on none.
+ * `who` is a MAC of the person and the team, by the host's key: one
+ * person's steps in one team share it, and their steps in two teams
+ * don't, so a tag joins nothing across teams. Nothing answers it back; it
+ * is there so the host can erase a person's events (`eraseEvents`), and
+ * so whatever draws figures from events can count people. **A figure
+ * drawn from events may be shown only when at least five distinct `who`
+ * values stand behind it** (the host's `minTeamShown`, the floor every
+ * figure about people holds to). `key` is the host's for the event and
+ * its team, the same on every retry: one event a key and team. `at` is
+ * kept to the hour, rounded down (events.ts), so no stored time pins one
+ * call. The step's own bound is the host's (core takes it as connect's
+ * action, `permissionActionSchema`); here it is any identifier's
+ * (`identifierMaxLength`).
  */
 export const newEventSchema = z.strictObject({
   key: changeKeySchema,
   team: principalSchema,
   step: wellFormedString().min(1).max(identifierMaxLength),
-  item: z
-    .string()
-    .regex(/^[0-9a-f]{64}$/u)
-    .nullable(),
+  item: macSchema.nullable(),
+  who: macSchema,
   at: z.iso.datetime(),
 });
 export type NewEvent = z.infer<typeof newEventSchema>;
@@ -1435,6 +1444,12 @@ export const newEventsSchema = z.strictObject({
   events: z.array(newEventSchema).min(1).max(eventsPerAddMax),
 });
 export type NewEvents = z.infer<typeof newEventsSchema>;
+
+/** A person's tags whose events to erase (`Brain.eraseEvents`): one a team. */
+export const eventErasureSchema = z.strictObject({
+  who: z.array(macSchema).min(1).max(eventsPerAddMax),
+});
+export type EventErasure = z.infer<typeof eventErasureSchema>;
 
 /**
  * Whether `source` may be in `group`: its key is the group's, "/" and
@@ -3241,6 +3256,12 @@ export interface Brain {
    * The shared store's alone. Safe to repeat.
    */
   expireEvents: () => Promise<void>;
+  /**
+   * Deletes every event whose `who` is one of `request.who`: a person's
+   * erasure, by their tag in each team. The shared store's alone. Safe to
+   * repeat, and answers alike whatever there was.
+   */
+  eraseEvents: (request: EventErasure) => Promise<void>;
   /**
    * Erases `person`'s own store whole, the one place what only they may
    * read is kept: everything it holds, and from then on every call is

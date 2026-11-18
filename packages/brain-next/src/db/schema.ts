@@ -1388,9 +1388,11 @@ export const personErasureMemories = sqliteTable("person_erasure_memories", {
 
 /**
  * What happened, as small records (events.ts): a team, a kind of step, the
- * item it was on, and when. Never a person, and never read: no member of
- * the contract answers a row of it, so recall, exports and restores never
- * hold one. Each is deleted once it is older than `eventsKeptMs`.
+ * item it was on, when, and a tag of who took it that only the host can
+ * compute. Never a person's name or ID, and never read: no member of the
+ * contract answers a row of it, so recall, exports and restores never
+ * hold one. Each is deleted once it is older than `eventsKeptMs`, or when
+ * its tag's person is erased (`eraseEvents`).
  */
 export const events = sqliteTable(
   "events",
@@ -1404,6 +1406,11 @@ export const events = sqliteTable(
     /** A MAC of the item's ID, in hex; null when it was on none. */
     item: text(),
     /**
+     * A MAC of who took the step and the team, in hex, by the host's key:
+     * the same person's in one team alike, in two teams apart.
+     */
+    who: text().notNull(),
+    /**
      * When it happened, in milliseconds, rounded down to the hour: never
      * later than when it was kept.
      */
@@ -1413,5 +1420,7 @@ export const events = sqliteTable(
     uniqueIndex("events_key_team_idx").on(table.key, table.team),
     // Expiry deletes by age.
     index("events_at_idx").on(table.at),
+    // A person's erasure deletes by their tags.
+    index("events_who_idx").on(table.who),
   ]
 );

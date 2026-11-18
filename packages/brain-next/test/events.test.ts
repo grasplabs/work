@@ -47,6 +47,7 @@ const eventOf = (team: string, step: string, key = crypto.randomUUID()) =>
     team,
     step,
     item: null,
+    who: "0".repeat(64),
     at: new Date().toISOString(),
   }) satisfies NewEvent;
 

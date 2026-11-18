@@ -612,12 +612,19 @@ const stepOf = (who: string, step: string, item: string | null) => ({
   at: new Date(),
 });
 
+/** A tag no one's: 64 random hex digits, as the host's MACs are written. */
+const aTag = (): string =>
+  [...crypto.getRandomValues(new Uint8Array(32))]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+
 /** An event of `team` now, as the store's `addEvents` takes it. */
 const eventOf = (team: string, step: string) => ({
   key: crypto.randomUUID(),
   team,
   step,
   item: null,
+  who: aTag(),
   at: new Date().toISOString(),
 });
 
@@ -4362,6 +4369,23 @@ export const coreProbes = {
       }),
     ];
   },
+  // A person's erasure of their events: no reader, and refused for no
+  // one without naming them. Never the reader's own: the planted event a
+  // later pass hunts for is the holder's.
+  eraseEventsOf: async ({ markers }) => [
+    await answer("someone's who never took a step", async () => {
+      await coreBrain.eraseEventsOf(env, stranger());
+    }),
+    await answer("no one", async () => {
+      await coreBrain.eraseEventsOf(env, "");
+    }),
+    await answer(
+      "someone named by the markers, past an ID's length",
+      async () => {
+        await coreBrain.eraseEventsOf(env, markers.join(" ").repeat(64));
+      }
+    ),
+  ],
 } satisfies Record<
   Exclude<CoreMember, CorePersonMember | CoreCodeMember | CoreAppMember>,
   Probe
@@ -10597,6 +10621,20 @@ export const storeProbes = {
       ),
     ];
   },
+  eraseEvents: async ({ personId, markers }) => [
+    await answer("tags no event has", async () => {
+      await store().eraseEvents({ who: [aTag(), aTag()] });
+    }),
+    await answer("no tags", async () => {
+      await store().eraseEvents({ who: [] });
+    }),
+    await answer("a tag that is the markers", async () => {
+      await store().eraseEvents(unchecked({ who: [markers.join(" ")] }));
+    }),
+    await answer("tags, from the reader's own store", async () => {
+      await personalStore(personId).eraseEvents({ who: [aTag()] });
+    }),
+  ],
   expireEvents: async ({ personId }) => [
     await answer("an expiry", async () => {
       await store().expireEvents();

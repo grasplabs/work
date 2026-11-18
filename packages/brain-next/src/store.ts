@@ -33,6 +33,7 @@ import {
   handOverResultSchema,
   isWholeKey,
   memoriesRequestSchema,
+  eventErasureSchema,
   newEventsSchema,
   newInstructionsSchema,
   newMemoriesSchema,
@@ -69,6 +70,7 @@ import {
   versionRequestSchema,
 } from "./contract.ts";
 import type {
+  EventErasure,
   NewEvents,
   RetireWrittenRequest,
   VersionChange,
@@ -190,7 +192,7 @@ import {
   sourcesWithoutCurrent,
 } from "./erasure.ts";
 import type { ErasureStore } from "./erasure.ts";
-import { addEvents, expireEvents } from "./events.ts";
+import { addEvents, eraseEvents, expireEvents } from "./events.ts";
 import {
   exportFile,
   exportStatus,
@@ -1341,6 +1343,16 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     }
     await this.#readyToWrite();
     addEvents(this.ctx.storage, events, Date.now());
+  }
+
+  /** Deletes the events of a person's tags (events.ts): their erasure. */
+  async eraseEvents(request: EventErasure): Promise<void> {
+    const { who } = checked(eventErasureSchema, request);
+    if (this.#kind.kind === "person") {
+      throw new Error(sharedOnly);
+    }
+    await this.#readyToWrite();
+    eraseEvents(this.ctx.storage.sql, who);
   }
 
   /** Deletes every event past its time (events.ts), by the store's clock. */

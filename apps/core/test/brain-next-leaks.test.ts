@@ -384,6 +384,8 @@ describe(
         "a memory the holder shared with a team the outsider isn't in":
           markerWord(),
         "an event of the holder's team": markerWord(),
+        // Its tag of who took it, as the store keeps it: set once planted.
+        "the tag of who took an event of the holder's team": markerWord(),
       };
       // What every member may read, and nobody outside the company.
       const companyMarkers = {
@@ -771,6 +773,17 @@ describe(
           at: new Date(),
         },
       ]);
+      const eventWho = await runInDurableObject(
+        sharedStore(),
+        (_store, state) =>
+          state.storage.sql
+            .exec<{ who: string }>(
+              "SELECT who FROM events WHERE step = ?",
+              eventMarker
+            )
+            .one().who
+      );
+      markers["the tag of who took an event of the holder's team"] = eventWho;
       const teamSource = `Board minutes ${sharedWord} ${teamMarker}`;
       const teamId = await add(teamSource, {
         kind: "team",
@@ -1330,6 +1343,7 @@ describe(
         teamSkillMarker,
         sharedMemoryMarker,
         eventMarker,
+        eventWho,
         instructionMarkers,
         inRecall,
         instructionGroups,
@@ -1898,6 +1912,7 @@ describe(
           "an App's instruction file the outsider doesn't build":
             world.appFileMarker,
           "an event of the holder's team": world.eventMarker,
+          "the tag of who took an event of the holder's team": world.eventWho,
         },
         { inRecall: world.inRecall }
       );

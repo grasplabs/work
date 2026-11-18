@@ -11,7 +11,10 @@ import type { NewEvent } from "./contract.ts";
 //   figure holds one; whatever is drawn from them later is drawn here and
 //   held to the five-person floor where it is drawn.
 // - A person in a row: the host names a team's group, never a person
-//   (contract.ts `newEventSchema`), and an item only by a MAC of its ID.
+//   (contract.ts `newEventSchema`), an item only by a MAC of its ID, and
+//   who took it only by a MAC of them and the team, which only the host
+//   can compute: so the host can erase their events (`eraseEvents`), and
+//   the tags of one person in two teams join nothing.
 // - One call pinned by its time: each is kept to the hour, rounded down.
 // - Kept for good: every event older than `eventsKeptMs` is deleted
 //   (`expireEvents`, on the host's clock), and one dated later than when
@@ -33,16 +36,17 @@ export const addEvents = (
 ): void => {
   const oldest = now - eventsKeptMs;
   storage.transactionSync(() => {
-    for (const { key, team, step, item, at } of events) {
+    for (const { key, team, step, item, who, at } of events) {
       const happened =
         Math.floor(Math.min(Date.parse(at), now) / hourMs) * hourMs;
       if (happened >= oldest) {
         storage.sql.exec(
-          "INSERT INTO events (key, team, step, item, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (key, team) DO NOTHING",
+          "INSERT INTO events (key, team, step, item, who, at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (key, team) DO NOTHING",
           key,
           team,
           step,
           item,
+          who,
           happened
         );
       }
@@ -53,4 +57,12 @@ export const addEvents = (
 /** Deletes every event older than `eventsKeptMs` as of `now`. */
 export const expireEvents = (sql: SqlStorage, now: number): void => {
   sql.exec("DELETE FROM events WHERE at < ?", now - eventsKeptMs);
+};
+
+/** Deletes every event whose tag is one of `who`: a person's erasure. */
+export const eraseEvents = (sql: SqlStorage, who: readonly string[]): void => {
+  sql.exec(
+    "DELETE FROM events WHERE who IN (SELECT value FROM json_each(?))",
+    JSON.stringify(who)
+  );
 };
