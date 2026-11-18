@@ -28,9 +28,11 @@ import { onboardingStore } from "./store.ts";
 // lab (scripts/lab/) plays the people Stephen interviews and judges what
 // he wrote down, with models, and those calls go through the model gateway
 // here, as every model call does: allowed models only, the deployment's
-// rules, the budgets and the audit log. The lab holds no provider key, and
-// no bridge to anyone's subscription: what it measures is reached the way
-// the interviews themselves are.
+// rules, the budgets and the audit log. The lab holds no provider key:
+// what it measures is reached the way the interviews themselves are. On
+// the lab's own stack (`vp run lab:dev`), connect's on-prem relay sends
+// those requests on to the lab's bridge to a Claude subscription
+// (scripts/lab/bridge.ts) instead of the API; nothing here changes for it.
 //
 // The benches (GRA-338) give Stephen fixed input: a turn here is the same
 // turn a link gets, with who it is with given instead of read from a link,
