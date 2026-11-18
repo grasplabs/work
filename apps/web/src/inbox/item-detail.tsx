@@ -5,11 +5,7 @@ import { useRouter } from "@tanstack/react-router";
 import { useId } from "react";
 import type { ReactNode } from "react";
 
-import {
-  grantReviewed,
-  requestAsker,
-  reviewedVersion,
-} from "../activity/pending.tsx";
+import { grantReviewed, reviewedVersion } from "../activity/pending.tsx";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import {
   confirmHeld,
@@ -368,7 +364,6 @@ const useApprovalWords = (): Partial<ApprovalWords> => {
  */
 const ApprovalFrame = ({
   frame,
-  who,
   summary,
   details,
   approveLabel,
@@ -378,8 +373,6 @@ const ApprovalFrame = ({
   onDecline,
 }: {
   frame: Frame;
-  /** Who asks: the App, agent or person. */
-  who?: string;
   /** The one fact that decides it, in the card's quiet line. */
   summary?: string;
   /** What to read before answering, under Details. */
@@ -418,7 +411,7 @@ const ApprovalFrame = ({
         </Button>
       )}
       <ApprovalRequest
-        {...(who === undefined ? {} : { agent: who })}
+        {...(item.asker === undefined ? {} : { agent: item.asker })}
         {...(summary === undefined ? {} : { summary })}
         {...(approveLabel === undefined ? {} : { approveLabel })}
         {...(approveHeld === undefined ? {} : { approveHeld })}
@@ -529,7 +522,6 @@ const RequestItem = ({
       onDecline={async (session) =>
         await session.permissions.revoke(request.id)
       }
-      who={requestAsker(request, pending.directory)}
     />
   );
 };
@@ -562,7 +554,6 @@ const WorkflowGoLiveDetail = ({
       grave
       onApprove={decide("approve")}
       onDecline={decide("reject")}
-      who={item.selfApproval ? t`You` : t`A builder`}
     />
   );
 };

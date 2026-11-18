@@ -749,6 +749,11 @@ msgstr "{going, plural, one {De teamleider van # team krijgt de link {when}. All
 msgid "{going} of {count}"
 msgstr "{going} van {count}"
 
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox filter with how many it holds"
+msgid "{groupName} {count}"
+msgstr "{groupName} {count}"
+
 #: src/brain/brain-chips.tsx
 #: src/brain/brain-source-contents.tsx
 msgid "{hidden, plural, one {Show # more} other {Show # more}}"
@@ -1755,7 +1760,7 @@ msgstr "Een bearer-token"
 msgid "A Brain collection it may read"
 msgstr "Een verzameling uit het Brein die hij mag lezen"
 
-#: src/inbox/item-detail.tsx
+#: src/inbox/items.ts
 msgid "A builder"
 msgstr "Een bouwer"
 
@@ -18736,7 +18741,7 @@ msgstr "jou"
 #: src/connections/connection-list.tsx
 #: src/connections/integration-inspector.tsx
 #: src/frame/part-words.tsx
-#: src/inbox/item-detail.tsx
+#: src/inbox/items.ts
 #: src/knowledge/timeline.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/workflows/go-lives-waiting.tsx

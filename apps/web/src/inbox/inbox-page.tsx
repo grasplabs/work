@@ -404,11 +404,19 @@ const ToDo = ({
             variant="segmented"
           >
             <TabsList aria-label={t`Show`}>
-              {(["all", ...shownGroups] as const).map((each) => (
-                <TabsTrigger key={each} value={each}>
-                  {i18n._(groupLabel[each])}
-                </TabsTrigger>
-              ))}
+              {(["all", ...shownGroups] as const).map((each) => {
+                const groupName = i18n._(groupLabel[each]);
+                const count =
+                  each === "all" ? items.length : (counts.get(each) ?? 0);
+                return (
+                  <TabsTrigger key={each} value={each}>
+                    {t({
+                      message: `${groupName} ${count}`,
+                      context: "inbox filter with how many it holds",
+                    })}
+                  </TabsTrigger>
+                );
+              })}
             </TabsList>
           </Tabs>
         )}

@@ -21,6 +21,7 @@ import { plural, t } from "@lingui/core/macro";
 import {
   requestNextRun,
   requestRow,
+  requestAsker,
   requestWords,
 } from "../activity/pending.tsx";
 import type { PendingRequests } from "../activity/pending.tsx";
@@ -133,6 +134,8 @@ export interface InboxItem {
   calm?: boolean;
   /** What the list says under its name, in place of its kind and date. */
   summary?: string;
+  /** Who asks, by name, where the item says it: an approval's quiet line names them. */
+  asker?: string;
   /** Whose it is, when it is someone's: their face stands for it in the list. */
   face?: string;
   source: InboxSource;
@@ -316,6 +319,7 @@ const requestItems = (pending: PendingRequests): InboxItem[] =>
     const who = requestWords(request, directory);
     const { binding } = request;
     return {
+      asker: requestAsker(request, directory),
       id: `request:${request.id}`,
       kind: "permissionRequest",
       title: t`Grant ${who}?`,
@@ -349,12 +353,16 @@ const requestItems = (pending: PendingRequests): InboxItem[] =>
  */
 const workflowGoLiveItems = (
   goLives: readonly WorkflowGoLiveItem[],
-  me: string
+  me: string,
+  people: ReadonlyMap<string, string> | undefined
 ): InboxItem[] =>
   goLives.map((item) => {
     const { workflow, version } = item;
     const { name } = workflow;
     return {
+      asker: item.selfApproval
+        ? t`You`
+        : (people?.get(item.requestedBy) ?? t`A builder`),
       id: item.id,
       kind: "goLive",
       title: t`Let version ${version} of ${name} go live?`,
@@ -881,7 +889,7 @@ export const inboxItems = (
     ...heldStartItems(heldStarts, me),
     ...outcomeItems(outcomes, me),
     ...(requests === undefined ? [] : requestItems(requests)),
-    ...workflowGoLiveItems(workflowGoLives, me),
+    ...workflowGoLiveItems(workflowGoLives, me, waiting.goLivePeople),
     ...bindingItems(bindings, readAt),
     ...(notifications === undefined ? [] : askedItems(notifications, me)),
     ...gapItems(gaps, askedGaps),
