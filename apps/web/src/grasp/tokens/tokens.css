@@ -1476,6 +1476,10 @@
   /* Chat message: chat message. */
   /* The widest a person's message grows across the conversation, so it reads as theirs. */
   --grasp-chat-bubble-width: 80%;
+  /* Every word the chat reads in: a message, an answer's Markdown, a source's passage, the Composer's text. 14px, as the sidebar's rows. */
+  --grasp-chat-text: var(--grasp-text-sm);
+  /* The line height of chat-text: a little more room than text-sm's, for reading at length. */
+  --grasp-chat-text-line: 1.375rem;
   /* Audio player: audio player. */
   /* The widest an audio player's bar grows. */
   --grasp-audio-width: 40rem;
