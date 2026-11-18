@@ -60,6 +60,7 @@ import {
   personErasureAreas,
   personErasures,
   sessions,
+  signInAddresses,
   stephenRequestCards,
   stephenRequests,
   skillDecisions,
@@ -90,6 +91,7 @@ import { eraseUploadsOf, uploadsOf } from "./knowledge-uploads.ts";
 import { eraseOnboardingAccount } from "./onboarding/new-brain.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import type { ErasureAreaName } from "./person-erasure-inventory.ts";
+import { forgetTokens, keptAccountKeysOf } from "./source-readers.ts";
 import { stopRunsFor } from "./workflows/resource-runs.ts";
 import { erasedChatPin } from "./workflows/run-evidence.ts";
 
@@ -195,6 +197,12 @@ const erasedEmail = (userId: string): string =>
  * keeps them out. Only the accounts whose subjects were hashed go: one
  * linked between the read and the batch stays, and so does the area,
  * pending, until the clock's next try hashes and deletes it too.
+ * In the same batch, the tokens the Brain knows their accounts by on
+ * copied reader lists (source-readers.ts `forgetTokens`, GRA-1761): those
+ * they claimed, and those nobody claimed of what these accounts, their
+ * connections' accounts (as connect keeps them until this is done) and
+ * their address name them by. Every list naming them
+ * names a token nobody holds from then on.
  */
 const identity: ErasureStep = {
   area: "identity",
@@ -204,15 +212,58 @@ const identity: ErasureStep = {
   after: "brain_shared",
   erase: async (env, userId) => {
     const db = drizzle(env.DB);
-    const held = await db
-      .select({
-        id: accounts.id,
-        providerId: accounts.providerId,
-        accountId: accounts.accountId,
-        oid: accounts.oid,
-      })
-      .from(accounts)
-      .where(eq(accounts.userId, userId));
+    const [held, [user], signedInAs] = await db.batch([
+      db
+        .select({
+          id: accounts.id,
+          providerId: accounts.providerId,
+          accountId: accounts.accountId,
+          oid: accounts.oid,
+          verifiedEmail: accounts.verifiedEmail,
+        })
+        .from(accounts)
+        .where(eq(accounts.userId, userId)),
+      db.select({ email: users.email }).from(users).where(eq(users.id, userId)),
+      db
+        .select({ address: signInAddresses.address })
+        .from(signInAddresses)
+        .where(eq(signInAddresses.userId, userId)),
+    ]);
+    // In this order, each before the read below: connect told their
+    // erasure began, so no connection of theirs is made from now on, a
+    // flow already under way included; then their connections stopped, as
+    // their removal does (it may have failed, and an erasure needs only
+    // the removal), so no renewal writes an address after the read. Then
+    // their accounts, disconnected or not, as connect still has them: its
+    // own erasure waits for this one (`connect`). A call that fails leaves
+    // this area pending, for the clock to try again.
+    await env.CONNECT.beginErasure({ ownerUserId: userId });
+    await env.CONNECT.disconnectPersonal({
+      person: null,
+      ownerUserIds: [userId],
+    });
+    const connected = await env.CONNECT.personalAccounts(userId);
+    const keptKeys = await keptAccountKeysOf(env, {
+      objectIds: [
+        ...held.flatMap(({ oid }) => (oid === null ? [] : [oid])),
+        ...connected.flatMap(({ provider, accountId }) =>
+          provider === "microsoft" ? [accountId] : []
+        ),
+      ],
+      addresses: [
+        ...held.flatMap(({ verifiedEmail }) =>
+          verifiedEmail === null ? [] : [verifiedEmail]
+        ),
+        // Every address their sign-ins and connections ever proved, not
+        // only the latest: each may name a token someone else could claim.
+        ...signedInAs.map(({ address }) => address),
+        ...connected.flatMap(({ verifiedEmail, pastVerifiedEmails }) => [
+          ...(verifiedEmail === null ? [] : [verifiedEmail]),
+          ...pastVerifiedEmails,
+        ]),
+        ...(user === undefined ? [] : [user.email]),
+      ],
+    });
     const subjects = new Set(
       held.flatMap((account) => subjectsOf(account, directoryProviderId))
     );
@@ -253,6 +304,8 @@ const identity: ErasureStep = {
           )
         )
       ),
+      forgetTokens(db, userId, keptKeys),
+      db.delete(signInAddresses).where(eq(signInAddresses.userId, userId)),
       db.delete(sessions).where(eq(sessions.userId, userId)),
       completed(
         db,
@@ -601,6 +654,9 @@ const channels: ErasureStep = {
  */
 const connect: ErasureStep = {
   area: "connect",
+  // Their connections' accounts are what `identity` forgets the reader
+  // tokens of (source-readers.ts, GRA-1761): kept until it has.
+  after: "identity",
   erase: async (env, userId) => {
     await env.CONNECT.erasePersonal({ ownerUserId: userId });
     await completed(drizzle(env.DB), userId, "connect");
