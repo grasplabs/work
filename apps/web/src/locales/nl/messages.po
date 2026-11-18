@@ -10115,6 +10115,10 @@ msgstr "Er passen geen gebeurtenissen in het laatste stuk van het log."
 msgid "No events match."
 msgstr "Geen gebeurtenissen gevonden."
 
+#: src/apps/app-data.tsx
+msgid "No example records"
+msgstr "Geen voorbeeldrecords"
+
 #: src/apps/app-code.tsx
 msgid "No files"
 msgstr "Geen bestanden"
@@ -10243,9 +10247,6 @@ msgid "No record of this table has that ID."
 msgstr "Geen record van deze tabel heeft die ID."
 
 #: src/apps/app-data.tsx
-msgid "No records"
-msgstr "Geen records"
-
 #: src/brain/memory-page.tsx
 msgid "No records yet"
 msgstr "Nog geen herinneringen"
@@ -13081,6 +13082,10 @@ msgstr "Testgegevens resetten?"
 #: src/apps/app-workspace.tsx
 msgid "Reset the example data in Data to try the change. Your team's records aren't touched."
 msgstr "Zet de voorbeeldgegevens in Gegevens terug om de wijziging te proberen. De records van je team blijven onaangeroerd."
+
+#: src/apps/app-data.tsx
+msgid "Reset the example data to fill it."
+msgstr "Zet de voorbeeldgegevens terug om hem te vullen."
 
 #: src/workflows/kept-state.tsx
 msgid "Reset what it keeps"
@@ -16399,6 +16404,10 @@ msgstr "Ze komen alleen bij de onboarding, en verliezen de toegang 7 dagen na de
 #: src/apps/app-workspace.tsx
 msgid "They see it once you share it with them."
 msgstr "Ze zien het zodra je het met hen deelt."
+
+#: src/apps/app-data.tsx
+msgid "They show here as people use the App."
+msgstr "Ze verschijnen hier zodra mensen de app gebruiken."
 
 #: src/brain/brain.ts
 #: src/routes/_shell.brain.$noteId.tsx

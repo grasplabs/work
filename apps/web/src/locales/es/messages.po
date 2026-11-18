@@ -10115,6 +10115,10 @@ msgstr "Ningún evento coincide en el tramo más reciente del registro."
 msgid "No events match."
 msgstr "Ningún evento coincide."
 
+#: src/apps/app-data.tsx
+msgid "No example records"
+msgstr "No hay registros de ejemplo"
+
 #: src/apps/app-code.tsx
 msgid "No files"
 msgstr "Sin archivos"
@@ -10243,9 +10247,6 @@ msgid "No record of this table has that ID."
 msgstr "Ningún registro de esta tabla tiene ese ID."
 
 #: src/apps/app-data.tsx
-msgid "No records"
-msgstr "Sin registros"
-
 #: src/brain/memory-page.tsx
 msgid "No records yet"
 msgstr "Aún no hay registros"
@@ -13081,6 +13082,10 @@ msgstr "¿Restablecer datos de prueba?"
 #: src/apps/app-workspace.tsx
 msgid "Reset the example data in Data to try the change. Your team's records aren't touched."
 msgstr "Restablece los datos de ejemplo en Datos para probar el cambio. Los registros de tu equipo no se tocan."
+
+#: src/apps/app-data.tsx
+msgid "Reset the example data to fill it."
+msgstr "Restablece los datos de ejemplo para llenarla."
 
 #: src/workflows/kept-state.tsx
 msgid "Reset what it keeps"
@@ -16399,6 +16404,10 @@ msgstr "Solo llegan a la incorporación, y pierden el acceso 7 días después de
 #: src/apps/app-workspace.tsx
 msgid "They see it once you share it with them."
 msgstr "Lo ven en cuanto lo compartas con ellos."
+
+#: src/apps/app-data.tsx
+msgid "They show here as people use the App."
+msgstr "Aparecen aquí a medida que la gente usa la app."
 
 #: src/brain/brain.ts
 #: src/routes/_shell.brain.$noteId.tsx

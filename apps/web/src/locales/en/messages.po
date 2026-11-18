@@ -10115,6 +10115,10 @@ msgstr "No events match in the latest stretch of the log."
 msgid "No events match."
 msgstr "No events match."
 
+#: src/apps/app-data.tsx
+msgid "No example records"
+msgstr "No example records"
+
 #: src/apps/app-code.tsx
 msgid "No files"
 msgstr "No files"
@@ -10243,9 +10247,6 @@ msgid "No record of this table has that ID."
 msgstr "No record of this table has that ID."
 
 #: src/apps/app-data.tsx
-msgid "No records"
-msgstr "No records"
-
 #: src/brain/memory-page.tsx
 msgid "No records yet"
 msgstr "No records yet"
@@ -13081,6 +13082,10 @@ msgstr "Reset test data?"
 #: src/apps/app-workspace.tsx
 msgid "Reset the example data in Data to try the change. Your team's records aren't touched."
 msgstr "Reset the example data in Data to try the change. Your team's records aren't touched."
+
+#: src/apps/app-data.tsx
+msgid "Reset the example data to fill it."
+msgstr "Reset the example data to fill it."
 
 #: src/workflows/kept-state.tsx
 msgid "Reset what it keeps"
@@ -16399,6 +16404,10 @@ msgstr "They reach the onboarding alone, and lose access 7 days after Grasp's go
 #: src/apps/app-workspace.tsx
 msgid "They see it once you share it with them."
 msgstr "They see it once you share it with them."
+
+#: src/apps/app-data.tsx
+msgid "They show here as people use the App."
+msgstr "They show here as people use the App."
 
 #: src/brain/brain.ts
 #: src/routes/_shell.brain.$noteId.tsx
