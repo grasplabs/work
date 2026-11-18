@@ -1,15 +1,20 @@
 import { interviewerNames, interviewers } from "@grasp-os/shared/onboarding";
 import type { InterviewKind, Interviewer } from "@grasp-os/shared/onboarding";
-import { Button } from "@grasp-os/ui/components/button";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { ErrorText } from "../error-text.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { visuallyHidden } from "../grasp/hidden/hidden.ts";
+import { arrive } from "../grasp/motion/arrive.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { LanguageChoice } from "../onboarding/language-choice.tsx";
 import { isRefused, participate } from "./api.ts";
 import { Head, headSizes, pair, useHead } from "./head.tsx";
 import { linkNow, update, useInterviewer, useProgress } from "./kept.ts";
+import { fullWidth, looks } from "./looks.ts";
 import { chose, toldWhat } from "./progress.ts";
 import { Quiet, sayAfterMs, SoundCheck } from "./sound-check.tsx";
 import type { AnswerBy } from "./sound-check.tsx";
@@ -33,6 +38,51 @@ import { usePromise } from "./words.ts";
 // what this is tells core they agree to take part (GRA-329): nothing they
 // say is heard or read by a model before core kept that.
 
+const styles = stylex.create({
+  // As wide as the two figures, so each name stands under its own figure.
+  pair: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: grasp.space6,
+    width: "fit-content",
+    maxWidth: "100%",
+    textAlign: "center",
+  },
+  figures: { display: "flex", justifyContent: "center", gap: grasp.space4 },
+  names: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: grasp.space4,
+    width: "100%",
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+  },
+  name: { justifySelf: "center", width: "100%", maxWidth: "12rem" },
+  // What this is: each row's name beside its words, or over them on a phone.
+  rows: { width: "100%", margin: 0, textAlign: "start" },
+  row: {
+    display: "grid",
+    gridTemplateColumns: { default: "1fr", [media.fromPhone]: "7rem 1fr" },
+    columnGap: grasp.space6,
+    rowGap: grasp.space1,
+    paddingBlock: grasp.space3,
+    borderBlockStartWidth: grasp.hairline,
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: grasp.line,
+    fontSize: grasp.textMd,
+    lineHeight: grasp.textMdLine,
+  },
+  last: {
+    borderBlockEndWidth: grasp.hairline,
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: grasp.line,
+  },
+  about: { color: grasp.muted },
+  text: { margin: 0, color: grasp.text },
+});
+
 /** The device's own language is marked already: a press on another switches to it, and nothing more. */
 const keepGoing = (): void => {
   // The choice is the language itself; the way on is Continue.
@@ -48,18 +98,16 @@ const Line = ({
 }) => {
   const said = useSaidOf(text);
   return (
-    <div
-      aria-live="polite"
-      className="flex min-h-16 w-full items-start justify-center"
-    >
-      <div
-        className="animate-in fade-in slide-in-from-bottom-2 max-w-lg duration-500 motion-reduce:animate-none"
-        key={text}
-      >
-        <PageHeaderTitle render={heading ? undefined : <p />}>
+    <div aria-live="polite" {...stylex.props(looks.lineRoom)}>
+      {heading ? (
+        <h1 key={text} {...stylex.props(looks.said, arrive.in)}>
           <SpokenText said={said} text={text} />
-        </PageHeaderTitle>
-      </div>
+        </h1>
+      ) : (
+        <p key={text} {...stylex.props(looks.said, arrive.in)}>
+          <SpokenText said={said} text={text} />
+        </p>
+      )}
     </div>
   );
 };
@@ -88,7 +136,7 @@ const Language = ({ room, onNext }: { room: number; onNext: () => void }) => {
     };
   }, [question, interviewer]);
   return (
-    <div className="flex w-full max-w-xl flex-col items-center gap-6 text-center">
+    <div {...stylex.props(looks.screen)}>
       <Head
         fill={0.35}
         label={t`${who}, drawn in dots.`}
@@ -97,17 +145,19 @@ const Language = ({ room, onNext }: { room: number; onNext: () => void }) => {
         voice={voiceLevel}
         who={interviewer}
       />
-      <div className="flex w-full flex-col items-center gap-6" ref={body}>
+      <div ref={body} {...stylex.props(looks.body)}>
         <Line heading text={question} />
         <LanguageChoice onPick={keepGoing} picked />
-        <Button
-          className="w-full max-w-sm"
-          onClick={onNext}
-          size="xl"
-          variant="highlight"
-        >
-          {t`Continue`}
-        </Button>
+        <div {...stylex.props(looks.actions)}>
+          <Button
+            layout={fullWidth.button}
+            onClick={onNext}
+            size="lg"
+            variant="ink"
+          >
+            {t`Continue`}
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -204,9 +254,8 @@ const Who = ({
     line = also;
   }
   return (
-    // As wide as the two figures, so each name stands under its own figure, as the prototype has them.
-    <div className="flex w-fit max-w-full flex-col items-center gap-6 text-center">
-      <div className="flex justify-center gap-4">
+    <div {...stylex.props(styles.pair)}>
+      <div {...stylex.props(styles.figures)}>
         {interviewers.map((each) => {
           const who = interviewerNames[each];
           return (
@@ -226,19 +275,21 @@ const Who = ({
           );
         })}
       </div>
-      <div className="flex w-full flex-col items-center gap-6" ref={body}>
+      <div ref={body} {...stylex.props(looks.body)}>
         <Line text={line} />
-        <fieldset className="grid w-full grid-cols-2 gap-4">
-          <legend className="sr-only">{t`Who would you like to talk with?`}</legend>
+        <fieldset {...stylex.props(styles.names)}>
+          <legend {...stylex.props(visuallyHidden)}>
+            {t`Who would you like to talk with?`}
+          </legend>
           {interviewers.map((each) => (
             <Button
-              className="w-full max-w-48 justify-self-center"
               key={each}
+              layout={styles.name}
               onClick={() => {
                 choose(each);
               }}
-              size="xl"
-              variant="outline"
+              size="lg"
+              variant="quiet"
             >
               {interviewerNames[each]}
             </Button>
@@ -307,9 +358,9 @@ const About = ({
     },
   ];
   return (
-    <div className="flex w-full max-w-xl flex-col items-center gap-6 text-center">
+    <div {...stylex.props(looks.screen)}>
       {/* Going to the other one after all, the one makes way for the other: two people, so neither turns into the other. */}
-      <div className="animate-in fade-in duration-500" key={interviewer}>
+      <div key={interviewer} {...stylex.props(arrive.in)}>
         <Head
           fill={0.35}
           label={t`${who}, drawn in dots.`}
@@ -317,27 +368,30 @@ const About = ({
           who={interviewer}
         />
       </div>
-      <div className="flex w-full flex-col items-center gap-6" ref={body}>
-        <PageHeaderTitle>
+      <div ref={body} {...stylex.props(looks.body)}>
+        <h1 {...stylex.props(looks.said)}>
           {t`Hi ${name}, I’m ${who}. I’m an AI, and I work for Grasp.`}
-        </PageHeaderTitle>
-        <dl className="w-full text-left">
-          {rows.map((row) => (
+        </h1>
+        <dl {...stylex.props(styles.rows)}>
+          {rows.map((row, at) => (
             <div
-              className="grid gap-x-6 gap-y-1 border-t py-3 last:border-b sm:grid-cols-[7rem_1fr]"
               key={row.about}
+              {...stylex.props(
+                styles.row,
+                at === rows.length - 1 && styles.last
+              )}
             >
-              <dt className="text-muted-foreground">{row.about}</dt>
-              <dd>{row.text}</dd>
+              <dt {...stylex.props(styles.about)}>{row.about}</dt>
+              <dd {...stylex.props(styles.text)}>{row.text}</dd>
             </div>
           ))}
         </dl>
-        <div className="flex w-full max-w-sm flex-col items-center gap-3">
+        <div {...stylex.props(looks.actions)}>
           <Button
-            className="w-full"
+            layout={fullWidth.button}
             onClick={onNext}
-            size="xl"
-            variant="highlight"
+            size="lg"
+            variant="ink"
           >
             {t`Check sound and microphone`}
           </Button>
@@ -349,11 +403,7 @@ const About = ({
           >
             {t`Rather talk with ${otherName}?`}
           </Quiet>
-          {refusal === null ? null : (
-            <p className="text-destructive text-sm" role="alert">
-              {refusal}
-            </p>
-          )}
+          {refusal === null ? null : <ErrorText>{refusal}</ErrorText>}
         </div>
       </div>
     </div>
@@ -460,10 +510,7 @@ export const Before = ({
     }
   }
   return (
-    <div
-      className="animate-in fade-in flex w-full justify-center duration-500"
-      key={screen}
-    >
+    <div key={screen} {...stylex.props(looks.stage, arrive.in)}>
       {shown}
     </div>
   );
