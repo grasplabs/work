@@ -593,23 +593,6 @@ const styles = stylex.create({
     visibility: "hidden",
     transitionDuration: simply.leave,
   },
-  // Behind the dock the page fades into the card's ground (F36). Taller than the dock by a group's
-  // room, and whole by the dock's top edge: the page's words are gone before the dock begins, so no
-  // line is cut by its edge. At the page's end, where the room below is clear, it lies on nothing.
-  dockFade: {
-    position: "absolute",
-    insetInline: 0,
-    insetBlockEnd: 0,
-    height: `calc(${grasp.shellPageRoomChat} + ${grasp.space8})`,
-    zIndex: grasp.shellPageLayer,
-    pointerEvents: "none",
-    backgroundImage: `linear-gradient(to bottom, transparent, ${grasp.shellCard} calc(100% - ${grasp.space4} - ${grasp.space12} - ${grasp.space2}))`,
-    transitionProperty: "opacity",
-    transitionDuration: simply.ui,
-    transitionTimingFunction: grasp.ease,
-    display: { default: "block", [FORCED]: "none" },
-  },
-  dockFadeAway: { opacity: 0 },
   // In the sheet the sidebar runs the rest of the panel, on its own ground from edge to edge, so
   // the sheet reads as the sidebar itself, and scrolls when the links outrun the window.
   sheetSidebar: {
@@ -1389,48 +1372,39 @@ const notePlace = (card: HTMLElement, keep: RefObject<number>) => {
   };
 };
 
-/** The dock over the card's foot, and the fade behind it: it sinks away while it is not shown. */
+/**
+ * The dock over the card's foot: it sinks away while it is not shown. No fade lies behind it (work
+ * removed the library's F36 fade on the owner's word: it hid the page's foot across the card).
+ */
 const ShellDock = ({
   dock,
   shown = true,
   align = "center",
-  under,
   inert,
   fading,
 }: {
   dock: ReactNode;
   shown?: boolean;
   align?: "center" | "end";
-  under: boolean;
   inert: boolean;
   fading: ReturnType<typeof fadesOf>["fading"];
 }) => (
-  <>
+  <div
+    data-slot="app-shell-dock"
+    data-shown={shown ? "" : undefined}
+    inert={inert || !shown}
+    {...stylex.props(styles.dock, align === "end" && styles.dockEnd, fading)}
+  >
     <div
-      aria-hidden="true"
-      data-slot="app-shell-dock-fade"
       {...stylex.props(
-        styles.dockFade,
-        (!shown || under) && styles.dockFadeAway
+        styles.dockHeld,
+        styles.dockMoves,
+        !shown && styles.dockAway
       )}
-    />
-    <div
-      data-slot="app-shell-dock"
-      data-shown={shown ? "" : undefined}
-      inert={inert || !shown}
-      {...stylex.props(styles.dock, align === "end" && styles.dockEnd, fading)}
     >
-      <div
-        {...stylex.props(
-          styles.dockHeld,
-          styles.dockMoves,
-          !shown && styles.dockAway
-        )}
-      >
-        {dock}
-      </div>
+      {dock}
     </div>
-  </>
+  </div>
 );
 
 /** Whether there are panels to stand beside the page: given, and not turned off. */
@@ -1691,7 +1665,6 @@ const ShellCard = ({
           dock={dock}
           shown={dockShown}
           align={dockAlign}
-          under={under}
           inert={pageInert}
           fading={fading}
         />
