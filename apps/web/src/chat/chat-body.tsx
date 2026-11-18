@@ -24,6 +24,7 @@ import { HeldWrites } from "./held-writes.tsx";
 import { PackageRequests } from "./package-requests.tsx";
 import { ChatSources } from "./sources.tsx";
 import { SubjectBarContent, subjectBarOf } from "./subject-bar.tsx";
+import type { ChatThread as ChatThreadType } from "./thread.tsx";
 
 // One chat's conversation and the box to ask in under it, as the dock
 // (chat-panel.tsx) and a chat's own page (chat-page.tsx) both show it: the
@@ -74,6 +75,8 @@ const styles = stylex.create({
     paddingBlockStart: grasp.space2,
     paddingBlockEnd: grasp.shellPageInline,
   },
+  // On a chat's page the column is already in from the card's sides: the box is as wide as the thread.
+  footerInColumn: { paddingInline: 0 },
   notice: {
     display: "flex",
     alignItems: "center",
@@ -83,11 +86,26 @@ const styles = stylex.create({
 });
 
 // The conversation, with its Markdown and code highlighting, loads once a
-// chat is shown: most pages show the chat idle.
-const ChatThread = lazy(async () => {
-  const { ChatThread: thread } = await import("./thread.tsx");
-  return { default: thread };
-});
+// chat is shown: most pages show the chat idle. A chat's page waits for it
+// in its loader (`loadThread`), so a chat just started never shows the
+// thread's loading shapes while its code arrives: once in, it is drawn
+// at once rather than through Suspense.
+type ThreadComponent = typeof ChatThreadType;
+
+let threadLoaded: ThreadComponent | undefined;
+let threadLoading: Promise<ThreadComponent> | undefined;
+
+/** Loads the conversation's code, once; what a chat's page waits for. */
+export const loadThread = async (): Promise<ThreadComponent> => {
+  threadLoading ??= (async () => {
+    const { ChatThread: thread } = await import("./thread.tsx");
+    threadLoaded = thread;
+    return thread;
+  })();
+  return await threadLoading;
+};
+
+const LazyThread = lazy(async () => ({ default: await loadThread() }));
 
 /** What the chat says before anything is asked in it. */
 const Welcome = ({ text }: { text: string }) => (
@@ -150,6 +168,7 @@ export const ChatConversation = ({
     return <Welcome text={words.empty} />;
   }
   const lastQuestion = view.messages.findLast(({ role }) => role === "user");
+  const ChatThread = threadLoaded ?? LazyThread;
   return (
     <Suspense fallback={<Loading />}>
       <ChatThread
@@ -249,8 +268,31 @@ const ModelsUnavailableNotice = ({
   );
 };
 
-/** The box to ask in, or the agent's questions in its place. */
-export const ChatFooter = ({ chat }: { chat: ChatBodyValues }) => {
+/**
+ * Whether the fold of what the chat's answers drew on gives way over the
+ * box: over the agent's questions or a plan that waits, which take the
+ * person's eye, and when the last answer's own sources (its pile) are
+ * right above it.
+ */
+export const sourcesGiveWay = (
+  messages: ChatBodyValues["view"]["messages"],
+  asking: ChatBodyValues["asking"],
+  planWaits: boolean
+): boolean => {
+  const last = messages.findLast(({ role }) => role === "assistant");
+  const cites =
+    last !== undefined && "citations" in last && last.citations.length > 0;
+  return asking !== undefined || planWaits || cites;
+};
+
+/** The box to ask in, or the agent's questions in its place; `inColumn` on a chat's page, as wide as its thread. */
+export const ChatFooter = ({
+  chat,
+  inColumn = false,
+}: {
+  chat: ChatBodyValues;
+  inColumn?: boolean;
+}) => {
   const { t } = useLingui();
   const {
     builds,
@@ -285,9 +327,19 @@ export const ChatFooter = ({ chat }: { chat: ChatBodyValues }) => {
       ? undefined
       : { ...subject.about, name: subject.name };
   return (
-    <div {...stylex.props(styles.footer)}>
+    <div {...stylex.props(styles.footer, inColumn && styles.footerInColumn)}>
       <BuildsFailure read={builds} />
-      <ChatSources names={sourceNames} provenance={view.provenance} />
+      <ChatSources
+        names={sourceNames}
+        provenance={view.provenance}
+        sourcesShown={
+          !sourcesGiveWay(
+            view.messages,
+            asking,
+            pendingPlan(view.messages, view.running) !== undefined
+          )
+        }
+      />
       <AskOrCompose
         {...composer}
         agentModel={agentModelOf(agents, summary?.agentId)}

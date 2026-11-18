@@ -26,9 +26,11 @@ export interface CardFile {
 }
 
 const styles = stylex.create({
+  // A question's files stand on the person's side, at the end, with their bubble.
   cards: {
     display: "flex",
     flexWrap: "wrap",
+    justifyContent: "flex-end",
     gap: grasp.space2,
   },
 });
@@ -53,7 +55,7 @@ export const useAttachmentWords = (
   };
 };
 
-/** The cards of a question's files, as Grasp UI's Composer draws them; in the box, each with a way to take it off. */
+/** The cards of a question's files, as Grasp UI's Composer draws them: in the box, each with a way to take it off; sent, at the end with the person's bubble. */
 export const FileCards = ({
   files,
   onRemove,

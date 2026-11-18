@@ -4,6 +4,7 @@ import { Link, useRouter } from "@tanstack/react-router";
 import { use } from "react";
 import type { ReactNode } from "react";
 
+import type { CoreConnection } from "../core-connection.ts";
 import { Button } from "../grasp/button/index.ts";
 import {
   Empty,
@@ -110,6 +111,18 @@ const levels = { h1: 1, h2: 2, h3: 3 } as const satisfies Record<
 const offersChat = (heading: StateHeading, inFrame: boolean): boolean =>
   heading === "h1" && inFrame;
 
+/**
+ * Waits for core to answer, as the tab's connection reaches it; at once
+ * where the router has no connection to ask (a stand-in in a test).
+ */
+const reachCore = async (
+  core: Partial<Pick<CoreConnection, "api">> | undefined
+): Promise<void> => {
+  if (typeof core?.api === "function") {
+    await core.api();
+  }
+};
+
 /** The way on from a page that isn't there or didn't load: Chat, the product's home. */
 const GoToChat = () => {
   const { t } = useLingui();
@@ -208,6 +221,9 @@ export const ErrorState = ({
 }) => {
   const { t } = useLingui();
   const router = useRouter();
+  // Read as what it may be: a test's stand-in router has no connection.
+  const context: { core?: Partial<Pick<CoreConnection, "api">> } | undefined =
+    router.options.context;
   const inFrame = use(InFrame);
   const reach = useCoreReach();
   return (
@@ -218,6 +234,13 @@ export const ErrorState = ({
           window.location.reload();
           return;
         }
+        // Core first, while the button says it is trying: the page is read
+        // again only once core answers, so a page out of reach stays as it
+        // is and its button says it failed, rather than being drawn anew
+        // with a button that never showed it was busy. `api` cuts the
+        // connection's pause before its next attempt short, and gives up
+        // in a few seconds.
+        await reachCore(context?.core);
         // The page's loaders read from core once more; still failing, the
         // button says so.
         await router.invalidate();

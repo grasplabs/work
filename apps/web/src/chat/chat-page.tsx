@@ -119,7 +119,7 @@ export const ChatPage = ({
             boxOf(page.current)?.focus();
           }}
         />
-        <ChatFooter chat={chat} />
+        <ChatFooter chat={chat} inColumn />
       </section>
     </div>
   );

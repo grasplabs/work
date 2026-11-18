@@ -11,6 +11,7 @@ import { useLingui } from "@lingui/react/macro";
 import { useRouteContext } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 
+import { useCoreReach } from "../frame/page-failed.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { setActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
@@ -105,6 +106,24 @@ export const unsentChatFor = (
     ? unsent.id
     : undefined;
 
+/** What the box says under it about the question: waiting, late, or why it didn't go. */
+const questionNote = ({
+  waiting,
+  late,
+  problem,
+  words,
+}: {
+  waiting: boolean;
+  late: boolean;
+  problem: string | undefined;
+  words: { waiting: string; late: string };
+}): string | undefined => {
+  if (waiting) {
+    return words.waiting;
+  }
+  return late ? words.late : problem;
+};
+
 /** Whether `error` is a refusal core named with a code, rather than a dropped connection's own. */
 const codedByCore = (error: unknown): boolean =>
   error instanceof Error && "code" in error && typeof error.code === "string";
@@ -137,6 +156,11 @@ export const useAsk = (
   const [sendFailed, setSendFailed] = useState(false);
   // Core hasn't confirmed the question on its way within the deadline.
   const [late, setLate] = useState(false);
+  // A question on its way, from the press until core confirms it or it
+  // fails: while core is out of reach, the box says it waits.
+  const [pending, setPending] = useState(false);
+  const reach = useCoreReach();
+  const waiting = pending && reach !== undefined && reach !== "reachable";
   // Why the last question didn't go: core's own words for a refusal it
   // names; ours for anything else (a dropped connection's raw text).
   const [unsentWhy, setUnsentWhy] = useState<string>();
@@ -209,6 +233,7 @@ export const useAsk = (
       return !late;
     }
     sending.current = true;
+    setPending(true);
     setLate(false);
     setUnsentWhy(undefined);
     const named = chatMentionsOf(mentioned);
@@ -263,6 +288,7 @@ export const useAsk = (
     const settled = async (): Promise<boolean> => {
       const sent = await call;
       sending.current = false;
+      setPending(false);
       setLate(false);
       if (sent === undefined) {
         // The box keeps the question and says why it wasn't sent; a new chat
@@ -334,9 +360,15 @@ export const useAsk = (
       // Not before core has said which models there are: a question
       // would name none, and core refuses it.
       busy: busy || models === undefined,
-      failure: late
-        ? t`Grasp hasn't confirmed your question yet. It's kept here, and goes once Grasp answers.`
-        : (unsentWhy ?? failure),
+      failure: questionNote({
+        waiting,
+        late,
+        problem: unsentWhy ?? failure,
+        words: {
+          waiting: t`Waiting to send. Grasp is out of reach for now; your question goes once it's back.`,
+          late: t`Grasp hasn't confirmed your question yet. It's kept here, and goes once Grasp answers.`,
+        },
+      }),
       fileProblem,
       files: files.map(({ id, file }) => ({
         id,

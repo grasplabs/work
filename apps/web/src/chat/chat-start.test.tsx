@@ -19,6 +19,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import type { CoreReach } from "../core-connection.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { examplesFor } from "../make/examples.ts";
 import { activeChat } from "./active-chat.ts";
@@ -87,6 +88,7 @@ const shown = async (
     named,
     models = Promise.resolve(["openai/gpt-5"]),
     confirmed = Promise.resolve(true),
+    reach,
   }: {
     agents?: ChatAgent[];
     named?: string;
@@ -94,6 +96,8 @@ const shown = async (
     models?: Promise<string[]>;
     /** When core confirms a question sent. */
     confirmed?: Promise<unknown>;
+    /** Whether the tab's connection reaches core, as it says and changes it. */
+    reach?: { now: CoreReach; changed: Set<() => void> };
   } = {}
 ) => {
   const asked: string[] = [];
@@ -118,6 +122,19 @@ const shown = async (
     withSession: async <T,>(
       action: (session: { chats: typeof chats }) => Promise<T>
     ): Promise<T> => await action({ chats }),
+    ...(reach === undefined
+      ? {}
+      : {
+          get reach(): CoreReach {
+            return reach.now;
+          },
+          watchReach: (changed: () => void) => {
+            reach.changed.add(changed);
+            return () => {
+              reach.changed.delete(changed);
+            };
+          },
+        }),
   };
   const rootRoute = createRootRoute({ component: Outlet });
   const shell = createRoute({
@@ -345,6 +362,40 @@ describe("Chat's page from Make something", () => {
         "send chat-1 What waits on me today?",
       ],
     });
+  });
+
+  it("says a question waits while Grasp is out of reach, and no more once it went", async () => {
+    const confirmed = Promise.withResolvers<boolean>();
+    const reach: { now: CoreReach; changed: Set<() => void> } = {
+      now: "unreachable",
+      changed: new Set(),
+    };
+    await shown(undefined, undefined, { confirmed: confirmed.promise, reach });
+    await act(async () => {
+      typeIn(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+    const waiting = document.body.textContent?.includes("Waiting to send.");
+    await act(async () => {
+      reach.now = "reachable";
+      for (const changed of reach.changed) {
+        changed();
+      }
+      confirmed.resolve(true);
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({
+      waiting,
+      after: document.body.textContent?.includes("Waiting to send."),
+    }).toStrictEqual({ waiting: true, after: false });
   });
 
   it("says in its own words that a question the connection dropped wasn't sent, never the connection's, and keeps it", async () => {

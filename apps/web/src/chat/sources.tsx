@@ -58,12 +58,16 @@ const styles = stylex.create({
 export const ChatSources = ({
   provenance,
   names,
+  sourcesShown = true,
 }: {
   provenance: ChatProvenance;
   names: ReadonlyMap<string, SourceName>;
+  /** Whether the fold of sources shows: not where something nearer says it, or wants the eye. */
+  sourcesShown?: boolean;
 }) => {
   const { t } = useLingui();
-  const { sources, restricted } = provenance;
+  const { restricted } = provenance;
+  const sources = sourcesShown ? provenance.sources : [];
   const count = sources.length;
   if (count === 0 && !restricted) {
     return null;

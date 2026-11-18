@@ -522,6 +522,53 @@ describe(ChatThread, () => {
     ]);
   });
 
+  it("says one thinking line at a time: how long it thought, then that it works on, never Thinking again", async () => {
+    // It thought, then searched; the search answered and the turn runs on, no words yet.
+    await thread(
+      [
+        asked,
+        {
+          id: 2,
+          role: "assistant",
+          text: "",
+          citations: [],
+          code: [],
+          tools: [
+            {
+              callId: "search",
+              tool: "searchBrain",
+              codeBefore: 0,
+              input: { query: "expense policy" },
+            },
+          ],
+          reasoning: { text: "Look it up.", ms: 3400 },
+          end: "done",
+          at: "2026-10-27T09:00:05.000Z",
+        },
+        {
+          id: 3,
+          role: "result",
+          callId: "search",
+          text: "Returned:\n[]",
+          failed: false,
+          at: "2026-10-27T09:00:06.000Z",
+        },
+      ],
+      null,
+      [],
+      undefined,
+      false
+    );
+
+    expect({
+      thought: thoughtLine().line,
+      working: workingLine(),
+    }).toStrictEqual({
+      thought: "Thought for 3 seconds",
+      working: "Working on it",
+    });
+  });
+
   it("says under a code step each widget it made or changed on the dashboard, with the way there", async () => {
     const at = "2026-10-27T09:00:05.000Z";
     await thread(

@@ -242,7 +242,10 @@ const MemberActions = ({
         <SelectContent />
       </Select>
       <DropdownMenu>
+        {/* Off while a role change is sent and the list read again, as the
+            role is: nothing acts on a row that is about to change. */}
         <DropdownMenuTrigger
+          disabled={busy}
           icon={More}
           aria-label={t`Actions for ${who}`}
           size="xs"

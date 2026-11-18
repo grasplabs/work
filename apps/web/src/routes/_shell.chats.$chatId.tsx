@@ -1,5 +1,6 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
+import { loadThread } from "../chat/chat-body.tsx";
 import { ChatPage } from "../chat/chat-page.tsx";
 import { chatPresence } from "../chat/chat-presence.ts";
 import { loadChat } from "../chat/chat-watch.ts";
@@ -31,6 +32,8 @@ export const Route = createFileRoute("/_shell/chats/$chatId")({
         core,
         async (session) => await session.chats.summary(chatId)
       ),
+      // Its thread's code too, so the chat shows whole, never its shapes.
+      loadThread(),
     ]);
     if (followed.gone === true) {
       throw notFound();

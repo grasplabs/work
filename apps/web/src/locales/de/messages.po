@@ -17545,7 +17545,7 @@ msgstr "Wartet auf Sie"
 
 #: src/chat/use-ask.ts
 msgid "Waiting to send. Grasp is out of reach for now; your question goes once it's back."
-msgstr ""
+msgstr "Wartet auf das Senden. Grasp ist gerade nicht erreichbar; Ihre Frage geht raus, sobald es wieder geht."
 
 #: src/apps/draft-changes.tsx
 msgid "Waits for an admin to grant it"
