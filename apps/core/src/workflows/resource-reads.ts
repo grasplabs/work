@@ -448,7 +448,9 @@ const requireOwnEvidenceReadable = async (
  * entity reads rested on still one the company may read
  * (`readableMemoriesAs`): not taken by a person's erasure, retired, or
  * resting on a source erased or narrowed (GRA-1985). A test run recalls
- * nothing, so has nothing to check. Asked before a model, connection,
+ * nothing; what it holds of the Brain is the kept state it started from,
+ * held to what its writers read before what it returned is shown
+ * (candidate-runs.ts `candidateRunFor`). Asked before a model, connection,
  * App or files-write call, a decision, its output, and before a step's
  * state is written (sealed-run.ts `stepRecording`); its files are listed
  * and downloaded only while it holds (run-file-downloads.ts), and what its
@@ -472,7 +474,8 @@ export const requireResourceRunEvidenceReadable = async (
 
 /**
  * The same check for a run that ended, before what it returned or why it
- * failed is shown to anyone (resource-runs.ts `resultOf`): its record
+ * failed is shown to anyone (resource-runs.ts `resultOf`, and a test
+ * run's: candidate-runs.ts `candidateRunFor`): its record
  * holds what it recalled, so once the company may no longer read that,
  * the record is withheld as `brain.revoked`, its status and times shown.
  */
