@@ -162,20 +162,45 @@ const readReport = async (): Promise<{
   };
 };
 
-/** The `files` sync of `connectionId` as `report` shows it. */
-const filesOf = async (
+/** Every sync of `connectionId` as `report` shows it. */
+const rowsOf = async (
   report: BrainReport | null,
   connectionId: string
-): Promise<BrainSyncConnection> => {
+): Promise<BrainSyncConnection[]> => {
   const hash = await sha256Hex(connectionId);
-  const row = report?.sync?.connections.find(
-    (each) => each.connection === hash.slice(0, 12) && each.feed === "files"
+  return (report?.sync?.connections ?? []).filter(
+    (each) => each.connection === hash.slice(0, 12)
   );
+};
+
+/** The `feed` sync of `connectionId` as `report` shows it. */
+const syncOf = async (
+  report: BrainReport | null,
+  connectionId: string,
+  feed = "files"
+): Promise<BrainSyncConnection> => {
+  const rows = await rowsOf(report, connectionId);
+  const row = rows.find((each) => each.feed === feed);
   if (row === undefined) {
-    throw new Error(`Expected the files sync of ${connectionId}`);
+    throw new Error(`Expected the ${feed} sync of ${connectionId}`);
   }
   return row;
 };
+
+/** A mail that went away, as a sync item. */
+const gone = (id: string) => ({ gone: true, id, kind: "mail" });
+
+/**
+ * A folder of the `folders` sync whose change feed holds `id`, then
+ * nothing, and whose names-only listing (its daily relist) names it.
+ */
+const folder = (id: string) => ({
+  changes: {
+    "": feedPage([mail(id, `Mail ${id}`)], "f1"),
+    f1: feedPage([], "f1"),
+  },
+  names: { "": feedPage([{ ...mail(id, ""), content: null }], "n") },
+});
 
 const hourMs = 60 * 60 * 1000;
 const dayMs = 24 * hourMs;
@@ -184,6 +209,63 @@ describe("native sync, as Grasp's staff see it", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
+
+  it(
+    "counts a page a run's budget stopped as no failure, for a source that never failed",
+    setUpTime,
+    async () => {
+      // First in the file: no other test's source is due in these runs.
+      const person = await signedInApi(idp, "user");
+      const { connectionId, subject } = await connectSample(person, {
+        "": feedPage([mail("memo", "Memo")], "m1"),
+        m1: feedPage([], "m1"),
+      });
+      // Its folders list as none: that listing gets through too.
+      await world(subject, { places: [] });
+      const first = Date.now();
+      await syncAt(first);
+      // Runs at one time, each with a call more, until one claims a source
+      // of the connection and runs out of calls before its page is done.
+      const said: unknown[] = [];
+      const spy = vi.spyOn(console, "info").mockImplementation((...line) => {
+        said.push(line);
+      });
+      let stopped = false;
+      try {
+        for (let left = 1; left < 60 && !stopped; left += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- one run after another
+          await syncAt(first + 2 * 60_000, left);
+          stopped = said.some((line) => {
+            const text = JSON.stringify(line);
+            return (
+              text.includes("brain.sync.budget_spent") &&
+              text.includes(connectionId)
+            );
+          });
+        }
+      } finally {
+        spy.mockRestore();
+      }
+
+      const { report } = await readReport();
+      const rows = await rowsOf(report, connectionId);
+
+      expect({
+        stopped,
+        rows: rows.map(({ feed, failing, error }) => ({
+          feed,
+          failing,
+          error,
+        })),
+      }).toStrictEqual({
+        stopped: true,
+        rows: [
+          { feed: "files", failing: false, error: null },
+          { feed: "folders", failing: false, error: null },
+        ],
+      });
+    }
+  );
 
   it(
     "shows a connection that synced, one that fails and one that is behind, by code and time, with nothing of whose or what, and records the read",
@@ -230,9 +312,9 @@ describe("native sync, as Grasp's staff see it", () => {
         report: null,
       };
       const [okRow, brokenRow, lateRow] = await Promise.all([
-        filesOf(report, ok.connectionId),
-        filesOf(report, broken.connectionId),
-        filesOf(report, late.connectionId),
+        syncOf(report, ok.connectionId),
+        syncOf(report, broken.connectionId),
+        syncOf(report, late.connectionId),
       ]);
       const ago = (at: string | null): number | null =>
         at === null ? null : firstRun - Date.parse(at);
@@ -323,7 +405,7 @@ describe("native sync, as Grasp's staff see it", () => {
       await syncAt(failedAt + hourMs);
 
       const { report } = await readReport();
-      const row = await filesOf(report, connectionId);
+      const row = await syncOf(report, connectionId);
 
       expect({
         error: row.error,
@@ -337,6 +419,69 @@ describe("native sync, as Grasp's staff see it", () => {
         failing: false,
         synced: new Date(failedAt + hourMs).toISOString(),
       });
+    }
+  );
+
+  it(
+    "leaves out a place the folders listing dropped, with its failures",
+    setUpTime,
+    async () => {
+      const person = await signedInApi(idp, "user");
+      const { connectionId, subject } = await connectSample(person, {
+        "": feedPage([], "m1"),
+        m1: feedPage([], "m1"),
+      });
+      // Two folders, one of which fails every read.
+      await world(subject, {
+        places: ["inbox", "old"],
+        folders: { inbox: folder("inbox/a"), old: folder("old/b") },
+        failing: ["old"],
+      });
+      const now = Date.now();
+      await syncAt(now - 2 * dayMs);
+      const { report: earlier } = await readReport();
+      const before = await syncOf(earlier, connectionId, "folders");
+      // The folder deleted: the next day's listing drops it, after the run
+      // read it, and failed, once more.
+      await world(subject, { places: ["inbox"] });
+      await syncAt(now - 30_000);
+
+      const { report } = await readReport();
+      const after = await syncOf(report, connectionId, "folders");
+
+      expect({
+        before: before.failing,
+        after: {
+          failing: after.failing,
+          error: after.error,
+          behind: after.behindSince,
+          items: after.items,
+        },
+      }).toStrictEqual({
+        before: true,
+        after: { failing: false, error: null, behind: null, items: 1 },
+      });
+    }
+  );
+
+  it(
+    "counts only the items a sync holds, not one that went away",
+    setUpTime,
+    async () => {
+      const person = await signedInApi(idp, "user");
+      const { connectionId } = await connectSample(person, {
+        "": feedPage([mail("kept", "Kept"), mail("memo", "Memo")], "m1"),
+        m1: feedPage([gone("memo")], "m2"),
+        m2: feedPage([], "m2"),
+      });
+      const at = Date.now() + 3 * hourMs;
+      await syncAt(at);
+      await syncAt(at + 2 * 60_000);
+
+      const { report } = await readReport();
+      const row = await syncOf(report, connectionId);
+
+      expect(row.items).toBe(1);
     }
   );
 

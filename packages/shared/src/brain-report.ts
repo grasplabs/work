@@ -437,13 +437,14 @@ export const brainReportSchema = z.object({
    * Native sync (core's brain-sync.ts): how many sources' daily full
    * relist is past its day, where a reader list can be staler than the
    * day the sync promises; and each synced connection, sync by sync
-   * (`brainSyncConnectionSchema`). Core always sends it; optional only so
-   * the admin reads a core of an older release.
+   * (`brainSyncConnectionSchema`). Core always sends both; each is
+   * optional only so the admin reads a core of an older release, one
+   * without native sync or one whose report counts overdue relists alone.
    */
   sync: z
     .object({
       overdueRelists: count,
-      connections: z.array(brainSyncConnectionSchema),
+      connections: z.array(brainSyncConnectionSchema).optional(),
     })
     .optional(),
 });

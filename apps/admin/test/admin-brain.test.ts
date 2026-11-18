@@ -1068,6 +1068,27 @@ describe("how an organization's Brain is doing", () => {
     });
   });
 
+  it("reads the report of a core that counts overdue relists but lists no connections, and says its synced connections aren't available yet", async () => {
+    const between = await liveClient();
+    between.core.admin = heardSnapshot("Between");
+    between.core.brain = {
+      ...brainReport(1_000_000),
+      sync: { overdueRelists: 2 },
+    };
+
+    const { status, html } = await page(
+      `/organizations/${between.clientId}/brain`
+    );
+
+    expect({
+      status,
+      rest: textOf(recallPartOf(html)).includes("Words 40 0"),
+      notYet: textOf(syncedPartOf(html)).includes(
+        "This client’s release doesn’t report its synced connections yet."
+      ),
+    }).toStrictEqual({ status: 200, rest: true, notYet: true });
+  });
+
   it("says a core on an older release doesn't report its synced connections yet", async () => {
     const older = await liveClient();
     older.core.admin = heardSnapshot("Older");

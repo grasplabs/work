@@ -1362,18 +1362,24 @@ const overdueBy = (source: Source, now: number): number => {
 };
 
 /**
- * How many sources' relists are past their day now, for the staff's view
- * of the Brain (brain-report.ts): where it is not 0, a reader list can be
- * staler than a day.
+ * Whether a source's relist is past its day at `now`: the one under way
+ * by when it was due to start, else the next by when it is due
+ * (`overdueBy` in SQL).
+ */
+const relistLate = (now: number): SQL =>
+  sql`CASE WHEN ${brainSyncSources.relisting} = 1 THEN coalesce(${brainSyncSources.relistSince}, ${brainSyncSources.relistAt}) ELSE ${brainSyncSources.relistAt} END < ${now - relistMs}`;
+
+/**
+ * How many sources' relists are past their day now, a dropped place's
+ * left out (it is read no more): where it is not 0, a reader list can be
+ * staler than a day. The staff's view of the Brain counts the same in
+ * `syncForStaff`.
  */
 export const overdueRelists = async (env: Pick<Env, "DB">): Promise<number> => {
-  const late = Date.now() - relistMs;
   const row = await drizzle(env.DB)
     .select({ count: sql<number>`count(*)` })
     .from(brainSyncSources)
-    .where(
-      sql`CASE WHEN ${brainSyncSources.relisting} = 1 THEN coalesce(${brainSyncSources.relistSince}, ${brainSyncSources.relistAt}) ELSE ${brainSyncSources.relistAt} END < ${late}`
-    )
+    .where(and(eq(brainSyncSources.dropped, false), relistLate(Date.now())))
     .get();
   return row?.count ?? 0;
 };
@@ -1397,16 +1403,20 @@ const isoOf = (ms: number | null): string | null =>
   ms === null ? null : new Date(ms).toISOString();
 
 /**
- * Each synced connection, sync by sync, for the staff's view of the Brain
- * (brain-report.ts, GRA-1817), from its sources' rows alone: never whose
- * it is, its account, its places or anything it holds. The connection is
- * named by a hash of its ID; a dropped place counts no more. Two reads,
- * whatever the number of connections: the sources, grouped, and how many
- * items each holds.
+ * Native sync for the staff's view of the Brain (brain-report.ts,
+ * GRA-1817): each synced connection, sync by sync, from its sources' rows
+ * alone, never whose it is, its account, its places or anything it holds;
+ * and how many sources' relists are past their day, counted over the same
+ * rows. The connection is named by a hash of its ID; a dropped place
+ * counts no more. Two reads, whatever the number of connections: the
+ * sources, grouped, and how many items each holds in a store.
  */
-export const syncConnections = async (
+export const syncForStaff = async (
   env: Pick<Env, "DB">
-): Promise<BrainSyncConnection[]> => {
+): Promise<{
+  overdueRelists: number;
+  connections: BrainSyncConnection[];
+}> => {
   const db = drizzle(env.DB);
   const now = Date.now();
   const s = brainSyncSources;
@@ -1426,7 +1436,7 @@ export const syncConnections = async (
         behindSince: sql<
           number | null
         >`min(CASE WHEN ${s.dueAt} < ${now - pollMs} THEN ${s.dueAt} END)`,
-        relistOverdue: sql<number>`max(CASE WHEN ${s.relisting} = 1 THEN coalesce(${s.relistSince}, ${s.relistAt}) ELSE ${s.relistAt} END < ${now - relistMs})`,
+        relistsOverdue: sql<number>`sum(${relistLate(now)})`,
         failing: sql<number>`max(${s.lastErrorAt} IS NOT NULL AND (${s.lastSuccessAt} IS NULL OR ${s.lastErrorAt} > ${s.lastSuccessAt}))`,
         errorCode: sql<string | null>`${latestError(sql`e.last_error`)}`,
         errorAt: sql<number | null>`${latestError(sql`e.last_error_at`)}`,
@@ -1460,7 +1470,7 @@ export const syncConnections = async (
         items: itemsOf.get(`${row.connectionId}\n${row.feed}`) ?? 0,
         syncedAt: isoOf(row.syncedAt),
         behindSince: isoOf(row.behindSince),
-        relistOverdue: row.relistOverdue === 1,
+        relistOverdue: row.relistsOverdue > 0,
         error:
           row.errorCode === null || row.errorAt === null
             ? null
@@ -1469,11 +1479,14 @@ export const syncConnections = async (
       };
     })
   );
-  return connections.toSorted(
-    (one, other) =>
-      one.connection.localeCompare(other.connection) ||
-      one.feed.localeCompare(other.feed)
-  );
+  return {
+    overdueRelists: rows.reduce((sum, row) => sum + row.relistsOverdue, 0),
+    connections: connections.toSorted(
+      (one, other) =>
+        one.connection.localeCompare(other.connection) ||
+        one.feed.localeCompare(other.feed)
+    ),
+  };
 };
 
 /**

@@ -993,8 +993,8 @@ const Synced = ({ report }: { report: BrainReport }) => {
   const now = Date.parse(report.now);
   const description =
     "Each connection synced into the Brain, sync by sync, by a hash of the connection: never whose it is or what it holds.";
-  const { sync } = report;
-  if (sync === undefined) {
+  const connections = report.sync?.connections;
+  if (connections === undefined) {
     // A core of an older release, on a slower channel, doesn't send them.
     return (
       <Section description={description} title="Synced connections">
@@ -1006,7 +1006,6 @@ const Synced = ({ report }: { report: BrainReport }) => {
       </Section>
     );
   }
-  const { connections } = sync;
   if (connections.length === 0) {
     return (
       <Section description={description} title="Synced connections">
