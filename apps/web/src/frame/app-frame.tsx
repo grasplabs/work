@@ -16,8 +16,6 @@ import type { AppShellProps } from "../grasp/app-shell/index.ts";
 import { useGraspSidebar } from "../grasp/frame/grasp-sidebar.tsx";
 import { Sidebar } from "../grasp/sidebar/index.ts";
 import { Toaster } from "../grasp/toast/index.ts";
-import { TourLayer } from "../tour/tour-layer.tsx";
-import { useTour } from "../tour/tour-state.ts";
 import {
   FailingBanner,
   providersOf,
@@ -59,8 +57,7 @@ const typing = (target: EventTarget | null): boolean =>
 /**
  * Cmd/Ctrl+B folds or opens the sidebar, as the kit's sidebar did, unless
  * someone is typing (Bold, in a text box). Grasp UI's Sidebar has no key of
- * its own yet. The tour holds every key before it reaches the window
- * (tour/tour-layer.tsx).
+ * its own yet.
  */
 const useFoldKey = (toggle: () => void) => {
   const onKey = useEffectEvent((event: KeyboardEvent) => {
@@ -121,12 +118,6 @@ const shellPanelsOf = (
  * the page, Grasp's chat (`panels`), docked or floating over it. A page outside the shell for someone
  * signed in, such as a decision opened from a link, has the frame with none
  * of them.
- *
- * While Stephen gives the tour, from his question whether the person is
- * ready to its end, the frame is inert: no press or key reaches a page
- * under him, as in the prototype. His card stands outside it, so it is
- * what is left to use. His offer alone doesn't hold it: the person may
- * pass it by and ask their own question.
  */
 export const AppFrame = ({
   core,
@@ -184,12 +175,9 @@ export const AppFrame = ({
     providers: providersOf(core),
     ...(failing === undefined ? {} : { failing }),
   });
-  const { phase } = useTour();
-  const touring = phase === "opening" || phase === "running";
   return (
     <PersonTheme userId={identity.userId}>
-      {/* The chat inside it too, docked or floating, so the tour holds it as well. */}
-      <div inert={touring} {...stylex.props(styles.shell)}>
+      <div {...stylex.props(styles.shell)}>
         <AppShell
           banner={
             failingNow.length === 0 ? undefined : (
@@ -223,7 +211,6 @@ export const AppFrame = ({
         aria-label={t`Notifications`}
         pendingLabel={t`Still working`}
       />
-      <TourLayer identity={identity} />
     </PersonTheme>
   );
 };
