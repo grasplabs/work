@@ -1,5 +1,6 @@
 import { defineConnector } from "@grasp-os/connector-kit/connector";
 
+import { calendarSync } from "./calendar-sync.ts";
 import { calendarTools } from "./calendar.ts";
 import { chatTools } from "./chats.ts";
 import { documentTools } from "./documents.ts";
@@ -28,7 +29,9 @@ import { workbookTools } from "./workbook.ts";
  *
  * It syncs the person's own OneDrive for the Brain (onedrive-sync.ts), on
  * `Files.ReadWrite.All`, which covers the sync's reads (driveItem delta,
- * permissions and content all take `Files.Read`).
+ * permissions and content all take `Files.Read`), and their own calendar
+ * (calendar-sync.ts), on `Calendars.ReadWrite`, which covers calendarView
+ * delta (`Calendars.Read`).
  */
 export default defineConnector({
   name: "microsoft-365",
@@ -77,5 +80,5 @@ export default defineConnector({
     ...chatTools,
     ...meetingTools,
   ],
-  syncs: [onedriveSync],
+  syncs: [onedriveSync, calendarSync],
 });
