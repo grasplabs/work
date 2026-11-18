@@ -1,6 +1,5 @@
 import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
-import { Link } from "@tanstack/react-router";
+import { Link as RouterLink } from "@tanstack/react-router";
 
 import { Button } from "../grasp/button/index.ts";
 import {
@@ -11,9 +10,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "../grasp/empty/index.ts";
-import { Icon, Lock } from "../grasp/icons/index.ts";
-import { Text } from "../grasp/text/index.ts";
-import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { Lock } from "../grasp/icons/index.ts";
 import { useMemberAdmin } from "../use-member-admin.ts";
 
 // What an AI feature shows while the organization has no AI provider to
@@ -22,14 +19,6 @@ import { useMemberAdmin } from "../use-member-admin.ts";
 // providers). Never an error: a state with the way out. An admin who can
 // connect one gets the link; anyone else, Grasp staff included (who may
 // read but never change whose key pays), is told who can.
-
-const styles = stylex.create({
-  line: {
-    display: "flex",
-    alignItems: "center",
-    gap: grasp.space2,
-  },
-});
 
 /** Empty's size for each of the sizes callers ask for. */
 const emptySize = {
@@ -42,7 +31,7 @@ const emptySize = {
 const GoToAiProviders = () => {
   const { t } = useLingui();
   return (
-    <Button render={<Link to="/settings/ai-providers" />} size="sm">
+    <Button render={<RouterLink to="/settings/ai-providers" />} size="sm">
       {t`Go to AI providers`}
     </Button>
   );
@@ -50,7 +39,7 @@ const GoToAiProviders = () => {
 
 /**
  * Connect an AI provider: a link to Settings › AI providers for whoever can,
- * and who to ask for anyone else. `xs` in a thread or under a box to ask in.
+ * and who to ask for anyone else. `xs` in a thread. The box to ask in says it in its own band (chat-composer.tsx).
  */
 export const ConnectAiProvider = ({
   size = "sm",
@@ -76,30 +65,5 @@ export const ConnectAiProvider = ({
         </EmptyContent>
       ) : null}
     </Empty>
-  );
-};
-
-/**
- * Over a box to ask in, while there is no AI provider: what is missing, in
- * a line, with the way to Settings › AI providers for whoever can connect
- * one, and who to ask for anyone else.
- */
-export const ConnectAiProviderCover = () => {
-  const { t } = useLingui();
-  const canConnect = useMemberAdmin();
-  return (
-    <>
-      <div {...stylex.props(styles.line)}>
-        <Icon icon={Lock} />
-        <Text element="span" weight="medium">
-          {t`Connect an AI provider to start asking`}
-        </Text>
-      </div>
-      {canConnect ? (
-        <GoToAiProviders />
-      ) : (
-        <Text tone="muted">{t`Ask your admin to connect one.`}</Text>
-      )}
-    </>
   );
 };
