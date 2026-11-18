@@ -450,7 +450,7 @@ const getEvent = async (
   room: SyncRoom,
   id: string,
   select: string
-): Promise<Response | "late" | "large"> => {
+): Promise<Response | "late" | "failed"> => {
   try {
     return await fetchInRoom(
       room,
@@ -458,25 +458,28 @@ const getEvent = async (
       { headers: { prefer: eventPrefer } }
     );
   } catch {
-    // Larger than connect reads of one answer: the egress cut it off.
-    return "large";
+    // Cut off on its way (too large for connect, or the connection gone):
+    // the read failed, and the line it was for is left out.
+    return "failed";
   }
 };
 
 /**
  * How a recurring event's series repeats, from its master's `recurrence`,
- * read once a series a page, within the page's room: "full" or "late"
- * when it has none left (the kit leaves the occurrence to the next page).
- * A master Graph no longer has (404) repeats nothing; a read that fails
- * otherwise leaves the line out for this occurrence, without failing the
- * page or keeping that for the series.
+ * read once a series a page, within the page's room. The line is the only
+ * thing the read adds, as the feed already gave the event whole: a page
+ * that holds events and has no room left for the read answers "full" (the
+ * kit leaves the occurrence to the next page); otherwise a read that can't
+ * be made, runs late, or fails leaves the line out for this occurrence
+ * alone, never its text, and isn't kept for the series. A master Graph no
+ * longer has (404) repeats nothing.
  * https://learn.microsoft.com/en-us/graph/api/event-get?view=graph-rest-1.0
  */
 const repeatsOfSeries = async (
   room: SyncRoom,
   masters: Map<string, string>,
   event: Event
-): Promise<{ repeats: string } | "full" | "late"> => {
+): Promise<{ repeats: string } | "full"> => {
   const master = event.seriesMasterId;
   if (master === null || master === undefined || master === "") {
     return { repeats: "" };
@@ -485,17 +488,11 @@ const repeatsOfSeries = async (
   if (known !== undefined) {
     return { repeats: known };
   }
-  if (room.requests <= 0) {
-    return "full";
-  }
   if (!mayRequest(room)) {
-    return "late";
+    return room.empty ? { repeats: "" } : "full";
   }
   const response = await getEvent(room, master, "recurrence");
-  if (response === "late") {
-    return "late";
-  }
-  if (response === "large") {
+  if (response === "late" || response === "failed") {
     return { repeats: "" };
   }
   if (response.status === 404) {
@@ -596,7 +593,7 @@ const takePage = async (
         return [goneOf(event.id)];
       }
       const series = await repeatsOfSeries(room, masters, event);
-      if (series === "full" || series === "late") {
+      if (series === "full") {
         return series;
       }
       const item = itemOf(room, owner, event, series.repeats);

@@ -35,6 +35,8 @@ interface Calendar {
   events: Record<string, Event>;
   /** Events whose next read Graph fails once (a 500). */
   failOnce: Set<string>;
+  /** Events Graph reads on their own only after this many ms. */
+  slowEvents: number;
   /** A skip token Graph answers only after `ms`. */
   slow?: { skip: string; ms: number };
   /** Answers every request instead, when it answers. */
@@ -45,6 +47,7 @@ const calendar: Calendar = {
   feed: {},
   events: {},
   failOnce: new Set(),
+  slowEvents: 0,
   graphPage: 1000,
   honoursPageSize: true,
 };
@@ -53,6 +56,7 @@ const reset = (): void => {
   calendar.feed = {};
   calendar.events = {};
   calendar.failOnce = new Set();
+  calendar.slowEvents = 0;
   calendar.graphPage = 1000;
   calendar.honoursPageSize = true;
   calendar.slow = undefined;
@@ -137,6 +141,9 @@ const internet = fakeInternet(async (request, url) => {
     return feedPage(url, request.headers.get("prefer") ?? "");
   }
   if (url.hostname === graphHost && url.pathname.startsWith(`${eventsPath}/`)) {
+    if (calendar.slowEvents > 0) {
+      await scheduler.wait(calendar.slowEvents);
+    }
     return eventAnswer(url);
   }
   return Response.json({ error: { code: "NotFound" } }, { status: 404 });
@@ -547,6 +554,50 @@ describe("syncing a person's own calendar", () => {
       kept: ["orphan", "daily-1", "daily-2"],
     });
   });
+
+  it(
+    "keeps every event's text and time when its series' repeats are always late, without them",
+    { timeout: 180_000 },
+    async () => {
+      const connectionId = await connected();
+      calendar.events = {
+        weekly: event("weekly", {
+          recurrence: {
+            pattern: { type: "weekly", interval: 1, daysOfWeek: ["monday"] },
+            range: { type: "noEnd", startDate: "2026-11-02" },
+          },
+        }),
+      };
+      // Past the page's deadline, and past the 30 s connect waits.
+      calendar.slowEvents = 35_000;
+      calendar.feed[start] = {
+        events: [
+          event("w1", { seriesMasterId: "weekly" }),
+          event("w2", { seriesMasterId: "weekly" }),
+        ],
+        end: "t1",
+      };
+      const { items } = await readAll(connectionId, null);
+      expect(
+        items.map((item) => [item.id, linesOf(items, item.id)])
+      ).toStrictEqual([
+        [
+          "w1",
+          [
+            "Start: 2026-11-20T10:00:00.0000000 UTC",
+            "End: 2026-11-20T11:00:00.0000000 UTC",
+          ],
+        ],
+        [
+          "w2",
+          [
+            "Start: 2026-11-20T10:00:00.0000000 UTC",
+            "End: 2026-11-20T11:00:00.0000000 UTC",
+          ],
+        ],
+      ]);
+    }
+  );
 
   it("lists again when Graph no longer knows the token, or the window is a year old", async () => {
     const connectionId = await connected();
