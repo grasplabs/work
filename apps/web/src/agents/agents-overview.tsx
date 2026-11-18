@@ -30,6 +30,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "../grasp/empty/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
 import { AgentPerson, Plus } from "../grasp/icons/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -80,7 +81,115 @@ const styles = stylex.create({
   },
   words: { display: "grid", gap: grasp.space1, marginBlockStart: grasp.space3 },
   title: { display: "flex", alignItems: "center", gap: grasp.space2 },
+  // CONCEPT A, Night: the card is the agent's night, the words light on it.
+  night: {
+    position: "relative",
+    display: "grid",
+    gridTemplateRows: "1fr auto",
+    minHeight: "21rem",
+    isolation: "isolate",
+    colorScheme: "dark",
+    color: grasp.text,
+  },
+  nightFigure: {
+    position: "relative",
+    zIndex: 1,
+    display: "grid",
+    placeItems: "center",
+    paddingBlockStart: grasp.space6,
+  },
+  nightWords: {
+    position: "relative",
+    zIndex: 1,
+    display: "grid",
+    gap: grasp.space1,
+    padding: grasp.space5,
+  },
+  // CONCEPT B, Paper: the figure on the card's own paper, centred, nothing round it.
+  paper: {
+    display: "grid",
+    justifyItems: "center",
+    textAlign: "center",
+    gap: grasp.space1,
+    paddingBlock: grasp.space4,
+  },
+  paperFigure: { marginBlockEnd: grasp.space3 },
+  // CONCEPT C, Tile: a small night tile beside the words.
+  tileGrid: {
+    gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 22rem), 1fr))",
+  },
+  tile: { display: "flex", alignItems: "center", gap: grasp.space4 },
+  tileArt: {
+    position: "relative",
+    display: "grid",
+    flexShrink: 0,
+    placeItems: "center",
+    width: "6rem",
+    height: "6rem",
+    overflow: "hidden",
+    borderRadius: grasp.corner,
+    isolation: "isolate",
+  },
+  tileWords: { display: "grid", gap: grasp.space1, minWidth: 0 },
+  // CONCEPT D, Edge: the picture runs to the card's edges, the words under it with room.
+  edge: {
+    position: "relative",
+    display: "grid",
+    placeItems: "center",
+    aspectRatio: "16 / 11",
+    isolation: "isolate",
+  },
+  edgeWords: { display: "grid", gap: grasp.space1, padding: grasp.space4 },
+  // CONCEPT E, Portrait: a tall night card, the name large in the serif, the figure large and
+  // cropped by the card's corner.
+  portrait: {
+    position: "relative",
+    display: "grid",
+    alignContent: "start",
+    gap: grasp.space2,
+    minHeight: "20rem",
+    padding: grasp.space5,
+    overflow: "hidden",
+    isolation: "isolate",
+    colorScheme: "dark",
+    color: grasp.text,
+  },
+  portraitFigure: {
+    position: "absolute",
+    insetBlockEnd: "-3rem",
+    insetInlineEnd: "-3rem",
+    zIndex: 0,
+  },
+  portraitWords: {
+    position: "relative",
+    zIndex: 1,
+    display: "grid",
+    gap: grasp.space2,
+    maxWidth: "70%",
+  },
+  portraitFoot: {
+    position: "absolute",
+    insetBlockEnd: grasp.space5,
+    insetInlineStart: grasp.space5,
+    zIndex: 1,
+  },
 });
+
+/** CONCEPT: which card the page draws, from `?card=` in the address. */
+type Concept = "a" | "b" | "c" | "d" | "e";
+const conceptOf = (): Concept => {
+  const asked =
+    typeof window === "undefined"
+      ? null
+      : new URLSearchParams(window.location.search).get("card");
+  return asked === "a" ||
+    asked === "b" ||
+    asked === "c" ||
+    asked === "d" ||
+    asked === "e"
+    ? asked
+    : "a";
+};
 
 /** What a card shows of one agent. */
 interface Shown {
@@ -175,10 +284,9 @@ const shownOf = (
   }));
 };
 
-/** The card's picture: the agent on its own night, asleep while paused, turning to the pointer. */
-const Stage = ({ shown }: { shown: Shown }) => {
+/** CONCEPT: the pose a card's figure takes: asleep while paused, turning to a pointer on it. */
+const usePose = (shown: Shown) => {
   const [near, setNear] = useState(false);
-  const look = lookOf(shown);
   const paused = shown.managed?.state === "paused";
   let state: FigureState = "idle";
   if (paused) {
@@ -186,31 +294,22 @@ const Stage = ({ shown }: { shown: Shown }) => {
   } else if (near) {
     state = "listening";
   }
-  return (
-    <CardMedia>
-      <span
-        onPointerEnter={() => {
-          setNear(true);
-        }}
-        onPointerLeave={() => {
-          setNear(false);
-        }}
-        {...stylex.props(styles.stage)}
-      >
-        {/* Mounted anew when it pauses or wakes: its light is drawn for one or the other. */}
-        <AgentAura
-          bright={paused ? 0.45 : 1}
-          key={paused ? "asleep" : "awake"}
-          look={look}
-        />
-        <AgentFigure look={look} size="lg" state={state} />
-      </span>
-    </CardMedia>
-  );
+  return {
+    state,
+    paused,
+    near: {
+      onPointerEnter: () => {
+        setNear(true);
+      },
+      onPointerLeave: () => {
+        setNear(false);
+      },
+    },
+  };
 };
 
-/** The card's words: the name, a Paused badge while it rests, its job and the facts. */
-const Words = ({
+/** CONCEPT: the job, and the facts in a quiet line. */
+const JobAndFacts = ({
   shown,
   facts,
 }: {
@@ -218,17 +317,8 @@ const Words = ({
   facts: readonly string[];
 }) => {
   const { t } = useLingui();
-  const paused = shown.managed?.state === "paused";
   return (
-    <span {...stylex.props(styles.words)}>
-      <span {...stylex.props(styles.title)}>
-        <CardTitle>{shown.name}</CardTitle>
-        {paused ? (
-          <Badge size="sm" tone="neutral">
-            {t`Paused`}
-          </Badge>
-        ) : null}
-      </span>
+    <>
       <CardDescription>
         {shown.job === "" ? t`No job written yet` : shown.job}
       </CardDescription>
@@ -237,6 +327,125 @@ const Words = ({
           {facts.join(" · ")}
         </Text>
       )}
+    </>
+  );
+};
+
+/** CONCEPT: the name, with Paused beside it while it rests. */
+const NameLine = ({ shown }: { shown: Shown }) => {
+  const { t } = useLingui();
+  return (
+    <span {...stylex.props(styles.title)}>
+      <CardTitle>{shown.name}</CardTitle>
+      {shown.managed?.state === "paused" ? (
+        <Badge size="sm" tone="neutral">
+          {t`Paused`}
+        </Badge>
+      ) : null}
+    </span>
+  );
+};
+
+/** CONCEPT: one card's inside, drawn as concept `concept`. */
+const Concepted = ({
+  concept,
+  shown,
+  facts,
+}: {
+  concept: Concept;
+  shown: Shown;
+  facts: readonly string[];
+}) => {
+  const { t } = useLingui();
+  const look = lookOf(shown);
+  const { state, paused, near } = usePose(shown);
+  const aura = (
+    <AgentAura
+      bright={paused ? 0.45 : 1}
+      key={paused ? "asleep" : "awake"}
+      look={look}
+    />
+  );
+  if (concept === "a") {
+    return (
+      <span {...near} {...stylex.props(styles.night)}>
+        {aura}
+        <span {...stylex.props(styles.nightFigure)}>
+          <AgentFigure look={look} size="lg" state={state} />
+        </span>
+        <span {...stylex.props(styles.nightWords)}>
+          <NameLine shown={shown} />
+          <JobAndFacts facts={facts} shown={shown} />
+        </span>
+      </span>
+    );
+  }
+  if (concept === "b") {
+    return (
+      <span {...near} {...stylex.props(styles.paper)}>
+        <span {...stylex.props(styles.paperFigure)}>
+          <AgentFigure look={look} size="lg" state={state} />
+        </span>
+        <NameLine shown={shown} />
+        <JobAndFacts facts={facts} shown={shown} />
+      </span>
+    );
+  }
+  if (concept === "c") {
+    return (
+      <span {...near} {...stylex.props(styles.tile)}>
+        <span {...stylex.props(styles.tileArt)}>
+          {aura}
+          <AgentFigure look={look} size="md" state={state} />
+        </span>
+        <span {...stylex.props(styles.tileWords)}>
+          <NameLine shown={shown} />
+          <JobAndFacts facts={facts} shown={shown} />
+        </span>
+      </span>
+    );
+  }
+  if (concept === "d") {
+    return (
+      <>
+        <CardMedia>
+          <span {...near} {...stylex.props(styles.edge)}>
+            {aura}
+            <AgentFigure look={look} size="lg" state={state} />
+          </span>
+        </CardMedia>
+        <span {...stylex.props(styles.edgeWords)}>
+          <NameLine shown={shown} />
+          <JobAndFacts facts={facts} shown={shown} />
+        </span>
+      </>
+    );
+  }
+  return (
+    <span {...near} {...stylex.props(styles.portrait)}>
+      {aura}
+      <span {...stylex.props(styles.portraitFigure)}>
+        <AgentFigure look={look} size="xl" state={state} />
+      </span>
+      <span {...stylex.props(styles.portraitWords)}>
+        <Heading level={3} size="md">
+          {shown.name}
+        </Heading>
+        <CardDescription>
+          {shown.job === "" ? t`No job written yet` : shown.job}
+        </CardDescription>
+      </span>
+      <span {...stylex.props(styles.portraitFoot)}>
+        {paused ? (
+          <Badge size="sm" tone="neutral">
+            {t`Paused`}
+          </Badge>
+        ) : (
+          <Text element="span" size="xs" tone="quiet">
+            {facts.at(0) ?? ""}
+          </Text>
+        )}
+      </span>
     </span>
   );
 };
@@ -253,15 +462,14 @@ const AgentCard = ({
   facts: readonly string[];
 }) => {
   const { t } = useLingui();
-  const inside = (
-    <>
-      <Stage shown={shown} />
-      <Words facts={facts} shown={shown} />
-    </>
-  );
+  const concept = conceptOf();
+  const inside = <Concepted concept={concept} facts={facts} shown={shown} />;
+  // A, D and E run to the card's edges: their own room is inside them.
+  const padding = concept === "b" || concept === "c" ? "md" : "none";
   if (shown.managed !== undefined) {
     return (
       <CardLink
+        padding={padding}
         render={<Link params={{ agent: shown.id }} to="/agents/$agent" />}
       >
         {inside}
@@ -273,13 +481,14 @@ const AgentCard = ({
     return (
       <CardLink
         aria-label={t`Chat with ${name}`}
+        padding={padding}
         render={<Link search={{ agent: shown.id }} to="/" />}
       >
         {inside}
       </CardLink>
     );
   }
-  return <Card>{inside}</Card>;
+  return <Card padding={padding}>{inside}</Card>;
 };
 
 /** The Agents page's body: the agents the person may `usable`, and what an admin `managed`. */
@@ -321,7 +530,10 @@ export const AgentsOverview = ({
           )}
         </Empty>
       ) : (
-        <ul aria-label={t`Agents`} {...stylex.props(styles.grid)}>
+        <ul
+          aria-label={t`Agents`}
+          {...stylex.props(styles.grid, conceptOf() === "c" && styles.tileGrid)}
+        >
           {agents.map((agent) => (
             <li key={agent.id}>
               <AgentCard
