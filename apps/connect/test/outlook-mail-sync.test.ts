@@ -45,6 +45,8 @@ interface Mailbox {
   date: string;
   /** A path answered only after `ms`. */
   slow?: { path: string; ms: number };
+  /** Called once a listing page has been answered. */
+  listed?: () => void;
   /** Answers every request instead, when it answers. */
   answer?: (url: URL) => Response | undefined;
 }
@@ -81,28 +83,123 @@ const reset = (): void => {
   mailbox.graphPage = 1000;
   mailbox.date = graphDate;
   mailbox.slow = undefined;
+  mailbox.listed = undefined;
   mailbox.answer = undefined;
 };
 
-const ge = /^lastModifiedDateTime ge (?<since>\S+)$/u;
+/** Documented properties (resource pages), for the fake's `$select`. */
+const messageProperties = new Set([
+  "bccRecipients",
+  "body",
+  "bodyPreview",
+  "categories",
+  "ccRecipients",
+  "changeKey",
+  "conversationId",
+  "conversationIndex",
+  "createdDateTime",
+  "flag",
+  "from",
+  "hasAttachments",
+  "id",
+  "importance",
+  "inferenceClassification",
+  "internetMessageHeaders",
+  "internetMessageId",
+  "isDeliveryReceiptRequested",
+  "isDraft",
+  "isRead",
+  "isReadReceiptRequested",
+  "lastModifiedDateTime",
+  "parentFolderId",
+  "receivedDateTime",
+  "replyTo",
+  "sender",
+  "sentDateTime",
+  "subject",
+  "toRecipients",
+  "uniqueBody",
+  "webLink",
+]);
+const attachmentProperties = new Set([
+  "contentType",
+  "id",
+  "isInline",
+  "lastModifiedDateTime",
+  "name",
+  "size",
+  "contentBytes",
+  "contentId",
+  "contentLocation",
+]);
+const folderProperties = new Set([
+  "childFolderCount",
+  "displayName",
+  "id",
+  "isHidden",
+  "parentFolderId",
+  "totalItemCount",
+  "unreadItemCount",
+]);
 
 /**
- * One listing page: messages changed at or after the filter's time, oldest
- * first, those of one time in the mailbox's order, a page at a time with a
- * next link that carries Graph's own `$skip`.
+ * The fields a request's `$select` names, or a 400 when it names one the
+ * resource doesn't have, as Graph refuses it.
+ */
+const selected = (
+  url: URL,
+  known: ReadonlySet<string>
+): string[] | Response => {
+  const fields = (url.searchParams.get("$select") ?? "")
+    .split(",")
+    .filter(Boolean);
+  return fields.every((name) => known.has(name))
+    ? fields
+    : Response.json(
+        { error: { code: "RequestBroker--ParseUri" } },
+        { status: 400 }
+      );
+};
+
+/** Only the fields asked for (and `@odata.type`), as Graph answers `$select`. */
+const only = (
+  each: Record<string, unknown>,
+  fields: readonly string[]
+): Record<string, unknown> =>
+  fields.length === 0
+    ? each
+    : Object.fromEntries(
+        Object.entries(each).filter(
+          ([name]) => fields.includes(name) || name === "@odata.type"
+        )
+      );
+
+const filterPattern = /^lastModifiedDateTime (?<op>gt|eq) (?<time>\S+)$/u;
+
+/**
+ * One listing page: messages changed after (`gt`) or at (`eq`) the
+ * filter's time, oldest first, those of one time in the mailbox's order,
+ * a page at a time with a next link that carries Graph's own `$skip`.
  */
 const listing = (url: URL): Response => {
-  const since = ge.exec(url.searchParams.get("$filter") ?? "")?.groups?.since;
+  const fields = selected(url, messageProperties);
+  if (fields instanceof Response) {
+    return fields;
+  }
+  const filter = filterPattern.exec(url.searchParams.get("$filter") ?? "");
+  const { op, time = "" } = filter?.groups ?? {};
   const top = Math.min(
     Number(url.searchParams.get("$top") ?? 10),
     mailbox.graphPage
   );
   const skip = Number(url.searchParams.get("$skip") ?? 0);
   const listed = mailbox.messages
-    .filter(
-      ({ lastModifiedDateTime }) =>
-        since === undefined || lastModifiedDateTime >= since
-    )
+    .filter(({ lastModifiedDateTime }) => {
+      if (op === "gt") {
+        return lastModifiedDateTime > time;
+      }
+      return op === "eq" ? lastModifiedDateTime === time : true;
+    })
     .map((message, index) => ({ message, index }))
     .toSorted(
       (a, b) =>
@@ -111,47 +208,57 @@ const listing = (url: URL): Response => {
         ) || a.index - b.index
     )
     .map(({ message }) => message);
-  // Only the fields asked for, as Graph answers `$select`.
-  const fields = (url.searchParams.get("$select") ?? "").split(",");
   const value = listed
     .slice(skip, skip + top)
-    .map((each) =>
-      Object.fromEntries(
-        Object.entries(each).filter(([name]) => fields.includes(name))
-      )
-    );
+    .map((each) => only(each, fields));
   const next = new URL(url);
   next.searchParams.set("$skip", String(skip + top));
-  return Response.json(
+  const answer = Response.json(
     {
       value,
       ...(skip + top < listed.length ? { "@odata.nextLink": next.href } : {}),
     },
     { headers: { date: mailbox.date } }
   );
+  mailbox.listed?.();
+  return answer;
 };
 
 const notFound = (): Response =>
   Response.json({ error: { code: "ErrorItemNotFound" } }, { status: 404 });
 
-const folderAnswer = (name: string): Response => {
+const folderAnswer = (url: URL, name: string): Response => {
+  const fields = selected(url, folderProperties);
+  if (fields instanceof Response) {
+    return fields;
+  }
   const id = wellKnown[name] ?? name;
   return Object.hasOwn(parents, id)
     ? Response.json({ id, parentFolderId: parents[id] })
     : notFound();
 };
 
-const messageAnswer = (rest: string[]): Response => {
+const messageAnswer = (url: URL, rest: string[]): Response => {
   const [id = "", part, attachment, value] = rest;
   const message = mailbox.messages.find((each) => each.id === id);
   if (message === undefined) {
     return notFound();
   }
   if (part === undefined) {
-    return Response.json(message);
+    const fields = selected(url, messageProperties);
+    return fields instanceof Response
+      ? fields
+      : Response.json(only(message, fields));
   }
   if (attachment === undefined) {
-    return Response.json({ value: mailbox.attachments[id] ?? [] });
+    const fields = selected(url, attachmentProperties);
+    return fields instanceof Response
+      ? fields
+      : Response.json({
+          value: (mailbox.attachments[id] ?? []).map((each) =>
+            only(each, fields)
+          ),
+        });
   }
   const content = mailbox.contents[`${id}/${attachment}`];
   return value === "$value" && content !== undefined
@@ -175,10 +282,10 @@ const internet = fakeInternet(async (_request, url) => {
     return listing(url);
   }
   if (path.startsWith("/v1.0/me/mailFolders/")) {
-    return folderAnswer(path.slice("/v1.0/me/mailFolders/".length));
+    return folderAnswer(url, path.slice("/v1.0/me/mailFolders/".length));
   }
   if (path.startsWith(`${messagesPath}/`)) {
-    return messageAnswer(path.slice(messagesPath.length + 1).split("/"));
+    return messageAnswer(url, path.slice(messagesPath.length + 1).split("/"));
   }
   return notFound();
 });
@@ -476,6 +583,88 @@ describe("syncing a person's own mailbox", () => {
       mailbox.slow = undefined;
       const { items } = await readAll(connectionId, first.cursor);
       expect(items.map(({ id }) => id)).toStrictEqual(["next"]);
+    }
+  );
+
+  it("never goes on by Graph's position: a message that changes between two listing pages hides none", async () => {
+    const connectionId = await connected();
+    // Graph lists three at a time.
+    mailbox.graphPage = 3;
+    mailbox.messages = Array.from({ length: 6 }, (_, index) =>
+      message(`x${index + 1}`, `2026-11-10T09:0${index + 1}:00Z`)
+    );
+    // Once the first page is answered, x1 changes: everything after it
+    // moves up one place.
+    mailbox.listed = () => {
+      mailbox.listed = undefined;
+      mailbox.messages = [
+        ...mailbox.messages.slice(1),
+        message("x1", "2026-11-10T09:09:00Z", { changeKey: "x1-2" }),
+      ];
+    };
+    const { items } = await readAll(connectionId, null);
+    expect(new Set(items.map(({ id }) => id))).toStrictEqual(
+      new Set(["x1", "x2", "x3", "x4", "x5", "x6"])
+    );
+  });
+
+  it("goes on inside a second's messages by their IDs, whatever order Graph lists them in", async () => {
+    const connectionId = await connected();
+    const large = "x".repeat(3 * 1024 * 1024);
+    const big = (id: string) =>
+      message(id, "2026-11-10T09:00:00Z", {
+        body: { contentType: "text", content: large },
+      });
+    mailbox.messages = [big("a"), big("b"), big("c"), big("d")];
+    // Two such messages fill a page.
+    const first = await read(connectionId, null);
+    // Graph now lists the same second's messages in another order.
+    mailbox.messages = [big("c"), big("d"), big("b"), big("a")];
+    const { items } = await readAll(connectionId, first.cursor);
+    expect({
+      first: first.items.map(({ id }) => id),
+      rest: items.map(({ id }) => id),
+    }).toStrictEqual({ first: ["a", "b"], rest: ["c", "d"] });
+  });
+
+  it(
+    "leaves a message whose file is late to the next page once the page holds one, file and all",
+    { timeout: 120_000 },
+    async () => {
+      const connectionId = await connected();
+      mailbox.messages = [
+        message("a", "2026-11-10T09:00:00Z"),
+        message("b", "2026-11-10T09:01:00Z", { hasAttachments: true }),
+      ];
+      mailbox.attachments.b = [
+        {
+          "@odata.type": "#microsoft.graph.fileAttachment",
+          id: "f",
+          name: "f.pdf",
+          size: 4,
+        },
+      ];
+      mailbox.contents = { "b/f": "%PDF" };
+      mailbox.slow = {
+        path: `${messagesPath}/b/attachments/f/$value`,
+        ms: 35_000,
+      };
+      const first = await read(connectionId, null);
+      mailbox.slow = undefined;
+      const next = await read(connectionId, first.cursor);
+      expect({
+        first: first.items.map(({ id }) => id),
+        next: next.items.map((item) => [
+          item.id,
+          !item.gone && item.content !== null,
+        ]),
+      }).toStrictEqual({
+        first: ["a"],
+        next: [
+          ["b", true],
+          ["b/f", true],
+        ],
+      });
     }
   );
 
