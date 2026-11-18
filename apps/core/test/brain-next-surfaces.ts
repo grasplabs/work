@@ -10432,6 +10432,22 @@ export const storeProbes = {
         ...of(stranger(), []),
         reason: markers.join(" "),
       }),
+      // With events, under the key the store's events are under, so no
+      // later pass's planted event is dropped: tags made of the markers,
+      // and tags that are the markers, which no tag can be.
+      await erase("events under tags made of the markers", {
+        ...of(stranger(), []),
+        events: {
+          keyId: await eventKeyId(),
+          who: markers.map((marker) =>
+            marker.replaceAll(/[^0-9a-f]/gu, "").padEnd(64, "0")
+          ),
+        },
+      }),
+      await erase("events under tags that are the markers", {
+        ...of(stranger(), []),
+        events: { keyId: await eventKeyId(), who: markers },
+      }),
     ];
   },
   // No reader either: the host names the writer. Its answer is a time and

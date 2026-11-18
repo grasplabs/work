@@ -37,6 +37,30 @@ import type { NewEvent } from "./contract.ts";
 //   (`expireEvents`, on the host's clock), and one dated later than when
 //   it is kept is kept as of then, so none outlives the window.
 
+/**
+ * The most bytes a string bound to one of Durable Object SQLite's
+ * statements may hold: 2 MB, its limit on a string, BLOB or row
+ * (developers.cloudflare.com/durable-objects/platform/limits/).
+ */
+const sqliteStringMaxBytes = 2_000_000;
+
+/**
+ * Most tags one statement binds as a JSON list: each is 64 hex digits, and
+ * 67 bytes in the list with its quotes and comma, so this many stay well
+ * inside `sqliteStringMaxBytes`. A longer list is written a slice at a
+ * time, in the same transaction: no erasure is refused for its size.
+ */
+export const tagsPerStatement = Math.floor(sqliteStringMaxBytes / 128);
+
+/** `tags` in slices of `tagsPerStatement`, each as one JSON list. */
+export const tagSlices = (tags: readonly string[]): string[] => {
+  const slices: string[] = [];
+  for (let start = 0; start < tags.length; start += tagsPerStatement) {
+    slices.push(JSON.stringify(tags.slice(start, start + tagsPerStatement)));
+  }
+  return slices;
+};
+
 /** An hour, in milliseconds: what an event's time is kept to. */
 const hourMs = 60 * 60 * 1000;
 
@@ -126,17 +150,18 @@ export const eraseEventsIn = (
   at: number
 ): void => {
   underKey(sql, keyId);
-  const listed = JSON.stringify(who);
-  sql.exec(
-    "DELETE FROM events WHERE who IN (SELECT value FROM json_each(?))",
-    listed
-  );
-  sql.exec(
-    `INSERT INTO closed_event_tags (who, at)
-    SELECT value, ? FROM json_each(?)
-    WHERE true
-    ON CONFLICT (who) DO UPDATE SET at = max(at, excluded.at)`,
-    at,
-    listed
-  );
+  for (const listed of tagSlices(who)) {
+    sql.exec(
+      "DELETE FROM events WHERE who IN (SELECT value FROM json_each(?))",
+      listed
+    );
+    sql.exec(
+      `INSERT INTO closed_event_tags (who, at)
+      SELECT value, ? FROM json_each(?)
+      WHERE true
+      ON CONFLICT (who) DO UPDATE SET at = max(at, excluded.at)`,
+      at,
+      listed
+    );
+  }
 };

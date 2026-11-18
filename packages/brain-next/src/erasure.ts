@@ -15,7 +15,7 @@ import type {
   PersonEvents,
 } from "./contract.ts";
 import { foldIdentifier } from "./entities.ts";
-import { eraseEventsIn } from "./events.ts";
+import { eraseEventsIn, tagSlices } from "./events.ts";
 import { hashOf, releaseVectors } from "./files.ts";
 import {
   deleteMemories,
@@ -665,13 +665,19 @@ const applyPersonEntry = (
     applyPerson(sql, { key, subject: entry.subject }, found);
   }
   if (events !== undefined) {
-    sql.exec(
-      `INSERT OR IGNORE INTO person_erasure_events (erasure, who, key_id)
-      SELECT ?, value, ? FROM json_each(?)`,
-      key,
-      events.keyId,
-      JSON.stringify(events.who)
-    );
+    // Kept only until its entry is written (`confirm`), which a replay's
+    // entry already is.
+    if (!confirmed) {
+      for (const listed of tagSlices(events.who)) {
+        sql.exec(
+          `INSERT OR IGNORE INTO person_erasure_events (erasure, who, key_id)
+          SELECT ?, value, ? FROM json_each(?)`,
+          key,
+          events.keyId,
+          listed
+        );
+      }
+    }
     eraseEventsIn(sql, events, entry.at);
   }
 };
@@ -1315,7 +1321,15 @@ const confirm = async (
     );
   }
   await inTime(bucket.put(key, body));
-  storage.sql.exec("UPDATE erasures SET confirmed = 1 WHERE key = ?", key);
+  // The entry holds the events' tags now: their working rows go with the
+  // confirmation, in one transaction.
+  storage.transactionSync(() => {
+    storage.sql.exec("UPDATE erasures SET confirmed = 1 WHERE key = ?", key);
+    storage.sql.exec(
+      "DELETE FROM person_erasure_events WHERE erasure = ?",
+      key
+    );
+  });
 };
 
 /**

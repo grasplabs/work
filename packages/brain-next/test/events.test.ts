@@ -15,6 +15,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { tagsPerStatement } from "../src/events.ts";
 import { exportSettled, tick } from "./export-reads.ts";
 import type { Store } from "./export-reads.ts";
 import { copyOf, restore } from "./store-copy.ts";
@@ -62,12 +63,52 @@ const aTag = (): string => crypto.randomUUID().replaceAll("-", "").repeat(2);
  * A person's erasure in the shared store, of someone with no card, with
  * the events under `who` (their tag in one team), made under `under`.
  */
-const erasedTags = async (who: string, under = keyId): Promise<void> => {
+const erasedTags = async (
+  who: string | string[],
+  under = keyId
+): Promise<void> => {
   await shared().erasePersonShared({
     person: `person-${crypto.randomUUID()}`,
     identifiers: [],
     reason: "person_erased",
-    events: { keyId: under, who: [who] },
+    events: { keyId: under, who: typeof who === "string" ? [who] : who },
+  });
+};
+
+/** How many working rows of erasures' event tags the shared store keeps. */
+const workingTags = async (): Promise<number> =>
+  await runInDurableObject(
+    shared(),
+    (_instance, state) =>
+      state.storage.sql
+        .exec<{ rows: number }>(
+          "SELECT count(*) AS rows FROM person_erasure_events"
+        )
+        .one().rows
+  );
+
+/** The shared store's ledger writes failing (`broken`), or working again. */
+const ledgerBroken = async (broken: boolean): Promise<void> => {
+  const bucket = env.BRAIN_OBJECTS;
+  await runInDurableObject(shared(), (instance) => {
+    const objectEnv: unknown = Reflect.get(instance, "env");
+    if (typeof objectEnv !== "object" || objectEnv === null) {
+      throw new TypeError("The store has no env");
+    }
+    Reflect.set(instance, "env", {
+      ...objectEnv,
+      BRAIN_OBJECTS: broken
+        ? new Proxy(bucket, {
+            get: (target, name): unknown =>
+              name === "put"
+                ? async () => {
+                    await Promise.resolve();
+                    throw new Error("Broken by the test");
+                  }
+                : Reflect.get(target, name, target),
+          })
+        : bucket,
+    });
   });
 };
 
@@ -360,6 +401,78 @@ describe("events", () => {
     expect({ replayed, after: await stepsFor(team) }).toStrictEqual({
       replayed: [],
       after: ["deals.kept"],
+    });
+  });
+
+  it("erase as many tags as the company has teams, past what one statement binds, keep none of them once the erasure is written, and replay them all after a restore", async () => {
+    const team = `team:${crypto.randomUUID()}`;
+    // Past what one statement binds twice over: as one list, more than
+    // Durable Object SQLite's 2 MB string.
+    const tags = Array.from({ length: tagsPerStatement * 2 + 2 }, () => aTag());
+    const first = tags[0] ?? "";
+    const last = tags.at(-1) ?? "";
+    await shared().addEvents({
+      keyId,
+      events: [
+        eventOf(team, "deals.first", undefined, first),
+        eventOf(team, "deals.last", undefined, last),
+      ],
+    });
+    const before = await copyOf(shared());
+    await erasedTags(tags);
+    const left = await workingTags();
+    await restore(shared(), before);
+    await shared().addEvents({
+      keyId,
+      events: [
+        eventOf(team, "deals.late", undefined, first),
+        eventOf(team, "deals.late", undefined, last),
+      ],
+    });
+
+    expect({ left, steps: await stepsFor(team) }).toStrictEqual({
+      left: 0,
+      steps: [],
+    });
+  });
+
+  it("keep an erasure's tags until its ledger entry is written, and write them from those when the first write failed", async () => {
+    const team = `team:${crypto.randomUUID()}`;
+    const erased = aTag();
+    await shared().addEvents({
+      keyId,
+      events: [eventOf(team, "deals.update", undefined, erased)],
+    });
+    const before = await copyOf(shared());
+    await ledgerBroken(true);
+    let failed: unknown;
+    try {
+      await erasedTags(erased);
+    } catch (error) {
+      failed = error instanceof Error ? error.message : error;
+    } finally {
+      await ledgerBroken(false);
+    }
+    const whileUnwritten = await workingTags();
+    // The tick writes the entry the erasure couldn't, from those rows.
+    await tick(shared());
+    const written = await workingTags();
+    await restore(shared(), before);
+    await shared().addEvents({
+      keyId,
+      events: [eventOf(team, "deals.late", undefined, erased)],
+    });
+
+    expect({
+      failed,
+      whileUnwritten,
+      written,
+      steps: await stepsFor(team),
+    }).toStrictEqual({
+      failed: "The Brain could not record the erasure: erase it again",
+      whileUnwritten: 1,
+      written: 0,
+      steps: [],
     });
   });
 });

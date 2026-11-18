@@ -1491,20 +1491,16 @@ export const newEventsSchema = z.strictObject({
 export type NewEvents = z.infer<typeof newEventsSchema>;
 
 /**
- * Most of a person's event tags one erasure names: one per team of the
- * company, as the host keeps them. A bound on one request, not on what
- * anyone keeps.
- */
-export const eventTagsPerErasureMax = 10_000;
-
-/**
  * A person's events to erase with them (`SharedPersonErasure.events`):
  * their tag in each team, under the host's key `keyId` (as
- * `NewEvents.keyId`).
+ * `NewEvents.keyId`). As many as the company has teams: an erasure is
+ * never refused for its size. The store writes them a slice at a time
+ * (events.ts `tagsPerStatement`); the only bound is the transport's, a
+ * Workers RPC message (32 MiB, some 400,000 tags).
  */
 export const personEventsSchema = z.strictObject({
   keyId: macSchema,
-  who: z.array(macSchema).min(1).max(eventTagsPerErasureMax),
+  who: z.array(macSchema).min(1),
 });
 export type PersonEvents = z.infer<typeof personEventsSchema>;
 

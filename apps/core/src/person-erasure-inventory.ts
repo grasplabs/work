@@ -700,7 +700,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     kept: "an erasure's own record: tags opaque without core's key, kept 90 days so a late write can't bring erased events back",
   },
   "brainStore.person_erasure_events": {
-    kept: "an erasure's own record: the tags of the events a person's erasure took, opaque without core's key, so a replay after a restore takes them again",
+    kept: "an erasure's own working record: the tags of the events a person's erasure took, opaque without core's key, deleted once its ledger entry holds them",
   },
   "brainStore.event_key": {
     none: "an id of core's key the events are made under, never a person",
