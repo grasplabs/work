@@ -72,6 +72,7 @@ import type {
   MemoryChangeOutcome,
   MemoryId,
   MemoryType,
+  NewEntity,
   ExportStatus,
   Finding,
   KeyState,
@@ -124,6 +125,7 @@ import type {
 import { brainSourceErrors, firstLineOf } from "@grasp-os/shared/brain-sources";
 import { brainConnectionIdSchema } from "@grasp-os/shared/connect";
 import { withinTime } from "@grasp-os/shared/deadline";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -137,6 +139,7 @@ import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import type { ModelErrorCode } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import { holdsKnownCredential, redact } from "@grasp-os/shared/redact";
 import { skillErrors } from "@grasp-os/shared/skills";
 import { sourceReaderSchema } from "@grasp-os/shared/source-readers";
 import { drizzle } from "drizzle-orm/d1";
@@ -4004,7 +4007,76 @@ export type Handed =
       readers: SourceReaders;
       /** The group it is added in (`addSource`): none for most. */
       group?: SourceRef;
+      /**
+       * What its producer's own code files on the version as it is added
+       * (`fileOnVersion`), quoting `text`: only for a text always within a
+       * source's bound, as `whenTooLarge` says none of it. None for most.
+       */
+      filed?: Filed;
     };
+
+/**
+ * Memories a producer's own code draws from a source's text, never a
+ * model's: the entities they name, and each memory with the words of the
+ * text it quotes. The system's word, as the producer wrote them.
+ */
+export interface Filed {
+  entities: NewEntity[];
+  memories: {
+    about: string;
+    attribute?: string;
+    object?: string;
+    value?: string;
+    type: MemoryType;
+    statement: string;
+    quote: string;
+  }[];
+}
+
+/**
+ * Files `filed` on version `version` of `source`, which `readers` may
+ * read: memories of the shared store resting on that version, readable by
+ * no more than its readers (the store holds them to the version's), under
+ * one change of that version, so filing it again adds nothing twice. It
+ * marks the version as drawn from, so what was filed on an earlier version
+ * of the source ends, and stays as history. Refused by the Brain for a
+ * version erased or removed meanwhile, or a quote the version doesn't say.
+ * Never for what one person alone may read: that is drawn in their own
+ * store.
+ */
+const fileOnVersion = async (
+  env: BrainEnv,
+  {
+    source,
+    version,
+    readers,
+    filed,
+  }: {
+    source: SourceRef;
+    version: number;
+    readers: SourceReaders;
+    filed: Filed;
+  }
+): Promise<void> => {
+  if (readers.kind === "owner") {
+    throw new Error(
+      "Refused: what one person alone may read is filed in their own store"
+    );
+  }
+  const key = sourceKeyOf(source);
+  await brain(env).addMemories({
+    // A source's key may take the whole length a change may: its hash.
+    change: `filed:${version}:${await sha256Hex(key)}`,
+    access: accessOf(readers),
+    entities: filed.entities,
+    memories: filed.memories.map(({ quote, ...memory }) => ({
+      ...memory,
+      speaker: { kind: "system" },
+      basis: { kind: "source", source: key, version, quote },
+    })),
+    extracted: { source: key, version },
+  });
+};
 
 /**
  * Why a noted source is not handed over after all, one of a fixed set:
@@ -4195,6 +4267,14 @@ const handOver = async (
     (await erasureBegun(env, readers.data.personId))
   ) {
     return await refused("erased", readers.data);
+  }
+  if (handed.filed !== undefined) {
+    await fileOnVersion(env, {
+      source,
+      version,
+      readers: readers.data,
+      filed: handed.filed,
+    });
   }
   const added: HandOverResult = { kind: "added", version };
   await attempt.ended(added);
@@ -6203,6 +6283,64 @@ const codeRememberSchema = z.strictObject({
   statement: memoryText(statementMaxLength),
 });
 
+/**
+ * Whether identifier `value` is a credential by its own shape: a known
+ * key format (`holdsKnownCredential`), or a link (a URL with a host) that
+ * `redact` signs or grants away. Never by a name before it: a `ref`'s
+ * system (`session:…`, `token:ETH`) or an id's own words
+ * (`checkout_session:cs_test_…`) are ordinary ids. An id shaped like a
+ * key (`sk-` and sixteen more letters, digits or dashes) is refused
+ * whatever words it spells, and so is a link with a `code`: neither can
+ * be told from a credential without a rule of our own.
+ */
+const credentialShaped = ({ type, value }: Identifier): boolean => {
+  // A ref's own system names where the id lives, never a credential.
+  const id = type === "ref" ? value.slice(value.indexOf(":") + 1) : value;
+  const link = URL.canParse(id) && new URL(id).host !== "";
+  return holdsKnownCredential(id) || (link && redact(id) !== id);
+};
+
+/**
+ * Why code may not remember `request` (a valid `codeRememberSchema`
+ * request) as it is, as `details.issues` say it (GRA-2003), each by its
+ * path, never its value; none when it may:
+ * - each identifier that is a credential by its own shape
+ *   (`credentialShaped`): an identifier finds an entity, so it is never
+ *   redacted, which would move the memory; refused instead, so a
+ *   credential is never kept as one;
+ * - each name `redact` changes, on an entity given no `id` and no
+ *   identifier: such an entity is found by its names (linking.ts
+ *   `linkedByName`), and two names redacted alike (`Token: ETH`, `Token:
+ *   BTC`) would be one entity. Refused, so two things are never merged;
+ *   given an `id` or an identifier, the name is kept redacted.
+ */
+export const credentialIssues = (request: unknown): string[] => {
+  const parsed = codeRememberSchema.safeParse(request);
+  if (!parsed.success) {
+    return [];
+  }
+  const { id, names, identifiers } = parsed.data.about;
+  const matchedByName = id === undefined && identifiers.length === 0;
+  return [
+    ...identifiers.flatMap((identifier, index) =>
+      credentialShaped(identifier)
+        ? [
+            `about.identifiers.${index}: looks like a password, key, token or signed link, which the Brain never keeps as an identifier. Leave it out, or identify the entity another way.`,
+          ]
+        : []
+    ),
+    ...(matchedByName
+      ? names.flatMap((name, index) =>
+          redact(name) === name
+            ? []
+            : [
+                `about.names.${index}: holds what looks like a password, key or token, and an entity with no id or identifier is found by its names. Leave it out of the name, or give the entity its id or an identifier.`,
+              ]
+        )
+      : []),
+  ];
+};
+
 /** One of its own memories App code forgets (`forgetForAppAs`). */
 const codeForgetSchema = z.strictObject({ memory: memoryIdSchema });
 
@@ -6227,7 +6365,8 @@ export const isCodeWriteRequest = (
   codeWriteRequests[operation].safeParse(input).success;
 
 /**
- * Remembers a fact App `app`'s code says, in the App's word, for the
+ * Remembers a fact App `app`'s code says, in the App's word, its
+ * credentials redacted (`redact`, each text whole), for the
  * member `personId` (admitted to the App by the caller), in the shared
  * store, read by the App's users alone: about an entity the App's code
  * may see (by id), or one an exact identifier finds there, or a new one;
@@ -6245,7 +6384,14 @@ export const rememberForAppAs = async (
   { app, change }: { app: AppId; change: string },
   request: unknown
 ): Promise<{ memory: MemoryId; entity: EntityId; learnedAt: Date }> => {
-  const { about, statement, ...memory } = checked(codeRememberSchema, request);
+  const { about, statement, value, attribute } = checked(
+    codeRememberSchema,
+    request
+  );
+  const issues = credentialIssues(request);
+  if (issues.length > 0) {
+    throw brainSourceErrors.create("brain.request_invalid", { issues });
+  }
   const writer = appWriterOf(app);
   const reader = await codeReaderOf(env, personId, "company", app);
   let added: Awaited<ReturnType<Brain["addMemories"]>>;
@@ -6255,13 +6401,24 @@ export const rememberForAppAs = async (
       access: { kind: "audience", group: appUsersGroup(app) },
       // An entity's id is taken only as the App's code may see it.
       reader,
-      entities: [{ key: "about", ...about }],
+      // Credentials redacted from what is kept and recalled, each text
+      // whole (GRA-2003): code may copy an outside system's answer. The
+      // same request redacts the same, so a repeat of `change` compares
+      // as what was kept.
+      entities: [
+        {
+          key: "about",
+          ...about,
+          names: about.names.map((name) => redact(name)),
+        },
+      ],
       memories: [
         {
           about: "about",
-          ...memory,
+          ...(attribute === undefined ? {} : { attribute }),
+          ...(value === undefined ? {} : { value: redact(value) }),
           type: "fact",
-          statement,
+          statement: redact(statement),
           speaker: { kind: "agent", agent: writer },
           basis: { kind: "writer", writer },
         },

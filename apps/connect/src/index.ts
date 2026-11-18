@@ -73,6 +73,7 @@ import type {
   NpmMalwareReports,
   NpmMetadata,
 } from "@grasp-os/shared/packages";
+import type { SyncPage } from "@grasp-os/shared/sync";
 import type { ClockRegistration } from "@grasp-os/workerflow/clock";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
@@ -178,6 +179,7 @@ import type { HeldAction } from "./pending.ts";
 import { erasePersonal } from "./person-erasure.ts";
 import { probeBindings } from "./probe.ts";
 import { revocationsByHand } from "./revocations-by-hand.ts";
+import { readSyncPage } from "./sync.ts";
 import { webhookPost } from "./webhooks.ts";
 
 // The egress handler of native connectors' isolates (src/connectors.ts).
@@ -611,6 +613,13 @@ export default class Connect
 
   async readPlaceFile(request: unknown): Promise<PlaceFile> {
     return await readPlaceFile(this.env, request);
+  }
+
+  // Native sync (src/sync.ts): one page of a source's changes, for core's
+  // sync run, which applies it to the Brain and keeps the cursor.
+
+  async readSyncPage(request: unknown): Promise<SyncPage> {
+    return await readSyncPage(this.env, request);
   }
 
   // Generated connector contracts (src/contracts.ts): what an App's

@@ -55,6 +55,7 @@ import {
   recallSurfaces,
   findingsOf,
   ownStoreOf,
+  settledOwnStores,
   join,
   leave,
   newTeam,
@@ -1204,6 +1205,10 @@ describe(
               () => "opens it",
               String
             );
+
+      // Their own stores embedded and asleep before any pass, so no tick
+      // of theirs, on its own alarm, runs while one asks (`settledOwnStores`).
+      await settledOwnStores([holder, outsider]);
 
       return {
         holder,
