@@ -19,6 +19,7 @@ import {
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
+import { SectionHeader } from "../grasp/section-header/index.ts";
 import { Tabs, TabsList, TabsTrigger } from "../grasp/tabs/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
@@ -338,7 +339,7 @@ const Aside = ({ entry }: { entry: LogEntry }) => {
 };
 
 /** One line: what kind of work it was, what it was, who and how, and what it gave the brain. The whole line opens what it is about. */
-const Line = ({ entry }: { entry: LogEntry }) => {
+const Line = ({ entry, flat = false }: { entry: LogEntry; flat?: boolean }) => {
   const parts = (
     <>
       <ItemMedia icon={icons[entry.kind]} />
@@ -351,14 +352,14 @@ const Line = ({ entry }: { entry: LogEntry }) => {
   );
   if (entry.opens === undefined) {
     return (
-      <Item layout={styles.line} size="sm">
+      <Item layout={flat ? undefined : styles.line} size="sm">
         {parts}
       </Item>
     );
   }
   return (
     <Item
-      layout={styles.line}
+      layout={flat ? undefined : styles.line}
       render={<Link params={{ noteId: entry.opens }} to="/brain/$noteId" />}
       size="sm"
     >
@@ -396,6 +397,30 @@ const Days = ({ days, today }: { days: LogDay[]; today: string }) => {
   );
 };
 
+/** Concept C: the days as plain sections, no spine and no chart. */
+const FlatDays = ({ days, today }: { days: LogDay[]; today: string }) => {
+  const { t } = useLingui();
+  return (
+    <>
+      {days.map(({ day, entries }) => (
+        <section key={day}>
+          <SectionHeader
+            size="sm"
+            title={day === today ? t`Today` : formatDay(day)}
+          />
+          <ul {...stylex.props(styles.lines)}>
+            {entries.map((entry) => (
+              <li key={entry.id}>
+                <Line entry={entry} flat />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </>
+  );
+};
+
 /**
  * The brain's log, as the Runs of the workflows are theirs (the prototype's
  * `components/knowledge/brain-log.tsx`): one row of tabs for the kind of
@@ -403,7 +428,7 @@ const Days = ({ days, today }: { days: LogDay[]; today: string }) => {
  * then the days themselves on a spine, newest first. Every line opens what
  * it is about.
  */
-export const BrainLog = () => {
+export const BrainLog = ({ concept }: { concept?: string | undefined }) => {
   const { t } = useLingui();
   const { workspace, brain } = useBrainData();
   const [tab, setTab] = useState<LogTab>("all");
@@ -431,7 +456,7 @@ export const BrainLog = () => {
     <div {...stylex.props(styles.pane)}>
       <div {...stylex.props(styles.column)}>
         <PageHeader title={<Trans context="the brain's log">Activity</Trans>} />
-        <SinceLastLook />
+        {concept === "c" ? null : <SinceLastLook folded={concept === "b"} />}
         <Tabs
           onValueChange={(value) => {
             const next = tabFrom(value);
@@ -453,14 +478,18 @@ export const BrainLog = () => {
             ))}
           </TabsList>
         </Tabs>
-        <DayColumns days={days} today={today} />
-        {days.length === 0 ? (
+        {concept === undefined ? (
+          <DayColumns days={days} today={today} />
+        ) : null}
+        {concept === "c" ? <FlatDays days={days} today={today} /> : null}
+        {concept !== "c" && days.length === 0 ? (
           <EmptyCard>
             <Trans>Nothing of this kind yet.</Trans>
           </EmptyCard>
-        ) : (
+        ) : null}
+        {concept !== "c" && days.length > 0 ? (
           <Days days={days} today={today} />
-        )}
+        ) : null}
       </div>
     </div>
   );

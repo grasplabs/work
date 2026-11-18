@@ -9,6 +9,7 @@ import type { CoreConnection } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { Button } from "../grasp/button/index.ts";
+import { Collapsible } from "../grasp/collapsible/index.ts";
 import { File, Inbox } from "../grasp/icons/index.ts";
 import {
   Item,
@@ -125,7 +126,7 @@ const ChangeLine = ({ change }: { change: BrainChange }) => {
 };
 
 /** "Since you last looked", above the brain's log. */
-export const SinceLastLook = () => {
+export const SinceLastLook = ({ folded = false }: { folded?: boolean }) => {
   const { t } = useLingui();
   const core = useCore();
   const { identity } = useRouteContext({ from: "/_shell" });
@@ -176,46 +177,66 @@ export const SinceLastLook = () => {
   };
 
   const when = read.state === "ready" ? formatDateTime(read.since) : "";
-  return (
-    <SectionCard density="compact" title={<Trans>Since you last looked</Trans>}>
-      <div {...stylex.props(styles.body)}>
-        {read.state === "failed" ? <ErrorText>{read.reason}</ErrorText> : null}
-        {read.state === "ready" && read.changes.length === 0 ? (
-          <Text size="sm" tone="muted">
-            <Trans>Nothing has changed since {when}.</Trans>
+  const count = read.state === "ready" ? read.changes.length : 0;
+  const body = (
+    <div {...stylex.props(styles.body)}>
+      {read.state === "failed" ? <ErrorText>{read.reason}</ErrorText> : null}
+      {read.state === "ready" && read.changes.length === 0 ? (
+        <Text size="sm" tone="muted">
+          <Trans>Nothing has changed since {when}.</Trans>
+        </Text>
+      ) : null}
+      {read.state === "ready" && read.changes.length > 0 ? (
+        <>
+          <ItemGroup aria-label={t`Changes since ${when}`} separated>
+            {read.changes.map((change) => (
+              <ChangeLine
+                change={change}
+                key={
+                  change.kind === "source"
+                    ? `source:${change.source.id}`
+                    : `document:${change.document.id}`
+                }
+              />
+            ))}
+          </ItemGroup>
+          {read.next === null ? null : (
+            <Button
+              disabled={more}
+              layout={styles.start}
+              onClick={() => {
+                if (read.next !== null) {
+                  void showMore(read.since, read.changes, read.next);
+                }
+              }}
+              size="sm"
+            >
+              <Trans>Show more</Trans>
+            </Button>
+          )}
+        </>
+      ) : null}
+    </div>
+  );
+  const title = <Trans>Since you last looked</Trans>;
+  return folded ? (
+    <Collapsible
+      title={
+        <>
+          {title}{" "}
+          <Text element="span" size="sm" tone="quiet">
+            {count}
+            {read.state === "ready" && read.next !== null ? "+" : ""}
           </Text>
-        ) : null}
-        {read.state === "ready" && read.changes.length > 0 ? (
-          <>
-            <ItemGroup aria-label={t`Changes since ${when}`} separated>
-              {read.changes.map((change) => (
-                <ChangeLine
-                  change={change}
-                  key={
-                    change.kind === "source"
-                      ? `source:${change.source.id}`
-                      : `document:${change.document.id}`
-                  }
-                />
-              ))}
-            </ItemGroup>
-            {read.next === null ? null : (
-              <Button
-                disabled={more}
-                layout={styles.start}
-                onClick={() => {
-                  if (read.next !== null) {
-                    void showMore(read.since, read.changes, read.next);
-                  }
-                }}
-                size="sm"
-              >
-                <Trans>Show more</Trans>
-              </Button>
-            )}
-          </>
-        ) : null}
-      </div>
+        </>
+      }
+      variant="raised"
+    >
+      {body}
+    </Collapsible>
+  ) : (
+    <SectionCard density="compact" title={title}>
+      {body}
     </SectionCard>
   );
 };
