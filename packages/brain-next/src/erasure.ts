@@ -1266,31 +1266,27 @@ interface Recorded extends Record<string, SqlStorageValue> {
 }
 
 /**
- * Writes `recorded`'s ledger entry within `ledgerWaitMs`, and confirms
- * it: throws if R2 fails. Written again, it is the same.
+ * The body of the ledger entry `key` (`named`), from what the store keeps
+ * of it: a source's mark of a group, a writer's change and count, a
+ * person's closed subjects and their events' tags.
  */
-const confirm = async (
-  { storage, bucket, groups }: ErasureStore,
-  { key }: Recorded
-): Promise<void> => {
-  const named = entryOf(key);
-  let body =
-    groups &&
-    named?.kind === "source" &&
-    isKnownGroup(storage.sql, named.subject)
-      ? groupBody
-      : "";
+const bodyOf = (
+  sql: SqlStorage,
+  groups: boolean,
+  key: string,
+  named: LedgerEntry | undefined
+): string => {
   if (named?.kind === "writer") {
-    const { change, memories } = storage.sql
+    const { change, memories } = sql
       .exec<{ change: string | null; memories: number | null }>(
         "SELECT change, memories FROM erasures WHERE key = ?",
         key
       )
       .one();
-    body = JSON.stringify(writerBodySchema.parse({ change, memories }));
+    return JSON.stringify(writerBodySchema.parse({ change, memories }));
   }
   if (named?.kind === "person") {
-    const subjects = storage.sql
+    const subjects = sql
       .exec<{ subject: string }>(
         `SELECT subject FROM person_erasure_subjects WHERE erasure = ?
         ORDER BY subject`,
@@ -1298,7 +1294,7 @@ const confirm = async (
       )
       .toArray()
       .map(({ subject }) => subject);
-    const tags = storage.sql
+    const tags = sql
       .exec<{ who: string; keyId: string }>(
         `SELECT who, key_id AS keyId FROM person_erasure_events
         WHERE erasure = ? ORDER BY who`,
@@ -1306,7 +1302,7 @@ const confirm = async (
       )
       .toArray();
     const [first] = tags;
-    body = JSON.stringify(
+    return JSON.stringify(
       personBodySchema.parse({
         subjects,
         ...(first === undefined
@@ -1319,6 +1315,41 @@ const confirm = async (
             }),
       })
     );
+  }
+  return groups && named?.kind === "source" && isKnownGroup(sql, named.subject)
+    ? groupBody
+    : "";
+};
+
+/**
+ * Writes `recorded`'s ledger entry within `ledgerWaitMs`, and confirms
+ * it: throws if R2 fails. Written again, it is the same. Its body is built
+ * in the transaction that asks whether it is still unconfirmed: once
+ * another caller confirmed it (a live retry while the tick waited on an
+ * earlier entry), it is never written again, as its working rows went
+ * with that confirmation (a person's events' tags) and a body built
+ * without them would lose them. Built while unconfirmed, a body holds
+ * them all, as they go only with the confirmation; so two callers that
+ * both build one write the same.
+ */
+const confirm = async (
+  { storage, bucket, groups }: ErasureStore,
+  { key }: Recorded
+): Promise<void> => {
+  const named = entryOf(key);
+  const body = storage.transactionSync(() => {
+    const [row] = storage.sql
+      .exec<{ confirmed: number }>(
+        "SELECT confirmed FROM erasures WHERE key = ?",
+        key
+      )
+      .toArray();
+    return row === undefined || row.confirmed === 1
+      ? undefined
+      : bodyOf(storage.sql, groups, key, named);
+  });
+  if (body === undefined) {
+    return;
   }
   await inTime(bucket.put(key, body));
   // The entry holds the events' tags now: their working rows go with the

@@ -87,6 +87,73 @@ const workingTags = async (): Promise<number> =>
         .one().rows
   );
 
+/**
+ * Where a held ledger write is (`ledgerHeld`): a plain object both sides
+ * poll, so no promise is settled from another request's context.
+ */
+interface Hold {
+  entered: boolean;
+  released: boolean;
+}
+
+/** Waits until `ready` says so, polling, at most 10 s. */
+const until = async (ready: () => boolean): Promise<void> => {
+  for (let look = 0; !ready(); look += 1) {
+    if (look === 1000) {
+      throw new Error("Waited 10 s");
+    }
+    // oxlint-disable-next-line no-await-in-loop -- until it is ready
+    await scheduler.wait(10);
+  }
+};
+
+/**
+ * The shared store's ledger writes held: a write of the entry whose key
+ * ends in `held` marks `hold.entered` and waits until `hold.released`;
+ * every other goes through. Each write's last body, by its key, in
+ * `bodies`.
+ */
+const ledgerHeld = async (
+  held: string,
+  hold: Hold,
+  bodies: Map<string, string>
+): Promise<void> => {
+  const bucket = env.BRAIN_OBJECTS;
+  await runInDurableObject(shared(), (instance) => {
+    const objectEnv: unknown = Reflect.get(instance, "env");
+    if (typeof objectEnv !== "object" || objectEnv === null) {
+      throw new TypeError("The store has no env");
+    }
+    Reflect.set(instance, "env", {
+      ...objectEnv,
+      BRAIN_OBJECTS: new Proxy(bucket, {
+        get: (target, name): unknown =>
+          name === "put"
+            ? async (key: string, body: string) => {
+                if (key.endsWith(held)) {
+                  hold.entered = true;
+                  await until(() => hold.released);
+                }
+                bodies.set(key, body);
+                return await target.put(key, body);
+              }
+            : Reflect.get(target, name, target),
+      }),
+    });
+  });
+};
+
+/** The keys of the person erasures the shared store hasn't confirmed, oldest first. */
+const unconfirmed = async (): Promise<string[]> =>
+  await runInDurableObject(shared(), (_instance, state) =>
+    state.storage.sql
+      .exec<{ key: string }>(
+        "SELECT key FROM erasures WHERE kind = 'person' AND confirmed = 0 ORDER BY key"
+      )
+      .toArray()
+      .map(({ key }) => key)
+  );
+
 /** The shared store's ledger writes failing (`broken`), or working again. */
 const ledgerBroken = async (broken: boolean): Promise<void> => {
   const bucket = env.BRAIN_OBJECTS;
@@ -474,5 +541,69 @@ describe("events", () => {
       written: 0,
       steps: [],
     });
+  });
+
+  it("keep a retried erasure's events in its ledger entry when the retry confirms it while the tick waits on an earlier one", async () => {
+    const team = `team:${crypto.randomUUID()}`;
+    const [tagA, tagB] = [aTag(), aTag()];
+    const [annaId, benId] = [
+      `person-${crypto.randomUUID()}`,
+      `person-${crypto.randomUUID()}`,
+    ];
+    const erase = async (person: string, who: string) => {
+      await shared().erasePersonShared({
+        person,
+        identifiers: [],
+        reason: "person_erased",
+        events: { keyId, who: [who] },
+      });
+    };
+    await shared().addEvents({
+      keyId,
+      events: [
+        eventOf(team, "deals.anna", undefined, tagA),
+        eventOf(team, "deals.ben", undefined, tagB),
+      ],
+    });
+    const before = await copyOf(shared());
+    // Both erasures recorded, neither written to the ledger.
+    await ledgerBroken(true);
+    for (const [person, tag] of [
+      [annaId, tagA],
+      [benId, tagB],
+    ] as const) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
+        await erase(person, tag);
+      } catch {
+        // Recorded, its entry not written: the tick or a retry writes it.
+      }
+    }
+    const [annaKey = "", benKey = ""] = await unconfirmed();
+    // The tick takes both, and waits on Anna's write; meanwhile Ben's
+    // erasure is retried and written; then Anna's write goes on.
+    const hold: Hold = { entered: false, released: false };
+    const bodies = new Map<string, string>();
+    await ledgerHeld(annaKey, hold, bodies);
+    const ticking = tick(shared());
+    await until(() => hold.entered);
+    await erase(benId, tagB);
+    hold.released = true;
+    await ticking;
+    await ledgerBroken(false);
+    const benBody = [...bodies].find(([key]) => key.endsWith(benKey))?.[1];
+    await restore(shared(), before);
+    await shared().addEvents({
+      keyId,
+      events: [
+        eventOf(team, "deals.late", undefined, tagA),
+        eventOf(team, "deals.late", undefined, tagB),
+      ],
+    });
+
+    expect({
+      benBody: benBody?.includes(tagB),
+      steps: await stepsFor(team),
+    }).toStrictEqual({ benBody: true, steps: [] });
   });
 });
