@@ -77,6 +77,7 @@ import type {
   SyncPage,
   SyncPlaceChoices,
   SyncPlaces,
+  SyncSourcePage,
 } from "@grasp-os/shared/sync";
 import type { ClockRegistration } from "@grasp-os/workerflow/clock";
 import { WorkerEntrypoint } from "cloudflare:workers";
@@ -186,6 +187,7 @@ import { readReaderGroups } from "./reader-groups.ts";
 import { revocationsByHand } from "./revocations-by-hand.ts";
 import {
   listSyncPlaces,
+  listSyncSources,
   pickSyncPlaces,
   readSyncPage,
   syncPlaceChoices,
@@ -638,6 +640,10 @@ export default class Connect
 
   async readSyncPage(request: unknown): Promise<SyncPage> {
     return await readSyncPage(this.env, request);
+  }
+
+  async syncSources(request: unknown): Promise<SyncSourcePage> {
+    return await listSyncSources(this.env, request);
   }
 
   /** The places of a connection's sync, each a source of its own. */

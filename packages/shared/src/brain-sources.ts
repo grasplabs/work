@@ -23,8 +23,9 @@ import { defineErrorFamily } from "./errors.ts";
  * team's piece of work from what five or more of its people told, an
  * opinion five or more people across the company hold, the company's
  * vision from the onboarding's kickoff, the company's teams from its
- * staff list, or what agents read through a shared connection
- * (`connected`).
+ * staff list, what agents read through a shared connection
+ * (`connected`), or an item native sync copied from a connected system
+ * (`sync`).
  */
 export type BrainSourceProducer =
   | "upload"
@@ -37,7 +38,8 @@ export type BrainSourceProducer =
   | "opinion"
   | "kickoff"
   | "roster"
-  | "connected";
+  | "connected"
+  | "sync";
 
 /** A source, as its producer names it. */
 export interface BrainSourceRef {

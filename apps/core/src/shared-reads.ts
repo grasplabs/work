@@ -73,10 +73,11 @@ const hashSchema = z.string().regex(/^[0-9a-f]{64}$/u);
  * subrequests per invocation: 10,000 by default on Workers Paid, as
  * Cloudflare's Workers limits page states it (checked 17 November 2026;
  * D1 queries count too; on-prem workerd has none). Erasures take a tenth
- * of it; the other 9,000 are left for the clock's other tasks in the same
- * invocation (the audit drain, the Brain's work queue and hand-overs, the
- * onboarding's and the uploads' owed work), which is an estimate, not a
- * measurement: each takes a few dozen calls a tick today. Every erasure
+ * of it, and native sync another tenth (brain-sync.ts); the other 8,000
+ * are left for the clock's other tasks in the same invocation (the audit
+ * drain, the Brain's work queue and hand-overs, the onboarding's and the
+ * uploads' owed work), which is an estimate, not a measurement: each
+ * takes a few dozen calls a tick today. Every erasure
  * under way shares it (`completeOwedErasures`); what is left is erased by
  * the next run, so any number is erased in the end.
  */
