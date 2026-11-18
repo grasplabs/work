@@ -3,7 +3,6 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import { formatNumber } from "../format.ts";
-import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { BrandIcon } from "../grasp/brand-icon/index.ts";
 import { Button } from "../grasp/button/index.ts";
@@ -31,15 +30,13 @@ import { brandOf } from "./provider-mark.tsx";
 
 /**
  * An app's mark, one size everywhere on the page: the library's Brand
- * icon on its tile where it has the brand, else its fallback for a
- * picture it lacks, an Avatar with the app's initials, the same size.
+ * icon on its tile; where it has no mark for the app, the same tile with
+ * the name's first letter (its own fallback).
  */
 export const AppMark = ({ integration }: { integration: Integration }) => {
   const brand = brandOf(integration.id, integration.name);
   return brand === undefined ? (
-    <Avatar decorative name={integration.name} size="sm">
-      <AvatarFallback />
-    </Avatar>
+    <BrandIcon decorative name={integration.name} size="sm" />
   ) : (
     <BrandIcon brand={brand} decorative size="sm" />
   );

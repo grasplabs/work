@@ -222,6 +222,32 @@ export const tableStyles = stylex.create({
     transitionDuration: simply.ui,
     transitionTimingFunction: grasp.ease,
   },
+  // A row that opens (a Data table's rowHref or onRowOpen): the box its name's press area stretches
+  // over, and the keyboard's ring round the whole row while that name has focus, inside the table.
+  opens: {
+    position: "relative",
+    cursor: "pointer",
+    outlineStyle: {
+      default: "none",
+      ":has([data-row-target]:focus-visible:not([data-focus-pointer]))":
+        "solid",
+    },
+    outlineWidth: grasp.ringWidth,
+    outlineColor: { default: grasp.ring, [media.forced]: "Highlight" },
+    outlineOffset: `calc(-1 * ${grasp.ringWidth})`,
+  },
+  // The row open now (its panel shows): the pointer's quiet fill kept, so it is told from the rest
+  // without the selection's fill. In forced colours a line round it.
+  current: {
+    backgroundImage: `linear-gradient(${grasp.tableRowFillHover}, ${grasp.tableRowFillHover})`,
+    outlineStyle: { default: null, [media.forced]: "solid" },
+    outlineWidth: { default: null, [media.forced]: grasp.hairline },
+    outlineColor: { default: null, [media.forced]: "CanvasText" },
+    outlineOffset: {
+      default: null,
+      [media.forced]: `calc(-1 * ${grasp.hairline})`,
+    },
+  },
   // The chosen looks other than the grey band (look.ts): a mint wash, or the band with a pine bar
   // at the row's start.
   chosenMint: {

@@ -239,6 +239,11 @@ export const Body = <Row extends RowData>({
             rowActions={props.rowActions}
             status={props.rowStatus?.(row.original)}
             detail={props.detail}
+            opening={{
+              href: props.rowHref,
+              onOpen: props.onRowOpen,
+              current: props.rowCurrent,
+            }}
           />
         )
       )}

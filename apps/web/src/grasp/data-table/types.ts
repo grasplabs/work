@@ -25,7 +25,8 @@ export interface DataTableColumn<Row> {
   /**
    * Its cell holds a small control (a Select, a Switch, a button): the control stands in a box one
    * line of the table's text tall, as the row's menu does, so the row keeps its height at every
-   * density.
+   * density. In a row that opens (`rowHref`, `onRowOpen`) the control stays its own, over the row's
+   * press area.
    * @default false
    */
   control?: boolean;
@@ -233,6 +234,25 @@ export interface DataTableProps<Row> {
   actions?: readonly DataTableAction[];
   /** What can be done to one row, in a menu at its end. */
   rowActions?: (row: Row) => readonly DataTableRowAction[];
+  /**
+   * Each row opens a page: its address. The lead column's words become a real link, drawn as the
+   * cell's plain text on its column's line, and the whole row is its press area for a pointer; the
+   * row's other controls (its checkbox, its menu, a Switch in a cell) stay their own. Works with
+   * scripts off, and opens in a new tab as any link does. With `stickyFirst` the held lead cell is
+   * its press area, not the whole row. One of `rowHref` and `onRowOpen`.
+   */
+  rowHref?: (row: Row) => string;
+  /**
+   * Each row opens something on this page (a panel): called with the row. The lead column's words
+   * become a button drawn as plain text, the whole row its press area. One of `rowHref` and
+   * `onRowOpen`.
+   */
+  onRowOpen?: (row: Row) => void;
+  /**
+   * The row open now (its panel shows beside the table): said as current, with a quiet fill of its
+   * own. Not the selection, which `selected` keeps.
+   */
+  rowCurrent?: (row: Row) => boolean;
   /** With the `expanding` piece: a detail that opens under a row. */
   detail?: (row: Row) => ReactNode;
   /** With the `expanding` piece: rows of its own that open under a row. */

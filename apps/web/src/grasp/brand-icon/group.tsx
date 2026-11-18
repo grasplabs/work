@@ -1,0 +1,137 @@
+// Brand icon group: a few brands as one row of tiles, then "+N" for the rest, named once for a
+// screen reader ("Slack, Google Drive and 2 others"): the tools an agent or a workflow reaches, in a
+// table's row or a card's foot. As Avatar group does, with its words; the tiles stand side by side
+// a step apart, never over each other, since a tile's corner is not a face's circle and a cut
+// would show. Every value is a token.
+//
+//   <BrandIconGroup brands={["slack", "google-drive", "notion", "stripe", "github"]} max={3} />
+"use client";
+
+import * as stylex from "@stylexjs/stylex";
+
+import { avatarGroupWords } from "../avatar/words";
+import { grasp, media } from "../tokens/tokens.stylex";
+import { useWords } from "../words/words";
+import { BrandIcon, brands } from "./brand-icon";
+import type { Brand, BrandIconSize, BrandIconTone } from "./brand-icon";
+
+/** Every prop a BrandIconGroup takes. */
+export interface BrandIconGroupProps {
+  /** The brands, in the order their tiles stand. */
+  brands: readonly Brand[];
+  /**
+   * How many tiles show before "+N" stands for the rest.
+   * @default 3
+   */
+  max?: number;
+  /**
+   * The tiles' size, as BrandIcon's.
+   * @default "xs"
+   */
+  size?: BrandIconSize;
+  /**
+   * The marks' colours, as BrandIcon's: their own, or the text colour.
+   * @default "brand"
+   */
+  tone?: BrandIconTone;
+  /** Its name for a screen reader, when the brands' names are not the right one ("Connected to 5 tools"). */
+  "aria-label"?: string;
+}
+
+const sizes: Record<BrandIconSize, string> = {
+  xs: grasp.avatarXs,
+  sm: grasp.avatarSm,
+  md: grasp.avatarMd,
+  lg: grasp.avatarLg,
+};
+
+const styles = stylex.create({
+  group: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: grasp.space1,
+    flexShrink: 0,
+    verticalAlign: "middle",
+  },
+  // The rest, as a tile of its own: the soft fill, the system's edge, the count in quiet ink, at
+  // least a tile wide and wider for a long count.
+  more: (tile: string, corner: string) => ({
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    boxSizing: "border-box",
+    minWidth: tile,
+    height: tile,
+    paddingInline: grasp.space1,
+    borderRadius: corner,
+    cornerShape: grasp.cornerShape,
+    backgroundColor: grasp.soft,
+    boxShadow: grasp.edge,
+    outline: {
+      default: "none",
+      [media.forced]: `${grasp.hairline} solid CanvasText`,
+    },
+    outlineOffset: `calc(-1 * ${grasp.hairline})`,
+    fontFamily: grasp.fontSans,
+    fontSize: `max(10px, calc(${tile} * 0.4))`,
+    fontWeight: grasp.weightMedium,
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.02em",
+    color: grasp.muted,
+    whiteSpace: "nowrap",
+  }),
+});
+
+/** A few brands as one row of tiles, then "+N", named once. */
+export const BrandIconGroup = ({
+  brands: list,
+  max = 3,
+  size = "xs",
+  tone = "brand",
+  "aria-label": label,
+}: BrandIconGroupProps) => {
+  // Avatar group's words: the same "+N", and the same way of naming a few and how many more.
+  const words = useWords("avatarGroup", avatarGroupWords);
+  const shown = list.slice(0, max);
+  const rest = list.length - shown.length;
+  const name =
+    label ??
+    words.name(
+      shown.map((brand) => brands[brand].name),
+      rest
+    );
+  // BrandIcon's corner for the size: the mark corner under 32px, else the one corner capped at half.
+  const tile = sizes[size];
+  const corner =
+    size === "xs"
+      ? grasp.cornerMark
+      : `min(${grasp.corner}, calc(${tile} / 2))`;
+  return (
+    <span
+      // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a row of marks is one picture with one name
+      role="img"
+      aria-label={name}
+      data-slot="brand-icon-group"
+      {...stylex.props(styles.group)}
+    >
+      {shown.map((brand, index) => (
+        <BrandIcon
+          key={`${brand}-${index}`}
+          brand={brand}
+          size={size}
+          tone={tone}
+          decorative
+        />
+      ))}
+      {rest > 0 && (
+        <span
+          aria-hidden="true"
+          data-slot="brand-icon-group-more"
+          {...stylex.props(styles.more(tile, corner))}
+        >
+          {words.more(rest)}
+        </span>
+      )}
+    </span>
+  );
+};

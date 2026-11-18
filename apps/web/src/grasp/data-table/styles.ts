@@ -118,12 +118,37 @@ export const styles = stylex.create({
   // An xs control in a cell takes no more height than the words: the row keeps its height.
   inRow: {
     display: "inline-flex",
+    position: "relative",
+    zIndex: 1,
     marginBlock: `calc((${grasp.tableTextLine} - ${grasp.controlXs}) / 2)`,
   },
+  // A row that opens: its name, a link or a button drawn as the cell's plain words, on the column's
+  // start line, wrapping in whole words; its press area stretched over the row (the row is the box,
+  // TableRow's \`opens\`). Its ring is the row's.
+  rowTarget: {
+    display: "inline",
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    color: "inherit",
+    font: "inherit",
+    letterSpacing: "inherit",
+    textAlign: "start",
+    textDecoration: "none",
+    overflowWrap: "inherit",
+    cursor: "pointer",
+    outline: "none",
+    "::after": { content: '""', position: "absolute", inset: 0, zIndex: 0 },
+  },
+  // The row's other controls stand over the stretched press area, so they stay their own.
+  aboveTarget: { position: "relative", zIndex: 1 },
   // A control alone in a cell (a row's actions): held in a box as tall as the line, so it does not
   // sit on the text's baseline and add height to the row.
   cellControl: {
     display: "inline-flex",
+    position: "relative",
+    zIndex: 1,
     alignItems: "center",
     verticalAlign: "top",
     height: grasp.tableTextLine,
