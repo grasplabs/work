@@ -30,6 +30,8 @@ interface Calendar {
   graphPage: number;
   /** Whether Graph takes `Prefer: odata.maxpagesize` as asked. */
   honoursPageSize: boolean;
+  /** A skip token Graph answers only after `ms`. */
+  slow?: { skip: string; ms: number };
   /** Answers every request instead, when it answers. */
   answer?: (url: URL) => Response | undefined;
 }
@@ -44,6 +46,7 @@ const reset = (): void => {
   calendar.feed = {};
   calendar.graphPage = 1000;
   calendar.honoursPageSize = true;
+  calendar.slow = undefined;
   calendar.answer = undefined;
 };
 
@@ -88,7 +91,13 @@ const feedPage = (url: URL, prefer: string): Response => {
   });
 };
 
-const internet = fakeInternet((request, url) => {
+const internet = fakeInternet(async (request, url) => {
+  if (
+    calendar.slow !== undefined &&
+    url.searchParams.get("$skiptoken") === calendar.slow.skip
+  ) {
+    await scheduler.wait(calendar.slow.ms);
+  }
   const answered = calendar.answer?.(url);
   if (answered !== undefined) {
     return answered;
@@ -270,6 +279,37 @@ describe("syncing a person's own calendar", () => {
     const { items } = await readAll(connectionId, null);
     expect(items.map(({ id }) => id)).toStrictEqual(events.map(({ id }) => id));
   });
+
+  it(
+    "answers with what it has when Graph's next page is late, and waits when it has nothing",
+    { timeout: 120_000 },
+    async () => {
+      const connectionId = await connected();
+      calendar.feed[start] = {
+        events: [event("a"), event("b")],
+        end: "t1",
+      };
+      // The second event's page: always past the page's deadline.
+      calendar.slow = { skip: "~1", ms: 35_000 };
+      const first = await read(connectionId, null);
+      const late = await read(connectionId, first.cursor).catch(
+        (error: unknown) => error
+      );
+      calendar.slow = undefined;
+      const next = await read(connectionId, first.cursor);
+      expect({
+        first: first.items.map(({ id }) => id),
+        firstMore: first.more,
+        late: syncErrors.codeOf(late),
+        next: next.items.map(({ id }) => id),
+      }).toStrictEqual({
+        first: ["a"],
+        firstMore: true,
+        late: "sync.throttled",
+        next: ["b"],
+      });
+    }
+  );
 
   it("lists again when Graph no longer knows the token, or the window is a year old", async () => {
     const connectionId = await connected();

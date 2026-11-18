@@ -2,6 +2,7 @@ import { ToolError } from "@grasp-os/connector-kit/connector";
 import {
   RestartSyncError,
   defineSync,
+  fetchBefore,
   syncPageLimits,
 } from "@grasp-os/connector-kit/sync";
 import type {
@@ -240,9 +241,14 @@ const feedPage = async (room: Room, position: Position) => {
           endDateTime: isoOf(began + year),
         })
       : graphUrl(delta, { [`$${token.kind}token`]: token.value });
-  const response = await fetch(url, { headers: { prefer } });
+  // Read whole before the page's deadline (the kit's `fetchBefore`).
+  const response = await fetchBefore(url, room.deadline, {
+    headers: { prefer },
+  });
+  if (response === "late") {
+    return "late";
+  }
   if (response.status === 410 || (response.status === 404 && token !== null)) {
-    await response.body?.cancel();
     throw new RestartSyncError();
   }
   if (!response.ok) {
@@ -250,6 +256,15 @@ const feedPage = async (room: Room, position: Position) => {
   }
   return feedSchema.parse(await response.json());
 };
+
+/**
+ * What a late read stands for when the page has nothing yet: Graph is
+ * slow, and the page waits as for a rate limit.
+ */
+const tooSlow = (): ToolError =>
+  new ToolError("Microsoft 365 didn't answer in time", {
+    code: "unavailable",
+  });
 
 /** A person, as an event's line writes them. */
 const addressOf = (person: z.infer<typeof addressSchema>): string => {
@@ -363,9 +378,16 @@ const lastOfEach = (items: readonly SyncItem[]): SyncItem[] => {
 /** The person's own Entra object ID, their events' only reader. */
 const ownerOf = async (room: Room): Promise<SyncReader[]> => {
   room.requests -= 1;
-  const response = await fetch(graphUrl(me, { $select: "id" }), {
-    headers: { prefer },
-  });
+  const response = await fetchBefore(
+    graphUrl(me, { $select: "id" }),
+    room.deadline,
+    {
+      headers: { prefer },
+    }
+  );
+  if (response === "late") {
+    throw tooSlow();
+  }
   if (!response.ok) {
     throw await graphFailure(response);
   }
@@ -411,6 +433,14 @@ const takePage = async (
   done: boolean;
 }> => {
   const feed = await feedPage(room, position);
+  if (feed === "late") {
+    // Cut off by the page's deadline: the page answers with what it has,
+    // or, holding nothing yet, waits as for a rate limit.
+    if (room.first) {
+      throw tooSlow();
+    }
+    return { items: [], at: position, more: true, done: false };
+  }
   const events = feed.value;
   const start = startOf(events, position.after);
   const items: SyncItem[] = [];
