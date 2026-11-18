@@ -41,8 +41,14 @@ const untilItHappens = { timeout: 45_000 };
 test.use({ trace: "retain-on-failure", actionTimeout: pageRead.timeout });
 test.describe.configure({ retries: 0 });
 
-/** A new workflow's name, as Build it makes one from the plan. */
-const newName = /^[a-z\d-]+-[\da-f]{6}$/u;
+/** What the plan calls the workflow: its title, which its page is headed by. */
+const planned = "Invoice approval";
+
+/**
+ * A new workflow's name, as Build it makes one from the plan: what the
+ * inbox still calls it by.
+ */
+const newName = String.raw`[a-z\d-]+-[\da-f]{6}`;
 
 /** Picks `person` in the open list of people, teams and roles on `page`. */
 const pick = async (page: Page, person: Person): Promise<void> => {
@@ -96,9 +102,9 @@ const drawnAndPublished = async (
     .getByRole("button", { name: "Build it" })
     .click(agentTurn);
   await expect(page).toHaveURL(/\/workflows\/[^/?]+$/u, agentTurn);
-  const title = page.getByRole("heading", { level: 1, name: newName });
-  await expect(title).toBeAttached(pageRead);
-  const name = (await title.textContent()) ?? "";
+  await expect(
+    page.getByRole("heading", { level: 1, name: planned, exact: true })
+  ).toBeAttached(pageRead);
   const workflow = new URL(page.url()).pathname.split("/").at(-1) ?? "";
 
   // The chat docked beside the Flow draws the approval.
@@ -118,7 +124,7 @@ const drawnAndPublished = async (
     .getByRole("button", { name: "Share", exact: true })
     .click(pageRead);
   await expect(page.getByText("Your changes are shared")).toBeVisible(pageRead);
-  return { workflow, name };
+  return { workflow, name: newName };
 };
 
 /** A Standard Webhooks signature of `body` with `secret` (`whsec_…`). */
@@ -273,7 +279,7 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   await asAdmin.goto("/inbox");
   await asAdmin
     .getByRole("region", { name: "What waits on you" })
-    .getByText(request)
+    .getByText(new RegExp(request, "u"))
     .first()
     .click(pageRead);
   await asAdmin
