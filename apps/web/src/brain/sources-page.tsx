@@ -108,13 +108,18 @@ const styles = stylex.create({
   // The source list and the opened source side by side on a wide page.
   split: {
     display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    alignItems: "start",
+    gap: grasp.space6,
+    minHeight: 0,
+  },
+  // Room for the source beside the list only while one is open: an empty
+  // half would push the list and its empty state off the middle.
+  splitOpen: {
     gridTemplateColumns: {
       default: "minmax(0, 1fr)",
       [media.fromSidebar]: "repeat(2, minmax(0, 1fr))",
     },
-    alignItems: "start",
-    gap: grasp.space6,
-    minHeight: 0,
   },
   // A row's facts: its kind, how it was found, its version.
   facts: {
@@ -307,46 +312,39 @@ const Search = ({
  */
 const ConnectionFeeds = ({ connections }: { connections: Connection[] }) => {
   const heading = useId();
+  // With no connection there is nothing to say how it feeds the Brain.
+  if (connections.length === 0) {
+    return null;
+  }
   return (
     <section aria-labelledby={heading} {...stylex.props(styles.section)}>
       <Heading id={heading} level={2} size="ui-sm">
         <Trans>How your connections feed the Brain</Trans>
       </Heading>
-      {connections.length === 0 ? (
-        <Text size="sm" tone="muted">
-          <Trans>You have no connections yet.</Trans>
-        </Text>
-      ) : (
-        <ItemGroup separated>
-          {connections.map(({ name }) => {
-            const brand = brandOf(name);
-            return (
-              <Item key={name} size="xs">
-                {brand === undefined ? (
-                  <ItemMedia icon={Cable} iconLook="inline" />
-                ) : (
-                  <ItemMedia>
-                    <BrandIcon
-                      brand={brand}
-                      decorative
-                      size="md"
-                      tile={false}
-                    />
-                  </ItemMedia>
-                )}
-                <ItemContent>
-                  <ItemTitle>
-                    <Trans>
-                      {name}: agents search it live when you ask. The Brain
-                      keeps nothing from it.
-                    </Trans>
-                  </ItemTitle>
-                </ItemContent>
-              </Item>
-            );
-          })}
-        </ItemGroup>
-      )}
+      <ItemGroup separated>
+        {connections.map(({ name }) => {
+          const brand = brandOf(name);
+          return (
+            <Item key={name} size="xs">
+              {brand === undefined ? (
+                <ItemMedia icon={Cable} iconLook="inline" />
+              ) : (
+                <ItemMedia>
+                  <BrandIcon brand={brand} decorative size="md" tile={false} />
+                </ItemMedia>
+              )}
+              <ItemContent>
+                <ItemTitle>
+                  <Trans>
+                    {name}: agents search it live when you ask. The Brain keeps
+                    nothing from it.
+                  </Trans>
+                </ItemTitle>
+              </ItemContent>
+            </Item>
+          );
+        })}
+      </ItemGroup>
     </section>
   );
 };
@@ -729,7 +727,12 @@ export const SourcesPage = ({
           <Heading id={heading} level={2} size="ui-sm">
             <Trans>Sources you may read</Trans>
           </Heading>
-          <div {...stylex.props(styles.split)}>
+          <div
+            {...stylex.props(
+              styles.split,
+              opened !== undefined && styles.splitOpen
+            )}
+          >
             <SourceList
               onPick={(source) => {
                 open(source);

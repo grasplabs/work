@@ -18890,10 +18890,6 @@ msgstr "Sie haben diesen Chat beendet. Vielen Dank für Ihre Zeit."
 msgid "You have no chats to add."
 msgstr "Sie haben keine Chats, die Sie hinzufügen können."
 
-#: src/brain/sources-page.tsx
-msgid "You have no connections yet."
-msgstr "Sie haben noch keine Verbindungen."
-
 #: src/workflows/item-test.tsx
 msgid "You have no recent runs whose input is still kept, so there was nothing to test on."
 msgstr "Sie haben keine aktuellen Läufe, deren Eingabe noch aufbewahrt wird, also gab es nichts zum Testen."
