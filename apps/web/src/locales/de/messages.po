@@ -5993,13 +5993,13 @@ msgstr "Punkte"
 msgid "Double-click or press F2 to rename"
 msgstr "Doppelklicken oder F2 drücken, um umzubenennen"
 
+#: src/knowledge/uploads.tsx
 #: src/workflows/run-files.tsx
 #: src/workflows/version-source.tsx
 msgctxt "download a file"
 msgid "Download"
 msgstr "Herunterladen"
 
-#: src/knowledge/uploads.tsx
 #: src/workflows/run-files.tsx
 msgid "Download {name}"
 msgstr "{name} herunterladen"
@@ -11317,6 +11317,7 @@ msgstr "Nur Sie sehen das"
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/in-inbox.tsx
 #: src/inbox/item-detail.tsx
+#: src/knowledge/uploads.tsx
 #: src/settings/where-stephen.tsx
 msgid "Open"
 msgstr "Öffnen"
@@ -11350,7 +11351,6 @@ msgstr "Öffnen"
 
 #: src/brain/brain-nav.tsx
 #: src/frame/part-words.tsx
-#: src/knowledge/uploads.tsx
 msgid "Open {name}"
 msgstr "{name} öffnen"
 

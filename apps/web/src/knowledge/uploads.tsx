@@ -270,10 +270,10 @@ export const Uploads = ({
             return [];
           }
           const { upload, documentId } = ready;
-          const { name } = upload;
+          // A verb each, as the part asks: the row already names the file.
           return [
             {
-              label: t`Open ${name}`,
+              label: t`Open`,
               onAction: () => {
                 void navigate({
                   to: "/knowledge/$collection",
@@ -284,7 +284,7 @@ export const Uploads = ({
             },
             // Core serves it as an attachment only, to those who may read it.
             {
-              label: t`Download ${name}`,
+              label: t({ message: "Download", context: "download a file" }),
               icon: Download,
               href: uploadOriginalPath(encodeURIComponent(upload.id)),
             },

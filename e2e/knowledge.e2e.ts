@@ -324,12 +324,12 @@ test("a person uploads a file and follows it through core failing for a moment u
   ).toBeVisible();
   // The original comes back as an attachment, never shown in the page.
   const href = await ready
-    .getByRole("link", { name: "Download expense-policy.pdf" })
+    .getByRole("link", { name: "Download", exact: true })
     .getAttribute("href");
   expect(href).toMatch(/^\/api\/knowledge\/uploads\/[\w-]+\/original$/u);
   const original = await page.request.get(href ?? "");
   expect(original.headers()["content-disposition"]).toMatch(/^attachment/u);
-  await ready.getByRole("button", { name: "Open expense-policy.pdf" }).click();
+  await ready.getByRole("button", { name: "Open", exact: true }).click();
   await expect(
     page.getByRole("heading", { level: 1, name: "expense-policy" })
   ).toBeVisible();
@@ -361,7 +361,7 @@ test("a person uploads a file and follows it through core failing for a moment u
       .getByRole("region", { name: "Files" })
       .getByRole("link", { name: "offices", exact: true })
   ).toHaveCount(0);
-  await past.getByRole("button", { name: "Open offices.xlsx" }).click();
+  await past.getByRole("button", { name: "Open", exact: true }).click();
   await expect(
     page.getByRole("heading", { level: 1, name: "offices", exact: true })
   ).toBeVisible();
