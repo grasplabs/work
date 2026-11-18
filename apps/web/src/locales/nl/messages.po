@@ -1232,7 +1232,6 @@ msgid "{person} revoked {alias} for version {version}"
 msgstr "{person} heeft {alias} ingetrokken voor versie {version}"
 
 #. Who connected the app, then the day they did.
-#: src/apps/app-settings.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{person}, {date}"
 msgstr "{person}, {date}"
@@ -9213,13 +9212,13 @@ msgstr "Kleine letters en cijfers, met enkele streepjes ertussen; niet de naam v
 msgid "Lowest"
 msgstr "Laagste"
 
-#: src/apps/app-settings.tsx
-msgid "Made"
-msgstr "Gemaakt"
-
 #: src/activity/audit-words.ts
 msgid "Made a webhook source a new secret"
 msgstr "Heeft een nieuw geheim gemaakt voor een webhookbron"
+
+#: src/apps/app-settings.tsx
+msgid "Made by {person} on {date}."
+msgstr "Gemaakt door {person} op {date}."
 
 #: src/workflows/workflow-settings.tsx
 msgid "Made by an earlier platform release: publish it again"
@@ -9228,6 +9227,10 @@ msgstr "Gemaakt door een eerdere platformversie: publiceer hem opnieuw"
 #: src/apps/app-settings.tsx
 msgid "Made for"
 msgstr "Gemaakt voor"
+
+#: src/apps/app-settings.tsx
+msgid "Made on {date}."
+msgstr "Gemaakt op {date}."
 
 #: src/dashboard/report.ts
 msgid "Made with Grasp on {date}"
