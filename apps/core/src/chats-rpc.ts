@@ -11,6 +11,7 @@ import { actorOf } from "@grasp-os/shared/audit";
 import {
   chatMakeSchema,
   chatMentionsSchema,
+  chatRatingReasonMax,
   chatTitleSchema,
   unmetNeeds,
 } from "@grasp-os/shared/chat";
@@ -23,6 +24,7 @@ import type {
   ChatFile,
   ChatFileInput,
   ChatQuestion,
+  ChatRating,
   ChatSearchHit,
   ChatsApi,
   ChatAgent,
@@ -105,6 +107,17 @@ import type { Chat } from "./workspace.ts";
  * mentions, named by ID alone. What Build it made is core's to say
  * (`build`), never the page's.
  */
+/** A rating as the page sends it (`ChatsApi.rate`). */
+const ratedSchema = z.strictObject({
+  messageId: z.int().positive(),
+  rating: z
+    .strictObject({
+      value: z.enum(["up", "down"]),
+      reason: z.string().trim().min(1).max(chatRatingReasonMax).optional(),
+    })
+    .nullable(),
+});
+
 const askedSchema = questionSchema.omit({ built: true }).extend({
   subject: subjectSchema.optional(),
   mentions: chatMentionsSchema.optional(),
@@ -453,6 +466,27 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         id,
         person.userId,
         parsed.data,
+        actorOf(person)
+      );
+    });
+  }
+
+  async rate(
+    chatId: string,
+    messageId: number,
+    rating: ChatRating | null
+  ): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      const id = chatIdOf(chatId);
+      const parsed = ratedSchema.safeParse({ messageId, rating });
+      if (!parsed.success) {
+        throw agentErrors.create("agent.invalid_request");
+      }
+      await this.#chatsOf(person.userId).rateAnswer(
+        id,
+        person.userId,
+        parsed.data.messageId,
+        parsed.data.rating,
         actorOf(person)
       );
     });
