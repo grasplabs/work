@@ -296,11 +296,13 @@ describe("an App's data page", () => {
     });
   });
 
-  it("opens a record by its ID, in a table that declares no fields", async () => {
+  it("opens a record by its ID, in a table that declares no fields, named by its title", async () => {
     await shown();
     await press("Open second");
     await press("second-bare-1");
-    expect(document.body.textContent).toContain("Record second-bare-1");
+    expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe(
+      "second's bare"
+    );
   });
 
   it("forgets a file's preview as soon as another is chosen, Import staying off until that one reads", async () => {

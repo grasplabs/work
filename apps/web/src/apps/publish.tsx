@@ -21,6 +21,7 @@ import { useEffect, useState } from "react";
 import { useGlobalChat } from "../chat/global-chat.tsx";
 import { formatList } from "../format.ts";
 import { Alert } from "../grasp/alert/index.ts";
+import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Checkbox } from "../grasp/checkbox/index.ts";
 import { Collapsible } from "../grasp/collapsible/index.ts";
@@ -664,39 +665,57 @@ const WhoGetsIt = ({
       </Text>
     );
   }
+  // Teams, then people, each under its own heading, never "Team" on
+  // every row; a person by their face.
+  const groups = [
+    { label: t`Teams`, of: offered.filter(({ type }) => type === "team") },
+    { label: t`People`, of: offered.filter(({ type }) => type === "person") },
+  ].filter(({ of }) => of.length > 0);
   return (
-    <ul aria-label={t`Who gets it`} {...stylex.props(styles.tight)}>
-      {offered.map((recipient) => {
-        const key = keyOf(recipient);
-        const has = shared.has(key);
-        const named =
-          recipient.type === "person"
-            ? apart.named(recipient)
-            : (recipient.name ?? "");
-        const team = recipient.type === "team" ? t`Team` : undefined;
-        const note = has ? t`has it` : team;
-        return (
-          <li key={key}>
-            <Field orientation="horizontal">
-              <Checkbox
-                checked={has || chosen.includes(key)}
-                disabled={has || disabled}
-                onCheckedChange={(checked) => {
-                  const rest = chosen.filter((one) => one !== key);
-                  onChosen(checked === true ? [...rest, key] : rest);
-                }}
-              />
-              <FieldContent>
-                <FieldLabel>{named}</FieldLabel>
-                {note === undefined ? null : (
-                  <FieldDescription>{note}</FieldDescription>
-                )}
-              </FieldContent>
-            </Field>
-          </li>
-        );
-      })}
-    </ul>
+    <section aria-label={t`Who gets it`} {...stylex.props(styles.stack)}>
+      {groups.map((group) => (
+        <div key={group.label} {...stylex.props(styles.tight)}>
+          <Text size="xs" tone="muted" weight="medium">
+            {group.label}
+          </Text>
+          <ul aria-label={group.label} {...stylex.props(styles.tight)}>
+            {group.of.map((recipient) => {
+              const key = keyOf(recipient);
+              const has = shared.has(key);
+              const named =
+                recipient.type === "person"
+                  ? apart.named(recipient)
+                  : (recipient.name ?? "");
+              return (
+                <li key={key}>
+                  <Field orientation="horizontal">
+                    <Checkbox
+                      checked={has || chosen.includes(key)}
+                      disabled={has || disabled}
+                      onCheckedChange={(checked) => {
+                        const rest = chosen.filter((one) => one !== key);
+                        onChosen(checked === true ? [...rest, key] : rest);
+                      }}
+                    />
+                    {recipient.type === "person" ? (
+                      <Avatar decorative name={named} size="xs">
+                        <AvatarFallback />
+                      </Avatar>
+                    ) : null}
+                    <FieldContent>
+                      <FieldLabel>{named}</FieldLabel>
+                      {has ? (
+                        <FieldDescription>{t`has it`}</FieldDescription>
+                      ) : null}
+                    </FieldContent>
+                  </Field>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
+    </section>
   );
 };
 

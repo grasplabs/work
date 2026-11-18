@@ -11775,6 +11775,7 @@ msgstr "PDF, Word, Excel, PowerPoint of tekst"
 msgid "Pending"
 msgstr "In afwachting"
 
+#: src/apps/publish.tsx
 #: src/chat/mentions.tsx
 #: src/people/people-teams-picker.tsx
 #: src/projects/project-dialog.tsx
@@ -12468,10 +12469,6 @@ msgstr "record"
 #: src/apps/app-data.tsx
 msgid "Record"
 msgstr "Record"
-
-#: src/apps/app-data.tsx
-msgid "Record {id}"
-msgstr "Record {id}"
 
 #: src/apps/access-view.tsx
 msgid "Record every time someone looks at these records, and keep no past values"
@@ -15189,7 +15186,6 @@ msgstr "Doelontwerp akkoord"
 msgid "tasks"
 msgstr "taken"
 
-#: src/apps/publish.tsx
 #: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
 #: src/inbox/interviews-item.tsx
@@ -15232,6 +15228,7 @@ msgstr "Teamomvang onbekend"
 msgid "Team size unknown."
 msgstr "Teamomvang onbekend."
 
+#: src/apps/publish.tsx
 #: src/brain/brain.ts
 #: src/knowledge/collection-markers.tsx
 #: src/knowledge/new-collection.tsx

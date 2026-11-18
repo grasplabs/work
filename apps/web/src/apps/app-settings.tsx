@@ -36,7 +36,6 @@ import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import { Archive, Link as LinkIcon } from "../grasp/icons/index.ts";
-import { PageHeader } from "../grasp/page-header/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   Select,
@@ -193,11 +192,6 @@ export const Read = <T,>({
     </>
   );
 };
-
-/** A section's heading and what it is for. */
-const SectionHeading = ({ title }: { title: string }) => (
-  <PageHeader size="md" title={title} />
-);
 
 // How wide a section's column grows: Grasp UI has no token for a
 // settings page's measure.
@@ -1037,7 +1031,6 @@ export const AppSettings = ({
   // Options waits on whether the App declares them; anything else opens
   // General.
   const section = asked ?? "general";
-  const title = i18n._(sectionLabels[section]);
   return (
     <div {...stylex.props(styles.settings)}>
       <TabsNav aria-label={t`Settings sections`}>
@@ -1055,7 +1048,6 @@ export const AppSettings = ({
       </TabsNav>
       <div {...stylex.props(styles.scroll)}>
         <div {...stylex.props(styles.column)}>
-          <SectionHeading title={title} />
           <SectionBody
             app={app}
             builds={builds}

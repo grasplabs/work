@@ -42,7 +42,6 @@ import type { Crumb } from "../frame/site-header.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Workflow as WorkflowMark } from "../grasp/icons/index.ts";
-import { Fold } from "../grasp/tabs/fold.tsx";
 import { TabsLink, TabsNav } from "../grasp/tabs/nav.tsx";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -97,13 +96,6 @@ import {
 /** What the main area shows. */
 type WorkflowView = "flow" | "runs" | "settings";
 
-/**
- * The width of the bar under which its views fold to one menu, as TabsNav
- * folds where its row doesn't fit: the bar's actions never give way, so
- * TabsNav alone is never squeezed (frame/item-shell.tsx).
- */
-const narrowBar = "@container bar (width < 48rem)";
-
 // The Flow comes in softly as it is shown again.
 const fadeIn = stylex.keyframes({
   from: { opacity: 0 },
@@ -113,9 +105,6 @@ const fadeIn = stylex.keyframes({
 const styles = stylex.create({
   // A view kept while another shows: its state stays.
   away: { display: "none" },
-  // The views as tabs where the bar has room, one menu where it is narrow.
-  views: { display: { default: null, [narrowBar]: "none" } },
-  viewsFolded: { display: { default: "none", [narrowBar]: "flex" } },
   flow: {
     display: "flex",
     flexDirection: "column",
@@ -321,20 +310,11 @@ const ViewSwitch = ({
       {each === "runs" ? <ListedCount count={runs} of="runs" /> : null}
     </TabsLink>
   ));
+  // TabsNav folds to one menu by itself where its links don't fit.
   return (
-    <>
-      <div {...stylex.props(styles.views)}>
-        <TabsNav aria-label={label} variant="segmented">
-          {links}
-        </TabsNav>
-      </div>
-      {/* TabsNav's own fold: the current view, the others in its menu. */}
-      <nav aria-label={label} {...stylex.props(styles.viewsFolded)}>
-        <Fold label={label} segmented>
-          {links}
-        </Fold>
-      </nav>
-    </>
+    <TabsNav aria-label={label} variant="segmented">
+      {links}
+    </TabsNav>
   );
 };
 

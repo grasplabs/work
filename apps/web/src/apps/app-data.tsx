@@ -88,6 +88,23 @@ import { useCoreAction } from "../use-core-action.ts";
 // and the find-by-ID field are as wide as the old grid's bar had them.
 const BAR_FIELD = "14rem";
 
+/**
+ * A record by what people call it: its `title` or `name` field where it
+ * has one as text, else the end of its ID, as the table shows it.
+ */
+const recordName = (record: {
+  id: string;
+  fields: Record<string, unknown>;
+}): string => {
+  for (const field of ["title", "name"]) {
+    const value = record.fields[field];
+    if (typeof value === "string" && value.trim() !== "") {
+      return value;
+    }
+  }
+  return `…${record.id.slice(-6)}`;
+};
+
 const styles = stylex.create({
   // The records: their bar, what a read ran into, then the table, which
   // scrolls on its own while the bar stays.
@@ -410,7 +427,7 @@ const RecordSheet = ({
   ) {
     void load(null);
   }
-  const { id } = record;
+  const shown = recordName(record);
   return (
     <Sheet
       onOpenChange={(open) => {
@@ -421,7 +438,7 @@ const RecordSheet = ({
       open
     >
       <SheetContent closeLabel={t`Close`}>
-        <SheetTitle>{t`Record ${id}`}</SheetTitle>
+        <SheetTitle>{shown}</SheetTitle>
         <SheetDescription>{formatDateTime(record.updatedAt)}</SheetDescription>
         <SheetBody>
           <div {...stylex.props(styles.stack)}>
