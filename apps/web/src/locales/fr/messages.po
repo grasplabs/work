@@ -1037,6 +1037,10 @@ msgstr "{name} : déconnexion partout effectuée."
 msgid "{name} is too large."
 msgstr "{name} est trop volumineux."
 
+#: src/settings/sign-in-settings.tsx
+msgid "{name} isn’t on the sign-in page yet."
+msgstr "{name} n’est pas encore sur la page de connexion."
+
 #: src/frame/setting-up.tsx
 msgid "{name} isn't ready yet"
 msgstr "{name} n’est pas encore prêt"
@@ -10578,10 +10582,6 @@ msgstr "Pas maintenant"
 msgid "Not offered"
 msgstr "Non proposée"
 
-#: src/settings/sign-in-settings.tsx
-msgid "Not on the sign-in page yet"
-msgstr "Pas encore sur la page de connexion"
-
 #: src/onboarding/send-plan-form.tsx
 msgid "Not planned yet"
 msgstr "Pas encore prévu"
@@ -11252,10 +11252,6 @@ msgstr "Seuls les concepteurs du workflow peuvent les modifier."
 msgid "Only when asked"
 msgstr "Seulement sur demande"
 
-#: src/settings/sign-in-settings.tsx
-msgid "Only work accounts at {hostedDomain}."
-msgstr "Uniquement les comptes professionnels de {hostedDomain}."
-
 #: src/connections/integration-inspector.tsx
 msgid "Only you"
 msgstr "Vous seul"
@@ -11283,10 +11279,6 @@ msgstr "Vous seul le voyez pendant que vous l’essayez. Vous le partagez quand 
 #: src/workflows/workflow-status.tsx
 msgid "Only you see this"
 msgstr "Vous seul voyez ceci"
-
-#: src/settings/sign-in-settings.tsx
-msgid "Only your organization’s work accounts."
-msgstr "Uniquement les comptes professionnels de votre organisation."
 
 #: src/chat/sidebar-chats.tsx
 #: src/connections/request-app-dialog.tsx
@@ -11441,15 +11433,15 @@ msgstr "Ouvrir l’exécution lancée le {started}"
 msgid "Open this link again whenever you like, and carry on where you stopped."
 msgstr "Rouvrez ce lien quand vous voulez, et reprenez là où vous vous êtes arrêté."
 
+#: src/settings/staff-access.tsx
+msgid "Open until"
+msgstr "Ouvert jusqu’au"
+
 #: src/decision-confirmation.tsx
 #: src/routes/decisions.$decision.tsx
 msgctxt "until when a decision can be answered"
 msgid "Open until"
 msgstr "Ouverte jusqu’au"
-
-#: src/settings/staff-access.tsx
-msgid "Open until {until}"
-msgstr "Ouvert jusqu’au {until}"
 
 #: src/inbox/interviews-item.tsx
 msgid "Open your onboarding"
@@ -13329,7 +13321,6 @@ msgstr "Risk-to-Compliance"
 msgid "Rocket"
 msgstr "Fusée"
 
-#: src/routes/_shell.settings.profile.tsx
 #: src/settings/invitations.tsx
 msgid "Role"
 msgstr "Rôle"
@@ -16881,6 +16872,7 @@ msgstr "Essayer"
 #: src/settings/ai-providers.tsx
 #: src/settings/profile-name.tsx
 #: src/settings/section.tsx
+#: src/settings/sign-in-settings.tsx
 #: src/settings/workspace-name.tsx
 msgid "Try again"
 msgstr "Réessayer"
