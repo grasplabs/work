@@ -38,6 +38,7 @@ import { requireWorkflowRole } from "./workflow-resources.ts";
 import {
   decideWorkflowStart,
   isStaleRefusal,
+  refusedForNow,
   receiptOf,
   startWorkflow,
 } from "./workflow-starts.ts";
@@ -457,8 +458,14 @@ export const confirmHeldStart = async (
     if (now?.decision === "declined") {
       throw workflowResourceErrors.create("workflow.start_held_gone");
     }
-    if (isExpectedError(error) && !isStaleRefusal(error)) {
-      // Refused for good: it never starts, and its agent is told why.
+    if (
+      isExpectedError(error) &&
+      !isStaleRefusal(error) &&
+      !refusedForNow(error)
+    ) {
+      // Refused for good: it never starts, and its agent is told why. One
+      // refused for now (what the workflow keeps couldn't be checked) its
+      // person may confirm again.
       await db
         .update(agentHeldStarts)
         .set({ refusal: error.code, input: null })

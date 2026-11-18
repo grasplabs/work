@@ -22,7 +22,11 @@ import {
 import { stopNoticed } from "../notifications.ts";
 import { allowingPermissionSql } from "../permissions.ts";
 import { nextOccurrence, startStatusSql } from "../trigger-resources.ts";
-import { isStaleRefusal, startWorkflow } from "../workflow-starts.ts";
+import {
+  isStaleRefusal,
+  refusedForNow,
+  startWorkflow,
+} from "../workflow-starts.ts";
 
 // Starting the runs of independent schedule triggers (platform
 // specification 15.1, 15.2; trigger-resources.ts) from core's clock, every
@@ -263,7 +267,13 @@ const recordFailure = async (
 
 /** What a start that threw was, by its error. */
 const failureOf = (error: unknown): Failure | "gone" => {
-  if (!isExpectedError(error) || isStaleRefusal(error)) {
+  // What the workflow keeps couldn't be checked now: core's own failure,
+  // backed off, never counted toward stopping.
+  if (
+    !isExpectedError(error) ||
+    isStaleRefusal(error) ||
+    refusedForNow(error)
+  ) {
     return { kind: "core" };
   }
   if (error.code === "workflow.trigger_unavailable") {
