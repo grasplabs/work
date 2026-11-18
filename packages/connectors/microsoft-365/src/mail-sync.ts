@@ -7,6 +7,7 @@ import {
   fetchInRoom,
   fillPage,
   fromInPagePart,
+  isTooLarge,
   inPagePart,
   startOfPage,
   fromCursorPart,
@@ -319,8 +320,14 @@ const get = async (
         ? init
         : { headers: { prefer: `${prefer}, odata.maxpagesize=${pageSize}` } }
     );
-  } catch {
-    return "large";
+  } catch (error) {
+    // Only an answer past what connect reads is "large"; any other failure
+    // while it came (a connection dropped) fails the page, to try again,
+    // never passing a message over.
+    if (isTooLarge(error)) {
+      return "large";
+    }
+    throw error;
   }
 };
 
@@ -364,12 +371,48 @@ const standingOf = async (
   room: SyncRoom,
   known: Map<string, Standing>,
   listed: ReadonlyMap<string, FolderEntry>,
-  folder: FolderEntry
-): Promise<Standing | null> => {
+  start: FolderEntry | string
+): Promise<Standing | { stoppedAt: string }> => {
   const walked: string[] = [];
-  let at: FolderEntry | null = folder;
+  let at: FolderEntry | string | null = start;
   let standing: Standing | undefined;
   while (standing === undefined) {
+    if (typeof at === "string") {
+      // A folder up the walk, known by its ID alone.
+      const id: string = at;
+      const decided = known.get(id);
+      if (decided !== undefined) {
+        standing = decided;
+        break;
+      }
+      const cached = listed.get(id);
+      if (cached !== undefined) {
+        at = cached;
+        continue;
+      }
+      if (!mayRequest(room)) {
+        return { stoppedAt: id };
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one folder up at a time
+      const response = await get(
+        room,
+        graphUrl(`${folders}/${segment(id)}`, { $select: folderFields })
+      );
+      if (response === "late") {
+        return { stoppedAt: id };
+      }
+      if (response === "large" || isUnreadable(response)) {
+        at = null;
+        continue;
+      }
+      if (!response.ok) {
+        // oxlint-disable-next-line no-await-in-loop -- the walk ends here
+        throw await graphFailure(response);
+      }
+      // oxlint-disable-next-line no-await-in-loop -- the walk goes on from it
+      at = folderEntrySchema.parse(await response.json());
+      continue;
+    }
     if (at === null || walked.includes(at.id)) {
       // Outside the mailbox's root, or a loop: not mail a client shows.
       standing = "leave";
@@ -384,37 +427,7 @@ const standingOf = async (
       standing = "leave";
       break;
     }
-    const parent: string | null = at.parentFolderId ?? null;
-    if (parent === null) {
-      at = null;
-      continue;
-    }
-    const cached = listed.get(parent);
-    if (cached !== undefined || known.has(parent)) {
-      at = cached ?? { id: parent };
-      continue;
-    }
-    if (!mayRequest(room)) {
-      return null;
-    }
-    // oxlint-disable-next-line no-await-in-loop -- one folder up at a time
-    const response = await get(
-      room,
-      graphUrl(`${folders}/${segment(parent)}`, { $select: folderFields })
-    );
-    if (response === "late") {
-      return null;
-    }
-    if (response === "large" || isUnreadable(response)) {
-      at = null;
-      continue;
-    }
-    if (!response.ok) {
-      // oxlint-disable-next-line no-await-in-loop -- the walk ends here
-      throw await graphFailure(response);
-    }
-    // oxlint-disable-next-line no-await-in-loop -- the walk goes on from it
-    at = folderEntrySchema.parse(await response.json());
+    at = at.parentFolderId ?? null;
   }
   for (const id of walked) {
     known.set(id, standing);
@@ -424,27 +437,43 @@ const standingOf = async (
 
 /**
  * Where the folder listing goes on: Graph's skip token (none: from its
- * start), and the folder of that page already handled.
+ * start), the folder of that page already handled, and, when a read ran
+ * out of room deciding it, the walk up from it still to finish: the
+ * folder, and the ID of the next folder above it to read.
  */
 interface ListingAt {
   token: string | null;
   after: string | null;
+  walk: { folder: string; at: string } | null;
 }
 
-/** The cursor of where the folder listing goes on: `l.<token>.<after>`. */
-const listingCursorOf = ({ token, after }: ListingAt): string =>
-  `l.${cursorPart(token)}.${cursorPart(after)}`;
+/**
+ * The cursor of where the folder listing goes on:
+ * `l.<token>.<after>.<walk's folder>.<walk's next folder>`.
+ */
+const listingCursorOf = ({ token, after, walk }: ListingAt): string =>
+  `l.${cursorPart(token)}.${cursorPart(after)}.${cursorPart(walk?.folder ?? null)}.${cursorPart(walk?.at ?? null)}`;
 
 /** Where a folder listing's cursor says it goes on; any other starts over. */
 const listingAtOf = (cursor: string | null): ListingAt => {
   if (cursor === null) {
-    return { token: null, after: null };
+    return { token: null, after: null, walk: null };
   }
-  const [tag, token, after, ...rest] = cursor.split(".");
+  const [tag, token, after, folder, walkAt, ...rest] = cursor.split(".");
   if (tag !== "l" || rest.length > 0) {
     throw notOurs();
   }
-  return { token: fromCursorPart(token), after: fromCursorPart(after) };
+  const walking = fromCursorPart(folder);
+  const next = fromCursorPart(walkAt);
+  if ((walking === null) !== (next === null)) {
+    throw notOurs();
+  }
+  return {
+    token: fromCursorPart(token),
+    after: fromCursorPart(after),
+    walk:
+      walking === null || next === null ? null : { folder: walking, at: next },
+  };
 };
 
 /**
@@ -483,6 +512,19 @@ const placesOf = async ({
     );
     known.set(id, name === rootFolder ? "keep" : "leave");
   }
+  if (at.walk !== null) {
+    // The walk up from a folder a read before had no room to finish.
+    const { walk } = at;
+    const standing = await standingOf(room, known, new Map(), walk.at);
+    if (typeof standing === "object") {
+      at = { ...at, walk: { folder: walk.folder, at: standing.stoppedAt } };
+      return stop();
+    }
+    if (standing === "keep") {
+      places.push(walk.folder);
+    }
+    at = { ...at, walk: null };
+  }
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- one page after another
     const response = await get(
@@ -515,21 +557,26 @@ const placesOf = async ({
       if (folder["@removed"] === undefined) {
         // oxlint-disable-next-line no-await-in-loop -- one folder after another
         const standing = await standingOf(room, known, listed, folder);
-        if (standing === null) {
-          // No room left to place it: the next read goes on from it.
+        if (typeof standing === "object") {
+          // No room left to place it: the next read finishes its walk.
+          at = {
+            token: at.token,
+            after: folder.id,
+            walk: { folder: folder.id, at: standing.stoppedAt },
+          };
           return stop();
         }
         if (standing === "keep") {
           places.push(folder.id);
         }
       }
-      at = { token: at.token, after: folder.id };
+      at = { token: at.token, after: folder.id, walk: null };
     }
     const next = page["@odata.nextLink"];
     if (next === undefined) {
       return { places, cursor: null };
     }
-    at = { token: tokenOf(next, "skip").value, after: null };
+    at = { token: tokenOf(next, "skip").value, after: null, walk: null };
     if (!mayRequest(room)) {
       return stop();
     }

@@ -43,6 +43,8 @@ interface Mailbox {
   folderPage: number;
   /** A folder listing Graph answers with no folder and the same token on, for ever. */
   stuckListing: boolean;
+  /** Messages whose next read drops its connection part-way, once. */
+  dropOnce: Set<string>;
   /** Each folder's delta feed, by folder. */
   feeds: Record<string, Feed>;
   /** Each message as Graph reads it on its own, by ID. */
@@ -63,6 +65,7 @@ const mailbox: Mailbox = {
   search: new Set(),
   folderPage: 1000,
   stuckListing: false,
+  dropOnce: new Set(),
   feeds: {},
   messages: {},
   attachments: {},
@@ -94,6 +97,7 @@ const reset = (): void => {
   mailbox.search = new Set();
   mailbox.folderPage = 1000;
   mailbox.stuckListing = false;
+  mailbox.dropOnce = new Set();
   mailbox.feeds = {};
   mailbox.messages = {};
   mailbox.attachments = {};
@@ -321,6 +325,17 @@ const messageAnswer = (url: URL, rest: string[]): Response => {
   if (refused !== null) {
     return refused;
   }
+  if (part === undefined && mailbox.dropOnce.delete(id)) {
+    // The connection drops after the headers, part-way through the body.
+    return new Response(
+      new ReadableStream({
+        start: (controller) => {
+          controller.enqueue(new TextEncoder().encode('{"subject":'));
+          controller.error(new Error("The connection was reset"));
+        },
+      })
+    );
+  }
   if (part === undefined) {
     const fields = selected(url, messageProperties);
     return fields instanceof Response
@@ -468,6 +483,62 @@ describe("syncing a person's own mailbox, folder by folder", () => {
     expect({ places: places.toSorted(), cursor }).toStrictEqual({
       places: ["archive", "inbox", "projects", "root"],
       cursor: null,
+    });
+  });
+
+  it("finishes a folder's walk up across reads, however deep, with its parents on other pages", async () => {
+    const connectionId = await connected();
+    // Forty-six folders, each in the one before, the deepest listed first
+    // and one a page: its parents are on pages still to come, more than
+    // one read has requests to read.
+    mailbox.folderPage = 1;
+    const chain = Array.from({ length: 46 }, (_, index) => `d${index + 1}`);
+    const { inbox, ...others } = mailbox.parents;
+    mailbox.parents = {
+      d46: "d45",
+      ...Object.fromEntries(
+        chain
+          .slice(0, -1)
+          .map((id, index) => [id, index === 0 ? "inbox" : `d${index}`])
+      ),
+      inbox: inbox ?? null,
+      ...others,
+    };
+    const listed: string[] = [];
+    let cursor: string | null = null;
+    let reads = 0;
+    do {
+      const answer: { places: string[]; cursor: string | null } =
+        // oxlint-disable-next-line no-await-in-loop -- reads come one after another
+        await exports.default.listSyncPlaces({
+          connectionId,
+          feed: "mail",
+          cursor,
+        });
+      listed.push(...answer.places);
+      ({ cursor } = answer);
+      reads += 1;
+    } while (cursor !== null && reads < 8);
+    expect({ done: cursor, places: new Set(listed) }).toStrictEqual({
+      done: null,
+      places: new Set(["root", "inbox", "projects", "archive", ...chain]),
+    });
+  });
+
+  it("tries a message again whole when its read drops part-way, never passing it over", async () => {
+    const connectionId = await connected();
+    mailbox.feeds.inbox = { "": { entries: [message("a")], end: "t1" } };
+    mailbox.dropOnce = new Set(["a"]);
+    const dropped = await read(connectionId, "inbox", null).catch(
+      (error: unknown) => error
+    );
+    const again = await read(connectionId, "inbox", null);
+    expect({
+      dropped: syncErrors.codeOf(dropped),
+      again: withContent(again),
+    }).toStrictEqual({
+      dropped: "sync.provider_failed",
+      again: [["inbox/a", true]],
     });
   });
 
