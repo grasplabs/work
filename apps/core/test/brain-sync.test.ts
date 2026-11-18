@@ -282,6 +282,24 @@ const holdStatement = /^update "brain_sync_items" set "held_since" = \?/u;
 /** An item claimed by a page (`claim`). */
 const claimStatement = /^insert into "brain_sync_items"/u;
 
+/** A dropped place's erase taking its rows' keys (`eraseDroppedPlace`). */
+const takeKeysStatement = /"leaving" = "brain_sync_items"\."key"/u;
+
+/** A delete of synced items: a dropped place's page of rows, or a disconnect's. */
+const deleteItemsStatement = /^delete from "brain_sync_items"/u;
+
+/** A page's commit: its source's cursor moved (`commit`). */
+const commitStatement = /^update "brain_sync_sources" set "cursor"/u;
+
+/** Due at once: the daily listing of `connectionId`'s folders. */
+const listFoldersNow = async (connectionId: string): Promise<void> => {
+  await env.DB.prepare(
+    "UPDATE brain_sync_sources SET due_at = 0 WHERE connection_id = ? AND place = ':places'"
+  )
+    .bind(connectionId)
+    .run();
+};
+
 /** The end of a dropped place's erase: its source deleted (`eraseDroppedPlace`). */
 const placeGoneStatement = /^delete from "brain_sync_sources"/u;
 
@@ -2041,6 +2059,197 @@ describe("native sync", () => {
         other: await finds(owner.userId, marks.other),
         rowsOfA: results[0]?.count,
       }).toStrictEqual({ late: false, old: false, other: true, rowsOfA: 0 });
+    }
+  );
+
+  it(
+    "keeps a folder listed again while its erase is under way: what it brings back stays, whether the erase stood at its keys or between its pages, and a second erase waits",
+    setUpTime,
+    async () => {
+      /** a dropped, then listed again with its old message and a new one while its erase stands at `pattern`. */
+      const restoredDuring = async (pattern: RegExp, secondErase: boolean) => {
+        const owner = await signedInApi(idp, "user");
+        const marks = { old: markerOf(), fresh: markerOf() };
+        const quiet = { changes: [], next: "q", more: false };
+        const { connectionId, world } = await connectSampleFeed(owner, {
+          "": quiet,
+          q: quiet,
+        });
+        const a: Record<string, unknown> = {
+          "": feedPage([mailItem("a/old", `Mail ${marks.old}`)], "a1"),
+          a1: feedPage([], "a1"),
+        };
+        const b = { "": feedPage([], "b1"), b1: feedPage([], "b1") };
+        const set = async (places: string[]) => {
+          await world({
+            places,
+            folders: { a: { changes: a }, b: { changes: b } },
+          });
+        };
+        await set(["a", "b"]);
+        later(pollMs);
+        await sync();
+        later(pollMs);
+        await sync();
+        // a deleted: its daily listing drops it.
+        await set(["b"]);
+        await listFoldersNow(connectionId);
+        later(pollMs);
+        await sync();
+        // a comes back, with its old message and a new one, while the next
+        // run erases it.
+        a[""] = feedPage(
+          [
+            mailItem("a/old", `Mail ${marks.old}`),
+            mailItem("a/fresh", `Mail ${marks.fresh}`),
+          ],
+          "a1"
+        );
+        later(pollMs);
+        await syncOn(
+          interleaving({ pattern, bound: connectionId }, async () => {
+            if (secondErase) {
+              await runSync(env);
+            }
+            await set(["a", "b"]);
+            await listFoldersNow(connectionId);
+            await runSync(env);
+            await runSync(env);
+          })
+        );
+        for (let run = 0; run < 3; run += 1) {
+          later(pollMs);
+          // oxlint-disable-next-line no-await-in-loop -- one run after another
+          await sync();
+        }
+        return [
+          await finds(owner.userId, marks.old),
+          await finds(owner.userId, marks.fresh),
+        ];
+      };
+
+      expect({
+        // The review's order: another run's erase of the same folder, then
+        // the folder listed again and read, between the erase's read of
+        // its rows and its taking their keys.
+        atItsKeys: await restoredDuring(takeKeysStatement, true),
+        // Its page read again between two pages of the erase.
+        betweenPages: await restoredDuring(deleteItemsStatement, false),
+      }).toStrictEqual({ atItsKeys: [true, true], betweenPages: [true, true] });
+    }
+  );
+
+  it(
+    "ends a disconnect's erase once, with one event, when a second run's erase overlaps it",
+    setUpTime,
+    async () => {
+      const [owner, colleague] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "user"),
+      ]);
+      await connectDrive(colleague);
+      const [first, second] = [markerOf(), markerOf()];
+      const { connectionId, subject, email } = await connectDrive(owner);
+      await driveHolds(subject, {
+        start: "80",
+        owned: [
+          docFile("first", email, { permissions: withDomain(email) }),
+          docFile("second", email, { permissions: withDomain(email) }),
+        ],
+        changes: { "80": { changes: [], newStartPageToken: "80" } },
+        contents: { first: `Plan ${first}`, second: `Plan ${second}` },
+      });
+      later(pollMs);
+      await sync();
+      await owner.api.connections.disconnect(connectionId);
+      await drainAuditOutboxes(env);
+      later(pollMs);
+      await syncOn(
+        interleaving(
+          { pattern: deleteItemsStatement, bound: connectionId },
+          async () => {
+            await runSync(env);
+          }
+        )
+      );
+      later(pollMs);
+      await sync();
+      const events = await syncEvents(connectionId);
+
+      expect({
+        found: [
+          await finds(colleague.userId, first),
+          await finds(colleague.userId, second),
+        ],
+        erased: events.filter(({ action }) => action === "brain.sync.erased"),
+      }).toStrictEqual({
+        found: [false, false],
+        erased: [{ action: "brain.sync.erased", detail: { sources: 2 } }],
+      });
+    }
+  );
+
+  it(
+    "keeps a change as one event when the read that saved it stopped before its page's commit, and a relist of it adds none",
+    setUpTime,
+    async () => {
+      const owner = await signedInApi(idp, "user");
+      const others = await Promise.all(
+        Array.from({ length: minTeamShown - 1 }, async () => {
+          const { userId } = await signedInWithRole(idp, "user");
+          return userId;
+        })
+      );
+      const team = await newTeam(owner.userId, ...others);
+      const note = markerOf();
+      const { connectionId } = await connectSampleFeed(owner, {
+        "": feedPage(
+          [mailItem("note", `Note ${note}`, { kind: "file" })],
+          "p1"
+        ),
+        p1: feedPage([], "p1"),
+      });
+      const stepsKept = async () =>
+        await inStoreOf("brain", (sql) =>
+          sql
+            .exec<{ step: string }>(
+              "SELECT step FROM events WHERE team = ?",
+              `team:${team}`
+            )
+            .toArray()
+            .map(({ step }) => step)
+        );
+      // The first read saves the file and stops before its commit.
+      later(pollMs);
+      await syncOn(
+        interleaving(
+          { pattern: commitStatement, bound: connectionId },
+          async () => {
+            await Promise.reject(new Error("Stopped before the commit"));
+          }
+        )
+      );
+      const stopped = await stepsKept();
+      later(pollMs);
+      await sync();
+      const read = await stepsKept();
+      // A day on, its relist reads it again.
+      later(24 * 60 * 60 * 1000);
+      await sync();
+      later(pollMs);
+      await sync();
+
+      expect({
+        stopped,
+        read,
+        relisted: await stepsKept(),
+        found: await finds(owner.userId, note),
+      }).toStrictEqual({
+        stopped: [],
+        read: ["file.added"],
+        relisted: ["file.added"],
+        found: true,
+      });
     }
   );
 

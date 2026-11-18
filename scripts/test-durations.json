@@ -272,7 +272,7 @@
   "@grasp-os/core test/brain-skills.test.ts": 6.1,
   "@grasp-os/core test/brain-sources.test.ts": 6.5,
   "@grasp-os/core test/brain-suite.test.ts": 2.4,
-  "@grasp-os/core test/brain-sync.test.ts": 8.0,
+  "@grasp-os/core test/brain-sync.test.ts": 885,
   "@grasp-os/core test/brain-team-groups.test.ts": 4.5,
   "@grasp-os/core test/brain-uploads.test.ts": 14.6,
   "@grasp-os/core test/brain-version-change.test.ts": 1.8,

@@ -12,7 +12,9 @@ CREATE TABLE `brain_sync_disconnects` (
 	`actor` text,
 	`requested_at` integer NOT NULL,
 	`erasing` integer NOT NULL,
-	`erased` integer NOT NULL
+	`erased` integer NOT NULL,
+	`lease_id` text,
+	`lease_until` integer
 );
 --> statement-breakpoint
 CREATE INDEX `brain_sync_disconnects_erasing_idx` ON `brain_sync_disconnects` (`erasing`);--> statement-breakpoint
@@ -32,6 +34,7 @@ CREATE TABLE `brain_sync_items` (
 	`leaving` text,
 	`leaving_store` text,
 	`held_since` integer,
+	`saved_at` integer,
 	PRIMARY KEY(`connection_id`, `feed`, `item_id`)
 );
 --> statement-breakpoint

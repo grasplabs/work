@@ -3605,7 +3605,10 @@ export const brainSyncSources = sqliteTable(
  * erases it, so an erase a stopped run left is finished on its next read,
  * and a disconnect's erasure finds it; and since when its removal is held
  * (`heldSince`: gone from one place of a sync that lists places, kept
- * until the others have read, so a move between two leaves no hole). Never its readers: each
+ * until the others have read, so a move between two leaves no hole), and
+ * when a page last saved a change of it (`savedAt`: one saved since its
+ * source last committed a page is the uncommitted page's own, whose step
+ * a replay of that page records again). Never its readers: each
  * page gives them to the Brain again, so nothing here names a person.
  * Core names a key here before the Brain is given it, so a disconnect's
  * erasure finds every key it gave.
@@ -3628,6 +3631,7 @@ export const brainSyncItems = sqliteTable(
     leaving: text(),
     leavingStore: text("leaving_store", { enum: ["own", "shared"] }),
     heldSince: timestamp("held_since"),
+    savedAt: timestamp("saved_at"),
   },
   (table) => [
     primaryKey({ columns: [table.connectionId, table.feed, table.itemId] }),
@@ -3689,6 +3693,9 @@ export const brainSyncDisconnects = sqliteTable(
     requestedAt: timestamp("requested_at").notNull(),
     erasing: integer({ mode: "boolean" }).notNull(),
     erased: integer().notNull(),
+    /** The run that holds the erase, until when: its token (brain-sync.ts `takeErasure`). */
+    leaseId: text("lease_id"),
+    leaseUntil: timestamp("lease_until"),
   },
   (table) => [index("brain_sync_disconnects_erasing_idx").on(table.erasing)]
 );

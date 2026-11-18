@@ -23,6 +23,10 @@ import { and, asc, eq, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import type { SQL, SQLWrapper } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import type {
+  SQLiteTable,
+  SQLiteUpdateSetSource,
+} from "drizzle-orm/sqlite-core";
 
 import {
   auditedBatch,
@@ -207,6 +211,90 @@ const spend = (budget: Budget, calls: number): void => {
 
 /** Core's database, as `drizzle` makes it. */
 type Database = DrizzleD1Database & { $client: D1Database };
+
+/** Core's database for reading, and for batches of fenced statements (`writesOf`): it writes nothing itself. */
+type Reads = Pick<Database, "select" | "batch">;
+
+/**
+ * Work a writer took, and the token it took it with: the lease
+ * (`lease_id`) on the row of a source, for a page of it (`dropped`
+ * false: `claimNext`, `listPlaces`) or for the erase of a place no longer
+ * listed (`dropped` true: `takeDroppedPlace`), or on the row of a
+ * disconnect, for its erase (`takeErasure`). A token is new each time the
+ * work is taken, and the work changes it whenever it changes hands or
+ * meaning: a new lease, a drop (`listPlaces`), a place listed again
+ * (`sourceStatement`), a disconnect (its sources' rows gone).
+ */
+type Work =
+  | {
+      readonly db: Database;
+      readonly token: string;
+      readonly connectionId: string;
+      readonly feed: string;
+      readonly place: string;
+      readonly dropped: boolean;
+    }
+  | {
+      readonly db: Database;
+      readonly token: string;
+      readonly erasure: string;
+    };
+
+/** That `work` is still the writer's, as the token it took it with says, as SQL. */
+const fenceOf = (work: Work): SQL =>
+  "erasure" in work
+    ? sql`EXISTS (SELECT 1 FROM ${brainSyncDisconnects} AS fence WHERE fence.connection_id = ${work.erasure} AND fence.lease_id = ${work.token} AND fence.erasing = 1)`
+    : sql`EXISTS (SELECT 1 FROM ${brainSyncSources} AS fence WHERE fence.connection_id = ${work.connectionId} AND fence.feed = ${work.feed} AND fence.place = ${work.place} AND fence.lease_id = ${work.token} AND fence.dropped = ${work.dropped ? 1 : 0})`;
+
+/**
+ * The one way a writer of the sync writes, every statement fenced by its
+ * work's token in the statement itself (`fenceOf`): once the work has
+ * changed hands or meaning, each matches nothing, and the writer stops at
+ * the first that a check of its own finds wrote nothing (`heldAfter`).
+ * Only what takes or changes work writes otherwise: `claimNext`,
+ * `takeDroppedPlace`, `takeErasure`, `refreshSources`'s upsert of the
+ * sources connect lists, and a disconnect (`closeSyncOfDisconnect`).
+ */
+const writesOf = (work: Work) => {
+  const { db } = work;
+  const fence = fenceOf(work);
+  return {
+    update: <T extends SQLiteTable>(
+      table: T,
+      set: SQLiteUpdateSetSource<T>,
+      where: SQL
+    ) =>
+      db
+        .update(table)
+        .set(set)
+        .where(sql`(${where}) AND ${fence}`),
+    delete: <T extends SQLiteTable>(table: T, where: SQL) =>
+      db.delete(table).where(sql`(${where}) AND ${fence}`),
+    /** `INSERT INTO table select WHERE (where) AND fence`: `select` has no WHERE of its own. */
+    insert: <T extends SQLiteTable>(
+      table: T,
+      select: SQL,
+      where: SQL = sql`1 = 1`
+    ) => db.insert(table).select(sql`${select} WHERE (${where}) AND ${fence}`),
+  };
+};
+
+type Writes = ReturnType<typeof writesOf>;
+
+/** The writes of a page of `source` this run claimed with `leaseId` (`claimNext`). */
+const pageWritesOf = (
+  db: Database,
+  source: Pick<Source, "connectionId" | "feed" | "place">,
+  leaseId: string
+): Writes =>
+  writesOf({
+    db,
+    token: leaseId,
+    connectionId: source.connectionId,
+    feed: source.feed,
+    place: source.place,
+    dropped: false,
+  });
 
 type Source = typeof brainSyncSources.$inferSelect;
 type Item = typeof brainSyncItems.$inferSelect;
@@ -408,9 +496,13 @@ const textOf = async (
 /** What a run holds while it applies a page. */
 interface Applying {
   env: Env;
-  db: Database;
+  /** Reads, and batches of statements `write` made: never a write of its own. */
+  db: Reads;
+  /** The audit outbox's own statements alone, each after a fenced write (`changes()`). */
+  outbox: Database;
+  /** Every write of the page, fenced by the source's lease (`writesOf`). */
+  write: Writes;
   source: Source;
-  leaseId: string;
   budget: Budget;
   /** When core read the page: every add and change of readers is as of then. */
   readAt: Date;
@@ -434,9 +526,17 @@ interface Applying {
   counts: { added: number; changed: number; removed: number };
   /**
    * The person's steps this read applied, one per change counted
-   * (`stepped`), recorded once the page is committed (`recordSteps`).
+   * (`stepped`), recorded once the page is committed (`recordSteps`), and
+   * the items they are of.
    */
   steps: ObservedStep[];
+  stepped: Set<string>;
+  /**
+   * Whether an earlier read of this page saved changes and stopped before
+   * its commit: its counters, stored with each change and reset only by a
+   * commit, weren't all zero when this read claimed the source.
+   */
+  replay: boolean;
 }
 
 /**
@@ -447,31 +547,20 @@ interface Applying {
 const isListing = ({ source, stream }: Applying): boolean =>
   stream === "relist" || source.listingOpen;
 
-/**
- * That `applying`'s run still holds its source, and the source is not
- * dropped (its place no longer listed, `listPlaces`), as SQL: the one
- * condition every statement of a page that claims, records, holds or
- * leaves an item carries, in the statement itself. A drop takes the lease
- * in the same statement, so a page under way when its place goes writes
- * nothing more: no item lands in a place whose erase (`eraseDroppedPlace`)
- * may already have passed it.
- */
-const stillHeld = ({ source, leaseId }: Applying): SQL =>
-  sql`EXISTS (SELECT 1 FROM ${brainSyncSources} WHERE ${brainSyncSources.connectionId} = ${source.connectionId} AND ${brainSyncSources.feed} = ${source.feed} AND ${brainSyncSources.place} = ${source.place} AND ${brainSyncSources.leaseId} = ${leaseId} AND ${brainSyncSources.dropped} = 0)`;
-
 /** That a disconnect closed `connectionId` for the sync, as SQL. */
 const closed = (connectionId: SQL | string): SQL =>
   sql`EXISTS (SELECT 1 FROM ${brainSyncDisconnects} WHERE ${brainSyncDisconnects.connectionId} = ${connectionId})`;
 
-/** The source's row, while `applying`'s run holds it and it isn't dropped (`stillHeld`), as SQL. */
-const heldSource = (applying: Applying) =>
-  and(
-    eq(brainSyncSources.connectionId, applying.source.connectionId),
-    eq(brainSyncSources.feed, applying.source.feed),
-    eq(brainSyncSources.place, applying.source.place),
-    eq(brainSyncSources.leaseId, applying.leaseId),
-    eq(brainSyncSources.dropped, false)
-  );
+/** The row of the source of `place` of `of`'s sync, as SQL. */
+const sourceRowOf = (
+  of: Pick<Source, "connectionId" | "feed">,
+  place: string
+): SQL =>
+  sql`${brainSyncSources.connectionId} = ${of.connectionId} AND ${brainSyncSources.feed} = ${of.feed} AND ${brainSyncSources.place} = ${place}`;
+
+/** The rows of the items of the place of `source`, as SQL. */
+const itemsOfPlace = (source: Source): SQL =>
+  sql`${brainSyncItems.connectionId} = ${source.connectionId} AND ${brainSyncItems.feed} = ${source.feed} AND ${brainSyncItems.place} = ${source.place}`;
 
 /**
  * One of the page's counters, one up, while the run holds the source (and
@@ -482,17 +571,11 @@ const counted = (
   counter: "added" | "changed" | "removed",
   when: SQL = sql`1 = 1`
 ) =>
-  applying.db
-    .update(brainSyncSources)
-    .set({ [counter]: sql`${brainSyncSources[counter]} + 1` })
-    .where(
-      and(
-        eq(brainSyncSources.connectionId, applying.source.connectionId),
-        eq(brainSyncSources.feed, applying.source.feed),
-        eq(brainSyncSources.place, applying.source.place),
-        eq(brainSyncSources.leaseId, applying.leaseId),
-        when
-      )
+  applying.write
+    .update(
+      brainSyncSources,
+      { [counter]: sql`${brainSyncSources[counter]} + 1` },
+      sql`${sourceRowOf(applying.source, applying.source.place)} AND ${when}`
     )
     .returning({ leaseId: brainSyncSources.leaseId });
 
@@ -502,15 +585,15 @@ const itemWhere = (applying: Applying, itemId: string): SQL =>
 
 /**
  * `row` as the run read it, still in the place the run acts for, as SQL:
- * the same generation, in this place, while the run holds its source.
- * Every statement that holds, leaves or erases an item for a place
- * checks it in the statement itself: a page of another place may have
- * brought the item there since it was read (`bringBack`), with the same
- * generation, and what this place says of an item no longer in it
- * changes nothing.
+ * the same generation, in this place (the run's lease the statement's
+ * fence adds, `writesOf`). Every statement that holds, leaves or erases
+ * an item for a place checks it in the statement itself: a page of
+ * another place may have brought the item there since it was read
+ * (`bringBack`), with the same generation, and what this place says of an
+ * item no longer in it changes nothing.
  */
 const stillHere = (applying: Applying, row: Item): SQL =>
-  sql`${itemWhere(applying, row.itemId)} AND ${brainSyncItems.generation} = ${row.generation} AND ${brainSyncItems.place} = ${applying.source.place} AND ${stillHeld(applying)}`;
+  sql`${itemWhere(applying, row.itemId)} AND ${brainSyncItems.generation} = ${row.generation} AND ${brainSyncItems.place} = ${applying.source.place}`;
 
 /** Throws when a batch's last statement, the counter, found the run no longer holding its source. */
 const heldAfter = (counter: readonly unknown[]): void => {
@@ -538,6 +621,7 @@ const stepped = async (
   item: string,
   at: Date
 ): Promise<void> => {
+  applying.stepped.add(item);
   applying.steps.push({
     key: await sha256Hex(JSON.stringify([key, change])),
     personId: applying.source.personId,
@@ -578,7 +662,7 @@ const addedReaders = (applying: Applying, store: Store): SourceReaders =>
  * erasing an erased key changes nothing.
  */
 const finishLeaving = async (applying: Applying, row: Item): Promise<Item> => {
-  const { env, db, budget } = applying;
+  const { env, write, budget } = applying;
   if (row.leaving === null || row.leavingStore === null) {
     return row;
   }
@@ -590,11 +674,11 @@ const finishLeaving = async (applying: Applying, row: Item): Promise<Item> => {
   });
   spend(budget, 1);
   heldAfter(
-    await db
-      .update(brainSyncItems)
-      .set({ leaving: null, leavingStore: null })
-      .where(
-        sql`${itemWhere(applying, row.itemId)} AND ${brainSyncItems.leaving} = ${row.leaving} AND ${stillHeld(applying)}`
+    await write
+      .update(
+        brainSyncItems,
+        { leaving: null, leavingStore: null },
+        sql`${itemWhere(applying, row.itemId)} AND ${brainSyncItems.leaving} = ${row.leaving}`
       )
       .returning({ key: brainSyncItems.key })
   );
@@ -616,7 +700,7 @@ const leave = async (
   applying: Applying,
   row: Item
 ): Promise<Item | undefined> => {
-  const { db, budget, source } = applying;
+  const { db, write, budget, source } = applying;
   if (row.store === null) {
     return await finishLeaving(applying, row);
   }
@@ -632,20 +716,21 @@ const leave = async (
     leaving: row.key,
     leavingStore: row.store,
     heldSince: null,
+    savedAt: new Date(),
   };
   spend(budget, 1);
   // Owed first, which a leave that took nothing leaves harmlessly set;
   // counted only if the row left, by the state the leave wrote.
   const [owed, gone, counter] = await db.batch([
-    db
-      .update(brainSyncSources)
-      .set({ leavesOwed: true })
-      .where(heldSource(applying))
+    write
+      .update(
+        brainSyncSources,
+        { leavesOwed: true },
+        sourceRowOf(source, source.place)
+      )
       .returning({ place: brainSyncSources.place }),
-    db
-      .update(brainSyncItems)
-      .set(left)
-      .where(stillHere(applying, row))
+    write
+      .update(brainSyncItems, left, stillHere(applying, row))
       .returning({ key: brainSyncItems.key }),
     counted(
       applying,
@@ -727,19 +812,19 @@ const hold = async (
   applying: Applying,
   row: Item
 ): Promise<Item | undefined> => {
-  const { db, budget } = applying;
+  const { db, write, budget } = applying;
   const heldSince = row.heldSince ?? new Date();
   spend(budget, 1);
   const [owed, held] = await db.batch([
-    db
-      .update(brainSyncSources)
-      .set({ leavesOwed: true })
-      .where(heldSource(applying))
+    write
+      .update(
+        brainSyncSources,
+        { leavesOwed: true },
+        sourceRowOf(applying.source, applying.source.place)
+      )
       .returning({ place: brainSyncSources.place }),
-    db
-      .update(brainSyncItems)
-      .set({ heldSince })
-      .where(stillHere(applying, row))
+    write
+      .update(brainSyncItems, { heldSince }, stillHere(applying, row))
       .returning({ key: brainSyncItems.key }),
   ]);
   heldAfter(owed);
@@ -795,11 +880,11 @@ const nextKey = async (applying: Applying, row: Item): Promise<Item> => {
   };
   spend(applying.budget, 1);
   heldAfter(
-    await applying.db
-      .update(brainSyncItems)
-      .set(moved)
-      .where(
-        sql`${itemWhere(applying, row.itemId)} AND ${brainSyncItems.generation} = ${row.generation} AND ${stillHeld(applying)}`
+    await applying.write
+      .update(
+        brainSyncItems,
+        moved,
+        sql`${itemWhere(applying, row.itemId)} AND ${brainSyncItems.generation} = ${row.generation}`
       )
       .returning({ key: brainSyncItems.key })
   );
@@ -867,7 +952,7 @@ const changeReaders = async (
   row: Item,
   plan: Plan
 ): Promise<Item> => {
-  const { env, db, budget, readAt } = applying;
+  const { env, db, write, budget, readAt } = applying;
   const change = await changeOf([
     "readers",
     plan.readersKey,
@@ -888,12 +973,11 @@ const changeReaders = async (
   }
   spend(budget, 1);
   const [, counter] = await db.batch([
-    db
-      .update(brainSyncItems)
-      .set({ version: made.version })
-      .where(
-        sql`${itemWhere(applying, row.itemId)} AND ${brainSyncItems.generation} = ${row.generation} AND ${stillHeld(applying)}`
-      ),
+    write.update(
+      brainSyncItems,
+      { version: made.version, savedAt: new Date() },
+      sql`${itemWhere(applying, row.itemId)} AND ${brainSyncItems.generation} = ${row.generation}`
+    ),
     counted(applying, "changed"),
   ]);
   countedIn(applying, "changed", counter);
@@ -920,17 +1004,17 @@ const claim = async (
   plan: Plan
 ): Promise<Item> => {
   const itemId = item.id;
-  const { db, budget, source } = applying;
+  const { write, budget, source } = applying;
   const generation = row?.generation ?? 1;
   const key =
     row?.key ??
     (await keyOf(source.connectionId, source.feed, itemId, generation));
   spend(budget, 1);
-  const [claimed] = await db
-    .insert(brainSyncItems)
-    .select(
-      sql`SELECT ${source.connectionId}, ${source.feed}, ${itemId}, ${source.place}, ${key}, ${generation}, ${plan.store}, NULL, NULL, NULL, ${item.partOf}, ${source.listing}, NULL, NULL, NULL
-        WHERE ${stillHeld(applying)} AND NOT ${closed(source.connectionId)}`
+  const [claimed] = await write
+    .insert(
+      brainSyncItems,
+      sql`SELECT ${source.connectionId}, ${source.feed}, ${itemId}, ${source.place}, ${key}, ${generation}, ${plan.store}, NULL, NULL, NULL, ${item.partOf}, ${source.listing}, NULL, NULL, NULL, NULL`,
+      sql`NOT ${closed(source.connectionId)}`
     )
     .onConflictDoUpdate({
       target: [
@@ -994,7 +1078,7 @@ const add = async (
   text: string,
   again = false
 ): Promise<void> => {
-  const { env, db, budget, source, readAt } = applying;
+  const { env, db, write, budget, source, readAt } = applying;
   const change = await changeOf([
     "version",
     item.version,
@@ -1057,11 +1141,11 @@ const add = async (
     return;
   }
   spend(budget, 1);
-  const recorded = db
-    .update(brainSyncItems)
-    .set({ change, version, marker: await markerOf(item) })
-    .where(
-      sql`${itemWhere(applying, item.id)} AND ${brainSyncItems.generation} = ${claimed.generation} AND ${stillHeld(applying)}`
+  const recorded = write
+    .update(
+      brainSyncItems,
+      { change, version, marker: await markerOf(item), savedAt: new Date() },
+      sql`${itemWhere(applying, item.id)} AND ${brainSyncItems.generation} = ${claimed.generation}`
     )
     .returning({ key: brainSyncItems.key });
   // Counted once, by the Brain's answer, the same on a repeat: a key's
@@ -1133,7 +1217,7 @@ const bringBack = async (
   rows: Map<string, Item>,
   kept: readonly Item[]
 ): Promise<void> => {
-  const { db, budget, source } = applying;
+  const { write, budget, source } = applying;
   const back = [
     ...page.items.flatMap((item) => {
       const row = item.gone ? undefined : rows.get(item.id);
@@ -1154,15 +1238,14 @@ const bringBack = async (
     listing: source.listing,
   };
   spend(budget, 1);
-  await db
-    .update(brainSyncItems)
-    .set(here)
-    .where(
-      sql`${brainSyncItems.connectionId} = ${source.connectionId} AND ${brainSyncItems.feed} = ${source.feed} AND ${inList(
-        brainSyncItems.itemId,
-        back.map(({ itemId }) => itemId)
-      )} AND ${brainSyncItems.store} IS NOT NULL AND ${stillHeld(applying)}`
-    );
+  await write.update(
+    brainSyncItems,
+    here,
+    sql`${brainSyncItems.connectionId} = ${source.connectionId} AND ${brainSyncItems.feed} = ${source.feed} AND ${inList(
+      brainSyncItems.itemId,
+      back.map(({ itemId }) => itemId)
+    )} AND ${brainSyncItems.store} IS NOT NULL`
+  );
   for (const row of back) {
     rows.set(row.itemId, { ...row, ...here });
   }
@@ -1214,7 +1297,7 @@ const noteCatchUps = async (
   page: SyncPage,
   rows: ReadonlyMap<string, Item>
 ): Promise<void> => {
-  const { db, budget, source } = applying;
+  const { write, budget, source } = applying;
   const wanted: string[] = [];
   for (const item of page.items) {
     if (item.gone) {
@@ -1236,12 +1319,12 @@ const noteCatchUps = async (
   spend(budget, 1);
   // The IDs bound as one value, however many the page names (`inList`):
   // D1 binds at most 100 to a statement, and a listing's page can name a
-  // thousand. The WHERE is SQLite's: without one, its parser takes the
-  // conflict clause for a join's.
-  await db
-    .insert(brainSyncCatchUps)
-    .select(
-      sql`SELECT ${source.connectionId}, ${source.feed}, ${source.place}, value FROM json_each(${JSON.stringify(wanted)}) WHERE true`
+  // thousand. Its WHERE (the fence, `writesOf`) is SQLite's too: without
+  // one, its parser takes the conflict clause for a join's.
+  await write
+    .insert(
+      brainSyncCatchUps,
+      sql`SELECT ${source.connectionId}, ${source.feed}, ${source.place}, value FROM json_each(${JSON.stringify(wanted)})`
     )
     .onConflictDoNothing();
 };
@@ -1353,7 +1436,7 @@ const applyAdds = async (
  * end of a listing, what it didn't name erased.
  */
 const apply = async (applying: Applying, page: SyncPage): Promise<void> => {
-  const { db, budget, source } = applying;
+  const { write, budget, source } = applying;
   const rows = await rowsOf(applying, page.items);
   const parts = unnamedParts(applying, page, rows);
   if ((source.listingOpen || source.relisting) && rows.size > 0) {
@@ -1362,12 +1445,11 @@ const apply = async (applying: Applying, page: SyncPage): Promise<void> => {
     // (`unnamedParts`): there, so not swept. What is in another place is
     // brought here, listing and all, or left alone (`bringBack`).
     spend(budget, 1);
-    await db
-      .update(brainSyncItems)
-      .set({ listing: source.listing })
-      .where(
-        sql`${brainSyncItems.connectionId} = ${source.connectionId} AND ${brainSyncItems.feed} = ${source.feed} AND ${brainSyncItems.place} = ${source.place} AND ${inList(brainSyncItems.itemId, [...rows.keys()])} AND ${stillHeld(applying)}`
-      );
+    await write.update(
+      brainSyncItems,
+      { listing: source.listing },
+      sql`${brainSyncItems.connectionId} = ${source.connectionId} AND ${brainSyncItems.feed} = ${source.feed} AND ${brainSyncItems.place} = ${source.place} AND ${inList(brainSyncItems.itemId, [...rows.keys()])}`
+    );
   }
   await bringBack(applying, page, rows, parts.kept);
   await applyRemovals(applying, page, rows, parts);
@@ -1492,13 +1574,86 @@ const recordSteps = async (applying: Applying): Promise<void> => {
 };
 
 /**
+ * The steps of what an earlier read of this page saved before it stopped
+ * short of its commit (`replay`), which this read, finding them done,
+ * didn't take again: each row of the place saved since the source last
+ * committed a page (`savedAt`), not stepped by this read. Its step is what
+ * the row now says: gone (no store), its key's first version (added), or
+ * a later one (changed), each keyed by the row's key and what it saved,
+ * the same however often the page is read again; only the read that
+ * commits records steps, so the Brain keeps each once. Only for
+ * a replay: an ordinary page, a relist of what was committed long ago
+ * among them, takes none.
+ */
+const replayedSteps = async (
+  applying: Applying,
+  page: SyncPage
+): Promise<void> => {
+  const { db, budget, source, readAt } = applying;
+  if (!applying.replay) {
+    return;
+  }
+  const since = source.lastSuccessAt?.getTime() ?? 0;
+  spend(budget, 1);
+  const saved = await db
+    .select()
+    .from(brainSyncItems)
+    .where(
+      sql`${itemsOfPlace(source)} AND ${brainSyncItems.savedAt} > ${since}`
+    );
+  const named = new Map(
+    page.items.flatMap((item) => (item.gone ? [] : [[item.id, item] as const]))
+  );
+  for (const row of saved) {
+    if (applying.stepped.has(row.itemId)) {
+      continue;
+    }
+    const at = named.get(row.itemId);
+    const when =
+      at === undefined ? (row.savedAt ?? readAt) : changedOf(at, readAt);
+    if (row.store === null) {
+      // oxlint-disable-next-line no-await-in-loop -- a hash each, no call
+      const left = await keyOf(
+        row.connectionId,
+        row.feed,
+        row.itemId,
+        row.generation - 1
+      );
+      // oxlint-disable-next-line no-await-in-loop -- a hash each, no call
+      await stepped(
+        applying,
+        "removed",
+        { key: left, change: "removed" },
+        row.itemId,
+        when
+      );
+    } else if (row.change !== null) {
+      // A key's first version as its add keyed it; a later one by its
+      // version too: a change of readers keeps the add's change.
+      // oxlint-disable-next-line no-await-in-loop -- a hash each, no call
+      await stepped(
+        applying,
+        row.version === 1 ? "added" : "changed",
+        {
+          key: row.key,
+          change:
+            row.version === 1 ? row.change : `${row.change}@${row.version}`,
+        },
+        row.itemId,
+        when
+      );
+    }
+  }
+};
+
+/**
  * Moves the source's cursor past `page`, once it is applied, in one batch
  * with the page's one event (if it did anything): its counters reset,
  * the listing closed at its first page with nothing more, due again at
  * once while there is more, and its lease given up.
  */
 const commit = async (applying: Applying, page: SyncPage): Promise<void> => {
-  const { env, db, budget, source, counts } = applying;
+  const { env, db, write, outbox, budget, source, counts } = applying;
   const now = Date.now();
   const cursorMoved =
     applying.stream === "changes"
@@ -1508,53 +1663,53 @@ const commit = async (applying: Applying, page: SyncPage): Promise<void> => {
           dueAt: new Date(page.more ? now : now + pollMs),
         }
       : await relistMoved(applying, page, now);
-  const moved = db
-    .update(brainSyncSources)
-    .set({
-      ...cursorMoved,
-      leaseId: null,
-      leaseUntil: null,
-      lastSuccessAt: new Date(now),
-      lastError: null,
-      added: 0,
-      changed: 0,
-      removed: 0,
-      // Every erase this page owed is done (they ran before this); only a
-      // removal still held for a move keeps it owed.
-      leavesOwed: sql`EXISTS (SELECT 1 FROM ${brainSyncItems} WHERE ${brainSyncItems.connectionId} = ${source.connectionId} AND ${brainSyncItems.feed} = ${source.feed} AND ${brainSyncItems.place} = ${source.place} AND ${brainSyncItems.heldSince} IS NOT NULL)`,
-    })
-    .where(heldSource(applying))
+  const moved = write
+    .update(
+      brainSyncSources,
+      {
+        ...cursorMoved,
+        leaseId: null,
+        leaseUntil: null,
+        lastSuccessAt: new Date(now),
+        lastError: null,
+        added: 0,
+        changed: 0,
+        removed: 0,
+        // Every erase this page owed is done (they ran before this); only a
+        // removal still held for a move keeps it owed.
+        leavesOwed: sql`EXISTS (SELECT 1 FROM ${brainSyncItems} WHERE ${brainSyncItems.connectionId} = ${source.connectionId} AND ${brainSyncItems.feed} = ${source.feed} AND ${brainSyncItems.place} = ${source.place} AND ${brainSyncItems.heldSince} IS NOT NULL)`,
+      },
+      sourceRowOf(source, source.place)
+    )
     .returning({ leaseId: brainSyncSources.leaseId });
   const did = counts.added + counts.changed + counts.removed + applying.skipped;
+  // Before the cursor moves, which gives up the lease that fences it.
   const fetched =
     applying.mode === "catchUp"
-      ? [
-          db
-            .delete(brainSyncCatchUps)
-            .where(
-              and(
-                eq(brainSyncCatchUps.connectionId, source.connectionId),
-                eq(brainSyncCatchUps.feed, source.feed),
-                eq(brainSyncCatchUps.place, source.place),
-                inList(brainSyncCatchUps.itemId, coveredOf(applying, page))
-              )
-            ),
-        ]
-      : [];
+      ? write.delete(
+          brainSyncCatchUps,
+          sql`${brainSyncCatchUps.connectionId} = ${source.connectionId} AND ${brainSyncCatchUps.feed} = ${source.feed} AND ${brainSyncCatchUps.place} = ${source.place} AND ${inList(brainSyncCatchUps.itemId, coveredOf(applying, page))}`
+        )
+      : undefined;
+  // The page's one event, only if the cursor moved (`changes()`).
+  const event = outboxedEventWhere(
+    outbox,
+    appliedEvent(source, { ...counts, skipped: applying.skipped }),
+    sql`changes() > 0`
+  );
   spend(budget, 1);
-  const [committed] =
-    did === 0
-      ? await db.batch([moved, ...fetched])
-      : await auditedBatch(env, db, [
-          moved,
-          outboxedEventWhere(
-            db,
-            appliedEvent(source, { ...counts, skipped: applying.skipped }),
-            sql`changes() > 0`
-          ),
-          ...fetched,
-        ]);
+  let committed: readonly unknown[];
+  if (did === 0 && fetched === undefined) {
+    [committed] = await db.batch([moved]);
+  } else if (did === 0 && fetched !== undefined) {
+    [, committed] = await db.batch([fetched, moved]);
+  } else if (fetched === undefined) {
+    [committed] = await auditedBatch(env, outbox, [moved, event]);
+  } else {
+    [, committed] = await auditedBatch(env, outbox, [fetched, moved, event]);
+  }
   heldAfter(committed);
+  await replayedSteps(applying, page);
   await recordSteps(applying);
 };
 
@@ -1563,7 +1718,7 @@ const commit = async (applying: Applying, page: SyncPage): Promise<void> => {
  * cursors as they were or as `set` says.
  */
 const release = async (
-  applying: Pick<Applying, "db" | "source" | "leaseId" | "stream">,
+  applying: Pick<Applying, "write" | "source" | "stream">,
   at: number,
   set: Partial<
     Pick<
@@ -1582,17 +1737,11 @@ const release = async (
     applying.stream === "changes"
       ? { dueAt: new Date(at) }
       : { relistAt: new Date(at) };
-  await applying.db
-    .update(brainSyncSources)
-    .set({ ...due, ...set, leaseId: null, leaseUntil: null })
-    .where(
-      and(
-        eq(brainSyncSources.connectionId, applying.source.connectionId),
-        eq(brainSyncSources.feed, applying.source.feed),
-        eq(brainSyncSources.place, applying.source.place),
-        eq(brainSyncSources.leaseId, applying.leaseId)
-      )
-    );
+  await applying.write.update(
+    brainSyncSources,
+    { ...due, ...set, leaseId: null, leaseUntil: null },
+    sourceRowOf(applying.source, applying.source.place)
+  );
 };
 
 /** How long a throttled read waits: as the provider said, else until the next run. */
@@ -1646,7 +1795,7 @@ export const overdueRelists = async (env: Pick<Env, "DB">): Promise<number> => {
  * Whether it started.
  */
 const startRelist = async (applying: Applying): Promise<boolean> => {
-  const { db, budget, source } = applying;
+  const { db, write, budget, source } = applying;
   const now = Date.now();
   spend(budget, 1);
   if (source.listingOpen) {
@@ -1655,25 +1804,22 @@ const startRelist = async (applying: Applying): Promise<boolean> => {
   }
   // What an earlier relist left to fetch goes: one catch-up per relist.
   const [, [started]] = await db.batch([
-    db
-      .delete(brainSyncCatchUps)
-      .where(
-        and(
-          eq(brainSyncCatchUps.connectionId, source.connectionId),
-          eq(brainSyncCatchUps.feed, source.feed),
-          eq(brainSyncCatchUps.place, source.place)
-        )
-      ),
-    db
-      .update(brainSyncSources)
-      .set({
-        relisting: true,
-        relistCatchUp: false,
-        relistCursor: null,
-        listing: source.listing + 1,
-        relistSince: source.relistAt,
-      })
-      .where(heldSource(applying))
+    write.delete(
+      brainSyncCatchUps,
+      sql`${brainSyncCatchUps.connectionId} = ${source.connectionId} AND ${brainSyncCatchUps.feed} = ${source.feed} AND ${brainSyncCatchUps.place} = ${source.place}`
+    ),
+    write
+      .update(
+        brainSyncSources,
+        {
+          relisting: true,
+          relistCatchUp: false,
+          relistCursor: null,
+          listing: source.listing + 1,
+          relistSince: source.relistAt,
+        },
+        sourceRowOf(source, source.place)
+      )
       .returning(),
   ]);
   if (started === undefined) {
@@ -1704,17 +1850,19 @@ const catchUpsOf = async (applying: Applying): Promise<string[]> => {
 
 /** Ends `applying`'s relist, nothing left to fetch, and gives its source up. */
 const finishRelist = async (applying: Applying): Promise<void> => {
-  const { db, budget, source } = applying;
+  const { write, budget, source } = applying;
   spend(budget, 1);
   heldAfter(
-    await db
-      .update(brainSyncSources)
-      .set({
-        ...(await endedRelist(source, Date.now())),
-        leaseId: null,
-        leaseUntil: null,
-      })
-      .where(heldSource(applying))
+    await write
+      .update(
+        brainSyncSources,
+        {
+          ...(await endedRelist(source, Date.now())),
+          leaseId: null,
+          leaseUntil: null,
+        },
+        sourceRowOf(source, source.place)
+      )
       .returning({ place: brainSyncSources.place })
   );
 };
@@ -1736,8 +1884,9 @@ const syncPage = async (
   const applying: Applying = {
     env,
     db,
+    outbox: db,
+    write: pageWritesOf(db, source, leaseId),
     source,
-    leaseId,
     budget,
     readAt: new Date(),
     skipped: 0,
@@ -1750,6 +1899,8 @@ const syncPage = async (
       removed: source.removed,
     },
     steps: [],
+    stepped: new Set(),
+    replay: source.added + source.changed + source.removed > 0,
   };
   // What earlier runs left owed needs only core and the Brain: done before
   // the read, so a source whose provider fails or whose connection waits
@@ -1861,7 +2012,7 @@ const syncPage = async (
  * named it last, for a sync that lists places.
  */
 const sourceStatement = (
-  db: Database,
+  insert: Writes["insert"],
   of: Pick<
     Source,
     | "connectionId"
@@ -1875,32 +2026,33 @@ const sourceStatement = (
   place: string,
   relistAt: number,
   now: number,
-  seenIn: number | null = null,
-  held: SQL = sql`1 = 1`
+  seenIn: number | null = null
 ) =>
-  db
-    .insert(brainSyncSources)
-    .select(
-      sql`SELECT ${of.connectionId}, ${of.feed}, ${place}, ${of.personId}, ${of.provider}, ${of.tenant}, ${of.account}, NULL, 1, 1, ${now}, NULL, NULL, NULL, NULL, 0, 0, 0, NULL, 0, ${relistAt}, NULL, 0, ${of.kind}, 0, 0, ${seenIn}
-        WHERE NOT ${closed(of.connectionId)} AND NOT ${erasureBegan(of.personId)} AND ${held}`
-    )
-    .onConflictDoUpdate({
-      target: [
-        brainSyncSources.connectionId,
-        brainSyncSources.feed,
-        brainSyncSources.place,
-      ],
-      set: {
-        tenant: of.tenant,
-        account: of.account,
-        kind: of.kind,
-        ...(seenIn === null ? {} : { seenIn }),
-        dropped: false,
-        cursor: sql`CASE WHEN ${brainSyncSources.dropped} = 1 THEN NULL ELSE ${brainSyncSources.cursor} END`,
-        listing: sql`CASE WHEN ${brainSyncSources.dropped} = 1 THEN ${brainSyncSources.listing} + 1 ELSE ${brainSyncSources.listing} END`,
-        listingOpen: sql`CASE WHEN ${brainSyncSources.dropped} = 1 THEN 1 ELSE ${brainSyncSources.listingOpen} END`,
-      },
-    });
+  insert(
+    brainSyncSources,
+    sql`SELECT ${of.connectionId}, ${of.feed}, ${place}, ${of.personId}, ${of.provider}, ${of.tenant}, ${of.account}, NULL, 1, 1, ${now}, NULL, NULL, NULL, NULL, 0, 0, 0, NULL, 0, ${relistAt}, NULL, 0, ${of.kind}, 0, 0, ${seenIn}`,
+    sql`NOT ${closed(of.connectionId)} AND NOT ${erasureBegan(of.personId)}`
+  ).onConflictDoUpdate({
+    target: [
+      brainSyncSources.connectionId,
+      brainSyncSources.feed,
+      brainSyncSources.place,
+    ],
+    set: {
+      tenant: of.tenant,
+      account: of.account,
+      kind: of.kind,
+      ...(seenIn === null ? {} : { seenIn }),
+      dropped: false,
+      // Listed again: the work changes meaning, and its token with it, so
+      // nothing taken while it was dropped (its erase) writes on.
+      leaseId: sql`CASE WHEN ${brainSyncSources.dropped} = 1 THEN NULL ELSE ${brainSyncSources.leaseId} END`,
+      leaseUntil: sql`CASE WHEN ${brainSyncSources.dropped} = 1 THEN NULL ELSE ${brainSyncSources.leaseUntil} END`,
+      cursor: sql`CASE WHEN ${brainSyncSources.dropped} = 1 THEN NULL ELSE ${brainSyncSources.cursor} END`,
+      listing: sql`CASE WHEN ${brainSyncSources.dropped} = 1 THEN ${brainSyncSources.listing} + 1 ELSE ${brainSyncSources.listing} END`,
+      listingOpen: sql`CASE WHEN ${brainSyncSources.dropped} = 1 THEN 1 ELSE ${brainSyncSources.listingOpen} END`,
+    },
+  });
 
 /**
  * The syncs connect lists now, each kept here, a page of connections at
@@ -1915,6 +2067,10 @@ const refreshSources = async (
   db: Database,
   budget: Budget
 ): Promise<void> => {
+  // What connect lists is the registry of work, which taking a page of
+  // it fences (`writesOf`): kept as it comes, not fenced by a token.
+  const registered: Writes["insert"] = (table, select, where) =>
+    db.insert(table).select(sql`${select} WHERE (${where ?? sql`1 = 1`})`);
   let after: string | null = null;
   do {
     spend(budget, 1);
@@ -1927,14 +2083,14 @@ const refreshSources = async (
       statements.push(
         listed.places === "own"
           ? sourceStatement(
-              db,
+              registered,
               of,
               ownPlace,
               // oxlint-disable-next-line no-await-in-loop -- a hash, no call
               await nextRelistAt({ ...listed, place: ownPlace }, now),
               now
             )
-          : sourceStatement(db, of, placesListing, never.getTime(), now)
+          : sourceStatement(registered, of, placesListing, never.getTime(), now)
       );
     }
     const [first, ...rest] = statements;
@@ -1966,7 +2122,8 @@ const listPlaces = async (
   leaseId: string,
   budget: Budget
 ): Promise<void> => {
-  const applying = { db, source: listing, leaseId, stream: "changes" as const };
+  const write = pageWritesOf(db, listing, leaseId);
+  const applying = { write, source: listing, stream: "changes" as const };
   const number =
     listing.cursor === null ? listing.listing + 1 : listing.listing;
   spend(budget, 1);
@@ -2004,17 +2161,15 @@ const listPlaces = async (
     )
   );
   // Only while this run still holds the listing, in the statement that
-  // keeps or drops: a run that lost it changes nothing.
-  const held = sql`EXISTS (SELECT 1 FROM ${brainSyncSources} AS held WHERE held.connection_id = ${listing.connectionId} AND held.feed = ${listing.feed} AND held.place = ${placesListing} AND held.lease_id = ${leaseId})`;
+  // keeps or drops (`writesOf`): a run that lost it changes nothing.
   const kept = read.places.map((place, index) =>
     sourceStatement(
-      db,
+      write.insert,
       listing,
       place,
       relists[index] ?? now + relistMs,
       now,
-      number,
-      held
+      number
     )
   );
   // What the listing no longer names, once it has ended: in the batch
@@ -2022,12 +2177,11 @@ const listPlaces = async (
   // checks.
   // The lease goes with it: a page of that place under way writes nothing
   // more (`stillHeld`).
-  const drop = db
-    .update(brainSyncSources)
-    .set({ dropped: true, leaseId: null, leaseUntil: null })
-    .where(
-      sql`${brainSyncSources.connectionId} = ${listing.connectionId} AND ${brainSyncSources.feed} = ${listing.feed} AND ${brainSyncSources.place} <> ${placesListing} AND ${brainSyncSources.dropped} = 0 AND (${brainSyncSources.seenIn} IS NULL OR ${brainSyncSources.seenIn} < ${number}) AND ${held}`
-    );
+  const drop = write.update(
+    brainSyncSources,
+    { dropped: true, leaseId: null, leaseUntil: null },
+    sql`${brainSyncSources.connectionId} = ${listing.connectionId} AND ${brainSyncSources.feed} = ${listing.feed} AND ${brainSyncSources.place} <> ${placesListing} AND ${brainSyncSources.dropped} = 0 AND (${brainSyncSources.seenIn} IS NULL OR ${brainSyncSources.seenIn} < ${number})`
+  );
   // The places first, then the cursor with what the listing drops: a run
   // stopped between the two reads the same places again, which changes
   // nothing.
@@ -2036,24 +2190,19 @@ const listPlaces = async (
     spend(budget, 1);
     await db.batch([first, ...rest]);
   }
-  const move = db
-    .update(brainSyncSources)
-    .set({
-      cursor: read.cursor,
-      listing: number,
-      dueAt: new Date(ended ? await nextRelistAt(listing, now) : now),
-      leaseId: null,
-      leaseUntil: null,
-      lastSuccessAt: new Date(now),
-      lastError: null,
-    })
-    .where(
-      and(
-        eq(brainSyncSources.connectionId, listing.connectionId),
-        eq(brainSyncSources.feed, listing.feed),
-        eq(brainSyncSources.place, placesListing),
-        eq(brainSyncSources.leaseId, leaseId)
-      )
+  const move = write
+    .update(
+      brainSyncSources,
+      {
+        cursor: read.cursor,
+        listing: number,
+        dueAt: new Date(ended ? await nextRelistAt(listing, now) : now),
+        leaseId: null,
+        leaseUntil: null,
+        lastSuccessAt: new Date(now),
+        lastError: null,
+      },
+      sourceRowOf(listing, placesListing)
     )
     .returning({ place: brainSyncSources.place });
   spend(budget, 1);
@@ -2071,25 +2220,70 @@ const readersIn = (source: Source, store: Store): SourceReaders =>
     ? { kind: "owner", personId: source.personId }
     : { kind: "none" };
 
-/** `completeDroppedPlaces` for one dropped source. */
+/**
+ * Takes the erase of `source`, a place no longer listed, for this run:
+ * its row's lease, the token every statement of the erase is fenced by
+ * (`writesOf`), unless another run holds it.
+ */
+const takeDroppedPlace = async (
+  db: Database,
+  budget: Budget,
+  source: Source,
+  leaseId: string
+): Promise<Writes | undefined> => {
+  const now = Date.now();
+  spend(budget, 1);
+  const [taken] = await db
+    .update(brainSyncSources)
+    .set({ leaseId, leaseUntil: new Date(now + leaseMs) })
+    .where(
+      sql`${sourceRowOf(source, source.place)} AND ${brainSyncSources.dropped} = 1 AND (${brainSyncSources.leaseUntil} IS NULL OR ${brainSyncSources.leaseUntil} <= ${now})`
+    )
+    .returning({ place: brainSyncSources.place });
+  return taken === undefined
+    ? undefined
+    : writesOf({
+        db,
+        token: leaseId,
+        connectionId: source.connectionId,
+        feed: source.feed,
+        place: source.place,
+        dropped: true,
+      });
+};
+
+/**
+ * `completeDroppedPlaces` for one dropped source, which this run took
+ * (`write`): each page of its rows begins with its lease renewed, so an
+ * erase whose place was listed again, or which another run took over,
+ * stops there, and every statement after is fenced by the same token.
+ */
 const eraseDroppedPlace = async (
   env: Env,
-  db: Database,
+  db: Reads,
+  write: Writes,
   budget: Budget,
   source: Source
 ): Promise<void> => {
-  const ofPlace = and(
-    eq(brainSyncItems.connectionId, source.connectionId),
-    eq(brainSyncItems.feed, source.feed),
-    eq(brainSyncItems.place, source.place)
-  );
   for (;;) {
+    spend(budget, 1);
+    // oxlint-disable-next-line no-await-in-loop -- a page at a time
+    const [still] = await write
+      .update(
+        brainSyncSources,
+        { leaseUntil: new Date(Date.now() + leaseMs) },
+        sourceRowOf(source, source.place)
+      )
+      .returning({ place: brainSyncSources.place });
+    if (still === undefined) {
+      return;
+    }
     spend(budget, 1);
     // oxlint-disable-next-line no-await-in-loop -- a page at a time
     const rows = await db
       .select()
       .from(brainSyncItems)
-      .where(ofPlace)
+      .where(itemsOfPlace(source))
       .orderBy(asc(brainSyncItems.itemId))
       .limit(erasedPerPage);
     if (rows.length === 0) {
@@ -2112,25 +2306,21 @@ const eraseDroppedPlace = async (
       }
     }
     // Then each key a row holds, taken from it (leaving, a generation on,
-    // so a claim from an earlier read misses it) in the statement that
-    // checks it is still in the dropped place: one another place brought
-    // over since the read keeps its key (`stillHere`).
+    // so a claim from an earlier read misses it) in a statement that
+    // checks it is still in this place: one another place brought over
+    // since the read keeps its key (`stillHere`).
     spend(budget, 1);
     // oxlint-disable-next-line no-await-in-loop -- a page at a time
-    const taken = await db
-      .update(brainSyncItems)
-      .set({
-        leaving: sql`${brainSyncItems.key}`,
-        leavingStore: sql`${brainSyncItems.store}`,
-        store: null,
-        generation: sql`${brainSyncItems.generation} + 1`,
-      })
-      .where(
-        and(
-          ofPlace,
-          inList(brainSyncItems.itemId, ids),
-          isNotNull(brainSyncItems.store)
-        )
+    const taken = await write
+      .update(
+        brainSyncItems,
+        {
+          leaving: sql`${brainSyncItems.key}`,
+          leavingStore: sql`${brainSyncItems.store}`,
+          store: null,
+          generation: sql`${brainSyncItems.generation} + 1`,
+        },
+        sql`${itemsOfPlace(source)} AND ${inList(brainSyncItems.itemId, ids)} AND ${brainSyncItems.store} IS NOT NULL`
       )
       .returning();
     for (const row of taken) {
@@ -2141,53 +2331,36 @@ const eraseDroppedPlace = async (
     }
     spend(budget, 1);
     // oxlint-disable-next-line no-await-in-loop -- a page at a time
-    await db
-      .delete(brainSyncItems)
-      .where(
-        and(
-          ofPlace,
-          inList(brainSyncItems.itemId, ids),
-          isNull(brainSyncItems.store)
-        )
-      );
+    await write.delete(
+      brainSyncItems,
+      sql`${itemsOfPlace(source)} AND ${inList(brainSyncItems.itemId, ids)} AND ${brainSyncItems.store} IS NULL`
+    );
   }
-  // Only while it is still dropped: listed again meanwhile, it stays.
+  // What it noted to fetch, then the source itself, still under the same
+  // token: listed again meanwhile, it stays.
   spend(budget, 1);
   await db.batch([
-    db
-      .delete(brainSyncCatchUps)
-      .where(
-        and(
-          eq(brainSyncCatchUps.connectionId, source.connectionId),
-          eq(brainSyncCatchUps.feed, source.feed),
-          eq(brainSyncCatchUps.place, source.place)
-        )
-      ),
-    db
-      .delete(brainSyncSources)
-      .where(
-        and(
-          eq(brainSyncSources.connectionId, source.connectionId),
-          eq(brainSyncSources.feed, source.feed),
-          eq(brainSyncSources.place, source.place),
-          eq(brainSyncSources.dropped, true)
-        )
-      ),
+    write.delete(
+      brainSyncCatchUps,
+      sql`${brainSyncCatchUps.connectionId} = ${source.connectionId} AND ${brainSyncCatchUps.feed} = ${source.feed} AND ${brainSyncCatchUps.place} = ${source.place}`
+    ),
+    write.delete(brainSyncSources, sourceRowOf(source, source.place)),
   ]);
 };
 
 /**
  * Erases what each dropped source added (its place no longer listed: a
- * folder deleted), as a disconnect does for a connection: each key it
- * holds or was leaving erased in its store, a page of rows at a time, the
- * rows forgotten, then, once none is left, what it noted to fetch and the
- * source itself. One that fails is logged and tried again at the next
- * run.
+ * folder deleted), as a disconnect does for a connection, each taken by
+ * this run first (`takeDroppedPlace`): each key it holds or was leaving
+ * erased in its store, a page of rows at a time, the rows forgotten,
+ * then, once none is left, what it noted to fetch and the source itself.
+ * One that fails is given up, logged and tried again at the next run.
  */
 const completeDroppedPlaces = async (
   env: Env,
   db: Database,
-  budget: Budget
+  budget: Budget,
+  leaseId: string
 ): Promise<void> => {
   spend(budget, 1);
   const dropped = await db
@@ -2195,10 +2368,22 @@ const completeDroppedPlaces = async (
     .from(brainSyncSources)
     .where(eq(brainSyncSources.dropped, true));
   for (const source of dropped) {
+    // oxlint-disable-next-line no-await-in-loop -- one source at a time
+    const write = await takeDroppedPlace(db, budget, source, leaseId);
+    if (write === undefined) {
+      continue;
+    }
     try {
       // oxlint-disable-next-line no-await-in-loop -- one source at a time
-      await eraseDroppedPlace(env, db, budget, source);
+      await eraseDroppedPlace(env, db, write, budget, source);
     } catch (error) {
+      // Given up, never left held until its lease runs out.
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await write.update(
+        brainSyncSources,
+        { leaseId: null, leaseUntil: null },
+        sourceRowOf(source, source.place)
+      );
       if (stoppedFor(error, "budget")) {
         throw error;
       }
@@ -2334,20 +2519,61 @@ const erasedEvent = async (
 });
 
 /**
- * Takes the erasure a disconnect of `connectionId` owes a step on, out
- * of `budget`: the keys it gave the shared store erased and forgotten, a
- * page at a time, and once none is left, its rows forgotten and the
- * erasure ended, with its one event (`brain.sync.erased`, how many
- * sources), in one batch. A step that fails leaves what it erased
- * forgotten; the next erases the rest, a key again without change.
+ * Takes the erase a disconnect of `connectionId` owes for this run: its
+ * row's lease, the token every statement of the erase is fenced by
+ * (`writesOf`), unless another run holds it.
  */
-export const stepSyncErasure = async (
+const takeErasure = async (
+  db: Database,
+  budget: Budget,
+  connectionId: string,
+  leaseId: string
+): Promise<Writes | undefined> => {
+  const now = Date.now();
+  spend(budget, 1);
+  const [taken] = await db
+    .update(brainSyncDisconnects)
+    .set({ leaseId, leaseUntil: new Date(now + leaseMs) })
+    .where(
+      sql`${brainSyncDisconnects.connectionId} = ${connectionId} AND ${brainSyncDisconnects.erasing} = 1 AND (${brainSyncDisconnects.leaseUntil} IS NULL OR ${brainSyncDisconnects.leaseUntil} <= ${now})`
+    )
+    .returning({ connectionId: brainSyncDisconnects.connectionId });
+  return taken === undefined
+    ? undefined
+    : writesOf({ db, token: leaseId, erasure: connectionId });
+};
+
+/**
+ * Takes the erasure a disconnect of `connectionId` owes a step on, which
+ * this run took (`write`), out of `budget`: each page begins with its
+ * lease renewed, so an erase another run took over stops there; the keys
+ * it gave the shared store erased and forgotten, a page at a time, and
+ * once none is left, its rows forgotten and the erasure ended, with its
+ * one event (`brain.sync.erased`, how many sources), in one batch, every
+ * statement fenced by the same token. A step that fails leaves what it
+ * erased forgotten; the next erases the rest, a key again without change.
+ */
+const stepSyncErasure = async (
   env: Env,
+  db: Database,
+  write: Writes,
   connectionId: string,
   budget: Budget
 ): Promise<void> => {
-  const db = drizzle(env.DB);
+  const ofDisconnect = sql`${brainSyncDisconnects.connectionId} = ${connectionId}`;
   for (;;) {
+    spend(budget, 1);
+    // oxlint-disable-next-line no-await-in-loop -- a page at a time
+    const [still] = await write
+      .update(
+        brainSyncDisconnects,
+        { leaseUntil: new Date(Date.now() + leaseMs) },
+        ofDisconnect
+      )
+      .returning({ connectionId: brainSyncDisconnects.connectionId });
+    if (still === undefined) {
+      return;
+    }
     spend(budget, 1);
     // oxlint-disable-next-line no-await-in-loop -- a page at a time
     const page = await db
@@ -2384,19 +2610,18 @@ export const stepSyncErasure = async (
     spend(budget, 1);
     // oxlint-disable-next-line no-await-in-loop -- a page at a time
     await db.batch([
-      db.delete(brainSyncItems).where(
-        and(
-          eq(brainSyncItems.connectionId, connectionId),
-          inList(
-            brainSyncItems.key,
-            page.map(({ key }) => key)
-          )
-        )
+      write.delete(
+        brainSyncItems,
+        sql`${brainSyncItems.connectionId} = ${connectionId} AND ${inList(
+          brainSyncItems.key,
+          page.map(({ key }) => key)
+        )}`
       ),
-      db
-        .update(brainSyncDisconnects)
-        .set({ erased: sql`${brainSyncDisconnects.erased} + changes()` })
-        .where(eq(brainSyncDisconnects.connectionId, connectionId)),
+      write.update(
+        brainSyncDisconnects,
+        { erased: sql`${brainSyncDisconnects.erased} + changes()` },
+        ofDisconnect
+      ),
     ]);
   }
   spend(budget, 1);
@@ -2415,43 +2640,55 @@ export const stepSyncErasure = async (
   }
   spend(budget, 1);
   await auditedBatch(env, db, [
-    db
-      .delete(brainSyncItems)
-      .where(eq(brainSyncItems.connectionId, connectionId)),
-    db
-      .update(brainSyncDisconnects)
+    write.delete(
+      brainSyncItems,
+      sql`${brainSyncItems.connectionId} = ${connectionId}`
+    ),
+    write.update(
+      brainSyncDisconnects,
       // Its event holds who disconnected: the row no longer needs to.
-      .set({ erasing: false, actor: null })
-      .where(
-        and(
-          eq(brainSyncDisconnects.connectionId, connectionId),
-          eq(brainSyncDisconnects.erasing, true)
-        )
-      ),
+      { erasing: false, actor: null, leaseId: null, leaseUntil: null },
+      ofDisconnect
+    ),
     outboxedEventWhere(db, await erasedEvent(row), sql`changes() > 0`),
   ]);
 };
 
 /**
  * Takes every erasure a disconnect owes a step on (`stepSyncErasure`),
- * oldest first, out of `budget`. One that fails is logged with its
- * connection and its error's name, and tried again at the next run.
+ * oldest first, each taken by this run first (`takeErasure`), out of
+ * `budget`. One that fails is given up, logged with its connection and
+ * its error's name, and tried again at the next run.
  */
 const completeSyncErasures = async (
   env: Env,
-  budget: Budget
+  budget: Budget,
+  leaseId: string
 ): Promise<void> => {
+  const db = drizzle(env.DB);
   spend(budget, 1);
-  const owed = await drizzle(env.DB)
+  const owed = await db
     .select({ connectionId: brainSyncDisconnects.connectionId })
     .from(brainSyncDisconnects)
     .where(eq(brainSyncDisconnects.erasing, true))
     .orderBy(asc(brainSyncDisconnects.requestedAt));
   for (const { connectionId } of owed) {
+    // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
+    const write = await takeErasure(db, budget, connectionId, leaseId);
+    if (write === undefined) {
+      continue;
+    }
     try {
       // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
-      await stepSyncErasure(env, connectionId, budget);
+      await stepSyncErasure(env, db, write, connectionId, budget);
     } catch (error) {
+      // Given up, never left held until its lease runs out.
+      // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
+      await write.update(
+        brainSyncDisconnects,
+        { leaseId: null, leaseUntil: null },
+        sql`${brainSyncDisconnects.connectionId} = ${connectionId}`
+      );
       if (stoppedFor(error, "budget")) {
         throw error;
       }
@@ -2475,9 +2712,9 @@ export const runSync = async (env: Env, given?: Budget): Promise<void> => {
   const db = drizzle(env.DB);
   const leaseId = crypto.randomUUID();
   try {
-    await completeSyncErasures(env, budget);
+    await completeSyncErasures(env, budget, leaseId);
     await refreshSources(env, db, budget);
-    await completeDroppedPlaces(env, db, budget);
+    await completeDroppedPlaces(env, db, budget, leaseId);
     for (;;) {
       // oxlint-disable-next-line no-await-in-loop -- one source at a time
       const claimed = await claimNext(db, budget, leaseId);
@@ -2499,7 +2736,7 @@ export const runSync = async (env: Env, given?: Budget): Promise<void> => {
           // still due since when it was, so it keeps its turn.
           // oxlint-disable-next-line no-await-in-loop -- ends the run
           await release(
-            { db, source, leaseId, stream },
+            { write: pageWritesOf(db, source, leaseId), source, stream },
             (stream === "changes" ? source.dueAt : source.relistAt).getTime()
           );
           return;
@@ -2513,9 +2750,13 @@ export const runSync = async (env: Env, given?: Budget): Promise<void> => {
           errorName: errorName(error),
         });
         // oxlint-disable-next-line no-await-in-loop -- one source at a time
-        await release({ db, source, leaseId, stream }, Date.now() + pollMs, {
-          lastError: lost ? "sync.lost" : "sync.failed",
-        });
+        await release(
+          { write: pageWritesOf(db, source, leaseId), source, stream },
+          Date.now() + pollMs,
+          {
+            lastError: lost ? "sync.lost" : "sync.failed",
+          }
+        );
       }
     }
   } catch (error) {
