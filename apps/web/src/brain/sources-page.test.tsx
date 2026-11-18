@@ -1326,7 +1326,7 @@ describe(SourcesPage, () => {
       // What it erases, and that a workflow's kept state stays unread.
       told: [
         "Every version of it is erased from the Brain",
-        "What a workflow kept from it between its runs isn't erased, but it is never shown or used again.",
+        "What a workflow kept from it between its runs isn't erased, but it is no longer shown or used.",
       ].map((text) => told.includes(text)),
       after: ["Payroll.vtt", "An upload"].map((text) =>
         section("Shared uploads").includes(text)
