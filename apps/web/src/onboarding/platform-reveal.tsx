@@ -1,4 +1,5 @@
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
 
@@ -8,6 +9,18 @@ import { useLessMotion } from "../brain/less-motion.ts";
 import { hold } from "../voice/voice.ts";
 import { currentReveal, setReveal, useReveal } from "./reveal-state.ts";
 import { readingSeconds } from "./setup.ts";
+
+const styles = stylex.create({
+  // Over the whole window, above everything, and never in the pointer's way.
+  layer: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 100,
+    width: "100%",
+    height: "100%",
+    pointerEvents: "none",
+  },
+});
 
 // The way into the platform at the end of the onboarding, told as one
 // piece across two pages, as in the prototype (grasplabs/prototype,
@@ -130,7 +143,7 @@ export const PlatformReveal = () => {
   }
   return (
     <DotsBuild
-      className="pointer-events-none fixed inset-0 z-100 size-full"
+      layer={styles.layer}
       from={from}
       label={t`Opening Grasp`}
       onEnd={endReveal}
