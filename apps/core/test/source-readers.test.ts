@@ -2160,10 +2160,16 @@ describe("groups copied from the source", () => {
       await inGroups(team, [company]);
       await groupsRead(connectionId);
       const marker = uniqueWord();
-      // As a list may write it: the address in capitals.
+      // As a list may write it: the address in capitals, beside an
+      // account, whose token the same step mints.
       const item = await sharedItem(
         marker,
-        readersOf(googleGroup(company.toUpperCase()))
+        readersOf(googleGroup(company.toUpperCase()), {
+          kind: "account",
+          provider: "google",
+          tenant: "acme.test",
+          account: `alice-${unique()}@acme.test`,
+        })
       );
       const mappedMarker = uniqueWord();
       const mappedItem = await sharedItem(
