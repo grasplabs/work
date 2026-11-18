@@ -88,7 +88,7 @@ import {
 } from "./agent-facts.tsx";
 import { AgentForm } from "./agent-form.tsx";
 import type { Part, Typed } from "./agent-form.tsx";
-import { AgentWakes } from "./agent-wakes.tsx";
+import { AgentWakes, useLast } from "./agent-wakes.tsx";
 
 // One agent's page, for the company's admins, on Grasp UI: its Page
 // header holds the agent (picture, name, what it is for, whether it is
@@ -287,6 +287,7 @@ const RecentActivity = ({
 }) => {
   const { t } = useLingui();
   const moment = useMoment();
+  const lastLine = useLast();
   const ran = wakes
     .flatMap((wake) =>
       wake.lastAt === null ? [] : [{ ...wake, lastAt: wake.lastAt }]
@@ -318,9 +319,7 @@ const RecentActivity = ({
               <ItemContent>
                 <ItemTitle>{wake.opening}</ItemTitle>
                 <ItemDescription>
-                  {wake.lastOutcome === null
-                    ? moment(wake.lastAt)
-                    : `${moment(wake.lastAt)} · ${wake.lastOutcome}`}
+                  {lastLine(wake) ?? moment(wake.lastAt)}
                 </ItemDescription>
               </ItemContent>
             </Item>
@@ -371,11 +370,13 @@ const Access = ({
   }
   return (
     <>
+      {/* A card per topic, each titled (Damsko's settings pattern); the
+          row doesn't name the agent again under the page's title. */}
       <SectionCard density="compact" flush title={t`Who may use it`}>
         <SettingsRows>
           <SettingRow
             info={t`Nobody outside it can ask it anything, in Grasp or a chat app.`}
-            label={t`${name} answers`}
+            label={t`Answers`}
           >
             {() => (
               <AudienceControl
