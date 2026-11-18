@@ -592,8 +592,10 @@ export const usage = sqliteTable(
 /**
  * Seconds of voice said today (`/api/speech`, onboarding/speech.ts), by
  * whom they were said for: `link:<person>` for someone's interview link,
- * `admin:<user>` for an admin. Only today's are kept: each count deletes
- * the days before it.
+ * `admin:<user>` for an admin; and of what was heard
+ * (onboarding/transcription.ts), `link:<person>:heard` and, for anyone
+ * signed in, `user:<user>:heard`. Only today's are kept: each count
+ * deletes the days before it.
  */
 export const voiceUse = sqliteTable(
   "voice_use",

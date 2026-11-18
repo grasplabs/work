@@ -354,6 +354,13 @@ const sessionShape = {
        * a system call. Only core's own code makes such a call.
        */
       z.strictObject({ platform: z.literal("opportunities") }),
+      /**
+       * A member's dictation, written down as they talk
+       * (onboarding/transcription.ts): their own voice, on Grasp's key,
+       * made for them, counted as theirs, and never the onboarding's.
+       * Only core's own code makes such a call.
+       */
+      z.strictObject({ platform: z.literal("dictation") }),
     ])
     .optional(),
   requestId: auditEventSchema.shape.requestId,

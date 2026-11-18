@@ -57,7 +57,8 @@ export interface SpendInput {
           | "stephen_requests"
           | "provider_test"
           | "agent_builder"
-          | "opportunities";
+          | "opportunities"
+          | "dictation";
       };
   /** The App's model binding the call is made through. */
   binding?: { app: string; alias: string };

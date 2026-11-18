@@ -38,7 +38,8 @@ export interface RulesInput {
           | "stephen_requests"
           | "provider_test"
           | "agent_builder"
-          | "opportunities";
+          | "opportunities"
+          | "dictation";
       };
 }
 
