@@ -490,6 +490,17 @@ describe("syncing a shared connection's picked shared drives", () => {
       { gone: true, id: "memo", kind: "file" },
       { gone: true, id: "brief", kind: "file" },
     ]);
+    // Nothing it doesn't use: no permissions asked of Drive, in the
+    // listing or the change feed.
+    const asked = sentToGoogle().filter(({ pathname }) =>
+      ["/drive/v3/files", "/drive/v3/changes"].includes(pathname)
+    );
+    expect({
+      calls: asked.length > 0,
+      permissions: asked.filter((url) =>
+        (url.searchParams.get("fields") ?? "").includes("permissions")
+      ),
+    }).toStrictEqual({ calls: true, permissions: [] });
   });
 
   it("never reads the connected account's own Drive, nor a drive nobody picked", async () => {

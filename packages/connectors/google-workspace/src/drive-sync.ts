@@ -114,8 +114,20 @@ const fileSchema = z.object({
 });
 export type DriveFile = z.infer<typeof fileSchema>;
 
-const fileFields =
-  "id,name,mimeType,size,modifiedTime,version,trashed,ownedByMe,driveId,lastModifyingUser(emailAddress),permissions(type,emailAddress,domain,allowFileDiscovery,deleted)";
+/** A file's fields every read asks Drive for. */
+const baseFields =
+  "id,name,mimeType,size,modifiedTime,version,trashed,ownedByMe,driveId,lastModifyingUser(emailAddress)";
+
+/** The permissions a read that names readers asks Drive for, too. */
+const permissionFields =
+  "permissions(type,emailAddress,domain,allowFileDiscovery,deleted)";
+
+/**
+ * A file's fields as `scope` reads them: its permissions only when the
+ * scope names readers from them, nothing it doesn't use.
+ */
+const fileFieldsOf = (scope: Scope): string =>
+  scope.readers === null ? baseFields : `${baseFields},${permissionFields}`;
 
 const startSchema = z.object({ startPageToken: z.string().min(1) });
 
@@ -155,8 +167,13 @@ export interface Scope {
   file: Readonly<Record<string, string>>;
   /** Whether a file is one this read syncs; else it comes as gone. */
   holds: (file: DriveFile) => boolean;
-  /** Who may open a file, as the item names them. */
-  readers: (file: DriveFile) => SyncReader[] | null;
+  /**
+   * Who may open a file, from its permissions; null when this read names
+   * no readers (its items' readers are null, and no permissions are
+   * asked for), as for a shared connection's picked drive, which its
+   * Brain audience reads.
+   */
+  readers: ((file: DriveFile) => SyncReader[] | null) | null;
 }
 
 /**
@@ -470,7 +487,7 @@ const itemOf = (
   changedAt,
   title: file.name,
   content,
-  readers: scope.readers(file),
+  readers: scope.readers === null ? null : scope.readers(file),
   changedBy: file.lastModifyingUser?.emailAddress?.toLowerCase() ?? null,
   partOf: null,
 });
@@ -538,7 +555,7 @@ const listPage = async (
         // ones before it.
         orderBy: "createdTime",
         pageSize: String(googlePageSize),
-        fields: `nextPageToken,files(${fileFields})`,
+        fields: `nextPageToken,files(${fileFieldsOf(scope)})`,
       },
       position.token ?? undefined
     ),
@@ -618,7 +635,7 @@ const changesPage = async (
       ...scope.changes,
       pageToken: position.token,
       pageSize: String(googlePageSize),
-      fields: `nextPageToken,newStartPageToken,changes(fileId,removed,time,file(${fileFields}))`,
+      fields: `nextPageToken,newStartPageToken,changes(fileId,removed,time,file(${fileFieldsOf(scope)}))`,
     }),
     changesSchema
   );

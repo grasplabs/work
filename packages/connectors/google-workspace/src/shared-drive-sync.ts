@@ -87,8 +87,9 @@ const sharedDrive = (driveId: string): Scope => ({
   file: ofAllDrives,
   // In this drive, and not in the bin: anything else went away from it.
   holds: (file: DriveFile) => file.driveId === driveId && file.trashed !== true,
-  // The connection's Brain audience reads it, not the drive's members.
-  readers: () => null,
+  // The connection's Brain audience reads it, not the drive's members:
+  // no permissions are asked for.
+  readers: null,
 });
 
 /** Whether a read failed for lack of time: Google is slow, and the read waits. */
