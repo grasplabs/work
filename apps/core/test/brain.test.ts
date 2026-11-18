@@ -192,6 +192,8 @@ const hubspotAs = (status: string) => ({
   status,
   via: "composio",
   matches: ["HubSpot"],
+  // A toolkit's connection can't tell Grasp what changed in it.
+  ...(status === "connected" ? { activityGap: true } : {}),
 });
 
 /** The native connections `person`'s Brain page lists as connected, each with its mark. */
@@ -210,6 +212,19 @@ const nativeConnected = async (
       .map(({ name, keepsReads }) => ({ name, keepsReads }))
       .toSorted((a, b) => a.name.localeCompare(b.name))
   );
+};
+
+/** The native connections `person`'s Brain page lists as connected, each with whether it is a gap. */
+const gaps = async (person: Awaited<ReturnType<typeof signedInApi>>) => {
+  const { connections } = await person.api.brain.read();
+  return connections
+    .filter(
+      ({ name, status }) =>
+        status === "connected" &&
+        ["Google Workspace", "google-directory", "Microsoft 365"].includes(name)
+    )
+    .map(({ name, activityGap }) => ({ name, activityGap }))
+    .toSorted((a, b) => a.name.localeCompare(b.name));
 };
 
 /** `teams` with the id of each team the kickoff named as `kickoff`: a hash of its name. */
@@ -365,6 +380,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
           status: "connected",
           via: "composio",
           matches: ["mail"],
+          activityGap: true,
         },
       ],
       others: true,
@@ -768,6 +784,47 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       ],
       // Someone else: the shared one alone, and no mark on it.
       other: [{ name: "Microsoft 365", keepsReads: undefined }],
+    });
+  });
+
+  it("shows as a gap each connection that can't tell Grasp what changed in it: all but a person's own to a native connector with a sync", async () => {
+    const owner = await signedInApi(idp, "user");
+    const other = await signedInApi(idp, "user");
+    const now = Date.now();
+    /** A native connection, as connect keeps one: `ownerUserId`'s, or shared. */
+    const connected = async (provider: string, ownerUserId: string | null) => {
+      await connectDb()
+        .prepare(
+          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', 'native', ?, ?, ?)"
+        )
+        .bind(
+          `connection-${crypto.randomUUID()}`,
+          provider,
+          ownerUserId === null ? "shared" : "personal",
+          ownerUserId,
+          `${provider}-server`,
+          now,
+          now
+        )
+        .run();
+    };
+    // The owner's own Google, which syncs; their own directory, a native
+    // connector with no sync; and a shared Microsoft 365, which syncs
+    // nothing until someone picks its places.
+    await connected("google", owner.userId);
+    await connected("google-directory", owner.userId);
+    await connected("microsoft", null);
+
+    expect({
+      owner: await gaps(owner),
+      other: await gaps(other),
+    }).toStrictEqual({
+      owner: [
+        { name: "Google Workspace", activityGap: undefined },
+        { name: "google-directory", activityGap: true },
+        { name: "Microsoft 365", activityGap: true },
+      ],
+      other: [{ name: "Microsoft 365", activityGap: true }],
     });
   });
 

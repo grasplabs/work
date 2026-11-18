@@ -7,6 +7,7 @@ import {
   drainMaxBatches,
 } from "./audit-outbox.ts";
 import type { Outbox } from "./audit-outbox.ts";
+import { recordCallEvents } from "./brain-events.ts";
 import { loneNotesPerDrain } from "./brain-hand-overs.ts";
 import { eraseCapturesOfDisconnects } from "./capture-erasures.ts";
 
@@ -17,12 +18,19 @@ import { eraseCapturesOfDisconnects } from "./capture-erasures.ts";
 // core's Brain module depends on through its own imports, so that module
 // never imports the Brain's.
 
-/** Connect's outbox, with what must be done before its events leave it. */
+/**
+ * Connect's outbox, with what must be done before its events leave it,
+ * and besides: its calls kept as the Brain's events (brain-events.ts),
+ * which never fails, then `besides`.
+ */
 const connectOf = (env: Env, besides?: Outbox["appended"]): Outbox =>
   connectOutbox(
     env,
     async (events) => await eraseCapturesOfDisconnects(env, events),
-    besides
+    async (events) => {
+      await recordCallEvents(env, events);
+      await besides?.(events);
+    }
   );
 
 /**

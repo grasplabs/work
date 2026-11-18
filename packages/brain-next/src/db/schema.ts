@@ -1385,3 +1385,30 @@ export const personErasureMemories = sqliteTable("person_erasure_memories", {
   /** The erasure that hid it (`erasures.key`). */
   erasure: text().notNull(),
 });
+
+/**
+ * What happened, as small records (events.ts): a team, a kind of step, the
+ * item it was on, and when. Never a person, and never read: no member of
+ * the contract answers a row of it, so recall, exports and restores never
+ * hold one. Each is deleted once it is older than `eventsKeptMs`.
+ */
+export const events = sqliteTable(
+  "events",
+  {
+    row: integer().primaryKey({ autoIncrement: true }),
+    /** The producer's key for the event, with its team: one row a pair. */
+    key: text().notNull(),
+    /** The team's group, as the host names it. */
+    team: text().notNull(),
+    step: text().notNull(),
+    /** The SHA-256 of the item's ID, in hex; null when it was on none. */
+    item: text(),
+    /** When it happened, in milliseconds: never later than when it was kept. */
+    at: integer().notNull(),
+  },
+  (table) => [
+    uniqueIndex("events_key_team_idx").on(table.key, table.team),
+    // Expiry deletes by age.
+    index("events_at_idx").on(table.at),
+  ]
+);

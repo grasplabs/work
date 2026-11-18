@@ -59,6 +59,7 @@ import { askMorePeople, workKnowledge } from "./brain-work.ts";
 import { mayHoldCapturesOf } from "./connection-capture-key.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
+import { nativeSyncs } from "./native-tool-classes.gen.ts";
 import { intakeIds, ownId } from "./onboarding/brain-intake.ts";
 import type { CompanyTeam } from "./onboarding/company-teams.ts";
 import { kickoffSaid, teamNameKey } from "./onboarding/kickoff-company.ts";
@@ -714,6 +715,23 @@ const connectionsOf = async (
   );
   const keepsReads = (key: string): { keepsReads?: true } =>
     keeping.has(key) ? { keepsReads: true } : {};
+  // What can tell Grasp what changed in it, beside what is done through
+  // Grasp (GRA-1763): the person's own connection of a native connector
+  // with a sync. Connect syncs a shared one only in places someone
+  // picked, which none can be yet. Any other connected entry is a gap.
+  const observing = new Set(
+    activeListed
+      .filter(
+        ({ source, scope, ownerUserId, provider }) =>
+          source === "native" &&
+          scope === "personal" &&
+          ownerUserId === connecting.userId &&
+          Object.hasOwn(nativeSyncs, provider)
+      )
+      .map(({ source, provider }) => entryKey(source, provider))
+  );
+  const activityGap = (key: string): { activityGap?: true } =>
+    active.has(key) && !observing.has(key) ? { activityGap: true } : {};
   // A hidden entry isn't offered, but a connection to it still runs:
   // it stays, by its catalog name.
   const shown = entries.filter(
@@ -725,6 +743,7 @@ const connectionsOf = async (
     via: viaOf(source),
     matches: [name],
     ...keepsReads(entryKey(source, id)),
+    ...activityGap(entryKey(source, id)),
   }));
   const listedKeys = new Set(
     entries.map(({ source, id }) => entryKey(source, id))
@@ -739,6 +758,7 @@ const connectionsOf = async (
         via: viaOf(source),
         matches: [provider],
         ...keepsReads(each),
+        ...activityGap(each),
       };
     });
   return [...offered, ...unlisted];

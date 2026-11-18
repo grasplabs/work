@@ -27,6 +27,7 @@ import {
   publishAs,
   readSourceVersionAs,
   recallAs,
+  recordEvents,
   rememberAs,
   versionRefSchema,
   workBrain,
@@ -381,6 +382,7 @@ describe(
         "an answer in the holder's chat": markerWord(),
         "a memory the holder shared with a team the outsider isn't in":
           markerWord(),
+        "an event of the holder's team": markerWord(),
       };
       // What every member may read, and nobody outside the company.
       const companyMarkers = {
@@ -426,6 +428,7 @@ describe(
         "an answer in the holder's chat": answerMarker,
         "a memory the holder shared with a team the outsider isn't in":
           sharedMemoryMarker,
+        "an event of the holder's team": eventMarker,
       } = markers;
       // Instruction files the outsider may not get: the holder's own,
       // another agent's than theirs, and an App's they don't build (one no
@@ -746,6 +749,17 @@ describe(
           id: `${sharedConnection}/${crypto.randomUUID()}`,
         }
       );
+      // A step the holder took, kept as an event of their team (GRA-1763):
+      // nobody reads it back, their team included.
+      await recordEvents(env, [
+        {
+          key: crypto.randomUUID(),
+          personId: holder,
+          step: `Sent ${sharedWord} ${eventMarker}`,
+          item: eventMarker,
+          at: new Date(),
+        },
+      ]);
       const teamSource = `Board minutes ${sharedWord} ${teamMarker}`;
       const teamId = await add(teamSource, {
         kind: "team",
@@ -1110,6 +1124,8 @@ describe(
           askedMarker,
           answerMarker,
           sharedMemoryMarker,
+          // Not the event's: nothing asks for an event, and every pass
+          // forbids its marker in what it gets (`markers`).
         ],
         hiddenVersions: everyVersionOf(
           ...ownerIds,
@@ -1286,6 +1302,7 @@ describe(
         teamUploadMarker,
         teamSkillMarker,
         sharedMemoryMarker,
+        eventMarker,
         instructionMarkers,
         inRecall,
         instructionGroups,
@@ -1823,6 +1840,7 @@ describe(
             world.narrowedMarker,
             world.agentFileMarker,
             world.appFileMarker,
+            world.eventMarker,
           ],
           hiddenVersions: [
             ...everyVersionOf(world.noneId),
@@ -1840,6 +1858,7 @@ describe(
           "another agent's instruction file": world.agentFileMarker,
           "an App's instruction file the outsider doesn't build":
             world.appFileMarker,
+          "an event of the holder's team": world.eventMarker,
         },
         { inRecall: world.inRecall }
       );

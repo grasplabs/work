@@ -1,0 +1,50 @@
+import { eventsKeptMs } from "./contract.ts";
+import type { NewEvent } from "./contract.ts";
+
+// Events: what happened, as small records, used only to find routines.
+// Each names a team, a kind of step, the item it was on (by a hash) and
+// when: never a person. The ways they could hurt someone, and how each is
+// closed:
+//
+// - A trail of one person read back: nothing reads this table. No member
+//   of the contract answers an event, so no recall, page, export or
+//   figure holds one; whatever is drawn from them later is drawn here and
+//   held to the five-person floor where it is drawn.
+// - A person in a row: the host names a team's group, never a person
+//   (contract.ts `newEventSchema`), and an item only by its SHA-256.
+// - Kept for good: every event older than `eventsKeptMs` is deleted
+//   (`expireEvents`, on the host's clock), and one dated later than when
+//   it is kept is kept as of then, so none outlives the window.
+
+/**
+ * Keeps `events`, each once by its key and team, as of `now`: one dated
+ * later is kept as of `now`, and one already past `eventsKeptMs` is not
+ * kept at all. One statement each, in one transaction.
+ */
+export const addEvents = (
+  storage: DurableObjectStorage,
+  events: readonly NewEvent[],
+  now: number
+): void => {
+  const oldest = now - eventsKeptMs;
+  storage.transactionSync(() => {
+    for (const { key, team, step, item, at } of events) {
+      const happened = Math.min(Date.parse(at), now);
+      if (happened >= oldest) {
+        storage.sql.exec(
+          "INSERT INTO events (key, team, step, item, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (key, team) DO NOTHING",
+          key,
+          team,
+          step,
+          item,
+          happened
+        );
+      }
+    }
+  });
+};
+
+/** Deletes every event older than `eventsKeptMs` as of `now`. */
+export const expireEvents = (sql: SqlStorage, now: number): void => {
+  sql.exec("DELETE FROM events WHERE at < ?", now - eventsKeptMs);
+};

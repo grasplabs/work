@@ -1533,6 +1533,10 @@ msgstr "Un formulaire est envoyé"
 msgid "A former member"
 msgstr "Un ancien membre"
 
+#: src/brain/sources-page.tsx
+msgid "A gap: this connection can’t tell Grasp what changed in it, so Grasp sees only what is done there through Grasp."
+msgstr "Une lacune : cette connexion ne peut pas dire à Grasp ce qui y a changé, donc Grasp ne voit que ce qui y est fait via Grasp."
+
 #: src/activity/audit-words.ts
 msgid "A guest chat changed"
 msgstr "Une discussion d’invité a changé"

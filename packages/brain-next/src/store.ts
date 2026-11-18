@@ -33,6 +33,7 @@ import {
   handOverResultSchema,
   isWholeKey,
   memoriesRequestSchema,
+  newEventsSchema,
   newInstructionsSchema,
   newMemoriesSchema,
   newSourceSchema,
@@ -68,6 +69,7 @@ import {
   versionRequestSchema,
 } from "./contract.ts";
 import type {
+  NewEvents,
   RetireWrittenRequest,
   VersionChange,
   VersionChangeRequest,
@@ -188,6 +190,7 @@ import {
   sourcesWithoutCurrent,
 } from "./erasure.ts";
 import type { ErasureStore } from "./erasure.ts";
+import { addEvents, expireEvents } from "./events.ts";
 import {
   exportFile,
   exportStatus,
@@ -1325,6 +1328,28 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         stopWorkOn(this.#work, removed);
       }
     });
+  }
+
+  /**
+   * Keeps events (events.ts): the shared store's alone, as they name a
+   * team, never one person. Nothing in the store reads them back.
+   */
+  async addEvents(request: NewEvents): Promise<void> {
+    const { events } = checked(newEventsSchema, request);
+    if (this.#kind.kind === "person") {
+      throw new Error(sharedOnly);
+    }
+    await this.#readyToWrite();
+    addEvents(this.ctx.storage, events, Date.now());
+  }
+
+  /** Deletes every event past its time (events.ts), by the store's clock. */
+  async expireEvents(): Promise<void> {
+    if (this.#kind.kind === "person") {
+      throw new Error(sharedOnly);
+    }
+    await this.#readyToWrite();
+    expireEvents(this.ctx.storage.sql, Date.now());
   }
 
   /**

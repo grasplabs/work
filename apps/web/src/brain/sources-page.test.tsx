@@ -911,7 +911,7 @@ describe(SourcesPage, () => {
     }).toStrictEqual({ calls: ["list", "search invoices"], shown: true });
   });
 
-  it("says what the Brain keeps of a person's own connections, marks each it keeps reads from, and says when there are none", async () => {
+  it("says what the Brain keeps of a person's own connections, marks each it keeps reads from and each that can't tell what changed in it, and says when there are none", async () => {
     await shown([
       {
         name: "Gmail",
@@ -926,7 +926,13 @@ describe(SourcesPage, () => {
         via: "direct",
         matches: [],
       },
-      { name: "HubSpot", status: "connected", via: "composio", matches: [] },
+      {
+        name: "HubSpot",
+        status: "connected",
+        via: "composio",
+        matches: [],
+        activityGap: true,
+      },
     ]);
     const feeds = section("How your connections feed the Brain");
     act(() => {
@@ -942,7 +948,8 @@ describe(SourcesPage, () => {
         "When an agent reads for you through an account you connected yourself, the Brain keeps what it read for you alone, while that account stays connected: one Gmail message or attachment, one OneNote page, or the answer of a read in another app, the company’s records included. Everything else agents search live when you ask, and the Brain keeps nothing of it." +
         "GmailThe Brain may keep, for you alone, some of what an agent reads for you through this connection, while it stays connected." +
         "Microsoft 365Searched live, nothing kept." +
-        "HubSpotSearched live, nothing kept.",
+        "HubSpotSearched live, nothing kept." +
+        "A gap: this connection can’t tell Grasp what changed in it, so Grasp sees only what is done there through Grasp.",
       none: "How your connections feed the BrainYou have no connections yet.",
     });
   });

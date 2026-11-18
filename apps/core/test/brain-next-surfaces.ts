@@ -31,6 +31,7 @@
 import {
   brainOf,
   currentReadMax,
+  eventsPerAddMax,
   handOversMax,
   listPageMax,
   listPrefixesMax,
@@ -601,6 +602,24 @@ const momentsOf = (probing: Probing): Date[] => [
 
 /** The Brain's store, as the harness reaches it: by its contract. */
 const store = (): Brain => brainOf(inJurisdiction(env, env.BRAIN_STORE));
+
+/** A step `who` took now, as a producer hands it to core's `recordEvents`. */
+const stepOf = (who: string, step: string, item: string | null) => ({
+  key: crypto.randomUUID(),
+  personId: who,
+  step,
+  item,
+  at: new Date(),
+});
+
+/** An event of `team` now, as the store's `addEvents` takes it. */
+const eventOf = (team: string, step: string) => ({
+  key: crypto.randomUUID(),
+  team,
+  step,
+  item: null,
+  at: new Date().toISOString(),
+});
 
 /** A source no one added. */
 const missingSource = (): SourceRef => ({
@@ -4287,6 +4306,64 @@ export const coreProbes = {
       );
     }),
   ],
+  // Events have no reader and nothing reads them back (GRA-1763): a
+  // record answers alike whether its steps are marked, someone else's or
+  // no member's, and holds no marker; one refused names nothing of them.
+  recordEvents: async ({ personId, markers }) => {
+    const record = async (
+      name: string,
+      steps: unknown,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => {
+          await coreBrain.recordEvents(env, unchecked(steps));
+        },
+        about
+      );
+    const marked = markers.map((marker) =>
+      stepOf(personId, `Sent ${marker}`, marker)
+    );
+    return [
+      await record("the reader's marked steps", marked, "hidden"),
+      await record("the same steps again", marked, "hidden"),
+      await record(
+        "a step of someone who is no member",
+        [stepOf(stranger(), "Sent", null)],
+        "nothing"
+      ),
+      await record("a marked step dated after now", [
+        {
+          ...stepOf(personId, `Sent ${markers.join(" ")}`, null),
+          at: new Date(Date.now() + 86_400_000),
+        },
+      ]),
+      await record("a step longer than a step may be", [
+        stepOf(personId, markers.join(" ").repeat(64), null),
+      ]),
+      await record("a step of no one", [stepOf("", markers.join(" "), null)]),
+      await record("a step at no time", [
+        { ...stepOf(personId, "Sent", null), at: markers.join(" ") },
+      ]),
+    ];
+  },
+  expireEvents: async ({ personId, markers }) => {
+    await coreBrain.recordEvents(env, [
+      {
+        key: crypto.randomUUID(),
+        personId,
+        step: `Sent ${markers.join(" ")}`.slice(0, 256),
+        item: markers.join(" "),
+        at: new Date(),
+      },
+    ]);
+    return [
+      await answer("an expiry with marked events kept", async () => {
+        await coreBrain.expireEvents(env);
+      }),
+    ];
+  },
 } satisfies Record<
   Exclude<CoreMember, CorePersonMember | CoreCodeMember | CoreAppMember>,
   Probe
@@ -10476,6 +10553,60 @@ export const storeProbes = {
       ),
     ];
   },
+  // As core's (above), through the contract itself: no reader, and no
+  // answer but a refusal that names nothing of what it was given.
+  addEvents: async ({ personId, markers }) => {
+    const add = async (
+      name: string,
+      request: unknown,
+      about?: Answer["about"],
+      into: Brain = store()
+    ) =>
+      await answer(
+        name,
+        async () => {
+          await into.addEvents(unchecked(request));
+        },
+        about
+      );
+    const marked = {
+      events: markers.map((marker) =>
+        eventOf(`team:${marker}`, `Sent ${marker}`)
+      ),
+    };
+    return [
+      await add("marked events", marked, "hidden"),
+      await add("the same events again", marked, "hidden"),
+      await add(
+        "an event of a team no one is in",
+        { events: [eventOf(`team:${crypto.randomUUID()}`, "Sent")] },
+        "nothing"
+      ),
+      await add("an event whose item is readable", {
+        events: [{ ...eventOf("team:x", "Sent"), item: markers.join(" ") }],
+      }),
+      await add("no events", { events: [] }),
+      await add("more events than one add takes", {
+        events: Array.from({ length: eventsPerAddMax + 1 }, () =>
+          eventOf("team:x", markers.join(" "))
+        ),
+      }),
+      await add(
+        "marked events, into the reader's own store",
+        marked,
+        undefined,
+        personalStore(personId)
+      ),
+    ];
+  },
+  expireEvents: async ({ personId }) => [
+    await answer("an expiry", async () => {
+      await store().expireEvents();
+    }),
+    await answer("an expiry of the reader's own store", async () => {
+      await personalStore(personId).expireEvents();
+    }),
+  ],
   ...memoryProbes,
   ...linkingProbes,
 } satisfies Record<StoreMember, Probe>;

@@ -1397,6 +1397,45 @@ export const sourceRemovalSchema = z.strictObject({
 export type SourceRemoval = z.infer<typeof sourceRemovalSchema>;
 
 /**
+ * How long the Brain keeps an event, from when it happened: 90 days, long
+ * enough to see a monthly routine three times. What is drawn from events
+ * (a routine's figures) stays; the events themselves go (`expireEvents`).
+ */
+export const eventsKeptMs = 90 * 24 * 60 * 60 * 1000;
+
+/** Most events one add takes (`Brain.addEvents`); a host with more sends a page after the other. */
+export const eventsPerAddMax = 500;
+
+/** Most characters of an event's kind of step. */
+export const eventStepMaxLength = 256;
+
+/**
+ * One thing that happened (`Brain.addEvents`): which team's (a group, as
+ * the host names it, never a person), what kind of step, on which item,
+ * and when. The item is the SHA-256 of the host's ID for it, in hex, so
+ * the Brain keeps nothing readable of it; null when the step was on none.
+ * `key` is the producer's for the event, the same on every retry: with its
+ * team, one event.
+ */
+export const newEventSchema = z.strictObject({
+  key: changeKeySchema,
+  team: principalSchema,
+  step: wellFormedString().min(1).max(eventStepMaxLength),
+  item: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/u)
+    .nullable(),
+  at: z.iso.datetime(),
+});
+export type NewEvent = z.infer<typeof newEventSchema>;
+
+/** Events to keep (`Brain.addEvents`). */
+export const newEventsSchema = z.strictObject({
+  events: z.array(newEventSchema).min(1).max(eventsPerAddMax),
+});
+export type NewEvents = z.infer<typeof newEventsSchema>;
+
+/**
  * Whether `source` may be in `group`: its key is the group's, "/" and
  * more, so no source joins a group its key isn't under.
  */
@@ -3187,6 +3226,20 @@ export interface Brain {
    * answers alike whatever there was.
    */
   removeSources: (request: SourceRemoval) => Promise<void>;
+  /**
+   * Keeps events (events.ts), each once by its key and team: a repeat adds
+   * nothing. One dated later than now is kept as of now, and one already
+   * older than `eventsKeptMs` is not kept. Nothing reads them back: no
+   * member answers an event, so they are never in a recall, an export or
+   * a figure about one person. The shared store's alone: a person's own
+   * store refuses them.
+   */
+  addEvents: (request: NewEvents) => Promise<void>;
+  /**
+   * Deletes every event older than `eventsKeptMs`, by the store's clock.
+   * The shared store's alone. Safe to repeat.
+   */
+  expireEvents: () => Promise<void>;
   /**
    * Erases `person`'s own store whole, the one place what only they may
    * read is kept: everything it holds, and from then on every call is

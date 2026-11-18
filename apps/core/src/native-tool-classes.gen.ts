@@ -89,3 +89,13 @@ export const nativeItemReads: Readonly<
     "onenote.read": "item",
   },
 };
+
+/**
+ * Each native connector's syncs, by its provider: the feeds it can list
+ * and follow the changes of. A connection of a provider in none can't
+ * tell Grasp what changed in it (core's brain-rpc.ts shows it as a gap).
+ */
+export const nativeSyncs: Readonly<Record<string, readonly string[]>> = {
+  "google": ["drive", "gmail"],
+  "microsoft": ["drive"],
+};

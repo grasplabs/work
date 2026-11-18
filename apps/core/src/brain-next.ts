@@ -17,6 +17,8 @@ import {
   changeReused,
   listPageMax,
   erasureReasons,
+  eventStepMaxLength,
+  eventsPerAddMax,
   exportFileNameSchema,
   exportIdSchema,
   handOversMax,
@@ -55,6 +57,7 @@ import {
 import type {
   Access,
   AskModel,
+  NewEvent,
   AttributeRule,
   Brain,
   ContestedCursor,
@@ -6313,4 +6316,72 @@ export const forgetForAppAs = async (
   } catch (error) {
     throw refusedAs(error);
   }
+};
+
+// Events (GRA-1763): what happened in people's work, kept by the Brain to
+// find routines in, never read back by anyone (@grasp-os/brain-next's
+// events.ts). A producer names the person who did a step; core turns them
+// into their teams here, from its own records read now, and hands the
+// Brain only those teams' groups: never the person, and the item only by
+// its SHA-256. A person in no team, or no longer a member, gives none.
+// The Brain deletes every event past its time on core's clock
+// (`expireEvents`).
+
+const observedStepSchema = z.strictObject({
+  /** The producer's key for the step, the same on every retry. */
+  key: changeSchema,
+  personId: idSchema,
+  step: wellFormedString().min(1).max(eventStepMaxLength),
+  item: wellFormedString().min(1).nullable(),
+  at: z.date(),
+});
+
+/**
+ * One step a person took, as a producer hands it to `recordEvents`: its
+ * key, the same on every retry; who took it, turned into their teams and
+ * never kept; what kind of step (a tool's action); the ID of the item it
+ * was on as its system names it, or null; and when.
+ */
+export type ObservedStep = z.infer<typeof observedStepSchema>;
+
+/**
+ * Keeps `steps` as the Brain's events, one per team each person is in
+ * now: safe to repeat, as each is kept once by its key and team.
+ * Server-side, for producers alone: nothing answers them back.
+ */
+export const recordEvents = async (
+  env: BrainEnv & ReaderEnv,
+  steps: readonly ObservedStep[]
+): Promise<void> => {
+  const observed = checked(z.array(observedStepSchema), steps);
+  const db = drizzle(env.DB);
+  const teamsOf = new Map<string, string[]>();
+  for (const personId of new Set(observed.map((step) => step.personId))) {
+    // oxlint-disable-next-line no-await-in-loop -- one person at a time
+    const [membership, memberTeams] = await db.batch(memberReads(db, personId));
+    const member = memberFrom(personId, membership, memberTeams);
+    teamsOf.set(
+      personId,
+      member === undefined ? [] : member.teams.map(({ id }) => teamGroup(id))
+    );
+  }
+  const events: NewEvent[] = [];
+  for (const { key, personId, step, item, at } of observed) {
+    // oxlint-disable-next-line no-await-in-loop -- one hash at a time
+    const hashed = item === null ? null : await sha256Hex(item);
+    for (const team of teamsOf.get(personId) ?? []) {
+      events.push({ key, team, step, item: hashed, at: at.toISOString() });
+    }
+  }
+  for (let start = 0; start < events.length; start += eventsPerAddMax) {
+    // oxlint-disable-next-line no-await-in-loop -- one page at a time
+    await brain(env).addEvents({
+      events: events.slice(start, start + eventsPerAddMax),
+    });
+  }
+};
+
+/** Deletes every event the Brain keeps past its time: core's clock runs it. */
+export const expireEvents = async (env: BrainEnv): Promise<void> => {
+  await brain(env).expireEvents();
 };
