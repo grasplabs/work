@@ -1041,10 +1041,10 @@ describe("how an organization's Brain is doing", () => {
       needSomeone: text.includes("Need someone"),
       count: text.includes("2 of 3"),
       failing: text.includes(
-        "1b2c3d4e5f60 google · drive Listing everything 0 Never sync.provider_failed 5 min ago Failing"
+        "google · drive 1b2c3d4e5f60 · Listing everything 0 Never sync.provider_failed 5 min ago Failing"
       ),
       behind: text.includes(
-        "2c3d4e5f6071 google · calendar Following changes 1,200 2 min ago None Behind since 2 hours ago Relist past its day"
+        "google · calendar 2c3d4e5f6071 · Following changes 1,200 2 min ago None Behind since 2 hours ago Relist past its day"
       ),
       // The fine one after them, folded under Details.
       fineLast: text.indexOf("0a1b2c3d4e5f") > text.indexOf("2c3d4e5f6071"),

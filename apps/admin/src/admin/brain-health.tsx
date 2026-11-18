@@ -902,7 +902,7 @@ const SyncState = ({ row, now }: { row: BrainSyncConnection; now: number }) => {
     return <Badge variant="passed">Fine</Badge>;
   }
   return (
-    <span className="flex flex-wrap justify-end gap-1">
+    <span className="flex flex-col items-end gap-1">
       {row.failing ? <Badge variant="attention">Failing</Badge> : null}
       {row.behindSince === null ? null : (
         <Badge variant="attention">
@@ -928,9 +928,7 @@ const SyncTable = ({
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead variant="card">Connection</TableHead>
           <TableHead variant="card">Sync</TableHead>
-          <TableHead variant="card">Doing</TableHead>
           <TableHead className="text-right" variant="card">
             Items
           </TableHead>
@@ -946,11 +944,15 @@ const SyncTable = ({
       <TableBody>
         {rows.map((row) => (
           <TableRow key={`${row.connection} ${row.feed}`}>
-            <TableCell variant="card">
-              <span className="font-mono text-xs">{row.connection}</span>
+            <TableCell className="whitespace-normal" variant="card">
+              <span className="flex flex-col gap-0.5">
+                <span>{`${row.provider} · ${row.feed}`}</span>
+                <span className="text-muted-foreground text-xs">
+                  <span className="font-mono">{row.connection}</span>
+                  {` · ${phaseWords[row.phase]}`}
+                </span>
+              </span>
             </TableCell>
-            <TableCell variant="card">{`${row.provider} · ${row.feed}`}</TableCell>
-            <TableCell variant="card">{phaseWords[row.phase]}</TableCell>
             <TableCell className="text-right" variant="card">
               <span className="tabular-nums">{whole(row.items)}</span>
             </TableCell>
