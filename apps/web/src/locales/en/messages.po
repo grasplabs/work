@@ -1316,6 +1316,10 @@ msgstr "{rows, plural, one {# row to import.} other {# rows to import.}}"
 msgid "{runs, plural, one {{date}: # run} other {{date}: # runs}}"
 msgstr "{runs, plural, one {{date}: # run} other {{date}: # runs}}"
 
+#: src/workflows/overview-concepts.tsx
+msgid "{runs, plural, one {# run} other {# runs}}"
+msgstr "{runs, plural, one {# run} other {# runs}}"
+
 #: src/dashboard/runs-widget.tsx
 msgid "{runs, plural, one {Without a person, of # run} other {Without a person, of # runs}}"
 msgstr "{runs, plural, one {Without a person, of # run} other {Without a person, of # runs}}"
@@ -3770,6 +3774,11 @@ msgstr "Build it"
 #: src/labels.ts
 msgid "Builder"
 msgstr "Builder"
+
+#: src/workflows/overview-concepts.tsx
+msgctxt "workflow phase"
+msgid "Building"
+msgstr "Building"
 
 #: src/frame/part-words.tsx
 msgid "Building the app"
@@ -9853,6 +9862,11 @@ msgctxt "tab listing the workflows that need a person"
 msgid "Needs you"
 msgstr "Needs you"
 
+#: src/workflows/overview-concepts.tsx
+msgctxt "workflow phase"
+msgid "Needs you"
+msgstr "Needs you"
+
 #: src/dashboard/widget-board.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Never"
@@ -11112,6 +11126,10 @@ msgstr "On {where}"
 msgid "On a later day"
 msgstr "On a later day"
 
+#: src/workflows/overview-concepts.tsx
+msgid "On a schedule"
+msgstr "On a schedule"
+
 #: src/onboarding/ai-step.tsx
 msgid "On Grasp’s AI: {grasp}"
 msgstr "On Grasp’s AI: {grasp}"
@@ -11765,6 +11783,10 @@ msgstr "Part {n} of {count}"
 msgid "Part {n} of {parts}: {label}"
 msgstr "Part {n} of {parts}: {label}"
 
+#: src/workflows/overview-concepts.tsx
+msgid "Part of an App"
+msgstr "Part of an App"
+
 #: src/routes/_shell.brain.sections.$sectionId.tsx
 msgid "Part of the brain not found"
 msgstr "Part of the brain not found"
@@ -12005,6 +12027,10 @@ msgstr "Personal connections"
 #: src/settings/erasures.tsx
 msgid "Personal Knowledge and memories"
 msgstr "Personal Knowledge and memories"
+
+#: src/workflows/overview-concepts.tsx
+msgid "Phase"
+msgstr "Phase"
 
 #: src/frame/part-words.tsx
 msgctxt "a screen width"
@@ -13469,6 +13495,11 @@ msgctxt "status of a workflow run"
 msgid "Running"
 msgstr "Running"
 
+#: src/workflows/overview-concepts.tsx
+msgctxt "workflow phase"
+msgid "Running"
+msgstr "Running"
+
 #: src/brain/brain.ts
 msgctxt "workflow status"
 msgid "Running"
@@ -14646,6 +14677,11 @@ msgstr "Size changed to {people}"
 msgid "Size changed to unknown"
 msgstr "Size changed to unknown"
 
+#: src/workflows/overview-concepts.tsx
+msgctxt "workflow phase"
+msgid "Sketched"
+msgstr "Sketched"
+
 #: src/labels.ts
 msgid "Skill"
 msgstr "Skill"
@@ -14915,6 +14951,10 @@ msgstr "Started a chat"
 #: src/workflows/runs.tsx
 msgid "Started by"
 msgstr "Started by"
+
+#: src/workflows/overview-concepts.tsx
+msgid "Started by a person"
+msgstr "Started by a person"
 
 #: src/activity/audit-words.ts
 msgid "Started following a connection late: changes before then weren't read"
@@ -16747,6 +16787,11 @@ msgstr "To"
 msgid "To act in this workspace, ask its admin to add you as a user, and sign in as one."
 msgstr "To act in this workspace, ask its admin to add you as a user, and sign in as one."
 
+#: src/workflows/overview-concepts.tsx
+msgctxt "workflow phase"
+msgid "To build"
+msgstr "To build"
+
 #: src/dashboard/todo-pile.tsx
 msgctxt "dashboard: what waits on you"
 msgid "To do"
@@ -18129,6 +18174,14 @@ msgstr "When an email arrives at its own address"
 #: src/workflows/trigger-description.ts
 msgid "When an email arrives for {localPart}"
 msgstr "When an email arrives for {localPart}"
+
+#: src/workflows/overview-concepts.tsx
+msgid "When an email comes in"
+msgstr "When an email comes in"
+
+#: src/workflows/overview-concepts.tsx
+msgid "When another system calls"
+msgstr "When another system calls"
 
 #: src/interview/words.ts
 msgid "When it goes differently"

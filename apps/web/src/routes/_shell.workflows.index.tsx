@@ -3,7 +3,10 @@ import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 import { canBuild } from "@grasp-os/shared/roles";
 import { runFilterStatuses } from "@grasp-os/shared/run-filter";
 import type { RunFilterStatus } from "@grasp-os/shared/run-filter";
-import type { WorkflowGoLiveWaiting } from "@grasp-os/shared/workflow-lifecycle";
+import type {
+  WorkflowGoLiveWaiting,
+  WorkflowStage,
+} from "@grasp-os/shared/workflow-lifecycle";
 import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
 import type {
   RunActivity,
@@ -48,6 +51,12 @@ import { ProcessGlyph, processNames } from "../workflows/business-process.tsx";
 import { RunFiguresView } from "../workflows/figures.tsx";
 import { GoLivesWaiting } from "../workflows/go-lives-waiting.tsx";
 import { needsAttention, processesIn, showsUnder } from "../workflows/lists.ts";
+import {
+  OverviewConcept,
+  phaseOf,
+  sampleRows,
+} from "../workflows/overview-concepts.tsx";
+import type { ConceptRow } from "../workflows/overview-concepts.tsx";
 import { listRuns, listWorkflows, readActivity } from "../workflows/reads.ts";
 import { runFiguresOf } from "../workflows/run-figures.ts";
 import { RunsLog } from "../workflows/runs.tsx";
@@ -70,6 +79,8 @@ import type { WorkflowProcesses } from "../workflows/workflows-table.tsx";
 // it means. A new workflow is the page's action, in the bar above it.
 
 interface WorkflowsSearch {
+  /** Which concept shows, for Ruben to choose (never merged). */
+  concept?: "a" | "b" | "c" | "d";
   tab?: "needs" | "runs";
   /** On the lists: the business process whose workflows show. */
   process?: BusinessProcess;
@@ -685,6 +696,80 @@ const Workflows = () => {
   );
 };
 
+// ---- Concepts, for Ruben to choose between (never merged) ----------------
+
+/** The seed's owners' teams, as the seed's company has them: core keeps no team on a workflow. */
+const ownersTeams: Readonly<Record<string, string>> = {
+  "Nina Visser": "Client onboarding",
+  "Lisa de Vries": "Customer service",
+  "Eva Bakker": "Finance",
+};
+
+/** The page's workflows as the concepts show them: the seed's, then the samples. */
+const conceptRowsOf = (
+  lists: Lists,
+  stages: ReadonlyMap<string, { stage: WorkflowStage; paused: boolean }>
+): ConceptRow[] => [
+  ...(lists.workflows.state === "ready" ? lists.workflows.data : []).map(
+    (row): ConceptRow => {
+      const owner = row.owner.name ?? row.owner.userId;
+      const known = stages.get(row.workflowId);
+      return {
+        id: row.workflowId,
+        name: row.name,
+        phase:
+          known === undefined
+            ? "building"
+            : phaseOf(known.stage, row, known.paused),
+        owner,
+        team: ownersTeams[owner] ?? "",
+        process: processOf(lists.processes, row),
+        kind: "person",
+        tools: [],
+        runs: row.handled,
+        sample: false,
+      };
+    }
+  ),
+  ...sampleRows,
+];
+
+/** A concept: the page's heading over the concept's content. */
+const ConceptPage = ({ concept }: { concept: "a" | "b" | "c" | "d" }) => {
+  const { t } = useLingui();
+  const page = Route.useLoaderData();
+  const { identity } = Route.useRouteContext();
+  return (
+    <>
+      <SiteHeader crumbs={[{ label: t`Workflows` }]} />
+      <Page>
+        <PageHeading
+          action={
+            canBuild(identity.role) ? (
+              <MakeSomethingLink kind="workflow" size="sm" />
+            ) : undefined
+          }
+          title={t`Workflows`}
+        />
+        <OverviewConcept
+          concept={concept}
+          rows={conceptRowsOf(page.lists, page.stages ?? new Map())}
+        />
+      </Page>
+    </>
+  );
+};
+
+/** The page, or the concept the address asks for. */
+const WorkflowsOrConcept = () => {
+  const { concept } = Route.useSearch();
+  return concept === undefined ? (
+    <Workflows />
+  ) : (
+    <ConceptPage concept={concept} />
+  );
+};
+
 /** The business process each workflow serves, by its ID. */
 const processesOf = (
   independent: Loaded<WorkflowResource[]>
@@ -736,6 +821,12 @@ const searchOf = (search: Record<string, unknown>): WorkflowsSearch => ({
     ? { process: search.process }
     : {}),
   ...(isStatus(search.status) ? { status: search.status } : {}),
+  ...(search.concept === "a" ||
+  search.concept === "b" ||
+  search.concept === "c" ||
+  search.concept === "d"
+    ? { concept: search.concept }
+    : {}),
 });
 
 export const Route = createFileRoute("/_shell/workflows/")({
@@ -745,10 +836,34 @@ export const Route = createFileRoute("/_shell/workflows/")({
   // choosing either reads neither the lists nor today's lanes again. A
   // refresh runs the loader, which reads the log for the address's
   // filters again too.
-  loaderDeps: ({ search: { tab } }) => ({ tab }),
+  loaderDeps: ({ search: { tab, concept } }) => ({ tab, concept }),
   // Every tab reads the lists, as the tabs count them; besides, each tab
   // reads only what it shows, and each read says on its own why it failed.
-  loader: async ({ context: { core }, deps: { tab }, location }) => {
+  loader: async ({ context: { core }, deps: { tab, concept }, location }) => {
+    if (concept !== undefined) {
+      const lists = await readLists(core);
+      const read = await loadFromCore(core, async (session) =>
+        lists.independent.state === "ready"
+          ? await Promise.all(
+              lists.independent.data.map(async (workflow) => {
+                const lifecycle = await session.workflowResources.lifecycle.get(
+                  workflow.id
+                );
+                return [
+                  workflow.id,
+                  { stage: lifecycle.stage, paused: lifecycle.paused !== null },
+                ] as const;
+              })
+            )
+          : []
+      );
+      return {
+        tab: "workflows" as const,
+        lists,
+        people: new Map<string, string>(),
+        stages: new Map(read.state === "ready" ? read.data : []),
+      };
+    }
     if (tab !== "runs") {
       const [lists, people] = await Promise.all([
         readLists(core),
@@ -778,5 +893,5 @@ export const Route = createFileRoute("/_shell/workflows/")({
     ]);
     return { tab: "runs" as const, lists, today, log, activity };
   },
-  component: Workflows,
+  component: WorkflowsOrConcept,
 });
