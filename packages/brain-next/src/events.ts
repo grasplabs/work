@@ -24,6 +24,10 @@ import type { NewEvent } from "./contract.ts";
 // - Tags no erasure can compute: the host names the key it made them
 //   with, and a call under another key deletes every event and closed tag
 //   first (`underKey`).
+// - Brought back by a restore: an export holds neither events nor closed
+//   tags (exports.ts reads neither), since events are short-lived activity
+//   and an old export could hold an erased person's; and a restore of an
+//   export clears neither, so the tags an erasure closed still hold.
 // - Kept for good: every event older than `eventsKeptMs` is deleted
 //   (`expireEvents`, on the host's clock), and one dated later than when
 //   it is kept is kept as of then, so none outlives the window.
