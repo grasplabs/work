@@ -92,7 +92,7 @@ const styles = stylex.create({
     imageRendering: "pixelated",
   },
   chosen: {
-    boxShadow: `0 0 0 2px ${grasp.ink}`,
+    boxShadow: `0 0 0 ${grasp.ringWidth} ${grasp.ink}`,
   },
   name: {
     overflow: "hidden",
