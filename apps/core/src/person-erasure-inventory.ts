@@ -208,6 +208,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
     company:
       "which Brain versions a run recalled, identifiers only, as runs are (D3)",
   },
+  "core.kept_run_evidence": noPerson,
   "core.run_brain_memories": {
     company:
       "which Brain memories a run's entity reads rested on, identifiers only, no person's, as runs are (D3)",
@@ -341,7 +342,6 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.build_receipts": noPerson,
   "core.business_store_versions": noPerson,
   "core.channel_signals": noPerson,
-  "core.collection_teams": noPerson,
   "core.dependency_policy": noPerson,
   "core.improvement_signal_computations": noPerson,
   "core.jwks": noPerson,
@@ -384,6 +384,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.workflow_ai_waits": noPerson,
   // Nothing writes it since GRA-1552; dropped in GRA-1613.
   "core.workflow_stores": noPerson,
+  // A key may hold what its run read of a person's card: read only while
+  // what that run read holds (workflow-state.ts, GRA-1996), so withheld
+  // for good once their erasure took it.
   "core.workflow_state": {
     company: "what a workflow keeps between its runs, as their outputs (D3)",
   },
@@ -472,13 +475,13 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   },
   "onboarding.brain_teams": noPerson,
   "onboarding.brain_claims": {
-    company: "a team's claims seven or more told and five back, names out",
+    company: "how a team works, as its people shared it, names out",
   },
   "onboarding.brain_drawings": {
-    company: "a team's work as five or more told it, names out",
+    company: "a team's work as its people shared it, names out",
   },
   "onboarding.checked_differences": {
-    company: "a team's difference five or more told each way, names out",
+    company: "a team's difference as its people told each way, names out",
   },
   "onboarding.draw_failures": noPerson,
   "onboarding.drawn_works": noPerson,

@@ -221,13 +221,7 @@ import { SourcesFallError } from "./sources-fall.ts";
 import type { FallingSource, SourceRemover } from "./sources-fall.ts";
 import { interviewBrief, setupView } from "./stephen-setup.ts";
 import { onboardingStoreName } from "./store-name.ts";
-import {
-  checksFor,
-  claimChecksMax,
-  teamClaims,
-  teamMayClaim,
-  TooManyClaimChecksError,
-} from "./team-claims.ts";
+import { checksFor, teamClaims } from "./team-claims.ts";
 import { assignWork, companyName, drawTeamMap } from "./team-map.ts";
 import { drawWork, knownOf } from "./work-drawing.ts";
 import type { WorkBrief, WorkKnown } from "./work-drawing.ts";
@@ -757,11 +751,11 @@ const foldedAddress = (email: string): string => email.trim().toLowerCase();
 /**
  * A team claim that stands now: not owed an erasure. The one rule, for
  * the hand-over (`claimToHand`) and the Brain page (`standingClaims`). A
- * claim that stops standing (under five backers, its team under seven
- * interviewed, or no longer made) is marked in the transaction of the
- * change that drops it, before that change commits (`#recountStanding`,
- * `#noteClaims`, `#fallenFirst`), so it leaves both before it is out of
- * the Brain, and no unmarked claim is of a team under seven.
+ * claim that stops standing (someone it rests on no longer counts, its
+ * team's work may no longer show, or it is no longer made) is marked in
+ * the transaction of the change that drops it, before that change commits
+ * (`#recountStanding`, `#noteClaims`, `#fallenFirst`), so it leaves both
+ * before it is out of the Brain.
  */
 const standingClaim = eq(brainClaims.erase, false);
 
@@ -835,7 +829,9 @@ const drawingOf = (stored: string | null): DrawnWork | null =>
 
 /**
  * What nobody who told a piece of work has said yet, each as a kind of
- * answer in words of the store's own (GRA-330): the next interview asks
+ * answer in words of the store's own (GRA-330): what its routine lacks,
+ * as a drawing shows a part from the first person who told it (GRA-1749,
+ * GRA-1987). The next interview asks
  * about these when they come up. Never the drawing's own open questions,
  * which the model writes from what as few as one colleague said, so they
  * could carry that colleague's words, paraphrased, into someone else's
@@ -843,12 +839,16 @@ const drawingOf = (stored: string | null): DrawnWork | null =>
  * Only that an answer is missing is told, never what anyone answered.
  */
 const unknownAnswers: readonly {
-  missing: (told: Told[]) => boolean;
+  missing: (told: Told[], routine: RoutineShows) => boolean;
   ask: string;
 }[] = [
+  // How often, until the team's routine shows it (GRA-1749): its standing
+  // drawing shows only a count of the whole team's, in the drawing's own
+  // period, as checked (brain-intake.ts `volumesOf`), so it is asked
+  // whenever that drawing has none, whatever the lines say.
   {
-    missing: (told) => told.every(({ volume }) => volume === null),
-    ask: "how many come in, in a week or a month",
+    missing: (_told, { teamCount }) => !teamCount,
+    ask: "how many the whole team does, in a week or a month",
   },
   {
     missing: (told) =>
@@ -885,14 +885,23 @@ const unknownAnswers: readonly {
   },
 ];
 
+/** What the standing drawing of a piece of work shows: its routine as members read it. */
+interface RoutineShows {
+  /** Whether it shows how often, as the whole team's count. */
+  teamCount: boolean;
+}
+
 /** What nobody has said yet of a piece of work, for Stephen to ask when it comes up. */
-const stillUnknown = (drawn: DrawnWork | null): string[] => {
+const stillUnknown = (
+  drawn: DrawnWork | null,
+  routine: RoutineShows
+): string[] => {
   const told = Object.values(drawn?.told ?? {});
   if (told.length === 0) {
     return [];
   }
   const asks = unknownAnswers
-    .filter(({ missing }) => missing(told))
+    .filter(({ missing }) => missing(told, routine))
     .map(({ ask }) => ask)
     .slice(0, 4);
   return asks.length === 0
@@ -937,8 +946,9 @@ const teamsBack = (
 /**
  * Who a piece of work is drawn from, and when each last agreed: who does
  * it and who was asked about it, as far as they agreed to something and
- * are in its team now (`teamOf`, from the roster): someone who moved to
- * another team takes their part with them (GRA-1748). `agreedAt` says
+ * told it in its team, where they are now (`teamOf`, the store's
+ * `#toldHere`): someone who moved to another team takes their part with
+ * them (GRA-1748), and brings none to the team they moved to (GRA-1984). `agreedAt` says
  * when someone did; undefined when they didn't.
  */
 const agreedAbout = (
@@ -1638,10 +1648,10 @@ export class Onboarding extends DurableObject<Env> {
     }
     this.#lateTeams(late ? before : roster, roster, now);
     this.#askNewcomers(before, roster);
-    // Someone moved out, made a lead or taken off may leave a team too
-    // small to have claims shown (`teamMayClaim`), or a claim under five of
-    // its team's people now: those claims are out of use in the Brain
-    // before this transaction commits (`#recountStanding`).
+    // Someone moved out, made a lead or taken off takes down every claim
+    // and drawing resting on them, and may leave a team with nobody who
+    // told its work: those are out of use in the Brain before this
+    // transaction commits (`#recountStanding`).
     this.#recountStanding("all");
     return { removed: gone.length, erased };
   }
@@ -2365,12 +2375,20 @@ export class Onboarding extends DurableObject<Env> {
    * which could say anything. `work` stays empty until the team's map
    * names their piece of work: Stephen then asks which one it is.
    */
-  turnContext(
+  async turnContext(
     secretMark: string,
     account: string,
     now: string = new Date().toISOString()
-  ): LinkAnswer<TurnContext> {
-    const found = this.#onLink(secretMark, { account }, now, "save");
+  ): Promise<LinkAnswer<TurnContext>> {
+    const first = this.#onLink(secretMark, { account }, now, "save");
+    if (!first.ok) {
+      return first;
+    }
+    // The routine's id is a hash, worked out before anything is read for
+    // the turn: everything after is read at once, the link checked again.
+    const routine = await this.#routineAskedOf(first.value.person.id);
+    // Checked again, not counted again: one request is one call.
+    const found = this.#onLink(secretMark, { account }, now, "save", false);
     if (!found.ok) {
       return found;
     }
@@ -2380,7 +2398,7 @@ export class Onboarding extends DurableObject<Env> {
     if (taking !== null) {
       return refused(taking);
     }
-    return answered(this.#contextOf(person, roster));
+    return answered(this.#contextOf(person, roster, routine));
   }
 
   /**
@@ -2388,15 +2406,56 @@ export class Onboarding extends DurableObject<Env> {
    * whether their link is out or not: the Stephen Lab (lab.ts) keeps it
    * with an interview it plays back. Null for someone not on the roster.
    */
-  contextOf(id: string): TurnContext | null {
+  async contextOf(id: string): Promise<TurnContext | null> {
+    const routine = await this.#routineAskedOf(id);
     const roster = this.#roster();
     const person = roster?.people.find((each) => each.id === id);
     return roster === null || person === undefined
       ? null
-      : this.#contextOf(person, roster);
+      : this.#contextOf(person, roster, routine);
   }
 
-  #contextOf(person: Roster["people"][number], roster: Roster): TurnContext {
+  /**
+   * The Brain's id (`intakeIds.workflow`) of the piece of work `person`
+   * is asked about, when they are asked about one: its routine's.
+   */
+  async #routineAskedOf(person: string): Promise<string | null> {
+    const [row] = this.#db
+      .select({ work: works.id, team: works.team })
+      .from(askedAbout)
+      .innerJoin(works, eq(works.id, askedAbout.work))
+      .where(eq(askedAbout.person, person))
+      .all();
+    return row === undefined
+      ? null
+      : await intakeIds.workflow(row.team, row.work);
+  }
+
+  /**
+   * What the standing drawing of the piece of work `routine` shows: none
+   * standing shows nothing. Only that drawing is read, by its work's id.
+   */
+  #routineShows(routine: string | null): RoutineShows {
+    const [row] =
+      routine === null
+        ? []
+        : this.#db
+            .select({ drawing: brainDrawings.drawing })
+            .from(brainDrawings)
+            .where(and(eq(brainDrawings.workflow, routine), standingDrawing))
+            .limit(1)
+            .all();
+    const drawing = row === undefined ? null : brainDrawingOf(row.drawing);
+    return {
+      teamCount: drawing?.volumes.some(({ of }) => of === "team") ?? false,
+    };
+  }
+
+  #contextOf(
+    person: Roster["people"][number],
+    roster: Roster,
+    routine: string | null
+  ): TurnContext {
     const team = roster.teams.find(({ id }) => id === person.team);
     const lead = roster.people.find(
       ({ id }) => id === team?.lead && id !== person.id
@@ -2412,7 +2471,12 @@ export class Onboarding extends DurableObject<Env> {
     const teamName = team?.name ?? "";
     const known = [
       ...(kind === "lead" ? teamKnown(person.name, teamName, members) : []),
-      ...(kind === "lead" ? [] : stillUnknown(this.#drawingAskedOf(person.id))),
+      ...(kind === "lead"
+        ? []
+        : stillUnknown(
+            this.#drawingAskedOf(person.id),
+            this.#routineShows(routine)
+          )),
       ...(kind === "lead" ? [] : this.#insteadKnown(person)),
       this.interviewBrief(),
       this.documentsBrief(teamName),
@@ -2637,14 +2701,6 @@ export class Onboarding extends DurableObject<Env> {
         tries,
         error: error instanceof Error ? error.name : "unknown",
       });
-      // Too many checks to put its claims together: nothing was written,
-      // and the audit log says so (GRA-1084).
-      if (error instanceof TooManyClaimChecksError) {
-        this.#changed({ type: "system" }, "onboarding.claims.capped", {
-          checks: claimChecksMax,
-        });
-        this.#deliverAudit();
-      }
       const wait = drawRetryMs[tries - 1];
       this.ctx.storage.transactionSync(() => {
         if (wait === undefined) {
@@ -2715,7 +2771,7 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * The teams whose results may be shown (`#teamShowsResults`, the one
    * rule a team's claims and drawings stand by too): on the list, taking
-   * part, and seven or more who tell their own work (GRA-1748).
+   * part, and someone in it told its work (GRA-1748, GRA-1987).
    */
   #teamsShowingResults(roster: Roster | null): string[] {
     const mayClaim = new Map<string, boolean>();
@@ -2726,14 +2782,13 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * Each team whose interviews its claims and drawings cite: one source
-   * for all of them (brain-intake.ts), with how many of its people agreed
-   * and the day the first of them did, never who. Only while its results
+   * for all of them (brain-intake.ts), with the day the first of its
+   * people agreed, never who nor how many. Only while its results
    * may be shown (`#teamsShowingResults`), in the order of that day.
    */
   interviewSources(): {
     team: string;
     name: string;
-    people: number;
     since: string;
   }[] {
     const roster = this.#roster();
@@ -2754,7 +2809,7 @@ export class Onboarding extends DurableObject<Env> {
           .toSorted();
         return team === undefined || since === undefined
           ? []
-          : [{ team: id, name: team.name, people: agreed.length, since }];
+          : [{ team: id, name: team.name, since }];
       })
       .toSorted(
         (a, b) => a.since.localeCompare(b.since) || a.team.localeCompare(b.team)
@@ -2932,13 +2987,27 @@ export class Onboarding extends DurableObject<Env> {
    * differences nobody could explain among them: what the review, and how
    * much of it is known, are read from.
    */
-  #reviewed(): {
+  async #reviewed(): Promise<{
     differences: Difference[];
     mapped: number;
     works: number;
     known: number;
-  } {
+  }> {
+    // The Brain's id of each piece of work first, a hash of its own: what
+    // follows reads the store in one go, with nothing awaited between.
+    const brainIds = await this.#brainIdsOfWorks();
     const settled = this.#settled();
+    // A difference shows only while the drawing it was checked in stands
+    // (GRA-1987): one that fell (someone it rests on moved, went or took a
+    // line back), or was never noted, shows none.
+    const standing = new Set(
+      this.#db
+        .select({ workflow: brainDrawings.workflow })
+        .from(brainDrawings)
+        .where(standingDrawing)
+        .all()
+        .map(({ workflow }) => workflow)
+    );
     const checked = new Map(
       this.#db
         .select()
@@ -2974,13 +3043,15 @@ export class Onboarding extends DurableObject<Env> {
         }
         mapped += 1;
         const { differs } = drawn;
-        // Shown only when the brain's intake checked five or more people
-        // behind each way, in this drawing, and without a name in either
-        // (GRA-1084): never one person's way of doing it.
+        // Shown only when the brain's intake checked someone behind each
+        // way, in this drawing, with nothing but how the work runs and
+        // without a name in either (GRA-1084, GRA-1987), never who told
+        // which.
         const check = checked.get(work.id);
         if (
           differs?.why === "conflict" &&
           heard &&
+          standing.has(brainIds.get(work.id) ?? "") &&
           check?.drawnAt === drawn.at
         ) {
           differences.push({
@@ -3002,8 +3073,8 @@ export class Onboarding extends DurableObject<Env> {
    * ways and nobody could say why, settled or not, and how many pieces of
    * work are mapped. Never who told which way.
    */
-  review(): OnboardingReview {
-    const { differences, mapped } = this.#reviewed();
+  async review(): Promise<OnboardingReview> {
+    const { differences, mapped } = await this.#reviewed();
     return { differences, mapped };
   }
 
@@ -3012,8 +3083,8 @@ export class Onboarding extends DurableObject<Env> {
    * much of what needs the admin is settled, half how much of the work is
    * known. Nothing counts before any piece of work is drawn.
    */
-  reviewKnown(): number {
-    const { differences, mapped, works: all, known } = this.#reviewed();
+  async reviewKnown(): Promise<number> {
+    const { differences, mapped, works: all, known } = await this.#reviewed();
     if (mapped === 0) {
       return 0;
     }
@@ -3029,14 +3100,13 @@ export class Onboarding extends DurableObject<Env> {
    * ways kept, or which way holds. It can be settled again another way.
    * Null when nothing about it needs settling.
    */
-  settle(
+  async settle(
     work: string,
     holds: SettleChoice,
     by: AuditActor
-  ): OnboardingReview | null {
-    const open = this.#reviewed().differences.some(
-      (difference) => difference.work === work
-    );
+  ): Promise<OnboardingReview | null> {
+    const { differences } = await this.#reviewed();
+    const open = differences.some((difference) => difference.work === work);
     if (!open) {
       return null;
     }
@@ -3050,7 +3120,7 @@ export class Onboarding extends DurableObject<Env> {
       this.#changed(by, "onboarding.work.settled", { holds });
     });
     this.#deliverAudit();
-    return this.review();
+    return await this.review();
   }
 
   /** The list after `change`, held to the roster's rules; or why it can't be. */
@@ -5248,10 +5318,14 @@ export class Onboarding extends DurableObject<Env> {
       if ((await this.drawNext()) !== null) {
         await this.releaseDue();
       }
-      await this.intakeNext();
       await this.remindDue();
       await this.sendUpdate();
       await this.deliverMail();
+      // Last: a team's intake makes the most model calls of anything here,
+      // and an alarm that runs out of time (15 minutes of wall time for an
+      // alarm handler) is cut off where it is. Reminders, the update and
+      // mail never wait behind it, and read nothing it writes.
+      await this.intakeNext();
     } finally {
       // Set again whatever failed above, so what is left is tried again.
       await this.#armLinks();
@@ -5820,7 +5894,7 @@ export class Onboarding extends DurableObject<Env> {
     const teamsOn = new Map(
       roster.teams.filter(({ off }) => !off).map((team) => [team.id, team])
     );
-    const teamOf = new Map(roster.people.map(({ id, team }) => [id, team]));
+    const teamOf = this.#toldHere(roster);
     const stands = new Map<string, boolean>();
     const standing = (team: string): boolean => {
       const known = stands.get(team);
@@ -6030,7 +6104,7 @@ export class Onboarding extends DurableObject<Env> {
     if (roster === null) {
       return [];
     }
-    const teamOf = new Map(roster.people.map(({ id, team }) => [id, team]));
+    const teamOf = this.#toldHere(roster);
     const asked = this.#db.select().from(askedAbout).all();
     const found: { work: string; name: string; drawn: DrawnWork }[] = [];
     for (const row of this.#db.select().from(works).all()) {
@@ -6257,8 +6331,8 @@ export class Onboarding extends DurableObject<Env> {
    * own work agreed to, and its pieces of work as drawn. Never the lead's
    * facts, whose role alone says who they are, nor a piece of work drawn
    * from the lead alone. None while the team may not have its results
-   * shown (`#teamShowsResults`: under seven who tell, switched off, or
-   * waiting for the admin): nothing it could note would stand, so no
+   * shown (`#teamShowsResults`: nobody in it told its work, switched off,
+   * or waiting for the admin): nothing it could note would stand, so no
    * model is asked. It waits until a change makes the team due again.
    */
   #teamIntake(teamId: string): TeamIntake | null {
@@ -6309,9 +6383,10 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * The people of a team whose facts reach the brain (GRA-329): on its
-   * list, not its lead, whose role alone says who they are, and with
-   * something they approved that counts. Only they count towards the five
-   * a team needs (`minTeamShown`).
+   * list, not its lead, whose role alone says who they are, who told it
+   * in this team (`#toldHere`, GRA-1984), and with something they approved
+   * and shared as how their team works that counts (`drawInput`). One of them is
+   * enough for the team's work to show (`#teamShowsResults`, GRA-1987).
    */
   #tellers(
     teamId: string,
@@ -6322,8 +6397,9 @@ export class Onboarding extends DurableObject<Env> {
     if (roster === null || team === undefined) {
       return [];
     }
-    return roster.people.flatMap(({ id, team: of }) => {
-      if (of !== teamId || id === team.lead) {
+    const toldHere = this.#toldHere(roster);
+    return roster.people.flatMap(({ id }) => {
+      if (toldHere.get(id) !== teamId || id === team.lead) {
         return [];
       }
       const input = this.drawInput(id);
@@ -6395,10 +6471,10 @@ export class Onboarding extends DurableObject<Env> {
         ...this.#interviewsOf(this.#roster()?.people.map(({ id }) => id) ?? []),
       ].filter(([, held]) => held !== null)
     );
-    // What five or more of its people said, put together (GRA-1084):
-    // never one person's fact. A failing model throws, and the intake is
+    // How its work runs, as its people told it, put together and checked
+    // (GRA-1084, GRA-1987): never one person's fact as they said it, never
+    // a judgment. A failing model throws, and the intake is
     // tried again, with nothing written.
-    // One budget of checks for both: past it, nothing is written.
     const checks = checksFor(this.env, (took) => {
       this.meter(took, at);
     });
@@ -6457,7 +6533,7 @@ export class Onboarding extends DurableObject<Env> {
       ),
     ];
     // A claim or drawing of the team the new backing leaves standing no
-    // more, or a team it leaves under seven, is out of use in the Brain
+    // more, or a team it leaves with nobody who told its work, is out of use in the Brain
     // before this transaction commits (`#recountStanding`): made again
     // then, from what the intake gave, its model never asked twice.
     const gone = await this.#fallenFirst(() =>
@@ -6518,16 +6594,16 @@ export class Onboarding extends DurableObject<Env> {
             .onConflictDoNothing()
             .run();
         }
-        // Which differences the review may show: those whose two ways five
-        // or more were checked to tell, each, in the drawing as it stands.
+        // Which differences the review may show: those whose two ways
+        // someone was checked to tell, each, in the drawing as it stands.
         for (const work of intake.works) {
           const support = supports.get(work.id);
           const { differs } = work.drawn;
           const checked =
             support !== undefined &&
             differs !== null &&
-            (support.steps[differs.step] ?? []).length >= minTeamShown &&
-            support.other.length >= minTeamShown;
+            (support.steps[differs.step] ?? []).length > 0 &&
+            support.other.length > 0;
           if (checked) {
             // As checked: each way with the roster's names taken out now,
             // never again with whatever names it has later.
@@ -6540,8 +6616,10 @@ export class Onboarding extends DurableObject<Env> {
             // In one statement, only while what it was checked from still
             // stands as the intake read it: the drawing it checked, and the
             // interview of everyone it rests on, at the same admission
-            // (`admissionSql`). One forgotten, withdrawn, deleted or taken
-            // back meanwhile leaves no copy of its words.
+            // (`admissionSql`), told in this team and still in it now
+            // (`#toldHere`, GRA-1984). One forgotten, withdrawn, deleted,
+            // taken back or moved to another team meanwhile leaves no copy
+            // of its words.
             const restsOn = [
               ...new Set([
                 ...(support.steps[differs.step] ?? []),
@@ -6555,6 +6633,13 @@ export class Onboarding extends DurableObject<Env> {
               ...restsOn.map(
                 (person) =>
                   sql`${admissionSql(person)} IS ${began.get(person) ?? null}`
+              ),
+              ...restsOn.map(
+                (person) => sql`EXISTS (SELECT 1 FROM ${people}
+              JOIN ${interviewStates} ON ${interviewStates.person} = ${people.id}
+              WHERE ${people.id} = ${person}
+                AND ${people.team} = ${teamId}
+                AND ${interviewStates.toldIn} = ${teamId})`
               )
             );
             this.#db
@@ -6961,10 +7046,10 @@ export class Onboarding extends DurableObject<Env> {
    * - `person`: that person's interviews, and the claims now owed of
    *   their team and of `teams` (the teams whose claims they backed before
    *   their request, `claimTeamsOf`): what their withdrawal or delete
-   *   takes out (a claim they backed that fell under five, or every claim
-   *   of a team their leaving took under seven), never another team's;
+   *   takes out (every claim and drawing resting on them), never another
+   *   team's;
    * - `claims`: every claim owed, after a roster save, which may take any
-   *   team under seven.
+   *   team's down.
    */
   owedErasures(
     scope?:
@@ -7045,11 +7130,12 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Those of `candidates` who back a claim of `team` now: they agree to what
-   * they said, and are in that team on the list now, so someone moved
-   * away no longer backs it. The one rule, for the recount
-   * (`#recountStanding`), for noting a claim (`#noteClaims`) and for
-   * forgetting whom one rested on (`#toForget`).
+   * Those of `candidates` who back a claim or drawing of `team` now: they
+   * agree to what they said, and told it in that team and are in it on the
+   * list now (`#toldHere`, GRA-1984), so someone moved away backs it no
+   * more, nor anything of the team they moved to. The one rule, for the
+   * recount (`#recountStanding`), for noting a claim (`#noteClaims`) and
+   * for forgetting whom one rested on (`#toForget`).
    */
   #currentBackers(
     team: string,
@@ -7061,18 +7147,38 @@ export class Onboarding extends DurableObject<Env> {
         .where(isNotNull(interviewStates.agreedAt))
         .all()
         .map(({ person }) => person)
-    )
+    ),
+    /** The list as read once for many (a recount), else read here. */
+    roster: Roster | null = this.#roster()
   ): string[] {
-    const inTeam = new Set(
-      this.#db
-        .select({ id: people.id })
-        .from(people)
-        .where(eq(people.team, team))
-        .all()
-        .map(({ id }) => id)
-    );
+    const toldHere = this.#toldHere(roster);
     return candidates.filter(
-      (person) => agreed.has(person) && inTeam.has(person)
+      (person) => agreed.has(person) && toldHere.get(person) === team
+    );
+  }
+
+  /**
+   * The team each person's interview counts for now (GRA-1984): the one
+   * they told it in (`told_in`), while they are in it on the list. Someone
+   * moved since counts for neither team until they have a new interview;
+   * one agreed to before the team was kept counts for none.
+   */
+  #toldHere(roster: Roster | null = this.#roster()): Map<string, string> {
+    const toldIn = new Map(
+      this.#db
+        .select({
+          person: interviewStates.person,
+          team: interviewStates.toldIn,
+        })
+        .from(interviewStates)
+        .where(isNotNull(interviewStates.toldIn))
+        .all()
+        .map(({ person, team }) => [person, team])
+    );
+    return new Map(
+      (roster?.people ?? []).flatMap(({ id, team }) =>
+        toldIn.get(id) === team ? [[id, team]] : []
+      )
     );
   }
 
@@ -7263,9 +7369,8 @@ export class Onboarding extends DurableObject<Env> {
    * The one recount of the team claims (GRA-1741) and drawings (GRA-1748),
    * in the transaction of a change that may take one down: the standing
    * claims and drawings of the teams `of` (`all` for a roster save). A
-   * claim stands while its team may have claims shown and five or more of
-   * its people back it (`#claimStands`); a drawing while all it rests on
-   * still count (`#drawingStands`). One that no longer stands must be out
+   * claim or a drawing stands while its team's work may show and all it
+   * rests on still count (`#claimStands`, `#drawingStands`). One that no longer stands must be out
    * of use in the Brain before the change commits (GRA-1946): the Brain
    * decides what is read, inside its own statement, so a read that runs
    * after the change finds nothing of it, also one whose reader was found
@@ -7338,8 +7443,8 @@ export class Onboarding extends DurableObject<Env> {
    * The one rule for whether a drawing of `team` resting on `resting`
    * stands now (GRA-1084, GRA-1748): its team may have its results shown
    * (`#teamShowsResults`, as for a claim), everyone it rests on still
-   * counts (none gone, none who took back what they approved, none moved
-   * to another team), and its
+   * counts (`#restsWhole`: none gone, none who took back what they
+   * approved, none moved to another team), and its
    * team's map stands on what its lead's facts are now (`#mapBacked`,
    * GRA-329). The
    * recount (`#recountStanding`), noting a drawing (`#noteDrawings`) and
@@ -7361,11 +7466,30 @@ export class Onboarding extends DurableObject<Env> {
   ): boolean {
     return (
       this.#teamShowsResults(team, { roster, mayClaim }) &&
-      resting.length > 0 &&
-      // Each still agrees, and is in the team now: one who moved away takes
-      // their part with them, as for a claim (`#currentBackers`).
-      this.#currentBackers(team, resting, agreed).length === resting.length &&
+      this.#restsWhole(team, resting, { roster, agreed }) &&
       this.#mapBacked(team)
+    );
+  }
+
+  /**
+   * Whether everyone a claim or drawing of `team` rests on (`resting`, as
+   * `brain_sent` notes them) still counts for it (`#currentBackers`): each
+   * still agrees, told it in this team and is in it now. One who went,
+   * took back what they approved, moved a line to anonymous or moved to
+   * another team takes the whole of it down with them, before that change
+   * commits; the team's next intake makes it again from whoever is left.
+   * Since a team's work shows from the first person who told it
+   * (GRA-1987), this is the only floor: none resting on nobody.
+   */
+  #restsWhole(
+    team: string,
+    resting: readonly string[],
+    { roster, agreed }: { roster: Roster | null; agreed?: ReadonlySet<string> }
+  ): boolean {
+    return (
+      resting.length > 0 &&
+      this.#currentBackers(team, resting, agreed, roster).length ===
+        resting.length
     );
   }
 
@@ -7374,10 +7498,10 @@ export class Onboarding extends DurableObject<Env> {
    * the drawings of its work) read at all (GRA-1748): it is on the list,
    * it takes part (an admin may switch a team off: then nothing of it is
    * shown to members, #2344; one switched on again, or new, shows only
-   * once the admin confirms it), and seven or more of its people tell their
-   * own work (`teamMayClaim`: five backers in a team of seven, the
-   * owner's decision of 16 November). Both `#claimStands` and
-   * `#drawingStands` ask it. A read of many passes the list read once, and
+   * once the admin confirms it), and someone in it told its work
+   * (`#tellers`): how the work runs shows from the first person who told
+   * it, for a team of any size (the owner's decision of 17 November,
+   * GRA-1987). Both `#claimStands` and `#drawingStands` ask it. A read of many passes the list read once, and
    * a map of each team's answer (`mayClaim`), filled as it goes.
    */
   #teamShowsResults(
@@ -7396,7 +7520,7 @@ export class Onboarding extends DurableObject<Env> {
     const takesPart =
       roster?.teams.some(({ id, off }) => id === team && !off) === true &&
       !this.#unconfirmed().teams.has(team);
-    const may = takesPart && teamMayClaim(this.#tellers(team, roster).length);
+    const may = takesPart && this.#tellers(team, roster).length > 0;
     mayClaim.set(team, may);
     return may;
   }
@@ -7404,8 +7528,10 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * The one rule for whether a claim of `team` resting on `backers` stands
    * now (GRA-1741): its team may have its results shown
-   * (`#teamShowsResults`), and five or more of `backers` back it now
-   * (`#currentBackers`). Both noting
+   * (`#teamShowsResults`), and every one of `backers` backs it now
+   * (`#restsWhole`, as for a drawing, GRA-1987), none of them its lead: a
+   * lead's facts make no claim (`#tellers`), so one who becomes the lead
+   * takes down what rests on them. Both noting
    * a claim (`#noteClaims`) and the recount (`#recountStanding`) ask it, so
    * neither keeps what the other drops. A recount over many claims passes
    * the list and the agreed people read once, and a map of what each team
@@ -7424,9 +7550,11 @@ export class Onboarding extends DurableObject<Env> {
       mayClaim?: Map<string, boolean>;
     } = {}
   ): boolean {
+    const lead = roster?.teams.find(({ id }) => id === team)?.lead ?? null;
     return (
       this.#teamShowsResults(team, { roster, mayClaim }) &&
-      this.#currentBackers(team, backers, agreed).length >= minTeamShown
+      (lead === null || !backers.includes(lead)) &&
+      this.#restsWhole(team, backers, { roster, agreed })
     );
   }
 
@@ -7517,6 +7645,28 @@ export class Onboarding extends DurableObject<Env> {
           .update(brainDrawings)
           .set({ erase: true })
           .where(inList(brainDrawings.source, ofProducer("drawing")))
+          .run();
+        // The differences the admin's review shows were checked in these
+        // drawings (`#reviewed`): one that falls (someone it rests on
+        // moved, went or took back a line) takes its team's differences
+        // with it, here, before the change commits. Its team's next intake
+        // checks them again from who still counts. Every work's of that
+        // team goes, not only the fallen drawing's: on the safe side.
+        const fallenTeams = this.#db
+          .select({ team: brainDrawings.team })
+          .from(brainDrawings)
+          .where(inList(brainDrawings.source, ofProducer("drawing")))
+          .all()
+          .map(({ team }) => team);
+        const fallenWorks = this.#db
+          .select({ id: works.id })
+          .from(works)
+          .where(inList(works.team, [...new Set(fallenTeams)]))
+          .all()
+          .map(({ id }) => id);
+        this.#db
+          .delete(checkedDifferences)
+          .where(inList(checkedDifferences.work, fallenWorks))
           .run();
       });
       if (this.#removeFallen === undefined) {
@@ -8518,8 +8668,8 @@ export class Onboarding extends DurableObject<Env> {
         .where(eq(interviewStates.person, person.id))
         .run();
     }
-    // A claim it took under five backers, or a team it took under seven
-    // interviewed, is out of use in the Brain before this transaction
+    // A claim or drawing resting on them, or a team it left with nobody
+    // who told its work, is out of use in the Brain before this transaction
     // commits (`#recountStanding`). Only a loss can take either down: a gain
     // never lowers backing, so it pays no recount, and going from counting
     // to not counting always loses something.
@@ -8543,8 +8693,8 @@ export class Onboarding extends DurableObject<Env> {
    */
   #forget(person: string, now: string, what: string, by: string): void {
     this.#erase(person);
-    // A claim it took under five backers, or a team it took under seven
-    // interviewed, is out of use in the Brain before this transaction
+    // A claim or drawing resting on them, or a team it left with nobody
+    // who told its work, is out of use in the Brain before this transaction
     // commits (`#recountStanding`). A roster save, which erases everyone it
     // takes off the list, recounts once for them all at the end of its
     // own transaction (`#writeRoster`).
@@ -9089,6 +9239,7 @@ export class Onboarding extends DurableObject<Env> {
       .select({
         kind: interviewStates.kind,
         leadOf: interviewStates.leadOf,
+        toldIn: interviewStates.toldIn,
         completedAt: interviewStates.completedAt,
       })
       .from(interviewStates)
@@ -9096,19 +9247,26 @@ export class Onboarding extends DurableObject<Env> {
       .all();
     // Once they agreed, whose interview it was, and of which team, is
     // settled: a lead named, moved or replaced afterwards changes nothing.
-    // Before that, a lead's interview is of the team they lead now.
+    // Before that, a lead's interview is of the team they lead now. So is
+    // the team they told it in (GRA-1984): the one they are in on the list
+    // as they agree, for which alone it counts.
+    const roster = this.#roster();
     const settled =
       held === undefined || held.completedAt === null
         ? {
             kind: state.kind,
             leadOf:
               state.kind === "lead"
-                ? (this.#roster()?.teams.find(
-                    ({ lead }) => lead === state.person
-                  )?.id ?? null)
+                ? (roster?.teams.find(({ lead }) => lead === state.person)
+                    ?.id ?? null)
                 : null,
+            toldIn:
+              state.completedAt === null
+                ? null
+                : (roster?.people.find(({ id }) => id === state.person)?.team ??
+                  null),
           }
-        : { kind: held.kind, leadOf: held.leadOf };
+        : { kind: held.kind, leadOf: held.leadOf, toldIn: held.toldIn };
     this.#db
       .insert(interviewStates)
       .values({ ...state, ...settled, updatedAt })

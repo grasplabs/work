@@ -1,9 +1,18 @@
-import { syncPageSchema } from "@grasp-os/shared/sync";
+import {
+  syncContentSchema,
+  syncCursorSchema,
+  syncItemKindSchema,
+  syncItemLimits,
+  syncItemSchema,
+  syncPageSchema,
+  syncReaderSchema,
+} from "@grasp-os/shared/sync";
 import type {
   SyncContent,
   SyncItem,
   SyncItemKind,
   SyncPage,
+  SyncReader,
 } from "@grasp-os/shared/sync";
 import { z } from "zod";
 
@@ -118,6 +127,109 @@ const failureOf = (error: unknown): SyncFailure => {
   return code === "access_denied" ? { code: "inactive" } : { code: "failed" };
 };
 
+/** `text` cut to at most `most` UTF-16 units, on a character's boundary. */
+const cutText = (text: string, most: number): string => {
+  let cut = "";
+  for (const character of text) {
+    if (cut.length + character.length > most) {
+      break;
+    }
+    cut += character;
+  }
+  return cut;
+};
+
+const idSchema = syncItemSchema.options[1].shape.id;
+const versionSchema = syncItemSchema.options[0].shape.version;
+const changedAtSchema = syncItemSchema.options[0].shape.changedAt;
+
+/** `value` if it is an ID the shared shape takes, else null. */
+const idOrNull = (value: unknown): string | null => {
+  const parsed = idSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+};
+
+const fieldsSchema = z.record(z.string(), z.unknown());
+
+/** A field of what a connector answered, read without trusting its shape. */
+const fieldOf = (raw: unknown, name: string): unknown => {
+  const fields = fieldsSchema.safeParse(raw);
+  return fields.success && Object.hasOwn(fields.data, name)
+    ? fields.data[name]
+    : undefined;
+};
+
+/**
+ * An item a sync answered, fitted to the shared shape (`syncItemSchema`),
+ * so a vendor's value past one of its bounds never fails a whole page and
+ * stalls the source:
+ *
+ * - a title too long is cut, on a character's boundary (the full one stays
+ *   in the item's content);
+ * - content, a reader, who changed it or what it is part of that doesn't
+ *   fit is left out: content null, the reader dropped (fewer readers, never
+ *   more), the others null;
+ * - an item whose version or time doesn't fit can't be told apart from
+ *   another version of it: it comes as gone, which shows it to nobody;
+ * - an item whose ID doesn't fit can't be named at all: it is left out.
+ */
+export const fitItem = (raw: unknown, kind: SyncItemKind): SyncItem | null => {
+  const exact = syncItemSchema.safeParse(raw);
+  if (exact.success) {
+    return exact.data;
+  }
+  const id = idOrNull(fieldOf(raw, "id"));
+  if (id === null) {
+    return null;
+  }
+  const itemKind = syncItemKindSchema.safeParse(fieldOf(raw, "kind"));
+  const gone: SyncItem = {
+    gone: true,
+    id,
+    kind: itemKind.success ? itemKind.data : kind,
+  };
+  const version = versionSchema.safeParse(fieldOf(raw, "version"));
+  const changedAt = changedAtSchema.safeParse(fieldOf(raw, "changedAt"));
+  if (
+    fieldOf(raw, "gone") !== false ||
+    !version.success ||
+    !changedAt.success
+  ) {
+    return gone;
+  }
+  const title = fieldOf(raw, "title");
+  const content = syncContentSchema.safeParse(fieldOf(raw, "content"));
+  const readers = fieldOf(raw, "readers");
+  const fitted = syncItemSchema.safeParse({
+    gone: false,
+    id,
+    kind: gone.kind,
+    version: version.data,
+    changedAt: changedAt.data,
+    title:
+      typeof title === "string"
+        ? cutText(title, syncItemLimits.titleLength)
+        : "",
+    content: content.success ? content.data : null,
+    readers: Array.isArray(readers)
+      ? readers.flatMap((reader): SyncReader[] => {
+          const parsed = syncReaderSchema.safeParse(reader);
+          return parsed.success ? [parsed.data] : [];
+        })
+      : null,
+    changedBy: idOrNull(fieldOf(raw, "changedBy")),
+    partOf: idOrNull(fieldOf(raw, "partOf")),
+  });
+  return fitted.success ? fitted.data : gone;
+};
+
+/** A page as a sync answers it, its items not yet fitted. */
+const answeredPageSchema = z.object({
+  items: z.array(z.unknown()),
+  cursor: syncCursorSchema,
+  more: z.boolean(),
+});
+
 /** A sync, from its definition. */
 export const defineSync = (definition: SyncDefinition): Sync => ({
   name: syncNameSchema.parse(definition.name),
@@ -137,7 +249,18 @@ export const defineSync = (definition: SyncDefinition): Sync => ({
     } catch (error) {
       return { failure: failureOf(error) };
     }
-    const parsed = syncPageSchema.safeParse(page);
+    // One item that doesn't fit never fails the page (`fitItem`); a page
+    // whose cursor or form is wrong does.
+    const answered = answeredPageSchema.safeParse(page);
+    if (!answered.success) {
+      return { failure: { code: "failed" } };
+    }
+    const parsed = syncPageSchema.safeParse({
+      ...answered.data,
+      items: answered.data.items.flatMap(
+        (item) => fitItem(item, definition.kind) ?? []
+      ),
+    });
     return parsed.success
       ? { page: parsed.data }
       : { failure: { code: "failed" } };
@@ -244,12 +367,42 @@ export type EntryItems =
   /** Its own request ran past the page's deadline. */
   | "late";
 
+/**
+ * Where a read is inside a provider's page: after the entry keyed `after`
+ * (null: from its start), and the key of an entry that ran late on the
+ * read before (`late`), so a second late answer in a row passes it over.
+ */
+export interface InPage {
+  after: string | null;
+  late: string | null;
+}
+
+/** The start of a provider's page. */
+export const startOfPage: InPage = { after: null, late: null };
+
+/**
+ * `InPage` as one part of a cursor: its two keys as `cursorPart`s joined
+ * by `~`, which base64url never holds.
+ */
+export const inPagePart = ({ after, late }: InPage): string =>
+  `${cursorPart(after)}~${cursorPart(late)}`;
+
+/** The `InPage` a part of a cursor holds; a part this kit didn't write starts over. */
+export const fromInPagePart = (value: string | undefined): InPage => {
+  const parts = value?.split("~") ?? [];
+  if (parts.length !== 2) {
+    throw new RestartSyncError("Not a cursor this sync wrote");
+  }
+  const [after, late] = parts.map(fromCursorPart);
+  return { after: after ?? null, late: late ?? null };
+};
+
 /** How a page is filled from one of a provider's pages (`fillPage`). */
 export interface PageFill<Entry> {
   room: SyncRoom;
   entries: readonly Entry[];
-  /** The key of the last entry handled, from the cursor; null from the start. */
-  after: string | null;
+  /** Where the read is in this page, from the cursor. */
+  at: InPage;
   keyOf: (entry: Entry) => string;
   itemsFor: (entry: Entry) => Promise<EntryItems>;
   /**
@@ -261,17 +414,20 @@ export interface PageFill<Entry> {
 }
 
 /**
- * The items of a provider's page `entries` after the one keyed `after`
- * (all of them when it isn't there), until the page is full: the items,
- * the key of the last entry handled, and whether every one was.
+ * The items of a provider's page `entries` after the one `at` names (all
+ * of them when it isn't there), until the page is full: the items, where
+ * the next read goes on (`at`), and whether every entry was handled.
  *
  * Every connector's page follows the same rules here, so no read can stall
  * a source:
  *
  * - An entry whose own request ran past the deadline ("late") is left for
- *   the next page, unless the page holds nothing yet: then it is passed
- *   over (`passOver`, its content left out), so an entry that is always too
- *   slow can't stop the source.
+ *   the next page. On a page that holds nothing yet, it is passed over
+ *   (`passOver`, its content left out) only when it ran late on the read
+ *   before too: the first time, the page answers nothing, marking it in
+ *   its cursor, so one slow answer (or a listing that used up the page's
+ *   time) never costs an entry its content, and one that is always too
+ *   slow costs one read more, then moves on.
  * - A page that can't even start its first entry ("full": its time ran out
  *   reading the provider's page) moves nothing on: it fails as throttled,
  *   without a time, so the caller backs off, never answering the same
@@ -280,32 +436,36 @@ export interface PageFill<Entry> {
 export const fillPage = async <Entry>({
   room,
   entries,
-  after,
+  at,
   keyOf,
   itemsFor,
   passOver,
 }: PageFill<Entry>): Promise<{
   items: SyncItem[];
-  last: string | null;
+  at: InPage;
   done: boolean;
 }> => {
   const from =
-    after === null
+    at.after === null
       ? 0
-      : entries.findIndex((entry) => keyOf(entry) === after) + 1;
+      : entries.findIndex((entry) => keyOf(entry) === at.after) + 1;
   const items: SyncItem[] = [];
-  let last = after;
+  let last = at.after;
   for (const entry of entries.slice(from)) {
     // oxlint-disable-next-line no-await-in-loop -- one entry after another, within the page's room
     const found = await itemsFor(entry);
     if (found === "full" || found === "late") {
       if (!room.empty) {
-        return { items, last, done: false };
+        return { items, at: { after: last, late: null }, done: false };
       }
       if (found === "full") {
         throw new ToolError("The page's time ran out before it took anything", {
           code: "throttled",
         });
+      }
+      const key = keyOf(entry);
+      if (at.late !== key) {
+        return { items, at: { after: last, late: key }, done: false };
       }
       items.push(...passOver(entry));
     } else {
@@ -314,7 +474,7 @@ export const fillPage = async <Entry>({
     room.empty = false;
     last = keyOf(entry);
   }
-  return { items, last, done: true };
+  return { items, at: { after: last, late: null }, done: true };
 };
 
 /**
@@ -327,10 +487,13 @@ export const fillPage = async <Entry>({
  */
 export const fetchBefore = async (
   url: URL,
-  deadline: number
+  deadline: number,
+  /** The request's own headers, such as a provider's `Prefer`. */
+  init: Pick<RequestInit, "headers"> = {}
 ): Promise<Response | "late"> => {
   try {
     const response = await fetch(url, {
+      ...init,
       signal: AbortSignal.timeout(Math.max(deadline - Date.now(), 0)),
     });
     const body = await response.arrayBuffer();
@@ -353,8 +516,9 @@ export const fetchBefore = async (
  */
 export const fetchInRoom = async (
   room: SyncRoom,
-  url: URL
+  url: URL,
+  init: Pick<RequestInit, "headers"> = {}
 ): Promise<Response | "late"> => {
   room.requests -= 1;
-  return await fetchBefore(url, room.deadline);
+  return await fetchBefore(url, room.deadline, init);
 };

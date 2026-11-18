@@ -3436,6 +3436,10 @@ msgstr "Peut transmettre à ses workflows des fichiers que les personnes peuvent
 msgid "Can’t be read"
 msgstr "Illisible"
 
+#: src/workflows/kept-state.tsx
+msgid "Can't be shown right now."
+msgstr "Ne peut pas être affiché pour le moment."
+
 #: src/workflows/start-run.tsx
 msgid "Can't offer Run: {unread}"
 msgstr "Impossible de proposer Exécuter : {unread}"
@@ -5187,6 +5191,11 @@ msgstr "A abandonné un événement qu’aucun workflow n’a pu recevoir"
 msgid "Dublin"
 msgstr "Dublin"
 
+#: src/brain/memories-page.tsx
+msgctxt "what the Brain remembers about something"
+msgid "Duration"
+msgstr "Durée"
+
 #: src/agents/agents-overview.tsx
 msgid "Each agent has its own name and job, answers only the people you choose, and does only what you let it."
 msgstr "Chaque agent a son propre nom et sa propre tâche, ne répond qu'aux personnes que vous choisissez et ne fait que ce que vous lui permettez."
@@ -5642,6 +5651,11 @@ msgstr "Tout ce que le Brain a conservé de ce que les agents y ont lu est effac
 #: src/interview/closed.tsx
 msgid "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."
 msgstr "Tout ce que vous m’avez dit est supprimé définitivement et ne peut pas être récupéré. Seul un point est faux ? Corrigez-le plutôt avec « Ajouter quelque chose »."
+
+#: src/brain/memories-page.tsx
+msgctxt "what the Brain remembers about something"
+msgid "Evidence"
+msgstr "Éléments"
 
 #: src/brain/sources-page.tsx
 msgctxt "how search found a passage"
@@ -6754,10 +6768,6 @@ msgstr "Nom de l'en-tête"
 msgid "Hear both again"
 msgstr "Réécouter les deux"
 
-#: src/brain/work-knowledge.tsx
-msgid "Heard from enough people"
-msgstr "Entendu de suffisamment de personnes"
-
 #: src/interview/words.ts
 msgid "Hello"
 msgstr "Bonjour"
@@ -6896,6 +6906,13 @@ msgstr "À quelle fréquence"
 #: src/brain/work-knowledge.tsx
 msgid "How sure"
 msgstr "Quelle certitude"
+
+#. Under a statement put together from the interviews
+#. Under a statement put together from the interviews
+#: src/brain/aggregate.tsx
+#: src/brain/brain.ts
+msgid "How the team works, as its people told it"
+msgstr "Comment l’équipe travaille, tel que ses membres l’ont raconté"
 
 #: src/brain/work-knowledge.tsx
 msgid "How the work goes today"
@@ -12068,13 +12085,6 @@ msgctxt "what something known rests on: people said it"
 msgid "Said"
 msgstr "Dit"
 
-#. Under a statement put together from the interviews
-#. Under a statement put together from the interviews
-#: src/brain/aggregate.tsx
-#: src/brain/brain.ts
-msgid "Said by five or more people"
-msgstr "Dit par cinq personnes ou plus"
-
 #: src/brain/work-knowledge.tsx
 msgid "Said in an interview"
 msgstr "Dit lors d’un entretien"
@@ -15206,6 +15216,10 @@ msgstr "Aujourd’hui"
 msgid "Token"
 msgstr "Jeton"
 
+#: src/brain/work-knowledge.tsx
+msgid "Told by the team that does it"
+msgstr "Raconté par l’équipe qui le fait"
+
 #: src/onboarding/send-plan-form.tsx
 msgid "Tomorrow"
 msgstr "Demain"
@@ -15691,6 +15705,11 @@ msgstr "Les valeurs ont été effacées avec la personne qui les a écrites."
 msgid "Values weren't read."
 msgstr "Les valeurs n'ont pas été lues."
 
+#: src/brain/memories-page.tsx
+msgctxt "what the Brain remembers about something"
+msgid "Variant"
+msgstr "Variante"
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "VAT number"
 msgstr "Numéro de TVA"
@@ -15801,6 +15820,11 @@ msgstr "Visiteur de {app}"
 #: src/voice/sound-controls.tsx
 msgid "Volume"
 msgstr "Volume"
+
+#: src/brain/memories-page.tsx
+msgctxt "what the Brain remembers about something"
+msgid "Wait"
+msgstr "Attente"
 
 #: src/workflows/figures.tsx
 msgid "wait for a decision now"
@@ -16429,6 +16453,14 @@ msgstr "Ce que demande cette décision ne peut pas être affiché pour le moment
 msgid "What this decision asks is withheld, so you can only reject it."
 msgstr "Ce que demande cette décision est retenu : vous ne pouvez donc que la rejeter."
 
+#: src/chat/held-writes.tsx
+msgid "What this would send can't be shown right now, so you can only reject it for now. Try again in a moment."
+msgstr "Ce que ceci enverrait ne peut pas être affiché pour l'instant : vous ne pouvez donc que le rejeter pour le moment. Réessayez dans un instant."
+
+#: src/chat/held-writes.tsx
+msgid "What this would send is withheld: the run that asked for it may no longer read what it read, so you can only reject it."
+msgstr "Ce que ceci enverrait est retenu : l'exécution qui l'a demandé ne peut plus lire ce qu'elle a lu, vous ne pouvez donc que le rejeter."
+
 #: src/agents/agent-wakes.tsx
 msgid "What to ask it each time"
 msgstr "Ce qu’on lui demande à chaque fois"
@@ -16471,8 +16503,16 @@ msgid "What was said is on the work it was about"
 msgstr "Ce qui a été dit figure sur le travail concerné"
 
 #: src/dashboard/outcome-card.tsx
+msgid "What was sent can't be shown right now. Try again in a moment."
+msgstr "Ce qui a été envoyé ne peut pas être affiché pour l'instant. Réessayez dans un instant."
+
+#: src/dashboard/outcome-card.tsx
 msgid "What was sent is no longer kept."
 msgstr "Ce qui a été envoyé n'est plus conservé."
+
+#: src/dashboard/outcome-card.tsx
+msgid "What was sent is withheld: the run that sent it may no longer read what it read."
+msgstr "Ce qui a été envoyé est retenu : l'exécution qui l'a envoyé ne peut plus lire ce qu'elle a lu."
 
 #: src/interview/before.tsx
 msgid "What we do"
@@ -16878,6 +16918,10 @@ msgstr "Retirer l’invitation de {email}"
 #: src/activity/audit-words.ts
 msgid "Withdrew an invitation"
 msgstr "A retiré une invitation"
+
+#: src/workflows/kept-state.tsx
+msgid "Withheld: the run that kept it read something that is no longer there to read, so later runs start without it."
+msgstr "Retenu : l'exécution qui l'a gardé a lu quelque chose qu'on ne peut plus lire, donc les exécutions suivantes démarrent sans cette valeur."
 
 #: src/brain/memories-page.tsx
 msgid "Without a name"

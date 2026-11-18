@@ -6,10 +6,13 @@ import {
   fetchInRoom,
   fillPage,
   fromCursorPart,
+  fromInPagePart,
+  inPagePart,
+  startOfPage,
   syncRoom,
   takeContent,
 } from "@grasp-os/connector-kit/sync";
-import type { SyncRoom } from "@grasp-os/connector-kit/sync";
+import type { InPage, SyncRoom } from "@grasp-os/connector-kit/sync";
 import type { SyncItem, SyncPage, SyncReader } from "@grasp-os/shared/sync";
 import { ownPlace } from "@grasp-os/shared/sync";
 import { z } from "zod";
@@ -90,28 +93,32 @@ const eventsSchema = z.object({
 
 /**
  * Where a read is: in the full listing, or in the changes since `sync`;
- * in Google's page `token`, after the entry keyed `after`.
+ * in Google's page `token`, where in it (`at`).
  */
 interface Position {
   sync: string | null;
   token: string | null;
-  after: string | null;
+  at: InPage;
 }
 
-const cursorOf = ({ sync, token, after }: Position): string =>
-  `${sync === null ? "f" : "s"}.${cursorPart(sync)}.${cursorPart(token)}.${cursorPart(after)}`;
+const cursorOf = ({ sync, token, at }: Position): string =>
+  `${sync === null ? "f" : "s"}.${cursorPart(sync)}.${cursorPart(token)}.${inPagePart(at)}`;
 
 /** The position a cursor this sync wrote names; any other starts over. */
 const positionOf = (cursor: string): Position => {
   const [phase, ...parts] = cursor.split(".");
-  const [sync, token, after] = parts.map(fromCursorPart);
+  const [sync, token] = parts.slice(0, 2).map(fromCursorPart);
   const known =
     parts.length === 3 &&
     ((phase === "f" && sync === null) || (phase === "s" && sync !== null));
   if (!known) {
     throw new RestartSyncError("Not a cursor this sync wrote");
   }
-  return { sync: sync ?? null, token: token ?? null, after: after ?? null };
+  return {
+    sync: sync ?? null,
+    token: token ?? null,
+    at: fromInPagePart(parts[2]),
+  };
 };
 
 /** One GET, read before the page's deadline: its JSON; a 410 starts over. */
@@ -226,10 +233,10 @@ const eventsPage = async (
     ),
     eventsSchema
   );
-  const { items, last, done } = await fillPage({
+  const { items, at, done } = await fillPage({
     room,
     entries: read.items ?? [],
-    after: position.after,
+    at: position.at,
     keyOf: (event) => `${event.id}@${event.updated ?? ""}`,
     // oxlint-disable-next-line require-await -- the kit's paging takes a promise
     itemsFor: async (event) => eventItems(room, owner, event),
@@ -243,7 +250,7 @@ const eventsPage = async (
   if (!done) {
     return {
       items,
-      cursor: cursorOf({ ...position, after: last }),
+      cursor: cursorOf({ ...position, at }),
       more: true,
     };
   }
@@ -251,7 +258,7 @@ const eventsPage = async (
   if (next !== "") {
     return {
       items,
-      cursor: cursorOf({ ...position, token: next, after: null }),
+      cursor: cursorOf({ ...position, token: next, at: startOfPage }),
       more: true,
     };
   }
@@ -263,7 +270,7 @@ const eventsPage = async (
   }
   return {
     items,
-    cursor: cursorOf({ sync, token: null, after: null }),
+    cursor: cursorOf({ sync, token: null, at: startOfPage }),
     more: false,
   };
 };
@@ -296,7 +303,7 @@ export const calendarSync = defineSync({
       room,
       owner,
       cursor === null
-        ? { sync: null, token: null, after: null }
+        ? { sync: null, token: null, at: startOfPage }
         : positionOf(cursor)
     );
   },

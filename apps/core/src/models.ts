@@ -571,7 +571,8 @@ const hasFailed = ({ stopReason }: AssistantMessage): boolean =>
  */
 const estimatedCharsPerToken = 4;
 
-const estimatedTokens = (chars: number): number =>
+/** Tokens `chars` characters of text take, by the rule of thumb above: for sizing a request before it is sent. */
+export const estimatedTokens = (chars: number): number =>
   Math.ceil(chars / estimatedCharsPerToken);
 
 /** The answer as far as it came: its text, reasoning and tool calls. */

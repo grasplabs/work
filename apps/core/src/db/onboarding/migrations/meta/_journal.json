@@ -302,6 +302,20 @@
       "when": 1794922649743,
       "tag": "0042_team_results_from_shared_lines",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1794939453222,
+      "tag": "0043_team_work_from_the_first_teller",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1794965876287,
+      "tag": "0044_drawings_by_work",
+      "breakpoints": true
     }
   ]
 }

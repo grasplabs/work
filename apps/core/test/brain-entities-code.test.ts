@@ -49,7 +49,6 @@ import { editWorkflowDraft, workflowDraft } from "../src/workflow-editor.ts";
 import { workflowFiles } from "../src/workflow-own.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
-import { workflowStateOf } from "../src/workflow-state.ts";
 import {
   candidateRunFor,
   startCandidateRun,
@@ -67,6 +66,7 @@ import {
 import { httpApiOrigin, httpApiReceivedUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { askedModel, jsonWorkflowAppsOf } from "./json-workflow-apps.ts";
+import { workflowStateOf } from "./kept-state.ts";
 import { runQuarterHourTasks } from "./maintenance.ts";
 import { fakeProviderFor } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";

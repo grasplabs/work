@@ -311,7 +311,9 @@ const parts: Parts = {
         // What asked for it waits on the answer.
         urgent: true,
         waitsOn: forMe,
-        verdicts: ["approve", "decline"],
+        // Nobody approves what they can't read (`withheld`).
+        verdicts:
+          action.withheld === undefined ? ["approve", "decline"] : ["decline"],
         action,
       })),
     };
@@ -328,7 +330,11 @@ const parts: Parts = {
         // A run may wait on the answer that was lost.
         urgent: true,
         waitsOn: forMe,
-        verdicts: ["happened", "notHappened"],
+        // Nobody lets go out again what they can't read (`withheld`).
+        verdicts:
+          outcome.withheld === undefined
+            ? ["happened", "notHappened"]
+            : ["happened"],
         outcome,
       })),
     };
