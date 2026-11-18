@@ -402,7 +402,6 @@ const cast = {
   brainMemoryShare: { admin: "admin", one: "user", two: "user" },
   brainQuestions: { admin: "admin", member: "user" },
   boardGoals: { admin: "admin", member: "user" },
-  tour: { member: "user" },
   setupVoice: { admin: "admin" },
   setupConnect: { admin: "admin" },
   setupDocuments: { admin: "admin" },

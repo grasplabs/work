@@ -130,6 +130,8 @@ export const useRecentChats = ({
     return {
       id: chat.id,
       label: title,
+      // In the regular weight, as "All chats" under them is.
+      quiet: true,
       render: <Link {...chatLink(chat.id)} />,
       current: matchRoute(chatLink(chat.id)) !== false,
       // Its agent is still answering: the Working mark at the row's end.
