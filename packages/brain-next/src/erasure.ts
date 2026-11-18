@@ -1,12 +1,7 @@
 import { z } from "zod";
 
 import type { BrainBucket } from "./bucket.ts";
-import {
-  erasureReasons,
-  proposeKind,
-  refusalPrefix,
-  restoringNow,
-} from "./contract.ts";
+import { erasureReasons, refusalPrefix, restoringNow } from "./contract.ts";
 import type {
   ErasureReason,
   ErasureStatus,
@@ -749,12 +744,10 @@ const apply = (
     sql.exec("DELETE FROM removed_sources WHERE source = ?", source);
     const rows = rowsOf(sql, source);
     sources += rows.length > 0 ? 1 : 0;
-    // A skill drafted from it (skill-proposals.ts) goes with it, open, and
-    // so does a draft of one still on the queue that names it, whatever its
-    // state (waiting, parked for good, or under way, which is stopped):
-    // each found through the proposals' index of what they name
-    // (`proposal_sources`), by key, never by reading the queue. One settled
-    // holds nothing of it, and names nothing.
+    // A skill drafted from it (skill-proposals.ts) goes with it, open,
+    // found through what proposals rest on (`proposal_sources`), by
+    // index. Nothing on the queue names a source: a draft asks which as it
+    // runs. One settled holds nothing of it, and rests on nothing.
     for (const { proposal } of sql
       .exec<{ proposal: string }>(
         "DELETE FROM proposal_sources WHERE source = ? RETURNING proposal",
@@ -766,16 +759,6 @@ const apply = (
         proposal
       );
       sql.exec("DELETE FROM proposal_sources WHERE proposal = ?", proposal);
-      const drafts = sql
-        .exec<{ key: string }>(
-          "DELETE FROM work_items WHERE kind = ? AND key = ? RETURNING key",
-          proposeKind,
-          proposal
-        )
-        .toArray();
-      for (const { key: draft } of drafts) {
-        stopped.push(draft);
-      }
     }
     if (hideVersions(sql, source, rows, key)) {
       stopped.push(source);

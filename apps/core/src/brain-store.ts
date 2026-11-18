@@ -2,12 +2,14 @@ import { BrainStore as Store } from "@grasp-os/brain-next/store";
 import type { AlarmHost } from "@grasp-os/brain-next/store";
 
 import { alarmHostOf } from "./brain-next.ts";
+import { proposalRunsFor } from "./skill-proposals.ts";
 
 /**
  * The Brain's store (@grasp-os/brain-next), as core registers it: a
  * person's own store works its queue on its own alarm with core's model
- * gateway and embedders, and tells core its health as each tick ends
- * (brain-next.ts `alarmHostOf`). The shared store is ticked by core's
+ * gateway and embedders, picks the runs a skill's draft is drawn from
+ * as it runs (skill-proposals.ts `proposalRunsFor`), and tells core its
+ * health as each tick ends (brain-next.ts `alarmHostOf`). The shared store is ticked by core's
  * clock instead (`workBrain`). The class's name stays the package's:
  * class names of Durable Objects are for good.
  */
@@ -21,5 +23,10 @@ export class BrainStore extends Store {
 
   // A field, as the store's: no caller reaches it over RPC.
   protected override readonly alarmHost = async (): Promise<AlarmHost> =>
-    await alarmHostOf(this.#env, this.ctx.id.name);
+    await alarmHostOf(
+      this.#env,
+      this.ctx.id.name,
+      async (person, subject) =>
+        await proposalRunsFor(this.#env, person, subject)
+    );
 }

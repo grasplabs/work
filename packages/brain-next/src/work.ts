@@ -27,6 +27,7 @@ import type {
   HandOvers,
   ModelTrouble,
   OverdueWork,
+  ProposalSources,
   WorkErrorCode,
   WorkOverview,
   WorkPriority,
@@ -263,6 +264,12 @@ export interface WorkContext {
    */
   owner?: string;
   /**
+   * The host's pick of the sources a skill's draft is drawn from, as it
+   * runs (contract.ts `ProposalSources`): a person's own store's alarm
+   * only.
+   */
+  proposalSources?: ProposalSources;
+  /**
    * Says more is left once this run returns (rule 7), having written
    * `progress` pieces of the work (more than 0, or the attempt fails): the
    * item is put back, due at once with its attempts reset, unless a newer
@@ -294,6 +301,8 @@ export interface WorkHost {
   handOvers?: HandOvers;
   /** A person's own store's tick only (`WorkContext.owner`). */
   owner?: string;
+  /** A person's own store's alarm only (`WorkContext.proposalSources`). */
+  proposalSources?: ProposalSources;
 }
 
 /** A kind of work, and how one item of it is done. */
@@ -1208,6 +1217,7 @@ const runItem = async (
         contextTokens: host.contextTokens,
         handOvers: host.handOvers,
         owner: host.owner,
+        proposalSources: host.proposalSources,
         again: (progress) => {
           again = { progress };
         },

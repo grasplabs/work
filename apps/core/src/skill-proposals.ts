@@ -2,9 +2,8 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { skillErrors } from "@grasp-os/shared/skills";
 import type { ListedSkill, SkillProposal } from "@grasp-os/shared/skills";
-import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { alias } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
 import { runSource } from "./brain-next-origins.ts";
@@ -16,13 +15,14 @@ import {
   readCurrentSkillAs,
   settleOwnSkillProposal,
 } from "./brain-next.ts";
-import type { OwnSkillProposal } from "./brain-next.ts";
+import type { OwnSkillProposal, SourceRef } from "./brain-next.ts";
 import { holdsWorkflowSql } from "./brain-run-sources.ts";
 import {
   workflowResourceRuns,
   workflowResources,
   workflowStartReceipts,
 } from "./db/core/schema.ts";
+import { runRetentionDays } from "./workflows/engine.ts";
 
 // Skills proposed to a person from their own runs that keep succeeding
 // (GRA-1756; the design is on the issue). The Brain's model drafts each in
@@ -46,6 +46,10 @@ import {
 //   current and theirs (their store's statement), and only while they
 //   hold the workflow and each run is theirs (`basisOf`'s statement): a
 //   role lost or a run erased hides it; an erasure deletes it.
+// - An erased run's id kept in queued work: a draft is queued naming no
+//   run (its workflow at a version, in core's words: `subjectOf`); it asks
+//   core which runs as it runs (`proposalRunsFor`), among those that still
+//   have their details, so what retention erased is never among them.
 // - A model asked for nothing new: only once a run's hand-over to them
 //   landed (`proposeAfterRun`, from brain-sources.ts), and once per
 //   workflow version, as the store drafts a key once, open or settled.
@@ -71,85 +75,142 @@ const sha256Of = async (text: string): Promise<string> =>
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 
-/** The run a streak is read for. */
-const thisRun = alias(workflowResourceRuns, "this_run");
+const dayMs = 24 * 60 * 60 * 1000;
+
+/** A run of a streak. */
+interface StreakRun {
+  id: string;
+  workflow: string;
+  name: string;
+  version: number;
+}
+
+/**
+ * `person`'s latest `proposalStreak` ended runs of `workflowId` that they
+ * or their agent started and that still have their details (not past the
+ * run retention, nor swept: what retention erased from the Brain is never
+ * among them), while they hold the workflow, read in one statement, when
+ * every one of them completed, at one version, none restricted: newest
+ * first. Null when they don't, or there are fewer.
+ */
+const streakOf = async (
+  env: Env,
+  person: string,
+  workflowId: string
+): Promise<StreakRun[] | null> => {
+  const kept = new Date(Date.now() - runRetentionDays * dayMs);
+  const runs = await drizzle(env.DB)
+    .select({
+      id: workflowResourceRuns.id,
+      workflow: workflowResourceRuns.workflowResourceId,
+      name: workflowResources.name,
+      version: workflowResourceRuns.version,
+      status: workflowResourceRuns.status,
+      restricted: workflowResourceRuns.restricted,
+    })
+    .from(workflowResourceRuns)
+    .innerJoin(
+      workflowStartReceipts,
+      eq(workflowStartReceipts.id, workflowResourceRuns.id)
+    )
+    .innerJoin(
+      workflowResources,
+      eq(workflowResources.id, workflowResourceRuns.workflowResourceId)
+    )
+    .where(
+      and(
+        eq(workflowResourceRuns.workflowResourceId, workflowId),
+        eq(workflowResourceRuns.principalId, person),
+        gt(workflowResourceRuns.endedAt, kept),
+        isNull(workflowStartReceipts.detailsRemovedAt),
+        inArray(workflowStartReceipts.invokerType, ["person", "agent"]),
+        holdsWorkflowSql(person, workflowId)
+      )
+    )
+    .orderBy(desc(workflowResourceRuns.endedAt), desc(workflowResourceRuns.id))
+    .limit(proposalStreak);
+  const [newest] = runs;
+  const holds =
+    newest !== undefined &&
+    runs.length === proposalStreak &&
+    runs.every(
+      ({ status, version, restricted }) =>
+        status === "completed" && version === newest.version && !restricted
+    );
+  return holds
+    ? runs.map(({ id, workflow, name, version }) => ({
+        id,
+        workflow,
+        name,
+        version,
+      }))
+    : null;
+};
+
+/** What a draft is queued for: a workflow at a version, in core's own words. */
+const subjectOf = (workflow: string, version: number): string =>
+  `${workflow}@${version}`;
 
 /**
  * After run `runId` was handed over to its person's own store: when it is
- * one of their latest `proposalStreak` ended runs of its workflow that
- * they or their agent started, and every one of those completed, at one
- * version, none restricted, while they hold the workflow, asks their own
- * store to draft a skill from them (once per workflow version). Read in
- * one statement. A failure is logged and left: the next run of theirs
- * that ends asks again.
+ * one of their streak of its workflow (`streakOf`), asks their own store
+ * to draft a skill (once per workflow version), naming no run: the draft
+ * asks which as it runs (`proposalRunsFor`). A failure is logged and
+ * left: the next run of theirs that ends asks again.
  */
 export const proposeAfterRun = async (
   env: Env,
   runId: string
 ): Promise<void> => {
   try {
-    const runs = await drizzle(env.DB)
+    const run = await drizzle(env.DB)
       .select({
-        id: workflowResourceRuns.id,
+        person: workflowResourceRuns.principalId,
         workflow: workflowResourceRuns.workflowResourceId,
-        name: workflowResources.name,
-        principal: workflowResourceRuns.principalId,
-        version: workflowResourceRuns.version,
-        status: workflowResourceRuns.status,
-        restricted: workflowResourceRuns.restricted,
       })
-      .from(thisRun)
-      .innerJoin(
-        workflowResourceRuns,
-        and(
-          eq(
-            workflowResourceRuns.workflowResourceId,
-            thisRun.workflowResourceId
-          ),
-          eq(workflowResourceRuns.principalId, thisRun.principalId)
-        )
-      )
-      .innerJoin(
-        workflowStartReceipts,
-        eq(workflowStartReceipts.id, workflowResourceRuns.id)
-      )
-      .innerJoin(
-        workflowResources,
-        eq(workflowResources.id, workflowResourceRuns.workflowResourceId)
-      )
-      .where(
-        and(
-          eq(thisRun.id, runId),
-          isNotNull(workflowResourceRuns.endedAt),
-          inArray(workflowStartReceipts.invokerType, ["person", "agent"]),
-          holdsWorkflowSql(thisRun.principalId, thisRun.workflowResourceId)
-        )
-      )
-      .orderBy(
-        desc(workflowResourceRuns.endedAt),
-        desc(workflowResourceRuns.id)
-      )
-      .limit(proposalStreak);
-    const [newest] = runs;
-    const kept =
-      newest !== undefined &&
-      runs.length === proposalStreak &&
-      runs.some(({ id }) => id === runId) &&
-      runs.every(
-        ({ status, version, restricted }) =>
-          status === "completed" && version === newest.version && !restricted
-      );
-    if (!kept) {
+      .from(workflowResourceRuns)
+      .where(eq(workflowResourceRuns.id, runId))
+      .get();
+    if (run === undefined) {
       return;
     }
-    await proposeOwnSkill(env, newest.principal, {
+    const streak = await streakOf(env, run.person, run.workflow);
+    const [newest] = streak ?? [];
+    if (
+      streak === null ||
+      newest === undefined ||
+      !streak.some(({ id }) => id === runId)
+    ) {
+      return;
+    }
+    await proposeOwnSkill(env, run.person, {
       key: await sha256Of(`${newest.workflow}:${newest.version}`),
       about: `Workflow "${newest.name}"`,
-      sources: runs.map(({ id }) => runSource(id)),
+      subject: subjectOf(newest.workflow, newest.version),
     });
   } catch (error) {
     log.warn("skills.proposal_unasked", errorFields(error));
   }
+};
+
+/**
+ * The runs a draft queued for `subject` is drawn from, picked for `person`
+ * as it runs (their own store's alarm, brain-store.ts): their streak of
+ * that workflow now, when it is still at that version; none otherwise,
+ * and the draft ends without a proposal.
+ */
+export const proposalRunsFor = async (
+  env: Env,
+  person: string,
+  subject: string
+): Promise<SourceRef[]> => {
+  const at = subject.lastIndexOf("@");
+  const workflow = subject.slice(0, at);
+  const version = Number(subject.slice(at + 1));
+  const streak = at > 0 ? await streakOf(env, person, workflow) : null;
+  return streak !== null && streak[0]?.version === version
+    ? streak.map(({ id }) => runSource(id))
+    : [];
 };
 
 /**

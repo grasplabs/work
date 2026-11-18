@@ -3,10 +3,11 @@ import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
 import {
+  currentReadMax,
   instructionsTextSchema,
   proposalKeySchema,
-  proposeKind,
   proposalRequestSchema,
+  sourceIdSchema,
   tokensOf,
 } from "./contract.ts";
 import type {
@@ -32,17 +33,24 @@ import type { WorkContext } from "./work.ts";
 // - Asked only when the host says something changed (`enqueueProposal`),
 //   once per key: a key drafted before, open or settled, is never drafted
 //   again, so the model is asked once for what the sources have in common.
-// - Drawn only from what the person may read: the current versions of the
-//   sources, as their own reader reads them, at the moment of the call;
-//   none missing (a source gone, out of use or never handed over drafts
-//   nothing). What the model writes is kept here alone, readable by them.
+// - Queued naming no source: the draft asks the host which sources as it
+//   runs (`ProposalSources`), so nothing on the queue holds a source an
+//   erasure must find.
+// - Drawn only from what the person may read: the current versions of
+//   those sources, as their own reader reads them, at the moment of the
+//   call; none missing (a source gone, out of use or never handed over
+//   drafts nothing). What the model writes is kept here alone, readable
+//   by them, saved only while every version it rests on still is.
 // - Listed only while every version it rests on is still current and
 //   theirs to read, in the statement that lists it (`listProposals`); an
-//   erasure of one of its sources deletes it, and a draft of it still on
-//   the queue, found by index (`proposal_sources`, erasure.ts `apply`).
+//   erasure of one of its sources deletes it, found by index
+//   (`proposal_sources`, written only as it is saved; erasure.ts `apply`).
 // - Not a skill: nothing lists, selects or reads it as one. The host
 //   writes the person's own skill from it once they accept, then settles
 //   it (`settleProposal`), which keeps the key alone.
+
+/** The kind of work a draft is: its call's purpose is `brain.skill.propose`. */
+const proposeKind = "skill.propose";
 
 /**
  * The part of the model's window the routine and its runs may take: the
@@ -60,20 +68,7 @@ Answer with the SKILL.md alone, nothing before or after it:
 Never copy personal data, credentials, people's names or one-off values from the results: describe their shape instead.
 Write in the language the routine and its results are written in.`;
 
-const payloadSchema = proposalRequestSchema.omit({ person: true }).extend({
-  /**
-   * The model's answer, kept before it is written (`WorkContext.keep`): a
-   * rerun writes it and asks the model nothing.
-   */
-  drafted: z
-    .strictObject({
-      text: z.string(),
-      restsOn: z.array(
-        z.strictObject({ source: z.string(), version: z.int().positive() })
-      ),
-    })
-    .optional(),
-});
+const payloadSchema = proposalRequestSchema.omit({ person: true });
 type Payload = z.infer<typeof payloadSchema>;
 
 /** Whether a proposal was drafted under `key`, open or settled. */
@@ -184,14 +179,27 @@ const inputOf = (
   ].join(runSeparator);
 };
 
-/** The draft of `payload`: the model's answer kept with it, or asked now. */
+/**
+ * The draft of `payload`: the sources the host picks now, read as the
+ * person reads them, and the model's answer; undefined when the host
+ * picks none, or one of them can't be read now (gone, out of use, never
+ * handed over, or not theirs): nothing is drafted from the rest. Never
+ * kept with the item, so the queue holds nothing of a source.
+ */
 const draftOf = async (
   context: WorkContext,
   payload: Payload,
   owner: string
-): Promise<Payload["drafted"] | undefined> => {
-  if (payload.drafted !== undefined) {
-    return payload.drafted;
+): Promise<{ text: string; restsOn: SourceVersionRef[] } | undefined> => {
+  if (context.proposalSources === undefined) {
+    return undefined;
+  }
+  const sources = z
+    .array(sourceIdSchema)
+    .max(currentReadMax)
+    .parse(await context.proposalSources(payload.subject));
+  if (sources.length === 0) {
+    return undefined;
   }
   const read = await readCurrent(
     {
@@ -200,11 +208,9 @@ const draftOf = async (
       bucket: context.bucket,
       groups: true,
     },
-    { sources: payload.sources, reader: { person: owner, groups: [] } }
+    { sources, reader: { person: owner, groups: [] } }
   );
-  // One missing (gone, out of use, never handed over, or not theirs):
-  // nothing is drafted from the rest.
-  if (read.length !== new Set(payload.sources).size) {
+  if (read.length !== new Set(sources).size) {
     return undefined;
   }
   const { text } = await context.ask({
@@ -219,12 +225,10 @@ const draftOf = async (
   if (skill === null) {
     throw new WorkError("invalid_answer");
   }
-  const drafted = {
+  return {
     text: skill,
     restsOn: read.map(({ source, version }) => ({ source, version })),
   };
-  context.keep({ ...payload, drafted });
-  return drafted;
 };
 
 const proposeWork = defineWork({
@@ -240,8 +244,10 @@ const proposeWork = defineWork({
     if (drafted === undefined) {
       return;
     }
-    // Written only while every version is still current and theirs, and
-    // nothing was drafted under the key meanwhile, in one transaction.
+    // Written only while every version it rests on is still current and
+    // theirs (an erasure meanwhile hid it), and nothing was drafted under
+    // the key meanwhile, in one transaction with what it rests on: the one
+    // place `proposal_sources` is written.
     const written = storage.transactionSync(() => {
       if (
         draftedBefore(storage.sql, payload.key) ||
@@ -257,8 +263,6 @@ const proposeWork = defineWork({
         JSON.stringify(drafted.restsOn),
         Date.now()
       );
-      // What it rests on, as it was drawn, for an erasure to find it by,
-      // whatever a later draft of the key named meanwhile.
       storage.sql.exec(
         `INSERT OR IGNORE INTO proposal_sources (source, proposal)
         SELECT json_extract(value, '$.source'), ? FROM json_each(?)`,
@@ -277,44 +281,19 @@ const proposeWork = defineWork({
 /**
  * Puts a draft of `request` on the queue in `storage`, a person's own
  * store, unless one was drafted under its key already (open or settled).
- * An item of the key still waiting is replaced.
+ * An item of the key still waiting is replaced. It names no source: the
+ * draft asks the host which as it runs (`draftOf`).
  */
 export const enqueueProposal = (
   storage: DurableObjectStorage,
-  { key, about, sources }: Omit<ProposalRequest, "person">
+  { key, about, subject }: Omit<ProposalRequest, "person">
 ): void => {
   if (draftedBefore(storage.sql, key)) {
     return;
   }
-  // What the draft names, by source, for an erasure to find it by
-  // (`proposal_sources`), synchronous with the enqueue, so both land or
-  // neither does: in place of what an earlier draft of the key named,
-  // unless one is under way, which still draws from what it named (the
-  // queue leaves it running beside this one): then added to, so every
-  // source a draft of the key may still use stays found. A saved proposal
-  // writes its own (`proposeWork`).
-  const running =
-    storage.sql
-      .exec(
-        "SELECT 1 FROM work_items WHERE kind = ? AND key = ? AND running = 1",
-        proposeKind,
-        key
-      )
-      .toArray().length > 0;
-  if (!running) {
-    storage.sql.exec("DELETE FROM proposal_sources WHERE proposal = ?", key);
-  }
-  storage.sql.exec(
-    `INSERT OR IGNORE INTO proposal_sources (source, proposal)
-    SELECT value, ? FROM json_each(?)`,
-    key,
-    JSON.stringify(sources)
-  );
-  // Keyed by the proposal's key, as work about a source is by its key: no
-  // source's key is one (a SHA-256 holds no ":").
   enqueueWork(storage, proposeWork, {
     key,
-    payload: { key, about, sources },
+    payload: { key, about, subject },
     priority: "conversation",
   });
 };
@@ -365,44 +344,25 @@ export const listProposals = (
 
 /**
  * Settles the open proposal `key`, accepted or dismissed alike (nothing
- * reads which), keeping its key alone, in one transaction, and answers the
- * keys of the queued drafts it took out, for the caller to stop; so
- * nothing is drafted under it again; one settled before stays as it was.
+ * reads which), keeping its key alone, so nothing is drafted under it
+ * again, and what it rested on with it; one settled before stays as it
+ * was. Run it in one transaction.
  */
 export const settleProposal = (
-  storage: DurableObjectStorage,
+  sql: SqlStorage,
   { key }: Omit<ProposalSettle, "person">
-): string[] => {
+): void => {
   const settled = proposalKeySchema.parse(key);
-  const { sql } = storage;
-  return storage.transactionSync(() => {
-    sql.exec(
-      `UPDATE skill_proposals SET state = 'settled', text = NULL, rests_on = NULL
-      WHERE key = ? AND state = 'open'`,
-      settled
-    );
-    const isSettled =
-      sql
-        .exec(
-          "SELECT 1 FROM skill_proposals WHERE key = ? AND state = 'settled'",
-          settled
-        )
-        .toArray().length > 0;
-    if (!isSettled) {
-      return [];
-    }
-    // A settled proposal rests on nothing: what it named goes, and so does
-    // a later draft of its key still on the queue (one queued while it was
-    // drawn), which would draft nothing and names those sources: whatever
-    // its state, under way too, which the caller stops.
-    sql.exec("DELETE FROM proposal_sources WHERE proposal = ?", settled);
-    return sql
-      .exec<{ key: string }>(
-        "DELETE FROM work_items WHERE kind = ? AND key = ? RETURNING key",
-        proposeKind,
-        settled
-      )
-      .toArray()
-      .map(({ key: draft }) => draft);
-  });
+  sql.exec(
+    `UPDATE skill_proposals SET state = 'settled', text = NULL, rests_on = NULL
+    WHERE key = ? AND state = 'open'`,
+    settled
+  );
+  sql.exec(
+    `DELETE FROM proposal_sources WHERE proposal = ? AND EXISTS (
+      SELECT 1 FROM skill_proposals WHERE key = ? AND state = 'settled'
+    )`,
+    settled,
+    settled
+  );
 };

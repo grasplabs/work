@@ -3726,28 +3726,18 @@ export interface OwnSkillProposal {
 }
 
 /**
- * Asks the member `personId`'s own store to draft a skill under `key`
- * from the current versions of `sources` and `about`, unless it drafted
- * one under it already. Refused once they are no longer a member.
+ * Asks the member `personId`'s own store to draft a skill under `key`,
+ * for `subject` (core's words: the draft asks core which sources as it
+ * runs, `alarmHostOf`) and `about`, unless it drafted one under it
+ * already. Refused once they are no longer a member.
  */
 export const proposeOwnSkill = async (
   env: BrainEnv & ReaderEnv,
   personId: string,
-  {
-    key,
-    about,
-    sources,
-  }: { key: string; about: string; sources: readonly SourceRef[] }
+  { key, about, subject }: { key: string; about: string; subject: string }
 ): Promise<void> => {
   const { person } = await skillReaderOf(env, personId, "person");
-  await ownBrain(env, person).proposeSkill({
-    person,
-    key,
-    about,
-    sources: sources.map((source) =>
-      sourceKeyOf(checked(sourceRefSchema, source))
-    ),
-  });
+  await ownBrain(env, person).proposeSkill({ person, key, about, subject });
 };
 
 /**
@@ -4353,11 +4343,13 @@ const healthOf = (overview: WorkOverview, at: Date): OwnStoreHealth => {
  */
 export const alarmHostOf = async (
   env: Env,
-  name: string | undefined
+  name: string | undefined,
+  proposalRuns: (person: string, subject: string) => Promise<SourceRef[]>
 ): Promise<{
   ask: AskModel;
   embedders: Embedders;
   contextTokens: number | null;
+  proposalSources: (subject: string) => Promise<SourceId[]>;
   report: (overview: WorkOverview) => Promise<void>;
 }> => {
   const kind = storeKindOf(name);
@@ -4366,6 +4358,14 @@ export const alarmHostOf = async (
   }
   return {
     ask: askModel(env),
+    // Which runs a skill's draft is drawn from, as core picks them for its
+    // person as it runs (skill-proposals.ts): the queue names none.
+    proposalSources: async (subject) => {
+      const runs = await proposalRuns(kind.person, subject);
+      return runs.map((source) =>
+        sourceKeyOf(checked(sourceRefSchema, source))
+      );
+    },
     embedders: await embeddersOf(env),
     // What extraction cuts the person's own sources to, as the shared
     // store's tick does (`workBrain`).

@@ -2009,7 +2009,7 @@ const strangersProposal = async ({
     person,
     key,
     about: markedText(markers),
-    sources: [`upload:${crypto.randomUUID()}`],
+    subject: "probe@1",
   });
   await runInDurableObject(
     inJurisdiction(env, env.BRAIN_STORE).getByName(`person:${person}`),
@@ -2027,10 +2027,14 @@ const strangersProposal = async ({
 };
 
 /**
- * Ticks `person`'s own store with a model that records what it is asked:
- * what reached it, for the harness to look for markers in.
+ * Ticks `person`'s own store with a model that records what it is asked,
+ * and a host that picks `picked` as the sources of any skill's draft: what
+ * reached the model, for the harness to look for markers in.
  */
-const askedOnTick = async (person: string): Promise<string[]> => {
+const askedOnTick = async (
+  person: string,
+  picked: readonly string[] = []
+): Promise<string[]> => {
   const asked: string[] = [];
   await personalStore(person).work({
     ask: async ({ system, input }) => {
@@ -2041,9 +2045,19 @@ const askedOnTick = async (person: string): Promise<string[]> => {
     embedders: noEmbedders,
     handOvers: noHandOvers,
     contextTokens: null,
+    proposalSources: async () => await Promise.resolve([...picked]),
   });
   return asked;
 };
+
+/** The keys of `versions`' sources, at most what one draft is drawn from. */
+const draftedFrom = (versions: readonly { source: SourceRef }[]): string[] =>
+  versions
+    .slice(0, currentReadMax)
+    .map(({ source }) => `${source.producer}:${source.id}`);
+
+/** Picks no run for any draft: a host whose drafts end without a proposal. */
+const noRuns = async (): Promise<SourceRef[]> => await Promise.resolve([]);
 
 /** Someone else's own export, written, holding every marker: its id. */
 const strangersExport = async ({ markers }: Probing): Promise<string> => {
@@ -4159,24 +4173,22 @@ export const coreProbes = {
       await coreBrain.proposeOwnSkill(env, personId, {
         key: await proposalKey(),
         about: markedText(markers),
-        sources: hiddenVersions
-          .slice(0, currentReadMax)
-          .map(({ source }) => source),
+        subject: "probe@1",
       });
-      return await askedOnTick(personId);
+      return await askedOnTick(personId, draftedFrom(hiddenVersions));
     }),
     await answer("a key that isn't one", async () => {
       await coreBrain.proposeOwnSkill(env, personId, {
         key: markers.join(""),
         about: "A routine.",
-        sources: [{ producer: "upload", id: crypto.randomUUID() }],
+        subject: "probe@1",
       });
     }),
     await answer("as someone who isn't a member", async () => {
       await coreBrain.proposeOwnSkill(env, stranger(), {
         key: await proposalKey(),
         about: "A routine.",
-        sources: [{ producer: "upload", id: crypto.randomUUID() }],
+        subject: "probe@1",
       });
     }),
   ],
@@ -4379,18 +4391,23 @@ export const coreProbes = {
   alarmHostOf: async ({ personId, markers }) => [
     await answer(
       "the shared store's",
-      async () => await coreBrain.alarmHostOf(env, "brain")
+      async () => await coreBrain.alarmHostOf(env, "brain", noRuns)
     ),
     await answer(
       "a store named by the markers",
-      async () => await coreBrain.alarmHostOf(env, markers.join(" "))
+      async () => await coreBrain.alarmHostOf(env, markers.join(" "), noRuns)
     ),
     await answer(
       "a person's store named by the markers",
-      async () => await coreBrain.alarmHostOf(env, `person:${markers.join("")}`)
+      async () =>
+        await coreBrain.alarmHostOf(env, `person:${markers.join("")}`, noRuns)
     ),
     await answer("the reader's own store's, its report kept", async () => {
-      const host = await coreBrain.alarmHostOf(env, `person:${personId}`);
+      const host = await coreBrain.alarmHostOf(
+        env,
+        `person:${personId}`,
+        noRuns
+      );
       await host.report(
         await personalBrainOf(
           inJurisdiction(env, env.BRAIN_STORE),
@@ -10577,14 +10594,9 @@ export const storeProbes = {
           person: reader.person,
           key: await proposalKey(),
           about: markedText(markers),
-          sources: [
-            `upload:${crypto.randomUUID()}`,
-            ...hiddenVersions
-              .slice(0, currentReadMax - 1)
-              .map(({ source }) => `${source.producer}:${source.id}`),
-          ],
+          subject: "probe@1",
         });
-        return await askedOnTick(reader.person);
+        return await askedOnTick(reader.person, draftedFrom(hiddenVersions));
       }
     ),
     await answer("the shared store", async () => {
@@ -10592,7 +10604,7 @@ export const storeProbes = {
         person: reader.person,
         key: await proposalKey(),
         about: "A routine.",
-        sources: [`upload:${crypto.randomUUID()}`],
+        subject: "probe@1",
       });
     }),
     await answer("someone else's own store, as the reader", async () => {
@@ -10600,7 +10612,7 @@ export const storeProbes = {
         person: reader.person,
         key: await proposalKey(),
         about: "A routine.",
-        sources: [`upload:${crypto.randomUUID()}`],
+        subject: "probe@1",
       });
     }),
     await answer("a key named by the markers", async () => {
@@ -10609,7 +10621,7 @@ export const storeProbes = {
           person: reader.person,
           key: markers.join(""),
           about: "A routine.",
-          sources: [`upload:${crypto.randomUUID()}`],
+          subject: "probe@1",
         })
       );
     }),

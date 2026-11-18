@@ -57,16 +57,45 @@ const draftingModel = (answer = drafted) => {
   return { ask, asked };
 };
 
-/** A tick of this test's person's store, with `ask` as its model. */
-const tick = async (ask: AskModel, who = person): Promise<void> => {
+/**
+ * A tick of this test's person's store, with `ask` as its model and a host
+ * that picks `picked` as the sources of any skill's draft.
+ */
+const tick = async (
+  ask: AskModel,
+  picked: readonly string[] = [],
+  who = person
+): Promise<void> => {
   await own(who).work({
     ask,
     at: new Date(),
     embedders: noModel,
     handOvers: noHandOvers,
     contextTokens: null,
+    proposalSources: async () => await Promise.resolve([...picked]),
   });
 };
+
+/** What drafts here are queued for, in the host's words. */
+const subject = "send-report@1";
+
+/** Every row of the store's proposals, their links and its queue that names `source`. */
+const naming = async (source: string): Promise<number> =>
+  await runInDurableObject(
+    own(),
+    (_store, state) =>
+      state.storage.sql
+        .exec<{ count: number }>(
+          `SELECT
+            (SELECT count(*) FROM skill_proposals WHERE rests_on LIKE ?1)
+            + (SELECT count(*) FROM proposal_sources WHERE source = ?2)
+            + (SELECT count(*) FROM work_items WHERE payload LIKE ?1)
+            AS count`,
+          `%${source}%`,
+          source
+        )
+        .one().count
+  );
 
 /** A source of `who`'s own holding `text`: its key. */
 const sourceOf = async (text: string, who = person): Promise<string> => {
@@ -93,7 +122,7 @@ const keyOf = async (): Promise<string> =>
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 
-/** Proposes from `sources` under `key`, then ticks with `ask`. */
+/** Queues a draft under `key`, then ticks with `ask`, the host picking `sources`. */
 const propose = async (
   key: string,
   sources: string[],
@@ -103,9 +132,9 @@ const propose = async (
     person,
     key,
     about: 'Workflow "send-report"',
-    sources,
+    subject,
   });
-  await tick(ask);
+  await tick(ask, sources);
 };
 
 describe("skill proposals", () => {
@@ -205,67 +234,53 @@ describe("skill proposals", () => {
     }).toStrictEqual({ listed: [], asked: 3 });
   });
 
-  it("takes out a draft still on the queue that names an erased source, parked for good too, and leaves no row naming it", async () => {
-    const erased = await sourceOf("Workflow run completed.");
+  it("queues a draft naming no source, and draws it from what the host picks as it runs: an erased one drafts nothing", async () => {
     const kept = await sourceOf("Workflow run completed.");
-    const [parked, waiting] = [await keyOf(), await keyOf()];
-    for (const key of [parked, waiting]) {
-      // oxlint-disable-next-line no-await-in-loop -- one after the other
-      await own().proposeSkill({
-        person,
-        key,
-        about: 'Workflow "send-report"',
-        sources: [kept, erased],
-      });
-    }
-    // One of them failed to its final park before the erasure.
-    await runInDurableObject(own(), (_store, state) => {
-      state.storage.sql.exec(
-        `UPDATE work_items SET parked_at = ?, parks = 3, attempts = 5
-        WHERE key = ?`,
-        Date.now(),
-        parked
-      );
+    const erased = await sourceOf("Workflow run completed.");
+    const key = await keyOf();
+    await own().proposeSkill({
+      person,
+      key,
+      about: 'Workflow "send-report"',
+      subject,
     });
-    await own().eraseSource({ source: erased, reason: "deleted" });
-    const naming = await runInDurableObject(
-      own(),
-      (_store, state) =>
-        state.storage.sql
-          .exec<{ count: number }>(
-            "SELECT count(*) AS count FROM work_items WHERE payload LIKE ?",
-            `%${erased}%`
-          )
-          .one().count
+    const queued = await runInDurableObject(own(), (_store, state) =>
+      state.storage.sql
+        .exec<{ payload: string }>(
+          "SELECT payload FROM work_items WHERE key = ?",
+          key
+        )
+        .toArray()
+        .map(({ payload }): unknown => JSON.parse(payload))
     );
+    await own().eraseSource({ source: erased, reason: "deleted" });
     const model = draftingModel();
-    await tick(model.ask);
-    expect({ naming, asked: model.asked.length }).toStrictEqual({
-      naming: 0,
+    // The host still picks the erased one: it can't be read.
+    await tick(model.ask, [kept, erased]);
+    expect({
+      queued,
+      asked: model.asked.length,
+      listed: await own().skillProposals({ reader: readerOf() }),
+      naming: await naming(erased),
+    }).toStrictEqual({
+      queued: [{ key, about: 'Workflow "send-report"', subject }],
       asked: 0,
+      listed: [],
+      naming: 0,
     });
   });
 
-  it("deletes a proposal on the erasure of a run it rests on, though a later draft of its key was queued while it was drawn", async () => {
+  it("deletes a proposal and what names its run on that run's erasure, and saves none whose run is erased while it is drawn", async () => {
     const runs = [
       await sourceOf("Workflow run completed."),
       await sourceOf("Workflow run completed."),
-      await sourceOf("Workflow run completed."),
-      await sourceOf("Workflow run completed."),
-      await sourceOf("Workflow run completed."),
-      await sourceOf("Workflow run completed."),
     ];
-    const [first = ""] = runs;
-    const key = await keyOf();
-    const queue = async (sources: string[]) => {
-      await own().proposeSkill({
-        person,
-        key,
-        about: 'Workflow "send-report"',
-        sources,
-      });
-    };
-    // The model's answer held until the sixth run queued its own draft.
+    const [first = "", second = ""] = runs;
+    // One saved, then its first run erased.
+    await propose(await keyOf(), runs, draftingModel().ask);
+    const [saved] = await own().skillProposals({ reader: readerOf() });
+    await own().eraseSource({ source: first, reason: "deleted" });
+    // One drawn from the second, which is erased while the model drafts.
     const held = Promise.withResolvers<boolean>();
     const asking = Promise.withResolvers<boolean>();
     const ask: AskModel = async () => {
@@ -273,80 +288,36 @@ describe("skill proposals", () => {
       await held.promise;
       return { kind: "answer", text: drafted, model: "test/model" };
     };
-    await queue(runs.slice(0, 5));
-    const ticking = tick(ask);
+    await own().proposeSkill({
+      person,
+      key: await keyOf(),
+      about: 'Workflow "send-report"',
+      subject,
+    });
+    const ticking = tick(ask, [second]);
     await asking.promise;
-    await queue(runs.slice(1));
+    await own().eraseSource({ source: second, reason: "deleted" });
     held.resolve(true);
     await ticking;
-    const [saved] = await own().skillProposals({ reader: readerOf() });
-    await own().eraseSource({ source: first, reason: "deleted" });
-    const naming = await runInDurableObject(
-      own(),
-      (_store, state) =>
-        state.storage.sql
-          .exec<{ count: number }>(
-            `SELECT
-              (SELECT count(*) FROM skill_proposals
-                WHERE rests_on LIKE ?1 OR state = 'open')
-              + (SELECT count(*) FROM proposal_sources WHERE source = ?2)
-              + (SELECT count(*) FROM work_items WHERE payload LIKE ?1)
-              AS count`,
-            `%${first}%`,
-            first
-          )
-          .one().count
-    );
     expect({
-      restedOnFirst: saved?.restsOn.map(({ source }) => source),
-      naming,
+      saved: saved?.restsOn.map(({ source }) => source),
       listed: await own().skillProposals({ reader: readerOf() }),
+      kept: await runInDurableObject(
+        own(),
+        (_store, state) =>
+          state.storage.sql
+            .exec<{ count: number }>(
+              "SELECT count(*) AS count FROM skill_proposals WHERE state = 'open'"
+            )
+            .one().count
+      ),
+      naming: [await naming(first), await naming(second)],
     }).toStrictEqual({
-      restedOnFirst: runs.slice(0, 5),
-      naming: 0,
+      saved: runs,
       listed: [],
+      kept: 0,
+      naming: [0, 0],
     });
-  });
-
-  it("takes out a later draft of its key still on the queue when a proposal is settled, so a run's erasure after leaves no row naming it", async () => {
-    const runs = [
-      await sourceOf("Workflow run completed."),
-      await sourceOf("Workflow run completed."),
-    ];
-    const [first = "", later = ""] = runs;
-    const key = await keyOf();
-    await propose(key, [first], draftingModel().ask);
-    // A later draft of the key, queued while the first was drawn and not
-    // run yet: as the queue keeps one (the queue left it waiting beside the
-    // running first, and is paused).
-    await runInDurableObject(own(), (_store, state) => {
-      state.storage.sql.exec(
-        `INSERT INTO work_items
-          (kind, key, payload, priority, added_at, not_before, parked_at)
-        VALUES ('skill.propose', ?, ?, 2, ?, 0, ?)`,
-        key,
-        JSON.stringify({ key, about: 'Workflow "send-report"', sources: runs }),
-        Date.now(),
-        Date.now()
-      );
-    });
-    await own().settleSkillProposal({ person, key });
-    await own().eraseSource({ source: later, reason: "deleted" });
-    const naming = await runInDurableObject(
-      own(),
-      (_store, state) =>
-        state.storage.sql
-          .exec<{ count: number }>(
-            `SELECT
-              (SELECT count(*) FROM work_items WHERE payload LIKE ?1)
-              + (SELECT count(*) FROM proposal_sources WHERE source = ?2)
-              AS count`,
-            `%${later}%`,
-            later
-          )
-          .one().count
-    );
-    expect(naming).toBe(0);
   });
 
   it("drafts from runs as long as a source may be, within what one request to the model may hold", async () => {

@@ -1331,6 +1331,12 @@ export interface WorkRequest {
    * (`contextTokensSchema`). Null when the host doesn't know it.
    */
   contextTokens: number | null;
+  /**
+   * The host's pick of the sources a skill's draft is drawn from, as it
+   * runs (`ProposalSources`): for a person's own store's tick; a store
+   * given none drafts nothing.
+   */
+  proposalSources?: ProposalSources;
 }
 
 /**
@@ -1580,25 +1586,28 @@ export type OwnExportStart = z.infer<typeof ownExportStartSchema>;
 export const proposalKeySchema = z.string().regex(/^[0-9a-f]{64}$/u);
 
 /**
- * The kind of work a draft is (skill-proposals.ts): its call's purpose is
- * `brain.skill.propose`. Erasure names it too (erasure.ts `apply`), to
- * take out the drafts still on the queue that name an erased source.
- */
-export const proposeKind = "skill.propose";
-
-/**
  * A proposal to draft for `person` under `key`, unless one was drafted
- * under it already, from the current versions of `sources` (at most a
- * read of current versions: `currentReadMax`), and what the host says
- * they have in common (`about`), as long as an instruction file at most.
+ * under it already: of what the host queued it for (`subject`, the host's
+ * own words, which name no source), and what the host says the sources
+ * have in common (`about`), as long as an instruction file at most. It
+ * names no source: the draft asks the host which, as it runs
+ * (`ProposalSources`).
  */
 export const proposalRequestSchema = z.strictObject({
   person: principalSchema,
   key: proposalKeySchema,
   about: wellFormedString().min(1).max(instructionsMaxLength),
-  sources: z.array(sourceIdSchema).min(1).max(currentReadMax),
+  subject: wellFormedString().min(1).max(sourceIdMaxLength),
 });
 export type ProposalRequest = z.infer<typeof proposalRequestSchema>;
+
+/**
+ * The sources a draft is to be drawn from, as the host picks them at the
+ * moment it runs, for what it queued it for (`subject`): at most a read
+ * of current versions (`currentReadMax`); none when its rule doesn't hold
+ * now. Only a person's own store's alarm is given it (`AlarmHost`).
+ */
+export type ProposalSources = (subject: string) => Promise<SourceId[]>;
 
 /** The open proposals of a person's own store, asked by that person. */
 export const proposalsRequestSchema = z.strictObject({
@@ -3344,8 +3353,9 @@ export interface Brain {
   /**
    * Puts a draft of a skill for `person` on their own store's queue
    * (skill-proposals.ts): the host's model writes it from the current
-   * versions of the sources, as that person reads them, once per key,
-   * open or settled. Only their own store takes it, and only for them.
+   * versions of the sources the host picks as it runs, as that person
+   * reads them, once per key, open or settled. Only their own store takes
+   * it, and only for them.
    */
   proposeSkill: (request: ProposalRequest) => Promise<void>;
   /**

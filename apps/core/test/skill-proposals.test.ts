@@ -23,6 +23,7 @@ import {
 } from "../src/workflow-members.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
+import { sweepWorkflowStartDetails } from "../src/workflows/retention.ts";
 import { actingFor } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { answeringProvider } from "./model-provider.ts";
@@ -123,6 +124,17 @@ const handedOver = async (personId: string): Promise<void> => {
     await workBrain(env, new Date(clock.at), producersOf(env));
   }
   for (let run = 0; run < 10; run += 1) {
+    // Only an alarm due within the queue's own waits (its pacing and
+    // backoff, minutes): one set for later (an erasure's files wait out
+    // their 15 minutes' grace) is not this test's to run.
+    // oxlint-disable-next-line no-await-in-loop -- one alarm after the other
+    const due = await runInDurableObject(
+      ownStore(personId),
+      async (_store, state) => await state.storage.getAlarm()
+    );
+    if (due === null || due > Date.now() + 5 * 60_000) {
+      return;
+    }
     // oxlint-disable-next-line no-await-in-loop -- one alarm after the other
     if (!(await runDurableObjectAlarm(ownStore(personId)))) {
       return;
@@ -556,6 +568,56 @@ describe("skill proposals", setUpTime, () => {
       retried: 1,
       current: [1, true],
       proposed: [],
+    });
+  });
+
+  it("draws a proposal only from runs that still have their details: what retention erased is never among its runs", async () => {
+    const { drafted } = await draftingProvider(`weekly-report-${unique()}`);
+    const [builder, ada] = await Promise.all([
+      person("builder"),
+      person("user"),
+    ]);
+    const workflow = await workflowOf(builder.by, [ada.userId]);
+    // Two older runs, then their details removed and their sources erased
+    // by run retention's own sweep, as for runs past the retention.
+    const old = await runs(ada.by, workflow.id, 2);
+    await sweepWorkflowStartDetails(env, new Date(), new Date());
+    await handedOver(ada.userId);
+    // Three newer: the latest five ended include the two older.
+    const newer = await runs(ada.by, workflow.id, 3);
+    const afterThree = await proposedFrom(ada.api, workflow.id);
+    const draftsAfterThree = drafted().length;
+    const naming = await runInDurableObject(
+      ownStore(ada.userId),
+      (_store, state) =>
+        old.map(
+          (id) =>
+            state.storage.sql
+              .exec<{ count: number }>(
+                `SELECT
+                  (SELECT count(*) FROM skill_proposals WHERE rests_on LIKE ?1)
+                  + (SELECT count(*) FROM proposal_sources WHERE source = ?2)
+                  + (SELECT count(*) FROM work_items WHERE payload LIKE ?1)
+                  AS count`,
+                `%${id}%`,
+                `run:${id}`
+              )
+              .one().count
+        )
+    );
+    // Two more: five with their details, which propose.
+    const latest = await runs(ada.by, workflow.id, 2);
+    const [proposal] = await proposedFrom(ada.api, workflow.id);
+    expect({
+      afterThree,
+      draftsAfterThree,
+      naming,
+      runs: proposal?.basis.runs.map(({ id }) => id),
+    }).toStrictEqual({
+      afterThree: [],
+      draftsAfterThree: 0,
+      naming: [0, 0],
+      runs: [...latest, ...newer],
     });
   });
 

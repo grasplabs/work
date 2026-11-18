@@ -1526,7 +1526,7 @@ const leavingWork: Record<string, (who: string) => Promise<void>> = {
       person: who,
       key: await sha256(crypto.randomUUID()),
       about: "A routine.",
-      sources: [`run:${crypto.randomUUID()}`],
+      subject: "routine@1",
     });
   },
   // Their own export: written by the queue, a part a run.
