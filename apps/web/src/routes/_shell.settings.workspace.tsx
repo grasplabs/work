@@ -230,7 +230,11 @@ const StaffAccess = ({
     return <StaffAccessSection editable={editable} staff={read.data} />;
   }
   return (
-    <SectionCard density="compact" title={t`Grasp staff access`}>
+    <SectionCard
+      variant="grouped"
+      density="compact"
+      title={t`Grasp staff access`}
+    >
       <SectionNotLoaded page={read} />
     </SectionCard>
   );
@@ -246,7 +250,11 @@ const Workspace = () => {
       {page.state === "ready" ? (
         <WorkspaceSettings canChange={editable} organization={page.data} />
       ) : (
-        <SectionCard density="compact" title={t`Organization`}>
+        <SectionCard
+          variant="grouped"
+          density="compact"
+          title={t`Organization`}
+        >
           <SectionNotLoaded page={page} />
         </SectionCard>
       )}

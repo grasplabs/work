@@ -1,7 +1,6 @@
 import type { SignInOption } from "@grasp-os/shared/rpc";
 import type { OwnSession, SessionDevice } from "@grasp-os/shared/sign-in";
 import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
@@ -18,7 +17,7 @@ import {
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
-import { BrandIcon, brands } from "../grasp/brand-icon/index.ts";
+import { BrandIcon } from "../grasp/brand-icon/index.ts";
 import type { Brand } from "../grasp/brand-icon/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Desktop, Phone } from "../grasp/icons/index.ts";
@@ -32,8 +31,7 @@ import {
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
-import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { SettingsRows } from "../grasp/setting-row/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import {
@@ -42,6 +40,7 @@ import {
 } from "../settings/chat-accounts.tsx";
 import type { ChatAccounts } from "../settings/chat-accounts.tsx";
 import { pendingChatLink } from "../settings/chat-link.ts";
+import { ReadOnlyRow } from "../settings/read-only-row.tsx";
 import {
   SectionNotLoaded,
   SettingsError,
@@ -51,8 +50,8 @@ import {
 import { useCore } from "../use-core.ts";
 
 // Settings › Security, as the library's Settings pattern has it (like
-// Profile): one compact card that says what the person signs in with, the
-// provider's mark and their organization's name; and one with the devices
+// Profile): one compact card that says what the person signs in with, their
+// organization's name in a field that only reads; and one with the devices
 // they are signed in on, each with its kind's icon, this one marked. Each
 // device but this one can be signed out here; this one signs out from the
 // person menu. Core names no place a session signed in from.
@@ -64,36 +63,14 @@ import { useCore } from "../use-core.ts";
 // the account stands among the rows. Never for Grasp staff, who aren't the
 // company's people. Devices show the newest ten, and all on a press.
 
-const styles = stylex.create({
-  // The provider's mark beside the organization's name.
-  signedInWith: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: grasp.space2,
-    minWidth: 0,
-    maxWidth: "100%",
-  },
-  // The organization's name on one line, cut short where it is long.
-  name: {
-    minWidth: 0,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-  },
-});
-
-/** Whether a sign-in provider has a mark of its own: core's ids are the brands' ("microsoft", "google"). */
-const isBrand = (id: string): id is Brand => Object.hasOwn(brands, id);
-
 /** The staff's own way in (core's `providerIds.staff`): not the organization's. */
 const staffProvider = "grasp-staff";
 
 /**
- * What the person signed in with: the organization's one way in, with its
- * mark, and the organization's name; for Grasp staff, Grasp's own. With
- * more than one way in, core can't say which they used, so no mark.
+ * What the person signed in with, in words: their organization's name (the
+ * organization's one way in); for Grasp staff, Grasp's own.
  */
-const SignedInWith = ({
+const useSignedInWith = ({
   options,
   organization,
   staff,
@@ -101,29 +78,16 @@ const SignedInWith = ({
   options: SignInOption[];
   organization: string | undefined;
   staff: boolean;
-}) => {
+}): string => {
   const { t } = useLingui();
   const own = options.filter(
     ({ providerId }) => (providerId === staffProvider) === staff
   );
   const [only] = own;
   const provider = own.length === 1 ? only : undefined;
-  const name = staff
+  return staff
     ? (provider?.label ?? "Grasp")
     : (organization ?? provider?.label ?? t`Your organization’s account`);
-  return (
-    <span {...stylex.props(styles.signedInWith)}>
-      {provider !== undefined && isBrand(provider.providerId) ? (
-        <BrandIcon
-          brand={provider.providerId}
-          decorative
-          size="md"
-          tile={false}
-        />
-      ) : null}
-      <span {...stylex.props(styles.name)}>{name}</span>
-    </span>
-  );
 };
 
 /** What a session signed in on, in the page's language: "Chrome on macOS". */
@@ -230,7 +194,7 @@ const Devices = ({ sessions }: { sessions: Loaded<OwnSession[]> }) => {
   const [showAll, setShowAll] = useState(false);
   if (sessions.state !== "ready") {
     return (
-      <SectionCard density="compact" title={t`Devices`}>
+      <SectionCard variant="grouped" density="compact" title={t`Devices`}>
         <SectionNotLoaded page={sessions} />
       </SectionCard>
     );
@@ -253,6 +217,7 @@ const Devices = ({ sessions }: { sessions: Loaded<OwnSession[]> }) => {
       : [here, ...shown.filter((session) => session !== here)];
   return (
     <SectionCard
+      variant="grouped"
       density="compact"
       flush
       footer={
@@ -284,21 +249,21 @@ const Security = () => {
   const { identity } = Route.useRouteContext();
   const { options, organization, sessions, chat, waiting } =
     Route.useLoaderData();
+  const signedInWith = useSignedInWith({
+    options,
+    organization,
+    staff: identity.staff,
+  });
   return (
     <>
-      <SectionCard density="compact" flush title={t`Sign-in`}>
+      <SectionCard variant="grouped" density="compact" flush title={t`Sign-in`}>
         <SettingsRows>
-          <SettingRow
+          <ReadOnlyRow
             info={t`Passwords and two-step sign-in live with your organization’s account.`}
             infoLabel={t`More about signing in`}
             label={t`Signed in with`}
-          >
-            <SignedInWith
-              options={options}
-              organization={organization}
-              staff={identity.staff}
-            />
-          </SettingRow>
+            value={signedInWith}
+          />
         </SettingsRows>
         {chat?.state === "ready" ? (
           <LinkedChatAccounts accounts={chat.data.accounts} />

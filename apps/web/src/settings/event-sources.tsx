@@ -49,6 +49,7 @@ import {
 } from "../grasp/empty/index.ts";
 import { Field, FieldError, FieldLabel } from "../grasp/field/index.ts";
 import {
+  ChevronRight,
   Copy,
   Edit,
   Link,
@@ -441,9 +442,13 @@ const SourceRow = ({
               variant="ghost"
             />
           )}
-          <Button onClick={onOpen} size="sm" variant="ghost">
-            {t`Details`}
-          </Button>
+          <Button
+            aria-label={t`Details of ${name}`}
+            icon={ChevronRight}
+            onClick={onOpen}
+            size="sm"
+            variant="ghost"
+          />
           <SourceMenu
             busy={changes.busy}
             name={name}
@@ -905,7 +910,8 @@ export const EventSourcesSettings = ({
       onClick={() => {
         setAdding(true);
       }}
-      size="sm"
+      // On the title's line, xs: a sm button there stands over the card (a library fault being fixed).
+      size={variant === "quiet" ? "xs" : "sm"}
       variant={variant}
     >
       {t`Add a source`}
@@ -934,9 +940,9 @@ export const EventSourcesSettings = ({
     );
   const list = (
     <SectionCard
+      variant="grouped"
       actions={sources.length > 0 ? addButton("quiet") : null}
       density="compact"
-      description={t`Outside systems send events here; workflows start on them.`}
       flush
       title={t`Sources`}
     >
