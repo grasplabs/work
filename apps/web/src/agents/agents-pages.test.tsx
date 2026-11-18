@@ -379,6 +379,31 @@ describe("the company's agents, on pages of their own", () => {
   });
 
   describe("one agent's page", () => {
+    it("says in words how its last run went, never core's code for it", async () => {
+      await mounted(
+        <AgentPage
+          agent={claire}
+          documents={[]}
+          editable
+          first={false}
+          firstAccess={undefined}
+          models={[]}
+          people={[]}
+          settings={managed.settings[claire.id]}
+          tab="overview"
+          teams={teams}
+          usable
+          usage={undefined}
+          wakes={[{ ...failedWake, agentId: claire.id }]}
+        />
+      );
+      const said = document.body.textContent ?? "";
+      expect({
+        why: said.includes("no AI provider is connected"),
+        code: said.includes("model.no_provider"),
+      }).toStrictEqual({ why: true, code: false });
+    });
+
     it("pauses the agent in core from its heading, and offers a chat only while it is on and answers the person", async () => {
       const asked = await mounted(page(claire, "overview"));
       expect(

@@ -10828,7 +10828,6 @@ msgstr "Older changes"
 msgid "Older versions"
 msgstr "Older versions"
 
-#: src/agents/agent-facts.tsx
 #: src/agents/agent-page.tsx
 #: src/agents/agent-wakes.tsx
 #: src/settings/stephen-settings.tsx
@@ -11619,7 +11618,6 @@ msgstr "Pause it"
 msgid "Pause Stephen outside Grasp?"
 msgstr "Pause Stephen outside Grasp?"
 
-#: src/agents/agent-facts.tsx
 #: src/agents/agents-overview.tsx
 #: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx

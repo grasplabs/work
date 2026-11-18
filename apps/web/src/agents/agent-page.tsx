@@ -87,7 +87,7 @@ import {
 } from "./agent-facts.tsx";
 import { AgentForm } from "./agent-form.tsx";
 import type { Part, Typed } from "./agent-form.tsx";
-import { AgentWakes } from "./agent-wakes.tsx";
+import { AgentWakes, useLast } from "./agent-wakes.tsx";
 
 // One agent's page, for the company's admins, on Grasp UI: its Page
 // header holds the agent (picture, name, what it is for, whether it is
@@ -286,6 +286,7 @@ const RecentActivity = ({
 }) => {
   const { t } = useLingui();
   const moment = useMoment();
+  const lastLine = useLast();
   const ran = wakes
     .flatMap((wake) =>
       wake.lastAt === null ? [] : [{ ...wake, lastAt: wake.lastAt }]
@@ -313,9 +314,7 @@ const RecentActivity = ({
               <ItemContent>
                 <ItemTitle>{wake.opening}</ItemTitle>
                 <ItemDescription>
-                  {wake.lastOutcome === null
-                    ? moment(wake.lastAt)
-                    : `${moment(wake.lastAt)} · ${wake.lastOutcome}`}
+                  {lastLine(wake) ?? moment(wake.lastAt)}
                 </ItemDescription>
               </ItemContent>
             </Item>

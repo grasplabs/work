@@ -10828,7 +10828,6 @@ msgstr "Modifications plus anciennes"
 msgid "Older versions"
 msgstr "Versions plus anciennes"
 
-#: src/agents/agent-facts.tsx
 #: src/agents/agent-page.tsx
 #: src/agents/agent-wakes.tsx
 #: src/settings/stephen-settings.tsx
@@ -11619,7 +11618,6 @@ msgstr "Le mettre en pause"
 msgid "Pause Stephen outside Grasp?"
 msgstr "Mettre Stephen en pause en dehors de Grasp ?"
 
-#: src/agents/agent-facts.tsx
 #: src/agents/agents-overview.tsx
 #: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
