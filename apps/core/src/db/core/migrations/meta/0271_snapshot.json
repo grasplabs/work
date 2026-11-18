@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "949834b9-99ee-4746-879b-b109e529108d",
-  "prevId": "669c0a53-677a-4525-aa63-30b0a805e995",
+  "id": "24136f14-7427-4891-9027-267a9390a052",
+  "prevId": "6369ac2f-f89a-4426-9f0a-907518752f7b",
   "tables": {
     "access_revocations": {
       "name": "access_revocations",
@@ -177,6 +177,13 @@
         "verified_email": {
           "name": "verified_email",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "verified_email_at": {
+          "name": "verified_email_at",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

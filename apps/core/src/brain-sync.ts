@@ -4,7 +4,10 @@ import type { AuditActor, AuditEvent } from "@grasp-os/shared/audit";
 import { brainSourceErrors } from "@grasp-os/shared/brain-sources";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorName, log } from "@grasp-os/shared/log";
-import { sourceReaderSchema } from "@grasp-os/shared/source-readers";
+import {
+  readerProofMaxAgeMs,
+  sourceReaderSchema,
+} from "@grasp-os/shared/source-readers";
 import type { SourceReader } from "@grasp-os/shared/source-readers";
 import { ownPlace, syncErrors } from "@grasp-os/shared/sync";
 import type {
@@ -117,13 +120,15 @@ const pollMs = clockPeriods.minute;
 
 /**
  * How often every source is listed again in full, its readers read again,
- * and what the listing didn't name taken out: once a day. A product
- * choice, not a number derived from a limit: some sharing changes come
- * with no signal at all (Microsoft gives none for unsharing one file;
- * Google's feed isn't guaranteed either), so where a vendor gives none, a
- * reader the source took off can read an item for at most a day.
+ * and what the listing didn't name taken out: once a day, the age a
+ * copied reader list may reach (`readerProofMaxAgeMs`, one constant for
+ * both). A product choice, not a number derived from a limit: some
+ * sharing changes come with no signal at all (Microsoft gives none for
+ * unsharing one file; Google's feed isn't guaranteed either), so where a
+ * vendor gives none, a reader the source took off can read an item for at
+ * most a day.
  */
-const relistMs = 24 * 60 * 60 * 1000;
+const relistMs = readerProofMaxAgeMs;
 
 /**
  * When `source` next starts its daily relist after `now`: at its own
