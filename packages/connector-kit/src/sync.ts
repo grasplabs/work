@@ -1,4 +1,5 @@
 import {
+  syncChoicesSchema,
   syncContentSchema,
   syncCursorSchema,
   syncItemKindSchema,
@@ -9,6 +10,7 @@ import {
   syncReaderSchema,
 } from "@grasp-os/shared/sync";
 import type {
+  SyncChoices,
   SyncContent,
   SyncItem,
   SyncItemKind,
@@ -74,9 +76,13 @@ export const syncResultSchema = z.union([
 ]);
 export type SyncResult = z.infer<typeof syncResultSchema>;
 
-/** A connector's answer to `syncPlacesMethod`: places, or why there are none. */
+/**
+ * A connector's answer to `syncPlacesMethod`: places (a `listed` sync's),
+ * places to pick from (a `picked` sync's), or why there are none.
+ */
 export const syncPlacesResultSchema = z.union([
   syncPlacesSchema,
+  syncChoicesSchema,
   z.strictObject({ failure: syncFailureSchema }),
 ]);
 export type SyncPlacesResult = z.infer<typeof syncPlacesResultSchema>;
@@ -123,6 +129,18 @@ export interface SyncDefinition {
     /** When the read stops taking more, in ms since the epoch. */
     deadline: number;
   }) => Promise<SyncPlaces>;
+  /**
+   * For a sync of a shared connection's picked places instead
+   * (`places: "picked"`): the places the connected account can see that an
+   * admin may pick, each with its name, a read at a time from `cursor`.
+   * `read` then reads only the place asked for, never the account's own
+   * mail or files; connect asks only for a place an admin picked.
+   */
+  choices?: (params: {
+    cursor: string | null;
+    /** When the read stops taking more, in ms since the epoch. */
+    deadline: number;
+  }) => Promise<SyncChoices>;
 }
 
 /** A sync, as a connector carries it. */
@@ -255,22 +273,73 @@ const answeredPageSchema = z.object({
   more: z.boolean(),
 });
 
+/**
+ * Control and format characters, bidirectional overrides among them: what
+ * could make a planted name show as something else.
+ */
+const invisible = /[\p{Cc}\p{Cf}]/gu;
+const spaces = /\s+/gu;
+
+/**
+ * A place's name as an admin is shown it: anyone who can name a shared
+ * drive, a site or a library can name it anything, so it is only data, on
+ * one line, without control or format characters. It is never cut: it is
+ * only shown, and connect reads a connector's answer up to its bound.
+ */
+const cleanName = (name: string): string =>
+  name.replaceAll(spaces, " ").replaceAll(invisible, "").trim();
+
+/** Places to pick from as a sync answered them, each name cleaned (`cleanName`). */
+const withCleanNames = (answered: unknown): unknown => {
+  const choices = fieldOf(answered, "choices");
+  if (!Array.isArray(choices)) {
+    return answered;
+  }
+  return {
+    choices: choices.map((choice: unknown) => {
+      const title = fieldOf(choice, "title");
+      const within = fieldOf(choice, "within");
+      return typeof title === "string" &&
+        (typeof within === "string" || within === null)
+        ? {
+            place: fieldOf(choice, "place"),
+            title: cleanName(title),
+            within: within === null ? null : cleanName(within),
+          }
+        : choice;
+    }),
+    cursor: fieldOf(answered, "cursor"),
+  };
+};
+
+/** What places a sync reads, from its definition. */
+const placesKindOf = (definition: SyncDefinition): SyncManifest["places"] => {
+  if (definition.places !== undefined && definition.choices !== undefined) {
+    throw new Error("A sync lists its own places or places to pick, not both");
+  }
+  if (definition.places !== undefined) {
+    return "listed";
+  }
+  return definition.choices === undefined ? "own" : "picked";
+};
+
 /** A sync, from its definition. */
 export const defineSync = (definition: SyncDefinition): Sync => ({
   name: syncNameSchema.parse(definition.name),
   manifest: syncManifestSchema.parse({
     kind: definition.kind,
-    places: definition.places === undefined ? "own" : "listed",
+    places: placesKindOf(definition),
     routes: definition.routes,
   }),
   places: async (params) => {
     const asked = syncPlacesParamsSchema.parse(params);
-    if (definition.places === undefined) {
+    const list = definition.places ?? definition.choices;
+    if (list === undefined) {
       return { failure: { code: "failed" } };
     }
     let places: unknown;
     try {
-      places = await definition.places({
+      places = await list({
         cursor: asked.cursor,
         deadline: Date.now() + syncPageLimits.millis,
       });
@@ -278,7 +347,10 @@ export const defineSync = (definition: SyncDefinition): Sync => ({
       return { failure: failureOf(error) };
     }
     // A list with one place that isn't one is refused whole.
-    const parsed = syncPlacesSchema.safeParse(places);
+    const parsed =
+      definition.places === undefined
+        ? syncChoicesSchema.safeParse(withCleanNames(places))
+        : syncPlacesSchema.safeParse(places);
     return parsed.success ? parsed.data : { failure: { code: "failed" } };
   },
   call: async (params) => {

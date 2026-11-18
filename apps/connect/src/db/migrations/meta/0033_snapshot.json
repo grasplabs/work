@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "abc617fb-6bda-40e6-9dbf-335d60070a98",
+  "id": "0a4e5cf3-f22d-4c32-a642-b2efb4b3c9ec",
   "prevId": "c7051666-2272-40b8-8dbf-1e7833674546",
   "tables": {
     "ai_provider_keys": {
@@ -599,34 +599,6 @@
         },
         "past_verified_emails": {
           "name": "past_verified_emails",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "reader_groups": {
-          "name": "reader_groups",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "reader_groups_at": {
-          "name": "reader_groups_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "reader_groups_tried_at": {
-          "name": "reader_groups_tried_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "reader_groups_reading": {
-          "name": "reader_groups_reading",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -1611,6 +1583,67 @@
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "sync_picks": {
+      "name": "sync_picks",
+      "columns": {
+        "connection_id": {
+          "name": "connection_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "feed": {
+          "name": "feed",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "place": {
+          "name": "place",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "picked_at": {
+          "name": "picked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "sync_picks_connection_id_connections_id_fk": {
+          "name": "sync_picks_connection_id_connections_id_fk",
+          "tableFrom": "sync_picks",
+          "tableTo": "connections",
+          "columnsFrom": [
+            "connection_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "sync_picks_connection_id_feed_place_pk": {
+          "columns": [
+            "connection_id",
+            "feed",
+            "place"
+          ],
+          "name": "sync_picks_connection_id_feed_place_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
