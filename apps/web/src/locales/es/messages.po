@@ -5200,6 +5200,11 @@ msgstr "Descartó un evento que ningún flujo de trabajo pudo recibir"
 msgid "Dublin"
 msgstr "Dublín"
 
+#: src/brain/memories-page.tsx
+msgctxt "what the Brain remembers about something"
+msgid "Duration"
+msgstr "Duración"
+
 #: src/agents/agents-overview.tsx
 msgid "Each agent has its own name and job, answers only the people you choose, and does only what you let it."
 msgstr "Cada agente tiene su propio nombre y su tarea, responde solo a las personas que usted elija y hace solo lo que usted le permita."
@@ -5659,6 +5664,11 @@ msgstr "Todo lo que el Brain guardó de lo que los agentes leyeron a través de 
 #: src/interview/closed.tsx
 msgid "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."
 msgstr "Todo lo que me has contado se elimina para siempre y no se puede recuperar. ¿Solo hay algo mal? Corrígelo mejor con «Añadir algo»."
+
+#: src/brain/memories-page.tsx
+msgctxt "what the Brain remembers about something"
+msgid "Evidence"
+msgstr "Evidencia"
 
 #: src/brain/sources-page.tsx
 msgctxt "how search found a passage"
@@ -15708,6 +15718,11 @@ msgstr "Los valores se borraron junto con la persona que los escribió."
 msgid "Values weren't read."
 msgstr "Los valores no se leyeron."
 
+#: src/brain/memories-page.tsx
+msgctxt "what the Brain remembers about something"
+msgid "Variant"
+msgstr "Variante"
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "VAT number"
 msgstr "Número de IVA"
@@ -15818,6 +15833,11 @@ msgstr "Visitante de {app}"
 #: src/voice/sound-controls.tsx
 msgid "Volume"
 msgstr "Volumen"
+
+#: src/brain/memories-page.tsx
+msgctxt "what the Brain remembers about something"
+msgid "Wait"
+msgstr "Espera"
 
 #: src/workflows/figures.tsx
 msgid "wait for a decision now"

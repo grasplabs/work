@@ -476,6 +476,7 @@
   "@grasp-os/core test/workflow-resource-runs.test.ts": 7.6,
   "@grasp-os/core test/workflow-resources.test.ts": 7,
   "@grasp-os/core test/workflow-restricted-runs.test.ts": 25.2,
+  "@grasp-os/core test/workflow-run-capture.test.ts": 11.8,
   "@grasp-os/core test/workflow-run-files.test.ts": 5.7,
   "@grasp-os/core test/workflow-run-permissions.test.ts": 1,
   "@grasp-os/core test/workflow-run-signals.test.ts": 5.8,

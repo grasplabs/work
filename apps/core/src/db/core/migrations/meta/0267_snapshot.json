@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ad6f8439-d8db-4c25-91cf-388ac6b95eb9",
+  "id": "f395ee00-149f-4b3c-8d7e-7c3c15e44a6e",
   "prevId": "c0388866-23a0-458d-af73-7aaa59a96228",
   "tables": {
     "access_revocations": {
@@ -169,13 +169,6 @@
         },
         "oid": {
           "name": "oid",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "verified_email": {
-          "name": "verified_email",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -11488,37 +11481,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "source_reader_tokens": {
-      "name": "source_reader_tokens",
-      "columns": {
-        "key": {
-          "name": "key",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "token": {
-          "name": "token",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "sso_providers": {
       "name": "sso_providers",
       "columns": {
@@ -15331,6 +15293,13 @@
         "failed_task": {
           "name": "failed_task",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "captured_at": {
+          "name": "captured_at",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

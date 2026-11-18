@@ -5296,6 +5296,14 @@ export const workflowResourceRuns = sqliteTable(
      * (signals.ts).
      */
     failedTask: text("failed_task"),
+    /**
+     * When it first kept something it read through a connection in its
+     * person's own Brain store (connection-capture.ts `captureRunRead`),
+     * set before the Brain is written: such a run hands over only how it
+     * ended (run-evidence.ts `readAnything`), never a second copy that
+     * would outlive the capture's erasure. Null for a run that kept none.
+     */
+    capturedAt: timestamp("captured_at"),
   },
   (table) => [
     // Dropped with its column (GRA-1589).

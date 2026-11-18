@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ac1c52b9-b6fd-46ec-ac46-1abef3a1d111",
-  "prevId": "ad6f8439-d8db-4c25-91cf-388ac6b95eb9",
+  "id": "feefc981-ca7f-4605-9104-e61dc09714e6",
+  "prevId": "f395ee00-149f-4b3c-8d7e-7c3c15e44a6e",
   "tables": {
     "access_revocations": {
       "name": "access_revocations",
@@ -15716,6 +15716,13 @@
         "failed_task": {
           "name": "failed_task",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "captured_at": {
+          "name": "captured_at",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
