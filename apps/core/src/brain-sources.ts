@@ -80,7 +80,8 @@ import { readAnything } from "./workflows/run-evidence.ts";
 //   own, and its App's rule for taking it out of use is GRA-1926. A run that
 //   read anything that may be withheld later (run-evidence.ts
 //   `readAnything`: a version its recalls were handed, a memory its entity
-//   reads rested on, what the chat that started it had read) hands over
+//   reads rested on, what the chat that started it had read, a read it
+//   kept through a connection, GRA-1828) hands over
 //   only how it ended, never what it returned: the Brain never holds a
 //   second copy of what it read, which would outlive that source being
 //   narrowed or erased, or a person's erasure (GRA-1731, GRA-1996).

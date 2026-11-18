@@ -3,8 +3,9 @@ import { log } from "@grasp-os/shared/log";
 
 import { erasureBegun } from "../brain-hand-overs.ts";
 import { addSource, eraseSource } from "../brain-next.ts";
-import type { Handed, SourceReaders, SourceRef } from "../brain-next.ts";
+import type { Filed, Handed, SourceReaders, SourceRef } from "../brain-next.ts";
 import { opinionSource } from "./company-opinions.ts";
+import { drawingText, routineFacts } from "./routine.ts";
 import { onboardingStore } from "./store.ts";
 import type { OwedErasure, StandingDrawing } from "./store.ts";
 import { claimSource } from "./team-claims.ts";
@@ -36,7 +37,9 @@ import { claimSource } from "./team-claims.ts";
 //   (`members`, as a claim), only while everyone it rests on still counts,
 //   its team's work may show, and its map stands on its lead's facts
 //   (counted by the store). Noted and read like a claim
-//   (`drawingOf`); one drawn anew is a new source.
+//   (`drawingOf`); one drawn anew is a new source. Its routine (GRA-1749,
+//   routine.ts) is filed on its version as it is handed over, resting on
+//   it: it falls with the drawing.
 // - The kickoff (`kickoff:<id>`, GRA-1748): what every member reads of it
 //   (kickoff-company.ts), readable by everyone, under an id minted for
 //   each kickoff. Noted for the hand-over like a claim, and read here
@@ -137,35 +140,49 @@ export const drawingSource = (id: string): SourceRef => ({
 });
 
 /**
- * Drawing `drawing` of `name` (`local` in its people's words) as the new
- * Brain's source text, for recall: written for a model to read, in
- * English like the rest of Grasp's own words to it. Its parts are only
- * what its people are checked to have told, with no one's name in them,
- * and it says nothing of how many told it (GRA-1987, brain-intake.ts).
+ * The routine a drawing makes (routine.ts, GRA-1749), filed on the
+ * drawing's version as it is handed over: the routine and its team, each
+ * found again by an exact identifier of the onboarding's own, so every
+ * drawing of the same piece of work is the same routine. Only from what
+ * the drawing's row holds, never the staff list as it is now: every
+ * attempt files the same. Nothing when no step of it stands.
  */
-export const drawingText = ({
-  name,
-  local,
-  drawing,
-}: Pick<StandingDrawing, "name" | "local" | "drawing">): string => {
-  const steps = drawing.steps.map(({ text, who, tool, minutes }, at) => {
-    const about = [
-      who,
-      tool,
-      minutes === null ? "" : `about ${minutes.normal} minutes`,
-    ].filter((part) => part !== "");
-    return `${at + 1}. ${text}${about.length === 0 ? "" : ` (${about.join(", ")})`}`;
-  });
-  return [
-    `How a team does ${name}${local === undefined ? "" : ` (${local})`}, as its people told it`,
-    drawing.starts === "" ? "" : `What starts one: ${drawing.starts}`,
-    steps.length === 0 ? "" : `Its steps:\n${steps.join("\n")}`,
-    drawing.waits.length === 0
-      ? ""
-      : `Where it waits: ${drawing.waits.join("; ")}`,
-  ]
-    .filter((part) => part !== "")
-    .join("\n\n");
+const routineFiled = (held: StandingDrawing): { filed?: Filed } => {
+  const facts = routineFacts(held);
+  if (facts.length === 0) {
+    return {};
+  }
+  return {
+    filed: {
+      entities: [
+        {
+          key: "routine",
+          kind: "routine",
+          names:
+            held.local === undefined ? [held.name] : [held.name, held.local],
+          identifiers: [
+            { type: "ref", value: `grasp:routine:${held.workflow}` },
+          ],
+        },
+        // By its identifier alone: a name would be the staff list's at the
+        // moment of each attempt, and a retry after a rename would file
+        // other memories under the same change.
+        {
+          key: "team",
+          kind: "team",
+          identifiers: [{ type: "ref", value: `grasp:team:${held.team}` }],
+        },
+      ],
+      memories: facts.map(({ attribute, value, statement, line }) => ({
+        about: "routine",
+        attribute,
+        ...(attribute === "team" ? { object: "team" } : { value }),
+        type: "fact",
+        statement,
+        quote: line,
+      })),
+    },
+  };
 };
 
 /** Drawing `id` as the onboarding holds it now: what its people told of the piece of work; nothing once it no longer stands. */
@@ -179,6 +196,7 @@ export const drawingOf = async (env: Env, id: string): Promise<Handed> => {
         text: drawingText(held),
         whenTooLarge: "A drawing of the team's work too large to keep.",
         readers: { kind: "members" },
+        ...routineFiled(held),
       };
 };
 

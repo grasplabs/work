@@ -213,8 +213,16 @@ const useAttributeLabel = (): ((attribute: BrainMemoryAttribute) => string) => {
       message: "Description",
       context: "what the Brain remembers about something",
     }),
+    duration: t({
+      message: "Duration",
+      context: "what the Brain remembers about something",
+    }),
     employer: t({
       message: "Employer",
+      context: "what the Brain remembers about something",
+    }),
+    evidence: t({
+      message: "Evidence",
       context: "what the Brain remembers about something",
     }),
     expertise: t({
@@ -339,6 +347,14 @@ const useAttributeLabel = (): ((attribute: BrainMemoryAttribute) => string) => {
     }),
     uses: t({
       message: "Uses",
+      context: "what the Brain remembers about something",
+    }),
+    variant: t({
+      message: "Variant",
+      context: "what the Brain remembers about something",
+    }),
+    wait: t({
+      message: "Wait",
       context: "what the Brain remembers about something",
     }),
   };

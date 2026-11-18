@@ -39,7 +39,7 @@ import {
   answerCaptureIdOf,
   captureIdOf,
 } from "../src/connection-capture-key.ts";
-import { captureRead } from "../src/connection-capture.ts";
+import { captureRead, captureRunRead } from "../src/connection-capture.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { instructionFilesFor } from "../src/instruction-files.ts";
 import { codeStep, says, toolStep } from "./agent-chat.ts";
@@ -53,6 +53,7 @@ import {
   recallSurfaces,
   findingsOf,
   ownStoreOf,
+  settledOwnStores,
   join,
   leave,
   newTeam,
@@ -225,12 +226,14 @@ interface HoldersProduced {
   ownUploadMarker: string;
   captureMarker: string;
   toolkitCaptureMarker: string;
+  runCaptureMarker: string;
   runMarker: string;
   askedMarker: string;
   answerMarker: string;
   ownUpload: SourceRef;
   captureId: SourceRef;
   toolkitCaptureId: SourceRef;
+  runCaptureId: SourceRef;
   runSource: SourceRef;
   turnSource: SourceRef;
 }
@@ -248,6 +251,7 @@ const holdersOwnProduced = (world: HoldersProduced) => {
     "what the holder's agent fetched through a connection": world.captureMarker,
     "what the holder's agent fetched through a toolkit":
       world.toolkitCaptureMarker,
+    "what the holder's run fetched through a toolkit": world.runCaptureMarker,
     "the holder's run": world.runMarker,
     "a question in the holder's chat": world.askedMarker,
     "an answer in the holder's chat": world.answerMarker,
@@ -259,6 +263,7 @@ const holdersOwnProduced = (world: HoldersProduced) => {
       world.ownUpload,
       world.captureId,
       world.toolkitCaptureId,
+      world.runCaptureId,
       world.runSource,
       world.turnSource,
     ],
@@ -364,6 +369,9 @@ describe(
         "an upload for a team the outsider isn't in": markerWord(),
         "what the holder's agent fetched through a connection": markerWord(),
         "what the holder's agent fetched through a toolkit": markerWord(),
+        "what the holder's run fetched through a toolkit": markerWord(),
+        "what a trigger's run fetched through the holder's toolkit":
+          markerWord(),
         "what an agent read through a shared connection for a team the outsider isn't in":
           markerWord(),
         "the holder's own skill": markerWord(),
@@ -408,6 +416,9 @@ describe(
         "what the holder's agent fetched through a connection": captureMarker,
         "what the holder's agent fetched through a toolkit":
           toolkitCaptureMarker,
+        "what the holder's run fetched through a toolkit": runCaptureMarker,
+        "what a trigger's run fetched through the holder's toolkit":
+          triggerCaptureMarker,
         "what an agent read through a shared connection for a team the outsider isn't in":
           sharedReadMarker,
         "the holder's own skill": holderSkillMarker,
@@ -652,6 +663,66 @@ describe(
           "mail.search",
           toolkitCall
         ),
+      };
+      // Read by a workflow run the holder started, through their own
+      // toolkit connection (GRA-1828, connection-capture.ts
+      // `captureRunRead`): kept as their agent's read is, theirs alone, its
+      // connection's ID holding a marker too. Its twin, the same read by a
+      // run a trigger started, acts as the workflow itself and is kept for
+      // nobody, the holder included.
+      const runConnection = `connection-${runCaptureMarker}`;
+      await connectDb()
+        .prepare(
+          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tools, created_at, updated_at) VALUES (?, 'mail', 'personal', ?, 'active', 'composio', 'https://mail.test/mcp', ?, ?, ?)"
+        )
+        .bind(
+          runConnection,
+          holder,
+          JSON.stringify([{ name: "mail.search", read: true }]),
+          readAtNow,
+          readAtNow
+        )
+        .run();
+      const runRead = async (
+        marker: string,
+        invoker: "person" | "trigger"
+      ): Promise<void> => {
+        await captureRunRead(
+          env,
+          {
+            run: {
+              runId: crypto.randomUUID(),
+              principal: holder,
+              invoker: {
+                type: invoker,
+                id: invoker === "person" ? holder : crypto.randomUUID(),
+                appVersion: null,
+              },
+            },
+            sensitive: false,
+            // As a step's attempt that has a minute left.
+            deadline: Date.now() + 60_000,
+          },
+          runConnection,
+          "mail.search",
+          { query: `orders ${marker}` },
+          {
+            result: {
+              output: JSON.stringify(`Supplier orders ${sharedWord} ${marker}`),
+              provenance: ["mail/mail.search"],
+              keep: true,
+            },
+            readAt: new Date(readAtNow),
+          }
+        );
+      };
+      await runRead(runCaptureMarker, "person");
+      await runRead(triggerCaptureMarker, "trigger");
+      const runCaptureId: SourceRef = {
+        producer: "capture",
+        id: await answerCaptureIdOf(runConnection, holder, "mail.search", {
+          query: `orders ${runCaptureMarker}`,
+        }),
       };
       // Read through a shared connection an admin opened in the Brain to a
       // team the outsider isn't in (GRA-1831): readable by that team, as
@@ -995,6 +1066,25 @@ describe(
           source.id === toolkitCaptureId.id &&
           text.includes(toolkitCaptureMarker)
       );
+      // And what their run read, by its own key; never its twin's.
+      /** Whether the holder's own recall finds `marker` in `source`'s text. */
+      const holderFinds = async (marker: string, source?: SourceRef) => {
+        const { items } = await recallAs(env, holder, {
+          personal: true,
+          question: `orders ${marker}`,
+          budget: { tokens: recallBudgetMax },
+        });
+        return items.some(
+          ({ source: found, text }) =>
+            (source === undefined || found.id === source.id) &&
+            text.includes(marker)
+        );
+      };
+      const holderFindsRunCapture = await holderFinds(
+        runCaptureMarker,
+        runCaptureId
+      );
+      const holderFindsTriggerCapture = await holderFinds(triggerCaptureMarker);
       // And by the ID the hidden copies share: their own chunk, as exact.
       const { items: cappedItems } = await recallAs(env, outsider, {
         personal: true,
@@ -1019,6 +1109,7 @@ describe(
           narrowedMarker,
           captureMarker,
           toolkitCaptureMarker,
+          runCaptureMarker,
           sharedReadMarker,
           toHolderMarker,
           ...instructionMarkers,
@@ -1040,6 +1131,7 @@ describe(
           teamUpload,
           captureId,
           toolkitCaptureId,
+          runCaptureId,
           sharedReadId,
           runSource,
           turnSource
@@ -1164,6 +1256,10 @@ describe(
               String
             );
 
+      // Their own stores embedded and asleep before any pass, so no tick
+      // of theirs, on its own alarm, runs while one asks (`settledOwnStores`).
+      await settledOwnStores([holder, outsider]);
+
       return {
         holder,
         outsider,
@@ -1191,6 +1287,9 @@ describe(
         captureId,
         toolkitCaptureMarker,
         toolkitCaptureId,
+        runCaptureMarker,
+        runCaptureId,
+        triggerCaptureMarker,
         runMarker,
         askedMarker,
         answerMarker,
@@ -1232,6 +1331,8 @@ describe(
           outsiderFinds: outsiderFinds.toSorted(),
           holderFindsCapture,
           holderFindsToolkitCapture,
+          holderFindsRunCapture,
+          holderFindsTriggerCapture,
           cappedFinds,
           teamSkillSelected,
           holderAppFile: holderAppFiles.some(
@@ -1346,6 +1447,8 @@ describe(
         ].toSorted(),
         holderFindsCapture: true,
         holderFindsToolkitCapture: true,
+        holderFindsRunCapture: true,
+        holderFindsTriggerCapture: false,
         cappedFinds: [{ text: capped, found: "exact" }],
         teamSkillSelected: {
           byTheHolder: [`${secretTeam}:${teamSkillMarker}`],
@@ -1446,12 +1549,15 @@ describe(
               // A non-member holds no group, those instruction files are
               // written for (the company's) included.
               instructionGroups: [],
+              // Every company marker stays forbidden (`forbidden`), the
+              // opinion's too; the fixture's own text holds the Brain's
+              // most a value may (500 characters), which the opinion's
+              // marker would pass once every producer has one.
               markers: [
                 ...asOutsider.markers,
                 world.everyoneUploadMarker,
                 world.claimMarker,
                 world.drawingMarker,
-                world.opinionMarker,
               ],
               hiddenVersions: [
                 ...asOutsider.hiddenVersions,
@@ -1618,6 +1724,8 @@ describe(
             world.narrowedMarker,
             world.captureMarker,
             world.toolkitCaptureMarker,
+            world.runCaptureMarker,
+            world.triggerCaptureMarker,
             world.toHolderMarker,
             ...world.instructionMarkers,
             world.ownUploadMarker,
@@ -1632,6 +1740,7 @@ describe(
             world.ownUpload,
             world.captureId,
             world.toolkitCaptureId,
+            world.runCaptureId,
             world.runSource,
             world.turnSource
           ),
