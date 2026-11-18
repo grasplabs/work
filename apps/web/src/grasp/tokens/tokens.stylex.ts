@@ -86,6 +86,7 @@ export const grasp = stylex.defineConsts({
   // Type: weights and tracking.
   weightRegular: "var(--grasp-weight-regular)",
   weightMedium: "var(--grasp-weight-medium)",
+  weightSemibold: "var(--grasp-weight-semibold)",
   trackingTitle: "var(--grasp-tracking-title)",
   trackingUi: "var(--grasp-tracking-ui)",
   trackingUiTitle: "var(--grasp-tracking-ui-title)",
@@ -290,6 +291,8 @@ export const grasp = stylex.defineConsts({
   popoverPadding: "var(--grasp-popover-padding)",
   popoverGap: "var(--grasp-popover-gap)",
   popoverWidth: "var(--grasp-popover-width)",
+  hoverCardMinWidth: "var(--grasp-hover-card-min-width)",
+  hoverCardMaxWidth: "var(--grasp-hover-card-max-width)",
   tooltipFill: "var(--grasp-tooltip-fill)",
   tooltipText: "var(--grasp-tooltip-text)",
   tooltipMuted: "var(--grasp-tooltip-muted)",

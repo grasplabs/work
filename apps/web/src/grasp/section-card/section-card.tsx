@@ -12,6 +12,9 @@
 //   <SectionCard title="Revenue" fill handle={{ label: "Move Revenue", ...dragProps }}>
 //     <Chart …/>                                   a dashboard widget: its cell's height, moved by its title row
 //   </SectionCard>
+//   <SectionCard variant="grouped" density="compact" flush title="Plan">
+//     <SettingsRows>…</SettingsRows>               the title on the page above, the card the rows alone
+//   </SectionCard>
 //
 // Every value is a token (src/tokens). A caller may set layout and width only (the `style` prop).
 "use client";
@@ -26,6 +29,7 @@ import type { CardLayoutStyle } from "../card";
 import { focus } from "../focus/focus";
 import { Info } from "../icons";
 import { SectionHeader } from "../section-header";
+import { sectionHeaderVars } from "../section-header/section-header.stylex";
 import { Separator } from "../separator";
 import { tableVars } from "../table/table.stylex";
 import { grasp } from "../tokens/tokens.stylex";
@@ -109,6 +113,14 @@ interface SectionCardOwn {
    * @default "comfortable"
    */
   density?: "comfortable" | "compact";
+  /**
+   * Where the title stands. `boxed`: in a header inside the card, a part of a page or a dashboard
+   * widget. `grouped`: on the page's ground just above the card, which holds the rows alone, a
+   * group of a settings page; its words start where the rows' do. `fill` and `handle` are a boxed
+   * card's.
+   * @default "boxed"
+   */
+  variant?: "boxed" | "grouped";
   /** Placeholders where the title and the sentence will be, while they load. @default false */
   loading?: boolean;
   /**
@@ -160,6 +172,24 @@ const styles = stylex.create({
   bodyTop: { paddingBlockStart: grasp.space5 },
   bodyTopCompact: { paddingBlockStart: grasp.space4 },
   footCompact: { paddingInline: grasp.space4 },
+  // Grouped: the title over the card, on the page's ground, its words where the rows' start. The
+  // card stands a small step under it, so the title and its card read as one group.
+  grouped: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    rowGap: grasp.space2,
+    minWidth: 0,
+  },
+  // A small button on the title's line is no taller than the line: the card stands 8px under the
+  // head's last line whether that is the title with an action or a sentence. The title is a
+  // group's (Section header's `group`): text-md, its sentence text-sm.
+  groupedHead: {
+    paddingInline: grasp.space5,
+    containerType: "inline-size",
+    containerName: "section-card-head",
+    [sectionHeaderVars.actionsTrim]: `min(0px, calc((${grasp.textMdLine} - ${grasp.controlSm}) / 2))`,
+  },
+  groupedHeadCompact: { paddingInline: grasp.space4 },
   // Over the header, under its actions (SectionHeader lifts them): the whole row but the buttons
   // takes the press. Its top corners are the card's, so the ring inside it follows them.
   handled: { position: "relative" },
@@ -366,7 +396,87 @@ const Beside = ({
   );
 };
 
-export const SectionCard = ({
+interface GroupedProps {
+  id: string;
+  title: ReactNode;
+  description: ReactNode;
+  aside: ReactNode;
+  actions: ReactNode;
+  level: 2 | 3 | 4;
+  loading: boolean;
+  compact: boolean;
+  flush: boolean;
+  ariaLabel: string | undefined;
+  layout: CardLayoutStyle | undefined;
+  children: ReactNode;
+  footer: ReactNode;
+}
+
+/** The grouped form: the title on the page, then the card of rows; one region named by the title. */
+const Grouped = ({
+  id,
+  title,
+  description,
+  aside,
+  actions,
+  level,
+  loading,
+  compact,
+  flush,
+  ariaLabel,
+  layout,
+  children,
+  footer,
+}: GroupedProps) => (
+  <section
+    aria-label={ariaLabel}
+    aria-labelledby={ariaLabel === undefined ? id : undefined}
+    data-slot="section-card"
+    data-variant="grouped"
+    {...stylex.props(styles.grouped, layout)}
+  >
+    <div
+      {...stylex.props(
+        styles.groupedHead,
+        compact && styles.groupedHeadCompact,
+        flush && styles.edgeFlush
+      )}
+    >
+      <SectionHeader
+        id={id}
+        title={title}
+        description={description}
+        aside={aside}
+        actions={actions}
+        headingLevel={level}
+        variant="group"
+        loading={loading}
+      />
+    </div>
+    <Card padding="none">
+      <div {...stylex.props(styles.card)}>
+        <div
+          data-slot="section-card-body"
+          {...stylex.props(
+            flush
+              ? styles.flush
+              : [
+                  styles.body,
+                  compact && styles.bodyCompact,
+                  compact ? styles.bodyTopCompact : styles.bodyTop,
+                ]
+          )}
+        >
+          {children}
+        </div>
+        <Foot footer={footer} fill={false} compact={compact} flush={flush} />
+      </div>
+    </Card>
+  </section>
+);
+
+// The boxed form: the title in a header inside the card.
+const Boxed = ({
   title,
   "aria-label": ariaLabel,
   description,
@@ -446,3 +556,57 @@ export const SectionCard = ({
     </Card>
   );
 };
+
+// The grouped form, from the card's props: the title on the page, the card of rows under it.
+const GroupedCard = ({
+  title,
+  "aria-label": ariaLabel,
+  description,
+  aside,
+  info,
+  infoLabel,
+  actions,
+  children,
+  footer,
+  flush = false,
+  level: levelDeprecated,
+  headingLevel: level = levelDeprecated ?? 2,
+  loading = false,
+  density = "comfortable",
+  style: styleProp,
+  layout,
+}: SectionCardProps) => {
+  const id = useId();
+  return (
+    <Grouped
+      id={id}
+      title={title}
+      description={description}
+      aside={
+        info === undefined ? (
+          aside
+        ) : (
+          <Beside info={info} infoLabel={infoLabel} aside={aside} />
+        )
+      }
+      actions={actions}
+      level={level}
+      loading={loading}
+      compact={density === "compact"}
+      flush={flush}
+      ariaLabel={ariaLabel}
+      layout={layout ?? styleProp}
+      footer={footer}
+    >
+      {children}
+    </Grouped>
+  );
+};
+
+/** One part of a page on a card: its title (in its header, or over it), what it holds, and a foot. */
+export const SectionCard = (props: SectionCardProps) =>
+  props.variant === "grouped" && props.title !== undefined ? (
+    <GroupedCard {...props} />
+  ) : (
+    <Boxed {...props} />
+  );
