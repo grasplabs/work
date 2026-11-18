@@ -12,6 +12,7 @@ import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { modelName } from "../chat/model-names.tsx";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
@@ -22,6 +23,7 @@ import {
   CardMedia,
   CardTitle,
 } from "../grasp/card/index.ts";
+import { cardLinkMarker } from "../grasp/card/markers.stylex.ts";
 import {
   Empty,
   EmptyContent,
@@ -31,11 +33,25 @@ import {
   EmptyTitle,
 } from "../grasp/empty/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardDescription,
+  HoverCardTitle,
+  HoverCardTrigger,
+} from "../grasp/hover-card/index.ts";
 import { AgentPerson, Plus } from "../grasp/icons/index.ts";
+import { KeyValueList } from "../grasp/key-value/index.ts";
+import { simply } from "../grasp/motion/simply.stylex.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { dollars } from "../settings/money.ts";
-import { classesOn, useAudienceLine, wakesOn } from "./agent-facts.tsx";
+import {
+  classesOn,
+  nextWakeAt,
+  useAudienceLine,
+  wakesOn,
+} from "./agent-facts.tsx";
 import { AgentAura, AgentFigure } from "./figure/agent-figure.tsx";
 import type { FigureState } from "./figure/body.ts";
 import { lookOf } from "./figure/look.ts";
@@ -173,23 +189,113 @@ const styles = stylex.create({
     insetInlineStart: grasp.space5,
     zIndex: 1,
   },
+  // CONCEPT F: the facts that matter most, two by two at the portrait's foot.
+  factsGrid: {
+    position: "absolute",
+    insetInline: 0,
+    insetBlockEnd: 0,
+    zIndex: 1,
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+    columnGap: grasp.space4,
+    rowGap: grasp.space3,
+    padding: grasp.space5,
+    paddingBlockStart: grasp.space10,
+    backgroundImage: `linear-gradient(to top, ${grasp.lightNight} 55%, transparent)`,
+  },
+  fact: { display: "grid", gap: "2px", minWidth: 0 },
+  // F: the figure lifted to the middle of the card's end, clear of the facts and the words.
+  richFigure: { insetBlockEnd: "8.5rem", insetInlineEnd: "-1.5rem" },
+  oneLine: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  // CONCEPT G: a smaller portrait, five to a row.
+  smallGrid: {
+    gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 12.5rem), 1fr))",
+    gap: grasp.space3,
+  },
+  small: { minHeight: "15rem", padding: grasp.space4 },
+  smallFigure: { insetBlockEnd: "-2.5rem", insetInlineEnd: "-2.5rem" },
+  smallFoot: { insetBlockEnd: grasp.space4, insetInlineStart: grasp.space4 },
+  clamp: {
+    display: "-webkit-box",
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: "vertical",
+    overflow: "hidden",
+  },
+  // CONCEPT H: a short, wide portrait, three to a row.
+  wideGrid: {
+    gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 21rem), 1fr))",
+    gap: grasp.space3,
+  },
+  wide: { minHeight: "9.5rem", padding: grasp.space4 },
+  wideWords: { maxWidth: "62%" },
+  wideFigure: {
+    insetBlockEnd: "auto",
+    insetBlockStart: "50%",
+    insetInlineEnd: "-2rem",
+    transform: "translateY(-50%)",
+  },
+  wideFoot: { insetBlockEnd: grasp.space4, insetInlineStart: grasp.space4 },
+  // The reveal: on the card's hover or keyboard focus, its night deepens from the foot and what
+  // there is to know rises into it, over the figure, on the house curve; at once with reduced motion.
+  reveal: {
+    position: "absolute",
+    inset: 0,
+    zIndex: 2,
+    display: "grid",
+    alignContent: "end",
+    padding: grasp.space5,
+    backgroundImage: `linear-gradient(to top, ${grasp.lightNight} 0%, ${grasp.lightNight} 46%, transparent 92%)`,
+    pointerEvents: "none",
+    opacity: {
+      default: 0,
+      [stylex.when.ancestor(":hover", cardLinkMarker)]: 1,
+      [stylex.when.ancestor(":focus-visible", cardLinkMarker)]: 1,
+    },
+    transform: {
+      default: "translateY(8px)",
+      [stylex.when.ancestor(":hover", cardLinkMarker)]: "none",
+      [stylex.when.ancestor(":focus-visible", cardLinkMarker)]: "none",
+    },
+    transitionProperty: "opacity, transform",
+    transitionDuration: simply.appear,
+    transitionTimingFunction: grasp.ease,
+  },
+  revealSmall: { padding: grasp.space4 },
+  // While it shows, the card's own foot steps back, so nothing is said twice.
+  hides: {
+    opacity: {
+      default: 1,
+      [stylex.when.ancestor(":hover", cardLinkMarker)]: 0,
+      [stylex.when.ancestor(":focus-visible", cardLinkMarker)]: 0,
+    },
+    transitionProperty: "opacity",
+    transitionDuration: simply.appear,
+    transitionTimingFunction: grasp.ease,
+  },
+  popCard: { display: "block", color: "inherit", textDecorationLine: "none" },
 });
 
 /** CONCEPT: which card the page draws, from `?card=` in the address. */
-type Concept = "a" | "b" | "c" | "d" | "e";
+type Concept = "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h";
+const concepts: readonly Concept[] = ["a", "b", "c", "d", "e", "f", "g", "h"];
 const conceptOf = (): Concept => {
   const asked =
     typeof window === "undefined"
       ? null
       : new URLSearchParams(window.location.search).get("card");
-  return asked === "a" ||
-    asked === "b" ||
-    asked === "c" ||
-    asked === "d" ||
-    asked === "e"
-    ? asked
-    : "a";
+  return concepts.find((each) => each === asked) ?? "e";
 };
+
+/** CONCEPT: how a card says more on hover, from `?hover=`: inside the card, or a HoverCard beside it. */
+const hoverOf = (): "reveal" | "pop" =>
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("hover") === "pop"
+    ? "pop"
+    : "reveal";
 
 /** What a card shows of one agent. */
 interface Shown {
@@ -200,9 +306,12 @@ interface Shown {
   face: string;
   /** Whether the person may talk to it. */
   usable: boolean;
+  /** The model its turns use; null for the asker's. */
+  model: string | null;
   /** As an admin reads it; undefined for anyone else. */
   managed:
     | {
+        changedAt: string | null;
         state: Agent["state"];
         first: boolean;
         settings: AgentSettings | undefined;
@@ -258,11 +367,12 @@ const shownOf = (
   managed: ManagedAgents | undefined
 ): Shown[] => {
   if (managed === undefined) {
-    return usable.map(({ id, name, job, face }) => ({
+    return usable.map(({ id, name, job, face, model }) => ({
       id,
       name,
       job,
       face,
+      model,
       usable: true,
       managed: undefined,
     }));
@@ -273,8 +383,10 @@ const shownOf = (
     name: agent.name,
     job: agent.job,
     face: agent.face,
+    model: agent.model,
     usable: usable.some(({ id }) => id === agent.id),
     managed: {
+      changedAt: agent.changedAt,
       state: agent.state,
       first: agent.id === first?.id,
       settings: managed.settings[agent.id],
@@ -346,17 +458,243 @@ const NameLine = ({ shown }: { shown: Shown }) => {
   );
 };
 
+/** CONCEPT: what there is to know of an agent before opening it, a row each. */
+const useDetails = (shown: Shown, teams: StephenReach["teams"]) => {
+  const { t, i18n } = useLingui();
+  const audienceLine = useAudienceLine(teams);
+  const moment = (iso: string): string =>
+    new Intl.DateTimeFormat(i18n.locale, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(new Date(iso));
+  const { managed } = shown;
+  const model = shown.model === null ? t`The asker's` : modelName(shown.model);
+  if (managed === undefined) {
+    return [{ key: t`Model`, value: model }];
+  }
+  const rows: { key: string; value: string }[] = [];
+  if (managed.first) {
+    rows.push({ key: t`Answers`, value: t`Everyone with Grasp` });
+  } else if (managed.settings === undefined) {
+    rows.push({ key: t`Answers`, value: t`Access not shown` });
+  } else {
+    const classes = classesOn(managed.settings);
+    rows.push(
+      { key: t`Answers`, value: audienceLine(managed.settings.audience) },
+      {
+        key: t`May do`,
+        value:
+          classes.on === 0
+            ? t`Nothing yet`
+            : t`${classes.on} of ${classes.of} kinds of work`,
+      }
+    );
+  }
+  const scheduled = wakesOn(managed.wakes).length;
+  const next = nextWakeAt(managed.wakes);
+  const nextMoment = next === undefined ? "" : moment(next);
+  rows.push({
+    key: t`On its own`,
+    value:
+      scheduled === 0
+        ? t`Only when asked`
+        : t`${scheduled} on a schedule, next ${nextMoment}`,
+  });
+  const { usage } = managed;
+  if (usage !== undefined) {
+    const spent = dollars(usage.spent);
+    const { requests, people } = usage;
+    rows.push(
+      {
+        key: t`This month`,
+        value: [
+          spent,
+          plural(requests, { one: "# request", other: "# requests" }),
+          plural(people, { one: "# person", other: "# people" }),
+        ].join(" · "),
+      },
+      {
+        key: t`Last asked`,
+        value: usage.lastAt === null ? t`Never yet` : moment(usage.lastAt),
+      }
+    );
+  }
+  rows.push({ key: t`Model`, value: model });
+  if (managed.changedAt !== null) {
+    rows.push({ key: t`Changed`, value: moment(managed.changedAt) });
+  }
+  return rows;
+};
+
+/** CONCEPT: a portrait's foot: the facts two by two, or one fact, or Paused; it steps back while the reveal shows. */
+const PortraitFoot = ({
+  rich,
+  paused,
+  reveal,
+  size,
+  details,
+  facts,
+}: {
+  rich: boolean;
+  paused: boolean;
+  reveal: boolean;
+  size: "tall" | "small" | "wide";
+  details: readonly { key: string; value: string }[];
+  facts: readonly string[];
+}) => {
+  const { t } = useLingui();
+  const small = size === "small";
+  const wide = size === "wide";
+  return rich && !paused ? (
+    <span {...stylex.props(styles.factsGrid, reveal && styles.hides)}>
+      {details.slice(0, 4).map(({ key, value }) => (
+        <span key={key} {...stylex.props(styles.fact)}>
+          <Text element="span" size="xs" tone="quiet">
+            {key}
+          </Text>
+          <span {...stylex.props(styles.oneLine)}>
+            <Text element="span" size="sm">
+              {value}
+            </Text>
+          </span>
+        </span>
+      ))}
+    </span>
+  ) : (
+    <span
+      {...stylex.props(
+        styles.portraitFoot,
+        small && styles.smallFoot,
+        wide && styles.wideFoot,
+        reveal && styles.hides
+      )}
+    >
+      {paused ? (
+        <Badge size="sm" tone="neutral">
+          {t`Paused`}
+        </Badge>
+      ) : (
+        <Text element="span" size="xs" tone="quiet">
+          {facts.at(0) ?? ""}
+        </Text>
+      )}
+    </span>
+  );
+};
+
+/**
+ * CONCEPT: each portrait's size, and how many rows of what there is to know fit under its name
+ * on hover: five on a tall card, three on a small one, two on a wide one.
+ */
+const portraitSizes: Record<
+  Concept,
+  { size: "tall" | "small" | "wide"; fits: number }
+> = {
+  a: { size: "tall", fits: 5 },
+  b: { size: "tall", fits: 5 },
+  c: { size: "tall", fits: 5 },
+  d: { size: "tall", fits: 5 },
+  e: { size: "tall", fits: 5 },
+  f: { size: "tall", fits: 5 },
+  g: { size: "small", fits: 3 },
+  h: { size: "wide", fits: 2 },
+};
+
+/** CONCEPT E to H: the portrait, as tall, rich, small or wide, with what there is to know on hover. */
+const Portrait = ({
+  concept,
+  shown,
+  facts,
+  reveal,
+  teams,
+}: {
+  concept: Concept;
+  shown: Shown;
+  facts: readonly string[];
+  /** Whether what there is to know rises inside the card on hover (else a HoverCard says it). */
+  reveal: boolean;
+  teams: StephenReach["teams"];
+}) => {
+  const { t } = useLingui();
+  const look = lookOf(shown);
+  const { state, paused, near } = usePose(shown);
+  const details = useDetails(shown, teams);
+  const { size, fits } = portraitSizes[concept];
+  const small = size === "small";
+  const wide = size === "wide";
+  const rich = concept === "f";
+  const compact = small || wide;
+  const shownDetails = details.slice(0, fits);
+  return (
+    <span
+      {...near}
+      {...stylex.props(
+        styles.portrait,
+        small && styles.small,
+        wide && styles.wide
+      )}
+    >
+      <AgentAura
+        bright={paused ? 0.45 : 1}
+        key={paused ? "asleep" : "awake"}
+        look={look}
+      />
+      <span
+        {...stylex.props(
+          styles.portraitFigure,
+          small && styles.smallFigure,
+          wide && styles.wideFigure,
+          rich && styles.richFigure
+        )}
+      >
+        <AgentFigure
+          look={look}
+          size={compact || rich ? "lg" : "xl"}
+          state={state}
+        />
+      </span>
+      <span {...stylex.props(styles.portraitWords, wide && styles.wideWords)}>
+        <Heading level={3} size={compact ? "sm" : "md"}>
+          {shown.name}
+        </Heading>
+        <span {...stylex.props(small && styles.clamp, reveal && styles.hides)}>
+          <CardDescription>
+            {shown.job === "" ? t`No job written yet` : shown.job}
+          </CardDescription>
+        </span>
+      </span>
+      <PortraitFoot
+        details={details}
+        facts={facts}
+        paused={paused}
+        reveal={reveal}
+        rich={rich}
+        size={size}
+      />
+      {reveal ? (
+        <span {...stylex.props(styles.reveal, compact && styles.revealSmall)}>
+          <KeyValueList items={shownDetails} variant="inline" />
+        </span>
+      ) : null}
+    </span>
+  );
+};
+
 /** CONCEPT: one card's inside, drawn as concept `concept`. */
 const Concepted = ({
   concept,
   shown,
   facts,
+  teams,
 }: {
   concept: Concept;
   shown: Shown;
   facts: readonly string[];
+  teams: StephenReach["teams"];
 }) => {
-  const { t } = useLingui();
   const look = lookOf(shown);
   const { state, paused, near } = usePose(shown);
   const aura = (
@@ -422,31 +760,13 @@ const Concepted = ({
     );
   }
   return (
-    <span {...near} {...stylex.props(styles.portrait)}>
-      {aura}
-      <span {...stylex.props(styles.portraitFigure)}>
-        <AgentFigure look={look} size="xl" state={state} />
-      </span>
-      <span {...stylex.props(styles.portraitWords)}>
-        <Heading level={3} size="md">
-          {shown.name}
-        </Heading>
-        <CardDescription>
-          {shown.job === "" ? t`No job written yet` : shown.job}
-        </CardDescription>
-      </span>
-      <span {...stylex.props(styles.portraitFoot)}>
-        {paused ? (
-          <Badge size="sm" tone="neutral">
-            {t`Paused`}
-          </Badge>
-        ) : (
-          <Text element="span" size="xs" tone="quiet">
-            {facts.at(0) ?? ""}
-          </Text>
-        )}
-      </span>
-    </span>
+    <Portrait
+      concept={concept}
+      facts={facts}
+      reveal={hoverOf() === "reveal"}
+      shown={shown}
+      teams={teams}
+    />
   );
 };
 
@@ -457,13 +777,42 @@ const Concepted = ({
 const AgentCard = ({
   shown,
   facts,
+  teams,
 }: {
   shown: Shown;
   facts: readonly string[];
+  teams: StephenReach["teams"];
 }) => {
   const { t } = useLingui();
   const concept = conceptOf();
-  const inside = <Concepted concept={concept} facts={facts} shown={shown} />;
+  const inside = (
+    <Concepted concept={concept} facts={facts} shown={shown} teams={teams} />
+  );
+  const details = useDetails(shown, teams);
+  if (hoverOf() === "pop" && "efgh".includes(concept)) {
+    const link =
+      shown.managed === undefined ? (
+        <Link search={{ agent: shown.id }} to="/" />
+      ) : (
+        <Link params={{ agent: shown.id }} to="/agents/$agent" />
+      );
+    return (
+      <HoverCard>
+        <HoverCardTrigger render={link}>
+          <span {...stylex.props(cardLinkMarker, styles.popCard)}>
+            <Card padding="none">{inside}</Card>
+          </span>
+        </HoverCardTrigger>
+        <HoverCardContent align="start" side="right">
+          <HoverCardTitle>{shown.name}</HoverCardTitle>
+          <HoverCardDescription>
+            {shown.job === "" ? t`No job written yet` : shown.job}
+          </HoverCardDescription>
+          <KeyValueList items={details} variant="inline" />
+        </HoverCardContent>
+      </HoverCard>
+    );
+  }
   // A, D and E run to the card's edges: their own room is inside them.
   const padding = concept === "b" || concept === "c" ? "md" : "none";
   if (shown.managed !== undefined) {
@@ -532,7 +881,12 @@ export const AgentsOverview = ({
       ) : (
         <ul
           aria-label={t`Agents`}
-          {...stylex.props(styles.grid, conceptOf() === "c" && styles.tileGrid)}
+          {...stylex.props(
+            styles.grid,
+            conceptOf() === "c" && styles.tileGrid,
+            conceptOf() === "g" && styles.smallGrid,
+            conceptOf() === "h" && styles.wideGrid
+          )}
         >
           {agents.map((agent) => (
             <li key={agent.id}>
@@ -541,6 +895,7 @@ export const AgentsOverview = ({
                   agent.managed === undefined ? [] : factsOf(agent.managed)
                 }
                 shown={agent}
+                teams={managed?.teams ?? []}
               />
             </li>
           ))}
