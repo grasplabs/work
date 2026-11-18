@@ -3,6 +3,8 @@ import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { brainTeams } from "../src/brain-rpc.ts";
+import { arrangeTeams } from "../src/brain-team-groups.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -109,6 +111,14 @@ const regionsRow = async () =>
       .toArray();
     return row ?? null;
   });
+
+/** How many times the groups were kept (`brain_team_group_saves`). */
+const keptSets = async (): Promise<number> => {
+  const row = await env.DB.prepare(
+    "SELECT count(*) AS saves FROM brain_team_group_saves"
+  ).first<{ saves: number }>();
+  return row?.saves ?? 0;
+};
 
 describe("the company's groups of teams", { timeout: 120_000 }, () => {
   beforeEach(aloneInTheStore);
@@ -543,6 +553,94 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
         { id: "group-everyone", teamIds: [support] },
       ],
       owed: 0,
+    });
+  });
+
+  it("keep nothing of an arrangement when an admin saves between its last read and its write, and audit none", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const tag = unique();
+    const finance = `team-finance-${tag}`;
+    const sales = `team-sales-${tag}`;
+    const support = `team-support-${tag}`;
+    await admin.api.onboarding.saveRoster(rosterOf(tag));
+    // A fault at the database binding: once the arrangement prepares its
+    // write (the statement that keeps the set of groups, seen through
+    // D1's public `prepare`), an admin's save is made through the real
+    // RPC, and only then does the arrangement's batch run. The model
+    // gateway's own batches never prepare that statement.
+    const writesSaves = /insert into "?brain_team_group_saves"?/iu;
+    let writing = false;
+    let injected = 0;
+    const db = new Proxy(env.DB, {
+      get: (target, key) => {
+        if (key === "prepare") {
+          return (query: string) => {
+            writing ||= writesSaves.test(query);
+            return target.prepare(query);
+          };
+        }
+        if (key === "batch") {
+          return async (statements: D1PreparedStatement[]) => {
+            if (writing && injected === 0) {
+              injected += 1;
+              await admin.api.brain.saveTeamGroups([
+                { id: "front", name: "Front office", teamIds: [sales] },
+              ]);
+            }
+            return await target.batch(statements);
+          };
+        }
+        const value: unknown = Reflect.get(target, key, target);
+        if (typeof value !== "function") {
+          return value;
+        }
+        return (...args: unknown[]): unknown => {
+          const result: unknown = Reflect.apply(value, target, args);
+          return result;
+        };
+      },
+    });
+    const faulty: Env = { ...env, DB: db };
+    const savesBefore = await keptSets();
+
+    let refused = "";
+    const events = await auditedDuring(async () => {
+      await answering(
+        [
+          arranging({
+            groups: [{ name: "Everyone", teamIds: [finance, sales, support] }],
+          }),
+        ],
+        async () => {
+          try {
+            await arrangeTeams(faulty, async () => await brainTeams(env));
+          } catch (error) {
+            refused = error instanceof Error ? error.message : String(error);
+          }
+        }
+      );
+    });
+    const { teamGroups } = await admin.api.brain.read();
+    const savesAfter = await keptSets();
+
+    expect({
+      injected,
+      // Thrown, so the onboarding's alarm keeps it owed and tries again.
+      refused,
+      regions: teamGroups.map(({ id, teamIds }) => ({ id, teamIds })),
+      saves: savesAfter - savesBefore,
+      arranged: events.filter(
+        ({ action }) => action === "brain.team_groups.arranged"
+      ).length,
+      saved: events.filter(({ action }) => action === "brain.team_groups.saved")
+        .length,
+    }).toStrictEqual({
+      injected: 1,
+      refused: "The regions changed while Grasp arranged the teams.",
+      regions: [{ id: "front", teamIds: [sales] }],
+      saves: 1,
+      arranged: 0,
+      saved: 1,
     });
   });
 
