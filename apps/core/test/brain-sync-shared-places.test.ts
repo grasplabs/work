@@ -10,6 +10,7 @@ import {
   it,
   vi,
 } from "vite-plus/test";
+import { z } from "zod";
 
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { addSource } from "../src/brain-next.ts";
@@ -43,7 +44,7 @@ import { interleaving } from "./d1-interleaving.ts";
 import { mockIdpWith } from "./idp.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
-import { connectDb } from "./test-env.ts";
+import { connectDb, testBinding } from "./test-env.ts";
 
 mockIdpWith(idp);
 
@@ -106,6 +107,11 @@ const eventsHeld = async (): Promise<number> =>
       sql.exec<{ count: number }>("SELECT count(*) AS count FROM events").one()
         .count
   );
+
+/** Runs `queries` on core's database, in one batch. */
+const run = async (queries: readonly string[]): Promise<void> => {
+  await env.DB.batch(queries.map((query) => env.DB.prepare(query)));
+};
 
 /** One run of the sync as the clock does, a poll after the last, on `given`. */
 const sync = async (given: Env = env): Promise<void> => {
@@ -802,6 +808,73 @@ describe("native sync of a shared connection's picked places", () => {
           "DELETE FROM brain_sync_sources WHERE connection_id IN (?, ?)"
         ).bind(first, last),
       ]);
+    }
+  });
+
+  it("keeps every source row whole through the migration that lets a source have no person, with no version of its picks yet", async () => {
+    // Core's migrations as the tests applied them (vite.config.ts), each
+    // statement by its file: this table's own, run on a scratch copy of it
+    // so the worker's own table stays as it is.
+    const migrations = z
+      .array(z.object({ name: z.string(), queries: z.array(z.string()) }))
+      .parse(testBinding("CORE_MIGRATIONS"));
+    const scratch = `brain_sync_sources_${unique().replaceAll("-", "").slice(0, 12)}`;
+    const ofTable = (name: string): string[] =>
+      (migrations.find((migration) => migration.name === name)?.queries ?? [])
+        .filter((query) => query.includes("brain_sync_sources"))
+        .map((query) => query.replaceAll("brain_sync_sources", scratch));
+    // As main's migrations left it before this one: a person's own source.
+    const row = {
+      connection_id: `connection-${unique()}`,
+      feed: "folders",
+      place: "inbox",
+      person_id: `person-${unique()}`,
+      provider: "microsoft",
+      tenant: "tenant",
+      account: "account",
+      cursor: "cursor",
+      listing: 3,
+      listing_open: 1,
+      due_at: 1000,
+      lease_id: "lease",
+      lease_until: 2000,
+      last_success_at: 3000,
+      last_error: "sync.failed",
+      added: 1,
+      changed: 2,
+      removed: 3,
+      relist_cursor: "relist",
+      relisting: 1,
+      relist_at: 4000,
+      relist_since: 5000,
+      leaves_owed: 1,
+      kind: "mail",
+      dropped: 0,
+      relist_catch_up: 1,
+      seen_in: 7,
+      last_error_at: 6000,
+    };
+    try {
+      await run([
+        ...ofTable("0274_brain_sync.sql"),
+        ...ofTable("0275_ambitious_monster_badoon.sql"),
+      ]);
+      const columns = Object.keys(row);
+      await env.DB.prepare(
+        `INSERT INTO ${scratch} (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`
+      )
+        .bind(...Object.values(row))
+        .run();
+      const migrated = ofTable("0276_brain_sync_shared_places.sql");
+      await run(migrated);
+      const after = await env.DB.prepare(`SELECT * FROM ${scratch}`).all();
+
+      expect({ ran: migrated.length > 0, rows: after.results }).toStrictEqual({
+        ran: true,
+        rows: [{ ...row, picks_version: null }],
+      });
+    } finally {
+      await env.DB.prepare(`DROP TABLE IF EXISTS ${scratch}`).run();
     }
   });
 
