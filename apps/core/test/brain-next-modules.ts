@@ -27,6 +27,10 @@ export const brainModules = {
   // Keeps the tool calls connect audited as events with core's
   // recordEvents, which answers nothing.
   "apps/core/src/brain-events.ts": "core",
+  // An admin's opportunities: the routines seen in activity, as core's
+  // observedRoutinesOf answers them (its probe holds what it returns),
+  // with their systems by catalog name, and nothing more of the Brain.
+  "apps/core/src/opportunities.ts": "core",
   // Answers the staff with core's brainStaffReport, actOnBrainForStaff and
   // brainErasureForStaff, through their schemas.
   "apps/core/src/brain-report.ts": "core",

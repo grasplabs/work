@@ -126,6 +126,8 @@ const stepBy = (personId: string, name: string) => ({
   key: crypto.randomUUID(),
   personId,
   step: name,
+  system: "crm",
+  writes: false,
   item: null,
   at: new Date(),
 });
@@ -169,6 +171,8 @@ const call = (
   detail: {
     outcome: "ok",
     action: "deals.update",
+    provider: "crm",
+    sideEffect: true,
     onBehalfOf: personId,
     subjectType: "agent",
     ...detail,
@@ -248,7 +252,10 @@ describe("the Brain's events", setUpTime, () => {
     const hour = Math.floor(Date.now() / hourMs) * hourMs - hourMs;
 
     await inConnectOutbox([
-      { ...call(member, { action: "deals.read" }), at: hour + 5 * 60_000 },
+      {
+        ...call(member, { action: "deals.read", sideEffect: false }),
+        at: hour + 5 * 60_000,
+      },
       {
         ...call(member, { action: "app.call", subjectType: "app" }),
         at: hour + 50 * 60_000,
@@ -269,10 +276,17 @@ describe("the Brain's events", setUpTime, () => {
     const kept = await eventsOf(team);
 
     expect(
-      kept.map(({ step, item, at }) => ({ step, item, at }))
+      kept.map(({ step, system, writes, item, at }) => ({
+        step,
+        system,
+        writes,
+        item,
+        at,
+      }))
     ).toStrictEqual([
-      { step: "deals.read", item: null, at: hour },
-      { step: "app.call", item: null, at: hour },
+      // In the system its connector is, and whether it changed something.
+      { step: "deals.read", system: "crm", writes: 0, item: null, at: hour },
+      { step: "app.call", system: "crm", writes: 1, item: null, at: hour },
     ]);
   });
 
@@ -287,6 +301,8 @@ describe("the Brain's events", setUpTime, () => {
       key: crypto.randomUUID(),
       personId: userId,
       step: name,
+      system: "crm",
+      writes: false,
       item: null,
       at: new Date(at),
     });
@@ -394,6 +410,8 @@ describe("the Brain's events", setUpTime, () => {
           key: crypto.randomUUID(),
           team: `team:${sales}`,
           step: "deals.late",
+          system: "crm",
+          writes: true,
           item: null,
           who: annaTag,
           at: new Date().toISOString(),
@@ -421,6 +439,8 @@ describe("the Brain's events", setUpTime, () => {
       key: crypto.randomUUID(),
       personId: anna,
       step: "deals.read",
+      system: "crm",
+      writes: false,
       item: "deal-42",
       at: new Date(),
     };
