@@ -162,7 +162,10 @@ test("a document and a chat each export as Markdown and as a page to print", asy
       .getByText("paid", { exact: true })
       .evaluate((element) => getComputedStyle(element).fontFamily)
   ).toMatch(/^"Geist Variable"/u);
-  await expect(printed.locator('[data-slot="grasp-mark"]')).toHaveCount(1);
+  // The page's head: the Grasp mark beside its name.
+  await expect(
+    printed.locator("header").filter({ hasText: "Grasp" }).locator("svg")
+  ).toHaveCount(1);
   // Once the dialog closes, the page to print goes.
   await closePrint(page, "Leave");
   await expect(page.locator('iframe[title="Leave"]')).toHaveCount(0);
