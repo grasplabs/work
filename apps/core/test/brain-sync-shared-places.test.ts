@@ -18,6 +18,7 @@ import { chooseAudience } from "./brain-audiences.ts";
 import { newTeam } from "./brain-next-leaks-harness.ts";
 import { inStoreOf } from "./brain-next-out-reads.ts";
 import {
+  clockAt,
   connectSharedSites,
   finds,
   idp,
@@ -239,7 +240,11 @@ describe("native sync of a shared connection's picked places", () => {
         const answer = await env.CONNECT.listSyncPlaces(request);
         if (!raced && request.connectionId === connectionId) {
           raced = true;
+          // The admin acts now, not at the run's clock, which other files
+          // in the worker may have moved past their session's end.
+          vi.useRealTimers();
           await pick(admin, connectionId, [two]);
+          vi.useFakeTimers({ toFake: ["Date"], now: clockAt() });
         }
         return answer;
       };
