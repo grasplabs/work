@@ -234,15 +234,20 @@ setInterval(() => {}, 1 << 30);
 };
 
 /**
- * workerd behind a shell that ends it, with `kill <signal>`, when the shell
- * gets SIGUSR1, then exits with `status`: the host's trouble, sent mid-call
- * by `endedMidCall`. Never on a clock, which a slow start outruns.
+ * workerd behind a shell that kills it (SIGKILL) when the shell gets
+ * SIGUSR1, then exits with `status`: the host's trouble, sent mid-call by
+ * `endedMidCall`. Never on a clock, which a slow start outruns. Always
+ * SIGKILL, which nothing catches and no core follows, so the call's end
+ * is seen at once: a signal workerd catches or dumps a core for holds its
+ * socket open while the kernel writes the core (some 19 s on CI's
+ * runners), past the call's deadline on a busy one. How the process ended
+ * is what `status` says, as the supervisor reads it.
  */
-const endedByTheHost = (signal: string, status: string): string => {
+const endedByTheHost = (status: string): string => {
   const script = path.join(tempDir(), "ended-by-the-host.sh");
   writeFileSync(
     script,
-    `#!/bin/sh\ntrap 'kill ${signal} $child' USR1\n"${nativeWorkerd}" "$@" &\nchild=$!\n# The first wait ends as the trap runs, the second as workerd does.\nwait $child\nwait $child\nexit ${status}\n`
+    `#!/bin/sh\ntrap 'kill -9 $child' USR1\n"${nativeWorkerd}" "$@" &\nchild=$!\n# The first wait ends as the trap runs, the second as workerd does.\nwait $child\nwait $child\nexit ${status}\n`
   );
   chmodSync(script, 0o755);
   return script;
@@ -442,7 +447,7 @@ describe("the sandbox supervisor", () => {
   it("says a call whose process was killed from outside crashed, as the kernel's OOM killer kills one", async () => {
     // What a full cgroup does to whichever process it picks.
     await withSupervisor(
-      { workerd: endedByTheHost("-9", "$?") },
+      { workerd: endedByTheHost("$?") },
       async (supervisor) => {
         const result = await endedMidCall(supervisor);
         expect(result).toMatchObject({
@@ -458,20 +463,19 @@ describe("the sandbox supervisor", () => {
   it.each([
     [
       "aborts without V8's heap limit line, as one refused memory under strict overcommit does",
-      "-ABRT",
-      "$?",
+      // SIGABRT's status, as a shell gives it (128 + 6).
+      "134",
     ],
     [
       "exits with a status of its own without V8's heap limit line, as one out of file descriptors does",
-      "-9",
       "1",
     ],
   ])(
     "says a call crashed, never its memory, when its process %s",
-    async (_how, signal, status) => {
+    async (_how, status) => {
       // The host's own trouble: never through the call's heap.
       await withSupervisor(
-        { workerd: endedByTheHost(signal, status) },
+        { workerd: endedByTheHost(status) },
         async (supervisor) => {
           const result = await endedMidCall(supervisor);
           expect({
