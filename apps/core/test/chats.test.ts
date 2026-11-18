@@ -1071,7 +1071,6 @@ describe("chats", () => {
     await ann.chats.rate(chat.id, answer.id, { value: "up" });
     await expect(ratingOf()).resolves.toStrictEqual({ value: "up" });
     await ann.chats.rate(chat.id, answer.id, null);
-    await expect(ratingOf()).resolves.toBeNull();
 
     // Only an answer, only of that chat, only by its person.
     const elsewhere = await ann.chats.create("Elsewhere");
@@ -1093,7 +1092,21 @@ describe("chats", () => {
       "agent.chat_not_found",
       "agent.invalid_request",
     ]);
+    // Taken back, and nothing refused left one.
     await expect(ratingOf()).resolves.toBeNull();
+    // Each rating is recorded, never which way or why.
+    const events = await allEvents();
+    expect(
+      events
+        .filter(({ action }) => action === "chat.answer_rated")
+        .map(({ actor, target, detail }) => ({ actor, target, detail }))
+    ).toStrictEqual(
+      Array.from({ length: 3 }, () => ({
+        actor: { type: "person", userId: ann.userId },
+        target: { type: "chat", id: chat.id },
+        detail: { workspace: personalWorkspaceId(ann.userId) },
+      }))
+    );
   });
 
   it("take one question at a time, and aren't deleted under their agent", async () => {

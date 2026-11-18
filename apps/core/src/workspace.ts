@@ -1655,6 +1655,7 @@ export class Workspace extends DurableObject<Env> {
     action:
       | "chat.created"
       | "chat.renamed"
+      | "chat.answer_rated"
       | "chat.deleted"
       | "chat.moved"
       | "chat.draft_restored"
@@ -4738,14 +4739,15 @@ export class Workspace extends DurableObject<Env> {
   /**
    * Keeps what `personId` thought of an answer of their own chat, or
    * takes it back (`null`): refused for anything but an answer of that
-   * chat. Not audited: it is the person's own note on their own chat,
-   * which nobody else reads and nothing acts on.
+   * chat. Audited as `by`'s, as a rename is: that they rated an answer
+   * of the chat, never which way or why, which stay theirs alone.
    */
   rateAnswer(
     chatId: unknown,
     personId: string,
     messageId: number,
-    rating: ChatRating | null
+    rating: ChatRating | null,
+    by: AuditActor
   ): void {
     const { id } = this.#graspChat(chatId, personId);
     const row = this.#db
@@ -4759,14 +4761,18 @@ export class Workspace extends DurableObject<Env> {
     ) {
       throw agentErrors.create("agent.invalid_request");
     }
-    this.#db
-      .update(chatMessages)
-      .set({
-        rating: rating?.value ?? null,
-        ratingReason: rating?.reason ?? null,
-      })
-      .where(eq(chatMessages.id, messageId))
-      .run();
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(chatMessages)
+        .set({
+          rating: rating?.value ?? null,
+          ratingReason: rating?.reason ?? null,
+        })
+        .where(eq(chatMessages.id, messageId))
+        .run();
+      this.#outboxed(by, "chat.answer_rated", id);
+    });
+    this.#deliverAudit();
   }
 
   /** Renames `personId`'s own chat, audited as `by`'s. */

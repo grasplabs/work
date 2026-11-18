@@ -1295,7 +1295,7 @@ export interface ChatsApi {
    * Rates an answer of the person's own chat, by its message's `id`, or
    * takes the rating back (`null`). Kept with the chat, where only its
    * person reads it: nobody else sees a rating, and nothing learns from
-   * one. Anything but an answer of that chat is `agent.invalid_request`.
+   * one. Audited without the rating or its reason. Anything but an answer of that chat is `agent.invalid_request`.
    */
   rate: (
     chatId: string,

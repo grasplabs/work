@@ -473,7 +473,8 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         id,
         person.userId,
         parsed.data.messageId,
-        parsed.data.rating
+        parsed.data.rating,
+        actorOf(person)
       );
     });
   }
