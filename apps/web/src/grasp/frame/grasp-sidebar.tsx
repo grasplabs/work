@@ -36,7 +36,6 @@ import {
   Conversation,
   Home,
   Cycle,
-  Inbox,
   Projects,
   Question,
   Settings,
@@ -66,7 +65,7 @@ const styles = stylex.create({
 // App shell stands it beside the page, folded as the person left it in this
 // browser (the frame keeps that), and on a phone in its menu's sheet.
 
-/** The Dashboard's count in words, for a screen reader: the badge shows the number alone. */
+/** What waits, in words, for a screen reader: the badge shows the number alone. */
 const thingsWaiting = (waiting: number): string =>
   plural(waiting, { one: "# thing waiting", other: "# things waiting" });
 
@@ -89,7 +88,6 @@ const useGroups = (
 ): SidebarGroupEntry[] => {
   const { t } = useLingui();
   const matchRoute = useMatchRoute();
-  const waiting = waitingItems?.length;
   const inbox = useInboxGroups(waitingItems);
   const workflowsWaiting = useWorkflowsWaiting();
   const apps = useSidebarApps(core);
@@ -111,14 +109,6 @@ const useGroups = (
         icon: Conversation,
         render: <Link to="/" />,
         current: at("/", false),
-      },
-      {
-        label: t`Dashboard`,
-        icon: Inbox,
-        render: <Link to="/dashboard" />,
-        current: at("/dashboard", false),
-        count: waiting,
-        countLabel: thingsWaiting(waiting ?? 0),
       },
       {
         label: t`Brain`,
@@ -385,7 +375,7 @@ export const useGraspSidebar = ({
   const openChats = useChatsWindow();
   const [tab, setTab] = useState<SidebarView>("home");
   // What waits on the person: the Inbox view's list, and so the bell's
-  // dot and the Dashboard's count.
+  // dot and the Inbox's count.
   const waitingItems = useWaitingItems(
     identity,
     identity.onboardingOnly !== true

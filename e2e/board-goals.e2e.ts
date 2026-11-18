@@ -5,15 +5,15 @@ import { apiOf, peopleIn } from "./people.ts";
 
 // The board's goals, end to end: an admin sets one on the Brain's Vision
 // page, words it again and links an independent workflow that serves it; a
-// member reads it there, with nothing to change it by, and the admin on
-// the dashboard, with its workflow. That only admins change goals, and
+// member reads it there, with nothing to change it by. That only admins
+// change goals, and
 // what each reader sees of a goal's workflows, are core's tests
 // (apps/core/test/brain-goals.test.ts).
 
 /** How long a page may take to show what core said. */
 const pageRead = { timeout: 20_000 };
 
-test("an admin sets a board goal, words it again and links a workflow; a member reads it on the Vision page, and can't change it, and the admin on the dashboard", async ({
+test("an admin sets a board goal, words it again and links a workflow; a member reads it on the Vision page, and can't change it", async ({
   pageOf,
 }) => {
   const { admin, member } = peopleIn("boardGoals");
@@ -71,12 +71,4 @@ test("an admin sets a board goal, words it again and links a workflow; a member 
   await expect(
     memberPage.getByRole("button", { name: `Reword ${worded}` })
   ).toHaveCount(0);
-
-  // And on the admin's dashboard, with the workflow that serves it: made,
-  // and not yet handling anything.
-  await page.goto("/dashboard");
-  const widget = page.getByRole("region", { name: "Board goals" });
-  await expect(
-    widget.getByRole("listitem").filter({ hasText: worded })
-  ).toContainText("0 of 1", pageRead);
 });

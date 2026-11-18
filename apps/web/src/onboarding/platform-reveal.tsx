@@ -82,7 +82,7 @@ export const useWayIn = ({
       open && explained
         ? window.setTimeout(() => {
             void revealPlatform(line, () => {
-              void navigate({ to: "/dashboard" });
+              void navigate({ to: "/inbox" });
             });
           }, wayInAfterMs)
         : undefined;

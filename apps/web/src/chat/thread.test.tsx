@@ -564,7 +564,7 @@ describe(ChatThread, () => {
     expect(workingLine()).toBe("Working on it");
   });
 
-  it("says under a code step each widget it made or changed on the dashboard, with the way there", async () => {
+  it("says under a code step each widget it made or changed on the dashboard", async () => {
     const at = "2026-10-27T09:00:05.000Z";
     await thread(
       [
@@ -602,14 +602,16 @@ describe(ChatThread, () => {
         },
       ]
     );
-    const way = document.querySelector('a[href="/dashboard"]');
+    const line = [...document.querySelectorAll("p")].find((each) =>
+      each.textContent.startsWith("Grasp added a widget")
+    );
     await openSteps();
 
     expect({
-      said: said(way?.parentElement),
+      said: said(line),
       steps: stepLines(),
     }).toStrictEqual({
-      said: "Grasp added a widget to your dashboard. Open the dashboard",
+      said: "Grasp added a widget to your dashboard.",
       steps: ["Ran a code step, Done"],
     });
   });
