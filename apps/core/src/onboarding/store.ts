@@ -204,6 +204,7 @@ import {
 } from "./kickoff.ts";
 import { linkSecretOf } from "./link-secret.ts";
 import { linkMail, reminderMail, updateMail } from "./mail-text.ts";
+import type { Proposer } from "./proposals.ts";
 import { referralOf, referred } from "./referral.ts";
 import {
   agreementsIn,
@@ -587,6 +588,10 @@ const linkCheckMs = 60 * 60 * 1000;
 const drawAfterMs = 15_000;
 /** How long a drawing that failed waits before it's tried again, each time; then it's given up. */
 const drawRetryMs = [60_000, 5 * 60_000, 30 * 60_000] as const;
+/** How long a proposal asked is claimed: past the 3 minutes the gateway gives a call. */
+const proposeClaimMs = 5 * 60_000;
+/** When a proposal given up is due: never. */
+const givenUpAt = "9999-12-31T00:00:00.000Z";
 /** And how soon the alarm goes on drawing the next thing. */
 const drawNextMs = 500;
 /** And how long before it retries delivering audit events, first and at most. */
@@ -1245,9 +1250,21 @@ export class Onboarding extends DurableObject<Env> {
    */
   readonly #removeFallen: SourceRemover | undefined;
 
-  constructor(ctx: DurableObjectState, env: Env, removeFallen?: SourceRemover) {
+  /**
+   * How what Grasp proposes for a routine is asked (proposals.ts): given
+   * by the Worker (onboarding/object.ts); without one, nothing is asked.
+   */
+  readonly #proposer: Proposer | undefined;
+
+  constructor(
+    ctx: DurableObjectState,
+    env: Env,
+    removeFallen?: SourceRemover,
+    proposer?: Proposer
+  ) {
     super(ctx, env);
     this.#removeFallen = removeFallen;
+    this.#proposer = proposer;
     migrateOnWake(ctx, migrations);
     // The one row everything else updates, there before anything asks. As
     // it is first made it takes the flow staff chose when they added the
@@ -2387,7 +2404,8 @@ export class Onboarding extends DurableObject<Env> {
     // The routine's id is a hash, worked out before anything is read for
     // the turn: everything after is read at once, the link checked again.
     const routine = await this.#routineAskedOf(first.value.person.id);
-    const found = this.#onLink(secretMark, { account }, now, "save");
+    // Checked again, not counted again: one request is one call.
+    const found = this.#onLink(secretMark, { account }, now, "save", false);
     if (!found.ok) {
       return found;
     }
@@ -2430,15 +2448,23 @@ export class Onboarding extends DurableObject<Env> {
       : await intakeIds.workflow(row.team, row.work);
   }
 
-  /** What the standing drawing of the piece of work `routine` shows: none standing shows nothing. */
+  /**
+   * What the standing drawing of the piece of work `routine` shows: none
+   * standing shows nothing. Only that drawing is read, by its work's id.
+   */
   #routineShows(routine: string | null): RoutineShows {
-    const standing =
+    const [row] =
       routine === null
-        ? undefined
-        : this.standingDrawings().find(({ workflow }) => workflow === routine);
+        ? []
+        : this.#db
+            .select({ drawing: brainDrawings.drawing })
+            .from(brainDrawings)
+            .where(and(eq(brainDrawings.workflow, routine), standingDrawing))
+            .limit(1)
+            .all();
+    const drawing = row === undefined ? null : brainDrawingOf(row.drawing);
     return {
-      teamCount:
-        standing?.drawing.volumes.some(({ of }) => of === "team") ?? false,
+      teamCount: drawing?.volumes.some(({ of }) => of === "team") ?? false,
     };
   }
 
@@ -2669,6 +2695,85 @@ export class Onboarding extends DurableObject<Env> {
    */
   async intakeNext(now: number = Date.now()): Promise<string | null> {
     return await this.#withBrain(async () => await this.#intakeDue(now));
+  }
+
+  /**
+   * Asks what Grasp proposes for each drawing that stands with none kept
+   * (proposals.ts), one at a time: each claimed first (its row in
+   * `draw_failures` says not before a while from now, so no second run asks
+   * it meanwhile), then asked. What fails is tried again after a minute,
+   * five and thirty, as a drawing is; then it's given up and logged, until
+   * its evidence changes (a drawing drawn anew is another). Returns how
+   * many it asked.
+   */
+  async proposeNext(now: number = Date.now()): Promise<number> {
+    const proposer = this.#proposer;
+    if (proposer === undefined) {
+      return 0;
+    }
+    const owed = await proposer.owed(
+      this.standingDrawings().map(({ source }) => source)
+    );
+    let asked = 0;
+    for (const source of owed) {
+      const item = `propose:${source}`;
+      const [failed] = this.#db
+        .select()
+        .from(drawFailures)
+        .where(eq(drawFailures.item, item))
+        .all();
+      const tries = failed?.tries ?? 0;
+      const due =
+        failed === undefined ||
+        (tries <= drawRetryMs.length &&
+          failed.after <= new Date(now).toISOString());
+      const drawing = this.drawingToHand(source);
+      if (!due || drawing === null) {
+        continue;
+      }
+      // Claimed before it is asked: past the longest a model call takes.
+      this.#db
+        .insert(drawFailures)
+        .values({
+          item,
+          tries,
+          after: new Date(now + proposeClaimMs).toISOString(),
+        })
+        .onConflictDoUpdate({
+          target: drawFailures.item,
+          set: { after: new Date(now + proposeClaimMs).toISOString() },
+        })
+        .run();
+      asked += 1;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one call at a time
+        await proposer.propose(
+          drawing,
+          () => this.drawingToHand(source) !== null
+        );
+        this.#db.delete(drawFailures).where(eq(drawFailures.item, item)).run();
+      } catch (error) {
+        const failures = tries + 1;
+        log.error("onboarding.propose_failed", {
+          tries: failures,
+          error: error instanceof Error ? error.name : "unknown",
+        });
+        const wait = drawRetryMs[failures - 1];
+        // Given up: kept past every retry, so it is never asked again
+        // for this drawing.
+        const after =
+          wait === undefined ? givenUpAt : new Date(now + wait).toISOString();
+        this.#db
+          .insert(drawFailures)
+          .values({ item, tries: failures, after })
+          .onConflictDoUpdate({
+            target: drawFailures.item,
+            set: { tries: failures, after },
+          })
+          .run();
+      }
+    }
+    return asked;
   }
 
   async #intakeDue(now: number): Promise<string | null> {
@@ -5317,6 +5422,9 @@ export class Onboarding extends DurableObject<Env> {
       // alarm handler) is cut off where it is. Reminders, the update and
       // mail never wait behind it, and read nothing it writes.
       await this.intakeNext();
+      // What Grasp proposes for each routine standing with none yet
+      // (GRA-1750): after the intake that notes it, never in a request.
+      await this.proposeNext();
     } finally {
       // Set again whatever failed above, so what is left is tried again.
       await this.#armLinks();
@@ -7238,6 +7346,11 @@ export class Onboarding extends DurableObject<Env> {
             and(eq(brainDrawings.source, source), eq(brainDrawings.erase, true))
           )
           .run();
+        // What asking its proposal left (`proposeNext`) goes with it.
+        this.#db
+          .delete(drawFailures)
+          .where(eq(drawFailures.item, `propose:${source}`))
+          .run();
       }
     });
     if (kind !== "interview") {
@@ -8081,8 +8194,18 @@ export class Onboarding extends DurableObject<Env> {
     const drawn = new Set(drawing.map(({ id, work }) => work?.team ?? id));
     // A team still being drawn goes to the brain once it is drawn.
     const forgettable = this.#toForget().length > 0;
+    // A proposal that failed, until it is given up (`proposeNext`).
+    const proposing = this.#db
+      .select({ after: drawFailures.after, tries: drawFailures.tries })
+      .from(drawFailures)
+      .where(like(drawFailures.item, "propose:%"))
+      .all()
+      .flatMap(({ after, tries }) =>
+        tries <= drawRetryMs.length ? [Date.parse(after)] : []
+      );
     const afters = [
       ...drawing.map(({ after }) => after),
+      ...proposing,
       ...this.#brainDueAt(now).flatMap(({ team, after }) =>
         drawn.has(team) ? [] : [after]
       ),

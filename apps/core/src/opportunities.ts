@@ -1,6 +1,5 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import type { WorkflowVersionRecord } from "@grasp-os/shared/brain-records";
-import { log } from "@grasp-os/shared/log";
 import { opportunityForms } from "@grasp-os/shared/opportunities";
 import type {
   Opportunity,
@@ -8,7 +7,7 @@ import type {
 } from "@grasp-os/shared/opportunities";
 import { requireAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { eq } from "drizzle-orm";
+import { eq, inArray, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -16,10 +15,12 @@ import { listApps } from "./apps.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { personOf } from "./connections.ts";
 import {
+  apps,
   opportunityDismissals,
   opportunityProposals,
 } from "./db/core/schema.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
+import type { Proposer } from "./onboarding/proposals.ts";
 import { drawingText } from "./onboarding/routine.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import type { StandingDrawing } from "./onboarding/store.ts";
@@ -30,8 +31,10 @@ import type { StandingDrawing } from "./onboarding/store.ts";
 // opportunity, ranked by the hours a week it takes, worked out here from
 // its drawing's figures; what it could become is proposed by one model
 // call per routine at the evidence it rests on, held to what the call was
-// given and kept, so it is asked once. Nothing ranked is stored: the list
-// is built for its reader when asked, from the routines they may read.
+// given and kept, asked as work of its own when the routine is noted (the
+// onboarding store's `proposeNext`, claimed first and retried with
+// back-off), never in a page's request. Nothing ranked is stored: the
+// list is built for its reader when asked, from what is kept, at once.
 //
 // - Size: cases a week (the whole team's count; a month's in weeks) times
 //   how long one takes (the middle of the quickest and the longest).
@@ -42,12 +45,12 @@ import type { StandingDrawing } from "./onboarding/store.ts";
 //   rank.
 // - An App that already covers it: the proposal points there, as a change
 //   to it, and proposes nothing new. Admins see every App kept, so every
-//   admin reads the same; one pointing at an App removed since is asked
-//   again.
+//   admin reads the same; one pointing at an App removed since proposes
+//   nothing until its evidence changes.
 //
 // The model sees the routine as every member reads it, and the names and
-// descriptions of the Apps the admin who asked sees; what it answers is
-// shown to admins alone. Its answer is data, never trusted: a form from
+// descriptions of the company's Apps, as every admin sees them; what it
+// answers is shown to admins alone. Its answer is data, never trusted: a form from
 // the list, an App from those it was given, a system the routine's own
 // text names, a step it has. A dismissal is kept at the evidence it was
 // made at: new evidence (a drawing drawn anew) shows the opportunity
@@ -85,6 +88,21 @@ const minutesOf = ({ takes }: WorkflowVersionRecord): number | null => {
   return takes.unit === "hours" ? middle * minutesPerHour : middle;
 };
 
+/** A text's own characters, escaped for a pattern. */
+const escaped = (text: string): string =>
+  text.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`);
+
+/**
+ * Whether `text` names `name` as a whole: not inside a longer word or
+ * number, case aside. A part of a word ("e", "ticket" in "tickets") is no
+ * system the routine names.
+ */
+const namesWhole = (text: string, name: string): boolean =>
+  new RegExp(
+    `(?<![\\p{L}\\p{N}])${escaped(name)}(?![\\p{L}\\p{N}])`,
+    "iu"
+  ).test(text);
+
 /** What the model answers, before it is held to what it was given. */
 const answerSchema = z.object({
   form: z.string(),
@@ -112,14 +130,14 @@ Answer in JSON with these fields:
 
 /**
  * `answer` held to what its call was given: a form from the list (a change
- * when it points at an App), an App among `apps`, systems the routine's own
+ * when it points at an App), an App among `appIds`, systems the routine's own
  * text names, steps it has. Anything else is dropped; none without a form
  * from the list.
  */
 const heldOf = (
   answer: z.infer<typeof answerSchema>,
   text: string,
-  apps: ReadonlySet<string>,
+  appIds: ReadonlySet<string>,
   steps: number
 ): Proposal | null => {
   const form = opportunityForms.find((each) => each === answer.form);
@@ -129,18 +147,14 @@ const heldOf = (
   const covers =
     answer.covers !== undefined &&
     answer.covers !== null &&
-    apps.has(answer.covers)
+    appIds.has(answer.covers)
       ? answer.covers
       : null;
-  const folded = text.toLocaleLowerCase("en");
   const systems = [
     ...new Set(
       (answer.systems ?? [])
         .map((system) => system.trim())
-        .filter(
-          (system) =>
-            system !== "" && folded.includes(system.toLocaleLowerCase("en"))
-        )
+        .filter((system) => system !== "" && namesWhole(text, system))
     ),
   ];
   const personApproves = [
@@ -160,56 +174,42 @@ const heldOf = (
 
 /**
  * Asks the careful model what `drawing` could become, through the gateway,
- * for `admin`, with the Apps they see: the answer held (`heldOf`), or none
- * when it gave no form from the list.
+ * as core's own work for no one in particular, with the company's Apps
+ * (every App kept, as every admin sees them): the answer held (`heldOf`).
+ * Throws when no model answered, or it gave no form from the list: the
+ * onboarding asks again later (`proposeNext`).
  */
 const propose = async (
   env: Env,
-  admin: Identity,
-  drawing: StandingDrawing,
-  apps: readonly { id: string; name: string; description: string }[]
-): Promise<Proposal | null> => {
+  drawing: StandingDrawing
+): Promise<Proposal> => {
+  const listed = await drizzle(env.DB)
+    .select({ id: apps.id, name: apps.name, description: apps.description })
+    .from(apps)
+    .where(isNull(apps.removedAt));
   const text = drawingText(drawing);
   const model = modelForRole(await modelSettings(env), "careful");
   const { output } = await models(env).call({
     model,
     purpose: "opportunities.propose",
-    trigger: { type: "person", userId: admin.userId },
+    trigger: { type: "system" },
     work: { platform: "opportunities" },
     effort: "medium",
     system: proposeSystem,
-    input: `<data>\n${JSON.stringify({ routine: text, apps })}\n</data>`,
+    input: `<data>\n${JSON.stringify({ routine: text, apps: listed })}\n</data>`,
     schema: answerSchema,
     maxTokens: 4000,
   });
-  return heldOf(
+  const held = heldOf(
     output,
     text,
-    new Set(apps.map(({ id }) => id)),
+    new Set(listed.map(({ id }) => id)),
     drawing.drawing.steps.length
   );
-};
-
-/**
- * `propose`, or none when no model could be asked (none set up, or the
- * call failed): the opportunity shows with its figures, no form proposed
- * yet, and is asked again at the next list. Logged by the error's name
- * alone.
- */
-const proposeOrNone = async (
-  env: Env,
-  admin: Identity,
-  drawing: StandingDrawing,
-  apps: readonly { id: string; name: string; description: string }[]
-): Promise<Proposal | null> => {
-  try {
-    return await propose(env, admin, drawing, apps);
-  } catch (error) {
-    log.warn("opportunities.propose_failed", {
-      error: error instanceof Error ? error.name : "unknown",
-    });
-    return null;
+  if (held === null) {
+    throw new Error("The model proposed no form from the list");
   }
+  return held;
 };
 
 /** A routine at an evidence, as one key. */
@@ -287,39 +287,6 @@ const connectedSystemsOf = async (
   );
 };
 
-/**
- * A proposal for `drawing` asked now (`proposeOrNone`) and kept, or none
- * when no model answered; `fallen` when the drawing fell while the model
- * answered: then what was kept is erased again (its erasure may have run
- * before the write), so what it rested on never outlives it. One that
- * falls later is erased with it.
- */
-const proposalAsked = async (
-  env: Env,
-  admin: Identity,
-  drawing: StandingDrawing,
-  apps: readonly { id: string; name: string; description: string }[]
-): Promise<Proposal | null | "fallen"> => {
-  const proposal = await proposeOrNone(env, admin, drawing, apps);
-  if (proposal === null) {
-    return null;
-  }
-  const { workflow: routine, source: evidence } = drawing;
-  const kept = JSON.stringify(proposal);
-  await drizzle(env.DB)
-    .insert(opportunityProposals)
-    .values({ routine, evidence, proposal: kept, createdAt: new Date() })
-    .onConflictDoUpdate({
-      target: [opportunityProposals.routine, opportunityProposals.evidence],
-      set: { proposal: kept, createdAt: new Date() },
-    });
-  if ((await onboardingStore(env).drawingToHand(evidence)) === null) {
-    await eraseOpportunitiesOn(env, evidence);
-    return "fallen";
-  }
-  return proposal;
-};
-
 /** `drawing` as an opportunity, with its `proposal` when there is one. */
 const opportunityOf = (
   drawing: StandingDrawing,
@@ -355,6 +322,42 @@ const opportunityOf = (
 };
 
 /**
+ * How the onboarding asks what Grasp proposes for its routines
+ * (onboarding/proposals.ts, the store's `proposeNext`): which standing
+ * drawings have no proposal kept, and asking one and keeping it, erased
+ * again when the drawing fell while the model answered (its erasure may
+ * have run before the write). One that falls later is erased with it.
+ */
+export const proposerOf = (env: Env): Proposer => ({
+  owed: async (sources) => {
+    if (sources.length === 0) {
+      return [];
+    }
+    const kept = await drizzle(env.DB)
+      .select({ evidence: opportunityProposals.evidence })
+      .from(opportunityProposals)
+      .where(inArray(opportunityProposals.evidence, [...sources]));
+    const has = new Set(kept.map(({ evidence }) => evidence));
+    return sources.filter((source) => !has.has(source));
+  },
+  propose: async (drawing, stands) => {
+    const proposal = await propose(env, drawing);
+    const { workflow: routine, source: evidence } = drawing;
+    const kept = JSON.stringify(proposal);
+    await drizzle(env.DB)
+      .insert(opportunityProposals)
+      .values({ routine, evidence, proposal: kept, createdAt: new Date() })
+      .onConflictDoUpdate({
+        target: [opportunityProposals.routine, opportunityProposals.evidence],
+        set: { proposal: kept, createdAt: new Date() },
+      });
+    if (!stands()) {
+      await eraseOpportunitiesOn(env, evidence);
+    }
+  },
+});
+
+/**
  * Every opportunity the admin `admin` may read, the largest first (by
  * hours a week; those with none last), dismissed ones left out. Each
  * routine standing now, with its proposal: asked of the model the first
@@ -372,28 +375,22 @@ export const listOpportunities = async (
   const drawings = await onboardingStore(env).standingDrawings();
   const kept = await keptOf(env);
   const listed = await listApps(env, admin);
-  const apps = listed.map(({ id, name, description }) => ({
-    id: String(id),
-    name,
-    description,
-  }));
-  const appNames = new Map(apps.map(({ id, name }) => [id, name]));
+  const appNames = new Map(listed.map(({ id, name }) => [String(id), name]));
   const connected = await connectedSystemsOf(env, admin);
   const opportunities: Opportunity[] = [];
   for (const drawing of drawings) {
     const key = keyOf(drawing.workflow, drawing.source);
-    if (kept.dismissed.has(key)) {
-      continue;
-    }
-    // One pointing at an App removed since is asked again: there is
-    // nothing to change any more.
-    const held = kept.proposals.get(key);
-    const proposal =
-      held === undefined || (held.covers !== null && !appNames.has(held.covers))
-        ? // oxlint-disable-next-line no-await-in-loop -- one call at a time
-          await proposalAsked(env, admin, drawing, apps)
-        : held;
-    if (proposal !== "fallen") {
+    if (!kept.dismissed.has(key)) {
+      // Only what is kept: the proposal is asked apart (`proposerOf`),
+      // never here. One pointing at an App removed since proposes nothing
+      // any more: there is nothing to change.
+      const held = kept.proposals.get(key) ?? null;
+      const proposal =
+        held?.covers !== null &&
+        held?.covers !== undefined &&
+        !appNames.has(held.covers)
+          ? null
+          : held;
       opportunities.push(opportunityOf(drawing, proposal, appNames, connected));
     }
   }

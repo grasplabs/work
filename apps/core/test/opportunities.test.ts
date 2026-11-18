@@ -32,8 +32,10 @@ import { outcome, signedInApi } from "./sign-in.ts";
 //
 // - Anyone but an admin reading the list or dismissing one.
 // - A model's answer taken on trust: an App it wasn't given, a system the
-//   routine never names, a step it hasn't.
-// - The model asked again for what it answered at the same evidence.
+//   routine never names (or names only as part of a word), a step it hasn't.
+// - A page's request that waits for a model: listing asks nothing, also
+//   two lists at once; a proposal is asked when the routine is noted, once,
+//   and a failing model is tried again later, never by the list.
 // - A dismissal that outlives the evidence it was made at, or one that
 //   lets go before.
 
@@ -109,14 +111,13 @@ const drawnTeam = async () => {
   return { ids, sam };
 };
 
-/** The tickets' opportunity, as `api` lists it while the model answers `replies`; and the requests it got. */
+/** The tickets' opportunity, as `api` lists it; and how many model calls the list made (none, ever). */
 const ticketsOf = async (
   api: Awaited<ReturnType<typeof signedInApi>>["api"],
-  ids: Ids,
-  replies: ProviderReply[] = []
+  ids: Ids
 ) => {
   const { requests, result } = await answering(
-    replies,
+    [],
     async () => await api.opportunities.list()
   );
   return {
@@ -127,36 +128,61 @@ const ticketsOf = async (
   };
 };
 
+/** What Grasp proposes for each routine owed one, as the onboarding's alarm asks it, while the model answers `replies`. */
+const proposed = async (replies: ProviderReply[], now?: number) => {
+  const { requests, result } = await answering(
+    replies,
+    async () => await onboardingStore(env).proposeNext(now)
+  );
+  return { calls: requests.length, asked: result };
+};
+
+/** Kept proposals at `evidence`, as core's database holds them. */
+const keptAt = async (evidence: string): Promise<number> => {
+  const row = await env.DB.prepare(
+    "SELECT COUNT(*) AS kept FROM opportunity_proposals WHERE evidence = ?"
+  )
+    .bind(evidence)
+    .first<{ kept: number }>();
+  return row?.kept ?? 0;
+};
+
+/** Past the first back-off of a proposal that failed (a minute). */
+const pastFirstRetryMs = 61_000;
+
 describe("opportunities", { timeout: 120_000 }, () => {
   beforeEach(aloneInTheStore);
 
-  it("give an admin each routine, ranked by its hours a week, with its evidence and the form proposed, held to what the model was given, asked once", async () => {
+  it("give an admin each routine with its figures and the form proposed, asked once when the routine is noted and held to what the model was given, and never asked by the list", async () => {
     const { ids } = await drawnTeam();
     const { api } = await signedInApi(idp, "admin");
-    const first = await ticketsOf(api, ids, [
+    const first = await proposed([
       proposing({
         form: "workflow",
-        // An App it was never given, a system the routine never names, and
-        // a step it hasn't: all left out.
+        // An App it was never given, a system the routine never names, one
+        // it names only inside a word, and a step it hasn't: all left out.
         covers: "app-it-was-never-given",
-        systems: ["Zendesk", "Salesforce"],
+        systems: ["Zendesk", "Salesforce", "e"],
         personApproves: [3, 9],
       }),
     ]);
-    const again = await ticketsOf(api, ids);
+    const again = await proposed([]);
+    const listed = await ticketsOf(api, ids);
     expect({
-      first: first.tickets,
-      asked: first.asked,
-      againAsked: again.asked,
-      same: again.tickets?.evidence === first.tickets?.evidence,
+      first,
+      again,
+      listed: listed.tickets,
+      listCalls: listed.asked,
     }).toMatchObject({
-      first: {
+      first: { calls: 1, asked: 1 },
+      again: { calls: 0, asked: 0 },
+      listed: {
         casesPerWeek: 42,
         hoursPerWeek: 16.8,
         basis: "described",
         form: "workflow",
         covers: null,
-        // Nothing is connected: Zendesk is a setup step.
+        // Named whole in what starts one, and not connected: a setup step.
         setup: ["Zendesk"],
         personApproves: [3],
         steps: [
@@ -165,29 +191,58 @@ describe("opportunities", { timeout: 120_000 }, () => {
           "Send the answer.",
         ],
       },
-      asked: 1,
-      againAsked: 0,
-      same: true,
+      listCalls: 0,
     });
   });
 
-  it("list a routine with its figures and no form proposed while no model answers, and ask again at the next list", async () => {
+  it("list a routine at once with no form proposed yet, two lists at once asking nothing", async () => {
+    const { ids } = await drawnTeam();
+    const [one, other] = await Promise.all([
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "admin"),
+    ]);
+    const { requests, result } = await answering(
+      [],
+      async () =>
+        await Promise.all([
+          one.api.opportunities.list(),
+          other.api.opportunities.list(),
+        ])
+    );
+    const forms = result.map((listed) => {
+      const found = listed.find(({ team: of }) => of === ids.team);
+      return found === undefined ? "missing" : found.form;
+    });
+    expect({ calls: requests.length, forms }).toStrictEqual({
+      calls: 0,
+      forms: [null, null],
+    });
+  });
+
+  it("try a failing model again after its back-off, never sooner, while the list shows the routine at once", async () => {
     const { ids } = await drawnTeam();
     const { api } = await signedInApi(idp, "admin");
-    const unanswered = await ticketsOf(api, ids);
-    const answered = await ticketsOf(api, ids, [
-      proposing({ form: "skill", systems: [] }),
-    ]);
+    const now = Date.now();
+    // No answer: the call fails.
+    const failed = await proposed([], now);
+    const listed = await ticketsOf(api, ids);
+    const tooSoon = await proposed([proposing({ form: "skill" })], now + 1000);
+    const later = await proposed(
+      [proposing({ form: "skill", systems: [] })],
+      now + pastFirstRetryMs
+    );
+    const after = await ticketsOf(api, ids);
     expect({
-      unanswered: {
-        form: unanswered.tickets?.form,
-        hours: unanswered.tickets?.hoursPerWeek,
-      },
-      asked: unanswered.asked > 0 && answered.asked > 0,
-      form: answered.tickets?.form,
+      failed: failed.asked,
+      listed: { form: listed.tickets?.form, calls: listed.asked },
+      tooSoon: tooSoon.calls,
+      later: later.asked,
+      form: after.tickets?.form,
     }).toStrictEqual({
-      unanswered: { form: null, hours: 16.8 },
-      asked: true,
+      failed: 1,
+      listed: { form: null, calls: 0 },
+      tooSoon: 0,
+      later: 1,
       form: "skill",
     });
   });
@@ -196,9 +251,10 @@ describe("opportunities", { timeout: 120_000 }, () => {
     const { ids } = await drawnTeam();
     const { api } = await signedInApi(idp, "admin");
     const { id: app } = await api.apps.create({ name: "Ticket desk" });
-    const { tickets } = await ticketsOf(api, ids, [
+    await proposed([
       proposing({ form: "app", covers: app, systems: [], personApproves: [] }),
     ]);
+    const { tickets } = await ticketsOf(api, ids);
     expect({ form: tickets?.form, covers: tickets?.covers }).toStrictEqual({
       form: "change",
       covers: { app, name: "Ticket desk" },
@@ -209,8 +265,7 @@ describe("opportunities", { timeout: 120_000 }, () => {
     const { ids, sam } = await drawnTeam();
     const { api } = await signedInApi(idp, "admin");
     const other = await signedInApi(idp, "admin");
-    const answer = proposing({ form: "workflow", systems: [] });
-    const { tickets } = await ticketsOf(api, ids, [answer]);
+    const { tickets } = await ticketsOf(api, ids);
     if (tickets === undefined) {
       throw new Error("The tickets were never listed.");
     }
@@ -230,7 +285,7 @@ describe("opportunities", { timeout: 120_000 }, () => {
       sam
     );
     await drawTickets(ids, "Close the ticket once answered.");
-    const redrawn = await ticketsOf(api, ids, [answer]);
+    const redrawn = await ticketsOf(api, ids);
     expect({
       dismissed: dismissed.tickets,
       back: redrawn.tickets !== undefined,
@@ -241,33 +296,26 @@ describe("opportunities", { timeout: 120_000 }, () => {
   it("drop a routine's opportunity as a withdrawal takes its drawing down, and keep nothing of it once the drawing is erased", async () => {
     const { ids } = await drawnTeam();
     const { api } = await signedInApi(idp, "admin");
-    const { tickets } = await ticketsOf(api, ids, [
-      proposing({ form: "workflow", systems: ["Zendesk"] }),
-    ]);
+    await proposed([proposing({ form: "workflow", systems: ["Zendesk"] })]);
+    const { tickets } = await ticketsOf(api, ids);
     if (tickets === undefined) {
       throw new Error("The tickets were never listed.");
     }
     await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
     const withdrawn = await ticketsOf(api, ids);
     await eraseOwedOnboardingSources(env);
-    const kept = await env.DB.prepare(
-      "SELECT COUNT(*) AS kept FROM opportunity_proposals WHERE evidence = ?"
-    )
-      .bind(tickets.evidence)
-      .first<{ kept: number }>();
-    expect({ withdrawn: withdrawn.tickets, kept: kept?.kept }).toStrictEqual({
-      withdrawn: undefined,
-      kept: 0,
-    });
+    expect({
+      withdrawn: withdrawn.tickets,
+      kept: await keptAt(tickets.evidence),
+    }).toStrictEqual({ withdrawn: undefined, kept: 0 });
   });
 
   it("keep no proposal for a drawing a withdrawal took down while the model answered", async () => {
     const { ids } = await drawnTeam();
-    const { api } = await signedInApi(idp, "admin");
     const before = await onboardingStore(env).standingDrawings();
     const drawing = before.find(({ team: of }) => of === ids.team);
     let withdrew = false;
-    const { result } = await answeringWith(
+    await answeringWith(
       async () => {
         // Pim withdraws while the model answers, and the drawing's erasure
         // runs before the answer is kept.
@@ -278,18 +326,12 @@ describe("opportunities", { timeout: 120_000 }, () => {
         }
         return proposing({ form: "workflow", systems: ["Zendesk"] });
       },
-      async () => await api.opportunities.list()
+      async () => await onboardingStore(env).proposeNext()
     );
-    const kept = await env.DB.prepare(
-      "SELECT COUNT(*) AS kept FROM opportunity_proposals WHERE evidence = ?"
-    )
-      .bind(drawing?.source ?? "")
-      .first<{ kept: number }>();
     expect({
       withdrew,
-      listed: result.some(({ evidence }) => evidence === drawing?.source),
-      kept: kept?.kept,
-    }).toStrictEqual({ withdrew: true, listed: false, kept: 0 });
+      kept: await keptAt(drawing?.source ?? ""),
+    }).toStrictEqual({ withdrew: true, kept: 0 });
   });
 
   it("refuse anyone but an admin, listing or dismissing", async () => {
