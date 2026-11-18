@@ -71,6 +71,7 @@ export const familyNamespaces = [
   "statistics",
   "stephen_requests",
   "submission",
+  "sync",
   "transcription",
   "upload",
   "version",

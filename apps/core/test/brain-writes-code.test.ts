@@ -1,4 +1,5 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { redact } from "@grasp-os/shared/redact";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -7,7 +8,7 @@ import {
   exportSettled,
   tick,
 } from "../../../packages/brain-next/test/export-reads.ts";
-import { callAppFunction } from "../src/app-functions.ts";
+import { callAppFunction, callPageFunction } from "../src/app-functions.ts";
 import { addMember, removeMember } from "../src/app-members.ts";
 import { holdingsOf, recallsTheBrain } from "../src/app-provenance.ts";
 import { removeApp } from "../src/app-removal.ts";
@@ -78,6 +79,10 @@ const setUpTime = { timeout: 180_000 };
 
 /** The shared store's object, as core reaches it. */
 const shared = () => inJurisdiction(env, env.BRAIN_STORE).getByName("brain");
+
+/** The entity a remember answered, or none. */
+const entityOf = (written: unknown): string =>
+  rememberedSchema.safeParse(written).data?.entity ?? "";
 
 describe("an App's code remembers and forgets for its users", setUpTime, () => {
   it("remembers for the App's users, read back through its own code; nothing else finds it; forgets only its own; and a call made again is one memory and one event", async () => {
@@ -270,6 +275,239 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
     });
   });
 
+  it("keeps what it remembers without the credentials an outside system's answer carried, each text redacted whole, and a call made again answers what it kept; never an identifier that holds one", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const app = await appOf(ada, admin);
+    const name = `Acme ${unique()}`;
+    const secret = `S3cret${unique()}`;
+    const token = `ghp_${"a".repeat(24)}${unique()}`;
+    // As code copies a connection's answer into what it remembers.
+    const remembered = {
+      about: {
+        kind: "customer",
+        names: [name, `${name} ${token}`],
+        identifiers: [{ type: "ref", value: `crm:${unique()}` }],
+      },
+      attribute: "status",
+      value: `active, password=${secret}`,
+      statement: `${name} signs in with password: "${secret}" and ${token}`,
+    };
+    const key = `call-${unique()}`;
+
+    const written = rememberedSchema.parse(
+      await onPage(app, ada, "remember", remembered, { key })
+    );
+    const again = await onPage(app, ada, "remember", remembered, { key });
+    const card = await onPage(app, ada, "get", { entity: written.entity });
+    const kept = await runInDurableObject(shared(), (_i, state) => ({
+      memory: state.storage.sql
+        .exec<{ statement: string; value: string | null }>(
+          "SELECT statement, value FROM memories WHERE id = ?",
+          written.memory
+        )
+        .one(),
+      // Every text kept of the entity, by name or identifier.
+      names: state.storage.sql
+        .exec<{ value: string }>(
+          "SELECT n.value FROM entity_names AS n JOIN entities AS e ON e.row = n.entity WHERE e.id = ? AND n.type = 'name' ORDER BY n.value",
+          written.entity
+        )
+        .toArray()
+        .map(({ value }) => value),
+    }));
+    expect({
+      again,
+      kept,
+      read: statementsOf(card),
+      shown: [JSON.stringify(card), JSON.stringify(kept)].some(
+        (text) => text.includes(secret) || text.includes(token)
+      ),
+    }).toStrictEqual({
+      again: written,
+      kept: {
+        memory: {
+          statement: redact(remembered.statement),
+          value: redact(remembered.value),
+        },
+        names: remembered.about.names.map((each) => redact(each)).toSorted(),
+      },
+      read: [redact(remembered.statement)],
+      shown: false,
+    });
+  });
+
+  it("never merges two things whose names redact alike: found by its names, such an entity is refused; given identifiers, each is its own; a plain name still finds its entity", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const app = await appOf(ada, admin);
+    /**
+     * What remembering `statement` about `about` answers the App's code,
+     * under an attribute of many values, so a card shows each fact.
+     */
+    const remembering = async (
+      about: {
+        kind: "product" | "customer";
+        names: string[];
+        identifiers?: { type: "ref"; value: string }[];
+      },
+      statement: string
+    ) => {
+      const attribute = about.kind === "product" ? "feature" : "requirement";
+      const { result } = await callPageFunction(
+        env,
+        ada,
+        app.app,
+        requestOf("remember", {
+          about,
+          attribute,
+          value: statement,
+          statement,
+        }),
+        Date.now() + 60_000
+      );
+      return result.ok
+        ? rememberedSchema.parse(result.value)
+        : { code: result.error.code, details: result.error.details };
+    };
+    const tag = unique();
+    // Both redact to `Token: [redacted]`.
+    const [eth, btc] = [`Token: ETH ${tag}`, `Token: BTC ${tag}`];
+    const byName = [
+      await remembering({ kind: "product", names: [eth] }, "ETH settles fast"),
+      await remembering({ kind: "product", names: [btc] }, "BTC settles slow"),
+    ];
+    const identified = [
+      await remembering(
+        {
+          kind: "product",
+          names: [eth],
+          identifiers: [{ type: "ref", value: `coin:eth-${tag}` }],
+        },
+        "ETH settles fast"
+      ),
+      await remembering(
+        {
+          kind: "product",
+          names: [btc],
+          identifiers: [{ type: "ref", value: `coin:btc-${tag}` }],
+        },
+        "BTC settles slow"
+      ),
+    ];
+    const plain = `Acme Holdings ${tag}`;
+    const plainly = [
+      await remembering({ kind: "customer", names: [plain] }, "Acme pays"),
+      await remembering({ kind: "customer", names: [plain] }, "Acme grows"),
+    ];
+    const factsOf = async (written: unknown) =>
+      statementsOf(
+        await onPage(app, ada, "get", { entity: entityOf(written) })
+      ).toSorted();
+
+    expect({
+      byName,
+      identified: {
+        apart: entityOf(identified[0]) !== entityOf(identified[1]),
+        eth: await factsOf(identified[0]),
+        btc: await factsOf(identified[1]),
+      },
+      plain: {
+        same: entityOf(plainly[0]) === entityOf(plainly[1]),
+        facts: await factsOf(plainly[0]),
+      },
+    }).toStrictEqual({
+      byName: byName.map(() => ({
+        code: "brain.request_invalid",
+        details: {
+          issues: [
+            "about.names.0: holds what looks like a password, key or token, and an entity with no id or identifier is found by its names. Leave it out of the name, or give the entity its id or an identifier.",
+          ],
+        },
+      })),
+      identified: {
+        apart: true,
+        eth: ["ETH settles fast"],
+        btc: ["BTC settles slow"],
+      },
+      plain: { same: true, facts: ["Acme grows", "Acme pays"] },
+    });
+  });
+
+  it("files a memory under any ordinary identifier, and refuses only one that is a credential by its own shape, saying which and why", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const app = await appOf(ada, admin);
+    const key = `ghp_${"b".repeat(24)}${unique()}`;
+    // A ref's system, or a word in its id, that names a credential is no
+    // credential: only the id's own shape is.
+    const kept = [
+      "crm:ACME-1",
+      "session:2026-11-17-yoga-morning",
+      "stripe:checkout_session:cs_test_a1b2c3",
+      "token:ETH",
+      "erc20:token:0x1f9840a85d5af5bf1d1762f925bdaddc4201f984",
+      "cookie:consent-v2",
+      "url:https://shop.example.com/cart?item=42",
+    ];
+    // A key's own format, and a link `redact` signs or grants away. An id
+    // shaped like a key (`sk-` and sixteen more) and a link's `code` can't
+    // be told from a credential: refused too.
+    const refused = [
+      `token:${key}`,
+      `ref:${key}`,
+      "slug:sk-hynix-semiconductor-europe",
+      "url:https://shop.example.com/cart?code=WELCOME10",
+      "files:https://bucket.example.com/report.pdf?X-Amz-Signature=abc123",
+    ];
+    /** What remembering a fact filed under `ref` answers the App's code. */
+    const filedUnder = async (ref: string) => {
+      const { result } = await callPageFunction(
+        env,
+        ada,
+        app.app,
+        requestOf("remember", {
+          about: {
+            kind: "customer",
+            names: [`Customer ${unique()}`],
+            identifiers: [{ type: "ref", value: ref }],
+          },
+          statement: "Signed up today",
+        }),
+        Date.now() + 60_000
+      );
+      return result.ok
+        ? "kept"
+        : {
+            code: result.error.code,
+            details: result.error.details,
+          };
+    };
+    const answers = [];
+    for (const ref of [...kept, ...refused]) {
+      // oxlint-disable-next-line no-await-in-loop -- one write at a time
+      answers.push(await filedUnder(ref));
+    }
+
+    const why = [
+      "about.identifiers.0: looks like a password, key, token or signed link, which the Brain never keeps as an identifier. Leave it out, or identify the entity another way.",
+    ];
+    expect({
+      answers,
+      // The refusal names the field, never what it held.
+      said: JSON.stringify(answers).includes(key),
+    }).toStrictEqual({
+      answers: [
+        ...kept.map(() => "kept"),
+        ...refused.map(() => ({
+          code: "brain.request_invalid",
+          details: { issues: why },
+        })),
+      ],
+      said: false,
+    });
+  });
+
   it("is refused at its request check when it names a person's own entity", () => {
     const remembered = {
       about: { kind: "person", names: ["Ann Smit"] },
@@ -395,10 +633,8 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
     const mailbox = await appOf(ada, admin);
     const reaching = await appOf(ada, admin);
     const reached = await appOf(ada, admin);
-    // Granted a Knowledge collection before the Brain replaced it, and,
-    // besides, one also reaching an App that can't be placed.
-    const knowledge = await appOf(ada, admin);
-    const knowledgeAndMore = await appOf(ada, admin);
+    // One reaching an App that can't be placed.
+    const cantPlace = await appOf(ada, admin);
     // A personal connection, granted and then revoked: it still counts.
     const connection = `connection-mailbox-${unique()}`;
     const now = Date.now();
@@ -422,17 +658,7 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
       // Reaching starts a workflow that calls the other App's functions.
       grant("app", reaching.app, "workflow", workflow, ["start"]),
       grant("workflow", workflow, "app", reached.app, ["call"]),
-      grant("app", knowledge.app, "collection", `collection-${unique()}`, [
-        "read",
-      ]),
-      grant(
-        "app",
-        knowledgeAndMore.app,
-        "collection",
-        `collection-${unique()}`,
-        ["read"]
-      ),
-      grant("app", knowledgeAndMore.app, "workflow", unplaced, ["start"]),
+      grant("app", cantPlace.app, "workflow", unplaced, ["start"]),
       grant("workflow", unplaced, "app", crypto.randomUUID(), ["call"]),
     ]);
 
@@ -443,16 +669,13 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
       mailbox: await tried(mailbox),
       reaching: await tried(reaching),
       reached: await tried(reached),
-      knowledge: await tried(knowledge),
-      knowledgeAndMore: await tried(knowledgeAndMore),
+      cantPlace: await tried(cantPlace),
     }).toStrictEqual({
       teamBrain: { failed: "permission.brain_write_reach" },
       mailbox: { failed: "permission.brain_write_reach" },
       reaching: { failed: "permission.brain_write_reach" },
       reached: { failed: "permission.brain_write_reach" },
-      knowledge: { failed: "permission.brain_write_reach" },
-      // The grant that lasts, whatever else can't be placed now.
-      knowledgeAndMore: { failed: "permission.brain_write_reach" },
+      cantPlace: { failed: "permission.brain_write_unplaced" },
     });
   });
 

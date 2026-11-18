@@ -1,4 +1,7 @@
-import type { ActionManifest } from "@grasp-os/connector-kit/manifest";
+import type {
+  ActionManifest,
+  SyncManifest,
+} from "@grasp-os/connector-kit/manifest";
 import type { CapabilityClaims } from "@grasp-os/shared/capability";
 import { connectErrors } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -10,7 +13,7 @@ import type { Connection } from "./connections.ts";
 import { loadConnector } from "./connector-isolate.ts";
 import type { EgressProps } from "./egress.ts";
 import { callTimeoutMs, mcpServer } from "./mcp.ts";
-import type { McpServer, McpTool } from "./mcp.ts";
+import type { McpServer, McpTool, NativeMcpServer } from "./mcp.ts";
 import { credentialFor } from "./tokens.ts";
 
 // Native connectors: our own MCP servers (packages/connectors), shipped in
@@ -111,30 +114,17 @@ export const nativeAction = (
   };
 };
 
-/**
- * The MCP server for one call of a native action, in a fresh isolate of
- * its connector. Only now is the connection's token read: every policy
- * check that can refuse the call has passed by then. The egress lets
- * through only the action's routes, with a path segment named after its
- * resource property bound to the resource the capability names.
- */
-export const nativeServer = async (
+/** A native connector's server in a fresh isolate, its egress held to `routes`. */
+const isolateServer = async (
   env: Env,
   connection: Connection,
-  { connector, declared }: NativeAction,
-  claims: Pick<CapabilityClaims, "jti" | "resource">,
-  routes: ActionManifest["routes"] = declared.routes
-): Promise<McpServer> => {
-  const { manifest, code } = connector;
+  { manifest, code }: NativeConnector,
+  egress: Pick<EgressProps, "callId" | "routes" | "values">
+): Promise<NativeMcpServer> => {
   const props: EgressProps = {
     connector: `${manifest.name}@${manifest.version}`,
-    callId: claims.jti,
     hosts: manifest.hosts,
-    routes,
-    values:
-      declared.resource === null || claims.resource === null
-        ? {}
-        : { [declared.resource]: claims.resource },
+    ...egress,
     credential: await credentialFor(env, connection.id),
     // The egress closes when connect's MCP client gives up on the call.
     expiresAt: Date.now() + callTimeoutMs,
@@ -150,3 +140,44 @@ export const nativeServer = async (
     nativeResponseBytes
   );
 };
+
+/**
+ * The MCP server for one call of a native action, in a fresh isolate of
+ * its connector. Only now is the connection's token read: every policy
+ * check that can refuse the call has passed by then. The egress lets
+ * through only the action's routes, with a path segment named after its
+ * resource property bound to the resource the capability names.
+ */
+export const nativeServer = async (
+  env: Env,
+  connection: Connection,
+  { connector, declared }: NativeAction,
+  claims: Pick<CapabilityClaims, "jti" | "resource">,
+  routes: ActionManifest["routes"] = declared.routes
+): Promise<McpServer> =>
+  await isolateServer(env, connection, connector, {
+    callId: claims.jti,
+    routes,
+    values:
+      declared.resource === null || claims.resource === null
+        ? {}
+        : { [declared.resource]: claims.resource },
+  });
+
+/**
+ * The server for one sync page of `connector` (sync.ts), in a fresh
+ * isolate: the egress lets through only the sync's routes, with a
+ * `{place}` path segment bound to `place`.
+ */
+export const syncServer = async (
+  env: Env,
+  connection: Connection,
+  connector: NativeConnector,
+  routes: SyncManifest["routes"],
+  place: string
+): Promise<NativeMcpServer> =>
+  await isolateServer(env, connection, connector, {
+    callId: `sync-${crypto.randomUUID()}`,
+    routes: [...routes],
+    values: { place },
+  });
