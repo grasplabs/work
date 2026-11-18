@@ -1,9 +1,8 @@
-import type { AuditRecord } from "@grasp-os/shared/audit-log";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Await, Link, useNavigate, useRouter } from "@tanstack/react-router";
+import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import {
   useEffect,
   useEffectEvent,
@@ -13,14 +12,7 @@ import {
 } from "react";
 import type { ReactNode } from "react";
 
-import { actorOf } from "../activity/audit-log.tsx";
-import { actionWords } from "../activity/audit-words.ts";
-import { typeLabels } from "../activity/type-labels.ts";
-import type { LatestActivity } from "../dashboard/activity.tsx";
-import type { Directory } from "../directory.ts";
-import { formatDateTime, formatDayMonth } from "../format.ts";
-import { LoadingLines } from "../frame/page-states.tsx";
-import { RouterLink } from "../frame/router-link.tsx";
+import { formatDayMonth } from "../format.ts";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Avatar } from "../grasp/avatar/index.ts";
@@ -35,7 +27,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "../grasp/empty/index.ts";
-import { Agent, ChevronLeft, ChevronRight } from "../grasp/icons/index.ts";
+import { ChevronLeft, ChevronRight } from "../grasp/icons/index.ts";
 import {
   Item,
   ItemContent,
@@ -45,19 +37,15 @@ import {
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
-import { SectionCard } from "../grasp/section-card/index.ts";
+import { KeyValueList } from "../grasp/key-value/index.ts";
+import { PanelSection } from "../grasp/panel-section/index.ts";
+import { Panel, PanelHeader, PanelView } from "../grasp/panel/index.ts";
 import {
   Sheet,
   SheetBody,
   SheetContent,
   SheetTitle,
 } from "../grasp/sheet/index.ts";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "../grasp/tabs/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { notLoadedText } from "../load-from-core.tsx";
@@ -69,16 +57,18 @@ import { groupOf, listed } from "./items.ts";
 import type { Group, InboxItem } from "./items.ts";
 import { orderOf, skip, stepFrom } from "./walk.ts";
 
-// The inbox, on Grasp UI: what waits on the person, to work through
-// quickly. The list on one side, by group (what blocks first), and the
-// item on the other, answered in place; on a narrow page one at a time,
-// the item with its way back. The open item is the page's address
-// (`?item=<id>`), as the sidebar's Inbox view and the dashboard lead to
-// it, so a link, Back and a reload keep it. J and K (or the arrow keys in
-// the list) go to the next and the one before. A settled item leaves the
-// list, and the one after it opens in its place. For admins, Activity
-// holds the latest of the audit trail. Items come from items.ts; each
-// action goes through the same calls as the dashboard's pile.
+// The Inbox, on Grasp UI: what waits on the person, to work through
+// quickly. A full-height list at the start, and beside it an inspector that
+// is always open, on the library's dither: the walk through what waits in
+// its head ("1 of 3", back, next, Skip), the item to decide under "To
+// decide", then its facts (Ruben's pick, 18 November). On a narrow page the
+// list stands alone and a row opens the walk in a Sheet. The open item is
+// the page's address (`?item=<id>`), so a link, Back and a reload keep it;
+// J and K (or the arrow keys in the list) go to the next and the one
+// before; a settled item leaves the list and the one after it opens in its
+// place. No tabs: the sidebar's Inbox view is the Inbox's filter, and what
+// happened is Settings' audit trail. The weekly report stands at the head
+// of the list once it is ready. Items come from items.ts.
 
 /** The page's own width at which the list and the item stand side by side; narrower, the item opens in a Sheet. */
 const WIDE_REM = 52;
@@ -87,7 +77,6 @@ const styles = stylex.create({
   page: {
     display: "flex",
     flexDirection: "column",
-    gap: grasp.space4,
     width: "100%",
   },
   split: {
@@ -97,26 +86,7 @@ const styles = stylex.create({
     gap: grasp.space4,
   },
   splitWide: {
-    gridTemplateColumns: "minmax(18rem, 24rem) minmax(0, 1fr)",
-  },
-  list: {
-    display: "flex",
-    flexDirection: "column",
-    gap: grasp.space3,
-    minWidth: 0,
-  },
-  // The item stays in view while the list beside it scrolls.
-  item: {
-    position: "sticky",
-    top: 0,
-    display: "flex",
-    flexDirection: "column",
-    gap: grasp.space2,
-    maxHeight: "calc(100dvh - 6rem)",
-    overflowY: "auto",
-    minWidth: 0,
-    // As wide as the approval card it shows, so the walk's head spans the card.
-    maxWidth: grasp.approvalWidth,
+    gridTemplateColumns: `minmax(0, 1fr) ${grasp.inspectorWidth}`,
   },
   // The walk's head: where in what waits the item is, between its arrows, and Skip apart.
   walk: {
@@ -130,7 +100,27 @@ const styles = stylex.create({
   skip: {
     marginInlineStart: "auto",
   },
-  // Nothing waits: the report's row stands under the Empty, at the list's width.
+  // The list as the page's own column, top to bottom.
+  pane: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space3,
+    minWidth: 0,
+    minHeight: "calc(100dvh - 9rem)",
+  },
+  paneBeside: {
+    borderInlineEndWidth: grasp.hairline,
+    borderInlineEndStyle: "solid",
+    borderInlineEndColor: grasp.line,
+    paddingInlineEnd: grasp.space4,
+  },
+  // The inspector stays in view while the list beside it scrolls.
+  panel: {
+    position: "sticky",
+    top: 0,
+    maxHeight: "calc(100dvh - 7rem)",
+  },
+  // Nothing waits: the report's item stands under the Empty, at a list's width.
   emptyFoot: {
     width: "100%",
     maxWidth: "24rem",
@@ -164,9 +154,6 @@ export const groupLabel: Record<Group, MessageDescriptor> = {
 /** The groups in the filter's order; the address (`?group=`) takes these. */
 // Workflows' and Apps' asks are one group, Approvals (Ruben, 17 November).
 export const groupOrder = ["asked", "brain", "approvals", "outcomes"] as const;
-
-const isGroup = (value: string | null): value is Group =>
-  value === "all" || groupOrder.some((each) => each === value);
 
 /** What a row says under its name: its own words, or its kind and date when it has one. */
 const rowLine = (item: InboxItem, kind: string): string => {
@@ -329,60 +316,6 @@ const NoItems = ({
   );
 };
 
-/** The groups as tabs, each with how many it holds; only where there are two or more. */
-const GroupTabs = ({
-  counts,
-  current,
-  shown,
-  total,
-}: {
-  counts: ReadonlyMap<Group, number>;
-  current: Group;
-  shown: readonly Exclude<Group, "all">[];
-  total: number;
-}) => {
-  const { t, i18n } = useLingui();
-  const navigate = useNavigate();
-  if (shown.length < 2) {
-    return null;
-  }
-  return (
-    <Tabs
-      onValueChange={(value) => {
-        if (isGroup(value)) {
-          // In the address, so the sidebar's views and Back follow it.
-          void navigate({
-            from: "/inbox",
-            to: "/inbox",
-            search: (before) => ({
-              ...before,
-              group: value === "all" ? undefined : value,
-            }),
-            replace: true,
-          });
-        }
-      }}
-      value={current}
-      variant="segmented"
-    >
-      <TabsList aria-label={t`Show`}>
-        {(["all", ...shown] as const).map((each) => {
-          const groupName = i18n._(groupLabel[each]);
-          const count = each === "all" ? total : (counts.get(each) ?? 0);
-          return (
-            <TabsTrigger key={each} value={each}>
-              {t({
-                message: `${groupName} ${count}`,
-                context: "inbox filter with how many it holds",
-              })}
-            </TabsTrigger>
-          );
-        })}
-      </TabsList>
-    </Tabs>
-  );
-};
-
 /**
  * The walk's head over the item: where in what waits it is, the one before
  * and the next (round and round), and Skip, which puts it at the back.
@@ -438,6 +371,101 @@ const WalkHead = ({
   );
 };
 
+/** What the inspector and the phone's Sheet are given: the list, and the walk's head and item. */
+interface ShapeProps {
+  wide: boolean;
+  /** A row was chosen: on a narrow page the walk opens in a Sheet. */
+  open: boolean;
+  selected: InboxItem | undefined;
+  onClose: () => void;
+  onSaid: (said: string) => void;
+  list: ReactNode;
+  head: ReactNode;
+}
+
+/** The kind of the item shown, as the inspector's and the Sheet's title. */
+const useKind = (selected: InboxItem | undefined): string => {
+  const { i18n } = useLingui();
+  return selected === undefined ? "" : i18n._(kindLabel[selected.kind]);
+};
+
+/** The item shown, answered in place. */
+const Detail = ({ selected, onSaid }: ShapeProps) =>
+  selected === undefined ? null : (
+    <ItemDetail item={selected} key={selected.id} onSaid={onSaid} />
+  );
+
+/** What the inspector holds under its head: the item to decide, then its facts. */
+const Sections = (shape: ShapeProps) => {
+  const { t } = useLingui();
+  const facts = shape.selected?.facts ?? [];
+  return (
+    <>
+      <PanelSection card={false} label={t`To decide`}>
+        <Detail {...shape} />
+      </PanelSection>
+      {facts.length === 0 ? null : (
+        <PanelSection label={t`Facts`}>
+          <KeyValueList
+            items={facts.map(({ label, value }) => ({ key: label, value }))}
+            variant="inline"
+          />
+        </PanelSection>
+      )}
+    </>
+  );
+};
+
+/** On a narrow page, the inspector in a Sheet once a row is chosen. */
+const PhoneSheet = (shape: ShapeProps) => {
+  const { wide, open, onClose, head } = shape;
+  const kind = useKind(shape.selected);
+  return !wide && open ? (
+    <Sheet
+      onOpenChange={(next) => {
+        if (!next) {
+          onClose();
+        }
+      }}
+      open
+      size="lg"
+    >
+      <SheetContent>
+        <SheetTitle>{kind}</SheetTitle>
+        <SheetBody>
+          {head}
+          <Sections {...shape} />
+        </SheetBody>
+      </SheetContent>
+    </Sheet>
+  ) : null;
+};
+
+/**
+ * The list, and beside it an inspector that is always open, on the dither:
+ * the walk in its head, the item to decide, then what is known about it.
+ */
+const Inspector = (shape: ShapeProps) => {
+  const { wide, head, selected } = shape;
+  const kind = useKind(selected);
+  return (
+    <div {...stylex.props(styles.split, wide && styles.splitWide)}>
+      {shape.list}
+      {wide && selected !== undefined ? (
+        <div {...stylex.props(styles.panel)}>
+          <Panel aria-label={kind}>
+            <PanelHeader actions={head} texture title={kind} />
+            <PanelView>
+              <Sections {...shape} />
+            </PanelView>
+          </Panel>
+        </div>
+      ) : null}
+      <PhoneSheet {...shape} />
+    </div>
+  );
+};
+
 /**
  * The list and, beside it, the walk through it: the item shown with its
  * head. On a narrow page the list stands alone, and a row opens the walk
@@ -460,10 +488,10 @@ const ToDo = ({
   onSaid: (said: string) => void;
   /** Whether the page has room for the walk beside the list. */
   wide: boolean;
-  /** What stands at the foot of the list's column: the report's row. */
+  /** What stands at the head of the list: the weekly report, once it is ready. */
   foot: ReactNode;
 }) => {
-  const { t, i18n } = useLingui();
+  const { i18n } = useLingui();
   const navigate = useNavigate();
   // Where the open item stood, so the one after it opens once it is settled.
   const [at, setAt] = useState(0);
@@ -474,7 +502,6 @@ const ToDo = ({
     const each = groupOf[item.kind];
     counts.set(each, (counts.get(each) ?? 0) + 1);
   }
-  const shownGroups = groupOrder.filter((each) => counts.has(each));
   // A group that has emptied falls back to everything.
   const current = group === "all" || counts.has(group) ? group : "all";
   const inGroup = listed(items, current, "urgent");
@@ -570,194 +597,50 @@ const ToDo = ({
   if (items.length === 0) {
     return <NoItems failed={failed} foot={foot} />;
   }
-  const walk =
-    selected === undefined ? null : (
-      <>
-        <WalkHead
-          count={list.length}
-          onSkip={skipShown}
-          onStep={step}
-          place={place + 1}
-        />
-        <ItemDetail item={selected} key={selected.id} onSaid={onSaid} />
-      </>
-    );
-  return (
-    <div {...stylex.props(styles.split, wide && styles.splitWide)}>
-      <div {...stylex.props(styles.list)}>
+  const shape: ShapeProps = {
+    wide,
+    open: reading,
+    selected,
+    onClose: back,
+    onSaid,
+    head: (
+      <WalkHead
+        count={list.length}
+        onSkip={skipShown}
+        onStep={step}
+        place={place + 1}
+      />
+    ),
+    // The list as the page's own full-height column: no card, no tabs (the
+    // sidebar's Inbox view is the filter), the report's item at its head.
+    list: (
+      <div {...stylex.props(styles.pane, wide && styles.paneBeside)}>
         {failed.map((text) => (
           <Alert key={text} variant="attention">
             {text}
           </Alert>
         ))}
-        <GroupTabs
-          counts={counts}
-          current={current}
-          shown={shownGroups}
-          total={items.length}
-        />
-        <SectionCard aria-label={t`What waits on you`} density="compact" flush>
-          {/* The one the walk shows is marked; on a narrow page only once it is open. */}
-          <ItemList
-            list={list}
-            onOpen={open}
-            selected={wide || reading ? selected : undefined}
-          />
-        </SectionCard>
         {foot}
+        <ItemList
+          list={list}
+          onOpen={open}
+          selected={wide || reading ? selected : undefined}
+        />
       </div>
-      {wide ? <div {...stylex.props(styles.item)}>{walk}</div> : null}
-      {!wide && reading && selected !== undefined ? (
-        <Sheet
-          onOpenChange={(next) => {
-            if (!next) {
-              back();
-            }
-          }}
-          open
-          size="lg"
-        >
-          <SheetContent>
-            <SheetTitle>{i18n._(kindLabel[selected.kind])}</SheetTitle>
-            <SheetBody>{walk}</SheetBody>
-          </SheetContent>
-        </Sheet>
-      ) : null}
-    </div>
-  );
-};
-
-/** What the activity tab read: the latest of the trail, with the names to show. */
-export interface InboxActivity extends LatestActivity {
-  directory: Directory;
-}
-
-type Who = "all" | "grasp" | "people";
-
-const isWho = (value: string | null): value is Who =>
-  value === "all" || value === "grasp" || value === "people";
-
-/** Whether Grasp or its agents, Apps and runs did it, rather than a person. */
-const byGrasp = (record: AuditRecord): boolean => {
-  const type = record.event?.actor.type;
-  return type !== "person" && type !== "staff" && type !== "guest";
-};
-
-const ActivityRow = ({
-  record,
-  directory,
-}: {
-  record: AuditRecord;
-  directory: Directory;
-}) => {
-  const { i18n, t } = useLingui();
-  const action = record.event?.action;
-  const text = action === undefined ? undefined : actionWords(action);
-  let sentence = t`Unreadable event`;
-  if (text !== undefined) {
-    sentence = i18n._(text);
-  } else if (action !== undefined) {
-    sentence = action;
-  }
-  const actor =
-    record.event === null ? "–" : actorOf(record.event.actor, directory).label;
-  return (
-    <Item size="xs">
-      {/* Who did it: a person's face, or Grasp's mark for what Grasp and its agents did. */}
-      {byGrasp(record) ? (
-        <ItemMedia icon={Agent} iconLook="inline" />
-      ) : (
-        <ItemMedia>
-          <Avatar name={actor} size="xs" />
-        </ItemMedia>
-      )}
-      <ItemContent>
-        <ItemTitle>
-          {sentence}
-          {record.type === null ? null : (
-            <ItemNote>
-              <Badge size="sm">{i18n._(typeLabels[record.type])}</Badge>
-            </ItemNote>
-          )}
-        </ItemTitle>
-        <ItemDescription>
-          {`${actor} · ${formatDateTime(record.receivedAt)}`}
-        </ItemDescription>
-      </ItemContent>
-    </Item>
-  );
-};
-
-/**
- * What happened, newest first: what Grasp and its agents did by
- * themselves, and what people did. The full, searchable list is the audit
- * trail in Settings.
- */
-const ActivityList = ({ activity }: { activity: InboxActivity }) => {
-  const { t } = useLingui();
-  const [who, setWho] = useState<Who>("all");
-  const shown = activity.records.filter((record) => {
-    if (who === "all") {
-      return true;
-    }
-    return who === "grasp" ? byGrasp(record) : !byGrasp(record);
-  });
-  return (
-    <SectionCard
-      actions={
-        <>
-          <Tabs
-            onValueChange={(value) => {
-              if (isWho(value)) {
-                setWho(value);
-              }
-            }}
-            value={who}
-            variant="segmented"
-          >
-            <TabsList aria-label={t`Show activity by`}>
-              <TabsTrigger value="all">
-                <Trans context="activity filter: everyone">All</Trans>
-              </TabsTrigger>
-              <TabsTrigger value="grasp">Grasp</TabsTrigger>
-              <TabsTrigger value="people">
-                <Trans context="activity filter: what people did">People</Trans>
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-          <RouterLink to="/settings/audit">
-            <Trans>The full audit trail</Trans>
-          </RouterLink>
-        </>
-      }
-      density="compact"
-      flush
-      title={t`Latest activity`}
-    >
-      <ItemGroup aria-label={t`Latest activity`} separated>
-        {shown.map((record) => (
-          <ActivityRow
-            directory={activity.directory}
-            key={record.seq}
-            record={record}
-          />
-        ))}
-      </ItemGroup>
-    </SectionCard>
-  );
+    ),
+  };
+  return <Inspector {...shape} />;
 };
 
 /**
  * The inbox. `notLoaded` are the parts of what waits that couldn't be
  * read, said above the list rather than left to look like nothing waits.
- * `activity` is the latest of the audit trail, for admins only.
  */
 export const InboxPage = ({
   items,
   chosen,
   group,
   notLoaded,
-  activity,
   foot,
 }: {
   items: readonly InboxItem[];
@@ -766,11 +649,10 @@ export const InboxPage = ({
   /** The group in view, as the address has it; all when it has none. */
   group?: Exclude<Group, "all">;
   notLoaded: readonly Loaded<unknown>[];
-  activity: Promise<Loaded<InboxActivity>> | undefined;
-  /** What stands at the foot of the list's column: the weekly report's row, with a programme. */
+  /** What stands at the head of the list: the weekly report, once it is ready. */
   foot?: ReactNode;
 }) => {
-  const { t, i18n } = useLingui();
+  const { t } = useLingui();
   const [said, setSaid] = useState("");
   // Whether the page has room for the walk beside the list, as the
   // library's approvals inbox measures its own screen.
@@ -789,57 +671,19 @@ export const InboxPage = ({
       watch.disconnect();
     };
   }, []);
-  const toDo = (
-    <ToDo
-      chosen={chosen}
-      foot={foot}
-      group={group ?? "all"}
-      items={items}
-      notLoaded={notLoaded}
-      onSaid={setSaid}
-      wide={wide}
-    />
-  );
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Inbox` }]} />
       <div ref={page} {...stylex.props(styles.page)}>
-        {activity === undefined ? (
-          toDo
-        ) : (
-          <Tabs defaultValue="todo">
-            <TabsList aria-label={t`Inbox`}>
-              <TabsTrigger value="todo">
-                <Trans context="inbox tab: what waits on you">To do</Trans>
-              </TabsTrigger>
-              <TabsTrigger value="activity">
-                <Trans context="inbox tab: what Grasp and people did">
-                  Activity
-                </Trans>
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="todo">{toDo}</TabsContent>
-            <TabsContent value="activity">
-              <Await fallback={<LoadingLines />} promise={activity}>
-                {(loaded) =>
-                  loaded.state === "ready" ? (
-                    <ActivityList activity={loaded.data} />
-                  ) : (
-                    <Empty tone="danger">
-                      <EmptyHeader>
-                        <EmptyMedia />
-                        <EmptyTitle />
-                        <EmptyDescription>
-                          {notLoadedText(loaded, i18n) ?? t`It didn't load`}
-                        </EmptyDescription>
-                      </EmptyHeader>
-                    </Empty>
-                  )
-                }
-              </Await>
-            </TabsContent>
-          </Tabs>
-        )}
+        <ToDo
+          chosen={chosen}
+          foot={foot}
+          group={group ?? "all"}
+          items={items}
+          notLoaded={notLoaded}
+          onSaid={setSaid}
+          wide={wide}
+        />
       </div>
       {/* What was done with an item, for a screen reader: the list only loses it. */}
       <output {...stylex.props(styles.unseen)}>{said}</output>

@@ -1,84 +1,68 @@
-import { isAdmin } from "@grasp-os/shared/roles";
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 
-import { readActivity, readWaiting } from "../dashboard/read-dashboard.ts";
-import { readDirectory } from "../directory.ts";
+import { readWaiting } from "../dashboard/read-dashboard.ts";
 import { PageLoading } from "../frame/page-states.tsx";
 import { InboxPage, groupOrder } from "../inbox/inbox-page.tsx";
 import { inboxItems, unread } from "../inbox/items.ts";
-import { ReportRow } from "../inbox/report-row.tsx";
+import { ReportItem } from "../inbox/report-row.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 
-// The inbox, as the prototype's (`routes/inbox.tsx`), at its address: what
-// waits on the person, read as the dashboard reads it, each item with
-// its actions; and, for admins, the latest of the audit trail. Like the
-// prototype's, the sidebar doesn't list it: the dashboard holds what waits,
-// and leads here to an item (`?item=`) only the inbox settles. The
-// sidebar's Inbox view links each of its rows here the same way.
-
-/** How many of the trail's latest events the activity tab shows at most. */
-const activityShown = 100;
+// The Inbox at its address: what waits on the person, each item with its
+// actions (inbox-page.tsx), and the weekly report as an item once it is
+// ready. The sidebar's Inbox view links each of its rows here (`?item=`)
+// and opens a group (`?group=`).
 
 const Inbox = () => {
-  const { waiting, readAt, activity, programme, report } =
-    Route.useLoaderData();
+  const { waiting, readAt, programme, report } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const { item, group } = Route.useSearch();
   return (
     <InboxPage
-      activity={activity}
       chosen={item}
+      foot={
+        programme === null || report === undefined ? undefined : (
+          <ReportItem programme={programme} report={report} />
+        )
+      }
       group={group}
       items={inboxItems(waiting, identity, readAt)}
-      foot={
-        programme.state === "ready" && programme.data !== null ? (
-          <ReportRow programme={programme.data} report={report} />
-        ) : undefined
-      }
       notLoaded={unread(waiting)}
     />
   );
 };
 
 export const Route = createFileRoute("/_shell/inbox")({
-  // `group`: the inbox's group in view, as its filter and the sidebar's Inbox view set it.
   validateSearch: z.object({
     item: z.string().optional(),
+    // The group in view, as the sidebar's Inbox view sets it.
     group: z.enum(groupOrder).optional(),
   }),
   pendingComponent: PageLoading,
   loader: async ({ context: { core, identity } }) => {
-    // Not awaited: the activity tab waits for it.
-    const activity = isAdmin(identity.role)
-      ? loadFromCore(core, async (session) => {
-          const [latest, directory] = await Promise.all([
-            readActivity(session, activityShown),
-            readDirectory(session),
-          ]);
-          return { ...latest, directory };
-        })
-      : undefined;
-    // Everyone's unknown outcomes too, once a visit, whatever the view: the
-    // filter offers their group, and only this page lists them (core records
-    // each list in the audit trail).
-    // Not awaited: the report's dialog waits for it.
-    const report = loadFromCore(
-      core,
-      async (session) => await session.dashboard.report()
-    );
-    const [waiting, programme] = await Promise.all([
+    // Everyone's unknown outcomes too, once a visit: only this page lists
+    // them (core records each list in the audit trail).
+    const [waiting, read] = await Promise.all([
       readWaiting(core, identity, { everyonesOutcomes: true }),
-      // The programme with Grasp, for the weekly report's row; none without a plan.
+      // The programme with Grasp, for the weekly report; none without a plan.
       loadFromCore(
         core,
         async (session) => await session.onboarding.programme()
       ),
     ]);
+    const programme = read.state === "ready" ? read.data : null;
+    // The report is an item only on the day it is ready; read then, not
+    // awaited: the report's page waits for it.
+    const report =
+      programme?.nextReport.inDays === 0
+        ? loadFromCore(
+            core,
+            async (session) => await session.dashboard.report()
+          )
+        : undefined;
     return {
       waiting,
       readAt: new Date().toISOString(),
-      activity,
       programme,
       report,
     };

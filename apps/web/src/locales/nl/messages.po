@@ -278,6 +278,10 @@ msgstr "{collection}: {name}"
 msgid "{coming} expected return"
 msgstr "{coming} verwachte opbrengst"
 
+#: src/inbox/report-view.tsx
+msgid "{company} · Week {number} of {weeks} · {from} to {to}"
+msgstr "{company} · Week {number} van {weeks} · {from} tot {to}"
+
 #: src/chat/held-writes.tsx
 #: src/dashboard/outcome-card.tsx
 msgid "{connection} ({tool})"
@@ -749,11 +753,6 @@ msgstr "{going, plural, one {De teamleider van # team krijgt de link {when}. All
 msgid "{going} of {count}"
 msgstr "{going} van {count}"
 
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox filter with how many it holds"
-msgid "{groupName} {count}"
-msgstr "{groupName} {count}"
-
 #: src/brain/brain-chips.tsx
 #: src/brain/brain-source-contents.tsx
 msgid "{hidden, plural, one {Show # more} other {Show # more}}"
@@ -781,7 +780,6 @@ msgid "{idle, plural, one {# more workflow didn't run in this time.} other {# mo
 msgstr "{idle, plural, one {# andere workflow liep in deze tijd niet.} other {# andere workflows liepen in deze tijd niet.}}"
 
 #: src/dashboard/report-bar.tsx
-#: src/inbox/report-row.tsx
 msgid "{inDays, plural, one {Your next report is ready tomorrow} other {Your next report is ready in # days}}"
 msgstr "{inDays, plural, one {Je volgende rapport is morgen klaar} other {Je volgende rapport is over # dagen klaar}}"
 
@@ -1217,6 +1215,10 @@ msgstr "{people, plural, one {voor # persoon} other {voor # personen}}"
 msgid "{percent}% known now"
 msgstr "Nu {percent}% bekend"
 
+#: src/inbox/report-view.tsx
+msgid "{percentAlone}% of this week's {total} runs needed nobody."
+msgstr "{percentAlone}% van de {total} runs van deze week had niemand nodig."
+
 #: src/inbox/items.ts
 msgid "{person} · {connection}"
 msgstr "{person} · {connection}"
@@ -1571,6 +1573,10 @@ msgstr "{total, plural, one {{count} van # tool toegestaan} other {{count} van #
 #: src/dashboard/runs-widget.tsx
 msgid "{total, plural, one {{withPerson} of # run asked a person for a decision.} other {{withPerson} of # runs asked a person for a decision.}}"
 msgstr "{total, plural, one {Bij {withPerson} van # run was een beslissing van een persoon nodig.} other {Bij {withPerson} van # runs was een beslissing van een persoon nodig.}}"
+
+#: src/inbox/report-view.tsx
+msgid "{total} runs from {from} to {to}."
+msgstr "{total} runs van {from} tot {to}."
 
 #: src/settings/ai-spend.tsx
 msgid "{total} so far this month."
@@ -2244,11 +2250,6 @@ msgctxt "dashboard: what Grasp and people did"
 msgid "Activity"
 msgstr "Activiteit"
 
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox tab: what Grasp and people did"
-msgid "Activity"
-msgstr "Activiteit"
-
 #: src/brain/brain-log.tsx
 #: src/brain/brain-nav.tsx
 #: src/routes/_shell.brain.tsx
@@ -2640,11 +2641,6 @@ msgstr "AI-tool"
 #: src/routes/_shell.workflows.index.tsx
 msgid "All"
 msgstr "Alles"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "activity filter: everyone"
-msgid "All"
-msgstr "Iedereen"
 
 #: src/inbox/inbox-page.tsx
 msgctxt "inbox filter, short"
@@ -4721,6 +4717,7 @@ msgid "Company Brain, read only. This can read company Brain evidence and its op
 msgstr "Company Brain, alleen lezen. Het kan bewijs en open vragen van het Company Brain lezen, uit de collecties die het kreeg en alleen wat de persoon voor wie het werkt ook mag lezen. Het kan nooit naar het Brein schrijven. Elke leesactie wordt vastgelegd"
 
 #: src/dashboard/runs-widget.tsx
+#: src/inbox/report-view.tsx
 #: src/workflows/runs.tsx
 msgid "Completed"
 msgstr "Voltooid"
@@ -6029,6 +6026,10 @@ msgstr "Downloaden als pdf"
 msgid "Download Markdown"
 msgstr "Markdown downloaden"
 
+#: src/inbox/report-row.tsx
+msgid "Download page"
+msgstr "Pagina downloaden"
+
 #: src/workflows/workflow-settings.tsx
 #: src/workflows/workflow-status.tsx
 #: src/workflows/workflows-table.tsx
@@ -6558,7 +6559,6 @@ msgid "Export definition"
 msgstr "Definitie exporteren"
 
 #: src/dashboard/report-bar.tsx
-#: src/inbox/report-row.tsx
 msgid "Export report"
 msgstr "Rapport exporteren"
 
@@ -6583,6 +6583,10 @@ msgstr "Extra hoog"
 msgid "Extracting"
 msgstr "Wordt uitgelezen"
 
+#: src/inbox/inbox-page.tsx
+msgid "Facts"
+msgstr "Feiten"
+
 #: src/workflows/today-lanes.tsx
 msgctxt "a run that ended in failure"
 msgid "failed"
@@ -6594,6 +6598,7 @@ msgid "failed"
 msgstr "mislukt"
 
 #: src/dashboard/runs-widget.tsx
+#: src/inbox/report-view.tsx
 #: src/knowledge/uploads.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/settings/ai-providers.tsx
@@ -8272,10 +8277,6 @@ msgstr "Het is niet gebeurd"
 msgid "It didn't happen: {who}"
 msgstr "Het is niet gebeurd: {who}"
 
-#: src/inbox/inbox-page.tsx
-msgid "It didn't load"
-msgstr "Niet geladen"
-
 #: src/apps/publish-errors.ts
 msgid "It doesn't pass its checks. Fix the problems, then share."
 msgstr "Het haalt de controles niet. Los de problemen op en deel het dan."
@@ -8864,7 +8865,6 @@ msgid "Lately the trail only records its own searches: older events are in the f
 msgstr "De audittrail legt de laatste tijd alleen zijn eigen zoekopdrachten vast: oudere gebeurtenissen vind je in de volledige audittrail."
 
 #: src/dashboard/activity.tsx
-#: src/inbox/inbox-page.tsx
 msgid "Latest activity"
 msgstr "Recente activiteit"
 
@@ -11928,11 +11928,6 @@ msgstr "In afwachting"
 msgid "People"
 msgstr "Mensen"
 
-#: src/inbox/inbox-page.tsx
-msgctxt "activity filter: what people did"
-msgid "People"
-msgstr "Mensen"
-
 #: src/brain/brain-source-contents.tsx
 msgctxt "column: how many people"
 msgid "People"
@@ -12977,6 +12972,10 @@ msgstr "Vervangen door een nieuwer verzoek"
 msgid "Report"
 msgstr "Rapport"
 
+#: src/inbox/report-row.tsx
+msgid "Report · {day}"
+msgstr "Rapport · {day}"
+
 #: src/activity/audit-event.tsx
 msgid "Request"
 msgstr "Verzoek"
@@ -13506,6 +13505,7 @@ msgstr "Nu bezig"
 msgid "Running or cancelled"
 msgstr "Loopt of geannuleerd"
 
+#: src/inbox/report-view.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/traces.tsx
@@ -13547,6 +13547,10 @@ msgstr "Draait bij: {whereItRuns}. Er geldt een maandlimiet: als die is bereikt,
 msgid "Runs by the day they started"
 msgstr "Runs per dag waarop ze startten"
 
+#: src/inbox/report-view.tsx
+msgid "Runs by workflow"
+msgstr "Runs per workflow"
+
 #: src/workflows/workflow-status.tsx
 msgid "Runs for {users} since {since}"
 msgstr "Draait voor {users} sinds {since}"
@@ -13562,6 +13566,10 @@ msgstr "Draait vanzelf"
 #: src/dashboard/runs-widget.tsx
 msgid "Runs over the last {fullDays} days, by the day they started and how they stand now."
 msgstr "Runs van de afgelopen {fullDays} dagen, per dag waarop ze startten en hoe ze er nu voor staan."
+
+#: src/inbox/report-view.tsx
+msgid "Runs per day"
+msgstr "Runs per dag"
 
 #: src/dashboard/report.ts
 msgctxt "a figure of the report"
@@ -13703,6 +13711,7 @@ msgid "Save as blueprint"
 msgstr "Opslaan als blueprint"
 
 #: src/dashboard/report-dialog.tsx
+#: src/inbox/report-row.tsx
 msgid "Save as PDF"
 msgstr "Opslaan als pdf"
 
@@ -14326,17 +14335,12 @@ msgstr "Delen ongedaan gemaakt"
 
 #: src/apps/app-data-model.tsx
 #: src/brain/atlas-overlays.tsx
-#: src/inbox/inbox-page.tsx
 msgid "Show"
 msgstr "Tonen"
 
 #: src/frame/part-words.tsx
 msgid "Show {count} more"
 msgstr "Toon er nog {count}"
-
-#: src/inbox/inbox-page.tsx
-msgid "Show activity by"
-msgstr "Activiteit tonen van"
 
 #: src/frame/part-words.tsx
 msgid "Show all"
@@ -14596,6 +14600,10 @@ msgstr "Het inloggen is verlopen of elders gestart. Probeer het opnieuw."
 #: src/frame/part-words.tsx
 msgid "Sign-in timed out. Try again."
 msgstr "Het inloggen duurde te lang. Probeer het opnieuw."
+
+#: src/inbox/report-view.tsx
+msgid "Signals"
+msgstr "Signalen"
 
 #: src/dashboard/signals.tsx
 msgid "Signals by kind"
@@ -15895,7 +15903,6 @@ msgid "The first links go out"
 msgstr "De eerste links gaan eruit"
 
 #: src/dashboard/activity.tsx
-#: src/inbox/inbox-page.tsx
 msgid "The full audit trail"
 msgstr "De volledige audittrail"
 
@@ -16218,9 +16225,12 @@ msgid "The webhook's secret"
 msgstr "Het geheim van de webhook"
 
 #: src/dashboard/report-bar.tsx
-#: src/inbox/report-row.tsx
 msgid "The week so far"
 msgstr "De week tot nu toe"
+
+#: src/inbox/report-view.tsx
+msgid "The week's figures"
+msgstr "De cijfers van de week"
 
 #: src/brain/share-record.tsx
 msgid "The whole company"
@@ -16777,13 +16787,12 @@ msgstr "Tot"
 msgid "To act in this workspace, ask its admin to add you as a user, and sign in as one."
 msgstr "Om in deze workspace iets te doen, vraag je de beheerder om je als gebruiker toe te voegen, en log je als gebruiker in."
 
+#: src/inbox/inbox-page.tsx
+msgid "To decide"
+msgstr "Te beslissen"
+
 #: src/dashboard/todo-pile.tsx
 msgctxt "dashboard: what waits on you"
-msgid "To do"
-msgstr "Te doen"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox tab: what waits on you"
 msgid "To do"
 msgstr "Te doen"
 
@@ -17185,7 +17194,6 @@ msgstr "Ongelezen berichten vanaf hier"
 
 #: src/activity/audit-log.tsx
 #: src/dashboard/activity.tsx
-#: src/inbox/inbox-page.tsx
 msgid "Unreadable event"
 msgstr "Onleesbare gebeurtenis"
 
@@ -17792,6 +17800,7 @@ msgid "week {week}"
 msgstr "week {week}"
 
 #: src/dashboard/report.ts
+#: src/inbox/report-row.tsx
 msgid "Week {week}"
 msgstr "Week {week}"
 
@@ -17837,6 +17846,7 @@ msgid "What changes"
 msgstr "Wat er verandert"
 
 #: src/dashboard/report.ts
+#: src/inbox/report-view.tsx
 msgid "What could be better"
 msgstr "Wat beter kan"
 
@@ -17865,6 +17875,10 @@ msgstr "Wat Grasp deed"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "What Grasp may do"
 msgstr "Wat Grasp mag doen"
+
+#: src/inbox/report-view.tsx
+msgid "What Grasp noticed could be better, by kind."
+msgstr "Wat Grasp zag dat beter kan, per soort."
 
 #: src/onboarding/setup-steps.tsx
 msgid "What happens next"
@@ -18241,6 +18255,10 @@ msgstr "Waar de tijd naartoe gaat"
 msgid "Where the work passes on"
 msgstr "Waar het werk wordt doorgegeven"
 
+#: src/inbox/report-view.tsx
+msgid "Where this week's {total} runs went."
+msgstr "Waar de {total} runs van deze week naartoe gingen."
+
 #: src/settings/where-stephen.tsx
 msgid "Where to reach Stephen"
 msgstr "Waar je Stephen bereikt"
@@ -18478,6 +18496,10 @@ msgstr "Heeft een uitnodiging ingetrokken"
 msgid "without a person"
 msgstr "zonder een persoon"
 
+#: src/inbox/report-view.tsx
+msgid "Without a person"
+msgstr "Zonder een persoon"
+
 #: src/activity/audit-words.ts
 msgid "Woke a waiting run whose wake hadn't got through"
 msgstr "Een wachtende run gewekt waarvan de wekker niet was aangekomen"
@@ -18577,6 +18599,7 @@ msgstr "workflow.json"
 #: src/dashboard/report.ts
 #: src/dashboard/widget-board.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
+#: src/inbox/report-view.tsx
 #: src/projects/file-item-dialog.tsx
 #: src/projects/project-view.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -19140,6 +19163,10 @@ msgstr "Je triggers ontvangen geen nieuwe e-mail van {name} meer"
 #: src/routes/apps.$app.draft.tsx
 msgid "Your version of the App"
 msgstr "Jouw versie van de App"
+
+#: src/inbox/report-row.tsx
+msgid "Your weekly report"
+msgstr "Je weekrapport"
 
 #: src/interview/before.tsx
 msgid "Your words"

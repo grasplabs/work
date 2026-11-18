@@ -389,6 +389,7 @@ const ApprovalFrame = ({
         onApprove={answer(onApprove, t`Approved: ${title}`)}
         onDecline={answer(onDecline, t`Declined: ${title}`)}
         title={title}
+        variant="ledger"
         words={words}
       >
         {details}

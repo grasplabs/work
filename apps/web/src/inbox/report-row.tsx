@@ -1,114 +1,232 @@
 import type { BoardReport } from "@grasp-os/shared/dashboard";
 import type { Programme } from "@grasp-os/shared/onboarding";
-import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useRouter } from "@tanstack/react-router";
-import { lazy, Suspense, useState } from "react";
+import { Await, useRouter } from "@tanstack/react-router";
+import { useEffect, useRef, useState } from "react";
 
-import { programmeLine } from "../dashboard/report.ts";
+import { formatDayMonth } from "../format.ts";
 import { Button } from "../grasp/button/index.ts";
-import { File, Icon } from "../grasp/icons/index.ts";
-import { Progress } from "../grasp/progress/index.ts";
-import { Text } from "../grasp/text/index.ts";
+import { Download, File, Pdf } from "../grasp/icons/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import {
+  Sheet,
+  SheetBody,
+  SheetContent,
+  SheetFooter,
+  SheetTitle,
+} from "../grasp/sheet/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
+import { useCore } from "../use-core.ts";
+import { ReportView } from "./report-view.tsx";
 
-// The weekly report as one quiet row at the foot of the Inbox's list: in
-// how many days the next report is ready, or that the one on the week
-// that closed is, with how far the week has come, and Export report, which
-// opens the report as it stands today (report-dialog.tsx). Only with a
-// programme.
-
-/** The days of a programme's week. */
-const WEEK_DAYS = 7;
-
-// The report and its export, with their Markdown, load once it is first asked for.
-const ReportDialog = lazy(async () => {
-  const { ReportDialog: dialog } =
-    await import("../dashboard/report-dialog.tsx");
-  return { default: dialog };
-});
+// The weekly report as an item in the Inbox: it stands at the head of the
+// list on the day the report on the week that closed is ready. Opening it
+// shows the report (report-view.tsx), in a Sheet until the library's
+// artifact viewer is installed, to download as the page itself, its fonts
+// carried in it, or as a PDF through print.
 
 const styles = stylex.create({
-  row: {
-    display: "flex",
-    alignItems: "center",
-    gap: grasp.space3,
-    minWidth: 0,
-    paddingInline: grasp.space2,
-  },
-  words: {
-    display: "flex",
-    flexDirection: "column",
-    flexGrow: 1,
-    gap: grasp.space2,
-    minWidth: 0,
+  sheet: {
+    borderRadius: grasp.corner,
+    overflow: "hidden",
   },
 });
 
-export const ReportRow = ({
+/** How many bytes go to `String.fromCodePoint` at once: well under any engine's argument limit. */
+const CHUNK = 8192;
+
+/** A font file the page loads, as data, so the file carries it. */
+const asData = async (url: string): Promise<string> => {
+  const response = await fetch(url);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  let binary = "";
+  for (let at = 0; at < bytes.length; at += CHUNK) {
+    binary += String.fromCodePoint(...bytes.subarray(at, at + CHUNK));
+  }
+  const type = response.headers.get("content-type") ?? "font/woff2";
+  return `data:${type};base64,${btoa(binary)}`;
+};
+
+/** Every font file the page's styles name, by its address. */
+const fontUrl = /url\("?(?<path>[^")]+\.woff2)"?\)/gu;
+
+/**
+ * The page as a file of its own: its markup, with every style the page has
+ * written in and its fonts carried as data, so it opens the same offline.
+ */
+const snapshot = async (page: HTMLElement, title: string): Promise<string> => {
+  const sheets = [...document.styleSheets].flatMap((sheet) => {
+    try {
+      return [...sheet.cssRules].map((rule) => ({
+        css: rule.cssText,
+        base: sheet.href ?? location.href,
+      }));
+    } catch {
+      return [];
+    }
+  });
+  const fonts = new Map<string, string>();
+  for (const { css, base } of sheets) {
+    for (const match of css.matchAll(fontUrl)) {
+      const url = match.groups?.path;
+      if (url !== undefined && !url.startsWith("data:")) {
+        fonts.set(url, new URL(url, base).href);
+      }
+    }
+  }
+  const data = new Map(
+    await Promise.all(
+      [...fonts].map(async ([url, href]) => [url, await asData(href)] as const)
+    )
+  );
+  const css = sheets
+    .map(({ css: text }) =>
+      text.replaceAll(fontUrl, (whole: string, url: string) => {
+        const inline = data.get(url);
+        return inline === undefined ? whole : `url("${inline}")`;
+      })
+    )
+    .join("\n");
+  const root = document.documentElement;
+  return `<!doctype html><html lang="${root.lang}" class="${root.className}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><style>${css}</style></head><body>${page.outerHTML}</body></html>`;
+};
+
+/** The report, made of the library's parts, with its downloads. */
+const ReportArtifact = ({
+  report,
+  programme,
+}: {
+  report: BoardReport;
+  programme: Programme;
+}) => {
+  const { t } = useLingui();
+  const core = useCore();
+  const [company, setCompany] = useState("");
+  const page = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    void core.withSession(async (session) => {
+      const organization = await session.organization.get();
+      setCompany(organization.name);
+    });
+  }, [core]);
+  const name = `${company} week ${programme.week}`.trim();
+  const file = async (): Promise<string> =>
+    page.current === null ? "" : await snapshot(page.current, name);
+  return (
+    <>
+      <SheetBody>
+        {/* The artifact viewer stands round it once it is installed. */}
+        <div {...stylex.props(styles.sheet)}>
+          <ReportView
+            company={company}
+            programme={programme}
+            ref={page}
+            report={report}
+          />
+        </div>
+      </SheetBody>
+      <SheetFooter>
+        <Button
+          icon={Download}
+          onClick={async () => {
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(
+              new Blob([await file()], { type: "text/html" })
+            );
+            link.download = `${name}.html`;
+            link.click();
+            URL.revokeObjectURL(link.href);
+          }}
+          variant="quiet"
+        >
+          {t`Download page`}
+        </Button>
+        <Button
+          icon={Pdf}
+          onClick={async () => {
+            // Printed from a frame of its own, so only the report is on the paper.
+            const frame = document.createElement("iframe");
+            frame.hidden = true;
+            frame.srcdoc = await file();
+            frame.addEventListener("load", () => {
+              frame.contentWindow?.print();
+              setTimeout(() => {
+                frame.remove();
+              }, 1000);
+            });
+            document.body.append(frame);
+          }}
+          variant="ink"
+        >
+          {t`Save as PDF`}
+        </Button>
+      </SheetFooter>
+    </>
+  );
+};
+
+export const ReportItem = ({
   programme,
   report,
 }: {
   programme: Programme;
-  /** The weekly report, as core reads it in one call: the dialog waits for it. */
+  /** The weekly report, as core reads it in one call: the page waits for it. */
   report: Promise<Loaded<BoardReport>>;
 }) => {
-  const { t, i18n } = useLingui();
+  const { t } = useLingui();
   const router = useRouter();
-  const [exporting, setExporting] = useState(false);
-  // Kept once opened, so it closes as a dialog does, not all at once.
-  const [exported, setExported] = useState(false);
+  const [open, setOpen] = useState(false);
   const { nextReport: next, today } = programme;
-  const { inDays, week } = next;
-  const said =
-    inDays === 0
-      ? t`Your report on week ${week} is ready`
-      : plural(inDays, {
-          one: "Your next report is ready tomorrow",
-          other: "Your next report is ready in # days",
-        });
+  const { week } = next;
+  const day = formatDayMonth(today);
+  const title = t`Your report on week ${week} is ready`;
   return (
-    <div {...stylex.props(styles.row)}>
-      <Icon icon={File} />
-      <div {...stylex.props(styles.words)}>
-        <Text size="sm">{said}</Text>
-        <Progress
-          label={t`The week so far`}
-          max={WEEK_DAYS}
-          showLabel={false}
-          size="sm"
-          value={next.through}
-        />
-      </div>
-      <Button
-        onClick={() => {
-          // Read again first, so the report is as it stands now, not as
-          // it stood when the page was opened.
-          void (async () => {
-            await router.invalidate();
-            setExported(true);
-            setExporting(true);
-          })();
-        }}
-        size="sm"
-        variant="ghost"
-      >
-        {t`Export report`}
-      </Button>
-      {exported ? (
-        <Suspense fallback={null}>
-          <ReportDialog
-            line={programmeLine(programme, i18n)}
-            next={next}
-            onOpenChange={setExporting}
-            open={exporting}
-            reads={report}
-            today={today}
-          />
-        </Suspense>
-      ) : null}
-    </div>
+    <>
+      <ItemGroup aria-label={t`Your weekly report`}>
+        <Item
+          render={
+            <button
+              aria-label={title}
+              onClick={() => {
+                // Read again first, so the report is as it stands now.
+                void (async () => {
+                  await router.invalidate();
+                  setOpen(true);
+                })();
+              }}
+              type="button"
+            />
+          }
+          size="xs"
+        >
+          <ItemMedia icon={File} iconLook="inline" />
+          <ItemContent>
+            <ItemTitle>{title}</ItemTitle>
+            <ItemDescription>{t`Report · ${day}`}</ItemDescription>
+          </ItemContent>
+        </Item>
+      </ItemGroup>
+      <Sheet onOpenChange={setOpen} open={open} size="wide">
+        <SheetContent>
+          <SheetTitle>{t`Week ${week}`}</SheetTitle>
+          <Await promise={report}>
+            {(loaded) =>
+              loaded.state === "ready" ? (
+                <ReportArtifact programme={programme} report={loaded.data} />
+              ) : null
+            }
+          </Await>
+        </SheetContent>
+      </Sheet>
+    </>
   );
 };
