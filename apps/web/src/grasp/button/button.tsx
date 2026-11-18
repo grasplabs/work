@@ -637,6 +637,15 @@ const styles = stylex.create({
     visibility: "visible",
     whiteSpace: "nowrap",
   },
+  // The icon's box, for the spinner that stands in its place while the button works.
+  iconPlace: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    width: iconVars.size,
+    height: iconVars.size,
+  },
   // A result arriving where the spinner was: its mark is drawn in at once, then its words slide in
   // beside it. Both leave by the layer's own fade. With reduced motion they are simply there.
   resultMark: {
@@ -754,6 +763,16 @@ const spinnerPlace = (
   alone: working && icon === undefined && iconEnd === undefined,
 });
 
+/**
+ * The spinner where an icon stood: in a box the icon's exact size (the button's icon size), centred,
+ * so the words beside it stand where they stood at rest. The spinner keeps its own, smaller size.
+ */
+const SpinnerInIconPlace = () => (
+  <span data-slot="button-spinner-place" {...stylex.props(styles.iconPlace)}>
+    <Spinner />
+  </span>
+);
+
 /** A span of words: on one line with an ellipsis when truncated, marked so the cut can be read. */
 const Words = ({
   truncate,
@@ -791,7 +810,7 @@ const Content = ({
     <span {...stylex.props(styles.stack)}>
       <Layer on={current === "idle" || working} faded={spinner.alone}>
         {spinner.atStart ? (
-          <Spinner />
+          <SpinnerInIconPlace />
         ) : (
           icon !== undefined && <Icon icon={icon} />
         )}
@@ -804,7 +823,7 @@ const Content = ({
           </Words>
         )}
         {spinner.atEnd ? (
-          <Spinner />
+          <SpinnerInIconPlace />
         ) : (
           iconEnd !== undefined && <Icon icon={iconEnd} />
         )}

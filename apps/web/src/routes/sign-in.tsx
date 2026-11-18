@@ -1,10 +1,10 @@
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { forgetActiveChats } from "../chat/active-chat.ts";
 import { loadCoreStatus } from "../core-connection.ts";
-import { signIn } from "../core.ts";
+import { leaveToSignIn, signInAddress } from "../core.ts";
 import { languageOptions } from "../frame/language-options.ts";
 import { BrandGoogle, BrandMicrosoft, Lock } from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
@@ -96,23 +96,33 @@ const Language = () => {
  * The library's sign-in page, the website's log-in: a button for each way
  * this deployment offers, Grasp staff's own way after them, why the last
  * sign-in was refused over them, and the language at its foot. A chosen way
- * leaves for its identity provider once the door has opened, and comes back
- * to `returnTo`.
+ * asks core where to go at the press and leaves for its identity provider
+ * once the door has opened, coming back to `returnTo`.
  */
 const SignIn = () => {
   const { connected, signInOptions } = Route.useLoaderData();
   const { error, returnTo } = Route.useSearch();
   // The way being left for, so the others are out of use meanwhile.
   const [leaving, setLeaving] = useState<string>();
+  // Where to leave for, asked of core at the press.
+  const asked = useRef<Promise<string> | null>(null);
+  const ask = async (id: string): Promise<string> =>
+    await signInAddress(id === "staff" ? staffProvider : id, returnTo);
   const ways = connected ? signInOptions : [];
   const notice = noticeOf(connected, error);
   return (
     <SignInDoor
       language={<Language />}
+      // The door has opened: leave as soon as core has said where to.
       onChoose={(id) => {
-        const providerId = id === "staff" ? staffProvider : id;
         setLeaving(id);
-        void signIn(providerId, returnTo);
+        void (async () => {
+          leaveToSignIn(await (asked.current ?? ask(id)));
+        })();
+      }}
+      // Asked at the press, so core answers while the door opens.
+      onPress={(id) => {
+        asked.current = ask(id);
       }}
       providers={ways
         .filter(({ providerId }) => providerId !== staffProvider)
