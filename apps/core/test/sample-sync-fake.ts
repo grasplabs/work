@@ -14,13 +14,16 @@ export const sampleSyncControlUrl = "https://sample-sync-control.test/feed";
  * sync's change feed (`GET /v1/me/changes?from=<position>`), and its
  * `folders` sync's places (`GET /v1/me/folders`, failing while the test
  * sets none) with each folder's change feed, names-only listing and items
- * by ID. Only for an account a test set a world for, by the token connect
+ * by ID; and its `sites` sync's places to pick (`GET /v1/sites`, failing
+ * while the test sets none), each with its own change feed. Only for an account a test set a world for, by the token connect
  * sends; a position with no page answers 410, which the connector takes
  * as "restart"; an item asked by ID that isn't there comes as gone.
  *
  * A test POSTs `{ subject, pages?, places?, placePages?, folders?,
- * failing? }` to the
+ * sites?, siteFeeds?, failing? }` to the
  * control URL: what it names replaces that part of the account's world;
+ * `sites` lists the sites to pick (`{ id, name }`), `siteFeeds` maps each
+ * site to its feed's pages by position (a site in `failing` answers 500);
  * `placePages` pages the folder list by position (`{ folders, next }`,
  * 410 for a position it has none for), in place of `places`;
  * `folders` maps each folder to `{ changes, names, items }`, its pages by
@@ -42,6 +45,7 @@ export const sampleSyncFake = () => {
   const tokenPattern = /^Bearer access\.(?<subject>.+)$/u;
   const folderPattern =
     /^\/v1\/me\/folders\/(?<folder>[^/]+)\/(?<what>changes|names|items)$/u;
+  const sitePattern = /^\/v1\/sites\/(?<site>[^/]+)\/changes$/u;
   // oxlint-disable-next-line unicorn/consistent-function-scoping -- self-contained: core's tests embed this function's source
   const field = (value: unknown, key: string): unknown =>
     typeof value === "object" && value !== null
@@ -91,6 +95,32 @@ export const sampleSyncFake = () => {
       more: false,
     });
   };
+  /** The `sites` sync's answer: the sites to pick, or a site's feed's page. */
+  const siteAnswer = (
+    world: Record<string, unknown>,
+    url: URL
+  ): Response | undefined => {
+    if (url.pathname === "/v1/sites") {
+      const sites = field(world, "sites");
+      return Array.isArray(sites)
+        ? Response.json({ sites })
+        : new Response(null, { status: 500 });
+    }
+    const site = sitePattern.exec(url.pathname)?.groups?.site;
+    if (site === undefined) {
+      return undefined;
+    }
+    const failing = field(world, "failing");
+    if (Array.isArray(failing) && failing.includes(decodeURIComponent(site))) {
+      return new Response(null, { status: 500 });
+    }
+    return pageOr410(
+      field(
+        field(field(world, "siteFeeds"), decodeURIComponent(site)),
+        url.searchParams.get("from") ?? ""
+      )
+    );
+  };
   return {
     control: async (request: Request): Promise<Response> => {
       if (request.method === "GET") {
@@ -109,6 +139,8 @@ export const sampleSyncFake = () => {
         "places",
         "placePages",
         "folders",
+        "sites",
+        "siteFeeds",
         "failing",
       ]) {
         const value = field(posted, part);
@@ -150,6 +182,10 @@ export const sampleSyncFake = () => {
         return Array.isArray(places)
           ? Response.json({ folders: places })
           : new Response(null, { status: 500 });
+      }
+      const sites = siteAnswer(world, url);
+      if (sites !== undefined) {
+        return sites;
       }
       const matched = folderPattern.exec(url.pathname)?.groups;
       if (matched?.folder === undefined || matched.what === undefined) {

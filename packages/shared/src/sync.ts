@@ -133,10 +133,22 @@ export type SyncPage = z.infer<typeof syncPageSchema>;
 export const ownPlace = "own";
 
 /**
+ * The place of core's row that lists a sync's places (`listSyncPlaces`)
+ * as work in the same queue as its pages: no place a sync lists can be
+ * it, since a place never holds ":" (`syncPlaceSchema`).
+ */
+export const placesListing = ":places";
+
+/**
  * One path segment's characters: none that can step out of it, and no
  * control character (`\p{Cc}`).
  */
 const placePattern = /^[^/\\?#%;:\p{Cc}]+$/u;
+
+/** A sync's name (`feed`), as a connector's manifest names it. */
+export const syncFeedSchema = z
+  .string()
+  .regex(/^[a-z][a-z\d-]{0,63}$/u, "Not a sync's name");
 
 /**
  * A place a sync reads of the connection's own account, as its connector
@@ -193,7 +205,7 @@ export type SyncChoices = z.infer<typeof syncChoicesSchema>;
 /** What core asks connect for: the places of one connection's sync. */
 export const syncPlacesRequestSchema = z.strictObject({
   connectionId: z.string().min(1).max(128),
-  feed: z.string().regex(/^[a-z][a-z\d-]{0,63}$/u, "Not a sync's name"),
+  feed: syncFeedSchema,
   /** Where the listing goes on, from the last read's answer; null from the start. */
   cursor: syncCursorSchema.nullable(),
 });
@@ -203,7 +215,7 @@ export type SyncPlacesRequest = z.input<typeof syncPlacesRequestSchema>;
 export const syncPageRequestSchema = z.strictObject({
   connectionId: z.string().min(1).max(128),
   /** Which of the connector's syncs: `drive`, `gmail`, `calendar`. */
-  feed: z.string().regex(/^[a-z][a-z\d-]{0,63}$/u, "Not a sync's name"),
+  feed: syncFeedSchema,
   /**
    * `own`; a place the connection's sync lists of its own account
    * (`listSyncPlaces`); or a place someone picked on a shared connection.
@@ -234,7 +246,7 @@ export type SyncPageRequest = z.input<typeof syncPageRequestSchema>;
  */
 export const syncPlaceChoicesSchema = z.strictObject({
   /** The sync whose places these are, as picks name it. */
-  feed: z.string().regex(/^[a-z][a-z\d-]{0,63}$/u, "Not a sync's name"),
+  feed: syncFeedSchema,
   choices: z.array(syncChoiceSchema.extend({ picked: z.boolean() })),
   /**
    * Every place picked for the sync now, those this listing doesn't show
@@ -277,10 +289,7 @@ export const syncPicksSchema = z
 export const syncPlaceChoicesRequestSchema = z.strictObject({
   person: connectionPersonSchema,
   connectionId: z.string().min(1).max(128),
-  feed: z
-    .string()
-    .regex(/^[a-z][a-z\d-]{0,63}$/u, "Not a sync's name")
-    .optional(),
+  feed: syncFeedSchema.optional(),
   cursor: syncCursorSchema.nullable(),
 });
 export type SyncPlaceChoicesRequest = z.input<
@@ -291,7 +300,7 @@ export type SyncPlaceChoicesRequest = z.input<
 export const pickSyncPlacesSchema = z.strictObject({
   person: connectionPersonSchema,
   connectionId: z.string().min(1).max(128),
-  feed: z.string().regex(/^[a-z][a-z\d-]{0,63}$/u, "Not a sync's name"),
+  feed: syncFeedSchema,
   /**
    * The picks the admin's page started from (`SyncPlaceChoices.picks`):
    * refused (`sync.picks_changed`), with nothing changed, once another
@@ -321,22 +330,23 @@ export const syncErrors = defineErrorFamily({
 /**
  * One sync core's sync run reads (GRA-1758): a connection whose connector
  * has a sync (`feed`), what kind of items it brings, and whether it reads
- * the whole account (`own`) or places it lists of it (`listed`, each its
- * own source: `listSyncPlaces`). With what core needs to name the items'
- * readers: the connection's person, provider and tenant, and its own
- * account as its items' readers name it (`account`: Google's address as
- * its verified sign-in gave it, Microsoft's object ID; null when the
- * provider didn't say).
+ * the whole account (`own`), places it lists of it (`listed`), or the
+ * places an admin picked on a shared connection (`picked`), each place
+ * its own source (`listSyncPlaces`). With what core needs to name the
+ * items' readers: the connection's person (null for a shared one, which
+ * has none), provider and tenant, and its own account as its items'
+ * readers name it (`account`: Google's address as its verified sign-in
+ * gave it, Microsoft's object ID; null when the provider didn't say).
  */
 export interface SyncSource {
   connectionId: string;
-  ownerUserId: string;
+  ownerUserId: string | null;
   provider: string;
   tenant: string | null;
   account: string | null;
   feed: string;
   kind: SyncItemKind;
-  places: "own" | "listed";
+  places: "own" | "listed" | "picked";
 }
 
 /** A page of the sources there are to sync, and where the next page starts. */

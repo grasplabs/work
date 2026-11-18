@@ -307,10 +307,10 @@ const EraseKept = ({
             </DialogTitle>
             <DialogDescription>
               <Trans>
-                Everything the Brain kept of what agents read through it is
-                erased for good, and nobody reads it from now on. This
-                can&apos;t be undone. To keep what agents read through it again,
-                choose who may read it once the erasure is done.
+                Everything the Brain kept from it is erased for good, and nobody
+                reads it from now on. This can&apos;t be undone. To keep
+                anything from it again, choose who may read it once the erasure
+                is done.
               </Trans>
             </DialogDescription>
           </DialogHeader>

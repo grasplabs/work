@@ -141,6 +141,13 @@ export const connections = sqliteTable(
      * it was connected (account-addresses.ts); null when never read.
      */
     accountSenders: text("account_senders", { mode: "json" }).$type<string[]>(),
+    /**
+     * For a shared connection whose places an admin picks: one up with
+     * each save that changed them (sync.ts `pickSyncPlaces`), so core
+     * hides what a save un-picked only for a save newer than the last it
+     * hid for (brain-sync.ts `hideUnpickedPlaces`). Null before the first.
+     */
+    syncPicksVersion: integer("sync_picks_version"),
     connectedBy: text("connected_by"),
     /**
      * For a Composio connection: the MCP server and the auth config

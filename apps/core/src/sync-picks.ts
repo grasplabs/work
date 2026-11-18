@@ -5,10 +5,15 @@ import type {
 } from "@grasp-os/shared/connect";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { syncErrors, syncPicksSchema } from "@grasp-os/shared/sync";
+import {
+  syncErrors,
+  syncFeedSchema,
+  syncPicksSchema,
+} from "@grasp-os/shared/sync";
 import { z } from "zod";
 
 import { appendAuditEvent } from "./audit-outbox.ts";
+import { hideUnpickedPlaces } from "./brain-sync.ts";
 
 // The places of a shared connection an admin picks to sync into the Brain
 // (GRA-1758, GRA-1759): its connector's shared drives or SharePoint
@@ -25,7 +30,7 @@ const connectionIdSchema = z.string().min(1).max(128);
 
 const pickSchema = z.strictObject({
   connectionId: connectionIdSchema,
-  feed: z.string().regex(/^[a-z][a-z\d-]{0,63}$/u),
+  feed: syncFeedSchema,
   from: syncPicksSchema,
   places: syncPicksSchema,
 });
@@ -112,7 +117,11 @@ export const readSyncPlaces = async (
  * them from `from`, the picks their page started from. Connect checks the
  * connection and the places, refuses (`sync.picks_changed`) when the
  * picks held are no longer `from`, and records the change in the audit
- * log.
+ * log. Then, before it answers, every place no longer picked is hidden in
+ * the Brain at once (brain-sync.ts `hideUnpickedPlaces`), so the admin's
+ * save is never answered while an un-picked place can still be read; by
+ * the version of the picks connect answers, so an older save's hide that
+ * lands after a newer one's drops nothing the newer one picks.
  */
 export const pickSyncPlaces = async (
   env: Env,
@@ -130,11 +139,17 @@ export const pickSyncPlaces = async (
     pickSchema,
     request
   );
-  await env.CONNECT.pickSyncPlaces({
+  const { version } = await env.CONNECT.pickSyncPlaces({
     person: await person(),
     connectionId,
     feed,
     from,
     places,
+  });
+  await hideUnpickedPlaces(env, {
+    connectionId,
+    feed,
+    picks: places,
+    version,
   });
 };
