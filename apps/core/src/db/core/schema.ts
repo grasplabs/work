@@ -5019,10 +5019,18 @@ export const workflowStartReceipts = sqliteTable(
      * read once and frozen: the hash of its snapshot
      * (`workflowStateSnapshots`), which every activation of its run reads
      * (`$state`); null for a start that admits no run, and once retention
-     * removed its details. Last, as the admitting statement writes every
-     * column in order.
+     * removed its details. The admitting statement writes every column in
+     * order.
      */
     stateHash: text("state_hash"),
+    /**
+     * How many keys of what the workflow kept its run started without:
+     * withheld, as the run that set each read what the company may no
+     * longer read (workflow-state.ts `readableStateOf`, GRA-1996); null
+     * for none. The run's page says so. Last, as the admitting statement
+     * writes every column in order.
+     */
+    stateWithheld: integer("state_withheld"),
   },
   (table) => [
     uniqueIndex("workflow_start_receipts_key").on(
@@ -5869,6 +5877,8 @@ export const workflowCandidateRuns = sqliteTable(
      * activation. A test run writes none back.
      */
     stateHash: text("state_hash"),
+    /** How many kept keys it started without, as a start's receipt says. */
+    stateWithheld: integer("state_withheld"),
     fixtures: text().notNull(),
     status: text({
       enum: ["starting", "running", "completed", "failed", "cancelled"],
