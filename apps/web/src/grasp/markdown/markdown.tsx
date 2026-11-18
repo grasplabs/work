@@ -102,8 +102,8 @@ export interface MarkdownProps {
   /**
    * `md` for an answer in a thread; `sm` for words in a card or a panel (an agent's instructions,
    * a note), a step smaller, its headings too; `xs` a step smaller again, for a note beside the
-   * answer (an agent's thoughts).
-   * @default "md"
+   * answer (an agent's thoughts). Left out inside a Chat message, the chat's words (chat-text,
+   * 14px), the headings at their `md` sizes; left out anywhere else, `md`.
    */
   size?: "md" | "sm" | "xs";
   /**
@@ -984,7 +984,7 @@ export const Markdown = ({
   streaming = false,
   cut = false,
   pace,
-  size = "md",
+  size: given,
   softBreaks = "space",
   codeMaxLines = 18,
   externalLabel,
@@ -996,6 +996,9 @@ export const Markdown = ({
   renderLink,
 }: MarkdownProps) => {
   // Its words: the product's, by its catalogue, else English; a text prop given still wins.
+  // Inside a Chat message, with no size given, it reads at the chat's size (chat-text).
+  const chat = useContext(ArrivingContext) !== null && given === undefined;
+  const size = given ?? "md";
   const text = withGiven(useWords("markdown", markdownWords), {
     external: externalLabel,
     back: backLabel,
@@ -1059,6 +1062,7 @@ export const Markdown = ({
       aria-busy={live || undefined}
       {...stylex.props(
         styles.root,
+        chat && styles.chat,
         size === "sm" && styles.small,
         size === "xs" && styles.xsmall
       )}

@@ -23,9 +23,10 @@ import type { ComponentProps } from "react";
 import { announce } from "../announce/announce";
 import { Icon, Spinner } from "../icons";
 import type { IconData } from "../icons";
+import { useMenuLook } from "./look";
+import type { MenuLook } from "./look";
 import { useMenuWork } from "./menu";
 import type { MenuWork } from "./menu";
-import { menuStyles as styles } from "./styles";
 
 type ItemPrimitiveProps = ComponentProps<typeof ItemPrimitive>;
 
@@ -144,10 +145,12 @@ const End = ({
   look,
   pending,
   failed,
+  styles,
 }: {
   look: ItemLook;
   pending: boolean;
   failed: boolean;
+  styles: MenuLook;
 }) => {
   if (pending) {
     return (
@@ -181,30 +184,34 @@ const Inside = ({
   look: ItemLook;
   pending: boolean;
   failed: boolean;
-}) => (
-  <>
-    {look.icon && (
-      <MenuItemIcon
-        mirror={look.mirrorIcon}
-        data-menu-icon=""
-        {...stylex.props(styles.icon)}
-      >
-        <Icon icon={look.icon} />
-      </MenuItemIcon>
-    )}
-    <span
-      {...stylex.props(
-        styles.words,
-        look.icon === undefined && styles.wordsBare
+}) => {
+  const styles = useMenuLook();
+  return (
+    <>
+      {look.icon && (
+        <MenuItemIcon
+          mirror={look.mirrorIcon}
+          data-menu-icon=""
+          {...stylex.props(styles.icon, look.danger && styles.iconDanger)}
+        >
+          <Icon icon={look.icon} />
+        </MenuItemIcon>
       )}
-    >
-      {look.children}
-    </span>
-    <End look={look} pending={pending} failed={failed} />
-  </>
-);
+      <span
+        {...stylex.props(
+          styles.words,
+          look.icon === undefined && styles.wordsBare
+        )}
+      >
+        {look.children}
+      </span>
+      <End look={look} pending={pending} failed={failed} styles={styles} />
+    </>
+  );
+};
 
 const itemClass = (
+  styles: MenuLook,
   danger: boolean,
   highlighted: boolean,
   disabled: boolean,
@@ -271,6 +278,7 @@ const assignRef = (ref: unknown, element: HTMLElement | null) => {
 // console as nothing; a screen reader hears the failure words.
 const WorkItem = ({ shared, look, action, failedLabel }: WorkItemProps) => {
   const menu = useMenuWork();
+  const styles = useMenuLook();
   const self = useRef<HTMLElement | null>(null);
   if (!menu) {
     throw new Error(
@@ -304,6 +312,7 @@ const WorkItem = ({ shared, look, action, failedLabel }: WorkItemProps) => {
           }}
           className={(state: MenuItemState) =>
             itemClass(
+              styles,
               look.danger,
               state.highlighted,
               state.disabled,
@@ -345,6 +354,7 @@ const Item = ({
   render,
   ...rest
 }: DropdownMenuItemProps & { keys?: Keys }) => {
+  const styles = useMenuLook();
   // The new name wins over the old one (the breaking release's step 1).
   const danger =
     variant === "danger" ||
@@ -382,7 +392,13 @@ const Item = ({
       render={render ?? linkTo(href)}
       onSelect={onSelect}
       className={(state: MenuItemState) =>
-        itemClass(danger, state.highlighted, state.disabled, state.pending)
+        itemClass(
+          styles,
+          danger,
+          state.highlighted,
+          state.disabled,
+          state.pending
+        )
       }
     >
       {(state: MenuItemState) => (

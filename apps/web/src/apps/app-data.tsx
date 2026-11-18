@@ -673,6 +673,8 @@ const ImportDialog = ({
 export interface RecordColumn {
   field: string;
   header: string;
+  /** A number: aligned to the end, as a table's numbers are. */
+  number?: boolean;
 }
 
 /** The words the record columns say, translated where they are made. */
@@ -681,51 +683,66 @@ interface RecordColumnWords {
   changed: string;
 }
 
-/** The table's columns: each record's ID, which opens it, its fields, and when it last changed. */
+/**
+ * The table's columns: each record by what people call it (`recordName`),
+ * which opens it, its fields, and when it last changed. The first column
+ * names the row, as a table's does, so the field that names it (`title`,
+ * else `name`) has no column of its own besides; numbers and the time
+ * stand at the row's end.
+ */
 const recordColumns = (
   columns: readonly RecordColumn[],
   words: RecordColumnWords,
   onOpen: (record: AppDataRecord) => void
-): DataTableColumn<AppDataRecord>[] => [
-  {
-    key: "_id",
-    header: words.record,
-    control: true,
-    value: (record) => record.id,
-    cell: (record) => (
-      <Button
-        onClick={() => {
-          onOpen(record);
-        }}
-        size="xs"
-        title={record.id}
-        variant="ghost"
-      >
-        {/* A UUIDv7 starts with its time, the same for records made
-            together: its end tells them apart. */}
-        {`…${record.id.slice(-6)}`}
-      </Button>
-    ),
-  },
-  ...columns.map(({ field, header }): DataTableColumn<AppDataRecord> => ({
-    key: field,
-    header,
-    value: (record) => {
-      const value = record.fields[field];
-      return value === undefined || value === null ? "" : valueText(value);
+): DataTableColumn<AppDataRecord>[] => {
+  const naming =
+    columns.find(({ field }) => field === "title") ??
+    columns.find(({ field }) => field === "name");
+  return [
+    {
+      key: "_id",
+      header: words.record,
+      // The row's name: it wraps in whole words where the row is narrow,
+      // as a table's first column does, so it stands in no control's box.
+      value: (record) => recordName(record),
+      cell: (record) => (
+        <Button
+          onClick={() => {
+            onOpen(record);
+          }}
+          size="xs"
+          // Its whole ID, for whoever looks a record up by it.
+          title={record.id}
+          variant="ghost"
+        >
+          {recordName(record)}
+        </Button>
+      ),
     },
-  })),
-  {
-    key: "_updatedAt",
-    header: words.changed,
-    value: (record) => record.updatedAt,
-    cell: (record) => (
-      <Text element="span" size="sm" tone="muted">
-        {formatDateTime(record.updatedAt)}
-      </Text>
-    ),
-  },
-];
+    ...columns
+      .filter((column) => column !== naming)
+      .map(({ field, header, number }): DataTableColumn<AppDataRecord> => ({
+        key: field,
+        header,
+        ...(number === true ? { align: "end" } : {}),
+        value: (record) => {
+          const value = record.fields[field];
+          return value === undefined || value === null ? "" : valueText(value);
+        },
+      })),
+    {
+      key: "_updatedAt",
+      header: words.changed,
+      align: "end",
+      value: (record) => record.updatedAt,
+      cell: (record) => (
+        <Text element="span" size="sm" tone="muted">
+          {formatDateTime(record.updatedAt)}
+        </Text>
+      ),
+    },
+  ];
+};
 
 /**
  * What finding, exporting or importing ran into: the App moved on, an ID
@@ -1045,7 +1062,17 @@ export const TableRecords = ({
           <DataTable
             columns={tableColumns}
             density="compact"
-            empty={{ description: t`No records` }}
+            empty={
+              read?.source.kind === "test"
+                ? {
+                    title: t`No example records`,
+                    description: t`Reset the example data to fill it.`,
+                  }
+                : {
+                    title: t`No records yet`,
+                    description: t`They show here as people use the App.`,
+                  }
+            }
             {...(pages.failure === undefined
               ? {}
               : {
@@ -1131,7 +1158,11 @@ export const AppData = ({
       // Its own state for each App and table: nothing read of one is
       // shown, or kept, for another.
       key={`${app}/${version}/${table.name}`}
-      columns={table.fields.map(({ name }) => ({ field: name, header: name }))}
+      columns={table.fields.map(({ name, kind }) => ({
+        field: name,
+        header: name,
+        number: kind === "number",
+      }))}
       label={table.name}
       table={table}
       toolbar={
