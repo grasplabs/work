@@ -123,8 +123,12 @@ const OpportunityCard = ({
   busy: boolean;
   onDismiss: () => void;
 }) => {
-  const { t } = useLingui();
+  const { t, i18n } = useLingui();
   const { name, local, steps, covers, setup, personApproves } = opportunity;
+  // A piece of work is named in lower case, as an activity
+  // (onboarding/team-map.ts): a card's title starts with a capital, for
+  // display alone.
+  const title = `${name.slice(0, 1).toLocaleUpperCase(i18n.locale)}${name.slice(1)}`;
   const approves = new Set(personApproves);
   const systems = formatList(setup);
   const app = covers?.name ?? "";
@@ -135,7 +139,7 @@ const OpportunityCard = ({
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="flex flex-col gap-1">
               <h2 className="text-base font-medium">
-                {local === undefined ? name : `${name} (${local})`}
+                {local === undefined ? title : `${title} (${local})`}
               </h2>
               <p className="text-muted-foreground text-sm">
                 <Trans>Described in the team&apos;s interviews.</Trans>
