@@ -7277,7 +7277,6 @@ msgstr "Grasp is nu niet bereikbaar. Probeer het over een minuut opnieuw."
 #: src/interview/api.ts
 #: src/load-from-core.tsx
 #: src/routes/decisions.$decision.tsx
-#: src/routes/sign-in.tsx
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Grasp is nu niet bereikbaar. Probeer het zo opnieuw."
 
@@ -14540,10 +14539,6 @@ msgstr "Log in om te antwoorden"
 msgid "Sign in to connect {name} now"
 msgstr "Inloggen om {name} nu te koppelen"
 
-#: src/routes/sign-in.tsx
-msgid "Sign in to Grasp"
-msgstr "Inloggen bij Grasp"
-
 #: src/sign-in-options.tsx
 msgid "Sign in with {label}"
 msgstr "Inloggen met {label}"
@@ -17277,10 +17272,6 @@ msgstr "Gebruik de app"
 #: src/workflows/resource-params.tsx
 msgid "Use the default"
 msgstr "Standaard gebruiken"
-
-#: src/routes/sign-in.tsx
-msgid "Use your organization’s account to go on."
-msgstr "Gebruik het account van je organisatie om verder te gaan."
 
 #: src/onboarding/ai-step.tsx
 msgid "Use your own key"
