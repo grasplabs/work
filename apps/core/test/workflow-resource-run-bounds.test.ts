@@ -92,15 +92,21 @@ describe("the bounds on runs of JSON workflows", () => {
       runs.push(started.runId);
     }
     const real = env.DB;
-    const seen = { batches: 0 };
-    // One of Ada's runs ends just after the refused admission commits, as
-    // anything asked afterwards would read it.
+    const seen = { admitting: false, admitted: false };
+    // One of Ada's runs ends just after the refused admission commits (the
+    // batch that writes its receipt), as anything asked afterwards would
+    // read it.
     const db: D1Database = {
-      prepare: (statement) => real.prepare(statement),
+      prepare: (statement) => {
+        seen.admitting ||= /insert into "workflow_start_receipts"/iu.test(
+          statement
+        );
+        return real.prepare(statement);
+      },
       batch: async <T = unknown>(statements: D1PreparedStatement[]) => {
         const results = await real.batch<T>(statements);
-        seen.batches += 1;
-        if (seen.batches === 1) {
+        if (seen.admitting && !seen.admitted) {
+          seen.admitted = true;
           await real
             .prepare(
               "UPDATE workflow_resource_runs SET status = 'completed', ended_at = ? WHERE id = ?"

@@ -64,7 +64,7 @@ import {
   requireWorkflowRole,
 } from "../workflow-resources.ts";
 import { acceptedInput } from "../workflow-starts.ts";
-import { workflowStateOf } from "../workflow-state.ts";
+import { readableStateOf } from "../workflow-state.ts";
 import { runEngine } from "./engine.ts";
 import type { PinnedCandidateRun } from "./engine.ts";
 import { modelCallLimitOf } from "./host.ts";
@@ -364,10 +364,12 @@ export const startCandidateRun = async (
   const built = await candidateBuildOf(env, by, workflow, source);
   const inputText = acceptedInput(JSON.stringify(built.contract.args), given);
   const paramsText = candidateParams(built.contract, params);
-  // What the workflow keeps between its runs, read once and frozen with
-  // the row, as a start's receipt freezes it: the test reads it, and
-  // writes nothing back (sealed-run.ts, `stepRecording`).
-  const snapshot = await snapshotFrom(await workflowStateOf(env, workflow.id));
+  // What the workflow keeps between its runs that its builder may read
+  // (workflow-state.ts `readableStateOf`), read once and frozen with the
+  // row, as a start's receipt freezes it: the test reads it, and writes
+  // nothing back (sealed-run.ts, `stepRecording`).
+  const readable = await readableStateOf(env, workflow.id, by.userId);
+  const snapshot = await snapshotFrom(readable.values);
   const runId = crypto.randomUUID();
   // Its build's own seal (sealed-artifacts.ts), which its row names.
   const reservation = newSeal();
@@ -443,6 +445,10 @@ export const startCandidateRun = async (
           revision,
           build: built.compiled.build.hash,
           fixtures: Object.keys(fixtures).length,
+          // How many kept keys it reads as unset (GRA-1996).
+          ...(readable.withheld > 0
+            ? { stateWithheld: readable.withheld }
+            : {}),
         },
       }),
     ]);

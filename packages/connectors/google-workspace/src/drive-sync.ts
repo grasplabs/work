@@ -8,11 +8,18 @@ import {
   fetchInRoom,
   fillPage,
   fromCursorPart,
+  fromInPagePart,
+  inPagePart,
   mayRequest,
+  startOfPage,
   syncRoom,
   takeContent,
 } from "@grasp-os/connector-kit/sync";
-import type { EntryItems, SyncRoom } from "@grasp-os/connector-kit/sync";
+import type {
+  EntryItems,
+  InPage,
+  SyncRoom,
+} from "@grasp-os/connector-kit/sync";
 import type {
   SyncContent,
   SyncItem,
@@ -132,41 +139,40 @@ const changesSchema = z.object({
 
 /**
  * Where a read is: listing the files, or reading the change feed; in
- * Google's page `token`, after the entry keyed `after` (null: from its
- * start).
+ * Google's page `token`, where in it (`at`).
  */
 type Position =
   | {
       phase: "list";
       start: string;
       token: string | null;
-      after: string | null;
+      at: InPage;
     }
-  | { phase: "changes"; token: string; after: string | null };
+  | { phase: "changes"; token: string; at: InPage };
 
 const cursorOf = (position: Position): string =>
   position.phase === "list"
-    ? `l.${cursorPart(position.start)}.${cursorPart(position.token)}.${cursorPart(position.after)}`
-    : `c.${cursorPart(position.token)}.${cursorPart(position.after)}`;
+    ? `l.${cursorPart(position.start)}.${cursorPart(position.token)}.${inPagePart(position.at)}`
+    : `c.${cursorPart(position.token)}.${inPagePart(position.at)}`;
 
 /** The position a cursor this sync wrote names; any other starts over. */
 const positionOf = (cursor: string): Position => {
   const [phase, ...parts] = cursor.split(".");
   if (phase === "l" && parts.length === 3) {
-    const [start, token, after] = parts.map(fromCursorPart);
+    const [start, token] = parts.slice(0, 2).map(fromCursorPart);
     if (start !== null && start !== undefined) {
       return {
         phase: "list",
         start,
         token: token ?? null,
-        after: after ?? null,
+        at: fromInPagePart(parts[2]),
       };
     }
   }
   if (phase === "c" && parts.length === 2) {
-    const [token, after] = parts.map(fromCursorPart);
-    if (token !== null && token !== undefined) {
-      return { phase: "changes", token, after: after ?? null };
+    const token = fromCursorPart(parts[0]);
+    if (token !== null) {
+      return { phase: "changes", token, at: fromInPagePart(parts[1]) };
     }
   }
   throw new RestartSyncError("Not a cursor this sync wrote");
@@ -488,10 +494,10 @@ const listPage = async (
     ),
     listSchema
   );
-  const { items, last, done } = await fillPage({
+  const { items, at, done } = await fillPage({
     room,
     entries: listed.files ?? [],
-    after: position.after,
+    at: position.at,
     keyOf: (file) => file.id,
     itemsFor: async (file) => await fileItem(room, file, file.modifiedTime),
     passOver: (file) => withoutContent(file, file.modifiedTime),
@@ -499,7 +505,7 @@ const listPage = async (
   if (!done) {
     return {
       items,
-      cursor: cursorOf({ ...position, after: last }),
+      cursor: cursorOf({ ...position, at }),
       more: true,
     };
   }
@@ -509,8 +515,8 @@ const listPage = async (
     items,
     cursor: cursorOf(
       next === ""
-        ? { phase: "changes", token: position.start, after: null }
-        : { ...position, token: next, after: null }
+        ? { phase: "changes", token: position.start, at: startOfPage }
+        : { ...position, token: next, at: startOfPage }
     ),
     more: true,
   };
@@ -562,10 +568,10 @@ const changesPage = async (
     }),
     changesSchema
   );
-  const { items, last, done } = await fillPage({
+  const { items, at, done } = await fillPage({
     room,
     entries: changed.changes ?? [],
-    after: position.after,
+    at: position.at,
     keyOf: changeKey,
     itemsFor: async (change) => await changeItem(room, change),
     passOver: changeWithoutContent,
@@ -573,7 +579,7 @@ const changesPage = async (
   if (!done) {
     return {
       items,
-      cursor: cursorOf({ ...position, after: last }),
+      cursor: cursorOf({ ...position, at }),
       more: true,
     };
   }
@@ -581,7 +587,7 @@ const changesPage = async (
   if (next !== "") {
     return {
       items,
-      cursor: cursorOf({ phase: "changes", token: next, after: null }),
+      cursor: cursorOf({ phase: "changes", token: next, at: startOfPage }),
       more: true,
     };
   }
@@ -593,7 +599,7 @@ const changesPage = async (
   }
   return {
     items,
-    cursor: cursorOf({ phase: "changes", token: start, after: null }),
+    cursor: cursorOf({ phase: "changes", token: start, at: startOfPage }),
     more: false,
   };
 };
@@ -628,7 +634,7 @@ export const driveSync = defineSync({
         phase: "list",
         start: startPageToken,
         token: null,
-        after: null,
+        at: startOfPage,
       });
     }
     const position = positionOf(cursor);

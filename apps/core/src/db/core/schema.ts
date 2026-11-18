@@ -2622,7 +2622,8 @@ export const runBrainEvidence = sqliteTable(
  * before the run's next model, connection or App call, decision or
  * output, the host checks the run may still read them all: each grant
  * still the run's, and each version still one its person may read. A run
- * that may no longer is refused from then on. Goes with the run's details.
+ * that may no longer is refused from then on. Goes with the run's details,
+ * unless a key of its workflow's state names the run (`keptRunEvidence`).
  */
 export const runBrainVersions = sqliteTable(
   "run_brain_versions",
@@ -2658,7 +2659,8 @@ export const runBrainVersions = sqliteTable(
  * host checks the company may still read them all and their writers
  * haven't retired them: one a person's erasure took, retired or taken
  * back, or whose source was erased or narrowed, refuses the run from then
- * on. Goes with the run's details.
+ * on. Goes with the run's details, unless a key of its workflow's state
+ * names the run (`keptRunEvidence`).
  */
 export const runBrainMemories = sqliteTable(
   "run_brain_memories",
@@ -2674,6 +2676,19 @@ export const runBrainMemories = sqliteTable(
     }),
   ]
 );
+
+/**
+ * The runs whose evidence (`runBrainVersions`, `runBrainMemories`,
+ * `runChatSources`) retention kept past their details, as a key of their
+ * workflow's state named them then (workflows/retention.ts, GRA-1996):
+ * that key is read only while what they read holds (workflow-state.ts).
+ * Once no key names one any more, its evidence and its row here go.
+ * Identifiers only.
+ */
+export const keptRunEvidence = sqliteTable("kept_run_evidence", {
+  runId: text("run_id").primaryKey(),
+  keptAt: timestamp("kept_at").notNull(),
+});
 
 /**
  * Nothing writes or reads it. Kept until GRA-1589 drops it, so a core
@@ -2697,7 +2712,8 @@ export const runEvidenceHolds = sqliteTable(
  * chat's scope, copied once as the start is admitted. Before anything
  * leaves the run, the host checks the chat's agent may still read them all
  * for its person (history-access.ts, `readableSources`): a run is held to
- * what its input may carry. Goes with the run's details.
+ * what its input may carry. Goes with the run's details, unless a key of
+ * its workflow's state names the run (`keptRunEvidence`).
  */
 export const runChatSources = sqliteTable(
   "run_chat_sources",
@@ -5617,7 +5633,12 @@ export const workflowState = sqliteTable(
     runId: text("run_id").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },
-  (table) => [primaryKey({ columns: [table.workflowResourceId, table.key] })]
+  (table) => [
+    primaryKey({ columns: [table.workflowResourceId, table.key] }),
+    // The keys a run set, as retention asks while it keeps the run's
+    // evidence (workflows/retention.ts, `keptEvidenceReleased`).
+    index("workflow_state_run_idx").on(table.runId),
+  ]
 );
 
 /**
