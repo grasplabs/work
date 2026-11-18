@@ -2,11 +2,12 @@ import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { OnboardingView, RosterInput } from "@grasp-os/shared/onboarding";
 import { onboardingPeopleMax, rosterSchema } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminCommands } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
+import { holdAlarm } from "./interview-link.ts";
 import { teamsMade } from "./members-teams.ts";
 import { auditedDuring, outcome, signedInApi } from "./sign-in.ts";
 
@@ -445,6 +446,11 @@ const sharedAgain: RosterInput = {
 };
 
 describe("a list shared again while the plan runs", () => {
+  // The test releases what is due itself, as the store's alarm would. The
+  // alarm each save of the list sets half a second on ran first on a slow
+  // runner and sent the links the test's own release was to send.
+  beforeEach(holdAlarm);
+
   it("sends nobody new on it a link until the admin confirms the organization, and then each team as it goes", async () => {
     const { api } = await signedInApi(idp, "admin");
     const store = onboardingStore(env);
