@@ -6548,10 +6548,6 @@ msgstr "Finance et comptabilité"
 msgid "Find a chat"
 msgstr "Trouver un chat"
 
-#: src/apps/app-code.tsx
-msgid "Find a file"
-msgstr "Rechercher un fichier"
-
 #: src/apps/app-data.tsx
 msgid "Find a record by its ID"
 msgstr "Trouver un enregistrement par son ID"

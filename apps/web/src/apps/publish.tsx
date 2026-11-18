@@ -43,7 +43,7 @@ import {
 import { Spinner } from "../grasp/spinner/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { toast } from "../grasp/toast/index.ts";
-import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { usePeopleApart } from "../people/people-apart.ts";
 import { useCore } from "../use-core.ts";
 import { ConfirmChange, useDraftChange } from "./app-history.tsx";
@@ -189,6 +189,9 @@ export const changeSummaries = (changes: AppDraftChanges): string[] =>
 
 /** The problems that stop it from being shared, a few, and Fix with Grasp. */
 const styles = stylex.create({
+  // Share's words from a phone's width on, its icon alone below it.
+  wide: { display: { default: "contents", [media.belowPhone]: "none" } },
+  narrow: { display: { default: "none", [media.belowPhone]: "contents" } },
   stack: { display: "grid", gap: grasp.space3, minWidth: 0 },
   tight: {
     display: "grid",
@@ -792,18 +795,34 @@ export const ShareWithTeam = ({
           phone's bar the words end in an ellipsis, the whole in a tooltip,
           so it never runs off the screen. BUILDER: SheetTrigger should take
           Button's `truncate`. */}
-      <Button
-        disabled={draft === undefined}
-        icon={People}
-        onClick={() => {
-          openOrClose(true);
-        }}
-        size="sm"
-        truncate
-        variant="ink"
-      >
-        {pending ? t`Share changes` : t`Share with your team`}
-      </Button>
+      {/* Its words from a phone's width on; on a phone its icon alone,
+          named, so the bar keeps one row and nothing runs off. */}
+      <span {...stylex.props(styles.wide)}>
+        <Button
+          disabled={draft === undefined}
+          icon={People}
+          onClick={() => {
+            openOrClose(true);
+          }}
+          size="sm"
+          truncate
+          variant="ink"
+        >
+          {pending ? t`Share changes` : t`Share with your team`}
+        </Button>
+      </span>
+      <span {...stylex.props(styles.narrow)}>
+        <Button
+          aria-label={pending ? t`Share changes` : t`Share with your team`}
+          disabled={draft === undefined}
+          icon={People}
+          onClick={() => {
+            openOrClose(true);
+          }}
+          size="sm"
+          variant="ink"
+        />
+      </span>
       <SheetContent closeLabel={t`Close`}>
         <SheetTitle>{t`Share ${name}`}</SheetTitle>
         <SheetDescription>

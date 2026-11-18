@@ -116,7 +116,7 @@ const IndexRow = ({
   onRemove: () => void;
 }) => (
   <Item size="sm">
-    <ItemMedia icon={icon} />
+    <ItemMedia align="center" icon={icon} />
     <ItemContent>
       <ItemTitle>
         {title}

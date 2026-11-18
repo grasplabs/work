@@ -174,7 +174,7 @@ const candidatesOf = (
 /** Someone the App is shared with, for whoever only looks: their name and role. */
 const MemberRow = ({ name, member }: { name: string; member: AppMember }) => (
   <Item size="sm">
-    <ItemMedia>
+    <ItemMedia align="center">
       <Mark name={member.name ?? name} type={member.type} />
     </ItemMedia>
     <ItemContent>
