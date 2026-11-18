@@ -294,6 +294,7 @@ export const IntegrationInspector = ({
           />
         }
         {...(onClose === undefined ? {} : { onClose })}
+        texture
         title={integration.name}
       />
       <PanelView>

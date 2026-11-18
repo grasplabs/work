@@ -38,12 +38,15 @@ import type {
   Integration,
   IntegrationSections,
 } from "../connections/integrations.ts";
+import { overviewConcepts } from "../connections/overview-concepts.tsx";
+import type { OverviewConcept } from "../connections/overview-concepts.tsx";
 import { RequestAppDialog } from "../connections/request-app-dialog.tsx";
 import { RequestedApps } from "../connections/requested-apps.tsx";
 import { RevocationsByHand } from "../connections/revocations-by-hand.tsx";
 import type { ConnectionUses } from "../connections/workflows-using.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import { formatNumber } from "../format.ts";
+import { PagePanel } from "../frame/page-panel.tsx";
 import { PageLoading } from "../frame/page-states.tsx";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
@@ -90,6 +93,10 @@ interface IntegrationsSearch {
   connectionError?: string;
   /** A connection a flow just made, when core sent it back here. */
   connection?: string;
+  /** Which of the concepts Ruben chooses between (concept branch only). */
+  concept?: OverviewConcept;
+  /** A concept's tab or filter. */
+  view?: string;
 }
 
 /** How many of a kind's apps show before "Show all", where every kind shows. */
@@ -594,7 +601,92 @@ const Details = ({
   );
 };
 
+/** A concept of the overview, with the open app in the shell's panel. */
+const Concept = ({ concept }: { concept: OverviewConcept }) => {
+  const { catalog, connections, uses } = Route.useLoaderData();
+  const { identity, core } = Route.useRouteContext();
+  const { q, app, view } = Route.useSearch();
+  const navigate = useNavigate({ from: "/integrations/" });
+  const [requesting, setRequesting] = useState(false);
+  const listed = connections.state === "ready" ? connections.data : [];
+  const integrations = integrationsOf(
+    catalog.state === "ready" ? catalog.data.entries : [],
+    listed
+  );
+  const opened = integrations.find((integration) => integration.key === app);
+  const Shape = overviewConcepts[concept];
+  const { t } = useLingui();
+  const close = () => {
+    void navigate({
+      resetScroll: false,
+      search: (last) => ({ ...last, app: undefined }),
+    });
+  };
+  return (
+    <>
+      <RequestAppDialog
+        integrations={integrations}
+        onOpenChange={setRequesting}
+        open={requesting}
+      />
+      <SiteHeader crumbs={[{ label: t`Integrations` }]} />
+      <Page>
+        <Await
+          fallback={
+            <Shape
+              connections={listed}
+              integrations={integrations}
+              onRequest={() => {
+                setRequesting(true);
+              }}
+              q={q}
+              uses={undefined}
+              view={view}
+            />
+          }
+          promise={uses}
+        >
+          {(read) => (
+            <Shape
+              connections={listed}
+              integrations={integrations}
+              onRequest={() => {
+                setRequesting(true);
+              }}
+              q={q}
+              uses={read.state === "ready" ? read.data : undefined}
+              view={view}
+            />
+          )}
+        </Await>
+      </Page>
+      <PagePanel onClose={close} open={opened !== undefined}>
+        {opened === undefined ? null : (
+          <IntegrationInspector
+            framed={false}
+            identity={identity}
+            integration={opened}
+            key={opened.key}
+            onClose={close}
+            tools={
+              opened.listed && opened.source === "native"
+                ? toolsOf(core, opened).tools
+                : undefined
+            }
+            uses={uses}
+          />
+        )}
+      </PagePanel>
+    </>
+  );
+};
+
 const Integrations = () => {
+  const { concept } = Route.useSearch();
+  return concept === undefined ? <Today /> : <Concept concept={concept} />;
+};
+
+const Today = () => {
   const { catalog, connections, requests, toRevoke, uses } =
     Route.useLoaderData();
   const { identity, core } = Route.useRouteContext();
@@ -744,6 +836,11 @@ export const Route = createFileRoute("/_shell/integrations/")({
     app: textOf(search.app),
     connectionError: textOf(search.connectionError),
     connection: textOf(search.connection),
+    concept:
+      search.concept === "a" || search.concept === "b" || search.concept === "c"
+        ? search.concept
+        : undefined,
+    view: textOf(search.view),
   }),
   // Read once: the search, a kind and the open app only narrow what was
   // read, so a new one keeps the page as it is rather than reading it

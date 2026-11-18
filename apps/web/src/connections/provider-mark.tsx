@@ -21,7 +21,7 @@ const plain = (text: string): string =>
   text.toLowerCase().replaceAll(/[^a-z]/gu, "");
 
 /** The library's brand for an app, by its catalog id or its name; none for the rest. */
-const brandOf = (id: string, name: string): Brand | undefined =>
+export const brandOf = (id: string, name: string): Brand | undefined =>
   brandKeys.find((key) => plain(key) === plain(id)) ??
   // A catalog name that is a brand's own, such as "Microsoft 365" or
   // "Google Workspace": the brand whose name starts it.

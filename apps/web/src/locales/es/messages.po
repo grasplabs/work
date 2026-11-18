@@ -468,6 +468,7 @@ msgstr "{count, plural, one {# deseo} other {# deseos}}"
 msgid "{count, plural, one {# workflow serves it} other {# workflows serve it}}"
 msgstr "{count, plural, one {# flujo de trabajo lo sirve} other {# flujos de trabajo lo sirven}}"
 
+#: src/connections/overview-concepts.tsx
 #: src/routes/_shell.workflows.index.tsx
 msgid "{count, plural, one {# workflow} other {# workflows}}"
 msgstr "{count, plural, one {# workflow} other {# workflows}}"
@@ -1232,6 +1233,7 @@ msgid "{person} revoked {alias} for version {version}"
 msgstr "{person} revocó {alias} para la versión {version}"
 
 #. Who connected the app, then the day they did.
+#: src/connections/overview-concepts.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{person}, {date}"
 msgstr "{person}, {date}"
@@ -2339,6 +2341,10 @@ msgstr "Añadir un disparador"
 msgid "Add a widget"
 msgstr "Añadir un widget"
 
+#: src/connections/overview-concepts.tsx
+msgid "Add an app"
+msgstr "Añadir una app"
+
 #: src/connections/http-connections.tsx
 msgid "Add an HTTP connection"
 msgstr "Añadir una conexión HTTP"
@@ -2648,6 +2654,14 @@ msgstr "Todos"
 #: src/chat/chat-composer.tsx
 msgid "All agents"
 msgstr "Todos los agentes"
+
+#: src/connections/overview-concepts.tsx
+msgid "All apps"
+msgstr "Todas las apps"
+
+#: src/connections/overview-concepts.tsx
+msgid "All apps · {othersCount}"
+msgstr "Todas las apps · {othersCount}"
 
 #: src/chat/chat-window.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
@@ -2973,7 +2987,12 @@ msgstr "¿Quieres conectar algo más?"
 msgid "Anything else?"
 msgstr "¿Algo más?"
 
+#: src/connections/overview-concepts.tsx
+msgid "app"
+msgstr "app"
+
 #: src/activity/audit-event.tsx
+#: src/connections/overview-concepts.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/inbox/items.ts
 #: src/pages/page-frame.tsx
@@ -3169,6 +3188,10 @@ msgstr "Responsable de aprobar herramientas nombrado"
 msgid "Approving"
 msgstr "Aprobando"
 
+#: src/connections/overview-concepts.tsx
+msgid "apps"
+msgstr "apps"
+
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
 #: src/dashboard/widget-board.tsx
@@ -3186,9 +3209,21 @@ msgstr "Aplicaciones"
 msgid "Apps and agents with a permission"
 msgstr "Aplicaciones y agentes con un permiso"
 
+#: src/connections/overview-concepts.tsx
+msgid "Apps connected to Grasp, those that need someone first."
+msgstr "Apps conectadas a Grasp, primero las que necesitan a alguien."
+
+#: src/connections/overview-concepts.tsx
+msgid "Apps Grasp can connect to."
+msgstr "Apps a las que Grasp puede conectarse."
+
 #: src/workflows/files-and-apps.tsx
 msgid "Apps it works in"
 msgstr "Apps en las que trabaja"
+
+#: src/connections/overview-concepts.tsx
+msgid "Apps to add"
+msgstr "Apps por añadir"
 
 #: src/apps/app-settings.tsx
 #: src/apps/app-status.tsx
@@ -3488,6 +3523,10 @@ msgstr "Pidiendo conectar {binding}"
 msgctxt "at an hour of the day: on Tuesday at 9:00"
 msgid "at"
 msgstr "a las"
+
+#: src/connections/overview-concepts.tsx
+msgid "At a glance"
+msgstr "De un vistazo"
 
 #: src/connections/http-connections.tsx
 msgid "At least {shortest} characters. Grasp keeps it sealed and never shows it again, not even to you. To change it, add another connection and revoke this one."
@@ -4479,6 +4518,7 @@ msgid "Clear filters"
 msgstr "Borrar filtros"
 
 #: src/agents/agents-overview.tsx
+#: src/connections/overview-concepts.tsx
 #: src/frame/part-words.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "Clear search"
@@ -4794,6 +4834,7 @@ msgstr "Confirmado por el consejo"
 #: src/chat/plan-card.tsx
 #: src/connections/integration-inspector.tsx
 #: src/connections/integration-item.tsx
+#: src/connections/overview-concepts.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -4805,6 +4846,7 @@ msgstr "Conectar"
 msgid "Connect {app}"
 msgstr "Conectar {app}"
 
+#: src/connections/overview-concepts.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/onboarding/hr-leads.tsx
 msgid "Connect {name}"
@@ -4830,6 +4872,7 @@ msgstr "Conecta un proveedor de IA para empezar a preguntar"
 msgid "Connect another account"
 msgstr "Conectar otra cuenta"
 
+#: src/connections/overview-concepts.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Connected"
 msgstr "Conectado"
@@ -4844,6 +4887,10 @@ msgctxt "state of one app"
 msgid "Connected"
 msgstr "Conectadas"
 
+#: src/connections/overview-concepts.tsx
+msgid "Connected · {connectedCount}"
+msgstr "Conectadas · {connectedCount}"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Connected {date}"
 msgstr "Conectado el {date}"
@@ -4854,6 +4901,7 @@ msgstr "Conectó una cuenta"
 
 #: src/connections/connection-list.tsx
 #: src/connections/integration-inspector.tsx
+#: src/connections/overview-concepts.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Connected by"
 msgstr "Conectada por"
@@ -6353,6 +6401,10 @@ msgstr "Entrevistados todos los equipos invitados"
 msgid "Every kind"
 msgstr "Todos los tipos"
 
+#: src/connections/overview-concepts.tsx
+msgid "Every kind · {othersCount}"
+msgstr "Todos los tipos · {othersCount}"
+
 #: src/agents/agent-wakes.tsx
 msgid "Every Monday"
 msgstr "Todos los lunes"
@@ -6934,6 +6986,7 @@ msgstr "Nota al pie {number}"
 
 #: src/activity/audit-event.tsx
 #: src/connections/integration-inspector.tsx
+#: src/connections/overview-concepts.tsx
 #: src/inbox/item-detail.tsx
 #: src/inbox/items.ts
 msgid "For"
@@ -7399,6 +7452,10 @@ msgstr "Grasp permite enviarlo una vez más, exactamente igual que antes, y una 
 msgid "Grasp links Stripe and sets up your plan with you."
 msgstr "Grasp conecta Stripe y configura tu plan contigo."
 
+#: src/connections/overview-concepts.tsx
+msgid "Grasp lost access to {name}: what uses it waits until someone signs in again."
+msgstr "Grasp perdió el acceso a {name}: lo que lo usa espera hasta que alguien vuelva a iniciar sesión."
+
 #: src/dashboard/widget-board.tsx
 msgid "Grasp made this widget for you. Taken off, it is gone for good."
 msgstr "Grasp hizo este widget para ti. Si lo quitas, desaparece para siempre."
@@ -7818,6 +7875,7 @@ msgid "HR"
 msgstr "RR. HH."
 
 #: src/connections/http-connections.tsx
+#: src/connections/overview-concepts.tsx
 msgid "HTTP connections"
 msgstr "Conexiones HTTP"
 
@@ -8099,6 +8157,7 @@ msgid "Integration"
 msgstr "Integración"
 
 #: src/apps/app-integrations.tsx
+#: src/connections/overview-concepts.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.integrations.index.tsx
@@ -8767,6 +8826,7 @@ msgid "Key figures"
 msgstr "Cifras clave"
 
 #: src/apps/resource-bindings.tsx
+#: src/connections/overview-concepts.tsx
 msgid "Kind"
 msgstr "Tipo"
 
@@ -9816,6 +9876,14 @@ msgstr "Mencionadas, sin enlazar"
 msgid "Names {title} under {under}"
 msgstr "Nombra a {title} en {under}"
 
+#: src/connections/overview-concepts.tsx
+msgid "Narrow the list"
+msgstr "Acotar la lista"
+
+#: src/connections/overview-concepts.tsx
+msgid "Need someone to sign in again"
+msgstr "Alguien debe volver a iniciar sesión"
+
 #: src/chat/plan-card.tsx
 msgid "Needs {name} connected"
 msgstr "Necesita {name} conectado"
@@ -9837,6 +9905,7 @@ msgstr "Necesita su propia app de inicio de sesión"
 msgid "Needs signing in again"
 msgstr "Hay que volver a iniciar sesión"
 
+#: src/connections/overview-concepts.tsx
 #: src/workflows/figures.tsx
 msgid "Needs someone"
 msgstr "Necesita a alguien"
@@ -9846,6 +9915,10 @@ msgstr "Necesita a alguien"
 #: src/workflows/files-and-apps.tsx
 msgid "Needs someone to sign in again"
 msgstr "Alguien tiene que volver a iniciar sesión"
+
+#: src/connections/overview-concepts.tsx
+msgid "Needs you"
+msgstr "Te necesita"
 
 #: src/workflows/requests/request-table.tsx
 msgctxt "Stephen's requests to fix"
@@ -10125,6 +10198,7 @@ msgid "No goals yet."
 msgstr "Aún no hay objetivos."
 
 #: src/apps/app-integrations.tsx
+#: src/connections/overview-concepts.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "No integrations match your search."
 msgstr "Ninguna integración coincide con tu búsqueda."
@@ -10335,6 +10409,7 @@ msgid "No workflow with counted hours here yet."
 msgstr "Aquí aún no hay ningún flujo de trabajo con horas contadas."
 
 #: src/brain/brain.ts
+#: src/connections/overview-concepts.tsx
 msgid "No workflow yet"
 msgstr "Aún sin flujo"
 
@@ -10516,6 +10591,7 @@ msgstr "No borrado"
 msgid "Not confirmed by the board yet"
 msgstr "Aún no confirmada por la dirección"
 
+#: src/connections/overview-concepts.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Not connected"
 msgstr "No conectada"
@@ -10611,6 +10687,7 @@ msgstr "Ahora no"
 
 #: src/connections/integration-item.tsx
 #: src/connections/integration-tile.tsx
+#: src/connections/overview-concepts.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Not offered"
 msgstr "No ofrecida"
@@ -10806,6 +10883,10 @@ msgstr "Anotado: {name}. La conectaremos contigo. Mientras tanto, comprueba qui�
 #: src/onboarding/connect-steps.tsx
 msgid "Noted. We’ll get in touch to put it on the laptops with you."
 msgstr "Anotado. Nos pondremos en contacto para instalarlo contigo en los portátiles."
+
+#: src/connections/overview-concepts.tsx
+msgid "Nothing connected yet."
+msgstr "Aún no hay nada conectado."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing connected yet. Choose an app below to connect it."
@@ -11287,6 +11368,7 @@ msgid "Only when asked"
 msgstr "Solo cuando se le pregunta"
 
 #: src/connections/integration-inspector.tsx
+#: src/connections/overview-concepts.tsx
 msgid "Only you"
 msgstr "Solo tú"
 
@@ -11315,6 +11397,7 @@ msgid "Only you see this"
 msgstr "Solo tú ves esto"
 
 #: src/chat/sidebar-chats.tsx
+#: src/connections/overview-concepts.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/in-inbox.tsx
 #: src/inbox/item-detail.tsx
@@ -11350,6 +11433,7 @@ msgid "Open"
 msgstr "Abrir"
 
 #: src/brain/brain-nav.tsx
+#: src/connections/overview-concepts.tsx
 #: src/frame/part-words.tsx
 #: src/knowledge/uploads.tsx
 msgid "Open {name}"
@@ -12988,6 +13072,7 @@ msgstr "Volver a solicitar"
 msgid "Request an app"
 msgstr "Solicitar una app"
 
+#: src/connections/overview-concepts.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "Request app"
 msgstr "Solicitar app"
@@ -13851,6 +13936,7 @@ msgstr "Buscar agentes"
 msgid "Search archived chats"
 msgstr "Buscar en chats archivados"
 
+#: src/connections/overview-concepts.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "Search by name or kind"
 msgstr "Buscar por nombre o tipo"
@@ -13869,6 +13955,7 @@ msgid "Search in {searched}"
 msgstr "Buscar en {searched}"
 
 #: src/apps/app-integrations.tsx
+#: src/connections/overview-concepts.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "Search integrations"
 msgstr "Buscar integraciones"
@@ -14506,6 +14593,7 @@ msgstr "Iniciar sesión"
 #: src/connections/integration-item.tsx
 #: src/connections/integration-tile.tsx
 #: src/connections/integrations-banner.tsx
+#: src/connections/overview-concepts.tsx
 #: src/dashboard/to-do.tsx
 #: src/inbox/item-detail.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -14988,6 +15076,7 @@ msgid "Statements"
 msgstr "Afirmaciones"
 
 #: src/apps/app-settings.tsx
+#: src/connections/overview-concepts.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/resource-runs.tsx
@@ -17289,6 +17378,7 @@ msgstr "Usó una herramienta conectada"
 msgid "Used an App's function as a visitor"
 msgstr "Usó una función de una aplicación como visitante"
 
+#: src/connections/overview-concepts.tsx
 #: src/knowledge/document.tsx
 msgid "Used by"
 msgstr "Usado por"
@@ -18385,6 +18475,10 @@ msgstr "¿Quién es quién en tu empresa?"
 msgid "whoever added the row"
 msgstr "quien añadió la fila"
 
+#: src/connections/overview-concepts.tsx
+msgid "Whole company"
+msgstr "Toda la empresa"
+
 #: src/apps/release-controls.tsx
 #: src/knowledge/purge.tsx
 #: src/workflows/requests/request-detail.tsx
@@ -18618,10 +18712,15 @@ msgstr "Flujos de trabajo que sirven a {title}"
 msgid "Workflows that spent most"
 msgstr "Flujos de trabajo que más gastaron"
 
+#: src/connections/overview-concepts.tsx
+msgid "Workflows that use them"
+msgstr "Flujos de trabajo que las usan"
+
 #: src/apps/app-workflows.tsx
 msgid "Workflows the App starts"
 msgstr "Flujos de trabajo que inicia la aplicación"
 
+#: src/connections/overview-concepts.tsx
 #: src/frame/part-words.tsx
 msgid "Working"
 msgstr "En curso"

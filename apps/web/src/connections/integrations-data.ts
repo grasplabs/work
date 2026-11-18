@@ -5,6 +5,7 @@ import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { listedOrNone } from "../directory.ts";
 import { loadFromCore } from "../load-from-core.tsx";
+import { withSamples } from "./concept-sample.ts";
 import type { HeldPermissions } from "./connection-list.tsx";
 
 // What the Integrations pages read: the catalog, the connections this
@@ -47,7 +48,9 @@ export const loadIntegrations = async (
     async (session) => await session.workflows.byConnection()
   );
   const [catalog, connections, permissions] = await Promise.all([
-    loadFromCore(core, async (session) => await session.connections.catalog()),
+    loadFromCore(core, async (session) =>
+      withSamples(await session.connections.catalog())
+    ),
     loadFromCore(core, async (session) => await session.connections.list()),
     held && canBuild(identity.role)
       ? loadFromCore(core, heldPermissions)
