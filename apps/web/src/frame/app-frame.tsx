@@ -221,7 +221,7 @@ export const AppFrame = ({
           {/* Grasp UI's toasts, for what the page and the chat say of an action. */}
           <GraspToaster
             closeLabel={t`Close`}
-            failedLabel={t`Could not finish`}
+            failedLabel={t`Not done`}
             aria-label={t`Notifications`}
             pendingLabel={t`Still working`}
           />

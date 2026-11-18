@@ -297,62 +297,6 @@
 }
 
 /*
- * From the prototype (packages/grasp/src/index.css), the dashboard's pile
- * of what waits on the person (dashboard/todo-pile.tsx).
- */
-/* The next card comes up out of the pile. */
-@keyframes pile-up {
-  from {
-    opacity: 0;
-    transform: translateY(10px) scale(0.97);
-  }
-}
-@utility animate-pile-up {
-  animation: pile-up 280ms cubic-bezier(0.2, 0.9, 0.3, 1.1);
-}
-
-/* The first time in a session, a ring goes twice around the card on top and is gone. */
-@keyframes pile-point {
-  0% {
-    opacity: 0;
-    transform: scale(1);
-  }
-  15% {
-    opacity: 0.9;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0;
-    transform: scale(1.012);
-  }
-  65% {
-    opacity: 0.9;
-    transform: scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: scale(1.012);
-  }
-}
-@utility animate-pile-point {
-  animation: pile-point 2s ease-out 0.5s both;
-}
-
-/* The room the pile had, which closes once its last card has gone as dots. */
-@utility pile-room {
-  display: grid;
-  grid-template-rows: 1fr;
-  transition-property: grid-template-rows, opacity, margin-bottom;
-  transition-duration: 300ms;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-}
-@utility pile-room-closed {
-  grid-template-rows: 0fr;
-  opacity: 0;
-  margin-bottom: calc(var(--spacing) * -6);
-}
-
-/*
  * From the prototype (packages/grasp/src/index.css at ddd235d), the rest of its
  * motion and surfaces: the document drop, workflow nodes and their wires and
  * nerves, the agent's spark, threads, live marks, the canvas and the torn

@@ -6,10 +6,22 @@ import { useApprovalWords } from "../chat/approval-words.ts";
 import { formatBytes, formatList, formatNumber } from "../format.ts";
 import { agentActivityWords } from "../grasp/agent-activity/words.ts";
 import { alertWords } from "../grasp/alert/words.ts";
+import { appBuildingWords } from "../grasp/app-building/words.ts";
+import { englishLabels as appCardWords } from "../grasp/app-card/words.ts";
+import {
+  englishFailure as appPreviewFailureWords,
+  englishLabels as appPreviewWords,
+  englishStopped as appPreviewStoppedWords,
+} from "../grasp/app-preview/words.ts";
 import { appShellPanelWords, appShellWords } from "../grasp/app-shell/words.ts";
 import { approvalRequestWords } from "../grasp/approval-request/words.ts";
 import { avatarGroupWords } from "../grasp/avatar/words.ts";
+import {
+  backdropPickerWords,
+  backdropPreviewWords,
+} from "../grasp/backdrop/words.ts";
 import { badgeWords } from "../grasp/badge/words.ts";
+import { breadcrumbWords } from "../grasp/breadcrumb/words.ts";
 import { buttonWords } from "../grasp/button/words.ts";
 import { calendarWords } from "../grasp/calendar/words.ts";
 import { chatMessageWords } from "../grasp/chat-message/words.ts";
@@ -26,6 +38,7 @@ import {
 import { datePickerWords } from "../grasp/date-picker/words.ts";
 import { dateRangePickerWords } from "../grasp/date-range-picker/words.ts";
 import { dialogWords } from "../grasp/dialog/words.ts";
+import { drawerWords } from "../grasp/drawer/words.ts";
 import { dropdownMenuWords } from "../grasp/dropdown-menu/words.ts";
 import { emptyWords } from "../grasp/empty/words.ts";
 import { fileUploadWords, imageWellWords } from "../grasp/file-upload/words.ts";
@@ -64,10 +77,18 @@ export const englishPartWords: GraspWordsCatalog = {
   "app-shell-panel": appShellPanelWords,
   agentActivity: agentActivityWords,
   alert: alertWords,
+  appBuilding: appBuildingWords,
+  appCard: appCardWords,
+  appPreview: appPreviewWords,
+  appPreviewFailure: appPreviewFailureWords,
+  appPreviewStopped: appPreviewStoppedWords,
   appShell: appShellWords,
   approvalRequest: approvalRequestWords,
   avatarGroup: avatarGroupWords,
+  backdropPicker: backdropPickerWords,
+  backdropPreview: backdropPreviewWords,
   badge: badgeWords,
+  breadcrumb: breadcrumbWords,
   calendar: calendarWords,
   combobox: comboboxWords,
   command: commandWords,
@@ -84,6 +105,7 @@ export const englishPartWords: GraspWordsCatalog = {
   dataTable: dataTableWords,
   dataTableFilters: englishFilterWords,
   dialog: dialogWords,
+  drawer: drawerWords,
   dropdownMenu: dropdownMenuWords,
   empty: emptyWords,
   fileUpload: fileUploadWords,
@@ -269,7 +291,7 @@ export const usePartWords = (): GraspWordsCatalog => {
       actions: t`Message actions`,
       copy: t({ message: "Copy", context: "a message" }),
       copied: t`Copied`,
-      copyFailed: t`Could not copy`,
+      copyFailed: t`Not copied`,
       streaming: t`Writing`,
       done: t`Answer ready`,
       thinking: t`Thinking`,
@@ -357,12 +379,12 @@ export const usePartWords = (): GraspWordsCatalog => {
     codeBlock: {
       copy: t`Copy code`,
       copied: t`Copied`,
-      copyFailed: t`Could not copy`,
+      copyFailed: t`Not copied`,
       writing: t`Writing`,
       more: t`Show more`,
       less: t`Show less`,
     },
-    copyField: { copied: t`Copied`, failed: t`Could not copy` },
+    copyField: { copied: t`Copied`, failed: t`Not copied` },
     avatarGroup: {
       more: (count) => t`+${count}`,
       // The names shown and how many more, joined as the language joins a list.
@@ -522,9 +544,120 @@ export const usePartWords = (): GraspWordsCatalog => {
       preview: t`What they will see`,
       copyLink: t`Copy link`,
       copied: t`Link copied`,
-      copyFailed: t`Could not copy`,
+      copyFailed: t`Not copied`,
       done: t({ message: "Done", context: "close the share dialog" }),
+      pick: t`Add people, teams or projects`,
+      add: t({ message: "Add", context: "add someone to share with" }),
+      added: t`Has access`,
+      noMatch: t`No one by that name`,
+      searching: t({
+        message: "Searching",
+        context: "a list fetching results",
+      }),
+      address: (address) => t`Invite ${address}`,
+      unpick: (name) => t`Remove ${name}`,
     },
+    appBuilding: {
+      name: t`Grasp is building`,
+      layout: t({ message: "Layout", context: "who builds an app's look" }),
+      data: t({ message: "Data", context: "who builds an app's data" }),
+      copy: t({ message: "Words", context: "who writes an app's words" }),
+    },
+    appCard: {
+      more: t`More actions`,
+      building: t`Being built`,
+      failed: t`Didn't start`,
+      empty: t`No preview yet`,
+    },
+    appPreview: {
+      region: t`App preview`,
+      reload: t`Reload`,
+      open: t`Open in a new tab`,
+      address: t`Address`,
+      widths: t({ message: "Width", context: "a preview's screen width" }),
+      phone: t({ message: "Phone", context: "a screen width" }),
+      tablet: t`Tablet`,
+      desktop: t`Desktop`,
+      fit: t({ message: "Fit", context: "a preview fitted to its room" }),
+      building: t`Building the app`,
+      loading: t`Loading the app`,
+      ready: t`The app is running`,
+      updating: t`Updating the app`,
+      stopped: t`The app is asleep`,
+      use: t`Use the app`,
+      useHint: t`Press to use the app`,
+      done: t({ message: "Done", context: "stop using the app's preview" }),
+      details: t`Technical details`,
+      more: t`More`,
+      fullscreen: t`Full screen`,
+      leaveFullscreen: t`Leave full screen`,
+      copy: t`Copy link`,
+      copied: t`Link copied`,
+      copyFailed: t`Could not copy the link`,
+      back: t`Back`,
+      forward: t`Forward`,
+    },
+    appPreviewFailure: {
+      title: t`The app didn't start`,
+      description: t`The server stopped before the app was ready.`,
+      retry: t`Try again`,
+    },
+    appPreviewStopped: {
+      title: t`The app is asleep`,
+      description: t`It stopped after a while unused. Starting it takes a few seconds.`,
+      start: t`Start the app`,
+    },
+    backdropPicker: {
+      names: {
+        cliffs: t`Cliffs`,
+        wave: t`Wave`,
+        aurora: t`Aurora`,
+        starry: t`Starry night`,
+        fuji: t`Fuji`,
+        wanderer: t`Wanderer`,
+        dusk: t`Dusk`,
+        dots: t`Dots`,
+        door: t`Door`,
+        sand: t`Sand`,
+        dunes: t`Dunes`,
+        rings: t`Rings`,
+        pixels: t`Pixel sand`,
+        none: t`None`,
+      },
+      patterns: { bayer: t`Bayer`, grid: t`Grid`, mix: t`Bayer grid` },
+      tones: {
+        light: t`Light`,
+        deep: t`Deep`,
+        mint: t`Mint`,
+        lime: t`Lime`,
+        ink: t`Ink`,
+        rim: t`Dark edge`,
+        core: t`Light edge`,
+        aurora: t`Aurora`,
+      },
+      scenes: t`Scenes`,
+      dithers: t`Dithers`,
+      sand: t`Sand`,
+      backdrop: t`Background`,
+      backdropHint: t`A scene, a dither, sand, or nothing.`,
+      pattern: t`Pattern`,
+      patternHint: t`How the dither's cells are set.`,
+      tone: t`Colour`,
+      toneHint: t`One green, or a run of greens from the edge in.`,
+      previewTitle: t`What should we look at today?`,
+      previewLabel: t`Preview of your chat background`,
+      randomize: t`Randomize`,
+    },
+    backdropPreview: {
+      title: t`What should we look at today?`,
+      placeholder: t`Ask anything, or describe a process`,
+      label: t`Preview of your chat background`,
+    },
+    breadcrumb: {
+      name: t`Breadcrumb`,
+      hidden: t`Show hidden levels`,
+    },
+    drawer: { resize: t`Resize` },
     datePicker: { choose: t`Choose date` },
     dateRangePicker: {
       presets: t`Presets`,
@@ -621,7 +754,7 @@ export const usePartWords = (): GraspWordsCatalog => {
     },
     toaster: {
       name: t`Notifications`,
-      failed: t`Could not finish`,
+      failed: t`Not done`,
       pending: t`Still working`,
       close: t`Close`,
     },

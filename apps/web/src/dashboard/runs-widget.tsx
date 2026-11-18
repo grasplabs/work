@@ -3,23 +3,26 @@ import type {
   RunActivityDay,
   RunActivityWorkflow,
 } from "@grasp-os/shared/workflows";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg, plural } from "@lingui/core/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useId } from "react";
+
+import { RouterLink } from "../frame/router-link.tsx";
+import { Heading } from "../grasp/heading/index.ts";
+import { visuallyHidden } from "../grasp/hidden/hidden.ts";
+import { StatsGrid, Stat } from "../grasp/stats/index.ts";
 import {
   Table,
   TableBody,
-  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
-import { cn } from "@grasp-os/ui/lib/utils";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg, plural } from "@lingui/core/macro";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
-import { useId } from "react";
-
-import { StatsGrid, Stat } from "../grasp/stats/index.ts";
+} from "../grasp/table/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import {
   columnsOf,
   fullDays,
@@ -48,20 +51,68 @@ const outcomeNames: Record<RunOutcome, MessageDescriptor> = {
 };
 
 /** Each outcome's part of a column: green once done, orange where it failed, pale while it waits. */
-const outcomeFills: Record<RunOutcome, string> = {
-  completed: "fill-status-agreed",
-  failed: "fill-status-attention",
-  waiting: "fill-status-attention/40",
-  other: "fill-muted-foreground/30",
-};
+const outcomeFills = stylex.create({
+  completed: { fill: grasp.success },
+  failed: { fill: grasp.attention },
+  waiting: { fill: grasp.attention, fillOpacity: 0.4 },
+  other: { fill: grasp.chartQuietFill },
+});
 
 /** Each outcome's mark in the key, as its part of a column. */
-const outcomeSwatches: Record<RunOutcome, string> = {
-  completed: "bg-status-agreed",
-  failed: "bg-status-attention",
-  waiting: "bg-status-attention/40",
-  other: "bg-muted-foreground/30",
-};
+const outcomeSwatches = stylex.create({
+  completed: { backgroundColor: grasp.success },
+  failed: { backgroundColor: grasp.attention },
+  waiting: { backgroundColor: grasp.attention, opacity: 0.4 },
+  other: { backgroundColor: grasp.chartQuietFill },
+});
+
+const styles = stylex.create({
+  key: {
+    display: "flex",
+    flexWrap: "wrap",
+    columnGap: grasp.space3,
+    rowGap: grasp.space1,
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  keyItem: { display: "flex", alignItems: "center", columnGap: grasp.space2 },
+  swatch: {
+    flexShrink: 0,
+    width: grasp.space2,
+    height: grasp.space2,
+    borderRadius: grasp.cornerCircle,
+  },
+  figure: {
+    display: "flex",
+    flexDirection: "column",
+    rowGap: grasp.space2,
+    margin: 0,
+  },
+  figureBoard: { flexGrow: 1, minHeight: 0 },
+  drawing: { flexGrow: 1, minHeight: 0 },
+  drawingTall: { height: "12rem" },
+  svg: { display: "block", width: "100%", height: "100%" },
+  pointed: { fill: "transparent" },
+  days: {
+    display: "flex",
+    paddingBlockStart: grasp.space1,
+    borderTopWidth: grasp.hairline,
+    borderTopStyle: "solid",
+    borderTopColor: grasp.line,
+  },
+  dayName: {
+    display: "flex",
+    flexGrow: 1,
+    flexBasis: 0,
+    justifyContent: "center",
+    minWidth: 0,
+    whiteSpace: "nowrap",
+  },
+  section: { display: "flex", flexDirection: "column", rowGap: grasp.space3 },
+  inFull: { display: "flex", flexDirection: "column", rowGap: grasp.space8 },
+  quietLine: { display: "flex", alignItems: "center", height: "100%" },
+});
 
 /** A UTC day, `YYYY-MM-DD`, as a moment inside it wherever the page is. */
 const middayOf = (day: string): string => `${day}T12:00:00Z`;
@@ -97,18 +148,13 @@ const columnName = (day: string, days: number, locale: string): string =>
 const OutcomeKey = () => {
   const { i18n } = useLingui();
   return (
-    <ul aria-hidden="true" className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+    <ul aria-hidden="true" {...stylex.props(styles.key)}>
       {runOutcomes.map((outcome) => (
-        <li className="flex items-center gap-1.5" key={outcome}>
-          <span
-            className={cn(
-              "size-2 flex-none rounded-full",
-              outcomeSwatches[outcome]
-            )}
-          />
-          <span className="text-muted-foreground">
+        <li key={outcome} {...stylex.props(styles.keyItem)}>
+          <span {...stylex.props(styles.swatch, outcomeSwatches[outcome])} />
+          <Text element="span" size="xs" tone="muted">
             {i18n._(outcomeNames[outcome])}
-          </span>
+          </Text>
         </li>
       ))}
     </ul>
@@ -119,11 +165,8 @@ const OutcomeKey = () => {
 const DaysTable = ({ days }: { days: readonly RunActivityDay[] }) => {
   const { i18n } = useLingui();
   return (
-    <div className="sr-only">
-      <Table>
-        <TableCaption>
-          <Trans>Runs by the day they started</Trans>
-        </TableCaption>
+    <div {...stylex.props(visuallyHidden)}>
+      <Table caption={<Trans>Runs by the day they started</Trans>}>
         <TableHeader>
           <TableRow>
             <TableHead>
@@ -165,13 +208,13 @@ const DayColumns = ({
   const { i18n } = useLingui();
   const columns = columnsOf(days);
   return (
-    <figure className={cn("flex flex-col gap-1.5", !tall && "min-h-0 flex-1")}>
-      <div className={tall ? "h-48" : "min-h-0 flex-1"}>
+    <figure {...stylex.props(styles.figure, !tall && styles.figureBoard)}>
+      <div {...stylex.props(tall ? styles.drawingTall : styles.drawing)}>
         <svg
           aria-hidden="true"
-          className="size-full"
           preserveAspectRatio="none"
           viewBox={`0 0 ${columns.length} 1`}
+          {...stylex.props(styles.svg)}
         >
           {columns.map(({ day, runs, parts }, index) => {
             const date = dayDate(day.day, i18n.locale);
@@ -185,20 +228,20 @@ const DayColumns = ({
                 </title>
                 {/* The whole height, so pointing anywhere over a day names it. */}
                 <rect
-                  className="fill-transparent"
                   height={1}
                   width={1}
                   x={index}
                   y={0}
+                  {...stylex.props(styles.pointed)}
                 />
                 {parts.map((part) => (
                   <rect
-                    className={outcomeFills[part.outcome]}
                     height={part.height}
                     key={part.outcome}
                     width={0.7}
                     x={index + 0.15}
                     y={1 - part.from - part.height}
+                    {...stylex.props(outcomeFills[part.outcome])}
                   />
                 ))}
               </g>
@@ -207,15 +250,14 @@ const DayColumns = ({
         </svg>
       </div>
       {/* A name wider than its column spills over the unnamed ones beside it. */}
-      <div aria-hidden="true" className="flex border-t pt-1">
+      <div aria-hidden="true" {...stylex.props(styles.days)}>
         {columns.map(({ day }, index) => (
-          <span
-            className="text-muted-foreground flex min-w-0 flex-1 justify-center text-xs whitespace-nowrap"
-            key={day.day}
-          >
-            {isLabelled(index, columns.length)
-              ? columnName(day.day, columns.length, i18n.locale)
-              : ""}
+          <span key={day.day} {...stylex.props(styles.dayName)}>
+            <Text element="span" size="xs" tone="muted">
+              {isLabelled(index, columns.length)
+                ? columnName(day.day, columns.length, i18n.locale)
+                : ""}
+            </Text>
           </span>
         ))}
       </div>
@@ -257,17 +299,17 @@ const Decisions = ({ activity }: { activity: RunActivity }) => {
     { key: "open", name: msg`Open now`, count: open },
   ];
   return (
-    <section aria-labelledby={id} className="flex flex-col gap-3">
-      <h3 className="font-medium" id={id}>
+    <section aria-labelledby={id} {...stylex.props(styles.section)}>
+      <Heading id={id} level={3} size="ui-sm">
         <Trans>Decisions</Trans>
-      </h3>
-      <p className="text-muted-foreground">
+      </Heading>
+      <Text tone="muted">
         <Plural
           one={`${withPerson} of # run asked a person for a decision.`}
           other={`${withPerson} of # runs asked a person for a decision.`}
           value={total}
         />
-      </p>
+      </Text>
       <StatsGrid
         aria-label={t`Decisions, by how they ended`}
         columns={4}
@@ -282,39 +324,41 @@ const Decisions = ({ activity }: { activity: RunActivity }) => {
 
 /** A workflow that ran, opening it. */
 const ActivityWorkflow = ({ row }: { row: RunActivityWorkflow }) => (
-  <Link
-    className="hover:underline"
+  <RouterLink
     params={{ workflow: row.workflowId }}
     to="/workflows/$workflow"
+    variant="standalone"
   >
     {row.name}
-  </Link>
+  </RouterLink>
 );
 
 /** Each workflow's runs over the window: how many started, completed and failed. */
 const Workflows = ({ activity }: { activity: RunActivity }) => {
+  const { t } = useLingui();
   const id = useId();
+  const title = t`By workflow`;
   if (activity.workflows.length === 0) {
     return null;
   }
   return (
-    <section aria-labelledby={id} className="flex flex-col gap-3">
-      <h3 className="font-medium" id={id}>
-        <Trans>By workflow</Trans>
-      </h3>
-      <Table>
+    <section aria-labelledby={id} {...stylex.props(styles.section)}>
+      <Heading id={id} level={3} size="ui-sm">
+        {title}
+      </Heading>
+      <Table aria-label={title}>
         <TableHeader>
           <TableRow>
             <TableHead>
               <Trans>Workflow</Trans>
             </TableHead>
-            <TableHead className="text-right">
+            <TableHead align="end">
               <Trans>Started</Trans>
             </TableHead>
-            <TableHead className="text-right">
+            <TableHead align="end">
               <Trans>Completed</Trans>
             </TableHead>
-            <TableHead className="text-right">
+            <TableHead align="end">
               <Trans>Failed</Trans>
             </TableHead>
           </TableRow>
@@ -322,12 +366,12 @@ const Workflows = ({ activity }: { activity: RunActivity }) => {
         <TableBody>
           {activity.workflows.map((row) => (
             <TableRow key={row.workflowId}>
-              <TableCell>
+              <TableCell lead>
                 <ActivityWorkflow row={row} />
               </TableCell>
-              <TableCell className="text-right">{row.started}</TableCell>
-              <TableCell className="text-right">{row.completed}</TableCell>
-              <TableCell className="text-right">{row.failed}</TableCell>
+              <TableCell align="end">{row.started}</TableCell>
+              <TableCell align="end">{row.completed}</TableCell>
+              <TableCell align="end">{row.failed}</TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -338,8 +382,8 @@ const Workflows = ({ activity }: { activity: RunActivity }) => {
 
 /** In full: the month's columns and headline, the decisions, and each workflow. */
 const RunsInFull = ({ activity }: { activity: RunActivity }) => (
-  <div className="flex flex-col gap-8">
-    <section className="flex flex-col gap-3">
+  <div {...stylex.props(styles.inFull)}>
+    <section {...stylex.props(styles.section)}>
       <Headline days={activity.days} />
       <DayColumns days={activity.days} tall />
     </section>
@@ -373,9 +417,11 @@ export const RunsWidget = ({ activity }: { activity: RunActivity }) => {
           <DayColumns days={week} />
         </>
       ) : (
-        <p className="text-muted-foreground flex h-full items-center">
-          <Trans>No runs this week.</Trans>
-        </p>
+        <div {...stylex.props(styles.quietLine)}>
+          <Text tone="muted">
+            <Trans>No runs this week.</Trans>
+          </Text>
+        </div>
       )}
     </WidgetBlock>
   );

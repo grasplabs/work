@@ -465,7 +465,7 @@ const LogFiltersControl = ({ search }: { search: LogSearch }) => {
             action={() => {
               show();
             }}
-            failedLabel={t`Could not clear`}
+            failedLabel={t`Not cleared`}
             variant="ghost"
           >
             {t`Clear`}
@@ -474,7 +474,7 @@ const LogFiltersControl = ({ search }: { search: LogSearch }) => {
             action={() => {
               show(shown);
             }}
-            failedLabel={t`Could not show them`}
+            failedLabel={t`Not shown`}
             variant="ink"
           >
             {t`Show events`}

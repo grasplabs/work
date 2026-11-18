@@ -6,3 +6,4 @@ export type {
   ShareLevel,
   ShareMember,
 } from "./share-access";
+export type { ShareCandidate, SharePicked } from "./picker";

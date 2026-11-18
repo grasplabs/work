@@ -348,14 +348,14 @@ const KeyDialog = ({
       setKey("");
       onOpenChange(false);
     },
-    { working: t`Saving`, done: t`Saved`, failed: t`Could not save` }
+    { working: t`Saving`, done: t`Saved`, failed: t`Not saved` }
   );
   const remove = useAction(
     async () => {
       await onDelete();
       onOpenChange(false);
     },
-    { working: t`Deleting`, done: t`Deleted`, failed: t`Could not delete` }
+    { working: t`Deleting`, done: t`Deleted`, failed: t`Not deleted` }
   );
   const failed = save.error ?? remove.error;
   // Why it can't be tested, or why its test failed: nothing while all is well.
@@ -580,7 +580,7 @@ const AddProviderDialog = ({
         close();
       }
     },
-    { working: t`Saving`, done: t`Saved`, failed: t`Could not save` }
+    { working: t`Saving`, done: t`Saved`, failed: t`Not saved` }
   );
   if (provider === undefined) {
     return null;

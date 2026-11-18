@@ -1,25 +1,29 @@
-import { Button } from "@grasp-os/ui/components/button";
+import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useId } from "react";
+import type { ReactNode } from "react";
+
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@grasp-os/ui/components/dialog";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
-import { PaintedField } from "@grasp-os/ui/components/painted-field";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../grasp/alert-dialog/index.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { Backdrop, BackdropGlass } from "../grasp/backdrop/index.ts";
+import type { BackdropLook } from "../grasp/backdrop/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
-import { Trans } from "@lingui/react/macro";
-import { useId, useState } from "react";
-import type { ReactNode } from "react";
-
-import { ErrorText } from "../error-text.tsx";
+} from "../grasp/tooltip/index.ts";
 
 // The card on top of the dashboard's pile (`todo-pile.tsx`), as the
 // prototype draws it (`components/dashboard/todo-stack.tsx`): as little
@@ -30,6 +34,93 @@ import { ErrorText } from "../error-text.tsx";
 // places; the pile puts where in it the card is, its arrows and Skip in
 // the card's top corners. What a button does is said when the pointer
 // rests on it, and nowhere else.
+
+/** The pile's own width from which its corners stand beside the card's name rather than over it. */
+const WIDE = "@container (width >= 48rem)";
+
+/**
+ * The painting the card stands on: the painted field's "dawn" in "columns"
+ * as the library's dither has it, in mint on a grid, still, so it reads
+ * at once and in both schemes.
+ */
+const painting: BackdropLook = {
+  backdrop: "dusk",
+  pattern: "grid",
+  tone: "mint",
+};
+
+const styles = stylex.create({
+  // The card: the painting to its corners, lifted as a card is (grasp/card).
+  card: {
+    display: "block",
+    minWidth: 0,
+    margin: 0,
+    overflow: "hidden",
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    boxShadow: grasp.liftMedium,
+  },
+  // Room on the painting round the glass, and over it for the pile's corners: less where they
+  // stand beside the name.
+  painting: {
+    display: "flex",
+    flexDirection: "column",
+    padding: {
+      default: `${grasp.space12} ${grasp.space4} ${grasp.space4}`,
+      [WIDE]: `${grasp.space8} ${grasp.space4} ${grasp.space4}`,
+    },
+  },
+  glass: {
+    minWidth: 0,
+    padding: grasp.space6,
+  },
+  inside: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: grasp.space5,
+    minWidth: 0,
+    textAlign: "center",
+  },
+  head: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: grasp.space2,
+    minWidth: 0,
+  },
+  name: {
+    maxWidth: grasp.frameColumn,
+  },
+  details: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space3,
+    width: "100%",
+    maxWidth: grasp.frameMeasure,
+    minWidth: 0,
+    textAlign: "start",
+  },
+  answers: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: grasp.space2,
+    minWidth: 0,
+  },
+  buttons: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: grasp.space2,
+    minWidth: 0,
+  },
+  // The yes and the no each as wide as the other, so they stand in the same places on every card.
+  answer: {
+    minWidth: `calc(${grasp.space24} + ${grasp.space4})`,
+  },
+});
 
 /** What the pile gives the card on top. */
 export interface Pile {
@@ -66,14 +157,14 @@ export interface Answer {
   /** The id of a line that says why it waits. */
   describedBy?: string;
   /**
-   * Asked once more before it is done, in a dialog: for an answer that
-   * can't be taken back. Its button warns (`destructive`) unless `variant`
+   * Asked once more before it is done, in an alert dialog: for an answer
+   * that can't be taken back. Its button warns (`danger`) unless `variant`
    * says otherwise.
    */
   confirm?: {
     title: string;
     description: string;
-    variant?: "default" | "destructive";
+    variant?: "ink" | "danger";
   };
 }
 
@@ -92,9 +183,9 @@ const AnswerButton = ({
   busy: boolean;
   pile: Pile;
   first?: boolean;
-  variant: "highlight" | "outline";
+  variant: "approve" | "quiet";
 }) => {
-  const [confirming, setConfirming] = useState(false);
+  const { t } = useLingui();
   const press = async (keys?: boolean): Promise<void> => {
     if (!pile.answering(keys)) {
       return;
@@ -107,61 +198,79 @@ const AnswerButton = ({
     }
     pile.settled();
   };
-  const button = (
-    <Button
-      aria-describedby={answer.describedBy}
-      aria-label={answer.name}
-      className="min-w-28"
-      data-first={first ? "" : undefined}
-      disabled={busy || answer.disabled === true}
-      onClick={
-        answer.confirm === undefined
-          ? () => {
-              void press();
-            }
-          : undefined
-      }
-      size="lg"
-      variant={variant}
-    />
-  );
+  const disabled = busy || answer.disabled === true;
+  const marked = first ? "" : undefined;
   const { confirm } = answer;
-  if (confirm === undefined) {
+  if (confirm !== undefined) {
     return (
-      <Tooltip>
-        <TooltipTrigger delay={rests} render={button}>
+      <AlertDialog>
+        <AlertDialogTrigger
+          aria-describedby={answer.describedBy}
+          aria-label={answer.name}
+          data-first={marked}
+          disabled={disabled}
+          layout={styles.answer}
+          size="lg"
+          variant={variant}
+        >
           {answer.label}
-        </TooltipTrigger>
-        <TooltipContent side={first ? "left" : "right"} sideOffset={10}>
-          {answer.does}
-        </TooltipContent>
-      </Tooltip>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogTitle>{confirm.title}</AlertDialogTitle>
+          <AlertDialogDescription>{confirm.description}</AlertDialogDescription>
+          <AlertDialogFooter>
+            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+            <AlertDialogAction
+              disabled={busy}
+              onClick={() => {
+                // Pressed in the dialog, outside the card: the keys go on
+                // with the next card all the same.
+                void press(true);
+              }}
+              variant={confirm.variant ?? "danger"}
+            >
+              {answer.label}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    );
+  }
+  if (disabled) {
+    // Out of use: nothing to press, so nothing to say it does; the line it
+    // points at says why it waits.
+    return (
+      <Button
+        aria-describedby={answer.describedBy}
+        aria-label={answer.name}
+        data-first={marked}
+        disabled
+        layout={styles.answer}
+        size="lg"
+        variant={variant}
+      >
+        {answer.label}
+      </Button>
     );
   }
   return (
-    <Dialog onOpenChange={setConfirming} open={confirming}>
-      <DialogTrigger render={button}>{answer.label}</DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{confirm.title}</DialogTitle>
-          <DialogDescription>{confirm.description}</DialogDescription>
-        </DialogHeader>
-        <DialogFooter showCloseButton>
-          <Button
-            disabled={busy}
-            onClick={() => {
-              setConfirming(false);
-              // Pressed in the dialog, outside the card: the keys go on
-              // with the next card all the same.
-              void press(true);
-            }}
-            variant={confirm.variant ?? "destructive"}
-          >
-            {answer.label}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <Tooltip delay={rests}>
+      <TooltipTrigger
+        aria-label={answer.name}
+        data-first={marked}
+        layout={styles.answer}
+        onClick={() => {
+          void press();
+        }}
+        size="lg"
+        variant={variant}
+      >
+        {answer.label}
+      </TooltipTrigger>
+      <TooltipContent side={first ? "left" : "right"}>
+        {answer.does}
+      </TooltipContent>
+    </Tooltip>
   );
 };
 
@@ -187,57 +296,46 @@ export const PileCard = ({
   const nameId = useId();
   return (
     // The one thing on the dashboard that waits on someone, so it stands on
-    // a painted field.
-    <PaintedField
-      className="min-w-0"
-      painting="dawn"
-      pattern="columns"
-      render={<article aria-labelledby={nameId} />}
-    >
-      <div className="flex min-w-0 flex-col items-center gap-5 px-6 pt-14 pb-8 text-center text-sm @3xl:pt-9">
-        <div className="relative flex flex-col items-center gap-2">
-          <p className="text-muted-foreground flex items-center gap-2">
-            {/* The mark of what needs someone beats, as something that waits does; still for whoever asks for less motion. */}
-            <span
-              aria-hidden="true"
-              className="relative flex size-1.5 flex-none"
-            >
-              <span className="bg-status-attention absolute inset-0 rounded-full motion-safe:animate-ping" />
-              <span className="bg-status-attention relative size-1.5 rounded-full" />
-            </span>
-            <Trans>Waiting on you</Trans>
-          </p>
-          <PageHeaderTitle
-            className="max-w-3xl break-words"
-            id={nameId}
-            render={<h2>{name}</h2>}
-          />
-        </div>
-        {details === undefined ? null : (
-          <div className="relative flex w-full max-w-2xl min-w-0 flex-col gap-3 text-left">
-            {details}
+    // a painting, its words on the glass over it.
+    <article aria-labelledby={nameId} {...stylex.props(styles.card)}>
+      <Backdrop layout={styles.painting} variant={painting}>
+        <BackdropGlass layout={styles.glass}>
+          <div {...stylex.props(styles.inside)}>
+            <div {...stylex.props(styles.head)}>
+              {/* The mark of what needs someone: it waits on the reader. */}
+              <Badge tone="attention" variant="dot">
+                <Trans>Waiting on you</Trans>
+              </Badge>
+              <Heading id={nameId} layout={styles.name} level={2} size="md">
+                {name}
+              </Heading>
+            </div>
+            {details === undefined ? null : (
+              <div {...stylex.props(styles.details)}>{details}</div>
+            )}
+            <div {...stylex.props(styles.answers)}>
+              <div {...stylex.props(styles.buttons)}>
+                <AnswerButton
+                  answer={yes}
+                  busy={busy || pile.deciding}
+                  first
+                  pile={pile}
+                  variant="approve"
+                />
+                <AnswerButton
+                  answer={no}
+                  busy={busy || pile.deciding}
+                  pile={pile}
+                  variant="quiet"
+                />
+              </div>
+              {failure === undefined ? null : (
+                <Alert variant="danger">{failure}</Alert>
+              )}
+            </div>
           </div>
-        )}
-        <div className="relative flex min-w-0 flex-col items-center gap-2">
-          {/* The yes and the no side by side, each as wide as the other, so they stand in the same places on every card. */}
-          <div className="flex min-w-0 flex-wrap items-center justify-center gap-2">
-            <AnswerButton
-              answer={yes}
-              busy={busy || pile.deciding}
-              first
-              pile={pile}
-              variant="highlight"
-            />
-            <AnswerButton
-              answer={no}
-              busy={busy || pile.deciding}
-              pile={pile}
-              variant="outline"
-            />
-          </div>
-          <ErrorText>{failure}</ErrorText>
-        </div>
-      </div>
-    </PaintedField>
+        </BackdropGlass>
+      </Backdrop>
+    </article>
   );
 };

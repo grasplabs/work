@@ -1,3 +1,4 @@
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 
 import {
@@ -7,6 +8,7 @@ import {
   palette,
   shimmerAt,
 } from "../brain/dot-ink.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { dotAt, FAREWELL_ENDS, fieldOf, PITCH } from "./pile-dots.ts";
 import type { Printed } from "./pile-dots.ts";
 
@@ -22,11 +24,25 @@ const TAU = Math.PI * 2;
 /** How lit the card's dots are: it is flat, so all the same. */
 const LIT = 0.6;
 
-/** The room around the card the dots drift into, in pixels: the canvas is this much larger on every side (`-inset-10`). */
+/** The room around the card the dots drift into, in pixels: the canvas is this much larger on every side (`styles.room`, space-10). */
 const ROOM = 40;
 
 /** How warm a dot gets as it lets go, 0 to 1: a glow at the wave's edge, not a fire. */
 const WARMTH = 0.55;
+
+const css = stylex.create({
+  // As far out on every side as `ROOM`.
+  room: {
+    position: "absolute",
+    inset: `calc(-1 * ${grasp.space10})`,
+    pointerEvents: "none",
+  },
+  canvas: {
+    display: "block",
+    width: "100%",
+    height: "100%",
+  },
+});
 
 /** Prints dots, listed by colour as x, y and radius: one path per colour, as the brain is drawn. */
 const print = (
@@ -145,8 +161,8 @@ export const PileFarewell = ({
         });
   }, []);
   return (
-    <div aria-hidden="true" className="pointer-events-none absolute -inset-10">
-      <canvas className="size-full" ref={canvas} />
+    <div aria-hidden="true" {...stylex.props(css.room)}>
+      <canvas ref={canvas} {...stylex.props(css.canvas)} />
     </div>
   );
 };

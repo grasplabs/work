@@ -43,7 +43,7 @@ export const LeaveConfirmDialog = ({
           <AlertDialogAction>{t`Stay`}</AlertDialogAction>
           <AlertDialogAction
             action={onLeave}
-            failedLabel={t`Could not finish`}
+            failedLabel={t`Not done`}
             variant="danger"
           >
             {t`Leave`}

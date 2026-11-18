@@ -1,5 +1,5 @@
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
@@ -7,6 +7,9 @@ import { forgetActiveChats } from "../chat/active-chat.ts";
 import { loadCoreStatus } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
 import { OnboardingFrame } from "../frame/onboarding-frame.tsx";
+import { Heading } from "../grasp/heading/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { signInErrorSearch } from "../sign-in-errors.ts";
 import { SignInOptions } from "../sign-in-options.tsx";
 
@@ -15,6 +18,10 @@ import { SignInOptions } from "../sign-in-options.tsx";
 // back there.
 
 const signInPath = "/sign-in";
+
+const styles = stylex.create({
+  intro: { display: "flex", flexDirection: "column", gap: grasp.space2 },
+});
 
 /**
  * What no path of this site holds: control characters and spaces, which
@@ -49,14 +56,10 @@ const SignIn = () => {
   return (
     <OnboardingFrame>
       <GraspBuddy />
-      <div className="flex flex-col gap-2">
-        <PageHeaderTitle>
-          <Trans>Sign in to Grasp</Trans>
-        </PageHeaderTitle>
+      <div {...stylex.props(styles.intro)}>
+        <Heading level={1}>{t`Sign in to Grasp`}</Heading>
         {connected ? (
-          <p className="text-muted-foreground text-balance">
-            <Trans>Use your organization’s account to go on.</Trans>
-          </p>
+          <Text tone="muted">{t`Use your organization’s account to go on.`}</Text>
         ) : null}
       </div>
       {connected ? (

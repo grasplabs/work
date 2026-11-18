@@ -29,6 +29,20 @@ export const shareAccessWords = {
   copyFailed: "Could not copy",
   /** The close button. */
   done: "Done",
+  /** The picker's field, when the host offers who can be added (`candidates`). */
+  pick: "Add people, teams or projects",
+  /** The picker's add button. */
+  add: "Add",
+  /** Under someone in the picker's list who already has access. */
+  added: "Has access",
+  /** The picker's list when nothing matches. */
+  noMatch: "No one by that name",
+  /** The picker's list while the host's results load. */
+  searching: "Searching",
+  /** The picker's row for a typed email address, with `allowAddress`. */
+  address: (address: string) => `Invite ${address}`,
+  /** A pick's remove button, from its name. */
+  unpick: (name: string) => `Remove ${name}`,
 };
 
 export type ShareAccessWords = typeof shareAccessWords;

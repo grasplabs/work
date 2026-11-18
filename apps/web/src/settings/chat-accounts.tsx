@@ -4,8 +4,6 @@ import type {
   ChannelLinkRefusal,
 } from "@grasp-os/shared/channel-accounts";
 import { chatPlatformName } from "@grasp-os/shared/chat";
-// The frame mounts this Toaster (frame/app-frame.tsx), not the library's own yet.
-import { toast } from "@grasp-os/ui/components/toast";
 import { useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 
@@ -25,6 +23,7 @@ import {
 } from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { SettingsRows } from "../grasp/setting-row/index.ts";
+import { toast } from "../grasp/toast/index.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { forgetChatLink } from "./chat-link.ts";
@@ -132,7 +131,7 @@ const OpenLink = ({
     });
     // The card goes and the account stands among the linked ones: say so.
     if (outcome.linked) {
-      toast.add({ type: "success", title: t`Linked` });
+      toast.success(t`Linked`);
     }
   };
   return (

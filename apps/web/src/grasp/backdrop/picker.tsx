@@ -10,6 +10,7 @@ import { focus } from "../focus/focus";
 import { Select, SelectTrigger, SelectValue, SelectContent } from "../select";
 import type { SelectItems } from "../select";
 import { grasp } from "../tokens/tokens.stylex";
+import { useWords, withGiven } from "../words/words";
 import { defaultScenes } from "./backdrop";
 import type { BackdropLayoutStyle } from "./backdrop";
 import { BackdropField } from "./field";
@@ -30,6 +31,7 @@ import type {
   BackdropTone,
 } from "./look";
 import { BackdropPreview } from "./preview";
+import { backdropPickerWords } from "./words";
 
 /** Every word the picker shows or says, with English defaults. */
 export interface BackdropPickerWords {
@@ -56,48 +58,6 @@ export interface BackdropPickerWords {
   /** The tiles' button that picks any look. */
   randomize: string;
 }
-
-const defaults: BackdropPickerWords = {
-  names: {
-    cliffs: "Cliffs",
-    wave: "Wave",
-    aurora: "Aurora",
-    starry: "Starry night",
-    fuji: "Fuji",
-    wanderer: "Wanderer",
-    dusk: "Dusk",
-    dots: "Dots",
-    door: "Door",
-    sand: "Sand",
-    dunes: "Dunes",
-    rings: "Rings",
-    pixels: "Pixel sand",
-    none: "None",
-  },
-  patterns: { bayer: "Bayer", grid: "Grid", mix: "Bayer grid" },
-  tones: {
-    light: "Light",
-    deep: "Deep",
-    mint: "Mint",
-    lime: "Lime",
-    ink: "Ink",
-    rim: "Dark edge",
-    core: "Light edge",
-    aurora: "Aurora",
-  },
-  scenes: "Scenes",
-  dithers: "Dithers",
-  sand: "Sand",
-  backdrop: "Backdrop",
-  backdropHint: "A scene, a dither, sand, or nothing.",
-  pattern: "Pattern",
-  patternHint: "How the dither's cells are set.",
-  tone: "Colour",
-  toneHint: "One green, or a run of greens from the edge in.",
-  previewTitle: "What should we look at today?",
-  previewLabel: "Preview of your chat backdrop",
-  randomize: "Randomize",
-};
 
 /** Every prop a BackdropPicker takes. */
 export interface BackdropPickerProps {
@@ -410,7 +370,11 @@ export const BackdropPicker = ({
     onChangeDeprecated,
     "BackdropPicker: pass `onValueChange`."
   );
-  const said: BackdropPickerWords = { ...defaults, ...words };
+  // Its words: the product's, by its catalogue, else English; the caller's `words` still win.
+  const said: BackdropPickerWords = withGiven(
+    useWords("backdropPicker", backdropPickerWords),
+    words ?? {}
+  );
   const kinds: SelectItems = [
     {
       type: "group",

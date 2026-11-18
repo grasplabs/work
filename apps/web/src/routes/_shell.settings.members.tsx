@@ -262,7 +262,7 @@ const MemberActions = ({
           </DropdownMenuItem>
           <DropdownMenuItem
             action={signOutEverywhere}
-            failedLabel={t`Could not sign out`}
+            failedLabel={t`Not signed out`}
             icon={SignOut}
             mirrorIcon
           >
@@ -299,7 +299,7 @@ const MemberActions = ({
               action={async () => {
                 await setRole("admin");
               }}
-              failedLabel={t`Could not make admin`}
+              failedLabel={t`Not changed`}
               variant="ink"
             >
               {t`Make admin`}
@@ -324,7 +324,7 @@ const MemberActions = ({
             <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
             <AlertDialogAction
               action={remove}
-              failedLabel={t`Could not remove`}
+              failedLabel={t`Not removed`}
               variant="danger"
               workingLabel={t`Removing`}
             >

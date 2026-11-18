@@ -192,9 +192,9 @@ const RemovePerson = ({
             <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
             <AlertDialogAction
               action={takeOut}
-              failedLabel={t`Couldn't take it out`}
+              failedLabel={t`Not taken out`}
               variant="danger"
-              workingLabel={t`Taking it out`}
+              workingLabel={t`Taking out`}
             >
               {t`Take out`}
             </AlertDialogAction>

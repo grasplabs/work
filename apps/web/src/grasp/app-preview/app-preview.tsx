@@ -27,7 +27,7 @@ import { focus } from "../focus/focus";
 import { FrameGuard } from "../frame-guard";
 import { visuallyHidden } from "../hidden/hidden";
 import type { LayoutStyle } from "../layout/layout";
-import { englishFailure, englishLabels, englishStopped } from "./labels";
+import { useWords, withGiven } from "../words/words";
 import type {
   AppPreviewFailure,
   AppPreviewLabels,
@@ -46,6 +46,7 @@ import {
   Widths,
 } from "./parts";
 import { styles } from "./styles";
+import { englishFailure, englishLabels, englishStopped } from "./words";
 
 /** What a caller may style: its size and where it sits. Never its look. */
 export type AppPreviewLayoutStyle = LayoutStyle;
@@ -463,6 +464,8 @@ const Top = ({
 const runningOf = (state: AppPreviewState) =>
   state === "ready" || state === "loading" || state === "updating";
 
+/** The frame's sandbox until the caller gives one: scripts and forms, nothing more. A value, not words. */
+const SANDBOX = "allow-scripts allow-forms";
 export const AppPreview = ({
   src,
   title,
@@ -474,10 +477,10 @@ export const AppPreview = ({
   width,
   defaultWidth = "fit",
   onWidthChange,
-  sandbox = "allow-scripts allow-forms",
+  sandbox = SANDBOX,
   building,
-  failure = englishFailure,
-  stopped = englishStopped,
+  failure: failureGiven,
+  stopped: stoppedGiven,
   labels,
   onReload,
   onRetry,
@@ -492,7 +495,13 @@ export const AppPreview = ({
 }: AppPreviewProps) => {
   const root = useRef<HTMLElement>(null);
   const [full, toggleFull] = useFullscreen(root);
-  const words = { ...englishLabels, ...labels };
+  // Its words: the product's, by its catalogue, else English; the caller's `labels`, `failure` and
+  // `stopped` still win.
+  const words = withGiven(useWords("appPreview", englishLabels), labels ?? {});
+  const catalogueFailure = useWords("appPreviewFailure", englishFailure);
+  const catalogueStopped = useWords("appPreviewStopped", englishStopped);
+  const failure = failureGiven ?? catalogueFailure;
+  const stopped = stoppedGiven ?? catalogueStopped;
   const [copied, copy] = useCopy(src, words);
   const history = (
     <History

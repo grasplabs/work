@@ -1,3 +1,4 @@
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 
 import {
@@ -7,6 +8,7 @@ import {
   palette,
   shimmerAt,
 } from "../brain/dot-ink.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { makingLight } from "./making-dots.ts";
 import { fieldOf, PITCH } from "./pile-dots.ts";
 
@@ -15,6 +17,24 @@ import { fieldOf, PITCH } from "./pile-dots.ts";
 // is said here: the block says Grasp is making it, for a screen reader.
 
 const TAU = Math.PI * 2;
+
+const css = stylex.create({
+  // Over the whole block, on its own ground and in its corners.
+  over: {
+    position: "absolute",
+    inset: 0,
+    zIndex: 10,
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    backgroundColor: grasp.raised,
+    pointerEvents: "none",
+  },
+  canvas: {
+    display: "block",
+    width: "100%",
+    height: "100%",
+  },
+});
 
 /** How lit the dots are where the light isn't. */
 const LIT = 0.35;
@@ -93,11 +113,8 @@ export const MakingDots = () => {
     return element === null ? undefined : playMaking(element);
   }, []);
   return (
-    <div
-      aria-hidden="true"
-      className="bg-card pointer-events-none absolute inset-0 z-10 rounded-xl"
-    >
-      <canvas className="size-full" ref={canvas} />
+    <div aria-hidden="true" {...stylex.props(css.over)}>
+      <canvas ref={canvas} {...stylex.props(css.canvas)} />
     </div>
   );
 };

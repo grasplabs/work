@@ -25,8 +25,10 @@ import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { useWords, withGiven } from "../words/words";
 import { Current } from "./current";
 import { HiddenLevels } from "./hidden-levels";
+import { breadcrumbWords } from "./words";
 
 const PHONE = media.belowPhone;
 const COARSE = media.coarse;
@@ -475,11 +477,15 @@ export const Breadcrumb = ({
   items,
   form: formDeprecated,
   variant: form = formDeprecated ?? "auto",
-  "aria-label": label = "Breadcrumb",
-  hiddenLabel = "Show hidden levels",
+  "aria-label": labelGiven,
+  hiddenLabel: hiddenLabelGiven,
   style: styleProp,
   layout,
 }: BreadcrumbProps) => {
+  const { name: label, hidden: hiddenLabel } = withGiven(
+    useWords("breadcrumb", breadcrumbWords),
+    { name: labelGiven, hidden: hiddenLabelGiven }
+  );
   // Until the script runs (and with none) nothing folds and the levels give way with an ellipsis,
   // so each carries its whole name as a title; the fold and the tooltip take over once it runs.
   const scripted = useSyncExternalStore(

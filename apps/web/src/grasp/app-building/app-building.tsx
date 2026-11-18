@@ -27,12 +27,14 @@ import {
 import type { AnimationEvent, ReactNode } from "react";
 
 import type { LayoutStyle } from "../layout/layout";
-import { cursorNames, englishLabel } from "./labels";
+import { useWords, withGiven } from "../words/words";
+import { cursorNames } from "./labels";
 import type { AppBuildingCursors } from "./labels";
 import type { AppBuildingLook } from "./parts";
 import { advance, planOf, startAt, stillOf } from "./plan";
 import { Scene } from "./scene";
 import { looks, styles } from "./styles";
+import { appBuildingWords } from "./words";
 
 /** What a caller may style: its size and where it sits. Never its look. */
 export type AppBuildingLayoutStyle = LayoutStyle;
@@ -235,7 +237,7 @@ export const AppBuilding = ({
   variant: look = lookDeprecated ?? "blocks",
   step,
   label: labelDeprecated,
-  "aria-label": label = labelDeprecated ?? englishLabel,
+  "aria-label": labelGiven,
   cursors,
   done = false,
   children,
@@ -243,6 +245,13 @@ export const AppBuilding = ({
   seed = 1,
   layout,
 }: AppBuildingProps) => {
+  // Its words: the product's, by its catalogue, else English; the caller's `aria-label` and
+  // `cursors` still win.
+  const words = withGiven(useWords("appBuilding", appBuildingWords), {
+    ...cursors,
+    name: labelGiven ?? labelDeprecated,
+  });
+  const { name: label } = words;
   const [root, setRoot] = useState<HTMLElement | null>(null);
   const seen = useSeen(root);
   const still = useReducedMotion();
@@ -283,7 +292,7 @@ export const AppBuilding = ({
             <Build
               look={look}
               seed={seed}
-              names={cursorNames(cursors)}
+              names={cursorNames(words)}
               done={done}
               still={still}
             />

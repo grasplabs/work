@@ -73,7 +73,7 @@ const EndStaffAccess = ({
           <AlertDialogAction
             action={end}
             agentConfirm={t`Signs everyone from Grasp out of this workspace`}
-            failedLabel={t`Could not end access`}
+            failedLabel={t`Not ended`}
             value="confirm"
             variant="danger"
             workingLabel={t`Ending access`}

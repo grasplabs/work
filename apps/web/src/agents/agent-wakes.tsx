@@ -1,7 +1,6 @@
 import type { Agent, AgentWake } from "@grasp-os/shared/agents";
 import { agentWakeOpeningMax } from "@grasp-os/shared/agents";
 import type { Member } from "@grasp-os/shared/members";
-import { toast } from "@grasp-os/ui/components/toast";
 import { useLingui } from "@lingui/react/macro";
 import { useRouteContext } from "@tanstack/react-router";
 import { useId, useState } from "react";
@@ -37,6 +36,7 @@ import { SectionCard } from "../grasp/section-card/index.ts";
 import { Select } from "../grasp/select/index.ts";
 import { Switch } from "../grasp/switch/index.ts";
 import { Textarea } from "../grasp/textarea/index.ts";
+import { toast } from "../grasp/toast/index.ts";
 
 // An agent's wake-ups, on its page's Schedule tab (agent-page.tsx): when it takes a
 // turn nobody asked for, for whom, and what it is asked. An admin picks
@@ -152,12 +152,10 @@ const removeWithUndo = async (
   if (!removed) {
     return;
   }
-  toast.add({
-    type: "success",
-    title: words.done,
-    actionProps: {
-      children: words.undo,
-      onClick: () => {
+  toast.success(words.done, {
+    action: {
+      label: words.undo,
+      onAction: () => {
         void change(async (session) => {
           const made = await session.connections.makeAgentWake(wake.agentId, {
             cron: wake.cron,

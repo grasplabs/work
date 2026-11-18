@@ -28,12 +28,13 @@ import type { ReactNode } from "react";
 
 import { Avatar, AvatarImage, AvatarFallback } from "../avatar";
 import type { LayoutStyle } from "../layout/layout";
+import { useWords, withGiven } from "../words/words";
 import { cardMarker } from "./app-card.stylex";
-import { englishLabels } from "./labels";
 import type { AppCardLabels } from "./labels";
 import { MoreMenu, Window } from "./parts";
 import type { AppCardAction, AppCardPreview } from "./parts";
 import { styles } from "./styles";
+import { englishLabels } from "./words";
 
 /** What a caller may style: its size and where it sits. Never its look. */
 export type AppCardLayoutStyle = LayoutStyle;
@@ -188,7 +189,7 @@ export const AppCard = ({
   layout,
 }: AppCardProps) => {
   const id = useId();
-  const words = { ...englishLabels, ...labels };
+  const words = withGiven(useWords("appCard", englishLabels), labels ?? {});
   const described = description !== undefined && description !== "";
   const metaWords = metaOf(state, meta, words);
   const hasMeta =

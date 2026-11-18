@@ -3,6 +3,7 @@ import type {
   UnknownOutcome,
 } from "@grasp-os/shared/connect";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
 import { useId } from "react";
 
@@ -10,6 +11,8 @@ import { changeThenRefresh } from "../change-then-refresh.ts";
 import { Described, ExactInput, useShown } from "../chat/held-writes.tsx";
 import type { Shown } from "../chat/held-writes.tsx";
 import { formatDateTime } from "../format.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { PileCard } from "./pile-card.tsx";
 import type { Pile } from "./pile-card.tsx";
@@ -23,6 +26,14 @@ import type { Pile } from "./pile-card.tsx";
 // nothing; "it didn't happen" lets it be sent once more, exactly as
 // before, and undoes nothing either. Core reads the person from their
 // session and checks the call's permission again before either.
+
+const styles = stylex.create({
+  details: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+  },
+});
 
 /** What the call does, and where: its tool's title, or its action. */
 const useOutcomeName = (outcome: UnknownOutcome): string => {
@@ -69,21 +80,21 @@ export const OutcomeDetails = ({
     where = t`${connection} (${tool})`;
   }
   return (
-    <div className="flex flex-col gap-2">
-      <p>
+    <div {...stylex.props(styles.details)}>
+      <Text size="sm">
         <Trans>
           Grasp sent this, but its answer was lost: nobody can tell whether it
           took effect. Check on {connection} before you say.
         </Trans>
-      </p>
-      <p className="text-muted-foreground">
+      </Text>
+      <Text size="sm" tone="muted">
         <Trans>On {where}</Trans>
-      </p>
-      <p className="text-muted-foreground">
+      </Text>
+      <Text size="sm" tone="muted">
         <Trans>
           Sent <time dateTime={outcome.sentAt}>{sent}</time>
         </Trans>
-      </p>
+      </Text>
       {description === undefined || input === null ? null : (
         <Described
           description={description}
@@ -93,17 +104,21 @@ export const OutcomeDetails = ({
         />
       )}
       {input === null ? (
-        <p id={removedId} role="note">
-          <Trans>What was sent is no longer kept.</Trans>
-        </p>
+        <div id={removedId} role="note">
+          <Text size="sm">
+            <Trans>What was sent is no longer kept.</Trans>
+          </Text>
+        </div>
       ) : (
         <>
           {description?.complete === false ? (
-            <p role="note">
-              <Trans>
-                More was sent than is shown above. Read exactly what was sent.
-              </Trans>
-            </p>
+            <div role="note">
+              <Text size="sm">
+                <Trans>
+                  More was sent than is shown above. Read exactly what was sent.
+                </Trans>
+              </Text>
+            </div>
           ) : null}
           <ExactInput
             input={input}
@@ -116,20 +131,20 @@ export const OutcomeDetails = ({
         </>
       )}
       {isUnresolvable(outcome) ? (
-        <p className="text-muted-foreground" id={unresolvableId}>
+        <Text id={unresolvableId} size="sm" tone="muted">
           <Trans>
             Grasp doesn&apos;t know where this came from, so it can&apos;t be
             resolved here.
           </Trans>
-        </p>
+        </Text>
       ) : null}
       {shown.unseen ? (
-        <p className="text-muted-foreground" id={shown.unseenId}>
+        <Text id={shown.unseenId} size="sm" tone="muted">
           <Trans>
             Part of what was sent is cut short above. Show it all, or exactly
             what was sent, before you say it didn&apos;t happen.
           </Trans>
-        </p>
+        </Text>
       ) : null}
     </div>
   );
@@ -231,7 +246,7 @@ export const OutcomeCard = ({
         confirm: {
           title: t`Say it happened?`,
           description: t`Grasp records your word that it took effect and never sends it again; a run waiting on it goes on without the answer that was lost. Nothing is changed or undone on ${connection}.`,
-          variant: "default",
+          variant: "ink",
         },
         onPress: async () => {
           await resolve("happened", t`Said it happened: ${who}.`);

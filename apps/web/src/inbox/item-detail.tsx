@@ -172,7 +172,7 @@ const ActButton = ({
           <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
           <AlertDialogAction
             action={press}
-            failedLabel={t`It didn't go through`}
+            failedLabel={t`Not done`}
             variant={confirm.variant ?? "danger"}
           >
             {act.label}
@@ -375,9 +375,9 @@ const useApprovalWords = (): Partial<ApprovalWords> => {
     approving: t`Approving`,
     declining: t`Declining`,
     sending: t`Sending`,
-    couldNotApprove: t`Could not approve`,
-    couldNotDecline: t`Could not decline`,
-    couldNotSend: t`Could not send`,
+    couldNotApprove: t`Not approved`,
+    couldNotDecline: t`Not declined`,
+    couldNotSend: t`Not sent`,
     approved: t`Approved`,
     declined: t`Declined`,
     changes: t`Changes asked`,

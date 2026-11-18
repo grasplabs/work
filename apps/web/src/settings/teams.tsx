@@ -354,7 +354,7 @@ const TeamRow = ({
               <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
               <AlertDialogAction
                 action={remove}
-                failedLabel={t`Could not delete`}
+                failedLabel={t`Not deleted`}
                 variant="danger"
                 workingLabel={t`Deleting`}
               >

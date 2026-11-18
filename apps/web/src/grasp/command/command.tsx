@@ -99,8 +99,9 @@ export interface CommandEntry {
    */
   actions?: CommandRowAction[];
   /**
-   * The one open now, as Item's `current` (the chat on the page, in a list of chats): the selected
-   * fill and its words at the medium weight while another is highlighted, and said as current.
+   * The one open now (the chat on the page, in a list of chats): in a list that marks one, the rows
+   * stand at the regular weight and this one at the medium, with no fill of its own (the highlight
+   * stays the list's only fill); said as current.
    */
   current?: boolean;
 }
@@ -341,13 +342,14 @@ const styles = stylex.create({
   // The open one (`current`): Item's selected fill while another is highlighted, its words heavier;
   // a border in forced colours, where fills drop.
   current: {
-    backgroundColor: grasp.ghostFillPress,
     fontWeight: grasp.weightMedium,
+    // In forced colours, where weight can be hard to tell, a hairline marks it too.
     outlineStyle: { default: "none", [FORCED]: "solid" },
     outlineWidth: { default: null, [FORCED]: grasp.hairline },
     outlineOffset: { default: null, [FORCED]: `calc(-1 * ${grasp.hairline})` },
   },
-  currentHighlighted: { fontWeight: grasp.weightMedium },
+  // The other rows of a list that marks the open one: the regular weight.
+  notCurrent: { fontWeight: grasp.weightRegular },
   // The words a search matched, in a result's second line: in ink at the medium weight, no fill, so
   // the line stays calm (in forced colours, the system's mark).
   match: {
@@ -553,10 +555,12 @@ const Entry = ({
   entry,
   failedLabel,
   rows,
+  marking = false,
 }: {
   entry: CommandEntry;
   failedLabel: string;
   rows: RowMenu;
+  marking?: boolean;
 }) => {
   const withActions = entry.actions !== undefined && entry.actions.length > 0;
   return (
@@ -572,11 +576,9 @@ const Entry = ({
       className={(state: CommandItemState) =>
         className(
           listStyles.item,
-          entry.current === true && !state.highlighted && styles.current,
-          entry.current === true &&
-            state.highlighted &&
-            styles.currentHighlighted,
           state.highlighted && listStyles.itemHighlighted,
+          marking &&
+            (entry.current === true ? styles.current : styles.notCurrent),
           state.disabled && !state.pending && listStyles.itemDisabled,
           state.pending && styles.pending,
           withActions && commandRow,
@@ -629,11 +631,13 @@ const Entries = ({
   byValue,
   failedLabel,
   rows,
+  marking,
 }: {
   items: CommandData;
   byValue: Map<string, CommandEntry>;
   failedLabel: string;
   rows: RowMenu;
+  marking: boolean;
 }) =>
   items.map((entry, index) => {
     if (typeof entry === "string") {
@@ -644,6 +648,7 @@ const Entries = ({
           entry={known}
           failedLabel={failedLabel}
           rows={rows}
+          marking={marking}
         />
       ) : null;
     }
@@ -673,6 +678,7 @@ const Entries = ({
                 entry={known}
                 failedLabel={failedLabel}
                 rows={rows}
+                marking={marking}
               />
             ) : null;
           })}
@@ -686,6 +692,7 @@ const Entries = ({
         entry={known}
         failedLabel={failedLabel}
         rows={rows}
+        marking={marking}
       />
     ) : null;
   });
@@ -875,6 +882,9 @@ export const CommandView = ({
     moreHint: moreHintGiven,
   });
   const byValue = commandsByValue(items);
+  // A list that marks the open one (`current`) draws its rows at the regular weight, the open one
+  // at the medium: the weight alone tells it, the highlight the list's only fill.
+  const marking = [...byValue.values()].some((entry) => entry.current === true);
   const { root, rows, onFieldKeys, opened } = useRowActions(byValue, moreLabel);
   // A failed action shows its failedLabel on the command, and the status line says it aloud.
   const [said, setSaid] = useState("");
@@ -955,6 +965,7 @@ export const CommandView = ({
             byValue={byValue}
             failedLabel={failedLabel}
             rows={rows}
+            marking={marking}
           />
         )}
       </CommandList>

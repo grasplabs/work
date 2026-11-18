@@ -1,6 +1,11 @@
 import type { WidgetProgress } from "@grasp-os/shared/widgets";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+
+import { Card } from "../grasp/card/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 
 // How Grasp is getting on with a widget it makes or changes, as core
 // streams it (`onProgress` of `makeWidget` and `changeWidget`): said over
@@ -38,6 +43,19 @@ const partsText = (progress: WidgetProgress | null): string | null => {
   return plural(count, { one: "# part so far", other: "# parts so far" });
 };
 
+/** Over the dots (making-dots.tsx), which stand at 10. */
+const OVER_DOTS = 20;
+
+const styles = stylex.create({
+  line: {
+    position: "absolute",
+    insetInline: grasp.space3,
+    insetBlockEnd: grasp.space3,
+    zIndex: OVER_DOTS,
+  },
+  words: { display: "flex", flexDirection: "column", minWidth: 0 },
+});
+
 /** The line over a block while Grasp makes its widget. */
 export const WidgetProgressLine = ({
   progress,
@@ -47,9 +65,19 @@ export const WidgetProgressLine = ({
   const text = useProgressText(progress);
   const parts = partsText(progress);
   return (
-    <output className="bg-card/90 text-muted-foreground absolute inset-x-3 bottom-3 z-20 flex flex-col rounded-lg px-3 py-2 text-sm">
-      <span className="text-foreground truncate">{text}</span>
-      {parts === null ? null : <span>{parts}</span>}
+    <output {...stylex.props(styles.line)}>
+      <Card padding="md">
+        <span {...stylex.props(styles.words)}>
+          <Text element="span" size="sm" tone="ink" wrap="truncate">
+            {text}
+          </Text>
+          {parts === null ? null : (
+            <Text element="span" size="sm" tone="muted">
+              {parts}
+            </Text>
+          )}
+        </span>
+      </Card>
     </output>
   );
 };

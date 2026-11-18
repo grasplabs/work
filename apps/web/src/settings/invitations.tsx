@@ -2,7 +2,6 @@ import { failureText } from "@grasp-os/shared/errors";
 import type { Invitation } from "@grasp-os/shared/members";
 import { roleSchema } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
-import { toast } from "@grasp-os/ui/components/toast";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -48,6 +47,7 @@ import {
   SelectContent,
 } from "../grasp/select/index.ts";
 import { TagInput } from "../grasp/tag-input/index.ts";
+import { toast } from "../grasp/toast/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { roleLabel } from "../labels.ts";
 import { useCoreAction } from "../use-core-action.ts";
@@ -217,7 +217,7 @@ export const InviteButton = () => {
           <DialogAction>{t`Cancel`}</DialogAction>
           <DialogAction
             action={send}
-            failedLabel={t`Could not send`}
+            failedLabel={t`Not sent`}
             variant="ink"
             workingLabel={t`Sending`}
           >
@@ -235,11 +235,11 @@ export const copyEmail = async (
   words: { copied: string; failed: string }
 ): Promise<void> => {
   const done = await copyText(email);
-  toast.add(
-    done
-      ? { type: "success", title: words.copied, description: email }
-      : { type: "error", title: words.failed }
-  );
+  if (done) {
+    toast.success(words.copied, { description: email });
+  } else {
+    toast.error(words.failed);
+  }
 };
 
 /** One invitation nobody has taken up yet: its badge, and a menu to copy the address or withdraw it. */
@@ -294,7 +294,7 @@ export const InvitationRow = ({ invitation }: { invitation: Invitation }) => {
               onSelect={() => {
                 void copyEmail(email, {
                   copied: t`Copied`,
-                  failed: t`Copying didn't work`,
+                  failed: t`Not copied`,
                 });
               }}
             >

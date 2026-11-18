@@ -365,7 +365,7 @@ const UpdateConfirmDialog = ({
           {/* Switching loses what isn't saved: the danger answer. */}
           <AlertDialogAction
             action={onSwitch}
-            failedLabel={t`Could not finish`}
+            failedLabel={t`Not done`}
             variant="danger"
           >
             {t`Switch now`}

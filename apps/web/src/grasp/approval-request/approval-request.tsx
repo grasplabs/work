@@ -222,7 +222,7 @@ const FORCED = media.forced;
 // On a phone the card tightens: less room, a smaller sentence.
 const NARROW = media.belowPhone;
 // A narrow card by its own width, not the window's: Details stands over the answers, which share
-// their row equally. A button is as wide as its widest words ("Could not approve"), so two of them
+// their row equally. A button is as wide as its widest words ("Approved"), so two of them
 // beside Details do not fit a phone.
 const NARROW_CARD = "@container approval (width < 26rem)";
 

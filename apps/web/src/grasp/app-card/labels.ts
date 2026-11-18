@@ -10,10 +10,4 @@ export interface AppCardLabels {
   empty: string;
 }
 
-/** The English words, used for any a caller leaves out. */
-export const englishLabels: AppCardLabels = {
-  more: "More actions",
-  building: "Being built",
-  failed: "Didn't start",
-  empty: "No preview yet",
-};
+export { englishLabels } from "./words";

@@ -24,11 +24,13 @@ import type { KeyboardEvent, ReactNode } from "react";
 
 import { Avatar, AvatarImage, AvatarFallback } from "../avatar";
 import { Button, useAction } from "../button";
-import { Company, Icon, Link, People } from "../icons";
+import { Company, Folder, Icon, Link, People } from "../icons";
 import { Input } from "../input";
 import { Select, SelectTrigger, SelectValue, SelectContent } from "../select";
 import { grasp } from "../tokens/tokens.stylex";
 import { useWords, withGiven } from "../words/words";
+import { SharePicker } from "./picker";
+import type { ShareCandidate, SharePicked } from "./picker";
 import { shareAccessWords } from "./words";
 import type { ShareAccessWords } from "./words";
 
@@ -65,10 +67,11 @@ export interface ShareMember {
   /** A quiet second line: a person's role, a group's count ("12 people"). */
   note?: string;
   /**
-   * A person shows their picture or initials; a group the people icon; everyone the company icon.
+   * A person shows their picture or initials; a group the people icon; a project the folder icon;
+   * everyone the company icon.
    * @default "person"
    */
-  kind?: "person" | "group" | "everyone";
+  kind?: "person" | "group" | "project" | "everyone";
   /** A person's picture. Without it, their initials. */
   src?: string;
   /** Their level: one of `levels`' values. Not for the owner. */
@@ -97,9 +100,37 @@ export interface ShareAccessProps {
   /**
    * Adds whoever was typed, at the chosen level: Enter in the field, or Invite. Return a Promise
    * and Invite is out of use while it works; once it settles the field empties and keeps the
-   * focus. A rejection says `failedInviteLabel` under the row and keeps the words.
+   * focus. A rejection says `failedInviteLabel` under the row and keeps the words. Not used when
+   * `candidates` makes the add row a picker (see `onAdd`).
    */
-  onInvite: (who: string, level: string) => unknown;
+  onInvite?: (who: string, level: string) => unknown;
+  /**
+   * Who can be added, as the host offers them: people, teams and projects, each by id. The add
+   * row becomes a picker over them: typing finds them (or, with `filter={false}`, the host's own
+   * results for `query`), several can be picked as chips, then Add gives them the chosen level.
+   * Someone already in `members` (by id) is shown as having access, not offered again.
+   */
+  candidates?: ShareCandidate[];
+  /**
+   * Adds who was picked, at the chosen level: their ids, and typed addresses with `allowAddress`.
+   * Return a Promise and Add is out of use while it works; once it settles the picks clear. A
+   * rejection says `failedInviteLabel` under the row and keeps them.
+   */
+  onAdd?: (picked: SharePicked, level: string) => unknown;
+  /**
+   * With `candidates`: `false` shows them as given, for a server's results for `query`, and the
+   * picker does not match them itself.
+   * @default true
+   */
+  filter?: boolean;
+  /** With `candidates` and `filter={false}`: the host is fetching results for `query`. */
+  loading?: boolean;
+  /**
+   * With `candidates`: a typed email address is offered as a row of its own ("Invite anna@…"), and
+   * reaches `onAdd` among `addresses`. Without it, only candidates can be added.
+   * @default false
+   */
+  allowAddress?: boolean;
   /** A member's level changed. */
   onLevelChange?: (id: string, level: string) => void;
   /** Takes a member away. With it, each row's levels end with `removeLabel`. */
@@ -318,10 +349,15 @@ const REMOVE = "\u0000remove";
 
 /** A member's face: their picture or initials, or the icon of a group or the company. */
 const Face = ({ member }: { member: ShareMember }) => {
-  if (member.kind === "group" || member.kind === "everyone") {
+  if (
+    member.kind === "group" ||
+    member.kind === "project" ||
+    member.kind === "everyone"
+  ) {
+    const marks = { group: People, project: Folder, everyone: Company };
     return (
       <span aria-hidden="true" {...stylex.props(styles.tile)}>
-        <Icon icon={member.kind === "group" ? People : Company} />
+        <Icon icon={marks[member.kind]} />
       </span>
     );
   }
@@ -496,7 +532,7 @@ const AddRow = ({
     }
     setBusy(true);
     setFailed(false);
-    const ok = await settles(() => props.onInvite(who.trim(), level));
+    const ok = await settles(() => props.onInvite?.(who.trim(), level));
     setBusy(false);
     if (ok) {
       setWho("");
@@ -548,6 +584,73 @@ const AddRow = ({
           {props.failedInviteLabel}
         </p>
       )}
+    </div>
+  );
+};
+
+/** The add row as a picker over the host's candidates: chips, the level, and Add. */
+const PickerRow = ({
+  props,
+  words,
+}: {
+  props: Resolved;
+  words: ShareAccessWords;
+}) => {
+  const giveable = props.levels.filter((level) => level.value !== "none");
+  const [held, setHeld] = useState(props.defaultQuery ?? "");
+  const query = props.query ?? held;
+  const [level, setLevel] = useState(
+    props.inviteLevel ?? giveable[0]?.value ?? ""
+  );
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const add = async (picked: SharePicked, chosen: string) => {
+    setBusy(true);
+    setFailed(false);
+    const ok = await settles(() => props.onAdd?.(picked, chosen));
+    setBusy(false);
+    setFailed(!ok);
+    return ok;
+  };
+  return (
+    <div {...stylex.props(styles.add)}>
+      <SharePicker
+        candidates={props.candidates ?? []}
+        inList={new Set(props.members.map((member) => member.id))}
+        levels={giveable}
+        level={level}
+        onLevelChange={setLevel}
+        onAdd={add}
+        query={query}
+        onQueryChange={(next) => {
+          if (props.query === undefined) {
+            setHeld(next);
+          }
+          props.onQueryChange?.(next);
+        }}
+        filter={props.filter !== false}
+        loading={props.loading === true}
+        allowAddress={props.allowAddress === true}
+        busy={busy}
+        areas={{ who: styles.who, level: styles.level, go: styles.go }}
+        words={{
+          find: props.findLabel === words.find ? words.pick : props.findLabel,
+          add: words.add,
+          inviteLevel: props.inviteLevelLabel,
+          added: words.added,
+          empty: words.noMatch,
+          searching: words.searching,
+          address: words.address,
+          unpick: words.unpick,
+        }}
+        failed={
+          failed ? (
+            <p role="alert" {...stylex.props(styles.failed)}>
+              {props.failedInviteLabel}
+            </p>
+          ) : null
+        }
+      />
     </div>
   );
 };
@@ -664,7 +767,8 @@ const Preview = ({ preview, label }: { preview: ReactNode; label: string }) => {
 
 /** Who has access, at what level, and how to add more: the content of a Dialog or a Sheet. */
 export const ShareAccess = (given: ShareAccessProps) => {
-  const props = withDefaults(given, useWords("shareAccess", shareAccessWords));
+  const words = useWords("shareAccess", shareAccessWords);
+  const props = withDefaults(given, words);
   const { members, onRemove } = props;
   const box = useRef<HTMLDivElement | null>(null);
   const list = useRef<HTMLUListElement | null>(null);
@@ -684,7 +788,11 @@ export const ShareAccess = (given: ShareAccessProps) => {
       data-slot="share-access"
       {...stylex.props(styles.root, props.layout ?? props.style)}
     >
-      <AddRow props={props} field={field} />
+      {props.candidates === undefined ? (
+        <AddRow props={props} field={field} />
+      ) : (
+        <PickerRow props={props} words={words} />
+      )}
       <ul
         ref={list}
         aria-label={props.listLabel}

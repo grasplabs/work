@@ -241,7 +241,7 @@ const Integrity = ({ record }: { record: AuditRecord }) => {
     <CopyField
       aria-label={t`Copy ${name}`}
       copiedLabel={t`Copied`}
-      failedLabel={t`Could not copy`}
+      failedLabel={t`Not copied`}
       size="sm"
       value={value}
     />
@@ -287,7 +287,7 @@ const Integrity = ({ record }: { record: AuditRecord }) => {
           labels={{
             copy: (name) => t`Copy ${name}`,
             copied: t`Copied`,
-            failed: t`Could not copy`,
+            failed: t`Not copied`,
           }}
         />
       </Collapsible>

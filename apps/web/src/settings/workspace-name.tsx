@@ -3,7 +3,6 @@ import {
   organizationLogoTypes,
 } from "@grasp-os/shared/organization";
 import type { Organization } from "@grasp-os/shared/organization";
-import { toast } from "@grasp-os/ui/components/toast";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
@@ -19,6 +18,7 @@ import { ImageWell } from "../grasp/file-upload/index.ts";
 import { Input } from "../grasp/input/index.ts";
 import { SettingRow } from "../grasp/setting-row/index.ts";
 import type { SettingRowState } from "../grasp/setting-row/index.ts";
+import { toast } from "../grasp/toast/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 
@@ -185,7 +185,7 @@ const putBack = async (
   try {
     await setLogo(image);
   } catch {
-    toast.add({ type: "error", title: failed });
+    toast.error(failed);
   }
 };
 
@@ -211,15 +211,13 @@ const removeWithUndo = async (
     image = new Uint8Array(await response.arrayBuffer());
     await removeLogo();
   } catch {
-    toast.add({ type: "error", title: words.failed });
+    toast.error(words.failed);
     return;
   }
-  toast.add({
-    type: "success",
-    title: words.done,
-    actionProps: {
-      children: words.undo,
-      onClick: () => {
+  toast.success(words.done, {
+    action: {
+      label: words.undo,
+      onAction: () => {
         void putBack(image, setLogo, words.undoFailed);
       },
     },
@@ -312,7 +310,7 @@ export const LogoField = ({
             remove: t`Remove the logo`,
             saving: t`Saving`,
             saved: t`Saved`,
-            failed: t`Could not save`,
+            failed: t`Not saved`,
             retry: t`Try again`,
             how: t`Click or drop a picture.`,
             refused: (file, reason) =>
