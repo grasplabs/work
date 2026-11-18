@@ -1,3 +1,4 @@
+import { connectorIsolateRequests } from "@grasp-os/connector-kit/manifest";
 import { syncErrors } from "@grasp-os/shared/sync";
 import type { SyncPage } from "@grasp-os/shared/sync";
 import { exports } from "cloudflare:workers";
@@ -414,6 +415,61 @@ const internet = fakeInternet(async (request, url) => {
 const sentToGraph = () =>
   internet.sent.filter(({ host }) => host === graphHost);
 
+/**
+ * A chain of `depth` folders under the inbox, each in the one before,
+ * listed deepest first ahead of the other folders: its IDs, top first.
+ */
+const chainOf = (depth: number): string[] => {
+  const chain = Array.from({ length: depth }, (_, index) => `d${index + 1}`);
+  mailbox.parents = {
+    ...Object.fromEntries(
+      chain
+        .map((id, index): [string, string] => [
+          id,
+          index === 0 ? "inbox" : `d${index}`,
+        ])
+        .toReversed()
+    ),
+    ...mailbox.parents,
+  };
+  return chain;
+};
+
+/**
+ * The mailbox's folders listed to the end, read after read: whether it
+ * finished, what it listed, and whether every read stayed within an
+ * isolate's requests, counted at Graph.
+ */
+const listAll = async (
+  connectionId: string
+): Promise<{ done: boolean; places: Set<string>; withinRequests: boolean }> => {
+  const places = new Set<string>();
+  let cursor: string | null = null;
+  let withinRequests = true;
+  // Far more reads than any listing here takes: a listing that never ends
+  // fails instead of hanging.
+  for (let reads = 0; reads < 1000; reads += 1) {
+    const before = sentToGraph().length;
+    const answer: { places: string[]; cursor: string | null } =
+      // oxlint-disable-next-line no-await-in-loop -- reads come one after another
+      await exports.default.listSyncPlaces({
+        connectionId,
+        feed: "mail",
+        cursor,
+      });
+    withinRequests &&=
+      sentToGraph().length - before <= connectorIsolateRequests;
+    for (const place of answer.places) {
+      places.add(place);
+    }
+    ({ cursor } = answer);
+    if (cursor === null) {
+      return { done: true, places, withinRequests };
+    }
+  }
+  return { done: false, places, withinRequests };
+};
+
 /** Someone's own Microsoft account, connected. */
 const connected = async (): Promise<string> => {
   reset();
@@ -496,44 +552,53 @@ describe("syncing a person's own mailbox, folder by folder", () => {
     });
   });
 
-  it("finishes a folder's walk up across reads, however deep, with its parents on other pages", async () => {
+  it("finishes a chain ninety folders deep listed deepest first, a folder a page", async () => {
     const connectionId = await connected();
-    // Forty-six folders, each in the one before, the deepest listed first
-    // and one a page: its parents are on pages still to come, more than
-    // one read has requests to read.
+    // The inbox and 89 folders under it, one in the next. Each walk up is
+    // longer than a read's requests, its parents are on pages still to
+    // come, and the second read's walk ends on its last request.
     mailbox.folderPage = 1;
-    const chain = Array.from({ length: 46 }, (_, index) => `d${index + 1}`);
-    const { inbox, ...others } = mailbox.parents;
-    mailbox.parents = {
-      d46: "d45",
-      ...Object.fromEntries(
-        chain
-          .slice(0, -1)
-          .map((id, index) => [id, index === 0 ? "inbox" : `d${index}`])
-      ),
-      inbox: inbox ?? null,
-      ...others,
-    };
-    const listed: string[] = [];
-    let cursor: string | null = null;
-    let reads = 0;
-    do {
-      const answer: { places: string[]; cursor: string | null } =
-        // oxlint-disable-next-line no-await-in-loop -- reads come one after another
-        await exports.default.listSyncPlaces({
-          connectionId,
-          feed: "mail",
-          cursor,
-        });
-      listed.push(...answer.places);
-      ({ cursor } = answer);
-      reads += 1;
-    } while (cursor !== null && reads < 8);
-    expect({ done: cursor, places: new Set(listed) }).toStrictEqual({
-      done: null,
+    const chain = chainOf(89);
+    const listing = await listAll(connectionId);
+    expect(listing).toStrictEqual({
+      done: true,
       places: new Set(["root", "inbox", "projects", "archive", ...chain]),
+      withinRequests: true,
     });
   });
+
+  it("finishes every chain of 1 to 120 folders listed deepest first, each read within its requests", async () => {
+    const connectionId = await connected();
+    const failed: string[] = [];
+    for (const folderPage of [1, 2]) {
+      for (let depth = 1; depth <= 120; depth += 1) {
+        reset();
+        mailbox.folderPage = folderPage;
+        const chain = chainOf(depth);
+        const listing =
+          // oxlint-disable-next-line no-await-in-loop -- one listing after another
+          await listAll(connectionId).catch(() => null);
+        const whole = new Set([
+          "root",
+          "inbox",
+          "projects",
+          "archive",
+          ...chain,
+        ]);
+        if (
+          listing === null ||
+          !listing.done ||
+          !listing.withinRequests ||
+          listing.places.size !== whole.size ||
+          [...whole].some((id) => !listing.places.has(id))
+        ) {
+          failed.push(`${depth} folders, ${folderPage} a page`);
+        }
+      }
+    }
+    expect(failed).toStrictEqual([]);
+    // Some 28,000 requests through connect: more than the default timeout.
+  }, 300_000);
 
   it("tries a message again whole when its read drops part-way, never passing it over", async () => {
     const connectionId = await connected();

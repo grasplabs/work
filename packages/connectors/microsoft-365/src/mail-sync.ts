@@ -361,150 +361,198 @@ const isLeftOutItself = (folder: FolderEntry): boolean =>
   folder["@odata.type"] === "#microsoft.graph.mailSearchFolder";
 
 /**
- * A folder's standing: left out itself, or as the folder above it; walked
- * up through the folders this read listed, then one read of Graph's each
- * (cached for the read), to a folder known. Null when the read has no
- * request left to finish the walk.
- * https://learn.microsoft.com/en-us/graph/api/mailfolder-get?view=graph-rest-1.0
+ * A folder ID, short enough for the listing's cursor: the first 12 bytes
+ * of its SHA-256, base64url. Graph's folder IDs run past 150 characters,
+ * and a cursor holds 2,048.
  */
-const standingOf = async (
-  room: SyncRoom,
-  known: Map<string, Standing>,
-  listed: ReadonlyMap<string, FolderEntry>,
-  start: FolderEntry | string
-): Promise<Standing | { stoppedAt: string }> => {
-  const walked: string[] = [];
-  let at: FolderEntry | string | null = start;
-  let standing: Standing | undefined;
-  while (standing === undefined) {
-    if (typeof at === "string") {
-      // A folder up the walk, known by its ID alone.
-      const id: string = at;
-      const decided = known.get(id);
-      if (decided !== undefined) {
-        standing = decided;
-        break;
-      }
-      const cached = listed.get(id);
-      if (cached !== undefined) {
-        at = cached;
-        continue;
-      }
-      if (!mayRequest(room)) {
-        return { stoppedAt: id };
-      }
-      // oxlint-disable-next-line no-await-in-loop -- one folder up at a time
-      const response = await get(
-        room,
-        graphUrl(`${folders}/${segment(id)}`, { $select: folderFields })
-      );
-      if (response === "late") {
-        return { stoppedAt: id };
-      }
-      if (response === "large" || isUnreadable(response)) {
-        at = null;
-        continue;
-      }
-      if (!response.ok) {
-        // oxlint-disable-next-line no-await-in-loop -- the walk ends here
-        throw await graphFailure(response);
-      }
-      // oxlint-disable-next-line no-await-in-loop -- the walk goes on from it
-      at = folderEntrySchema.parse(await response.json());
-      continue;
-    }
-    if (at === null || walked.includes(at.id)) {
-      // Outside the mailbox's root, or a loop: not mail a client shows.
-      standing = "leave";
-      break;
-    }
-    standing = known.get(at.id);
-    if (standing !== undefined) {
-      break;
-    }
-    walked.push(at.id);
-    if (isLeftOutItself(at)) {
-      standing = "leave";
-      break;
-    }
-    at = at.parentFolderId ?? null;
-  }
-  for (const id of walked) {
-    known.set(id, standing);
-  }
-  return standing;
+const digestOf = async (id: string): Promise<string> => {
+  const hash = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(id)
+  );
+  return btoa(String.fromCodePoint(...new Uint8Array(hash, 0, 12)))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_");
 };
 
+/** A digest as `digestOf` writes it. */
+const digestPattern = /^[\w-]{16}$/u;
+
 /**
- * Where the folder listing goes on: Graph's skip token (none: from its
- * start), the folder of that page already handled, and, when a read ran
- * out of room deciding it, the walk up from it still to finish: the
- * folder, and the ID of the next folder above it to read.
+ * Where the folder listing stands, kept up to date before every request
+ * so that a read can end at any of them:
+ * - `wellKnown`: the digests of the mailbox's root and of the folders left
+ *   out with what is under them, read once, on the listing's first read;
+ * - `token`: Graph's skip token (none: from its start);
+ * - `after`: the digest of the last folder of that page handled;
+ * - `walk`: the folder after it, while its walk up is unfinished, and the
+ *   ID of the next folder above it to read;
+ * - `kept`: the digest of a folder known kept: the parent of the last
+ *   folder kept (every folder above a kept one is kept).
  */
-interface ListingAt {
+interface WellKnown {
+  root: string;
+  leftOut: string[];
+}
+
+interface Listing {
+  wellKnown: WellKnown | null;
   token: string | null;
   after: string | null;
-  walk: { folder: string; at: string } | null;
+  walk: { folder: string; next: string } | null;
+  kept: string | null;
 }
 
 /**
  * The cursor of where the folder listing goes on:
- * `l.<token>.<after>.<walk's folder>.<walk's next folder>`.
+ * `l.<well-known>.<token>.<after>.<walk's folder>.<walk's next>.<kept>`.
  */
-const listingCursorOf = ({ token, after, walk }: ListingAt): string =>
-  `l.${cursorPart(token)}.${cursorPart(after)}.${cursorPart(walk?.folder ?? null)}.${cursorPart(walk?.at ?? null)}`;
+const listingCursorOf = (listing: Listing): string =>
+  [
+    "l",
+    listing.wellKnown === null
+      ? null
+      : [listing.wellKnown.root, ...listing.wellKnown.leftOut].join(","),
+    listing.token,
+    listing.after,
+    listing.walk?.folder ?? null,
+    listing.walk?.next ?? null,
+    listing.kept,
+  ]
+    .map((part, index) => (index === 0 ? part : cursorPart(part)))
+    .join(".");
+
+/** A digest a cursor holds, or none; anything else isn't one this sync wrote. */
+const digestIn = (part: string | undefined): string | null => {
+  const digest = fromCursorPart(part);
+  if (digest !== null && !digestPattern.test(digest)) {
+    throw notOurs();
+  }
+  return digest;
+};
 
 /** Where a folder listing's cursor says it goes on; any other starts over. */
-const listingAtOf = (cursor: string | null): ListingAt => {
+const listingOf = (cursor: string | null): Listing => {
   if (cursor === null) {
-    return { token: null, after: null, walk: null };
+    return {
+      wellKnown: null,
+      token: null,
+      after: null,
+      walk: null,
+      kept: null,
+    };
   }
-  const [tag, token, after, folder, walkAt, ...rest] = cursor.split(".");
+  const [tag, wellKnown, token, after, folder, next, kept, ...rest] =
+    cursor.split(".");
   if (tag !== "l" || rest.length > 0) {
     throw notOurs();
   }
-  const walking = fromCursorPart(folder);
-  const next = fromCursorPart(walkAt);
-  if ((walking === null) !== (next === null)) {
+  const known = fromCursorPart(wellKnown)?.split(",") ?? null;
+  const [root, ...leftOut] = known ?? [];
+  if (
+    known !== null &&
+    (root === undefined ||
+      leftOut.length !== leftOutFolders.length ||
+      !known.every((digest) => digestPattern.test(digest)))
+  ) {
+    throw notOurs();
+  }
+  const walking = digestIn(folder);
+  const above = fromCursorPart(next);
+  if ((walking === null) !== (above === null)) {
     throw notOurs();
   }
   return {
+    wellKnown: root === undefined ? null : { root, leftOut },
     token: fromCursorPart(token),
-    after: fromCursorPart(after),
+    after: digestIn(after),
     walk:
-      walking === null || next === null ? null : { folder: walking, at: next },
+      walking === null || above === null
+        ? null
+        : { folder: walking, next: above },
+    kept: digestIn(kept),
   };
 };
 
+/** Ends a listing's read: no request or time left for the next request. */
+class OutOfRoomError extends Error {
+  constructor() {
+    super("No room left in the read");
+    this.name = "OutOfRoomError";
+  }
+}
+
 /**
- * One page of mailFolder delta, from its start (no token) or a skip token:
- * "late" when the read's deadline cut it off.
+ * The folder listing's only way to Graph: a GET within the read's room,
+ * which ends the read (`OutOfRoomError`) when no request or time is left
+ * before it goes, or the deadline cuts it off. The listing itself never
+ * holds the room, so no request of its can go without this check.
+ */
+type Ask = (url: URL, pageSize?: number) => Promise<Response | "large">;
+
+/** Graph's answer to a request the listing can't go without, as JSON. */
+const askJson = async <Schema extends z.ZodType>(
+  ask: Ask,
+  url: URL,
+  schema: Schema,
+  pageSize?: number
+): Promise<z.output<Schema>> => {
+  const response = await ask(url, pageSize);
+  if (response === "large") {
+    throw new ToolError("Graph's answer is larger than connect reads", {
+      code: "failed",
+    });
+  }
+  if (!response.ok) {
+    throw await graphFailure(response);
+  }
+  return schema.parse(await response.json());
+};
+
+/** The digests of the mailbox's root and of the folders left out. */
+const wellKnownOf = async (ask: Ask): Promise<WellKnown> => {
+  const digests: string[] = [];
+  for (const name of [rootFolder, ...leftOutFolders]) {
+    // oxlint-disable-next-line no-await-in-loop -- five small reads, once a listing
+    const { id } = await askJson(
+      ask,
+      graphUrl(`${folders}/${name}`, { $select: "id" }),
+      folderSchema
+    );
+    // oxlint-disable-next-line no-await-in-loop -- one after another
+    digests.push(await digestOf(id));
+  }
+  const [root, ...leftOut] = digests;
+  if (root === undefined) {
+    throw new Error("The mailbox's root has no digest");
+  }
+  return { root, leftOut };
+};
+
+/**
+ * One page of mailFolder delta, from its start (no token) or a skip token.
+ * A token Graph no longer knows lists the folders again from the start:
+ * Outlook's tokens, mailFolder's too, expire when Graph's token cache
+ * fills, answered 410 or a 40X with `syncStateNotFound`
+ * (https://learn.microsoft.com/en-us/graph/delta-query-overview,
+ * "Synchronization reset" and "Token duration").
  */
 const folderPageOf = async (
-  room: SyncRoom,
+  ask: Ask,
   token: string | null
-): Promise<z.infer<typeof foldersSchema> | "late"> => {
-  const response = await get(
-    room,
+): Promise<z.infer<typeof foldersSchema>> => {
+  const response = await ask(
     graphUrl(
       `${folders}/delta`,
       token === null ? { $select: folderFields } : { $skiptoken: token }
     ),
     folderPageSize
   );
-  if (response === "late") {
-    return "late";
-  }
   if (response === "large") {
     throw new ToolError("Graph's folder page is larger than connect reads", {
       code: "failed",
     });
   }
-  // A token Graph no longer knows lists the folders again from the start:
-  // Outlook's tokens, mailFolder's too, expire when Graph's token cache
-  // fills, answered 410 or a 40X with `syncStateNotFound`
-  // (https://learn.microsoft.com/en-us/graph/delta-query-overview,
-  // "Synchronization reset" and "Token duration").
   if (response.status === 410 || (response.status === 404 && token !== null)) {
     throw new RestartSyncError();
   }
@@ -515,12 +563,181 @@ const folderPageOf = async (
 };
 
 /**
+ * A folder up a walk, read on its own
+ * (https://learn.microsoft.com/en-us/graph/api/mailfolder-get?view=graph-rest-1.0):
+ * null when Graph refuses it or no longer has it.
+ */
+const folderOf = async (ask: Ask, id: string): Promise<FolderEntry | null> => {
+  const response = await ask(
+    graphUrl(`${folders}/${segment(id)}`, { $select: folderFields })
+  );
+  if (response === "large" || isUnreadable(response)) {
+    return null;
+  }
+  if (!response.ok) {
+    throw await graphFailure(response);
+  }
+  return folderEntrySchema.parse(await response.json());
+};
+
+/** What one read of the folder listing knows: its standings, by digest. */
+interface Read {
+  ask: Ask;
+  listing: Listing;
+  known: Map<string, Standing>;
+  /** The folders of Graph's page being handled, by ID. */
+  listed: ReadonlyMap<string, FolderEntry>;
+}
+
+/**
+ * Records a folder's standing; a kept folder's parent is kept too (the
+ * mailbox's root aside), and is carried to the next read.
+ */
+const decide = async (
+  read: Read,
+  folder: FolderEntry,
+  standing: Standing
+): Promise<void> => {
+  const digest = await digestOf(folder.id);
+  read.known.set(digest, standing);
+  const parent = folder.parentFolderId;
+  if (
+    standing === "keep" &&
+    parent !== null &&
+    parent !== undefined &&
+    digest !== read.listing.wellKnown?.root
+  ) {
+    const kept = await digestOf(parent);
+    read.known.set(kept, "keep");
+    read.listing.kept = kept;
+  }
+};
+
+/**
+ * A folder's standing: left out itself, or as the folder above it, walked
+ * up through the folders of the page, then one read of Graph's each, to a
+ * folder known. A walk an earlier read left unfinished goes on from its
+ * next folder.
+ */
+const standingOf = async (
+  read: Read,
+  folder: FolderEntry,
+  digest: string
+): Promise<Standing> => {
+  const decided = read.known.get(digest);
+  if (decided !== undefined) {
+    await decide(read, folder, decided);
+    return decided;
+  }
+  const { walk } = read.listing;
+  const path = [folder];
+  let next =
+    walk?.folder === digest ? walk.next : (folder.parentFolderId ?? null);
+  let standing: Standing | undefined = isLeftOutItself(folder)
+    ? "leave"
+    : undefined;
+  while (standing === undefined) {
+    if (next === null) {
+      // Outside the mailbox's root: not mail a client shows.
+      standing = "leave";
+      break;
+    }
+    const id: string = next;
+    // oxlint-disable-next-line no-await-in-loop -- one folder up at a time
+    standing = read.known.get(await digestOf(id));
+    if (standing !== undefined) {
+      break;
+    }
+    read.listing.walk = { folder: digest, next: id };
+    const above =
+      // oxlint-disable-next-line no-await-in-loop -- one folder up at a time
+      read.listed.get(id) ?? (await folderOf(read.ask, id));
+    if (above === null || path.some((each) => each.id === id)) {
+      // Unreadable, or a loop: not mail a client shows.
+      standing = "leave";
+      break;
+    }
+    path.push(above);
+    if (isLeftOutItself(above)) {
+      standing = "leave";
+      break;
+    }
+    next = above.parentFolderId ?? null;
+  }
+  // From the top down, so the folder itself is decided last and its parent
+  // is the one carried as kept.
+  for (const each of path.toReversed()) {
+    // oxlint-disable-next-line no-await-in-loop -- one after another
+    await decide(read, each, standing);
+  }
+  read.listing.walk = null;
+  return standing;
+};
+
+/**
+ * Lists the mailbox's folders from where `listing` stands, adding those to
+ * keep to `places`, until Graph's last page or `OutOfRoomError`.
+ */
+const listFolders = async (
+  ask: Ask,
+  listing: Listing,
+  places: string[]
+): Promise<void> => {
+  const wellKnown = listing.wellKnown ?? (await wellKnownOf(ask));
+  listing.wellKnown = wellKnown;
+  const { root, leftOut } = wellKnown;
+  const known = new Map<string, Standing>([
+    [root, "keep"],
+    ...leftOut.map((digest): [string, Standing] => [digest, "leave"]),
+  ]);
+  if (listing.kept !== null) {
+    known.set(listing.kept, "keep");
+  }
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- one page after another
+    const page = await folderPageOf(ask, listing.token);
+    const read: Read = {
+      ask,
+      listing,
+      known,
+      listed: new Map(page.value.map((folder) => [folder.id, folder])),
+    };
+    // oxlint-disable-next-line no-await-in-loop -- the page's digests at once
+    const digests = await Promise.all(
+      page.value.map(async ({ id }) => await digestOf(id))
+    );
+    const from =
+      listing.after === null ? 0 : digests.indexOf(listing.after) + 1;
+    for (const [index, folder] of page.value.entries()) {
+      const digest = digests[index];
+      if (index < from || digest === undefined) {
+        continue;
+      }
+      if (
+        folder["@removed"] === undefined &&
+        // oxlint-disable-next-line no-await-in-loop -- one folder after another
+        (await standingOf(read, folder, digest)) === "keep"
+      ) {
+        places.push(folder.id);
+      }
+      listing.after = digest;
+    }
+    const next = page["@odata.nextLink"];
+    if (next === undefined) {
+      return;
+    }
+    listing.token = tokenOf(next, "skip").value;
+    listing.after = null;
+  }
+};
+
+/**
  * The mailbox's folders to sync, a read at a time: every folder mailFolder
  * delta lists (https://learn.microsoft.com/en-us/graph/api/mailfolder-delta?view=graph-rest-1.0),
  * less hidden ones, search folders, and Deleted Items, Junk Email, Drafts
  * and the search folders' parent with every folder under them. A list
- * longer than one read goes on from its cursor: Graph's skip token and
- * the last folder handled in its page.
+ * longer than one read goes on from its cursor; a read that moved nothing
+ * on waits as for a rate limit.
  */
 const placesOf = async ({
   cursor,
@@ -529,78 +746,33 @@ const placesOf = async ({
   cursor: string | null;
   deadline: number;
 }): Promise<{ places: string[]; cursor: string | null }> => {
+  const listing = listingOf(cursor);
+  const from = listingCursorOf(listing);
   const room = syncRoom(deadline);
-  let at = listingAtOf(cursor);
-  const from0 = listingCursorOf(at);
-  const places: string[] = [];
-  /** What the read answers when it must stop: a wait if it moved nothing on. */
-  const stop = (): { places: string[]; cursor: string | null } => {
-    if (places.length === 0 && listingCursorOf(at) === from0) {
-      throw tooSlow();
-    }
-    return { places, cursor: listingCursorOf(at) };
-  };
-  const known = new Map<string, Standing>();
-  for (const name of [rootFolder, ...leftOutFolders]) {
-    // oxlint-disable-next-line no-await-in-loop -- five small reads
-    const { id } = await getJson(
-      room,
-      graphUrl(`${folders}/${name}`, { $select: "id" }),
-      folderSchema
-    );
-    known.set(id, name === rootFolder ? "keep" : "leave");
-  }
-  if (at.walk !== null) {
-    // The walk up from a folder a read before had no room to finish.
-    const { walk } = at;
-    const standing = await standingOf(room, known, new Map(), walk.at);
-    if (typeof standing === "object") {
-      at = { ...at, walk: { folder: walk.folder, at: standing.stoppedAt } };
-      return stop();
-    }
-    if (standing === "keep") {
-      places.push(walk.folder);
-    }
-    at = { ...at, walk: null };
-  }
-  for (;;) {
-    // oxlint-disable-next-line no-await-in-loop -- one page after another
-    const page = await folderPageOf(room, at.token);
-    if (page === "late") {
-      return stop();
-    }
-    const listed = new Map(page.value.map((folder) => [folder.id, folder]));
-    const { after } = at;
-    const from =
-      after === null ? 0 : page.value.findIndex(({ id }) => id === after) + 1;
-    for (const folder of page.value.slice(from)) {
-      if (folder["@removed"] === undefined) {
-        // oxlint-disable-next-line no-await-in-loop -- one folder after another
-        const standing = await standingOf(room, known, listed, folder);
-        if (typeof standing === "object") {
-          // No room left to place it: the next read finishes its walk.
-          at = {
-            token: at.token,
-            after: folder.id,
-            walk: { folder: folder.id, at: standing.stoppedAt },
-          };
-          return stop();
-        }
-        if (standing === "keep") {
-          places.push(folder.id);
-        }
-      }
-      at = { token: at.token, after: folder.id, walk: null };
-    }
-    const next = page["@odata.nextLink"];
-    if (next === undefined) {
-      return { places, cursor: null };
-    }
-    at = { token: tokenOf(next, "skip").value, after: null, walk: null };
+  const ask: Ask = async (url, pageSize) => {
     if (!mayRequest(room)) {
-      return stop();
+      throw new OutOfRoomError();
+    }
+    const response = await get(room, url, pageSize);
+    if (response === "late") {
+      throw new OutOfRoomError();
+    }
+    return response;
+  };
+  const places: string[] = [];
+  try {
+    await listFolders(ask, listing, places);
+    return { places, cursor: null };
+  } catch (error) {
+    if (!(error instanceof OutOfRoomError)) {
+      throw error;
     }
   }
+  const at = listingCursorOf(listing);
+  if (places.length === 0 && at === from) {
+    throw tooSlow();
+  }
+  return { places, cursor: at };
 };
 
 /** A recipient, as a mail's header line writes it. */
