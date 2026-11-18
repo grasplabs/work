@@ -1033,6 +1033,10 @@ msgstr "{name} ha cerrado sesión en todas partes."
 msgid "{name} is too large."
 msgstr "{name} es demasiado grande."
 
+#: src/settings/sign-in-settings.tsx
+msgid "{name} isn’t on the sign-in page yet."
+msgstr "{name} aún no está en la página de inicio de sesión."
+
 #: src/frame/setting-up.tsx
 msgid "{name} isn't ready yet"
 msgstr "{name} aún no está listo"
@@ -1235,10 +1239,6 @@ msgstr "{place, selectordinal, other {, ordenado en #.º lugar}}"
 #: src/dashboard/todo-pile.tsx
 msgid "{place} of {count}"
 msgstr "{place} de {count}"
-
-#: src/tour/tour-layer.tsx
-msgid "{position} of {count}"
-msgstr "{position} de {count}"
 
 #: src/apps/indexes-view.tsx
 msgid "{query} (on {routes})"
@@ -2094,6 +2094,7 @@ msgstr "Un flujo de trabajo iniciado"
 
 #: src/activity/audit-event.tsx
 #: src/apps/app-settings.tsx
+#: src/settings/org-card.tsx
 #: src/workflows/workflow-settings.tsx
 msgid "About"
 msgstr "Acerca de"
@@ -2750,10 +2751,6 @@ msgstr "Un administrador abandonó el cambio de datos que necesita esta versión
 msgid "An admin approves its access again before it works for your team."
 msgstr "Un administrador vuelve a aprobar su acceso antes de que funcione para tu equipo."
 
-#: src/settings/workspace-name.tsx
-msgid "An admin changes it."
-msgstr "Lo cambia un administrador."
-
 #: src/connections/integration-facts.ts
 msgid "An admin connects this for everyone."
 msgstr "Un administrador lo conecta para todos."
@@ -3367,13 +3364,10 @@ msgstr "Pedir que la versión {askable} funcione para el equipo"
 msgid "Ask what you're looking for"
 msgstr "Pregunta lo que buscas"
 
+#: src/chat/chat-composer.tsx
 #: src/frame/connect-ai-provider.tsx
 msgid "Ask your admin to connect an AI provider."
 msgstr "Pide a tu administrador que conecte un proveedor de IA."
-
-#: src/frame/connect-ai-provider.tsx
-msgid "Ask your admin to connect one."
-msgstr "Pide a tu administrador que conecte uno."
 
 #: src/apps/app-access-requests.tsx
 #: src/inbox/items.ts
@@ -3557,7 +3551,6 @@ msgstr "Disponible, a través de Composio"
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/inbox/item-detail.tsx
 #: src/onboarding/setup-frame.tsx
-#: src/tour/tour-layer.tsx
 #: src/workflows/requests/request-detail.tsx
 msgid "Back"
 msgstr "Atrás"
@@ -4829,7 +4822,7 @@ msgstr "Conecta un proveedor de IA"
 msgid "Connect an AI provider before sending."
 msgstr "Conecta un proveedor de IA antes de enviar."
 
-#: src/frame/connect-ai-provider.tsx
+#: src/chat/chat-composer.tsx
 msgid "Connect an AI provider to start asking"
 msgstr "Conecta un proveedor de IA para empezar a preguntar"
 
@@ -5412,10 +5405,6 @@ msgctxt "kind of app"
 msgid "Data and analytics"
 msgstr "Datos y análisis"
 
-#: src/routes/_shell.settings.workspace.tsx
-msgid "Data location"
-msgstr "Ubicación de los datos"
-
 #: src/apps/app-data-model.tsx
 msgid "Data model"
 msgstr "Modelo de datos"
@@ -5952,11 +5941,6 @@ msgctxt "stop using the app's preview"
 msgid "Done"
 msgstr "Listo"
 
-#: src/tour/tour-layer.tsx
-msgctxt "tour"
-msgid "Done"
-msgstr "Hecho"
-
 #: src/brain/work-knowledge.tsx
 msgctxt "what something known rests on: it happened in a run"
 msgid "Done"
@@ -6142,6 +6126,10 @@ msgstr "Editar {name}"
 msgid "Edit JSON"
 msgstr "Editar JSON"
 
+#: src/settings/org-card.tsx
+msgid "Edit the name"
+msgstr "Editar el nombre"
+
 #: src/frame/part-words.tsx
 msgid "Edit: {text}"
 msgstr "Editar: {text}"
@@ -6223,10 +6211,6 @@ msgstr "¿Terminar ahora el acceso del personal de Grasp?"
 msgid "End staff access now"
 msgstr "Terminar ahora el acceso del personal"
 
-#: src/tour/tour-layer.tsx
-msgid "End the tour"
-msgstr "Terminar el recorrido"
-
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
 msgid "Ended"
@@ -6301,8 +6285,8 @@ msgctxt "a badge's dot"
 msgid "Error"
 msgstr "Error"
 
-#: src/routes/_shell.settings.workspace.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/org-card.tsx
 msgid "European Union"
 msgstr "Unión Europea"
 
@@ -6480,10 +6464,6 @@ msgstr "Todo, desde el pedido a un proveedor hasta que se paga su factura."
 #: src/brain/brain.ts
 msgid "Everything Grasp learned about {company}, each fact traceable to the conversation, document or connection it came from."
 msgstr "Todo lo que Grasp aprendió sobre {company}, cada dato rastreable hasta la conversación, el documento o la conexión de donde vino."
-
-#: src/routes/_shell.settings.workspace.tsx
-msgid "Everything Grasp stores for you stays here."
-msgstr "Todo lo que Grasp guarda para ti se queda aquí."
 
 #: src/onboarding/setup-steps.tsx
 msgid "Everything I read and every conversation I have runs on an AI model, on your organization’s own key."
@@ -7201,6 +7181,7 @@ msgstr "Seguir sin sonido"
 msgid "Go to {time}, {who}"
 msgstr "Ir a {time}, {who}"
 
+#: src/chat/chat-composer.tsx
 #: src/frame/connect-ai-provider.tsx
 msgid "Go to AI providers"
 msgstr "Ir a proveedores de IA"
@@ -7649,10 +7630,6 @@ msgstr "Este es el plan"
 msgid "Here's what Grasp will make"
 msgstr "Esto es lo que hará Grasp"
 
-#: src/tour/tour-script.ts
-msgid "Hey, great to have you here. This can all be a little overwhelming, so I’ll bring you up to speed in just one minute. Are you ready?"
-msgstr "Hola, qué bien tenerte aquí. Todo esto puede abrumar un poco, así que te pongo al día en solo un minuto. ¿Empezamos?"
-
 #: src/onboarding/setup-steps.tsx
 msgid "Hi {admin}, I’m Stephen"
 msgstr "Hola, {admin}, soy Stephen"
@@ -7923,10 +7900,6 @@ msgstr "Apunto lo que me cuentas. Al final te lo leo y tú dices qué está mal.
 #: src/interview/before.tsx
 msgid "I’m {firstName}."
 msgstr "Soy {firstName}."
-
-#: src/tour/tour-script.ts
-msgid "I’m ready"
-msgstr "Empecemos"
 
 #: src/onboarding/setup-steps.tsx
 msgid "I’ve handled everything else."
@@ -9192,7 +9165,7 @@ msgstr "Cargando el valor"
 msgid "Loading…"
 msgstr "Cargando…"
 
-#: src/settings/workspace-name.tsx
+#: src/settings/org-card.tsx
 msgid "Logo"
 msgstr "Logo"
 
@@ -9757,10 +9730,10 @@ msgstr "Mi versión de la App no arrancó. Averigua por qué y arréglalo:"
 #: src/projects/project-dialog.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/event-sources.tsx
+#: src/settings/org-card.tsx
 #: src/settings/profile-name.tsx
 #: src/settings/team-members-dialog.tsx
 #: src/settings/teams.tsx
-#: src/settings/workspace-name.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Name"
 msgstr "Nombre"
@@ -9946,7 +9919,6 @@ msgstr "Más recientes"
 #: src/chat/asked-questions.tsx
 #: src/frame/part-words.tsx
 #: src/settings/event-sources.tsx
-#: src/tour/tour-layer.tsx
 msgid "Next"
 msgstr "Siguiente"
 
@@ -10600,7 +10572,6 @@ msgid "Not named by the provider"
 msgstr "Sin nombre del proveedor"
 
 #: src/onboarding/hr-leads.tsx
-#: src/tour/tour-script.ts
 msgid "Not now"
 msgstr "Ahora no"
 
@@ -10609,10 +10580,6 @@ msgstr "Ahora no"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Not offered"
 msgstr "No ofrecida"
-
-#: src/settings/sign-in-settings.tsx
-msgid "Not on the sign-in page yet"
-msgstr "Aún no está en la página de inicio de sesión"
 
 #: src/onboarding/send-plan-form.tsx
 msgid "Not planned yet"
@@ -11143,10 +11110,6 @@ msgctxt "links: drawn workflows, opened on the Workflows page"
 msgid "On the Workflows page"
 msgstr "En la página Flujos de trabajo"
 
-#: src/tour/tour-script.ts
-msgid "On this page you connect the applications your organization works in. They are the platform’s instruments to build what you need."
-msgstr "En esta página conectas las herramientas con las que trabaja tu organización. Son los instrumentos de la plataforma para construir lo que necesitas."
-
 #: src/make/examples.ts
 msgid "Onboard a new hire"
 msgstr "Incorporar a una nueva persona"
@@ -11288,10 +11251,6 @@ msgstr "Solo los creadores del flujo de trabajo pueden cambiarlos."
 msgid "Only when asked"
 msgstr "Solo cuando se le pregunta"
 
-#: src/settings/sign-in-settings.tsx
-msgid "Only work accounts at {hostedDomain}."
-msgstr "Solo cuentas de trabajo de {hostedDomain}."
-
 #: src/connections/integration-inspector.tsx
 msgid "Only you"
 msgstr "Solo tú"
@@ -11319,10 +11278,6 @@ msgstr "Solo tú lo ves mientras lo pruebas. Lo compartes cuando esté bien."
 #: src/workflows/workflow-status.tsx
 msgid "Only you see this"
 msgstr "Solo tú ves esto"
-
-#: src/settings/sign-in-settings.tsx
-msgid "Only your organization’s work accounts."
-msgstr "Solo las cuentas de trabajo de tu organización."
 
 #: src/chat/sidebar-chats.tsx
 #: src/connections/request-app-dialog.tsx
@@ -11477,15 +11432,15 @@ msgstr "Abrir la ejecución iniciada el {started}"
 msgid "Open this link again whenever you like, and carry on where you stopped."
 msgstr "Vuelve a abrir este enlace cuando quieras y sigue donde lo dejaste."
 
+#: src/settings/staff-access.tsx
+msgid "Open until"
+msgstr "Abierto hasta"
+
 #: src/decision-confirmation.tsx
 #: src/routes/decisions.$decision.tsx
 msgctxt "until when a decision can be answered"
 msgid "Open until"
 msgstr "Abierta hasta"
-
-#: src/settings/staff-access.tsx
-msgid "Open until {until}"
-msgstr "Abierto hasta {until}"
 
 #: src/inbox/interviews-item.tsx
 msgid "Open your onboarding"
@@ -11564,6 +11519,7 @@ msgid "Order"
 msgstr "Orden"
 
 #: src/routes/_shell.settings.workspace.tsx
+#: src/settings/org-card.tsx
 msgid "Organization"
 msgstr "Organización"
 
@@ -11962,10 +11918,6 @@ msgstr "Se rechazaron {rejected} de {answered, plural, one {# respuesta} other {
 #: src/onboarding/setup-steps.tsx
 msgid "People respond better when they know why I’m reaching out. I’ve drafted a message you can send yourself. Then pick the day the interviews start."
 msgstr "La gente responde mejor cuando sabe por qué me pongo en contacto. He redactado un mensaje que puedes enviar tú mismo. Después elige el día en que empiezan las entrevistas."
-
-#: src/routes/_shell.settings.workspace.tsx
-msgid "People sign in with an address in these. To change them, ask your Grasp contact."
-msgstr "Se inicia sesión con una dirección de estos dominios. Para cambiarlos, pregunta a tu contacto en Grasp."
 
 #: src/settings/team-members-dialog.tsx
 msgid "People to tick"
@@ -13365,7 +13317,6 @@ msgstr "Risk-to-Compliance"
 msgid "Rocket"
 msgstr "Cohete"
 
-#: src/routes/_shell.settings.profile.tsx
 #: src/settings/invitations.tsx
 msgid "Role"
 msgstr "Rol"
@@ -14187,6 +14138,7 @@ msgstr "Preparando {name}…"
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.settings.tsx
+#: src/routes/_shell.settings.workspace.tsx
 msgid "Settings"
 msgstr "Ajustes"
 
@@ -14572,10 +14524,6 @@ msgstr "Inicio de sesión"
 msgid "Sign-in didn't work. Try again, or ask an admin."
 msgstr "No se pudo iniciar sesión. Vuelve a intentarlo o pregunta a un administrador."
 
-#: src/routes/_shell.settings.workspace.tsx
-msgid "Sign-in domains"
-msgstr "Dominios de inicio de sesión"
-
 #: src/settings/sign-in-settings.tsx
 msgid "Sign-in isn’t set up for this workspace yet, so nobody can sign in. Grasp sets it up."
 msgstr "El inicio de sesión aún no está configurado para este espacio de trabajo, así que nadie puede iniciar sesión. Grasp lo configura."
@@ -14900,10 +14848,6 @@ msgstr "Iniciar la app"
 #: src/workflows/start-run.tsx
 msgid "Start the run"
 msgstr "Iniciar la ejecución"
-
-#: src/tour/tour-script.ts
-msgid "Start the tour"
-msgstr "Empezar el recorrido"
 
 #: src/apps/app-workflows.tsx
 msgid "Start with a letter, then use only letters, digits or underscores."
@@ -15557,10 +15501,6 @@ msgstr "Eso es todo por tu parte. Ahora hablaré con tu equipo."
 #: src/onboarding/connect-steps.tsx
 msgid "That’s plenty to start with. Let’s move on."
 msgstr "Con esto puedo empezar bien. Sigamos."
-
-#: src/tour/tour-script.ts
-msgid "That’s the tour. Ask me anything, on any page. You’ll find me right here."
-msgstr "Y eso es todo. Pregúntame lo que quieras, en cualquier página. Me tienes aquí mismo."
 
 #: src/frame/part-words.tsx
 msgid "The {many} did not load"
@@ -16316,10 +16256,6 @@ msgstr "No había nada que deshacer: Grasp ya no usa esto."
 msgid "There's nowhere to share it yet: you're in no team, and in no chat others share."
 msgstr "Aún no hay dónde compartirlo: no estás en ningún equipo ni en ningún chat que otros compartan."
 
-#: src/tour/tour-script.ts
-msgid "These are your Apps. Each one is made for a team or a person, with its own pages, data and people, standing on your workflows."
-msgstr "Estas son tus aplicaciones. Cada una está hecha para un equipo o una persona, con sus propias páginas, datos y personas, basada en tus flujos de trabajo."
-
 #: src/brain/forget.tsx
 msgid "These notes rest on nothing else and go too: {named} and {more} more."
 msgstr "Estas notas no se apoyan en nada más y también se van: {named} y {more} más."
@@ -16529,17 +16465,9 @@ msgstr "Esta entrevista siguió en otra ventana. Ahora ves esa."
 msgid "This is right"
 msgstr "Esto es correcto"
 
-#: src/tour/tour-script.ts
-msgid "This is the Brain. Everything I learn about your company comes together here. Every answer and every workflow is built on it."
-msgstr "Este es el Cerebro. Todo lo que aprendo sobre tu empresa se reúne aquí. Cada respuesta y cada flujo de trabajo se apoya en él."
-
 #: src/connections/connection-list.tsx
 msgid "This is the consent as Grasp words it now. The audit log keeps a hash of the exact text they were shown."
 msgstr "Este es el consentimiento tal como lo redacta Grasp ahora. El registro de auditoría guarda un hash del texto exacto que se mostró."
-
-#: src/tour/tour-script.ts
-msgid "This is the work itself, one workflow for each piece of work. You see where the time goes, and what I can take off your hands."
-msgstr "Este es el trabajo en sí, un flujo de trabajo por cada tarea. Ves adónde se va el tiempo y qué puedo quitarte de encima."
 
 #: src/frame/ai-key-banner.tsx
 msgid "This is usually an outage on their side; Grasp keeps retrying."
@@ -16886,10 +16814,6 @@ msgstr "Tema"
 msgid "Topics"
 msgstr "Temas"
 
-#: src/tour/tour-layer.tsx
-msgid "Tour of Grasp"
-msgstr "Recorrido por Grasp"
-
 #: src/make/examples.ts
 msgid "Track the month-end close"
 msgstr "Llevar el cierre de mes"
@@ -16941,6 +16865,7 @@ msgstr "Intentar"
 #: src/settings/ai-providers.tsx
 #: src/settings/profile-name.tsx
 #: src/settings/section.tsx
+#: src/settings/sign-in-settings.tsx
 #: src/settings/workspace-name.tsx
 msgid "Try again"
 msgstr "Reintentar"
@@ -17812,10 +17737,6 @@ msgstr "Semana {week} de {weeks} · {stage}"
 #: src/workflows/requests/request-summary.tsx
 msgid "Weekly summary"
 msgstr "Resumen semanal"
-
-#: src/tour/tour-script.ts
-msgid "Welcome to Grasp. Shall I show you around? It takes about a minute."
-msgstr "Hola, te doy la bienvenida a Grasp. ¿Quieres que te lo enseñe? Es solo un minuto."
 
 #: src/workflows/today-lanes.tsx
 msgid "went to people"

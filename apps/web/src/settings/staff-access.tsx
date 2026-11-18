@@ -16,9 +16,19 @@ import {
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
+import {
+  InputGroup,
+  InputGroupInput,
+  InputGroupText,
+} from "../grasp/input-group/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import { FactRow, RowAlert, SettingsRows } from "../grasp/setting-row/index.ts";
+import {
+  RowAlert,
+  SettingRow,
+  SettingsRows,
+} from "../grasp/setting-row/index.ts";
 import { useCore } from "../use-core.ts";
+import { controlStyles } from "./workspace-name.tsx";
 
 // Settings › Workspace › Grasp staff access, for the company's admins,
 // only while Grasp's staff may sign in: what they reach and until when, as
@@ -120,23 +130,35 @@ export const StaffAccessSection = ({
         {failure === undefined ? null : (
           <RowAlert variant="danger">{failure}</RowAlert>
         )}
-        <FactRow label={t`Open until ${until}`}>
-          {staff.scope === "onboarding" ? (
-            <Badge
-              explain={t`They reach the onboarding alone, and lose access 7 days after Grasp's go.`}
-              tone="attention"
-            >
-              {t`Onboarding only`}
-            </Badge>
-          ) : (
-            <Badge
-              explain={t`They can do everything their role allows in the whole workspace, not only the onboarding.`}
-              tone="attention"
-            >
-              {t`Full access`}
-            </Badge>
+        {/* Until when, in a field that only reads, with what staff reach at its end. */}
+        <SettingRow label={t`Open until`}>
+          {(field) => (
+            // BUILDER: InputGroup has no `sm` size, so this field stands taller than an `sm` Input;
+            // asked of the library.
+            <InputGroup layout={controlStyles.fill}>
+              <InputGroupInput {...field} readOnly value={until} />
+              <InputGroupText>
+                {staff.scope === "onboarding" ? (
+                  <Badge
+                    explain={t`They reach the onboarding alone, and lose access 7 days after Grasp's go.`}
+                    size="sm"
+                    tone="attention"
+                  >
+                    {t`Onboarding only`}
+                  </Badge>
+                ) : (
+                  <Badge
+                    explain={t`They can do everything their role allows in the whole workspace, not only the onboarding.`}
+                    size="sm"
+                    tone="attention"
+                  >
+                    {t`Full access`}
+                  </Badge>
+                )}
+              </InputGroupText>
+            </InputGroup>
           )}
-        </FactRow>
+        </SettingRow>
       </SettingsRows>
     </SectionCard>
   );
