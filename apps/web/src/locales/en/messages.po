@@ -1037,6 +1037,10 @@ msgstr "{name} is signed out everywhere."
 msgid "{name} is too large."
 msgstr "{name} is too large."
 
+#: src/settings/sign-in-settings.tsx
+msgid "{name} isn’t on the sign-in page yet."
+msgstr "{name} isn’t on the sign-in page yet."
+
 #: src/frame/setting-up.tsx
 msgid "{name} isn't ready yet"
 msgstr "{name} isn't ready yet"
@@ -2086,6 +2090,7 @@ msgstr "A workflow started"
 
 #: src/activity/audit-event.tsx
 #: src/apps/app-settings.tsx
+#: src/settings/org-card.tsx
 #: src/workflows/workflow-settings.tsx
 msgid "About"
 msgstr "About"
@@ -2741,10 +2746,6 @@ msgstr "An admin abandoned the data change this version needs, so it can't be sh
 #: src/apps/publish.tsx
 msgid "An admin approves its access again before it works for your team."
 msgstr "An admin approves its access again before it works for your team."
-
-#: src/settings/workspace-name.tsx
-msgid "An admin changes it."
-msgstr "An admin changes it."
 
 #: src/connections/integration-facts.ts
 msgid "An admin connects this for everyone."
@@ -5401,10 +5402,6 @@ msgctxt "kind of app"
 msgid "Data and analytics"
 msgstr "Data and analytics"
 
-#: src/routes/_shell.settings.workspace.tsx
-msgid "Data location"
-msgstr "Data location"
-
 #: src/apps/app-data-model.tsx
 msgid "Data model"
 msgstr "Data model"
@@ -6126,6 +6123,10 @@ msgstr "Edit {name}"
 msgid "Edit JSON"
 msgstr "Edit JSON"
 
+#: src/settings/org-card.tsx
+msgid "Edit the name"
+msgstr "Edit the name"
+
 #: src/frame/part-words.tsx
 msgid "Edit: {text}"
 msgstr "Edit: {text}"
@@ -6281,8 +6282,8 @@ msgctxt "a badge's dot"
 msgid "Error"
 msgstr "Error"
 
-#: src/routes/_shell.settings.workspace.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/org-card.tsx
 msgid "European Union"
 msgstr "European Union"
 
@@ -6460,10 +6461,6 @@ msgstr "Everything from ordering from a supplier until their invoice is paid."
 #: src/brain/brain.ts
 msgid "Everything Grasp learned about {company}, each fact traceable to the conversation, document or connection it came from."
 msgstr "Everything Grasp learned about {company}, each fact traceable to the conversation, document or connection it came from."
-
-#: src/routes/_shell.settings.workspace.tsx
-msgid "Everything Grasp stores for you stays here."
-msgstr "Everything Grasp stores for you stays here."
 
 #: src/onboarding/setup-steps.tsx
 msgid "Everything I read and every conversation I have runs on an AI model, on your organization’s own key."
@@ -9164,7 +9161,7 @@ msgstr "Loading the value"
 msgid "Loading…"
 msgstr "Loading…"
 
-#: src/settings/workspace-name.tsx
+#: src/settings/org-card.tsx
 msgid "Logo"
 msgstr "Logo"
 
@@ -9729,10 +9726,10 @@ msgstr "My version of the App didn't start. Find out why and fix it:"
 #: src/projects/project-dialog.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/event-sources.tsx
+#: src/settings/org-card.tsx
 #: src/settings/profile-name.tsx
 #: src/settings/team-members-dialog.tsx
 #: src/settings/teams.tsx
-#: src/settings/workspace-name.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Name"
 msgstr "Name"
@@ -10579,10 +10576,6 @@ msgstr "Not now"
 msgid "Not offered"
 msgstr "Not offered"
 
-#: src/settings/sign-in-settings.tsx
-msgid "Not on the sign-in page yet"
-msgstr "Not on the sign-in page yet"
-
 #: src/onboarding/send-plan-form.tsx
 msgid "Not planned yet"
 msgstr "Not planned yet"
@@ -11253,10 +11246,6 @@ msgstr "Only the workflow's builders can change these."
 msgid "Only when asked"
 msgstr "Only when asked"
 
-#: src/settings/sign-in-settings.tsx
-msgid "Only work accounts at {hostedDomain}."
-msgstr "Only work accounts at {hostedDomain}."
-
 #: src/connections/integration-inspector.tsx
 msgid "Only you"
 msgstr "Only you"
@@ -11284,10 +11273,6 @@ msgstr "Only you see it while you try it. You share it when it's right."
 #: src/workflows/workflow-status.tsx
 msgid "Only you see this"
 msgstr "Only you see this"
-
-#: src/settings/sign-in-settings.tsx
-msgid "Only your organization’s work accounts."
-msgstr "Only your organization’s work accounts."
 
 #: src/chat/sidebar-chats.tsx
 #: src/connections/request-app-dialog.tsx
@@ -11442,15 +11427,15 @@ msgstr "Open the run started {started}"
 msgid "Open this link again whenever you like, and carry on where you stopped."
 msgstr "Open this link again whenever you like, and carry on where you stopped."
 
+#: src/settings/staff-access.tsx
+msgid "Open until"
+msgstr "Open until"
+
 #: src/decision-confirmation.tsx
 #: src/routes/decisions.$decision.tsx
 msgctxt "until when a decision can be answered"
 msgid "Open until"
 msgstr "Open until"
-
-#: src/settings/staff-access.tsx
-msgid "Open until {until}"
-msgstr "Open until {until}"
 
 #: src/inbox/interviews-item.tsx
 msgid "Open your onboarding"
@@ -11529,6 +11514,7 @@ msgid "Order"
 msgstr "Order"
 
 #: src/routes/_shell.settings.workspace.tsx
+#: src/settings/org-card.tsx
 msgid "Organization"
 msgstr "Organization"
 
@@ -11927,10 +11913,6 @@ msgstr "People rejected {rejected} of {answered, plural, one {# answer} other {#
 #: src/onboarding/setup-steps.tsx
 msgid "People respond better when they know why I’m reaching out. I’ve drafted a message you can send yourself. Then pick the day the interviews start."
 msgstr "People respond better when they know why I’m reaching out. I’ve drafted a message you can send yourself. Then pick the day the interviews start."
-
-#: src/routes/_shell.settings.workspace.tsx
-msgid "People sign in with an address in these. To change them, ask your Grasp contact."
-msgstr "People sign in with an address in these. To change them, ask your Grasp contact."
 
 #: src/settings/team-members-dialog.tsx
 msgid "People to tick"
@@ -13334,7 +13316,6 @@ msgstr "Risk-to-Compliance"
 msgid "Rocket"
 msgstr "Rocket"
 
-#: src/routes/_shell.settings.profile.tsx
 #: src/settings/invitations.tsx
 msgid "Role"
 msgstr "Role"
@@ -14156,6 +14137,7 @@ msgstr "Setting up {name}…"
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.settings.tsx
+#: src/routes/_shell.settings.workspace.tsx
 msgid "Settings"
 msgstr "Settings"
 
@@ -14540,10 +14522,6 @@ msgstr "Sign-in"
 #: src/sign-in-errors.ts
 msgid "Sign-in didn't work. Try again, or ask an admin."
 msgstr "Sign-in didn't work. Try again, or ask an admin."
-
-#: src/routes/_shell.settings.workspace.tsx
-msgid "Sign-in domains"
-msgstr "Sign-in domains"
 
 #: src/settings/sign-in-settings.tsx
 msgid "Sign-in isn’t set up for this workspace yet, so nobody can sign in. Grasp sets it up."
@@ -16886,6 +16864,7 @@ msgstr "Try"
 #: src/settings/ai-providers.tsx
 #: src/settings/profile-name.tsx
 #: src/settings/section.tsx
+#: src/settings/sign-in-settings.tsx
 #: src/settings/workspace-name.tsx
 msgid "Try again"
 msgstr "Try again"

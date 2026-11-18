@@ -308,13 +308,18 @@ export const inputStyles = stylex.create({
   // Can be read and copied, not changed: settled. The soft ground (field-fill-read), a hairline and
   // no lift or hover, its words a step quieter (field-ink-read). Between rest and disabled: disabled
   // is the weaker look.
+  // It is no place to type: no text cursor in it, the arrow over it, and with the keyboard's focus
+  // only its edge a step stronger, never the ring a field to type in gets. Its words can still be
+  // selected and copied.
   readOnly: {
     backgroundColor: grasp.fieldFillRead,
     boxShadow: {
       default: `inset 0 0 0 1px ${grasp.fieldEdge}`,
-      ":focus-visible": grasp.fieldFocus,
+      ":focus-visible": `inset 0 0 0 1px ${grasp.fieldEdgeHover}`,
     },
     color: grasp.fieldInkRead,
+    caretColor: "transparent",
+    cursor: "default",
   },
   disabled: {
     opacity: grasp.dim,
