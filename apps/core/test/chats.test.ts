@@ -1067,7 +1067,11 @@ describe("chats", () => {
       ann.chats.send(chat.id, question),
     ]);
     await settled(follower);
-    await ann.chats.send(chat.id, question);
+    // What a repeat names is not looked up again: it may be gone since.
+    await ann.chats.send(chat.id, {
+      ...question,
+      mentions: [{ kind: "agent", id: crypto.randomUUID() }],
+    });
     expect(
       follower.messages().map(({ role, text }) => ({ role, text }))
     ).toStrictEqual([
@@ -1110,8 +1114,10 @@ describe("chats", () => {
     const ben = await person();
     const key = crypto.randomUUID();
     const made = await ann.chats.create("Travel", undefined, undefined, key);
+    // Nor is the agent a repeat names looked up again: gone since, it
+    // would refuse only a new chat.
     await expect(
-      ann.chats.create("Travel", undefined, undefined, key)
+      ann.chats.create("Travel", crypto.randomUUID(), undefined, key)
     ).resolves.toStrictEqual(made);
     await expect(ann.chats.list()).resolves.toHaveLength(1);
     // Someone else's same key is their own chat.

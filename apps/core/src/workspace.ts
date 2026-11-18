@@ -1442,10 +1442,9 @@ export class Workspace extends DurableObject<Env> {
     key?: string
   ): Chat {
     const repeated =
-      key === undefined ? undefined : this.#requested("create", key);
+      key === undefined ? undefined : this.chatMadeWith(personId, key);
     if (repeated !== undefined) {
-      // The person's own chat, as the first call made it.
-      return this.#graspChat(repeated.chatId, personId);
+      return repeated;
     }
     const agent = workspaceAgentIdSchema.safeParse(agentId);
     if (!agent.success) {
@@ -1485,6 +1484,19 @@ export class Workspace extends DurableObject<Env> {
     });
     this.#deliverAudit();
     return chat;
+  }
+
+  /**
+   * The chat `personId` made with `key` within a day, as the first call
+   * made it, if they made one: what a repeat of `createChat` answers, and
+   * what its caller asks first, so a repeat is checked for nothing a new
+   * chat would be (chats-rpc.ts).
+   */
+  chatMadeWith(personId: string, key: string): Chat | undefined {
+    const made = this.#requested("create", key);
+    return made === undefined
+      ? undefined
+      : this.#graspChat(made.chatId, personId);
   }
 
   /** The chat a request with `key` was kept for, and when, if one was within a day. */
@@ -2806,24 +2818,8 @@ export class Workspace extends DurableObject<Env> {
     key?: string
   ): Promise<void> {
     const chat = this.#graspChat(chatId, personId);
-    if (key !== undefined) {
-      const taken = this.#requested("send", key);
-      // Another chat's key says nothing of this question.
-      if (
-        (taken ?? this.#starting.get(key) ?? { chatId: chat.id }).chatId !==
-        chat.id
-      ) {
-        throw agentErrors.create("agent.invalid_question");
-      }
-      if (taken !== undefined && (await this.#questionStands(chat, taken.at))) {
-        return;
-      }
-      // After the last await, so of two repeats only one starts a turn.
-      const starting = this.#starting.get(key);
-      if (starting !== undefined) {
-        await starting.started;
-        return;
-      }
+    if (key !== undefined && (await this.sentBefore(chatId, personId, key))) {
+      return;
     }
     const started = Promise.withResolvers<boolean>();
     if (key !== undefined) {
@@ -2844,6 +2840,39 @@ export class Workspace extends DurableObject<Env> {
     }
     // The alarm keeps the object up until the turn ends (`alarm`).
     await this.#alarmBy(Date.now());
+  }
+
+  /**
+   * Whether `personId`'s chat took the question with `key` already
+   * (`send`): resolves once it has, as the first call did, or is refused
+   * with it; false for a key not taken, or one whose question a restart
+   * lost. What `send`'s caller asks first, so a repeat is checked for
+   * nothing a new question would be (chats-rpc.ts).
+   */
+  async sentBefore(
+    chatId: unknown,
+    personId: string,
+    key: string
+  ): Promise<boolean> {
+    const chat = this.#graspChat(chatId, personId);
+    const taken = this.#requested("send", key);
+    // Another chat's key says nothing of this question.
+    if (
+      (taken ?? this.#starting.get(key) ?? { chatId: chat.id }).chatId !==
+      chat.id
+    ) {
+      throw agentErrors.create("agent.invalid_question");
+    }
+    if (taken !== undefined && (await this.#questionStands(chat, taken.at))) {
+      return true;
+    }
+    // After the last await, so of two repeats only one starts a turn.
+    const starting = this.#starting.get(key);
+    if (starting === undefined) {
+      return false;
+    }
+    await starting.started;
+    return true;
   }
 
   /**

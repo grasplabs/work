@@ -382,6 +382,15 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
           parsed.success ? "agent.invalid_request" : "agent.invalid_title"
         );
       }
+      // A repeat answers the chat it made before anything a new chat is
+      // checked for: its agent or project may be gone since.
+      const repeated =
+        keyed.data === undefined
+          ? undefined
+          : await this.#chatsOf(userId).chatMadeWith(userId, keyed.data);
+      if (repeated !== undefined) {
+        return summaryOfMade(repeated);
+      }
       if (making !== undefined) {
         requireBuilder(person);
         if (making.data.project !== undefined) {
@@ -510,6 +519,15 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         throw agentErrors.create("agent.invalid_question");
       }
       const { subject: named, mentions: picked, key, ...asked } = parsed.data;
+      // A repeat is answered before anything it names is looked up: what
+      // the first call found may be gone since, and that refuses only a
+      // new question.
+      if (
+        key !== undefined &&
+        (await this.#chatsOf(person.userId).sentBefore(id, person.userId, key))
+      ) {
+        return;
+      }
       const [subject, mentions] = await Promise.all([
         named === undefined ? undefined : this.#subjectOf(person, named),
         picked === undefined || picked.length === 0
