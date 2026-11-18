@@ -3367,10 +3367,6 @@ msgstr "Fragen Sie, wonach Sie suchen"
 msgid "Ask your admin to connect an AI provider."
 msgstr "Bitten Sie Ihren Admin, einen KI-Anbieter zu verbinden."
 
-#: src/frame/connect-ai-provider.tsx
-msgid "Ask your admin to connect one."
-msgstr "Bitten Sie Ihren Admin, einen zu verbinden."
-
 #: src/apps/app-access-requests.tsx
 #: src/inbox/items.ts
 #: src/workflows/requests/request-detail.tsx
