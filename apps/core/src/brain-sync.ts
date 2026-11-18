@@ -603,6 +603,30 @@ const heldAfter = (counter: readonly unknown[]): void => {
 };
 
 /**
+ * What a step saved, as its row says it once saved: the key it was in,
+ * the change it holds there and the Brain's version of it, or the key it
+ * left (`change` "removed", no version).
+ */
+interface StepSaved {
+  key: string;
+  change: string;
+  version: number | null;
+}
+
+/**
+ * A step's event key, the one way it is made: from what it saved alone,
+ * so a step has the same key whether the read that saved it records it or
+ * a read of the same page again rebuilds it from the row
+ * (`replayedSteps`), and the Brain keeps it once.
+ */
+const stepKeyOf = async ({
+  key,
+  change,
+  version,
+}: StepSaved): Promise<string> =>
+  await sha256Hex(JSON.stringify([key, change, version]));
+
+/**
  * One step of the connection's owner for a change this read counted: the
  * sync's kind and what happened (`file.added`, `mail.removed`), keyed by
  * the item's key in the Brain (its connection, feed, item and generation:
@@ -617,13 +641,13 @@ const heldAfter = (counter: readonly unknown[]): void => {
 const stepped = async (
   applying: Applying,
   counter: "added" | "changed" | "removed",
-  { key, change }: { key: string; change: string },
+  saved: StepSaved,
   item: string,
   at: Date
 ): Promise<void> => {
   applying.stepped.add(item);
   applying.steps.push({
-    key: await sha256Hex(JSON.stringify([key, change])),
+    key: await stepKeyOf(saved),
     personId: applying.source.personId,
     step: `${applying.source.kind}.${counter}`,
     system: applying.source.provider,
@@ -746,7 +770,7 @@ const leave = async (
   await stepped(
     applying,
     "removed",
-    { key: row.key, change: "removed" },
+    { key: row.key, change: "removed", version: null },
     row.itemId,
     applying.readAt
   );
@@ -985,7 +1009,7 @@ const changeReaders = async (
   await stepped(
     applying,
     "changed",
-    { key: row.key, change },
+    { key: row.key, change: row.change, version: made.version },
     row.itemId,
     readAt
   );
@@ -1163,7 +1187,7 @@ const add = async (
   await stepped(
     applying,
     counter,
-    { key: claimed.key, change },
+    { key: claimed.key, change, version },
     item.id,
     changedOf(item, readAt)
   );
@@ -1579,9 +1603,10 @@ const recordSteps = async (applying: Applying): Promise<void> => {
  * didn't take again: each row of the place saved since the source last
  * committed a page (`savedAt`), not stepped by this read. Its step is what
  * the row now says: gone (no store), its key's first version (added), or
- * a later one (changed), each keyed by the row's key and what it saved,
- * the same however often the page is read again; only the read that
- * commits records steps, so the Brain keeps each once. Only for
+ * a later one (changed), keyed as the read that saved it keyed it
+ * (`stepKeyOf`); only the read that commits records steps, so the Brain
+ * keeps each once. Read while this read still holds the source, before its
+ * commit gives the lease up: no row of a later page is saved by then. Only for
  * a replay: an ordinary page, a relist of what was committed long ago
  * among them, takes none.
  */
@@ -1623,22 +1648,16 @@ const replayedSteps = async (
       await stepped(
         applying,
         "removed",
-        { key: left, change: "removed" },
+        { key: left, change: "removed", version: null },
         row.itemId,
         when
       );
     } else if (row.change !== null) {
-      // A key's first version as its add keyed it; a later one by its
-      // version too: a change of readers keeps the add's change.
       // oxlint-disable-next-line no-await-in-loop -- a hash each, no call
       await stepped(
         applying,
         row.version === 1 ? "added" : "changed",
-        {
-          key: row.key,
-          change:
-            row.version === 1 ? row.change : `${row.change}@${row.version}`,
-        },
+        { key: row.key, change: row.change, version: row.version },
         row.itemId,
         when
       );
@@ -1697,6 +1716,9 @@ const commit = async (applying: Applying, page: SyncPage): Promise<void> => {
     appliedEvent(source, { ...counts, skipped: applying.skipped }),
     sql`changes() > 0`
   );
+  // The steps an earlier read of this page left, while the lease that
+  // keeps the next page from being read is still this read's.
+  await replayedSteps(applying, page);
   spend(budget, 1);
   let committed: readonly unknown[];
   if (did === 0 && fetched === undefined) {
@@ -1709,7 +1731,6 @@ const commit = async (applying: Applying, page: SyncPage): Promise<void> => {
     [, committed] = await auditedBatch(env, outbox, [fetched, moved, event]);
   }
   heldAfter(committed);
-  await replayedSteps(applying, page);
   await recordSteps(applying);
 };
 

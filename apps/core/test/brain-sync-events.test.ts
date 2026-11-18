@@ -2,6 +2,7 @@ import { minTeamShown } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { afterEach, expect, it, vi, describe } from "vite-plus/test";
 
+import { runSync } from "../src/brain-sync.ts";
 import { newTeam } from "./brain-next-leaks-harness.ts";
 import { inStoreOf } from "./brain-next-out-reads.ts";
 import {
@@ -20,6 +21,10 @@ import {
 } from "./brain-sync-world.ts";
 import { interleaving } from "./d1-interleaving.ts";
 import { signedInApi, signedInWithRole } from "./sign-in.ts";
+
+/** A file in the sample feed at `version`. */
+const file = (id: string, text: string, version: string) =>
+  mailItem(id, text, { kind: "file", version });
 
 // Native sync (src/brain-sync.ts, GRA-1758): the Brain's events of synced changes. The shared world,
 // fakes and clock are in test/brain-sync-world.ts.
@@ -181,6 +186,101 @@ describe("native sync", () => {
         read: ["file.added"],
         relisted: ["file.added"],
         found: true,
+      });
+    }
+  );
+
+  it(
+    "keeps a change past a key's first version as one event when the read that saved it stopped before its commit, and takes none from another run's next page around the retry's commit, nor from a later page seeing it again",
+    setUpTime,
+    async () => {
+      const owner = await signedInApi(idp, "user");
+      const others = await Promise.all(
+        Array.from({ length: minTeamShown - 1 }, async () => {
+          const { userId } = await signedInWithRole(idp, "user");
+          return userId;
+        })
+      );
+      const team = await newTeam(owner.userId, ...others);
+      const marks = {
+        x: markerOf(),
+        x2: markerOf(),
+        y: markerOf(),
+        y2: markerOf(),
+      };
+      const pages: Record<string, unknown> = {
+        "": feedPage(
+          [file("x", `X ${marks.x}`, "1"), file("y", `Y ${marks.y}`, "1")],
+          "p1"
+        ),
+        p1: feedPage([], "p1"),
+      };
+      const { connectionId, post } = await connectSampleFeed(owner, pages);
+      const stepsKept = async () =>
+        await inStoreOf("brain", (sql) =>
+          sql
+            .exec<{ step: string }>(
+              "SELECT step FROM events WHERE team = ? ORDER BY step",
+              `team:${team}`
+            )
+            .toArray()
+            .map(({ step }) => step)
+        );
+      later(pollMs);
+      await sync();
+      // x changes on the next page, y on the page after it.
+      pages.p1 = {
+        changes: [file("x", `X ${marks.x2}`, "2")],
+        next: "p2",
+        more: true,
+      };
+      pages.p2 = feedPage([file("y", `Y ${marks.y2}`, "2")], "p3");
+      pages.p3 = feedPage([], "p3");
+      await post(pages);
+      // The first read of x's page saves its change and stops before its
+      // commit.
+      later(pollMs);
+      await syncOn(
+        interleaving(
+          { pattern: commitStatement, bound: connectionId },
+          async () => {
+            await Promise.reject(new Error("Stopped before the commit"));
+          }
+        )
+      );
+      // Its retry commits, and another run reads the next page, saving y's
+      // change, as soon as that commit lets the source go.
+      later(pollMs);
+      await syncOn(
+        interleaving(
+          { pattern: commitStatement, bound: connectionId },
+          async () => {
+            await Promise.resolve();
+          },
+          async () => {
+            await runSync(env);
+          }
+        )
+      );
+      const retried = await stepsKept();
+      // A later page names x again, as it now is.
+      pages.p3 = feedPage([file("x", `X ${marks.x2}`, "2")], "p4");
+      pages.p4 = feedPage([], "p4");
+      await post(pages);
+      later(pollMs);
+      await sync();
+
+      expect({
+        retried,
+        after: await stepsKept(),
+        found: [
+          await finds(owner.userId, marks.x2),
+          await finds(owner.userId, marks.y2),
+        ],
+      }).toStrictEqual({
+        retried: ["file.added", "file.added", "file.changed", "file.changed"],
+        after: ["file.added", "file.added", "file.changed", "file.changed"],
+        found: [true, true],
       });
     }
   );

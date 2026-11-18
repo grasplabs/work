@@ -7,12 +7,14 @@ import { env } from "cloudflare:workers";
  * never sets it off): another run's work landing between what this run
  * read and what it writes, in the order a test chooses. `after`, if
  * given, runs once that statement or batch has run, whether it wrote or
- * failed. `during` uses the plain `env`, so it is not caught again.
+ * failed, before the writer goes on: another run's work landing between
+ * this write and the next. Both use the plain `env`, so neither is
+ * caught again.
  */
 export const interleaving = (
   { pattern, bound }: { pattern: RegExp; bound: string },
   during: () => Promise<void>,
-  after?: () => void
+  after?: () => Promise<void> | void
 ): Env => {
   const queries = new WeakMap<object, { query: string; values: unknown[] }>();
   let ran = false;
@@ -33,7 +35,7 @@ export const interleaving = (
     try {
       return await write();
     } finally {
-      after?.();
+      await after?.();
     }
   };
   const db = new Proxy(env.DB, {
