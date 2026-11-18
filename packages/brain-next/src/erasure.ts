@@ -1,7 +1,12 @@
 import { z } from "zod";
 
 import type { BrainBucket } from "./bucket.ts";
-import { erasureReasons, refusalPrefix, restoringNow } from "./contract.ts";
+import {
+  erasureReasons,
+  proposeKind,
+  refusalPrefix,
+  restoringNow,
+} from "./contract.ts";
 import type {
   ErasureReason,
   ErasureStatus,
@@ -745,7 +750,10 @@ const apply = (
     const rows = rowsOf(sql, source);
     sources += rows.length > 0 ? 1 : 0;
     // A skill drafted from it (skill-proposals.ts) goes with it, open; one
-    // settled holds nothing of it.
+    // settled holds nothing of it. So does a draft of one still on the
+    // queue that names it among what it is drawn from, whatever its state
+    // (waiting, parked for good, or under way, which is stopped): its
+    // payload holds the source's key and what the host said of it.
     sql.exec(
       `DELETE FROM skill_proposals WHERE state = 'open' AND EXISTS (
         SELECT 1 FROM json_each(rests_on)
@@ -753,6 +761,18 @@ const apply = (
       )`,
       source
     );
+    for (const { key: draft } of sql
+      .exec<{ key: string }>(
+        `DELETE FROM work_items WHERE kind = ? AND EXISTS (
+          SELECT 1 FROM json_each(json_extract(payload, '$.sources'))
+          WHERE value = ?
+        ) RETURNING key`,
+        proposeKind,
+        source
+      )
+      .toArray()) {
+      stopped.push(draft);
+    }
     if (hideVersions(sql, source, rows, key)) {
       stopped.push(source);
     }

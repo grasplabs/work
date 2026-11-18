@@ -1580,6 +1580,13 @@ export type OwnExportStart = z.infer<typeof ownExportStartSchema>;
 export const proposalKeySchema = z.string().regex(/^[0-9a-f]{64}$/u);
 
 /**
+ * The kind of work a draft is (skill-proposals.ts): its call's purpose is
+ * `brain.skill.propose`. Erasure names it too (erasure.ts `apply`), to
+ * take out the drafts still on the queue that name an erased source.
+ */
+export const proposeKind = "skill.propose";
+
+/**
  * A proposal to draft for `person` under `key`, unless one was drafted
  * under it already, from the current versions of `sources` (at most a
  * read of current versions: `currentReadMax`), and what the host says

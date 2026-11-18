@@ -10,6 +10,7 @@ import type {
   ModelRequest,
   PersonReader,
 } from "@grasp-os/brain-next/contract";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
@@ -202,6 +203,67 @@ describe("skill proposals", () => {
       listed: await own().skillProposals({ reader: readerOf() }),
       asked: model.asked.length,
     }).toStrictEqual({ listed: [], asked: 3 });
+  });
+
+  it("takes out a draft still on the queue that names an erased source, parked for good too, and leaves no row naming it", async () => {
+    const erased = await sourceOf("Workflow run completed.");
+    const kept = await sourceOf("Workflow run completed.");
+    const [parked, waiting] = [await keyOf(), await keyOf()];
+    for (const key of [parked, waiting]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      await own().proposeSkill({
+        person,
+        key,
+        about: 'Workflow "send-report"',
+        sources: [kept, erased],
+      });
+    }
+    // One of them failed to its final park before the erasure.
+    await runInDurableObject(own(), (_store, state) => {
+      state.storage.sql.exec(
+        `UPDATE work_items SET parked_at = ?, parks = 3, attempts = 5
+        WHERE key = ?`,
+        Date.now(),
+        `proposal:${parked}`
+      );
+    });
+    await own().eraseSource({ source: erased, reason: "deleted" });
+    const naming = await runInDurableObject(
+      own(),
+      (_store, state) =>
+        state.storage.sql
+          .exec<{ count: number }>(
+            "SELECT count(*) AS count FROM work_items WHERE payload LIKE ?",
+            `%${erased}%`
+          )
+          .one().count
+    );
+    const model = draftingModel();
+    await tick(model.ask);
+    expect({ naming, asked: model.asked.length }).toStrictEqual({
+      naming: 0,
+      asked: 0,
+    });
+  });
+
+  it("treats an answer a person could never add as one that doesn't fit: what it needs is the host's, not a draft's", async () => {
+    const model = draftingModel(`---
+name: weekly-report
+description: When you ask for the weekly report.
+requires:
+  tools: mail.send
+---
+Send it.
+`);
+    await propose(
+      await keyOf(),
+      [await sourceOf("Workflow run completed.")],
+      model.ask
+    );
+    expect({
+      asked: model.asked.length,
+      listed: await own().skillProposals({ reader: readerOf() }),
+    }).toStrictEqual({ asked: 1, listed: [] });
   });
 
   it("refuses an answer that isn't a skill, and writes nothing", async () => {

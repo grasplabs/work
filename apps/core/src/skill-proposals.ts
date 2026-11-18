@@ -11,6 +11,7 @@ import { runSource } from "./brain-next-origins.ts";
 import {
   addOwnSkill,
   ownSkillProposalsAs,
+  ownSkillTextOf,
   proposeOwnSkill,
   readCurrentSkillAs,
   settleOwnSkillProposal,
@@ -209,6 +210,21 @@ const basisOf = async (
   };
 };
 
+/**
+ * Whether `text` is one the add takes as a person's own skill, by the
+ * add's own check (`ownSkillTextOf`): a draft it would refuse is never
+ * shown or accepted. The Brain keeps only drafts of a name and a
+ * description, so this holds a drift between the two, never a person.
+ */
+const addableText = (text: string): boolean => {
+  try {
+    ownSkillTextOf(text);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 /** `by`'s open proposals that rest on runs of theirs they may still see, each with its basis. */
 const proposalsOf = async (
   env: Env,
@@ -216,50 +232,32 @@ const proposalsOf = async (
 ): Promise<(SkillProposal & { own: OwnSkillProposal })[]> => {
   const listed = await ownSkillProposalsAs(env, by.userId);
   const shown = await Promise.all(
-    listed.map(async (own) => {
-      const basis = await basisOf(env, by.userId, own);
-      return basis === null
-        ? []
-        : [
-            {
-              key: own.key,
-              name: own.name,
-              description: own.description,
-              text: own.text,
-              basis,
-              own,
-            },
-          ];
-    })
+    listed
+      .filter(({ text }) => addableText(text))
+      .map(async (own) => {
+        const basis = await basisOf(env, by.userId, own);
+        return basis === null
+          ? []
+          : [
+              {
+                key: own.key,
+                name: own.name,
+                description: own.description,
+                text: own.text,
+                basis,
+                own,
+              },
+            ];
+      })
   );
   return shown.flat();
 };
 
 /**
- * Whether `by` may add `proposal` now: no own skill of its name; `same`
- * when an own skill of its name already holds its very text (a retry of
- * an accept whose settle didn't land). A name they deleted for good is
- * refused by the add itself (`skills.name_erased`), which says so.
- */
-const addable = async (
-  env: Env,
-  by: Identity,
-  { name, text }: { name: string; text: string }
-): Promise<"yes" | "same" | "no"> => {
-  const current = await readCurrentSkillAs(env, by.userId, {
-    scope: "person",
-    name,
-  });
-  if (current === null) {
-    return "yes";
-  }
-  return current.text === text ? "same" : "no";
-};
-
-/**
  * The skills proposed to `by` from their own runs: those they may add now,
  * each with what it rests on. One whose name they already use for a skill
- * of their own isn't shown: adding it would replace theirs.
+ * of their own isn't shown: adding it would replace theirs, so the add
+ * refuses it too (`acceptProposal`).
  */
 export const skillProposalsFor = async (
   env: Env,
@@ -267,9 +265,13 @@ export const skillProposalsFor = async (
 ): Promise<SkillProposal[]> => {
   const proposals = await proposalsOf(env, by);
   const shown = await Promise.all(
-    proposals.map(async ({ own: _own, ...proposal }) =>
-      (await addable(env, by, proposal)) === "yes" ? [proposal] : []
-    )
+    proposals.map(async ({ own: _own, ...proposal }) => {
+      const current = await readCurrentSkillAs(env, by.userId, {
+        scope: "person",
+        name: proposal.name,
+      });
+      return current === null ? [proposal] : [];
+    })
   );
   return shown.flat();
 };
@@ -284,9 +286,12 @@ const keyOf = (key: unknown): string =>
 /**
  * Adds `by`'s proposal `key` as their own skill, then settles it, so it
  * isn't proposed again: `skills.not_found` for one they aren't shown now
- * (none of theirs, settled, resting on what they no longer see, or named
- * as a skill of theirs that holds other text). Its change key is its
- * text's SHA-256: a retry after the add landed adds nothing twice.
+ * (none of theirs, settled, or resting on what they no longer see). Added
+ * only while they have no skill of its name, checked in the very write
+ * in their own store (`addOwnSkill`'s `onlyNew`): `skills.name_taken`
+ * otherwise, theirs untouched, whatever they saved meanwhile. Its change
+ * key is its text's SHA-256: a retry after the add landed answers what it
+ * wrote, and settles.
  */
 export const acceptProposal = async (
   env: Env,
@@ -299,30 +304,15 @@ export const acceptProposal = async (
   if (proposal === undefined) {
     throw skillErrors.create("skills.not_found");
   }
-  const state = await addable(env, by, proposal);
-  if (state === "no") {
-    throw skillErrors.create("skills.not_found");
-  }
-  const added =
-    state === "same"
-      ? undefined
-      : await addOwnSkill(env, by.userId, {
-          change: `proposal-${await sha256Of(proposal.text)}`,
-          text: proposal.text,
-        });
+  const added = await addOwnSkill(env, by.userId, {
+    change: `proposal-${await sha256Of(proposal.text)}`,
+    text: proposal.text,
+    onlyNew: true,
+  });
   await settleOwnSkillProposal(env, by.userId, wanted);
-  const current =
-    added ??
-    (await readCurrentSkillAs(env, by.userId, {
-      scope: "person",
-      name: proposal.name,
-    }));
-  if (current === null) {
-    throw skillErrors.create("skills.not_found");
-  }
   return {
     name: proposal.name,
-    version: current.version,
+    version: added.version,
     description: proposal.description,
   };
 };

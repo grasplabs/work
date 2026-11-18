@@ -12,7 +12,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { memberOf } from "../src/auth/identity.ts";
-import { eraseSource, workBrain } from "../src/brain-next.ts";
+import { addOwnSkill, eraseSource, workBrain } from "../src/brain-next.ts";
 import { skillsFor } from "../src/brain-skills.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
@@ -181,12 +181,19 @@ const drafts = (request: SentRequest): boolean =>
  * one, and finds nothing for the Brain's extraction of the runs; and the
  * draft requests it got.
  */
-const draftingProvider = async (name: string) => {
+const draftingProvider = async (
+  name: string,
+  { numbered = false }: { numbered?: boolean } = {}
+) => {
   const provider = await answeringProvider((requests) => {
     const body = JSON.stringify(requests.at(-1)?.body);
     if (body.includes(draftingWords)) {
+      // Numbered: each draft's text its own, by how many came before it.
+      const draft = numbered
+        ? ` Draft ${requests.filter((request) => drafts(request)).length}.`
+        : "";
       return {
-        text: `---\nname: ${name}\ndescription: When you ask for the weekly report.\n---\nAsk which week, then send it.`,
+        text: `---\nname: ${name}\ndescription: When you ask for the weekly report.\n---\nAsk which week, then send it.${draft}`,
         inputTokens: 50,
         outputTokens: 20,
       };
@@ -203,6 +210,16 @@ const draftingProvider = async (name: string) => {
     drafted: () => provider.requests.filter((request) => drafts(request)),
   };
 };
+
+/** The SHA-256 of `text`, as hex. */
+const sha256Of = async (text: string): Promise<string> =>
+  [
+    ...new Uint8Array(
+      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))
+    ),
+  ]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 
 /** What `api`'s skills page proposes from workflow `id`. */
 const proposedFrom = async (
@@ -454,9 +471,91 @@ describe("skill proposals", setUpTime, () => {
     }).toStrictEqual({
       draftsAsked: 1,
       proposed: [],
-      adds: "skills.not_found",
+      adds: "skills.name_taken",
       own: [1],
       text: mine,
+    });
+  });
+
+  it("never writes a draft over a skill of its name, though the person saves one or accepts another of it at the same moment", async () => {
+    const name = `weekly-report-${unique()}`;
+    await draftingProvider(name, { numbered: true });
+    const [builder, ada] = await Promise.all([
+      person("builder"),
+      person("user"),
+    ]);
+    // Two workflows, each proposing a draft of the same name, other text.
+    const [first, second] = [
+      await workflowOf(builder.by, [ada.userId]),
+      await workflowOf(builder.by, [ada.userId]),
+    ];
+    await runs(ada.by, first.id, 5);
+    await runs(ada.by, second.id, 5);
+    const [one] = await proposedFrom(ada.api, first.id);
+    const [two] = await proposedFrom(ada.api, second.id);
+    const mine = `---\nname: ${name}\ndescription: My own way.\n---\nMine.\n`;
+    // Both accepted, and her own saved in another tab, all at once.
+    const [acceptedOne, acceptedTwo, saved] = await Promise.all([
+      outcome(ada.api.skills.acceptProposal(one?.key ?? "")),
+      outcome(ada.api.skills.acceptProposal(two?.key ?? "")),
+      outcome(ada.api.skills.save(mine)),
+    ]);
+    const { own } = await ada.api.skills.overview();
+    const { text, version } = await ada.api.skills.read("own", name);
+    const outcomes = [acceptedOne, acceptedTwo];
+    expect({
+      distinct: one !== undefined && two !== undefined && one.text !== two.text,
+      saved,
+      // At most one draft landed, and only where nothing of the name was:
+      // her save, always hers to make, is the current text either way.
+      accepted: outcomes.filter((each) => each === "ok").length <= 1,
+      refused: outcomes.every((each) =>
+        ["ok", "skills.name_taken"].includes(each)
+      ),
+      // A draft that landed is version 1; her save made the next.
+      versions: version === (outcomes.includes("ok") ? 2 : 1),
+      listed: own.filter((skill) => skill.name === name).length,
+      text,
+    }).toStrictEqual({
+      distinct: true,
+      saved: "ok",
+      accepted: true,
+      refused: true,
+      versions: true,
+      listed: 1,
+      text: mine,
+    });
+  });
+
+  it("answers a retry of the same accept, whose add landed before, with what it wrote, and settles it", async () => {
+    const name = `weekly-report-${unique()}`;
+    await draftingProvider(name);
+    const [builder, ada] = await Promise.all([
+      person("builder"),
+      person("user"),
+    ]);
+    const workflow = await workflowOf(builder.by, [ada.userId]);
+    await runs(ada.by, workflow.id, 5);
+    const [proposal] = await proposedFrom(ada.api, workflow.id);
+    const text = proposal?.text ?? "";
+    // The first try's add landed and its settle didn't: the same write.
+    const landed = await addOwnSkill(env, ada.userId, {
+      change: `proposal-${await sha256Of(text)}`,
+      text,
+      onlyNew: true,
+    });
+    const retried = await ada.api.skills.acceptProposal(proposal?.key ?? "");
+    const read = await ada.api.skills.read("own", name);
+    expect({
+      landed: landed.version,
+      retried: retried.version,
+      current: [read.version, read.text === text],
+      proposed: await proposedFrom(ada.api, workflow.id),
+    }).toStrictEqual({
+      landed: 1,
+      retried: 1,
+      current: [1, true],
+      proposed: [],
     });
   });
 

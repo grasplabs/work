@@ -12,6 +12,8 @@ export const skillErrors = defineErrorFamily({
   "skills.name_erased":
     "You deleted a skill of that name for good: give this one another name.",
   "skills.not_in_team": "You can share a skill only with a team you're in.",
+  "skills.name_taken":
+    "You have a skill of that name already: yours stays as it is.",
 });
 
 /** A skill as the skills page lists it: its name, version and when to use it. */

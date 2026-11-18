@@ -4231,6 +4231,32 @@ export const coreProbes = {
       }),
     ];
   },
+  // A text checked as a person's own skill takes it: no reader, and only
+  // what it is given (so never the markers, which it would echo back).
+  ownSkillTextOf: async () => [
+    await answer(
+      "a skill",
+      async () =>
+        await Promise.resolve(
+          coreBrain.ownSkillTextOf(
+            "---\nname: probe\ndescription: A probe.\n---\nSteps.\n"
+          )
+        )
+    ),
+    await answer(
+      "a skill declaring needs it can't say",
+      async () =>
+        await Promise.resolve(
+          coreBrain.ownSkillTextOf(
+            "---\nname: probe\ndescription: A probe.\nrequires:\n  tools: mail.send\n---\nSteps.\n"
+          )
+        )
+    ),
+    await answer(
+      "no skill",
+      async () => await Promise.resolve(coreBrain.ownSkillTextOf("Steps."))
+    ),
+  ],
   // A number, the longest question recall takes: the same for everyone.
   recallQuestionMaxLength: async () => [
     await answer(

@@ -1,10 +1,11 @@
-import { instructionsMaxLength } from "@grasp-os/shared/instruction-files";
 import { log } from "@grasp-os/shared/log";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
 import {
+  instructionsTextSchema,
   proposalKeySchema,
+  proposeKind,
   proposalRequestSchema,
   tokensOf,
 } from "./contract.ts";
@@ -41,9 +42,6 @@ import type { WorkContext } from "./work.ts";
 // - Not a skill: nothing lists, selects or reads it as one. The host
 //   writes the person's own skill from it once they accept, then settles
 //   it (`settleProposal`), which keeps the key alone.
-
-/** The kind of work a draft is: its call's purpose is `brain.skill.propose`. */
-const proposeKind = "skill.propose";
 
 /**
  * The part of the model's window the routine and its runs may take: the
@@ -113,18 +111,27 @@ const allCurrent = (
     )
     .one().count === versions.length;
 
+/** What a draft's frontmatter may hold: its card alone. */
+const draftKeys: ReadonlySet<string> = new Set(["name", "description"]);
+
 /**
  * The SKILL.md the model answered, its one surrounding code fence taken
- * off; null when it isn't a skill in the Agent Skills format, or is longer
- * than an instruction file may be (what the host adds as a skill takes).
+ * off; null when it isn't one a person could add as their own: a skill in
+ * the Agent Skills format whose frontmatter holds its card alone (`name`
+ * and `description`: anything else, such as what it needs, is the host's
+ * to judge, and a draft has no call to declare it), as an instruction
+ * file's text (`instructionsTextSchema`, as the host's add takes it).
+ * Such an answer doesn't fit: the item fails as `invalid_answer`.
  */
-const skillOf = (answer: string): string | null => {
+const draftSkillOf = (answer: string): string | null => {
   const fenced = /^```[a-z]*\r?\n(?<body>[\s\S]*?)\r?\n```$/u.exec(
     answer.trim()
   );
   const text = `${(fenced?.groups?.body ?? answer).trim()}\n`;
-  return text.length <= instructionsMaxLength &&
-    skillFrontmatterOf(text) !== null
+  const frontmatter = skillFrontmatterOf(text);
+  return instructionsTextSchema.safeParse(text).success &&
+    frontmatter !== null &&
+    Object.keys(frontmatter).every((key) => draftKeys.has(key))
     ? text
     : null;
 };
@@ -191,7 +198,7 @@ const draftOf = async (
       context.contextTokens
     ),
   });
-  const skill = skillOf(text);
+  const skill = draftSkillOf(text);
   if (skill === null) {
     throw new WorkError("invalid_answer");
   }
