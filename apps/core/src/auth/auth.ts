@@ -49,7 +49,7 @@ import {
 import { mayComeIn, staffMayStay } from "../onboarding/gate.ts";
 import { onboardingStore } from "../onboarding/store.ts";
 import { keepSignInAddress } from "../source-readers.ts";
-import { addedByHand } from "../staff-list-teams.ts";
+import { addedByHand, placePrimaries } from "../staff-list-teams.ts";
 import { checkClaims } from "./claims.ts";
 import {
   devIdpOrigin,
@@ -392,6 +392,23 @@ const interviewInvites = async (
 };
 
 /**
+ * Puts a member signing in in the team the confirmed staff list names for
+ * their verified address (GRA-2055), by the confirm's own rule
+ * (staff-list-teams.ts `placementOf`): someone with no account at the
+ * confirm joins their team now. A failure keeps nobody from signing in;
+ * it places nobody, and the next sign-in or confirm tries again.
+ */
+const placeAtSignIn = async (env: Env, userId: string): Promise<void> => {
+  try {
+    await placePrimaries(env, { type: "system" }, userId);
+  } catch (error) {
+    log.error("auth.staff_list_place_failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+};
+
+/**
  * Folds the user Better Auth just made for a first Microsoft sign-in into
  * the member the directory made for the same Entra object id, the one
  * their sign-in's verified ID token names: their account moves to that
@@ -620,7 +637,11 @@ const startSession = async <T extends { expiresAt: Date; userId: string }>(
           })
         : session.userId;
     // For members.
-    return (await ensureMember(env, config, userId))
+    const member = await ensureMember(env, config, userId);
+    if (member) {
+      await placeAtSignIn(env, userId);
+    }
+    return member
       ? {
           data: {
             ...session,

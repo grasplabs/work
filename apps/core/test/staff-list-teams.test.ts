@@ -4,7 +4,16 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { mockIdp } from "./idp.ts";
-import { auditedDuring, callAuth, signedInApi, unique } from "./sign-in.ts";
+import { acmeTenant } from "./sign-in-config.ts";
+import {
+  auditedDuring,
+  callAuth,
+  entraPerson,
+  signIn,
+  signedInApi,
+  unique,
+  whoami,
+} from "./sign-in.ts";
 
 // One list of teams with one id (GRA-2055, core's staff-list-teams.ts):
 // the onboarding's staff list names the members' teams. What can go
@@ -409,5 +418,85 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
       again: again.ok,
       rows: after.length,
     }).toStrictEqual({ byList: byBetterAuth, again: true, rows: 1 });
+  });
+
+  it("place a member who first signs in after the confirm in the team it gave their address, never by a draft, nor someone removed or erased", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const removed = await signedInApi(idp, "user");
+    const erased = await signedInApi(idp, "user");
+    const tag = unique();
+    await admin.api.members.remove(removed.userId);
+    await admin.api.members.remove(erased.userId);
+    await admin.api.members.erase(erased.userId, String(erased.person.name));
+    // No account yet: Nia signs in for the first time after the confirm.
+    const nia = entraPerson(acmeTenant, "acme.test", {
+      email: `nia-${tag}@acme.test`,
+    });
+    const roster = (niaIn: string): RosterInput => ({
+      teams: [
+        { id: "sales", name: `Sales ${tag}`, lead: null },
+        { id: "finance", name: `Finance ${tag}`, lead: null },
+      ],
+      people: [
+        { id: "nia", name: "Nia", email: String(nia.email), team: niaIn },
+        { id: "rex", name: "Rex", email: emailOf(removed), team: "sales" },
+        { id: "eve", name: "Eve", email: emailOf(erased), team: "sales" },
+      ],
+    });
+    await admin.api.onboarding.confirmRoster(roster("sales"));
+    const { roster: kept } = await admin.api.onboarding.view();
+    const idOf = (name: string): string =>
+      kept?.teams.find((team) => team.name === `${name} ${tag}`)?.id ?? "";
+    // A draft moving her changes nothing at her sign-in.
+    await admin.api.onboarding.saveRoster({
+      ...roster("finance"),
+      teams: [
+        { id: idOf("Sales"), name: `Sales ${tag}`, lead: null },
+        { id: idOf("Finance"), name: `Finance ${tag}`, lead: null },
+      ],
+      people: roster("finance").people.map((person) => ({
+        ...person,
+        team: person.id === "nia" ? idOf("Finance") : idOf("Sales"),
+      })),
+    });
+
+    let session: string | undefined;
+    const events = await auditedDuring(async () => {
+      ({ session } = await signIn(idp, "microsoft", nia));
+    });
+    const signedInNia = await whoami(session);
+    const back = await Promise.all(
+      [removed.person, erased.person].map(async (claims) => {
+        const again = await signIn(idp, "microsoft", claims);
+        return again.session;
+      })
+    );
+    const teams = await membersTeams(admin);
+
+    expect({
+      nia: signedInNia.teams.map(({ id }) => id),
+      events: events
+        .filter(({ action }) => action.startsWith("team.member."))
+        .map(({ action, actor, target, detail }) => ({
+          action,
+          actor: actor.type,
+          target: target?.id,
+          detail,
+        })),
+      back,
+      sales: teams.get(`Sales ${tag}`)?.memberIds,
+    }).toStrictEqual({
+      nia: [idOf("Sales")],
+      events: [
+        {
+          action: "team.member.added",
+          actor: "system",
+          target: idOf("Sales"),
+          detail: { userId: signedInNia.userId, via: "staffList" },
+        },
+      ],
+      back: [undefined, undefined],
+      sales: [signedInNia.userId],
+    });
   });
 });

@@ -69,6 +69,7 @@ import {
   stephenSummaries,
   stephenSummaryReaders,
   teamMembers,
+  staffListPlaces,
   teamPrimaries,
   users,
   workflowDecisionConfirmations,
@@ -281,6 +282,8 @@ const identity: ErasureStep = {
       db
         .delete(appVisitorSessions)
         .where(eq(appVisitorSessions.address, theirAddress)),
+      // Where the staff list placed their address (GRA-2055).
+      db.delete(staffListPlaces).where(eq(staffListPlaces.email, theirAddress)),
       db
         .update(users)
         .set({

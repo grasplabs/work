@@ -570,6 +570,27 @@ export const teamPrimaries = sqliteTable(
 );
 
 /**
+ * Where the staff list the admin last confirmed puts each address
+ * (GRA-2055): the team of everyone on it with an email, folded to lower
+ * case, whether they have an account yet or not. Replaced whole by each
+ * confirm, never by a draft save; read by the one rule that places members
+ * in their primary team (staff-list-teams.ts `placePrimaries`), at the
+ * confirm and at each sign-in. The first of two people sharing an address
+ * keeps it.
+ */
+export const staffListPlaces = sqliteTable(
+  "staff_list_places",
+  {
+    email: text().primaryKey(),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    confirmedAt: timestamp("confirmed_at").notNull(),
+  },
+  (table) => [index("staff_list_places_team_id_idx").on(table.teamId)]
+);
+
+/**
  * Part of the SSO plugin's model, and stays empty: sign-in providers come
  * only from deployment config, and registering one in-product is refused.
  */

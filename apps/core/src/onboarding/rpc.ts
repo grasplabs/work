@@ -64,7 +64,11 @@ import { z } from "zod";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
-import { intoMembersTeams, placePrimaries } from "../staff-list-teams.ts";
+import {
+  intoMembersTeams,
+  keepStaffListPlaces,
+  placePrimaries,
+} from "../staff-list-teams.ts";
 import {
   inProgramme,
   nextReport,
@@ -198,7 +202,8 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         confirmed,
       });
       if (confirmed) {
-        await placePrimaries(this.#env, named, by);
+        await keepStaffListPlaces(this.#env, named);
+        await placePrimaries(this.#env, by);
       }
       // A team the save took under seven loses its claims in the Brain now,
       // not only by core's clock (onboarding/new-brain.ts).

@@ -7,7 +7,13 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { teamAccessMayHaveDropped } from "./access-revocations.ts";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember, organizationId } from "./auth/membership-sql.ts";
-import { teamMembers, teamPrimaries, teams, users } from "./db/core/schema.ts";
+import {
+  staffListPlaces,
+  teamMembers,
+  teamPrimaries,
+  teams,
+  users,
+} from "./db/core/schema.ts";
 import { chunks, inList, statementsWithin } from "./db/d1.ts";
 import { teamNameKey } from "./onboarding/kickoff-company.ts";
 
@@ -18,9 +24,11 @@ import { teamNameKey } from "./onboarding/kickoff-company.ts";
 // store beside the team under the team's id. The ways this can leak, and
 // what stops each:
 //
-// - Someone placed in a team reads what the team's members read. Only an
-//   admin's confirm places anyone (`placePrimaries`), never a draft save;
-//   only a current member (not removed, checked in the statement itself),
+// - Someone placed in a team reads what the team's members read. Only
+//   what an admin's confirm kept places anyone (`staff_list_places`,
+//   `placePrimaries`), at the confirm or at their sign-in, never a draft
+//   save; only a current member (not removed, checked in the statement
+//   itself; an erased address never signs in),
 //   found by the address their company's sign-in verified, never by name
 //   nor by a directory placeholder; every placement and removal audited.
 // - Nothing automatic overrides what an admin did by hand (`placementOf`):
@@ -271,16 +279,14 @@ export const placementOf = (
 };
 
 /**
- * Puts each person on the confirmed `roster` who is a member now in their
- * team, as their primary one, found by the address their sign-in
- * verified; and moves out of the team it gave them before whoever the
- * list moved, took off, or no longer finds by their address, by the one
- * rule (`placementOf`). Each change audited.
+ * Keeps where the confirmed `roster` puts each address (`staff_list_places`),
+ * replacing what the last confirm kept: what `placePrimaries` places by,
+ * at the confirm and at each sign-in. Only a confirm calls this; a draft
+ * save never.
  */
-export const placePrimaries = async (
+export const keepStaffListPlaces = async (
   env: Env,
-  roster: Roster,
-  actor: AuditActor
+  roster: Roster
 ): Promise<void> => {
   const db = drizzle(env.DB);
   const teamOf = new Map<string, string>();
@@ -290,13 +296,46 @@ export const placePrimaries = async (
       teamOf.set(address, team);
     }
   }
+  const now = new Date();
+  const rows = [...teamOf].map(([email, teamId]) => ({
+    email,
+    teamId,
+    confirmedAt: now,
+  }));
+  await db.batch([
+    db.delete(staffListPlaces),
+    ...statementsWithin(rows, (part) =>
+      db.insert(staffListPlaces).values(part)
+    ),
+  ]);
+};
+
+/**
+ * Puts each current member whose verified address the confirmed staff
+ * list names (`staff_list_places`) in that team, as their primary one;
+ * and moves out of the team it gave them before whoever the list moved,
+ * took off, or no longer finds by their address, by the one rule
+ * (`placementOf`). For everyone at a confirm; for `only` (a user id) as
+ * they sign in, so someone with no account at the confirm joins their
+ * team with their first sign-in. Each change audited.
+ */
+export const placePrimaries = async (
+  env: Env,
+  actor: AuditActor,
+  only?: string
+): Promise<void> => {
+  const db = drizzle(env.DB);
   const [found, placed] = await db.batch([
     db
-      .select({ id: users.id, email: users.email })
+      .select({ id: users.id, team: staffListPlaces.teamId })
       .from(users)
+      .innerJoin(
+        staffListPlaces,
+        eq(staffListPlaces.email, sql`lower(${users.email})`)
+      )
       .where(
         and(
-          inList(sql`lower(${users.email})`, [...teamOf.keys()]),
+          only === undefined ? undefined : eq(users.id, only),
           sql`${users.email} NOT LIKE ${placeholderSuffix}`,
           activeMember(users.id)
         )
@@ -307,15 +346,10 @@ export const placePrimaries = async (
         teamId: teamPrimaries.teamId,
         made: teamPrimaries.made,
       })
-      .from(teamPrimaries),
+      .from(teamPrimaries)
+      .where(only === undefined ? undefined : eq(teamPrimaries.userId, only)),
   ]);
-  const wanted = new Map<string, string>();
-  for (const { id, email } of found) {
-    const team = teamOf.get(email.toLowerCase());
-    if (team !== undefined) {
-      wanted.set(id, team);
-    }
-  }
+  const wanted = new Map(found.map(({ id, team }) => [id, team]));
   const was = new Map(
     placed.map(({ userId, teamId, made }) => [userId, { teamId, made }])
   );
