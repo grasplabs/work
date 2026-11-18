@@ -1,11 +1,12 @@
 /**
  * A source the onboarding gives the Brain that stands only while what it
- * rests on does: a team claim (`claim:<source>`, GRA-1946) or a drawing of
- * a team's piece of work (`drawing:<source>`, GRA-1748), each by the id
- * the onboarding minted for it.
+ * rests on does: a team claim (`claim:<source>`, GRA-1946), a drawing of
+ * a team's piece of work (`drawing:<source>`, GRA-1748) or an opinion of
+ * the company's (`opinion:<source>`, GRA-1987), each by the id the
+ * onboarding minted for it.
  */
 export interface FallingSource {
-  producer: "claim" | "drawing";
+  producer: "claim" | "drawing" | "opinion";
   id: string;
 }
 
