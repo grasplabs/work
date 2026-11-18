@@ -93,6 +93,14 @@ const idSchema = z
   .string()
   .regex(/^[A-Za-z0-9_-]{1,60}$/u, "Letters, digits, - and _ only");
 
+/**
+ * A team's name as people mean it, whichever way it is written: trimmed,
+ * in one Unicode form (NFC) and lower case. Two names with the same key are
+ * the same team, to the web's staff list and to core alike.
+ */
+export const teamNameKey = (name: string): string =>
+  name.trim().normalize("NFC").toLowerCase();
+
 /** A team, as the staff list and its admin have it. */
 export const rosterTeamSchema = z.strictObject({
   /**

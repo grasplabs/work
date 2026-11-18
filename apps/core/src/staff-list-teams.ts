@@ -1,6 +1,7 @@
 import { createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import type { Roster } from "@grasp-os/shared/onboarding";
+import { teamNameKey } from "@grasp-os/shared/onboarding";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -18,7 +19,6 @@ import {
   users,
 } from "./db/core/schema.ts";
 import { chunks, inList } from "./db/d1.ts";
-import { teamNameKey } from "./onboarding/kickoff-company.ts";
 
 // One list of teams with one id (GRA-2055): the onboarding's staff list
 // names the members' teams (Better Auth's `teams`), never teams of its

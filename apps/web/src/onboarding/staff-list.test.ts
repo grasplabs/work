@@ -337,6 +337,26 @@ describe("a staff list shared again", () => {
     expect(rosterSchema.safeParse(again).success).toBeTruthy();
   });
 
+  it("keeps a team's saved choices when its name comes back in another Unicode form or with spaces around it", () => {
+    const composed = "Caf\u00E9";
+    const decomposed = " Cafe\u0301 ";
+    const read = staffListOf(
+      [
+        ["Name", "Email", "Team", "Job"],
+        ["Ada Bos", "ada@x.com", decomposed, ""],
+      ],
+      "Other"
+    ).roster;
+    const savedCafe: Roster = rosterSchema.parse({
+      teams: [{ id: "members-cafe", name: composed, lead: null, off: true }],
+      people: [{ id: "ada", name: "Ada Bos", team: "members-cafe" }],
+    });
+    const again = withSaved(read, savedCafe);
+    expect(again.teams.map(({ id, off }) => [id, off])).toStrictEqual([
+      ["members-cafe", true],
+    ]);
+  });
+
   it("is the list itself when nothing was saved before", () => {
     expect(withSaved(first, null)).toStrictEqual(first);
   });

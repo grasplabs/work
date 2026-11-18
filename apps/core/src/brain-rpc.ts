@@ -28,7 +28,7 @@ import type {
 } from "@grasp-os/shared/brain-records";
 import type { ConnectionSource } from "@grasp-os/shared/connect";
 import type { KickoffView } from "@grasp-os/shared/kickoff";
-import { minTeamShown } from "@grasp-os/shared/onboarding";
+import { minTeamShown, teamNameKey } from "@grasp-os/shared/onboarding";
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
 import { isAdmin } from "@grasp-os/shared/roles";
@@ -62,7 +62,7 @@ import { organizations } from "./db/core/schema.ts";
 import { nativeSyncs } from "./native-tool-classes.gen.ts";
 import { intakeIds, ownId } from "./onboarding/brain-intake.ts";
 import type { CompanyTeam } from "./onboarding/company-teams.ts";
-import { kickoffSaid, teamNameKey } from "./onboarding/kickoff-company.ts";
+import { kickoffSaid } from "./onboarding/kickoff-company.ts";
 import type { CompanyKickoff } from "./onboarding/kickoff-company.ts";
 import { mondayOf } from "./onboarding/rules.ts";
 import { onboardingStore } from "./onboarding/store.ts";

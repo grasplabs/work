@@ -2,6 +2,7 @@ import type { DirectoryPerson } from "@grasp-os/shared/directory";
 import {
   onboardingPeopleMax,
   onboardingTeamsMax,
+  teamNameKey,
 } from "@grasp-os/shared/onboarding";
 import type {
   Roster,
@@ -215,7 +216,7 @@ const teamIds = () => {
   const byName = new Map<string, string>();
   const taken = new Set<string>();
   return (name: string): { id: string; fresh: boolean } => {
-    const key = name.toLowerCase();
+    const key = teamNameKey(name);
     const known = byName.get(key);
     if (known !== undefined) {
       return { id: known, fresh: false };
@@ -458,12 +459,12 @@ const underSavedIds = (
   saved: Roster
 ): StaffList["roster"] => {
   const savedIds = new Map(
-    saved.teams.map((team) => [team.name.toLowerCase(), team.id])
+    saved.teams.map((team) => [teamNameKey(team.name), team.id])
   );
   const idOf = new Map(
     read.teams.map((team) => [
       team.id,
-      savedIds.get(team.name.toLowerCase()) ?? team.id,
+      savedIds.get(teamNameKey(team.name)) ?? team.id,
     ])
   );
   return {

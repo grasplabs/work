@@ -1,5 +1,6 @@
 import { kickoffVisionFields } from "@grasp-os/shared/kickoff";
 import type { KickoffView } from "@grasp-os/shared/kickoff";
+import { teamNameKey } from "@grasp-os/shared/onboarding";
 
 // What the kickoff gives the whole company (GRA-528, GRA-1748): the
 // vision, as what the kickoff read about the goals (its ambition) and the
@@ -23,14 +24,6 @@ export const kickoffSaid = (
     .map((each) => each?.trim() ?? "")
     .filter((each) => each !== "")
     .join("\n");
-
-/**
- * A team's name as people mean it, whichever way it is written: trimmed,
- * lower case and in one Unicode form. Two names with the same key are the
- * same team.
- */
-export const teamNameKey = (name: string): string =>
-  name.trim().toLowerCase().normalize("NFC");
 
 /** The kickoff as every member may read it. */
 export interface CompanyKickoff {
