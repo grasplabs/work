@@ -34,7 +34,7 @@ Vite+ (`vp`) is the toolchain. Run from the repo root:
 - `vp run -r build`: build everything
 - `vp run e2e`: Playwright end-to-end tests (`*.e2e.ts` in `e2e/`)
 - `vp run smoke:workerd`: boot core on plain workerd (on-prem readiness)
-- `vp run dev`: run the frontend (localhost:5173) with core and connect behind it (localhost:8787); `vp -C apps/admin dev` for the admin
+- `vp run dev`: run the frontend (localhost:5173) with core and connect behind it (localhost:8787); `vp -C apps/admin dev` for the admin. It has a fake outside API to add as an HTTP connection (`apps/connect/test/outside-api-fake.ts`): `https://api.acme-billing.test`, any credential, paths under `/v1`. `/v1/invoices` answers at once, `/v1/slow` after 10 seconds, and `/v1/dropped` takes the request and never answers
 - `vp run seed`: while `vp run dev` runs, fill it with a demo company (`scripts/seed/`): people in teams, Apps with 30 days of runs, Knowledge and chats; sign in as admin@acme.test. It adds only what's missing; to start over, stop dev and delete `apps/core/.wrangler/state`
 - `vp run seed:onboarding`: on a fresh `vp run dev` instead of `vp run seed`, the same company halfway through its onboarding (`scripts/seed-onboarding.ts`): day 8 of 14 of the interviews, most leads heard, one team quiet, Grasp at 75% of the 80% go. Admin at `/setup` as admin@acme.test, Grasp's side at `/onboarding` as staff@grasp.test
 - `vp run -r typegen`: regenerate `worker-configuration.d.ts` after changing a `wrangler.jsonc`

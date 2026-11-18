@@ -13,6 +13,13 @@
  * jurisdiction is set only by the admin's rendering (unset is the EU), so
  * the local config carries it instead.
  *
+ * With `CONNECT_DEV_MAIN` set, the local config's `main` is that file
+ * instead of the Worker's own: `vp run dev` (scripts/dev.ts) names
+ * connect's test/dev-entry.ts, which is connect with a fake outside API
+ * beside it. An environment variable of this script's, read on a
+ * developer's machine: no Worker reads it, and a deployment is rendered
+ * from wrangler.jsonc, never from the local config.
+ *
  * Usage: `node scripts/wrangler-local-config.ts <config> NAME:value...`
  */
 import { readFileSync, writeFileSync } from "node:fs";
@@ -40,8 +47,10 @@ const added = Object.fromEntries(
   })
 );
 const vars: unknown = Reflect.get(parsed, "vars");
+const devMain = process.env.CONNECT_DEV_MAIN;
 const local = {
   ...parsed,
+  ...(devMain === undefined ? {} : { main: devMain }),
   vars: { ...(typeof vars === "object" ? vars : {}), ...added },
 };
 
