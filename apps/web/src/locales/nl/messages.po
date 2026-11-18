@@ -7506,6 +7506,10 @@ msgstr "Grasp onthoudt: {statement}"
 msgid "Grasp will remember: {statement} (value: {value})"
 msgstr "Grasp onthoudt: {statement} (waarde: {value})"
 
+#: src/apps/app-code.tsx
+msgid "Grasp writes the first version in the chat."
+msgstr "Grasp schrijft de eerste versie in de chat."
+
 #: src/apps/app-history.tsx
 msgid "Grasp, in {name}'s chat"
 msgstr "Grasp, in de chat van {name}"
@@ -10079,8 +10083,8 @@ msgid "No chats yet"
 msgstr "Nog geen chats"
 
 #: src/apps/app-code.tsx
-msgid "No code yet: Grasp writes the first version in the chat."
-msgstr "Nog geen code: Grasp schrijft de eerste versie in de chat."
+msgid "No code yet"
+msgstr "Nog geen code"
 
 #: src/brain/brain.ts
 msgid "No connector yet"
@@ -10097,6 +10101,10 @@ msgstr "Er passen geen gebeurtenissen in het laatste stuk van het log."
 #: src/activity/audit-log.tsx
 msgid "No events match."
 msgstr "Geen gebeurtenissen gevonden."
+
+#: src/apps/app-code.tsx
+msgid "No files"
+msgstr "Geen bestanden"
 
 #: src/knowledge/nav.tsx
 #: src/routes/_shell.knowledge.index.tsx
@@ -16671,10 +16679,6 @@ msgstr "De opgeslagen code van deze pagina komt niet meer overeen met de gepubli
 msgid "This version can't open"
 msgstr "Deze versie kan niet openen"
 
-#: src/apps/app-code.tsx
-msgid "This version has no files."
-msgstr "Deze versie heeft geen bestanden."
-
 #: src/pages/frame-failure.tsx
 msgid "This version of the App hasn't been sealed, so it can't be opened. A builder can publish it again."
 msgstr "Deze versie van de app is niet verzegeld, dus hij kan niet worden geopend. Een bouwer kan hem opnieuw publiceren."
@@ -16919,7 +16923,6 @@ msgid "Try"
 msgstr "Proberen"
 
 #: src/agents/agent-documents.tsx
-#: src/apps/app-data.tsx
 #: src/apps/app-owner.tsx
 #: src/apps/app-settings.tsx
 #: src/chat/builds.tsx

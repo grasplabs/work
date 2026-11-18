@@ -51,8 +51,8 @@ import {
   Database,
   Download,
   Icon,
+  More,
   Search,
-  Sortable,
   Upload,
 } from "../grasp/icons/index.ts";
 import {
@@ -135,9 +135,6 @@ const styles = stylex.create({
     paddingBlock: grasp.space2,
     paddingInline: grasp.space3,
   },
-  // A note, and what to do about it beside it.
-  note: { display: "flex", alignItems: "center", gap: grasp.space2 },
-  noteWords: { flexGrow: 1 },
   grid: { flexGrow: 1, minHeight: 0, overflow: "auto" },
   // A record's sheet and a history entry: their parts, one under the other.
   stack: { display: "grid", gap: grasp.space4 },
@@ -729,18 +726,19 @@ const recordColumns = (
   },
 ];
 
-/** What a read of records ran into: the App moved on, an ID found nothing, a failure. */
+/**
+ * What finding, exporting or importing ran into: the App moved on, an ID
+ * found nothing, a call that failed. A page of records that failed to
+ * load is the table's own to say (its `failed`), with Try again.
+ */
 const RecordNotes = ({
   stale,
   missing,
   failure,
-  onRetry,
 }: {
   stale: boolean;
   missing: boolean;
   failure: string | undefined;
-  /** Reads again what failed to load; none for a failure nothing reads again. */
-  onRetry?: () => void;
 }) => {
   const { t } = useLingui();
   const router = useRouter();
@@ -750,35 +748,27 @@ const RecordNotes = ({
   return (
     <div {...stylex.props(styles.notes)}>
       {stale ? (
-        <div {...stylex.props(styles.note)}>
-          <Alert layout={styles.noteWords} tone="attention">
-            {t`This App changed. Reload to see its current version.`}
-          </Alert>
-          <Button
-            onClick={() => {
-              void router.invalidate();
-            }}
-            size="sm"
-          >
-            {t`Reload`}
-          </Button>
-        </div>
+        <Alert
+          action={
+            <Button
+              onClick={() => {
+                void router.invalidate();
+              }}
+              size="xs"
+              variant="quiet"
+            >
+              {t`Reload`}
+            </Button>
+          }
+          tone="attention"
+        >
+          {t`This App changed. Reload to see its current version.`}
+        </Alert>
       ) : null}
       {missing ? (
         <Alert>{t`No record of this table has that ID.`}</Alert>
       ) : null}
-      {failure === undefined ? null : (
-        <div {...stylex.props(styles.note)}>
-          <Alert layout={styles.noteWords} tone="danger">
-            {failure}
-          </Alert>
-          {onRetry === undefined ? null : (
-            <Button onClick={onRetry} size="sm">
-              {t`Try again`}
-            </Button>
-          )}
-        </div>
-      )}
+      {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
     </div>
   );
 };
@@ -916,7 +906,7 @@ const RecordActions = ({
         <DropdownMenuTrigger
           aria-label={t`Import or export`}
           disabled={busy}
-          icon={Sortable}
+          icon={More}
           size="sm"
           title={t`Import or export`}
           variant="ghost"
@@ -1047,12 +1037,7 @@ export const TableRecords = ({
       </div>
       {instead}
       {instead === undefined ? (
-        <RecordNotes
-          failure={pages.failure ?? action.failure}
-          {...(pages.failure === undefined ? {} : { onRetry: pages.retry })}
-          missing={missing}
-          stale={stale}
-        />
+        <RecordNotes failure={action.failure} missing={missing} stale={stale} />
       ) : null}
       {instead === undefined ? (
         <div {...stylex.props(styles.grid)}>
@@ -1060,6 +1045,11 @@ export const TableRecords = ({
             columns={tableColumns}
             density="compact"
             empty={{ description: t`No records` }}
+            {...(pages.failure === undefined
+              ? {}
+              : {
+                  failed: { description: pages.failure, onRetry: pages.retry },
+                })}
             hasMore={pages.more && pages.failure === undefined}
             label={label}
             loading={pages.loading}

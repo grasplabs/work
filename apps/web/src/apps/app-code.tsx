@@ -10,7 +10,19 @@ import { useCopy } from "../copy.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { Breadcrumb } from "../grasp/breadcrumb/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Copy, Folder as FolderIcon, Tick } from "../grasp/icons/index.ts";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../grasp/empty/index.ts";
+import {
+  Code,
+  Copy,
+  Folder as FolderIcon,
+  Tick,
+} from "../grasp/icons/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { Tree } from "../grasp/tree/index.ts";
@@ -223,11 +235,14 @@ const FilesView = ({ files, asked, onAsk }: OpenFile & { files: AppFiles }) => {
   if (file === undefined) {
     return (
       <EditorFrame>
-        <div {...stylex.props(styles.padded)}>
-          <Text size="sm" tone="muted">
-            <Trans>This version has no files.</Trans>
-          </Text>
-        </div>
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia icon={Code} />
+            <EmptyTitle>
+              <Trans>No files</Trans>
+            </EmptyTitle>
+          </EmptyHeader>
+        </Empty>
       </EditorFrame>
     );
   }
@@ -333,13 +348,17 @@ export const AppCode = ({
   }
   if (current === null) {
     return (
-      <div {...stylex.props(styles.padded)}>
-        <Text size="sm" tone="muted">
-          <Trans>
-            No code yet: Grasp writes the first version in the chat.
-          </Trans>
-        </Text>
-      </div>
+      <Empty>
+        <EmptyHeader>
+          <EmptyMedia icon={Code} />
+          <EmptyTitle>
+            <Trans>No code yet</Trans>
+          </EmptyTitle>
+          <EmptyDescription>
+            <Trans>Grasp writes the first version in the chat.</Trans>
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
   return (
