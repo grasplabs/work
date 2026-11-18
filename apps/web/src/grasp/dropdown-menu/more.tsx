@@ -7,10 +7,12 @@ import type { RenderProp } from "@ui-sdk/react/primitive";
 import type { ButtonSize } from "../button";
 import { More } from "../icons";
 import type { IconData } from "../icons";
+import { useWords, withGiven } from "../words/words";
 import { DropdownMenuItem } from "./item";
 import { DropdownMenu } from "./menu";
 import { DropdownMenuContent } from "./panel";
 import { DropdownMenuTrigger } from "./trigger";
+import { dropdownMenuWords } from "./words";
 
 /**
  * One action that folds into a "More" menu: the App card's "…" menu, the App shell bar's actions
@@ -43,8 +45,11 @@ export interface DropdownMenuAction {
 export interface DropdownMenuMoreProps {
   /** The actions, in order. */
   actions: readonly DropdownMenuAction[];
-  /** The button's name ("More actions"). */
-  label: string;
+  /**
+   * The button's name.
+   * @default "More actions"
+   */
+  label?: string;
   /** Its size. @default "sm" */
   size?: ButtonSize;
 }
@@ -52,32 +57,38 @@ export interface DropdownMenuMoreProps {
 /** A "More" button and its menu of actions. */
 export const DropdownMenuMore = ({
   actions,
-  label,
+  label: labelGiven,
   size = "sm",
-}: DropdownMenuMoreProps) => (
-  <DropdownMenu>
-    <DropdownMenuTrigger
-      icon={More}
-      aria-label={label}
-      variant="ghost"
-      size={size}
-    />
-    <DropdownMenuContent align="end">
-      {actions.map((action) => (
-        <DropdownMenuItem
-          key={action.label}
-          icon={action.icon}
-          variant={action.danger === true ? "danger" : undefined}
-          disabled={action.disabled}
-          href={action.href}
-          render={action.render}
-          onSelect={() => {
-            action.onSelect?.();
-          }}
-        >
-          {action.label}
-        </DropdownMenuItem>
-      ))}
-    </DropdownMenuContent>
-  </DropdownMenu>
-);
+}: DropdownMenuMoreProps) => {
+  const { more: label } = withGiven(
+    useWords("dropdownMenu", dropdownMenuWords),
+    { more: labelGiven }
+  );
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        icon={More}
+        aria-label={label}
+        variant="ghost"
+        size={size}
+      />
+      <DropdownMenuContent align="end">
+        {actions.map((action) => (
+          <DropdownMenuItem
+            key={action.label}
+            icon={action.icon}
+            variant={action.danger === true ? "danger" : undefined}
+            disabled={action.disabled}
+            href={action.href}
+            render={action.render}
+            onSelect={() => {
+              action.onSelect?.();
+            }}
+          >
+            {action.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};

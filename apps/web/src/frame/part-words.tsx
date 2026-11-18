@@ -916,6 +916,7 @@ export const usePartWords = (): GraspWordsCatalog => {
     dialog: { close: t`Close`, actionFailed: t`Could not finish` },
     dropdownMenu: {
       working: t({ message: "Working", context: "a menu item's action" }),
+      more: t`More actions`,
     },
     link: { external: t`opens in a new tab` },
     sectionCard: { info: t`More about this section` },

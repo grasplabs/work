@@ -202,7 +202,8 @@ export const AppFrame = ({
           panelResizeLabel={t`Resize the chat`}
           panelsCloseLabel={t`Close the chat`}
           panelsToggleLabel={t`Show or hide the chat`}
-          sidebar={<Sidebar {...sidebar} />}
+          // No tree lines on nested rows: Ruben saw them and took them out (18 Nov 2026).
+          sidebar={<Sidebar {...sidebar} guides={false} />}
         >
           <div {...stylex.props(styles.page, fills && styles.fill)}>
             <PagePanelProvider value={pagePanel.frame}>

@@ -1258,6 +1258,11 @@
   --grasp-table-row-fill-chosen-mint: var(--grasp-grid-range-wash);
   /* The head's ground in the soft look. */
   --grasp-table-head-fill-soft: var(--grasp-soft);
+  /* A column's name in the head: the muted words, a step lighter in dark, so they reach 4.5:1 on the page's own ground as the plain head draws them. */
+  --grasp-table-head-text: light-dark(
+    var(--grasp-muted),
+    oklch(0.72 0.025 158)
+  );
   /* The chip a sorted head's place stands in, in the quiet look. */
   --grasp-table-sort-chip: color-mix(
     in oklch,

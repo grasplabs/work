@@ -490,6 +490,7 @@ export const grasp = stylex.defineConsts({
   tableLeadMin: "var(--grasp-table-lead-min)",
   tableRowFillChosenMint: "var(--grasp-table-row-fill-chosen-mint)",
   tableHeadFillSoft: "var(--grasp-table-head-fill-soft)",
+  tableHeadText: "var(--grasp-table-head-text)",
   tableSortChip: "var(--grasp-table-sort-chip)",
   // Drawer and sheet: drawer and sheet.
   drawerWidth: "var(--grasp-drawer-width)",

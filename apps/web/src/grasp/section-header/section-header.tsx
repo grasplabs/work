@@ -83,9 +83,12 @@ const styles = stylex.create({
     display: "grid",
     rowGap: grasp.space1,
     flexGrow: 1,
-    flexBasis: "16rem",
-    minWidth: 0,
+    // Beside the actions the words take what is left: a title alone down to its longest word (its
+    // own min-content, a flex item's floor), a title with a line under it down to 10rem, so that
+    // line is never squeezed to a word a line. Past that the actions wrap under them.
+    flexBasis: 0,
   },
+  wordsWithLine: { minWidth: "10rem" },
   titleRow: {
     display: "flex",
     flexWrap: "wrap",
@@ -128,16 +131,13 @@ const styles = stylex.create({
     textWrap: "pretty",
     overflowWrap: "break-word",
   },
-  // Never past the header's edge: on a line of their own they may shrink to its width and wrap
-  // (a search and Invite on a phone ran 60px past a card at 320). In a Section card narrower than
-  // 30rem they take the line under the title, its full width: by the card's width, not the window's.
   actions: {
     display: "flex",
     flexWrap: "wrap",
     alignItems: "center",
     gap: grasp.space2,
     flexShrink: 1,
-    flexBasis: { default: "auto", [NARROW_CARD]: "100%" },
+    flexBasis: "auto",
     minWidth: 0,
     maxWidth: "100%",
     // On the title's line they may give back room above themselves (a grouped Section card's, so an
@@ -176,6 +176,11 @@ const lookOf = (
       group && styles.titleGroup,
     ],
     centred: small && description === undefined,
+    words: [
+      styles.words,
+      description !== undefined && styles.wordsWithLine,
+      small && styles.wordsSm,
+    ],
   };
 };
 
@@ -205,6 +210,7 @@ export const SectionHeader = ({
     small,
     title: titleLook,
     centred,
+    words,
   } = lookOf(size, variant, description);
   return (
     <div
@@ -216,7 +222,7 @@ export const SectionHeader = ({
         layout ?? styleProp
       )}
     >
-      <div {...stylex.props(styles.words, small && styles.wordsSm)}>
+      <div {...stylex.props(words)}>
         {loading ? (
           <>
             <Skeleton text="lg" layout={styles.titleWait} />

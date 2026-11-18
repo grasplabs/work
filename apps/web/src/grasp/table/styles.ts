@@ -344,7 +344,7 @@ export const tableStyles = stylex.create({
     verticalAlign: "middle",
     fontSize: grasp.textSm,
     fontWeight: grasp.weightMedium,
-    color: grasp.muted,
+    color: grasp.tableHeadText,
     whiteSpace: "nowrap",
   },
   // A head with controls after its name (a column's menu, a resize handle): they sit at its end.

@@ -532,6 +532,10 @@
   --grasp-table-fade: var(--grasp-space-12);
   --grasp-table-row-fill-chosen-mint: var(--grasp-grid-range-wash);
   --grasp-table-head-fill-soft: var(--grasp-soft);
+  --grasp-table-head-text: light-dark(
+    var(--grasp-muted),
+    oklch(0.72 0.025 158)
+  );
   --grasp-table-sort-chip: color-mix(
     in oklch,
     var(--grasp-mint) 22%,
@@ -1384,6 +1388,7 @@
   --grasp-table-fade: var(--grasp-space-12);
   --grasp-table-row-fill-chosen-mint: var(--grasp-grid-range-wash);
   --grasp-table-head-fill-soft: var(--grasp-soft);
+  --grasp-table-head-text: light-dark(var(--grasp-muted), oklch(0.72 0.05 178));
   --grasp-table-sort-chip: color-mix(
     in oklch,
     var(--grasp-mint) 22%,
@@ -2230,6 +2235,7 @@
   --grasp-table-fade: var(--grasp-space-12);
   --grasp-table-row-fill-chosen-mint: var(--grasp-grid-range-wash);
   --grasp-table-head-fill-soft: var(--grasp-soft);
+  --grasp-table-head-text: light-dark(var(--grasp-muted), oklch(0.72 0.006 75));
   --grasp-table-sort-chip: color-mix(
     in oklch,
     var(--grasp-mint) 22%,

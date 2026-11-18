@@ -866,6 +866,17 @@ const styles = stylex.create({
     borderEndStartRadius: ELBOW,
     pointerEvents: "none",
   },
+  // Where the stem carries on past a row, the elbow leaves the stem's own column to the stem: the
+  // guide's colour is see-through, and the curve's first, nearly upright stretch laid over the stem
+  // drew a darker run at every row. Cut out of the elbow, the column is the stem's alone: one layer
+  // everywhere, over the ground and over a hovered or current row alike. The last row has no stem
+  // below its elbow, and keeps its whole curve.
+  guideBranchCut: {
+    clipPath: {
+      default: `inset(0 0 0 ${guideVars.stroke})`,
+      ":dir(rtl)": `inset(0 ${guideVars.stroke} 0 0)`,
+    },
+  },
   // The path down to the current row, in `path` (the line's colour unless a host sets it).
   guidePath: {
     borderInlineStartColor: { default: guideVars.path, [FORCED]: "GrayText" },
@@ -1373,6 +1384,7 @@ const Guide = ({
       data-slot="sidebar-guide-branch"
       {...stylex.props(
         styles.guideBranch,
+        !last && styles.guideBranchCut,
         path === "at" && styles.guideBranchPath
       )}
     />
