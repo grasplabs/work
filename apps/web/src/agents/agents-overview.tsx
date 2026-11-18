@@ -11,6 +11,7 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
+import type { ReactNode } from "react";
 
 import { Page, PageHeading } from "../frame/page.tsx";
 import { AgentMark } from "../grasp/agent-mark/index.ts";
@@ -41,7 +42,7 @@ import {
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { Link as TextLink } from "../grasp/link/index.ts";
-import { SectionHeader } from "../grasp/section-header/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -71,16 +72,9 @@ export interface ManagedAgents {
 }
 
 const styles = stylex.create({
-  tools: {
-    display: "flex",
-    flexWrap: "wrap",
-    alignItems: "center",
-    gap: grasp.space3,
-  },
-  search: { width: "100%", maxWidth: "18rem" },
+  search: { width: "14rem" },
   lines: { display: "grid", gap: grasp.space1 },
-  groups: { display: "grid", gap: grasp.space8 },
-  groupHead: { marginBlockEnd: grasp.space2 },
+  groups: { display: "grid", gap: grasp.space6 },
 });
 
 /** What a row shows of one agent. */
@@ -257,45 +251,72 @@ interface AgentGroup {
  * The list's groups, in order: the person's own agents ("Yours"), the
  * company's, and a colleague's own put forward for the whole company
  * ("Waiting for approval", each row with Approve and Decline). A group
- * shows only while it holds an agent, and its name only beside another
- * group: alone, the page's title says it. This branch's core has only
- * the company's agents, the first agent first; the other two join as one
- * entry each once core names them (main's `ownAgents`, `offeredAgents`).
+ * shows only while it holds an agent. Each is a flush, compact Section
+ * card with its rows, as Damsko's Members pattern draws a list: titled
+ * with its name beside another group, and alone with how many it holds
+ * (the page's title says the rest), the search in the first one's head.
+ * This branch's core has only the company's agents, the first agent
+ * first; the other two join as one entry each once core names them
+ * (main's `ownAgents`, `offeredAgents`).
  */
 const AgentGroups = ({
   groups,
   factsOf,
+  tools,
+  nothing,
 }: {
   groups: readonly AgentGroup[];
   factsOf: (managed: NonNullable<Shown["managed"]>) => string[];
+  /** The search and the filter, in the first card's head; none while there are few agents. */
+  tools: ReactNode;
+  /** What the one card says when the search or the filter hid every agent. */
+  nothing: ReactNode;
 }) => {
   const { t } = useLingui();
   const held = groups.filter(({ agents }) => agents.length > 0);
   const named = held.length > 1;
+  if (held.length === 0) {
+    const count = 0;
+    return (
+      <SectionCard
+        actions={tools}
+        density="compact"
+        title={t`${plural(count, { one: "# agent", other: "# agents" })}`}
+      >
+        {nothing}
+      </SectionCard>
+    );
+  }
   return (
     <div {...stylex.props(styles.groups)}>
-      {held.map((group) => (
-        <section key={group.key}>
-          {named ? (
-            <SectionHeader
-              layout={styles.groupHead}
-              size="sm"
-              title={group.name}
-            />
-          ) : null}
-          <ItemGroup aria-label={named ? group.name : t`Agents`} separated>
-            {group.agents.map((agent) => (
-              <AgentRow
-                facts={
-                  agent.managed === undefined ? [] : factsOf(agent.managed)
-                }
-                key={agent.id}
-                shown={agent}
-              />
-            ))}
-          </ItemGroup>
-        </section>
-      ))}
+      {held.map((group, index) => {
+        const count = group.agents.length;
+        return (
+          <SectionCard
+            actions={index === 0 ? tools : undefined}
+            density="compact"
+            flush
+            key={group.key}
+            title={
+              named
+                ? group.name
+                : t`${plural(count, { one: "# agent", other: "# agents" })}`
+            }
+          >
+            <ItemGroup aria-label={named ? group.name : t`Agents`} separated>
+              {group.agents.map((agent) => (
+                <AgentRow
+                  facts={
+                    agent.managed === undefined ? [] : factsOf(agent.managed)
+                  }
+                  key={agent.id}
+                  shown={agent}
+                />
+              ))}
+            </ItemGroup>
+          </SectionCard>
+        );
+      })}
     </div>
   );
 };
@@ -332,6 +353,38 @@ export const AgentsOverview = ({
     (agent) => agent.managed?.state === "paused"
   ).length;
   const newAgent = makes ? <NewAgentButton models={models} /> : undefined;
+  // Search only once there are enough to look for one; the filter only
+  // where some are paused, as with all on there is nothing to tell apart.
+  const tools =
+    agents.length < 6 && paused === 0 ? undefined : (
+      <>
+        <InputGroup layout={styles.search}>
+          <InputGroupText icon={Search} />
+          <InputGroupInput
+            aria-label={t`Search the agents`}
+            onValueChange={setQuery}
+            placeholder={t`Search`}
+            type="search"
+            value={query}
+          />
+          <InputGroupClear aria-label={t`Clear search`} />
+        </InputGroup>
+        {managed === undefined || paused === 0 ? null : (
+          <ToggleGroup
+            aria-label={t`Which agents to show`}
+            onValueChange={(next: unknown[]) => {
+              setFilter(filters.find((each) => each === next.at(0)) ?? "all");
+            }}
+            size="sm"
+            value={[filter]}
+          >
+            <Toggle value="all">{t`All`}</Toggle>
+            <Toggle value="on">{t`On`}</Toggle>
+            <Toggle value="paused">{t`Paused`}</Toggle>
+          </ToggleGroup>
+        )}
+      </>
+    );
   return (
     <Page>
       <PageHeading action={newAgent} title={t`Agents`} />
@@ -352,53 +405,20 @@ export const AgentsOverview = ({
           )}
         </Empty>
       ) : (
-        <>
-          {/* Search only once there are enough to look for one. */}
-          {agents.length < 6 && paused === 0 ? null : (
-            <div {...stylex.props(styles.tools)}>
-              <InputGroup layout={styles.search}>
-                <InputGroupText icon={Search} />
-                <InputGroupInput
-                  aria-label={t`Search the agents`}
-                  onValueChange={setQuery}
-                  placeholder={t`Search`}
-                  type="search"
-                  value={query}
-                />
-                <InputGroupClear aria-label={t`Clear search`} />
-              </InputGroup>
-              {/* Only where some are paused: with all on there is nothing to tell apart. */}
-              {managed === undefined || paused === 0 ? null : (
-                <ToggleGroup
-                  aria-label={t`Which agents to show`}
-                  onValueChange={(next: unknown[]) => {
-                    setFilter(
-                      filters.find((each) => each === next.at(0)) ?? "all"
-                    );
-                  }}
-                  size="sm"
-                  value={[filter]}
-                >
-                  <Toggle value="all">{t`All`}</Toggle>
-                  <Toggle value="on">{t`On`}</Toggle>
-                  <Toggle value="paused">{t`Paused`}</Toggle>
-                </ToggleGroup>
-              )}
-            </div>
-          )}
-          {shown.length === 0 ? (
-            <Empty size="section">
+        <AgentGroups
+          factsOf={factsOf}
+          groups={[{ key: "company", name: t`Company`, agents: shown }]}
+          // In the card, under the search that hid them all, so what was
+          // typed stays to change.
+          nothing={
+            <Empty size="inline">
               {asked === ""
                 ? t`No agent to show here`
                 : t`No agent matches “${asked}”`}
             </Empty>
-          ) : (
-            <AgentGroups
-              factsOf={factsOf}
-              groups={[{ key: "company", name: t`Company`, agents: shown }]}
-            />
-          )}
-        </>
+          }
+          tools={tools}
+        />
       )}
     </Page>
   );
