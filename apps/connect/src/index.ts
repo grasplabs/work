@@ -72,7 +72,7 @@ import type {
   NpmMalwareReports,
   NpmMetadata,
 } from "@grasp-os/shared/packages";
-import type { SyncPage } from "@grasp-os/shared/sync";
+import type { SyncPage, SyncPlaces } from "@grasp-os/shared/sync";
 import type { ClockRegistration } from "@grasp-os/workerflow/clock";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
@@ -618,7 +618,7 @@ export default class Connect
   }
 
   /** The places of a connection's sync, each a source of its own. */
-  async listSyncPlaces(request: unknown): Promise<{ places: string[] }> {
+  async listSyncPlaces(request: unknown): Promise<SyncPlaces> {
     return await listSyncPlaces(this.env, request);
   }
 

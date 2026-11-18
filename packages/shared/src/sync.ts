@@ -134,9 +134,14 @@ export const syncPlaceSchema = z
     "Not a place"
   );
 
-/** The places of a sync to read, each its own source with its own cursor. */
+/**
+ * Places of a sync to read, each its own source with its own cursor, and
+ * where the listing goes on (`cursor`): null once it is whole. Core puts
+ * the reads of one listing together before it adds or drops a source.
+ */
 export const syncPlacesSchema = z.strictObject({
   places: z.array(syncPlaceSchema),
+  cursor: syncCursorSchema.nullable(),
 });
 export type SyncPlaces = z.infer<typeof syncPlacesSchema>;
 
@@ -144,6 +149,8 @@ export type SyncPlaces = z.infer<typeof syncPlacesSchema>;
 export const syncPlacesRequestSchema = z.strictObject({
   connectionId: z.string().min(1).max(128),
   feed: z.string().regex(/^[a-z][a-z\d-]{0,63}$/u, "Not a sync's name"),
+  /** Where the listing goes on, from the last read's answer; null from the start. */
+  cursor: syncCursorSchema.nullable(),
 });
 export type SyncPlacesRequest = z.input<typeof syncPlacesRequestSchema>;
 
