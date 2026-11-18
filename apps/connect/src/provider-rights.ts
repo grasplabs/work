@@ -99,8 +99,18 @@ const microsoftImpliedRights: Readonly<Record<string, readonly string[]>> = {
 const googleScope = (name: string): string =>
   `https://www.googleapis.com/auth/${name}`;
 
-/** Asked whatever is on: the sign-in. Google gives a refresh token anyway. */
-const googleSignIn = ["openid", "email", "profile"] as const;
+/**
+ * Asked whatever is on: the sign-in, and the groups the account is in,
+ * which core counts the person in a copied reader list's group by
+ * (reader-groups.ts; Microsoft's sign-in `User.Read` reads them there).
+ * Google gives a refresh token anyway.
+ */
+const googleSignIn = [
+  "openid",
+  "email",
+  "profile",
+  googleScope("cloud-identity.groups.readonly"),
+] as const;
 
 /**
  * Each class's rights at Google, as the Google Workspace connector's tools

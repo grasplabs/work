@@ -20,6 +20,20 @@ import {
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
 /**
+ * A read of an account's groups under way (reader-groups.ts): when it
+ * started, the account and the address it reads for, the groups found so
+ * far, the members still to ask, and the next page of the first of them.
+ */
+export interface ReaderGroupsReading {
+  startedAt: number;
+  account: string;
+  address: string | null;
+  found: string[];
+  pending: string[];
+  page: string | null;
+}
+
+/**
  * One connection to an outside system, and the MCP server that carries out
  * its actions: a native connector of ours (`server` names it) or a Composio
  * server scoped to one toolkit (`server` is its HTTPS URL).
@@ -89,6 +103,30 @@ export const connections = sqliteTable(
     pastVerifiedEmails: text("past_verified_emails", { mode: "json" }).$type<
       string[]
     >(),
+    /**
+     * The groups the account is in at the provider, nested ones included,
+     * as the last whole read with its own token said (reader-groups.ts),
+     * for the providers whose reader lists name groups: null until one
+     * was. What core counts a person in a list's group by
+     * (`personalAccounts`), only while `reader_groups_at` is recent.
+     */
+    readerGroups: text("reader_groups", { mode: "json" }).$type<string[]>(),
+    /** When a whole read last said `reader_groups`. */
+    readerGroupsAt: timestamp("reader_groups_at"),
+    /**
+     * When a turn of a read of the account's groups was last taken, whole
+     * or not: one is due again only once the connection's access token was
+     * minted after it, or while a read is under way (reader-groups.ts).
+     */
+    readerGroupsTriedAt: timestamp("reader_groups_tried_at"),
+    /**
+     * A read of the account's groups under way, as its last turn left it:
+     * the groups found so far, which count for nothing until it is whole,
+     * and the members still to ask. Null when none is.
+     */
+    readerGroupsReading: text("reader_groups_reading", {
+      mode: "json",
+    }).$type<ReaderGroupsReading>(),
     /**
      * The other addresses the account's mailbox receives mail at (its
      * primary address and SMTP aliases), as its provider said when it was

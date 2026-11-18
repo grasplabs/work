@@ -5,8 +5,13 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { fileSecondsIn, updatedDurations } from "./test-durations.ts";
+import { aloneSeconds } from "./test-shards.ts";
 
 const log = (...lines: string[]): string => `${lines.join("\n")}\n`;
+
+/** A passed test of the leak test's, or of `file`'s, that took `ms`. */
+const leakTest = (ms: number, file = "test/leaks.test.ts") =>
+  `2026-11-18T10:00:42.023Z passed ${ms}ms @grasp-os/core ${file} > leaks > hold`;
 
 describe("reading test files' durations from progress logs", () => {
   it("times each file from its first test's start to its last's end, and counts a test without a time as none", () => {
@@ -115,6 +120,22 @@ describe("reading test files' durations from progress logs", () => {
     ).toStrictEqual({
       "admin test/x.test.ts": 1.2,
       "admin test/y.test.ts": 3,
+    });
+  });
+
+  it("keeps the time of a file the split runs alone, from a log of it alone, and takes it from a log beside others", () => {
+    const leaks = "@grasp-os/core test/leaks.test.ts";
+
+    expect({
+      alone: updatedDurations({ [leaks]: aloneSeconds * 3 }, [
+        log(leakTest(95_000)),
+      ]),
+      beside: updatedDurations({ [leaks]: aloneSeconds * 3 }, [
+        log(leakTest(95_000), leakTest(1000, "test/other.test.ts")),
+      ]),
+    }).toStrictEqual({
+      alone: { [leaks]: aloneSeconds * 3 },
+      beside: { [leaks]: 95, "@grasp-os/core test/other.test.ts": 1 },
     });
   });
 });
