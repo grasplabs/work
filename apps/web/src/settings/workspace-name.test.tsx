@@ -15,9 +15,9 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { useShownName } from "../frame/organization-name.tsx";
-import { NameField } from "./workspace-name.tsx";
+import { OrgCard } from "./org-card.tsx";
 
-// Settings › Workspace › Name against core's organization as the page
+// Settings › Workspace's card, its name against core's organization as the page
 // reaches it over RPC, faked: it keeps a new name, or refuses it, and the
 // page's next read answers with what it keeps. Beside the field, the
 // sidebar's line as frame/organization-name.tsx shows it.
@@ -96,7 +96,16 @@ const shown = async (
     return (
       <>
         <Sidebar read={read} />
-        <NameField canChange name={name} />
+        <OrgCard
+          canChange
+          organization={{
+            name,
+            timeZone: "UTC",
+            dataRegion: "eu",
+            signInDomains: [],
+            logo: null,
+          }}
+        />
       </>
     );
   };
@@ -120,9 +129,17 @@ const shown = async (
   await settled();
 };
 
-/** Types `name` into the field and presses Enter, as a person renames it. */
+/** Presses Edit, types `name` into the field and presses Enter, as a person renames it. */
 const rename = async (name: string): Promise<void> => {
-  const field = document.querySelector("input");
+  await act(async () => {
+    document
+      .querySelector<HTMLButtonElement>('button[aria-label="Edit the name"]')
+      ?.click();
+    await Promise.resolve();
+  });
+  const field = document.querySelector<HTMLInputElement>(
+    'input[aria-label="Name"]'
+  );
   if (field === null) {
     throw new TypeError("No name field");
   }
@@ -171,7 +188,7 @@ describe("Settings › Workspace › Name", () => {
     });
   });
 
-  it("keeps the old name in the sidebar when core refuses the rename, and says why at the field", async () => {
+  it("keeps the old name in the sidebar when core refuses the rename, and says why on the card", async () => {
     const { organization } = fakeOrganization("Noordkade Finance", true);
     await shown(organization);
 

@@ -1037,6 +1037,10 @@ msgstr "{name} is overal afgemeld."
 msgid "{name} is too large."
 msgstr "{name} is te groot."
 
+#: src/settings/sign-in-settings.tsx
+msgid "{name} isn’t on the sign-in page yet."
+msgstr "{name} staat nog niet op de inlogpagina."
+
 #: src/frame/setting-up.tsx
 msgid "{name} isn't ready yet"
 msgstr "{name} is nog niet klaar"
@@ -2086,6 +2090,7 @@ msgstr "Een gestarte workflow"
 
 #: src/activity/audit-event.tsx
 #: src/apps/app-settings.tsx
+#: src/settings/org-card.tsx
 #: src/workflows/workflow-settings.tsx
 msgid "About"
 msgstr "Over de App"
@@ -2741,10 +2746,6 @@ msgstr "Een beheerder heeft de gegevenswijziging die deze versie nodig heeft lat
 #: src/apps/publish.tsx
 msgid "An admin approves its access again before it works for your team."
 msgstr "Een beheerder keurt de toegang opnieuw goed voordat het voor je team werkt."
-
-#: src/settings/workspace-name.tsx
-msgid "An admin changes it."
-msgstr "Een beheerder past dit aan."
 
 #: src/connections/integration-facts.ts
 msgid "An admin connects this for everyone."
@@ -5396,10 +5397,6 @@ msgctxt "kind of app"
 msgid "Data and analytics"
 msgstr "Data en analyse"
 
-#: src/routes/_shell.settings.workspace.tsx
-msgid "Data location"
-msgstr "Datalocatie"
-
 #: src/apps/app-data-model.tsx
 msgid "Data model"
 msgstr "Datamodel"
@@ -6121,6 +6118,10 @@ msgstr "{name} bewerken"
 msgid "Edit JSON"
 msgstr "JSON bewerken"
 
+#: src/settings/org-card.tsx
+msgid "Edit the name"
+msgstr "Naam bewerken"
+
 #: src/frame/part-words.tsx
 msgid "Edit: {text}"
 msgstr "Bewerken: {text}"
@@ -6276,8 +6277,8 @@ msgctxt "a badge's dot"
 msgid "Error"
 msgstr "Fout"
 
-#: src/routes/_shell.settings.workspace.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/org-card.tsx
 msgid "European Union"
 msgstr "Europese Unie"
 
@@ -6455,10 +6456,6 @@ msgstr "Alles van een bestelling bij een leverancier tot zijn factuur is betaald
 #: src/brain/brain.ts
 msgid "Everything Grasp learned about {company}, each fact traceable to the conversation, document or connection it came from."
 msgstr "Alles wat Grasp over {company} heeft geleerd, elk feit terug te leiden tot het gesprek, document of de koppeling waar het vandaan komt."
-
-#: src/routes/_shell.settings.workspace.tsx
-msgid "Everything Grasp stores for you stays here."
-msgstr "Alles wat Grasp voor je bewaart, blijft hier."
 
 #: src/onboarding/setup-steps.tsx
 msgid "Everything I read and every conversation I have runs on an AI model, on your organization’s own key."
@@ -9163,7 +9160,7 @@ msgstr "De waarde wordt geladen"
 msgid "Loading…"
 msgstr "Laden…"
 
-#: src/settings/workspace-name.tsx
+#: src/settings/org-card.tsx
 msgid "Logo"
 msgstr "Logo"
 
@@ -9728,10 +9725,10 @@ msgstr "Mijn versie van de App startte niet. Zoek uit waarom en los het op:"
 #: src/projects/project-dialog.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/event-sources.tsx
+#: src/settings/org-card.tsx
 #: src/settings/profile-name.tsx
 #: src/settings/team-members-dialog.tsx
 #: src/settings/teams.tsx
-#: src/settings/workspace-name.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Name"
 msgstr "Naam"
@@ -10582,10 +10579,6 @@ msgstr "Nu niet"
 msgid "Not offered"
 msgstr "Niet aangeboden"
 
-#: src/settings/sign-in-settings.tsx
-msgid "Not on the sign-in page yet"
-msgstr "Nog niet op de inlogpagina"
-
 #: src/onboarding/send-plan-form.tsx
 msgid "Not planned yet"
 msgstr "Nog niet gepland"
@@ -11256,10 +11249,6 @@ msgstr "Alleen de bouwers van de workflow kunnen deze wijzigen."
 msgid "Only when asked"
 msgstr "Alleen als het gevraagd wordt"
 
-#: src/settings/sign-in-settings.tsx
-msgid "Only work accounts at {hostedDomain}."
-msgstr "Alleen werkaccounts bij {hostedDomain}."
-
 #: src/connections/integration-inspector.tsx
 msgid "Only you"
 msgstr "Alleen jij"
@@ -11287,10 +11276,6 @@ msgstr "Alleen jij ziet het terwijl je het uitprobeert. Je deelt het als het goe
 #: src/workflows/workflow-status.tsx
 msgid "Only you see this"
 msgstr "Alleen jij ziet dit"
-
-#: src/settings/sign-in-settings.tsx
-msgid "Only your organization’s work accounts."
-msgstr "Alleen werkaccounts van je organisatie."
 
 #: src/chat/sidebar-chats.tsx
 #: src/connections/request-app-dialog.tsx
@@ -11445,15 +11430,15 @@ msgstr "Run gestart op {started} openen"
 msgid "Open this link again whenever you like, and carry on where you stopped."
 msgstr "Open deze link weer wanneer je wilt, en ga verder waar je gebleven was."
 
+#: src/settings/staff-access.tsx
+msgid "Open until"
+msgstr "Open tot"
+
 #: src/decision-confirmation.tsx
 #: src/routes/decisions.$decision.tsx
 msgctxt "until when a decision can be answered"
 msgid "Open until"
 msgstr "Open tot"
-
-#: src/settings/staff-access.tsx
-msgid "Open until {until}"
-msgstr "Open tot {until}"
 
 #: src/inbox/interviews-item.tsx
 msgid "Open your onboarding"
@@ -11532,6 +11517,7 @@ msgid "Order"
 msgstr "Volgorde"
 
 #: src/routes/_shell.settings.workspace.tsx
+#: src/settings/org-card.tsx
 msgid "Organization"
 msgstr "Organisatie"
 
@@ -11930,10 +11916,6 @@ msgstr "Mensen wezen {days, plural, one {de afgelopen dag} other {de afgelopen #
 #: src/onboarding/setup-steps.tsx
 msgid "People respond better when they know why I’m reaching out. I’ve drafted a message you can send yourself. Then pick the day the interviews start."
 msgstr "Mensen reageren beter als ze weten waarom ik contact opneem. Ik heb een bericht opgesteld dat je zelf kunt versturen. Kies daarna de dag waarop de gesprekken beginnen."
-
-#: src/routes/_shell.settings.workspace.tsx
-msgid "People sign in with an address in these. To change them, ask your Grasp contact."
-msgstr "Mensen loggen in met een adres in een van deze domeinen. Vraag je contactpersoon bij Grasp om ze te wijzigen."
 
 #: src/settings/team-members-dialog.tsx
 msgid "People to tick"
@@ -13333,7 +13315,6 @@ msgstr "Risk-to-Compliance"
 msgid "Rocket"
 msgstr "Raket"
 
-#: src/routes/_shell.settings.profile.tsx
 #: src/settings/invitations.tsx
 msgid "Role"
 msgstr "Rol"
@@ -14155,6 +14136,7 @@ msgstr "{name} wordt opgezet…"
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.settings.tsx
+#: src/routes/_shell.settings.workspace.tsx
 msgid "Settings"
 msgstr "Instellingen"
 
@@ -14539,10 +14521,6 @@ msgstr "Inloggen"
 #: src/sign-in-errors.ts
 msgid "Sign-in didn't work. Try again, or ask an admin."
 msgstr "Inloggen is niet gelukt. Probeer het opnieuw of vraag een beheerder."
-
-#: src/routes/_shell.settings.workspace.tsx
-msgid "Sign-in domains"
-msgstr "Inlogdomeinen"
 
 #: src/settings/sign-in-settings.tsx
 msgid "Sign-in isn’t set up for this workspace yet, so nobody can sign in. Grasp sets it up."
@@ -16880,6 +16858,7 @@ msgstr "Proberen"
 #: src/settings/ai-providers.tsx
 #: src/settings/profile-name.tsx
 #: src/settings/section.tsx
+#: src/settings/sign-in-settings.tsx
 #: src/settings/workspace-name.tsx
 msgid "Try again"
 msgstr "Opnieuw proberen"
