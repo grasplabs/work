@@ -11,6 +11,7 @@ import { useState } from "react";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { copyText } from "../copy.ts";
 import { formatDate, formatList } from "../format.ts";
+import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import {
   Dialog,
@@ -35,6 +36,7 @@ import {
   Item,
   ItemContent,
   ItemDescription,
+  ItemMedia,
   ItemTitle,
   ItemActions,
 } from "../grasp/item/index.ts";
@@ -50,6 +52,7 @@ import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { roleLabel } from "../labels.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { PhoneHidden } from "./phone-hidden.tsx";
 import { roleItems } from "./roles.ts";
 import { RowNote } from "./section.tsx";
 
@@ -263,6 +266,13 @@ export const InvitationRow = ({ invitation }: { invitation: Invitation }) => {
   };
   return (
     <Item size="xs">
+      <PhoneHidden>
+        <ItemMedia align="center">
+          <Avatar decorative name={email} size="xs">
+            <AvatarFallback />
+          </Avatar>
+        </ItemMedia>
+      </PhoneHidden>
       <ItemContent>
         <ItemTitle>{email}</ItemTitle>
         <ItemDescription>

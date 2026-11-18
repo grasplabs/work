@@ -16,6 +16,7 @@ import { useEffect, useId, useState } from "react";
 
 import { formatDate } from "../format.ts";
 import { Alert } from "../grasp/alert/index.ts";
+import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import {
@@ -41,6 +42,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { Progress } from "../grasp/progress/index.ts";
@@ -49,6 +51,7 @@ import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { PhoneHidden } from "./phone-hidden.tsx";
 
 // Erasing someone an admin removed (GRA-903, GRA-1195): their email,
 // sign-ins and personal content go; their name and ID stay on the
@@ -553,6 +556,13 @@ export const RemovedRow = ({ person }: { person: RemovedPerson }) => {
   return (
     <>
       <Item size="xs">
+        <PhoneHidden>
+          <ItemMedia>
+            <Avatar decorative name={name} size="xs">
+              <AvatarFallback />
+            </Avatar>
+          </ItemMedia>
+        </PhoneHidden>
         <ItemContent>
           <ItemTitle>
             <Text element="span" size="sm" tone="muted">

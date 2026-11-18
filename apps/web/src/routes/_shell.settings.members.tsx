@@ -23,6 +23,7 @@ import {
   AlertDialogTitle,
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
+import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import {
@@ -52,6 +53,7 @@ import {
   ItemDescription,
   ItemDetail,
   ItemGroup,
+  ItemMedia,
   ItemRevealButton,
   ItemTitle,
 } from "../grasp/item/index.ts";
@@ -79,6 +81,7 @@ import {
   InvitationRow,
   InviteButton,
 } from "../settings/invitations.tsx";
+import { PhoneHidden } from "../settings/phone-hidden.tsx";
 import { roleItems, roleLines } from "../settings/roles.ts";
 import {
   SectionNotLoaded,
@@ -405,6 +408,13 @@ const MemberRow = ({
   const { name } = member;
   return (
     <Item size="xs">
+      <PhoneHidden>
+        <ItemMedia align="center">
+          <Avatar decorative name={member.name} size="xs">
+            <AvatarFallback />
+          </Avatar>
+        </ItemMedia>
+      </PhoneHidden>
       <ItemContent>
         <ItemTitle>
           {member.name}
