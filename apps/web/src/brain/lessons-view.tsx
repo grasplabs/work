@@ -17,12 +17,7 @@ import {
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "../grasp/empty/index.ts";
+import { Empty, EmptyHeader, EmptyTitle } from "../grasp/empty/index.ts";
 import { Skill } from "../grasp/icons/index.ts";
 import { InspectorPanel } from "../grasp/inspector-panel/index.ts";
 import {
@@ -337,12 +332,6 @@ const LessonList = ({
           <EmptyTitle>
             <Trans>No lessons yet</Trans>
           </EmptyTitle>
-          <EmptyDescription>
-            <Trans>
-              When a task keeps failing the same way, the Brain notes it here as
-              a lesson you can check.
-            </Trans>
-          </EmptyDescription>
         </EmptyHeader>
       </Empty>
     );

@@ -282,9 +282,6 @@ const RequestFlow = ({
   return (
     <>
       <DialogTitle>{t`Request an app`}</DialogTitle>
-      <DialogDescription>
-        {t`A workflow needs an app that is not here yet? Tell Grasp which one, and what it should do there.`}
-      </DialogDescription>
       <DialogBody>
         <Form
           id={formId}

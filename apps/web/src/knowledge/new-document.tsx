@@ -16,7 +16,6 @@ import {
   DialogAction,
   DialogBody,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogTitle,
   DialogTrigger,
@@ -183,9 +182,6 @@ export const NewDocument = ({ collectionId }: { collectionId: string }) => {
       </DialogTrigger>
       <DialogContent closeLabel={t`Close`}>
         <DialogTitle>{t`New document`}</DialogTitle>
-        <DialogDescription>
-          {t`It starts with its name as a heading; write the rest in the editor.`}
-        </DialogDescription>
         {open ? (
           <DocumentForm
             collectionId={collectionId}

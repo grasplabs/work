@@ -107,15 +107,12 @@ export const AppsOverview = ({
           <EmptyHeader>
             <EmptyMedia picture="nothing" />
             <EmptyTitle>{t`No Apps yet`}</EmptyTitle>
-            <EmptyDescription>
-              {builds ? (
+            {/* Only who builds is told what to do. */}
+            {builds ? (
+              <EmptyDescription>
                 <Trans>Say what you want to build, and Grasp builds it.</Trans>
-              ) : (
-                <Trans>
-                  The Apps your colleagues share with you show here.
-                </Trans>
-              )}
-            </EmptyDescription>
+              </EmptyDescription>
+            ) : null}
           </EmptyHeader>
           {builds ? (
             <EmptyContent>

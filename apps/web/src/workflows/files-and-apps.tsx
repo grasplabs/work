@@ -110,19 +110,20 @@ const styles = stylex.create({
 const Section = ({
   title,
   flush = false,
-  description,
+  info,
   children,
 }: {
   title: string;
   flush?: boolean;
-  description?: string;
+  /** More about it behind the info mark beside its title. */
+  info?: string;
   children: ReactNode;
 }) => (
   <SectionCard
     density="compact"
     flush={flush}
     title={title}
-    {...(description === undefined ? {} : { description })}
+    {...(info === undefined ? {} : { info })}
   >
     {children}
   </SectionCard>
@@ -719,7 +720,7 @@ export const FilesAndApps = ({
       {pending === undefined ||
       (pending.state === "ready" && pending.data.length === 0) ? null : (
         <Section
-          description={t`It can't start until you approve what each binding reaches, for the version it runs.`}
+          info={t`It can't start until you approve what each binding reaches, for the version it runs.`}
           title={t`Waiting for your approval`}
         >
           <Part loaded={pending}>

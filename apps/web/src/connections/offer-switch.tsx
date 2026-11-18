@@ -22,7 +22,8 @@ export const OfferSwitch = ({
   const { change } = useChange();
   const { t } = useLingui();
   return (
-    <SectionCard density="compact" flush title={t`Offered`}>
+    // No title: the switch's label says it, and a title would repeat it.
+    <SectionCard aria-label={t`Offered`} density="compact" flush>
       <SettingsRows>
         <SwitchRow>
           <Switch

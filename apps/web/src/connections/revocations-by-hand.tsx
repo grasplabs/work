@@ -153,12 +153,9 @@ const ToDoList = ({
   return (
     <SectionCard
       density="compact"
-      description={
-        toDos.state === "ready"
-          ? t`Grasp couldn't remove its own access at these apps. Until someone removes it there, it may still work.`
-          : undefined
-      }
       flush
+      // Why, behind the info mark: the title says what to do.
+      info={t`Grasp couldn't remove its own access at these apps. Until someone removes it there, it may still work.`}
       title={t`Access to remove by hand`}
     >
       {toDos.state === "ready" ? (

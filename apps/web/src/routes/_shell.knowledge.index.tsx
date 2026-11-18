@@ -330,12 +330,6 @@ const CollectionBlocks = ({
           <EmptyTitle>
             <Trans>There are no collections you can read yet.</Trans>
           </EmptyTitle>
-          <EmptyDescription>
-            <Trans>
-              Collections hold the documents Grasp and its agents may read. An
-              admin shares them with you, or you add your own.
-            </Trans>
-          </EmptyDescription>
         </EmptyHeader>
       </Empty>
     );
@@ -399,17 +393,7 @@ const Knowledge = () => {
     >
       <div {...stylex.props(styles.scroll)}>
         <div {...stylex.props(styles.column)}>
-          <PageHeading
-            description={
-              <Trans>
-                Everything Grasp and its agents may read, in collections: your
-                own, your teams&apos; and your organization&apos;s. Agents read
-                a document when they need it, and always have the memory files
-                in mind.
-              </Trans>
-            }
-            title={<Trans>Knowledge</Trans>}
-          />
+          <PageHeading title={<Trans>Knowledge</Trans>} />
           {results === undefined ? null : (
             <section
               aria-labelledby="results"

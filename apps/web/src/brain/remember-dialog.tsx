@@ -17,7 +17,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "../grasp/dialog/index.ts";
-import { Field, FieldDescription, FieldLabel } from "../grasp/field/index.ts";
+import { Field, FieldLabel } from "../grasp/field/index.ts";
 import { Plus } from "../grasp/icons/index.ts";
 import { RadioGroup, RadioGroupItem } from "../grasp/radio-group/index.ts";
 import { Textarea } from "../grasp/textarea/index.ts";
@@ -92,9 +92,6 @@ const RememberForm = ({
             rows={4}
             value={text}
           />
-          <FieldDescription>
-            {t`It starts as proposed: Grasp uses it, and you can correct or retire it here.`}
-          </FieldDescription>
         </Field>
         <ErrorText>{failure}</ErrorText>
       </DialogBody>

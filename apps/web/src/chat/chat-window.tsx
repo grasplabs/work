@@ -504,17 +504,19 @@ export const ChatWindow = ({
   const [query, setQuery] = useState("");
   const [renaming, setRenaming] = useState<ChatSummary>();
   const [deleting, setDeleting] = useState<ChatSummary>();
-  // Each time it opens, it opens on the chats, with nothing searched.
+  const search = useChatSearch();
+  const listing = useListed(archived);
+  // Each time it opens, it opens on the chats, with nothing searched, and
+  // reads them again: what it showed last time stands until they answer.
   const [wasOpen, setWasOpen] = useState(open);
   if (open !== wasOpen) {
     setWasOpen(open);
     if (open) {
       setArchived(false);
       setQuery("");
+      listing.read();
     }
   }
-  const search = useChatSearch();
-  const listing = useListed(archived);
   const changes = useChanges(() => {
     listing.read();
   });

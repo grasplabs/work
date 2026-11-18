@@ -283,10 +283,7 @@ const NeedsAttention = ({
     <div {...stylex.props(styles.stack)}>
       {nothing ? (
         <EmptyCard>
-          <Trans>
-            No workflow needs attention: nothing waits for a decision or to go
-            live, nothing failed lately.
-          </Trans>
+          <Trans>Nothing needs you.</Trans>
         </EmptyCard>
       ) : null}
       {workflows.state === "ready" ? null : <NotLoadedState page={workflows} />}

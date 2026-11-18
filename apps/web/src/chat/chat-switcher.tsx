@@ -1,29 +1,18 @@
 import type { ChatSummary } from "@grasp-os/shared/chat";
 import { useMatchRoute } from "@tanstack/react-router";
-import {
-  createContext,
-  lazy,
-  Suspense,
-  use,
-  useEffect,
-  useEffectEvent,
-  useState,
-} from "react";
+import { createContext, use, useEffect, useEffectEvent, useState } from "react";
 import type { ReactNode } from "react";
 
 import { isShortcut } from "../shortcuts.ts";
 import { chatLink } from "./chat-link.ts";
+import { ChatWindow } from "./chat-window.tsx";
 import { DeleteChatDialog } from "./delete-chat-dialog.tsx";
 
 // The way to the person's chats window (chat-window.tsx) on every page: ⌘K
 // anywhere, and the sidebar's "All chats"; and the one delete
-// dialog the sidebar's chat rows ask in. The window itself, with
-// its command list, loads the first time it opens.
-
-const ChatWindow = lazy(async () => {
-  const { ChatWindow: window } = await import("./chat-window.tsx");
-  return { default: window };
-});
+// dialog the sidebar's chat rows ask in. The window comes with the page,
+// not as a chunk of its own: fetched on the first press, it opened a
+// second late. It opens at once and fills in as core answers.
 
 /** The chats window's key: ⌘K, or Ctrl K off a Mac. */
 export const chatsKey = "k";
@@ -71,7 +60,7 @@ const OpenChats = createContext<(open: boolean) => void>(() => {
 
 /**
  * The frame's chats window, on every page: ⌘K or Ctrl K opens it (and
- * closes it again), as does a page's {@link ChatSwitcherButton}.
+ * closes it again), as does the sidebar's "All chats" ({@link useChatsWindow}).
  */
 export const ChatSwitcherProvider = ({ children }: { children: ReactNode }) => {
   const [open, setOpen] = useState(false);
@@ -108,11 +97,7 @@ export const ChatSwitcherProvider = ({ children }: { children: ReactNode }) => {
           }}
         />
       )}
-      {opened ? (
-        <Suspense fallback={null}>
-          <ChatWindow onOpenChange={setOpen} open={open} />
-        </Suspense>
-      ) : null}
+      {opened ? <ChatWindow onOpenChange={setOpen} open={open} /> : null}
     </OpenChats>
   );
 };

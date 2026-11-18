@@ -39,6 +39,7 @@ import {
   DialogAction,
   DialogBody,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
@@ -764,6 +765,9 @@ const AddTrigger = ({
       <Dialog onOpenChange={setOpen} open={open}>
         <DialogContent closeLabel={t`Close`}>
           <DialogTitle>{t`Add a trigger`}</DialogTitle>
+          <DialogDescription>
+            {t`It runs as you, and starts nothing until an admin allows it.`}
+          </DialogDescription>
           <DialogBody>
             <Form
               id={formId}
@@ -963,11 +967,11 @@ const AddTrigger = ({
                       />
                     </Field>
                   </FormRow>
-                  <Text size="sm" tone="muted">
-                    {sources.length === 0
-                      ? t`No webhook source yet: an admin adds one in Settings, with the URL and secret its sender uses.`
-                      : t`Each event of this type from the source starts a run, with its data as the input.`}
-                  </Text>
+                  {sources.length === 0 ? (
+                    <Text size="sm" tone="muted">
+                      {t`No webhook source yet: an admin adds one in Settings, with the URL and secret its sender uses.`}
+                    </Text>
+                  ) : null}
                 </>
               ) : null}
               <ErrorText>{problem ?? failure}</ErrorText>
@@ -1139,14 +1143,10 @@ export const WorkflowTriggers = ({
   me: string;
   builder: boolean;
 }) => {
-  const { t } = useLingui();
   // One more each time a change asks for the triggers to be read again.
   const [generation, setGeneration] = useState(0);
   return (
     <div {...stylex.props(styles.triggers)}>
-      <Text size="sm" tone="muted">
-        {t`A trigger starts a run on its own, as whoever made it. Adding one asks an admin to allow it to start this workflow, and one on a connection to read its events there: it starts nothing until they do.`}
-      </Text>
       <TriggersRead
         builder={builder}
         // Read again, as core has them now, after each change.

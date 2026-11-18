@@ -1,6 +1,3 @@
-import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
-
 import {
   AppWindow,
   Doc,
@@ -23,7 +20,6 @@ export interface BrainSection {
   key: string;
   group: Group;
   icon: IconData;
-  description: MessageDescriptor;
 }
 
 export const brainSections: BrainSection[] = [
@@ -32,42 +28,36 @@ export const brainSections: BrainSection[] = [
     key: "1 Vision",
     group: "vision",
     icon: Rocket,
-    description: msg`What the board wants from the sprint: its goals and the rules of the road.`,
   },
   {
     slug: "teams",
     key: "2 Inventory/Teams",
     group: "teams",
     icon: People,
-    description: msg`Every team Grasp spoke to: who they are, how they work and what slows them down.`,
   },
   {
     slug: "workflows",
     key: "2 Inventory/Candidates",
     group: "candidates",
     icon: Workflow,
-    description: msg`Time-consuming work that could be automated, and what was said about each.`,
   },
   {
     slug: "tools",
     key: "2 Inventory/Tools",
     group: "tools",
     icon: AppWindow,
-    description: msg`The apps teams named, and the ones seen in use that nobody mentioned.`,
   },
   {
     slug: "gaps",
     key: "2 Inventory/Gaps",
     group: "gaps",
     icon: Question,
-    description: msg`What Grasp does not know yet, and who can answer it.`,
   },
   {
     slug: "sources",
     key: "Sources",
     group: "sources",
     icon: Doc,
-    description: msg`Where everything came from: conversations, documents, Pulse and connections.`,
   },
 ];
 

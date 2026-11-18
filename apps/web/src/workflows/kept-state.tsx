@@ -106,8 +106,9 @@ const KeptEntries = ({
         ) : null
       }
       density="compact"
-      description={t`What its steps keep for later runs, which each run reads as it starts. It uses ${used} KB of ${cap} KB.`}
+      description={t`It uses ${used} KB of ${cap} KB.`}
       flush
+      info={t`What its steps keep for later runs, which each run reads as it starts.`}
       title={t`Kept between runs`}
     >
       {state.entries.length === 0 ? (

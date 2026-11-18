@@ -124,7 +124,6 @@ const SectionPage = () => {
         <PageHeader
           aside={<Badge icon={section.icon}>{shownCount(folder)}</Badge>}
           breadcrumb={<BackButton />}
-          description={i18n._(section.description)}
           title={i18n._(groupLabel[section.group])}
         />
         {section.group === "vision" && isAdmin(identity.role) ? (

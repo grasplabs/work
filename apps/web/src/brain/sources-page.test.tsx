@@ -384,13 +384,11 @@ describe(SourcesPage, () => {
     expect({
       empty: {
         onlyYou: empty.includes("Those marked Only you"),
-        documents: empty.includes(
-          "Documents and workflow runs show here once they reach the Brain."
-        ),
+        nothing: empty.includes("Nothing in the Brain you may read yet"),
       },
       listed: listedText.includes("Those marked Only you"),
     }).toStrictEqual({
-      empty: { onlyYou: false, documents: true },
+      empty: { onlyYou: false, nothing: true },
       listed: true,
     });
   });

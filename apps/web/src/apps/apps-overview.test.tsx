@@ -163,11 +163,14 @@ describe(AppsOverview, () => {
     });
   });
 
-  it("offers Make something to who builds alone, also before there is any App, and tells someone who doesn't build where Apps shared with them show", async () => {
+  it("offers Make something to who builds alone, also before there is any App, and tells only who builds what to do", async () => {
     await shown([], true);
     const builder = {
       makeLink: makeLink(),
       said: document.body.textContent.includes("No Apps yet"),
+      told: document.body.textContent.includes(
+        "Say what you want to build, and Grasp builds it."
+      ),
     };
     act(() => {
       root?.unmount();
@@ -177,14 +180,15 @@ describe(AppsOverview, () => {
 
     const user = {
       makeLink: makeLink(),
-      said: document.body.textContent.includes(
-        "The Apps your colleagues share with you show here."
+      said: document.body.textContent.includes("No Apps yet"),
+      told: document.body.textContent.includes(
+        "Say what you want to build, and Grasp builds it."
       ),
     };
 
     expect({ builder, user }).toStrictEqual({
-      builder: { makeLink: "/?make=app", said: true },
-      user: { makeLink: undefined, said: true },
+      builder: { makeLink: "/?make=app", said: true, told: true },
+      user: { makeLink: undefined, said: true, told: false },
     });
   });
 });

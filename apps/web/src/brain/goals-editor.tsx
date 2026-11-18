@@ -18,7 +18,7 @@ import {
   DialogFooter,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
-import { Field, FieldDescription, FieldLabel } from "../grasp/field/index.ts";
+import { Field, FieldLabel } from "../grasp/field/index.ts";
 import { Edit, Plus, Workflow } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
 import {
@@ -195,11 +195,6 @@ const WordingDialog = ({
                 rows={3}
                 value={wording.howWeNotice}
               />
-              {goal === undefined ? null : (
-                <FieldDescription>
-                  {t`The earlier wording stays in the goal's history.`}
-                </FieldDescription>
-              )}
             </Field>
             <ErrorText>{failure}</ErrorText>
           </form>

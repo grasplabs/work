@@ -11,7 +11,6 @@ import { Button } from "../grasp/button/index.ts";
 import {
   Empty,
   EmptyContent,
-  EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
@@ -98,13 +97,8 @@ const Projects = () => {
           <Empty>
             <EmptyHeader>
               <EmptyMedia icon={ProjectsIcon} />
+              {/* What a project is, New project's dialog says as one is made. */}
               <EmptyTitle>{t`No projects yet`}</EmptyTitle>
-              <EmptyDescription>
-                <Trans>
-                  Group the apps and workflows of a process, a team or a goal in
-                  a project. You see the projects you are in.
-                </Trans>
-              </EmptyDescription>
             </EmptyHeader>
             {builds ? <EmptyContent>{make}</EmptyContent> : null}
           </Empty>

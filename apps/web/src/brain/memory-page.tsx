@@ -27,12 +27,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "../grasp/dialog/index.ts";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "../grasp/empty/index.ts";
+import { Empty, EmptyHeader, EmptyTitle } from "../grasp/empty/index.ts";
 import { Field, FieldLabel } from "../grasp/field/index.ts";
 import { File, Note } from "../grasp/icons/index.ts";
 import { InspectorPanel } from "../grasp/inspector-panel/index.ts";
@@ -581,12 +576,6 @@ const RecordList = ({
           <EmptyTitle>
             <Trans>No records yet</Trans>
           </EmptyTitle>
-          <EmptyDescription>
-            <Trans>
-              What you and your agents remember, and what others share with you,
-              shows here.
-            </Trans>
-          </EmptyDescription>
         </EmptyHeader>
       </Empty>
     );

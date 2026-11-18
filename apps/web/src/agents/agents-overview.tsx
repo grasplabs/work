@@ -340,11 +340,12 @@ export const AgentsOverview = ({
           <EmptyHeader>
             <EmptyMedia icon={AgentPerson} />
             <EmptyTitle>{t`No agents yet`}</EmptyTitle>
-            <EmptyDescription>
-              {managed === undefined
-                ? t`The agents your company sets up for you show here.`
-                : t`Make one for a job, such as chasing unpaid invoices.`}
-            </EmptyDescription>
+            {/* Only who can make one is told what to do. */}
+            {managed === undefined ? null : (
+              <EmptyDescription>
+                {t`Make one for a job, such as chasing unpaid invoices.`}
+              </EmptyDescription>
+            )}
           </EmptyHeader>
           {newAgent === undefined ? null : (
             <EmptyContent>{newAgent}</EmptyContent>

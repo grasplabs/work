@@ -1712,17 +1712,13 @@ msgid "A change"
 msgstr "A change"
 
 #: src/workflows/resource-params.tsx
-msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
-msgstr "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
+msgid "A change applies to runs that start after it."
+msgstr "A change applies to runs that start after it."
 
 #: src/apps/app-access-requests.tsx
 #: src/apps/draft-changes.tsx
 msgid "A collection"
 msgstr "A collection"
-
-#: src/knowledge/new-collection.tsx
-msgid "A collection holds documents Grasp and its agents may read."
-msgstr "A collection holds documents Grasp and its agents may read."
 
 #: src/apps/app-access-requests.tsx
 msgid "A collection to read"
@@ -2010,10 +2006,6 @@ msgstr "A tool switched on starts as Read where Composio says it only reads; Gra
 msgid "A topic"
 msgstr "A topic"
 
-#: src/workflows/workflow-triggers.tsx
-msgid "A trigger starts a run on its own, as whoever made it. Adding one asks an admin to allow it to start this workflow, and one on a connection to read its events there: it starts nothing until they do."
-msgstr "A trigger starts a run on its own, as whoever made it. Adding one asks an admin to allow it to start this workflow, and one on a connection to read its events there: it starts nothing until they do."
-
 #: src/apps/field-kinds.tsx
 msgid "A type the App's code declares"
 msgstr "A type the App's code declares"
@@ -2035,10 +2027,6 @@ msgstr "A widget Grasp made"
 #: src/workflows/requests/request-parts.tsx
 msgid "A workflow"
 msgstr "A workflow"
-
-#: src/connections/request-app-dialog.tsx
-msgid "A workflow needs an app that is not here yet? Tell Grasp which one, and what it should do there."
-msgstr "A workflow needs an app that is not here yet? Tell Grasp which one, and what it should do there."
 
 #: src/workflows/requests/request-plan.tsx
 msgid "A workflow started"
@@ -2811,10 +2799,6 @@ msgstr "An index, to sort and filter by a field"
 #: src/onboarding/setup-steps.tsx
 msgid "An old format: save it as PDF or a newer file"
 msgstr "An old format: save it as PDF or a newer file"
-
-#: src/connections/http-connections.tsx
-msgid "An outside API that Apps and workflows can call through Grasp, once you allow them to: only this origin, with these methods, under these paths."
-msgstr "An outside API that Apps and workflows can call through Grasp, once you allow them to: only this origin, with these methods, under these paths."
 
 #: src/workflows/requests/request-who.tsx
 msgid "An owner can turn this on."
@@ -4623,10 +4607,6 @@ msgstr "Collection not found"
 msgid "Collections"
 msgstr "Collections"
 
-#: src/routes/_shell.knowledge.index.tsx
-msgid "Collections hold the documents Grasp and its agents may read. An admin shares them with you, or you add your own."
-msgstr "Collections hold the documents Grasp and its agents may read. An admin shares them with you, or you add your own."
-
 #: src/frame/part-words.tsx
 #: src/settings/backdrop-settings.tsx
 #: src/settings/composer-settings.tsx
@@ -5230,10 +5210,6 @@ msgstr "Couldn't share"
 msgid "Couldn't stop sharing"
 msgstr "Couldn't stop sharing"
 
-#: src/workflows/figures.tsx
-msgid "Counted over the workflows of the Apps you can open; independent workflows aren't counted here."
-msgstr "Counted over the workflows of the Apps you can open; independent workflows aren't counted here."
-
 #: src/connections/integration-facts.ts
 msgctxt "permission group"
 msgid "Create and change"
@@ -5827,14 +5803,6 @@ msgstr "Document not found"
 msgid "Documents"
 msgstr "Documents"
 
-#: src/brain/sources-page.tsx
-msgid "Documents and workflow runs show here once they reach the Brain."
-msgstr "Documents and workflow runs show here once they reach the Brain."
-
-#: src/routes/_shell.knowledge.$collection.tsx
-msgid "Documents written here, and files uploaded to it, show up here for Grasp and its agents to read."
-msgstr "Documents written here, and files uploaded to it, show up here for Grasp and its agents to read."
-
 #: src/frame/part-words.tsx
 msgctxt "a filter's operator"
 msgid "does not contain"
@@ -6059,10 +6027,6 @@ msgstr "Each area is erased on its own. One that fails is tried again until it i
 #: src/agents/agent-page.tsx
 msgid "Each as the company has it, or for fewer people. Never more."
 msgstr "Each as the company has it, or for fewer people. Never more."
-
-#: src/workflows/workflow-triggers.tsx
-msgid "Each event of this type from the source starts a run, with its data as the input."
-msgstr "Each event of this type from the source starts a run, with its data as the input."
 
 #: src/inbox/interviews-item.tsx
 msgid "Each link is its owner's own: send it only to them."
@@ -6329,10 +6293,6 @@ msgstr "Every record it holds and every file in them is gone for good, and its c
 msgid "Every row is checked first. If one is wrong, nothing is added."
 msgstr "Every row is checked first. If one is wrong, nothing is added."
 
-#: src/brain/brain-sections.ts
-msgid "Every team Grasp spoke to: who they are, how they work and what slows them down."
-msgstr "Every team Grasp spoke to: who they are, how they work and what slows them down."
-
 #: src/apps/reset-test-data.tsx
 msgid "Every test record goes, for everyone who builds this App. The App's live data isn't touched."
 msgstr "Every test record goes, for everyone who builds this App. The App's live data isn't touched."
@@ -6433,10 +6393,6 @@ msgstr "Everything from a first client conversation until the money is in the ba
 #: src/workflows/business-process.tsx
 msgid "Everything from ordering from a supplier until their invoice is paid."
 msgstr "Everything from ordering from a supplier until their invoice is paid."
-
-#: src/routes/_shell.knowledge.index.tsx
-msgid "Everything Grasp and its agents may read, in collections: your own, your teams' and your organization's. Agents read a document when they need it, and always have the memory files in mind."
-msgstr "Everything Grasp and its agents may read, in collections: your own, your teams' and your organization's. Agents read a document when they need it, and always have the memory files in mind."
 
 #: src/brain/brain.ts
 msgid "Everything Grasp learned about {company}, each fact traceable to the conversation, document or connection it came from."
@@ -7492,10 +7448,6 @@ msgstr "Grasp's own team can sign in here to help only while Grasp has opened a 
 msgid "Grid"
 msgstr "Grid"
 
-#: src/routes/_shell.projects.index.tsx
-msgid "Group the apps and workflows of a process, a team or a goal in a project. You see the projects you are in."
-msgstr "Group the apps and workflows of a process, a team or a goal in a project. You see the projects you are in."
-
 #: src/activity/audit-event.tsx
 msgid "Guest"
 msgstr "Guest"
@@ -7997,6 +7949,10 @@ msgstr "Inbox"
 msgid "Incoming events"
 msgstr "Incoming events"
 
+#: src/workflows/figures.tsx
+msgid "Independent workflows aren't counted here."
+msgstr "Independent workflows aren't counted here."
+
 #: src/apps/indexes-view.tsx
 msgid "Indexes"
 msgstr "Indexes"
@@ -8337,13 +8293,13 @@ msgstr "It rests on nothing you can see."
 msgid "It rests on turns you were not part of."
 msgstr "It rests on turns you were not part of."
 
+#: src/workflows/workflow-triggers.tsx
+msgid "It runs as you, and starts nothing until an admin allows it."
+msgstr "It runs as you, and starts nothing until an admin allows it."
+
 #: src/apps/app-workspace.tsx
 msgid "It shows here as soon as there is something to see."
 msgstr "It shows here as soon as there is something to see."
-
-#: src/brain/remember-dialog.tsx
-msgid "It starts as proposed: Grasp uses it, and you can correct or retire it here."
-msgstr "It starts as proposed: Grasp uses it, and you can correct or retire it here."
 
 #: src/workflows/workflow-triggers.tsx
 msgid "It starts no more runs. Runs it already started go on. This can't be undone."
@@ -8356,10 +8312,6 @@ msgstr "It starts nothing until an admin allows it to start this workflow."
 #: src/agents/new-agent.tsx
 msgid "It starts reaching nobody. You choose who may ask it next."
 msgstr "It starts reaching nobody. You choose who may ask it next."
-
-#: src/knowledge/new-document.tsx
-msgid "It starts with its name as a heading; write the rest in the editor."
-msgstr "It starts with its name as a heading; write the rest in the editor."
 
 #: src/interview/page.tsx
 msgid "It stays here for you to read. You can still delete it."
@@ -8396,6 +8348,10 @@ msgstr "It takes {fields}."
 #: src/pages/frame-failure.tsx
 msgid "It took too long to start: the connection may be slow, or the page never finished drawing."
 msgstr "It took too long to start: the connection may be slow, or the page never finished drawing."
+
+#: src/workflows/kept-state.tsx
+msgid "It uses {used} KB of {cap} KB."
+msgstr "It uses {used} KB of {cap} KB."
 
 #: src/workflows/today-lanes.tsx
 msgid "It waits on you since {since}."
@@ -9499,6 +9455,10 @@ msgstr "More about the owner"
 msgid "More about the staff list"
 msgstr "More about the staff list"
 
+#: src/inbox/interviews-item.tsx
+msgid "More about the teams"
+msgstr "More about the teams"
+
 #: src/onboarding/connect-steps.tsx
 msgid "More about these connections"
 msgstr "More about these connections"
@@ -9854,10 +9814,6 @@ msgstr "New: “{label}”"
 #: src/activity/audit-log.tsx
 msgid "Newer"
 msgstr "Newer"
-
-#: src/workflows/item-test.tsx
-msgid "Newest item first. Nothing was sent or changed: every call was answered from what you gave."
-msgstr "Newest item first. Nothing was sent or changed: every call was answered from what you gave."
 
 #: src/chat/asked-questions.tsx
 #: src/settings/event-sources.tsx
@@ -10215,10 +10171,6 @@ msgstr "No workflow has called a model this month."
 #: src/settings/stephen-settings.tsx
 msgid "No workflow is open to asking yet."
 msgstr "No workflow is open to asking yet."
-
-#: src/routes/_shell.workflows.index.tsx
-msgid "No workflow needs attention: nothing waits for a decision or to go live, nothing failed lately."
-msgstr "No workflow needs attention: nothing waits for a decision or to go live, nothing failed lately."
 
 #: src/dashboard/report.ts
 msgid "No workflow ran in this time."
@@ -10782,6 +10734,10 @@ msgstr "Nothing is shared with the project, so they lose no access."
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Nothing matched."
 msgstr "Nothing matched."
+
+#: src/routes/_shell.workflows.index.tsx
+msgid "Nothing needs you."
+msgstr "Nothing needs you."
 
 #: src/workflows/workflow-status.tsx
 msgid "Nothing new starts until you resume it: a start is refused while it is paused. Runs already going carry on to their end."
@@ -15489,10 +15445,6 @@ msgstr "The agent asked an admin for {name}"
 msgid "The agent looked something up"
 msgstr "The agent looked something up"
 
-#: src/agents/agents-overview.tsx
-msgid "The agents your company sets up for you show here."
-msgstr "The agents your company sets up for you show here."
-
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "The answer was cut off at the model's limit."
@@ -15611,17 +15563,9 @@ msgstr "The App's tests can't run on this deployment, so nothing was shared."
 msgid "The App's tests fail, so nothing was shared. Fix them, then share."
 msgstr "The App's tests fail, so nothing was shared. Fix them, then share."
 
-#: src/brain/brain-sections.ts
-msgid "The apps teams named, and the ones seen in use that nobody mentioned."
-msgstr "The apps teams named, and the ones seen in use that nobody mentioned."
-
 #: src/chat/builds.tsx
 msgid "The Apps this chat builds didn't load."
 msgstr "The Apps this chat builds didn't load."
-
-#: src/apps/apps-overview.tsx
-msgid "The Apps your colleagues share with you show here."
-msgstr "The Apps your colleagues share with you show here."
 
 #: src/agents/agent-page.tsx
 msgid "The asker's"
@@ -15757,10 +15701,6 @@ msgstr "The documents couldn't be loaded. Reload the page."
 msgid "The draft's code doesn't build."
 msgstr "The draft's code doesn't build."
 
-#: src/brain/goals-editor.tsx
-msgid "The earlier wording stays in the goal's history."
-msgstr "The earlier wording stays in the goal's history."
-
 #: src/activity/audit-event.tsx
 msgid "the event ID"
 msgstr "the event ID"
@@ -15820,11 +15760,6 @@ msgstr "The input isn't JSON."
 #: src/interview/page.tsx
 msgid "The interviews are over."
 msgstr "The interviews are over."
-
-#: src/workflows/resource-runs.tsx
-#: src/workflows/traces.tsx
-msgid "The latest runs, newest first."
-msgstr "The latest runs, newest first."
 
 #: src/frame/part-words.tsx
 msgid "The limit of {limit} characters is reached"
@@ -16657,10 +16592,6 @@ msgstr "Time wasters"
 #: src/workflows/workflow-triggers.tsx
 msgid "Time zone"
 msgstr "Time zone"
-
-#: src/brain/brain-sections.ts
-msgid "Time-consuming work that could be automated, and what was said about each."
-msgstr "Time-consuming work that could be automated, and what was said about each."
 
 #: src/dashboard/runs-widget.tsx
 msgid "Timed out"
@@ -17763,17 +17694,9 @@ msgstr "What every agent has in its context, all the time."
 msgid "What gets in the way"
 msgstr "What gets in the way"
 
-#: src/inbox/inbox-page.tsx
-msgid "What Grasp asks you, and what waits for your yes, comes here."
-msgstr "What Grasp asks you, and what waits for your yes, comes here."
-
 #: src/chat/thread.tsx
 msgid "What Grasp did"
 msgstr "What Grasp did"
-
-#: src/brain/brain-sections.ts
-msgid "What Grasp does not know yet, and who can answer it."
-msgstr "What Grasp does not know yet, and who can answer it."
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/integration-inspector.tsx
@@ -17882,8 +17805,8 @@ msgid "What its calls answer"
 msgstr "What its calls answer"
 
 #: src/workflows/kept-state.tsx
-msgid "What its steps keep for later runs, which each run reads as it starts. It uses {used} KB of {cap} KB."
-msgstr "What its steps keep for later runs, which each run reads as it starts. It uses {used} KB of {cap} KB."
+msgid "What its steps keep for later runs, which each run reads as it starts."
+msgstr "What its steps keep for later runs, which each run reads as it starts."
 
 #: src/connections/integration-inspector.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -17913,10 +17836,6 @@ msgstr "What people ask"
 #: src/dashboard/report.ts
 msgid "What ran"
 msgstr "What ran"
-
-#: src/dashboard/report-dialog.tsx
-msgid "What ran, the decisions it asked for, every workflow and what could be better. Keep it as Markdown, or save it as a PDF from the print window."
-msgstr "What ran, the decisions it asked for, every workflow and what could be better. Keep it as Markdown, or save it as a PDF from the print window."
 
 #: src/chat/approval-words.ts
 #: src/inbox/item-detail.tsx
@@ -17948,17 +17867,9 @@ msgstr "What starts it"
 msgid "What the App may do with it"
 msgstr "What the App may do with it"
 
-#: src/brain/brain-sections.ts
-msgid "What the board wants from the sprint: its goals and the rules of the road."
-msgstr "What the board wants from the sprint: its goals and the rules of the road."
-
 #: src/settings/erasures.tsx
 msgid "What the Brain keeps that only they may read"
 msgstr "What the Brain keeps that only they may read"
-
-#: src/brain/sources-page.tsx
-msgid "What the Brain keeps that you may read, and search through it as your agents recall it."
-msgstr "What the Brain keeps that you may read, and search through it as your agents recall it."
 
 #: src/brain/brain-log.tsx
 msgid "What the brain kept of it"
@@ -18028,10 +17939,6 @@ msgstr "What to show of the traces"
 msgid "What waits on you"
 msgstr "What waits on you"
 
-#: src/routes/_shell.dashboard.tsx
-msgid "What waits on you, each with its next step, and what could be better."
-msgstr "What waits on you, each with its next step, and what could be better."
-
 #: src/brain/brain-atlas.ts
 msgid "What was heard, written and connected"
 msgstr "What was heard, written and connected"
@@ -18061,10 +17968,6 @@ msgstr "What we do"
 msgid "What you agreed to is kept. Forgot something? This link works until {closes}."
 msgstr "What you agreed to is kept. Forgot something? This link works until {closes}."
 
-#: src/brain/memory-page.tsx
-msgid "What you and your agents remember, and what others share with you, shows here."
-msgstr "What you and your agents remember, and what others share with you, shows here."
-
 #: src/connections/connected-dialog.tsx
 msgid "What you chose"
 msgstr "What you chose"
@@ -18085,10 +17988,6 @@ msgstr "When"
 #: src/workflows/trigger-description.ts
 msgid "When {account} reports an event"
 msgstr "When {account} reports an event"
-
-#: src/brain/lessons-view.tsx
-msgid "When a task keeps failing the same way, the Brain notes it here as a lesson you can check."
-msgstr "When a task keeps failing the same way, the Brain notes it here as a lesson you can check."
 
 #: src/workflows/trigger-description.ts
 msgid "When an email arrives at its own address"
@@ -18142,10 +18041,6 @@ msgstr "Where"
 #: src/onboarding/setup-steps.tsx
 msgid "Where does the work get written down?"
 msgstr "Where does the work get written down?"
-
-#: src/brain/brain-sections.ts
-msgid "Where everything came from: conversations, documents, Pulse and connections."
-msgstr "Where everything came from: conversations, documents, Pulse and connections."
 
 #: src/workflows/today-lanes.tsx
 msgctxt "the card that follows one item across workflows"

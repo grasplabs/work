@@ -66,7 +66,7 @@ export const RunFiguresView = ({
       {/* What core counts: the Apps' workflows, never independent ones. */}
       {scope === "all" ? (
         <Text size="sm" tone="muted">
-          {t`Counted over the workflows of the Apps you can open; independent workflows aren't counted here.`}
+          {t`Independent workflows aren't counted here.`}
         </Text>
       ) : null}
     </div>

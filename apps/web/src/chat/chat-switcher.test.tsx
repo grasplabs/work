@@ -131,7 +131,7 @@ const press = async (init: KeyboardEventInit): Promise<void> => {
   });
 };
 
-/** How long the window may take to open: the first time, its code loads first. */
+/** How long the window may take to open and read the chats. */
 const openMs = 5000;
 
 /** Opens the window with `keys`, once it has loaded and read the chats. */
@@ -286,13 +286,21 @@ describe("the chats window", () => {
     });
   });
 
-  it("closes again with the same keys", async () => {
-    await shown(async () => await Promise.resolve([]));
+  it("closes again with the same keys, and opens again on the chats as core lists them then", async () => {
+    const listed = [board, lease];
+    await shown(async () => await Promise.resolve([]), listed);
     await openWindow({ key: "k", ctrlKey: true });
 
     await press({ key: "k", ctrlKey: true });
     await vi.waitFor(() => {
       expect(dialog()).toBeNull();
+    });
+
+    // A chat started while it was closed.
+    listed.push(travel);
+    await press({ key: "k", ctrlKey: true });
+    await vi.waitFor(() => {
+      expect(chatRows()).toContain("Trip to Lyon");
     });
   });
 });

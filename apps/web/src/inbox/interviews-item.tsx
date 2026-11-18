@@ -363,8 +363,9 @@ export const InterviewsDetail = ({
       {teams.length === 0 ? null : (
         <SectionCard
           density="compact"
-          description={t`Teams under five show only their lead.`}
           flush
+          info={t`Teams under five show only their lead.`}
+          infoLabel={t`More about the teams`}
           title={t`By team`}
         >
           <ItemGroup aria-label={t`By team`} separated>

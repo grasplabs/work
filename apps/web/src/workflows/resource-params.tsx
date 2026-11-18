@@ -411,7 +411,7 @@ export const ResourceParams = ({
         ? {}
         : {
             footer: editable
-              ? t`A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value.`
+              ? t`A change applies to runs that start after it.`
               : t`Only the workflow's builders can change these.`,
           })}
     >

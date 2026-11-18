@@ -25,12 +25,7 @@ import { formatDateTime, formatList } from "../format.ts";
 import { BrandIcon } from "../grasp/brand-icon/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Card } from "../grasp/card/index.ts";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "../grasp/empty/index.ts";
+import { Empty, EmptyHeader, EmptyTitle } from "../grasp/empty/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import { Cable } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
@@ -447,11 +442,6 @@ const SourceList = ({
           <EmptyTitle headingLevel={3}>
             <Trans>Nothing in the Brain you may read yet</Trans>
           </EmptyTitle>
-          <EmptyDescription>
-            <Trans>
-              Documents and workflow runs show here once they reach the Brain.
-            </Trans>
-          </EmptyDescription>
         </EmptyHeader>
       </Empty>
     );
@@ -731,12 +721,6 @@ export const SourcesPage = ({
     <div {...stylex.props(styles.pane)}>
       <div {...stylex.props(styles.column)}>
         <PageHeader
-          description={
-            <Trans>
-              What the Brain keeps that you may read, and search through it as
-              your agents recall it.
-            </Trans>
-          }
           title={<Trans context="the Brain's sources page">Sources</Trans>}
         />
         <Search onOpen={open} />

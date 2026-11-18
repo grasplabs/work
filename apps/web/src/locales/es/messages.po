@@ -1712,17 +1712,13 @@ msgid "A change"
 msgstr "Un cambio"
 
 #: src/workflows/resource-params.tsx
-msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
-msgstr "Un cambio se aplica a las ejecuciones que empiezan después: las que ya están en marcha conservan los valores con los que empezaron. Cada cambio queda registrado, sin su valor."
+msgid "A change applies to runs that start after it."
+msgstr "Un cambio se aplica a las ejecuciones que empiezan después."
 
 #: src/apps/app-access-requests.tsx
 #: src/apps/draft-changes.tsx
 msgid "A collection"
 msgstr "Una colección"
-
-#: src/knowledge/new-collection.tsx
-msgid "A collection holds documents Grasp and its agents may read."
-msgstr "Una colección contiene documentos que Grasp y sus agentes pueden leer."
 
 #: src/apps/app-access-requests.tsx
 msgid "A collection to read"
@@ -2010,10 +2006,6 @@ msgstr "Una herramienta activada empieza en Lectura donde Composio dice que solo
 msgid "A topic"
 msgstr "Un tema"
 
-#: src/workflows/workflow-triggers.tsx
-msgid "A trigger starts a run on its own, as whoever made it. Adding one asks an admin to allow it to start this workflow, and one on a connection to read its events there: it starts nothing until they do."
-msgstr "Un disparador inicia una ejecución por sí solo, en nombre de quien lo creó. Al añadir uno se pide a un administrador que le permita iniciar este flujo de trabajo y, si es de una conexión, leer allí sus eventos: no inicia nada hasta que lo haga."
-
 #: src/apps/field-kinds.tsx
 msgid "A type the App's code declares"
 msgstr "Un tipo que declara el código de la App"
@@ -2035,10 +2027,6 @@ msgstr "Un widget que hizo Grasp"
 #: src/workflows/requests/request-parts.tsx
 msgid "A workflow"
 msgstr "Un flujo de trabajo"
-
-#: src/connections/request-app-dialog.tsx
-msgid "A workflow needs an app that is not here yet? Tell Grasp which one, and what it should do there."
-msgstr "¿Un workflow necesita una app que aún no está aquí? Dile a Grasp cuál, y qué debe hacer en ella."
 
 #: src/workflows/requests/request-plan.tsx
 msgid "A workflow started"
@@ -2811,10 +2799,6 @@ msgstr "Un índice, para ordenar y filtrar por un campo"
 #: src/onboarding/setup-steps.tsx
 msgid "An old format: save it as PDF or a newer file"
 msgstr "Un formato antiguo: guárdalo como PDF o en un archivo más reciente"
-
-#: src/connections/http-connections.tsx
-msgid "An outside API that Apps and workflows can call through Grasp, once you allow them to: only this origin, with these methods, under these paths."
-msgstr "Una API externa a la que las aplicaciones y los workflows pueden llamar a través de Grasp, una vez que se lo permitas: solo este origen, con estos métodos, bajo estas rutas."
 
 #: src/workflows/requests/request-who.tsx
 msgid "An owner can turn this on."
@@ -4623,10 +4607,6 @@ msgstr "Colección no encontrada"
 msgid "Collections"
 msgstr "Colecciones"
 
-#: src/routes/_shell.knowledge.index.tsx
-msgid "Collections hold the documents Grasp and its agents may read. An admin shares them with you, or you add your own."
-msgstr "Las colecciones contienen los documentos que Grasp y sus agentes pueden leer. Un administrador las comparte contigo, o añades las tuyas."
-
 #: src/frame/part-words.tsx
 #: src/settings/backdrop-settings.tsx
 #: src/settings/composer-settings.tsx
@@ -5230,10 +5210,6 @@ msgstr "No se pudo compartir"
 msgid "Couldn't stop sharing"
 msgstr "No se pudo dejar de compartir"
 
-#: src/workflows/figures.tsx
-msgid "Counted over the workflows of the Apps you can open; independent workflows aren't counted here."
-msgstr "Contadas sobre los flujos de trabajo de las aplicaciones que puede abrir; aquí no se cuentan los flujos de trabajo independientes."
-
 #: src/connections/integration-facts.ts
 msgctxt "permission group"
 msgid "Create and change"
@@ -5827,14 +5803,6 @@ msgstr "Documento no encontrado"
 msgid "Documents"
 msgstr "Documentos"
 
-#: src/brain/sources-page.tsx
-msgid "Documents and workflow runs show here once they reach the Brain."
-msgstr "Los documentos y las ejecuciones de flujos de trabajo aparecen aquí cuando llegan al cerebro."
-
-#: src/routes/_shell.knowledge.$collection.tsx
-msgid "Documents written here, and files uploaded to it, show up here for Grasp and its agents to read."
-msgstr "Los documentos escritos aquí y los archivos que se suban aparecen aquí para que Grasp y sus agentes los lean."
-
 #: src/frame/part-words.tsx
 msgctxt "a filter's operator"
 msgid "does not contain"
@@ -6059,10 +6027,6 @@ msgstr "Cada área se borra por separado. Si una falla, se vuelve a intentar has
 #: src/agents/agent-page.tsx
 msgid "Each as the company has it, or for fewer people. Never more."
 msgstr "Cada una como la tiene la empresa, o para menos personas. Nunca para más."
-
-#: src/workflows/workflow-triggers.tsx
-msgid "Each event of this type from the source starts a run, with its data as the input."
-msgstr "Cada evento de este tipo de la fuente inicia una ejecución, con sus datos como entrada."
 
 #: src/inbox/interviews-item.tsx
 msgid "Each link is its owner's own: send it only to them."
@@ -6329,10 +6293,6 @@ msgstr "Todos sus registros y todos los archivos que contienen desaparecen para 
 msgid "Every row is checked first. If one is wrong, nothing is added."
 msgstr "Primero se comprueba cada fila. Si una es incorrecta, no se añade nada."
 
-#: src/brain/brain-sections.ts
-msgid "Every team Grasp spoke to: who they are, how they work and what slows them down."
-msgstr "Cada equipo con el que habló Grasp: quiénes son, cómo trabajan y qué los frena."
-
 #: src/apps/reset-test-data.tsx
 msgid "Every test record goes, for everyone who builds this App. The App's live data isn't touched."
 msgstr "Se borran todos los registros de prueba, para todas las personas que construyen esta App. Los datos reales de la App no se tocan."
@@ -6433,10 +6393,6 @@ msgstr "Todo, desde la primera conversación con un cliente hasta que el dinero 
 #: src/workflows/business-process.tsx
 msgid "Everything from ordering from a supplier until their invoice is paid."
 msgstr "Todo, desde el pedido a un proveedor hasta que se paga su factura."
-
-#: src/routes/_shell.knowledge.index.tsx
-msgid "Everything Grasp and its agents may read, in collections: your own, your teams' and your organization's. Agents read a document when they need it, and always have the memory files in mind."
-msgstr "Todo lo que Grasp y sus agentes pueden leer, en colecciones: las tuyas, las de tus equipos y las de tu organización. Los agentes leen un documento cuando lo necesitan y siempre tienen presentes los archivos de memoria."
 
 #: src/brain/brain.ts
 msgid "Everything Grasp learned about {company}, each fact traceable to the conversation, document or connection it came from."
@@ -7492,10 +7448,6 @@ msgstr "El propio equipo de Grasp solo puede entrar aquí para ayudar mientras G
 msgid "Grid"
 msgstr "Cuadrícula"
 
-#: src/routes/_shell.projects.index.tsx
-msgid "Group the apps and workflows of a process, a team or a goal in a project. You see the projects you are in."
-msgstr "Agrupa las apps y los flujos de trabajo de un proceso, un equipo o un objetivo en un proyecto. Ves los proyectos de los que formas parte."
-
 #: src/activity/audit-event.tsx
 msgid "Guest"
 msgstr "Invitado"
@@ -7997,6 +7949,10 @@ msgstr "Bandeja de entrada"
 msgid "Incoming events"
 msgstr "Eventos entrantes"
 
+#: src/workflows/figures.tsx
+msgid "Independent workflows aren't counted here."
+msgstr "Los flujos de trabajo independientes no se cuentan aquí."
+
 #: src/apps/indexes-view.tsx
 msgid "Indexes"
 msgstr "Índices"
@@ -8337,13 +8293,13 @@ msgstr "No se basa en nada que puedas ver."
 msgid "It rests on turns you were not part of."
 msgstr "Se basa en turnos en los que no participaste."
 
+#: src/workflows/workflow-triggers.tsx
+msgid "It runs as you, and starts nothing until an admin allows it."
+msgstr "Se ejecuta como tú y no inicia nada hasta que un administrador lo permita."
+
 #: src/apps/app-workspace.tsx
 msgid "It shows here as soon as there is something to see."
 msgstr "Aparece aquí en cuanto haya algo que ver."
-
-#: src/brain/remember-dialog.tsx
-msgid "It starts as proposed: Grasp uses it, and you can correct or retire it here."
-msgstr "Empieza como propuesto: Grasp lo usa, y puedes corregirlo o retirarlo aquí."
 
 #: src/workflows/workflow-triggers.tsx
 msgid "It starts no more runs. Runs it already started go on. This can't be undone."
@@ -8356,10 +8312,6 @@ msgstr "No inicia nada hasta que un administrador le permita iniciar este flujo 
 #: src/agents/new-agent.tsx
 msgid "It starts reaching nobody. You choose who may ask it next."
 msgstr "Empieza sin llegar a nadie. Después eliges quién puede preguntarle."
-
-#: src/knowledge/new-document.tsx
-msgid "It starts with its name as a heading; write the rest in the editor."
-msgstr "Empieza con su nombre como título; escribe el resto en el editor."
 
 #: src/interview/page.tsx
 msgid "It stays here for you to read. You can still delete it."
@@ -8396,6 +8348,10 @@ msgstr "Recibe {fields}."
 #: src/pages/frame-failure.tsx
 msgid "It took too long to start: the connection may be slow, or the page never finished drawing."
 msgstr "Tardó demasiado en arrancar: puede que la conexión sea lenta o que la página nunca terminara de dibujarse."
+
+#: src/workflows/kept-state.tsx
+msgid "It uses {used} KB of {cap} KB."
+msgstr "Usa {used} KB de {cap} KB."
 
 #: src/workflows/today-lanes.tsx
 msgid "It waits on you since {since}."
@@ -9499,6 +9455,10 @@ msgstr "Más sobre el propietario"
 msgid "More about the staff list"
 msgstr "Más sobre la lista de personal"
 
+#: src/inbox/interviews-item.tsx
+msgid "More about the teams"
+msgstr "Más sobre los equipos"
+
 #: src/onboarding/connect-steps.tsx
 msgid "More about these connections"
 msgstr "Más sobre estas conexiones"
@@ -9854,10 +9814,6 @@ msgstr "Nuevo: «{label}»"
 #: src/activity/audit-log.tsx
 msgid "Newer"
 msgstr "Más recientes"
-
-#: src/workflows/item-test.tsx
-msgid "Newest item first. Nothing was sent or changed: every call was answered from what you gave."
-msgstr "El elemento más reciente primero. No se envió ni cambió nada: cada llamada se respondió con lo que diste."
 
 #: src/chat/asked-questions.tsx
 #: src/settings/event-sources.tsx
@@ -10215,10 +10171,6 @@ msgstr "Ningún flujo de trabajo ha llamado a un modelo este mes."
 #: src/settings/stephen-settings.tsx
 msgid "No workflow is open to asking yet."
 msgstr "Aún no hay ningún flujo de trabajo abierto a peticiones."
-
-#: src/routes/_shell.workflows.index.tsx
-msgid "No workflow needs attention: nothing waits for a decision or to go live, nothing failed lately."
-msgstr "Ningún flujo de trabajo requiere atención: nada espera una decisión ni su publicación, nada ha fallado últimamente."
 
 #: src/dashboard/report.ts
 msgid "No workflow ran in this time."
@@ -10782,6 +10734,10 @@ msgstr "No hay nada compartido con el proyecto, así que no pierden ningún acce
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Nothing matched."
 msgstr "No hubo coincidencias."
+
+#: src/routes/_shell.workflows.index.tsx
+msgid "Nothing needs you."
+msgstr "Nada te necesita."
 
 #: src/workflows/workflow-status.tsx
 msgid "Nothing new starts until you resume it: a start is refused while it is paused. Runs already going carry on to their end."
@@ -15489,10 +15445,6 @@ msgstr "El agente pidió {name} a un administrador"
 msgid "The agent looked something up"
 msgstr "El agente consultó algo"
 
-#: src/agents/agents-overview.tsx
-msgid "The agents your company sets up for you show here."
-msgstr "Los agentes que tu empresa configure para ti aparecen aquí."
-
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "The answer was cut off at the model's limit."
@@ -15611,17 +15563,9 @@ msgstr "Las pruebas de la App no pueden ejecutarse en esta instalación, así qu
 msgid "The App's tests fail, so nothing was shared. Fix them, then share."
 msgstr "Las pruebas de la App fallan, así que no se compartió nada. Corrígelas y luego compártela."
 
-#: src/brain/brain-sections.ts
-msgid "The apps teams named, and the ones seen in use that nobody mentioned."
-msgstr "Las apps que nombraron los equipos, y las que se usan pero nadie mencionó."
-
 #: src/chat/builds.tsx
 msgid "The Apps this chat builds didn't load."
 msgstr "Las aplicaciones que crea este chat no se cargaron."
-
-#: src/apps/apps-overview.tsx
-msgid "The Apps your colleagues share with you show here."
-msgstr "Las Apps que tus compañeros comparten contigo aparecen aquí."
 
 #: src/agents/agent-page.tsx
 msgid "The asker's"
@@ -15757,10 +15701,6 @@ msgstr "No se pudieron cargar los documentos. Recarga la página."
 msgid "The draft's code doesn't build."
 msgstr "El código del borrador no se compila."
 
-#: src/brain/goals-editor.tsx
-msgid "The earlier wording stays in the goal's history."
-msgstr "La redacción anterior queda en el historial del objetivo."
-
 #: src/activity/audit-event.tsx
 msgid "the event ID"
 msgstr "el ID del evento"
@@ -15820,11 +15760,6 @@ msgstr "La entrada no es JSON."
 #: src/interview/page.tsx
 msgid "The interviews are over."
 msgstr "Las entrevistas han terminado."
-
-#: src/workflows/resource-runs.tsx
-#: src/workflows/traces.tsx
-msgid "The latest runs, newest first."
-msgstr "Las ejecuciones más recientes, primero las nuevas."
 
 #: src/frame/part-words.tsx
 msgid "The limit of {limit} characters is reached"
@@ -16657,10 +16592,6 @@ msgstr "Pérdidas de tiempo"
 #: src/workflows/workflow-triggers.tsx
 msgid "Time zone"
 msgstr "Zona horaria"
-
-#: src/brain/brain-sections.ts
-msgid "Time-consuming work that could be automated, and what was said about each."
-msgstr "Trabajo que lleva mucho tiempo y podría automatizarse, y lo que se dijo de cada uno."
 
 #: src/dashboard/runs-widget.tsx
 msgid "Timed out"
@@ -17763,17 +17694,9 @@ msgstr "Lo que cada agente tiene siempre en su contexto."
 msgid "What gets in the way"
 msgstr "Lo que estorba"
 
-#: src/inbox/inbox-page.tsx
-msgid "What Grasp asks you, and what waits for your yes, comes here."
-msgstr "Lo que Grasp te pregunta y lo que espera tu sí llega aquí."
-
 #: src/chat/thread.tsx
 msgid "What Grasp did"
 msgstr "Lo que hizo Grasp"
-
-#: src/brain/brain-sections.ts
-msgid "What Grasp does not know yet, and who can answer it."
-msgstr "Lo que Grasp aún no sabe, y quién puede responderlo."
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/integration-inspector.tsx
@@ -17882,8 +17805,8 @@ msgid "What its calls answer"
 msgstr "Qué responden sus llamadas"
 
 #: src/workflows/kept-state.tsx
-msgid "What its steps keep for later runs, which each run reads as it starts. It uses {used} KB of {cap} KB."
-msgstr "Lo que sus pasos guardan para ejecuciones posteriores, que cada ejecución lee al empezar. Usa {used} KB de {cap} KB."
+msgid "What its steps keep for later runs, which each run reads as it starts."
+msgstr "Lo que sus pasos guardan para ejecuciones posteriores, que cada ejecución lee al empezar."
 
 #: src/connections/integration-inspector.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -17913,10 +17836,6 @@ msgstr "Lo que la gente pregunta"
 #: src/dashboard/report.ts
 msgid "What ran"
 msgstr "Qué se ejecutó"
-
-#: src/dashboard/report-dialog.tsx
-msgid "What ran, the decisions it asked for, every workflow and what could be better. Keep it as Markdown, or save it as a PDF from the print window."
-msgstr "Qué se ejecutó, las decisiones que pidió, cada flujo de trabajo y qué podría ir mejor. Guárdalo como Markdown o como PDF desde la ventana de impresión."
 
 #: src/chat/approval-words.ts
 #: src/inbox/item-detail.tsx
@@ -17948,17 +17867,9 @@ msgstr "Qué lo inicia"
 msgid "What the App may do with it"
 msgstr "Qué puede hacer la aplicación con ella"
 
-#: src/brain/brain-sections.ts
-msgid "What the board wants from the sprint: its goals and the rules of the road."
-msgstr "Lo que la dirección quiere del sprint: sus objetivos y las reglas del juego."
-
 #: src/settings/erasures.tsx
 msgid "What the Brain keeps that only they may read"
 msgstr "Lo que el cerebro guarda y solo esa persona puede leer"
-
-#: src/brain/sources-page.tsx
-msgid "What the Brain keeps that you may read, and search through it as your agents recall it."
-msgstr "Lo que el cerebro guarda y puedes leer, y la búsqueda en ello tal como lo recuerdan tus agentes."
 
 #: src/brain/brain-log.tsx
 msgid "What the brain kept of it"
@@ -18028,10 +17939,6 @@ msgstr "Qué mostrar de las trazas"
 msgid "What waits on you"
 msgstr "Lo que te espera"
 
-#: src/routes/_shell.dashboard.tsx
-msgid "What waits on you, each with its next step, and what could be better."
-msgstr "Lo que te espera, cada cosa con su siguiente paso, y lo que podría ir mejor."
-
 #: src/brain/brain-atlas.ts
 msgid "What was heard, written and connected"
 msgstr "Lo que se oyó, se escribió y se conectó"
@@ -18061,10 +17968,6 @@ msgstr "Qué hacemos"
 msgid "What you agreed to is kept. Forgot something? This link works until {closes}."
 msgstr "Lo que has confirmado queda guardado. ¿Se te olvidó algo? Este enlace funciona hasta el {closes}."
 
-#: src/brain/memory-page.tsx
-msgid "What you and your agents remember, and what others share with you, shows here."
-msgstr "Lo que tú y tus agentes recordáis, y lo que otros comparten contigo, aparece aquí."
-
 #: src/connections/connected-dialog.tsx
 msgid "What you chose"
 msgstr "Lo que elegiste"
@@ -18085,10 +17988,6 @@ msgstr "Cuándo"
 #: src/workflows/trigger-description.ts
 msgid "When {account} reports an event"
 msgstr "Cuando {account} informa de un evento"
-
-#: src/brain/lessons-view.tsx
-msgid "When a task keeps failing the same way, the Brain notes it here as a lesson you can check."
-msgstr "Cuando una tarea falla una y otra vez de la misma forma, el cerebro lo anota aquí como una lección que puedes revisar."
 
 #: src/workflows/trigger-description.ts
 msgid "When an email arrives at its own address"
@@ -18142,10 +18041,6 @@ msgstr "Dónde"
 #: src/onboarding/setup-steps.tsx
 msgid "Where does the work get written down?"
 msgstr "¿Dónde queda escrito el trabajo?"
-
-#: src/brain/brain-sections.ts
-msgid "Where everything came from: conversations, documents, Pulse and connections."
-msgstr "De dónde viene todo: conversaciones, documentos, Pulse y conexiones."
 
 #: src/workflows/today-lanes.tsx
 msgctxt "the card that follows one item across workflows"

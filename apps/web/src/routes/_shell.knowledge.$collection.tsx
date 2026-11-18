@@ -18,7 +18,6 @@ import { PageHeading, SectionTitle } from "../frame/page.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
 import {
   Empty,
-  EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
@@ -170,12 +169,6 @@ const FileList = ({ documents }: { documents: DocumentSummary[] }) => {
           <EmptyTitle>
             <Trans>This collection has no files yet.</Trans>
           </EmptyTitle>
-          <EmptyDescription>
-            <Trans>
-              Documents written here, and files uploaded to it, show up here for
-              Grasp and its agents to read.
-            </Trans>
-          </EmptyDescription>
         </EmptyHeader>
       </Empty>
     );

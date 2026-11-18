@@ -4,12 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { useId } from "react";
 import type { ReactNode } from "react";
 
-import {
-  CardDescription,
-  CardLink,
-  CardMedia,
-  CardTitle,
-} from "../grasp/card/index.ts";
+import { CardLink, CardMedia, CardTitle } from "../grasp/card/index.ts";
 import { Link as TextLink } from "../grasp/link/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
 import { Separator } from "../grasp/separator/index.ts";
@@ -635,7 +630,6 @@ export const BrainHome = ({ brain }: { brain: Brain }) => {
                 </Text>
               </span>
             </div>
-            <CardDescription>{i18n._(section.description)}</CardDescription>
           </CardLink>
         );
       })}

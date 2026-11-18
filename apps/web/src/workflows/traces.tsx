@@ -281,7 +281,7 @@ const RunsTable = ({
   }
   return (
     <SectionCard aria-label={t`Runs`} density="compact" flush>
-      <Table caption={t`The latest runs, newest first.`}>
+      <Table aria-label={t`Runs`}>
         <TableHeader>
           <TableRow>
             <TableHead>{t`Started`}</TableHead>

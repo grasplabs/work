@@ -97,6 +97,7 @@ const ItemResult = ({ item }: { item: WorkflowItemTestItem }) => {
 const ItemTestTable = ({ test }: { test: WorkflowItemTest }) => {
   const { t } = useLingui();
   const { draftRevision } = test;
+  const revision = draftRevision;
   if (test.items.length === 0) {
     return (
       <Empty size="section">
@@ -109,9 +110,7 @@ const ItemTestTable = ({ test }: { test: WorkflowItemTest }) => {
     );
   }
   return (
-    <Table
-      caption={t`Newest item first. Nothing was sent or changed: every call was answered from what you gave.`}
-    >
+    <Table aria-label={t`Test revision ${revision} on recent items`}>
       <TableHeader>
         <TableRow>
           <TableHead>{t`Real run`}</TableHead>

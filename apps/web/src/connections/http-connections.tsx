@@ -40,7 +40,6 @@ import {
   DialogAction,
   DialogBody,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogTitle,
 } from "../grasp/dialog/index.ts";
@@ -332,9 +331,6 @@ const AddHttpConnection = () => {
       <Dialog onOpenChange={setOpen} open={open}>
         <DialogContent closeLabel={t`Close`}>
           <DialogTitle>{t`Add an HTTP connection`}</DialogTitle>
-          <DialogDescription>
-            {t`An outside API that Apps and workflows can call through Grasp, once you allow them to: only this origin, with these methods, under these paths.`}
-          </DialogDescription>
           {/* Mounted anew each time it opens: nothing of the last time
               is left in it, not the credential, nor why an add failed. */}
           <AddHttpForm

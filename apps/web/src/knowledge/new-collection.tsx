@@ -17,7 +17,6 @@ import {
   DialogAction,
   DialogBody,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogTitle,
   DialogTrigger,
@@ -315,9 +314,6 @@ export const NewCollection = ({ identity }: { identity: Identity }) => {
       </DialogTrigger>
       <DialogContent closeLabel={t`Close`}>
         <DialogTitle>{t`New collection`}</DialogTitle>
-        <DialogDescription>
-          {t`A collection holds documents Grasp and its agents may read.`}
-        </DialogDescription>
         {open ? <CollectionForm admin={isAdmin(identity.role)} /> : null}
       </DialogContent>
     </Dialog>
