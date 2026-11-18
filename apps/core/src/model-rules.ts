@@ -37,7 +37,8 @@ export interface RulesInput {
           | "dashboard_widgets"
           | "stephen_requests"
           | "provider_test"
-          | "agent_builder";
+          | "agent_builder"
+          | "opportunities";
       };
 }
 
