@@ -16,6 +16,13 @@ import { formatDateTime, formatSince } from "../format.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import type { BadgeTone } from "../grasp/badge/index.ts";
 import { Empty, EmptyDescription, EmptyHeader } from "../grasp/empty/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "../grasp/item/index.ts";
 import { Link as TextLink } from "../grasp/link/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import {
@@ -47,7 +54,15 @@ const statusLabels: Readonly<Record<RunStatus, MessageDescriptor>> = {
   cancelled: msg`Cancelled`,
 };
 
+/** The width of the log under which each run is a row of its own, its facts under its time. */
+const narrowLog = "@container runs-log (width < 40rem)";
+
 const styles = stylex.create({
+  // The log measures its own width, whatever the page beside it.
+  measured: { containerName: "runs-log", containerType: "inline-size" },
+  // Wide: the table; narrow: the rows, so the result is never scrolled out of sight.
+  wide: { display: { default: "block", [narrowLog]: "none" } },
+  narrow: { display: { default: "none", [narrowLog]: "block" } },
   // A result over what it waits for, and the way to the decision.
   outcome: {
     display: "flex",
@@ -205,39 +220,69 @@ export const RunsLog = ({
   return (
     <div {...stylex.props(styles.log)}>
       <SectionCard aria-label={t`Runs`} density="compact" flush>
-        <Table aria-label={t`Runs`}>
-          <TableHeader>
-            <TableRow>
-              <TableHead>
-                {t({ message: "When", context: "column: when a run happened" })}
-              </TableHead>
-              {withWorkflow ? <TableHead>{t`Workflow`}</TableHead> : null}
-              <TableHead>{t`Started by`}</TableHead>
-              <TableHead>
-                {t({
-                  message: "Result",
-                  context: "column: what happened in a run",
-                })}
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {runs.map((run) => (
-              <TableRow key={run.id}>
-                <TableCell>{formatDateTime(run.createdAt)}</TableCell>
-                {withWorkflow ? (
-                  <TableCell lead>
-                    <RunWorkflow run={run} />
-                  </TableCell>
-                ) : null}
-                <TableCell>{startedByOf(run, me)}</TableCell>
-                <TableCell wrap>
-                  <RunOutcome run={run} />
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <div {...stylex.props(styles.measured)}>
+          <div {...stylex.props(styles.wide)}>
+            <Table aria-label={t`Runs`}>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>
+                    {t({
+                      message: "When",
+                      context: "column: when a run happened",
+                    })}
+                  </TableHead>
+                  {withWorkflow ? <TableHead>{t`Workflow`}</TableHead> : null}
+                  <TableHead>{t`Started by`}</TableHead>
+                  <TableHead>
+                    {t({
+                      message: "Result",
+                      context: "column: what happened in a run",
+                    })}
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {runs.map((run) => (
+                  <TableRow key={run.id}>
+                    <TableCell>{formatDateTime(run.createdAt)}</TableCell>
+                    {withWorkflow ? (
+                      <TableCell lead>
+                        <RunWorkflow run={run} />
+                      </TableCell>
+                    ) : null}
+                    <TableCell>{startedByOf(run, me)}</TableCell>
+                    <TableCell wrap>
+                      <RunOutcome run={run} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          <div {...stylex.props(styles.narrow)}>
+            <ItemGroup aria-label={t`Runs`} separated>
+              {runs.map((run) => (
+                <Item key={run.id} size="sm">
+                  <ItemContent>
+                    <ItemTitle>
+                      {withWorkflow ? (
+                        <RunWorkflow run={run} />
+                      ) : (
+                        formatDateTime(run.createdAt)
+                      )}
+                    </ItemTitle>
+                    <ItemDescription>
+                      {withWorkflow
+                        ? `${formatDateTime(run.createdAt)} · ${startedByOf(run, me)}`
+                        : startedByOf(run, me)}
+                    </ItemDescription>
+                    <RunOutcome run={run} />
+                  </ItemContent>
+                </Item>
+              ))}
+            </ItemGroup>
+          </div>
+        </div>
       </SectionCard>
       {more ? (
         <Text size="sm" tone="muted">
