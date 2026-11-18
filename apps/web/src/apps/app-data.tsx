@@ -61,6 +61,7 @@ import {
   InputGroupText,
 } from "../grasp/input-group/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
+import { Link } from "../grasp/link/index.ts";
 import {
   Select,
   SelectContent,
@@ -128,6 +129,8 @@ const styles = stylex.create({
     borderBottomColor: grasp.line,
   },
   spacer: { flexGrow: 1 },
+  // A button centres its words; a row's name starts where its header does.
+  nameButton: { textAlign: "start" },
   barField: { width: BAR_FIELD, maxWidth: "100%" },
   notes: {
     display: "grid",
@@ -669,6 +672,23 @@ const ImportDialog = ({
   );
 };
 
+const minuteMs = 60_000;
+const hourMs = 60 * minuteMs;
+const dayMs = 24 * hourMs;
+
+/** How long ago `value` was ("3 hours ago"), as the page's language says it. */
+const formatAgo = (value: string, now: Date = new Date()): string => {
+  const ago = Math.max(0, now.getTime() - new Date(value).getTime());
+  const say = new Intl.RelativeTimeFormat(i18n.locale, { numeric: "auto" });
+  if (ago >= dayMs) {
+    return say.format(-Math.floor(ago / dayMs), "day");
+  }
+  if (ago >= hourMs) {
+    return say.format(-Math.floor(ago / hourMs), "hour");
+  }
+  return say.format(-Math.floor(ago / minuteMs), "minute");
+};
+
 /** A column of a table's records: the field whose values it shows, and its name in the head. */
 export interface RecordColumn {
   field: string;
@@ -705,18 +725,27 @@ const recordColumns = (
       // The row's name: it wraps in whole words where the row is narrow,
       // as a table's first column does, so it stands in no control's box.
       value: (record) => recordName(record),
+      // Until the library's table opens a row itself, the name is a link
+      // drawn as a button: start-aligned under its header, wrapping in
+      // whole words, with no padding of its own.
       cell: (record) => (
-        <Button
-          onClick={() => {
-            onOpen(record);
-          }}
-          size="xs"
-          // Its whole ID, for whoever looks a record up by it.
-          title={record.id}
-          variant="ghost"
+        <Link
+          render={
+            <button
+              aria-label={recordName(record)}
+              onClick={() => {
+                onOpen(record);
+              }}
+              // Its whole ID, for whoever looks a record up by it.
+              title={record.id}
+              type="button"
+              {...stylex.props(styles.nameButton)}
+            />
+          }
+          variant="standalone"
         >
           {recordName(record)}
-        </Button>
+        </Link>
       ),
     },
     ...columns
@@ -735,10 +764,14 @@ const recordColumns = (
       header: words.changed,
       align: "end",
       value: (record) => record.updatedAt,
+      // How long ago, the full time on hover: the same date five times
+      // over says nothing a row needs.
       cell: (record) => (
-        <Text element="span" size="sm" tone="muted">
-          {formatDateTime(record.updatedAt)}
-        </Text>
+        <span title={formatDateTime(record.updatedAt)}>
+          <Text element="span" size="sm" tone="muted">
+            {formatAgo(record.updatedAt)}
+          </Text>
+        </span>
       ),
     },
   ];
@@ -1061,6 +1094,7 @@ export const TableRecords = ({
         <div {...stylex.props(styles.grid)}>
           <DataTable
             columns={tableColumns}
+            appearance={{ head: "plain" }}
             density="compact"
             empty={
               read?.source.kind === "test"
