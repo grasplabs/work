@@ -26,8 +26,8 @@ export interface DriveWorld {
 /**
  * Google Drive v3 as the Google Workspace connector's sync reads it
  * (packages/connectors/google-workspace/src/drive-sync.ts): the change
- * feed's start, the listing of what the person owns, the change feed, and
- * each file's export or bytes. It answers only for an account a test set
+ * feed's start, the listing of what the person owns, the change feed,
+ * each file's export or bytes, and its metadata's version now. It answers only for an account a test set
  * a Drive for, by the token connect sends, so every other test's Google
  * stays as it was.
  *
@@ -47,6 +47,41 @@ export const driveSyncFake = () => {
     typeof value === "object" && value !== null
       ? Reflect.get(value, key)
       : undefined;
+  /** A file's version now: as the change feed last gave it, else as the listing does. */
+  const versionNow = (world: object, id: string): unknown => {
+    const pages = field(world, "changes");
+    const changed = Object.values(
+      typeof pages === "object" && pages !== null ? pages : {}
+    ).flatMap((page: unknown) => {
+      const entries = field(page, "changes");
+      return (Array.isArray(entries) ? entries : []).flatMap(
+        (entry: unknown) => {
+          const file = field(entry, "file");
+          return field(file, "id") === id ? [field(file, "version")] : [];
+        }
+      );
+    });
+    const owned: unknown = field(world, "owned");
+    const listed: unknown = (Array.isArray(owned) ? owned : []).find(
+      (file: unknown) => field(file, "id") === id
+    );
+    return changed.at(-1) ?? field(listed, "version") ?? "";
+  };
+  /** One file's export, bytes or metadata (its version now). */
+  const fileAnswer = (world: object, path: string, url: URL): Response => {
+    const [rawId = "", exported] = path
+      .slice("/drive/v3/files/".length)
+      .split("/");
+    const id = decodeURIComponent(rawId);
+    const content = field(field(world, "contents"), id);
+    if (typeof content !== "string") {
+      return notFound();
+    }
+    if (exported === "export" || url.searchParams.get("alt") === "media") {
+      return new Response(content);
+    }
+    return Response.json({ version: versionNow(world, id) });
+  };
   return {
     control: async (request: Request): Promise<Response> => {
       const posted: unknown = await request.json();
@@ -105,12 +140,7 @@ export const driveSyncFake = () => {
           ...(next < files.length ? { nextPageToken: String(next) } : {}),
         });
       }
-      const [id] = path.slice("/drive/v3/files/".length).split("/");
-      const content = field(
-        field(world, "contents"),
-        decodeURIComponent(id ?? "")
-      );
-      return typeof content === "string" ? new Response(content) : notFound();
+      return fileAnswer(world, path, url);
     },
   };
 };
