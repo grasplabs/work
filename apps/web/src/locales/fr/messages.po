@@ -5008,6 +5008,10 @@ msgstr "Copier"
 msgid "Copy {name}"
 msgstr "Copier {name}"
 
+#: src/frame/part-words.tsx
+msgid "Copy {what}"
+msgstr "Copier {what}"
+
 #: src/chat/chat-more.tsx
 msgid "Copy as Markdown"
 msgstr "Copier en Markdown"
@@ -5123,6 +5127,10 @@ msgstr "N'a pas pu être ouvert"
 #: src/apps/app-workflows.tsx
 msgid "Could not bind"
 msgstr "Impossible de lier"
+
+#: src/frame/part-words.tsx
+msgid "Could not copy"
+msgstr "Copie impossible"
 
 #: src/frame/part-words.tsx
 msgid "Could not copy the link"
@@ -5964,6 +5972,7 @@ msgid "Download Markdown"
 msgstr "Télécharger en Markdown"
 
 #: src/workflows/workflow-settings.tsx
+#: src/workflows/workflow-status.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Draft"
 msgstr "Brouillon"
@@ -9019,6 +9028,7 @@ msgid "live"
 msgstr "en production"
 
 #: src/workflows/workflow-settings.tsx
+#: src/workflows/workflow-status.tsx
 msgid "Live"
 msgstr "En ligne"
 
@@ -9041,6 +9051,7 @@ msgid "Loaded"
 msgstr "Chargé"
 
 #: src/brain/forget.tsx
+#: src/frame/part-words.tsx
 #: src/onboarding/place-picker.tsx
 msgid "Loading"
 msgstr "Chargement"

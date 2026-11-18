@@ -5008,6 +5008,10 @@ msgstr "Kopiëren"
 msgid "Copy {name}"
 msgstr "{name} kopiëren"
 
+#: src/frame/part-words.tsx
+msgid "Copy {what}"
+msgstr "{what} kopiëren"
+
 #: src/chat/chat-more.tsx
 msgid "Copy as Markdown"
 msgstr "Kopiëren als Markdown"
@@ -5123,6 +5127,10 @@ msgstr "Kon niet worden geopend"
 #: src/apps/app-workflows.tsx
 msgid "Could not bind"
 msgstr "Kon niet koppelen"
+
+#: src/frame/part-words.tsx
+msgid "Could not copy"
+msgstr "Kopiëren is niet gelukt"
 
 #: src/frame/part-words.tsx
 msgid "Could not copy the link"
@@ -5964,6 +5972,7 @@ msgid "Download Markdown"
 msgstr "Markdown downloaden"
 
 #: src/workflows/workflow-settings.tsx
+#: src/workflows/workflow-status.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Draft"
 msgstr "Concept"
@@ -9019,6 +9028,7 @@ msgid "live"
 msgstr "live"
 
 #: src/workflows/workflow-settings.tsx
+#: src/workflows/workflow-status.tsx
 msgid "Live"
 msgstr "Live"
 
@@ -9041,6 +9051,7 @@ msgid "Loaded"
 msgstr "Geladen"
 
 #: src/brain/forget.tsx
+#: src/frame/part-words.tsx
 #: src/onboarding/place-picker.tsx
 msgid "Loading"
 msgstr "Laden"

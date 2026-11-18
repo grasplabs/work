@@ -1,6 +1,6 @@
 // SourcePile: the folded list under an answer (list.tsx). The first marks overlap in a row, as
-// Perplexity's favicons do but ours, then the count, with the kinds in words after it on the same line
-// ("4 files, 3 messages"). A pointer fans the marks apart (only where a pointer hovers). A source found while
+// Perplexity's favicons do but ours, then the count, with the kinds in words under it ("4 files,
+// 3 messages"). A pointer fans the marks apart (only where a pointer hovers). A source found while
 // the answer streams arrives in the pile: its mark settles in and our light crosses it once.
 "use client";
 
@@ -42,7 +42,7 @@ export const SourcePile = ({
   // The steps the last mark fans.
   const spread = Math.max(0, shown.length - 1);
   return (
-    <div {...stylex.props(styles.pileLine)}>
+    <div {...stylex.props(styles.section)}>
       <button
         type="button"
         id={id}

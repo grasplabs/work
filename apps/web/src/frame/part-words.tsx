@@ -45,6 +45,7 @@ import { fileUploadWords, imageWellWords } from "../grasp/file-upload/words.ts";
 import { filterBuilderWords } from "../grasp/filter-builder/words.ts";
 import { inputWords } from "../grasp/input/words.ts";
 import { englishWords as inspectorPanelWords } from "../grasp/inspector-panel/words.ts";
+import { keyValueWords } from "../grasp/key-value/words.ts";
 import { languageSwitchWords } from "../grasp/language-switch/words.ts";
 import { linkWords } from "../grasp/link/words.ts";
 import { markdownWords } from "../grasp/markdown/words.ts";
@@ -115,6 +116,7 @@ export const englishPartWords: GraspWordsCatalog = {
   imageWell: imageWellWords,
   input: inputWords,
   inspectorPanel: inspectorPanelWords,
+  keyValue: keyValueWords,
   link: linkWords,
   markdown: markdownWords,
   ownerPicker: ownerPickerWords,
@@ -689,6 +691,15 @@ export const usePartWords = (): GraspWordsCatalog => {
       },
       close: t`Close`,
       views: t({ message: "Views", context: "an inspector's views" }),
+    },
+    keyValue: {
+      copy: (name) => {
+        const what = name.toLowerCase();
+        return t`Copy ${what}`;
+      },
+      copied: t`Copied`,
+      failed: t`Could not copy`,
+      pending: t`Loading`,
     },
     datePicker: { choose: t`Choose date` },
     dateRangePicker: {

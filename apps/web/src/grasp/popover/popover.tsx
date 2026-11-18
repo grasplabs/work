@@ -59,6 +59,17 @@ export interface PopoverProps extends Omit<
   controller?: PopoverController;
 }
 
+/**
+ * Whether the popover is asked to close because focus went into the Toaster: a toast's action
+ * (Undo) pressed while the popover is open. A press there never counts as outside (UI SDK keeps the
+ * toast region over every layer), and the focus it takes does not either, so the action runs and
+ * the popover stays.
+ */
+const focusedIntoToaster = (details: OpenChangeDetails) =>
+  details.reason === "focus-out" &&
+  details.event?.target instanceof Element &&
+  details.event.target.closest("[data-slot=toast-region]") !== null;
+
 /** The root: holds the trigger and the panel, and renders nothing of its own. */
 export const Popover = ({
   children,
@@ -80,7 +91,7 @@ export const Popover = ({
   };
   // While an action works, nothing closes it: Escape, a press outside, Tab out and the trigger wait.
   const change = (open: boolean, details: OpenChangeDetails) => {
-    if (!open && working.current) {
+    if (!open && (working.current || focusedIntoToaster(details))) {
       details.cancel();
       return;
     }

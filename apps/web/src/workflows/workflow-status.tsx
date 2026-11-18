@@ -51,11 +51,20 @@ import { useGrace } from "../use-grace.ts";
 /** How long a pause can be taken back before core is asked, in seconds. */
 const graceSeconds = 5;
 
+/**
+ * The width of the workflow's bar under which it says its short word
+ * (Draft, Live, Paused), as its views fold (frame/item-shell.tsx).
+ */
+const narrowBar = "@container bar (width < 48rem)";
+
 const styles = stylex.create({
   row: { display: "flex", alignItems: "center", gap: grasp.space2 },
   countdown: { display: "flex", alignItems: "center", gap: grasp.space3 },
   // Capped, so who it runs for never takes the name's room.
   word: { maxWidth: "16rem" },
+  // Its whole word where the bar has room, its short one where it is narrow.
+  long: { display: { default: null, [narrowBar]: "none" } },
+  short: { display: { default: "none", [narrowBar]: "inline" } },
   facts: { display: "flex", flexDirection: "column", gap: grasp.space1 },
   decision: {
     display: "flex",
@@ -192,10 +201,19 @@ const tones: Readonly<Record<StatusView["shows"], BadgeTone>> = {
   paused: "attention",
 };
 
+/** Its whole word, or the short one where the bar is narrow. */
+const Word = ({ word, short }: { word: string; short: string }) => (
+  <span>
+    <span {...stylex.props(styles.long)}>{word}</span>
+    <span {...stylex.props(styles.short)}>{short}</span>
+  </span>
+);
+
 /** The status word, and the menu of what the reader may change, if anything. */
 const StatusMenu = ({
   view,
   word,
+  short,
   name,
   busy,
   highlight,
@@ -205,6 +223,8 @@ const StatusMenu = ({
 }: {
   view: StatusView;
   word: string;
+  /** The word where the bar is narrow: Draft, Live or Paused. */
+  short: string;
   name: string;
   busy: boolean;
   /** Whether it is the page's one main action. */
@@ -218,7 +238,7 @@ const StatusMenu = ({
   if (!canPause && !canResume && askable === null) {
     return (
       <Badge tone={tones[view.shows]} variant="dot">
-        {word}
+        <Word short={short} word={word} />
       </Badge>
     );
   }
@@ -233,7 +253,7 @@ const StatusMenu = ({
         truncate
         variant={highlight ? "ink" : "quiet"}
       >
-        {word}
+        <Word short={short} word={word} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
         {canPause ? (
@@ -361,10 +381,18 @@ export const WorkflowStatus = ({
     who === undefined || who.length === 0
       ? t`Runs for your team since ${since}`
       : t`Runs for ${users} since ${since}`;
+  const paused = t({ message: "Paused", context: "a workflow someone paused" });
   const words: Readonly<Record<StatusView["shows"], string>> = {
     stage: t`Only you see this`,
     live: runsFor,
-    paused: t({ message: "Paused", context: "a workflow someone paused" }),
+    paused,
+  };
+  // Where the bar is narrow, one word; the menu's button keeps the whole
+  // one in its name.
+  const shortWords: Readonly<Record<StatusView["shows"], string>> = {
+    stage: t`Draft`,
+    live: t`Live`,
+    paused,
   };
   return (
     <span {...stylex.props(styles.row)}>
@@ -385,6 +413,7 @@ export const WorkflowStatus = ({
         onResume={() => {
           void change("resume", { revision: lifecycle.revision });
         }}
+        short={shortWords[view.shows]}
         view={view}
         word={words[view.shows]}
       />

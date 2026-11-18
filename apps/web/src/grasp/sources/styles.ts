@@ -367,18 +367,8 @@ export const sourceStyles = stylex.create({
     transitionDuration: simply.ui,
     transitionTimingFunction: grasp.ease,
   },
-  // The kinds in words, after the count. Each kind keeps its number
+  // The kinds in words: on the column's start edge with the first mark. Each kind keeps its number
   // ("1 code file" never splits), and the lines are balanced, so no word stands alone on a line.
-  // The pile on one line: the marks and the count, then the kinds after them, as a message's foot
-  // lays its items out; on a narrow column the kinds wrap under as a whole.
-  pileLine: {
-    display: "flex",
-    flexWrap: "wrap",
-    alignItems: "center",
-    columnGap: grasp.space1,
-    minWidth: 0,
-    fontFamily: grasp.fontSans,
-  },
   pileKinds: {
     margin: 0,
     fontSize: grasp.textXs,
