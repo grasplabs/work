@@ -418,6 +418,34 @@ describe("syncing a person's own mailbox", () => {
   });
 
   it(
+    "leaves a message that is late to the next page, and lets it go when it is first",
+    { timeout: 120_000 },
+    async () => {
+      const connectionId = await connected();
+      mailbox.messages = [
+        message("a", "2026-11-10T09:00:00Z"),
+        message("slow", "2026-11-10T09:01:00Z"),
+        message("b", "2026-11-10T09:02:00Z"),
+      ];
+      // Always past the page's deadline, and past the 30 s connect waits.
+      mailbox.slow = { path: `${messagesPath}/slow`, ms: 35_000 };
+      const first = await read(connectionId, null);
+      const second = await read(connectionId, first.cursor);
+      mailbox.slow = undefined;
+      const third = await read(connectionId, second.cursor);
+      expect({
+        first: first.items.map(({ id }) => id),
+        second: second.items,
+        third: third.items.map(({ id }) => id),
+      }).toStrictEqual({
+        first: ["a"],
+        second: [{ gone: true, id: "slow", kind: "mail" }],
+        third: ["b"],
+      });
+    }
+  );
+
+  it(
     "gives up a slow attachment at the page's deadline",
     { timeout: 60_000 },
     async () => {
