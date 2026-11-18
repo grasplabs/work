@@ -21,6 +21,7 @@ const chartColors = [
   "chart-3",
   "chart-4",
   "chart-5",
+  "chart-6",
 ] as const;
 
 export type ChartColor = (typeof chartColors)[number];
@@ -34,6 +35,7 @@ const markerColors = {
   "chart-3": "border-chart-3 bg-chart-3",
   "chart-4": "border-chart-4 bg-chart-4",
   "chart-5": "border-chart-5 bg-chart-5",
+  "chart-6": "border-chart-6 bg-chart-6",
 } as const satisfies Record<ChartColor, string>;
 
 /** The token a mark's colour names, when it is `chartColor(token)`. */

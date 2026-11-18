@@ -87,6 +87,16 @@ export const onboardingSourceIds: ReadonlySet<string> = new Set([
 /** What the onboarding's own record ids start with: nobody else's do. */
 export const onboardingIdPrefix = "onb-";
 
+/**
+ * What the id of an opinion of the company's starts with on the Brain
+ * page (GRA-1987): what five or more people across the company say, put
+ * together from what they left only counted anonymously, never a team's.
+ */
+export const companyOpinionIdPrefix = `${onboardingIdPrefix}opinion-`;
+
+/** The one source every opinion of the company's names on the Brain page: no team, no count, no one's moment. */
+export const companyOpinionsSourceId = `${onboardingIdPrefix}opinions`;
+
 /** A record's id, chosen by whoever adds it: letters, digits, `-` and `_`. */
 export const brainRecordIdSchema = z
   .string()

@@ -88,6 +88,7 @@ const purposeShade: Record<Purpose, ChartColor> = {
   runs: "chart-3",
   chat: "chart-4",
   reading: "chart-2",
+  opinions: "chart-6",
 };
 
 /** A shade as a swatch's class, and as an SVG mark's fill. */
@@ -97,6 +98,7 @@ const swatch: Record<ChartColor, string> = {
   "chart-3": "bg-chart-3",
   "chart-4": "bg-chart-4",
   "chart-5": "bg-chart-5",
+  "chart-6": "bg-chart-6",
 };
 const fill: Record<ChartColor, string> = {
   "chart-1": "fill-chart-1",
@@ -104,6 +106,7 @@ const fill: Record<ChartColor, string> = {
   "chart-3": "fill-chart-3",
   "chart-4": "fill-chart-4",
   "chart-5": "fill-chart-5",
+  "chart-6": "fill-chart-6",
 };
 
 /** What AI is used for, in a word. */
@@ -113,6 +116,7 @@ const purposeWords: Record<Purpose, string> = {
   drawing: "Drawing the work",
   chat: "Chat",
   runs: "Workflows",
+  opinions: "Company opinions",
 };
 
 /** What does the work: a model by its own name, Stephen's voice and ears by what they are. */
