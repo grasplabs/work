@@ -69,5 +69,47 @@ export default defineConnector({
         return { items: feed.changes, cursor: feed.next, more: feed.more };
       },
     }),
+    // Places of the account it lists itself (a mailbox's folders), each
+    // read from its own feed, the route's `{place}` bound to it.
+    defineSync({
+      name: "folders",
+      kind: "mail",
+      routes: [
+        { method: "GET", host: sampleHost, path: "/v1/me/folders" },
+        {
+          method: "GET",
+          host: sampleHost,
+          path: "/v1/me/folders/{place}/changes",
+        },
+      ],
+      places: async ({ cursor }) => {
+        const url = new URL(`${api}/v1/me/folders`);
+        if (cursor !== null) {
+          url.searchParams.set("from", cursor);
+        }
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`The provider answered ${response.status}`);
+        }
+        const { folders, next } = z
+          .object({ folders: z.array(z.string()), next: z.string().nullish() })
+          .parse(await response.json());
+        return { places: folders, cursor: next ?? null };
+      },
+      read: async ({ place, cursor }) => {
+        const url = new URL(
+          `${api}/v1/me/folders/${encodeURIComponent(place)}/changes`
+        );
+        if (cursor !== null) {
+          url.searchParams.set("from", cursor);
+        }
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`The provider answered ${response.status}`);
+        }
+        const feed = feedSchema.parse(await response.json());
+        return { items: feed.changes, cursor: feed.next, more: feed.more };
+      },
+    }),
   ],
 });
