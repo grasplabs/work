@@ -37,6 +37,7 @@ import {
   newInstructionsSchema,
   newMemoriesSchema,
   newSourceSchema,
+  readersChangeSchema,
   onlyInOwnStore,
   ownEntityRequestSchema,
   profileRequestSchema,
@@ -131,6 +132,7 @@ import type {
   Access,
   StoreKind,
   NewSource,
+  ReadersChange,
   PersonErasure,
   SharedPersonErasure,
   WriterErasure,
@@ -252,6 +254,7 @@ import {
 } from "./skill-proposals.ts";
 import {
   addVersion,
+  changeReaders,
   changeVersion,
   readCurrent,
   readVersion,
@@ -907,6 +910,24 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       await this.#readyToWrite();
       return await this.#unlessErasedMeanwhile(
         async () => await addVersion(this.#sources, adding, { indexed: true })
+      );
+    });
+  }
+
+  /**
+   * Gives a source other readers: a new version with its current text
+   * (sources.ts `changeReaders`), checked as an add is.
+   */
+  async changeReaders(change: ReadersChange): Promise<AddedVersion | null> {
+    const changing = checked(readersChangeSchema, change);
+    if (isWholeKey(changing.source)) {
+      throw new Error(notInstructions);
+    }
+    this.#mayKeep(changing.access);
+    return await this.#changing(async () => {
+      await this.#readyToWrite();
+      return await this.#unlessErasedMeanwhile(
+        async () => await changeReaders(this.#sources, changing)
       );
     });
   }
