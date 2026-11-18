@@ -707,7 +707,7 @@ export const reviewedPersonColumns: Readonly<
   "brainStore.removed_sources": ["subject"],
   "brainStore.source_subjects": ["group_subject", "subject"],
   "core.access_revocations": ["user_ids"],
-  "core.accounts": ["user_id", "verified_email"],
+  "core.accounts": ["user_id", "verified_email", "verified_email_at"],
   "core.source_reader_tokens": ["person"],
   "core.action_invocations": ["person_id"],
   "core.agent_held_starts": ["person_id"],

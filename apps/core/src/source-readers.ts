@@ -176,6 +176,7 @@ export const signInAccountsRead = (db: DrizzleD1Database, userId: string) =>
       providerId: accounts.providerId,
       oid: accounts.oid,
       verifiedEmail: accounts.verifiedEmail,
+      verifiedEmailAt: accounts.verifiedEmailAt,
       verifiedTenant: accounts.verifiedTenant,
     })
     .from(accounts)
@@ -195,6 +196,13 @@ interface Account {
   tenant: string;
   account: string;
 }
+
+/**
+ * Whether a proof of an address made at `at` (milliseconds) still counts:
+ * within `readerProofMaxAgeMs`, the one bound every address proof has.
+ */
+const recent = (at: number | null): boolean =>
+  at !== null && Date.now() - at < readerProofMaxAgeMs;
 
 /** Whether `address` is in one of `domains`, after its last `@`. */
 const inDomains = (address: string, domains: readonly string[]): boolean => {
@@ -225,30 +233,36 @@ const readingAccountsOf = (
   return [
     // Each in the tenant its sign-in proved, only while the config names
     // it: a tenant the config moved to is proved by a sign-in through it.
-    ...signIns.flatMap(({ providerId, oid, verifiedEmail, verifiedTenant }) => {
-      const proved = (tenant: string): boolean =>
-        verifiedTenant !== null &&
-        comparable(verifiedTenant) === comparable(tenant);
-      if (
-        providerId === providerIds.entra &&
-        config.entra &&
-        oid !== null &&
-        proved(config.entra.tenantId)
-      ) {
-        return [
-          {
-            provider: "microsoft",
-            tenant: config.entra.tenantId,
-            account: oid,
-          },
-        ];
+    // A sign-in's address, as every proof of an address, only while
+    // confirmed within a day (`recent`): one signed in once and then used
+    // only through a chat app stops counting by it.
+    ...signIns.flatMap(
+      ({ providerId, oid, verifiedEmail, verifiedEmailAt, verifiedTenant }) => {
+        const proved = (tenant: string): boolean =>
+          verifiedTenant !== null &&
+          comparable(verifiedTenant) === comparable(tenant);
+        if (
+          providerId === providerIds.entra &&
+          config.entra &&
+          oid !== null &&
+          proved(config.entra.tenantId)
+        ) {
+          return [
+            {
+              provider: "microsoft",
+              tenant: config.entra.tenantId,
+              account: oid,
+            },
+          ];
+        }
+        return providerId === providerIds.google &&
+          config.google &&
+          proved(config.google.hostedDomain) &&
+          recent(verifiedEmailAt?.getTime() ?? null)
+          ? google(config.google.hostedDomain, verifiedEmail)
+          : [];
       }
-      return providerId === providerIds.google &&
-        config.google &&
-        proved(config.google.hostedDomain)
-        ? google(config.google.hostedDomain, verifiedEmail)
-        : [];
-    }),
+    ),
     // A connection's only while connected, and its address only while
     // the provider confirmed it within a day (`readerProofMaxAgeMs`): an
     // idle connection, or one needing reconnecting, stops counting by it.
@@ -267,10 +281,7 @@ const readingAccountsOf = (
         if (provider === "microsoft") {
           return [{ provider, tenant, account: accountId }];
         }
-        const recent =
-          verifiedEmailAt !== null &&
-          Date.now() - verifiedEmailAt < readerProofMaxAgeMs;
-        return provider === "google" && recent
+        return provider === "google" && recent(verifiedEmailAt)
           ? google(tenant, verifiedEmail)
           : [];
       }

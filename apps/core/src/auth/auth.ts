@@ -680,13 +680,16 @@ const keptClaimsOf = (
 ): {
   oid: string | null;
   verifiedEmail: string | null;
+  verifiedEmailAt: Date | null;
   verifiedTenant: string | null;
 } => {
   const claims = claimsOf(idToken);
+  const verifiedEmail =
+    claims.email_verified === true ? (claims.email ?? null) : null;
   return {
     oid: claims.oid ?? null,
-    verifiedEmail:
-      claims.email_verified === true ? (claims.email ?? null) : null,
+    verifiedEmail,
+    verifiedEmailAt: verifiedEmail === null ? null : new Date(),
     verifiedTenant: claims.tid ?? claims.hd ?? null,
   };
 };
@@ -807,6 +810,7 @@ const createAuth = (
       additionalFields: {
         oid: { type: "string", required: false, input: false },
         verifiedEmail: { type: "string", required: false, input: false },
+        verifiedEmailAt: { type: "date", required: false, input: false },
         verifiedTenant: { type: "string", required: false, input: false },
       },
     },

@@ -17,12 +17,16 @@ import {
   workBrain,
 } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
-import { inJurisdiction } from "../src/durable-objects.ts";
+import { personalWorkspaceId } from "../src/chats-rpc.ts";
+import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import worker from "../src/index.ts";
+import { says } from "./agent-chat.ts";
+import { requestGranted } from "./apps.ts";
 import { objectsHolding, tablesHolding } from "./brain-next-traces.ts";
 import { consentCode, googleAddressUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { runMinuteTasks } from "./maintenance.ts";
+import { fakeProvider } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
 import {
   acmeTenant,
@@ -284,6 +288,50 @@ const findsLater = async (
   } finally {
     vi.useRealTimers();
   }
+};
+
+/**
+ * Whether the model saw `secret` in a turn `personId` asked about `topic`
+ * in their own direct message on a chat app, which recalls as them with
+ * no web session.
+ */
+const findsInDirectMessage = async (
+  admin: Awaited<ReturnType<typeof signedInApi>>,
+  personId: string,
+  topic: string,
+  secret: string
+): Promise<boolean> => {
+  const agentId = crypto.randomUUID();
+  await requestGranted(idp, admin, {
+    subject: { type: "agent", agentId },
+    object: { type: "platform" },
+    actions: ["brain"],
+    binding: "BRAIN",
+  });
+  const provider = await fakeProvider(says("Noted."));
+  await workspace(env, personalWorkspaceId(personId)).askThrough(
+    personId,
+    agentId,
+    "slack",
+    `What about ${topic}?`,
+    undefined,
+    { kind: "direct" }
+  );
+  return JSON.stringify(provider.requests.map(({ body }) => body)).includes(
+    secret
+  );
+};
+
+/** Sets when `personId`'s sign-in last confirmed their address to `agoMs` ago. */
+const signInConfirmedAgo = async (
+  personId: string,
+  agoMs: number
+): Promise<void> => {
+  await env.DB.prepare(
+    "UPDATE accounts SET verified_email_at = ? WHERE user_id = ? AND verified_email IS NOT NULL"
+  )
+    .bind(Date.now() - agoMs, personId)
+    .run();
 };
 
 const readersOf = (...readers: SourceReader[]): SourceReaders => ({
@@ -1162,6 +1210,70 @@ describe("readers copied from the source", () => {
       );
 
       await expect(finds(newcomer, list, marker)).resolves.toBeFalsy();
+    }
+  );
+
+  it(
+    "counts a Google sign-in's address for a day after the sign-in confirmed it, also in a direct-message turn, and again after a new sign-in",
+    setUpTime,
+    async () => {
+      // Bob signs in once, then uses Grasp only through Slack; his address
+      // is then given to a new hire, and files shared with them name it.
+      const admin = await signedInApi(idp, "admin");
+      const bobClaims = googlePerson();
+      const { userId: bob } = await whoami(
+        await signedIn(idp, "google", bobClaims)
+      );
+      const [topic, secret] = [uniqueWord(), uniqueWord()];
+      await sharedItem(
+        `${topic} ${secret}`,
+        readersOf({
+          kind: "account",
+          provider: "google",
+          tenant: "acme.test",
+          account: String(bobClaims.email),
+        })
+      );
+      await signInConfirmedAgo(bob, 23 * hourMs);
+      const at23 = await findsInDirectMessage(admin, bob, topic, secret);
+      await signInConfirmedAgo(bob, 25 * hourMs);
+      const at25 = await findsInDirectMessage(admin, bob, topic, secret);
+      await signedIn(idp, "google", bobClaims);
+
+      expect({
+        at23,
+        at25,
+        signedInAgain: await findsInDirectMessage(admin, bob, topic, secret),
+      }).toStrictEqual({ at23: true, at25: false, signedInAgain: true });
+    }
+  );
+
+  it(
+    "keeps counting the Google address of a person whose connected account confirmed it, though their sign-in's proof lapsed",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      const local = `syncs-${unique()}`;
+      const claims = googlePerson({ sub: local, email: `${local}@acme.test` });
+      const session = await signedIn(idp, "google", claims);
+      const { userId } = await whoami(session);
+      // Their own Google account, connected: the sync keeps it confirmed.
+      await connectedGoogle({ session, email: String(claims.email) });
+      const [topic, secret] = [uniqueWord(), uniqueWord()];
+      await sharedItem(
+        `${topic} ${secret}`,
+        readersOf({
+          kind: "account",
+          provider: "google",
+          tenant: "acme.test",
+          account: String(claims.email),
+        })
+      );
+      await signInConfirmedAgo(userId, 25 * hourMs);
+
+      await expect(
+        findsInDirectMessage(admin, userId, topic, secret)
+      ).resolves.toBeTruthy();
     }
   );
 
