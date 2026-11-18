@@ -556,9 +556,14 @@ const styles = stylex.create({
     minWidth: "auto",
   },
   // The bar's end, at its end: the page's actions, then the shell's own button, the bar's gap apart.
+  // Once the crumbs have given way and the bar is still too narrow (`data-tight`, fitBar), the end
+  // gives way before it leaves the window: the actions shrink in their own row (a TabsNav there
+  // folds; buttons scroll sideways, Tab still reaching each), and what the shell puts after them
+  // (the panels' button) keeps its whole box, so a closed panel always has a way back.
   tail: {
     display: "flex",
-    flexShrink: 0,
+    flexShrink: { default: 0, [stylex.when.ancestor("[data-tight]")]: 1 },
+    minWidth: { default: null, [stylex.when.ancestor("[data-tight]")]: 0 },
     alignItems: "center",
     gap: grasp.space3,
     marginInlineStart: "auto",
@@ -567,6 +572,15 @@ const styles = stylex.create({
     display: "flex",
     alignItems: "center",
     gap: grasp.space2,
+    minWidth: { default: null, [stylex.when.ancestor("[data-tight]")]: 0 },
+    overflowX: {
+      default: null,
+      [stylex.when.ancestor("[data-tight]")]: "auto",
+    },
+    scrollbarWidth: {
+      default: null,
+      [stylex.when.ancestor("[data-tight]")]: "none",
+    },
   },
 });
 
@@ -838,8 +852,8 @@ const thin = (bar: HTMLElement) => {
 
 const ROWS = ["one", "two", "three"] as const;
 
-/** Lays the bar out in the fewest rows in which its parts fit, as the order above says. */
-const fitBar = (bar: HTMLElement) => {
+/** The rows the bar takes, and what gives way in them first: the crumbs' steps, then what trails them. */
+const fitRows = (bar: HTMLElement) => {
   restoreSteps(bar);
   const middle = bar.querySelector<HTMLElement>(
     '[data-slot="app-shell-bar-middle"]'
@@ -865,6 +879,24 @@ const fitBar = (bar: HTMLElement) => {
       }
     }
   }
+};
+
+/**
+ * Last of all, once the crumbs have given way and the bar still runs past its room: the end gives
+ * way (`data-tight`), its actions shrinking in their own row, so the shell's own buttons keep their
+ * whole box and nothing leaves the bar.
+ */
+const tighten = (bar: HTMLElement) => {
+  if (overflows(bar)) {
+    bar.dataset.tight = "";
+  }
+};
+
+/** Lays the bar out in the fewest rows in which its parts fit, as the order above says. */
+const fitBar = (bar: HTMLElement) => {
+  delete bar.dataset.tight;
+  fitRows(bar);
+  tighten(bar);
 };
 
 // What the measure changes itself, so it is not watched: the start that holds the crumbs, their
@@ -1031,7 +1063,11 @@ export const PageBar = ({
         ref={setBar}
         data-slot="app-shell-bar"
         aria-busy={busyOf(loading)}
-        {...stylex.props(styles.bar, look === "page" && styles.pageBar)}
+        {...stylex.props(
+          styles.bar,
+          look === "page" && styles.pageBar,
+          stylex.defaultMarker()
+        )}
       >
         {barStart}
         {head}
@@ -1051,7 +1087,8 @@ export const PageBar = ({
         styles.bar,
         look === "page" && styles.pageBar,
         styles.centred,
-        phoneMiddle === "sheet" && styles.centredSheet
+        phoneMiddle === "sheet" && styles.centredSheet,
+        stylex.defaultMarker()
       )}
     >
       <div data-slot="app-shell-bar-start" {...stylex.props(styles.start)}>

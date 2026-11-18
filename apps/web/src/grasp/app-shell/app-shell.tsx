@@ -168,6 +168,13 @@ export interface AppShellProps {
    * @default true
    */
   panelsOpen?: boolean;
+  /**
+   * Opens and closes the panels from the shell's own button, when you keep `panelsOpen` with it:
+   * the button then stands at the bar's row at every width, open or closed, so a closed panel
+   * always has a visible way back. Without it, the button shows only on a phone, while the panels
+   * show, to set them aside; opening closed panels is then yours (an Ask bar, a chat button).
+   */
+  onPanelsOpenChange?: (open: boolean) => void;
   /** Runs once the panels have arrived and stand still. */
   onPanelsShown?: () => void;
   /** Runs once the panels have left, after `panelsOpen` was turned off. */
@@ -493,6 +500,10 @@ const styles = stylex.create({
   toggle: {
     display: { default: "none", [NARROW]: "flex" },
     flexShrink: 0,
+  },
+  // With the host's `onPanelsOpenChange`: at every width, so closed panels always have a way back.
+  toggleEverywhere: {
+    display: "flex",
   },
   // With a page's own bar, or none, it floats at the row's end, as the Menu button at its start.
   toggleOverBar: {
@@ -1201,36 +1212,52 @@ const PanelsToggle = ({
   aside,
   setAside,
   underBanner = false,
+  open,
+  phone,
+  onOpenChange,
 }: {
   bar: "frame" | "page" | "none";
   label: string;
   aside: boolean;
   setAside: (aside: boolean) => void;
   underBanner?: boolean;
-}) => (
-  <span
-    data-slot="app-shell-panels-toggle"
-    {...stylex.props(
-      styles.toggle,
-      bar === "frame" && styles.menuInBar,
-      bar === "page" && styles.toggleOverBar,
-      bar === "none" && styles.toggleRaised,
-      underBanner && styles.floatUnderBanner,
-      underBanner && styles.floatUnderBannerEnd
-    )}
-  >
-    <Button
-      variant="ghost"
-      size="xs"
-      icon={PanelToggle}
-      aria-label={label}
-      aria-expanded={!aside}
-      onClick={() => {
-        setAside(!aside);
-      }}
-    />
-  </span>
-);
+  open: boolean;
+  phone: boolean;
+  onOpenChange: ((open: boolean) => void) | undefined;
+}) => {
+  // On a phone with the panels shown, it sets them aside and back; otherwise, with the host's
+  // `onPanelsOpenChange`, it opens and closes them, at every width.
+  const setsAside = phone && open;
+  return (
+    <span
+      data-slot="app-shell-panels-toggle"
+      {...stylex.props(
+        styles.toggle,
+        onOpenChange !== undefined && styles.toggleEverywhere,
+        bar === "frame" && styles.menuInBar,
+        bar === "page" && styles.toggleOverBar,
+        bar === "none" && styles.toggleRaised,
+        underBanner && styles.floatUnderBanner,
+        underBanner && styles.floatUnderBannerEnd
+      )}
+    >
+      <Button
+        variant="ghost"
+        size="xs"
+        icon={PanelToggle}
+        aria-label={label}
+        aria-expanded={setsAside ? !aside : open}
+        onClick={() => {
+          if (setsAside) {
+            setAside(!aside);
+          } else {
+            onOpenChange?.(!open);
+          }
+        }}
+      />
+    </span>
+  );
+};
 
 type CardProps = Pick<
   AppShellProps,
@@ -1277,6 +1304,10 @@ type CardProps = Pick<
   aside: boolean;
   setAside: (aside: boolean) => void;
   panelsToggleLabel: string;
+  /** Panels are given, open or not, and the host opens and closes them (`onPanelsOpenChange`). */
+  panelsGiven: boolean;
+  phone: boolean;
+  onPanelsOpenChange: ((open: boolean) => void) | undefined;
   menuOpen: boolean;
   setMenuOpen: (open: boolean) => void;
 };
@@ -1491,6 +1522,9 @@ const ShellCard = ({
   aside,
   setAside,
   panelsToggleLabel,
+  panelsGiven,
+  phone,
+  onPanelsOpenChange,
   crumbs,
   phoneCrumbs,
   trailing: trailingDeprecated,
@@ -1557,15 +1591,19 @@ const ShellCard = ({
   );
   // On a phone the card stays live (its bar's row) and only the page and the dock go under the panels.
   const pageInert = under && !inertCard;
-  const toggle = paneled ? (
-    <PanelsToggle
-      bar={bar}
-      label={panelsToggleLabel}
-      aside={aside}
-      setAside={setAside}
-      underBanner={underBanner}
-    />
-  ) : undefined;
+  const toggle =
+    paneled || (panelsGiven && onPanelsOpenChange !== undefined) ? (
+      <PanelsToggle
+        bar={bar}
+        label={panelsToggleLabel}
+        aside={aside}
+        setAside={setAside}
+        underBanner={underBanner}
+        open={paneled}
+        phone={phone}
+        onOpenChange={onPanelsOpenChange}
+      />
+    ) : undefined;
   const own = useRef<HTMLDivElement>(null);
 
   // Note where focus stands in the card, so panels that come to cover it can take focus from there
@@ -1713,6 +1751,7 @@ export const AppShell = ({
   bar = "frame",
   panels,
   panelsOpen,
+  onPanelsOpenChange,
   onPanelsShown,
   onPanelsGone,
   panelWidth,
@@ -1794,6 +1833,9 @@ export const AppShell = ({
       aside={phone && aside}
       setAside={setAside}
       panelsToggleLabel={said.togglePanel}
+      panelsGiven={hasPanels(panels, true)}
+      phone={narrow}
+      onPanelsOpenChange={onPanelsOpenChange}
       menuOpen={menuOpen}
       setMenuOpen={setMenuOpen}
     />
