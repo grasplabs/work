@@ -177,6 +177,10 @@ describe("model calls", () => {
       end: { status: "failed", code: "workflow.model_call_limit" },
       requests: 1,
     });
+    // Why it failed says the number a run may make, as the platform has it.
+    expect(run.error?.message).toContain(
+      `${platformLimits.lineageModelRequests} model requests`
+    );
   });
 
   it("waits while the provider refuses the key, provably billing nothing, and goes on once an admin replaces it, its call made again in a step of its own", async () => {

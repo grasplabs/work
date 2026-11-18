@@ -5376,8 +5376,8 @@ msgid "Each place only narrows who reaches him there, and whether he does things
 msgstr "Cada lugar solo limita quién lo contacta allí y si hace cosas por las personas o solo responde."
 
 #: src/routes/_shell.settings.models.tsx
-msgid "Each workflow run, with the runs it starts, may make at most 100 model requests, retries included."
-msgstr "Cada ejecución de flujo de trabajo, con las ejecuciones que inicia, puede hacer como máximo 100 solicitudes al modelo, reintentos incluidos."
+msgid "Each workflow run, with the runs it starts, may make at most {limit} model requests, retries included."
+msgstr "Cada ejecución de flujo de trabajo, con las ejecuciones que inicia, puede hacer como máximo {limit} solicitudes al modelo, reintentos incluidos."
 
 #: src/chat/chat-window.tsx
 msgctxt "older chats"

@@ -1233,5 +1233,21 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
       tooLarge: "workflow.resource_invalid",
       backlog: "workflow.resource_invalid",
     });
+
+    // A wrong input says which field, by its path in the trigger's config,
+    // and never what was typed there.
+    const typed = "not-what-a-report-is";
+    const refused: unknown = await createTriggerResource(env, admin, {
+      kind: "schedule",
+      workflowId: workflow.id,
+      config: scheduleConfig("* * * * *", "UTC", { report: 7, job: typed }),
+    }).catch((error: unknown) => error);
+    // Its code and details, as they cross to whoever asked.
+    const said = JSON.stringify(refused);
+    expect({
+      refusal: said.includes('"workflow.resource_invalid"'),
+      where: said.includes('"config.input.report: '),
+      leaks: said.includes(typed),
+    }).toStrictEqual({ refusal: true, where: true, leaks: false });
   });
 });
