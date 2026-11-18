@@ -749,29 +749,33 @@ const apply = (
     sql.exec("DELETE FROM removed_sources WHERE source = ?", source);
     const rows = rowsOf(sql, source);
     sources += rows.length > 0 ? 1 : 0;
-    // A skill drafted from it (skill-proposals.ts) goes with it, open; one
-    // settled holds nothing of it. So does a draft of one still on the
-    // queue that names it among what it is drawn from, whatever its state
-    // (waiting, parked for good, or under way, which is stopped): its
-    // payload holds the source's key and what the host said of it.
-    sql.exec(
-      `DELETE FROM skill_proposals WHERE state = 'open' AND EXISTS (
-        SELECT 1 FROM json_each(rests_on)
-        WHERE json_extract(value, '$.source') = ?
-      )`,
-      source
-    );
-    for (const { key: draft } of sql
-      .exec<{ key: string }>(
-        `DELETE FROM work_items WHERE kind = ? AND EXISTS (
-          SELECT 1 FROM json_each(json_extract(payload, '$.sources'))
-          WHERE value = ?
-        ) RETURNING key`,
-        proposeKind,
+    // A skill drafted from it (skill-proposals.ts) goes with it, open, and
+    // so does a draft of one still on the queue that names it, whatever its
+    // state (waiting, parked for good, or under way, which is stopped):
+    // each found through the proposals' index of what they name
+    // (`proposal_sources`), by key, never by reading the queue. One settled
+    // holds nothing of it, and names nothing.
+    for (const { proposal } of sql
+      .exec<{ proposal: string }>(
+        "DELETE FROM proposal_sources WHERE source = ? RETURNING proposal",
         source
       )
       .toArray()) {
-      stopped.push(draft);
+      sql.exec(
+        "DELETE FROM skill_proposals WHERE key = ? AND state = 'open'",
+        proposal
+      );
+      sql.exec("DELETE FROM proposal_sources WHERE proposal = ?", proposal);
+      const drafts = sql
+        .exec<{ key: string }>(
+          "DELETE FROM work_items WHERE kind = ? AND key = ? RETURNING key",
+          proposeKind,
+          proposal
+        )
+        .toArray();
+      for (const { key: draft } of drafts) {
+        stopped.push(draft);
+      }
     }
     if (hideVersions(sql, source, rows, key)) {
       stopped.push(source);

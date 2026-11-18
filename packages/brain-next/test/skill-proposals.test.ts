@@ -224,7 +224,7 @@ describe("skill proposals", () => {
         `UPDATE work_items SET parked_at = ?, parks = 3, attempts = 5
         WHERE key = ?`,
         Date.now(),
-        `proposal:${parked}`
+        parked
       );
     });
     await own().eraseSource({ source: erased, reason: "deleted" });

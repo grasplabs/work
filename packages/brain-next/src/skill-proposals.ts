@@ -38,7 +38,8 @@ import type { WorkContext } from "./work.ts";
 //   nothing). What the model writes is kept here alone, readable by them.
 // - Listed only while every version it rests on is still current and
 //   theirs to read, in the statement that lists it (`listProposals`); an
-//   erasure of one of its sources deletes it (erasure.ts `apply`).
+//   erasure of one of its sources deletes it, and a draft of it still on
+//   the queue, found by index (`proposal_sources`, erasure.ts `apply`).
 // - Not a skill: nothing lists, selects or reads it as one. The host
 //   writes the person's own skill from it once they accept, then settles
 //   it (`settleProposal`), which keeps the key alone.
@@ -261,8 +262,20 @@ export const enqueueProposal = (
   if (draftedBefore(storage.sql, key)) {
     return;
   }
+  // What the draft names, by source, for an erasure to find it by
+  // (`proposal_sources`): in place of what an earlier draft of the key
+  // named. Synchronous with the enqueue, so both land or neither does.
+  storage.sql.exec("DELETE FROM proposal_sources WHERE proposal = ?", key);
+  storage.sql.exec(
+    `INSERT OR IGNORE INTO proposal_sources (source, proposal)
+    SELECT value, ? FROM json_each(?)`,
+    key,
+    JSON.stringify(sources)
+  );
+  // Keyed by the proposal's key, as work about a source is by its key: no
+  // source's key is one (a SHA-256 holds no ":").
   enqueueWork(storage, proposeWork, {
-    key: `proposal:${key}`,
+    key,
     payload: { key, about, sources },
     priority: "conversation",
   });
@@ -321,9 +334,17 @@ export const settleProposal = (
   sql: SqlStorage,
   { key }: Omit<ProposalSettle, "person">
 ): void => {
+  const settled = proposalKeySchema.parse(key);
   sql.exec(
     `UPDATE skill_proposals SET state = 'settled', text = NULL, rests_on = NULL
     WHERE key = ? AND state = 'open'`,
-    proposalKeySchema.parse(key)
+    settled
+  );
+  // A settled proposal rests on nothing: what it named goes.
+  sql.exec(
+    `DELETE FROM proposal_sources WHERE proposal = ?
+    AND EXISTS (SELECT 1 FROM skill_proposals WHERE key = ? AND state = 'settled')`,
+    settled,
+    settled
   );
 };

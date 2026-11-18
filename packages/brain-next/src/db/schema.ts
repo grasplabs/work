@@ -1406,3 +1406,24 @@ export const skillProposals = sqliteTable("skill_proposals", {
   restsOn: text("rests_on"),
   draftedAt: integer("drafted_at", { mode: "timestamp_ms" }).notNull(),
 });
+
+/**
+ * Each source a skill proposal rests on, or a draft of one on the queue is
+ * to be drawn from (skill-proposals.ts), by the proposal's key: written as
+ * the draft is queued, in place of what an earlier one of the key named.
+ * An erasure of a source finds by it, through its key, the open proposal
+ * and the queued draft that name it, and deletes them with these rows
+ * (erasure.ts `apply`): by index, never by reading the queue. Settling a
+ * proposal deletes its rows. Only in a person's own store.
+ */
+export const proposalSources = sqliteTable(
+  "proposal_sources",
+  {
+    source: text().notNull(),
+    proposal: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.source, table.proposal] }),
+    index("proposal_sources_proposal_idx").on(table.proposal),
+  ]
+);

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5e37e645-a807-4978-a348-f198c3f5107b",
+  "id": "477af347-89b4-40c6-903b-eb9161b1fe60",
   "prevId": "abced1a5-01df-4ee5-9746-de88104b0b1b",
   "tables": {
     "chunk_blocks": {
@@ -2094,6 +2094,46 @@
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "proposal_sources": {
+      "name": "proposal_sources",
+      "columns": {
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "proposal": {
+          "name": "proposal",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "proposal_sources_proposal_idx": {
+          "name": "proposal_sources_proposal_idx",
+          "columns": [
+            "proposal"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "proposal_sources_source_proposal_pk": {
+          "columns": [
+            "source",
+            "proposal"
+          ],
+          "name": "proposal_sources_source_proposal_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
