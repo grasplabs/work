@@ -122,7 +122,7 @@ export const BannerHeader = ({
             : note.title}
         </PageHeaderTitle>
         {note.kind === "statement" && isTeamClaim(note.id) ? (
-          <ClaimBasis />
+          <ClaimBasis statementId={note.id} />
         ) : null}
         {/* Last heard follows the summary's last word, so a summary that wraps keeps it beside its words. A source's summary already carries its date. */}
         <p className="text-muted-foreground text-sm">
@@ -174,7 +174,9 @@ export const StatementLine = ({
             <KindLabel kind={statement.kind} />
           </span>
         ) : null}
-        {isTeamClaim(statement.id) ? <ClaimBasis /> : null}
+        {isTeamClaim(statement.id) ? (
+          <ClaimBasis statementId={statement.id} />
+        ) : null}
       </span>
       <Link
         className="text-muted-foreground hover:text-foreground max-w-64 truncate text-right text-xs hover:underline"
