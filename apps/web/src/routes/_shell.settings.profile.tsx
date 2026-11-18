@@ -2,17 +2,12 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { Badge } from "../grasp/badge/index.ts";
 import { DE, ES, FR, GB, NL } from "../grasp/flags/index.ts";
 import type { FlagData } from "../grasp/flags/index.ts";
 import { Input } from "../grasp/input/index.ts";
 import { LanguageSwitch } from "../grasp/language-switch/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import {
-  FactRow,
-  SettingRow,
-  SettingsRows,
-} from "../grasp/setting-row/index.ts";
+import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
 import { chooseLocale, isLocale, localeNames } from "../i18n.ts";
 import type { Locale } from "../i18n.ts";
 import { roleLabel } from "../labels.ts";
@@ -23,8 +18,8 @@ import { SettingsError } from "../settings/section.tsx";
 // speaks to them, as the library's Settings pattern has it: one compact
 // card of rows, every control on one edge and as wide as the others. Their
 // name is theirs to change; their email is their sign-in's, so it stands in
-// a field that only reads; their role is an admin's to give. Their teams
-// are shown where they are managed.
+// a field that only reads, as is their role, an admin's to give. Their
+// teams are shown where they are managed.
 
 const styles = stylex.create({
   // Every control fills the rows' shared control column.
@@ -42,6 +37,32 @@ const flags: Record<Locale, FlagData> = {
 
 const languages = Object.entries(localeNames).flatMap(([code, name]) =>
   isLocale(code) ? [{ code, name, flag: flags[code] }] : []
+);
+
+/** A value this person reads here but doesn't change, in a field that only reads. */
+const ReadOnlyRow = ({
+  label,
+  value,
+  info,
+  type,
+}: {
+  label: string;
+  value: string;
+  info?: string;
+  type?: "email";
+}) => (
+  <SettingRow {...(info === undefined ? {} : { info })} label={label}>
+    {(field) => (
+      <Input
+        {...field}
+        layout={styles.control}
+        readOnly
+        size="sm"
+        {...(type === undefined ? {} : { type })}
+        value={value}
+      />
+    )}
+  </SettingRow>
 );
 
 /** The language Grasp speaks to this person, chosen as it is picked. */
@@ -74,28 +95,17 @@ const Profile = () => {
       <SettingsRows>
         {/* Grasp's staff sign in for a while, as Grasp names them. */}
         {identity.staff ? (
-          <FactRow label={t`Name`}>{identity.name}</FactRow>
+          <ReadOnlyRow label={t`Name`} value={identity.name} />
         ) : (
           <ProfileName name={identity.name} />
         )}
-        <SettingRow
+        <ReadOnlyRow
           info={t`Your sign-in; your admin changes it.`}
           label={t`Email`}
-        >
-          {(field) => (
-            <Input
-              {...field}
-              layout={styles.control}
-              readOnly
-              size="sm"
-              type="email"
-              value={identity.email}
-            />
-          )}
-        </SettingRow>
-        <FactRow label={t`Role`}>
-          <Badge size="sm">{roleLabel(identity.role)}</Badge>
-        </FactRow>
+          type="email"
+          value={identity.email}
+        />
+        <ReadOnlyRow label={t`Role`} value={roleLabel(identity.role)} />
         <LanguageRow />
       </SettingsRows>
     </SectionCard>
