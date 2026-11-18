@@ -367,7 +367,10 @@ describe("the Incoming events settings", () => {
       [shop.id]: [{ id: "wf-invoices", name: "Invoice check" }],
     });
     const said = document.body.textContent.includes("Starts 1 workflow");
-    await press("Details");
+    await act(async () => {
+      named("Details of Shop system")?.click();
+      await settled();
+    });
 
     // The workflow it starts, and the run it started: each opens the workflow.
     const links = [...document.querySelectorAll("button")]
