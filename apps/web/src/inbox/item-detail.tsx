@@ -32,7 +32,7 @@ import type { ApprovalWords } from "../grasp/approval-request/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { CodeBlock } from "../grasp/code-block/index.ts";
-import { ArrowLeft, External } from "../grasp/icons/index.ts";
+import { External } from "../grasp/icons/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
 import { QuestionTool } from "../grasp/question-tool/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
@@ -54,20 +54,12 @@ import { TargetLink } from "./target-link.tsx";
 // brain asked the person is answered here, in their own words, on the
 // Question tool (`brain.answerGap`); core then lists it no more.
 
-/** The inbox's own width at which the list and the item stand side by side, as inbox-page.tsx has it. */
-const WIDE = "@container inbox (width >= 52rem)";
-
 const styles = stylex.create({
   item: {
     display: "flex",
     flexDirection: "column",
     gap: grasp.space2,
     minWidth: 0,
-  },
-  // Only where the item takes the list's place: beside it, the list is the way back.
-  back: {
-    alignSelf: "flex-start",
-    display: { default: null, [WIDE]: "none" },
   },
   marks: {
     display: "flex",
@@ -199,7 +191,7 @@ const ItemFrame = ({
   failure: string | undefined;
 }) => {
   const { t, i18n } = useLingui();
-  const { item, onBack } = frame;
+  const { item } = frame;
   // Who it is for, when it is someone in particular: an admin's by default.
   const facts = item.facts.map(({ label, value }) => ({ key: label, value }));
   if (item.forWhom !== undefined && "role" in item.forWhom) {
@@ -215,17 +207,6 @@ const ItemFrame = ({
       : acts;
   return (
     <div {...stylex.props(styles.item)}>
-      {onBack === undefined ? null : (
-        <Button
-          icon={ArrowLeft}
-          layout={styles.back}
-          onClick={onBack}
-          size="sm"
-          variant="ghost"
-        >
-          {t`All items`}
-        </Button>
-      )}
       <SectionCard
         aside={
           <span {...stylex.props(styles.marks)}>
@@ -280,8 +261,6 @@ const ItemFrame = ({
 /** What the inbox gives an item: the way back to the list, and where to say what was done. */
 interface Frame {
   item: InboxItem;
-  /** Back to the list, where the item takes the list's place (a narrow page). */
-  onBack?: () => void;
   /** Says what was done, for a screen reader: the list only loses the item. */
   onSaid: (said: string) => void;
 }
@@ -388,7 +367,7 @@ const ApprovalFrame = ({
   const router = useRouter();
   const core = useCore();
   const words = useApprovalWords();
-  const { item, onBack } = frame;
+  const { item } = frame;
   const answer =
     (change: (session: Session) => Promise<unknown>, said: string) =>
     async () => {
@@ -399,17 +378,6 @@ const ApprovalFrame = ({
   const { title } = item;
   return (
     <div {...stylex.props(styles.item)}>
-      {onBack === undefined ? null : (
-        <Button
-          icon={ArrowLeft}
-          layout={styles.back}
-          onClick={onBack}
-          size="sm"
-          variant="ghost"
-        >
-          {t`All items`}
-        </Button>
-      )}
       <ApprovalRequest
         {...(item.asker === undefined ? {} : { agent: item.asker })}
         {...(summary === undefined ? {} : { summary })}
@@ -843,33 +811,16 @@ const ElsewhereItem = ({ frame }: { frame: Frame }) => {
   );
 };
 
-/** The interviews, with the way back to the list where they take its place. */
+/** The interviews. */
 const InterviewsFrame = ({
-  frame,
   source,
 }: {
-  frame: Frame;
   source: Extract<InboxSource, { type: "interviews" }>;
-}) => {
-  const { t } = useLingui();
-  const { onBack } = frame;
-  return (
-    <div {...stylex.props(styles.item)}>
-      {onBack === undefined ? null : (
-        <Button
-          icon={ArrowLeft}
-          layout={styles.back}
-          onClick={onBack}
-          size="sm"
-          variant="ghost"
-        >
-          {t`All items`}
-        </Button>
-      )}
-      <InterviewsDetail interviews={source.interviews} today={source.today} />
-    </div>
-  );
-};
+}) => (
+  <div {...stylex.props(styles.item)}>
+    <InterviewsDetail interviews={source.interviews} today={source.today} />
+  </div>
+);
 
 /**
  * Someone else's change whose answer was lost, for the organization's own
@@ -886,22 +837,10 @@ const EveryonesOutcomeItem = ({
   source: Extract<InboxSource, { type: "everyonesOutcome" }>;
 }) => {
   const { t } = useLingui();
-  const { onBack } = frame;
   const { listing, person } = source;
   const connection = listing.connectionName ?? listing.connectionId;
   return (
     <div {...stylex.props(styles.item)}>
-      {onBack === undefined ? null : (
-        <Button
-          icon={ArrowLeft}
-          layout={styles.back}
-          onClick={onBack}
-          size="sm"
-          variant="ghost"
-        >
-          {t`All items`}
-        </Button>
-      )}
       <SectionCard
         density="compact"
         description={t`Its answer was lost: nobody can tell whether it took effect.`}
@@ -941,7 +880,7 @@ const EveryonesOutcomeItem = ({
 export const ItemDetail = (frame: Frame) => {
   const { source } = frame.item;
   if (source.type === "interviews") {
-    return <InterviewsFrame frame={frame} source={source} />;
+    return <InterviewsFrame source={source} />;
   }
   if (source.type === "everyonesOutcome") {
     return <EveryonesOutcomeItem frame={frame} source={source} />;

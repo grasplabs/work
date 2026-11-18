@@ -10,13 +10,13 @@ import { Button } from "../grasp/button/index.ts";
 import { ChevronLeft, ChevronRight } from "../grasp/icons/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import { orderOf, placeIn, skip, turn, untouched } from "../inbox/walk.ts";
+import type { Turned } from "../inbox/walk.ts";
 import { OutcomeCard } from "./outcome-card.tsx";
 import type { Pile } from "./pile-card.tsx";
 import { HeldCard, RequestCard } from "./pile-cards.tsx";
 import type { Printed } from "./pile-dots.ts";
 import { PileFarewell } from "./pile-farewell.tsx";
-import { orderOf, placeIn, skip, turn, untouched } from "./pile.ts";
-import type { Turned } from "./pile.ts";
 
 // What waits on the person, as the prototype's pile of cards on top of the
 // dashboard (`components/dashboard/todo-stack.tsx`), made to be gone

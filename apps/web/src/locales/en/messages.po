@@ -781,6 +781,7 @@ msgid "{idle, plural, one {# more workflow didn't run in this time.} other {# mo
 msgstr "{idle, plural, one {# more workflow didn't run in this time.} other {# more workflows didn't run in this time.}}"
 
 #: src/dashboard/report-bar.tsx
+#: src/inbox/report-row.tsx
 msgid "{inDays, plural, one {Your next report is ready tomorrow} other {Your next report is ready in # days}}"
 msgstr "{inDays, plural, one {Your next report is ready tomorrow} other {Your next report is ready in # days}}"
 
@@ -1242,6 +1243,7 @@ msgid "{place, selectordinal, one {, sorted #st} two {, sorted #nd} few {, sorte
 msgstr "{place, selectordinal, one {, sorted #st} two {, sorted #nd} few {, sorted #rd} other {, sorted #th}}"
 
 #: src/dashboard/todo-pile.tsx
+#: src/inbox/inbox-page.tsx
 msgid "{place} of {count}"
 msgstr "{place} of {count}"
 
@@ -2662,10 +2664,6 @@ msgstr "All agents"
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "All chats"
 msgstr "All chats"
-
-#: src/inbox/item-detail.tsx
-msgid "All items"
-msgstr "All items"
 
 #: src/frame/part-words.tsx
 msgid "All languages"
@@ -6544,6 +6542,7 @@ msgid "Export definition"
 msgstr "Export definition"
 
 #: src/dashboard/report-bar.tsx
+#: src/inbox/report-row.tsx
 msgid "Export report"
 msgstr "Export report"
 
@@ -11032,10 +11031,6 @@ msgstr "Older"
 msgid "Older changes"
 msgstr "Older changes"
 
-#: src/inbox/inbox-page.tsx
-msgid "Older failed workflows are on the <0>dashboard</0>."
-msgstr "Older failed workflows are on the <0>dashboard</0>."
-
 #: src/brain/sources-page.tsx
 msgid "Older versions"
 msgstr "Older versions"
@@ -14619,6 +14614,7 @@ msgid "Skip"
 msgstr "Skip"
 
 #: src/dashboard/todo-pile.tsx
+#: src/inbox/inbox-page.tsx
 msgctxt "put a to-do card at the back of the pile"
 msgid "Skip"
 msgstr "Skip"
@@ -15933,6 +15929,7 @@ msgid "The new secret"
 msgstr "The new secret"
 
 #: src/dashboard/todo-pile.tsx
+#: src/inbox/inbox-page.tsx
 msgid "The next one"
 msgstr "The next one"
 
@@ -15941,6 +15938,7 @@ msgid "The numbers"
 msgstr "The numbers"
 
 #: src/dashboard/todo-pile.tsx
+#: src/inbox/inbox-page.tsx
 msgid "The one before"
 msgstr "The one before"
 
@@ -16147,6 +16145,7 @@ msgid "The webhook's secret"
 msgstr "The webhook's secret"
 
 #: src/dashboard/report-bar.tsx
+#: src/inbox/report-row.tsx
 msgid "The week so far"
 msgstr "The week so far"
 
@@ -18995,6 +18994,7 @@ msgstr "Your question"
 
 #: src/dashboard/report-bar.tsx
 #: src/dashboard/report.ts
+#: src/inbox/report-row.tsx
 msgid "Your report on week {week} is ready"
 msgstr "Your report on week {week} is ready"
 

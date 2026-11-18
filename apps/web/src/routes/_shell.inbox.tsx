@@ -7,6 +7,7 @@ import { readDirectory } from "../directory.ts";
 import { PageLoading } from "../frame/page-states.tsx";
 import { InboxPage, groupOrder } from "../inbox/inbox-page.tsx";
 import { inboxItems, unread } from "../inbox/items.ts";
+import { ReportRow } from "../inbox/report-row.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 
 // The inbox, as the prototype's (`routes/inbox.tsx`), at its address: what
@@ -20,7 +21,8 @@ import { loadFromCore } from "../load-from-core.tsx";
 const activityShown = 100;
 
 const Inbox = () => {
-  const { waiting, readAt, activity } = Route.useLoaderData();
+  const { waiting, readAt, activity, programme, report } =
+    Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const { item, group } = Route.useSearch();
   return (
@@ -29,11 +31,12 @@ const Inbox = () => {
       chosen={item}
       group={group}
       items={inboxItems(waiting, identity, readAt)}
-      notLoaded={unread(waiting)}
-      olderFailures={
-        waiting.notifications.state === "ready" &&
-        waiting.notifications.data.page.more
+      foot={
+        programme.state === "ready" && programme.data !== null ? (
+          <ReportRow programme={programme.data} report={report} />
+        ) : undefined
       }
+      notLoaded={unread(waiting)}
     />
   );
 };
@@ -59,10 +62,26 @@ export const Route = createFileRoute("/_shell/inbox")({
     // Everyone's unknown outcomes too, once a visit, whatever the view: the
     // filter offers their group, and only this page lists them (core records
     // each list in the audit trail).
-    const waiting = await readWaiting(core, identity, {
-      everyonesOutcomes: true,
-    });
-    return { waiting, readAt: new Date().toISOString(), activity };
+    // Not awaited: the report's dialog waits for it.
+    const report = loadFromCore(
+      core,
+      async (session) => await session.dashboard.report()
+    );
+    const [waiting, programme] = await Promise.all([
+      readWaiting(core, identity, { everyonesOutcomes: true }),
+      // The programme with Grasp, for the weekly report's row; none without a plan.
+      loadFromCore(
+        core,
+        async (session) => await session.onboarding.programme()
+      ),
+    ]);
+    return {
+      waiting,
+      readAt: new Date().toISOString(),
+      activity,
+      programme,
+      report,
+    };
   },
   component: Inbox,
 });

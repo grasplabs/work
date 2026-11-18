@@ -4,7 +4,14 @@ import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Await, Link, useNavigate, useRouter } from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import type { ReactNode } from "react";
 
 import { actorOf } from "../activity/audit-log.tsx";
 import { actionWords } from "../activity/audit-words.ts";
@@ -28,7 +35,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "../grasp/empty/index.ts";
-import { Agent } from "../grasp/icons/index.ts";
+import { Agent, ChevronLeft, ChevronRight } from "../grasp/icons/index.ts";
 import {
   Item,
   ItemContent,
@@ -39,6 +46,12 @@ import {
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
+import {
+  Sheet,
+  SheetBody,
+  SheetContent,
+  SheetTitle,
+} from "../grasp/sheet/index.ts";
 import {
   Tabs,
   TabsContent,
@@ -54,6 +67,7 @@ import { kindLabel, kindMark } from "./inbox-kind.tsx";
 import { ItemDetail } from "./item-detail.tsx";
 import { groupOf, listed } from "./items.ts";
 import type { Group, InboxItem } from "./items.ts";
+import { orderOf, skip, stepFrom } from "./walk.ts";
 
 // The inbox, on Grasp UI: what waits on the person, to work through
 // quickly. The list on one side, by group (what blocks first), and the
@@ -66,17 +80,11 @@ import type { Group, InboxItem } from "./items.ts";
 // holds the latest of the audit trail. Items come from items.ts; each
 // action goes through the same calls as the dashboard's pile.
 
-/**
- * The page's own width at which the list and the item stand side by side.
- * Written out here as in item-detail.tsx: StyleX reads a key only from
- * the file it is in.
- */
-const WIDE = "@container inbox (width >= 52rem)";
+/** The page's own width at which the list and the item stand side by side; narrower, the item opens in a Sheet. */
+const WIDE_REM = 52;
 
 const styles = stylex.create({
   page: {
-    containerName: "inbox",
-    containerType: "inline-size",
     display: "flex",
     flexDirection: "column",
     gap: grasp.space4,
@@ -84,12 +92,12 @@ const styles = stylex.create({
   },
   split: {
     display: "grid",
-    gridTemplateColumns: {
-      default: "minmax(0, 1fr)",
-      [WIDE]: "minmax(18rem, 24rem) minmax(0, 1fr)",
-    },
+    gridTemplateColumns: "minmax(0, 1fr)",
     alignItems: "start",
     gap: grasp.space4,
+  },
+  splitWide: {
+    gridTemplateColumns: "minmax(18rem, 24rem) minmax(0, 1fr)",
   },
   list: {
     display: "flex",
@@ -97,17 +105,37 @@ const styles = stylex.create({
     gap: grasp.space3,
     minWidth: 0,
   },
-  // On a narrow page, the list makes way for the item that was opened.
-  listAway: { display: { default: "none", [WIDE]: "flex" } },
   // The item stays in view while the list beside it scrolls.
   item: {
-    position: { default: null, [WIDE]: "sticky" },
+    position: "sticky",
     top: 0,
-    maxHeight: { default: null, [WIDE]: "calc(100dvh - 6rem)" },
-    overflowY: { default: null, [WIDE]: "auto" },
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+    maxHeight: "calc(100dvh - 6rem)",
+    overflowY: "auto",
     minWidth: 0,
+    // As wide as the approval card it shows, so the walk's head spans the card.
+    maxWidth: grasp.approvalWidth,
   },
-  itemAway: { display: { default: "none", [WIDE]: "block" } },
+  // The walk's head: where in what waits the item is, between its arrows, and Skip apart.
+  walk: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space1,
+  },
+  place: {
+    fontVariantNumeric: "tabular-nums",
+  },
+  skip: {
+    marginInlineStart: "auto",
+  },
+  // Nothing waits: the report's row stands under the Empty, at the list's width.
+  emptyFoot: {
+    width: "100%",
+    maxWidth: "24rem",
+    marginInline: "auto",
+  },
   unseen: {
     position: "absolute",
     width: grasp.hairline,
@@ -250,28 +278,197 @@ const ItemList = ({
   );
 };
 
-/** The list and the item beside it, or on a narrow page one at a time. */
+/**
+ * Nothing in the list: nothing waits, with the report's row under it; or
+ * nothing loaded, said as a failure with Try again, never as an empty inbox.
+ */
+const NoItems = ({
+  failed,
+  foot,
+}: {
+  failed: readonly string[];
+  foot: ReactNode;
+}) => {
+  const { t } = useLingui();
+  const router = useRouter();
+  // Nothing loaded: Try again reads the inbox again, and works until it has.
+  const retry = useAction(
+    async () => {
+      await router.invalidate({ sync: true });
+    },
+    { working: t`Trying again…`, done: t`Loaded`, failed: t`Not loaded` }
+  );
+  if (failed.length === 0) {
+    return (
+      <>
+        <Empty size="lg">
+          <EmptyHeader>
+            <EmptyMedia picture="done" />
+            <EmptyTitle>{t`Nothing waits for you`}</EmptyTitle>
+          </EmptyHeader>
+        </Empty>
+        {foot === undefined ? null : (
+          <div {...stylex.props(styles.emptyFoot)}>{foot}</div>
+        )}
+      </>
+    );
+  }
+  return (
+    <Empty size="lg" tone="danger">
+      <EmptyHeader>
+        <EmptyMedia />
+        <EmptyTitle>{t`The inbox didn't load`}</EmptyTitle>
+        <EmptyDescription>{failed.join(" ")}</EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button variant="ink" {...retry.props}>
+          {t`Try again`}
+        </Button>
+      </EmptyContent>
+    </Empty>
+  );
+};
+
+/** The groups as tabs, each with how many it holds; only where there are two or more. */
+const GroupTabs = ({
+  counts,
+  current,
+  shown,
+  total,
+}: {
+  counts: ReadonlyMap<Group, number>;
+  current: Group;
+  shown: readonly Exclude<Group, "all">[];
+  total: number;
+}) => {
+  const { t, i18n } = useLingui();
+  const navigate = useNavigate();
+  if (shown.length < 2) {
+    return null;
+  }
+  return (
+    <Tabs
+      onValueChange={(value) => {
+        if (isGroup(value)) {
+          // In the address, so the sidebar's views and Back follow it.
+          void navigate({
+            from: "/inbox",
+            to: "/inbox",
+            search: (before) => ({
+              ...before,
+              group: value === "all" ? undefined : value,
+            }),
+            replace: true,
+          });
+        }
+      }}
+      value={current}
+      variant="segmented"
+    >
+      <TabsList aria-label={t`Show`}>
+        {(["all", ...shown] as const).map((each) => {
+          const groupName = i18n._(groupLabel[each]);
+          const count = each === "all" ? total : (counts.get(each) ?? 0);
+          return (
+            <TabsTrigger key={each} value={each}>
+              {t({
+                message: `${groupName} ${count}`,
+                context: "inbox filter with how many it holds",
+              })}
+            </TabsTrigger>
+          );
+        })}
+      </TabsList>
+    </Tabs>
+  );
+};
+
+/**
+ * The walk's head over the item: where in what waits it is, the one before
+ * and the next (round and round), and Skip, which puts it at the back.
+ */
+const WalkHead = ({
+  place,
+  count,
+  onStep,
+  onSkip,
+}: {
+  place: number;
+  count: number;
+  onStep: (by: 1 | -1) => void;
+  onSkip: () => void;
+}) => {
+  const { t } = useLingui();
+  // One alone has nowhere to go: no head.
+  if (count < 2) {
+    return null;
+  }
+  return (
+    <div {...stylex.props(styles.walk)}>
+      <Button
+        aria-label={t`The one before`}
+        icon={ChevronLeft}
+        onClick={() => {
+          onStep(-1);
+        }}
+        size="sm"
+        variant="ghost"
+      />
+      <span {...stylex.props(styles.place)}>
+        <Text element="span" size="sm" tone="muted">
+          <Trans>
+            {place} of {count}
+          </Trans>
+        </Text>
+      </span>
+      <Button
+        aria-label={t`The next one`}
+        icon={ChevronRight}
+        onClick={() => {
+          onStep(1);
+        }}
+        size="sm"
+        variant="ghost"
+      />
+      {/* Skipping is no answer: it stands apart from the item's own. */}
+      <Button layout={styles.skip} onClick={onSkip} size="sm" variant="ghost">
+        <Trans context="put a to-do card at the back of the pile">Skip</Trans>
+      </Button>
+    </div>
+  );
+};
+
+/**
+ * The list and, beside it, the walk through it: the item shown with its
+ * head. On a narrow page the list stands alone, and a row opens the walk
+ * in a Sheet.
+ */
 const ToDo = ({
   items,
   chosen,
   group,
   notLoaded,
-  olderFailures,
   onSaid,
+  wide,
+  foot,
 }: {
   items: readonly InboxItem[];
   chosen: string | undefined;
   /** The group in view, as the address has it (`?group=`). */
   group: Group;
   notLoaded: readonly Loaded<unknown>[];
-  olderFailures: boolean;
   onSaid: (said: string) => void;
+  /** Whether the page has room for the walk beside the list. */
+  wide: boolean;
+  /** What stands at the foot of the list's column: the report's row. */
+  foot: ReactNode;
 }) => {
   const { t, i18n } = useLingui();
   const navigate = useNavigate();
-  const router = useRouter();
   // Where the open item stood, so the one after it opens once it is settled.
   const [at, setAt] = useState(0);
+  // What was skipped this visit, last skipped last: it waits at the back.
+  const [skipped, setSkipped] = useState<readonly string[]>([]);
   const counts = new Map<Group, number>();
   for (const item of items) {
     const each = groupOf[item.kind];
@@ -280,15 +477,20 @@ const ToDo = ({
   const shownGroups = groupOrder.filter((each) => counts.has(each));
   // A group that has emptied falls back to everything.
   const current = group === "all" || counts.has(group) ? group : "all";
-  const list = listed(items, current, "urgent");
+  const inGroup = listed(items, current, "urgent");
+  const ids = inGroup.map(({ id }) => id);
+  const list = orderOf(ids, skipped).flatMap(
+    (id) => inGroup.find((item) => item.id === id) ?? []
+  );
   const index = list.findIndex(({ id }) => id === chosen);
   if (index !== -1 && index !== at) {
     setAt(index);
   }
   const selected =
     index === -1 ? list[Math.min(at, list.length - 1)] : list[index];
-  // On a narrow page the item takes the list's place once one is asked for.
+  // On a narrow page the walk opens in a Sheet once a row is chosen.
   const reading = chosen !== undefined && selected !== undefined;
+  const place = list.findIndex(({ id }) => id === selected?.id);
 
   const open = (id: string, focus: boolean) => {
     void navigate({
@@ -306,6 +508,25 @@ const ToDo = ({
           )
           ?.focus();
       });
+    }
+  };
+  const step = (by: 1 | -1) => {
+    const next = list[stepFrom(list.length, place, by)];
+    if (next !== undefined) {
+      open(next.id, false);
+    }
+  };
+  const skipShown = () => {
+    if (selected === undefined) {
+      return;
+    }
+    const after = skip(ids, {
+      at: { id: selected.id, index: place },
+      skipped,
+    });
+    setSkipped(after.skipped);
+    if (after.at !== null) {
+      open(after.at.id, false);
     }
   };
   const back = () => {
@@ -345,103 +566,63 @@ const ToDo = ({
     };
   }, []);
 
-  // Nothing loaded: Try again reads the inbox again, and works until it has.
-  const retry = useAction(
-    async () => {
-      await router.invalidate({ sync: true });
-    },
-    { working: t`Trying again…`, done: t`Loaded`, failed: t`Not loaded` }
-  );
   const failed = notLoaded.flatMap((part) => notLoadedText(part, i18n) ?? []);
   if (items.length === 0) {
-    return failed.length === 0 ? (
-      <Empty size="lg">
-        <EmptyHeader>
-          <EmptyMedia picture="done" />
-          <EmptyTitle>{t`Nothing waits for you`}</EmptyTitle>
-        </EmptyHeader>
-      </Empty>
-    ) : (
-      <Empty size="lg" tone="danger">
-        <EmptyHeader>
-          <EmptyMedia />
-          <EmptyTitle>{t`The inbox didn't load`}</EmptyTitle>
-          <EmptyDescription>{failed.join(" ")}</EmptyDescription>
-        </EmptyHeader>
-        <EmptyContent>
-          <Button variant="ink" {...retry.props}>
-            {t`Try again`}
-          </Button>
-        </EmptyContent>
-      </Empty>
-    );
+    return <NoItems failed={failed} foot={foot} />;
   }
+  const walk =
+    selected === undefined ? null : (
+      <>
+        <WalkHead
+          count={list.length}
+          onSkip={skipShown}
+          onStep={step}
+          place={place + 1}
+        />
+        <ItemDetail item={selected} key={selected.id} onSaid={onSaid} />
+      </>
+    );
   return (
-    <div {...stylex.props(styles.split)}>
-      <div {...stylex.props(styles.list, reading && styles.listAway)}>
+    <div {...stylex.props(styles.split, wide && styles.splitWide)}>
+      <div {...stylex.props(styles.list)}>
         {failed.map((text) => (
           <Alert key={text} variant="attention">
             {text}
           </Alert>
         ))}
-        {shownGroups.length < 2 ? null : (
-          <Tabs
-            onValueChange={(value) => {
-              if (isGroup(value)) {
-                // In the address, so the sidebar's views and Back follow it.
-                void navigate({
-                  from: "/inbox",
-                  to: "/inbox",
-                  search: (before) => ({
-                    ...before,
-                    group: value === "all" ? undefined : value,
-                  }),
-                  replace: true,
-                });
-              }
-            }}
-            value={current}
-            variant="segmented"
-          >
-            <TabsList aria-label={t`Show`}>
-              {(["all", ...shownGroups] as const).map((each) => {
-                const groupName = i18n._(groupLabel[each]);
-                const count =
-                  each === "all" ? items.length : (counts.get(each) ?? 0);
-                return (
-                  <TabsTrigger key={each} value={each}>
-                    {t({
-                      message: `${groupName} ${count}`,
-                      context: "inbox filter with how many it holds",
-                    })}
-                  </TabsTrigger>
-                );
-              })}
-            </TabsList>
-          </Tabs>
-        )}
+        <GroupTabs
+          counts={counts}
+          current={current}
+          shown={shownGroups}
+          total={items.length}
+        />
         <SectionCard aria-label={t`What waits on you`} density="compact" flush>
-          <ItemList list={list} onOpen={open} selected={selected} />
-        </SectionCard>
-        {olderFailures ? (
-          <Text size="xs" tone="muted">
-            <Trans>
-              Older failed workflows are on the{" "}
-              <RouterLink to="/dashboard">dashboard</RouterLink>.
-            </Trans>
-          </Text>
-        ) : null}
-      </div>
-      <div {...stylex.props(styles.item, !reading && styles.itemAway)}>
-        {selected === undefined ? null : (
-          <ItemDetail
-            item={selected}
-            key={selected.id}
-            onBack={reading ? back : undefined}
-            onSaid={onSaid}
+          {/* The one the walk shows is marked; on a narrow page only once it is open. */}
+          <ItemList
+            list={list}
+            onOpen={open}
+            selected={wide || reading ? selected : undefined}
           />
-        )}
+        </SectionCard>
+        {foot}
       </div>
+      {wide ? <div {...stylex.props(styles.item)}>{walk}</div> : null}
+      {!wide && reading && selected !== undefined ? (
+        <Sheet
+          onOpenChange={(next) => {
+            if (!next) {
+              back();
+            }
+          }}
+          open
+          size="lg"
+        >
+          <SheetContent>
+            <SheetTitle>{i18n._(kindLabel[selected.kind])}</SheetTitle>
+            <SheetBody>{walk}</SheetBody>
+          </SheetContent>
+        </Sheet>
+      ) : null}
     </div>
   );
 };
@@ -576,8 +757,8 @@ export const InboxPage = ({
   chosen,
   group,
   notLoaded,
-  olderFailures,
   activity,
+  foot,
 }: {
   items: readonly InboxItem[];
   /** The item open, by its ID: the list's first when none is, or it waits no more. */
@@ -585,26 +766,44 @@ export const InboxPage = ({
   /** The group in view, as the address has it; all when it has none. */
   group?: Exclude<Group, "all">;
   notLoaded: readonly Loaded<unknown>[];
-  /** Whether core has failed workflows older than the ones listed: the dashboard shows them. */
-  olderFailures: boolean;
   activity: Promise<Loaded<InboxActivity>> | undefined;
+  /** What stands at the foot of the list's column: the weekly report's row, with a programme. */
+  foot?: ReactNode;
 }) => {
   const { t, i18n } = useLingui();
   const [said, setSaid] = useState("");
+  // Whether the page has room for the walk beside the list, as the
+  // library's approvals inbox measures its own screen.
+  const page = useRef<HTMLDivElement>(null);
+  const [wide, setWide] = useState(false);
+  useLayoutEffect(() => {
+    const element = page.current;
+    // In rem of 16px, as the library's approvals inbox measures its own.
+    const watch = new ResizeObserver(([entry]) => {
+      setWide((entry?.contentRect.width ?? 0) >= WIDE_REM * 16);
+    });
+    if (element !== null) {
+      watch.observe(element);
+    }
+    return () => {
+      watch.disconnect();
+    };
+  }, []);
   const toDo = (
     <ToDo
       chosen={chosen}
+      foot={foot}
       group={group ?? "all"}
       items={items}
       notLoaded={notLoaded}
-      olderFailures={olderFailures}
       onSaid={setSaid}
+      wide={wide}
     />
   );
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Inbox` }]} />
-      <div {...stylex.props(styles.page)}>
+      <div ref={page} {...stylex.props(styles.page)}>
         {activity === undefined ? (
           toDo
         ) : (

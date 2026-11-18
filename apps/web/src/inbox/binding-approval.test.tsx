@@ -122,7 +122,6 @@ const shown = async () => {
     component: () => (
       <ItemDetail
         item={shownItem}
-        onBack={() => {}}
         onSaid={(line) => {
           said.push(line);
         }}
