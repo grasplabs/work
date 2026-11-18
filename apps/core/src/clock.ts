@@ -12,7 +12,7 @@ import { sweepTestFixtures } from "./app-tests.ts";
 import { sweepAppVisitors } from "./app-visitors.ts";
 import { drainWebhookDeliveries } from "./app-webhooks.ts";
 import { auditLog } from "./audit-log.ts";
-import { workBrain } from "./brain-next.ts";
+import { expireEvents, workBrain } from "./brain-next.ts";
 import { removeLostRunSources } from "./brain-run-sources.ts";
 import { producersOf, relayHandOvers } from "./brain-sources.ts";
 import { completeOwedRemovals } from "./brain-uploads.ts";
@@ -73,6 +73,15 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "minute",
     run: async (env, at) => {
       await workBrain(env, at, producersOf(env));
+    },
+  },
+  // Events past their time, deleted from the new Brain (GRA-1763,
+  // src/brain-next.ts `expireEvents`).
+  {
+    name: "brain.events",
+    period: "minute",
+    run: async (env) => {
+      await expireEvents(env);
     },
   },
   // What core noted to hand over to the new Brain, put on its work queue
