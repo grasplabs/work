@@ -731,7 +731,9 @@ export const BrainNav = ({
             current={onBrain && shownRegion === undefined}
             icon={BrainMark}
             label={t`Brain`}
-            link={<Link to="/brain" />}
+            // Exact, as the open row's: the router marks a fuzzy match as
+            // the page, on every page under the brain.
+            link={<Link activeOptions={{ exact: true }} to="/brain" />}
           />
           <RailLink
             current={onActivity}
@@ -757,7 +759,13 @@ export const BrainNav = ({
               icon={icon}
               key={region.id}
               label={region.name}
-              link={<Link search={{ region: region.id }} to="/brain" />}
+              link={
+                <Link
+                  activeOptions={{ exact: true }}
+                  search={{ region: region.id }}
+                  to="/brain"
+                />
+              }
             />
           ))}
         </div>

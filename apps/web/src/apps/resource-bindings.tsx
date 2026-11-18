@@ -11,7 +11,7 @@ import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
@@ -462,9 +462,12 @@ const ResourcePart = ({
   const facts = useFacts();
   const { alias, kind, state, binding, choices } = resource;
   const reason = stateReasons[state];
+  // Named by its alias, its heading: a region of its own among the App's resources.
+  const headingId = useId();
   return (
-    <section {...stylex.props(styles.resource)}>
+    <section aria-labelledby={headingId} {...stylex.props(styles.resource)}>
       <SectionHeader
+        id={headingId}
         actions={
           binding === null || choices === null ? undefined : (
             <Revoke
