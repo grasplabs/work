@@ -1,4 +1,5 @@
 {
+  "[brain-meaning] › brain-meaning.e2e.ts › a person's upload is found by a search that shares no word with it, by meaning": 72.0,
   "[chromium] › activity.e2e.ts › an admin approves a permission request, finds it in the audit log, and exports it": 8.2,
   "[chromium] › activity.e2e.ts › an admin sees a grant asked for again after a new version, and approves only the version the list shows": 6.6,
   "[chromium] › app-built.e2e.ts › a builder has an App built in its chat, publishes it, and someone it is shared with adds a contact its data then shows": 16.5,
@@ -17,7 +18,6 @@
   "[chromium] › apps.e2e.ts › the sidebar shows everyone the sections, and Settings each person the sections they may open": 14.3,
   "[chromium] › board-goals.e2e.ts › an admin sets a board goal, words it again and links a workflow; a member reads it on the Vision page, and can't change it, and the admin on the dashboard": 10.1,
   "[chromium] › board-page.e2e.ts › an admin takes a snapshot on the board page, writes its narrative and prints it on one page": 15.7,
-  "[chromium] › brain-meaning.e2e.ts › a person's upload is found by a search that shares no word with it, by meaning": 72.0,
   "[chromium] › brain-questions.e2e.ts › an admin closes a question without an answer and redacts another's answer, which a member can't": 7.5,
   "[chromium] › brain.e2e.ts › a person asks the brain on its atlas, in a chat of its own apart from the one the dock carries elsewhere": 10.7,
   "[chromium] › brain.e2e.ts › a person folds the brain's navigation to a rail, which marks the page they are on": 6,

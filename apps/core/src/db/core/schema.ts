@@ -6751,3 +6751,39 @@ export const brainOwnStores = sqliteTable("brain_own_stores", {
   /** Whether its SQLite is near what one object holds (`storeNearLimit`). */
   nearLimit: integer("near_limit", { mode: "boolean" }).notNull(),
 });
+
+/**
+ * What Grasp proposes for a team's routine (opportunities.ts, GRA-1750),
+ * at the evidence it rests on: the model's answer, held to what it was
+ * given, kept so it is asked once per evidence. Only while that evidence
+ * stands: an opportunity list forgets the rest. No person's data: a form,
+ * an App's id, systems from the catalog and step numbers.
+ */
+export const opportunityProposals = sqliteTable(
+  "opportunity_proposals",
+  {
+    /** The onboarding's id for the team's piece of work. */
+    routine: text().notNull(),
+    /** The drawing it rests on, by its id in the Brain. */
+    evidence: text().notNull(),
+    /** The proposal, as JSON (opportunities.ts `proposalSchema`). */
+    proposal: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.routine, table.evidence] })]
+);
+
+/**
+ * Opportunities an admin dismissed (opportunities.ts, GRA-1750), each at
+ * the evidence it was shown with: hidden until that changes. Who dismissed
+ * it is in the audit log, not here.
+ */
+export const opportunityDismissals = sqliteTable(
+  "opportunity_dismissals",
+  {
+    routine: text().notNull(),
+    evidence: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.routine, table.evidence] })]
+);
