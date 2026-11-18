@@ -1,4 +1,5 @@
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 
 import { ComposerAction } from "../grasp/composer/index.ts";
@@ -16,6 +17,12 @@ import { chatKey, useGlobalChat } from "./global-chat.tsx";
 // files too, is the chat's own box's, so it is all still there once the
 // chat opens. While Grasp answers, its light runs round it and Stop stops
 // the answer. Back, it takes the cursor if the chat had it.
+
+const styles = stylex.create({
+  // As wide as the dock gives (App shell's shell-dock-width): the dock
+  // centres what it holds, so a holder with no width shrinks to the box's least.
+  bar: { width: "100%" },
+});
 
 /** How long the bar offers its box the cursor back as the chat closes: the dock's motion, in ms. */
 const returnWithinMs = 300;
@@ -74,7 +81,7 @@ export const ChatBar = () => {
   const shortcut = shortcutLabel(chatKey);
   const { onAttach } = composer;
   return (
-    <div ref={bar}>
+    <div ref={bar} {...stylex.props(styles.bar)}>
       <ChatComposer
         {...composer}
         footer={

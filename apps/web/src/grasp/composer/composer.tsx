@@ -1369,6 +1369,12 @@ const ComposerCount = ({
     return null;
   }
   const stage = stageOf(length, max);
+  // Work's change (.context/library-changes.md, 14): far under the limit the
+  // count is not drawn at all. Its kept room (113px for "100,000/100,000")
+  // made the one row's end side so wide that the bar always went tall.
+  if (stage === "under") {
+    return null;
+  }
   return (
     <span
       aria-hidden="true"
@@ -1380,11 +1386,7 @@ const ComposerCount = ({
         {words.count(max, max)}
       </span>
       <span
-        {...stylex.props(
-          styles.countLayer,
-          stage === "under" && styles.countUnseen,
-          stage === "at" && styles.countAt
-        )}
+        {...stylex.props(styles.countLayer, stage === "at" && styles.countAt)}
       >
         {words.count(Math.min(length, max), max)}
       </span>
