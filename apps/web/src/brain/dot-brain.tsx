@@ -39,6 +39,8 @@ import { useLessMotion } from "./less-motion.ts";
 // animation its scene and where the pointer is.
 
 const looks = stylex.create({
+  // The caller's className gives the square its size only (a width or height), never one of these
+  // properties: StyleX decides between two class names by its own order, not theirs.
   square: { position: "relative", aspectRatio: "1", maxWidth: "100%" },
   canvas: { position: "absolute", inset: 0, width: "100%", height: "100%" },
 });
@@ -1330,7 +1332,6 @@ export const DotBrain = ({
     return element === null ? undefined : watch(element, live, pointer);
   }, []);
 
-  // The caller's className (its size, from its own StyleX) after the square's own.
   const square = [stylex.props(looks.square).className, className]
     .filter((part) => part !== undefined && part !== "")
     .join(" ");
