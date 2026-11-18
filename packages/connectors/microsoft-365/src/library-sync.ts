@@ -82,9 +82,9 @@ import { timeOf, tokenOf } from "./onedrive-sync.ts";
 // (`GET /sites?search=*`, https://learn.microsoft.com/en-us/graph/api/site-search?view=graph-rest-1.0),
 // less personal OneDrive sites, and each site's document libraries
 // (`GET /sites/{id}/drives`, https://learn.microsoft.com/en-us/graph/api/drive-list?view=graph-rest-1.0).
-// A listing too long for one read goes on after the last site it handled,
-// by its ID, in Graph's page of sites; a site whose libraries a read
-// couldn't finish is listed again from its start.
+// A listing too long for one read goes on after the last site it
+// finished, by its ID, in Graph's page of sites, and inside a site under
+// way from Graph's position in its drives: every page read is kept.
 //
 // NEEDS A REAL TENANT TO CONFIRM (not documented by Microsoft): which
 // sites `search=*` answers for a delegated account (the page says only
@@ -441,25 +441,35 @@ const drivesSchema = z.object({
 const isPersonal = (site: z.infer<typeof siteSchema>): boolean =>
   site.id.split(",")[0]?.toLowerCase().endsWith("-my.sharepoint.com") === true;
 
-/** A listing's position: Graph's page of sites, and the last site handled in it. */
+/**
+ * A listing's position: Graph's page of sites (`page`), the last site
+ * finished in it (`after`), and the site under way, if any (`site`), with
+ * Graph's position in that site's drives (`drivePage`). Every page of drives
+ * read is kept at once, so a site with more drives than one read can list
+ * goes on where the last read stopped, never from its start again.
+ */
 interface Listing {
   page: string | null;
   after: string | null;
+  site: string | null;
+  drivePage: string | null;
 }
 
-const listingCursor = ({ page, after }: Listing): string =>
-  `${cursorPart(page)}.${cursorPart(after)}`;
+const listingCursor = ({ page, after, site, drivePage }: Listing): string =>
+  [page, after, site, drivePage].map(cursorPart).join(".");
 
 /** The listing a cursor this sync wrote names; any other starts it over. */
 const listingOf = (cursor: string | null): Listing => {
   if (cursor === null) {
-    return { page: null, after: null };
+    return { page: null, after: null, site: null, drivePage: null };
   }
-  const [page, after, ...rest] = cursor.split(".");
-  if (rest.length > 0) {
+  const parts = cursor.split(".");
+  if (parts.length !== 4) {
     throw notOurs();
   }
-  return { page: fromCursorPart(page), after: fromCursorPart(after) };
+  const [page = null, after = null, site = null, drivePage = null] =
+    parts.map(fromCursorPart);
+  return { page, after, site, drivePage };
 };
 
 /** Out of room part-way through a listing. */
@@ -470,7 +480,12 @@ class OutOfRoomError extends Error {
   }
 }
 
-/** One GET of a listing, within the read's room, or `OutOfRoomError`. */
+/**
+ * One GET of a listing, the only way a listing reaches Graph: within the
+ * read's room, checked before the request starts, or `OutOfRoomError`,
+ * which ends the read with what it found and the listing's position, so
+ * no request goes out without room and no progress is lost.
+ */
 const listingGet = async <Schema extends z.ZodType>(
   room: SyncRoom,
   url: URL,
@@ -489,15 +504,35 @@ const listingGet = async <Schema extends z.ZodType>(
   return schema.parse(await response.json());
 };
 
-/** Every document library of `site`, as places to pick, Graph's pages followed. */
-const librariesOf = async (
+/** The document libraries of one page of a site's drives, as places to pick. */
+const librariesIn = (
+  answer: z.infer<typeof drivesSchema>,
+  siteName: string
+): SyncChoice[] =>
+  answer.value.flatMap((library): SyncChoice[] =>
+    library.driveType === libraryType &&
+    syncPlaceSchema.safeParse(library.id).success
+      ? [{ place: library.id, title: library.name ?? "", within: siteName }]
+      : []
+  );
+
+/**
+ * Lists `site`'s document libraries into `choices`, one page of Graph's
+ * at a time, from where `listing` stands in it, keeping each page's
+ * libraries and position as soon as the page is read.
+ */
+const listSite = async (
   room: SyncRoom,
-  site: z.infer<typeof siteSchema>
-): Promise<SyncChoice[]> => {
+  listing: Listing,
+  site: z.infer<typeof siteSchema>,
+  choices: SyncChoice[]
+): Promise<void> => {
   const siteName = site.displayName ?? site.name ?? "";
-  const choices: SyncChoice[] = [];
-  let page: string | undefined;
-  do {
+  if (listing.site !== site.id) {
+    listing.site = site.id;
+    listing.drivePage = null;
+  }
+  for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- one page after another
     const answer = await listingGet(
       room,
@@ -505,31 +540,69 @@ const librariesOf = async (
         graphUrl(`/sites/${segment(site.id)}/drives`, {
           $select: "id,name,driveType",
         }),
-        page
+        listing.drivePage ?? undefined
       ),
       drivesSchema
     );
-    for (const library of answer.value) {
-      if (
-        library.driveType === libraryType &&
-        syncPlaceSchema.safeParse(library.id).success
-      ) {
-        choices.push({
-          place: library.id,
-          title: library.name ?? "",
-          within: siteName,
-        });
+    choices.push(...librariesIn(answer, siteName));
+    const next = nextPageOf(answer["@odata.nextLink"]);
+    if (next === null) {
+      break;
+    }
+    listing.drivePage = next;
+  }
+  listing.after = site.id;
+  listing.site = null;
+  listing.drivePage = null;
+};
+
+/**
+ * Lists the document libraries of the SharePoint sites the account can
+ * find into `choices`, from where `listing` stands, until Graph's last
+ * page of sites or `OutOfRoomError`.
+ */
+const listSites = async (
+  room: SyncRoom,
+  listing: Listing,
+  choices: SyncChoice[]
+): Promise<void> => {
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- one page after another
+    const sites = await listingGet(
+      room,
+      atPage(
+        // The page documents `search` alone.
+        graphUrl("/sites", { search: "*" }),
+        listing.page ?? undefined
+      ),
+      sitesSchema
+    );
+    const start =
+      listing.after === null
+        ? 0
+        : sites.value.findIndex(({ id }) => id === listing.after) + 1;
+    for (const site of sites.value.slice(start)) {
+      if (isPersonal(site)) {
+        listing.after = site.id;
+      } else {
+        // oxlint-disable-next-line no-await-in-loop -- one site after another
+        await listSite(room, listing, site, choices);
       }
     }
-    page = nextPageOf(answer["@odata.nextLink"]) ?? undefined;
-  } while (page !== undefined);
-  return choices;
+    const next = nextPageOf(sites["@odata.nextLink"]);
+    if (next === null) {
+      return;
+    }
+    listing.page = next;
+    listing.after = null;
+  }
 };
 
 /**
  * The document libraries of the SharePoint sites the account can find, a
- * read at a time: a site's libraries whole, or none of them, going on
- * after the last site handled, by its ID, in Graph's page of sites.
+ * read at a time, going on from the cursor: after the last site finished,
+ * by its ID, in Graph's page of sites, and inside a site under way from
+ * Graph's own position in its drives.
  */
 const choicesOf = async ({
   cursor,
@@ -543,43 +616,16 @@ const choicesOf = async ({
   const from = listingCursor(listing);
   const choices: SyncChoice[] = [];
   try {
-    for (;;) {
-      // oxlint-disable-next-line no-await-in-loop -- one page after another
-      const sites = await listingGet(
-        room,
-        atPage(
-          // The page documents `search` alone.
-          graphUrl("/sites", { search: "*" }),
-          listing.page ?? undefined
-        ),
-        sitesSchema
-      );
-      const start =
-        listing.after === null
-          ? 0
-          : sites.value.findIndex(({ id }) => id === listing.after) + 1;
-      for (const site of sites.value.slice(start)) {
-        if (!isPersonal(site)) {
-          // oxlint-disable-next-line no-await-in-loop -- one site after another
-          choices.push(...(await librariesOf(room, site)));
-        }
-        listing.after = site.id;
-      }
-      const next = nextPageOf(sites["@odata.nextLink"]);
-      if (next === null) {
-        return { choices, cursor: null };
-      }
-      listing.page = next;
-      listing.after = null;
-    }
+    await listSites(room, listing, choices);
+    return { choices, cursor: null };
   } catch (error) {
     if (!(error instanceof OutOfRoomError)) {
       throw error;
     }
   }
   const at = listingCursor(listing);
-  // Nothing moved on: Graph is too slow for one read to take a site.
-  if (at === from) {
+  // Nothing moved on: Graph is too slow for one read to take one page.
+  if (at === from && choices.length === 0) {
     throw tooSlow();
   }
   return { choices, cursor: at };

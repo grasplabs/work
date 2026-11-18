@@ -120,6 +120,11 @@ interface SharePoint {
   sitePages: { id: string; displayName: string }[][];
   /** Each site's drives. */
   drives: Record<string, Library[]>;
+  /**
+   * How many of a site's drives Graph answers a page, as it may ("The
+   * service may return fewer"): all of them when unset.
+   */
+  drivesPerPage?: number;
   /** Each drive's delta feed: each token's entries, and the token after them. */
   feeds: Record<string, Record<string, { entries: Entry[]; end: string }>>;
   /** Each file's bytes, by ID. */
@@ -182,6 +187,7 @@ const fileIn = (
 });
 
 const reset = (): void => {
+  sharePoint.drivesPerPage = undefined;
   sharePoint.sitePages = [
     [
       { id: salesSite, displayName: "Sales" },
@@ -307,9 +313,21 @@ const siteOrDriveCall = (url: URL): Response => {
   const decoded = decodeURIComponent(id);
   if (kind === "sites" && rest === "/drives") {
     const drives = sharePoint.drives[decoded];
-    return drives === undefined || !selectsOnly(url, driveProperties)
-      ? itemNotFound()
-      : Response.json({ value: drives });
+    if (drives === undefined || !selectsOnly(url, driveProperties)) {
+      return itemNotFound();
+    }
+    // Graph's position in the site's drives, as its next link carries it.
+    const from = Number(url.searchParams.get("$skiptoken") ?? 0);
+    const size = sharePoint.drivesPerPage ?? drives.length;
+    const next = from + size;
+    return Response.json({
+      value: drives.slice(from, next),
+      ...(next < drives.length
+        ? {
+            "@odata.nextLink": `https://${graphHost}/v1.0/sites/${encodeURIComponent(decoded)}/drives?$select=id,name,driveType&$skiptoken=${next}`,
+          }
+        : {}),
+    });
   }
   const library = libraryOf(decoded);
   return kind === "drives" && library !== undefined
@@ -449,6 +467,72 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
       },
       places: { places: [salesContracts.id, legalDocs.id], cursor: null },
     });
+  });
+
+  it("lists a site with more pages of drives than one read can take, across reads, every library once, no read past its requests", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    // One drive a page: a read's room (`connectorIsolateRequests`, less
+    // the page of sites each read starts from) holds 49 of them. Sizes
+    // around that, and one that takes three reads.
+    const sizes = [48, 49, 50, 101];
+    const sites = sizes.map((size, at) => ({
+      id: `acme.sharepoint.com,site-${at},web`,
+      displayName: `Site ${size}`,
+      size,
+    }));
+    sharePoint.sitePages = [
+      sites.map(({ id, displayName }) => ({ id, displayName })),
+    ];
+    sharePoint.drives = Object.fromEntries(
+      sites.map(({ id, size }, at) => [
+        id,
+        Array.from({ length: size }, (_, index) => ({
+          id: `b!s${at}-${index}`,
+          name: `Library ${index}`,
+          driveType: "documentLibrary",
+        })),
+      ])
+    );
+    sharePoint.drivesPerPage = 1;
+
+    const listed: string[] = [];
+    const perRead: number[] = [];
+    let cursor: string | null = null;
+    for (;;) {
+      const before = internet.sent.filter(
+        ({ host }) => host === graphHost
+      ).length;
+      // oxlint-disable-next-line no-await-in-loop -- one read after another, each from the last one's cursor
+      const answer = await exports.default.syncPlaceChoices({
+        person: admin,
+        connectionId,
+        feed,
+        cursor,
+      });
+      perRead.push(
+        internet.sent.filter(({ host }) => host === graphHost).length - before
+      );
+      listed.push(...answer.choices.map(({ place }) => place));
+      ({ cursor } = answer);
+      if (cursor === null) {
+        break;
+      }
+      // Each read must move on: far fewer reads than this list every one.
+      if (perRead.length > 20) {
+        throw new Error("The listing never ended");
+      }
+    }
+
+    const expected = sites.flatMap(({ size }, at) =>
+      Array.from({ length: size }, (_, index) => `b!s${at}-${index}`)
+    );
+    expect({
+      listed,
+      // `connectorIsolateRequests`: what connect loads a connector's
+      // isolate with.
+      overLimit: perRead.filter((requests) => requests > 50),
+      reads: perRead.length > 1,
+    }).toStrictEqual({ listed: expected, overLimit: [], reads: true });
   });
 
   it("reads a picked library whole, catches up from when it began, then its changes, with no reader copied", async () => {
