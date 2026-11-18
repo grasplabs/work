@@ -171,6 +171,27 @@ describe("opportunities", { timeout: 120_000 }, () => {
     });
   });
 
+  it("list a routine with its figures and no form proposed while no model answers, and ask again at the next list", async () => {
+    const { ids } = await drawnTeam();
+    const { api } = await signedInApi(idp, "admin");
+    const unanswered = await ticketsOf(api, ids);
+    const answered = await ticketsOf(api, ids, [
+      proposing({ form: "skill", systems: [] }),
+    ]);
+    expect({
+      unanswered: {
+        form: unanswered.tickets?.form,
+        hours: unanswered.tickets?.hoursPerWeek,
+      },
+      asked: unanswered.asked > 0 && answered.asked > 0,
+      form: answered.tickets?.form,
+    }).toStrictEqual({
+      unanswered: { form: null, hours: 16.8 },
+      asked: true,
+      form: "skill",
+    });
+  });
+
   it("point a routine an existing App covers at that App, as a change to it", async () => {
     const { ids } = await drawnTeam();
     const { api } = await signedInApi(idp, "admin");

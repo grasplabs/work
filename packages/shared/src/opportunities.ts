@@ -34,7 +34,8 @@ export interface Opportunity {
   hoursPerWeek: number | null;
   /** Where its evidence comes from: what people described in interviews. */
   basis: "described";
-  form: OpportunityForm;
+  /** What Grasp proposes: none while it couldn't ask a model (none set up, or the call failed); asked again at the next list. */
+  form: OpportunityForm | null;
   /** An existing App that already covers it: then it points there, and proposes nothing new. */
   covers: { app: string; name: string } | null;
   /** Systems a step needs that aren't connected yet: each a setup step, never a lower rank. */

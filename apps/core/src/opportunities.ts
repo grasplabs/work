@@ -1,5 +1,6 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import type { WorkflowVersionRecord } from "@grasp-os/shared/brain-records";
+import { log } from "@grasp-os/shared/log";
 import { opportunityForms } from "@grasp-os/shared/opportunities";
 import type {
   Opportunity,
@@ -189,6 +190,28 @@ const propose = async (
   );
 };
 
+/**
+ * `propose`, or none when no model could be asked (none set up, or the
+ * call failed): the opportunity shows with its figures, no form proposed
+ * yet, and is asked again at the next list. Logged by the error's name
+ * alone.
+ */
+const proposeOrNone = async (
+  env: Env,
+  admin: Identity,
+  drawing: StandingDrawing,
+  apps: readonly { id: string; name: string; description: string }[]
+): Promise<Proposal | null> => {
+  try {
+    return await propose(env, admin, drawing, apps);
+  } catch (error) {
+    log.warn("opportunities.propose_failed", {
+      error: error instanceof Error ? error.name : "unknown",
+    });
+    return null;
+  }
+};
+
 /** A routine at an evidence, as one key. */
 const keyOf = (routine: string, evidence: string): string =>
   `${routine}\u0000${evidence}`;
@@ -265,6 +288,73 @@ const connectedSystemsOf = async (
 };
 
 /**
+ * A proposal for `drawing` asked now (`proposeOrNone`) and kept, or none
+ * when no model answered; `fallen` when the drawing fell while the model
+ * answered: then what was kept is erased again (its erasure may have run
+ * before the write), so what it rested on never outlives it. One that
+ * falls later is erased with it.
+ */
+const proposalAsked = async (
+  env: Env,
+  admin: Identity,
+  drawing: StandingDrawing,
+  apps: readonly { id: string; name: string; description: string }[]
+): Promise<Proposal | null | "fallen"> => {
+  const proposal = await proposeOrNone(env, admin, drawing, apps);
+  if (proposal === null) {
+    return null;
+  }
+  const { workflow: routine, source: evidence } = drawing;
+  const kept = JSON.stringify(proposal);
+  await drizzle(env.DB)
+    .insert(opportunityProposals)
+    .values({ routine, evidence, proposal: kept, createdAt: new Date() })
+    .onConflictDoUpdate({
+      target: [opportunityProposals.routine, opportunityProposals.evidence],
+      set: { proposal: kept, createdAt: new Date() },
+    });
+  if ((await onboardingStore(env).drawingToHand(evidence)) === null) {
+    await eraseOpportunitiesOn(env, evidence);
+    return "fallen";
+  }
+  return proposal;
+};
+
+/** `drawing` as an opportunity, with its `proposal` when there is one. */
+const opportunityOf = (
+  drawing: StandingDrawing,
+  proposal: Proposal | null,
+  appNames: ReadonlyMap<string, string>,
+  connected: ReadonlySet<string>
+): Opportunity => {
+  const cases = casesPerWeekOf(drawing.drawing);
+  const minutes = minutesOf(drawing.drawing);
+  return {
+    routine: drawing.workflow,
+    evidence: drawing.source,
+    name: drawing.name,
+    ...(drawing.local === undefined ? {} : { local: drawing.local }),
+    team: drawing.team,
+    steps: drawing.drawing.steps.map(({ text }) => text),
+    casesPerWeek: cases === null ? null : roundedOf(cases),
+    hoursPerWeek:
+      cases === null || minutes === null
+        ? null
+        : roundedOf((cases * minutes) / minutesPerHour),
+    basis: "described",
+    form: proposal?.form ?? null,
+    covers:
+      proposal === null || proposal.covers === null
+        ? null
+        : { app: proposal.covers, name: appNames.get(proposal.covers) ?? "" },
+    setup: (proposal?.systems ?? []).filter(
+      (system) => !connected.has(system.toLocaleLowerCase("en"))
+    ),
+    personApproves: proposal?.personApproves ?? [],
+  };
+};
+
+/**
  * Every opportunity the admin `admin` may read, the largest first (by
  * hours a week; those with none last), dismissed ones left out. Each
  * routine standing now, with its proposal: asked of the model the first
@@ -291,73 +381,21 @@ export const listOpportunities = async (
   const connected = await connectedSystemsOf(env, admin);
   const opportunities: Opportunity[] = [];
   for (const drawing of drawings) {
-    const { workflow: routine, source: evidence } = drawing;
-    const key = keyOf(routine, evidence);
+    const key = keyOf(drawing.workflow, drawing.source);
     if (kept.dismissed.has(key)) {
       continue;
     }
     // One pointing at an App removed since is asked again: there is
     // nothing to change any more.
     const held = kept.proposals.get(key);
-    let proposal =
+    const proposal =
       held === undefined || (held.covers !== null && !appNames.has(held.covers))
-        ? null
+        ? // oxlint-disable-next-line no-await-in-loop -- one call at a time
+          await proposalAsked(env, admin, drawing, apps)
         : held;
-    if (proposal === null) {
-      // oxlint-disable-next-line no-await-in-loop -- one call at a time
-      proposal = await propose(env, admin, drawing, apps);
-      if (proposal === null) {
-        continue;
-      }
-      // oxlint-disable-next-line no-await-in-loop -- kept as it is asked
-      await drizzle(env.DB)
-        .insert(opportunityProposals)
-        .values({
-          routine,
-          evidence,
-          proposal: JSON.stringify(proposal),
-          createdAt: new Date(),
-        })
-        .onConflictDoUpdate({
-          target: [opportunityProposals.routine, opportunityProposals.evidence],
-          set: { proposal: JSON.stringify(proposal), createdAt: new Date() },
-        });
-      // The drawing may have fallen while the model answered, and its
-      // erasure run before this write: checked after it, so what it rested
-      // on never outlives it. One that falls later is erased with it.
-      // oxlint-disable-next-line no-await-in-loop -- checked as it is kept
-      if ((await onboardingStore(env).drawingToHand(evidence)) === null) {
-        // oxlint-disable-next-line no-await-in-loop -- erased as it is found
-        await eraseOpportunitiesOn(env, evidence);
-        continue;
-      }
+    if (proposal !== "fallen") {
+      opportunities.push(opportunityOf(drawing, proposal, appNames, connected));
     }
-    const cases = casesPerWeekOf(drawing.drawing);
-    const minutes = minutesOf(drawing.drawing);
-    const covers =
-      proposal.covers === null
-        ? null
-        : { app: proposal.covers, name: appNames.get(proposal.covers) ?? "" };
-    opportunities.push({
-      routine,
-      evidence,
-      name: drawing.name,
-      ...(drawing.local === undefined ? {} : { local: drawing.local }),
-      team: drawing.team,
-      steps: drawing.drawing.steps.map(({ text }) => text),
-      casesPerWeek: cases === null ? null : roundedOf(cases),
-      hoursPerWeek:
-        cases === null || minutes === null
-          ? null
-          : roundedOf((cases * minutes) / minutesPerHour),
-      basis: "described",
-      form: proposal.form,
-      covers,
-      setup: proposal.systems.filter(
-        (system) => !connected.has(system.toLocaleLowerCase("en"))
-      ),
-      personApproves: proposal.personApproves,
-    });
   }
   return opportunities.toSorted(
     (one, other) =>
