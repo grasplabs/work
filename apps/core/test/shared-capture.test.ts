@@ -11,7 +11,7 @@ import { sharedReadHashOf } from "../src/connection-capture-key.ts";
 import { captureRead } from "../src/connection-capture.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { personalWorkspaceId } from "../src/personal-workspace.ts";
-import { completeOwedErasures } from "../src/shared-reads.ts";
+import { completeOwedErasures, keptOf } from "../src/shared-reads.ts";
 import { chatOf, codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -182,7 +182,8 @@ const capturedWith = async (
   reader: string,
   connectionId: string,
   marker: string,
-  between: () => Promise<void>
+  between: () => Promise<void>,
+  readAt = new Date()
 ): Promise<void> => {
   const racing: Env = {
     ...env,
@@ -206,9 +207,14 @@ const capturedWith = async (
         provenance: [],
         keep: true,
       },
-      readAt: new Date(),
+      readAt,
     }
   );
+};
+
+/** Nothing landing between a capture's naming and its add. */
+const nothing = async (): Promise<void> => {
+  await Promise.resolve();
 };
 
 /** Every erasure under way taken to its end, as the clock would. */
@@ -320,6 +326,39 @@ describe("what agents read through a shared connection", setUpTime, () => {
       carl: [],
       othersByAnn: false,
       othersByDana: false,
+    });
+  });
+
+  it("gives the connection's last read as the latest read of a record read again, while it has an audience", async () => {
+    const { admin, member, team, connectionId } = await openToTeam();
+    const marker = markerOf();
+    const day = 24 * 60 * 60 * 1000;
+    const first = new Date(Date.now() - 2 * day);
+    const again = new Date(Date.now() - day);
+    const lastRead = async () => {
+      const [row] = await keptOf(env, [connectionId]);
+      return row === undefined
+        ? undefined
+        : { records: row.records, lastReadAt: row.lastReadAt };
+    };
+    await capturedWith(member, connectionId, marker, nothing, first);
+    await capturedWith(member, connectionId, marker, nothing, again);
+    const readAgain = await lastRead();
+    // A read older than the latest, landing after it, moves nothing back.
+    await capturedWith(member, connectionId, marker, nothing, first);
+    const lateOlder = await lastRead();
+    // With no audience the read is not named, so it moves nothing either.
+    await chooseAudience(admin.api, connectionId, { kind: "nobody" });
+    await capturedWith(member, connectionId, marker, nothing);
+    await chooseAudience(admin.api, connectionId, {
+      kind: "team",
+      teamId: team,
+    });
+
+    expect({ readAgain, lateOlder, closed: await lastRead() }).toStrictEqual({
+      readAgain: { records: 1, lastReadAt: again },
+      lateOlder: { records: 1, lastReadAt: again },
+      closed: { records: 1, lastReadAt: again },
     });
   });
 

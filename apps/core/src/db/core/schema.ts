@@ -3462,7 +3462,7 @@ export const connectionBrainAudiences = sqliteTable(
  * `connected` kind: written before the Brain is given the key, so every key
  * the Brain holds of a connection is named here, for its erasure to find.
  * `generation` is the connection's erasure generation it was kept in
- * (`connection_brain_erasures`); `read_at` when it was first read.
+ * (`connection_brain_erasures`); `read_at` when it was last read.
  */
 export const connectionBrainReads = sqliteTable(
   "connection_brain_reads",

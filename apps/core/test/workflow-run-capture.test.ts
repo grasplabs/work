@@ -176,6 +176,32 @@ const searching = async (
   return { workflow, executable, serving };
 };
 
+/** A webhook trigger of `by`'s that may start workflow `workflowId`, granted by `admin`. */
+const triggerOf = async (
+  by: Identity,
+  admin: Identity,
+  workflowId: string
+): Promise<{ id: string }> => {
+  const trigger = await createTriggerResource(env, by, {
+    kind: "webhook",
+    workflowId,
+    config: await webhookConfig(),
+  });
+  await granted(by, admin, {
+    subject: {
+      type: "trigger",
+      triggerId: triggerIdSchema.parse(trigger.id),
+    },
+    object: {
+      type: "workflow",
+      workflowId: workflowResourceIdSchema.parse(workflowId),
+    },
+    actions: ["start"],
+    binding: `START_${unique().toUpperCase().replaceAll("-", "_")}`,
+  });
+  return trigger;
+};
+
 /** Starts workflow `id` as `invoker` for `who`: its run's ID. */
 const startedAs = async (
   serving: Env,
@@ -416,23 +442,7 @@ describe("what a workflow run reads through a connection", setUpTime, () => {
     const [quote, byPerson, byTrigger] = [markerOf(), markerOf(), markerOf()];
     const mail = await ownMail(ada.userId, [`Ada's quote ${quote}`]);
     const { workflow, serving } = await searching(ada, admin, mail.id);
-    const trigger = await createTriggerResource(env, ada, {
-      kind: "webhook",
-      workflowId: workflow.id,
-      config: await webhookConfig(),
-    });
-    await granted(ada, admin, {
-      subject: {
-        type: "trigger",
-        triggerId: triggerIdSchema.parse(trigger.id),
-      },
-      object: {
-        type: "workflow",
-        workflowId: workflowResourceIdSchema.parse(workflow.id),
-      },
-      actions: ["start"],
-      binding: `START_${unique().toUpperCase().replaceAll("-", "_")}`,
-    });
+    const trigger = await triggerOf(ada, admin, workflow.id);
     // The trigger's run first, then its twin a person started: the same
     // read through the same connection, each its own call, so its own key.
     const triggerRun = await startedAs(
@@ -466,7 +476,7 @@ describe("what a workflow run reads through a connection", setUpTime, () => {
     });
   });
 
-  it("keeps nothing of a call that passes a sensitive parameter, its value in no event", async () => {
+  it("keeps nothing of a call that passes a sensitive parameter, its value in no event, and records nothing of one a trigger's run made through a person's own connection", async () => {
     const [admin, ada] = await Promise.all([
       person("admin"),
       person("builder"),
@@ -477,6 +487,16 @@ describe("what a workflow run reads through a connection", setUpTime, () => {
     const { workflow, serving } = await searching(ada, admin, mail.id, {
       token,
     });
+    // A trigger's run first: it acts for nobody, so nothing of its call
+    // through Ada's own connection is recorded, sensitive or not.
+    const trigger = await triggerOf(ada, admin, workflow.id);
+    const triggerRun = await startedAs(
+      serving,
+      { type: "trigger", triggerId: trigger.id },
+      workflow.id,
+      "Ada"
+    );
+    await ended(ada, workflow.id, triggerRun);
     const runId = await startedAs(
       serving,
       { type: "person", person: ada },
@@ -529,23 +549,7 @@ describe("what a workflow run reads through a connection", setUpTime, () => {
       { kind: "nobody" }
     );
     const { workflow, serving } = await searching(ada, admin, shared.id);
-    const trigger = await createTriggerResource(env, ada, {
-      kind: "webhook",
-      workflowId: workflow.id,
-      config: await webhookConfig(),
-    });
-    await granted(ada, admin, {
-      subject: {
-        type: "trigger",
-        triggerId: triggerIdSchema.parse(trigger.id),
-      },
-      object: {
-        type: "workflow",
-        workflowId: workflowResourceIdSchema.parse(workflow.id),
-      },
-      actions: ["start"],
-      binding: `START_${unique().toUpperCase().replaceAll("-", "_")}`,
-    });
+    const trigger = await triggerOf(ada, admin, workflow.id);
     const personRun = await startedAs(
       serving,
       { type: "person", person: ada },

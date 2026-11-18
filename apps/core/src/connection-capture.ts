@@ -184,6 +184,12 @@ interface Capturer {
    * else.
    */
   readonly personId: string | undefined;
+  /**
+   * Whether the call passed a sensitive argument (a run's binding
+   * argument): skipped (`sensitive`), as the key hashes the call's input
+   * and the answer may carry what the value gave.
+   */
+  readonly sensitive?: boolean;
   readonly where: { readonly chat: string } | { readonly run: string };
   readonly actor: () => AuditActor;
   /**
@@ -454,6 +460,11 @@ const captured = async (
     // refuses: `connect.not_owner`).
     return skippedAll("shared", named);
   }
+  // Decided after whose the connection is: a trigger's run records
+  // nothing of a call through anything but a shared one, this included.
+  if (capturer.sensitive === true) {
+    return skippedAll("sensitive", Math.max(1, named));
+  }
   if (!(answers ? answerClasses : itemClasses).has(classOf(owner, action))) {
     return skippedAll("reach", named);
   }
@@ -617,6 +628,7 @@ export const captureRunRead = async (
   }
   const capturer: Capturer = {
     personId: run.invoker.type === "trigger" ? undefined : run.principal,
+    sensitive,
     where: { run: run.runId },
     // As the run's call receipts name it (resource-calls.ts): the
     // workflow, as a run, is the system's.
@@ -652,9 +664,7 @@ export const captureRunRead = async (
     });
     return;
   }
-  const capture = sensitive
-    ? endedAudited(env, capturer, connectionId, skippedAll("sensitive", items))
-    : capturedFor(env, capturer, connectionId, action, input, read);
+  const capture = capturedFor(env, capturer, connectionId, action, input, read);
   if (!(await endedWithin(capture, budget))) {
     log.warn("connection_capture.given_up", {
       connectionId,
