@@ -8,6 +8,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
 import { connections } from "../src/db/schema.ts";
+import { pickSyncPlaces } from "../src/sync.ts";
 import {
   addConnection,
   auditEvents,
@@ -220,6 +221,7 @@ const audit = auditEvents();
 const sales = { id: "sales", name: "Sales" };
 const legal = { id: "legal", name: "Legal" };
 const board = { id: "board", name: "Board" };
+const longName = `Board ${"minutes ".repeat(60)}2026`;
 
 /** A connection an admin made for the company, of the sample sync. */
 const sharedConnection = async (): Promise<{
@@ -458,6 +460,127 @@ describe("a shared connection's picked places", () => {
     });
   });
 
+  it("records what each of two admins picking at once changed, from the picks their write replaced", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, ["sales", "legal"]);
+    const other = someone("admin");
+    // The other admin's pick lands after this one's checks, right before
+    // its write.
+    let raced = false;
+    const racing: Env = {
+      ...env,
+      DB: new Proxy(env.DB, {
+        get: (target, name): unknown => {
+          const member: unknown = Reflect.get(target, name);
+          if (typeof member !== "function") {
+            return member;
+          }
+          if (name === "batch" && !raced) {
+            raced = true;
+            return async (
+              statements: D1PreparedStatement[]
+            ): Promise<unknown> => {
+              await pick(other, connectionId, ["board"]);
+              return await target.batch(statements);
+            };
+          }
+          return (...given: unknown[]): unknown =>
+            Reflect.apply(member, target, given);
+        },
+      }),
+    };
+    const { length: before } = await picksRecorded(connectionId);
+
+    await pickSyncPlaces(racing, {
+      person: admin,
+      connectionId,
+      feed: "sites",
+      places: ["sales"],
+    });
+
+    const recordedAfter = await picksRecorded(connectionId);
+    expect({
+      raced,
+      listed: await places({ connectionId, feed: "sites", cursor: null }),
+      recorded: recordedAfter.slice(before),
+    }).toStrictEqual({
+      raced: true,
+      listed: { places: ["sales"], cursor: null },
+      recorded: [
+        {
+          actor: other.userId,
+          detail: {
+            feed: "sites",
+            outcome: "ok",
+            places: 1,
+            added: 1,
+            removed: 2,
+          },
+        },
+        // Against Board, which the other admin's pick left, not against
+        // the Sales and Legal it read before.
+        {
+          actor: admin.userId,
+          detail: {
+            feed: "sites",
+            outcome: "ok",
+            places: 1,
+            added: 1,
+            removed: 1,
+          },
+        },
+      ],
+    });
+  });
+
+  it("records a pick refused for its connection or its sync, as one refused for its person", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    const own = await ownConnection();
+    const refused = {
+      personal: await outcomeOf(async () => await pick(admin, own, ["sales"])),
+      notPicked: await outcomeOf(
+        async () =>
+          await exports.default.pickSyncPlaces({
+            person: admin,
+            connectionId,
+            feed: "folders",
+            places: ["inbox"],
+          })
+      ),
+    };
+    expect({
+      refused,
+      recorded: {
+        personal: await picksRecorded(own),
+        shared: await picksRecorded(connectionId),
+      },
+    }).toStrictEqual({
+      refused: { personal: "sync.not_shared", notPicked: "sync.place_refused" },
+      recorded: {
+        personal: [
+          {
+            actor: admin.userId,
+            detail: {
+              feed: "sites",
+              outcome: "refused",
+              reason: "sync.not_shared",
+            },
+          },
+        ],
+        shared: [
+          {
+            actor: admin.userId,
+            detail: {
+              feed: "folders",
+              outcome: "refused",
+              reason: "sync.place_refused",
+            },
+          },
+        ],
+      },
+    });
+  });
+
   it("shows an admin what they may pick, with what is picked, and names only as data", async () => {
     const { admin, connectionId } = await sharedConnection();
     provider.sites = {
@@ -467,6 +590,8 @@ describe("a shared connection's picked places", () => {
           // A name planted to show as something else: a bidirectional
           // override and a line break.
           { id: "legal", name: "Le\u202Egal\nTeam  " },
+          // A name longer than any bound Grasp could invent: shown whole.
+          { id: "board", name: longName },
         ],
       },
     };
@@ -492,8 +617,9 @@ describe("a shared connection's picked places", () => {
     }).toStrictEqual({
       choices: {
         choices: [
-          { place: "sales", title: "Sales", picked: false },
-          { place: "legal", title: "Legal Team", picked: true },
+          { place: "sales", title: "Sales", within: null, picked: false },
+          { place: "legal", title: "Legal Team", within: null, picked: true },
+          { place: "board", title: longName, within: null, picked: false },
         ],
         cursor: null,
       },

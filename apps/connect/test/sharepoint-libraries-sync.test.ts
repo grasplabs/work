@@ -425,13 +425,24 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
     }).toStrictEqual({
       choices: {
         choices: [
-          { place: salesDocs.id, title: "Sales › Documents", picked: false },
+          {
+            place: salesDocs.id,
+            title: "Documents",
+            within: "Sales",
+            picked: false,
+          },
           {
             place: salesContracts.id,
-            title: "Sales › Contracts",
+            title: "Contracts",
+            within: "Sales",
             picked: true,
           },
-          { place: legalDocs.id, title: "Legal › Documents", picked: true },
+          {
+            place: legalDocs.id,
+            title: "Documents",
+            within: "Legal",
+            picked: true,
+          },
         ],
         cursor: null,
       },
@@ -491,6 +502,8 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
       t2: { entries: [], end: "t2" },
     };
     sharePoint.contents.plan = "the plan";
+    // Readable where it now is: only its other drive makes it gone here.
+    sharePoint.contents.moved = "moved bytes";
     const changes = await readAll(connectionId, salesDocs.id, listing.cursor);
     expect(changes.items).toStrictEqual([
       expect.objectContaining({

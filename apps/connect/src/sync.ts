@@ -5,6 +5,7 @@ import {
   syncResultSchema,
 } from "@grasp-os/connector-kit/sync";
 import type { SyncFailure } from "@grasp-os/connector-kit/sync";
+import { createAuditEvent } from "@grasp-os/shared/audit";
 import { connectErrors, connectionErrors } from "@grasp-os/shared/connect";
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
@@ -26,12 +27,11 @@ import type {
 import { and, eq, not, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { recordEvents } from "./audit.ts";
 import { nativeConnector } from "./bundled-connectors.ts";
 import { auditRefusal, connectionEvent } from "./connection-audit.ts";
 import type { Connection } from "./connections.ts";
 import { syncServer } from "./connectors.ts";
-import { connections, syncPicks } from "./db/schema.ts";
+import { auditOutbox, connections, syncPicks } from "./db/schema.ts";
 import { ownerErased } from "./erased-people.ts";
 import { McpError } from "./mcp.ts";
 
@@ -416,6 +416,33 @@ const pickableOf = async (env: Env, connectionId: string, feed: string) => {
 };
 
 /**
+ * `pickableOf`, with every refusal recorded in the audit log as an
+ * admin's refused pick, as the refusals of who may pick are.
+ */
+const pickableOrRefused = async (
+  env: Env,
+  person: ConnectionPerson,
+  connectionId: string,
+  feed: string
+) => {
+  try {
+    return await pickableOf(env, connectionId, feed);
+  } catch (error) {
+    const reason = syncErrors.codeOf(error);
+    if (reason !== undefined) {
+      await auditRefusal(
+        env,
+        person,
+        "connection.sync_places",
+        { feed, outcome: "refused", reason },
+        connectionId
+      );
+    }
+    throw error;
+  }
+};
+
+/**
  * One read of the places an admin may pick for a shared connection's sync,
  * as its connector lists what the connected account sees, from `cursor`
  * on, each with its name and whether it is picked. For the company's
@@ -431,7 +458,7 @@ export const syncPlaceChoices = async (
     request
   );
   await refuseUnlessAdmin(env, person, connectionId, feed);
-  const found = await pickableOf(env, connectionId, feed);
+  const found = await pickableOrRefused(env, person, connectionId, feed);
   const listed = await choicesRead(env, found, feed, cursor);
   const picks = await picksOf(env, connectionId, feed);
   return {
@@ -462,55 +489,69 @@ export const pickSyncPlaces = async (
     request
   );
   await refuseUnlessAdmin(env, person, connectionId, feed);
-  await pickableOf(env, connectionId, feed);
-  const before = await picksOf(env, connectionId, feed);
-  const after = new Set(places);
-  const added = places.filter((place) => !before.has(place)).length;
-  const removed = [...before].filter((place) => !after.has(place)).length;
-  if (added === 0 && removed === 0) {
-    return { places };
-  }
+  await pickableOrRefused(env, person, connectionId, feed);
   const db = drizzle(env.DB);
-  const ofSync = and(
-    eq(syncPicks.connectionId, connectionId),
-    eq(syncPicks.feed, feed)
-  );
   // One value, so the set's size is bounded by D1's, not a statement's
   // bound parameters (`syncPicksSchema`).
-  const picked = sql`(SELECT value FROM json_each(${JSON.stringify(places)}))`;
-  await recordEvents(
-    env,
-    [
-      connectionEvent(person, "connection.sync_places", connectionId, {
-        feed,
-        outcome: "ok",
-        places: places.length,
-        added,
-        removed,
-      }),
-    ],
-    [
-      db
-        .delete(syncPicks)
-        .where(and(ofSync, sql`${syncPicks.place} NOT IN ${picked}`)),
-      db
-        .insert(syncPicks)
-        .select(
-          db
-            .select({
-              connectionId: sql<string>`${connectionId}`.as("connection_id"),
-              feed: sql<string>`${feed}`.as("feed"),
-              place: sql<string>`value`.as("place"),
-              pickedAt: sql<Date>`${Date.now()}`.as("picked_at"),
-            })
-            .from(sql`json_each(${JSON.stringify(places)})`)
-            // SQLite reads `ON CONFLICT` after a bare `SELECT … FROM` as a
-            // join's: a `WHERE` ends the `SELECT` (sqlite.org/lang_upsert.html,
-            // "Parsing Ambiguity").
-            .where(sql`true`)
-        )
-        .onConflictDoNothing(),
-    ]
+  const asked = JSON.stringify(places);
+  const held = sql`(SELECT ${syncPicks.place} FROM ${syncPicks} WHERE ${syncPicks.connectionId} = ${connectionId} AND ${syncPicks.feed} = ${feed})`;
+  // What came and went, counted in the same transaction as the write, from
+  // the picks it replaces: two admins picking at once each record what
+  // their own write changed.
+  const added = sql`(SELECT count(*) FROM json_each(${asked}) WHERE value NOT IN ${held})`;
+  const removed = sql`(SELECT count(*) FROM ${held} AS kept WHERE kept.place NOT IN (SELECT value FROM json_each(${asked})))`;
+  const event = createAuditEvent(
+    connectionEvent(person, "connection.sync_places", connectionId, {
+      feed,
+      outcome: "ok",
+      places: places.length,
+      added: 0,
+      removed: 0,
+    }),
+    "connect"
   );
+  await db.batch([
+    // Recorded only when the picks change: the same set again records
+    // nothing.
+    db.insert(auditOutbox).select(
+      db
+        .select({
+          id: sql<string>`${event.id}`.as("id"),
+          event:
+            sql<string>`json_set(${JSON.stringify(event)}, '$.detail.added', ${added}, '$.detail.removed', ${removed})`.as(
+              "event"
+            ),
+          createdAt: sql<Date>`${Date.now()}`.as("created_at"),
+        })
+        .from(sql`(SELECT 1)`)
+        .where(sql`${added} > 0 OR ${removed} > 0`)
+    ),
+    db
+      .delete(syncPicks)
+      .where(
+        and(
+          eq(syncPicks.connectionId, connectionId),
+          eq(syncPicks.feed, feed),
+          sql`${syncPicks.place} NOT IN (SELECT value FROM json_each(${asked}))`
+        )
+      ),
+    db
+      .insert(syncPicks)
+      .select(
+        db
+          .select({
+            connectionId: sql<string>`${connectionId}`.as("connection_id"),
+            feed: sql<string>`${feed}`.as("feed"),
+            place: sql<string>`value`.as("place"),
+            pickedAt: sql<Date>`${Date.now()}`.as("picked_at"),
+          })
+          .from(sql`json_each(${asked})`)
+          // SQLite reads `ON CONFLICT` after a bare `SELECT … FROM` as a
+          // join's: a `WHERE` ends the `SELECT` (sqlite.org/lang_upsert.html,
+          // "Parsing Ambiguity").
+          .where(sql`true`)
+      )
+      .onConflictDoNothing(),
+  ]);
   return { places };
 };

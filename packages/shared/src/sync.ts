@@ -159,17 +159,18 @@ export const syncPlacesSchema = z.strictObject({
 });
 export type SyncPlaces = z.infer<typeof syncPlacesSchema>;
 
-/** Longest name of a place an admin is shown to pick from. */
-export const syncChoiceTitleLength = 256;
-
 /**
  * A place of a shared connection an admin may pick for a sync (a shared
  * drive, a document library), as its connector lists what the connected
- * account can see: its ID and its name, which is only ever shown.
+ * account can see: its ID, its own name, and the name of what it is in (a
+ * library's site; null for a place in nothing else). Names are only ever
+ * shown, whole: none is cut, so two places of one long-named site stay
+ * apart.
  */
 export const syncChoiceSchema = z.strictObject({
   place: syncPlaceSchema,
-  title: z.string().max(syncChoiceTitleLength),
+  title: z.string(),
+  within: z.string().nullable(),
 });
 export type SyncChoice = z.infer<typeof syncChoiceSchema>;
 
