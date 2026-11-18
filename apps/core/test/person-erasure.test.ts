@@ -1,7 +1,7 @@
 import { stillDeletingAtMostMs } from "@grasp-os/brain-next/contract";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { storeIdSchema } from "@grasp-os/shared/ids";
+import { storeIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import { interviewProgressSchema } from "@grasp-os/shared/interview-links";
 import type { ErasureArea } from "@grasp-os/shared/members";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
@@ -15,6 +15,7 @@ import { organizationId } from "../src/auth/auth.ts";
 import { addSource } from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace, inJurisdiction } from "../src/durable-objects.ts";
+import { brainVersionRead } from "../src/history-access.ts";
 import type { Onboarding } from "../src/onboarding/store.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import {
@@ -23,6 +24,7 @@ import {
 } from "../src/person-erasure-inventory.ts";
 import { rollback } from "../src/publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
+import { readWorkflowState, readableStateOf } from "../src/workflow-state.ts";
 import { testApp } from "./app-definitions.ts";
 import { allEvents, eventsAfter, logHead } from "./audit-events.ts";
 import { finishedByTheClock } from "./brain-next-own-store.ts";
@@ -532,7 +534,119 @@ const referralWhileErased = async (erased: "max" | "pim") => {
   };
 };
 
+/**
+ * A key of workflow `workflowId`'s state set by a new run, and that run's
+ * evidence kept past its details, as a key keeps it, unless the run is
+ * `recent` (within its 30 days): with the pin of a real chat of
+ * `personId`'s when given, as a start from that chat pins what it read
+ * (workflow-starts.ts). The run's ID.
+ */
+const keptKey = async (
+  workflowId: string,
+  key: string,
+  personId?: string,
+  recent = false
+): Promise<string> => {
+  const runId = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO workflow_state (workflow_resource_id, key, value, run_id, updated_at) VALUES (?, ?, ?, ?, ?)"
+    ).bind(workflowId, key, JSON.stringify(`${key} value`), runId, Date.now()),
+    ...(recent
+      ? []
+      : [
+          env.DB.prepare(
+            "INSERT INTO kept_run_evidence (run_id, kept_at) VALUES (?, ?)"
+          ).bind(runId, Date.now()),
+        ]),
+  ]);
+  if (personId !== undefined) {
+    const workspaceId = workspaceIdSchema.parse(crypto.randomUUID());
+    const agentId = `agent-${crypto.randomUUID()}`;
+    const chat = await workspace(env, workspaceId).createChat(
+      "Questions",
+      personId,
+      agentId
+    );
+    await env.DB.prepare(
+      "INSERT INTO run_chat_sources (run_id, source_id, workspace_id, chat_id, agent_id, person_id) VALUES (?, ?, ?, ?, ?, ?)"
+    )
+      .bind(
+        runId,
+        brainVersionRead({
+          source: { producer: "upload", id: crypto.randomUUID() },
+          version: 1,
+        }),
+        workspaceId,
+        chat.id,
+        agentId,
+        personId
+      )
+      .run();
+  }
+  return runId;
+};
+
 describe("erasing a person", () => {
+  it("deletes every kept value a run of their chats set and every pin of theirs, whatever the run's age, leaving other people's: withheld once they are removed, gone once erased", async () => {
+    const { admin, person } = await removedPerson();
+    const other = await signedInApi(idp, "builder");
+    const by = {
+      userId: admin.userId,
+      role: "admin" as const,
+      teams: [],
+      staff: false,
+    };
+    const workflow = await createWorkflowResource(
+      env,
+      by,
+      `keeps-${crypto.randomUUID().slice(0, 8)}`
+    );
+    await keptKey(workflow.id, "theirs", person.userId);
+    await keptKey(workflow.id, "recent", person.userId, true);
+    const others = await keptKey(workflow.id, "others", other.userId);
+    await keptKey(workflow.id, "plain");
+    const removed = await readWorkflowState(env, by, workflow.id);
+
+    await admin.api.members.erase(person.userId, String(person.person.name));
+
+    const keys = await env.DB.prepare(
+      "SELECT key FROM workflow_state WHERE workflow_resource_id = ? ORDER BY key"
+    )
+      .bind(workflow.id)
+      .all<{ key: string }>();
+    const theirPins = await env.DB.prepare(
+      "SELECT count(*) AS n FROM run_chat_sources WHERE person_id = ?"
+    )
+      .bind(person.userId)
+      .first<number>("n");
+    const otherPins = await env.DB.prepare(
+      "SELECT count(*) AS n FROM run_chat_sources WHERE run_id = ? AND person_id = ?"
+    )
+      .bind(others, other.userId)
+      .first<number>("n");
+    const shown = await readWorkflowState(env, by, workflow.id);
+    const next = await readableStateOf(env, workflow.id, admin.userId);
+
+    expect({
+      removed: removed.entries
+        .filter(({ key }) => key === "theirs" || key === "recent")
+        .map(({ withheld }) => withheld),
+      keys: keys.results.map(({ key }) => key),
+      theirPins,
+      otherPins,
+      shown: shown.entries.map(({ key }) => key),
+      next: Object.keys(next.values),
+    }).toStrictEqual({
+      removed: ["revoked", "revoked"],
+      keys: ["others", "plain"],
+      theirPins: 0,
+      otherPins: 1,
+      shown: ["others", "plain"],
+      next: ["plain"],
+    });
+  });
+
   it("takes out the codes and sessions they had as an App's visitor under the address that was theirs, and leaves everyone else's", async () => {
     const { admin, person } = await removedPerson();
     const app = crypto.randomUUID();
