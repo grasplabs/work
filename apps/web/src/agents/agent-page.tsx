@@ -14,10 +14,12 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { useId, useState } from "react";
+import type { ReactNode } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { modelName } from "../chat/model-names.tsx";
 import type { Session } from "../core.ts";
+import { PagePanel } from "../frame/page-panel.tsx";
 import { Page } from "../frame/page.tsx";
 import {
   AlertDialog,
@@ -29,6 +31,7 @@ import {
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
 import { Button } from "../grasp/button/index.ts";
+import { Card } from "../grasp/card/index.ts";
 import {
   Dialog,
   DialogAction,
@@ -43,6 +46,7 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "../grasp/empty/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
 import {
   CalendarIcon,
   Conversation,
@@ -88,6 +92,8 @@ import {
 import { AgentForm } from "./agent-form.tsx";
 import type { Part, Typed } from "./agent-form.tsx";
 import { AgentWakes, useLast } from "./agent-wakes.tsx";
+import { AgentAura, AgentFigure } from "./figure/agent-figure.tsx";
+import { lookOf } from "./figure/look.ts";
 
 // One agent's page, for the company's admins, on Grasp UI: its Page
 // header holds the agent (picture, name, what it is for, whether it is
@@ -145,6 +151,66 @@ const styles = stylex.create({
   // The `hidden` attribute alone loses to the stack's own display.
   hidden: { display: "none" },
 });
+
+/** CONCEPT: which agent page, from `?concept=` in the address. */
+const conceptOf = (): "a" | "b" | "c" | "now" => {
+  const asked =
+    typeof window === "undefined"
+      ? null
+      : new URLSearchParams(window.location.search).get("concept");
+  return asked === "a" || asked === "b" || asked === "c" ? asked : "now";
+};
+
+const conceptStyles = stylex.create({
+  // CONCEPT A: the agent's portrait as the page's head.
+  portrait: {
+    position: "relative",
+    display: "grid",
+    alignContent: "start",
+    gap: grasp.space3,
+    minHeight: "15rem",
+    padding: grasp.space6,
+    overflow: "hidden",
+    borderRadius: "inherit",
+    isolation: "isolate",
+    colorScheme: "dark",
+    color: grasp.text,
+  },
+  figure: {
+    position: "absolute",
+    insetBlockEnd: "-4rem",
+    insetInlineEnd: { default: "-4rem", "@media (width >= 48rem)": "3rem" },
+    zIndex: 0,
+  },
+  words: {
+    position: "relative",
+    zIndex: 1,
+    display: "grid",
+    gap: grasp.space2,
+    maxWidth: "36rem",
+  },
+  facts: {
+    position: "relative",
+    zIndex: 1,
+    display: "flex",
+    flexWrap: "wrap",
+    columnGap: grasp.space6,
+    rowGap: grasp.space2,
+    maxWidth: "36rem",
+  },
+  fact: { display: "grid", gap: "2px" },
+  // CONCEPT B: the agent itself, to ask, at the top of its page.
+  ask: {
+    display: "grid",
+    justifyItems: "center",
+    gap: grasp.space3,
+    paddingBlock: grasp.space6,
+    textAlign: "center",
+  },
+});
+
+/** CONCEPT: nothing said elsewhere. */
+const nothingSaid: readonly ("job" | "answers" | "own" | "usage")[] = [];
 
 /** A date and time as people read it here. */
 const useMoment = () => {
@@ -233,7 +299,13 @@ const Facts = ({
   teams,
   wakes,
   usage,
+  said = nothingSaid,
+  bare = false,
 }: {
+  /** CONCEPT: the rows the page already says elsewhere, left out here. */
+  said?: readonly ("job" | "answers" | "own" | "usage")[];
+  /** CONCEPT: the rows alone, for the page's side panel. */
+  bare?: boolean;
   agent: Agent;
   first: boolean;
   settings: AgentSettings | undefined;
@@ -247,27 +319,40 @@ const Facts = ({
   const scheduled = wakesOn(wakes).length;
   const next = nextWakeAt(wakes);
   const nextMoment = next === undefined ? "" : moment(next);
-  return (
-    <SectionCard density="compact" flush title={t`Details`}>
-      <SettingsRows>
+  const rows = (
+    <SettingsRows>
+      {said.includes("job") ? null : (
         <FactRow label={t`What it is for`}>
           {agent.job === "" ? t`No job written yet` : agent.job}
         </FactRow>
+      )}
+      {said.includes("answers") ? null : (
         <FactRow label={t`Answers`}>{who}</FactRow>
-        <FactRow label={t`May do`}>{may}</FactRow>
+      )}
+      <FactRow label={t`May do`}>{may}</FactRow>
+      {said.includes("own") ? null : (
         <FactRow label={t`On its own`}>
           {scheduled === 0
             ? t`Only when asked`
             : t`${scheduled} on a schedule, next ${nextMoment}`}
         </FactRow>
-        <FactRow label={t`Model`}>
-          {agent.model === null ? t`The asker's` : modelName(agent.model)}
-        </FactRow>
-        {usage === undefined ? null : <UsageRow usage={usage} />}
-        {agent.changedAt === null ? null : (
-          <FactRow label={t`Changed`}>{moment(agent.changedAt)}</FactRow>
-        )}
-      </SettingsRows>
+      )}
+      <FactRow label={t`Model`}>
+        {agent.model === null ? t`The asker's` : modelName(agent.model)}
+      </FactRow>
+      {usage === undefined || said.includes("usage") ? null : (
+        <UsageRow usage={usage} />
+      )}
+      {agent.changedAt === null ? null : (
+        <FactRow label={t`Changed`}>{moment(agent.changedAt)}</FactRow>
+      )}
+    </SettingsRows>
+  );
+  return bare ? (
+    rows
+  ) : (
+    <SectionCard variant="grouped" density="compact" flush title={t`Details`}>
+      {rows}
     </SectionCard>
   );
 };
@@ -294,7 +379,12 @@ const RecentActivity = ({
     .toSorted((a, b) => b.lastAt.localeCompare(a.lastAt));
   const asked = usage?.lastAt ?? null;
   return (
-    <SectionCard density="compact" flush title={t`Recent activity`}>
+    <SectionCard
+      variant="grouped"
+      density="compact"
+      flush
+      title={t`Recent activity`}
+    >
       {ran.length === 0 && asked === null ? (
         <Empty size="inline">{t`Nothing yet. What it does shows here.`}</Empty>
       ) : (
@@ -367,7 +457,12 @@ const Access = ({
     <>
       {/* A card per topic, each titled (Damsko's settings pattern); the
           row doesn't name the agent again under the page's title. */}
-      <SectionCard density="compact" flush title={t`Who may use it`}>
+      <SectionCard
+        variant="grouped"
+        density="compact"
+        flush
+        title={t`Who may use it`}
+      >
         <SettingsRows>
           <SettingRow
             info={t`Nobody outside it can ask it anything, in Grasp or a chat app.`}
@@ -396,6 +491,7 @@ const Access = ({
         </SettingsRows>
       </SectionCard>
       <SectionCard
+        variant="grouped"
         density="compact"
         flush
         info={t`Each as the company has it, or for fewer people. Never more.`}
@@ -510,6 +606,7 @@ const DeleteAgent = ({
   const { t } = useLingui();
   return (
     <SectionCard
+      variant="grouped"
       density="compact"
       actions={
         <AlertDialog>
@@ -550,6 +647,108 @@ const DeleteAgent = ({
 };
 
 /** One agent's page body. */
+/** CONCEPT A: the agent's portrait as the page's head: its night, its name, its job, its figure and three facts. */
+const PortraitHead = ({
+  agent,
+  first,
+  settings,
+  teams,
+  wakes,
+  usage,
+  actions,
+}: {
+  agent: Agent;
+  first: boolean;
+  settings: AgentSettings | undefined;
+  teams: StephenReach["teams"];
+  wakes: readonly AgentWake[];
+  usage: AgentUsage | undefined;
+  actions: ReactNode;
+}) => {
+  const { t } = useLingui();
+  const moment = useMoment();
+  const { who } = useAccessWords(first, settings, teams);
+  const next = nextWakeAt(wakes);
+  const look = lookOf(agent);
+  const paused = agent.state === "paused";
+  const facts = [
+    { key: t`Answers`, value: who },
+    {
+      key: t`On its own`,
+      value: next === undefined ? t`Only when asked` : moment(next),
+    },
+    ...(usage === undefined
+      ? []
+      : [{ key: t`This month`, value: dollars(usage.spent) }]),
+  ];
+  return (
+    <Card padding="none">
+      <span {...stylex.props(conceptStyles.portrait)}>
+        <AgentAura bright={paused ? 0.45 : 1} look={look} />
+        <span {...stylex.props(conceptStyles.figure)}>
+          <AgentFigure
+            follow
+            look={look}
+            size="xl"
+            state={paused ? "asleep" : "idle"}
+          />
+        </span>
+        <span {...stylex.props(conceptStyles.words)}>
+          <Heading level={1} size="lg">
+            {agent.name}
+          </Heading>
+          <Text tone="muted">
+            {agent.job === "" ? t`No job written yet` : agent.job}
+          </Text>
+        </span>
+        <span {...stylex.props(conceptStyles.facts)}>
+          {facts.map(({ key, value }) => (
+            <span key={key} {...stylex.props(conceptStyles.fact)}>
+              <Text element="span" size="xs" tone="quiet">
+                {key}
+              </Text>
+              <Text element="span" size="sm">
+                {value}
+              </Text>
+            </span>
+          ))}
+        </span>
+        <span {...stylex.props(conceptStyles.words)}>{actions}</span>
+      </span>
+    </Card>
+  );
+};
+
+/** CONCEPT B: the agent itself at the top of its page, to ask. */
+const AskIt = ({ agent, usable }: { agent: Agent; usable: boolean }) => {
+  const { t } = useLingui();
+  const look = lookOf(agent);
+  const on = agent.state === "on";
+  const { name } = agent;
+  return (
+    <span {...stylex.props(conceptStyles.ask)}>
+      <AgentFigure
+        follow
+        look={look}
+        size="xl"
+        state={on ? "listening" : "asleep"}
+      />
+      <Text tone="muted">
+        {agent.job === "" ? t`No job written yet` : agent.job}
+      </Text>
+      {usable && on ? (
+        <Button
+          icon={Conversation}
+          render={<Link search={{ agent: agent.id }} to="/" />}
+          variant="ink"
+        >
+          {t`Ask ${name}`}
+        </Button>
+      ) : null}
+    </span>
+  );
+};
+
 export const AgentPage = ({
   agent,
   first,
@@ -649,50 +848,45 @@ export const AgentPage = ({
     }
     await navigate({ to: "/agents", replace: true });
   };
+  const concept = conceptOf();
+  const [panelOpen, setPanelOpen] = useState(true);
+  const actionsNode = (
+    <div {...stylex.props(styles.actions)}>
+      <Switch
+        checked={on}
+        disabled={!can}
+        label={t`On`}
+        onCheckedChange={(next) => {
+          void change(async (session) => {
+            await session.connections.setAgentPaused(agent.id, !next);
+          });
+        }}
+      />
+      <EditAgent
+        agent={agent}
+        can={can}
+        models={models}
+        save={save}
+        typed={typed}
+      />
+      {usable && on ? (
+        <Button
+          icon={Conversation}
+          render={<Link search={{ agent: agent.id }} to="/" />}
+          variant="ink"
+        >
+          {t`Chat`}
+        </Button>
+      ) : null}
+    </div>
+  );
+  const hiddenTab = (shown: AgentTab): boolean =>
+    concept !== "c" && tab !== shown;
   return (
     <Page>
-      <PageHeader
-        actions={
-          <div {...stylex.props(styles.actions)}>
-            <Switch
-              checked={on}
-              disabled={!can}
-              label={t`On`}
-              onCheckedChange={(next) => {
-                void change(async (session) => {
-                  await session.connections.setAgentPaused(agent.id, !next);
-                });
-              }}
-            />
-            <EditAgent
-              agent={agent}
-              can={can}
-              models={models}
-              save={save}
-              typed={typed}
-            />
-            {usable && on ? (
-              <Button
-                icon={Conversation}
-                render={<Link search={{ agent: agent.id }} to="/" />}
-                variant="ink"
-              >
-                {t`Chat`}
-              </Button>
-            ) : null}
-          </div>
-        }
-        // The agent's name on every part: the side nav marks which part.
-        title={name}
-      />
-      <AgentFailure>{failure}</AgentFailure>
-      {/* Every tab stays mounted, the others hidden: what is typed and
-          not yet saved on one stays while another is looked at. */}
-      <div
-        hidden={tab !== "overview"}
-        {...stylex.props(styles.stack, tab !== "overview" && styles.hidden)}
-      >
-        <Facts
+      {concept === "a" ? (
+        <PortraitHead
+          actions={actionsNode}
           agent={agent}
           first={first}
           settings={settings}
@@ -700,17 +894,65 @@ export const AgentPage = ({
           usage={usage}
           wakes={wakes}
         />
+      ) : (
+        <PageHeader
+          actions={actionsNode}
+          // The agent's name on every part: the side nav marks which part.
+          title={name}
+        />
+      )}
+      <AgentFailure>{failure}</AgentFailure>
+      {/* Every tab stays mounted, the others hidden: what is typed and
+          not yet saved on one stays while another is looked at. */}
+      <div
+        hidden={hiddenTab("overview")}
+        {...stylex.props(styles.stack, hiddenTab("overview") && styles.hidden)}
+      >
+        {concept === "b" ? <AskIt agent={agent} usable={usable} /> : null}
+        {concept === "b" ? (
+          <PagePanel
+            label={t`Details`}
+            onOpenChange={setPanelOpen}
+            open={panelOpen}
+          >
+            <Facts
+              bare
+              said={["job"]}
+              agent={agent}
+              first={first}
+              settings={settings}
+              teams={teams}
+              usage={usage}
+              wakes={wakes}
+            />
+          </PagePanel>
+        ) : (
+          <Facts
+            agent={agent}
+            first={first}
+            said={concept === "a" ? ["job", "answers", "own", "usage"] : []}
+            settings={settings}
+            teams={teams}
+            usage={usage}
+            wakes={wakes}
+          />
+        )}
         <RecentActivity usage={usage} wakes={wakes} />
         {first ? null : <DeleteAgent can={can} name={name} remove={remove} />}
       </div>
       <div
-        hidden={tab !== "instructions"}
-        {...stylex.props(styles.stack, tab !== "instructions" && styles.hidden)}
+        hidden={hiddenTab("instructions")}
+        {...stylex.props(
+          styles.stack,
+          hiddenTab("instructions") && styles.hidden
+        )}
       >
         {/* No title: the side nav says "Instructions" already. */}
         <SectionCard
+          variant="grouped"
           aria-label={t`Instructions`}
           density="compact"
+          {...(concept === "c" ? { title: t`Instructions` } : {})}
           footer={
             <div {...stylex.props(styles.foot)}>
               <Text size="sm" tone="muted">
@@ -748,8 +990,8 @@ export const AgentPage = ({
         />
       </div>
       <div
-        hidden={tab !== "access"}
-        {...stylex.props(styles.stack, tab !== "access" && styles.hidden)}
+        hidden={hiddenTab("access")}
+        {...stylex.props(styles.stack, hiddenTab("access") && styles.hidden)}
       >
         {firstAccess === undefined ? (
           <Access
@@ -773,8 +1015,8 @@ export const AgentPage = ({
         )}
       </div>
       <div
-        hidden={tab !== "schedule"}
-        {...stylex.props(styles.stack, tab !== "schedule" && styles.hidden)}
+        hidden={hiddenTab("schedule")}
+        {...stylex.props(styles.stack, hiddenTab("schedule") && styles.hidden)}
       >
         <AgentWakes
           agent={agent}

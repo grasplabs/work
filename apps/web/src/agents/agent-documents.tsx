@@ -114,6 +114,7 @@ export const AgentDocuments = ({
   const editing = editable && documents !== undefined;
   return (
     <SectionCard
+      variant="grouped"
       density="compact"
       flush
       // Behind the info mark: who may learn what a document says.

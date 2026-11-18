@@ -15,6 +15,7 @@ import {
   AlertDialogTitle,
 } from "../grasp/alert-dialog/index.ts";
 import { Button } from "../grasp/button/index.ts";
+import { Empty } from "../grasp/empty/index.ts";
 import {
   FactRow,
   SettingRow,
@@ -26,7 +27,6 @@ import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useAskGrasp } from "../workflows/requests/request-needs.tsx";
 import { SettingsSection } from "./settings-parts.tsx";
 import { AudienceControl, audienceOf, chosenOf } from "./stephen-audience.tsx";
-import { StephenAvatar } from "./stephen-avatar.tsx";
 
 // Stephen himself, on top of Settings › Stephen, as the prototype's
 // `components/stephen/stephen-card.tsx`: his name, whether he is on
@@ -107,7 +107,7 @@ const WeekBars = ({ weeks }: { weeks: StephenWeek["weeks"] }) => {
 const Usage = ({ week }: { week: StephenWeek }) => {
   const { t } = useLingui();
   if (week.questions === 0) {
-    return <FactRow label={t`Nobody asked him anything yet.`}>{null}</FactRow>;
+    return <Empty size="inline">{t`Nobody asked him anything yet.`}</Empty>;
   }
   const asked = formatNumber(week.asked);
   const reach = formatNumber(week.reach);
@@ -195,8 +195,7 @@ export const StephenCard = ({
           />
         </span>
       }
-      media={<StephenAvatar />}
-      title="Stephen"
+      title={t`Outside Grasp`}
     >
       <SettingsRows>
         <SettingRow label={t`Who can talk to him`}>

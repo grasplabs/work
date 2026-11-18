@@ -342,6 +342,7 @@ export const AgentWakes = ({
   return (
     // No title: the side nav says "Schedule" already; Add a time at its foot.
     <SectionCard
+      variant="grouped"
       aria-label={t`Schedule`}
       density="compact"
       flush

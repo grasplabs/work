@@ -42,6 +42,7 @@ export const SettingsSection = ({
   children?: ReactNode;
 }) => (
   <SectionCard
+    variant="grouped"
     actions={action}
     density="compact"
     description={description}
