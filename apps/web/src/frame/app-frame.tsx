@@ -23,7 +23,7 @@ import {
 } from "./ai-key-banner.tsx";
 import type { FailingProvider } from "./ai-key-banner.tsx";
 import { InFrame } from "./in-frame.ts";
-import { usePageFills } from "./page-fill.ts";
+import { usePageFills, usePageWhole } from "./page-fill.ts";
 import { PersonTheme } from "./person-theme.tsx";
 
 const styles = stylex.create({
@@ -159,6 +159,7 @@ export const AppFrame = ({
   // with no room under it (App shell's page for an open chat), and no dock
   // over its foot: the chat is the page.
   const chatPage = useMatchRoute()({ to: "/chats/$chatId" }) !== false;
+  const whole = usePageWhole();
   const sidebar = useGraspSidebar({
     core,
     identity,
@@ -193,7 +194,7 @@ export const AppFrame = ({
           menuLabel={t`Menu`}
           menuOpen={menuOpen}
           onMenuOpenChange={setMenuOpen}
-          page={chatPage ? "whole" : "padded"}
+          page={chatPage || whole ? "whole" : "padded"}
           panelResizeLabel={t`Resize the chat`}
           panelsCloseLabel={t`Close the chat`}
           panelsToggleLabel={t`Show or hide the chat`}
