@@ -1142,7 +1142,7 @@ export const BrainAtlas = ({
   };
 
   return (
-    <div {...stylex.props(styles.atlas)} data-tour="brain" ref={box}>
+    <div {...stylex.props(styles.atlas)} ref={box}>
       <canvas
         aria-hidden="true"
         ref={canvas}
