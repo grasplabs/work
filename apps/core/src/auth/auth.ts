@@ -647,6 +647,8 @@ const idTokenClaimsSchema = z.looseObject({
   oid: z.string().optional(),
   email: z.string().optional(),
   email_verified: z.boolean().optional(),
+  tid: z.string().optional(),
+  hd: z.string().optional(),
 });
 
 /** The claims of an ID token the SSO plugin verified in this request, as far as core keeps them. */
@@ -665,20 +667,27 @@ const claimsOf = (idToken: unknown): z.infer<typeof idTokenClaimsSchema> => {
 
 /**
  * What a sign-in keeps of its verified ID token: the Entra object ID
- * (`oid`), and the address only where the provider marks it verified
+ * (`oid`); the address only where the provider marks it verified
  * (`email_verified`, as Google's tokens do; a Google sign-in is refused
  * without it, claims.ts), which an item's reader list may name its
- * account by (source-readers.ts). Entra's `email` is never verified, so
- * none of Entra's is kept.
+ * account by (source-readers.ts); and the tenant the token was checked
+ * against (claims.ts), Entra's `tid` or Google's `hd`, which that account
+ * counts in only while the sign-in config names it. Entra's `email` is
+ * never verified, so none of Entra's is kept.
  */
 const keptClaimsOf = (
   idToken: unknown
-): { oid: string | null; verifiedEmail: string | null } => {
+): {
+  oid: string | null;
+  verifiedEmail: string | null;
+  verifiedTenant: string | null;
+} => {
   const claims = claimsOf(idToken);
   return {
     oid: claims.oid ?? null,
     verifiedEmail:
       claims.email_verified === true ? (claims.email ?? null) : null,
+    verifiedTenant: claims.tid ?? claims.hd ?? null,
   };
 };
 
@@ -798,6 +807,7 @@ const createAuth = (
       additionalFields: {
         oid: { type: "string", required: false, input: false },
         verifiedEmail: { type: "string", required: false, input: false },
+        verifiedTenant: { type: "string", required: false, input: false },
       },
     },
     advanced: {

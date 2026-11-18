@@ -175,6 +175,7 @@ export const signInAccountsRead = (db: DrizzleD1Database, userId: string) =>
       providerId: accounts.providerId,
       oid: accounts.oid,
       verifiedEmail: accounts.verifiedEmail,
+      verifiedTenant: accounts.verifiedTenant,
     })
     .from(accounts)
     .where(
@@ -221,8 +222,18 @@ const readingAccountsOf = (
       ? [{ provider: "google", tenant, account: address }]
       : [];
   return [
-    ...signIns.flatMap(({ providerId, oid, verifiedEmail }) => {
-      if (providerId === providerIds.entra && config.entra && oid !== null) {
+    // Each in the tenant its sign-in proved, only while the config names
+    // it: a tenant the config moved to is proved by a sign-in through it.
+    ...signIns.flatMap(({ providerId, oid, verifiedEmail, verifiedTenant }) => {
+      const proved = (tenant: string): boolean =>
+        verifiedTenant !== null &&
+        comparable(verifiedTenant) === comparable(tenant);
+      if (
+        providerId === providerIds.entra &&
+        config.entra &&
+        oid !== null &&
+        proved(config.entra.tenantId)
+      ) {
         return [
           {
             provider: "microsoft",
@@ -231,7 +242,9 @@ const readingAccountsOf = (
           },
         ];
       }
-      return providerId === providerIds.google && config.google
+      return providerId === providerIds.google &&
+        config.google &&
+        proved(config.google.hostedDomain)
         ? google(config.google.hostedDomain, verifiedEmail)
         : [];
     }),
@@ -290,6 +303,46 @@ export const heldPrincipalsOf = async (
       ),
     ]),
   ];
+};
+
+/**
+ * Claims for the member `userId` the tokens of the suite accounts they
+ * connected as their own (`connected`, connect's `personalAccounts`),
+ * minting each that no list named yet, as the connection proves them:
+ * so their erasure finds them by person (`forgetTokens`), whatever address
+ * a connection carries and whether or not they ever read by it. Called
+ * when a connection is made or made again (connections.ts).
+ */
+export const claimConnectedTokens = async (
+  env: Pick<Env, "DB" | "BETTER_AUTH_SECRET">,
+  userId: string,
+  connected: readonly PersonalAccount[]
+): Promise<void> => {
+  const keys = await keysOf(
+    env,
+    connected.flatMap(({ provider, accountId, verifiedEmail }) => {
+      if (provider === "microsoft") {
+        return [{ provider, account: accountId }];
+      }
+      return provider === "google" && verifiedEmail !== null
+        ? [{ provider, account: verifiedEmail }]
+        : [];
+    })
+  );
+  if (keys.length === 0) {
+    return;
+  }
+  const claimed = JSON.stringify(keys.map((key) => [key, crypto.randomUUID()]));
+  await drizzle(env.DB)
+    .insert(sourceReaderTokens)
+    .select(
+      sql`SELECT json_extract(value, '$[0]'), ${userId}, json_extract(value, '$[1]'), ${Date.now()}
+        FROM json_each(${claimed}) WHERE true`
+    )
+    .onConflictDoUpdate({
+      target: sourceReaderTokens.key,
+      set: { person: userId },
+    });
 };
 
 /**

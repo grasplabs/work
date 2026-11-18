@@ -6,4 +6,5 @@ CREATE TABLE `source_reader_tokens` (
 );
 --> statement-breakpoint
 CREATE INDEX `source_reader_tokens_person_idx` ON `source_reader_tokens` (`person`);--> statement-breakpoint
-ALTER TABLE `accounts` ADD `verified_email` text;
+ALTER TABLE `accounts` ADD `verified_email` text;--> statement-breakpoint
+ALTER TABLE `accounts` ADD `verified_tenant` text;

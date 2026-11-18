@@ -122,6 +122,7 @@ import {
   eraseBrainReads,
   mayHoldReadsOf,
 } from "./shared-reads.ts";
+import { claimConnectedTokens } from "./source-readers.ts";
 import { routeMember } from "./staff-audit.ts";
 import {
   readStephenReach,
@@ -1183,6 +1184,14 @@ export const handleConnectionCallback = async (
       // Only whether there is one matters; the provider's text isn't kept.
       error: params.get("error")?.slice(0, 64) ?? undefined,
     });
+    // The accounts it proves are theirs, for the reader lists the Brain
+    // copies (GRA-1761): failed, the flow fails, and connecting again in
+    // place claims them.
+    await claimConnectedTokens(
+      env,
+      identity.userId,
+      await env.CONNECT.personalAccounts(identity.userId)
+    );
   } catch (error) {
     return failed(errorCodeOf(error));
   }

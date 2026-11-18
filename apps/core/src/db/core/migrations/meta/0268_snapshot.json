@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a68d7271-fafc-4e0f-90a7-a5185e60faf2",
+  "id": "4bad4a20-b086-4d38-a5bf-3a808ad505c3",
   "prevId": "f395ee00-149f-4b3c-8d7e-7c3c15e44a6e",
   "tables": {
     "access_revocations": {
@@ -176,6 +176,13 @@
         },
         "verified_email": {
           "name": "verified_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "verified_tenant": {
+          "name": "verified_tenant",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

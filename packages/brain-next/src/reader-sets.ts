@@ -89,6 +89,28 @@ const accessOfPrincipals = (
 };
 
 /**
+ * Whether `access` names a principal the set of readers keyed `before`
+ * doesn't: a change of readers that adds one. A key that isn't one adds
+ * every principal.
+ */
+export const addsReaders = (before: string, access: Access): boolean => {
+  let parsed: unknown = undefined;
+  try {
+    parsed = JSON.parse(before);
+  } catch {
+    return true;
+  }
+  const held = new Set(
+    (keyPrincipalsSchema.safeParse(parsed).data ?? []).map((principal) =>
+      JSON.stringify(principal)
+    )
+  );
+  return principalsOf(access).some(
+    ({ kind, principal }) => !held.has(JSON.stringify([kind, principal]))
+  );
+};
+
+/**
  * The access a set of readers' key names: the inverse of
  * {@link readerSetKeyOf}, the one way the Brain reads a key back. Undefined
  * for anything `readerSetKeyOf` doesn't write, so a key it can't name is

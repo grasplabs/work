@@ -40,7 +40,12 @@ import {
   subjectOf,
   subjectsOver,
 } from "./erasure.ts";
-import { enqueueExtraction, enqueueExtractionIfDue } from "./extraction.ts";
+import {
+  enqueueExtraction,
+  enqueueExtractionIfDue,
+  isExtracted,
+  queuedExtractOf,
+} from "./extraction.ts";
 import {
   fileKeyOf,
   hashOf,
@@ -51,7 +56,12 @@ import {
   noteWrite,
 } from "./files.ts";
 import { judgeVersion } from "./quotes.ts";
-import { readableSql, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
+import {
+  addsReaders,
+  readableSql,
+  readerSetKeyOf,
+  readerSetOf,
+} from "./reader-sets.ts";
 import { refuseRemoved } from "./removal.ts";
 import { isRestoring } from "./restoring.ts";
 import { removeVectorsOf } from "./vectors.ts";
@@ -823,7 +833,7 @@ const versionToKeep = (
  */
 export const changeReaders = async (
   store: SourcesStore,
-  { source, change, access, readAt }: ReadersChange
+  { source, change, access, readAt, extract }: ReadersChange
 ): Promise<AddedVersion | null> => {
   for (;;) {
     const kept = versionToKeep(store.db, source, change);
@@ -846,6 +856,14 @@ export const changeReaders = async (
         .run();
       return { source, version: kept.version };
     }
+    // Drawn again only when it needs it (contract.ts `changeReaders`): as
+    // the caller says, or as the queue was drawing the source.
+    const drawing = extract ?? queuedExtractOf(store.storage, source);
+    const draws =
+      drawing !== undefined &&
+      !kept.made &&
+      (!isExtracted(store.storage, source, kept.version) ||
+        addsReaders(kept.readers, access));
     // oxlint-disable-next-line no-await-in-loop -- again only after another add
     const text = await textOf(store.bucket, kept.file);
     if (text === null) {
@@ -865,6 +883,7 @@ export const changeReaders = async (
             : {}),
           ...(readAt === undefined ? {} : { readAt }),
           ...(kept.made ? {} : { after: kept.version }),
+          ...(draws ? { extract: drawing } : {}),
         },
         { indexed: true }
       );
