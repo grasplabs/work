@@ -991,7 +991,7 @@ const AnswerRow = ({
         copyLabels={{
           copy: t`Copy the answer`,
           copied: t`Copied`,
-          failed: t`Could not copy`,
+          failed: t`Not copied`,
         }}
         copyText={live || copyText === "" ? undefined : copyText}
         failedLabel={

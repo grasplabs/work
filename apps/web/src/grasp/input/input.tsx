@@ -54,6 +54,12 @@ export interface InputProps extends Omit<
    */
   type?: "text" | "email" | "password" | "search" | "tel" | "url" | "time";
   /**
+   * Words a machine reads, in the system's mono face: a cron line, an id, a key. A step smaller,
+   * on the same line, so the field keeps its height; 16px on a touch screen as every field is.
+   * @default false
+   */
+  mono?: boolean;
+  /**
    * The value it starts with. A form reset returns here. For a value you keep in state, pass
    * `value` and `onValueChange` instead.
    */
@@ -281,6 +287,12 @@ export const inputStyles = stylex.create({
     borderRadius: `min(${grasp.corner}, calc(${grasp.controlLg} / 2))`,
   },
 
+  // Words a machine reads: the mono face a step smaller, on the same line.
+  mono: {
+    fontFamily: grasp.fontMono,
+    fontSize: { default: grasp.textXs, [media.typing]: grasp.fieldTextTouch },
+  },
+
   // Open for typing: the hairline deepens under a pointer.
   live: {
     boxShadow: {
@@ -391,6 +403,7 @@ export const Input = ({
   size = "md",
   type = "text",
   secret = false,
+  mono = false,
   icon,
   style: styleProp,
   layout,
@@ -452,6 +465,7 @@ export const Input = ({
               styles.input,
               !long && styles.fits,
               sizeStyles[size],
+              mono && styles.mono,
               icon && iconStartStyles[size],
               !(state.disabled || state.readOnly) && styles.live,
               state.readOnly && styles.readOnly,

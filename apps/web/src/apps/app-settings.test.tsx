@@ -376,7 +376,17 @@ describe(AppSettings, () => {
     await opened(fake, "page", "sharing");
     const before = document.body.textContent.includes("Ann");
 
-    await press("Stop sharing with Ann");
+    // Taking Ann off, from the role at her row's end, asks first.
+    await press("Access for Ann");
+    const remove = [...document.querySelectorAll("[role=option]")].find(
+      (each) => each instanceof HTMLElement && nameOf(each) === "Remove"
+    );
+    await act(async () => {
+      if (remove instanceof HTMLElement) {
+        remove.click();
+      }
+      await Promise.resolve();
+    });
     await press("Stop sharing");
 
     expect({

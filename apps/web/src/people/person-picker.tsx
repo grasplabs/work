@@ -10,7 +10,7 @@ import { initials } from "../frame/person-menu.tsx";
 import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Command } from "../grasp/command/index.ts";
 import type { CommandEntry } from "../grasp/command/index.ts";
-import { ChevronDown, Icon, Person } from "../grasp/icons/index.ts";
+import { ChevronDown, Icon } from "../grasp/icons/index.ts";
 import {
   Popover,
   PopoverContent,
@@ -98,7 +98,8 @@ export const PersonOption = ({
 );
 
 /**
- * One person in the library's list of people to pick from: their name,
+ * One person in the library's list of people to pick from: their portrait
+ * and name,
  * found by their name, their email or what tells them apart from a
  * namesake (`usePeopleApart`), which stands under it. Their ID keeps two
  * people of the same name apart.
@@ -110,7 +111,7 @@ export const personEntry = (
 ): CommandEntry => ({
   value,
   label: person.name,
-  icon: Person,
+  media: <PersonAvatar name={person.name} />,
   keywords: [person.email ?? "", hint ?? ""],
   ...(hint === undefined ? {} : { description: hint }),
 });

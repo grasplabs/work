@@ -2,7 +2,6 @@ import { failureText } from "@grasp-os/shared/errors";
 import type { DiagramTask } from "@grasp-os/shared/workflow-diagrams";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowDraft } from "@grasp-os/shared/workflow-resources";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
@@ -46,8 +45,8 @@ import type { Layout } from "./workflow-diagram.tsx";
 // change it (core's `editStep`, GRA-514), saved as the draft's next
 // revision and checked like any edit; the JSON behind it stays one click
 // away, in its Settings' Definition. Its toolbar, its sheet and its empty
-// state are the library's; the canvas itself (its dotted ground, its zoom
-// and its nodes' cards) keeps its Tailwind classes until it moves whole.
+// state are the library's; its dotted ground, its zoom and its nodes'
+// cards are laid out here, on the library's tokens.
 
 /** How many lines a step's field shows before its text scrolls. */
 const STEP_ROWS = 16;
@@ -101,17 +100,72 @@ const styles = stylex.create({
   },
   over: { position: "relative" },
   done: { color: grasp.success },
+  // The dotted ground the steps lie on: a fine grid of dots in the page's
+  // own hairline ink, on its soft surface.
+  ground: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minHeight: "24rem",
+    overflow: "auto",
+    paddingInline: grasp.space8,
+    paddingBlockStart: grasp.space20,
+    paddingBlockEnd: grasp.space12,
+    backgroundColor: grasp.soft,
+    backgroundImage: `radial-gradient(circle at center, ${grasp.line} 1px, transparent 1.4px)`,
+    backgroundSize: `${grasp.space4} ${grasp.space4}`,
+  },
+  // In the middle of the ground while it fits; from its start once larger.
+  drawing: { margin: "auto", width: "max-content" },
+  // A node: a small sheet lifted off the dotted ground.
+  node: {
+    display: "flex",
+    flexShrink: 0,
+    backgroundColor: grasp.raised,
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    boxShadow: grasp.liftLow,
+  },
+  starts: {
+    width: "14rem",
+    alignItems: "flex-start",
+    gap: grasp.space3,
+    padding: grasp.space3,
+  },
+  startsText: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: grasp.space1,
+  },
+  ends: {
+    alignItems: "center",
+    gap: grasp.space2,
+    paddingInline: grasp.space3,
+    paddingBlock: grasp.space2,
+  },
+  // CSS zoom, not a transform: the drawing takes the room it shows at, so
+  // it centres and scrolls as it is seen.
+  zoom50: { zoom: 0.5 },
+  zoom75: { zoom: 0.75 },
+  zoom90: { zoom: 0.9 },
+  zoom100: { zoom: 1 },
+  zoom110: { zoom: 1.1 },
+  zoom125: { zoom: 1.25 },
+  zoom150: { zoom: 1.5 },
 });
 
 /** The zooms the canvas steps through, each a scale of its own. */
 const zooms = [
-  { scale: 0.5, className: "zoom-50" },
-  { scale: 0.75, className: "zoom-75" },
-  { scale: 0.9, className: "zoom-90" },
-  { scale: 1, className: "zoom-100" },
-  { scale: 1.1, className: "zoom-110" },
-  { scale: 1.25, className: "zoom-125" },
-  { scale: 1.5, className: "zoom-150" },
+  { scale: 0.5, style: styles.zoom50 },
+  { scale: 0.75, style: styles.zoom75 },
+  { scale: 0.9, style: styles.zoom90 },
+  { scale: 1, style: styles.zoom100 },
+  { scale: 1.1, style: styles.zoom110 },
+  { scale: 1.25, style: styles.zoom125 },
+  { scale: 1.5, style: styles.zoom150 },
 ] as const;
 
 /** Where the canvas starts: as drawn, unzoomed. */
@@ -152,11 +206,11 @@ const fitting = (
 const Starts = ({ onTriggers }: { onTriggers: () => void }) => {
   const { t } = useLingui();
   return (
-    <div className="bg-card node-sheet flex w-56 flex-none items-start gap-3 rounded-xl p-3">
+    <div {...stylex.props(styles.node, styles.starts)}>
       <span {...stylex.props(styles.muted)}>
         <Icon icon={Play} />
       </span>
-      <div className="flex flex-col items-start gap-1">
+      <div {...stylex.props(styles.startsText)}>
         <Text element="span" size="xs" tone="muted">
           {t({ message: "Starts", context: "where a workflow starts" })}
         </Text>
@@ -172,7 +226,7 @@ const Starts = ({ onTriggers }: { onTriggers: () => void }) => {
 const Done = () => {
   const { t } = useLingui();
   return (
-    <div className="bg-card node-sheet flex flex-none items-center gap-2 rounded-xl px-3 py-2">
+    <div {...stylex.props(styles.node, styles.ends)}>
       <span {...stylex.props(styles.done)}>
         <Icon icon={Tick} />
       </span>
@@ -503,7 +557,7 @@ export const WorkflowFlow = ({
     setZoom(fitting(drawing.current, room.current));
   }, []);
 
-  const { className: scale } = zooms[zoom] ?? zooms[unzoomed];
+  const { style: scale } = zooms[zoom] ?? zooms[unzoomed];
   // It fills the room the page gives it, edge to edge, the ground taking
   // what its caption leaves.
   return (
@@ -525,11 +579,7 @@ export const WorkflowFlow = ({
         >
           {t`Edit JSON`}
         </Button>
-        <div
-          className="dot-ground flex min-h-96 flex-1 flex-col overflow-auto px-8 pt-20 pb-12"
-          data-ground=""
-          ref={room}
-        >
+        <div {...stylex.props(styles.ground)} data-ground="" ref={room}>
           {checkpoint === null ? (
             // Nothing passed yet, as a new workflow starts: its builders
             // tell Grasp how the work runs, in its chat beside the Flow.
@@ -539,7 +589,7 @@ export const WorkflowFlow = ({
           ) : (
             // In the middle of the ground while it fits; from its start
             // once it is larger, so all of it scrolls into view.
-            <div className={cn("m-auto w-max", scale)} ref={drawing}>
+            <div {...stylex.props(styles.drawing, scale)} ref={drawing}>
               <WorkflowDiagramView
                 canvas={{
                   layout,

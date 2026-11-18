@@ -21,48 +21,20 @@ import {
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
 import { Avatar } from "../grasp/avatar/index.ts";
-import { Button } from "../grasp/button/index.ts";
-import { Checkbox } from "../grasp/checkbox/index.ts";
-import {
-  Dialog,
-  DialogAction,
-  DialogBody,
-  DialogContent,
-  DialogFooter,
-  DialogTitle,
-} from "../grasp/dialog/index.ts";
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldLabel,
-} from "../grasp/field/index.ts";
-import { Icon, Folder, People, Search, UserAdd } from "../grasp/icons/index.ts";
-import {
-  InputGroup,
-  InputGroupInput,
-  InputGroupText,
-} from "../grasp/input-group/index.ts";
+import { Folder, Icon, People } from "../grasp/icons/index.ts";
 import {
   Item,
   ItemActions,
   ItemContent,
-  ItemDescription,
   ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
-import {
-  Select,
-  SelectContent,
-  SelectTrigger,
-  SelectValue,
-} from "../grasp/select/index.ts";
-import { Spinner } from "../grasp/spinner/index.ts";
+import { ShareAccess } from "../grasp/share-access/index.ts";
+import type { ShareCandidate } from "../grasp/share-access/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { roleLabel } from "../labels.ts";
@@ -70,13 +42,14 @@ import { usePeopleApart } from "../people/people-apart.ts";
 import type { PeopleApart } from "../people/people-apart.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { buildsApp } from "./app-role.ts";
+import { useAppRead } from "./use-app-read.ts";
 
 // Sharing an App (an App's): whom it is open to besides its owner and
 // the admins, as a user (its pages) or a builder (its code, settings and
-// whom it is shared with), in its Settings' Sharing. Each member is a row
-// with their face (a team's or project's mark), their role at the row's
-// end and Unshare, which asks first; Share opens a dialog to tick people,
-// teams and projects by face and name, with the role to give them.
+// whom it is shared with), in its Settings' Sharing, on Grasp UI's Share
+// access: each member with their role at the row's end, and a picker of
+// the people, teams and projects core offers to add several at once.
+// Taking someone off asks first.
 // Its builders share it, change a role and unshare it; everyone with a role
 // in it sees whom it is shared with. Whom to share with comes from
 // `apps.members.candidates`: the organization's people and teams by name,
@@ -124,123 +97,18 @@ export const readMembers = async (
 
 const styles = stylex.create({
   section: { display: "flex", flexDirection: "column", gap: grasp.space3 },
-  head: {
-    display: "flex",
-    flexWrap: "wrap",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: grasp.space3,
-  },
-  // The candidates, scrolled within the dialog past a few.
-  list: {
-    display: "flex",
-    flexDirection: "column",
-    gap: grasp.space1,
-    maxHeight: "18rem",
-    overflowY: "auto",
-    margin: 0,
-    padding: 0,
-    listStyle: "none",
-  },
-  candidate: {
-    display: "flex",
-    alignItems: "center",
-    gap: grasp.space3,
-  },
-  waiting: {
-    display: "flex",
-    alignItems: "center",
-    gap: grasp.space2,
-    minHeight: grasp.controlMd,
-  },
 });
 
 /** The roles to give, from least to most. */
 const roles: readonly AppRole[] = ["user", "builder"];
 
-/** A role's Select: its items in the page's language. */
-const RoleSelect = ({
-  role,
-  label,
-  disabled = false,
-  onChange,
-}: {
-  role: AppRole;
-  label: string;
-  disabled?: boolean;
-  onChange: (role: AppRole) => void;
-}) => (
-  <Select
-    disabled={disabled}
-    items={roles.map((each) => ({ value: each, label: roleLabel(each) }))}
-    onValueChange={(value) => {
-      const chosen = roles.find((each) => each === value);
-      if (chosen !== undefined && chosen !== role) {
-        onChange(chosen);
-      }
-    }}
-    value={role}
-  >
-    <SelectTrigger aria-label={label} size="sm">
-      <SelectValue />
-    </SelectTrigger>
-    <SelectContent />
-  </Select>
-);
-
-/** Whom a member or a candidate is: a person's face, or a team's or project's mark. */
+/** Whom a member is: a person's face, or a team's or project's mark. */
 const Mark = ({ type, name }: { type: AppMemberRef["type"]; name: string }) => {
   if (type === "person") {
     return <Avatar decorative name={name} size="xs" />;
   }
   return <Icon icon={type === "team" ? People : Folder} />;
 };
-
-/** Someone, a team or a project to share with, as the dialog lists them. */
-interface Candidate {
-  key: string;
-  ref: AppMemberRef;
-  /** Their own name, for their face and the search. */
-  name: string;
-  /** How the list says them: a team or a project says so. */
-  label: string;
-  /** What tells a person apart from a namesake. */
-  note?: string;
-}
-
-/** Everyone the App can still be shared with, as the dialog lists them. */
-const candidatesOf = (
-  offered: ShareCandidates,
-  apart: PeopleApart,
-  words: MemberWords
-): Candidate[] => [
-  ...offered.people.map((person) => {
-    const note = apart.hint(person);
-    return {
-      key: `person:${person.id}`,
-      ref: { type: "person" as const, id: person.id },
-      name: person.name,
-      label: person.name,
-      ...(note === undefined ? {} : { note }),
-    };
-  }),
-  ...offered.teams.map((team) => ({
-    key: `team:${team.id}`,
-    ref: { type: "team" as const, id: team.id },
-    name: team.name,
-    label: words.team(team.name),
-  })),
-  ...offered.projects.map((project) => ({
-    key: `project:${project.id}`,
-    ref: { type: "project" as const, id: project.id },
-    name: project.name,
-    label: words.project(project.name),
-  })),
-];
-
-/** Whether `candidate` is one `typed` finds: by their name, as typed. */
-const found = (candidate: Candidate, typed: string): boolean =>
-  candidate.label.toLowerCase().includes(typed.trim().toLowerCase());
 
 /** The words that say a member's kind, in the page's language. */
 const useMemberWords = (): MemberWords => {
@@ -252,236 +120,100 @@ const useMemberWords = (): MemberWords => {
   };
 };
 
-/** While the list is read, or why it wasn't; nothing once it is. */
-const Waiting = ({
-  read,
-  failure,
-}: {
-  read: boolean;
-  failure: string | undefined;
-}) => {
-  const { t } = useLingui();
-  if (read) {
-    return null;
-  }
-  if (failure !== undefined) {
-    return <Alert title={failure} variant="danger" />;
-  }
-  return (
-    <span {...stylex.props(styles.waiting)}>
-      <Spinner />
-      <Text size="sm" tone="muted">
-        {t`Loading…`}
-      </Text>
-    </span>
-  );
+/** A member's or a candidate's key: its kind and its ID, as Share access knows them. */
+const keyOf = ({ type, id }: AppMemberRef): string => `${type}:${id}`;
+
+/** The member a key names, back from Share access. */
+const refOf = (key: string): AppMemberRef | undefined => {
+  const [type, ...rest] = key.split(":");
+  const id = rest.join(":");
+  return type === "person" || type === "team" || type === "project"
+    ? { type, id }
+    : undefined;
 };
 
-/** The dialog's list: each candidate ticked or not, by face and name. */
-const Candidates = ({
-  candidates,
-  chosen,
-  onChosen,
-}: {
-  candidates: readonly Candidate[];
-  chosen: readonly string[];
-  onChosen: (chosen: string[]) => void;
-}) => {
-  const { t } = useLingui();
-  return (
-    <ul aria-label={t`Share with`} {...stylex.props(styles.list)}>
-      {candidates.map(({ key, ref, name, label, note }) => (
-        <li key={key}>
-          <Field orientation="horizontal">
-            <Checkbox
-              checked={chosen.includes(key)}
-              onCheckedChange={(checked) => {
-                const rest = chosen.filter((one) => one !== key);
-                onChosen(checked === true ? [...rest, key] : rest);
-              }}
-            />
-            <span {...stylex.props(styles.candidate)}>
-              <Mark name={name} type={ref.type} />
-              <FieldContent>
-                <FieldLabel>{label}</FieldLabel>
-                {note === undefined ? null : (
-                  <FieldDescription>{note}</FieldDescription>
-                )}
-              </FieldContent>
-            </span>
-          </Field>
-        </li>
-      ))}
-    </ul>
-  );
-};
+/** Who the organization offers to share with: read when Sharing opens, for its builders. */
+const readCandidates = async (
+  session: Session,
+  app: string
+): Promise<ShareCandidates> => await session.apps.members.candidates(app);
+
+/** Everyone the App can be shared with, as Share access offers them. */
+const candidatesOf = (
+  offered: ShareCandidates,
+  owner: string,
+  apart: PeopleApart,
+  words: MemberWords
+): ShareCandidate[] => [
+  // Never the owner, who always opens it.
+  ...offered.people
+    .filter(({ id }) => id !== owner)
+    .map((person) => {
+      const note = apart.hint(person);
+      return {
+        id: keyOf({ type: "person", id: person.id }),
+        name: person.name,
+        kind: "person" as const,
+        ...(note === undefined ? {} : { note }),
+      };
+    }),
+  ...offered.teams.map((team) => ({
+    id: keyOf({ type: "team", id: team.id }),
+    name: words.team(team.name),
+    kind: "team" as const,
+  })),
+  // Only the projects the person builds: sharing with one reaches everyone
+  // in it, which its builders decide.
+  ...offered.projects.map((project) => ({
+    id: keyOf({ type: "project", id: project.id }),
+    name: words.project(project.name),
+    kind: "project" as const,
+  })),
+];
+
+/** Someone the App is shared with, for whoever only looks: their name and role. */
+const MemberRow = ({ name, member }: { name: string; member: AppMember }) => (
+  <Item size="sm">
+    <ItemMedia>
+      <Mark name={member.name ?? name} type={member.type} />
+    </ItemMedia>
+    <ItemContent>
+      <ItemTitle>{name}</ItemTitle>
+    </ItemContent>
+    <ItemActions>
+      <Text element="span" size="sm" tone="muted">
+        {roleLabel(member.role)}
+      </Text>
+    </ItemActions>
+  </Item>
+);
 
 /**
- * Share: a dialog of the organization's people, teams and projects the
- * App isn't shared with yet, read when it opens, to tick by face and
- * name, and the role to give them.
+ * Sharing, for its builders, on Grasp UI's Share access: who it is shared
+ * with at which role, a role to change at each row's end, and a picker of
+ * the organization's people, teams and projects to add several at once.
+ * Taking someone off asks first.
  */
-export const ShareApp = ({
+const ShareWith = ({
   app,
   members,
+  named,
 }: {
   app: App;
-  /** Whom it is shared with now, left out of the list; none while unknown. */
-  members: readonly AppMemberRef[];
+  members: readonly AppMember[];
+  named: (member: AppMember) => string;
 }) => {
   const { t } = useLingui();
   const router = useRouter();
   const words = useMemberWords();
-  const reading = useCoreAction();
-  const sharing = useCoreAction();
-  const [open, setOpen] = useState(false);
-  const [candidates, setCandidates] = useState<ShareCandidates>();
-  const [chosen, setChosen] = useState<string[]>([]);
-  const [role, setRole] = useState<AppRole>("user");
-  const [typed, setTyped] = useState("");
+  const { failure, run } = useCoreAction();
+  const offered = useAppRead(app.id, readCandidates);
+  const [removing, setRemoving] = useState<AppMember>();
   // Everyone in the organization, so someone is told apart from a
   // namesake it is shared with already, or its owner.
-  const apart = usePeopleApart(candidates?.people ?? []);
-  const shared = new Set(members.map(({ type, id }) => `${type}:${id}`));
-  const isOffered = (type: AppMemberRef["type"], id: string): boolean =>
-    !shared.has(`${type}:${id}`) && !(type === "person" && id === app.owner);
-  const offered =
-    candidates === undefined
-      ? undefined
-      : candidatesOf(
-          {
-            people: candidates.people.filter(({ id }) =>
-              isOffered("person", id)
-            ),
-            teams: candidates.teams.filter(({ id }) => isOffered("team", id)),
-            // Only the projects the person builds: sharing with one reaches
-            // everyone in it, which its builders decide.
-            projects: candidates.projects.filter(({ id }) =>
-              isOffered("project", id)
-            ),
-          },
-          apart,
-          words
-        );
-  const read = async (): Promise<void> => {
-    const listed = await reading.run(
-      async (session) => await session.apps.members.candidates(app.id)
-    );
-    if (listed !== undefined) {
-      setCandidates(listed);
-    }
-  };
-  const share = async (): Promise<void> => {
-    const picked = (offered ?? []).filter(({ key }) => chosen.includes(key));
-    let done = false;
-    await sharing.run(async (session) => {
-      await changeThenRefresh(
-        async () => {
-          for (const { ref } of picked) {
-            // oxlint-disable-next-line no-await-in-loop -- one share at a time, in the order ticked
-            await session.apps.members.add(app.id, { ...ref, role });
-          }
-          done = true;
-        },
-        async () => {
-          await router.invalidate({ sync: true });
-        }
-      );
-    });
-    if (!done) {
-      throw new Error("Not shared.");
-    }
-  };
-  const { name } = app;
-  const shown = (offered ?? []).filter((each) => found(each, typed));
-  return (
-    <>
-      <Button
-        icon={UserAdd}
-        onClick={() => {
-          setChosen([]);
-          setTyped("");
-          setOpen(true);
-          void read();
-        }}
-        size="sm"
-        variant="quiet"
-      >
-        {t`Share`}
-      </Button>
-      <Dialog onOpenChange={setOpen} open={open}>
-        <DialogContent closeLabel={t`Close`}>
-          <DialogTitle>{t`Share ${name}`}</DialogTitle>
-          <DialogBody>
-            <Field>
-              <FieldLabel>{t`Share as`}</FieldLabel>
-              <RoleSelect label={t`Share as`} onChange={setRole} role={role} />
-            </Field>
-            <Waiting failure={reading.failure} read={offered !== undefined} />
-            {offered !== undefined && offered.length === 0 ? (
-              <Text size="sm" tone="muted">
-                {t`Nobody else to share with.`}
-              </Text>
-            ) : null}
-            {offered !== undefined && offered.length > 0 ? (
-              <>
-                <InputGroup>
-                  <InputGroupText icon={Search} />
-                  <InputGroupInput
-                    aria-label={t`Find someone`}
-                    onValueChange={setTyped}
-                    placeholder={t`Find someone`}
-                    type="search"
-                    value={typed}
-                  />
-                </InputGroup>
-                <Candidates
-                  candidates={shown}
-                  chosen={chosen}
-                  onChosen={setChosen}
-                />
-              </>
-            ) : null}
-            {sharing.failure === undefined ? null : (
-              <Alert title={sharing.failure} variant="danger" />
-            )}
-          </DialogBody>
-          <DialogFooter>
-            <DialogAction>{t`Cancel`}</DialogAction>
-            <DialogAction
-              action={share}
-              disabled={chosen.length === 0}
-              failedLabel={t`Couldn't share`}
-              variant="ink"
-            >
-              {t`Share`}
-            </DialogAction>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+  const apart = usePeopleApart(
+    offered?.state === "ready" ? offered.data.people : []
   );
-};
-
-/** Someone the App is shared with: their role, and unsharing, for its builders. */
-const MemberRow = ({
-  app,
-  member,
-  editable,
-  apart,
-}: {
-  app: App;
-  member: AppMember;
-  editable: boolean;
-  /** Telling apart the people it is shared with of the same name. */
-  apart: PeopleApart;
-}) => {
-  const { t } = useLingui();
-  const router = useRouter();
-  const words = useMemberWords();
-  const { busy, failure, run } = useCoreAction();
-  const name = memberName(member, words, apart);
-  const ref: AppMemberRef = { type: member.type, id: member.id };
   const change = async (
     action: (session: Session) => Promise<unknown>
   ): Promise<boolean> => {
@@ -499,81 +231,110 @@ const MemberRow = ({
     });
     return done;
   };
+  const gone = removing === undefined ? "" : named(removing);
   return (
-    <Item size="sm">
-      <ItemMedia>
-        <Mark name={member.name ?? name} type={member.type} />
-      </ItemMedia>
-      <ItemContent>
-        <ItemTitle>{name}</ItemTitle>
-        {failure === undefined ? null : (
-          <ItemDescription>
-            <Alert quiet title={failure} tone="danger" />
-          </ItemDescription>
-        )}
-      </ItemContent>
-      <ItemActions>
-        {editable ? (
-          <>
-            <RoleSelect
-              disabled={busy}
-              label={t`Role of ${name}`}
-              onChange={(role) => {
-                void change(
-                  async (session) =>
-                    await session.apps.members.add(app.id, { ...ref, role })
-                );
+    <>
+      <ShareAccess
+        candidates={
+          offered?.state === "ready"
+            ? candidatesOf(offered.data, app.owner, apart, words)
+            : []
+        }
+        failedInviteLabel={t`Couldn't share`}
+        levels={roles.map((role) => ({ value: role, label: roleLabel(role) }))}
+        listLabel={t`Shared with`}
+        members={members.map((member) => ({
+          id: keyOf(member),
+          name: named(member),
+          kind: member.type === "team" ? "group" : member.type,
+          level: member.role,
+        }))}
+        onAdd={async (picked, level) => {
+          const role = roles.find((each) => each === level) ?? "user";
+          const refs = picked.ids.flatMap((id) => {
+            const ref = refOf(id);
+            return ref === undefined ? [] : [ref];
+          });
+          const done = await change(async (session) => {
+            for (const ref of refs) {
+              // oxlint-disable-next-line no-await-in-loop -- one share at a time, in the order picked
+              await session.apps.members.add(app.id, { ...ref, role });
+            }
+          });
+          if (!done) {
+            throw new Error("Not shared.");
+          }
+        }}
+        onLevelChange={(id, level) => {
+          const ref = refOf(id);
+          const role = roles.find((each) => each === level);
+          if (ref !== undefined && role !== undefined) {
+            void change(
+              async (session) =>
+                await session.apps.members.add(app.id, { ...ref, role })
+            );
+          }
+        }}
+        onRemove={(id) => {
+          setRemoving(members.find((member) => keyOf(member) === id));
+        }}
+      />
+      {offered !== undefined && offered.state !== "ready" ? (
+        <Alert
+          title={t`Who to share with couldn't be read. Try again in a moment.`}
+          variant="danger"
+        />
+      ) : null}
+      {failure === undefined ? null : (
+        <Alert title={failure} variant="danger" />
+      )}
+      <AlertDialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setRemoving(undefined);
+          }
+        }}
+        open={removing !== undefined}
+      >
+        <AlertDialogContent>
+          <AlertDialogTitle>{t`Stop sharing with ${gone}?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t`Their open pages of it stop within seconds, and they can no longer open it. You can share it with them again.`}
+          </AlertDialogDescription>
+          <AlertDialogFooter>
+            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+            <AlertDialogAction
+              action={async () => {
+                if (removing === undefined) {
+                  return;
+                }
+                const ref: AppMemberRef = {
+                  type: removing.type,
+                  id: removing.id,
+                };
+                const done = await change(async (session) => {
+                  await session.apps.members.remove(app.id, ref);
+                });
+                if (!done) {
+                  throw new Error("Still shared.");
+                }
               }}
-              role={member.role}
-            />
-            <AlertDialog>
-              <AlertDialogTrigger
-                aria-label={t`Stop sharing with ${name}`}
-                disabled={busy}
-                size="sm"
-                variant="ghost"
-              >
-                {t`Unshare`}
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogTitle>{t`Stop sharing with ${name}?`}</AlertDialogTitle>
-                <AlertDialogDescription>
-                  {t`Their open pages of it stop within seconds, and they can no longer open it. You can share it with them again.`}
-                </AlertDialogDescription>
-                <AlertDialogFooter>
-                  <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
-                  <AlertDialogAction
-                    action={async () => {
-                      const done = await change(async (session) => {
-                        await session.apps.members.remove(app.id, ref);
-                      });
-                      if (!done) {
-                        throw new Error("Still shared.");
-                      }
-                    }}
-                    failedLabel={t`Couldn't stop sharing`}
-                    variant="danger"
-                  >
-                    {t`Stop sharing`}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </>
-        ) : (
-          <Text element="span" size="sm" tone="muted">
-            {roleLabel(member.role)}
-          </Text>
-        )}
-      </ItemActions>
-    </Item>
+              failedLabel={t`Couldn't stop sharing`}
+              variant="danger"
+            >
+              {t`Stop sharing`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 };
 
 /**
  * Who opens the App: its owner and the admins, who build it, and the
  * people, teams and projects it is shared with, each as a user or a
- * builder.
+ * builder. Its builders share it here; everyone else only sees with whom.
  */
 export const AppMembers = ({
   app,
@@ -585,39 +346,40 @@ export const AppMembers = ({
   identity: Identity;
 }) => {
   const { t } = useLingui();
+  const words = useMemberWords();
   const editable = sharesApp(app, identity);
   const apart = usePeopleApart(
     members.flatMap(({ type, id, name }) =>
       type === "person" && name !== null ? [{ id, name }] : []
     )
   );
+  const named = (member: AppMember): string => memberName(member, words, apart);
   return (
     <div {...stylex.props(styles.section)}>
-      <div {...stylex.props(styles.head)}>
-        <Text size="sm" tone="muted">
-          {app.owner === identity.userId
-            ? t`Created by you. It opens for you, the admins, and whoever it is shared with.`
-            : t`It opens for the member who created it, the admins, and whoever it is shared with.`}
-        </Text>
-        {editable ? <ShareApp app={app} members={members} /> : null}
-      </div>
+      <Text size="sm" tone="muted">
+        {app.owner === identity.userId
+          ? t`Created by you. It opens for you, the admins, and whoever it is shared with.`
+          : t`It opens for the member who created it, the admins, and whoever it is shared with.`}
+      </Text>
+      {editable ? (
+        <ShareWith app={app} members={members} named={named} />
+      ) : null}
       {members.length === 0 ? (
         <Text size="sm" tone="muted">
           {t`It isn’t shared with anyone.`}
         </Text>
-      ) : (
+      ) : null}
+      {!editable && members.length > 0 ? (
         <ItemGroup aria-label={t`Shared with`} separated>
           {members.map((member) => (
             <MemberRow
-              apart={apart}
-              app={app}
-              editable={editable}
-              key={`${member.type}:${member.id}`}
+              key={keyOf(member)}
               member={member}
+              name={named(member)}
             />
           ))}
         </ItemGroup>
-      )}
+      ) : null}
     </div>
   );
 };

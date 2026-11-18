@@ -297,7 +297,7 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   // Confirming goes through core's checks again: the agent was never
   // granted this connection, so it's refused, and the write still waits.
   await confirm.click();
-  await expect(card).toContainText("Could not approve");
+  await expect(card).toContainText("Failed");
   await expect(
     waiting.getByText("This App or agent has no permission to do that.")
   ).toBeVisible();

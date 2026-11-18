@@ -67,11 +67,16 @@ const styles = stylex.create({
     flexDirection: "column",
     padding: {
       default: `${grasp.space12} ${grasp.space4} ${grasp.space4}`,
-      [WIDE]: `${grasp.space8} ${grasp.space4} ${grasp.space4}`,
+      [WIDE]: `${grasp.space12} ${grasp.space12} ${grasp.space8}`,
     },
   },
+  // On a wide pile the glass is narrower than the card, so the painting
+  // reads around it on every side.
   glass: {
     minWidth: 0,
+    width: "100%",
+    maxWidth: { default: null, [WIDE]: "44rem" },
+    alignSelf: "center",
     padding: grasp.space6,
   },
   inside: {

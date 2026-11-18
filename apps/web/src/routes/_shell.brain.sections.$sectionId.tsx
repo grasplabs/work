@@ -14,26 +14,14 @@ import {
 } from "../brain/brain-sections.ts";
 import type { BrainSection } from "../brain/brain-sections.ts";
 import { folderTree, groupLabel } from "../brain/brain.ts";
-import type { Group, Note } from "../brain/brain.ts";
+import type { Note } from "../brain/brain.ts";
 import { GoalsEditor } from "../brain/goals-editor.tsx";
 import { AppLogo } from "../connections/app-logo.tsx";
 import { NotFoundState } from "../frame/page-states.tsx";
 import { SectionTitle } from "../frame/page.tsx";
 import { Badge } from "../grasp/badge/index.ts";
 import { iconVars } from "../grasp/icons/icon.stylex.ts";
-import {
-  AppWindow,
-  Brain as BrainMark,
-  Company,
-  Doc,
-  Icon,
-  Note as NoteMark,
-  People,
-  Question,
-  Rocket,
-  Workflow,
-} from "../grasp/icons/index.ts";
-import type { IconData } from "../grasp/icons/index.ts";
+import { Brain as BrainMark, Icon } from "../grasp/icons/index.ts";
 import { Link as TextLink } from "../grasp/link/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
 import { Text } from "../grasp/text/index.ts";
@@ -42,21 +30,6 @@ import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 // One part of the brain on its own page, as the prototype has it
 // (`routes/brain/sections.$sectionId.tsx`). On the Vision page, admins
 // also change the board's goals (goals-editor.tsx).
-
-/**
- * Each part's mark, from the library's icons. The parts in brain-sections.ts
- * still carry Lucide's; these stand in for them here.
- */
-const groupIcon: Record<Group, IconData> = {
-  company: Company,
-  vision: Rocket,
-  teams: People,
-  candidates: Workflow,
-  tools: AppWindow,
-  gaps: Question,
-  sources: Doc,
-  statements: NoteMark,
-};
 
 const styles = stylex.create({
   scroll: { flex: 1, minHeight: 0, overflowY: "auto" },
@@ -110,7 +83,7 @@ const NoteBlock = ({
         <AppLogo name={note.title} size="lg" />
       ) : (
         <span {...stylex.props(styles.tile, tone[section.group].ink)}>
-          <Icon icon={groupIcon[section.group]} />
+          <Icon icon={section.icon} />
         </span>
       )}
     </Panel>
@@ -155,9 +128,7 @@ const SectionPage = () => {
     <div {...stylex.props(styles.scroll)}>
       <div {...stylex.props(blockStyles.column)}>
         <PageHeader
-          aside={
-            <Badge icon={groupIcon[section.group]}>{shownCount(folder)}</Badge>
-          }
+          aside={<Badge icon={section.icon}>{shownCount(folder)}</Badge>}
           breadcrumb={<BackButton />}
           description={i18n._(section.description)}
           title={i18n._(groupLabel[section.group])}

@@ -112,6 +112,7 @@ const styles = stylex.create({
     lineHeight: grasp.textSmLine,
     "::placeholder": { color: grasp.muted, opacity: 1 },
   },
+  // A pill: the plain full radius, never the squircle (a 50% radius on a wide box is an oval).
   chip: {
     [iconVars.size]: grasp.badgeIcon,
     display: "inline-flex",
@@ -121,7 +122,8 @@ const styles = stylex.create({
     height: grasp.controlXs,
     boxSizing: "border-box",
     paddingInlineStart: grasp.space1,
-    borderRadius: grasp.cornerCircle,
+    borderRadius: grasp.cornerPill,
+    cornerShape: "round",
     backgroundColor: grasp.soft,
     boxShadow: grasp.edge,
     color: grasp.ink,
@@ -179,7 +181,8 @@ const styles = stylex.create({
   },
   row: { paddingBlock: grasp.space1 },
   icon: { display: "flex", flexShrink: 0 },
-  content: { width: "var(--anchor-width)", minWidth: "16rem" },
+  // The list takes the box's width and edges, as Combobox's and Select's take their field's.
+  content: { width: "var(--anchor-width)", maxWidth: "var(--anchor-width)" },
 });
 
 const className = (...parts: (stylex.StyleXStyles | false)[]) =>
@@ -290,6 +293,8 @@ export const SharePicker = ({
   // Names of picks the host's results no longer hold (a search moved on): kept so a chip keeps its name.
   const [known, setKnown] = useState<Map<string, ShareCandidate>>(new Map());
   const [picked, setPicked] = useState<string[]>([]);
+  // The chips' box, the field the list hangs under: the text field inside it is narrower.
+  const [box, setBox] = useState<HTMLDivElement | null>(null);
   const nameOf = (value: string) =>
     value.startsWith(ADDRESS)
       ? value.slice(ADDRESS.length)
@@ -345,7 +350,7 @@ export const SharePicker = ({
           itemToLabel={nameOf}
           autoHighlight="always"
         >
-          <ComboboxChips {...stylex.props(styles.box)}>
+          <ComboboxChips ref={setBox} {...stylex.props(styles.box)}>
             <ComboboxValue>
               {() =>
                 picked.map((value) => {
@@ -383,6 +388,7 @@ export const SharePicker = ({
             />
           </ComboboxChips>
           <ComboboxContent
+            anchor={box}
             sideOffset={popup.gap}
             collisionPadding={popup.gutter}
             {...stylex.props(listStyles.popup, styles.content, scroll.bar)}

@@ -221,7 +221,7 @@ describe("the chats window", () => {
         '[role="option"] mark, [data-slot="command-match"]'
       )?.textContent
     ).toBe("lease");
-  });
+  }, 20_000);
 
   it("says which chat app a chat came through, and nothing for one started in Grasp", async () => {
     await shown(

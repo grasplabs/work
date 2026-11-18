@@ -42,6 +42,7 @@ import { drawerWords } from "../grasp/drawer/words.ts";
 import { dropdownMenuWords } from "../grasp/dropdown-menu/words.ts";
 import { emptyWords } from "../grasp/empty/words.ts";
 import { fileUploadWords, imageWellWords } from "../grasp/file-upload/words.ts";
+import { filterBuilderWords } from "../grasp/filter-builder/words.ts";
 import { inputWords } from "../grasp/input/words.ts";
 import { languageSwitchWords } from "../grasp/language-switch/words.ts";
 import { linkWords } from "../grasp/link/words.ts";
@@ -109,6 +110,7 @@ export const englishPartWords: GraspWordsCatalog = {
   dropdownMenu: dropdownMenuWords,
   empty: emptyWords,
   fileUpload: fileUploadWords,
+  filterBuilder: filterBuilderWords,
   imageWell: imageWellWords,
   input: inputWords,
   link: linkWords,
@@ -658,6 +660,20 @@ export const usePartWords = (): GraspWordsCatalog => {
       hidden: t`Show hidden levels`,
     },
     drawer: { resize: t`Resize` },
+    filterBuilder: {
+      field: t({ message: "Field", context: "a filter condition's part" }),
+      operator: t({
+        message: "Operator",
+        context: "a filter condition's part",
+      }),
+      value: t({ message: "Value", context: "a filter condition's part" }),
+      name: t`Filter condition`,
+      segments: {
+        field: t`Filter field`,
+        operator: t`Filter operator`,
+        value: t`Filter value`,
+      },
+    },
     datePicker: { choose: t`Choose date` },
     dateRangePicker: {
       presets: t`Presets`,

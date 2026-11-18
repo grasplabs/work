@@ -7,6 +7,8 @@ import {
   chatFileTypes,
 } from "@grasp-os/shared/chat";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
 
 import type { Session } from "../core.ts";
 import { formatBytes } from "../format.ts";
@@ -31,6 +33,7 @@ import {
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 
 // An agent's documents, on its page's Instructions part (agent-page.tsx):
 // files an admin gives it to answer from, such as a checklist or a policy
@@ -38,12 +41,21 @@ import { SectionCard } from "../grasp/section-card/index.ts";
 // keeps only that (agent-documents.ts); the agent is told its documents
 // by name and reads one when a question needs it. Whoever may ask the
 // agent may learn what a document says, and the card says so where one
-// is added (behind the card's info mark). A card of Grasp UI's Items, and
-// its File upload at the foot: each file is sent to core as it is dropped
-// or chosen, said on its own row, and once core keeps it, it is a row above.
+// is added (behind the card's info mark). A card of Grasp UI's Items, with
+// File upload's button in its head ("Add documents"): each file is sent to
+// core as it is chosen, said on its own row in the card's body under the
+// documents, and once core keeps it, it is a document's row.
 
 /** What a page change asks of core, then the page read again. */
 type Change = (action: (session: Session) => Promise<unknown>) => Promise<void>;
+
+const styles = stylex.create({
+  // Where File upload draws the files on their way to core: room around
+  // them in the flush card while there are any, none when there are none.
+  sending: {
+    padding: { default: 0, ":has(li)": grasp.space3 },
+  },
+});
 
 /** The kinds of file core takes, by their extensions. */
 const accepted = Object.keys(chatFileTypes).map((extension) => `.${extension}`);
@@ -67,6 +79,8 @@ export const AgentDocuments = ({
 }) => {
   const { t, i18n } = useLingui();
   const { name } = agent;
+  // The card's body, where File upload lists the files it is sending.
+  const [sending, setSending] = useState<HTMLDivElement | null>(null);
   const most = agentDocumentsMax;
   const kept = documents?.length ?? 0;
   const added = (at: string): string =>
@@ -104,23 +118,23 @@ export const AgentDocuments = ({
       flush
       // Behind the info mark: who may learn what a document says.
       info={t`Files ${name} reads when a question needs them. Anyone who may ask it can learn what they say.`}
-      footer={
+      actions={
         editing && kept < most ? (
-          // No label of its own: the card's title says what it adds to,
-          // and its button names it ("Choose files").
           <FileUpload
             accept={accepted}
             disabled={!can}
-            // Each file a new list: those core kept are rows above.
+            // Each file a new list: those core kept are documents' rows.
             key={kept}
+            listIn={sending}
             maxFiles={most - kept}
             maxSize={chatFileMaxBytes}
             multiple
+            // Said to a screen reader on the button; refusals say the rest.
             hint={t`PDF, Word, Excel, Markdown, text, CSV or JSON, up to 10 MB each. At most ${most} documents.`}
             upload={send}
+            variant="button"
             words={{
-              drop: t`Drop files here, or`,
-              choose: t`Choose files`,
+              choose: t`Add documents`,
               uploading: t`Adding`,
               done: t`Added`,
               failed: t`Not added`,
@@ -150,7 +164,7 @@ export const AgentDocuments = ({
           {t`The documents couldn't be loaded. Reload the page.`}
         </Empty>
       ) : null}
-      {/* Where documents can be added, the place to add them says enough. */}
+      {/* Where documents can be added, the button to add them says enough. */}
       {documents?.length === 0 && !editing ? (
         <Empty size="inline">{t`${name} has no documents.`}</Empty>
       ) : null}
@@ -211,6 +225,7 @@ export const AgentDocuments = ({
           })}
         </ItemGroup>
       )}
+      <div ref={setSending} {...stylex.props(styles.sending)} />
     </SectionCard>
   );
 };

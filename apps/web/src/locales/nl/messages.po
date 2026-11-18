@@ -2303,6 +2303,10 @@ msgstr "Een integratie toevoegen"
 msgid "Add as"
 msgstr "Toevoegen als"
 
+#: src/agents/agent-documents.tsx
+msgid "Add documents"
+msgstr "Documenten toevoegen"
+
 #: src/apps/field-editor.tsx
 msgid "Add field"
 msgstr "Veld toevoegen"
@@ -4361,7 +4365,6 @@ msgstr "Documenten kiezen"
 msgid "Choose every {one} shown"
 msgstr "Elke getoonde {one} kiezen"
 
-#: src/agents/agent-documents.tsx
 #: src/frame/part-words.tsx
 msgid "Choose files"
 msgstr "Bestanden kiezen"
@@ -4463,7 +4466,6 @@ msgstr "Kliffen"
 #: src/apps/app-history.tsx
 #: src/apps/app-own-link.tsx
 #: src/apps/app-reset.tsx
-#: src/apps/app-sharing.tsx
 #: src/apps/app-webhooks.tsx
 #: src/apps/app-workflows.tsx
 #: src/apps/blueprints.tsx
@@ -4753,7 +4755,6 @@ msgstr "Bevestigd door de directie"
 #: src/chat/plan-card.tsx
 #: src/connections/integration-inspector.tsx
 #: src/connections/integration-item.tsx
-#: src/connections/integration-row.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -4762,7 +4763,6 @@ msgstr "Koppelen"
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/integration-item.tsx
-#: src/connections/integration-row.tsx
 msgid "Connect {app}"
 msgstr "{app} koppelen"
 
@@ -4800,7 +4800,6 @@ msgctxt "apps that are connected"
 msgid "Connected"
 msgstr "Gekoppeld"
 
-#: src/connections/integration-row.tsx
 #: src/workflows/files-and-apps.tsx
 msgctxt "state of one app"
 msgid "Connected"
@@ -5121,10 +5120,6 @@ msgstr "Kon niet worden geopend"
 msgid "Could not bind"
 msgstr "Kon niet koppelen"
 
-#: src/chat/thread.tsx
-msgid "Could not copy"
-msgstr "Kon niet kopiëren"
-
 #: src/frame/part-words.tsx
 msgid "Could not copy the link"
 msgstr "Kon de link niet kopiëren"
@@ -5182,7 +5177,6 @@ msgstr "Kon niet versturen"
 msgid "Could not unbind"
 msgstr "Kon niet ontkoppelen"
 
-#: src/chat/chat-files.tsx
 #: src/frame/part-words.tsx
 msgid "Could not upload"
 msgstr "Kon niet uploaden"
@@ -6011,7 +6005,6 @@ msgstr "Schijf"
 msgid "Drop files here"
 msgstr "Zet bestanden hier neer"
 
-#: src/agents/agent-documents.tsx
 #: src/frame/part-words.tsx
 msgid "Drop files here, or"
 msgstr "Zet bestanden hier neer, of"
@@ -6648,6 +6641,11 @@ msgstr "Minste tekens"
 msgid "Field"
 msgstr "Veld"
 
+#: src/frame/part-words.tsx
+msgctxt "a filter condition's part"
+msgid "Field"
+msgstr ""
+
 #: src/apps/app-data.tsx
 msgid "Field for {column}"
 msgstr "Veld voor {column}"
@@ -6729,6 +6727,22 @@ msgstr "Filteren"
 msgid "Filter {name}"
 msgstr "{name} filteren"
 
+#: src/frame/part-words.tsx
+msgid "Filter condition"
+msgstr ""
+
+#: src/frame/part-words.tsx
+msgid "Filter field"
+msgstr ""
+
+#: src/frame/part-words.tsx
+msgid "Filter operator"
+msgstr ""
+
+#: src/frame/part-words.tsx
+msgid "Filter value"
+msgstr ""
+
 #: src/activity/audit-log.tsx
 msgid "Filters"
 msgstr "Filters"
@@ -6761,10 +6775,6 @@ msgstr "Mensen zoeken"
 #: src/activity/audit-event.tsx
 msgid "Find similar"
 msgstr "Vergelijkbare"
-
-#: src/apps/app-sharing.tsx
-msgid "Find someone"
-msgstr "Zoek iemand"
 
 #: src/settings/where-stephen.tsx
 msgid "Find Stephen under Apps in your Slack workspace."
@@ -8419,10 +8429,6 @@ msgstr "Gedaan"
 msgid "It's gone, or you can't read it."
 msgstr "Ze bestaat niet meer, of je mag ze niet lezen."
 
-#: src/knowledge/uploads.tsx
-msgid "It's past the first {pageMaxLimit} files listed: open it from here."
-msgstr "Het staat na de eerste {pageMaxLimit} getoonde bestanden: open het van hier."
-
 #: src/frame/part-words.tsx
 msgctxt "pagination, one"
 msgid "item"
@@ -8691,7 +8697,7 @@ msgstr "Sleutel"
 
 #: src/export/figure-tiles.tsx
 msgid "Key figures"
-msgstr ""
+msgstr "Kerncijfers"
 
 #: src/apps/resource-bindings.tsx
 msgid "Kind"
@@ -9093,7 +9099,6 @@ msgid "Loading the page"
 msgstr "Pagina laden"
 
 #: src/activity/audit-log.tsx
-#: src/apps/app-sharing.tsx
 #: src/apps/app-workspace.tsx
 #: src/apps/publish.tsx
 #: src/frame/page-states.tsx
@@ -9270,7 +9275,6 @@ msgid "Makes {table} sensitive: its history keeps no values, and every read is r
 msgstr "Maakt {table} gevoelig: de geschiedenis bewaart geen waarden, en elke keer lezen wordt vastgelegd."
 
 #: src/connections/integration-item.tsx
-#: src/connections/integration-row.tsx
 #: src/settings/ai-providers.tsx
 msgid "Manage"
 msgstr "Beheren"
@@ -9278,14 +9282,6 @@ msgstr "Beheren"
 #: src/connections/integration-item.tsx
 msgid "Manage {app}"
 msgstr "{app} beheren"
-
-#: src/connections/integration-row.tsx
-msgid "Manage {app}, connected for everyone"
-msgstr "{app} beheren, gekoppeld voor iedereen"
-
-#: src/connections/integration-row.tsx
-msgid "Manage {app}, connected for you"
-msgstr "{app} beheren, gekoppeld voor jou"
 
 #: src/settings/ai-providers.tsx
 msgid "Manage {label}"
@@ -9742,7 +9738,6 @@ msgid "Needs its own sign-in app"
 msgstr "Heeft een eigen aanmeldapp nodig"
 
 #: src/connections/integration-item.tsx
-#: src/connections/integration-row.tsx
 msgid "Needs signing in again"
 msgstr "Opnieuw aanmelden nodig"
 
@@ -9765,10 +9760,6 @@ msgstr "Heeft je nodig"
 msgctxt "tab listing the workflows that need a person"
 msgid "Needs you"
 msgstr "Heeft je nodig"
-
-#: src/connections/integration-row.tsx
-msgid "Needs your own sign-in app"
-msgstr "Eigen inlog-app nodig"
 
 #: src/dashboard/widget-board.tsx
 #: src/workflows/workflows-table.tsx
@@ -10290,7 +10281,6 @@ msgstr "Niemand wijzigt de records in {table}, ook Sam niet."
 msgid "Nobody else to add."
 msgstr "Er is niemand anders om toe te voegen."
 
-#: src/apps/app-sharing.tsx
 #: src/apps/publish.tsx
 msgid "Nobody else to share with."
 msgstr "Er is niemand anders om mee te delen."
@@ -10433,6 +10423,7 @@ msgid "Not connected"
 msgstr "Niet verbonden"
 
 #: src/activity/audit-event.tsx
+#: src/chat/thread.tsx
 #: src/frame/page-failed.tsx
 #: src/frame/part-words.tsx
 #: src/settings/invitations.tsx
@@ -10521,7 +10512,6 @@ msgid "Not now"
 msgstr "Nu niet"
 
 #: src/connections/integration-item.tsx
-#: src/connections/integration-row.tsx
 #: src/connections/integration-tile.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Not offered"
@@ -10597,6 +10587,7 @@ msgstr "Niet opgeslagen"
 msgid "Not saved yet. Trying again."
 msgstr "Nog niet opgeslagen. Nieuwe poging volgt."
 
+#: src/chat/chat-files.tsx
 #: src/inbox/item-detail.tsx
 #: src/settings/composer-settings.tsx
 #: src/settings/invitations.tsx
@@ -11434,6 +11425,11 @@ msgstr "Opent de app voor de leden van de workspace die hem mogen gebruiken, zol
 #: src/apps/resource-bindings.tsx
 msgid "Operations"
 msgstr "Bewerkingen"
+
+#: src/frame/part-words.tsx
+msgctxt "a filter condition's part"
+msgid "Operator"
+msgstr ""
 
 #: src/workflows/business-process.tsx
 msgctxt "business process"
@@ -12455,6 +12451,10 @@ msgstr "Klaar"
 msgid "Ready to send"
 msgstr "Klaar om te versturen"
 
+#: src/knowledge/uploads.tsx
+msgid "Ready. It's past the first {pageMaxLimit} files listed: open it from here."
+msgstr "Klaar. Het staat voorbij de eerste {pageMaxLimit} bestanden in de lijst: open het hier."
+
 #: src/workflows/item-test.tsx
 msgid "Real run"
 msgstr "Echte run"
@@ -13267,10 +13267,6 @@ msgstr "Rol"
 #: src/projects/project-people.tsx
 msgid "Role in the project"
 msgstr "Rol in het project"
-
-#: src/apps/app-sharing.tsx
-msgid "Role of {name}"
-msgstr "Rol van {name}"
 
 #: src/workflows/share-workflow.tsx
 msgid "Role of {shown}"
@@ -14109,7 +14105,6 @@ msgstr "Geregeld: {choice}"
 msgid "Setup"
 msgstr "Instellen"
 
-#: src/apps/app-sharing.tsx
 #: src/apps/publish.tsx
 #: src/workflows/share-workflow.tsx
 msgid "Share"
@@ -14125,15 +14120,10 @@ msgctxt "share a workflow with someone"
 msgid "Share"
 msgstr "Delen"
 
-#: src/apps/app-sharing.tsx
 #: src/apps/publish.tsx
 #: src/workflows/share-workflow.tsx
 msgid "Share {name}"
 msgstr "{name} delen"
-
-#: src/apps/app-sharing.tsx
-msgid "Share as"
-msgstr "Delen als"
 
 #: src/apps/publish.tsx
 msgid "Share changes"
@@ -14155,7 +14145,6 @@ msgstr "Delen zodra het klaar is"
 msgid "Share this record"
 msgstr "Deze herinnering delen"
 
-#: src/apps/app-sharing.tsx
 #: src/brain/share-record.tsx
 #: src/workflows/share-workflow.tsx
 msgid "Share with"
@@ -14388,7 +14377,6 @@ msgstr "Aanmelden"
 #: src/connections/connection-list.tsx
 #: src/connections/integration-inspector.tsx
 #: src/connections/integration-item.tsx
-#: src/connections/integration-row.tsx
 #: src/connections/integration-tile.tsx
 #: src/connections/integrations-banner.tsx
 #: src/dashboard/to-do.tsx
@@ -14407,7 +14395,6 @@ msgstr "Aanmelden bij {app}"
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/integration-item.tsx
-#: src/connections/integration-row.tsx
 #: src/dashboard/to-do.tsx
 #: src/inbox/items.ts
 msgid "Sign in to {app} again"
@@ -15010,12 +14997,8 @@ msgid "Stop sharing"
 msgstr "Niet meer delen"
 
 #: src/apps/app-sharing.tsx
-msgid "Stop sharing with {name}"
-msgstr "Niet meer delen met {name}"
-
-#: src/apps/app-sharing.tsx
-msgid "Stop sharing with {name}?"
-msgstr "Niet meer delen met {name}?"
+msgid "Stop sharing with {gone}?"
+msgstr ""
 
 #: src/workflows/share-workflow.tsx
 msgid "Stop sharing with {shown}"
@@ -17113,7 +17096,6 @@ msgstr "Onleesbare gebeurtenis"
 msgid "Unsaved changes"
 msgstr "Niet-opgeslagen wijzigingen"
 
-#: src/apps/app-sharing.tsx
 #: src/workflows/share-workflow.tsx
 msgid "Unshare"
 msgstr "Niet meer delen"
@@ -17257,6 +17239,11 @@ msgstr "UTC"
 #: src/workflows/kept-state.tsx
 msgid "Value"
 msgstr "Waarde"
+
+#: src/frame/part-words.tsx
+msgctxt "a filter condition's part"
+msgid "Value"
+msgstr ""
 
 #: src/apps/data-model-changes.tsx
 msgid "Value for {name}"
@@ -17468,6 +17455,11 @@ msgstr "Wacht"
 
 #: src/dashboard/custom-widget.tsx
 msgctxt "a workflow's state"
+msgid "Waiting"
+msgstr "Wacht"
+
+#: src/dashboard/widget-board.tsx
+msgctxt "workflows waiting on a person"
 msgid "Waiting"
 msgstr "Wacht"
 
@@ -18314,6 +18306,10 @@ msgstr "Wie welke rijen ziet"
 #: src/inbox/interviews-item.tsx
 msgid "Who talked"
 msgstr "Wie er sprak"
+
+#: src/apps/app-sharing.tsx
+msgid "Who to share with couldn't be read. Try again in a moment."
+msgstr ""
 
 #: src/connections/connect-dialog.tsx
 msgid "Who uses it"

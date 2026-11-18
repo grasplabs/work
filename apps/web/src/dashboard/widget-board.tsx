@@ -159,6 +159,21 @@ const stateExplained: Partial<Record<WorkflowState, MessageDescriptor>> = {
   waiting: msg`A run of it waits for a person to decide.`,
 };
 
+/**
+ * Each state's name on the small card's four columns, short enough for
+ * one line, so the four figures under them share a line. The dots' list
+ * keeps the full name for a screen reader.
+ */
+const stateShortNames: Record<WorkflowState, MessageDescriptor> = {
+  attention: msg`Needs attention`,
+  waiting: msg({
+    message: "Waiting",
+    context: "workflows waiting on a person",
+  }),
+  ran: msg`Ran`,
+  notRun: msg`Not run yet`,
+};
+
 /** Each state's name. */
 const stateNames: Record<WorkflowState, MessageDescriptor> = {
   attention: msg`Needs attention`,
@@ -400,7 +415,11 @@ const WorkflowTabsView = ({ rows }: { rows: readonly WorkflowSummary[] }) => {
               </ul>
               <span {...stylex.props(styles.count)}>
                 <Separator decorative />
-                <Stat bare title={name} value={String(here.length)} />
+                <Stat
+                  bare
+                  title={i18n._(stateShortNames[state])}
+                  value={String(here.length)}
+                />
               </span>
             </li>
           );

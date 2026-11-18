@@ -8,11 +8,11 @@ import {
   InlineCitationSource,
   InlineCitationText,
 } from "@grasp-os/ui/components/inline-citation";
-import { toast } from "@grasp-os/ui/components/toast";
 import { useLingui } from "@lingui/react/macro";
 import { useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
+import { toast } from "../grasp/toast/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 
@@ -42,8 +42,7 @@ export const CitedNote = ({
       async (session) => await session.knowledge.getDocument(documentId)
     );
     if (found.state !== "ready") {
-      toast.add({
-        type: "error",
+      toast.error({
         title: t`This note can't be opened`,
         description:
           found.state === "offline"

@@ -808,6 +808,7 @@ const AddTrigger = ({
                     <Field>
                       <FieldLabel>{t`When, as a cron expression`}</FieldLabel>
                       <Input
+                        mono
                         onValueChange={setCron}
                         placeholder="0 9 * * 1-5"
                         spellCheck={false}
@@ -828,6 +829,7 @@ const AddTrigger = ({
                       {t`The input each run starts with, as JSON`}
                     </FieldLabel>
                     <Textarea
+                      mono
                       onValueChange={setInput}
                       spellCheck={false}
                       value={input}
@@ -858,6 +860,7 @@ const AddTrigger = ({
                       {t`The run's input fields, each from the message as a JSON Pointer, as JSON`}
                     </FieldLabel>
                     <Textarea
+                      mono
                       onValueChange={setMapping}
                       placeholder='{ "subject": "/subject", "from": "/from/address", "attachments": "/attachments" }'
                       spellCheck={false}
@@ -920,6 +923,7 @@ const AddTrigger = ({
                       {t`The run's input fields, each from the event as a JSON Pointer, as JSON`}
                     </FieldLabel>
                     <Textarea
+                      mono
                       onValueChange={setMapping}
                       placeholder='{ "subject": "/payload/subject" }'
                       spellCheck={false}

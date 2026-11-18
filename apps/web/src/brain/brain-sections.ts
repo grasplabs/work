@@ -1,15 +1,15 @@
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
-import {
-  AppWindowIcon,
-  CircleDashedIcon,
-  LibraryIcon,
-  TargetIcon,
-  UsersIcon,
-  WorkflowIcon,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 
+import {
+  AppWindow,
+  Doc,
+  People,
+  Question,
+  Rocket,
+  Workflow,
+} from "../grasp/icons/index.ts";
+import type { IconData } from "../grasp/icons/index.ts";
 import type { Folder, Group, Note } from "./brain.ts";
 
 // The parts of the brain, as the prototype has them
@@ -22,7 +22,7 @@ export interface BrainSection {
   /** Its folder's id in `Note.path`, joined with "/". */
   key: string;
   group: Group;
-  icon: LucideIcon;
+  icon: IconData;
   description: MessageDescriptor;
 }
 
@@ -31,42 +31,42 @@ export const brainSections: BrainSection[] = [
     slug: "vision",
     key: "1 Vision",
     group: "vision",
-    icon: TargetIcon,
+    icon: Rocket,
     description: msg`What the board wants from the sprint: its goals and the rules of the road.`,
   },
   {
     slug: "teams",
     key: "2 Inventory/Teams",
     group: "teams",
-    icon: UsersIcon,
+    icon: People,
     description: msg`Every team Grasp spoke to: who they are, how they work and what slows them down.`,
   },
   {
     slug: "workflows",
     key: "2 Inventory/Candidates",
     group: "candidates",
-    icon: WorkflowIcon,
+    icon: Workflow,
     description: msg`Time-consuming work that could be automated, and what was said about each.`,
   },
   {
     slug: "tools",
     key: "2 Inventory/Tools",
     group: "tools",
-    icon: AppWindowIcon,
+    icon: AppWindow,
     description: msg`The apps teams named, and the ones seen in use that nobody mentioned.`,
   },
   {
     slug: "gaps",
     key: "2 Inventory/Gaps",
     group: "gaps",
-    icon: CircleDashedIcon,
+    icon: Question,
     description: msg`What Grasp does not know yet, and who can answer it.`,
   },
   {
     slug: "sources",
     key: "Sources",
     group: "sources",
-    icon: LibraryIcon,
+    icon: Doc,
     description: msg`Where everything came from: conversations, documents, Pulse and connections.`,
   },
 ];

@@ -14,8 +14,8 @@ import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useId, useRef, useState } from "react";
-import type { ReactNode } from "react";
 
 import {
   formatDate,
@@ -57,6 +57,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
+import { KeyValueList } from "../grasp/key-value/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   Select,
@@ -67,6 +68,7 @@ import {
 import { Text } from "../grasp/text/index.ts";
 import { Textarea } from "../grasp/textarea/index.ts";
 import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { httpConnectionsOf } from "./integrations.ts";
 import type { HttpListed } from "./integrations.ts";
 import { useChange } from "./use-change.ts";
@@ -448,18 +450,16 @@ const HttpRow = ({
   );
 };
 
-const Detail = ({ term, children }: { term: string; children: ReactNode }) => (
-  <div className="flex flex-col gap-0.5 sm:flex-row sm:gap-8">
-    <dt className="text-muted-foreground flex-none sm:w-32">{term}</dt>
-    <dd className="min-w-0 break-words">{children}</dd>
-  </div>
-);
+const styles = stylex.create({
+  item: { minWidth: 0, listStyle: "none" },
+  mono: { fontFamily: grasp.fontMono },
+});
 
 /** One HTTP connection: where it reaches, what it allows, and, for admins, revoking it. */
 export const HttpConnectionItem = ({
   listed: { connection, http },
   manages,
-  heading: Heading = "h3",
+  heading = "h3",
 }: {
   listed: HttpListed;
   manages: boolean;
@@ -470,42 +470,52 @@ export const HttpConnectionItem = ({
   const ranOut = connection.status === "needs_reauth";
   const header = http.credentialHeader;
   return (
-    <li className="bg-card flex flex-col gap-4 rounded-xl border p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Heading className="font-medium">{http.name}</Heading>
-        {manages ? (
-          <Revoke
-            createdAt={connection.createdAt}
-            id={connection.id}
-            name={http.name}
-          />
+    <li {...stylex.props(styles.item)}>
+      <SectionCard
+        actions={
+          manages ? (
+            <Revoke
+              createdAt={connection.createdAt}
+              id={connection.id}
+              name={http.name}
+            />
+          ) : undefined
+        }
+        density="compact"
+        headingLevel={heading === "h4" ? 4 : 3}
+        title={http.name}
+      >
+        <KeyValueList
+          items={[
+            { key: t`Origin`, value: http.origin, mono: true },
+            { key: t`Methods`, value: formatList(http.methods), mono: true },
+            {
+              key: t`Paths`,
+              value: formatList(http.pathPrefixes),
+              mono: true,
+            },
+            {
+              key: t`Credential`,
+              value: (
+                <Trans>
+                  Sent in <span {...stylex.props(styles.mono)}>{header}</span>,
+                  never shown
+                </Trans>
+              ),
+            },
+            { key: t`Added on`, value: formatDate(connection.createdAt) },
+          ]}
+          variant="inline"
+        />
+        {ranOut ? (
+          <Text size="sm" tone="muted">
+            <Trans>
+              It doesn&apos;t work now. An admin can revoke it and add it again
+              with a new credential.
+            </Trans>
+          </Text>
         ) : null}
-      </div>
-      <dl className="flex flex-col gap-3">
-        <Detail term={t`Origin`}>
-          <span className="font-mono">{http.origin}</span>
-        </Detail>
-        <Detail term={t`Methods`}>
-          <span className="font-mono">{formatList(http.methods)}</span>
-        </Detail>
-        <Detail term={t`Paths`}>
-          <span className="font-mono">{formatList(http.pathPrefixes)}</span>
-        </Detail>
-        <Detail term={t`Credential`}>
-          <Trans>
-            Sent in <span className="font-mono">{header}</span>, never shown
-          </Trans>
-        </Detail>
-        <Detail term={t`Added on`}>{formatDate(connection.createdAt)}</Detail>
-      </dl>
-      {ranOut ? (
-        <p className="text-muted-foreground">
-          <Trans>
-            It doesn&apos;t work now. An admin can revoke it and add it again
-            with a new credential.
-          </Trans>
-        </p>
-      ) : null}
+      </SectionCard>
     </li>
   );
 };

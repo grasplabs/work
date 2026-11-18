@@ -11,39 +11,29 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Link, useRouter } from "@tanstack/react-router";
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import { useEffect, useId, useRef, useState } from "react";
 
 import { readWithin } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { isTransient, wait } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
-import { Button } from "../grasp/button/index.ts";
 import { FileUpload } from "../grasp/file-upload/index.ts";
+import type { FileUploadStatus } from "../grasp/file-upload/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
-import { Download, Failed, File as FileMark } from "../grasp/icons/index.ts";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "../grasp/item/index.ts";
+import { Download } from "../grasp/icons/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCore } from "../use-core.ts";
 
-// Uploading a file into a collection, and following it: the library's file
-// upload sends each file as it is dropped or chosen, and says how the
-// sending went; core answers at
-// once with the upload `pending`, and extracts its text in the background,
+// Uploading a file into a collection, and following it, in the library's
+// file upload: it sends each file as it is dropped or chosen, and its row
+// then says what core does with it. Core answers at once with the upload `pending`, and extracts its text in the background,
 // so the page asks again, less often the longer it takes, until it's
 // ready (a version of the document at the file's name, with a link to its
 // original) or failed, with core's reason. Only the person who uploaded a
 // file can follow it, and only while this page stays open: leaving it
-// stops the asking.
+// stops the asking. Once ready, the row opens its document and downloads
+// its original.
 
 /** How long to wait before asking again, each time; the last one repeats. */
 const followDelaysMs = [500, 1000, 2000, 3000] as const;
@@ -61,6 +51,8 @@ interface Followed {
   upload: Upload;
   /** Why the page stopped following it before it settled. */
   problem?: string;
+  /** Core refused to say: the problem is a failure, not a wait. */
+  refused?: boolean;
 }
 
 /**
@@ -97,7 +89,7 @@ const follow = async (
       onChange(current);
     } catch (error) {
       if (!isTransient(error)) {
-        return { upload: current, problem: failureText(error) };
+        return { upload: current, problem: failureText(error), refused: true };
       }
     }
   }
@@ -118,11 +110,11 @@ const statusLabels: Readonly<Record<UploadStatus, MessageDescriptor>> = {
   failed: msg`Failed`,
 };
 
-/** Why a file didn't reach core, in core's words. */
-interface Refused {
-  file: File;
-  problem: string;
-}
+/**
+ * A sent file, as this page knows it: core's upload, followed until it
+ * settles, or why it never reached core.
+ */
+type Tracked = Followed | { problem: string };
 
 /**
  * Sends `file` into the collection: the upload core started, or why it
@@ -149,95 +141,68 @@ const sendFile = async (
   }
 };
 
+/** The words a file's row says once it is sent. */
+interface RowWords {
+  /** A ready document past the first page of the file list. */
+  past: string;
+}
+
+/**
+ * What the row of a sent file says: core's reason when it never got
+ * there, the following's problem, else the upload's status (with core's
+ * reason when its reading failed). `listed` holds the documents the file
+ * list shows.
+ */
+const statusOf = (
+  tracked: Tracked | undefined,
+  listed: ReadonlySet<string>,
+  words: RowWords
+): FileUploadStatus | undefined => {
+  if (tracked === undefined) {
+    return undefined;
+  }
+  if (!("upload" in tracked)) {
+    return { line: tracked.problem, tone: "danger" };
+  }
+  const { upload, problem, refused } = tracked;
+  if (problem !== undefined) {
+    return { line: problem, tone: refused === true ? "danger" : "neutral" };
+  }
+  const status = i18n._(statusLabels[upload.status]);
+  if (upload.status === "failed") {
+    const line =
+      upload.failure === null ? status : `${status}: ${upload.failure.message}`;
+    return { line, tone: "danger" };
+  }
+  if (upload.status !== "ready") {
+    return { line: status, working: true };
+  }
+  // The file list shows its first page only: a name that sorts past it
+  // opens from here.
+  const past = upload.documentId !== null && !listed.has(upload.documentId);
+  return { line: past ? words.past : status };
+};
+
+/** The document a sent file made, once it's ready; null before. */
+const readyOf = (
+  tracked: Tracked | undefined
+): { upload: Upload; documentId: string } | null => {
+  const upload =
+    tracked !== undefined && "upload" in tracked ? tracked.upload : undefined;
+  if (upload?.status !== "ready" || upload.documentId === null) {
+    return null;
+  }
+  return { upload, documentId: upload.documentId };
+};
+
 const styles = stylex.create({
   section: { display: "flex", flexDirection: "column", gap: grasp.space2 },
 });
 
 /**
- * One upload: its status, and once ready, links to its document and its
- * original. `listed` holds the documents the file list shows.
- */
-const UploadRow = ({
-  upload,
-  problem,
-  listed,
-}: Followed & { listed: ReadonlySet<string> }) => {
-  const { t } = useLingui();
-  const { name, documentId } = upload;
-  const status = i18n._(statusLabels[upload.status]);
-  // The document it made, once it's ready.
-  const opens = upload.status === "ready" ? documentId : null;
-  // The file list shows its first page only: a name that sorts past it
-  // opens from here.
-  const past = opens !== null && !listed.has(opens);
-  return (
-    <Item size="sm" variant="outline">
-      <ItemMedia icon={upload.status === "failed" ? Failed : FileMark} />
-      <ItemContent>
-        <ItemTitle>{name}</ItemTitle>
-        <ItemDescription>
-          <output>
-            {upload.failure === null
-              ? status
-              : `${status}: ${upload.failure.message}`}
-          </output>
-        </ItemDescription>
-        {past ? (
-          <ItemDescription>
-            {t`It's past the first ${pageMaxLimit} files listed: open it from here.`}
-          </ItemDescription>
-        ) : null}
-        <ErrorText>{problem}</ErrorText>
-      </ItemContent>
-      {opens === null ? null : (
-        <ItemActions>
-          <Button
-            render={
-              <Link
-                params={{ collection: upload.collectionId }}
-                search={{ doc: opens }}
-                to="/knowledge/$collection"
-              />
-            }
-            size="sm"
-            variant="ghost"
-          >
-            {t`Open ${name}`}
-          </Button>
-          {/* Core serves it as an attachment only, to those who may read it. */}
-          <Button
-            aria-label={t`Download ${name}`}
-            icon={Download}
-            render={
-              <a
-                aria-label={t`Download ${name}`}
-                download
-                href={uploadOriginalPath(encodeURIComponent(upload.id))}
-              />
-            }
-            size="sm"
-            variant="ghost"
-          />
-        </ItemActions>
-      )}
-    </Item>
-  );
-};
-
-/** A file that didn't reach core: its name, and core's reason. */
-const RefusedRow = ({ file, problem }: Refused) => (
-  <Item size="sm" variant="outline">
-    <ItemMedia icon={Failed} />
-    <ItemContent>
-      <ItemTitle>{file.name}</ItemTitle>
-      <ErrorText>{problem}</ErrorText>
-    </ItemContent>
-  </Item>
-);
-
-/**
- * Uploading files into the collection `collectionId`, and their status;
- * `listed` holds the documents the file list shows.
+ * Uploading files into the collection `collectionId`, and their status,
+ * in the one list of the file upload; `listed` holds the documents the
+ * file list shows.
  */
 export const Uploads = ({
   collectionId,
@@ -247,10 +212,10 @@ export const Uploads = ({
   listed: ReadonlySet<string>;
 }) => {
   const router = useRouter();
+  const navigate = useNavigate();
   const headingId = useId();
   const core = useCore();
-  const [refused, setRefused] = useState<Refused[]>([]);
-  const [followed, setFollowed] = useState<Followed[]>([]);
+  const [tracked, setTracked] = useState<ReadonlyMap<File, Tracked>>(new Map());
   const { t } = useLingui();
   // Whether the page is still open: nobody sees the status once it isn't.
   const open = useRef(true);
@@ -260,44 +225,40 @@ export const Uploads = ({
       open.current = false;
     };
   }, []);
-  const update = ({ upload, problem }: Followed): void => {
-    setFollowed((all) =>
-      all.map((entry) =>
-        entry.upload.id === upload.id ? { upload, problem } : entry
-      )
-    );
+  const set = (file: File, entry: Tracked): void => {
+    setTracked((all) => new Map(all).set(file, entry));
   };
-  const track = async (started: Upload): Promise<void> => {
+  const track = async (file: File, started: Upload): Promise<void> => {
     const end = await follow(
       core,
       started,
       (news) => {
-        update({ upload: news });
+        set(file, { upload: news });
       },
       () => open.current
     );
     if (!open.current) {
       return;
     }
-    update(end);
+    set(file, end);
     if (end.upload.status === "ready") {
       // The file list shows the new document, or its new version.
       await router.invalidate({ sync: true });
     }
   };
-  // Sends one file; File upload shows it on its way, and Try again sends it
-  // again. A refusal throws, so its row says it failed, and core's reason
-  // shows below. Several can be on their way at once.
+  // Sends one file, File upload showing it on its way; several can be on
+  // their way at once. Core's refusal shows on its row, in core's words.
   const send = async (file: File): Promise<void> => {
-    setRefused((all) => all.filter((entry) => entry.file !== file));
     const sent = await sendFile(core, collectionId, file);
     if ("problem" in sent) {
-      const { problem } = sent;
-      setRefused((all) => [{ file, problem }, ...all]);
-      throw new Error(problem);
+      set(file, { problem: sent.problem });
+      return;
     }
-    setFollowed((all) => [{ upload: sent.started }, ...all]);
-    void track(sent.started);
+    set(file, { upload: sent.started });
+    void track(file, sent.started);
+  };
+  const words: RowWords = {
+    past: t`Ready. It's past the first ${pageMaxLimit} files listed: open it from here.`,
   };
   const accept = Object.keys(uploadTypes).map((extension) => `.${extension}`);
   return (
@@ -307,28 +268,41 @@ export const Uploads = ({
       </Heading>
       <FileUpload
         accept={accept}
+        actions={(file) => {
+          const ready = readyOf(tracked.get(file));
+          if (ready === null) {
+            return [];
+          }
+          const { upload, documentId } = ready;
+          const { name } = upload;
+          return [
+            {
+              label: t`Open ${name}`,
+              onAction: () => {
+                void navigate({
+                  to: "/knowledge/$collection",
+                  params: { collection: upload.collectionId },
+                  search: { doc: documentId },
+                });
+              },
+            },
+            // Core serves it as an attachment only, to those who may read it.
+            {
+              label: t`Download ${name}`,
+              icon: Download,
+              href: uploadOriginalPath(encodeURIComponent(upload.id)),
+            },
+          ];
+        }}
         hint={t`Upload a PDF, Word or Excel file, or captions (.vtt)`}
         maxSize={uploadMaxBytes}
         multiple
+        status={(file) => statusOf(tracked.get(file), listed, words)}
         upload={send}
       />
       <Text size="xs" tone="muted">
         {t`Don’t upload interview recordings or their captions: interviews go through the interview flow.`}
       </Text>
-      {refused.length === 0 && followed.length === 0 ? null : (
-        <ItemGroup>
-          {refused.map((entry) => (
-            <RefusedRow
-              file={entry.file}
-              key={`${entry.file.name}-${entry.file.lastModified}`}
-              problem={entry.problem}
-            />
-          ))}
-          {followed.map((entry) => (
-            <UploadRow key={entry.upload.id} listed={listed} {...entry} />
-          ))}
-        </ItemGroup>
-      )}
     </section>
   );
 };

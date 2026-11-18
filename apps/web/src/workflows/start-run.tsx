@@ -326,6 +326,7 @@ const StartDialog = ({
               <Field>
                 <FieldLabel>{t`Input, as JSON`}</FieldLabel>
                 <Textarea
+                  mono
                   onValueChange={setJson}
                   spellCheck={false}
                   value={json}

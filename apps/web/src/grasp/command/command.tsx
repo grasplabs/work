@@ -73,6 +73,12 @@ export interface CommandEntry {
   label: string;
   /** An icon before the words. Import it from the icons entry (`@/components/grasp/icons`). */
   icon?: IconData;
+  /**
+   * What stands before the words in the icon's place, for a row that is a person or a thing with
+   * a mark of its own: an Avatar, a Brand icon, an Agent mark. It is decoration: the row is named
+   * by its `label`. Given with `icon`, it wins.
+   */
+  media?: ReactNode;
   /** A keyboard shortcut that runs it while the list is on the page, like `"mod+j"`. Shown at the end. */
   shortcut?: string;
   /** Other words typing finds it by ("member" for Invite people). */
@@ -224,6 +230,8 @@ const spin = stylex.keyframes({
 });
 
 const styles = stylex.create({
+  // A face or a mark in the icon's place: it keeps its own size and never squeezes.
+  media: { display: "inline-flex", alignItems: "center", flexShrink: 0 },
   // The surface: the popup's, standing in the page.
   root: {
     [iconVars.size]: grasp.iconSm,
@@ -588,10 +596,22 @@ const Entry = ({
     >
       {(state: CommandItemState) => (
         <>
-          {entry.icon && (
-            <CommandItemIcon {...stylex.props(listStyles.itemIcon)}>
-              <Icon icon={entry.icon} />
-            </CommandItemIcon>
+          {entry.media !== undefined &&
+          entry.media !== null &&
+          entry.media !== false ? (
+            <span
+              aria-hidden="true"
+              data-slot="command-media"
+              {...stylex.props(styles.media)}
+            >
+              {entry.media}
+            </span>
+          ) : (
+            entry.icon && (
+              <CommandItemIcon {...stylex.props(listStyles.itemIcon)}>
+                <Icon icon={entry.icon} />
+              </CommandItemIcon>
+            )
           )}
           {entry.description !== undefined && entry.description !== "" ? (
             <span {...stylex.props(styles.stack)}>

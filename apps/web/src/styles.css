@@ -201,69 +201,6 @@
   }
 }
 
-/* The workflow experiment's canvas (`components/workflow-inside/inside-canvas.tsx`). A step is a
-   small sheet lifted off the dotted ground: one soft shadow in the page's own ink and no hard
-   edge. `node-sheet-up` is the sheet a little higher, for the one pointed at; `node-sheet-open`
-   has ink around it, for the one whose panel is open; `node-sheet-live` has Grasp's warm light,
-   for the step it is working in. */
-@utility node-sheet {
-  box-shadow:
-    0 0 0 1px color-mix(in oklch, var(--foreground) 7%, transparent),
-    0 1px 2px -1px color-mix(in oklch, var(--foreground) 12%, transparent),
-    0 10px 22px -12px color-mix(in oklch, var(--foreground) 24%, transparent);
-}
-
-@utility node-sheet-up {
-  box-shadow:
-    0 0 0 1px color-mix(in oklch, var(--foreground) 12%, transparent),
-    0 2px 4px -2px color-mix(in oklch, var(--foreground) 14%, transparent),
-    0 18px 32px -14px color-mix(in oklch, var(--foreground) 32%, transparent);
-}
-
-@utility node-sheet-open {
-  box-shadow:
-    0 0 0 1.5px var(--foreground),
-    0 18px 32px -14px color-mix(in oklch, var(--foreground) 32%, transparent);
-}
-
-@utility node-sheet-live {
-  box-shadow:
-    0 0 0 1.5px color-mix(in oklch, var(--brain-heat) 75%, transparent),
-    0 0 26px -4px color-mix(in oklch, var(--brain-heat) 40%, transparent),
-    0 14px 28px -14px color-mix(in oklch, var(--foreground) 28%, transparent);
-}
-
-/* The dotted ground the steps lie on: a fine grid of dots in the page's own ink, on the page's
-   muted surface (a workflow's Flow, `workflows/workflow-flow.tsx`). */
-@utility dot-ground {
-  background-color: color-mix(in oklch, var(--muted) 45%, var(--background));
-  background-image: radial-gradient(
-    circle at center,
-    color-mix(in oklch, var(--foreground) 16%, transparent) 1px,
-    transparent 1.4px
-  );
-  background-size: 16px 16px;
-}
-
-/* How near the Flow's drawing is (`zoom-75` is three quarters as drawn). CSS zoom, not a
-   transform: the drawing takes the room it shows at, so it centres and scrolls as it is seen. */
-@utility zoom-* {
-  zoom: calc(--value(integer) * 1%);
-}
-
-/* An agent's step carries the brain's print: a field of dots in its top right corner that fades
-   into the sheet. A person's step is plain paper. */
-@utility node-print {
-  background-image: radial-gradient(
-    circle at center,
-    color-mix(in oklch, var(--foreground) 22%, transparent) 0.9px,
-    transparent 1.3px
-  );
-  background-size: 7px 7px;
-  background-position: top right;
-  mask-image: radial-gradient(115% 125% at 100% 0%, #000 0%, transparent 56%);
-}
-
 /* The agent's mark is a spark printed in dots. Its dots go out from the middle: once when its
    step is pointed at (`agent-spark-once`), and on and on while the agent works (`agent-spark-live`). */
 @utility agent-spark {

@@ -197,47 +197,51 @@ const button = (name: string, within: ParentNode = document) =>
     (each) => words(each) === name || each.getAttribute("aria-label") === name
   );
 
-/** The open Share dialog. */
-const dialog = (): ParentNode =>
-  document.querySelector("[role=dialog]") ?? document;
-
-/** The candidates the open Share dialog lists, each its label then any note under it. */
-const options = (): HTMLLIElement[] => [
-  ...document.querySelectorAll<HTMLLIElement>("[aria-label='Share with'] li"),
-];
-
-/** The names offered in the open Share dialog. */
-const offered = (): string[] =>
-  options().map((each) => {
-    const label = each.querySelector("label");
-    return label === null ? "" : words(label);
-  });
-
-/** Each offered option's name, and what it says under it. */
-const optionLines = (): (string | null)[][] =>
-  options().map((each) => [
-    ...[...each.querySelectorAll("label")].map(words),
-    ...[...each.querySelectorAll("p")].map((line) => line.textContent),
-  ]);
-
-/** Ticks the offered option that says `text`, and shares with it. */
-const pickOption = async (text: string): Promise<void> => {
-  await press(
-    options()
-      .find((each) => each.textContent?.includes(text))
-      ?.querySelector("[role=checkbox]") ?? undefined
+/** The picker's field. */
+const field = (): HTMLInputElement | null =>
+  document.querySelector<HTMLInputElement>(
+    "input[aria-label='Add people, teams or projects']"
   );
-  await press(button("Share", dialog()));
+
+/** Opens the picker's list, as the person does by typing in its field. */
+const openPicker = async (): Promise<void> => {
+  const box = field();
+  if (box === null) {
+    throw new TypeError("No picker");
+  }
+  await act(async () => {
+    box.focus();
+    box.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })
+    );
+    await Promise.resolve();
+  });
+  await settled();
 };
 
-/** Who the list shows it is shared with, by name. */
+/** The options the picker's list shows, each as its lines read. */
+const optionLines = (): string[] =>
+  [...document.querySelectorAll("[role=option]")].map(words);
+
+/** Picks the option that says `text`. */
+const pickOption = async (text: string): Promise<void> => {
+  await press(
+    [...document.querySelectorAll("[role=option]")].find((each) =>
+      each.textContent?.includes(text)
+    )
+  );
+};
+
+/** Who the list shows it is shared with, by name: each row's face, then its words. */
 const listed = (): string[] =>
   [
-    ...document.querySelectorAll("[aria-label='Shared with'] [data-slot=item]"),
-  ].map(
-    // Its mark, then its words, whose first line is the name.
-    (row) => row.children[1]?.firstElementChild?.textContent?.trim() ?? ""
-  );
+    ...document.querySelectorAll(
+      "[data-share-member], [aria-label='Shared with'] [data-slot=item]"
+    ),
+  ].map((row) => {
+    const name = row.children[1]?.firstElementChild;
+    return name ? words(name) : "";
+  });
 
 describe("Sharing an App's App", () => {
   afterEach(() => {
@@ -248,22 +252,21 @@ describe("Sharing an App's App", () => {
     document.body.innerHTML = "";
   });
 
-  it("lets a builder share it with a person and a team, offering only who it isn't shared with yet", async () => {
+  it("lets a builder share it with a person and a team at once, never offering its owner, and marks who has it", async () => {
     const { session, asked } = fakeMembers();
     await shown(session, app("builder"));
-    expect(document.body.textContent).toContain("It isn’t shared with anyone.");
 
-    await press(button("Share"));
-    const first = offered();
+    await openPicker();
+    const first = optionLines();
     await pickOption("Ann");
-    await press(button("Share"));
-    const second = offered();
     await pickOption("Sales");
+    await press(button("Add"));
+    await openPicker();
+    const second = optionLines();
 
     expect({ first, second, asked, listed: listed() }).toStrictEqual({
-      // Never the owner, who always opens it; a team says it is one.
       first: ["Ann", "Bo", "Sales (team)"],
-      second: ["Bo", "Sales (team)"],
+      second: ["AnnHas access", "Bo", "Sales (team)Has access"],
       asked: [
         ["add", "person", "user-ann", "user"],
         ["add", "team", "team-sales", "user"],
@@ -272,7 +275,7 @@ describe("Sharing an App's App", () => {
     });
   });
 
-  it("tells apart people of the same name by the end of their ID, in the list and whom it is shared with", async () => {
+  it("tells apart people of the same name by the end of their ID, in the picker and whom it is shared with", async () => {
     const { session, asked } = fakeMembers([], {
       people: [
         { id: "user-eva-0000aaaaaa", name: "Eva de Vries" },
@@ -284,29 +287,25 @@ describe("Sharing an App's App", () => {
     });
     await shown(session, app("builder"));
 
-    await press(button("Share"));
-    const first = optionLines();
+    await openPicker();
+    const offered = optionLines();
     await pickOption("bbbbbb");
-    await press(button("Share"));
-    // The other Eva is still told apart from the one it is shared with.
-    const second = optionLines();
     await pickOption("aaaaaa");
+    await press(button("Add"));
 
-    expect({ first, second, asked, listed: listed() }).toStrictEqual({
+    expect({ offered, asked, listed: listed() }).toStrictEqual({
       // Bo's name is theirs alone, so it says nothing more.
-      first: [
-        ["Eva de Vries", "ID …aaaaaa"],
-        ["eva  de \u200BVries", "ID …bbbbbb"],
-        ["Bo"],
+      offered: [
+        "Eva de VriesID …aaaaaa",
+        "eva  de \u200BVriesID …bbbbbb",
+        "Bo",
       ],
-      second: [["Eva de Vries", "ID …aaaaaa"], ["Bo"]],
       asked: [
         ["add", "person", "user-eva-1111bbbbbb", "user"],
         ["add", "person", "user-eva-0000aaaaaa", "user"],
       ],
       listed: ["eva  de \u200BVries (ID …bbbbbb)", "Eva de Vries (ID …aaaaaa)"],
     });
-    expect(button("Stop sharing with Eva de Vries (ID …aaaaaa)")).toBeDefined();
   });
 
   it("lets a builder unshare it, only once they confirm", async () => {
@@ -322,10 +321,18 @@ describe("Sharing an App's App", () => {
     ]);
     await shown(session, app("builder"));
 
-    await press(button("Stop sharing with Ann"));
+    const remove = async (): Promise<void> => {
+      await press(button("Access for Ann"));
+      await press(
+        [...document.querySelectorAll("[role=option]")].find(
+          (each) => words(each) === "Remove"
+        )
+      );
+    };
+    await remove();
     await press(button("Cancel"));
     const afterCancel = [...asked];
-    await press(button("Stop sharing with Ann"));
+    await remove();
     await press(button("Stop sharing"));
 
     expect({ afterCancel, asked, listed: listed() }).toStrictEqual({

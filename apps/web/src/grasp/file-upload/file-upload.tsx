@@ -27,17 +27,20 @@ import {
 } from "@ui-sdk/react/file-input";
 import type { FileInputValueChangeDetails } from "@ui-sdk/react/file-input";
 import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { Button } from "../button/button";
 import { useFieldName } from "../field/field";
 import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
 import { Cross, File as FileMark, Icon, Upload } from "../icons";
+import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { arrive } from "../motion/arrive";
 import { simply } from "../motion/simply.stylex";
 import { Progress } from "../progress/progress";
+import { Spinner } from "../spinner/spinner";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { useWords, withGiven } from "../words/words";
 import { fileUploadWords } from "./words";
@@ -63,6 +66,28 @@ export interface FileUploadWords {
   remove: (name: string) => string;
   /** Why a file was refused: `file-type`, `file-too-large`, `file-too-small`, `too-many-files`, or your own. */
   refused: (name: string, reason: string) => string;
+}
+
+/** What the host says of a sent file, in place of "uploaded": what it is doing with it. */
+export interface FileUploadStatus {
+  /** One short line ("Reading the text", "Ready", "Could not read"). */
+  line: string;
+  /** `danger` when it failed, in the danger colour; otherwise quiet. @default "neutral" */
+  tone?: "neutral" | "danger";
+  /** Still at work on it: a small turning mark before the line. */
+  working?: boolean;
+}
+
+/** Something to do with a sent file, at its row's end before Remove: Open, Download. */
+export interface FileUploadAction {
+  /** Its words, a verb ("Open", "Download"). */
+  label: string;
+  /** An icon; with one, the button is the icon alone, named by `label`. */
+  icon?: IconData;
+  /** Where it goes: the button is a link. */
+  href?: string;
+  /** What it does, for a button that is not a link. */
+  onAction?: () => void;
 }
 
 /** Every prop a FileUpload takes. */
@@ -100,6 +125,22 @@ export interface FileUploadProps {
   disabled?: boolean;
   /** Its words, in the page's language. */
   words?: Partial<FileUploadWords>;
+  /**
+   * What the host does with a file once it is sent (or chosen, without `upload`), said on its row
+   * in place of "uploaded": reading it, ready, could not read. The part's list is then the only
+   * list of the files; nothing need be drawn again below it.
+   */
+  status?: (file: File) => FileUploadStatus | undefined;
+  /** What can be done with a sent file, at its row's end before Remove: Open, Download. */
+  actions?: (file: File) => FileUploadAction[];
+  /**
+   * `zone` a place to drop files, with its button; `button` the button alone (with an icon), for a
+   * card's head, the list drawn below it or in `listIn`.
+   * @default "zone"
+   */
+  variant?: "zone" | "button";
+  /** With `variant="button"`: where the list of files is drawn, an element of the host's. */
+  listIn?: HTMLElement | null;
   /** @deprecated Use `layout`. */
   style?: FileUploadLayoutStyle;
   /** Layout only: where it sits and how wide it is. */
@@ -170,6 +211,12 @@ const styles = stylex.create({
     transitionTimingFunction: grasp.ease,
   },
   // Without script: the browser's own file input, unseen over the whole zone, takes a click or a drop.
+  // The button form: the button, with the browser's own input over it until the script runs.
+  buttonBox: {
+    position: "relative",
+    display: "inline-flex",
+    justifySelf: "start",
+  },
   native: {
     position: "absolute",
     // Over the zone and its button, so a press anywhere on it opens the picker.
@@ -241,6 +288,9 @@ const styles = stylex.create({
     color: grasp.ink,
   },
   meta: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: grasp.space1,
     fontSize: grasp.textXs,
     lineHeight: grasp.textXsLine,
     color: grasp.muted,
@@ -306,10 +356,15 @@ const announceChange = ({
 const metaLine = (
   file: File,
   state: Sending | undefined,
-  words: FileUploadWords
+  words: FileUploadWords,
+  told: FileUploadStatus | undefined
 ) => {
   if (state?.status === "uploading") {
     return `${words.uploading}, ${Math.round(state.progress * 100)}%`;
+  }
+  // Sent (or chosen, with nothing to send): the host's own word on it, when it has one.
+  if (told !== undefined && state?.status !== "failed") {
+    return told.line;
   }
   if (state?.status === "done") {
     return words.doneLine(formatFileSize(file.size));
@@ -318,6 +373,99 @@ const metaLine = (
     return words.failed;
   }
   return formatFileSize(file.size);
+};
+
+/** One thing to do with a sent file: a quiet button, or a link; with an icon, the icon alone. */
+const RowAction = ({ action }: { action: FileUploadAction }) => {
+  const { onAction } = action;
+  // oxlint-disable-next-line jsx-a11y/anchor-has-content, jsx-a11y/control-has-associated-label -- the Button draws its words or its named icon into the link
+  const link = action.href === undefined ? undefined : <a href={action.href} />;
+  if (action.icon !== undefined) {
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        icon={action.icon}
+        aria-label={action.label}
+        render={link}
+        onClick={onAction}
+      />
+    );
+  }
+  return (
+    <Button variant="ghost" size="sm" render={link} onClick={onAction}>
+      {action.label}
+    </Button>
+  );
+};
+
+interface ButtonFormProps {
+  mounted: boolean;
+  native: { current: HTMLInputElement | null };
+  sentAs: string | undefined;
+  upload: FileUploadProps["upload"];
+  accept: FileUploadProps["accept"];
+  multiple: boolean;
+  required: boolean | undefined;
+  disabled: boolean | undefined;
+  words: FileUploadWords;
+  limits: string | undefined;
+  hintId: string;
+}
+
+/** The button form: the button alone, with the browser's own input over it until the script runs. */
+const ButtonForm = ({
+  mounted,
+  native,
+  sentAs,
+  upload,
+  accept,
+  multiple,
+  required,
+  disabled,
+  words,
+  limits,
+  hintId,
+}: ButtonFormProps) => {
+  const hasLimits = limits !== undefined && limits !== "";
+  return (
+    <span {...stylex.props(styles.buttonBox)}>
+      {mounted ? null : (
+        <input
+          ref={native}
+          data-slot="file-upload-native"
+          type="file"
+          name={upload ? undefined : sentAs}
+          accept={typeof accept === "string" ? accept : accept?.join(",")}
+          multiple={multiple}
+          required={required}
+          disabled={disabled}
+          aria-label={words.choose}
+          {...stylex.props(styles.native)}
+        />
+      )}
+      <FileInputTrigger
+        render={(props: Record<string, unknown>) => (
+          <Button
+            {...props}
+            icon={Upload}
+            aria-describedby={hasLimits ? hintId : undefined}
+            aria-hidden={mounted ? undefined : true}
+            tabIndex={mounted ? undefined : -1}
+            variant="quiet"
+            size="sm"
+          >
+            {words.choose}
+          </Button>
+        )}
+      />
+      {hasLimits ? (
+        <span id={hintId} {...stylex.props(visuallyHidden)}>
+          {limits}
+        </span>
+      ) : null}
+    </span>
+  );
 };
 
 export const FileUpload = ({
@@ -332,6 +480,10 @@ export const FileUpload = ({
   required,
   disabled,
   words: given,
+  status: statusOf,
+  actions: actionsOf,
+  variant = "zone",
+  listIn,
   style: styleProp,
   layout,
 }: FileUploadProps) => {
@@ -452,6 +604,84 @@ export const FileUpload = ({
   const limits = hint ?? describe(accept);
   const hasLimits = limits !== undefined && limits !== "";
 
+  const list = (
+    <FileInputList aria-label={words.files} {...stylex.props(styles.list)}>
+      <FileInputItem {...stylex.props(styles.item, arrive.in, focus.ring)}>
+        {({ file }: { file: File }) => {
+          const state = sending.get(file);
+          const status = state?.status;
+          // The host's word on a file it has (sent, or chosen with nothing to send), and its actions.
+          const settled =
+            status === "done" || (upload === undefined && status === undefined);
+          const told = settled ? statusOf?.(file) : undefined;
+          const doable = settled ? (actionsOf?.(file) ?? []) : [];
+          return (
+            <>
+              <span aria-hidden="true" {...stylex.props(styles.fileIcon)}>
+                <Icon icon={FileMark} />
+              </span>
+              <span {...stylex.props(styles.words)}>
+                <span {...stylex.props(styles.name)} title={file.name}>
+                  {file.name}
+                </span>
+                <span
+                  {...stylex.props(
+                    styles.meta,
+                    (status === "failed" || told?.tone === "danger") &&
+                      styles.failed
+                  )}
+                >
+                  {told?.working === true ? <Spinner size="sm" /> : null}
+                  {metaLine(file, state, words, told)}
+                </span>
+              </span>
+              <span {...stylex.props(styles.actions)}>
+                {status === "failed" ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(event) => {
+                      // Try again goes as the file is sent again: focus stays on its row.
+                      event.currentTarget
+                        .closest<HTMLElement>("[data-slot=file-input-item]")
+                        ?.focus();
+                      send(file);
+                    }}
+                  >
+                    {words.retry}
+                  </Button>
+                ) : null}
+                {doable.map((action) => (
+                  <RowAction key={action.label} action={action} />
+                ))}
+                <FileInputItemRemove
+                  render={(props: Record<string, unknown>) => (
+                    <Button
+                      {...props}
+                      variant="ghost"
+                      size="sm"
+                      icon={Cross}
+                      aria-label={words.remove(file.name)}
+                    />
+                  )}
+                />
+              </span>
+              {status === "uploading" ? (
+                <Progress
+                  label={`${words.uploading} ${file.name}`}
+                  value={Math.round((state?.progress ?? 0) * 100)}
+                  size="sm"
+                  showLabel={false}
+                  layout={styles.progress}
+                />
+              ) : null}
+            </>
+          );
+        }}
+      </FileInputItem>
+    </FileInputList>
+  );
+
   return (
     <div
       data-slot="file-upload"
@@ -474,112 +704,65 @@ export const FileUpload = ({
         announcement={announceChange}
         {...stylex.props(styles.inner)}
       >
-        <FileInputDropzone className={stylex.props(styles.zone).className}>
-          {mounted ? null : (
-            <input
-              ref={native}
-              data-slot="file-upload-native"
-              type="file"
-              name={upload ? undefined : sentAs}
-              accept={typeof accept === "string" ? accept : accept?.join(",")}
-              multiple={multiple}
-              required={required}
-              disabled={disabled}
-              aria-label={words.choose}
-              {...stylex.props(styles.native)}
-            />
-          )}
-          <span aria-hidden="true" {...stylex.props(styles.zoneIcon)}>
-            <Icon icon={Upload} />
-          </span>
-          <span {...stylex.props(styles.zoneLine)}>
-            <span>{words.drop}</span>
-            <FileInputTrigger
-              render={(props: Record<string, unknown>) => (
-                <Button
-                  {...props}
-                  aria-describedby={hasLimits ? hintId : undefined}
-                  aria-hidden={mounted ? undefined : true}
-                  tabIndex={mounted ? undefined : -1}
-                  variant="quiet"
-                  size="sm"
-                >
-                  {words.choose}
-                </Button>
-              )}
-            />
-          </span>
-          {hasLimits ? (
-            <p id={hintId} {...stylex.props(styles.hint)}>
-              {limits}
-            </p>
-          ) : null}
-        </FileInputDropzone>
-        <FileInputList aria-label={words.files} {...stylex.props(styles.list)}>
-          <FileInputItem {...stylex.props(styles.item, arrive.in, focus.ring)}>
-            {({ file }: { file: File }) => {
-              const state = sending.get(file);
-              const status = state?.status;
-              return (
-                <>
-                  <span aria-hidden="true" {...stylex.props(styles.fileIcon)}>
-                    <Icon icon={FileMark} />
-                  </span>
-                  <span {...stylex.props(styles.words)}>
-                    <span {...stylex.props(styles.name)} title={file.name}>
-                      {file.name}
-                    </span>
-                    <span
-                      {...stylex.props(
-                        styles.meta,
-                        status === "failed" && styles.failed
-                      )}
-                    >
-                      {metaLine(file, state, words)}
-                    </span>
-                  </span>
-                  <span {...stylex.props(styles.actions)}>
-                    {status === "failed" ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={(event) => {
-                          // Try again goes as the file is sent again: focus stays on its row.
-                          event.currentTarget
-                            .closest<HTMLElement>("[data-slot=file-input-item]")
-                            ?.focus();
-                          send(file);
-                        }}
-                      >
-                        {words.retry}
-                      </Button>
-                    ) : null}
-                    <FileInputItemRemove
-                      render={(props: Record<string, unknown>) => (
-                        <Button
-                          {...props}
-                          variant="ghost"
-                          size="sm"
-                          icon={Cross}
-                          aria-label={words.remove(file.name)}
-                        />
-                      )}
-                    />
-                  </span>
-                  {status === "uploading" ? (
-                    <Progress
-                      label={`${words.uploading} ${file.name}`}
-                      value={Math.round((state?.progress ?? 0) * 100)}
-                      size="sm"
-                      showLabel={false}
-                      layout={styles.progress}
-                    />
-                  ) : null}
-                </>
-              );
-            }}
-          </FileInputItem>
-        </FileInputList>
+        {variant === "button" ? (
+          <ButtonForm
+            mounted={mounted}
+            native={native}
+            sentAs={sentAs}
+            upload={upload}
+            accept={accept}
+            multiple={multiple}
+            required={required}
+            disabled={disabled}
+            words={words}
+            limits={limits}
+            hintId={hintId}
+          />
+        ) : (
+          <FileInputDropzone className={stylex.props(styles.zone).className}>
+            {mounted ? null : (
+              <input
+                ref={native}
+                data-slot="file-upload-native"
+                type="file"
+                name={upload ? undefined : sentAs}
+                accept={typeof accept === "string" ? accept : accept?.join(",")}
+                multiple={multiple}
+                required={required}
+                disabled={disabled}
+                aria-label={words.choose}
+                {...stylex.props(styles.native)}
+              />
+            )}
+            <span aria-hidden="true" {...stylex.props(styles.zoneIcon)}>
+              <Icon icon={Upload} />
+            </span>
+            <span {...stylex.props(styles.zoneLine)}>
+              <span>{words.drop}</span>
+              <FileInputTrigger
+                render={(props: Record<string, unknown>) => (
+                  <Button
+                    {...props}
+                    aria-describedby={hasLimits ? hintId : undefined}
+                    aria-hidden={mounted ? undefined : true}
+                    tabIndex={mounted ? undefined : -1}
+                    variant="quiet"
+                    size="sm"
+                  >
+                    {words.choose}
+                  </Button>
+                )}
+              />
+            </span>
+            {hasLimits ? (
+              <p id={hintId} {...stylex.props(styles.hint)}>
+                {limits}
+              </p>
+            ) : null}
+          </FileInputDropzone>
+        )}
+        {/* The button form draws its list where the host puts it (a card's body); the context goes along. */}
+        {variant === "button" && listIn ? createPortal(list, listIn) : list}
       </FileInput>
       {refused.length > 0 ? (
         <ul data-slot="file-upload-refusals" {...stylex.props(styles.refusals)}>
