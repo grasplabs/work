@@ -14,9 +14,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
 import { useEffect, useId, useState } from "react";
 
-import { formatDate } from "../format.ts";
 import { Alert } from "../grasp/alert/index.ts";
-import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import {
@@ -29,6 +27,12 @@ import {
   DialogTitle,
 } from "../grasp/dialog/index.ts";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../grasp/dropdown-menu/index.ts";
+import {
   Field,
   FieldDescription,
   FieldError,
@@ -36,15 +40,8 @@ import {
 } from "../grasp/field/index.ts";
 import { Form } from "../grasp/form/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
+import { More, Trash } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemMedia,
-  ItemTitle,
-} from "../grasp/item/index.ts";
 import { Progress } from "../grasp/progress/index.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
 import { Text } from "../grasp/text/index.ts";
@@ -98,6 +95,13 @@ const doneOf = (areas: readonly ErasureArea[]): number =>
   areas.filter(({ state }) => state !== "pending").length;
 
 const styles = stylex.create({
+  // A row's last cell: where it stands, then its menu, on one line.
+  ends: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: grasp.space2,
+  },
   stack: { display: "flex", flexDirection: "column", gap: grasp.space4 },
   areas: {
     display: "flex",
@@ -536,15 +540,14 @@ const Standing = ({ person }: { person: RemovedPerson }) => {
 };
 
 /**
- * One person an admin removed, at the foot of the members list under its
- * Removed name, in a quiet state (their name muted, where an erasure
- * stands), and what may be done about them now.
+ * What can be done about someone an admin removed, in the people table's
+ * last column: where an erasure stands once one started, and a menu to
+ * erase them, follow the erasure, or release their address once erased.
  */
-export const RemovedRow = ({ person }: { person: RemovedPerson }) => {
+export const RemovedActions = ({ person }: { person: RemovedPerson }) => {
   const { t } = useLingui();
   const [open, setOpen] = useState<"erase" | "release">();
   const { name, erasure } = person;
-  const date = formatDate(person.removedAt);
   const { email } = person;
   const who = email === null ? name : `${name} (${email})`;
   const close = (next: boolean): void => {
@@ -552,67 +555,50 @@ export const RemovedRow = ({ person }: { person: RemovedPerson }) => {
       setOpen(undefined);
     }
   };
+  const erasing = erasure !== null && erasure.completedAt === null;
+  const releasable = erasure?.completedAt !== null && person.addressKeptOut;
   return (
-    <>
-      <Item size="xs">
-        <ItemMedia>
-          <Avatar decorative name={name} size="xs">
-            <AvatarFallback />
-          </Avatar>
-        </ItemMedia>
-        <ItemContent>
-          <ItemTitle>
-            <Text element="span" size="sm" tone="muted">
-              {name}
-            </Text>
-          </ItemTitle>
-          <ItemDescription>
-            {email === null
-              ? t`Removed on ${date} · email erased`
-              : t`${email} · removed on ${date}`}
-          </ItemDescription>
-        </ItemContent>
-        <ItemActions>
-          <>
-            <Standing person={person} />
-            {erasure === null || erasure.completedAt === null ? (
-              <Button
-                aria-label={
-                  erasure === null
-                    ? t`Erase ${who}`
-                    : t`Follow the erasure of ${who}`
-                }
-                onClick={() => {
+    <span {...stylex.props(styles.ends)}>
+      <Standing person={person} />
+      {erasure !== null && !erasing && !releasable ? null : (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            aria-label={t`Actions for ${who}`}
+            icon={More}
+            size="xs"
+            variant="ghost"
+          />
+          <DropdownMenuContent align="end">
+            {erasure === null || erasing ? (
+              <DropdownMenuItem
+                icon={erasure === null ? Trash : undefined}
+                onSelect={() => {
                   setOpen("erase");
                 }}
-                size="sm"
-                variant={erasure === null ? "quiet" : "ghost"}
+                {...(erasure === null ? { variant: "danger" as const } : {})}
               >
                 {erasure === null ? t`Erase…` : t`Follow`}
-              </Button>
+              </DropdownMenuItem>
             ) : null}
-            {erasure?.completedAt !== null && person.addressKeptOut ? (
-              <Button
-                aria-label={t`Release address of ${who}, letting it sign in again`}
-                onClick={() => {
+            {releasable ? (
+              <DropdownMenuItem
+                onSelect={() => {
                   setOpen("release");
                 }}
-                size="sm"
-                variant="ghost"
               >
                 {t`Release address…`}
-              </Button>
+              </DropdownMenuItem>
             ) : null}
-          </>
-        </ItemActions>
-      </Item>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
       {open === "erase" ? (
         <EraseDialog onOpenChange={close} person={person} />
       ) : null}
       {open === "release" ? (
         <ReleaseAddressDialog onOpenChange={close} person={person} />
       ) : null}
-    </>
+    </span>
   );
 };
 

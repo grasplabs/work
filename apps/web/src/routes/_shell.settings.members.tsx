@@ -4,6 +4,7 @@ import type {
   Invitation,
   Member,
   RemovedPeoplePage,
+  RemovedPerson,
 } from "@grasp-os/shared/members";
 import { isMemberAdmin, roleSchema } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
@@ -11,9 +12,10 @@ import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
+import { formatDate } from "../format.ts";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,8 +25,10 @@ import {
   AlertDialogTitle,
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
-import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
+import { DataTable, DataTablePerson } from "../grasp/data-table/index.ts";
+import type { DataTableColumn } from "../grasp/data-table/index.ts";
 import {
   DropdownMenu,
   DropdownMenuItem,
@@ -32,12 +36,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../grasp/dropdown-menu/index.ts";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "../grasp/empty/index.ts";
 import {
   Copy,
   Info,
@@ -52,18 +50,6 @@ import {
   InputGroupText,
 } from "../grasp/input-group/index.ts";
 import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemDetail,
-  ItemGroup,
-  ItemMedia,
-  ItemRevealButton,
-  ItemTitle,
-} from "../grasp/item/index.ts";
-import { Pagination } from "../grasp/pagination/index.ts";
-import {
   Popover,
   PopoverContent,
   PopoverTitle,
@@ -75,14 +61,14 @@ import {
   SelectValue,
   SelectContent,
 } from "../grasp/select/index.ts";
-import { SettingsRows } from "../grasp/setting-row/index.ts";
+import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
-import { RemovedRow, useRemovedPeople } from "../settings/erasures.tsx";
+import { RemovedActions, useRemovedPeople } from "../settings/erasures.tsx";
 import {
   copyEmail,
-  InvitationRow,
+  InvitationActions,
   InviteButton,
 } from "../settings/invitations.tsx";
 import { roleItems, roleLines } from "../settings/roles.ts";
@@ -137,13 +123,8 @@ const styles = stylex.create({
   roleText: { margin: 0, color: grasp.muted },
 });
 
-/** How many people a page of the list holds: the rest are a page further. */
+/** How many people a page of the table holds: the rest are a page further. */
 const pageSize = 20;
-
-/** One row of the people's list: a member, or an invitation not yet taken up. */
-type Listed =
-  | { kind: "member"; member: Member }
-  | { kind: "invited"; invitation: Invitation };
 
 /** What a change did, or why it failed. */
 interface Notice {
@@ -379,19 +360,6 @@ const RolesButton = () => {
   );
 };
 
-/** Whether `person` is what the search names: in their name or email. */
-const matches = (
-  person: { name?: string; email: string },
-  search: string
-): boolean => {
-  const words = search.trim().toLocaleLowerCase();
-  return (
-    words === "" ||
-    (person.name ?? "").toLocaleLowerCase().includes(words) ||
-    person.email.toLocaleLowerCase().includes(words)
-  );
-};
-
 /**
  * One's own role, which one doesn't change here (core allows it while
  * another admin exists, but nobody should lose this page by accident): on
@@ -412,66 +380,143 @@ const OwnRole = ({ role }: { role: Role }) => {
   );
 };
 
-/** One member: their face, their name (a quiet "You" on one's own), their email, their role and their menu. */
-const MemberRow = ({
-  member,
+/** One row of the people's table: a member, an invitation or someone removed, with its date. */
+interface PersonRow {
+  key: string;
+  kind: "member" | "invited" | "removed";
+  name: string;
+  email: string;
+  /** When they joined, were invited or were removed. */
+  at: string;
+  invitedBy?: string;
+  member?: Member;
+  invitation?: Invitation;
+  removed?: RemovedPerson;
+}
+
+/** The table's words, in the page's language. */
+interface PeopleWords {
+  name: string;
+  since: string;
+  role: string;
+  invited: string;
+  joined: (date: string) => string;
+  invitedOn: (date: string, by: string) => string;
+  removedOn: (date: string) => string;
+}
+
+/** The people's columns: who, since when, and their role with what can be done. */
+const peopleColumns = ({
+  words,
   me,
+  narrow,
   onNotice,
-  onRemoved,
 }: {
-  member: Member;
-  me: boolean;
+  words: PeopleWords;
+  me: string;
+  /** Below the phone's width, Since steps aside so Name and Role fit. */
+  narrow: boolean;
   onNotice: (notice: Notice) => void;
-  onRemoved: () => void;
-}) => {
-  const { t } = useLingui();
-  const { name } = member;
-  return (
-    <Item size="xs">
-      <ItemMedia align="center">
-        <Avatar decorative name={member.name} size="xs">
-          <AvatarFallback />
-        </Avatar>
-      </ItemMedia>
-      <ItemContent>
-        <ItemTitle>
-          {member.name}
-          {me ? <ItemDetail>{t`You`}</ItemDetail> : null}
-        </ItemTitle>
-        <ItemDescription>
-          {member.email}
-          <ItemRevealButton
-            aria-label={t`Copy email of ${name}`}
-            icon={Copy}
-            onClick={() => {
-              void copyEmail(member.email, {
-                copied: t`Copied`,
-                failed: t`Copying didn't work`,
-              });
-            }}
-          />
-        </ItemDescription>
-      </ItemContent>
-      <ItemActions>
-        {me ? (
-          <OwnRole role={member.role} />
+}): DataTableColumn<PersonRow>[] => {
+  const columns: DataTableColumn<PersonRow>[] = [
+    {
+      key: "name",
+      header: words.name,
+      value: (row) => `${row.name} ${row.email}`,
+      cell: (row) => (
+        <DataTablePerson
+          name={row.name}
+          {...(row.kind === "invited" || row.email === ""
+            ? {}
+            : { detail: row.email })}
+        />
+      ),
+    },
+    {
+      key: "since",
+      header: words.since,
+      value: (row) => row.at,
+      cell: (row) => {
+        const date = formatDate(row.at);
+        if (row.kind === "invited") {
+          return (
+            <span {...stylex.props(styles.rowEnd)}>
+              <Badge size="sm" tone="info">
+                {words.invited}
+              </Badge>
+              {words.invitedOn(date, row.invitedBy ?? "")}
+            </span>
+          );
+        }
+        if (row.kind === "removed") {
+          return (
+            <Text element="span" size="sm" tone="muted">
+              {words.removedOn(date)}
+            </Text>
+          );
+        }
+        return words.joined(date);
+      },
+    },
+    {
+      key: "role",
+      header: words.role,
+      align: "end",
+      control: true,
+      value: (row) =>
+        row.member === undefined ? "" : roleLabel(row.member.role),
+      cell: (row) => {
+        if (row.invitation !== undefined) {
+          return <InvitationActions invitation={row.invitation} />;
+        }
+        if (row.removed !== undefined) {
+          return <RemovedActions person={row.removed} />;
+        }
+        if (row.member === undefined) {
+          return null;
+        }
+        return row.member.userId === me ? (
+          <OwnRole role={row.member.role} />
         ) : (
           <MemberActions
-            member={member}
+            member={row.member}
             onNotice={onNotice}
-            onRemoved={onRemoved}
+            onRemoved={() => {
+              // The table reads again, without their row.
+            }}
           />
-        )}
-      </ItemActions>
-    </Item>
-  );
+        );
+      },
+    },
+  ];
+  return narrow ? columns.filter((column) => column.key !== "since") : columns;
 };
 
+/** Whether the window is narrower than a phone's: the library's own breakpoint (media.belowPhone). */
+const belowPhone = "(width < 40rem)";
+const onWidth = (changed: () => void): (() => void) => {
+  const query = matchMedia(belowPhone);
+  query.addEventListener("change", changed);
+  return () => {
+    query.removeEventListener("change", changed);
+  };
+};
+const useNarrow = (): boolean =>
+  useSyncExternalStore(
+    onWidth,
+    () => matchMedia(belowPhone).matches,
+    () => false
+  );
+
 /**
- * The members, the invitations not yet taken up and, at the foot, the
- * people removed, in one list found by name or email.
+ * The people as one table, the library's Members pattern as Ruben chose it
+ * (with headers): Name with the face and email, Since with the date each
+ * joined, was invited (and by whom) or was removed, and Role with what can
+ * be done; the count, the search and Invite on the head's one line; paged
+ * twenty at a time, the search over everyone. Invited and removed people
+ * are states of a row.
  */
-const MembersList = ({
+const PeopleTable = ({
   members,
   invitations,
   removed,
@@ -485,27 +530,35 @@ const MembersList = ({
   const { t } = useLingui();
   const [notice, setNotice] = useState<Notice>({});
   const [search, setSearch] = useState("");
-  const searchField = useRef<HTMLInputElement>(null);
   const gone = useRemovedPeople(removed);
-  const [page, setPage] = useState(1);
-  // The people and the invitations not yet taken up, as one list.
-  const everyone = members.length + invitations.length;
-  const found: Listed[] = [
-    ...members
-      .filter((member) => matches(member, search))
-      .map((member) => ({ kind: "member" as const, member })),
-    ...invitations
-      .filter((invitation) => matches(invitation, search))
-      .map((invitation) => ({ kind: "invited" as const, invitation })),
+  const narrow = useNarrow();
+  const rows: PersonRow[] = [
+    ...members.map((member) => ({
+      key: member.userId,
+      kind: "member" as const,
+      name: member.name,
+      email: member.email,
+      at: member.joinedAt,
+      member,
+    })),
+    ...invitations.map((invitation) => ({
+      key: invitation.id,
+      kind: "invited" as const,
+      name: invitation.email,
+      email: invitation.email,
+      at: invitation.invitedAt,
+      invitedBy: invitation.invitedBy,
+      invitation,
+    })),
+    ...gone.people.map((person) => ({
+      key: person.userId,
+      kind: "removed" as const,
+      name: person.name,
+      email: person.email ?? "",
+      at: person.removedAt,
+      removed: person,
+    })),
   ];
-  // Paged twenty at a time; the search runs over all of them.
-  const pages = Math.max(1, Math.ceil(found.length / pageSize));
-  const at = Math.min(page, pages);
-  const onPage = found.slice((at - 1) * pageSize, at * pageSize);
-  const left = gone.people.filter((person) =>
-    matches({ name: person.name, email: person.email ?? "" }, search)
-  );
-  const nobody = found.length === 0 && left.length === 0;
   return (
     <TitledCard
       actions={
@@ -515,12 +568,8 @@ const MembersList = ({
             <InputGroupText icon={Search} />
             <InputGroupInput
               aria-label={t`Search members`}
-              onValueChange={(value) => {
-                setSearch(value);
-                setPage(1);
-              }}
+              onValueChange={setSearch}
               placeholder={t`Search members`}
-              ref={searchField}
               type="search"
               value={search}
             />
@@ -528,21 +577,30 @@ const MembersList = ({
           <InviteButton />
         </>
       }
-      density="compact"
       flush
       footer={
-        found.length > pageSize ? (
-          <Pagination
-            aria-label={t`Pages of members`}
-            onPageChange={setPage}
-            page={at}
-            pageSize={pageSize}
-            total={found.length}
-            unit={{ one: t`person`, other: t`people` }}
-          />
+        gone.more ? (
+          <>
+            <Button
+              disabled={gone.busy}
+              onClick={() => {
+                void gone.showMore();
+              }}
+              size="sm"
+              variant="ghost"
+            >
+              {t`Show older`}
+            </Button>
+            {gone.failure === undefined ? null : (
+              <Alert tone="danger">{gone.failure}</Alert>
+            )}
+          </>
         ) : undefined
       }
-      title={plural(everyone, { one: "# person", other: "# people" })}
+      title={plural(members.length + invitations.length, {
+        one: "# person",
+        other: "# people",
+      })}
     >
       {notice.failure === undefined && notice.done === undefined ? null : (
         <div {...stylex.props(styles.notice)}>
@@ -553,65 +611,31 @@ const MembersList = ({
           )}
         </div>
       )}
-      {nobody ? (
-        <Empty size="sm">
-          <EmptyHeader>
-            <EmptyTitle>{t`No one matches`}</EmptyTitle>
-            <EmptyDescription>
-              {t`Search finds people by their name or email.`}
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      ) : (
-        <ItemGroup aria-label={t`Members`} separated>
-          {onPage.map((each) =>
-            each.kind === "member" ? (
-              <MemberRow
-                key={each.member.userId}
-                me={each.member.userId === me}
-                member={each.member}
-                onNotice={setNotice}
-                onRemoved={() => {
-                  searchField.current?.focus();
-                }}
-              />
-            ) : (
-              <InvitationRow
-                invitation={each.invitation}
-                key={each.invitation.id}
-              />
-            )
-          )}
-        </ItemGroup>
-      )}
-      {/* Removed people: the list's foot, under a quiet name, a step back. */}
-      {/* At the list's foot: on its last page only. */}
-      {left.length === 0 || at < pages ? null : (
-        <SettingsRows label={t`Removed`}>
-          <ItemGroup separated>
-            {left.map((person) => (
-              <RemovedRow key={person.userId} person={person} />
-            ))}
-          </ItemGroup>
-          {gone.more ? (
-            <div {...stylex.props(styles.older)}>
-              <Button
-                disabled={gone.busy}
-                onClick={() => {
-                  void gone.showMore();
-                }}
-                size="sm"
-                variant="ghost"
-              >
-                {t`Show older`}
-              </Button>
-              {gone.failure === undefined ? null : (
-                <Alert tone="danger">{gone.failure}</Alert>
-              )}
-            </div>
-          ) : null}
-        </SettingsRows>
-      )}
+      {/* A column's being hidden is read as the table starts: it starts again when the width crosses the phone's. */}
+      <DataTable
+        key={narrow ? "narrow" : "wide"}
+        columns={peopleColumns({
+          words: {
+            name: t`Name`,
+            since: t`Since`,
+            role: t`Role`,
+            invited: t`Invited`,
+            joined: (date) => t`Joined ${date}`,
+            invitedOn: (date, by) => t`${date} by ${by}`,
+            removedOn: (date) => t`Removed ${date}`,
+          },
+          me,
+          narrow,
+          onNotice: setNotice,
+        })}
+        label={t`Members`}
+        onQueryChange={setSearch}
+        pageSize={pageSize}
+        query={search}
+        rowKey={(row) => row.key}
+        rows={rows}
+        unit={{ one: t`person`, other: t`people` }}
+      />
     </TitledCard>
   );
 };
@@ -628,7 +652,7 @@ const MembersPage = () => {
   return (
     <div {...stylex.props(styles.page)}>
       {page.state === "ready" ? (
-        <MembersList
+        <PeopleTable
           invitations={page.data.invitations}
           me={identity.userId}
           members={page.data.members}

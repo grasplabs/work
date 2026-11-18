@@ -43,8 +43,10 @@ msgstr "(la vôtre)"
 msgid "{0, plural, one {# line taken out.} other {# lines taken out.}}"
 msgstr "{0, plural, one {# ligne retirée.} other {# lignes retirées.}}"
 
+#. placeholder {0}: members.length + invitations.length
 #. placeholder {0}: team.people
 #: src/onboarding/send-plan-form.tsx
+#: src/routes/_shell.settings.members.tsx
 msgid "{0, plural, one {# person} other {# people}}"
 msgstr "{0, plural, one {# personne} other {# personnes}}"
 
@@ -569,6 +571,10 @@ msgstr "{count} demandes la semaine dernière, {by} de plus que la semaine préc
 msgid "{cutOff, plural, one {# earlier run today isn't shown: only the latest fit} other {# earlier runs today aren't shown: only the latest fit}}"
 msgstr "{cutOff, plural, one {# exécution plus ancienne d’aujourd’hui n’est pas affichée : seules les plus récentes tiennent} other {# exécutions plus anciennes d’aujourd’hui ne sont pas affichées : seules les plus récentes tiennent}}"
 
+#: src/routes/_shell.settings.members.tsx
+msgid "{date} by {by}"
+msgstr "{date} par {by}"
+
 #: src/dashboard/signals.tsx
 msgid "{days, plural, one {# day} other {# days}}"
 msgstr "{days, plural, one {# jour} other {# jours}}"
@@ -643,17 +649,9 @@ msgstr "{each, plural, one {# heure par semaine} other {# heures par semaine}}"
 msgid "{each} a run"
 msgstr "{each} par exécution"
 
-#: src/settings/erasures.tsx
-msgid "{email} · removed on {date}"
-msgstr "{email} · retiré le {date}"
-
 #: src/workflows/trigger-description.ts
 msgid "{event}, at {account}"
 msgstr "{event}, sur {account}"
-
-#: src/routes/_shell.settings.members.tsx
-msgid "{everyone, plural, one {# person} other {# people}}"
-msgstr "{everyone, plural, one {# personne} other {# personnes}}"
 
 #: src/workflows/workflows-table.tsx
 msgid "{failed, plural, one {# failed in the last {days} days} other {# failed in the last {days} days}}"
@@ -2211,6 +2209,7 @@ msgid "Actions for {name}"
 msgstr "Actions pour {name}"
 
 #: src/routes/_shell.settings.members.tsx
+#: src/settings/erasures.tsx
 msgid "Actions for {who}"
 msgstr "Actions pour {who}"
 
@@ -5079,10 +5078,6 @@ msgstr "Copier le code"
 msgid "Copy email"
 msgstr "Copier l’e-mail"
 
-#: src/routes/_shell.settings.members.tsx
-msgid "Copy email of {name}"
-msgstr "Copier l’e-mail de {name}"
-
 #: src/knowledge/copy-skill.tsx
 msgid "Copy into Our skills"
 msgstr "Copier dans Our skills"
@@ -6282,10 +6277,6 @@ msgid "Erase {name}?"
 msgstr "Effacer {name} ?"
 
 #: src/settings/erasures.tsx
-msgid "Erase {who}"
-msgstr "Effacer {who}"
-
-#: src/settings/erasures.tsx
 msgid "Erase…"
 msgstr "Effacer…"
 
@@ -6944,10 +6935,6 @@ msgstr "Suis chaque devis du premier appel jusqu’au paiement de la facture, et
 #: src/make/examples.ts
 msgid "Follow quotes to payment"
 msgstr "Suivre les devis jusqu’au paiement"
-
-#: src/settings/erasures.tsx
-msgid "Follow the erasure of {who}"
-msgstr "Suivre l’effacement de {who}"
 
 #: src/frame/part-words.tsx
 msgid "Footnote {number}"
@@ -8178,17 +8165,13 @@ msgstr "Inviter des personnes"
 msgid "Invite them from the people list first."
 msgstr "Invitez-les d’abord depuis la liste des personnes."
 
-#: src/settings/invitations.tsx
+#: src/routes/_shell.settings.members.tsx
 msgid "Invited"
 msgstr "Invité"
 
 #: src/activity/audit-words.ts
 msgid "Invited a guest"
 msgstr "A invité un invité"
-
-#: src/settings/invitations.tsx
-msgid "Invited as {role} on {date}"
-msgstr "Invité comme {role} le {date}"
 
 #: src/activity/audit-event.tsx
 msgid "Invited by"
@@ -8660,6 +8643,10 @@ msgstr "Ses versions l’appellent {aliases}"
 #: src/brain/brain-article/team-work.tsx
 msgid "Its work"
 msgstr "Son travail"
+
+#: src/routes/_shell.settings.members.tsx
+msgid "Joined {date}"
+msgstr "Arrivé le {date}"
 
 #: src/activity/audit-words.ts
 msgid "Joined from the directory, writing to Stephen"
@@ -9768,6 +9755,7 @@ msgstr "Ma version de l’App n’a pas démarré. Trouve pourquoi et corrige-le
 #: src/knowledge/new-document.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/projects/project-dialog.tsx
+#: src/routes/_shell.settings.members.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/event-sources.tsx
 #: src/settings/org-card.tsx
@@ -10209,10 +10197,6 @@ msgstr "Personne de ce nom"
 #: src/frame/part-words.tsx
 msgid "No one has that name"
 msgstr "Personne ne porte ce nom"
-
-#: src/routes/_shell.settings.members.tsx
-msgid "No one matches"
-msgstr "Personne ne correspond"
 
 #: src/settings/teams.tsx
 msgid "No one yet: open it to add people"
@@ -11772,10 +11756,6 @@ msgstr "Pages de {name}"
 msgid "Pages of events"
 msgstr "Pages d'événements"
 
-#: src/routes/_shell.settings.members.tsx
-msgid "Pages of members"
-msgstr "Pages des membres"
-
 #: src/frame/part-words.tsx
 msgid "Pagination"
 msgstr "Pagination"
@@ -12743,10 +12723,6 @@ msgid "Rejected: {who}."
 msgstr "Rejeté : {who}."
 
 #: src/settings/erasures.tsx
-msgid "Release address of {who}, letting it sign in again"
-msgstr "Libérer l'adresse de {who}, pour qu'elle puisse se reconnecter"
-
-#: src/settings/erasures.tsx
 msgid "Release address…"
 msgstr "Libérer l’adresse…"
 
@@ -12886,14 +12862,14 @@ msgstr "Retirer ceci du cerveau"
 msgid "Remove: {text}"
 msgstr "Retirer : {text}"
 
-#: src/routes/_shell.settings.members.tsx
-msgid "Removed"
-msgstr "Supprimé"
-
 #: src/apps/draft-changes.tsx
 msgctxt "a file a change removes"
 msgid "Removed"
 msgstr "Supprimé"
+
+#: src/routes/_shell.settings.members.tsx
+msgid "Removed {date}"
+msgstr "Retiré le {date}"
 
 #: src/activity/audit-words.ts
 msgid "Removed a file from a chat before sending it"
@@ -12915,10 +12891,6 @@ msgstr "Supprimé au bout d’une semaine"
 #: src/brain/forget.tsx
 msgid "Removed from the brain"
 msgstr "Retiré du cerveau"
-
-#: src/settings/erasures.tsx
-msgid "Removed on {date} · email erased"
-msgstr "Supprimé le {date} · e-mail effacé"
 
 #: src/activity/audit-words.ts
 msgid "Removed the organization's logo"
@@ -13401,6 +13373,7 @@ msgstr "Risk-to-Compliance"
 msgid "Rocket"
 msgstr "Fusée"
 
+#: src/routes/_shell.settings.members.tsx
 #: src/settings/invitations.tsx
 msgid "Role"
 msgstr "Rôle"
@@ -13894,10 +13867,6 @@ msgstr "Rechercher dans les chats"
 #: src/activity/audit-log.tsx
 msgid "Search events by person or ID"
 msgstr "Rechercher des événements par personne ou ID"
-
-#: src/routes/_shell.settings.members.tsx
-msgid "Search finds people by their name or email."
-msgstr "La recherche trouve les personnes par leur nom ou leur e-mail."
 
 #: src/apps/indexes-view.tsx
 msgid "Search in {searched}"
@@ -14673,6 +14642,10 @@ msgstr "La déconnexion n'a pas abouti"
 #: src/settings/staff-access.tsx
 msgid "Signs everyone from Grasp out of this workspace"
 msgstr "Déconnecte toutes les personnes de Grasp de cet espace de travail"
+
+#: src/routes/_shell.settings.members.tsx
+msgid "Since"
+msgstr "Depuis"
 
 #: src/brain/since-last-look.tsx
 msgid "Since you last looked"
@@ -18826,7 +18799,6 @@ msgstr "vous"
 #: src/connections/integration-inspector.tsx
 #: src/frame/part-words.tsx
 #: src/knowledge/timeline.tsx
-#: src/routes/_shell.settings.members.tsx
 #: src/workflows/go-lives-waiting.tsx
 #: src/workflows/run-detail.tsx
 #: src/workflows/runs.tsx

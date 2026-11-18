@@ -10,9 +10,7 @@ import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { copyText } from "../copy.ts";
-import { formatDate, formatList } from "../format.ts";
-import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
-import { Badge } from "../grasp/badge/index.ts";
+import { formatList } from "../format.ts";
 import {
   Dialog,
   DialogAction,
@@ -38,27 +36,19 @@ import {
 } from "../grasp/field/index.ts";
 import { Copy, More, Plus, Trash } from "../grasp/icons/index.ts";
 import {
-  Item,
-  ItemContent,
-  ItemDescription,
-  ItemMedia,
-  ItemTitle,
-  ItemActions,
-} from "../grasp/item/index.ts";
-import {
   Select,
   SelectTrigger,
   SelectValue,
   SelectContent,
 } from "../grasp/select/index.ts";
 import { TagInput } from "../grasp/tag-input/index.ts";
+import { Text } from "../grasp/text/index.ts";
 import { toast } from "../grasp/toast/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { roleLabel } from "../labels.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { roleItems } from "./roles.ts";
-import { RowNote } from "./section.tsx";
 
 // Invitations: an admin names someone's address and the role they get
 // when they first sign in with the organization's account. Grasp sends no
@@ -79,6 +69,13 @@ const isAddress = (text: string): boolean => addressPattern.test(text);
 
 const styles = stylex.create({
   fields: { display: "grid", gap: grasp.space4 },
+  // A row's last cell: what it says, then its menu, on one line.
+  ends: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: grasp.space2,
+  },
   // The role's choice as wide as the addresses over it.
   full: { width: "100%" },
 });
@@ -267,71 +264,69 @@ export const copyEmail = async (
   }
 };
 
-/** One invitation nobody has taken up yet: its badge, and a menu to copy the address or withdraw it. */
-export const InvitationRow = ({ invitation }: { invitation: Invitation }) => {
+/**
+ * What can be done to an invitation nobody has taken up yet, in the people
+ * table's last column: the role they would join as, and a menu to copy the
+ * address or withdraw it. Why a withdrawal failed is said beside it.
+ */
+export const InvitationActions = ({
+  invitation,
+}: {
+  invitation: Invitation;
+}) => {
   const { t } = useLingui();
   const router = useRouter();
-  const { busy, failure, run } = useCoreAction();
+  const { busy, run } = useCoreAction();
   const { email } = invitation;
-  const date = formatDate(invitation.invitedAt);
-  const role = roleLabel(invitation.role);
   const withdraw = (): void => {
-    void run(async (session) => {
-      await changeThenRefresh(
-        async () => {
-          await session.members.withdrawInvitation(invitation.id);
-        },
-        async () => {
-          await router.invalidate({ sync: true });
-        }
-      );
-    });
+    void run(
+      async (session) => {
+        await changeThenRefresh(
+          async () => {
+            await session.members.withdrawInvitation(invitation.id);
+          },
+          async () => {
+            await router.invalidate({ sync: true });
+          }
+        );
+      },
+      // Why it failed, said where it is seen whatever the row's room.
+      (failure) => {
+        toast.error(failure);
+      }
+    );
   };
   return (
-    <Item size="xs">
-      <ItemMedia align="center">
-        <Avatar decorative name={email} size="xs">
-          <AvatarFallback />
-        </Avatar>
-      </ItemMedia>
-      <ItemContent>
-        <ItemTitle>{email}</ItemTitle>
-        <ItemDescription>
-          <RowNote failure={failure}>
-            {/* Who sent it is in the audit trail: the row keeps to what they join as, and since when. */}
-            {t`Invited as ${role} on ${date}`}
-          </RowNote>
-        </ItemDescription>
-      </ItemContent>
-      <ItemActions>
-        <Badge size="sm" tone="info">{t`Invited`}</Badge>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            aria-label={t`Actions for ${email}`}
-            disabled={busy}
-            icon={More}
-            size="xs"
-            variant="ghost"
-          />
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              icon={Copy}
-              onSelect={() => {
-                void copyEmail(email, {
-                  copied: t`Copied`,
-                  failed: t`Not copied`,
-                });
-              }}
-            >
-              {t`Copy email`}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem icon={Trash} onSelect={withdraw} variant="danger">
-              {t`Withdraw invitation`}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </ItemActions>
-    </Item>
+    <span {...stylex.props(styles.ends)}>
+      <Text element="span" size="sm" tone="muted">
+        {roleLabel(invitation.role)}
+      </Text>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          aria-label={t`Actions for ${email}`}
+          disabled={busy}
+          icon={More}
+          size="xs"
+          variant="ghost"
+        />
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            icon={Copy}
+            onSelect={() => {
+              void copyEmail(email, {
+                copied: t`Copied`,
+                failed: t`Not copied`,
+              });
+            }}
+          >
+            {t`Copy email`}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem icon={Trash} onSelect={withdraw} variant="danger">
+            {t`Withdraw invitation`}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </span>
   );
 };
