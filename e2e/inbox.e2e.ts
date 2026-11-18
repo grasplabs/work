@@ -22,7 +22,7 @@ test("an admin reads what Grasp and people did, with the way to the audit trail"
   // The trail records the roles the setup gave the cast, at least.
   const activity = page.getByRole("list", { name: "Latest activity" });
   await expect(activity.getByRole("listitem").first()).toBeVisible(pageRead);
-  await page.getByRole("button", { name: "People" }).click();
+  await page.getByRole("tab", { name: "People" }).click();
   await expect(activity.getByRole("listitem").first()).toBeVisible();
   await page.getByRole("link", { name: "The full audit trail" }).click();
   await expect(page).toHaveURL(/\/settings\/audit$/u);

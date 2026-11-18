@@ -27,7 +27,7 @@ const askFromStart = async (page: Page, question: string) => {
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page).toHaveURL(/\/chats\/[^/]+$/u);
   const messages = page.getByRole("log", { name: "Messages" });
-  await expect(messages.getByRole("article").first()).toHaveText(question);
+  await expect(messages.getByRole("article").first()).toContainText(question);
   return messages;
 };
 

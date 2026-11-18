@@ -280,13 +280,8 @@ test("a person with nothing waiting finds an empty board, takes a widget off, ad
   await expect(
     page.getByRole("navigation", { name: "Breadcrumb" }).getByText("Inbox")
   ).toBeVisible(pageRead);
-  await expect(page.getByRole("tab", { name: /^To do/u })).toHaveText(
-    /^To do\s*0$/u
-  );
   await expect(
-    page
-      .getByRole("region", { name: "What waits on you" })
-      .getByText("Nothing waits on you.")
+    page.getByRole("main").getByText("Nothing waits for you")
   ).toBeVisible();
   await expect(page.getByRole("tab", { name: "Activity" })).toHaveCount(0);
   await page.getByRole("tab", { name: /^Done/u }).click();

@@ -28,7 +28,7 @@ test("an admin opens Settings on the workspace, and each section from the sideba
 
   // The name and time zone are the admin's to change (e2e/web.e2e.ts
   // changes them, so this test doesn't pin their values).
-  const workspace = sectionOf(page, "Workspace");
+  const workspace = sectionOf(page, "Organization");
   await expect(workspace.getByLabel("Name")).toBeEnabled();
   await expect(sectionOf(page, "Region")).toContainText("European Union");
   await expect(

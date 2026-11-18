@@ -230,9 +230,8 @@ test("an admin signs someone out everywhere, then removes them, and is told what
   await page.getByRole("menuitem", { name: "Remove" }).click();
   const confirm = page.getByRole("alertdialog", { name: "Remove Person?" });
   await confirm.getByRole("button", { name: "Remove" }).click();
-  await expect(notice).toHaveText(
-    "Person is removed. 0 personal connections were disconnected."
-  );
+  // None of their own connections to disconnect: said only when some were.
+  await expect(notice).toHaveText("Person is removed.");
   await expect(actions).toHaveCount(0);
   // Their row, and the menu that had the focus, are gone: the focus goes on.
   await expect(
@@ -360,7 +359,8 @@ test("an admin makes a team, puts someone in it and takes them off, renames it a
   // Untick them and rename it, in one save.
   const renamed = `${name} and legal`;
   await teams.getByRole("button", { name, exact: true }).click();
-  await team.getByRole("checkbox", { name: "Person" }).uncheck();
+  // The one ticked in: the dialog lists everyone again.
+  await team.getByRole("checkbox", { name: "Person", checked: true }).uncheck();
   await team.getByRole("textbox", { name: "Name" }).fill(renamed);
   await team.getByRole("button", { name: "Save changes" }).click();
   await expect(team).toBeHidden();
@@ -423,9 +423,9 @@ test("shows the members page only to someone signed in, and never signs them out
   failing = Number.POSITIVE_INFINITY;
   await page.goto("/settings/members");
   await expect(
-    page.getByText(
-      "Grasp could not reach its servers. Nothing you saved is lost."
-    )
+    page.getByRole("paragraph").filter({
+      hasText: "Grasp could not reach its servers. Nothing you saved is lost.",
+    })
   ).toBeVisible({ timeout: reconnectMs });
   expect(new URL(page.url()).pathname).toBe("/settings/members");
   await expect(

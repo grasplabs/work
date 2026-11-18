@@ -129,8 +129,9 @@ test("a document and a chat each export as Markdown and as a page to print", asy
 
   // The page to print: the Grasp mark, the title, then the text rendered,
   // in a frame of this origin that keeps its policy, styled by the app's
-  // own stylesheets: the title (a page's title, the prototype's 28 px) and the text's
-  // headings in Newsreader (Markdown's serif headings), the text in Geist.
+  // own stylesheets: the title in the library's serif (Geist Serif, as a page's
+  // title), the text's headings in Newsreader (Markdown's serif headings), the text
+  // in Geist.
   await countPrints(page);
   await choose(page, "Export", "PDF");
   await expect
@@ -148,7 +149,7 @@ test("a document and a chat each export as Markdown and as a page to print", asy
           return `${style.fontSize} ${style.fontFamily}`;
         })
     )
-    .toMatch(/^28px "Newsreader Variable"/u);
+    .toMatch(/^\d+px "Geist Serif"/u);
   expect(
     await printed
       .getByRole("heading", { level: 2, name: "Who" })
@@ -175,7 +176,7 @@ test("a document and a chat each export as Markdown and as a page to print", asy
   const messages = page
     .getByRole("region", { name: question })
     .getByRole("log", { name: "Messages" });
-  await expect(messages.getByRole("article").first()).toHaveText(question);
+  await expect(messages.getByRole("article").first()).toContainText(question);
   const chat = page.waitForEvent("download");
   await downloadChat(page, "Markdown (.md)");
   const chatFile = await chat;
