@@ -380,6 +380,9 @@ const MemoryOrigin = ({ memory }: { memory: BrainMemoryShown }) => {
     interview: <Trans>From your interview, version {version}</Trans>,
     claim: <Trans>From what your team said, version {version}</Trans>,
     drawing: <Trans>From how a team works, version {version}</Trans>,
+    opinion: (
+      <Trans>From what people across the company say, version {version}</Trans>
+    ),
     kickoff: <Trans>From the company&apos;s vision, version {version}</Trans>,
     roster: <Trans>From the company&apos;s teams, version {version}</Trans>,
     connected: <Trans>Read from a shared connection, version {version}</Trans>,

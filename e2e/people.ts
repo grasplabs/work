@@ -599,6 +599,7 @@ const cast = {
   iconMoves: { member: "user" },
   pageRecovery: { member: "user" },
   brain: { member: "user" },
+  brainMeaning: { member: "user" },
   brainQuestions: { admin: "admin", member: "user" },
   boardGoals: { admin: "admin", member: "user" },
   tour: { member: "user" },
