@@ -666,12 +666,15 @@ jobs:
         env:
           GRASP_E2E_PART: ${{ matrix.project }}
           PART: ${{ matrix.artifact }}
+      # No cache main kept (evicted, or never filled): fail here, naming
+      # it, rather than minutes later as a test that found nothing.
       - if: steps.meaning.outputs.runs == 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/grasp-os/model-files
           key: model-files-${{ github.run_id }}
           restore-keys: model-files-
+          fail-on-cache-miss: true
       # Beside the journeys, the runner's memory once a minute, as in the
       # test shards (scripts/memory-log.ts).
       - run: |
