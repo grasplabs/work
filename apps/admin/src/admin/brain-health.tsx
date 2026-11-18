@@ -12,7 +12,8 @@
  * the company's audit log, by the staff member.
  *
  * Operational state only: counts, ages, kinds of work, error codes,
- * sizes, recall's counts, and erasures as counts alone. Amber marks what
+ * sizes, recall's counts, erasures as counts alone, and each synced
+ * connection by a hash of it (GRA-1817). Amber marks what
  * needs someone: parked items, a store near its limit, a ledger that
  * isn't read through, a step that failed, a way of recall that failed.
  * What is fine is said in a line or folded: the queue's one kind, upkeep
@@ -30,6 +31,8 @@ import type {
   BrainReport,
   BrainSearchWay,
   BrainStep,
+  BrainSyncConnection,
+  BrainSyncPhase,
   BrainWithoutMeaningReason,
 } from "@grasp-os/shared/brain-report";
 import { Badge } from "@grasp-os/ui/components/badge";
@@ -882,6 +885,178 @@ const OwnStores = ({ report }: { report: BrainReport }) => {
   );
 };
 
+/** Where a connection's sync stands, in words. */
+const phaseWords: Record<BrainSyncPhase, string> = {
+  listing: "Listing everything",
+  relisting: "Daily relist",
+  changes: "Following changes",
+};
+
+/** Whether a synced connection needs someone: failing, behind, or its relist past its day. */
+const needsSomeone = (row: BrainSyncConnection): boolean =>
+  row.failing || row.behindSince !== null || row.relistOverdue;
+
+/** Where one synced connection stands: what needs someone in amber, else fine. */
+const SyncState = ({ row, now }: { row: BrainSyncConnection; now: number }) => {
+  if (!needsSomeone(row)) {
+    return <Badge variant="passed">Fine</Badge>;
+  }
+  return (
+    <span className="flex flex-col items-end gap-1">
+      {row.failing ? <Badge variant="attention">Failing</Badge> : null}
+      {row.behindSince === null ? null : (
+        <Badge variant="attention">
+          {`Behind since ${agoWords(Date.parse(row.behindSince), now)}`}
+        </Badge>
+      )}
+      {row.relistOverdue ? (
+        <Badge variant="attention">Relist past its day</Badge>
+      ) : null}
+    </span>
+  );
+};
+
+/** Synced connections in a table, each row one sync of one connection. */
+const SyncTable = ({
+  rows,
+  now,
+}: {
+  rows: readonly BrainSyncConnection[];
+  now: number;
+}) => (
+  <div className="border-t">
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead variant="card">Sync</TableHead>
+          <TableHead className="text-right" variant="card">
+            Items
+          </TableHead>
+          <TableHead className="text-right" variant="card">
+            Last synced
+          </TableHead>
+          <TableHead variant="card">Latest error</TableHead>
+          <TableHead className="text-right" variant="card">
+            State
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((row) => (
+          <TableRow key={`${row.connection} ${row.feed}`}>
+            <TableCell className="whitespace-normal" variant="card">
+              <span className="flex flex-col gap-0.5">
+                <span>{`${row.provider} · ${row.feed}`}</span>
+                <span className="text-muted-foreground text-xs">
+                  <span className="font-mono">{row.connection}</span>
+                  {` · ${phaseWords[row.phase]}`}
+                </span>
+              </span>
+            </TableCell>
+            <TableCell className="text-right" variant="card">
+              <span className="tabular-nums">{whole(row.items)}</span>
+            </TableCell>
+            <TableCell className="text-right" variant="card">
+              {row.syncedAt === null
+                ? "Never"
+                : agoWords(Date.parse(row.syncedAt), now)}
+            </TableCell>
+            <TableCell variant="card">
+              {row.error === null ? (
+                <span className="text-muted-foreground">None</span>
+              ) : (
+                <span className="flex flex-col gap-0.5">
+                  <span className="font-mono text-xs">{row.error.code}</span>
+                  <span className="text-muted-foreground text-xs">
+                    {agoWords(Date.parse(row.error.at), now)}
+                  </span>
+                </span>
+              )}
+            </TableCell>
+            <TableCell className="text-right" variant="card">
+              <SyncState now={now} row={row} />
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  </div>
+);
+
+/**
+ * Each connection native sync reads into the Brain, sync by sync: what
+ * needs someone (failing, behind, a relist past its day) shown, what is
+ * fine folded. Each connection by a hash of its ID alone: never whose it
+ * is, its account or anything it holds.
+ */
+const Synced = ({ report }: { report: BrainReport }) => {
+  const now = Date.parse(report.now);
+  const description =
+    "Each connection synced into the Brain, sync by sync, by a hash of the connection: never whose it is or what it holds.";
+  const connections = report.sync?.connections;
+  if (connections === undefined) {
+    // A core of an older release, on a slower channel, doesn't send them.
+    return (
+      <Section description={description} title="Synced connections">
+        <SectionRow label="Not available yet">
+          <span>
+            This client’s release doesn’t report its synced connections yet.
+          </span>
+        </SectionRow>
+      </Section>
+    );
+  }
+  if (connections.length === 0) {
+    return (
+      <Section description={description} title="Synced connections">
+        <SectionRow label="Connections">
+          <span className="text-muted-foreground">None syncs yet</span>
+        </SectionRow>
+      </Section>
+    );
+  }
+  const attention = connections.filter((row) => needsSomeone(row));
+  const fine = connections.filter((row) => !needsSomeone(row));
+  return (
+    <Collapsible>
+      <Section
+        action={
+          fine.length > 0 && attention.length > 0 ? (
+            <CollapsibleTrigger render={<Button size="sm" variant="outline" />}>
+              Details
+            </CollapsibleTrigger>
+          ) : undefined
+        }
+        description={description}
+        title="Synced connections"
+      >
+        <SectionRow
+          description="Failing, behind (a run of the clock went by without reading it), or its daily relist past its day."
+          label="Need someone"
+        >
+          {attention.length > 0 ? (
+            <Badge variant="attention">
+              {`${whole(attention.length)} of ${whole(connections.length)}`}
+            </Badge>
+          ) : (
+            <Badge variant="passed">None</Badge>
+          )}
+        </SectionRow>
+        {attention.length > 0 ? (
+          <SyncTable now={now} rows={attention} />
+        ) : (
+          <SyncTable now={now} rows={fine} />
+        )}
+        {attention.length > 0 && fine.length > 0 ? (
+          <CollapsibleContent keepMounted>
+            <SyncTable now={now} rows={fine} />
+          </CollapsibleContent>
+        ) : null}
+      </Section>
+    </Collapsible>
+  );
+};
+
 /** While the section waits for its core, or hasn't asked it (a preload). */
 const Reading = () => (
   <EmptySection>Reading how its Brain is doing from its core…</EmptySection>
@@ -907,6 +1082,7 @@ const Report = ({ acting, read }: { acting: Acting; read: BrainRead }) => {
       <Figures report={report} />
       <Parked acting={acting} report={report} />
       <Waiting report={report} />
+      <Synced report={report} />
       <Recall report={report} />
       <ModelSpend report={report} />
       <Ledger report={report} />

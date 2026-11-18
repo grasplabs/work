@@ -1,5 +1,8 @@
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
-import type { BrainReport } from "@grasp-os/shared/brain-report";
+import type {
+  BrainReport,
+  BrainSyncConnection,
+} from "@grasp-os/shared/brain-report";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -259,6 +262,28 @@ const upkeepPartOf = (html: string): string =>
     html.indexOf(">Upkeep<"),
     html.indexOf(">People&#x27;s own stores<")
   );
+
+/** The Synced connections section of a page's HTML. */
+const syncedPartOf = (html: string): string =>
+  html.slice(html.indexOf(">Synced connections<"), html.indexOf(">Recall<"));
+
+/** One sync of one connection, as core reports it: fine unless `more` says otherwise. */
+const syncRow = (
+  connection: string,
+  more: Partial<BrainSyncConnection> = {}
+): BrainSyncConnection => ({
+  connection,
+  provider: "google",
+  feed: "gmail",
+  phase: "changes",
+  items: 1200,
+  syncedAt: "2026-11-12T09:58:00.000Z",
+  behindSince: null,
+  relistOverdue: false,
+  error: null,
+  failing: false,
+  ...more,
+});
 
 /** The part of `html` that shows people's own stores. */
 const ownStoresPartOf = (html: string): string =>
@@ -955,6 +980,125 @@ describe("how an organization's Brain is doing", () => {
       totals: false,
       spendNotYet: true,
     });
+  });
+
+  it("shows each synced connection by its hash, what needs someone in amber first with its error's code and when, and what is fine folded", async () => {
+    const acme = await liveClient();
+    acme.core.admin = heardSnapshot("Acme");
+    const calm = await liveClient();
+    calm.core.admin = heardSnapshot("Calm");
+    const report = brainReport(1_000_000);
+    acme.core.brain = {
+      ...report,
+      sync: {
+        overdueRelists: 1,
+        connections: [
+          syncRow("0a1b2c3d4e5f"),
+          syncRow("1b2c3d4e5f60", {
+            feed: "drive",
+            phase: "listing",
+            items: 0,
+            syncedAt: null,
+            error: {
+              code: "sync.provider_failed",
+              at: "2026-11-12T09:55:00.000Z",
+            },
+            failing: true,
+          }),
+          syncRow("2c3d4e5f6071", {
+            feed: "calendar",
+            behindSince: "2026-11-12T08:00:00.000Z",
+            relistOverdue: true,
+          }),
+        ],
+      },
+    };
+    calm.core.brain = {
+      ...report,
+      sync: {
+        overdueRelists: 0,
+        connections: [
+          syncRow("0a1b2c3d4e5f", {
+            error: { code: "sync.throttled", at: "2026-11-12T09:00:00.000Z" },
+          }),
+        ],
+      },
+    };
+
+    const { status, html } = await page(
+      `/organizations/${acme.clientId}/brain`
+    );
+    const synced = syncedPartOf(html);
+    const text = textOf(synced);
+    const { html: calmHtml } = await page(
+      `/organizations/${calm.clientId}/brain`
+    );
+    const calmPart = syncedPartOf(calmHtml);
+    const calmText = textOf(calmPart);
+
+    expect({
+      status,
+      needSomeone: text.includes("Need someone"),
+      count: text.includes("2 of 3"),
+      failing: text.includes(
+        "google · drive 1b2c3d4e5f60 · Listing everything 0 Never sync.provider_failed 5 min ago Failing"
+      ),
+      behind: text.includes(
+        "google · calendar 2c3d4e5f6071 · Following changes 1,200 2 min ago None Behind since 2 hours ago Relist past its day"
+      ),
+      // The fine one after them, folded under Details.
+      fineLast: text.indexOf("0a1b2c3d4e5f") > text.indexOf("2c3d4e5f6071"),
+      details: synced.includes(">Details</button>"),
+      amber: synced.includes("text-status-attention"),
+      calm: {
+        none: calmText.includes("its daily relist past its day. None"),
+        keptError: calmText.includes("sync.throttled 1 hour ago Fine"),
+        amber: calmPart.includes("text-status-attention"),
+      },
+    }).toStrictEqual({
+      status: 200,
+      needSomeone: true,
+      count: true,
+      failing: true,
+      behind: true,
+      fineLast: true,
+      details: true,
+      amber: true,
+      calm: { none: true, keptError: true, amber: false },
+    });
+  });
+
+  it("reads the report of a core that counts overdue relists but lists no connections, and says its synced connections aren't available yet", async () => {
+    const between = await liveClient();
+    between.core.admin = heardSnapshot("Between");
+    between.core.brain = {
+      ...brainReport(1_000_000),
+      sync: { overdueRelists: 2 },
+    };
+
+    const { status, html } = await page(
+      `/organizations/${between.clientId}/brain`
+    );
+
+    expect({
+      status,
+      rest: textOf(recallPartOf(html)).includes("Words 40 0"),
+      notYet: textOf(syncedPartOf(html)).includes(
+        "This client’s release doesn’t report its synced connections yet."
+      ),
+    }).toStrictEqual({ status: 200, rest: true, notYet: true });
+  });
+
+  it("says a core on an older release doesn't report its synced connections yet", async () => {
+    const older = await liveClient();
+    older.core.admin = heardSnapshot("Older");
+    older.core.brain = brainReport(1_000_000);
+
+    const { html } = await page(`/organizations/${older.clientId}/brain`);
+
+    expect(textOf(syncedPartOf(html))).toContain(
+      "This client’s release doesn’t report its synced connections yet."
+    );
   });
 
   it("shows the report of a core on a newer release, which reports a step this admin doesn't know, with the steps it knows", async () => {
