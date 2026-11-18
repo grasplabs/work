@@ -57,6 +57,7 @@ import type {
   Access,
   AskModel,
   NewEvent,
+  ObservedRoutine,
   AttributeRule,
   Brain,
   ContestedCursor,
@@ -129,6 +130,7 @@ import { brainConnectionIdSchema } from "@grasp-os/shared/connect";
 import { withinTime } from "@grasp-os/shared/deadline";
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import {
@@ -6493,6 +6495,10 @@ const observedStepSchema = z.strictObject({
   personId: idSchema,
   /** What kind of step: a connection's action, as connect bounds it. */
   step: permissionActionSchema,
+  /** The system it was in: its connector, as connect's catalog names it. */
+  system: wellFormedString().min(1).max(identifierMaxLength),
+  /** Whether it changed something in that system. */
+  writes: z.boolean(),
   item: wellFormedString().min(1).nullable(),
   at: z.date(),
 });
@@ -6551,7 +6557,7 @@ export const recordEvents = async (
     derivedHmacKey(env, eventWhoPurpose, ["sign"]),
   ]);
   const events: NewEvent[] = [];
-  for (const { key, personId, step, item, at } of observed) {
+  for (const { key, personId, step, system, writes, item, at } of observed) {
     // oxlint-disable-next-line no-await-in-loop -- one MAC at a time
     const marked = item === null ? null : await macOf(itemKey, item);
     for (const teamId of teamsOf.get(personId) ?? []) {
@@ -6562,6 +6568,8 @@ export const recordEvents = async (
           key: await macOf(keyKey, JSON.stringify([key, team])),
           team,
           step,
+          system,
+          writes,
           item: marked,
           // oxlint-disable-next-line no-await-in-loop -- one MAC at a time
           who: await whoOf(whoKey, personId, team),
@@ -6607,3 +6615,24 @@ export const eraseEventsOf = async (
 export const expireEvents = async (env: BrainEnv): Promise<void> => {
   await brain(env).expireEvents();
 };
+
+/**
+ * The routines seen in the teams' activity now (GRA-1764), each team by
+ * its id: every move in one made by at least `minTeamShown` distinct
+ * people of that team, as the Brain holds it in its read (@grasp-os/
+ * brain-next's routines-observed.ts). Worked out at each call, never
+ * kept. For admins' opportunities (opportunities.ts).
+ */
+export const observedRoutinesOf = async (
+  env: BrainEnv
+): Promise<SeenInTeam[]> => {
+  const routines = await brain(env).observedRoutines();
+  return routines.flatMap((routine) =>
+    routine.team.startsWith(teamPrefix)
+      ? [{ ...routine, team: routine.team.slice(teamPrefix.length) }]
+      : []
+  );
+};
+
+/** A routine seen in a team's activity (`observedRoutinesOf`): the team by its id. */
+export type SeenInTeam = ObservedRoutine;

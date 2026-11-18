@@ -1,9 +1,12 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import type { WorkflowVersionRecord } from "@grasp-os/shared/brain-records";
+import type { CatalogEntry } from "@grasp-os/shared/connect";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { opportunityForms } from "@grasp-os/shared/opportunities";
 import type {
   Opportunity,
   OpportunityDismissal,
+  SeenRoutine,
 } from "@grasp-os/shared/opportunities";
 import { requireAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -13,6 +16,8 @@ import { z } from "zod";
 
 import { listApps } from "./apps.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
+import { observedRoutinesOf } from "./brain-next.ts";
+import type { SeenInTeam } from "./brain-next.ts";
 import { personOf } from "./connections.ts";
 import {
   apps,
@@ -24,6 +29,7 @@ import type { Proposer } from "./onboarding/proposals.ts";
 import { drawingText } from "./onboarding/routine.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import type { StandingDrawing } from "./onboarding/store.ts";
+import { teamsWithMembers } from "./organization-teams.ts";
 
 // Opportunities (GRA-1750): the Brain notices a team's routines (GRA-1749),
 // core acts on them. Each routine, as the onboarding's standing drawing
@@ -56,6 +62,20 @@ import type { StandingDrawing } from "./onboarding/store.ts";
 // made at: new evidence (a drawing drawn anew) shows the opportunity
 // again. What is kept at a drawing is erased with it
 // (`eraseOpportunitiesOn`).
+//
+// Routines seen in activity (GRA-1764) come from the Brain's read of
+// events, each move in them made by five or more people of a team, held
+// there; nothing of them is kept here either, so one that falls in the
+// Brain is gone from the next list. A seen routine is the same as a
+// described one when their team has the same name (the staff list and
+// Settings › Members list the same company's teams, apart) and the
+// described one names a system the seen one is in: its text names the
+// system whole, or a system its proposal found in that text is the
+// catalog's (`namesWhole`, the same test as for what is connected). Then
+// it is one opportunity, described and seen, with where the two differ by
+// system. A seen one
+// matching none is an opportunity of its own, seen only: its name its
+// first and last steps, no model asked.
 
 /** A week of a month: 52 weeks over 12 months. */
 const weeksPerMonth = 52 / 12;
@@ -260,6 +280,12 @@ export const eraseOpportunitiesOn = async (
   ]);
 };
 
+/** What a catalog entry says it is: its name and, for a native one, what its description says it covers (`connectedSystemsOf`). */
+const saysOf = ({ name, description, source }: CatalogEntry): string =>
+  source === "native" && description !== null
+    ? `${name}\n${description}`
+    : name;
+
 /**
  * What the company has connected for everyone, as the catalog says it: a
  * shared connection, active, as connect lists it for `admin`, by its name
@@ -271,12 +297,12 @@ export const eraseOpportunitiesOn = async (
  */
 const connectedSystemsOf = async (
   env: Env,
-  admin: Identity
+  admin: Identity,
+  catalog: readonly CatalogEntry[]
 ): Promise<string[]> => {
-  const [catalog, connections] = await Promise.all([
-    env.CONNECT.catalog(),
-    env.CONNECT.listConnections(await personOf(env, admin)),
-  ]);
+  const connections = await env.CONNECT.listConnections(
+    await personOf(env, admin)
+  );
   const active = new Set(
     connections
       .filter(
@@ -284,13 +310,165 @@ const connectedSystemsOf = async (
       )
       .map(({ provider }) => provider)
   );
-  return catalog.entries
-    .filter(({ id }) => active.has(id))
-    .map(({ name, description, source }) =>
-      source === "native" && description !== null
-        ? `${name}\n${description}`
-        : name
-    );
+  return catalog.filter(({ id }) => active.has(id)).map(saysOf);
+};
+
+/** A system a seen routine is in: its catalog name, and what its entry says (`saysOf`); its connector's id when the catalog has none. */
+interface SeenSystem {
+  /** Its connector's id. */
+  id: string;
+  name: string;
+  says: string;
+}
+
+/** The system a connector id is, as the catalog names it. */
+const systemOf = (
+  catalog: readonly CatalogEntry[],
+  provider: string
+): SeenSystem => {
+  const entry = catalog.find(({ id }) => id === provider);
+  return entry === undefined
+    ? { id: provider, name: provider, says: provider }
+    : { id: provider, name: entry.name, says: saysOf(entry) };
+};
+
+/** A team's name as two lists of the company's teams are compared: case and Unicode form aside. */
+const teamNameKey = (name: string): string =>
+  name.normalize("NFC").trim().toLocaleLowerCase();
+
+/**
+ * A described routine as a seen one is held to it: its text as every
+ * member reads it, and the systems its proposal found there (each named
+ * whole in that text, `heldOf`), none before one is kept.
+ */
+interface Described {
+  drawing: StandingDrawing;
+  text: string;
+  told: readonly string[];
+}
+
+/** Whether `described` names `system`: its text names it by catalog name or connector, or a system it was told in is the catalog's. */
+const describes = (described: Described, system: SeenSystem): boolean =>
+  namesWhole(described.text, system.name) ||
+  namesWhole(described.text, system.id) ||
+  described.told.some((told) => namesWhole(system.says, told));
+
+/** A routine seen in a team, with its systems as the catalog names them. */
+interface Seen {
+  routine: SeenInTeam;
+  /** Its team's name in Settings › Members. */
+  teamName: string;
+  /** Each step's system, in step order. */
+  systems: SeenSystem[];
+}
+
+/** `seen` as an admin reads it: its steps' systems by their catalog names. */
+const seenRoutineOf = (
+  { routine, systems }: Seen,
+  catalog: readonly CatalogEntry[]
+): SeenRoutine => ({
+  steps: routine.steps.map(({ step, hoursAfter, copied }, at) => ({
+    system: systems[at]?.name ?? "",
+    step,
+    hoursAfter,
+    copied,
+  })),
+  variants: routine.variants.map(({ after, system, step }) => ({
+    after,
+    system: systemOf(catalog, system).name,
+    step,
+  })),
+});
+
+/**
+ * Where `described` and `seen` differ, by system: those seen and not
+ * described, and those it was told in and not seen.
+ */
+const differsOf = (
+  described: Described,
+  seen: Seen
+): { seenOnly: string[]; toldOnly: string[] } => ({
+  seenOnly: [
+    ...new Set(
+      seen.systems
+        .filter((system) => !describes(described, system))
+        .map(({ name }) => name)
+    ),
+  ],
+  toldOnly: described.told.filter(
+    (told) => !seen.systems.some(({ says }) => namesWhole(says, told))
+  ),
+});
+
+/**
+ * Pairs each seen routine with the described one it is (see the top): of
+ * its team by name, describing the most of its systems, at least one;
+ * each described one with one seen one at most, the first that matches it
+ * best.
+ */
+const pairsOf = (
+  described: readonly Described[],
+  seen: readonly Seen[],
+  rosterNames: ReadonlyMap<string, string>
+): Map<StandingDrawing, Seen> => {
+  const pairs = new Map<StandingDrawing, Seen>();
+  for (const each of seen) {
+    const [best] = described
+      .filter(
+        ({ drawing }) =>
+          !pairs.has(drawing) &&
+          teamNameKey(rosterNames.get(drawing.team) ?? "") ===
+            teamNameKey(each.teamName)
+      )
+      .map((one) => ({
+        drawing: one.drawing,
+        shared: each.systems.filter((system) => describes(one, system)).length,
+      }))
+      .filter(({ shared }) => shared > 0)
+      .toSorted((one, other) => other.shared - one.shared);
+    if (best !== undefined) {
+      pairs.set(best.drawing, each);
+    }
+  }
+  return pairs;
+};
+
+/**
+ * A routine seen only, as an opportunity: named by its first and last
+ * steps, keyed by its team and steps, its evidence what it is made of
+ * (its steps and variants, not its timings, which move with every week).
+ */
+const seenOnlyOf = async (
+  seen: Seen,
+  catalog: readonly CatalogEntry[]
+): Promise<Omit<Opportunity, "dismissed">> => {
+  const { routine, systems } = seen;
+  const path = routine.steps.map(({ system, step }) => [system, step]);
+  const shape = await sha256Hex(
+    JSON.stringify({ path, variants: routine.variants })
+  );
+  const pathHash = await sha256Hex(JSON.stringify(path));
+  const ends = [routine.steps.at(0), routine.steps.at(-1)].map((step, at) =>
+    step === undefined
+      ? ""
+      : `${(at === 0 ? systems.at(0) : systems.at(-1))?.name ?? ""} ${step.step}`
+  );
+  return {
+    routine: `seen-${routine.team}-${pathHash.slice(0, 16)}`,
+    evidence: `seen-${shape}`,
+    name: ends.join(" → "),
+    team: routine.team,
+    steps: [],
+    casesPerWeek: null,
+    hoursPerWeek: null,
+    basis: "observed",
+    seen: seenRoutineOf(seen, catalog),
+    differs: null,
+    form: null,
+    covers: null,
+    setup: [],
+    personApproves: [],
+  };
 };
 
 /** Whether `system`, as a routine names it, is one the company connected (`connectedSystemsOf`). */
@@ -319,6 +497,8 @@ const opportunityOf = (
         ? null
         : roundedOf((cases * minutes) / minutesPerHour),
     basis: "described",
+    seen: null,
+    differs: null,
     form: proposal?.form ?? null,
     covers:
       proposal === null || proposal.covers === null
@@ -401,8 +581,51 @@ export const listOpportunities = async (
   const kept = await keptOf(env);
   const listed = await listApps(env, admin);
   const appNames = new Map(listed.map(({ id, name }) => [String(id), name]));
-  const connected = await connectedSystemsOf(env, admin);
+  const { entries: catalog } = await env.CONNECT.catalog();
+  const connected = await connectedSystemsOf(env, admin, catalog);
+  const [observed, memberTeams] = await Promise.all([
+    observedRoutinesOf(env),
+    teamsWithMembers(env),
+  ]);
+  const teamNames = new Map(memberTeams.map(({ id, name }) => [id, name]));
+  const seen = observed.flatMap((routine): Seen[] => {
+    const teamName = teamNames.get(routine.team);
+    return teamName === undefined
+      ? []
+      : [
+          {
+            routine,
+            teamName,
+            systems: routine.steps.map(({ system }) =>
+              systemOf(catalog, system)
+            ),
+          },
+        ];
+  });
+  const roster = await store.companyTeams();
+  const rosterNames = new Map(
+    (roster?.teams ?? []).map(({ id, name }) => [id, name])
+  );
+  const described = drawings.map((drawing) => ({
+    drawing,
+    text: drawingText(drawing),
+    told:
+      kept.proposals.get(keyOf(drawing.workflow, drawing.source))?.systems ??
+      [],
+  }));
+  const pairs = pairsOf(described, seen, rosterNames);
+  const paired = new Set(pairs.values());
   const opportunities: Opportunity[] = [];
+  for (const each of seen.filter((one) => !paired.has(one))) {
+    // oxlint-disable-next-line no-await-in-loop -- one hash at a time
+    const opportunity = await seenOnlyOf(each, catalog);
+    opportunities.push({
+      ...opportunity,
+      dismissed: kept.dismissed.has(
+        keyOf(opportunity.routine, opportunity.evidence)
+      ),
+    });
+  }
   for (const drawing of drawings) {
     const key = keyOf(drawing.workflow, drawing.source);
     // Only what is kept: the proposal is asked apart (`proposerOf`), never
@@ -415,8 +638,23 @@ export const listOpportunities = async (
       !appNames.has(held.covers)
         ? null
         : held;
+    const pair = pairs.get(drawing);
     opportunities.push({
       ...opportunityOf(drawing, proposal, appNames, connected),
+      ...(pair === undefined
+        ? {}
+        : {
+            basis: "both" as const,
+            seen: seenRoutineOf(pair, catalog),
+            differs: differsOf(
+              {
+                drawing,
+                text: drawingText(drawing),
+                told: held?.systems ?? [],
+              },
+              pair
+            ),
+          }),
       dismissed: kept.dismissed.has(key),
     });
   }

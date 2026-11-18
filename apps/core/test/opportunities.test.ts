@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { eraseEventsOf, recordEvents } from "../src/brain-next.ts";
 import { eraseOwedOnboardingSources } from "../src/onboarding/new-brain.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { proposerOf } from "../src/opportunities.ts";
@@ -28,7 +29,8 @@ import {
 import type { Ids, Key } from "./onboarding-team.ts";
 import type { ProviderReply } from "./provider-streams.ts";
 import { acmeTenant } from "./sign-in-config.ts";
-import { outcome, routed, signedInApi } from "./sign-in.ts";
+import { outcome, routed, signedInApi, signedInWithRole } from "./sign-in.ts";
+import { namedTeam } from "./teams.ts";
 
 // Opportunities (GRA-1750): each of a team's routines (GRA-1749) as an
 // admin reads it, ranked by the hours a week it takes, with its evidence
@@ -48,6 +50,8 @@ import { outcome, routed, signedInApi } from "./sign-in.ts";
 //   routine names its product (Gmail) and not the suite.
 // - A dismissal that outlives the evidence it was made at, or one that
 //   lets go before.
+// - A routine seen in activity (GRA-1764) shown once it rests on fewer
+//   than five people, or kept after an erasure took it below.
 
 const idp = mockIdp();
 
@@ -218,6 +222,35 @@ const keptAt = async (evidence: string): Promise<number> => {
     .first<{ kept: number }>();
   return row?.kept ?? 0;
 };
+
+/** `count` new members of the company, by their user IDs. */
+const membersOf = async (count: number): Promise<string[]> =>
+  await Promise.all(
+    Array.from({ length: count }, async () => {
+      const { userId } = await signedInWithRole(idp, "user");
+      return userId;
+    })
+  );
+
+/** A step as a producer hands it to the Brain: its kind, its system and whether it writes. */
+interface Step {
+  step: string;
+  system: string;
+  writes: boolean;
+}
+
+/** `first` an hour ago and then `then` now, by each of `people`. */
+const eachTook = (people: readonly string[], first: Step, then: Step) =>
+  people.flatMap((personId) => [
+    {
+      key: crypto.randomUUID(),
+      personId,
+      ...first,
+      item: null,
+      at: new Date(Date.now() - 3_600_000),
+    },
+    { key: crypto.randomUUID(), personId, ...then, item: null, at: new Date() },
+  ]);
 
 /** Past the claim on a proposal being asked (five minutes). */
 const proposeClaimPastMs = 5 * 60_000 + 1000;
@@ -659,6 +692,104 @@ describe("opportunities", { timeout: 120_000 }, () => {
       ],
       google: ["Outlook", "OneDrive", "SharePoint", "Zendesk"],
       both: ["Zendesk"],
+    });
+  });
+
+  it("show a routine five people were seen doing, beside the one described or alone, with where the two differ and data copied, until it rests on four", async () => {
+    const { ids } = await drawnTeam("Send the answer from the Excel sheet.");
+    // The systems the tickets were told in, as their proposal found them.
+    await proposed([
+      proposing({ form: "workflow", systems: ["Zendesk", "Excel"] }),
+    ]);
+    const admin = await signedInApi(idp, "admin");
+    // Named as the staff list names the team whose tickets were described.
+    const ops = await membersOf(5);
+    await namedTeam("Ops", ...ops);
+    const finance = await membersOf(5);
+    await namedTeam("Finance", ...finance);
+    await recordEvents(env, [
+      // Read in Zendesk, as described; then mailed from Microsoft 365.
+      ...eachTook(
+        ops,
+        { step: "tickets.read", system: "zendesk", writes: false },
+        { step: "mail.send", system: "microsoft", writes: true }
+      ),
+      // Read in one system and written into another: described by no one.
+      ...eachTook(
+        finance,
+        { step: "invoices.read", system: "exact", writes: false },
+        { step: "rows.add", system: "sheets", writes: true }
+      ),
+    ]);
+    const seenOf = async () => {
+      const listed = await admin.api.opportunities.list();
+      return listed.flatMap(({ basis, team: of, name, seen, differs }) =>
+        of === ids.team || basis === "observed"
+          ? [{ basis, name, seen, differs }]
+          : []
+      );
+    };
+    const both = await seenOf();
+    // One of each team erased: what rests on four falls at the next list.
+    await eraseEventsOf(env, ops[0] ?? "");
+    await eraseEventsOf(env, finance[0] ?? "");
+
+    expect({ both, after: await seenOf() }).toStrictEqual({
+      // The described one first: it has hours a week to rank by.
+      both: [
+        {
+          basis: "both",
+          name: "handling new tickets",
+          seen: {
+            steps: [
+              {
+                system: "zendesk",
+                step: "tickets.read",
+                hoursAfter: null,
+                copied: false,
+              },
+              {
+                system: "Microsoft 365",
+                step: "mail.send",
+                hoursAfter: 1,
+                copied: true,
+              },
+            ],
+            variants: [],
+          },
+          differs: { seenOnly: ["Microsoft 365"], toldOnly: ["Excel"] },
+        },
+        {
+          basis: "observed",
+          name: "exact invoices.read → sheets rows.add",
+          seen: {
+            steps: [
+              {
+                system: "exact",
+                step: "invoices.read",
+                hoursAfter: null,
+                copied: false,
+              },
+              {
+                system: "sheets",
+                step: "rows.add",
+                hoursAfter: 1,
+                copied: true,
+              },
+            ],
+            variants: [],
+          },
+          differs: null,
+        },
+      ],
+      after: [
+        {
+          basis: "described",
+          name: "handling new tickets",
+          seen: null,
+          differs: null,
+        },
+      ],
     });
   });
 

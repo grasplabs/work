@@ -46,6 +46,8 @@ const eventOf = (team: string, step: string, key = crypto.randomUUID()) =>
     key,
     team,
     step,
+    system: "crm",
+    writes: false,
     item: null,
     who: "0".repeat(64),
     at: new Date().toISOString(),
@@ -75,11 +77,13 @@ describe("events", () => {
       ownExpiry: await outcome(async () => {
         await own.expireEvents();
       }),
+      ownRoutines: await outcome(async () => await own.observedRoutines()),
     }).toStrictEqual({
       sales: [{ team: sales, step: "deals.update", item: null }],
       finance: [{ team: finance, step: "deals.update", item: null }],
       ownAdd: refused,
       ownExpiry: refused,
+      ownRoutines: refused,
     });
   });
 

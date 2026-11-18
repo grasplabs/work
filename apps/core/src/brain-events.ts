@@ -14,8 +14,10 @@ import type { ObservedStep } from "./brain-next.ts";
 // - Only a call that went through (`ok`), made for a person: never one
 //   answered from an earlier one (a repeat), and never an independent
 //   workflow's, which runs as the system, for no one's team.
-// - The step is the call's action. Never its connection: a person's own
-//   connection names that person. Never its input or its answer.
+// - The step is the call's action, in the system its connector is
+//   (`provider`), and whether it changed something there (`sideEffect`).
+//   Never its connection: a person's own connection names that person.
+//   Never its input or its answer.
 // - No item: what a call names as read is a record for a native tool,
 //   but for a toolkit's its toolkit and tool (connect's policy.ts
 //   `withProvenance`), which no item is. The sync's events carry items.
@@ -31,7 +33,8 @@ const stepOf = (event: AuditEvent): ObservedStep[] => {
     detail.replayed === true ||
     detail.subjectType === "workflow" ||
     typeof detail.onBehalfOf !== "string" ||
-    typeof detail.action !== "string"
+    typeof detail.action !== "string" ||
+    typeof detail.provider !== "string"
   ) {
     return [];
   }
@@ -40,6 +43,8 @@ const stepOf = (event: AuditEvent): ObservedStep[] => {
       key: event.id,
       personId: detail.onBehalfOf,
       step: detail.action,
+      system: detail.provider,
+      writes: detail.sideEffect === true,
       item: null,
       at: new Date(event.at),
     },

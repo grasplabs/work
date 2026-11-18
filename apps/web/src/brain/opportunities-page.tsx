@@ -1,7 +1,10 @@
 import { failureText } from "@grasp-os/shared/errors";
 import type {
   Opportunity,
+  OpportunityBasis,
   OpportunityForm,
+  SeenRoutine,
+  SeenStep,
 } from "@grasp-os/shared/opportunities";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
@@ -18,6 +21,7 @@ import {
   PageHeaderTitle,
 } from "@grasp-os/ui/components/page-header";
 import { Stat } from "@grasp-os/ui/components/stat";
+import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -28,10 +32,11 @@ import { formatDecimal, formatList } from "../format.ts";
 import { useCore } from "../use-core.ts";
 
 // Opportunities (GRA-1750): what Grasp could automate or improve, from how
-// the company's teams describe their work, for admins. Each is one of a
-// team's routines, the largest first, with what it rests on and what
-// Grasp proposes; an admin dismisses one until its evidence changes. Core
-// holds every rule (opportunities.ts): the page only asks.
+// the company's teams describe their work and how five or more of a team
+// were seen doing it (GRA-1764), for admins. Each is one of a team's
+// routines, the largest first, with what it rests on and what Grasp
+// proposes; an admin dismisses one until its evidence changes. Core holds
+// every rule (opportunities.ts): the page only asks.
 
 /** What a call to core came to. */
 type Read<T> =
@@ -114,6 +119,120 @@ const FormBadge = ({ form }: { form: OpportunityForm | null }) => {
   );
 };
 
+/** Where an opportunity's evidence comes from, as its card says it. */
+const BasisText = ({ basis }: { basis: OpportunityBasis }) => {
+  if (basis === "observed") {
+    return <Trans>Seen in the team&apos;s activity.</Trans>;
+  }
+  if (basis === "both") {
+    return (
+      <Trans>
+        Described in the team&apos;s interviews, and seen in its activity.
+      </Trans>
+    );
+  }
+  return <Trans>Described in the team&apos;s interviews.</Trans>;
+};
+
+/** How long after the step before one comes, as people take it. */
+const AfterText = ({ hours }: { hours: number }) => {
+  const { t } = useLingui();
+  return hours === 0
+    ? t`Within the hour of the step before`
+    : t`${plural(hours, {
+        one: "# hour after the step before",
+        other: "# hours after the step before",
+      })}`;
+};
+
+/** One step seen, with when it comes and whether it copies data. */
+const SeenStepItem = ({
+  seen: { system, step, hoursAfter, copied },
+}: {
+  seen: SeenStep;
+}) => (
+  <li>
+    <div className="flex flex-wrap items-center gap-2">
+      <span>
+        <Trans context="a system and a step taken in it">
+          {system}: {step}
+        </Trans>
+      </span>
+      {copied ? (
+        <Badge variant="attention">
+          <Trans>Copied from another system</Trans>
+        </Badge>
+      ) : null}
+    </div>
+    {hoursAfter === null ? null : (
+      <p className="text-muted-foreground text-xs">
+        <AfterText hours={hoursAfter} />
+      </p>
+    )}
+  </li>
+);
+
+/** What was seen of a routine in activity: its steps, and what some do instead. */
+const SeenSection = ({ seen }: { seen: SeenRoutine }) => (
+  <section className="flex flex-col gap-2">
+    <h3 className="text-sm font-medium">
+      <Trans>Seen in activity</Trans>
+    </h3>
+    <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm">
+      {seen.steps.map((step, at) => (
+        <SeenStepItem key={`${at}:${step.system}:${step.step}`} seen={step} />
+      ))}
+    </ol>
+    {seen.variants.length === 0 ? null : (
+      <ul className="text-muted-foreground flex flex-col gap-1 text-sm">
+        {seen.variants.map(({ after, system, step }) => {
+          const position = after + 1;
+          return (
+            <li key={`${after}:${system}:${step}`}>
+              <Trans>
+                After step {position}, some go to {system}: {step}
+              </Trans>
+            </li>
+          );
+        })}
+      </ul>
+    )}
+  </section>
+);
+
+/** Where what a team described and what it was seen doing differ, by system. */
+const DiffersText = ({
+  differs,
+}: {
+  differs: NonNullable<Opportunity["differs"]>;
+}) => {
+  const seenOnly = formatList(differs.seenOnly);
+  const toldOnly = formatList(differs.toldOnly);
+  if (differs.seenOnly.length === 0 && differs.toldOnly.length === 0) {
+    return (
+      <p className="text-sm">
+        <Trans>
+          What was described and what was seen use the same systems.
+        </Trans>
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-1 text-sm">
+      {differs.seenOnly.length === 0 ? null : (
+        <p>
+          <Trans>Seen, but not described: {seenOnly}.</Trans>
+        </p>
+      )}
+      {differs.toldOnly.length === 0 ? null : (
+        <p>
+          <Trans>Described, but not seen: {toldOnly}.</Trans>
+        </p>
+      )}
+    </div>
+  );
+};
+
 /** One figure of an opportunity, with what it counts under it. */
 const Figure = ({ value, label }: { value: number | null; label: string }) => (
   // The term first, as a description list reads; shown under its figure.
@@ -134,7 +253,7 @@ const OpportunityCard = ({
   onDismiss: () => void;
 }) => {
   const { t, i18n } = useLingui();
-  const { steps, covers, setup, personApproves } = opportunity;
+  const { steps, covers, setup, personApproves, seen, differs } = opportunity;
   const approves = new Set(personApproves);
   const systems = formatList(setup);
   const app = covers?.name ?? "";
@@ -148,7 +267,7 @@ const OpportunityCard = ({
                 {titleOf(opportunity, i18n.locale)}
               </h2>
               <p className="text-muted-foreground text-sm">
-                <Trans>Described in the team&apos;s interviews.</Trans>
+                <BasisText basis={opportunity.basis} />
               </p>
             </div>
             <FormBadge form={opportunity.form} />
@@ -172,23 +291,27 @@ const OpportunityCard = ({
               </Trans>
             </p>
           )}
-          <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm">
-            {steps.map((step, at) => (
-              <li key={`${at}:${step}`}>
-                <span className="mr-2">{step}</span>
-                {approves.has(at + 1) ? (
-                  <Badge variant="attention">
-                    <Trans>A person approves</Trans>
-                  </Badge>
-                ) : null}
-              </li>
-            ))}
-          </ol>
+          {steps.length === 0 ? null : (
+            <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm">
+              {steps.map((step, at) => (
+                <li key={`${at}:${step}`}>
+                  <span className="mr-2">{step}</span>
+                  {approves.has(at + 1) ? (
+                    <Badge variant="attention">
+                      <Trans>A person approves</Trans>
+                    </Badge>
+                  ) : null}
+                </li>
+              ))}
+            </ol>
+          )}
           {setup.length === 0 ? null : (
             <p className="text-sm">
               <Trans>Connect first: {systems}.</Trans>
             </p>
           )}
+          {seen === null ? null : <SeenSection seen={seen} />}
+          {differs === null ? null : <DiffersText differs={differs} />}
           <div>
             <Button
               disabled={busy}
@@ -324,8 +447,8 @@ export const OpportunitiesPage = () => {
           <PageHeaderDescription>
             <Trans>
               What Grasp could automate or improve, from how your teams describe
-              their work, the largest first. One hidden comes back when its
-              evidence changes.
+              their work and how five or more of a team were seen doing it, the
+              largest first. One hidden comes back when its evidence changes.
             </Trans>
           </PageHeaderDescription>
         </PageHeader>

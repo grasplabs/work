@@ -6,10 +6,10 @@ import type { NewEvent } from "./contract.ts";
 // when: never a person. The ways they could hurt someone, and how each is
 // closed:
 //
-// - A trail of one person read back: nothing reads this table. No member
-//   of the contract answers an event, so no recall, page, export or
-//   figure holds one; whatever is drawn from them later is drawn here and
-//   held to the five-person floor where it is drawn.
+// - A trail of one person read back: only routines-observed.ts reads this
+//   table, and it answers what at least `minTeamShown` distinct people of
+//   a team did, never an event. No member of the contract answers an
+//   event, so no recall, export or figure about one person holds one.
 // - A person in a row: the host names a team's group, never a person
 //   (contract.ts `newEventSchema`), an item only by a MAC of its ID, and
 //   who took it only by a MAC of them and the team, which only the host
@@ -38,15 +38,17 @@ export const addEvents = (
 ): void => {
   const oldest = now - eventsKeptMs;
   storage.transactionSync(() => {
-    for (const { key, team, step, item, who, at } of events) {
+    for (const { key, team, step, system, writes, item, who, at } of events) {
       const happened =
         Math.floor(Math.min(Date.parse(at), now) / hourMs) * hourMs;
       if (happened >= oldest) {
         storage.sql.exec(
-          "INSERT INTO events (key, team, step, item, who, at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (key, team) DO NOTHING",
+          "INSERT INTO events (key, team, step, system, writes, item, who, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (key, team) DO NOTHING",
           key,
           team,
           step,
+          system,
+          writes ? 1 : 0,
           item,
           who,
           happened

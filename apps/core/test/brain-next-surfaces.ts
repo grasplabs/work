@@ -74,6 +74,7 @@ import {
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
 import { instructionsMaxLength } from "@grasp-os/shared/instruction-files";
+import { minTeamShown } from "@grasp-os/shared/onboarding";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -111,6 +112,7 @@ import { appOf as writingAppOf } from "./brain-writing-app.ts";
 import { noProducers } from "./no-producers.ts";
 import { person as orgMember } from "./sealed-apps.ts";
 import { holding, holdsNothing } from "./stored-skills.ts";
+import { newTeam } from "./teams.ts";
 
 /** The reader a probe calls as, and what they may not see. */
 export interface Probing {
@@ -608,9 +610,19 @@ const stepOf = (who: string, step: string, item: string | null) => ({
   key: crypto.randomUUID(),
   personId: who,
   step,
+  system: "mail",
+  writes: true,
   item,
   at: new Date(),
 });
+
+/**
+ * `marker` as a step or a system this call alone takes: the passes' readers
+ * share teams, and the same marked step taken by five of them would be
+ * five people's, which a routine seen in activity shows (GRA-1764).
+ */
+const takenOnce = (marker: string): string =>
+  `${marker}.${crypto.randomUUID().slice(0, 8)}`;
 
 /** A tag no one's: 64 random hex digits, as the host's MACs are written. */
 const aTag = (): string =>
@@ -623,6 +635,8 @@ const eventOf = (team: string, step: string) => ({
   key: crypto.randomUUID(),
   team,
   step,
+  system: "mail",
+  writes: true,
   item: null,
   who: aTag(),
   at: new Date().toISOString(),
@@ -4517,7 +4531,9 @@ export const coreProbes = {
         },
         about
       );
-    const marked = markers.map((marker) => stepOf(personId, marker, marker));
+    const marked = markers.map((marker) =>
+      stepOf(personId, takenOnce(marker), marker)
+    );
     return [
       await record("the reader's marked steps", marked, "hidden"),
       await record("the same steps again", marked, "hidden"),
@@ -4528,7 +4544,7 @@ export const coreProbes = {
       ),
       await record("a marked step dated after now", [
         {
-          ...stepOf(personId, markers[0] ?? "mail.send", null),
+          ...stepOf(personId, takenOnce(markers[0] ?? "mail"), null),
           at: new Date(Date.now() + 86_400_000),
         },
       ]),
@@ -4546,7 +4562,9 @@ export const coreProbes = {
       {
         key: crypto.randomUUID(),
         personId,
-        step: markers[0] ?? "mail.send",
+        step: takenOnce(markers[0] ?? "mail"),
+        system: takenOnce(markers[0] ?? "mail"),
+        writes: true,
         item: markers.join(" "),
         at: new Date(),
       },
@@ -4555,6 +4573,44 @@ export const coreProbes = {
       await answer("an expiry with marked events kept", async () => {
         await coreBrain.expireEvents(env);
       }),
+    ];
+  },
+  // Routines seen in activity (GRA-1764): what at least five people of a
+  // team did, never fewer. The reader and three more of a team of five
+  // taking marked steps, again and again, answers just as before.
+  observedRoutinesOf: async ({ personId, markers }) => {
+    const before = await answer(
+      "the routines seen, before four people took marked steps",
+      async () => await coreBrain.observedRoutinesOf(env),
+      "nothing"
+    );
+    const others = await Promise.all(
+      Array.from(
+        { length: minTeamShown - 1 },
+        async () => await orgMember("user")
+      )
+    );
+    await newTeam(personId, ...others.map(({ userId }) => userId));
+    const four = [personId, ...others.slice(1).map(({ userId }) => userId)];
+    const hourAgo = new Date(Date.now() - 3_600_000);
+    // The same marked steps for the four, and for no one else.
+    const marks = markers.map(takenOnce);
+    await coreBrain.recordEvents(
+      env,
+      four.flatMap((who) =>
+        marks.flatMap((marker) => [
+          { ...stepOf(who, "deals.read", null), system: marker, at: hourAgo },
+          { ...stepOf(who, marker, marker), system: "mail" },
+        ])
+      )
+    );
+    return [
+      before,
+      await answer(
+        "the routines seen, after four people took marked steps",
+        async () => await coreBrain.observedRoutinesOf(env),
+        "hidden"
+      ),
     ];
   },
   // A person's erasure of their events: no reader, and refused for no
@@ -10923,6 +10979,45 @@ export const storeProbes = {
       await personalStore(personId).eraseEvents({ who: [aTag()] });
     }),
   ],
+  // Routines seen in activity, through the contract: four people's
+  // marked steps in a team answer just as before they were kept, and a
+  // person's own store refuses, naming nothing.
+  observedRoutines: async ({ personId, markers }) => {
+    const before = await answer(
+      "the routines seen, before four people's marked steps",
+      async () => await store().observedRoutines(),
+      "nothing"
+    );
+    const hourAgo = new Date(Date.now() - 3_600_000).toISOString();
+    // A team of this call's own: the passes run this probe again and again.
+    const marks = markers.map(takenOnce);
+    await store().addEvents({
+      events: Array.from({ length: minTeamShown - 1 }, aTag).flatMap((who) =>
+        marks.flatMap((marker) => [
+          {
+            ...eventOf(`team:${marker}`, `Read ${marker}`),
+            system: marker,
+            writes: false,
+            who,
+            at: hourAgo,
+          },
+          { ...eventOf(`team:${marker}`, `Sent ${marker}`), who },
+        ])
+      ),
+    });
+    return [
+      before,
+      await answer(
+        "the routines seen, after four people's marked steps",
+        async () => await store().observedRoutines(),
+        "hidden"
+      ),
+      await answer(
+        "the routines seen, from the reader's own store",
+        async () => await personalStore(personId).observedRoutines()
+      ),
+    ];
+  },
   expireEvents: async ({ personId }) => [
     await answer("an expiry", async () => {
       await store().expireEvents();

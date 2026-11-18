@@ -1649,6 +1649,7 @@ const leavingNone = [
   "eraseWriter",
   "erasureStatus",
   "expireEvents",
+  "observedRoutines",
   "exportFile",
   "exportStatus",
   "findEntities",

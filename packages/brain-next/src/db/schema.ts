@@ -1403,6 +1403,14 @@ export const events = sqliteTable(
     /** The team's group, as the host names it. */
     team: text().notNull(),
     step: text().notNull(),
+    /**
+     * The system the step was in: its connector, as the host's catalog
+     * names it (GRA-1764), so a step that writes into another system than
+     * the one before it shows as data copied between them.
+     */
+    system: text().notNull(),
+    /** Whether the step changed something in its system. */
+    writes: integer({ mode: "boolean" }).notNull(),
     /** A MAC of the item's ID, in hex; null when it was on none. */
     item: text(),
     /**
@@ -1422,6 +1430,9 @@ export const events = sqliteTable(
     index("events_at_idx").on(table.at),
     // A person's erasure deletes by their tags.
     index("events_who_idx").on(table.who),
+    // Routines read each person's steps in a team in order
+    // (routines-observed.ts).
+    index("events_trail_idx").on(table.team, table.who, table.at, table.row),
   ]
 );
 

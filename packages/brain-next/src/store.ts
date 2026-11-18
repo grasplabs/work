@@ -75,6 +75,7 @@ import {
 import type {
   EventErasure,
   NewEvents,
+  ObservedRoutine,
   RetireWrittenRequest,
   VersionChange,
   VersionChangeRequest,
@@ -247,6 +248,7 @@ import { addMemories } from "./remember.ts";
 import { isRemoved, removeSources } from "./removal.ts";
 import { checkRestore, restoreStatus, startRestore } from "./restore.ts";
 import { isRestoring } from "./restoring.ts";
+import { observedRoutines } from "./routines-observed.ts";
 import {
   enqueueProposal,
   listProposals,
@@ -1371,6 +1373,18 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     }
     await this.#readyToWrite();
     eraseEvents(this.ctx.storage.sql, who);
+  }
+
+  /**
+   * The routines seen in each team's events now (routines-observed.ts),
+   * each held to `minTeamShown` distinct people inside the read itself.
+   */
+  async observedRoutines(): Promise<ObservedRoutine[]> {
+    if (this.#kind.kind === "person") {
+      throw new Error(sharedOnly);
+    }
+    await this.#ready();
+    return observedRoutines(this.ctx.storage.sql);
   }
 
   /** Deletes every event past its time (events.ts), by the store's clock. */

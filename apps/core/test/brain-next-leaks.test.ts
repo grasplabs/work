@@ -769,10 +769,41 @@ describe(
           key: crypto.randomUUID(),
           personId: holder,
           step: eventMarker,
+          system: "crm",
+          writes: false,
           item: eventMarker,
           at: new Date(),
         },
       ]);
+      // Four of that team, the holder among them, reading in a system the
+      // marker names and then mailing (GRA-1764): one person short of a
+      // routine seen in activity, so no read shows it.
+      const anHourAgo = new Date(Date.now() - 3_600_000);
+      await recordEvents(
+        env,
+        [holder, ...eventPeople.slice(1).map(({ userId }) => userId)].flatMap(
+          (personId) => [
+            {
+              key: crypto.randomUUID(),
+              personId,
+              step: "deals.read",
+              system: eventMarker,
+              writes: false,
+              item: null,
+              at: anHourAgo,
+            },
+            {
+              key: crypto.randomUUID(),
+              personId,
+              step: "mail.send",
+              system: "mail",
+              writes: true,
+              item: null,
+              at: new Date(),
+            },
+          ]
+        )
+      );
       const eventWho = await runInDurableObject(
         sharedStore(),
         (_store, state) =>
