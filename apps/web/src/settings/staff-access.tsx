@@ -133,9 +133,7 @@ export const StaffAccessSection = ({
         {/* Until when, in a field that only reads, with what staff reach at its end. */}
         <SettingRow label={t`Open until`}>
           {(field) => (
-            // A few pixels taller than the rows' `sm` inputs: InputGroup has no `sm` size yet. Once
-            // it has, it takes `size="sm"` and the row is as tall as the others.
-            <InputGroup layout={controlStyles.fill}>
+            <InputGroup size="sm" layout={controlStyles.fill}>
               <InputGroupInput {...field} readOnly value={until} />
               <InputGroupText>
                 {staff.scope === "onboarding" ? (

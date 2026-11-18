@@ -52,9 +52,7 @@ const EmailRow = ({ email, role }: { email: string; role: string }) => {
   return (
     <SettingRow info={t`Your sign-in; your admin changes it.`} label={t`Email`}>
       {(field) => (
-        // A few pixels taller than the rows' `sm` inputs: InputGroup has no `sm` size yet. Once
-        // it has, it takes `size="sm"` and the row is as tall as the others.
-        <InputGroup layout={styles.control}>
+        <InputGroup size="sm" layout={styles.control}>
           <InputGroupInput {...field} readOnly type="email" value={email} />
           <InputGroupText>
             <Badge size="sm">{role}</Badge>
