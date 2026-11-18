@@ -23,8 +23,9 @@ import { derivedHmacKey } from "./derived-keys.ts";
 // Brain's, and puts a person in that group at every read only from
 // accounts they proved are theirs: the ones they sign in with, and the
 // suite accounts they connected as their own. A link reaches nobody, an
-// outside account is held by nobody, and a group is held by nobody until
-// core knows its members.
+// outside account is held by nobody, and a group only by the people whose
+// own connection's last read of their groups, within a day, says they are
+// in it.
 //
 // Each system names a user reader by what its own ID tokens vouch for:
 // Microsoft by the Entra object ID (Graph's `grantedToV2.user.id`, the
@@ -55,6 +56,16 @@ import { derivedHmacKey } from "./derived-keys.ts";
 // erasure) reads a list that still names it until the sync reads that list
 // again, at most a day (decided for the sync run, GRA-1719); the leaver
 // themselves is refused at once, as every read checks membership.
+//
+// A group reader is held by a person through the suite account they
+// connected as their own: connect reads, with that account's own token,
+// the groups it is in, nested ones included, each time its access token is
+// minted (connect's reader-groups.ts), and the groups count while that read
+// is recent (`readerProofMaxAgeMs`, as every proof here). So a person who
+// leaves a group stops reading by it at their connection's next token
+// renewal, and a day after its last read whatever happens; nobody holds a
+// group by a directory's word, or by a read that failed, and nothing of
+// anyone else's groups is kept (GRA-1719, "Group members").
 //
 // A group's name is its kind, then its parts joined by ":", which no part
 // holds (`sourceReaderSchema`), so two readers never share a name. No other
@@ -105,6 +116,17 @@ const keysOf = async (
 const tenantPrincipal = (provider: string, tenant: string): string =>
   `tenant:${provider}:${comparable(tenant)}`;
 
+/**
+ * The Brain's group of the group `group` in `tenant` at `provider`: a
+ * group's ID compared as an account's is (Entra's object IDs and Google's
+ * addresses are both case-blind).
+ */
+const groupPrincipal = (
+  provider: string,
+  tenant: string,
+  group: string
+): string => `group:${provider}:${comparable(tenant)}:${comparable(group)}`;
+
 /** The Brain's group of an account by its token. */
 const tokenPrincipal = (token: string): string => `account:${token}`;
 
@@ -116,7 +138,7 @@ const tokenPrincipal = (token: string): string => `account:${token}`;
 export const plainPrincipalOf = (reader: SourceReader): string | undefined => {
   switch (reader.kind) {
     case "group": {
-      return `group:${reader.provider}:${comparable(reader.tenant)}:${reader.group}`;
+      return groupPrincipal(reader.provider, reader.tenant, reader.group);
     }
     case "tenant": {
       return tenantPrincipal(reader.provider, reader.tenant);
@@ -328,9 +350,24 @@ const readingAccountsOf = (
 };
 
 /**
+ * The Brain's groups of the groups the suite accounts the member connected
+ * as their own (`connected`) are in: of each connection still connected,
+ * the groups its last whole read found (connect's reader-groups.ts), while
+ * that read is recent (`readerProofMaxAgeMs`), in its own tenant.
+ */
+const groupsHeldBy = (connected: readonly PersonalAccount[]): string[] =>
+  connected.flatMap(
+    ({ provider, tenant, groups, groupsReadAt, connected: live }) =>
+      live && recent(groupsReadAt)
+        ? groups.map((group) => groupPrincipal(provider, tenant, group))
+        : []
+  );
+
+/**
  * The Brain's groups the member `userId` holds, reading as themselves, by
  * the accounts they proved are theirs (`signIns`, `connected`): each
- * account's token and its tenant's name. One batch: they claim the
+ * account's token and its tenant's name, and the groups their connected
+ * accounts are in (`groupsHeldBy`). One batch: they claim the
  * tokens of those accounts (`person`, written only where it changes), and
  * their tokens are read. Nothing is minted: an account no list named has
  * no token, and holds nothing.
@@ -342,8 +379,9 @@ export const heldPrincipalsOf = async (
   connected: readonly PersonalAccount[]
 ): Promise<string[]> => {
   const reading = readingAccountsOf(env, signIns, connected);
+  const groups = groupsHeldBy(connected);
   if (reading.length === 0) {
-    return [];
+    return [...new Set(groups)];
   }
   const keys = await keysOf(env, reading);
   const db = drizzle(env.DB);
@@ -372,6 +410,7 @@ export const heldPrincipalsOf = async (
       ...reading.map(({ provider, tenant }) =>
         tenantPrincipal(provider, tenant)
       ),
+      ...groups,
     ]),
   ];
 };

@@ -186,6 +186,16 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // model's files copied from the release directory first
   // (src/embedder.ts).
   { name: "embed.warm", period: "minute", run: warmQuestionEmbedder },
+  // The groups each person's own suite account is in, read again once its
+  // token was minted since, which copied reader lists' groups count them
+  // in (connect's src/reader-groups.ts, source-readers.ts).
+  {
+    name: "brain.reader_groups",
+    period: "minute",
+    run: async (env) => {
+      await env.CONNECT.readReaderGroups();
+    },
+  },
   // Connect's own clock armed, if nothing has (connect's src/clock.ts).
   {
     name: "connect.clock",

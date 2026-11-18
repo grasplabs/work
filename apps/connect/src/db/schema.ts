@@ -90,6 +90,22 @@ export const connections = sqliteTable(
       string[]
     >(),
     /**
+     * The groups the account is in at the provider, nested ones included,
+     * as the last whole read with its own token said (reader-groups.ts),
+     * for the providers whose reader lists name groups: null until one
+     * was. What core counts a person in a list's group by
+     * (`personalAccounts`), only while `reader_groups_at` is recent.
+     */
+    readerGroups: text("reader_groups", { mode: "json" }).$type<string[]>(),
+    /** When a whole read last said `reader_groups`. */
+    readerGroupsAt: timestamp("reader_groups_at"),
+    /**
+     * When a read of the account's groups was last tried, whole or not:
+     * one is due again only once the connection's access token was minted
+     * after it (reader-groups.ts).
+     */
+    readerGroupsTriedAt: timestamp("reader_groups_tried_at"),
+    /**
      * The other addresses the account's mailbox receives mail at (its
      * primary address and SMTP aliases), as its provider said when it was
      * connected (account-addresses.ts); null when never read.

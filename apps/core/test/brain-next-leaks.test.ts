@@ -10,6 +10,7 @@ import { brainUploadReadersSchema } from "@grasp-os/shared/brain-sources";
 import type { BrainUploadReaders } from "@grasp-os/shared/brain-sources";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { authoritySchema } from "@grasp-os/shared/permissions";
+import { readerProofMaxAgeMs } from "@grasp-os/shared/source-readers";
 import type { SourceReader } from "@grasp-os/shared/source-readers";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -369,6 +370,8 @@ describe(
         "the holder's own source": markerWord(),
         "a team's source the outsider isn't in": markerWord(),
         "a source nobody is known to read": markerWord(),
+        "a file shared with a group the outsider proved they were in over a day ago":
+          markerWord(),
         "the holder's interview": markerWord(),
         "a source narrowed away from the outsider": markerWord(),
         "a source narrowed to the holder alone": markerWord(),
@@ -419,6 +422,8 @@ describe(
         "the holder's own source": ownerMarker,
         "a team's source the outsider isn't in": teamMarker,
         "a source nobody is known to read": noneMarker,
+        "a file shared with a group the outsider proved they were in over a day ago":
+          staleGroupMarker,
         "the holder's interview": interviewMarker,
         "a source narrowed away from the outsider": narrowedMarker,
         "a source narrowed to the holder alone": toHolderMarker,
@@ -809,6 +814,39 @@ describe(
       const noneId = await add(`Unfiled note ${sharedWord} ${noneMarker}`, {
         kind: "none",
       });
+      // Shared with a group the outsider is in by the last read of their
+      // own connection's groups (GRA-1761), but that read is over a day
+      // old: it proves nothing any more, so the file is nobody's.
+      const staleGroup = crypto.randomUUID();
+      await connectDb()
+        .prepare(
+          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tenant, account_id, reader_groups, reader_groups_at, created_at, updated_at) VALUES (?, 'microsoft', 'personal', ?, 'active', 'native', 'microsoft-365', ?, ?, ?, ?, ?, ?)"
+        )
+        .bind(
+          crypto.randomUUID(),
+          outsider,
+          acmeTenant,
+          String(outsiderPerson.oid),
+          JSON.stringify([staleGroup]),
+          Date.now() - readerProofMaxAgeMs - 60_000,
+          readAtNow,
+          readAtNow
+        )
+        .run();
+      const staleGroupId = await add(
+        `Lease annex ${sharedWord} ${staleGroupMarker}`,
+        {
+          kind: "readers",
+          readers: [
+            {
+              kind: "group",
+              provider: "microsoft",
+              tenant: acmeTenant,
+              group: staleGroup,
+            },
+          ],
+        }
+      );
       // A claim of how a staff-list team works, from its interviews, from
       // the first person who told it (GRA-1741, GRA-1987): every member
       // reads it as themselves (GRA-1748), nobody outside the company, and
@@ -1159,6 +1197,7 @@ describe(
           interviewMarker,
           teamMarker,
           noneMarker,
+          staleGroupMarker,
           narrowedMarker,
           captureMarker,
           toolkitCaptureMarker,
@@ -1181,6 +1220,7 @@ describe(
           ...ownerIds,
           teamId,
           noneId,
+          staleGroupId,
           narrowedId,
           ownUpload,
           teamUpload,
@@ -1333,6 +1373,7 @@ describe(
         interviewMarker,
         teamMarker,
         noneMarker,
+        staleGroupMarker,
         claimMarker,
         claimText,
         drawingMarker,
@@ -1371,6 +1412,7 @@ describe(
         ownerIds,
         teamId,
         noneId,
+        staleGroupId,
         claimId,
         drawingId,
         opinionId,
@@ -1782,6 +1824,7 @@ describe(
             world.ownerMarker,
             world.interviewMarker,
             world.noneMarker,
+            world.staleGroupMarker,
             world.narrowedMarker,
             world.captureMarker,
             world.toolkitCaptureMarker,
@@ -1797,6 +1840,7 @@ describe(
           hiddenVersions: everyVersionOf(
             ...world.ownerIds,
             world.noneId,
+            world.staleGroupId,
             world.narrowedId,
             world.ownUpload,
             world.captureId,
@@ -1911,12 +1955,14 @@ describe(
           // The team claim is theirs to read: they told their work in it.
           markers: [
             world.noneMarker,
+            world.staleGroupMarker,
             world.narrowedMarker,
             world.agentFileMarker,
             world.appFileMarker,
           ],
           hiddenVersions: [
             ...everyVersionOf(world.noneId),
+            ...everyVersionOf(world.staleGroupId),
             { source: world.narrowedId, version: 1 },
           ],
           // Their own instruction file is theirs, and so are the Apps'
@@ -1927,6 +1973,8 @@ describe(
         },
         {
           "a source nobody is known to read": world.noneMarker,
+          "a file shared with a group the outsider proved they were in over a day ago":
+            world.staleGroupMarker,
           "a source narrowed away from the outsider": world.narrowedMarker,
           "another agent's instruction file": world.agentFileMarker,
           "an App's instruction file the outsider doesn't build":
@@ -1961,6 +2009,7 @@ describe(
             world.interviewMarker,
             world.teamMarker,
             world.noneMarker,
+            world.staleGroupMarker,
             world.claimMarker,
             world.drawingMarker,
             world.opinionMarker,
@@ -1973,6 +2022,7 @@ describe(
             ...world.ownerIds,
             world.teamId,
             world.noneId,
+            world.staleGroupId,
             world.claimId,
             world.drawingId,
             world.opinionId,
@@ -1989,6 +2039,8 @@ describe(
           "a memory shared with a team, though the holder is in the team":
             world.sharedMemoryMarker,
           "a source nobody is known to read": world.noneMarker,
+          "a file shared with a group the outsider proved they were in over a day ago":
+            world.staleGroupMarker,
           "a team's claim from the interviews, which code never gets":
             world.claimMarker,
           "a team's drawing from the interviews, which code never gets":
@@ -2043,6 +2095,7 @@ describe(
             world.interviewMarker,
             world.teamMarker,
             world.noneMarker,
+            world.staleGroupMarker,
             world.claimMarker,
             world.drawingMarker,
             world.opinionMarker,
@@ -2055,6 +2108,7 @@ describe(
             ...world.ownerIds,
             world.teamId,
             world.noneId,
+            world.staleGroupId,
             world.claimId,
             world.drawingId,
             world.opinionId,
@@ -2073,6 +2127,8 @@ describe(
           "a memory shared with a team the grant doesn't name, though the holder is in it":
             world.sharedMemoryMarker,
           "a source nobody is known to read": world.noneMarker,
+          "a file shared with a group the outsider proved they were in over a day ago":
+            world.staleGroupMarker,
           "a team's claim from the interviews, which code never gets":
             world.claimMarker,
           "a team's drawing from the interviews, which code never gets":
@@ -2284,6 +2340,7 @@ describe(
             world.ownerMarker,
             world.interviewMarker,
             world.noneMarker,
+            world.staleGroupMarker,
             world.narrowedMarker,
             world.toHolderMarker,
             ...world.instructionMarkers,
@@ -2292,6 +2349,7 @@ describe(
           hiddenVersions: everyVersionOf(
             ...world.ownerIds,
             world.noneId,
+            world.staleGroupId,
             world.narrowedId,
             ...holdersOwnProduced(world).sources
           ),
@@ -2342,6 +2400,7 @@ describe(
             world.interviewMarker,
             world.teamMarker,
             world.noneMarker,
+            world.staleGroupMarker,
             world.narrowedMarker,
             world.toHolderMarker,
             ...world.instructionMarkers,
@@ -2355,6 +2414,7 @@ describe(
             ...world.ownerIds,
             world.teamId,
             world.noneId,
+            world.staleGroupId,
             world.narrowedId,
             ...holdersOwnProduced(world).sources,
             world.teamUpload,

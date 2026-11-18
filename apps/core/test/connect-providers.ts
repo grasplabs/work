@@ -151,6 +151,17 @@ export const googleAddressUrl = "https://google-control.test/address";
  */
 export const googleHoldUrl = "https://google-control.test/hold";
 
+/**
+ * Where tests set the groups a member is directly in, at Microsoft or
+ * Google alike: POST `{ member, groups }`, the member a Microsoft object
+ * ID, a Google address or a group's ID, each lower case; or `{ member,
+ * failing }`, which makes every read of that account's groups fail (503)
+ * while true. Graph's `/me/transitiveMemberOf` answers the token's own
+ * account's groups through every nesting, Cloud Identity's
+ * `searchDirectGroups` a member's direct ones, as each documents.
+ */
+export const groupsControlUrl = "https://groups-control.test/groups";
+
 /** Where tests read how many drafts Graph made for `?mailbox=`: `{ drafts }`. */
 export const graphDraftsUrl = "https://graph-control.test/drafts";
 
@@ -330,6 +341,108 @@ const encoded = (value) =>
   base64Url(new TextEncoder().encode(JSON.stringify(value)));
 /** Each Google account's Workspace domain and address now, by its subject. */
 const googleAccounts = new Map();
+/** Each member's direct groups (\`groupsControlUrl\`), by its key, lower case. */
+const directGroups = new Map();
+/** The members whose group reads fail. */
+const failingGroups = new Set();
+/** Every group \`member\` is in, through any nesting, each once. */
+const transitiveGroups = (member) => {
+  const found = new Set();
+  let members = [member];
+  while (members.length > 0) {
+    const next = [];
+    for (const each of members) {
+      for (const group of directGroups.get(each) ?? []) {
+        if (!found.has(group)) {
+          found.add(group);
+          next.push(group);
+        }
+      }
+    }
+    members = next;
+  }
+  return [...found];
+};
+/** The subject an access token of the fakes names: \`access.<subject>\`, maybe with a renewal's suffix. */
+const subjectOf = (request) => {
+  const authorization = request.headers.get("authorization") ?? "";
+  const [subject = ""] = authorization.startsWith("Bearer access.")
+    ? authorization.slice("Bearer access.".length).split(".")
+    : [];
+  return subject;
+};
+/**
+ * Graph's \`GET /me/transitiveMemberOf\`
+ * (https://learn.microsoft.com/en-us/graph/api/user-list-transitivememberof?view=graph-rest-1.0):
+ * the token's account's groups, nested ones too, 100 a page (Graph's
+ * default) with a directory role among them, as Graph lists roles too.
+ * Query options other than its own \`$skiptoken\` are advanced queries,
+ * refused here as Graph refuses them without \`ConsistencyLevel\`.
+ */
+const graphMemberOf = (request, url) => {
+  if ([...url.searchParams.keys()].some((key) => key !== "$skiptoken")) {
+    return Response.json({ error: { code: "Request_UnsupportedQuery" } }, { status: 400 });
+  }
+  const subject = subjectOf(request).toLowerCase();
+  if (subject === "") {
+    return Response.json({ error: { code: "InvalidAuthenticationToken" } }, { status: 401 });
+  }
+  if (failingGroups.has(subject)) {
+    return Response.json({ error: { code: "serviceNotAvailable" } }, { status: 503 });
+  }
+  const all = [
+    { "@odata.type": "#microsoft.graph.directoryRole", id: "62e90394-69f5-4237-9190-012177145e10" },
+    ...transitiveGroups(subject).map((id) => ({ "@odata.type": "#microsoft.graph.group", id })),
+  ];
+  const start = Number(url.searchParams.get("$skiptoken") ?? "0");
+  const value = all.slice(start, start + 100);
+  return Response.json({
+    value,
+    ...(start + 100 < all.length
+      ? { "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/transitiveMemberOf?$skiptoken=" + (start + 100) }
+      : {}),
+  });
+};
+const groupQueryStart = "member_key_id == '";
+const groupQueryEnd = "' && 'cloudidentity.googleapis.com/groups.discussion_forum' in labels";
+/** The member a \`searchDirectGroups\` query names, in the one shape connect asks it; null for any other. */
+const groupQueryMember = (query) =>
+  query.startsWith(groupQueryStart) && query.endsWith(groupQueryEnd) &&
+  query.length > groupQueryStart.length + groupQueryEnd.length
+    ? query.slice(groupQueryStart.length, query.length - groupQueryEnd.length)
+    : null;
+/**
+ * Cloud Identity's \`groups.memberships.searchDirectGroups\`
+ * (https://docs.cloud.google.com/identity/docs/reference/rest/v1/groups.memberships/searchDirectGroups):
+ * a member's direct groups, at most \`pageSize\` (1000 at most) a page,
+ * for a token whose grant holds \`cloud-identity.groups.readonly\`; any
+ * other option, or a query of another shape, is refused.
+ */
+const searchDirectGroups = (request, url) => {
+  const allowed = new Set(["query", "pageSize", "pageToken", "orderBy"]);
+  const member = groupQueryMember(url.searchParams.get("query") ?? "");
+  const pageSize = Number(url.searchParams.get("pageSize") ?? "200");
+  if ([...url.searchParams.keys()].some((key) => !allowed.has(key)) || member === null || member.includes("'") || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 1000) {
+    return Response.json({ error: { code: 400, status: "INVALID_ARGUMENT" } }, { status: 400 });
+  }
+  const account = googleAccounts.get(subjectOf(request));
+  if (account === undefined || !(account.scope ?? "").split(" ").includes("https://www.googleapis.com/auth/cloud-identity.groups.readonly")) {
+    return Response.json({ error: { code: 403, status: "PERMISSION_DENIED" } }, { status: 403 });
+  }
+  if (failingGroups.has(account.email)) {
+    return Response.json({ error: { code: 503, status: "UNAVAILABLE" } }, { status: 503 });
+  }
+  const groups = directGroups.get(member) ?? [];
+  const start = Number(url.searchParams.get("pageToken") ?? "0");
+  return Response.json({
+    memberships: groups.slice(start, start + pageSize).map((id) => ({
+      group: "groups/" + id.replace(/[^a-z0-9]/gu, ""),
+      groupKey: { id },
+      roles: [{ name: "MEMBER" }],
+    })),
+    ...(start + pageSize < groups.length ? { nextPageToken: String(start + pageSize) } : {}),
+  });
+};
 /** A hold on the next look-up of a Google account's addresses, while a test asks for one. */
 let googleHold = null;
 /**
@@ -390,7 +503,7 @@ const googleConsent = async (request) => {
     email: subject + "@" + domain,
     email_verified: true,
   };
-  googleAccounts.set(subject, { domain, email: claims.email });
+  googleAccounts.set(subject, { domain, email: claims.email, scope: atob(granted) });
   return Response.json({
     token_type: "Bearer",
     access_token: "access." + subject,
@@ -568,6 +681,30 @@ export default {
     const url = new URL(request.url);
     if (aiProviders.handles(url)) {
       return await aiProviders.answer(request, url);
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(groupsControlUrl)}) {
+      const { member, groups, failing } = await request.json();
+      if (groups !== undefined) {
+        directGroups.set(member, groups);
+      }
+      if (failing === true) {
+        failingGroups.add(member);
+      } else if (failing === false) {
+        failingGroups.delete(member);
+      }
+      return new Response(null, { status: 204 });
+    }
+    if (url.hostname === "graph.microsoft.com" && request.method === "GET" && url.pathname === "/v1.0/me/transitiveMemberOf") {
+      return graphMemberOf(request, url);
+    }
+    if (url.hostname === "cloudidentity.googleapis.com" && request.method === "GET" && url.pathname === "/v1/groups/-/memberships:searchDirectGroups") {
+      if (googleHold !== null && url.href.startsWith(googleHold.prefix)) {
+        googleHold.reached = true;
+        while (googleHold?.held === true) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      }
+      return searchDirectGroups(request, url);
     }
     if (url.hostname === "backend.composio.dev" && url.pathname.startsWith("/api/v3.1/")) {
       return await composioApi(request, url);
@@ -829,7 +966,7 @@ export default {
     if (request.method === "POST" && url.href === ${JSON.stringify(googleAddressUrl)}) {
       const { subject, email } = await request.json();
       const account = googleAccounts.get(subject);
-      googleAccounts.set(subject, { domain: account?.domain ?? "acme.test", email });
+      googleAccounts.set(subject, { ...account, domain: account?.domain ?? "acme.test", email });
       return new Response(null, { status: 204 });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkKeysUrl)}) {
