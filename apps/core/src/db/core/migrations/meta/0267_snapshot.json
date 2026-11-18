@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "9488fc9e-a098-404a-a13c-ca8a45b63387",
+  "id": "f395ee00-149f-4b3c-8d7e-7c3c15e44a6e",
   "prevId": "c0388866-23a0-458d-af73-7aaa59a96228",
   "tables": {
     "access_revocations": {
@@ -8548,91 +8548,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "opportunity_dismissals": {
-      "name": "opportunity_dismissals",
-      "columns": {
-        "routine": {
-          "name": "routine",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "evidence": {
-          "name": "evidence",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "opportunity_dismissals_routine_evidence_pk": {
-          "columns": [
-            "routine",
-            "evidence"
-          ],
-          "name": "opportunity_dismissals_routine_evidence_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "opportunity_proposals": {
-      "name": "opportunity_proposals",
-      "columns": {
-        "routine": {
-          "name": "routine",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "evidence": {
-          "name": "evidence",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "proposal": {
-          "name": "proposal",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "opportunity_proposals_routine_evidence_pk": {
-          "columns": [
-            "routine",
-            "evidence"
-          ],
-          "name": "opportunity_proposals_routine_evidence_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "org_settings": {
       "name": "org_settings",
       "columns": {
@@ -15378,6 +15293,13 @@
         "failed_task": {
           "name": "failed_task",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "captured_at": {
+          "name": "captured_at",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
