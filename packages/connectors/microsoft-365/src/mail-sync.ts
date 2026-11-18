@@ -2,11 +2,17 @@ import { ToolError } from "@grasp-os/connector-kit/connector";
 import { maxReadBytes, toBase64 } from "@grasp-os/connector-kit/content";
 import { segment } from "@grasp-os/connector-kit/provider";
 import {
-  RestartSyncError,
+  cursorPart,
   defineSync,
-  fetchBefore,
-  syncPageLimits,
+  fetchInRoom,
+  fillPage,
+  fromCursorPart,
+  mayRequest,
+  RestartSyncError,
+  syncRoom,
+  takeContent,
 } from "@grasp-os/connector-kit/sync";
+import type { SyncRoom } from "@grasp-os/connector-kit/sync";
 import type {
   SyncContent,
   SyncItem,
@@ -29,8 +35,7 @@ import { graphFailure, graphHost, graphUrl, v1 } from "./graph.ts";
 // is per folder only (message delta), and one cursor can't hold a token
 // for every folder; so the sync lists `/me/messages`, which holds "the
 // messages in the signed-in user's mailbox (including the Deleted Items
-// and Clutter folders)", ordered by `lastModifiedDateTime`, from the last
-// message it handled on
+// and Clutter folders)", ordered by `lastModifiedDateTime`
 // (https://learn.microsoft.com/en-us/graph/api/user-list-messages?view=graph-rest-1.0).
 // The first listing and every change after it are the same read: the
 // first has no lower bound. Messages are asked for by their immutable IDs
@@ -38,32 +43,42 @@ import { graphFailure, graphHost, graphUrl, v1 } from "./graph.ts";
 // item is moved from one container … to another"
 // (https://learn.microsoft.com/en-us/graph/api/resources/message?view=graph-rest-1.0).
 //
-// Resuming, by key, never by position: the cursor is the last handled
-// message's `lastModifiedDateTime` and its ID. A read lists from that time
-// on (`ge`) and goes on after that ID. Ties on the time are handled so
-// nothing is skipped:
+// Resuming, by key, never by position, and without assuming how Graph
+// orders messages changed at the same time. Graph documents ordering by
+// several properties, but none by `id`, and "properties that appear in
+// `$orderby` must also appear in `$filter`"
+// (https://learn.microsoft.com/en-us/graph/query-parameters), so there is
+// no second sort key to lean on. Instead the sync takes the messages of
+// one `lastModifiedDateTime` (a "time") as a group, in the order of their
+// IDs, which it sorts itself:
+// - A listing reads past the last time done (`gt`), and only the first
+//   page of it: Graph's next link carries `$skip`, a position ("This API
+//   uses the `$skip` value to keep count of all the items it has gone
+//   through"), which a message that changes meanwhile shifts.
+// - Every time but the last of a full listing page is whole in the page.
+//   The last one, and a time a page stopped inside, is read on its own
+//   (`eq`), its IDs sorted, and goes on after the greatest ID handled.
 // - Only messages last changed before the second Graph answered the
-//   listing in (its `Date` header) are taken: a later change at the same
-//   second as the last one handled can't come after the read went past.
-// - A tie group longer than a listing page is followed through Graph's own
-//   next links, as Microsoft asks ("apply the entire URL returned in
-//   `@odata.nextLink`"), until the handled ID is found.
-// - When that ID isn't found among the messages of its time (it changed
-//   again, or went), every message of that time is read again. Reading one
-//   twice is harmless.
+//   listing in (its `Date` header) are taken, so no message joins a time
+//   once the sync has started on it.
+// - A time is done only when all of its messages are; the cursor then
+//   moves past it.
 //
 // What goes away, at once: a message in Deleted Items or Junk Email, or in
 // a folder under either (a deleted folder is moved under Deleted Items),
 // found by walking a message's folder up to the mailbox's root. A message
 // outside the root, or whose folder Graph no longer has, can't be
 // confirmed as mail and goes away too. The sync run removes a message's
-// attachments with it.
+// attachments with it. A message whose read is late past the page's
+// deadline is left to the next page; the page's first goes away, so it
+// can't hold the sync, and comes back when it next changes or at the
+// daily relisting.
 //
 // What is left out: drafts (`isDraft`, not sent yet); inline attachments
 // (pictures in the body, such as signatures); attachments that are an
 // Outlook item (an attached message, event or contact) or a link to a
 // cloud file; a file attachment larger than a read takes (`maxReadBytes`)
-// comes without its content.
+// comes without its content; Bcc and Reply-To in a message's header lines.
 //
 // THE BOUND: a HARD delete (a message deleted for good, or Deleted Items
 // emptied) never shows in `/me/messages`: the message just isn't there.
@@ -77,10 +92,12 @@ import { graphFailure, graphHost, graphUrl, v1 } from "./graph.ts";
 //   moves its `lastModifiedDateTime`. Microsoft documents a move as making
 //   "a new copy of the message in the destination folder", which suggests
 //   so; if not, a move to Deleted Items goes at the daily relisting.
-// - That messages tied on `lastModifiedDateTime` keep one order between
-//   reads. If not, the handled ID not found reads the whole tie again.
 // - That `lastModifiedDateTime` is set no later than the `Date` of the
 //   first answer that lists the message.
+// - A time of more than one listing page of messages (1,000 changed in
+//   one second) can only be read through Graph's next links, a position: a
+//   message of it that changes during that read can hide another until the
+//   daily relisting.
 
 const me = "/me";
 const messages = `${me}/messages`;
@@ -101,6 +118,9 @@ const rootFolder = "msgfolderroot";
 
 /** Immutable IDs, and bodies as text (user-list-messages, message-get). */
 const prefer = 'IdType="ImmutableId", outlook.body-content-type="text"';
+
+/** Each Graph read's headers. */
+const init = { headers: { prefer } };
 
 /**
  * A time as Graph writes it, and as the cursor carries it into a
@@ -177,75 +197,61 @@ const meSchema = z.object({ id: z.string().min(1) });
 const unknownType = "application/octet-stream";
 
 /**
- * Where a read is: the last handled message's time and ID (none: from the
- * start).
+ * Where a read is: from the start; inside a time, after the greatest ID
+ * handled in it (none: from its first); or past a time.
  */
-interface Position {
-  since: string | null;
-  after: string | null;
-}
+type Position =
+  | { at: "start" }
+  | { at: "inside"; time: string; after: string | null }
+  | { at: "past"; time: string };
 
-const base64url = /^[\w-]*$/u;
+/** The cursor of a position: `m.s`, `m.i.<time>.<after>` or `m.p.<time>`. */
+const cursorOf = (position: Position): string => {
+  switch (position.at) {
+    case "start": {
+      return "m.s";
+    }
+    case "inside": {
+      return `m.i.${cursorPart(position.time)}.${cursorPart(position.after)}`;
+    }
+    case "past": {
+      return `m.p.${cursorPart(position.time)}`;
+    }
+    default: {
+      return position satisfies never;
+    }
+  }
+};
 
 const notOurs = (): RestartSyncError =>
   new RestartSyncError("Not a cursor this sync wrote");
 
-const encode = (value: string): string =>
-  btoa(String.fromCodePoint(...new TextEncoder().encode(value)))
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replaceAll("=", "");
-
-const decode = (value: string): string => {
-  if (!base64url.test(value)) {
+/** A time a cursor carries, checked before it goes into a `$filter`. */
+const timeOf = (part: string | undefined): string => {
+  const time = fromCursorPart(part);
+  if (time === null || !timeSchema.safeParse(time).success) {
     throw notOurs();
   }
-  try {
-    const binary = atob(value.replaceAll("-", "+").replaceAll("_", "/"));
-    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(
-      Uint8Array.from(binary, (char) => char.codePointAt(0) ?? 0)
-    );
-  } catch {
-    throw notOurs();
-  }
+  return time;
 };
-
-/** The cursor of a position: `m.<since>.<after>`. */
-const cursorOf = ({ since, after }: Position): string =>
-  `m.${encode(since ?? "")}.${encode(after ?? "")}`;
 
 /** The position a cursor this sync wrote names; any other starts over. */
 const positionOf = (cursor: string): Position => {
-  const [tag, since, after, ...rest] = cursor.split(".");
-  if (tag !== "m" || since === undefined || after === undefined) {
+  const [tag, at, time, after, ...rest] = cursor.split(".");
+  if (tag !== "m" || rest.length > 0) {
     throw notOurs();
   }
-  if (rest.length > 0) {
-    throw notOurs();
+  if (at === "s" && time === undefined) {
+    return { at: "start" };
   }
-  const time = decode(since);
-  const id = decode(after);
-  if (time !== "" && !timeSchema.safeParse(time).success) {
-    throw notOurs();
+  if (at === "i" && after !== undefined) {
+    return { at: "inside", time: timeOf(time), after: fromCursorPart(after) };
   }
-  return { since: time === "" ? null : time, after: id === "" ? null : id };
+  if (at === "p" && after === undefined) {
+    return { at: "past", time: timeOf(time) };
+  }
+  throw notOurs();
 };
-
-/**
- * What a page has left: requests, content bytes, and when it stops taking
- * more (`deadline`, from the connector kit's `syncPageLimits.millis`).
- */
-interface Room {
-  requests: number;
-  bytes: number;
-  deadline: number;
-  /**
-   * Whether the message being read is the page's first: it is taken
-   * whatever is left, its files without their content if need be, so
-   * every read moves on.
-   */
-  first: boolean;
-}
 
 /**
  * Why a page stops before a message: no room left in it (`full`), or a
@@ -265,14 +271,10 @@ class StopError extends Error {
   }
 }
 
-/** Whether `error` stops the page for `why`. */
-const stops = (error: unknown, why: "full" | "late"): boolean =>
-  error instanceof StopError && error.why === why;
-
 /**
- * What a read the page can't go without (the owner, the folders, the
- * listing) stands for when it is late: Graph is slow, and the page waits
- * as for a rate limit.
+ * What a read the page can't go without stands for when it is late or out
+ * of room with nothing taken: Graph is slow, and the page waits as for a
+ * rate limit, rather than answering with no progress.
  */
 const tooSlow = (): ToolError =>
   new ToolError("Microsoft 365 didn't answer in time", {
@@ -281,16 +283,14 @@ const tooSlow = (): ToolError =>
 
 /**
  * A GET to Graph, within the page's requests, its whole answer read before
- * the page's deadline (the kit's `fetchBefore`); a `late` stop when cut off.
+ * the page's deadline (the kit's `fetchInRoom`); a stop when there is no
+ * request left or the deadline cut it off.
  */
-const get = async (room: Room, url: URL): Promise<Response> => {
+const get = async (room: SyncRoom, url: URL): Promise<Response> => {
   if (room.requests <= 0) {
     throw new StopError("full");
   }
-  room.requests -= 1;
-  const response = await fetchBefore(url, room.deadline, {
-    headers: { prefer },
-  });
+  const response = await fetchInRoom(room, url, init);
   if (response === "late") {
     throw new StopError("late");
   }
@@ -299,7 +299,7 @@ const get = async (room: Room, url: URL): Promise<Response> => {
 
 /** Graph's JSON answer to a GET that must succeed. */
 const getJson = async <Schema extends z.ZodType>(
-  room: Room,
+  room: SyncRoom,
   url: URL,
   schema: Schema
 ): Promise<z.output<Schema>> => {
@@ -316,7 +316,7 @@ const isUnreadable = (response: Response): boolean =>
 
 /**
  * A next link Graph handed back, followed only on its own host and the
- * same path, as Microsoft asks: its `$skip` is Graph's own to read.
+ * same path (see "NEEDS A REAL TENANT" for where it is followed).
  */
 const nextUrl = (link: string, path: string): URL => {
   const url = new URL(link);
@@ -337,9 +337,22 @@ const secondOf = (response: Response): number => {
   return time;
 };
 
-/** One page of the listing, and Graph's second of it. */
-const listingPage = async (room: Room, url: URL) => {
-  const response = await get(room, url);
+/**
+ * The first page of the listing past `time` (from the start without one),
+ * oldest change first, and Graph's second of it. `$filter` and `$orderby`
+ * name the same property, as Graph requires (user-list-messages, "Using
+ * filter and orderby in the same query").
+ */
+const listingAfter = async (room: SyncRoom, time: string | null) => {
+  const response = await get(
+    room,
+    graphUrl(messages, {
+      $filter: time === null ? undefined : `lastModifiedDateTime gt ${time}`,
+      $orderby: "lastModifiedDateTime",
+      $select: listedFields,
+      $top: String(listingSize),
+    })
+  );
   if (!response.ok) {
     throw await graphFailure(response);
   }
@@ -349,19 +362,34 @@ const listingPage = async (room: Room, url: URL) => {
   };
 };
 
+/** By ID, as the sync orders a time's messages itself. */
+const byId = (a: Listed, b: Listed): number =>
+  a.id < b.id ? -1 : Number(a.id > b.id);
+
 /**
- * The listing from `since` on, oldest change first, without a lower bound
- * at the start. `$filter` and `$orderby` name the same property, as Graph
- * requires (user-list-messages, "Using filter and orderby in the same
- * query").
+ * Every message changed at `time`, in the order of their IDs. Past one
+ * listing page, through Graph's next links (see "NEEDS A REAL TENANT").
  */
-const listingUrl = (since: string | null): URL =>
-  graphUrl(messages, {
-    $filter: since === null ? undefined : `lastModifiedDateTime ge ${since}`,
-    $orderby: "lastModifiedDateTime",
+const messagesAt = async (room: SyncRoom, time: string): Promise<Listed[]> => {
+  const listed: Listed[] = [];
+  let url: URL | null = graphUrl(messages, {
+    $filter: `lastModifiedDateTime eq ${time}`,
     $select: listedFields,
     $top: String(listingSize),
   });
+  while (url !== null) {
+    // oxlint-disable-next-line no-await-in-loop -- one page after another
+    const page: z.infer<typeof listingSchema> = await getJson(
+      room,
+      url,
+      listingSchema
+    );
+    listed.push(...page.value);
+    const next: string | undefined = page["@odata.nextLink"];
+    url = next === undefined ? null : nextUrl(next, messages);
+  }
+  return listed.toSorted(byId);
+};
 
 /** Whether a folder's messages are mail, as far as the page found out. */
 type Standing = "mail" | "gone";
@@ -373,7 +401,7 @@ type Standing = "mail" | "gone";
  * https://learn.microsoft.com/en-us/graph/api/mailfolder-get?view=graph-rest-1.0
  */
 const standingOf = async (
-  room: Room,
+  room: SyncRoom,
   known: Map<string, Standing>,
   folder: string
 ): Promise<Standing> => {
@@ -396,8 +424,6 @@ const standingOf = async (
       graphUrl(`${folders}/${segment(at)}`, { $select: "id,parentFolderId" })
     );
     if (isUnreadable(response)) {
-      // oxlint-disable-next-line no-await-in-loop -- the walk ends here
-      await response.body?.cancel();
       standing = "gone";
       break;
     }
@@ -416,7 +442,7 @@ const standingOf = async (
 };
 
 /** The well-known folders' standing: the root is mail, the others not. */
-const knownFolders = async (room: Room): Promise<Map<string, Standing>> => {
+const knownFolders = async (room: SyncRoom): Promise<Map<string, Standing>> => {
   const known = new Map<string, Standing>();
   for (const name of [rootFolder, ...goneFolders]) {
     // oxlint-disable-next-line no-await-in-loop -- three small reads
@@ -454,25 +480,16 @@ const textOf = (message: Message): string => {
   return `${lines.join("\n")}\n\n${message.body?.content ?? ""}`;
 };
 
-/** JSON bytes of `content` in a page. */
-const sizeOf = (content: SyncContent): number =>
-  new TextEncoder().encode(JSON.stringify(content)).byteLength;
-
-/** Whether the page has taken no content yet. */
-const isEmpty = (room: Room): boolean =>
-  room.bytes === syncPageLimits.contentBytes;
-
-/** Takes `content` into the page, if it fits: it always fits an empty one. */
-const take = (room: Room, content: SyncContent): SyncContent | null => {
-  const size = sizeOf(content);
-  if (size > room.bytes) {
-    if (isEmpty(room) || room.first) {
-      return null;
-    }
+/**
+ * Takes `content` into the page if it fits; on an empty page, without it;
+ * else the page stops before the message (the kit's `takeContent`).
+ */
+const take = (room: SyncRoom, content: SyncContent): SyncContent | null => {
+  const taken = takeContent(room, content);
+  if (taken === null) {
     throw new StopError("full");
   }
-  room.bytes -= size;
-  return content;
+  return taken.content;
 };
 
 /** Whether an attachment is a file to sync: a file, not inline. */
@@ -481,7 +498,10 @@ const isFile = (attachment: Attachment): boolean =>
   attachment.isInline !== true;
 
 /** A message's attachments, as listed, through Graph's next links. */
-const attachmentsOf = async (room: Room, id: string): Promise<Attachment[]> => {
+const attachmentsOf = async (
+  room: SyncRoom,
+  id: string
+): Promise<Attachment[]> => {
   const path = `${messages}/${segment(id)}/attachments`;
   const listed: Attachment[] = [];
   let url: URL | null = graphUrl(path, {
@@ -502,26 +522,25 @@ const attachmentsOf = async (room: Room, id: string): Promise<Attachment[]> => {
 };
 
 /**
- * An attachment's bytes, given up at the page's deadline: a slow file
- * never holds a page past it. Null: too large to read, or late.
+ * An attachment's bytes: null when it is larger than a read takes, Graph
+ * no longer has it, or, for the page's first message only, it is late or
+ * out of room. For any later message that stops the page before it, so
+ * the file is read with its content on the next page.
  * https://learn.microsoft.com/en-us/graph/api/attachment-get?view=graph-rest-1.0
  */
 const bytesOf = async (
-  room: Room,
+  room: SyncRoom,
   message: string,
   attachment: Attachment
 ): Promise<Uint8Array | null> => {
-  if ((attachment.size ?? 0) > maxReadBytes || Date.now() >= room.deadline) {
+  if ((attachment.size ?? 0) > maxReadBytes) {
     return null;
-  }
-  if (room.requests <= 0) {
-    if (room.first) {
-      return null;
-    }
-    throw new StopError("full");
   }
   let response: Response;
   try {
+    if (!mayRequest(room)) {
+      throw new StopError(room.requests <= 0 ? "full" : "late");
+    }
     response = await get(
       room,
       graphUrl(
@@ -529,12 +548,10 @@ const bytesOf = async (
       )
     );
   } catch (error) {
-    // Late: the page's first message takes the file without its content,
-    // any later one is left to the next page.
-    if (stops(error, "late") && room.first) {
+    if (error instanceof StopError && room.empty) {
       return null;
     }
-    throw stops(error, "late") ? new StopError("full") : error;
+    throw error;
   }
   if (isUnreadable(response)) {
     return null;
@@ -554,12 +571,12 @@ interface Mailbox {
 
 /**
  * A message, as items: the message and each file attachment, or gone, or
- * nothing (a draft). Throws a `full` stop when the page has no room for all of
+ * nothing (a draft). Throws a stop when the page has no room for all of
  * it: a message is taken whole or not at all.
  * https://learn.microsoft.com/en-us/graph/api/message-get?view=graph-rest-1.0
  */
 const itemsOf = async (
-  room: Room,
+  room: SyncRoom,
   mailbox: Mailbox,
   listed: Listed
 ): Promise<SyncItem[]> => {
@@ -579,7 +596,6 @@ const itemsOf = async (
     graphUrl(`${messages}/${segment(listed.id)}`, { $select: messageFields })
   );
   if (isUnreadable(response)) {
-    await response.body?.cancel();
     return gone;
   }
   if (!response.ok) {
@@ -629,104 +645,120 @@ const itemsOf = async (
   return items;
 };
 
-/** The listing's messages from where the read goes on, and how to read on. */
-interface Listing {
-  entries: Listed[];
-  next: URL | null;
-  settled: number;
-}
-
-/** Where the listing goes on after a page. */
-const nextLink = (page: z.infer<typeof listingSchema>): URL | null => {
-  const link = page["@odata.nextLink"];
-  return link === undefined ? null : nextUrl(link, messages);
-};
-
 /**
- * The first listing page with messages left to handle: after the handled
- * message, following Graph's next links through its tie, or the whole tie
- * again when it isn't there as it was.
+ * One message's items for the kit's `fillPage`, or "full" when the page
+ * stops before it: out of room or time, or a read late. The page's first
+ * message is taken whatever it costs; if its reads are late it goes away,
+ * so it can't hold the sync.
  */
-const resume = async (room: Room, position: Position): Promise<Listing> => {
-  const first = await listingPage(room, listingUrl(position.since));
-  let { page } = first;
-  if (position.after === null) {
-    return {
-      entries: page.value,
-      next: nextLink(page),
-      settled: first.settled,
-    };
-  }
-  for (;;) {
-    // The handled message as it was: at the cursor's time. Found later, it
-    // changed again, and the messages between were never handled.
-    const index = page.value.findIndex(
-      ({ id, lastModifiedDateTime }) =>
-        id === position.after && lastModifiedDateTime === position.since
-    );
-    if (index !== -1) {
-      return {
-        entries: page.value.slice(index + 1),
-        next: nextLink(page),
-        settled: first.settled,
-      };
+const itemsFor =
+  (room: SyncRoom, mailbox: Mailbox) =>
+  async (listed: Listed): Promise<readonly SyncItem[] | "full"> => {
+    if (!room.empty && !mayRequest(room)) {
+      return "full";
     }
-    const next = nextLink(page);
-    const stillTied = page.value.every(
-      ({ lastModifiedDateTime }) => lastModifiedDateTime === position.since
-    );
-    if (next === null || !stillTied) {
-      // Not there as it was: the whole tie again, from the first page.
-      return {
-        entries: first.page.value,
-        next: nextLink(first.page),
-        settled: first.settled,
-      };
+    try {
+      return await itemsOf(room, mailbox, listed);
+    } catch (error) {
+      if (!(error instanceof StopError)) {
+        throw error;
+      }
+      if (!room.empty) {
+        return "full";
+      }
+      if (error.why === "late") {
+        return [{ gone: true, id: listed.id, kind: "mail" }];
+      }
+      throw tooSlow();
     }
-    // oxlint-disable-next-line no-await-in-loop -- through the tie, a page at a time
-    ({ page } = await listingPage(room, next));
-  }
-};
+  };
 
 /** The person's own Entra object ID, their mail's only reader. */
-const ownerOf = async (room: Room): Promise<SyncReader[]> => {
+const ownerOf = async (room: SyncRoom): Promise<SyncReader[]> => {
   const { id } = await getJson(room, graphUrl(me, { $select: "id" }), meSchema);
   return [{ kind: "account", id: id.toLowerCase() }];
 };
 
+/** What a step of the page took, and where it goes on. */
+interface Step {
+  items: SyncItem[];
+  at: Position;
+  /** Whether the page stops here, and whether more is due at once. */
+  stop: { more: boolean } | null;
+}
+
 /**
- * One message's items, or why the page stops before it: the page's
- * deadline passed, Graph changed it at or after the second it answered,
- * or there is no room for all of it.
+ * The messages of `time` after `after`, in the order of their IDs: those
+ * a listing page already holds whole, or read on their own.
  */
-const handle = async (
-  room: Room,
+const insideStep = async (
+  room: SyncRoom,
   mailbox: Mailbox,
-  listing: Listing,
-  listed: Listed
-): Promise<SyncItem[] | "unsettled" | "full"> => {
-  if (Date.parse(listed.lastModifiedDateTime) >= listing.settled) {
-    return "unsettled";
+  time: string,
+  after: string | null,
+  whole: readonly Listed[] | null
+): Promise<Step> => {
+  const all = whole ?? (await messagesAt(room, time));
+  const left = all.filter(({ id }) => after === null || id > after);
+  const filled = await fillPage(
+    room,
+    left,
+    null,
+    ({ id }) => id,
+    itemsFor(room, mailbox)
+  );
+  if (!filled.done) {
+    return {
+      items: filled.items,
+      at: { at: "inside", time, after: filled.last ?? after },
+      stop: { more: true },
+    };
   }
-  if (!room.first && Date.now() >= room.deadline) {
-    return "full";
-  }
-  try {
-    return await itemsOf(room, mailbox, listed);
-  } catch (error) {
-    if (stops(error, "full") && !room.first) {
-      return "full";
+  return { items: filled.items, at: { at: "past", time }, stop: null };
+};
+
+/**
+ * The listing past the last time done: each time whole in its page taken
+ * from there; the last time of a page that goes on, which may go on past
+ * it, read on its own next.
+ */
+const listingStep = async (
+  room: SyncRoom,
+  mailbox: Mailbox,
+  position: Exclude<Position, { at: "inside" }>
+): Promise<Step> => {
+  const { settled, page } = await listingAfter(
+    room,
+    position.at === "past" ? position.time : null
+  );
+  const listed = page.value.filter(
+    ({ lastModifiedDateTime }) => Date.parse(lastModifiedDateTime) < settled
+  );
+  const lastTime = page.value.at(-1)?.lastModifiedDateTime;
+  const goesOn = page["@odata.nextLink"] !== undefined;
+  const items: SyncItem[] = [];
+  let at: Position = position;
+  const times = [
+    ...new Set(listed.map(({ lastModifiedDateTime }) => lastModifiedDateTime)),
+  ];
+  for (const time of times) {
+    if (goesOn && time === lastTime) {
+      return { items, at: { at: "inside", time, after: null }, stop: null };
     }
-    if (stops(error, "late")) {
-      // Left to the next page; as the page's first, it can't be read in
-      // time and can't hold the sync: it goes away, and comes back when it
-      // next changes or at the daily relisting.
-      return room.first
-        ? [{ gone: true, id: listed.id, kind: "mail" }]
-        : "full";
+    const whole = listed
+      .filter(({ lastModifiedDateTime }) => lastModifiedDateTime === time)
+      .toSorted(byId);
+    // oxlint-disable-next-line no-await-in-loop -- one time after another
+    const step = await insideStep(room, mailbox, time, null, whole);
+    items.push(...step.items);
+    ({ at } = step);
+    if (step.stop !== null) {
+      return { items, at, stop: step.stop };
     }
-    throw error;
   }
+  // Every settled time is done: what's left changed at or after the second
+  // Graph answered in, or there is nothing more.
+  return { items, at, stop: { more: false } };
 };
 
 /** One page of the person's own mailbox from `position` on. */
@@ -734,53 +766,40 @@ const readPage = async (
   position: Position,
   deadline: number
 ): Promise<SyncPage> => {
-  const room: Room = {
-    requests: syncPageLimits.requests,
-    bytes: syncPageLimits.contentBytes,
-    deadline,
-    first: true,
-  };
-  let mailbox: Mailbox;
-  let listing: Listing;
-  try {
-    mailbox = { owner: await ownerOf(room), folders: await knownFolders(room) };
-    listing = await resume(room, position);
-  } catch (error) {
-    throw stops(error, "late") ? tooSlow() : error;
-  }
+  const room = syncRoom(deadline);
   const items: SyncItem[] = [];
   let at = position;
-  for (;;) {
-    const listed = listing.entries.shift();
-    if (listed === undefined) {
-      if (listing.next === null) {
-        return { items, cursor: cursorOf(at), more: false };
+  try {
+    const mailbox: Mailbox = {
+      owner: await ownerOf(room),
+      folders: await knownFolders(room),
+    };
+    for (;;) {
+      const step =
+        at.at === "inside"
+          ? // oxlint-disable-next-line no-await-in-loop -- one step after another, within the page's room
+            await insideStep(room, mailbox, at.time, at.after, null)
+          : // oxlint-disable-next-line no-await-in-loop -- one step after another, within the page's room
+            await listingStep(room, mailbox, at);
+      items.push(...step.items);
+      ({ at } = step);
+      if (step.stop !== null) {
+        return { items, cursor: cursorOf(at), more: step.stop.more };
       }
-      let next: Awaited<ReturnType<typeof listingPage>>;
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- the listing's next page
-        next = await listingPage(room, listing.next);
-      } catch (error) {
-        if (stops(error, "late") || stops(error, "full")) {
-          return { items, cursor: cursorOf(at), more: true };
-        }
-        throw error;
+      if (!mayRequest(room)) {
+        return { items, cursor: cursorOf(at), more: true };
       }
-      listing.entries = next.page.value;
-      listing.next = nextLink(next.page);
-      continue;
     }
-    // oxlint-disable-next-line no-await-in-loop -- one message after another, within the page's room
-    const handled = await handle(room, mailbox, listing, listed);
-    if (handled === "unsettled") {
-      return { items, cursor: cursorOf(at), more: false };
+  } catch (error) {
+    if (!(error instanceof StopError)) {
+      throw error;
     }
-    if (handled === "full") {
-      return { items, cursor: cursorOf(at), more: true };
+    // A listing or a folder late or out of room: what the page has, or,
+    // with nothing taken yet, a wait as for a rate limit.
+    if (room.empty) {
+      throw tooSlow();
     }
-    items.push(...handled);
-    room.first = false;
-    at = { since: listed.lastModifiedDateTime, after: listed.id };
+    return { items, cursor: cursorOf(at), more: true };
   }
 };
 
@@ -811,7 +830,7 @@ export const mailSync = defineSync({
       });
     }
     return await readPage(
-      cursor === null ? { since: null, after: null } : positionOf(cursor),
+      cursor === null ? { at: "start" } : positionOf(cursor),
       deadline
     );
   },
