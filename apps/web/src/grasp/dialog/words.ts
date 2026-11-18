@@ -3,6 +3,11 @@
 export const dialogWords = {
   /** The name of the close button in the corner. */
   close: "Close",
+  /**
+   * An action whose work failed, when the host gives no `failedLabel` of its own: neutral, as the
+   * work may be a save, a check or a send.
+   */
+  actionFailed: "Could not finish",
 };
 
 export type DialogWords = typeof dialogWords;

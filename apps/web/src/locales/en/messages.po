@@ -4968,6 +4968,7 @@ msgid "Could not export"
 msgstr "Could not export"
 
 #: src/apps/app-history.tsx
+#: src/frame/part-words.tsx
 msgid "Could not finish"
 msgstr "Could not finish"
 

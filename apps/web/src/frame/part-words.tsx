@@ -913,7 +913,7 @@ export const usePartWords = (): GraspWordsCatalog => {
       empty: t`Press Enter to add it.`,
       invalid: t({ message: "not valid", context: "a tag typed" }),
     },
-    dialog: { close: t`Close` },
+    dialog: { close: t`Close`, actionFailed: t`Could not finish` },
     dropdownMenu: {
       working: t({ message: "Working", context: "a menu item's action" }),
     },
