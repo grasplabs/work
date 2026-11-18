@@ -13705,6 +13705,10 @@ msgid "Schedule"
 msgstr "Schema"
 
 #: src/activity/pending.tsx
+msgid "Schedule for {workflow}"
+msgstr "Schema voor {workflow}"
+
+#: src/activity/pending.tsx
 msgid "Schedule for {workflow}, next run {when} ({zone})"
 msgstr "Schema voor {workflow}, volgende run {when} ({zone})"
 

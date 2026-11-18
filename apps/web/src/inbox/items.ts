@@ -18,7 +18,7 @@ import type {
 } from "@grasp-os/shared/waiting";
 import { plural, t } from "@lingui/core/macro";
 
-import { requestWords, subjectOf } from "../activity/pending.tsx";
+import { requestAsker, requestWords } from "../activity/pending.tsx";
 import type { PendingRequests } from "../activity/pending.tsx";
 import { integrationKey } from "../connections/integrations.ts";
 import type { NotificationsPage } from "../dashboard/notifications-page.ts";
@@ -315,7 +315,7 @@ const outcomeItems = (
 const requestItems = (pending: PendingRequests): InboxItem[] =>
   pending.requests.map((request) => {
     const { directory } = pending;
-    const subject = subjectOf(request, directory);
+    const subject = requestAsker(request, directory);
     const who = requestWords(request, directory);
     const { binding } = request;
     return {

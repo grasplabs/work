@@ -274,17 +274,16 @@ export const grantReviewed = async (
 };
 
 /**
- * A schedule trigger asking to start its workflow, in words: what it is
- * and when it next runs, in the schedule's own time zone and the page's
- * language, from the request's own fields (the cron is read by croner,
- * through `nextScheduledRun`, skipping a time the clocks skip, as such a
- * trigger does). Undefined for any other request, or a schedule with no
- * time to come: then the request reads as every other one.
+ * A schedule trigger asking to start its workflow: its workflow's name and
+ * when it next runs, from the request's own fields (the cron read by
+ * croner, through `nextScheduledRun`, skipping a time the clocks skip, as
+ * such a trigger does). Undefined for any other request, or a schedule
+ * with no time to come: then the request reads as every other one.
  */
-const scheduleWords = (
+const scheduleOf = (
   { trigger, object, actions, workflowNames }: Permission,
   now: Date
-): string | undefined => {
+): { workflow: string; next: Date; timeZone: string } | undefined => {
   const schedule = trigger?.kind === "schedule" ? trigger.schedule : null;
   const startsWorkflow =
     object.type === "workflow" &&
@@ -298,32 +297,52 @@ const scheduleWords = (
     return undefined;
   }
   const workflow = workflowNames?.[object.workflowId] ?? object.workflowId;
-  const when = new Intl.DateTimeFormat(i18n.locale, {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: schedule.timeZone,
-  }).format(next);
-  const zone = formatZone(schedule.timeZone);
-  return i18n._(
-    msg`Schedule for ${ph({ workflow })}, next run ${ph({ when })} (${ph({ zone })})`
-  );
+  return { workflow, next, timeZone: schedule.timeZone };
+};
+
+/**
+ * Who asks, in one line: a schedule asking to start its workflow by what
+ * it is ("Schedule for invoice-approval"), never its cron; any other as
+ * `subjectOf` names it.
+ */
+export const requestAsker = (
+  request: Permission,
+  directory: Directory,
+  now: Date = new Date()
+): string => {
+  const scheduled = scheduleOf(request, now);
+  if (scheduled === undefined) {
+    return subjectOf(request, directory);
+  }
+  const { workflow } = scheduled;
+  return i18n._(msg`Schedule for ${ph({ workflow })}`);
 };
 
 /**
  * What a request asks, in one line: who asks, for what, on what; a
- * schedule asking to start its workflow says so in words, with its next run.
+ * schedule asking to start its workflow says so in words, with its next
+ * run in the schedule's own time zone and the page's language.
  */
 export const requestWords = (
   request: Permission,
   directory: Directory,
   now: Date = new Date()
 ): string => {
-  const scheduled = scheduleWords(request, now);
+  const scheduled = scheduleOf(request, now);
   if (scheduled !== undefined) {
-    return scheduled;
+    const { workflow, next, timeZone } = scheduled;
+    const when = new Intl.DateTimeFormat(i18n.locale, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone,
+    }).format(next);
+    const zone = formatZone(timeZone);
+    return i18n._(
+      msg`Schedule for ${ph({ workflow })}, next run ${ph({ when })} (${ph({ zone })})`
+    );
   }
   const subject = subjectOf(request, directory);
   const object = objectOf(request, directory);

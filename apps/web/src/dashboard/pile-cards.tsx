@@ -7,10 +7,10 @@ import { Link as RouterLink, useRouter } from "@tanstack/react-router";
 import {
   askedAgain,
   grantReviewed,
+  requestAsker,
   requestWords,
   reviewedVersion,
   reviewedVersionText,
-  subjectOf,
 } from "../activity/pending.tsx";
 import type { PendingRequests } from "../activity/pending.tsx";
 import { changeThenRefresh } from "../change-then-refresh.ts";
@@ -186,7 +186,7 @@ export const RequestCard = ({
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   const { t } = useLingui();
-  const subject = subjectOf(request, directory);
+  const subject = requestAsker(request, directory);
   const who = requestWords(request, directory);
   const decide = async (
     change: (permissions: Session["permissions"]) => Promise<unknown>,

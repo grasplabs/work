@@ -9,7 +9,7 @@ import {
 import type { Permission } from "@grasp-os/shared/permissions";
 import { describe, expect, it } from "vite-plus/test";
 
-import { objectOf, requestWords, subjectOf } from "./pending.tsx";
+import { objectOf, requestAsker, requestWords, subjectOf } from "./pending.tsx";
 
 const app = "11111111-1111-4111-8111-111111111111";
 
@@ -164,12 +164,18 @@ describe("a schedule trigger asking to start its workflow", () => {
       hour: scheduled.includes("09:00"),
       cron: scheduled.includes("* *"),
       other: other.endsWith(": start on Workflow invoice-approval"),
+      asker: requestAsker(triggered("schedule"), directory, now),
+      otherAsker:
+        requestAsker(triggered("email"), directory, now) ===
+        subjectOf(triggered("email"), directory),
     }).toStrictEqual({
       scheduled: true,
       day: true,
       hour: true,
       cron: false,
       other: true,
+      asker: "Schedule for invoice-approval",
+      otherAsker: true,
     });
   });
 });
