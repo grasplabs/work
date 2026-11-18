@@ -38,6 +38,9 @@ export const Route = createFileRoute("/_shell/inbox")({
     // The group in view, as the sidebar's Inbox view sets it.
     group: z.enum(groupOrder).optional(),
   }),
+  // The list and its inspector have the whole card: the inspector meets
+  // the bar, the card's end and its foot (frame/page-fill.ts).
+  staticData: { page: "whole" },
   pendingComponent: PageLoading,
   loader: async ({ context: { core, identity } }) => {
     // Everyone's unknown outcomes too, once a visit: only this page lists

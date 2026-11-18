@@ -38,7 +38,6 @@ export const RequestDetails = ({
   request: Permission;
   directory: PendingRequests["directory"];
 }) => {
-  const { binding } = request;
   const nextRun = requestNextRun(request);
   const version = reviewedVersionText(request, directory);
   const again = askedAgain(request, directory);
@@ -46,11 +45,8 @@ export const RequestDetails = ({
   const date = formatTime(request.requestedAt);
   return (
     <div {...stylex.props(styles.details)}>
-      {nextRun === undefined ? (
-        <Text size="sm" tone="muted">
-          <Trans>Named {binding} in its code</Trans>
-        </Text>
-      ) : (
+      {/* A binding's name in code says nothing to a person: only a schedule's next run. */}
+      {nextRun === undefined ? null : (
         <Text size="sm" tone="muted">
           {nextRun}
         </Text>

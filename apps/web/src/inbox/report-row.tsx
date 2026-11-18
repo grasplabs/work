@@ -136,7 +136,9 @@ const snapshot = async (page: HTMLElement, title: string): Promise<string> => {
     )
     .join("\n");
   const root = document.documentElement;
-  return `<!doctype html><html lang="${root.lang}" class="${root.className}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><style>${css}</style></head><body>${page.outerHTML}</body></html>`;
+  // Light or dark as whatever opens it is: the tokens' light-dark() follow
+  // the colour scheme, not the theme that was on when it was saved.
+  return `<!doctype html><html lang="${root.lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>${title}</title><style>${css}\n:root{color-scheme:light dark}</style></head><body>${page.outerHTML}</body></html>`;
 };
 
 /** The report, made of the library's parts, with its downloads. */

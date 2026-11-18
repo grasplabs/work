@@ -324,7 +324,8 @@ const requestItems = (pending: PendingRequests): InboxItem[] =>
       // The row says who asks and, where the request says it plainly, what.
       context: requestRow(request, directory),
       body: [],
-      facts: [{ label: t`Asked`, value: formatDateTime(request.requestedAt) }],
+      // Who asked and when stand under the request's Details.
+      facts: [],
       about:
         request.subject.type === "app"
           ? {

@@ -74,16 +74,21 @@ import { orderOf, skip, stepFrom } from "./walk.ts";
 const WIDE_REM = 52;
 
 const styles = stylex.create({
+  // The page has the whole card (`page: "whole"` on its route): the list
+  // keeps the shell's own room, the inspector none, so it meets the bar,
+  // the card's end and its foot.
   page: {
     display: "flex",
     flexDirection: "column",
     width: "100%",
+    height: "100%",
+    minHeight: 0,
   },
   split: {
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr)",
-    alignItems: "start",
-    gap: grasp.space4,
+    height: "100%",
+    minHeight: 0,
   },
   splitWide: {
     gridTemplateColumns: `minmax(0, 1fr) ${grasp.inspectorWidth}`,
@@ -100,30 +105,29 @@ const styles = stylex.create({
   skip: {
     marginInlineStart: "auto",
   },
-  // The list as the page's own column, top to bottom.
+  // The list, the page itself: it scrolls on its own, in the shell's room.
   pane: {
     display: "flex",
     flexDirection: "column",
     gap: grasp.space3,
     minWidth: 0,
-    minHeight: "calc(100dvh - 9rem)",
+    minHeight: 0,
+    overflowY: "auto",
+    paddingBlockStart: grasp.space7,
+    paddingBlockEnd: grasp.shellPageRoomBelow,
+    paddingInline: grasp.shellPageInline,
   },
-  paneBeside: {
-    borderInlineEndWidth: grasp.hairline,
-    borderInlineEndStyle: "solid",
-    borderInlineEndColor: grasp.line,
-    paddingInlineEnd: grasp.space4,
+  // Nothing in the list: its state in the middle of the page.
+  paneEmpty: {
+    justifyContent: "center",
   },
-  // The item in the inspector, on its left edge.
-  decide: {
-    paddingInline: grasp.inspectorPad,
-    paddingBlockStart: grasp.space2,
-  },
-  // The inspector stays in view while the list beside it scrolls.
+  // The inspector, flush with the bar, the card's end and its foot; one hairline toward the page.
   panel: {
-    position: "sticky",
-    top: 0,
-    maxHeight: "calc(100dvh - 7rem)",
+    height: "100%",
+    minHeight: 0,
+    borderInlineStartWidth: grasp.hairline,
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: grasp.line,
   },
   // Nothing waits: the report's item stands under the Empty, at a list's width.
   emptyFoot: {
@@ -407,9 +411,7 @@ const Sections = (shape: ShapeProps) => {
   return (
     <>
       {/* The request is the one title here: the row already names its kind. */}
-      <div {...stylex.props(styles.decide)}>
-        <Detail {...shape} />
-      </div>
+      <Detail {...shape} />
       {facts.length === 0 ? null : (
         <PanelSection label={t`Facts`}>
           <RowList aria-label={t`Facts`}>
@@ -460,7 +462,7 @@ const Inspector = (shape: ShapeProps) => {
       {shape.list}
       {wide && selected !== undefined ? (
         <div {...stylex.props(styles.panel)}>
-          <Panel aria-label={kind}>
+          <Panel aria-label={kind} framed={false}>
             <PanelHeader actions={head} texture />
             <PanelView>
               <Sections {...shape} />
@@ -602,7 +604,11 @@ const ToDo = ({
 
   const failed = notLoaded.flatMap((part) => notLoadedText(part, i18n) ?? []);
   if (items.length === 0) {
-    return <NoItems failed={failed} foot={foot} />;
+    return (
+      <div {...stylex.props(styles.pane, styles.paneEmpty)}>
+        <NoItems failed={failed} foot={foot} />
+      </div>
+    );
   }
   const shape: ShapeProps = {
     wide,
@@ -621,7 +627,7 @@ const ToDo = ({
     // The list as the page's own full-height column: no card, no tabs (the
     // sidebar's Inbox view is the filter), the report's item at its head.
     list: (
-      <div {...stylex.props(styles.pane, wide && styles.paneBeside)}>
+      <div {...stylex.props(styles.pane)}>
         {failed.map((text) => (
           <Alert key={text} variant="attention">
             {text}
