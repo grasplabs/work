@@ -78,6 +78,7 @@ import {
   instructionFileToEdit,
   saveInstructionFile,
 } from "./instruction-files.ts";
+import { parseModelRef } from "./model-catalog.ts";
 import { modelSettings, modelEffortsOf } from "./models.ts";
 import { chatPackageRequests } from "./packages/requests.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
@@ -318,6 +319,18 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       const { models: allowed } = await modelSettings(this.#env);
       return Object.fromEntries(
         allowed.map((model) => [model, modelEffortsOf(model)])
+      );
+    });
+  }
+
+  async names(): Promise<Record<string, string>> {
+    return await withPerson(this.#check, async () => {
+      const { models: allowed } = await modelSettings(this.#env);
+      return Object.fromEntries(
+        allowed.map((model) => [
+          model,
+          parseModelRef(model)?.catalog.name ?? model,
+        ])
       );
     });
   }
