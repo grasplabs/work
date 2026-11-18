@@ -441,6 +441,49 @@ describe("routines in the new Brain", { timeout: 120_000 }, () => {
     });
   });
 
+  it("read only the asked-about work's drawing for a turn, however many drawings the company has", async () => {
+    const { ids } = await drawnTeam();
+    const store = onboardingStore(env);
+    /** The rows the store's own database reads while Mo's turn is put together. */
+    const rowsOfTurn = async (): Promise<number> => {
+      const cursors: { rowsRead: number }[] = [];
+      await runInDurableObject(store, (_instance, state) => {
+        const { sql } = state.storage;
+        const exec = sql.exec.bind(sql);
+        Reflect.set(sql, "exec", (...args: Parameters<typeof exec>) => {
+          const cursor = exec(...args);
+          cursors.push(cursor);
+          return cursor;
+        });
+      });
+      await store.contextOf(ids.mo);
+      await runInDurableObject(store, (_instance, state) => {
+        Reflect.deleteProperty(state.storage.sql, "exec");
+      });
+      return cursors.reduce((sum, { rowsRead }) => sum + rowsRead, 0);
+    };
+    const before = await rowsOfTurn();
+    // Two hundred more drawings stand, of other work.
+    const standing = await store.standingDrawings();
+    const drawing = standing.find(({ team: of }) => of === ids.team);
+    await runInDurableObject(store, (_instance, state) => {
+      for (let at = 0; at < 200; at += 1) {
+        state.storage.sql.exec(
+          "INSERT INTO brain_drawings (source, record, workflow, team, name, drawing, at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          crypto.randomUUID(),
+          `onb-wfv-other-${at}`,
+          `onb-wf-other-${at}`,
+          ids.team,
+          `other work ${at}`,
+          JSON.stringify(drawing?.drawing ?? {}),
+          new Date().toISOString()
+        );
+      }
+    });
+    const after = await rowsOfTurn();
+    expect({ grows: after - before > 20 }).toStrictEqual({ grows: false });
+  });
+
   it("file every count of how often as one figure, as `frequency` holds one value", () => {
     const counts = routineFacts({
       name: "handling new tickets",

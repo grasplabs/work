@@ -1,0 +1,1 @@
+CREATE INDEX `brain_drawings_workflow` ON `brain_drawings` (`workflow`);
