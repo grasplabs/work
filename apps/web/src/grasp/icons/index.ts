@@ -85,6 +85,7 @@ import {
   LeftToRightListDashIcon,
   Link04Icon,
   Loading03Icon,
+  Location01Icon,
   Logout03Icon,
   Mail01Icon,
   MailWarningIcon,
@@ -148,6 +149,7 @@ import {
   UserAdd01Icon,
   UserCircleIcon,
   UserGroupIcon,
+  Video01Icon,
   ViewIcon,
   ViewOffSlashIcon,
   VolumeHighIcon,
@@ -560,3 +562,9 @@ export const FloorPlan: IconData = FloorPlanIcon;
 export const ThumbsUpFilled: IconData = solidForm(ThumbsUpIcon);
 /** A poor answer given: ThumbsDown's own shapes filled in the ink, for an action that stays on. ThumbsDownIcon. */
 export const ThumbsDownFilled: IconData = solidForm(ThumbsDownIcon);
+
+// Drafts in the answer (draft): an event's place and its video call.
+/** Where something happens: a place. Location01Icon. */
+export const Place: IconData = Location01Icon;
+/** A video call. Video01Icon. */
+export const VideoCall: IconData = Video01Icon;

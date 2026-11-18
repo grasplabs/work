@@ -100,6 +100,15 @@ export const composerWords = {
       count === 0
         ? "No results"
         : `${count} ${count === 1 ? "result" : "results"}`,
+    /** A picture's chip in the text, by the order it was added. */
+    image: (number: number) => `Image ${number}`,
+    /** The heading over the pictures already in the message, in the @ menu. */
+    screenshots: "Screenshots",
+    /** When a picture was added, its line in the @ menu ("11:20"). */
+    pictureTime: (at: Date) =>
+      at.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }),
+    /** Said when a picture's chip is taken out of the text. */
+    pictureRemoved: (label: string) => `${label} removed`,
     /** The count near the limit (`maxLengthCountLabel`). */
     count: (length: number, max: number) => `${length}/${max}`,
     /** Said once near the limit (`maxLengthNearLabel`). */

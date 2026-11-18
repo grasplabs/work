@@ -17,6 +17,8 @@ import { iconVars } from "../icons/icon.stylex";
 import { popoverStyles } from "../popover/styles";
 import { grasp, media } from "../tokens/tokens.stylex";
 import type { ComposerKind } from "./add";
+import { PictureRowThumb } from "./pictures";
+import type { ComposerPicture } from "./pictures";
 
 /** One thing that can be mentioned: a person, an agent, a skill, a file, or a command. */
 export interface ComposerMentionItem {
@@ -32,8 +34,9 @@ export interface ComposerMentionItem {
   icon?: IconData;
 }
 
-/** One row of the open menu: a kind (to go into) or a thing (to pick). */
+/** One row of the open menu: a picture in the message, a kind (to go into) or a thing (to pick). */
 export type MentionRow =
+  | { type: "picture"; picture: ComposerPicture }
   | { type: "kind"; kind: ComposerKind }
   | { type: "item"; item: ComposerMentionItem; icon?: IconData };
 
@@ -43,9 +46,17 @@ export const mentionRows = (
   query: string,
   level: string | null,
   kinds: ComposerKind[],
-  items: ComposerMentionItem[]
+  items: ComposerMentionItem[],
+  pictures: ComposerPicture[] = []
 ): MentionRow[] => {
   const q = query.trim().toLowerCase();
+  // The pictures already in the message come first, under Screenshots, so one can be named again.
+  const shots: MentionRow[] =
+    trigger === "@" && (level === null || level === "")
+      ? pictures
+          .filter((picture) => !q || picture.label.toLowerCase().includes(q))
+          .map((picture) => ({ type: "picture", picture }))
+      : [];
   const iconOf = (item: ComposerMentionItem) =>
     item.icon ?? kinds.find((kind) => kind.value === item.kind)?.icon;
   const match = (item: ComposerMentionItem) =>
@@ -63,11 +74,17 @@ export const mentionRows = (
       .map((item) => ({ type: "item", item, icon: iconOf(item) }));
   }
   if (!q) {
-    return kinds.map((kind) => ({ type: "kind", kind }));
+    return [
+      ...shots,
+      ...kinds.map((kind): MentionRow => ({ type: "kind", kind })),
+    ];
   }
-  return items
-    .filter((item) => item.kind !== "commands" && match(item))
-    .map((item) => ({ type: "item", item, icon: iconOf(item) }));
+  return [
+    ...shots,
+    ...items
+      .filter((item) => item.kind !== "commands" && match(item))
+      .map((item): MentionRow => ({ type: "item", item, icon: iconOf(item) })),
+  ];
 };
 
 /** Where the caret stands in a text field, as a point inside the field's box. */
@@ -204,6 +221,10 @@ interface MenuProps {
   emptyLabel: string;
   /** Where it stands in the text's box: its start, and its top or its bottom edge. */
   place: { x: number; top?: number; bottom?: number };
+  /** The heading over the pictures already in the message ("Screenshots"). */
+  picturesLabel: string;
+  /** When a picture was added, as its row's line ("11:20"). */
+  pictureTime: (at: Date) => string;
   onPick: (index: number) => void;
   onHover: (index: number) => void;
 }
@@ -220,6 +241,38 @@ const placeOf = (place: MenuProps["place"]) => {
 };
 
 /** The open menu, at the caret. */
+/** A row's name, line, mark and key, whatever it is. */
+const rowParts = (row: MentionRow, pictureTime: (at: Date) => string) => {
+  if (row.type === "picture") {
+    return {
+      key: `picture-${row.picture.id}`,
+      name: row.picture.label,
+      line: pictureTime(row.picture.at),
+      mark: undefined,
+      thumb: <PictureRowThumb preview={row.picture.preview} />,
+      kind: false,
+    };
+  }
+  if (row.type === "kind") {
+    return {
+      key: `kind-${row.kind.value}`,
+      name: row.kind.label,
+      line: row.kind.description,
+      mark: row.kind.icon,
+      thumb: null,
+      kind: true,
+    };
+  }
+  return {
+    key: `item-${row.item.value}`,
+    name: row.item.label,
+    line: row.item.description,
+    mark: row.icon,
+    thumb: null,
+    kind: false,
+  };
+};
+
 export const MentionMenu = ({
   id,
   rows,
@@ -229,6 +282,8 @@ export const MentionMenu = ({
   loadingLabel,
   emptyLabel,
   place,
+  picturesLabel,
+  pictureTime,
   onPick,
   onHover,
 }: MenuProps) => {
@@ -246,14 +301,23 @@ export const MentionMenu = ({
       </li>
     );
   } else {
-    body = rows.map((row, index) => {
-      const kind = row.type === "kind";
-      const name = kind ? row.kind.label : row.item.label;
-      const line = kind ? row.kind.description : row.item.description;
-      const mark = kind ? row.kind.icon : row.icon;
-      return (
+    body = rows.flatMap((row, index) => {
+      const { key, name, line, mark, thumb, kind } = rowParts(row, pictureTime);
+      const heading =
+        row.type === "picture" && index === 0 ? (
+          <li
+            key="pictures"
+            role="presentation"
+            data-slot="composer-mentions-pictures"
+            {...stylex.props(styles.group)}
+          >
+            {picturesLabel}
+          </li>
+        ) : null;
+      return [
+        heading,
         <li
-          key={kind ? `kind-${row.kind.value}` : `item-${row.item.value}`}
+          key={key}
           id={`${id}-${index}`}
           // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role, jsx-a11y/no-noninteractive-element-to-interactive-role -- the text's combobox popup: focus stays in the text, and an <option> lives only in a <select>
           role="option"
@@ -268,6 +332,7 @@ export const MentionMenu = ({
           }}
           {...stylex.props(styles.row)}
         >
+          {thumb}
           {mark && (
             <span aria-hidden="true" {...stylex.props(styles.mark)}>
               <Icon icon={mark} />
@@ -284,8 +349,8 @@ export const MentionMenu = ({
               <Icon icon={ChevronRight} />
             </span>
           )}
-        </li>
-      );
+        </li>,
+      ];
     });
   }
   return (

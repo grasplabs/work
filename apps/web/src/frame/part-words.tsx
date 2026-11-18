@@ -597,6 +597,14 @@ export const usePartWords = (): GraspWordsCatalog => {
         mentionsLoading: t`Looking`,
         mentionsFound: (count) =>
           t`${plural(count, { one: "# result", other: "# results" })}`,
+        image: (number) => t`Image ${number}`,
+        screenshots: t`Screenshots`,
+        pictureTime: (at) =>
+          at.toLocaleTimeString(i18n.locale, {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+        pictureRemoved: (label) => t`${label} removed`,
         count: (length, max) => `${formatNumber(length)}/${formatNumber(max)}`,
         near: (max) => {
           const limit = formatNumber(max);

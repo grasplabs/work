@@ -580,14 +580,14 @@ const styles = stylex.create({
   },
   // At the foot's end (dockAlign="end"): a chat box floating there, its end where the words end (F37).
   dockEnd: { justifyContent: "flex-end" },
-  // What the dock holds has a width of its own: a row that sizes to its holder (the one-row
-  // Composer) measured 24px in a holder that sizes to it. It stands centred in that width, or at its
-  // end (dockHeldEnd), so a narrower box keeps its place.
+  // The dock's own box has the width (shell-dock-width), and what it holds fills it: the one-row
+  // Composer, or a host's plain wrapper round it, which shrank to the Composer's least width when the
+  // dock centred it. At the foot's end (dockHeldEnd), a box of its own width keeps to the end.
   dockHeld: {
     position: "relative",
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr)",
-    justifyItems: "center",
+    justifyItems: "stretch",
     width: `min(100%, ${grasp.shellDockWidth})`,
     pointerEvents: "auto",
   },

@@ -19,6 +19,7 @@ import { Textarea as TextareaPrimitive } from "@ui-sdk/react/textarea";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type {
   ClipboardEvent,
+  CompositionEvent,
   ComponentProps,
   Dispatch,
   DragEvent,
@@ -55,6 +56,26 @@ import { ComposerGlow } from "./glow";
 import type { ComposerAccent, ComposerEdge } from "./glow";
 import { MentionMenu, caretPoint, mentionRows } from "./mention";
 import type { ComposerMentionItem, MentionRow } from "./mention";
+import {
+  COMPOSER_CLIPBOARD,
+  PictureChip,
+  canonicalSlice,
+  chipAt,
+  wholeChips,
+  composerPictureToken,
+  composerUnreferenced,
+  editField,
+  isInlinePicture,
+  mapBack,
+  piecesOf,
+  pictureToken,
+  readableText,
+  seenLength,
+  showText,
+  shownOf,
+  useInlinePictures,
+} from "./pictures";
+import type { ComposerPicture, Insertion, Piece } from "./pictures";
 import { rowMarker } from "./row.stylex";
 import { ComposerSend } from "./send";
 import { ComposerVoice } from "./voice";
@@ -74,6 +95,12 @@ export type ComposerActivity = "idle" | "working" | "success" | "disabled";
 
 type TextareaProps = ComponentProps<typeof TextareaPrimitive>;
 
+/** What a send carries besides its text. */
+export interface ComposerSendDetails {
+  /** The attachments, in order: the pictures in the text and the files above it. */
+  attachments: ComposerFile[];
+}
+
 /** Every prop a Composer takes. */
 export interface ComposerProps {
   /** The name of the text, for a screen reader and an agent ("Message"). It is not shown. */
@@ -84,9 +111,11 @@ export interface ComposerProps {
   placeholder?: string;
   /**
    * Sends the text. Return a Promise and the composer waits: on success the text clears, on
-   * failure it stays and `failedLabel` shows under the card.
+   * failure it stays and `failedLabel` shows under the card. Each picture's chip in the text comes
+   * as `@[Image 1](attachment:<id>)` (read it back with `composerTextParts`), and `details` has the
+   * attachments in order.
    */
-  onSend: (text: string) => unknown;
+  onSend: (text: string, details: ComposerSendDetails) => unknown;
   /**
    * The words when a send failed, shown under the card and given to an agent.
    * @default "Could not send"
@@ -189,7 +218,11 @@ export interface ComposerProps {
   after?: ReactNode;
   /** Anything else inside the card above the text. Files go in `attachments`. */
   above?: ReactNode;
-  /** The files waiting to be sent, shown as cards in a strip above the text. The composer keeps none. */
+  /**
+   * The files waiting to be sent. A picture (an image's `type`, with its `preview`) goes in the text
+   * as a chip, "Image 1", at the caret where it was pasted or dropped; other files, and a picture
+   * that failed, stand as cards in a strip above the text. The composer keeps none.
+   */
   attachments?: ComposerFile[];
   /**
    * Called with files that were dropped on the composer or pasted into it. Without it, files cannot
@@ -774,16 +807,37 @@ const chipStyles = stylex.create({
 const escape = (word: string) =>
   word.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 
-/** The text with each picked mention marked, for the chip layer behind the text. */
-const chipText = (text: string, picked: ComposerMentionItem[]) => {
+/** The text with each picked mention and each picture marked, for the chip layer behind the text. */
+const chipText = (
+  text: string,
+  picked: ComposerMentionItem[],
+  pictures: ComposerPicture[]
+) => {
   const labels = picked
     .map((item) => item.label)
     .toSorted((a, b) => b.length - a.length);
-  if (labels.length === 0) {
+  const shots = pictures
+    .map((picture) => pictureToken(picture.label))
+    .toSorted((a, b) => b.length - a.length);
+  if (labels.length === 0 && shots.length === 0) {
     return text;
   }
-  const pattern = new RegExp(`([@/](?:${labels.map(escape).join("|")}))`, "gu");
+  const alternatives = [
+    ...(labels.length === 0 ? [] : [`[@/](?:${labels.map(escape).join("|")})`]),
+    ...shots.map(escape),
+  ];
+  const pattern = new RegExp(`(${alternatives.join("|")})`, "gu");
   return text.split(pattern).map((part, index) => {
+    const picture = pictures.find((each) => part === pictureToken(each.label));
+    if (picture !== undefined) {
+      return (
+        <PictureChip
+          key={index}
+          label={picture.label}
+          preview={picture.preview}
+        />
+      );
+    }
     const item = picked.find(
       (entry) => part === `@${entry.label}` || part === `/${entry.label}`
     );
@@ -1083,6 +1137,209 @@ const cardLook = ({
   over && styles.targetOver,
 ];
 
+/** The caret, while the text has the focus; else nothing (a picture dropped then goes at the end). */
+const caretIfFocused = (field: HTMLTextAreaElement | null) =>
+  field !== null && document.activeElement === field
+    ? field.selectionStart
+    : null;
+
+interface ShownInput {
+  /** The canonical text. */
+  text: string;
+  value: string | undefined;
+  setOwn: Dispatch<SetStateAction<string>>;
+  onValueChange: TextareaProps["onValueChange"];
+  attachments: ComposerFile[];
+  area: RefObject<HTMLTextAreaElement | null>;
+  imageLabel: (n: number) => string;
+  onRemoveAttachment: ((id: string) => void) | undefined;
+}
+
+/**
+ * The text in its two forms (pictures.tsx; handover/composer-inline-pictures/ARCHITECTURE.md): the
+ * canonical one the host sees, and the shown one in the field, with each picture's reference drawn as
+ * its chip. An edit of the field maps back to the canonical text; while an input method composes,
+ * the field keeps what it shows and nothing is mapped until it ends. The clipboard carries the
+ * canonical text in a type of its own, so a paste binds by id. Pictures the text no longer names are
+ * let go when the draft ends: at send, when the host clears it, and when the composer leaves.
+ */
+const useShownText = ({
+  text,
+  value,
+  setOwn,
+  onValueChange,
+  attachments,
+  area,
+  imageLabel,
+  onRemoveAttachment,
+}: ShownInput) => {
+  // What the composer's own next edit puts in, and the last kind of input the browser said.
+  const insertion = useRef<Insertion | null>(null);
+  const inputType = useRef("");
+  const caretAfter = useRef<number | null>(null);
+  const [raw, setRaw] = useState<string | null>(null);
+  const composing = useRef(false);
+  const putText = (next: string) => {
+    if (value === undefined) {
+      setOwn(next);
+    }
+    onValueChange?.(next, writtenDetails);
+  };
+  const expect = (next: Insertion) => {
+    insertion.current = next;
+  };
+  const pictures = useInlinePictures({
+    attachments,
+    text,
+    area,
+    label: imageLabel,
+    write: putText,
+    expect: (canonical) => {
+      expect({ canonical });
+    },
+  });
+  const pieces = piecesOf(text, pictures.ids);
+  const shown = shownOf(pieces);
+
+  // The kind of each input, from the browser, before the change it makes: undo and redo put a chip's characters back.
+  useEffect(() => {
+    const field = area.current;
+    if (field === null) {
+      return holdNothing;
+    }
+    const heard = (event: Event) => {
+      inputType.current = event instanceof InputEvent ? event.inputType : "";
+    };
+    field.addEventListener("beforeinput", heard);
+    return () => {
+      field.removeEventListener("beforeinput", heard);
+    };
+  }, [area]);
+
+  // The caret where the composer's own rewrite of the field leaves it.
+  useEffect(() => {
+    const at = caretAfter.current;
+    if (at !== null && area.current !== null) {
+      area.current.setSelectionRange(at, at);
+      caretAfter.current = null;
+    }
+  });
+
+  /** A new shown string, from the field or the composer, as the canonical text and the caret in what will show. */
+  const toCanonical = (whole: string) => {
+    const said = insertion.current ?? {
+      byLabel: inputType.current.startsWith("history"),
+    };
+    insertion.current = null;
+    const { canonical, upToCaret } = mapBack(
+      pieces,
+      shown,
+      whole,
+      pictures.idOf,
+      said
+    );
+    const reshown = showText(canonical, pictures.ids);
+    const caret = showText(upToCaret, pictures.ids).length;
+    if (reshown !== whole) {
+      caretAfter.current = caret;
+    }
+    return { canonical, reshown, caret: reshown === whole ? null : caret };
+  };
+
+  // Let go, once each, of the pictures the text no longer names.
+  const released = useRef(new Set<string>());
+  const release = (from: string) => {
+    for (const file of composerUnreferenced(from, attachments)) {
+      if (!released.current.has(file.id)) {
+        released.current.add(file.id);
+        onRemoveAttachment?.(file.id);
+      }
+    }
+  };
+  // The host cleared the draft: what it set is empty, and not what the composer last said.
+  const said = useRef(value);
+  const latest = useRef({ text, release });
+  useEffect(() => {
+    latest.current = { text, release };
+  });
+  useEffect(() => {
+    if (value === "" && said.current !== "" && said.current !== undefined) {
+      latest.current.release("");
+    }
+    said.current = value;
+  }, [value]);
+  // The composer leaves: its draft ends.
+  useEffect(
+    () => () => {
+      latest.current.release(latest.current.text);
+    },
+    []
+  );
+
+  /** Copy and cut: the person's words as text, the canonical text in the composer's own type. */
+  const copy = (event: ClipboardEvent<HTMLTextAreaElement>, cut: boolean) => {
+    const field = event.currentTarget;
+    const canonical = canonicalSlice(
+      pieces,
+      field.selectionStart,
+      field.selectionEnd
+    );
+    if (
+      canonical === "" ||
+      !pieces.some(
+        (piece) =>
+          piece.chip &&
+          piece.from < field.selectionEnd &&
+          piece.to > field.selectionStart
+      )
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.clipboardData.setData("text/plain", readableText(canonical));
+    event.clipboardData.setData(COMPOSER_CLIPBOARD, canonical);
+    if (cut) {
+      wholeChips(field, pieces);
+      editField(field, null);
+    }
+  };
+  /** A paste of the composer's own type puts its canonical text in, bound by id. True when it did. */
+  const pasteOwn = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const canonical = event.clipboardData.getData(COMPOSER_CLIPBOARD);
+    if (canonical === "") {
+      return false;
+    }
+    event.preventDefault();
+    expect({ canonical });
+    editField(event.currentTarget, showText(canonical, pictures.ids));
+    return true;
+  };
+
+  return {
+    pieces,
+    shown: raw ?? shown,
+    pictures,
+    /** While an input method composes, the field keeps what it shows. */
+    composing: () => composing.current,
+    handleCompositionStart: () => {
+      composing.current = true;
+    },
+    endComposing: () => {
+      composing.current = false;
+    },
+    setRaw,
+    toCanonical,
+    putText,
+    expect,
+    release,
+    copy,
+    pasteOwn,
+    seen: seenLength(pieces),
+    // The field's own limit, raised by each chip's extra characters, so a chip counts as one.
+    extra: shown.length - seenLength(pieces),
+  };
+};
+
 /** How many times the composer has arrived at success: each arrival plays the halo once more. */
 const useSuccessCount = (activity: ComposerActivity) => {
   const [success, setSuccess] = useState(activity === "success" ? 1 : 0);
@@ -1156,13 +1413,17 @@ const useTakeoverFocus = (
 
 interface SendInput {
   text: string;
+  /** The text as the host gets it, and the attachments it names. */
+  prepare: (text: string) => [string, ComposerSendDetails];
+  /** After a send went: the draft ends, and the pictures it no longer names are let go. */
+  onSent: (text: string) => void;
   value: string | undefined;
   setOwn: Dispatch<SetStateAction<string>>;
   validation: string | undefined;
   empty: boolean;
   disabled: boolean;
   working: boolean;
-  onSend: (text: string) => unknown;
+  onSend: ComposerProps["onSend"];
   failedLabel: string;
   sendFailed: boolean | undefined;
   onSendFailedChange: ((failed: boolean) => void) | undefined;
@@ -1176,6 +1437,8 @@ interface SendInput {
  */
 const useSend = ({
   text,
+  prepare,
+  onSent,
   value,
   setOwn,
   validation,
@@ -1224,7 +1487,8 @@ const useSend = ({
       async () => {
         await failingWith(
           async () => {
-            await onSend(sent);
+            await onSend(...prepare(sent));
+            onSent(sent);
             // Clear only what was sent: words typed while it went stay.
             if (value === undefined && latest.current === sent) {
               setOwn("");
@@ -1354,25 +1618,27 @@ interface LimitWords {
 /**
  * The count near the limit, in the footer before send. Its room is kept whenever there is a limit
  * (the widest it can read, unseen, in the same cell), so the footer never moves when it shows.
+ * In the one row it takes no room until it shows: room held unseen there left the text under its
+ * least width, and the row tall at rest (the product's maxLength of 100,000). Shown, it may tip the
+ * row tall like any other width.
  * What a screen reader hears is apart (limitSaid): said only as the stage changes, never per key.
  */
 const ComposerCount = ({
   length,
   max,
   words,
+  row,
 }: {
   length: number;
   max: number | undefined;
   words: LimitWords;
+  row: boolean;
 }) => {
   if (max === undefined) {
     return null;
   }
   const stage = stageOf(length, max);
-  // Work's change (.context/library-changes.md, 14): far under the limit the
-  // count is not drawn at all. Its kept room (113px for "100,000/100,000")
-  // made the one row's end side so wide that the bar always went tall.
-  if (stage === "under") {
+  if (row && stage === "under") {
     return null;
   }
   return (
@@ -1386,7 +1652,11 @@ const ComposerCount = ({
         {words.count(max, max)}
       </span>
       <span
-        {...stylex.props(styles.countLayer, stage === "at" && styles.countAt)}
+        {...stylex.props(
+          styles.countLayer,
+          stage === "under" && styles.countUnseen,
+          stage === "at" && styles.countAt
+        )}
       >
         {words.count(Math.min(length, max), max)}
       </span>
@@ -1439,6 +1709,14 @@ const ComposerLimitSaid = ({
 
 interface MentionsInput {
   text: string;
+  /** The pictures the host holds: offered under Screenshots after @. */
+  pictures: ComposerPicture[];
+  /** The shown text's pieces: a chip is stepped over as one character. */
+  pieces: Piece[];
+  /** A picture's chip was taken out by Backspace or Delete, by its label. */
+  onPictureRemoved: (label: string) => void;
+  /** Says what canonical text the next edit puts in (a picture's chip picked from the menu). */
+  expect: (insertion: Insertion) => void;
   area: RefObject<HTMLTextAreaElement | null>;
   kinds: ComposerKind[];
   items: ComposerMentionItem[];
@@ -1449,9 +1727,124 @@ interface MentionsInput {
   setText: (next: string) => void;
 }
 
+/**
+ * Backspace after a chip, or Delete before it, takes it out whole, through the browser's own editing
+ * so undo puts it back. Its picture stays with the host until the draft ends. True when it did.
+ */
+const chipOut = (
+  event: KeyboardEvent<HTMLTextAreaElement>,
+  pieces: Piece[],
+  removed: (label: string) => void
+) => {
+  const field = event.currentTarget;
+  const chip = chipAt(
+    pieces,
+    field.selectionStart,
+    event.key === "Backspace" ? "before" : "after"
+  );
+  if (chip === null) {
+    return false;
+  }
+  event.preventDefault();
+  field.setSelectionRange(chip.start, chip.end);
+  editField(field, null);
+  removed(chip.label);
+  return true;
+};
+
+/** A key that edits a selection cutting into a chip widens it to the whole chip, so the browser makes the edit itself. */
+const widened = (
+  event: KeyboardEvent<HTMLTextAreaElement>,
+  pieces: Piece[]
+) => {
+  const editing =
+    event.key.length === 1 ||
+    event.key === "Backspace" ||
+    event.key === "Delete" ||
+    event.key === "Enter";
+  return (
+    editing &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    wholeChips(event.currentTarget, pieces)
+  );
+};
+
+/**
+ * A picture's chip is one character to the keys: the arrows step over it (Shift with them selects
+ * it whole), Backspace and Delete take it out whole. True when the key was the chip's.
+ */
+const pictureKeys = (
+  event: KeyboardEvent<HTMLTextAreaElement>,
+  pieces: Piece[],
+  removed: (label: string) => void
+) => {
+  const element = event.currentTarget;
+  const { selectionStart: start, selectionEnd: end } = element;
+  if (
+    !pieces.some((piece) => piece.chip) ||
+    widened(event, pieces) ||
+    event.altKey ||
+    event.metaKey ||
+    event.ctrlKey
+  ) {
+    return false;
+  }
+  if (event.key === "Backspace" || event.key === "Delete") {
+    return start === end && chipOut(event, pieces, removed);
+  }
+  if (
+    (event.key !== "ArrowLeft" && event.key !== "ArrowRight") ||
+    (!event.shiftKey && start !== end)
+  ) {
+    return false;
+  }
+  // Right to left, the left arrow goes on through the text.
+  const ahead =
+    (event.key === "ArrowRight") ===
+    (getComputedStyle(element).direction !== "rtl");
+  const backward = element.selectionDirection === "backward";
+  const moving = backward ? start : end;
+  const anchor = backward ? end : start;
+  const chip = chipAt(pieces, moving, ahead ? "after" : "before");
+  if (chip === null) {
+    return false;
+  }
+  event.preventDefault();
+  const to = ahead ? chip.end : chip.start;
+  if (event.shiftKey) {
+    element.setSelectionRange(
+      Math.min(anchor, to),
+      Math.max(anchor, to),
+      to < anchor ? "backward" : "forward"
+    );
+  } else {
+    element.setSelectionRange(to, to);
+  }
+  return true;
+};
+
+/** A caret put inside a chip (by a press) goes to its end, so the chip stays one character. */
+const outOfChip = (element: HTMLTextAreaElement, pieces: Piece[]) => {
+  const { selectionStart: start, selectionEnd: end } = element;
+  if (start !== end) {
+    return start;
+  }
+  const chip = chipAt(pieces, start, "inside");
+  if (chip !== null) {
+    element.setSelectionRange(chip.end, chip.end);
+    return chip.end;
+  }
+  return start;
+};
+
 /** Mentions: @ for people, agents, skills and files; / at a line's start for commands. */
 const useMentions = ({
   text,
+  pictures,
+  pieces,
+  onPictureRemoved,
+  expect,
   area,
   kinds,
   items,
@@ -1460,7 +1853,7 @@ const useMentions = ({
   commandsLabel,
   setText,
 }: MentionsInput) => {
-  const on = kinds.length > 0 || items.length > 0;
+  const on = kinds.length > 0 || items.length > 0 || pictures.length > 0;
   const [picked, setPicked] = useState<ComposerMentionItem[]>([]);
   const [menu, setMenu] = useState<Menu | null>(null);
   const [caret, setCaret] = useState(0);
@@ -1471,7 +1864,7 @@ const useMentions = ({
   const rows: MentionRow[] =
     menu === null
       ? []
-      : mentionRows(menu.trigger, query, menu.level, kinds, items);
+      : mentionRows(menu.trigger, query, menu.level, kinds, items, pictures);
   const title = titleOf(menu, commandsLabel, kinds);
 
   // A new menu, level or query starts the highlight at the top again.
@@ -1548,6 +1941,19 @@ const useMentions = ({
       setMenu({ ...menu, level: row.kind.value });
       return;
     }
+    if (row.type === "picture") {
+      // The same picture's chip again, in place of the @ and what was typed after it.
+      const chip = `${pictureToken(row.picture.label)} `;
+      expect({
+        canonical: `${composerPictureToken(row.picture.id, row.picture.label)} `,
+      });
+      write(
+        `${text.slice(0, menu.start)}${chip}${text.slice(caret)}`,
+        menu.start + chip.length
+      );
+      setMenu(null);
+      return;
+    }
     const token = `${menu.trigger}${row.item.label} `;
     write(
       `${text.slice(0, menu.start)}${token}${text.slice(caret)}`,
@@ -1619,6 +2025,9 @@ const useMentions = ({
     if (menu !== null && menuKeys(event, menu)) {
       return;
     }
+    if (pictureKeys(event, pieces, onPictureRemoved)) {
+      return;
+    }
     // One Backspace takes a whole mention out.
     const element = event.currentTarget;
     if (
@@ -1664,6 +2073,8 @@ const useMentions = ({
     highlight,
     handleHover: setHighlight,
     picked,
+    pictures,
+    pieces,
     place,
     setCaret,
     watch,
@@ -1687,6 +2098,10 @@ interface FieldProps {
   mentions: Mentions;
   onChange: TextareaProps["onValueChange"];
   onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
+  onCopy: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
+  onCut: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
+  onCompositionStart: () => void;
+  onCompositionEnd: (event: CompositionEvent<HTMLTextAreaElement>) => void;
   onSubmit: () => void;
   maxLength: number | undefined;
 }
@@ -1704,6 +2119,10 @@ const ComposerField = ({
   mentions,
   onChange,
   onPaste,
+  onCopy,
+  onCut,
+  onCompositionStart,
+  onCompositionEnd,
   onSubmit,
   maxLength,
 }: FieldProps) => {
@@ -1719,12 +2138,16 @@ const ComposerField = ({
       maxLength={maxLength}
       onValueChange={onChange}
       onPaste={onPaste}
+      onCopy={onCopy}
+      onCut={onCut}
+      onCompositionStart={onCompositionStart}
+      onCompositionEnd={onCompositionEnd}
       onKeyDown={mentions.handleKeyDown}
       onKeyUp={(event: KeyboardEvent<HTMLTextAreaElement>) => {
         mentions.setCaret(event.currentTarget.selectionStart);
       }}
       onClick={(event: MouseEvent<HTMLTextAreaElement>) => {
-        mentions.setCaret(event.currentTarget.selectionStart);
+        mentions.setCaret(outOfChip(event.currentTarget, mentions.pieces));
       }}
       aria-autocomplete={mentions.on ? "list" : undefined}
       aria-controls={open ? mentions.id : undefined}
@@ -1763,6 +2186,8 @@ interface EditorProps {
   emptyLabel: string;
   loadingLabel: string;
   statusWords: MenuStatusWords;
+  picturesLabel: string;
+  pictureTime: (at: Date) => string;
 }
 
 /**
@@ -1779,13 +2204,15 @@ const ComposerEditor = ({
   emptyLabel,
   loadingLabel,
   statusWords,
+  picturesLabel,
+  pictureTime,
 }: EditorProps) => {
   if (!mentions.on) {
     return field;
   }
   return (
     <div {...stylex.props(styles.editor)}>
-      {mentions.picked.length > 0 && (
+      {(mentions.picked.length > 0 || mentions.pictures.length > 0) && (
         <div
           aria-hidden="true"
           data-slot="composer-chips"
@@ -1795,7 +2222,7 @@ const ComposerEditor = ({
             styles.chips
           )}
         >
-          {chipText(text, mentions.picked)}
+          {chipText(text, mentions.picked, mentions.pictures)}
         </div>
       )}
       {field}
@@ -1809,6 +2236,8 @@ const ComposerEditor = ({
           loadingLabel={loadingLabel}
           emptyLabel={emptyLabel}
           place={mentions.place}
+          picturesLabel={picturesLabel}
+          pictureTime={pictureTime}
           onPick={mentions.handlePick}
           onHover={mentions.handleHover}
         />
@@ -2146,6 +2575,11 @@ const wordDefaults = (
   uploadingLabel: props.uploadingLabel ?? words.uploading,
   attachmentsLabel: props.attachmentsLabel ?? words.attachments,
   dictateLabel: props.dictateLabel ?? words.dictate,
+  // Pictures in the text: by the catalogue only (GraspWords), no text prop.
+  imageLabel: words.image,
+  screenshotsLabel: words.screenshots,
+  pictureTime: words.pictureTime,
+  pictureRemovedLabel: words.pictureRemoved,
 });
 
 type Resolved = ComposerProps &
@@ -2185,7 +2619,11 @@ const ComposerForm = (props: Resolved) => {
   const label = nameOf(props);
   const [own, setOwn] = useState(props.defaultValue);
   const text = value ?? own;
-  const { voice, takeover, dismiss } = dictationParts(props, text);
+  // A dictation's typed words, as the person reads them: a picture by its label.
+  const { voice, takeover, dismiss } = dictationParts(
+    props,
+    readableText(text)
+  );
   const area = useRef<HTMLTextAreaElement | null>(null);
   // The limit: where the text stands against it, and whether the last paste was cut there (set by
   // the paste, read by the change that follows it).
@@ -2216,12 +2654,35 @@ const ComposerForm = (props: Resolved) => {
     null
   );
 
-  const { tall, fold } = useRowFit(row, text, card, area);
+  const words = useShownText({
+    text,
+    value,
+    setOwn,
+    onValueChange,
+    attachments,
+    area,
+    imageLabel: props.imageLabel,
+    onRemoveAttachment: props.onRemoveAttachment,
+  });
+  const { pictures } = words;
+  // The row's fit reads the text as the field shows it (a chip by its characters).
+  const { tall, fold } = useRowFit(row, words.shown, card, area);
+  // Said when a chip is taken out.
+  const [pictureSaid, setPictureSaid] = useState("");
   const files = useFileDrop(props.onAttach, disabled);
   const success = useSuccessCount(activity);
   const focusWatch = useTakeoverFocus(taken, card, area);
   const sending = useSend({
     text,
+    prepare: (sent) => [
+      sent,
+      {
+        attachments: attachments.filter(
+          (file) => !composerUnreferenced(sent, [file]).includes(file)
+        ),
+      },
+    ],
+    onSent: words.release,
     value,
     setOwn,
     validation,
@@ -2234,7 +2695,13 @@ const ComposerForm = (props: Resolved) => {
     onSendFailedChange: props.onSendFailedChange,
   });
   const mentions = useMentions({
-    text,
+    text: words.shown,
+    pictures: pictures.pictures,
+    pieces: words.pieces,
+    onPictureRemoved: (name) => {
+      setPictureSaid(props.pictureRemovedLabel(name));
+    },
+    expect: words.expect,
     area,
     kinds: props.mentionKinds,
     items: props.mentionItems,
@@ -2242,29 +2709,39 @@ const ComposerForm = (props: Resolved) => {
     onMention: props.onMention,
     commandsLabel: props.commandsLabel,
     setText: (next) => {
-      if (value === undefined) {
-        setOwn(next);
-      }
-      onValueChange?.(next, writtenDetails);
+      words.putText(words.toCanonical(next).canonical);
     },
   });
 
   // Drawn now, in the same task as the change, not in a render React schedules for later: an
   // agent's plan writes and then presses Send, and between the two it waits only two frames, which
   // Firefox can run back to back before that render (Send was still off in 2 of 10 plans).
-  const change: TextareaProps["onValueChange"] = (whole, details) => {
+  const change: TextareaProps["onValueChange"] = (field, details) => {
+    // While an input method composes, the field keeps what it shows; it is read when it ends.
+    if (words.composing()) {
+      flushSync(() => {
+        words.setRaw(field);
+      });
+      return;
+    }
     // A change from outside the keys (a mention picked near the limit) is cut there too.
-    const next =
-      max !== undefined && whole.length > max ? whole.slice(0, max) : whole;
+    const room = max === undefined ? undefined : max + words.extra;
+    const whole =
+      room !== undefined && field.length > room ? field.slice(0, room) : field;
+    const { canonical, reshown, caret } = words.toCanonical(whole);
     flushSync(() => {
+      words.setRaw(null);
       setCut(cutting.current);
       cutting.current = false;
       if (value === undefined) {
-        setOwn(next);
+        setOwn(canonical);
       }
-      mentions.watch(next, area.current?.selectionStart ?? next.length);
+      mentions.watch(
+        reshown,
+        caret ?? area.current?.selectionStart ?? reshown.length
+      );
       sending.setFailed(false);
-      onValueChange?.(next, details);
+      onValueChange?.(canonical, details);
     });
   };
 
@@ -2329,14 +2806,30 @@ const ComposerForm = (props: Resolved) => {
       area={area}
       label={label}
       placeholder={props.placeholder}
-      text={text}
+      text={words.shown}
       describedBy={sending.failed || invalid ? underId : undefined}
       invalid={invalid}
       disabled={disabled}
       compact={compact}
       mentions={mentions}
       onChange={change}
+      onCopy={(event: ClipboardEvent<HTMLTextAreaElement>) => {
+        words.copy(event, false);
+      }}
+      onCut={(event: ClipboardEvent<HTMLTextAreaElement>) => {
+        words.copy(event, true);
+      }}
+      onCompositionStart={words.handleCompositionStart}
+      onCompositionEnd={(event: CompositionEvent<HTMLTextAreaElement>) => {
+        words.endComposing();
+        change(event.currentTarget.value, writtenDetails);
+      }}
       onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
+        // The composer's own copy binds by id; pictures pasted go in where the caret is.
+        if (words.pasteOwn(event)) {
+          return;
+        }
+        pictures.markAt(event.currentTarget.selectionStart);
         files.handlePaste(event);
         if (event.defaultPrevented || max === undefined) {
           return;
@@ -2344,17 +2837,19 @@ const ComposerForm = (props: Resolved) => {
         // The field takes what fits and drops the rest; that it was cut is said.
         const box = event.currentTarget;
         const room =
-          max - (box.value.length - (box.selectionEnd - box.selectionStart));
+          max +
+          words.extra -
+          (box.value.length - (box.selectionEnd - box.selectionStart));
         cutting.current = event.clipboardData.getData("text").length > room;
       }}
       onSubmit={sendByKey}
-      maxLength={max}
+      maxLength={max === undefined ? undefined : max + words.extra}
     />
   );
   const editor = (
     <ComposerEditor
       field={field}
-      text={text}
+      text={words.shown}
       compact={compact}
       mentions={mentions}
       loading={props.mentionsLoading}
@@ -2365,11 +2860,18 @@ const ComposerForm = (props: Resolved) => {
         looking: props.mentionsLoadingLabel,
         found: props.mentionsFoundLabel,
       }}
+      picturesLabel={props.screenshotsLabel}
+      pictureTime={props.pictureTime}
     />
   );
   const last = (
     <>
-      <ComposerCount length={text.length} max={max} words={limitWords} />
+      <ComposerCount
+        length={words.seen}
+        max={max}
+        words={limitWords}
+        row={row}
+      />
       <ComposerEnd
         voice={voice}
         empty={empty}
@@ -2394,7 +2896,11 @@ const ComposerForm = (props: Resolved) => {
       onSubmit={submit}
       onDragOver={files.handleDragOver}
       onDragLeave={files.handleDragLeave}
-      onDrop={files.handleDrop}
+      onDrop={(event: DragEvent<HTMLFormElement>) => {
+        // Pictures dropped go in at the caret, if the text has the focus; else at the end.
+        pictures.markAt(caretIfFocused(area.current));
+        files.handleDrop(event);
+      }}
       onKeyDown={onKeyDown}
       {...stylex.props(styles.root, props.layout ?? props.style)}
     >
@@ -2455,7 +2961,9 @@ const ComposerForm = (props: Resolved) => {
                       controls={props.controls}
                       above={props.above}
                       chosenAgent={chosenAgent}
-                      attachments={attachments}
+                      attachments={attachments.filter(
+                        (file) => !isInlinePicture(file)
+                      )}
                       onAttach={props.onAttach}
                       onRemoveAttachment={props.onRemoveAttachment}
                       onRetryAttachment={props.onRetryAttachment}
@@ -2486,11 +2994,18 @@ const ComposerForm = (props: Resolved) => {
         {statusWords(activity, props.workingLabel, props.successLabel)}
       </p>
       <ComposerLimitSaid
-        length={text.length}
+        length={words.seen}
         max={max}
         cut={cut}
         words={limitWords}
       />
+      <p
+        aria-live="polite"
+        data-slot="composer-pictures-said"
+        {...stylex.props(visuallyHidden)}
+      >
+        {pictureSaid}
+      </p>
     </form>
   );
 };

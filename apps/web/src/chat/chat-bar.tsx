@@ -1,36 +1,24 @@
-import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 
-import { ComposerAction } from "../grasp/composer/index.ts";
-import { AppWindow, PanelToggle } from "../grasp/icons/index.ts";
-import { shortcutLabel } from "../shortcuts.ts";
 import { ChatComposer } from "./chat-composer.tsx";
 import { useOpenChat } from "./chat-presence.ts";
-import { chatKey, useGlobalChat } from "./global-chat.tsx";
+import { useGlobalChat } from "./global-chat.tsx";
 
 // Grasp's chat while it waits (global-chat.tsx): the chat's one box to ask
 // in (chat-composer.tsx), in one row, at the foot of the page, as one line to ask in. It mentions with
 // `@` as the chat's box does, and its + adds a file or a mention; sending
-// opens the chat where it last was, with the answer coming in, and its
-// last button opens it without asking. What is typed here, mentions and
+// opens the chat where it last was, with the answer coming in; the
+// page's own bar opens it without asking. What is typed here, mentions and
 // files too, is the chat's own box's, so it is all still there once the
 // chat opens. While Grasp answers, its light runs round it and Stop stops
 // the answer. Back, it takes the cursor if the chat had it.
-
-const styles = stylex.create({
-  // As wide as the dock gives (App shell's shell-dock-width): the dock
-  // centres what it holds, so a holder with no width shrinks to the box's least.
-  bar: { width: "100%" },
-});
 
 /** How long the bar offers its box the cursor back as the chat closes: the dock's motion, in ms. */
 const returnWithinMs = 300;
 
 /** The chat's idle bar: on every page the chat shows on, while it is closed. */
 export const ChatBar = () => {
-  const { t } = useLingui();
-  const { placement, stage, composer, words, view } = useGlobalChat();
+  const { stage, composer, words, view } = useGlobalChat();
   const openHere = useOpenChat();
   const bar = useRef<HTMLDivElement>(null);
   // Back as the chat closes: the chat had the cursor, which it loses as it
@@ -78,21 +66,11 @@ export const ChatBar = () => {
   }
   // Nothing to ask with (no AI provider yet): the chat opens to say so.
   const canSend = (composer.models?.length ?? 0) > 0 && !composer.busy;
-  const shortcut = shortcutLabel(chatKey);
   const { onAttach } = composer;
   return (
-    <div ref={bar} {...stylex.props(styles.bar)}>
+    <div ref={bar}>
       <ChatComposer
         {...composer}
-        footer={
-          <ComposerAction
-            icon={placement === "floating" ? AppWindow : PanelToggle}
-            aria-label={t`Open the chat (${shortcut})`}
-            onClick={() => {
-              openHere();
-            }}
-          />
-        }
         compact
         label={words.title}
         // Files show in the chat's box, which opens to show them.

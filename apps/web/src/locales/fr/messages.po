@@ -776,6 +776,10 @@ msgid "{label} refused that key. Check it in your provider's console and paste i
 msgstr "{label} a refusé cette clé. Vérifiez-la dans la console de votre fournisseur et collez-la de nouveau."
 
 #: src/frame/part-words.tsx
+msgid "{label} removed"
+msgstr "{label} supprimé"
+
+#: src/frame/part-words.tsx
 msgid "{label}, {current}"
 msgstr "{label}, {current}"
 
@@ -7681,6 +7685,10 @@ msgstr "Si cela dure, consultez <0>{page}</0> ou changez de fournisseur."
 msgid "If it lasts, switch provider."
 msgstr "Si cela dure, changez de fournisseur."
 
+#: src/frame/part-words.tsx
+msgid "Image {number}"
+msgstr "Image {number}"
+
 #: src/apps/app-data.tsx
 msgid "Import"
 msgstr "Importer"
@@ -13332,6 +13340,10 @@ msgstr "Planning de {workflow}"
 #: src/workflows/trigger-description.ts
 msgid "Schedule trigger"
 msgstr "Déclencheur planifié"
+
+#: src/frame/part-words.tsx
+msgid "Screenshots"
+msgstr "Captures d'écran"
 
 #: src/agents/agents-overview.tsx
 #: src/apps/apps-overview.tsx

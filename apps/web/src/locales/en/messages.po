@@ -776,6 +776,10 @@ msgid "{label} refused that key. Check it in your provider's console and paste i
 msgstr "{label} refused that key. Check it in your provider's console and paste it again."
 
 #: src/frame/part-words.tsx
+msgid "{label} removed"
+msgstr "{label} removed"
+
+#: src/frame/part-words.tsx
 msgid "{label}, {current}"
 msgstr "{label}, {current}"
 
@@ -7681,6 +7685,10 @@ msgstr "If it lasts, check <0>{page}</0> or switch provider."
 msgid "If it lasts, switch provider."
 msgstr "If it lasts, switch provider."
 
+#: src/frame/part-words.tsx
+msgid "Image {number}"
+msgstr "Image {number}"
+
 #: src/apps/app-data.tsx
 msgid "Import"
 msgstr "Import"
@@ -13332,6 +13340,10 @@ msgstr "Schedule for {workflow}"
 #: src/workflows/trigger-description.ts
 msgid "Schedule trigger"
 msgstr "Schedule trigger"
+
+#: src/frame/part-words.tsx
+msgid "Screenshots"
+msgstr "Screenshots"
 
 #: src/agents/agents-overview.tsx
 #: src/apps/apps-overview.tsx

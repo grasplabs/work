@@ -776,6 +776,10 @@ msgid "{label} refused that key. Check it in your provider's console and paste i
 msgstr "{label} heeft die sleutel geweigerd. Controleer hem in de console van je aanbieder en plak hem opnieuw."
 
 #: src/frame/part-words.tsx
+msgid "{label} removed"
+msgstr "{label} verwijderd"
+
+#: src/frame/part-words.tsx
 msgid "{label}, {current}"
 msgstr "{label}, {current}"
 
@@ -7681,6 +7685,10 @@ msgstr "Als het aanhoudt, kijk op <0>{page}</0> of stap over op een andere aanbi
 msgid "If it lasts, switch provider."
 msgstr "Als het aanhoudt, stap over op een andere aanbieder."
 
+#: src/frame/part-words.tsx
+msgid "Image {number}"
+msgstr "Afbeelding {number}"
+
 #: src/apps/app-data.tsx
 msgid "Import"
 msgstr "Importeren"
@@ -13332,6 +13340,10 @@ msgstr "Schema voor {workflow}"
 #: src/workflows/trigger-description.ts
 msgid "Schedule trigger"
 msgstr "Schematrigger"
+
+#: src/frame/part-words.tsx
+msgid "Screenshots"
+msgstr "Schermafbeeldingen"
 
 #: src/agents/agents-overview.tsx
 #: src/apps/apps-overview.tsx

@@ -594,6 +594,11 @@ export const grasp = stylex.defineConsts({
   chatBubbleWidth: "var(--grasp-chat-bubble-width)",
   chatText: "var(--grasp-chat-text)",
   chatTextLine: "var(--grasp-chat-text-line)",
+  // Draft: draft.
+  draftWidth: "var(--grasp-draft-width)",
+  draftHour: "var(--grasp-draft-hour)",
+  draftScale: "var(--grasp-draft-scale)",
+  draftHatch: "var(--grasp-draft-hatch)",
   // Audio player: audio player.
   audioWidth: "var(--grasp-audio-width)",
   // Sidebar: sidebar.

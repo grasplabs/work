@@ -776,6 +776,10 @@ msgid "{label} refused that key. Check it in your provider's console and paste i
 msgstr "{label} hat diesen Schlüssel abgelehnt. Prüfen Sie ihn in der Konsole Ihres Anbieters und fügen Sie ihn erneut ein."
 
 #: src/frame/part-words.tsx
+msgid "{label} removed"
+msgstr "{label} entfernt"
+
+#: src/frame/part-words.tsx
 msgid "{label}, {current}"
 msgstr "{label}, {current}"
 
@@ -7681,6 +7685,10 @@ msgstr "Wenn es anhält, prüfen Sie <0>{page}</0> oder wechseln Sie den Anbiete
 msgid "If it lasts, switch provider."
 msgstr "Wenn es anhält, wechseln Sie den Anbieter."
 
+#: src/frame/part-words.tsx
+msgid "Image {number}"
+msgstr "Bild {number}"
+
 #: src/apps/app-data.tsx
 msgid "Import"
 msgstr "Importieren"
@@ -13332,6 +13340,10 @@ msgstr "Zeitplan für {workflow}"
 #: src/workflows/trigger-description.ts
 msgid "Schedule trigger"
 msgstr "Zeitplan-Auslöser"
+
+#: src/frame/part-words.tsx
+msgid "Screenshots"
+msgstr "Screenshots"
 
 #: src/agents/agents-overview.tsx
 #: src/apps/apps-overview.tsx
