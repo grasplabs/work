@@ -12,7 +12,7 @@ import type { MenuCheckboxItemState } from "@ui-sdk/react/menu";
 import type { ComponentProps } from "react";
 
 import { Icon, Tick } from "../icons";
-import { menuStyles as styles } from "./styles";
+import { useMenuLook } from "./look";
 
 type CheckboxPrimitiveProps = ComponentProps<typeof CheckboxPrimitive>;
 
@@ -51,22 +51,25 @@ const className = (...parts: (stylex.StyleXStyles | false)[]) =>
 export const DropdownMenuCheckboxItem = ({
   children,
   ...rest
-}: DropdownMenuCheckboxItemProps) => (
-  <CheckboxPrimitive
-    {...rest}
-    value={children}
-    label={children}
-    className={(state: MenuCheckboxItemState) =>
-      className(
-        styles.item,
-        state.highlighted && styles.highlighted,
-        state.disabled && styles.disabled
-      )
-    }
-  >
-    <span {...stylex.props(styles.words, styles.wordsBare)}>{children}</span>
-    <MenuItemIndicator {...stylex.props(styles.tick)}>
-      <Icon icon={Tick} />
-    </MenuItemIndicator>
-  </CheckboxPrimitive>
-);
+}: DropdownMenuCheckboxItemProps) => {
+  const styles = useMenuLook();
+  return (
+    <CheckboxPrimitive
+      {...rest}
+      value={children}
+      label={children}
+      className={(state: MenuCheckboxItemState) =>
+        className(
+          styles.item,
+          state.highlighted && styles.highlighted,
+          state.disabled && styles.disabled
+        )
+      }
+    >
+      <span {...stylex.props(styles.words, styles.wordsBare)}>{children}</span>
+      <MenuItemIndicator {...stylex.props(styles.tick)}>
+        <Icon icon={Tick} />
+      </MenuItemIndicator>
+    </CheckboxPrimitive>
+  );
+};
