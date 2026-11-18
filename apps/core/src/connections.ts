@@ -39,6 +39,7 @@ import type {
   OfferedCatalog,
   AppPointerSetting,
   SharedMailboxSetting,
+  SharedSyncPlaces,
   ConnectionBrainAudienceSetting,
   ToolClassSetting,
 } from "@grasp-os/shared/connect";
@@ -130,6 +131,7 @@ import {
   setStephenPlace,
   setStephenReach,
 } from "./stephen-reach.ts";
+import { pickSyncPlaces, readSyncPlaces } from "./sync-picks.ts";
 import {
   anyMailboxPointed,
   classesOn,
@@ -838,6 +840,30 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
   async eraseBrainReads(connectionId: unknown): Promise<void> {
     await withPerson(this.#check, async (identity) => {
       await eraseBrainReads(this.#env, identity, connectionId);
+    });
+  }
+
+  async syncPlaces(connectionId: unknown): Promise<SharedSyncPlaces | null> {
+    return await withPerson(
+      this.#check,
+      async (identity) =>
+        await readSyncPlaces(
+          this.#env,
+          identity,
+          async () => await personOf(this.#env, identity),
+          connectionId
+        )
+    );
+  }
+
+  async pickSyncPlaces(request: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await pickSyncPlaces(
+        this.#env,
+        identity,
+        async () => await personOf(this.#env, identity),
+        request
+      );
     });
   }
 

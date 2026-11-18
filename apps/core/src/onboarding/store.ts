@@ -1470,10 +1470,17 @@ export class Onboarding extends DurableObject<Env> {
   async saveRoster(
     roster: Roster,
     by: AuditActor,
-    { confirmed = true }: { confirmed?: boolean } = {}
+    {
+      confirmed = true,
+      moved = new Map(),
+    }: {
+      confirmed?: boolean;
+      /** Teams the save gave another id, by their id before (`#moveTeams`). */
+      moved?: ReadonlyMap<string, string>;
+    } = {}
   ): Promise<OnboardingView> {
     return await this.#fallenFirst(
-      async () => await this.#saveRosterOnce(roster, by, { confirmed })
+      async () => await this.#saveRosterOnce(roster, by, { confirmed, moved })
     );
   }
 
@@ -1481,10 +1488,14 @@ export class Onboarding extends DurableObject<Env> {
   async #saveRosterOnce(
     roster: Roster,
     by: AuditActor,
-    { confirmed = true }: { confirmed?: boolean } = {}
+    {
+      confirmed,
+      moved,
+    }: { confirmed: boolean; moved: ReadonlyMap<string, string> }
   ): Promise<OnboardingView> {
     const fresh = await this.#freshCodes(roster);
     const said = this.ctx.storage.transactionSync(() => {
+      this.#moveTeams(moved);
       const before = this.#roster();
       const { removed, erased } = this.#writeRoster(roster, fresh, {
         late: false,
@@ -1510,6 +1521,87 @@ export class Onboarding extends DurableObject<Env> {
       await this.#afterForget();
     }
     return this.view();
+  }
+
+  /**
+   * A team the confirm made a members' team of (GRA-2055) is the same team
+   * under its new id: everything kept under the id it had on a draft moves
+   * to it, in the caller's transaction, before the save reads the list, so
+   * the save sees it as it was. Its row (lead, description, whether it takes
+   * part, its map), its people, its hold in the plan (`later`), whether it
+   * waits for the confirm, and every count, piece of work and hand-over
+   * noted under it. Nothing it gave the Brain needs moving: a team on a
+   * draft gave it nothing, as no link of its goes out before a confirm.
+   * Only teams the store has; one moved onto an id it has already, never.
+   */
+  #moveTeams(moved: ReadonlyMap<string, string>): void {
+    const known = new Set(
+      this.#db
+        .select({ id: teams.id })
+        .from(teams)
+        .all()
+        .map(({ id }) => id)
+    );
+    const moves = [...moved].filter(
+      ([from, to]) => from !== to && known.has(from) && !known.has(to)
+    );
+    if (moves.length === 0) {
+      return;
+    }
+    for (const [from, to] of moves) {
+      this.#db.update(teams).set({ id: to }).where(eq(teams.id, from)).run();
+      this.#db
+        .update(people)
+        .set({ team: to })
+        .where(eq(people.team, from))
+        .run();
+      this.#db
+        .update(links)
+        .set({ ledTeam: to })
+        .where(eq(links.ledTeam, from))
+        .run();
+      this.#db
+        .update(interviewStates)
+        .set({ leadOf: to })
+        .where(eq(interviewStates.leadOf, from))
+        .run();
+      for (const table of [
+        countedPeople,
+        teamCounts,
+        works,
+        brainTeams,
+        brainSent,
+        brainClaims,
+        brainDrawings,
+        opinionCandidates,
+      ]) {
+        this.#db
+          .update(table)
+          .set({ team: to })
+          .where(eq(table.team, from))
+          .run();
+      }
+    }
+    const to = new Map(moves);
+    const { plan } = this.#row();
+    if (plan?.later !== undefined) {
+      const later = Object.fromEntries(
+        Object.entries(plan.later).map(([team, at]) => [
+          to.get(team) ?? team,
+          at,
+        ])
+      );
+      this.#db
+        .update(onboarding)
+        .set({ plan: JSON.stringify({ ...plan, later }) })
+        .where(eq(onboarding.id, 1))
+        .run();
+    }
+    const waiting = this.#unconfirmed();
+    this.#keepUnconfirmed({
+      teams: [...waiting.teams].map((team) => to.get(team) ?? team),
+      people: [...waiting.people],
+    });
   }
 
   /**

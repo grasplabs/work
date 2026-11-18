@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "06dce764-4a08-4f10-a53b-4b3459a4bc4b",
+  "id": "f3e92352-01c5-469a-8899-5847c3480767",
   "prevId": "c02bf4dd-71af-425a-a16e-8b972d8f5430",
   "tables": {
     "access_revocations": {
@@ -11683,6 +11683,23 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "source_reader_groups": {
+      "name": "source_reader_groups",
+      "columns": {
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "source_reader_tokens": {
       "name": "source_reader_tokens",
       "columns": {
@@ -12448,79 +12465,6 @@
           "tableTo": "users",
           "columnsFrom": [
             "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "team_primaries": {
-      "name": "team_primaries",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "team_id": {
-          "name": "team_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "placed_at": {
-          "name": "placed_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "made": {
-          "name": "made",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "team_primaries_team_id_idx": {
-          "name": "team_primaries_team_id_idx",
-          "columns": [
-            "team_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "team_primaries_user_id_users_id_fk": {
-          "name": "team_primaries_user_id_users_id_fk",
-          "tableFrom": "team_primaries",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "team_primaries_team_id_teams_id_fk": {
-          "name": "team_primaries_team_id_teams_id_fk",
-          "tableFrom": "team_primaries",
-          "tableTo": "teams",
-          "columnsFrom": [
-            "team_id"
           ],
           "columnsTo": [
             "id"

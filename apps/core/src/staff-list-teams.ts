@@ -414,9 +414,10 @@ export const placePrimaries = async (
 };
 
 /**
- * An admin added `userId` to `teamId` by hand (Settings › Members): where
- * that is the team the list gives them, the membership is theirs from now
- * on, and the list never takes it away (`placementOf`).
+ * An admin adds `userId` to `teamId` by hand (Settings › Members), called
+ * before Better Auth's insert: where that is the team the list gives them,
+ * the membership is theirs from now on, and the list never takes it away
+ * (`placementOf`), though the add fail or find it there already.
  */
 export const addedByHand = async (
   env: Env,

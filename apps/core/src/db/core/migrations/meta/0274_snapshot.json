@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "66730c81-0421-475c-abea-8dba3d07a94e",
-  "prevId": "06dce764-4a08-4f10-a53b-4b3459a4bc4b",
+  "id": "16a2f4f1-53a5-4a16-8318-9df7252d0288",
+  "prevId": "f3e92352-01c5-469a-8899-5847c3480767",
   "tables": {
     "access_revocations": {
       "name": "access_revocations",
@@ -11683,6 +11683,23 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "source_reader_groups": {
+      "name": "source_reader_groups",
+      "columns": {
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "source_reader_tokens": {
       "name": "source_reader_tokens",
       "columns": {
@@ -11805,59 +11822,6 @@
           "tableTo": "users",
           "columnsFrom": [
             "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "staff_list_places": {
-      "name": "staff_list_places",
-      "columns": {
-        "email": {
-          "name": "email",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "team_id": {
-          "name": "team_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "confirmed_at": {
-          "name": "confirmed_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "staff_list_places_team_id_idx": {
-          "name": "staff_list_places_team_id_idx",
-          "columns": [
-            "team_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "staff_list_places_team_id_teams_id_fk": {
-          "name": "staff_list_places_team_id_teams_id_fk",
-          "tableFrom": "staff_list_places",
-          "tableTo": "teams",
-          "columnsFrom": [
-            "team_id"
           ],
           "columnsTo": [
             "id"

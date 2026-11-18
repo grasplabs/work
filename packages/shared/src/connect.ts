@@ -529,6 +529,15 @@ export interface PersonalAccount {
   verifiedEmailAt: number | null;
   /** Addresses it was confirmed under before, for its person's erasure alone. */
   pastVerifiedEmails: string[];
+  /**
+   * The groups the account is in at the provider, nested ones included,
+   * as the last whole read with its own token said (connect's
+   * reader-groups.ts); none until one was. Each by the ID a reader list
+   * names it by: an Entra object ID, a Google group's address.
+   */
+  groups: string[];
+  /** When that read was (milliseconds); null when there was none. */
+  groupsReadAt: number | null;
   connected: boolean;
 }
 
@@ -780,6 +789,53 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
    * when done. Asking again while it runs changes nothing.
    */
   eraseBrainReads: (connectionId: string) => Promise<void>;
+  /**
+   * The places of the shared connection `connectionId` an admin may pick
+   * to sync into the Brain (its shared drives or SharePoint libraries, as
+   * the connected account sees them), every one, with whether it is
+   * picked; null when the connection syncs no picked places. Admins only,
+   * never Grasp staff.
+   */
+  syncPlaces: (connectionId: string) => Promise<SharedSyncPlaces | null>;
+  /**
+   * Sets which places of the shared connection the sync `feed` reads: the
+   * whole set, replacing the one before, from the picks the page started
+   * from. Admins only, never Grasp staff; audited, refusals too.
+   */
+  pickSyncPlaces: (request: {
+    connectionId: string;
+    feed: string;
+    /**
+     * The picks the page started from (`SharedSyncPlaces.picks`): refused
+     * (`sync.picks_changed`), with nothing changed, once another change
+     * landed meanwhile.
+     */
+    from: string[];
+    places: string[];
+  }) => Promise<void>;
+}
+
+/**
+ * Every place of a shared connection an admin may pick to sync, as its
+ * connector lists them: the sync they are of, and each place.
+ */
+export interface SharedSyncPlaces {
+  feed: string;
+  /**
+   * Each place: its ID, its own name, what it is in (a library's site;
+   * null for a shared drive), and whether it is picked. Names are whole.
+   */
+  choices: {
+    place: string;
+    title: string;
+    within: string | null;
+    picked: boolean;
+  }[];
+  /**
+   * Every place picked now, those the listing doesn't show too: what a
+   * save starts from, so it never drops a pick the page didn't show.
+   */
+  picks: string[];
 }
 
 // The catalog: everything an admin can connect, in one list. Native
@@ -2011,6 +2067,18 @@ export interface ConnectApi
    * forgets (GRA-1761).
    */
   personalAccounts: (userId: string) => Promise<PersonalAccount[]>;
+  /**
+   * Reads, with each person's own token, the groups of the personal suite
+   * connections whose token was minted since their last read, or whose
+   * read is under way (connect's reader-groups.ts), sending at most
+   * `requests` requests to the providers and starting no turn once it made
+   * `queries` D1 queries: core's clock asks every minute, with its shares
+   * of the platform's limits. How many reads became whole.
+   */
+  readReaderGroups: (request: {
+    requests: number;
+    queries: number;
+  }) => Promise<{ read: number }>;
   /**
    * Asks the connections whose grant lacks the rights of `classes`, those
    * an admin just turned on, to be connected again (`needs_reauth`), in

@@ -1023,8 +1023,11 @@ const createAuth = (
         organizationHooks: {
           // A membership an admin adds by hand is theirs, though the staff
           // list once made it: the list never takes it away (GRA-2055,
-          // staff-list-teams.ts `placementOf`).
-          afterAddTeamMember: async ({ teamMember }) => {
+          // staff-list-teams.ts `placementOf`). Marked before Better Auth's
+          // insert, so a confirm landing between the two never takes the
+          // admin's new row; an add that then fails, or finds the
+          // membership there already, leaves it the admin's all the same.
+          beforeAddTeamMember: async ({ teamMember }) => {
             await addedByHand(env, teamMember.teamId, teamMember.userId);
           },
           afterRemoveTeamMember: async ({ teamMember }) => {

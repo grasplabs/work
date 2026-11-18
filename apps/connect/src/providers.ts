@@ -308,7 +308,7 @@ const userinfoTimeoutMs = 10_000;
  * for the account `accountId` under the hosted domain `tenant`, marked
  * verified; `null` for anything else, an error included.
  */
-const googleUserinfoAddress = async (
+export const googleUserinfoAddress = async (
   accessToken: string,
   tenant: string,
   accountId: string

@@ -483,21 +483,25 @@ describe("the leads from the HR platform", () => {
       "Other"
     ).roster;
     const [service, finance] = before.teams;
+    // As core keeps it: under the members' teams' ids (GRA-2055).
     const saved: Roster = {
       teams: before.teams.map((team) =>
         team.id === finance?.id
           ? {
               ...team,
+              id: membersId(team.id),
               lead:
                 before.people.find(({ name }) => name === "Joost Smit")?.id ??
                 null,
               off: true,
             }
-          : team
+          : { ...team, id: membersId(team.id) }
       ),
-      people: before.people.map((person) =>
-        person.name === "Lisa Jansen" ? { ...person, away: true } : person
-      ),
+      people: before.people.map((person) => ({
+        ...person,
+        team: membersId(person.team),
+        away: person.name === "Lisa Jansen",
+      })),
     };
     // HiBob knows who reports to whom in customer service, not in finance.
     const fromHr = directoryListOf(
@@ -541,8 +545,8 @@ describe("the leads from the HR platform", () => {
       taken: rosterSchema.safeParse(merged).success,
     }).toStrictEqual({
       teams: [
-        { id: service?.id, lead: "Daan Bakker", off: false },
-        { id: finance?.id, lead: "Joost Smit", off: true },
+        { id: membersId(service?.id ?? ""), lead: "Daan Bakker", off: false },
+        { id: membersId(finance?.id ?? ""), lead: "Joost Smit", off: true },
       ],
       away: ["Lisa Jansen"],
       taken: true,

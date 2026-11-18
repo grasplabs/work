@@ -235,6 +235,8 @@ const asAdmin = async (
         }
         await Promise.resolve();
       },
+      // Notes syncs no picked places, as core answers for it.
+      syncPlaces: async () => await Promise.resolve(null),
       // An erase takes the audience away and is under way until the
       // clock ends it.
       eraseBrainReads: async (...given: unknown[]) => {

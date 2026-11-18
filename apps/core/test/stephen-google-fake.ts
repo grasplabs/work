@@ -3,7 +3,8 @@
  * (stephen-eval-google-*-of-*.test.ts): a person's Gmail and Google
  * Calendar, the files of a shared drive, and a company's spreadsheets, as the Google
  * Workspace connector's reads ask for them, in the shapes Gmail v1,
- * Calendar v3, Drive v3 and Sheets v4 document. Calendar times come back
+ * Calendar v3, Drive v3 and Sheets v4 document, and the shared drives
+ * held, for picking them (`drives.list`). Calendar times come back
  * in UTC, as the connector asks for them (`timeZone=UTC`), and a day in a
  * sheet as Sheets' serial number with a date format, which the connector
  * reads as the sheet shows it. A test sets a mailbox's world, a drive's
@@ -177,6 +178,24 @@ export const stephenGoogleFake = () => {
       )
       .at(0);
 
+  /**
+   * drives.list: every shared drive held, one a page, which Google allows
+   * ("fewer may be returned"), so a listing runs over many pages; each
+   * drive's name is its ID. Nothing for any other path.
+   */
+  const drivesAnswer = (parts: string[], url: URL): Response | undefined => {
+    if (parts[3] !== "drives" || parts.length !== 4) {
+      return undefined;
+    }
+    const ids = [...drives.keys()];
+    const at = Number(url.searchParams.get("pageToken") ?? 0);
+    const id = ids[at];
+    return Response.json({
+      drives: id === undefined ? [] : [{ id, name: id }],
+      ...(at + 1 < ids.length ? { nextPageToken: String(at + 1) } : {}),
+    });
+  };
+
   const driveAnswer = (rest: string[], url: URL): Response | undefined => {
     const [id, more] = rest;
     if (id === undefined) {
@@ -284,8 +303,9 @@ export const stephenGoogleFake = () => {
         : () => calendarAnswer(world, request.method, parts.slice(5), url);
     }
     if (url.hostname === "www.googleapis.com" && parts[1] === "drive") {
-      // /drive/v3/files[/{file}[/export]]
-      const answered = driveAnswer(parts.slice(4), url);
+      // /drive/v3/drives, or /drive/v3/files[/{file}[/export]]
+      const answered =
+        drivesAnswer(parts, url) ?? driveAnswer(parts.slice(4), url);
       return answered === undefined ? undefined : () => answered;
     }
     if (

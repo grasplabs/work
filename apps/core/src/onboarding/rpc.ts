@@ -198,8 +198,17 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
       const named = await intoMembersTeams(this.#env, parsed, by, {
         make: confirmed,
       });
+      // A team a confirm made a members' team of keeps what was set for
+      // it on the draft (the store's `#moveTeams`): in the list's order.
+      const moved = new Map(
+        parsed.teams.flatMap(({ id }, index) => {
+          const to = named.teams[index]?.id;
+          return to === undefined || to === id ? [] : [[id, to] as const];
+        })
+      );
       const view = await onboardingStore(this.#env).saveRoster(named, by, {
         confirmed,
+        moved,
       });
       if (confirmed) {
         await keepStaffListPlaces(this.#env, named);
