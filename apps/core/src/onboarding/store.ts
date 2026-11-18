@@ -4776,6 +4776,38 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * A team renamed in Settings › Members (GRA-2055): the staff list names
+   * the members' teams, so its name there follows at once, and so does
+   * what every member reads of the company's teams, given to the Brain
+   * anew (`#keepConfirmed`). Nothing when the list has no such team.
+   */
+  renameTeam(id: string, name: string): void {
+    this.ctx.storage.transactionSync(() => {
+      this.#db.update(teams).set({ name }).where(eq(teams.id, id)).run();
+      const held = this.companyTeams();
+      if (held === null || !held.teams.some((team) => team.id === id)) {
+        return;
+      }
+      this.#keepConfirmed(
+        held.at,
+        held.teams.map((team) => (team.id === id ? { ...team, name } : team))
+      );
+    });
+    this.#deliverAudit();
+  }
+
+  /** Whether the staff list has the members' team `id` (GRA-2055). */
+  listsTeam(id: string): boolean {
+    return (
+      this.#db
+        .select({ id: teams.id })
+        .from(teams)
+        .where(eq(teams.id, id))
+        .all().length > 0
+    );
+  }
+
+  /**
    * The roster as Grasp's staff read it: what each team does as its lead's
    * map drew it, where it did (`mappedDoes`), else as the admin described
    * it. Staff's alone (admin-snapshot.ts); never a member's, never the
@@ -4840,7 +4872,11 @@ export class Onboarding extends DurableObject<Env> {
    * teams, as a version saying so, so it never keeps listing them.
    */
   #rosterConfirmed(at: string): void {
-    const confirmed = this.#confirmedTeams();
+    this.#keepConfirmed(at, this.#confirmedTeams());
+  }
+
+  /** `#rosterConfirmed`'s keeping of `confirmed`, as confirmed at `at`. */
+  #keepConfirmed(at: string, confirmed: CompanyTeam[]): void {
     this.ctx.storage.kv.put(rosterConfirmedKey, { at, teams: confirmed });
     const before = this.#rosterHanded();
     if (confirmed.length === 0 && before === null) {

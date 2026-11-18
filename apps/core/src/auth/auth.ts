@@ -1007,6 +1007,21 @@ const createAuth = (
           afterDeleteTeam: async ({ team }) => {
             await teamGone(env, team.id);
           },
+          // The onboarding's staff list names these same teams (GRA-2055,
+          // staff-list-teams.ts): a rename shows on it at once, and a team
+          // on it is taken off there first, so it never names one gone.
+          afterUpdateTeam: async ({ team }) => {
+            if (team !== null) {
+              await onboardingStore(env).renameTeam(team.id, team.name);
+            }
+          },
+          beforeDeleteTeam: async ({ team }) => {
+            if (await onboardingStore(env).listsTeam(team.id)) {
+              throw new APIError("CONFLICT", {
+                message: "The team is on the staff list.",
+              });
+            }
+          },
         },
       }),
       ssoOf({

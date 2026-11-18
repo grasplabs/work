@@ -542,6 +542,28 @@ export const teamMembers = sqliteTable(
 );
 
 /**
+ * Each member's primary team (GRA-2055): the one the onboarding's staff
+ * list puts them in, beside Better Auth's `team_members`, whose rows carry
+ * no fields of ours. One per member, by the key; a primary is always a
+ * `team_members` row too, which the staff list alone adds and takes away
+ * (staff-list-teams.ts). Teams an admin added someone to by hand have no
+ * row here, and the staff list never touches them.
+ */
+export const teamPrimaries = sqliteTable(
+  "team_primaries",
+  {
+    userId: text("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    placedAt: timestamp("placed_at").notNull(),
+  },
+  (table) => [index("team_primaries_team_id_idx").on(table.teamId)]
+);
+
+/**
  * Part of the SSO plugin's model, and stays empty: sign-in providers come
  * only from deployment config, and registering one in-product is refused.
  */

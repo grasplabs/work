@@ -95,6 +95,11 @@ const idSchema = z
 
 /** A team, as the staff list and its admin have it. */
 export const rosterTeamSchema = z.strictObject({
+  /**
+   * The members' team it is (GRA-2055): core saves a team under the id of
+   * the members' team with this id or, failing that, with its name, and
+   * makes a new one, under an id of its own, for any other.
+   */
   id: idSchema,
   name: nameSchema,
   /** Its lead, by person: someone in the team. */

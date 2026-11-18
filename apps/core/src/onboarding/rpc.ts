@@ -64,6 +64,7 @@ import { z } from "zod";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
+import { intoMembersTeams, placePrimaries } from "../staff-list-teams.ts";
 import {
   inProgramme,
   nextReport,
@@ -185,11 +186,18 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         rosterSchema,
         roster
       );
-      const view = await onboardingStore(this.#env).saveRoster(
-        parsed,
-        actorOf(person),
-        { confirmed }
-      );
+      const by = actorOf(person);
+      // The list names the members' teams (GRA-2055): they are made and
+      // renamed first, so the store keeps their ids; empty, a team made
+      // here gives nobody anything. People join their team only once the
+      // admin confirms the list.
+      const named = await intoMembersTeams(this.#env, parsed, by);
+      const view = await onboardingStore(this.#env).saveRoster(named, by, {
+        confirmed,
+      });
+      if (confirmed) {
+        await placePrimaries(this.#env, named, by);
+      }
       // A team the save took under seven loses its claims in the Brain now,
       // not only by core's clock (onboarding/new-brain.ts).
       await eraseOwedClaimsQuietly(this.#env);
