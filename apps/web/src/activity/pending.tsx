@@ -215,13 +215,16 @@ const reviewedLabel = (
     : null;
 
 /** The version to review, as the row shows it. */
+/** What `reviewedVersionText` says for a request with no App version to review. */
+export const noVersion = "–";
+
 export const reviewedVersionText = (
   request: Permission,
   directory: Directory
 ): string => {
   const app = reviewedApp(request);
   if (app === undefined) {
-    return "–";
+    return noVersion;
   }
   if (!directory.apps.has(app)) {
     return i18n._(msg`Unknown`);
@@ -319,30 +322,43 @@ export const requestAsker = (
 };
 
 /**
+ * When a schedule asking to start its workflow next runs, in words: the
+ * time in the schedule's own zone, as the page's language writes a day and
+ * an hour (24-hour where its language is). Undefined for any other request.
+ */
+export const requestNextRun = (
+  request: Permission,
+  now: Date = new Date()
+): string | undefined => {
+  const scheduled = scheduleOf(request, now);
+  if (scheduled === undefined) {
+    return undefined;
+  }
+  const { next, timeZone } = scheduled;
+  const when = new Intl.DateTimeFormat(i18n.locale, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone,
+  }).format(next);
+  const zone = formatZone(timeZone);
+  return i18n._(msg`Next run ${ph({ when })} (${ph({ zone })})`);
+};
+
+/**
  * What a request asks, in one line: who asks, for what, on what; a
- * schedule asking to start its workflow says so in words, with its next
- * run in the schedule's own time zone and the page's language.
+ * schedule asking to start its workflow by what it is alone, as
+ * `requestAsker` has it (its next run is `requestNextRun`'s line).
  */
 export const requestWords = (
   request: Permission,
   directory: Directory,
   now: Date = new Date()
 ): string => {
-  const scheduled = scheduleOf(request, now);
-  if (scheduled !== undefined) {
-    const { workflow, next, timeZone } = scheduled;
-    const when = new Intl.DateTimeFormat(i18n.locale, {
-      weekday: "short",
-      day: "numeric",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-      timeZone,
-    }).format(next);
-    const zone = formatZone(timeZone);
-    return i18n._(
-      msg`Schedule for ${ph({ workflow })}, next run ${ph({ when })} (${ph({ zone })})`
-    );
+  if (scheduleOf(request, now) !== undefined) {
+    return requestAsker(request, directory, now);
   }
   const subject = subjectOf(request, directory);
   const object = objectOf(request, directory);

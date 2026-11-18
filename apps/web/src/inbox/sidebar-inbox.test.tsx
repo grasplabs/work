@@ -184,11 +184,11 @@ describe("the sidebar's inbox", () => {
       expect(counted()).toBe("2");
     });
     const links = rows().map(({ href }) => href);
-    // The inbox's views in its filter's order: all, Asked of you, Apps.
+    // The inbox's views in its filter's order: all, Asked of you, Approvals.
     expect(links.slice(0, 3)).toStrictEqual([
       "/inbox",
       "/inbox?group=asked",
-      "/inbox?group=apps",
+      "/inbox?group=approvals",
     ]);
     // Then each item, to its place in the inbox.
     expect(links.slice(3).toSorted()).toStrictEqual([

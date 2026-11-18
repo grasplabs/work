@@ -648,12 +648,6 @@ export const AgentPage = ({
     }
     await navigate({ to: "/agents", replace: true });
   };
-  const partNames = {
-    overview: t`Overview`,
-    instructions: t`Instructions`,
-    access: t`Access`,
-    schedule: t`Schedule`,
-  } as const satisfies Record<AgentTab, string>;
   return (
     <Page>
       <PageHeader
@@ -687,10 +681,8 @@ export const AgentPage = ({
             ) : null}
           </div>
         }
-        // The part shown, as Settings names its page, in the same title:
-        // the agent's mark and name stand above it in the sidebar, and in
-        // the crumbs.
-        title={partNames[tab]}
+        // The agent's name on every part: the side nav marks which part.
+        title={name}
       />
       <AgentFailure>{failure}</AgentFailure>
       {/* Every tab stays mounted, the others hidden: what is typed and
@@ -714,7 +706,7 @@ export const AgentPage = ({
         hidden={tab !== "instructions"}
         {...stylex.props(styles.stack, tab !== "instructions" && styles.hidden)}
       >
-        {/* No title: the page's is "Instructions" already. */}
+        {/* No title: the side nav says "Instructions" already. */}
         <SectionCard
           aria-label={t`Instructions`}
           density="compact"

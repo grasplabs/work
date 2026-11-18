@@ -569,9 +569,9 @@ describe(inboxItems, () => {
       .filter(({ kind }) => kind === "permissionRequest")
       .map(({ title }) => title);
 
-    // A schedule says what it is and when it next runs, never its cron.
-    const scheduled = titles.filter((title) =>
-      title.startsWith("Grant Schedule for workflow-1, next run ")
+    // A schedule says what it is, never its cron.
+    const scheduled = titles.filter(
+      (title): boolean => title === "Grant Schedule for workflow-1?"
     );
     expect({
       scheduled: scheduled.length,
@@ -689,16 +689,10 @@ describe(listed, () => {
   });
 
   it("shows one group of kinds when asked", () => {
+    // Workflows' and Apps' asks are one group: everything here but the question.
     expect(
-      listed(items, "workflows", "urgent").map(({ kind }) => kind)
-    ).toStrictEqual([
-      "decision",
-      "bindingApproval",
-      "stoppedEvents",
-      "heldStart",
-      "goLive",
-      "stoppedSchedule",
-    ]);
+      listed(items, "approvals", "urgent").map(({ kind }) => kind)
+    ).not.toContain("openQuestion");
     const quotes = items.find(({ id }) => id === workflowGoLive.id);
     expect({
       title: quotes?.title,
@@ -733,7 +727,7 @@ describe(listed, () => {
         section: "triggers",
       },
     });
-    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 7);
+    expect(listed(items, "approvals", "urgent")).toHaveLength(items.length - 1);
   });
 });
 

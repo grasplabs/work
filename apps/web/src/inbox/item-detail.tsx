@@ -310,47 +310,6 @@ const useDecide = (onSaid: (said: string) => void) => {
   return { ...action, decide };
 };
 
-/** A held write: approving it is for what the person was shown, all of it. */
-const HeldItem = ({
-  frame,
-  source,
-}: {
-  frame: Frame;
-  source: Extract<InboxSource, { type: "held" }>;
-}) => {
-  const { t } = useLingui();
-  const { action } = source;
-  const shown = useShown(action);
-  const { busy, failure, decide } = useDecide(frame.onSaid);
-  const who = frame.item.context;
-  return (
-    <ItemFrame
-      acts={[
-        {
-          label: t`Approve`,
-          name: t`Approve ${who}`,
-          disabled: shown.unseen,
-          describedBy: shown.unseen ? shown.unseenId : undefined,
-          onPress: async () => {
-            await decide(confirmHeld(action), t`Approved: ${who}.`);
-          },
-        },
-        {
-          label: t`Reject`,
-          name: t`Reject ${who}`,
-          onPress: async () => {
-            await decide(declineHeld(action), t`Rejected: ${who}.`);
-          },
-        },
-      ]}
-      busy={busy}
-      extra={<HeldWriteDetails action={action} shown={shown} />}
-      failure={failure}
-      frame={frame}
-    />
-  );
-};
-
 /** Every word the Approval request card shows, in the page's language. */
 const useApprovalWords = (): Partial<ApprovalWords> => {
   const { t } = useLingui();
@@ -407,6 +366,7 @@ const ApprovalFrame = ({
   summary,
   details,
   approveLabel,
+  approveHeld,
   grave = false,
   onApprove,
   onDecline,
@@ -419,6 +379,8 @@ const ApprovalFrame = ({
   /** What to read before answering, under Details. */
   details?: ReactNode;
   approveLabel?: string;
+  /** Why Approve waits, while it does: it stays out of use until then. */
+  approveHeld?: string | undefined;
   grave?: boolean;
   onApprove: (session: Session) => Promise<unknown>;
   onDecline: (session: Session) => Promise<unknown>;
@@ -453,6 +415,7 @@ const ApprovalFrame = ({
         {...(who === undefined ? {} : { agent: who })}
         {...(summary === undefined ? {} : { summary })}
         {...(approveLabel === undefined ? {} : { approveLabel })}
+        {...(approveHeld === undefined ? {} : { approveHeld })}
         askedAt={item.date === "" ? undefined : formatDate(item.date)}
         grave={grave}
         headingLevel={2}
@@ -464,6 +427,38 @@ const ApprovalFrame = ({
         {details}
       </ApprovalRequest>
     </div>
+  );
+};
+
+/**
+ * A held write: confirming it is for what the person was shown, all of
+ * it. Confirm waits, with why, until every part of what it sends was shown.
+ */
+const HeldItem = ({
+  frame,
+  source,
+}: {
+  frame: Frame;
+  source: Extract<InboxSource, { type: "held" }>;
+}) => {
+  const { t } = useLingui();
+  const { action } = source;
+  const shown = useShown(action);
+  return (
+    <ApprovalFrame
+      approveHeld={
+        shown.unseen
+          ? t`Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm.`
+          : undefined
+      }
+      approveLabel={t`Confirm`}
+      details={
+        <HeldWriteDetails action={action} saysUnseen={false} shown={shown} />
+      }
+      frame={frame}
+      onApprove={confirmHeld(action)}
+      onDecline={declineHeld(action)}
+    />
   );
 };
 

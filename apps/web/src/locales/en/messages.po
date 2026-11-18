@@ -2107,7 +2107,6 @@ msgctxt "memory record state"
 msgid "Accepted"
 msgstr "Accepted"
 
-#: src/agents/agent-page.tsx
 #: src/agents/agent-section.tsx
 #: src/apps/publish.tsx
 msgid "Access"
@@ -3215,10 +3214,6 @@ msgstr "Article"
 #: src/chat/connection-requests.tsx
 msgid "As"
 msgstr "As"
-
-#: src/dashboard/pile-cards.tsx
-msgid "as {binding}"
-msgstr "as {binding}"
 
 #: src/settings/stephen-settings.tsx
 msgid "As for Stephen"
@@ -9706,6 +9701,10 @@ msgstr "Name of your HR platform"
 msgid "name@company.com"
 msgstr "name@company.com"
 
+#: src/dashboard/pile-cards.tsx
+msgid "Named {binding} in its code"
+msgstr "Named {binding} in its code"
+
 #: src/brain/brain.ts
 msgid "Named by"
 msgstr "Named by"
@@ -9875,6 +9874,10 @@ msgstr "Next page"
 #: src/interview/words.ts
 msgid "Next person"
 msgstr "Next person"
+
+#: src/activity/pending.tsx
+msgid "Next run {when} ({zone})"
+msgstr "Next run {when} ({zone})"
 
 #: src/workflows/workflow-triggers.tsx
 msgid "Next run: {next}"
@@ -11553,7 +11556,6 @@ msgstr "Outside systems send events here; workflows start on them."
 msgid "Over the next two weeks you’ll get a short personal link to talk with Stephen, Grasp’s AI interviewer: leads for about 20 minutes, everyone else for 10 to 15. By voice or by typing."
 msgstr "Over the next two weeks you’ll get a short personal link to talk with Stephen, Grasp’s AI interviewer: leads for about 20 minutes, everyone else for 10 to 15. By voice or by typing."
 
-#: src/agents/agent-page.tsx
 #: src/agents/agent-section.tsx
 msgid "Overview"
 msgstr "Overview"
@@ -13692,7 +13694,6 @@ msgstr "Say what you want to build, and Grasp builds it."
 msgid "Scenes"
 msgstr "Scenes"
 
-#: src/agents/agent-page.tsx
 #: src/agents/agent-section.tsx
 #: src/agents/agent-wakes.tsx
 msgid "Schedule"
@@ -13701,10 +13702,6 @@ msgstr "Schedule"
 #: src/activity/pending.tsx
 msgid "Schedule for {workflow}"
 msgstr "Schedule for {workflow}"
-
-#: src/activity/pending.tsx
-msgid "Schedule for {workflow}, next run {when} ({zone})"
-msgstr "Schedule for {workflow}, next run {when} ({zone})"
 
 #: src/workflows/trigger-description.ts
 msgid "Schedule trigger"
@@ -17545,6 +17542,10 @@ msgstr "Waiting on a person"
 #: src/dashboard/pile-card.tsx
 msgid "Waiting on you"
 msgstr "Waiting on you"
+
+#: src/chat/use-ask.ts
+msgid "Waiting to send. Grasp is out of reach for now; your question goes once it's back."
+msgstr "Waiting to send. Grasp is out of reach for now; your question goes once it's back."
 
 #: src/apps/draft-changes.tsx
 msgid "Waits for an admin to grant it"

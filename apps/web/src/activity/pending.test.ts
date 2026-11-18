@@ -13,6 +13,7 @@ import {
   objectOf,
   requestAsker,
   requestRow,
+  requestNextRun,
   requestWords,
   subjectOf,
 } from "./pending.tsx";
@@ -162,23 +163,27 @@ describe("a schedule trigger asking to start its workflow", () => {
     const scheduled = requestWords(triggered("schedule"), directory, now);
     const other = requestWords(triggered("email"), directory, now);
 
+    const next = requestNextRun(triggered("schedule"), now) ?? "";
+
     expect({
-      scheduled: scheduled.startsWith(
-        "Schedule for invoice-approval, next run "
-      ),
-      day: scheduled.includes("18"),
-      hour: scheduled.includes("09:00"),
-      cron: scheduled.includes("* *"),
+      scheduled,
+      next: next.startsWith("Next run "),
+      day: next.includes("18"),
+      hour: next.includes("09:00"),
+      cron: next.includes("* *"),
+      otherNext: requestNextRun(triggered("email"), now),
       other: other.endsWith(": start on Workflow invoice-approval"),
       asker: requestAsker(triggered("schedule"), directory, now),
       otherAsker:
         requestAsker(triggered("email"), directory, now) ===
         subjectOf(triggered("email"), directory),
     }).toStrictEqual({
-      scheduled: true,
+      scheduled: "Schedule for invoice-approval",
+      next: true,
       day: true,
       hour: true,
       cron: false,
+      otherNext: undefined,
       other: true,
       asker: "Schedule for invoice-approval",
       otherAsker: true,

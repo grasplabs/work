@@ -46,7 +46,7 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
   brainQuestion: msg({ message: "Brain question", context: "inbox item kind" }),
   interviews: msg({ message: "Interviews", context: "inbox item kind" }),
   everyonesOutcome: msg({
-    message: "Unknown outcome",
+    message: "Unconfirmed change",
     context: "inbox item kind",
   }),
   unknownAiTool: msg({ message: "AI tool", context: "inbox item kind" }),
@@ -55,8 +55,8 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
   heldWrite: msg({ message: "Change", context: "inbox item kind" }),
   heldStart: msg({ message: "Workflow start", context: "inbox item kind" }),
   unknownOutcome: msg({
-    message: "Did it happen?",
-    context: "inbox item kind: a change whose answer was lost",
+    message: "Unconfirmed change",
+    context: "inbox item kind",
   }),
   permissionRequest: msg({ message: "Permission", context: "inbox item kind" }),
   stoppedSchedule: msg({

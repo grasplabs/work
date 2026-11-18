@@ -8,14 +8,7 @@ import { readWaiting } from "../dashboard/read-dashboard.ts";
 import { formatAge } from "../format.ts";
 import { useFrameRead } from "../frame/frame-read.ts";
 import type { IconData } from "../grasp/icons/index.ts";
-import {
-  AppPanels,
-  Bell,
-  Brain,
-  People,
-  Question,
-  Workflow,
-} from "../grasp/icons/index.ts";
+import { Bell, Brain, People, Question, Tick } from "../grasp/icons/index.ts";
 import type { SidebarGroup, SidebarRow } from "../grasp/sidebar/index.ts";
 import { kindMark } from "./inbox-kind.tsx";
 import { groupLabel, groupOrder } from "./inbox-page.tsx";
@@ -42,8 +35,7 @@ const groupIcon: Record<Group, IconData> = {
   asked: Question,
   brain: Brain,
   outcomes: Question,
-  workflows: Workflow,
-  apps: AppPanels,
+  approvals: Tick,
 };
 
 /** How many of the items that waited longest the view lists. */

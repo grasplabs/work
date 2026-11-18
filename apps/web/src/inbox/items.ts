@@ -18,7 +18,11 @@ import type {
 } from "@grasp-os/shared/waiting";
 import { plural, t } from "@lingui/core/macro";
 
-import { requestRow, requestWords } from "../activity/pending.tsx";
+import {
+  requestNextRun,
+  requestRow,
+  requestWords,
+} from "../activity/pending.tsx";
 import type { PendingRequests } from "../activity/pending.tsx";
 import { integrationKey } from "../connections/integrations.ts";
 import type { NotificationsPage } from "../dashboard/notifications-page.ts";
@@ -135,38 +139,32 @@ export interface InboxItem {
 }
 
 /** The kinds, grouped as the filter offers them. */
-export type Group =
-  | "all"
-  | "asked"
-  | "workflows"
-  | "brain"
-  | "outcomes"
-  | "apps";
+export type Group = "all" | "asked" | "brain" | "approvals" | "outcomes";
 
 export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
-  checkDrawing: "workflows",
-  checkProposal: "workflows",
-  goLive: "workflows",
-  approveChange: "workflows",
-  confirmResult: "workflows",
+  checkDrawing: "approvals",
+  checkProposal: "approvals",
+  goLive: "approvals",
+  approveChange: "approvals",
+  confirmResult: "approvals",
   conflict: "brain",
   openQuestion: "asked",
   brainQuestion: "brain",
   interviews: "brain",
   everyonesOutcome: "outcomes",
-  unknownAiTool: "apps",
-  signInAgain: "apps",
-  externalDomain: "apps",
-  heldWrite: "apps",
-  heldStart: "workflows",
-  unknownOutcome: "apps",
-  permissionRequest: "apps",
-  stoppedSchedule: "workflows",
-  packageNotice: "apps",
-  stoppedEvents: "workflows",
-  appMessage: "apps",
-  bindingApproval: "workflows",
-  decision: "workflows",
+  unknownAiTool: "approvals",
+  signInAgain: "approvals",
+  externalDomain: "approvals",
+  heldWrite: "approvals",
+  heldStart: "approvals",
+  unknownOutcome: "approvals",
+  permissionRequest: "approvals",
+  stoppedSchedule: "approvals",
+  packageNotice: "approvals",
+  stoppedEvents: "approvals",
+  appMessage: "approvals",
+  bindingApproval: "approvals",
+  decision: "approvals",
 };
 
 export type Sort = "urgent" | "newest" | "oldest";
@@ -325,7 +323,10 @@ const requestItems = (pending: PendingRequests): InboxItem[] =>
       context: requestRow(request, directory),
       body: [],
       facts: [
-        { label: t`Binding`, value: binding },
+        // A schedule's name in code ("START") says no more than its title.
+        ...(requestNextRun(request) === undefined
+          ? [{ label: t`Binding`, value: binding }]
+          : []),
         { label: t`Asked`, value: formatDateTime(request.requestedAt) },
       ],
       about:

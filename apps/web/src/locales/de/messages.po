@@ -2107,7 +2107,6 @@ msgctxt "memory record state"
 msgid "Accepted"
 msgstr "Akzeptiert"
 
-#: src/agents/agent-page.tsx
 #: src/agents/agent-section.tsx
 #: src/apps/publish.tsx
 msgid "Access"
@@ -3007,7 +3006,7 @@ msgstr "Genehmigung"
 #: src/inbox/inbox-page.tsx
 msgctxt "inbox filter"
 msgid "Approvals"
-msgstr ""
+msgstr "Freigaben"
 
 #: src/apps/app-webhooks.tsx
 #: src/dashboard/pile-cards.tsx
@@ -3215,10 +3214,6 @@ msgstr "Artikel"
 #: src/chat/connection-requests.tsx
 msgid "As"
 msgstr "Als"
-
-#: src/dashboard/pile-cards.tsx
-msgid "as {binding}"
-msgstr "als {binding}"
 
 #: src/settings/stephen-settings.tsx
 msgid "As for Stephen"
@@ -4192,7 +4187,7 @@ msgstr "Änderungen seit {when}"
 #: src/inbox/inbox-page.tsx
 msgctxt "inbox filter"
 msgid "Changes we couldn’t confirm"
-msgstr ""
+msgstr "Änderungen, die wir nicht bestätigen konnten"
 
 #: src/apps/data-model-changes.tsx
 msgid "Changes who can see and change the records of {table}."
@@ -9706,6 +9701,10 @@ msgstr "Name Ihrer HR-Plattform"
 msgid "name@company.com"
 msgstr "name@firma.de"
 
+#: src/dashboard/pile-cards.tsx
+msgid "Named {binding} in its code"
+msgstr "Im Code {binding} genannt"
+
 #: src/brain/brain.ts
 msgid "Named by"
 msgstr "Genannt von"
@@ -9875,6 +9874,10 @@ msgstr "Nächste Seite"
 #: src/interview/words.ts
 msgid "Next person"
 msgstr "Nächste Person"
+
+#: src/activity/pending.tsx
+msgid "Next run {when} ({zone})"
+msgstr "Nächster Lauf {when} ({zone})"
 
 #: src/workflows/workflow-triggers.tsx
 msgid "Next run: {next}"
@@ -11553,7 +11556,6 @@ msgstr "Externe Systeme senden Events hierher; Workflows starten darauf."
 msgid "Over the next two weeks you’ll get a short personal link to talk with Stephen, Grasp’s AI interviewer: leads for about 20 minutes, everyone else for 10 to 15. By voice or by typing."
 msgstr "In den nächsten zwei Wochen erhalten Sie einen kurzen persönlichen Link, um mit Stephen zu sprechen, dem KI-Interviewer von Grasp: Teamleitungen etwa 20 Minuten, alle anderen 10 bis 15. Per Sprache oder per Tippen."
 
-#: src/agents/agent-page.tsx
 #: src/agents/agent-section.tsx
 msgid "Overview"
 msgstr "Übersicht"
@@ -13692,7 +13694,6 @@ msgstr "Sagen Sie, was Sie bauen möchten, und Grasp baut es."
 msgid "Scenes"
 msgstr "Szenen"
 
-#: src/agents/agent-page.tsx
 #: src/agents/agent-section.tsx
 #: src/agents/agent-wakes.tsx
 msgid "Schedule"
@@ -13701,10 +13702,6 @@ msgstr "Zeitplan"
 #: src/activity/pending.tsx
 msgid "Schedule for {workflow}"
 msgstr "Zeitplan für {workflow}"
-
-#: src/activity/pending.tsx
-msgid "Schedule for {workflow}, next run {when} ({zone})"
-msgstr "Zeitplan für {workflow}, nächste Ausführung {when} ({zone})"
 
 #: src/workflows/trigger-description.ts
 msgid "Schedule trigger"
@@ -16944,7 +16941,7 @@ msgstr "Wird gelöst"
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
 msgid "Unconfirmed change"
-msgstr ""
+msgstr "Unbestätigte Änderung"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Under 5"
@@ -17545,6 +17542,10 @@ msgstr "Wartet auf eine Person"
 #: src/dashboard/pile-card.tsx
 msgid "Waiting on you"
 msgstr "Wartet auf Sie"
+
+#: src/chat/use-ask.ts
+msgid "Waiting to send. Grasp is out of reach for now; your question goes once it's back."
+msgstr ""
 
 #: src/apps/draft-changes.tsx
 msgid "Waits for an admin to grant it"

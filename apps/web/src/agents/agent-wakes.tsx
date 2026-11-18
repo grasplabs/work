@@ -340,7 +340,7 @@ export const AgentWakes = ({
     return found.name === "" ? found.email : found.name;
   };
   return (
-    // No title: the page's is "Schedule" already; Add a time at its foot.
+    // No title: the side nav says "Schedule" already; Add a time at its foot.
     <SectionCard
       aria-label={t`Schedule`}
       density="compact"

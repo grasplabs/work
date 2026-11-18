@@ -8,9 +8,11 @@ import {
   askedAgain,
   grantReviewed,
   requestAsker,
+  requestNextRun,
   requestWords,
   reviewedVersion,
   reviewedVersionText,
+  noVersion,
 } from "../activity/pending.tsx";
 import type { PendingRequests } from "../activity/pending.tsx";
 import { changeThenRefresh } from "../change-then-refresh.ts";
@@ -120,9 +122,11 @@ export const HeldCard = ({
 };
 
 /**
- * What has to be read of a permission request before deciding it: as
- * which binding, the version of its App the grant trusts, and who asked.
- * On the dashboard's pile and in the inbox.
+ * What has to be read of a permission request before deciding it: when a
+ * schedule next runs, the name its code asks under, the version of its App
+ * the grant trusts, and who asked. A line with nothing to say is left out,
+ * and a schedule's name in code ("START") with it: its title says it
+ * starts the workflow. On the dashboard's pile and in the inbox.
  */
 export const RequestDetails = ({
   request,
@@ -132,23 +136,32 @@ export const RequestDetails = ({
   directory: PendingRequests["directory"];
 }) => {
   const { binding } = request;
+  const nextRun = requestNextRun(request);
   const version = reviewedVersionText(request, directory);
   const again = askedAgain(request, directory);
   const requester = personName(directory, request.requestedBy);
   const date = formatTime(request.requestedAt);
   return (
     <div {...stylex.props(styles.details)}>
-      <Text size="sm" tone="muted">
-        <Trans>as {binding}</Trans>
-      </Text>
+      {nextRun === undefined ? (
+        <Text size="sm" tone="muted">
+          <Trans>Named {binding} in its code</Trans>
+        </Text>
+      ) : (
+        <Text size="sm" tone="muted">
+          {nextRun}
+        </Text>
+      )}
       {request.chat === null ? null : (
         <Text size="sm" tone="muted">
           <Trans>In one chat only, for {requester}</Trans>
         </Text>
       )}
-      <Text size="sm" tone="muted">
-        <Trans>Version to review: {version}</Trans>
-      </Text>
+      {version === noVersion ? null : (
+        <Text size="sm" tone="muted">
+          <Trans>Version to review: {version}</Trans>
+        </Text>
+      )}
       <Text size="sm" tone="muted">
         <Trans>
           Asked by {requester} on {date}

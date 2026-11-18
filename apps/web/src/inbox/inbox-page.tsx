@@ -122,21 +122,18 @@ const styles = stylex.create({
  */
 export const groupLabel: Record<Group, MessageDescriptor> = {
   all: msg({ message: "All", context: "inbox filter, short" }),
-  workflows: msg({ message: "Workflows", context: "inbox filter" }),
   asked: msg({ message: "Asked of you", context: "inbox filter" }),
   brain: msg({ message: "Brain", context: "inbox filter, short" }),
-  outcomes: msg({ message: "Unknown outcomes", context: "inbox filter" }),
-  apps: msg({ message: "Apps", context: "inbox filter, short" }),
+  approvals: msg({ message: "Approvals", context: "inbox filter" }),
+  outcomes: msg({
+    message: "Changes we couldn’t confirm",
+    context: "inbox filter",
+  }),
 };
 
 /** The groups in the filter's order; the address (`?group=`) takes these. */
-export const groupOrder = [
-  "asked",
-  "brain",
-  "outcomes",
-  "workflows",
-  "apps",
-] as const;
+// Workflows' and Apps' asks are one group, Approvals (Ruben, 17 November).
+export const groupOrder = ["asked", "brain", "approvals", "outcomes"] as const;
 
 const isGroup = (value: string | null): value is Group =>
   value === "all" || groupOrder.some((each) => each === value);
