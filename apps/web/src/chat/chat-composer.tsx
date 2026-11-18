@@ -4,7 +4,10 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
-import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
+import {
+  ConnectAiProvider,
+  ConnectAiProviderLine,
+} from "../frame/connect-ai-provider.tsx";
 import { Composer, ComposerAdd } from "../grasp/composer/index.ts";
 import type {
   ComposerAgentOption,
@@ -134,8 +137,17 @@ const attachmentsOf = (files: readonly CardFile[]): ComposerFile[] =>
  * (from the box, or from Try again in the thread). Said, never a reason to
  * hold the next question back, as `validation` would.
  */
-const noteOf = (noProvider: boolean, problem: string | undefined) =>
-  noProvider ? <ConnectAiProvider size="xs" /> : problem;
+const noteOf = (
+  noProvider: boolean,
+  /** In one row at a page's foot: a line, so nothing stands over the page. */
+  compact: boolean,
+  problem: string | undefined
+) => {
+  if (!noProvider) {
+    return problem;
+  }
+  return compact ? <ConnectAiProviderLine /> : <ConnectAiProvider size="xs" />;
+};
 
 /**
  * Whether Grasp has just finished an answer here: from the moment it stops
@@ -311,7 +323,7 @@ export const ChatComposer = ({
       }
       aria-label={label ?? t`Your question`}
       layout={styles.fill}
-      note={noteOf(noProvider, fileProblem ?? failure)}
+      note={noteOf(noProvider, compact, fileProblem ?? failure)}
       onAttach={
         onAttach === undefined
           ? undefined
