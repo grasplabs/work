@@ -1725,9 +1725,16 @@ const useDockRoom = (
         page.scrollTop = page.scrollHeight;
       }
     };
-    const observer = new ResizeObserver(read);
+    // Read in the frame after the dock settles: the Composer inside it can change its own height while
+    // the observer delivers (its row going tall), and a read then left that change undelivered.
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(read);
+    });
     observer.observe(held);
     return () => {
+      cancelAnimationFrame(frame);
       observer.disconnect();
     };
   }, [card, on, shown]);
