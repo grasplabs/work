@@ -472,10 +472,6 @@ msgstr "{count, plural, one {Es kann noch nicht geteilt werden: # Problem} other
 msgid "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
 msgstr "{count, plural, one {Lese # Workflow} other {Lese # Workflows}}"
 
-#: src/routes/_shell.integrations.index.tsx
-msgid "{count, plural, one {Show the # app in {label}} other {Show all # in {label}}}"
-msgstr "{count, plural, one {Die # App in {label} anzeigen} other {Alle # in {label} anzeigen}}"
-
 #: src/connections/tool-rows.tsx
 msgid "{count, plural, one {Show the # tool} other {Show all # tools}}"
 msgstr "{count, plural, one {Das # Tool anzeigen} other {Alle # Tools anzeigen}}"
@@ -496,7 +492,6 @@ msgstr "{count, plural, one {Das ist keine E-Mail-Adresse:} other {Das sind kein
 msgid "{count, plural, one {Took # step} other {Took # steps}}"
 msgstr "{count, plural, one {# Schritt} other {# Schritte}}"
 
-#: src/connections/integration-tile.tsx
 #: src/connections/workflows-using.tsx
 msgid "{count, plural, one {Used by # workflow} other {Used by # workflows}}"
 msgstr "{count, plural, one {Von # Workflow genutzt} other {Von # Workflows genutzt}}"
@@ -2218,6 +2213,11 @@ msgstr "Zeit hinzufügen"
 msgid "Add a trigger"
 msgstr "Einen Auslöser hinzufügen"
 
+#: src/connections/overview-lists.tsx
+msgctxt "apps that can still be connected"
+msgid "Add an app"
+msgstr "App hinzufügen"
+
 #: src/connections/http-connections.tsx
 msgid "Add an HTTP connection"
 msgstr "HTTP-Verbindung hinzufügen"
@@ -2245,11 +2245,6 @@ msgstr "HTTP-Verbindung hinzufügen"
 #: src/apps/indexes-view.tsx
 msgid "Add index"
 msgstr "Index hinzufügen"
-
-#: src/routes/_shell.integrations.index.tsx
-msgctxt "apps that can still be connected"
-msgid "Add more"
-msgstr "Weitere hinzufügen"
 
 #: src/chat/package-requests.tsx
 msgid "Add npm packages to {subject}"
@@ -4581,6 +4576,7 @@ msgstr "Von der Geschäftsführung bestätigt"
 #: src/chat/plan-card.tsx
 #: src/connections/integration-inspector.tsx
 #: src/connections/integration-item.tsx
+#: src/connections/overview-lists.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -4592,6 +4588,7 @@ msgstr "Verbinden"
 msgid "Connect {app}"
 msgstr "{app} verbinden"
 
+#: src/connections/overview-lists.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/onboarding/hr-leads.tsx
 msgid "Connect {name}"
@@ -4621,7 +4618,7 @@ msgstr "Weiteres Konto verbinden"
 msgid "Connected"
 msgstr "Verbunden"
 
-#: src/routes/_shell.integrations.index.tsx
+#: src/connections/overview-lists.tsx
 msgctxt "apps that are connected"
 msgid "Connected"
 msgstr "Verbunden"
@@ -4646,12 +4643,10 @@ msgid "Connected by"
 msgstr "Verbunden von"
 
 #: src/connections/integration-item.tsx
-#: src/connections/integration-tile.tsx
 msgid "Connected for everyone"
 msgstr "Für alle verbunden"
 
 #: src/connections/integration-item.tsx
-#: src/connections/integration-tile.tsx
 msgid "Connected for you"
 msgstr "Für dich verbunden"
 
@@ -6101,10 +6096,6 @@ msgstr "Jedes Ereignis ist mit dem vorherigen verkettet, sodass ein später entf
 #: src/brain/brain.ts
 msgid "Every invited team interviewed"
 msgstr "Alle eingeladenen Teams interviewt"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Every kind"
-msgstr "Alle Arten"
 
 #: src/agents/agent-wakes.tsx
 msgid "Every Monday"
@@ -9448,6 +9439,10 @@ msgstr "braucht Aufmerksamkeit"
 msgid "Needs its own sign-in app"
 msgstr "Braucht eine eigene Anmelde-App"
 
+#: src/connections/overview-lists.tsx
+msgid "Needs sign-in. What uses it waits until then."
+msgstr "Anmeldung nötig. Was es nutzt, wartet bis dahin."
+
 #: src/connections/integration-item.tsx
 msgid "Needs signing in again"
 msgstr "Erneute Anmeldung nötig"
@@ -9461,6 +9456,10 @@ msgstr "Braucht jemanden"
 #: src/workflows/files-and-apps.tsx
 msgid "Needs someone to sign in again"
 msgstr "Jemand muss sich erneut anmelden"
+
+#: src/connections/overview-lists.tsx
+msgid "Needs you"
+msgstr "Braucht dich"
 
 #: src/workflows/requests/request-table.tsx
 msgctxt "Stephen's requests to fix"
@@ -9923,10 +9922,6 @@ msgstr "Kein Workflow dient diesem Prozess."
 msgid "No workflow uses {app} yet."
 msgstr "Noch kein Workflow nutzt {app}."
 
-#: src/connections/integration-tile.tsx
-msgid "No workflow uses it yet"
-msgstr "Noch kein Workflow nutzt es"
-
 #: src/brain/brain.ts
 msgid "No workflow yet"
 msgstr "Noch kein Workflow"
@@ -10200,7 +10195,7 @@ msgid "Not now"
 msgstr "Jetzt nicht"
 
 #: src/connections/integration-item.tsx
-#: src/connections/integration-tile.tsx
+#: src/connections/overview-lists.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Not offered"
 msgstr "Nicht angeboten"
@@ -10388,10 +10383,6 @@ msgstr "Notiert: {name}. Wir verbinden sie gemeinsam mit Ihnen. Prüfen Sie bis 
 #: src/onboarding/connect-steps.tsx
 msgid "Noted. We’ll get in touch to put it on the laptops with you."
 msgstr "Notiert. Wir melden uns, um es mit Ihnen auf die Laptops zu bringen."
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Nothing connected yet. Choose an app below to connect it."
-msgstr "Noch nichts verbunden. Wähle unten eine App, um sie zu verbinden."
 
 #: src/frame/part-words.tsx
 #: src/onboarding/place-picker.tsx
@@ -10839,6 +10830,7 @@ msgid "Only when asked"
 msgstr "Nur auf Anfrage"
 
 #: src/connections/integration-inspector.tsx
+#: src/connections/overview-lists.tsx
 msgid "Only you"
 msgstr "Nur du"
 
@@ -10867,6 +10859,7 @@ msgid "Only you see this"
 msgstr "Nur Sie sehen das"
 
 #: src/chat/sidebar-chats.tsx
+#: src/connections/overview-lists.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/inbox/item-detail.tsx
 #: src/settings/where-stephen.tsx
@@ -10900,6 +10893,7 @@ msgctxt "open one run of a workflow"
 msgid "Open"
 msgstr "Öffnen"
 
+#: src/connections/overview-lists.tsx
 #: src/frame/part-words.tsx
 #: src/knowledge/uploads.tsx
 msgid "Open {name}"
@@ -11875,7 +11869,6 @@ msgstr "Andere erreichen"
 msgid "Reached"
 msgstr "Erreicht"
 
-#: src/connections/integration-inspector.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Reaches"
 msgstr "Reicht bis"
@@ -13893,8 +13886,8 @@ msgstr "Anmelden"
 #: src/connections/connection-list.tsx
 #: src/connections/integration-inspector.tsx
 #: src/connections/integration-item.tsx
-#: src/connections/integration-tile.tsx
 #: src/connections/integrations-banner.tsx
+#: src/connections/overview-lists.tsx
 #: src/inbox/item-detail.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Sign in again"
@@ -13917,6 +13910,10 @@ msgstr "Erneut bei {app} anmelden"
 #: src/connections/connection-list.tsx
 msgid "Sign in to {label} again"
 msgstr "Erneut bei {label} anmelden"
+
+#: src/connections/overview-lists.tsx
+msgid "Sign in to {name} again"
+msgstr "Erneut bei {name} anmelden"
 
 #: src/routes/decisions.$decision.tsx
 msgid "Sign in to answer"
@@ -13985,6 +13982,10 @@ msgstr "Signale"
 #: src/routes/_shell.settings.security.tsx
 msgid "Signed in {time}"
 msgstr "Angemeldet am {time}"
+
+#: src/connections/integration-inspector.tsx
+msgid "Signed in as"
+msgstr "Angemeldet als"
 
 #: src/activity/audit-words.ts
 msgid "Signed in for the first time, after joining from the directory"
@@ -17633,6 +17634,10 @@ msgstr "Wer ist wer in Ihrem Unternehmen?"
 #: src/apps/draft-changes.tsx
 msgid "whoever added the row"
 msgstr "der Person, die die Zeile hinzugefügt hat"
+
+#: src/connections/overview-lists.tsx
+msgid "Whole company"
+msgstr "Ganzes Unternehmen"
 
 #: src/apps/release-controls.tsx
 #: src/knowledge/purge.tsx
