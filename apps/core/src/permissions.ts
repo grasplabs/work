@@ -432,10 +432,10 @@ const servedObjectTypes = permissionObjectSchema.options.map(
 /**
  * That a permission row is of a kind the platform serves, as SQL: not a
  * store's own grant, and on an object of a kind it serves. The rest are
- * left from kinds the platform removed (a grant on a store, from before
- * each App's store was its own; one on a Knowledge collection, from
- * before the Brain): nothing serves them, so every read takes them as not
- * there, and a later release removes them with their audit events.
+ * left from a kind the platform removed (a grant on a store, from before
+ * each App's store was its own): nothing serves them, so every read takes
+ * them as not there, and a later release removes them with their audit
+ * events.
  */
 const servedSql = sql`${permissions.subjectType} <> 'store' AND ${inArray(permissions.objectType, servedObjectTypes)}`;
 

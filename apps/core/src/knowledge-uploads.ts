@@ -1,4 +1,4 @@
-import { and, asc, count, eq, inArray, lt, sql } from "drizzle-orm";
+import { asc, count, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { uploadCleanups, uploads } from "./db/core/schema.ts";
@@ -6,28 +6,13 @@ import { inList } from "./db/d1.ts";
 
 // What is left of the files once uploaded into Knowledge, which is gone
 // (GRA-1941): core's own rows of them (`uploads`) and their originals in
-// `FILES` under `knowledge/`. A person's erasure forgets every upload they
-// made (`eraseUploadsOf`), and the clock those left unended
-// (`sweepLeftUploads`); S7 of GRA-1735 drops the tables. Nothing uploads
-// into Knowledge any more. An original's delete is recorded
-// (`upload_cleanups`) in the batch that forgets its upload, then done,
-// every one due, page after page; an R2 refusal fails the erasure's area,
-// or the clock's run, and its rerun deletes what is left. Nothing reads as
-// erased before it is.
-//
-// The clock forgets only an upload unchanged for `storingMs`: one the
-// release before this one was still taking as it was replaced may yet
-// store its original, and deleting its key first would leave that object
-// with no row or record to delete it by. A recorded delete is due at once,
-// for an erasure and for the clock alike, so an erasure's area ends with
-// every original it recorded gone.
-
-/**
- * How long after an upload last changed its original may still be being
- * stored, by a release still taking uploads: far more than storing 10 MB
- * takes.
- */
-const storingMs = 10 * 60_000;
+// `FILES` under `knowledge/`. Nothing uploads into Knowledge any more. A
+// person's erasure forgets every upload they made (`eraseUploadsOf`): an
+// original's delete is recorded (`upload_cleanups`) in the batch that
+// forgets its upload, then done, every one due, page after page; an R2
+// refusal fails the erasure's area, and its rerun deletes what is left.
+// Nothing reads as erased before it is. The tables go with the account's
+// deletion of the `knowledge/` originals.
 
 /** Originals deleted at once: R2 deletes up to 1,000 keys in one call. */
 export const cleanupsPerPage = 100;
@@ -102,41 +87,6 @@ export const eraseUploadsOf = async (
       )
       .onConflictDoNothing(),
     db.delete(uploads).where(where),
-  ]);
-  await cleanUpOriginals(env);
-};
-
-/**
- * Every minute (the clock), until S7 drops the tables: forgets
- * the uploads that never ended and haven't changed for `storingMs`
- * (nothing finishes one any more), recording
- * their originals for deleting, then deletes every original due, those a
- * failure recorded before uploads stopped among them. Throws while R2 or
- * the database refuses: the clock records it and tries again.
- */
-export const sweepLeftUploads = async (env: Env): Promise<void> => {
-  const db = drizzle(env.DB);
-  const unended = and(
-    inArray(uploads.status, ["pending", "extracting", "saving"]),
-    lt(uploads.updatedAt, new Date(Date.now() - storingMs))
-  );
-  await db.batch([
-    db
-      .insert(uploadCleanups)
-      .select(
-        db
-          .select({
-            key: sql<string>`'knowledge/' || ${uploads.collectionId} || '/' || ${uploads.id}`.as(
-              "key"
-            ),
-            uploadId: uploads.id,
-            createdAt: uploads.createdAt,
-          })
-          .from(uploads)
-          .where(unended)
-      )
-      .onConflictDoNothing(),
-    db.delete(uploads).where(unended),
   ]);
   await cleanUpOriginals(env);
 };
