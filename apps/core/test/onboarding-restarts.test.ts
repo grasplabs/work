@@ -8,9 +8,9 @@ import { interviewTurnPath, turnEvents } from "@grasp-os/shared/interview-turn";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 
-import { onboardingStore } from "../src/onboarding/store.ts";
+import { Onboarding, onboardingStore } from "../src/onboarding/store.ts";
 import {
   answering,
   approveAgreed,
@@ -230,6 +230,17 @@ describe("the onboarding after a restart", { timeout: 60_000 }, () => {
   });
 
   it("draws a team's map a restart cut off once it is back, once: its pieces of work and its links not doubled", async () => {
+    // The test draws and opens the links itself, as the store's alarm
+    // would. The alarm, which saving the staff list, agreeing and drawing
+    // set half a second on, got there first on a slow runner: it drew with
+    // no reply queued, so the drawing failed and waited a minute (`drew:
+    // null`), or it opened the links the test then found open (`opened:
+    // []`). Held on the class, not the object (`holdAlarm`): the restart
+    // makes a new one.
+    const alarm = vi.spyOn(Onboarding.prototype, "alarm").mockResolvedValue();
+    onTestFinished(() => {
+      alarm.mockRestore();
+    });
     const store = onboardingStore(env);
     const id = unique();
     const ids = {
