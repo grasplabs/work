@@ -255,9 +255,10 @@ const connectionIdSchema = brainConnectionIdSchema;
 
 /**
  * What reading as a member needs: core's records, and, for the accounts
- * they proved are theirs, the sign-in config and connect.
+ * they proved are theirs, the sign-in config, connect and the secret their
+ * tokens are keyed by.
  */
-type ReaderEnv = Pick<Env, "DB" | "SIGN_IN" | "CONNECT">;
+type ReaderEnv = Pick<Env, "DB" | "SIGN_IN" | "CONNECT" | "BETTER_AUTH_SECRET">;
 
 /** A person's or a team's ID, as core passes it: never empty. */
 const idSchema = wellFormedString()
@@ -856,14 +857,11 @@ const accessOf = (
  * tokens, minted where a list names one first (source-readers.ts).
  */
 const accessFor = async (
-  env: Pick<Env, "DB">,
+  env: Pick<Env, "DB" | "BETTER_AUTH_SECRET">,
   readers: SourceReaders
 ): Promise<Access> =>
   readers.kind === "readers"
-    ? accessOf(
-        readers,
-        await readerPrincipalsOf(drizzle(env.DB), readers.readers)
-      )
+    ? accessOf(readers, await readerPrincipalsOf(env, readers.readers))
     : accessOf(readers);
 
 /**
@@ -925,7 +923,7 @@ const memberGroupsOf = async (
     ],
     audiences,
     accountGroups: asThemselves
-      ? await heldPrincipalsOf(env, db, signIns, connected)
+      ? await heldPrincipalsOf(env, member.userId, signIns, connected)
       : [],
   };
 };
@@ -1251,7 +1249,7 @@ const readersChangeSchema = z.strictObject({
  * alone may read stays in their store until erased.
  */
 export const changeSourceReaders = async (
-  env: BrainEnv & Pick<Env, "DB">,
+  env: BrainEnv & Pick<Env, "DB" | "BETTER_AUTH_SECRET">,
   changed: {
     source: SourceRef;
     change: string;

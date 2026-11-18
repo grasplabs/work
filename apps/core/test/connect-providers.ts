@@ -757,6 +757,10 @@ export default {
     if (fromStephenGoogle !== undefined) {
       return fromStephenGoogle;
     }
+    if (request.method === "POST" && url.href === "https://oauth2.googleapis.com/revoke") {
+      // Google takes back the grant a disconnect revokes, as it does.
+      return new Response(null, { status: 200 });
+    }
     if (request.method === "POST" && url.href === "https://oauth2.googleapis.com/token") {
       const answered = await googleConsent(request.clone());
       if (answered !== undefined) {

@@ -778,7 +778,13 @@ const versionToKeep = (
   source: string,
   change: string
 ):
-  | { made: boolean; version: number; file: string; readers: string }
+  | {
+      made: boolean;
+      row: number;
+      version: number;
+      file: string;
+      readers: string;
+    }
   | undefined => {
   const made = db
     .select(versionFields)
@@ -811,8 +817,9 @@ const versionToKeep = (
  * (a repeat, which `addVersion` answers with that version), else of the
  * current one, over that version (`after`), so an add that lands while
  * the text is read is never undone: the change is then made again over
- * it. Readers the current version already has answer with it, nothing
- * written: decided without an await, so it holds as answered.
+ * it. Readers the current version already has answer with it and
+ * record the change on it, with when it was read, and no new version:
+ * decided without an await, so it holds as answered.
  */
 export const changeReaders = async (
   store: SourcesStore,
@@ -824,6 +831,19 @@ export const changeReaders = async (
       return null;
     }
     if (!kept.made && kept.readers === readerSetKeyOf(access)) {
+      // The current version is this change too, and keeps when it was
+      // read, so a later change read before it is refused as older
+      // (`newerThan`), as when an add matches the current version
+      // (`madeBefore`). Without an await since it was read: still current.
+      store.db
+        .insert(sourceChanges)
+        .values({
+          source,
+          change,
+          versionRow: kept.row,
+          ...(readAt === undefined ? {} : { readAt: new Date(readAt) }),
+        })
+        .run();
       return { source, version: kept.version };
     }
     // oxlint-disable-next-line no-await-in-loop -- again only after another add

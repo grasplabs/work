@@ -6893,15 +6893,21 @@ export const brainOwnStores = sqliteTable("brain_own_stores", {
 /**
  * The token the Brain knows each account on a copied reader list by
  * (source-readers.ts, GRA-1761), so the Brain never holds an address or an
- * object ID: `key` is the account as reader lists name it
- * (`<provider>:<tenant>:<account>`, compared form), `token` random, minted
- * the first time a list or a reader needs it. Erasing a person deletes the
- * rows of their accounts (person-erasure.ts `identity`), so lists made
- * before name a token nobody holds again; a later list naming the address
- * mints a new one.
+ * object ID, and nor does this table: `key` is a keyed hash of the account
+ * as lists name it (`<provider>:<account>`, compared form), `token` random,
+ * minted the first time a list names the account. `person` is the member
+ * who last proved the account theirs as they read (null until one has):
+ * erasing them deletes their rows (person-erasure.ts `identity`), so the
+ * lists made before name a token nobody holds again; a later list naming
+ * the account mints a new one.
  */
-export const sourceReaderTokens = sqliteTable("source_reader_tokens", {
-  key: text().primaryKey(),
-  token: text().notNull(),
-  createdAt: timestamp("created_at").notNull(),
-});
+export const sourceReaderTokens = sqliteTable(
+  "source_reader_tokens",
+  {
+    key: text().primaryKey(),
+    person: text(),
+    token: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [index("source_reader_tokens_person_idx").on(table.person)]
+);

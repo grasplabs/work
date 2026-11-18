@@ -61,10 +61,12 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.sessions": { erased: "identity" },
   "core.accounts": { erased: "identity" },
   // The token the Brain knows each account on a copied reader list by
-  // (source-readers.ts): a person's accounts' rows go with their accounts.
-  // An outsider's stay, the company's record of who its documents were
-  // shared with: telling whether a stored list still names one would take
-  // a read of the Brain's sets.
+  // (source-readers.ts, GRA-1761), under a keyed hash of the account, so
+  // no row holds an address or an object ID: the rows a person claimed by
+  // reading as themselves, and those nobody claimed of the accounts core
+  // keeps of them, go with their accounts. An outsider's stay, the
+  // company's record of who its documents were shared with, naming nobody
+  // readable.
   "core.source_reader_tokens": { erased: "identity" },
   "core.members": { erased: "removal" },
   "core.member_removals": { kept: "keeps someone removed out" },
@@ -578,14 +580,15 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // needs no entry here. The word indexes (migrations, not in the schema)
   // hold the words of these passages and memories, and go with them.
   // A set copied from where a document lives names each reader's account
-  // (source-readers.ts, GRA-1761): an Entra object ID, or a Google
-  // address. Kept with the document, as its text is; taking an erased
-  // person's accounts out of these sets is still to be built (GRA-1761).
+  // by a random token core keeps in its place (source-readers.ts,
+  // `core.source_reader_tokens`, GRA-1761), never by an address or an
+  // object ID: an erased person's token goes with their accounts, and the
+  // sets name one nobody holds again.
   "brainStore.reader_sets": {
-    company: "who a document is shared with, by account, where it lives",
+    company: "who a document is shared with, by token, where it lives",
   },
   "brainStore.reader_set_members": {
-    company: "who a document is shared with, by account, where it lives",
+    company: "who a document is shared with, by token, where it lives",
   },
   "brainStore.files": noPerson,
   "brainStore.source_versions": {
@@ -704,6 +707,7 @@ export const reviewedPersonColumns: Readonly<
   "brainStore.source_subjects": ["group_subject", "subject"],
   "core.access_revocations": ["user_ids"],
   "core.accounts": ["user_id", "verified_email"],
+  "core.source_reader_tokens": ["person"],
   "core.action_invocations": ["person_id"],
   "core.agent_held_starts": ["person_id"],
   "core.agents": ["changed_by", "made_by", "owner_id"],
