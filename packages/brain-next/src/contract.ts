@@ -1,4 +1,5 @@
 import { brainQuestionMaxLength } from "@grasp-os/shared/brain-sources";
+import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import {
   instructionsMaxLength,
   isOverInstructionsLimit,
@@ -1432,6 +1433,127 @@ export const sourceRemovalSchema = z.strictObject({
 export type SourceRemoval = z.infer<typeof sourceRemovalSchema>;
 
 /**
+ * How long the Brain keeps an event, from when it happened: 90 days, long
+ * enough to see a monthly routine three times. What is drawn from events
+ * (a routine's figures) stays; the events themselves go (`expireEvents`).
+ */
+export const eventsKeptMs = 90 * 24 * 60 * 60 * 1000;
+
+/** Most events one add takes (`Brain.addEvents`); a host with more sends a page after the other. */
+export const eventsPerAddMax = 500;
+
+/** A MAC the host makes under a key of its own (HMAC-SHA256), in hex. */
+const macSchema = z.string().regex(/^[0-9a-f]{64}$/u);
+
+/**
+ * One thing that happened (`Brain.addEvents`): which team's (a group, as
+ * the host names it, never a person), what kind of step, on which item,
+ * who took it, and when. The item is a MAC of the host's ID for it, so
+ * the Brain keeps nothing readable of it; null when the step was on none.
+ * `who` is a MAC of the person and the team, by the host's key: one
+ * person's steps in one team share it, and their steps in two teams
+ * don't. Without the host's key no tag can be computed or matched to a
+ * person; but one call makes one event in each of its person's teams,
+ * with the same step and hour, so with raw access to the store their
+ * tags in two teams can be lined up by co-occurring. Nothing answers it back; it
+ * is there so the host can erase a person's events (`erasePersonShared`'s
+ * `events`), and
+ * so whatever draws figures from events can count people. **A figure
+ * drawn from events may be shown only when at least five distinct `who`
+ * values stand behind it** (the host's `minTeamShown`, the floor every
+ * figure about people holds to). `key` is the host's for the event and
+ * its team, the same on every retry: one event a key and team. `at` is
+ * kept to the hour, rounded down (events.ts), so no stored time pins one
+ * call. The step's own bound is the host's (core takes it as connect's
+ * action, `permissionActionSchema`); here it is any identifier's
+ * (`identifierMaxLength`).
+ */
+export const newEventSchema = z.strictObject({
+  key: changeKeySchema,
+  team: principalSchema,
+  step: wellFormedString().min(1).max(identifierMaxLength),
+  /**
+   * The system the step was in: its connector, as the host's catalog names
+   * it. A step that writes into another system than the one before it is
+   * data copied between them (`observedRoutines`).
+   */
+  system: wellFormedString().min(1).max(identifierMaxLength),
+  /** Whether the step changed something in its system. */
+  writes: z.boolean(),
+  item: macSchema.nullable(),
+  who: macSchema,
+  at: z.iso.datetime(),
+});
+export type NewEvent = z.infer<typeof newEventSchema>;
+
+/** Events to keep (`Brain.addEvents`). */
+export const newEventsSchema = z.strictObject({
+  /**
+   * Which of the host's keys made the events' keys and tags: an id of it,
+   * never the key. A call under another id than the store last saw first
+   * deletes every event and closed tag (events.ts `underKey`).
+   */
+  keyId: macSchema,
+  events: z.array(newEventSchema).min(1).max(eventsPerAddMax),
+});
+export type NewEvents = z.infer<typeof newEventsSchema>;
+
+/** One step of a routine seen in activity (`Brain.observedRoutines`). */
+export interface ObservedRoutineStep {
+  /** The system it is in, as the event names it. */
+  system: string;
+  /** What kind of step, as the event names it. */
+  step: string;
+  /** Whether it changes something in its system. */
+  writes: boolean;
+  /**
+   * How many hours after the step before it comes: the middle of each
+   * person's own middle, so no one person sets it. Null on the first.
+   * Events are kept to the hour, so this is whole hours and halves.
+   */
+  hoursAfter: number | null;
+  /**
+   * It writes into another system than the step before it was in: the
+   * same data copied from one system into the other, a friction.
+   */
+  copied: boolean;
+}
+
+/** A step some take instead of the routine's next one: a variant. */
+export interface ObservedVariant {
+  /** The routine's step it follows instead of the next one (from 0). */
+  after: number;
+  system: string;
+  step: string;
+}
+
+/**
+ * A routine seen in a team's activity (`Brain.observedRoutines`): its
+ * steps in order and its variants, each made by at least `minTeamShown`
+ * distinct people of the team. Never who, how many, an item or a time.
+ */
+export interface ObservedRoutine {
+  /** The team's group, as the host named it on its events. */
+  team: string;
+  steps: ObservedRoutineStep[];
+  variants: ObservedVariant[];
+}
+
+/**
+ * A person's events to erase with them (`SharedPersonErasure.events`):
+ * their tag in each team, under the host's key `keyId` (as
+ * `NewEvents.keyId`). As many as the company has teams: an erasure is
+ * never refused for its size. The store writes them a slice at a time
+ * (events.ts `tagsPerStatement`); the only bound is the transport's, a
+ * Workers RPC message (32 MiB, some 400,000 tags).
+ */
+export const personEventsSchema = z.strictObject({
+  keyId: macSchema,
+  who: z.array(macSchema).min(1),
+});
+export type PersonEvents = z.infer<typeof personEventsSchema>;
+
+/**
  * Whether `source` may be in `group`: its key is the group's, "/" and
  * more, so no source joins a group its key isn't under.
  */
@@ -2055,12 +2177,17 @@ export type Identifier = z.infer<typeof identifierSchema>;
  * the host's id for them, as it names them whose word a memory is or who
  * confirmed one, and the exact identifiers the host verified as theirs
  * (their sign-in email). A name is never one: only exact evidence says
- * which entity is theirs.
+ * which entity is theirs. With it, their events (`events`): those under
+ * their tags are deleted and the tags closed, so no later add keeps one
+ * under them while an event could still arrive (events.ts), recorded in
+ * the erasure's ledger entry, so a replay after a restore of the store's
+ * storage erases them again.
  */
 export const sharedPersonErasureSchema = z.strictObject({
   person: principalSchema,
   identifiers: z.array(identifierSchema).max(namesPerEntityMax),
   reason: z.literal("person_erased"),
+  events: personEventsSchema.optional(),
 });
 export type SharedPersonErasure = z.infer<typeof sharedPersonErasureSchema>;
 
@@ -3302,6 +3429,31 @@ export interface Brain {
    * answers alike whatever there was.
    */
   removeSources: (request: SourceRemoval) => Promise<void>;
+  /**
+   * Keeps events (events.ts), each once by its key and team: a repeat adds
+   * nothing. One dated later than now is kept as of now, and one already
+   * older than `eventsKeptMs`, or under a tag an erasure closed, is not
+   * kept. Under another `keyId` than last time, every event and closed tag
+   * is deleted first. Nothing reads them back: no
+   * member answers an event, so they are never in a recall, an export or
+   * a figure about one person. The shared store's alone: a person's own
+   * store refuses them.
+   */
+  addEvents: (request: NewEvents) => Promise<void>;
+  /**
+   * Deletes every event older than `eventsKeptMs`, by the store's clock.
+   * The shared store's alone. Safe to repeat.
+   */
+  expireEvents: () => Promise<void>;
+  /**
+   * The routines seen in each team's events now (routines-observed.ts):
+   * which step follows which, by plain counting, each move kept only when
+   * at least `minTeamShown` distinct people of the team made it. Worked
+   * out at each call from the events there are, never kept: one resting
+   * on fewer people since (an erasure, an expiry) is gone at the next.
+   * The shared store's alone.
+   */
+  observedRoutines: () => Promise<ObservedRoutine[]>;
   /**
    * Erases `person`'s own store whole, the one place what only they may
    * read is kept: everything it holds, and from then on every call is

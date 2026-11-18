@@ -377,7 +377,13 @@ describe("a class turned on", () => {
 const googleScope = (name: string): string =>
   `https://www.googleapis.com/auth/${name}`;
 
-const googleSignIn = ["openid", "email", "profile"];
+// The sign-in, and the groups the account is in (reader-groups.ts).
+const googleSignIn = [
+  "openid",
+  "email",
+  "profile",
+  googleScope("cloud-identity.groups.readonly"),
+];
 
 /** The rights a consent asks Google for, the company having `classes` on. */
 const googleAskedFor = async (classes?: CompanyToolClass[]) => {

@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { connectionPersonSchema } from "./connect.ts";
 import { defineErrorFamily } from "./errors.ts";
 
 // Native sync (GRA-1758, GRA-1759): what one synced item is, whichever
@@ -85,7 +86,13 @@ export const syncItemSchema = z.discriminatedUnion("gone", [
     readers: z.array(syncReaderSchema).nullable(),
     /** The account ID of who changed it last, if the provider says. */
     changedBy: sourceIdSchema.nullable(),
-    /** For an attachment: the ID of the item it belongs to. */
+    /**
+     * For an attachment: the ID of the item it belongs to. A part follows
+     * its item: an item read with its content comes with every part it has,
+     * in the same page, so a part left out is no longer one of them; an
+     * item without its content (names only, or passed over) keeps its
+     * parts as they are, and a gone item takes them with it.
+     */
     partOf: sourceIdSchema.nullable(),
   }),
   z.strictObject({
@@ -158,6 +165,31 @@ export const syncPlacesSchema = z.strictObject({
 });
 export type SyncPlaces = z.infer<typeof syncPlacesSchema>;
 
+/**
+ * A place of a shared connection an admin may pick for a sync (a shared
+ * drive, a document library), as its connector lists what the connected
+ * account can see: its ID, its own name, and the name of what it is in (a
+ * library's site; null for a place in nothing else). Names are only ever
+ * shown, whole: none is cut, so two places of one long-named site stay
+ * apart.
+ */
+export const syncChoiceSchema = z.strictObject({
+  place: syncPlaceSchema,
+  title: z.string(),
+  within: z.string().nullable(),
+});
+export type SyncChoice = z.infer<typeof syncChoiceSchema>;
+
+/**
+ * The places a sync of a shared connection can read (`places: "picked"`),
+ * a read at a time: where the listing goes on (`cursor`), null once whole.
+ */
+export const syncChoicesSchema = z.strictObject({
+  choices: z.array(syncChoiceSchema),
+  cursor: syncCursorSchema.nullable(),
+});
+export type SyncChoices = z.infer<typeof syncChoicesSchema>;
+
 /** What core asks connect for: the places of one connection's sync. */
 export const syncPlacesRequestSchema = z.strictObject({
   connectionId: z.string().min(1).max(128),
@@ -196,7 +228,79 @@ export const syncPageRequestSchema = z.strictObject({
 });
 export type SyncPageRequest = z.input<typeof syncPageRequestSchema>;
 
-/** Why a page couldn't be read. */
+/**
+ * A sync's places of a shared connection, for its admin to pick from: as
+ * its connector lists them, each with whether it is picked.
+ */
+export const syncPlaceChoicesSchema = z.strictObject({
+  /** The sync whose places these are, as picks name it. */
+  feed: z.string().regex(/^[a-z][a-z\d-]{0,63}$/u, "Not a sync's name"),
+  choices: z.array(syncChoiceSchema.extend({ picked: z.boolean() })),
+  /**
+   * Every place picked for the sync now, those this listing doesn't show
+   * too: what a save starts from (`pickSyncPlacesSchema`'s `from`).
+   */
+  picks: z.array(syncPlaceSchema),
+  cursor: syncCursorSchema.nullable(),
+});
+export type SyncPlaceChoices = z.infer<typeof syncPlaceChoicesSchema>;
+
+/**
+ * Most bytes a set of picks takes as JSON: connect writes it as one value,
+ * and D1 takes at most 2,000,000 bytes in a string
+ * (https://developers.cloudflare.com/d1/platform/limits/).
+ */
+const picksMaxBytes = 2_000_000;
+
+/**
+ * The places of a shared connection a sync reads, as its admin picks them:
+ * the whole set, replacing the one before, each once.
+ */
+export const syncPicksSchema = z
+  .array(syncPlaceSchema)
+  .refine((places) => new Set(places).size === places.length, {
+    message: "A place picked twice",
+  })
+  .refine(
+    (places) =>
+      new TextEncoder().encode(JSON.stringify(places)).byteLength <=
+      picksMaxBytes,
+    { message: "More places than one write takes" }
+  );
+
+/**
+ * What core asks connect for: the places the admin `person` may pick for a
+ * sync of a shared connection, a read at a time from `cursor`. Without a
+ * `feed`, the connection's one sync of picked places, whichever its
+ * connector has: an admin's page knows no connector's syncs.
+ */
+export const syncPlaceChoicesRequestSchema = z.strictObject({
+  person: connectionPersonSchema,
+  connectionId: z.string().min(1).max(128),
+  feed: z
+    .string()
+    .regex(/^[a-z][a-z\d-]{0,63}$/u, "Not a sync's name")
+    .optional(),
+  cursor: syncCursorSchema.nullable(),
+});
+export type SyncPlaceChoicesRequest = z.input<
+  typeof syncPlaceChoicesRequestSchema
+>;
+
+/** What core asks connect for: the admin `person` picks a sync's places. */
+export const pickSyncPlacesSchema = z.strictObject({
+  person: connectionPersonSchema,
+  connectionId: z.string().min(1).max(128),
+  feed: z.string().regex(/^[a-z][a-z\d-]{0,63}$/u, "Not a sync's name"),
+  /**
+   * The picks the admin's page started from (`SyncPlaceChoices.picks`):
+   * refused (`sync.picks_changed`), with nothing changed, once another
+   * change landed meanwhile, so a page left open never undoes one.
+   */
+  from: syncPicksSchema,
+  places: syncPicksSchema,
+});
+export type PickSyncPlaces = z.input<typeof pickSyncPlacesSchema>;
 export const syncErrors = defineErrorFamily({
   "sync.invalid": "That isn't a valid request for a page of a sync.",
   "sync.not_found":
@@ -204,6 +308,10 @@ export const syncErrors = defineErrorFamily({
   "sync.inactive": "This connection needs reconnecting before it can sync.",
   "sync.place_refused":
     "That place isn't the connection's own account or a place picked on it.",
+  "sync.picks_changed":
+    "The places picked were changed in the meantime: look at them again.",
+  "sync.not_shared":
+    "Places are picked only on a connection shared with the company.",
   "sync.restart":
     "The source no longer knows that cursor: list it again from the start.",
   "sync.throttled": "The provider is throttling reads: try again later.",

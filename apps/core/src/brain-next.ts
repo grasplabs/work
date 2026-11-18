@@ -17,6 +17,7 @@ import {
   changeReused,
   listPageMax,
   erasureReasons,
+  eventsPerAddMax,
   exportFileNameSchema,
   exportIdSchema,
   handOversMax,
@@ -51,11 +52,15 @@ import {
   storeBytesMax,
   workPriorities,
   storeKindOf,
+  readerGroupsMax,
 } from "@grasp-os/brain-next/contract";
 import type {
   Extract as BrainExtract,
   Access,
   AskModel,
+  NewEvent,
+  PersonEvents,
+  ObservedRoutine,
   AttributeRule,
   Brain,
   ContestedCursor,
@@ -126,8 +131,9 @@ import type {
 import { brainSourceErrors, firstLineOf } from "@grasp-os/shared/brain-sources";
 import { brainConnectionIdSchema } from "@grasp-os/shared/connect";
 import { withinTime } from "@grasp-os/shared/deadline";
-import { sha256Hex } from "@grasp-os/shared/encoding";
+import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import {
@@ -139,7 +145,11 @@ import type { InstructionFileRef } from "@grasp-os/shared/instruction-files";
 import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import type { ModelErrorCode } from "@grasp-os/shared/models";
-import { permissionErrors } from "@grasp-os/shared/permissions";
+import { minTeamShown } from "@grasp-os/shared/onboarding";
+import {
+  permissionActionSchema,
+  permissionErrors,
+} from "@grasp-os/shared/permissions";
 import { holdsKnownCredential, redact } from "@grasp-os/shared/redact";
 import { skillErrors } from "@grasp-os/shared/skills";
 import { sourceReaderSchema } from "@grasp-os/shared/source-readers";
@@ -154,9 +164,13 @@ import {
   ownStoresTotals,
 } from "./brain-own-stores.ts";
 import type { OwnStoreHealth } from "./brain-own-stores.ts";
-import { largeEnoughAudiences } from "./brain-share-audiences.ts";
+import {
+  largeEnoughAudiences,
+  teamsOfAtLeast,
+} from "./brain-share-audiences.ts";
 import { audiencesRead } from "./connection-audiences.ts";
 import type { ConnectionAudience } from "./connection-audiences.ts";
+import { derivedHmacKey } from "./derived-keys.ts";
 import { inJurisdiction, workspace } from "./durable-objects.ts";
 import {
   embedInBulk,
@@ -167,6 +181,7 @@ import {
 import { parseModelRef } from "./model-catalog.ts";
 import { brainSpendByPurpose, spendMonth } from "./model-spend.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
+import { teamsWithMembers } from "./organization-teams.ts";
 import { organizationTimeZone } from "./organization.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { shippedSkills } from "./shipped-skills.ts";
@@ -519,7 +534,10 @@ const newSourceSchema = z.strictObject({
 export { questionMaxLength as recallQuestionMaxLength } from "@grasp-os/brain-next/contract";
 export { removalsMax } from "@grasp-os/brain-next/contract";
 /** The longest group name the Brain takes: a reader whose name is longer is nobody. */
-export { principalMaxLength } from "@grasp-os/brain-next/contract";
+export {
+  eventsPerAddMax,
+  principalMaxLength,
+} from "@grasp-os/brain-next/contract";
 
 /** Whose word a memory is, as the Brain names it: what a chat pins of it (history-access.ts). */
 export { speakerSchema } from "@grasp-os/brain-next/contract";
@@ -901,6 +919,7 @@ const memberGroupsOf = async (
   groups: string[];
   audiences: readonly ConnectionAudience[];
   accountGroups: string[];
+  sourceGroups: string[];
 }> => {
   const id = checked(idSchema, personId);
   // One snapshot: their teams, the audiences and their sign-in accounts,
@@ -919,6 +938,9 @@ const memberGroupsOf = async (
   if (member === undefined) {
     throw permissionErrors.create("permission.person_inactive");
   }
+  const held = asThemselves
+    ? await heldPrincipalsOf(env, member.userId, signIns, connected)
+    : { accounts: [], groups: [] };
   return {
     person: member.userId,
     groups: [
@@ -927,9 +949,8 @@ const memberGroupsOf = async (
       membersGroup,
     ],
     audiences,
-    accountGroups: asThemselves
-      ? await heldPrincipalsOf(env, member.userId, signIns, connected)
-      : [],
+    accountGroups: held.accounts,
+    sourceGroups: held.groups,
   };
 };
 
@@ -965,6 +986,28 @@ const withConnections = (
 };
 
 /**
+ * A person's groups as their reader holds them: their own (`own`: teams,
+ * the company, connections, the accounts they proved and their tenants),
+ * each once, then the groups of theirs at a provider that sources name
+ * (`sourceGroups`, sorted: source-readers.ts `heldPrincipalsOf`), as many
+ * as there is room for beside them (`readerGroupsMax`). Past it, only the
+ * last of those provider groups are left out: what is shared with them
+ * alone isn't read, and everything else is, so a person in more groups
+ * that sources name than a reader holds keeps the rest of their search. A
+ * person whose own groups pass the bound is refused, as before.
+ */
+const asHeld = (
+  own: readonly string[],
+  sourceGroups: readonly string[]
+): string[] => {
+  const held = [...new Set(own)];
+  return [
+    ...held,
+    ...sourceGroups.slice(0, Math.max(0, readerGroupsMax - held.length)),
+  ];
+};
+
+/**
  * The member `personId` as the Brain's reader: the person, their teams as
  * core counts them now, the company, the members reading as themselves
  * (`membersGroup`), and the shared connections whose Brain audience holds
@@ -974,14 +1017,14 @@ const personReaderOf = async (
   env: ReaderEnv,
   personId: string
 ): Promise<PersonReader> => {
-  const { person, groups, audiences, accountGroups } = await memberGroupsOf(
-    env,
-    personId,
-    true
-  );
+  const { person, groups, audiences, accountGroups, sourceGroups } =
+    await memberGroupsOf(env, personId, true);
   return {
     person,
-    groups: [...withConnections(groups, audiences), ...accountGroups],
+    groups: asHeld(
+      [...withConnections(groups, audiences), ...accountGroups],
+      sourceGroups
+    ),
   };
 };
 
@@ -1013,16 +1056,16 @@ const readerOf = async (
   reach: Reach,
   teams: readonly string[] = []
 ): Promise<Reader> => {
-  const { person, groups, audiences, accountGroups } = await memberGroupsOf(
-    env,
-    personId,
-    reach === "person"
-  );
+  const { person, groups, audiences, accountGroups, sourceGroups } =
+    await memberGroupsOf(env, personId, reach === "person");
   switch (reach) {
     case "person": {
       return {
         person,
-        groups: [...withConnections(groups, audiences), ...accountGroups],
+        groups: asHeld(
+          [...withConnections(groups, audiences), ...accountGroups],
+          sourceGroups
+        ),
       };
     }
     case "teams": {
@@ -2270,31 +2313,6 @@ const sharedPersonErasureSchema = z.strictObject({
   // As sign-in kept it: the Brain checks it by its own identifier rule.
   email: z.string().min(1).nullable(),
 });
-
-/**
- * Erases from the shared store, for an admin's erasure of the member
- * `personId`, what the Brain derived about them and what is in their own
- * word, and keeps the company's documents, even where their text names
- * them (decided 16 November, GRA-1747: how the plan's "removes their
- * personal content everywhere" reads for what others may read). Which
- * entity is theirs is decided on `email` alone, the address their
- * sign-in verified, never on a name (the Brain's people.ts). Hidden from
- * every read once it returns, and in the Brain's ledger, so a restore
- * can't bring it back; deleted by the Brain's tick. Safe to repeat: the
- * same person is the same erasure, its email the first call's. One that
- * throws must be repeated.
- */
-export const erasePersonShared = async (
-  env: BrainEnv,
-  erased: { personId: string; email: string | null }
-): Promise<void> => {
-  const { personId, email } = checked(sharedPersonErasureSchema, erased);
-  await brain(env).erasePersonShared({
-    person: personId,
-    identifiers: email === null ? [] : [{ type: "email", value: email }],
-    reason: "person_erased",
-  });
-};
 
 /**
  * Erases every memory `writer` wrote in the shared store, learned up to
@@ -6607,3 +6625,234 @@ export const forgetForAppAs = async (
     throw refusedAs(error);
   }
 };
+
+// Events (GRA-1763): what happened in people's work, kept by the Brain to
+// find routines in, never read back by anyone (@grasp-os/brain-next's
+// events.ts). A producer names the person who did a step; core turns them
+// into their teams here, from its own records read now, and hands the
+// Brain only those teams' groups, never the person. The ways an event
+// could still point at one person, and how each is closed:
+//
+// - A small team's events are its few people's trail: an event is kept
+//   only for a team of at least `minTeamShown` current members now, the
+//   floor every figure about people holds to. A smaller team, no team, or
+//   someone no longer a member, gives none, so a person's erasure has
+//   nothing of theirs to find.
+// - A row joined back to the audit log, or an item to its system: the
+//   event's key is a MAC of the producer's key (for a call, its audit
+//   event's id) and the team, and the item a MAC of its ID, each under a
+//   key of core's own (`derivedHmacKey`), so whoever holds the Brain's
+//   rows alone can't compute either.
+// - A call pinned by its time: the Brain keeps each to the hour.
+// - Figures from five events of one person, and events outliving their
+//   person: each event carries who took it as a MAC of the person and the
+//   team under a third key (`eventWhoPurpose`), so figures can count
+//   distinct people, no tag can be computed or matched to a person
+//   without core's key (one person's tags in two teams differ, though one
+//   call's events in each of their teams co-occur), and a person's
+//   erasure finds and deletes their events in every team
+//   (`erasePersonShared`). A member removed but not erased keeps theirs, as
+//   history.
+// - A drain that read a person's teams before their erasure writing after
+//   it: the erasure closes their tags in the Brain, which then refuses an
+//   event under one.
+// - A rotated auth secret, after which no erasure could compute the old
+//   tags: each call names its key (`eventKeyIdLabel`), and the Brain drops
+//   every event and closed tag made under another.
+//
+// The Brain deletes every event past its time on core's clock
+// (`expireEvents`).
+
+/** What the key of each event's MAC is derived for (`derivedHmacKey`). */
+const eventKeyPurpose = "grasp-os/brain-event-key/v1";
+
+/** What the key of each event item's MAC is derived for (`derivedHmacKey`). */
+const eventItemPurpose = "grasp-os/brain-event-item/v1";
+
+/** What the key of each event's tag of who took it is derived for (`derivedHmacKey`). */
+const eventWhoPurpose = "grasp-os/brain-event-who/v1";
+
+const observedStepSchema = z.strictObject({
+  /** The producer's key for the step, the same on every retry. */
+  key: changeSchema,
+  personId: idSchema,
+  /** What kind of step: a connection's action, as connect bounds it. */
+  step: permissionActionSchema,
+  /** The system it was in: its connector, as connect's catalog names it. */
+  system: wellFormedString().min(1).max(identifierMaxLength),
+  /** Whether it changed something in that system. */
+  writes: z.boolean(),
+  item: wellFormedString().min(1).nullable(),
+  at: z.date(),
+});
+
+/**
+ * One step a person took, as a producer hands it to `recordEvents`: its
+ * key, the same on every retry; who took it, turned into their teams and
+ * never kept; what kind of step (a connection's action); the ID of the
+ * item it was on as its system names it, or null; and when, which the
+ * Brain keeps to the hour.
+ */
+export type ObservedStep = z.infer<typeof observedStepSchema>;
+
+/** `text`'s HMAC-SHA256 under `key`, in hex. */
+const macOf = async (key: CryptoKey, text: string): Promise<string> =>
+  toHex(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(text))
+    )
+  );
+
+/**
+ * What names the keys events are made under, for the Brain (`keyId`): a
+ * MAC of this under the `who` key, which identifies the key without
+ * revealing it. The three event keys derive from the same secret, so one
+ * id stands for all three; when it changes, the Brain drops what was made
+ * under the old ones (its events.ts `underKey`).
+ */
+const eventKeyIdLabel = "grasp-os/brain-event-key-id";
+
+/** `personId`'s tag in team `team` (a group, `teamGroup`), under `whoKey`. */
+const whoOf = async (
+  whoKey: CryptoKey,
+  personId: string,
+  team: string
+): Promise<string> => await macOf(whoKey, JSON.stringify([personId, team]));
+
+/**
+ * Keeps `steps` as the Brain's events, one per team each person is in
+ * now that has at least `minTeamShown` current members: safe to repeat,
+ * as each is kept once by its key and team. Server-side, for producers
+ * alone: nothing answers them back.
+ */
+export const recordEvents = async (
+  env: BrainEnv & ReaderEnv & Pick<Env, "BETTER_AUTH_SECRET">,
+  steps: readonly ObservedStep[]
+): Promise<void> => {
+  const observed = checked(z.array(observedStepSchema), steps);
+  const db = drizzle(env.DB);
+  const teamsOf = new Map<string, string[]>();
+  for (const personId of new Set(observed.map((step) => step.personId))) {
+    // oxlint-disable-next-line no-await-in-loop -- one person at a time
+    const [membership, memberTeams] = await db.batch(memberReads(db, personId));
+    const member = memberFrom(personId, membership, memberTeams);
+    teamsOf.set(personId, member?.teams.map(({ id }) => id) ?? []);
+  }
+  const large = await teamsOfAtLeast(
+    env.DB,
+    [...new Set([...teamsOf.values()].flat())],
+    minTeamShown
+  );
+  const [keyKey, itemKey, whoKey] = await Promise.all([
+    derivedHmacKey(env, eventKeyPurpose, ["sign"]),
+    derivedHmacKey(env, eventItemPurpose, ["sign"]),
+    derivedHmacKey(env, eventWhoPurpose, ["sign"]),
+  ]);
+  const events: NewEvent[] = [];
+  for (const { key, personId, step, system, writes, item, at } of observed) {
+    // oxlint-disable-next-line no-await-in-loop -- one MAC at a time
+    const marked = item === null ? null : await macOf(itemKey, item);
+    for (const teamId of teamsOf.get(personId) ?? []) {
+      if (large.has(teamId)) {
+        const team = teamGroup(teamId);
+        events.push({
+          // oxlint-disable-next-line no-await-in-loop -- one MAC at a time
+          key: await macOf(keyKey, JSON.stringify([key, team])),
+          team,
+          step,
+          system,
+          writes,
+          item: marked,
+          // oxlint-disable-next-line no-await-in-loop -- one MAC at a time
+          who: await whoOf(whoKey, personId, team),
+          at: at.toISOString(),
+        });
+      }
+    }
+  }
+  for (let start = 0; start < events.length; start += eventsPerAddMax) {
+    // oxlint-disable-next-line no-await-in-loop -- one page at a time
+    await brain(env).addEvents({
+      // oxlint-disable-next-line no-await-in-loop -- one page at a time
+      keyId: await macOf(whoKey, eventKeyIdLabel),
+      events: events.slice(start, start + eventsPerAddMax),
+    });
+  }
+};
+
+/**
+ * `personId`'s events for their erasure: their tag in each of the
+ * organization's teams, as core keeps them now (they may have left one),
+ * under core's key now; none in an organization with no team. A team
+ * deleted since is no longer known: its events of theirs go only with
+ * their time (`eventsKeptMs`).
+ */
+const eventsOfPerson = async (
+  env: Env,
+  personId: string
+): Promise<PersonEvents | undefined> => {
+  const teamRows = await teamsWithMembers(env);
+  if (teamRows.length === 0) {
+    return undefined;
+  }
+  const whoKey = await derivedHmacKey(env, eventWhoPurpose, ["sign"]);
+  const who = await Promise.all(
+    teamRows.map(async ({ id }) => await whoOf(whoKey, personId, teamGroup(id)))
+  );
+  return { keyId: await macOf(whoKey, eventKeyIdLabel), who };
+};
+
+/**
+ * Erases from the shared store, for an admin's erasure of the member
+ * `personId`, what the Brain derived about them and what is in their own
+ * word, and keeps the company's documents, even where their text names
+ * them (decided 16 November, GRA-1747: how the plan's "removes their
+ * personal content everywhere" reads for what others may read). Which
+ * entity is theirs is decided on `email` alone, the address their
+ * sign-in verified, never on a name (the Brain's people.ts). With it, the
+ * events of the steps they took (GRA-1763), by their tag in each team
+ * (`eventsOfPerson`). Hidden from every read once it returns, and in the
+ * Brain's ledger, so a restore of its storage can't bring any of it back;
+ * deleted by the Brain's tick. Safe to repeat: the same person is the
+ * same erasure, its email and events the first call's. One that throws
+ * must be repeated.
+ */
+export const erasePersonShared = async (
+  env: Env,
+  erased: { personId: string; email: string | null }
+): Promise<void> => {
+  const { personId, email } = checked(sharedPersonErasureSchema, erased);
+  const events = await eventsOfPerson(env, personId);
+  await brain(env).erasePersonShared({
+    person: personId,
+    identifiers: email === null ? [] : [{ type: "email", value: email }],
+    reason: "person_erased",
+    ...(events === undefined ? {} : { events }),
+  });
+};
+
+/** Deletes every event the Brain keeps past its time: core's clock runs it. */
+export const expireEvents = async (env: BrainEnv): Promise<void> => {
+  await brain(env).expireEvents();
+};
+
+/**
+ * The routines seen in the teams' activity now (GRA-1764), each team by
+ * its id: every move in one made by at least `minTeamShown` distinct
+ * people of that team, as the Brain holds it in its read (@grasp-os/
+ * brain-next's routines-observed.ts). Worked out at each call, never
+ * kept. For admins' opportunities (opportunities.ts).
+ */
+export const observedRoutinesOf = async (
+  env: BrainEnv
+): Promise<SeenInTeam[]> => {
+  const routines = await brain(env).observedRoutines();
+  return routines.flatMap((routine) =>
+    routine.team.startsWith(teamPrefix)
+      ? [{ ...routine, team: routine.team.slice(teamPrefix.length) }]
+      : []
+  );
+};
+
+/** A routine seen in a team's activity (`observedRoutinesOf`): the team by its id. */
+export type SeenInTeam = ObservedRoutine;

@@ -12,7 +12,7 @@ import { sweepTestFixtures } from "./app-tests.ts";
 import { sweepAppVisitors } from "./app-visitors.ts";
 import { drainWebhookDeliveries } from "./app-webhooks.ts";
 import { auditLog } from "./audit-log.ts";
-import { workBrain } from "./brain-next.ts";
+import { expireEvents, workBrain } from "./brain-next.ts";
 import { removeLostRunSources } from "./brain-run-sources.ts";
 import { producersOf, relayHandOvers } from "./brain-sources.ts";
 import { runSync } from "./brain-sync.ts";
@@ -37,6 +37,10 @@ import { recordPlatformUpdate } from "./platform-updates.ts";
 import { sweepReleases } from "./release-retention.ts";
 import { completeOwedErasures } from "./shared-reads.ts";
 import { reconcileSkills } from "./skill-shares.ts";
+import {
+  readerGroupQueriesPerTick,
+  readerGroupRequestsPerTick,
+} from "./source-readers.ts";
 import { sweepSpokenLines } from "./speech-cache.ts";
 import { sendStephenSummaries } from "./stephen-summary.ts";
 import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
@@ -74,6 +78,15 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "minute",
     run: async (env, at) => {
       await workBrain(env, at, producersOf(env));
+    },
+  },
+  // Events past their time, deleted from the new Brain (GRA-1763,
+  // src/brain-next.ts `expireEvents`).
+  {
+    name: "brain.events",
+    period: "minute",
+    run: async (env) => {
+      await expireEvents(env);
     },
   },
   // What core noted to hand over to the new Brain, put on its work queue
@@ -197,6 +210,19 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // model's files copied from the release directory first
   // (src/embedder.ts).
   { name: "embed.warm", period: "minute", run: warmQuestionEmbedder },
+  // The groups each person's own suite account is in, read again once its
+  // token was minted since, which copied reader lists' groups count them
+  // in (connect's src/reader-groups.ts, source-readers.ts).
+  {
+    name: "brain.reader_groups",
+    period: "minute",
+    run: async (env) => {
+      await env.CONNECT.readReaderGroups({
+        requests: readerGroupRequestsPerTick,
+        queries: readerGroupQueriesPerTick,
+      });
+    },
+  },
   // Connect's own clock armed, if nothing has (connect's src/clock.ts).
   {
     name: "connect.clock",

@@ -1,7 +1,6 @@
 import { personalBrainOf } from "@grasp-os/brain-next/contract";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { chatIdSchema } from "@grasp-os/shared/ids";
-import { redact } from "@grasp-os/shared/redact";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -327,12 +326,19 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
       crypto.randomUUID().replaceAll("-", ""),
     ].join("");
     // Each answer's text blocks, and the image between them that keeps
-    // connect from joining them itself: a credential split across blocks,
-    // and a block of JSON next to one of prose.
+    // connect from joining them itself: a credential split across blocks;
+    // a block of JSON next to one of prose; and blocks of JSON whose
+    // string, or the JSON held as text in one, has a credential on the
+    // line after another (GRA-1880), where a line break is `\n`.
+    const lines = `password: x\nCookie: sid=${token}`;
     const answers = [
       ["password:", secret],
       ["Authorization: Bearer", token],
       [JSON.stringify({ password: secret }), `and token=${token}`],
+      [
+        JSON.stringify({ body: lines }),
+        JSON.stringify({ text: JSON.stringify({ note: lines }) }),
+      ],
     ];
     const chat = await chatOf(
       person.userId,
@@ -368,18 +374,23 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
       );
       stored.push(read?.text ?? "");
     }
-    // The text an answer's blocks make, a blank line between them.
-    const joined = answers.map((texts) => texts.join("\n\n"));
-
     expect({
       stored,
       secrets: stored.map(
         (text) => text.includes(secret) || text.includes(token)
       ),
     }).toStrictEqual({
-      // Redacted once, over exactly the text kept.
-      stored: joined.map((text) => redact(text)),
-      secrets: [false, false, false],
+      // Each block of JSON, then the text kept, its blocks a blank line
+      // apart.
+      // That second pass reads the blocks of JSON as text, and takes
+      // `\nCookie:` with the password before it: more removed, never less.
+      stored: [
+        "password:\n\n[redacted]",
+        "Authorization: [redacted]",
+        '{"password":"[redacted]"}\n\nand token=[redacted]',
+        `${String.raw`{"body":"password: [redacted] [redacted]"}`}\n\n${String.raw`{"text":"{\"note\":\"password: [redacted] [redacted]\"}"}`}`,
+      ],
+      secrets: [false, false, false, false],
     });
   });
 
@@ -738,7 +749,8 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
           action: "brain.capture.skipped",
           onBehalfOf: person.userId,
           detail: {
-            reason: "shared",
+            // No Brain audience chosen for it (GRA-1831): kept for nobody.
+            reason: "no_audience",
             items: 1,
             kept: 0,
             failed: 0,
@@ -751,7 +763,7 @@ describe("what a chat's agent reads through a toolkit", setUpTime, () => {
           query: mine,
         }),
       ],
-      sharedAfter: ["shared", "shared"],
+      sharedAfter: ["no_audience", "no_audience"],
       sharedRecalled: [],
       sharedStatus: "active",
       sharedKeepsReads: undefined,

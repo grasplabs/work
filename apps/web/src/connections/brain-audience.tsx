@@ -26,6 +26,7 @@ import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useCore } from "../use-core.ts";
+import { SyncPlaces } from "./sync-places.tsx";
 import { useChange } from "./use-change.ts";
 
 // For an admin, on a shared connection's card: who may read in the Brain
@@ -35,6 +36,9 @@ import { useChange } from "./use-change.ts";
 // the card only asks. Opening it or widening it is confirmed first, in a
 // whole sentence that says what was kept before is shown too; back to
 // nobody hides it and keeps it, so it needs none. Erasing is for good.
+// Beside it, which of the connection's shared drives or libraries Grasp
+// may copy into the Brain (sync-places.tsx): what comes in, and who may
+// read it, are decided in one place.
 
 /** A team of the company, to choose. */
 interface Team {
@@ -463,6 +467,7 @@ export const BrainAudience = ({
           teams={teams}
         />
       )}
+      <SyncPlaces connection={connection} label={label} />
       {!erasing &&
       (audience.kind !== "nobody" || connection.keepsReads === true) ? (
         <EraseKept connection={connection} label={label} onErased={onChanged} />

@@ -377,7 +377,9 @@ const brain: ErasureStep = {
  * address they signed in with, as `users` has it until `identity` erases
  * it, which waits for this area: so this runs first, and a try of it
  * again still has it. Complete once the Brain answered: recorded, hidden
- * from every read and in its ledger; its tick deletes the rest.
+ * from every read and in its ledger; its tick deletes the rest. With it,
+ * the events of the steps they took (GRA-1763), deleted by their tag in
+ * each of the company's teams, in the same ledger entry.
  */
 const brainShared: ErasureStep = {
   area: "brain_shared",

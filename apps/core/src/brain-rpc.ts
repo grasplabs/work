@@ -54,15 +54,12 @@ import {
   stepsOf,
 } from "./brain-records.ts";
 import type { HeldRecords, OnboardingHeld } from "./brain-records.ts";
-import {
-  proposeTeamGroups,
-  saveTeamGroups,
-  teamGroupsOf,
-} from "./brain-team-groups.ts";
+import { saveTeamGroups, teamGroupsOf } from "./brain-team-groups.ts";
 import { askMorePeople, workKnowledge } from "./brain-work.ts";
 import { mayHoldCapturesOf } from "./connection-capture-key.ts";
 import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
+import { nativeSyncs } from "./native-tool-classes.gen.ts";
 import { intakeIds, ownId } from "./onboarding/brain-intake.ts";
 import type { CompanyTeam } from "./onboarding/company-teams.ts";
 import { kickoffSaid, teamNameKey } from "./onboarding/kickoff-company.ts";
@@ -722,6 +719,23 @@ const connectionsOf = async (
   );
   const keepsReads = (key: string): { keepsReads?: true } =>
     keeping.has(key) ? { keepsReads: true } : {};
+  // What can tell Grasp what changed in it, beside what is done through
+  // Grasp (GRA-1763): the person's own connection of a native connector
+  // with a sync. Connect syncs a shared one only in places someone
+  // picked, which none can be yet. Any other connected entry is a gap.
+  const observing = new Set(
+    activeListed
+      .filter(
+        ({ source, scope, ownerUserId, provider }) =>
+          source === "native" &&
+          scope === "personal" &&
+          ownerUserId === connecting.userId &&
+          Object.hasOwn(nativeSyncs, provider)
+      )
+      .map(({ source, provider }) => entryKey(source, provider))
+  );
+  const activityGap = (key: string): { activityGap?: true } =>
+    active.has(key) && !observing.has(key) ? { activityGap: true } : {};
   // A hidden entry isn't offered, but a connection to it still runs:
   // it stays, by its catalog name.
   const shown = entries.filter(
@@ -733,6 +747,7 @@ const connectionsOf = async (
     via: viaOf(source),
     matches: [name],
     ...keepsReads(entryKey(source, id)),
+    ...activityGap(entryKey(source, id)),
   }));
   const listedKeys = new Set(
     entries.map(({ source, id }) => entryKey(source, id))
@@ -747,6 +762,7 @@ const connectionsOf = async (
         via: viaOf(source),
         matches: [provider],
         ...keepsReads(each),
+        ...activityGap(each),
       };
     });
   return [...offered, ...unlisted];
@@ -1128,6 +1144,16 @@ const readBrainCore = async (
 };
 
 /**
+ * The brain's teams, every one, as an admin reads them: the ones its
+ * regions may name (brain-team-groups.ts). The one place that says which
+ * teams the Brain has, for regrouping them and for arranging them.
+ */
+export const brainTeams = async (env: Env): Promise<Team[]> => {
+  const { teams } = await readBrainCore(env, { role: "admin" });
+  return teams;
+};
+
+/**
  * The brain's teams, what they said and its workflows, as `person` may
  * read them, as `readBrain` reads them: what a step of a chat's thinking
  * may name (agent-thinking.ts). What a team said is a claim of how it
@@ -1350,24 +1376,6 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
     );
   }
 
-  /** The brain's teams as `person` reads them. */
-  async #teams(person: Identity): Promise<Team[]> {
-    const { teams } = await readBrain(this.#env, person);
-    return teams;
-  }
-
-  async proposeTeamGroups(): Promise<TeamGroup[]> {
-    return await withPerson(
-      this.#check,
-      async (person) =>
-        await proposeTeamGroups(
-          this.#env,
-          person,
-          async () => await this.#teams(person)
-        )
-    );
-  }
-
   async saveTeamGroups(groups: unknown): Promise<TeamGroup[]> {
     return await withPerson(
       this.#check,
@@ -1376,7 +1384,7 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
           this.#env,
           person,
           groups,
-          async () => await this.#teams(person)
+          async () => await brainTeams(this.#env)
         )
     );
   }

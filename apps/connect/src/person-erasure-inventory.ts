@@ -20,8 +20,9 @@ export const noPerson = { none: "holds no person" } as const;
 
 /** Every table of connect's database. */
 export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
-  // Their personal connections are emptied, and everything read through
-  // them or still to be done with them goes.
+  // Their personal connections are emptied (accounts, addresses, and the
+  // groups their accounts are in: reader-groups.ts), and everything read
+  // through them or still to be done with them goes.
   connections: {
     erased: "connect",
     keeps: "a shared connection they made keeps them as `connected_by`",
@@ -43,6 +44,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   },
   given_up_revocations: {
     kept: "revokes given up on, by connection ID, for admins to do by hand",
+  },
+  sync_picks: {
+    none: "places of shared connections picked to sync, by connection ID",
   },
   ai_provider_keys: { none: "the organization's own AI provider keys" },
   http_connections: {

@@ -25,6 +25,8 @@ import {
   claimConnectedTokens,
   heldPrincipalsOf,
   keepSignInAddress,
+  readerGroupQueriesPerTick,
+  readerGroupRequestsPerTick,
 } from "../src/source-readers.ts";
 import { says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
@@ -33,6 +35,7 @@ import {
   consentCode,
   googleAddressUrl,
   googleHoldUrl,
+  groupsControlUrl,
 } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { runMinuteTasks } from "./maintenance.ts";
@@ -441,6 +444,136 @@ const exchangeHeld = async (): Promise<void> => {
   }
   throw new Error("The held look-up was never reached");
 };
+
+/** Tells the providers' fakes the groups `member` is directly in from now on. */
+const inGroups = async (member: string, groups: string[]): Promise<void> => {
+  const response = await fakeGoogle(groupsControlUrl, {
+    method: "POST",
+    body: JSON.stringify({ member: member.toLowerCase(), groups }),
+  });
+  await response.body?.cancel();
+};
+
+/** Makes every read of the groups of the account `member` fail, or not. */
+const groupReadsFail = async (
+  member: string,
+  failing: boolean
+): Promise<void> => {
+  const response = await fakeGoogle(groupsControlUrl, {
+    method: "POST",
+    body: JSON.stringify({ member: member.toLowerCase(), failing }),
+  });
+  await response.body?.cancel();
+};
+
+/** One run of connect's reads of people's groups, as core's clock asks it. */
+const readGroupsOnce = async (): Promise<void> => {
+  await env.CONNECT.readReaderGroups({
+    requests: readerGroupRequestsPerTick,
+    queries: readerGroupQueriesPerTick,
+  });
+};
+
+/**
+ * The URL a read of `member`'s Google groups starts with, for holding it
+ * at Google (\`googleHoldUrl\`).
+ */
+const groupsQueryOf = (member: string): string =>
+  `https://cloudidentity.googleapis.com/v1/groups/-/memberships:searchDirectGroups?${new URLSearchParams(
+    { query: `member_key_id == '${member}'` }
+  ).toString()}`;
+
+/** Holds every request to Google starting with `prefix` until `released`. */
+const holdAtGoogle = async (prefix: string): Promise<void> => {
+  const response = await fakeGoogle(googleHoldUrl, {
+    method: "POST",
+    body: JSON.stringify({ hold: true, prefix }),
+  });
+  await response.body?.cancel();
+};
+
+/** Lets the request held at Google go on. */
+const releasedAtGoogle = async (): Promise<void> => {
+  const response = await fakeGoogle(googleHoldUrl, {
+    method: "POST",
+    body: JSON.stringify({ hold: false }),
+  });
+  await response.body?.cancel();
+};
+
+/** Waits, a bounded while, until `check` holds. */
+const eventually = async (check: () => Promise<boolean>): Promise<boolean> => {
+  for (let tries = 0; tries < 200; tries += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- until it holds
+    if (await check()) {
+      return true;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- until it holds
+    await scheduler.wait(50);
+  }
+  return false;
+};
+
+/** The ID of the personal connection to the account `accountId`. */
+const connectionTo = async (accountId: string): Promise<string> => {
+  const row = await connectDb()
+    .prepare("SELECT id FROM connections WHERE account_id = ?")
+    .bind(accountId)
+    .first<{ id: string }>();
+  if (row === null) {
+    throw new Error("No connection to that account");
+  }
+  return row.id;
+};
+
+/**
+ * Runs connect's reads of people's groups, as core's clock does every
+ * minute, until `connectionId`'s turn came after its token was last
+ * minted: other files' connections share each run's budget.
+ */
+const groupsRead = async (connectionId: string): Promise<void> => {
+  for (let runs = 0; runs < 50; runs += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one run after another, as the clock's
+    await readGroupsOnce();
+    // oxlint-disable-next-line no-await-in-loop -- until its turn came
+    const row = await connectDb()
+      .prepare(
+        `SELECT c.reader_groups_tried_at >= t.updated_at AS tried
+          FROM connections c JOIN connection_tokens t ON t.connection_id = c.id
+          WHERE c.id = ?`
+      )
+      .bind(connectionId)
+      .first<{ tried: number | null }>();
+    if (row?.tried === 1) {
+      return;
+    }
+  }
+  throw new Error("The connection's groups were never read");
+};
+
+/** Whether any row of connect's connections holds `text`, a group's ID. */
+const connectionsHold = async (text: string): Promise<boolean> => {
+  const { results } = await connectDb()
+    .prepare("SELECT * FROM connections")
+    .all();
+  return JSON.stringify(results).toLowerCase().includes(text.toLowerCase());
+};
+
+/** A Google group's reader, by its address. */
+const googleGroup = (group: string): SourceReader => ({
+  kind: "group",
+  provider: "google",
+  tenant: "acme.test",
+  group,
+});
+
+/** An Entra group's reader, by its object ID. */
+const entraGroup = (group: string): SourceReader => ({
+  kind: "group",
+  provider: "microsoft",
+  tenant: acmeTenant,
+  group,
+});
 
 const readersOf = (...readers: SourceReader[]): SourceReaders => ({
   kind: "readers",
@@ -1960,4 +2093,617 @@ describe("readers copied from the source", () => {
         "Error: Refused: what one person alone may read is never given other readers",
     });
   });
+});
+
+describe("groups copied from the source", () => {
+  it(
+    "lets the members of a Microsoft group, nested ones too, read what it is shared with, by their own connection's read, and nobody else",
+    setUpTime,
+    async () => {
+      const team = crypto.randomUUID();
+      const department = crypto.randomUUID();
+      const member = await microsoftMember();
+      const outsider = await microsoftMember();
+      // In the group, but with no connection of their own to prove it.
+      const unconnected = await microsoftMember();
+      await inGroups(member.oid, [team]);
+      await inGroups(unconnected.oid, [team]);
+      await inGroups(team, [department]);
+      await connectedMicrosoft(member);
+      await connectedMicrosoft(outsider);
+      await groupsRead(await connectionTo(member.oid));
+      await groupsRead(await connectionTo(outsider.oid));
+      const teamMarker = uniqueWord();
+      // As a list may write it: the object ID in capitals.
+      const teamItem = await sharedItem(
+        teamMarker,
+        readersOf(entraGroup(team.toUpperCase()))
+      );
+      const departmentMarker = uniqueWord();
+      const departmentItem = await sharedItem(
+        departmentMarker,
+        readersOf(entraGroup(department))
+      );
+      const readsBoth = async (
+        personId: string,
+        personal = true
+      ): Promise<boolean[]> => [
+        await finds(personId, teamItem, teamMarker, personal),
+        await finds(personId, departmentItem, departmentMarker, personal),
+      ];
+
+      expect({
+        member: await readsBoth(member.userId),
+        asTheirTeams: await readsBoth(member.userId, false),
+        outsider: await readsBoth(outsider.userId),
+        unconnected: await readsBoth(unconnected.userId),
+      }).toStrictEqual({
+        member: [true, true],
+        asTheirTeams: [false, false],
+        outsider: [false, false],
+        unconnected: [false, false],
+      });
+    }
+  );
+
+  it(
+    "finds a person's Google groups through every nesting, and stops counting one they left at their connection's next renewal",
+    setUpTime,
+    async () => {
+      const alice = await microsoftMember();
+      const { id: connectionId } = await connectedGoogle(alice);
+      const team = `team-${unique()}@acme.test`;
+      const company = `company-${unique()}@acme.test`;
+      // Mapped from another identity source: no Drive permission names it.
+      const mapped = `mapped-${unique()}@acme.test`;
+      await inGroups(alice.email, [team, mapped]);
+      await inGroups(team, [company]);
+      await groupsRead(connectionId);
+      const marker = uniqueWord();
+      // As a list may write it: the address in capitals, beside an
+      // account, whose token the same step mints.
+      const item = await sharedItem(
+        marker,
+        readersOf(googleGroup(company.toUpperCase()), {
+          kind: "account",
+          provider: "google",
+          tenant: "acme.test",
+          account: `alice-${unique()}@acme.test`,
+        })
+      );
+      const mappedMarker = uniqueWord();
+      const mappedItem = await sharedItem(
+        mappedMarker,
+        readersOf(googleGroup(mapped))
+      );
+      const before = await finds(alice.userId, item, marker);
+      const mappedGroup = await finds(alice.userId, mappedItem, mappedMarker);
+      // Taken out of the team: what was read still counts until her
+      // token is renewed, and no longer once it was.
+      await inGroups(alice.email, []);
+      await readGroupsOnce();
+      const unrenewed = await finds(alice.userId, item, marker);
+      await renewedOnly(connectionId);
+      await groupsRead(connectionId);
+
+      expect({
+        before,
+        mappedGroup,
+        unrenewed,
+        renewed: await finds(alice.userId, item, marker),
+      }).toStrictEqual({
+        before: true,
+        mappedGroup: false,
+        unrenewed: true,
+        renewed: false,
+      });
+    }
+  );
+
+  it(
+    "counts a read of someone's groups for a day after it, however the reads after it fail, and grants nothing by a failed one",
+    setUpTime,
+    async () => {
+      const bob = await microsoftMember();
+      const { id: connectionId } = await connectedGoogle(bob);
+      const first = `first-${unique()}@acme.test`;
+      const second = `second-${unique()}@acme.test`;
+      await inGroups(bob.email, [first]);
+      await groupsRead(connectionId);
+      // Added to another group, but every read of his groups fails now.
+      await inGroups(bob.email, [first, second]);
+      await groupReadsFail(bob.email, true);
+      await renewedOnly(connectionId);
+      await groupsRead(connectionId);
+      const firstMarker = uniqueWord();
+      const firstItem = await sharedItem(
+        firstMarker,
+        readersOf(googleGroup(first))
+      );
+      const secondMarker = uniqueWord();
+      const secondItem = await sharedItem(
+        secondMarker,
+        readersOf(googleGroup(second))
+      );
+
+      expect({
+        second: await finds(bob.userId, secondItem, secondMarker),
+        firstNow: await finds(bob.userId, firstItem, firstMarker),
+        firstWithinTheDay: await findsLater(
+          23 * hourMs,
+          bob.userId,
+          firstItem,
+          firstMarker
+        ),
+        firstAfterTheDay: await findsLater(
+          25 * hourMs,
+          bob.userId,
+          firstItem,
+          firstMarker
+        ),
+      }).toStrictEqual({
+        second: false,
+        firstNow: true,
+        firstWithinTheDay: true,
+        firstAfterTheDay: false,
+      });
+    }
+  );
+
+  it(
+    "counts no group of a connection whose grant can't read groups, or that was disconnected",
+    setUpTime,
+    async () => {
+      const carol = await microsoftMember();
+      const dave = await microsoftMember();
+      const group = `group-${unique()}@acme.test`;
+      await inGroups(carol.email, [group]);
+      await inGroups(dave.email, [group]);
+      // Carol's grant is one made before groups were asked for.
+      const { core } = await openRpc(carol.session);
+      const { url } = await core.authenticate().connections.start({
+        provider: "google",
+        scope: "personal",
+        returnTo: "/integrations",
+      });
+      const flow = new URL(url);
+      const [local = ""] = carol.email.split("@");
+      await backFromProvider(carol.session, {
+        code: consentCode(
+          flow,
+          "acme.test",
+          local,
+          (flow.searchParams.get("scope") ?? "")
+            .split(" ")
+            .filter((scope) => !scope.includes("cloud-identity"))
+            .join(" ")
+        ),
+        state: flow.searchParams.get("state") ?? "",
+      });
+      await groupsRead(await connectionTo(local));
+      const { id: davesId } = await connectedGoogle(dave);
+      await groupsRead(davesId);
+      const marker = uniqueWord();
+      const item = await sharedItem(marker, readersOf(googleGroup(group)));
+      const daveConnected = await finds(dave.userId, item, marker);
+      await disconnect(dave, davesId);
+
+      expect({
+        carol: await finds(carol.userId, item, marker),
+        daveConnected,
+        daveDisconnected: await finds(dave.userId, item, marker),
+        // Nothing reads a disconnected connection's groups: none are kept.
+        kept: await connectionsHold(group),
+      }).toStrictEqual({
+        carol: false,
+        daveConnected: true,
+        daveDisconnected: false,
+        kept: false,
+      });
+    }
+  );
+
+  it(
+    "keeps no groups of a read that lands after its connection was disconnected, and none of an erased person's",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      const erin = await microsoftMember();
+      const frank = await microsoftMember();
+      const erinsGroup = `erin-${unique()}@acme.test`;
+      const franksGroup = `frank-${unique()}@acme.test`;
+      await inGroups(erin.email, [erinsGroup]);
+      await inGroups(frank.email, [franksGroup]);
+      const { id: erinsId } = await connectedGoogle(erin);
+      await groupsRead(erinsId);
+      const { id: franksId } = await connectedGoogle(frank);
+      // Frank's read is held at Google until his connection is disconnected.
+      const query = new URLSearchParams({
+        query: `member_key_id == '${frank.email.toLowerCase()}'`,
+      }).toString();
+      const held = await fakeGoogle(googleHoldUrl, {
+        method: "POST",
+        body: JSON.stringify({
+          hold: true,
+          prefix: `https://cloudidentity.googleapis.com/v1/groups/-/memberships:searchDirectGroups?${query}`,
+        }),
+      });
+      await held.body?.cancel();
+      // Runs the reads, as the clock does, until his comes and ends.
+      const reading = (async () => {
+        for (let runs = 0; runs < 50; runs += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- one run after another
+          await readGroupsOnce();
+          // oxlint-disable-next-line no-await-in-loop -- until his read ended
+          const row = await connectDb()
+            .prepare(
+              "SELECT status, reader_groups_tried_at AS tried FROM connections WHERE id = ?"
+            )
+            .bind(franksId)
+            .first<{ status: string; tried: number | null }>();
+          if (row?.status === "disconnected" || row?.tried !== null) {
+            return;
+          }
+        }
+      })();
+      await exchangeHeld();
+      await disconnect(frank, franksId);
+      const released = await fakeGoogle(googleHoldUrl, {
+        method: "POST",
+        body: JSON.stringify({ hold: false }),
+      });
+      await released.body?.cancel();
+      await reading;
+      const franksAfterDisconnect = await connectionsHold(franksGroup);
+      const erinsBeforeErasure = await connectionsHold(erinsGroup);
+      await erasedBy(admin, erin);
+
+      expect({
+        franksAfterDisconnect,
+        erinsBeforeErasure,
+        erinsAfterErasure: await connectionsHold(erinsGroup),
+      }).toStrictEqual({
+        franksAfterDisconnect: false,
+        erinsBeforeErasure: true,
+        erinsAfterErasure: false,
+      });
+    }
+  );
+
+  it(
+    "keeps nothing of a read made for an address a renewal gave to someone else meanwhile",
+    setUpTime,
+    async () => {
+      const bob = await microsoftMember();
+      const [local = ""] = bob.email.split("@");
+      const { id: connectionId } = await connectedGoogle(bob);
+      // Before his groups are first read: his token runs out, Google
+      // renames his account, and his old address goes to a new hire, whose
+      // groups a read by it now finds.
+      const hiresGroup = `hire-${unique()}@acme.test`;
+      await inGroups(bob.email, [hiresGroup]);
+      await googleGives(local, `${local}-renamed@acme.test`);
+      await connectDb()
+        .prepare(
+          "UPDATE connection_tokens SET access_expires_at = 0 WHERE connection_id = ?"
+        )
+        .bind(connectionId)
+        .run();
+      // The read picked his old address; its renewal confirms the new one.
+      await groupsRead(connectionId);
+      const marker = uniqueWord();
+      const item = await sharedItem(marker, readersOf(googleGroup(hiresGroup)));
+
+      await expect(finds(bob.userId, item, marker)).resolves.toBeFalsy();
+    }
+  );
+
+  it(
+    "starts over, never goes on with, a read that stopped before asking about an address a renewal gave to someone else meanwhile",
+    setUpTime,
+    async () => {
+      const bob = await microsoftMember();
+      const [local = ""] = bob.email.split("@");
+      const { id: connectionId } = await connectedGoogle(bob);
+      // Runs too small to ask anything: his read stops with his address
+      // still to be asked about.
+      const stopped = await eventually(async () => {
+        await env.CONNECT.readReaderGroups({
+          requests: 3,
+          queries: readerGroupQueriesPerTick,
+        });
+        const row = await connectDb()
+          .prepare(
+            "SELECT reader_groups_reading IS NOT NULL AS stopped FROM connections WHERE id = ?"
+          )
+          .bind(connectionId)
+          .first<{ stopped: number }>();
+        return row?.stopped === 1;
+      });
+      // Google renames his account, his old address goes to a new hire,
+      // whose groups a read by it now finds, and his token is renewed.
+      const hiresGroup = `hire-${unique()}@acme.test`;
+      const bobsGroup = `bob-${unique()}@acme.test`;
+      await inGroups(bob.email, [hiresGroup]);
+      await inGroups(`${local}-renamed@acme.test`, [bobsGroup]);
+      await googleGives(local, `${local}-renamed@acme.test`);
+      await renewedOnly(connectionId);
+      await groupsRead(connectionId);
+      const marker = uniqueWord();
+      const item = await sharedItem(marker, readersOf(googleGroup(hiresGroup)));
+      const ownMarker = uniqueWord();
+      const own = await sharedItem(
+        ownMarker,
+        readersOf(googleGroup(bobsGroup))
+      );
+
+      // His read starts over for his new address in the same turn.
+      expect({
+        stopped,
+        hires: await finds(bob.userId, item, marker),
+        his: await finds(bob.userId, own, ownMarker),
+      }).toStrictEqual({ stopped: true, hires: false, his: true });
+    }
+  );
+
+  it(
+    "lets someone in more groups than a reader can hold find their own, the company's, and what is shared with one of their groups, and nothing shared with a group they aren't in",
+    setUpTime,
+    async () => {
+      const person = await microsoftMember();
+      // In order, the last is the one a bound on their groups would leave
+      // out first.
+      const theirs = Array.from({ length: 1100 }, () =>
+        crypto.randomUUID()
+      ).toSorted();
+      const oneOfTheirs = theirs.at(-1) ?? "";
+      await inGroups(person.oid, theirs);
+      await connectedMicrosoft(person);
+      await groupsRead(await connectionTo(person.oid));
+      const markers = {
+        own: uniqueWord(),
+        company: uniqueWord(),
+        shared: uniqueWord(),
+        notShared: uniqueWord(),
+      };
+      const own = await sharedItem(markers.own, {
+        kind: "owner",
+        personId: person.userId,
+      });
+      const company = await sharedItem(markers.company, { kind: "everyone" });
+      const shared = await sharedItem(
+        markers.shared,
+        readersOf(entraGroup(oneOfTheirs))
+      );
+      const notShared = await sharedItem(
+        markers.notShared,
+        readersOf(entraGroup(crypto.randomUUID()))
+      );
+
+      expect({
+        own: await finds(person.userId, own, markers.own),
+        company: await finds(person.userId, company, markers.company),
+        shared: await finds(person.userId, shared, markers.shared),
+        notShared: await finds(person.userId, notShared, markers.notShared),
+      }).toStrictEqual({
+        own: true,
+        company: true,
+        shared: true,
+        notShared: false,
+      });
+    }
+  );
+
+  it(
+    "still answers someone in more groups that sources name than a reader can hold, leaving out only groups past what it holds",
+    setUpTime,
+    async () => {
+      const person = await microsoftMember();
+      const theirs = Array.from({ length: 1050 }, () => crypto.randomUUID());
+      await inGroups(person.oid, theirs);
+      await connectedMicrosoft(person);
+      await groupsRead(await connectionTo(person.oid));
+      const markers = {
+        own: uniqueWord(),
+        company: uniqueWord(),
+        everyGroup: uniqueWord(),
+      };
+      const own = await sharedItem(markers.own, {
+        kind: "owner",
+        personId: person.userId,
+      });
+      const company = await sharedItem(markers.company, { kind: "everyone" });
+      // Shared with every one of their groups: each is one a source names.
+      const everyGroup = await sharedItem(
+        markers.everyGroup,
+        readersOf(...theirs.map((group) => entraGroup(group)))
+      );
+
+      expect({
+        own: await finds(person.userId, own, markers.own),
+        company: await finds(person.userId, company, markers.company),
+        everyGroup: await finds(person.userId, everyGroup, markers.everyGroup),
+      }).toStrictEqual({ own: true, company: true, everyGroup: true });
+    }
+  );
+
+  it(
+    "keeps nothing of a read for an address Google gave someone else while the account's token was still fresh",
+    setUpTime,
+    async () => {
+      const bob = await microsoftMember();
+      const [local = ""] = bob.email.split("@");
+      const { id: connectionId } = await connectedGoogle(bob);
+      // Google renames his account and his old address goes to a new hire,
+      // whose groups a read by it now finds; his token is still fresh, so
+      // nothing renews it before the read.
+      const hiresGroup = `hire-${unique()}@acme.test`;
+      await inGroups(bob.email, [hiresGroup]);
+      await googleGives(local, `${local}-renamed@acme.test`);
+      await groupsRead(connectionId);
+      const marker = uniqueWord();
+      const item = await sharedItem(marker, readersOf(googleGroup(hiresGroup)));
+
+      await expect(finds(bob.userId, item, marker)).resolves.toBeFalsy();
+    }
+  );
+
+  it(
+    "starts no turn past a run's share of D1 queries, and reads the rest in the next runs",
+    setUpTime,
+    async () => {
+      // Six people whose tokens all ran out: each turn renews one, the
+      // costliest turn in D1 queries.
+      const people = await Promise.all(
+        Array.from({ length: 6 }, async () => await microsoftMember())
+      );
+      const groups = people.map(() => `team-${unique()}@acme.test`);
+      const connectionIds: string[] = [];
+      for (const [index, person] of people.entries()) {
+        // oxlint-disable-next-line no-await-in-loop -- one consent at a time
+        await inGroups(person.email, [groups[index] ?? ""]);
+        // oxlint-disable-next-line no-await-in-loop -- one consent at a time
+        const { id } = await connectedGoogle(person);
+        connectionIds.push(id);
+      }
+      await connectDb()
+        .prepare(
+          `UPDATE connection_tokens SET access_expires_at = 0 WHERE connection_id IN (SELECT value FROM json_each(?))`
+        )
+        .bind(JSON.stringify(connectionIds))
+        .run();
+      // A share a few renewals spend.
+      const first = await env.CONNECT.readReaderGroups({
+        requests: readerGroupRequestsPerTick,
+        queries: 30,
+      });
+      for (const id of connectionIds) {
+        // oxlint-disable-next-line no-await-in-loop -- each in turn
+        await groupsRead(id);
+      }
+      const items = await Promise.all(
+        groups.map(async (group) => {
+          const marker = uniqueWord();
+          return {
+            marker,
+            item: await sharedItem(marker, readersOf(googleGroup(group))),
+          };
+        })
+      );
+      const read = await Promise.all(
+        people.map(async ({ userId }, index) => {
+          const { marker, item } = items[index] ?? {
+            marker: "",
+            item: { producer: "upload" as const, id: "" },
+          };
+          return await finds(userId, item, marker);
+        })
+      );
+
+      expect({
+        firstRunStopped: first.read < people.length,
+        read,
+      }).toStrictEqual({
+        firstRunStopped: true,
+        read: people.map(() => true),
+      });
+    }
+  );
+
+  it(
+    "reads a person's groups across runs however many they are in, grants none until the read is whole, and reads others in between",
+    setUpTime,
+    async () => {
+      const id = unique();
+      // Dave's groups were read once, and his token renewed since: due
+      // again, though tried before Alice ever was.
+      const dave = await microsoftMember();
+      const davesOld = `dave-old-${id}@acme.test`;
+      const davesNew = `dave-new-${id}@acme.test`;
+      await inGroups(dave.email, [davesOld]);
+      const { id: davesId } = await connectedGoogle(dave);
+      await groupsRead(davesId);
+      await inGroups(dave.email, [davesNew]);
+      await renewedOnly(davesId);
+      // Alice is in 121 groups: a hub, the hub's 119 groups, and a group
+      // of one of those, more than one run's requests reach.
+      const alice = await microsoftMember();
+      const hub = `hub-${id}@acme.test`;
+      const parents = Array.from(
+        { length: 119 },
+        (_, index) => `p${index}-${id}@acme.test`
+      );
+      const held = `p60-${id}@acme.test`;
+      const lateParent = `p110-${id}@acme.test`;
+      const last = `p118-${id}@acme.test`;
+      const late = `late-${id}@acme.test`;
+      await inGroups(alice.email, [hub]);
+      await inGroups(hub, parents);
+      await inGroups(lateParent, [late]);
+      const markers = {
+        dave: uniqueWord(),
+        hub: uniqueWord(),
+        last: uniqueWord(),
+        late: uniqueWord(),
+      };
+      const items = {
+        dave: await sharedItem(markers.dave, readersOf(googleGroup(davesNew))),
+        hub: await sharedItem(markers.hub, readersOf(googleGroup(hub))),
+        last: await sharedItem(markers.last, readersOf(googleGroup(last))),
+        late: await sharedItem(markers.late, readersOf(googleGroup(late))),
+      };
+      // Her read can't be whole while the question of one group's groups
+      // is held at Google.
+      await holdAtGoogle(groupsQueryOf(held));
+      const { id: alicesId } = await connectedGoogle(alice);
+      const aliceWhole = async (): Promise<boolean> => {
+        const row = await connectDb()
+          .prepare(
+            "SELECT reader_groups_reading IS NULL AND reader_groups IS NOT NULL AS whole FROM connections WHERE id = ?"
+          )
+          .bind(alicesId)
+          .first<{ whole: number }>();
+        return row?.whole === 1;
+      };
+      // Runs of 40 requests, as the clock's would be, until hers is whole.
+      const runs = (async () => {
+        for (let run = 0; run < 100; run += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- one run after another
+          await env.CONNECT.readReaderGroups({
+            requests: 40,
+            queries: readerGroupQueriesPerTick,
+          });
+          // oxlint-disable-next-line no-await-in-loop -- until hers is whole
+          if (await aliceWhole()) {
+            return true;
+          }
+        }
+        return false;
+      })().catch(() => false);
+      const daveRead = await eventually(
+        async () => await finds(dave.userId, items.dave, markers.dave)
+      );
+      const beforeWhole = await finds(alice.userId, items.hub, markers.hub);
+      // Taken out while her read goes on, before it asks that group.
+      await inGroups(lateParent, []);
+      await releasedAtGoogle();
+      const whole = await runs;
+
+      expect({
+        daveRead,
+        beforeWhole,
+        whole,
+        hub: await finds(alice.userId, items.hub, markers.hub),
+        last: await finds(alice.userId, items.last, markers.last),
+        late: await finds(alice.userId, items.late, markers.late),
+      }).toStrictEqual({
+        daveRead: true,
+        beforeWhole: false,
+        whole: true,
+        hub: true,
+        last: true,
+        late: false,
+      });
+    }
+  );
 });

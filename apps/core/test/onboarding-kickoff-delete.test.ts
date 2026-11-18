@@ -6,6 +6,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminKickoff } from "./admin-kickoff.ts";
 import { mockIdp } from "./idp.ts";
+import { noRegionsOwed } from "./interview-link.ts";
 import { d1ColumnsWith, onboardingTablesWith } from "./kept-where.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
@@ -113,6 +114,9 @@ describe("deleting the kickoff", { timeout: 60_000 }, () => {
   it("takes it and everything drawn from it out of every read, with one audit event", async () => {
     const admin = await signedInApi(idp, "admin");
     await admin.api.onboarding.saveRoster(roster);
+    // Arranging the list's teams into regions (GRA-1993) is no part of
+    // deleting the kickoff: its model call stays out of the audit read here.
+    await noRegionsOwed();
     const marker = markerOf();
     await bringIn(marker);
     // Staff answer again.
