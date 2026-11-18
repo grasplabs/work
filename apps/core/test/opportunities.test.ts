@@ -1,6 +1,6 @@
-import { runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { eraseOwedOnboardingSources } from "../src/onboarding/new-brain.ts";
@@ -267,15 +267,34 @@ describe("opportunities", { timeout: 120_000 }, () => {
       [proposing({ form: "skill", systems: [] })],
       at + 24 * 60 * 60 * 1000
     );
-    const listed = await ticketsOf(api, ids);
-    const asked = await proposed([proposing({ form: "skill", systems: [] })]);
+    // Nothing else is due: the list alone sets the alarm. The store's own
+    // alarm runs again (the fixture held it), and asks it as it runs.
+    const store = onboardingStore(env);
+    await runInDurableObject(store, async (instance, state) => {
+      await state.storage.deleteAlarm();
+      // The fixture's spy on it, found again and taken off.
+      vi.spyOn(instance, "alarm").mockRestore();
+    });
+    const { requests, result: listed } = await answering(
+      [proposing({ form: "skill", systems: [] })],
+      async () => {
+        const all = await api.opportunities.list();
+        await runDurableObjectAlarm(store);
+        return all.some(({ team: of }) => of === ids.team);
+      }
+    );
     const after = await ticketsOf(api, ids);
     expect({
       givenUp: givenUp.calls,
-      listCalls: listed.asked,
-      asked: asked.calls,
+      listed,
+      asked: requests.length,
       form: after.tickets?.form,
-    }).toStrictEqual({ givenUp: 0, listCalls: 0, asked: 1, form: "skill" });
+    }).toStrictEqual({
+      givenUp: 0,
+      listed: true,
+      asked: 1,
+      form: "skill",
+    });
   });
 
   it("neither ask a proposal twice at once nor lose it when the store stops mid-call", async () => {
