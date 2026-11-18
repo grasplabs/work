@@ -3001,10 +3001,6 @@ msgstr "App not found"
 msgid "App or workflow"
 msgstr "App or workflow"
 
-#: src/pages/page-frame.tsx
-msgid "App page"
-msgstr "App page"
-
 #: src/frame/part-words.tsx
 msgid "App preview"
 msgstr "App preview"

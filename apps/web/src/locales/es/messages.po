@@ -3001,10 +3001,6 @@ msgstr "Aplicación no encontrada"
 msgid "App or workflow"
 msgstr "App o flujo de trabajo"
 
-#: src/pages/page-frame.tsx
-msgid "App page"
-msgstr "Página de la aplicación"
-
 #: src/frame/part-words.tsx
 msgid "App preview"
 msgstr "Vista previa de la App"

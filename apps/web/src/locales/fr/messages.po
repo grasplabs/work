@@ -3001,10 +3001,6 @@ msgstr "Application introuvable"
 msgid "App or workflow"
 msgstr "App ou workflow"
 
-#: src/pages/page-frame.tsx
-msgid "App page"
-msgstr "Page de l’application"
-
 #: src/frame/part-words.tsx
 msgid "App preview"
 msgstr "Aperçu de l’App"

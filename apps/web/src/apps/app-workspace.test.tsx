@@ -23,7 +23,6 @@ import {
 } from "@grasp-os/shared/ids";
 import type { Permission } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -366,14 +365,14 @@ const opened = async (
     id: "_shell",
     beforeLoad: () => ({ identity }),
     component: () => (
-      <SidebarProvider>
+      <>
         <GlobalChatProvider>
           <Outlet />
           <ChatPanel />
           <ChatBar />
         </GlobalChatProvider>
         <Toaster aria-label="Notifications" />
-      </SidebarProvider>
+      </>
     ),
   });
   const page = createRoute({
