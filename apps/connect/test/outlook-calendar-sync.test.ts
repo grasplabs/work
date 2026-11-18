@@ -2,6 +2,7 @@ import { syncErrors } from "@grasp-os/shared/sync";
 import type { SyncItem, SyncPage } from "@grasp-os/shared/sync";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { connectAccount, ownAccount, someone } from "./connect.ts";
 import { fakeInternet } from "./internet.ts";
@@ -18,6 +19,7 @@ const providers = fakeProviders();
 
 const graphHost = "graph.microsoft.com";
 const deltaPath = "/v1.0/me/calendarView/delta";
+const eventsPath = "/v1.0/me/events";
 const year = 365 * 24 * 60 * 60 * 1000;
 
 type Event = Record<string, unknown> & { id: string };
@@ -30,6 +32,8 @@ interface Calendar {
   graphPage: number;
   /** Whether Graph takes `Prefer: odata.maxpagesize` as asked. */
   honoursPageSize: boolean;
+  /** Every event Graph reads on its own (in UTC), by ID: masters too. */
+  events: Record<string, Event>;
   /** A skip token Graph answers only after `ms`. */
   slow?: { skip: string; ms: number };
   /** Answers every request instead, when it answers. */
@@ -38,12 +42,14 @@ interface Calendar {
 
 const calendar: Calendar = {
   feed: {},
+  events: {},
   graphPage: 1000,
   honoursPageSize: true,
 };
 
 const reset = (): void => {
   calendar.feed = {};
+  calendar.events = {};
   calendar.graphPage = 1000;
   calendar.honoursPageSize = true;
   calendar.slow = undefined;
@@ -98,6 +104,54 @@ const feedPage = (url: URL, prefer: string): Response => {
   });
 };
 
+/** The zones the fake reads an event in: Graph's (Windows) names. */
+const zones: Readonly<Record<string, string>> = {
+  "W. Europe Standard Time": "Europe/Amsterdam",
+};
+
+/** A UTC time of Graph's (`2026-10-19T07:00:00.0000000`) in `zone`. */
+const inZone = (utc: string, zone: string): string => {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: zones[zone] ?? "UTC",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date(`${utc.slice(0, 19)}Z`))
+      .map(({ type, value }) => [type, value])
+  );
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}.0000000`;
+};
+
+/** One event, as Graph reads it on its own: in the zone `Prefer` asks. */
+const eventAnswer = (url: URL, prefer: string): Response => {
+  const id = decodeURIComponent(url.pathname.slice(eventsPath.length + 1));
+  const found = calendar.events[id];
+  if (found === undefined) {
+    return Response.json(
+      { error: { code: "ErrorItemNotFound" } },
+      { status: 404 }
+    );
+  }
+  const zone = /outlook\.timezone="(?<zone>[^"]+)"/u.exec(prefer)?.groups?.zone;
+  const at = (time: unknown) => {
+    const { dateTime } = z.object({ dateTime: z.string() }).parse(time);
+    return zone === undefined
+      ? time
+      : { dateTime: inZone(dateTime, zone), timeZone: zone };
+  };
+  return Response.json({
+    ...found,
+    start: at(found.start),
+    end: at(found.end),
+  });
+};
+
 const internet = fakeInternet(async (request, url) => {
   if (
     calendar.slow !== undefined &&
@@ -111,6 +165,9 @@ const internet = fakeInternet(async (request, url) => {
   }
   if (url.hostname === graphHost && url.pathname === deltaPath) {
     return feedPage(url, request.headers.get("prefer") ?? "");
+  }
+  if (url.hostname === graphHost && url.pathname.startsWith(`${eventsPath}/`)) {
+    return eventAnswer(url, request.headers.get("prefer") ?? "");
   }
   return Response.json({ error: { code: "NotFound" } }, { status: 404 });
 });
@@ -350,6 +407,77 @@ describe("syncing a person's own calendar", () => {
     }).toStrictEqual({
       first: ["e0", "e1", "e2", "e3"],
       seen: events.map(({ id }) => id).toSorted(),
+    });
+  });
+
+  it("keeps a weekly event's time in its own zone across a daylight saving change, and says how it repeats", async () => {
+    const connectionId = await connected();
+    // 09:00 in Amsterdam, every Monday: 07:00 UTC in summer time, 08:00 UTC
+    // after the clocks go back on 25 October 2026.
+    const amsterdam = {
+      originalStartTimeZone: "W. Europe Standard Time",
+      originalEndTimeZone: "W. Europe Standard Time",
+      seriesMasterId: "standup",
+    };
+    const occurrence = (id: string, from: string, to: string) =>
+      event(id, {
+        ...amsterdam,
+        subject: "Stand-up",
+        start: { dateTime: from, timeZone: "UTC" },
+        end: { dateTime: to, timeZone: "UTC" },
+      });
+    const before = occurrence(
+      "standup-1019",
+      "2026-10-19T07:00:00.0000000",
+      "2026-10-19T07:15:00.0000000"
+    );
+    const after = occurrence(
+      "standup-1026",
+      "2026-10-26T08:00:00.0000000",
+      "2026-10-26T08:15:00.0000000"
+    );
+    calendar.events = {
+      [before.id]: before,
+      [after.id]: after,
+      standup: event("standup", {
+        recurrence: {
+          pattern: { type: "weekly", interval: 1, daysOfWeek: ["monday"] },
+          range: {
+            type: "noEnd",
+            startDate: "2026-10-05",
+            recurrenceTimeZone: "W. Europe Standard Time",
+          },
+        },
+      }),
+    };
+    calendar.feed[start] = { events: [before, after], end: "t1" };
+    const { items } = await readAll(connectionId, null);
+    const lines = (id: string) => {
+      const item = items.find((each) => each.id === id);
+      const text =
+        item?.gone === false && item.content?.type === "text"
+          ? item.content.text
+          : "";
+      return text
+        .split("\n")
+        .filter((line) => /^(?:Start|End|Repeats): /u.test(line));
+    };
+    const repeats =
+      "Repeats: weekly, every 1 week on monday; from 2026-10-05, no end (W. Europe Standard Time)";
+    expect({
+      before: lines("standup-1019"),
+      after: lines("standup-1026"),
+    }).toStrictEqual({
+      before: [
+        "Start: 2026-10-19T09:00:00.0000000 W. Europe Standard Time",
+        "End: 2026-10-19T09:15:00.0000000 W. Europe Standard Time",
+        repeats,
+      ],
+      after: [
+        "Start: 2026-10-26T09:00:00.0000000 W. Europe Standard Time",
+        "End: 2026-10-26T09:15:00.0000000 W. Europe Standard Time",
+        repeats,
+      ],
     });
   });
 
