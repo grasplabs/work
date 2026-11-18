@@ -15,6 +15,7 @@ import {
 } from "../grasp/app-preview/words.ts";
 import { appShellPanelWords, appShellWords } from "../grasp/app-shell/words.ts";
 import { approvalRequestWords } from "../grasp/approval-request/words.ts";
+import { audioPlayerWords } from "../grasp/audio-player/words.ts";
 import { avatarGroupWords } from "../grasp/avatar/words.ts";
 import {
   backdropPickerWords,
@@ -45,10 +46,12 @@ import { fileUploadWords, imageWellWords } from "../grasp/file-upload/words.ts";
 import { filterBuilderWords } from "../grasp/filter-builder/words.ts";
 import { inputWords } from "../grasp/input/words.ts";
 import { englishWords as inspectorPanelWords } from "../grasp/inspector-panel/words.ts";
+import { englishWords as interviewWords } from "../grasp/interview/words.ts";
 import { keyValueWords } from "../grasp/key-value/words.ts";
 import { languageSwitchWords } from "../grasp/language-switch/words.ts";
 import { linkWords } from "../grasp/link/words.ts";
 import { markdownWords } from "../grasp/markdown/words.ts";
+import { multiStepFormWords } from "../grasp/multi-step-form/words.ts";
 import { ownerPickerWords } from "../grasp/owner-picker/words.ts";
 import { paginationWords } from "../grasp/pagination/words.ts";
 import { panelWords } from "../grasp/panel/words.ts";
@@ -78,6 +81,8 @@ import type { GraspWordsCatalog } from "../grasp/words/words.tsx";
 // part never speaks English on a Dutch page. Work's own sentences stay
 // Lingui's own, as ever.
 
+const MS_PER_MINUTE = 60_000;
+
 /** Every installed part's words in English: the library's own. */
 export const englishPartWords: GraspWordsCatalog = {
   "app-shell-panel": appShellPanelWords,
@@ -90,6 +95,7 @@ export const englishPartWords: GraspWordsCatalog = {
   appPreviewStopped: appPreviewStoppedWords,
   appShell: appShellWords,
   approvalRequest: approvalRequestWords,
+  audioPlayer: audioPlayerWords,
   avatarGroup: avatarGroupWords,
   backdropPicker: backdropPickerWords,
   backdropPreview: backdropPreviewWords,
@@ -132,6 +138,8 @@ export const englishPartWords: GraspWordsCatalog = {
   shareAccess: shareAccessWords,
   sheet: sheetWords,
   sidebar: sidebarWords,
+  interview: interviewWords,
+  multiStepForm: multiStepFormWords,
   sources: sourcesWords,
   stepper: stepperWords,
   tag: tagWords,
@@ -319,6 +327,54 @@ export const usePartWords = (): GraspWordsCatalog => {
       done: t`Done`,
       notDone: t`Not done`,
       table: t`Table`,
+    },
+    audioPlayer: {
+      failed: t`Could not play this file`,
+      loading: t`Loading the sound`,
+    },
+    // Times and passage numbers are the library's own: digits read the same in every language.
+    interview: {
+      ...interviewWords,
+      length: (ms) => {
+        const minutes = Math.max(1, Math.round(ms / MS_PER_MINUTE));
+        return t`${minutes} min`;
+      },
+      atPassage: (number) => t`passage ${number}`,
+      seek: (time, who) => t`Go to ${time}, ${who}`,
+      transcript: t`Transcript`,
+      timeline: t`Conversation timeline`,
+      speakers: t`Speakers`,
+      chapters: t`Chapters`,
+      highlight: t({ message: "Highlight", context: "a marked moment" }),
+      kinds: t`Kinds of highlight`,
+      runs: t`Who spoke when`,
+      run: (who, from, to) => t`${who}, ${from} to ${to}`,
+      mark: (kind, time) => t`${kind} at ${time}`,
+      count: (count, total) =>
+        t`${plural(total, { one: `${count} of # interview`, other: `${count} of # interviews` })}`,
+      player: (who, time) => t`${who} at ${time}`,
+      sound: t`Interview sound`,
+      origin: (how, said) =>
+        [
+          t({ message: "Interview", context: "where a quote comes from" }),
+          how,
+          said,
+        ]
+          .filter((part) => part !== undefined && part !== "")
+          .join(" · "),
+      search: t`Search the transcript`,
+      previousMatch: t`Previous match`,
+      nextMatch: t`Next match`,
+      matchOf: (index, count) => t`${index} of ${count}`,
+      noMatches: t`No matches`,
+    },
+    multiStepForm: {
+      back: t`Back`,
+      next: t`Next`,
+      submit: t`Send`,
+      failed: t`Could not send`,
+      page: t({ message: "Page", context: "one page of a form" }),
+      counter: (page, total) => t`${page} of ${total}`,
     },
     stepper: {
       states: {

@@ -783,6 +783,10 @@ msgstr "{idle, plural, one {# weiterer Workflow lief in dieser Zeit nicht.} othe
 msgid "{inDays, plural, one {Your next report is ready tomorrow} other {Your next report is ready in # days}}"
 msgstr "{inDays, plural, one {Ihr nächster Bericht ist morgen fertig} other {Ihr nächster Bericht ist in # Tagen fertig}}"
 
+#: src/frame/part-words.tsx
+msgid "{index} of {count}"
+msgstr "{index} von {count}"
+
 #: src/activity/audit-event.tsx
 msgid "{input} in, {output} out"
 msgstr "{input} ein, {output} aus"
@@ -802,6 +806,10 @@ msgstr "{jump}, neue Nachrichten"
 #: src/activity/pending.tsx
 msgid "{kind} ({what})"
 msgstr "{kind} ({what})"
+
+#: src/frame/part-words.tsx
+msgid "{kind} at {time}"
+msgstr "{kind} bei {time}"
 
 #: src/workflows/binding-approvals.tsx
 msgid "{kind}: {contractId}"
@@ -901,6 +909,10 @@ msgstr "{memories, plural, one {# Erinnerung geschwärzt oder gelöscht} other {
 #: src/workflows/saved-ago.tsx
 msgid "{minutes, plural, one {Saved # min ago} other {Saved # min ago}}"
 msgstr "{minutes, plural, one {Vor # Min. gespeichert} other {Vor # Min. gespeichert}}"
+
+#: src/frame/part-words.tsx
+msgid "{minutes} min"
+msgstr "{minutes} Min."
 
 #: src/apps/app-history.tsx
 msgid "{more, plural, one {# more file} other {# more files}}"
@@ -1169,6 +1181,10 @@ msgstr "{outCount, plural, one {# verschickt, als Liste} other {# verschickt, al
 #: src/onboarding/interviews-progress.tsx
 msgid "{outCount, plural, one {The link that is out, as a list} other {The # links that are out, as a list}}"
 msgstr "{outCount, plural, one {Der verfügbare Link als Liste} other {Die # verfügbaren Links als Liste}}"
+
+#: src/frame/part-words.tsx
+msgid "{page} of {total}"
+msgstr "{page} von {total}"
 
 #: src/brain/brain.ts
 msgid "{people, plural, one {{sector}, # person.} other {{sector}, # people.}}"
@@ -1541,6 +1557,10 @@ msgstr "{title} auf {connection}"
 msgid "{title} removed from the dashboard."
 msgstr "{title} wurde vom Dashboard entfernt."
 
+#: src/frame/part-words.tsx
+msgid "{total, plural, one {{count} of # interview} other {{count} of # interviews}}"
+msgstr "{total, plural, one {{count} von # Interview} other {{count} von # Interviews}}"
+
 #: src/connections/integration-facts.ts
 msgid "{total, plural, one {{count} of its # tool allowed} other {{count} of its # tools allowed}}"
 msgstr "{total, plural, one {{count} von # Tool erlaubt} other {{count} von # Tools erlaubt}}"
@@ -1617,6 +1637,10 @@ msgstr "{waiting, plural, one {Es nutzt # neue Art von Zugriff. Ein Admin genehm
 msgid "{what}, as {binding} in its code: {actions}"
 msgstr "{what}, als {binding} im Code: {actions}"
 
+#: src/frame/part-words.tsx
+msgid "{who} at {time}"
+msgstr "{who} bei {time}"
+
 #: src/dashboard/pile-cards.tsx
 msgid "{who} can't be granted later: it has to ask again."
 msgstr "{who} kann später nicht mehr erteilt werden: es muss erneut angefragt werden."
@@ -1629,6 +1653,10 @@ msgstr "{who} hat dem vor dem Verbinden zugestimmt"
 #: src/interview/voice-bar.tsx
 msgid "{who} is talking"
 msgstr "{who} spricht"
+
+#: src/frame/part-words.tsx
+msgid "{who}, {from} to {to}"
+msgstr "{who}, {from} bis {to}"
 
 #: src/apps/app-data.tsx
 msgid "{who}, {when}"
@@ -4201,6 +4229,10 @@ msgstr "Ändert, wer die Datensätze von {table} sehen und ändern kann."
 msgid "Changing the App's definition"
 msgstr "Ändert die Definition der App"
 
+#: src/frame/part-words.tsx
+msgid "Chapters"
+msgstr "Kapitel"
+
 #: src/projects/project-dialog.tsx
 msgid "Chart"
 msgstr "Diagramm"
@@ -4971,6 +5003,10 @@ msgstr "Weiter mit {signIn}"
 msgid "Contract"
 msgstr "Vertrag"
 
+#: src/frame/part-words.tsx
+msgid "Conversation timeline"
+msgstr "Zeitachse des Gesprächs"
+
 #. Folder of the sources that are conversations: the vision talk and the interviews by voice or chat
 #: src/brain/brain.ts
 msgid "Conversations"
@@ -5161,6 +5197,10 @@ msgstr "Konnte nicht abgeschlossen werden"
 #: src/frame/part-words.tsx
 msgid "Could not invite"
 msgstr "Konnte nicht einladen"
+
+#: src/frame/part-words.tsx
+msgid "Could not play this file"
+msgstr "Diese Datei konnte nicht abgespielt werden"
 
 #: src/apps/app-reset.tsx
 #: src/apps/reset-test-data.tsx
@@ -7153,6 +7193,10 @@ msgstr "Livegang"
 msgid "Go on without sound"
 msgstr "Ohne Ton weiter"
 
+#: src/frame/part-words.tsx
+msgid "Go to {time}, {who}"
+msgstr "Zu {time} gehen, {who}"
+
 #: src/frame/connect-ai-provider.tsx
 msgid "Go to AI providers"
 msgstr "Zu den KI-Anbietern"
@@ -7659,6 +7703,11 @@ msgstr "Hoch"
 msgid "Highest"
 msgstr "Höchstwert"
 
+#: src/frame/part-words.tsx
+msgctxt "a marked moment"
+msgid "Highlight"
+msgstr "Markierung"
+
 #: src/workflows/business-process.tsx
 msgctxt "business process"
 msgid "Hire-to-Retire"
@@ -8062,6 +8111,15 @@ msgstr "Integrität"
 #: src/settings/audit-chain.tsx
 msgid "Integrity and archive"
 msgstr "Integrität und Archiv"
+
+#: src/frame/part-words.tsx
+msgctxt "where a quote comes from"
+msgid "Interview"
+msgstr "Interview"
+
+#: src/frame/part-words.tsx
+msgid "Interview sound"
+msgstr "Ton des Interviews"
 
 #. Something that has not happened yet, on a timeline
 #: src/brain/brain.ts
@@ -8719,6 +8777,10 @@ msgstr "Art der Aussage"
 msgid "Kinds of field"
 msgstr "Arten von Feldern"
 
+#: src/frame/part-words.tsx
+msgid "Kinds of highlight"
+msgstr "Arten von Markierungen"
+
 #: src/knowledge/frame.tsx
 #: src/knowledge/nav.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
@@ -9106,6 +9168,10 @@ msgstr "Das Gespräch wird geladen"
 #: src/frame/part-words.tsx
 msgid "Loading the page"
 msgstr "Seite wird geladen"
+
+#: src/frame/part-words.tsx
+msgid "Loading the sound"
+msgstr "Ton wird geladen"
 
 #: src/frame/part-words.tsx
 msgid "Loading the value"
@@ -9873,12 +9939,14 @@ msgid "Newer"
 msgstr "Neuer"
 
 #: src/chat/asked-questions.tsx
+#: src/frame/part-words.tsx
 #: src/settings/event-sources.tsx
 #: src/tour/tour-layer.tsx
 msgid "Next"
 msgstr "Weiter"
 
 #: src/brain/brain-transcript.tsx
+#: src/frame/part-words.tsx
 msgid "Next match"
 msgstr "Nächster Treffer"
 
@@ -10079,6 +10147,7 @@ msgid "No longer where it was"
 msgstr "Nicht mehr dort, wo es war"
 
 #: src/brain/brain-transcript.tsx
+#: src/frame/part-words.tsx
 msgid "No matches"
 msgstr "Keine Treffer"
 
@@ -11655,6 +11724,11 @@ msgid "Packages of {name} were revoked as malware"
 msgstr "Pakete von {name} wurden als Malware widerrufen"
 
 #: src/frame/part-words.tsx
+msgctxt "one page of a form"
+msgid "Page"
+msgstr "Seite"
+
+#: src/frame/part-words.tsx
 msgid "Page {current} of {count}"
 msgstr "Seite {current} von {count}"
 
@@ -11713,6 +11787,10 @@ msgstr "Ein Teil dessen, was gesendet wird, ist oben gekürzt. Zeigen Sie alles 
 #: src/inbox/item-detail.tsx
 msgid "Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm."
 msgstr "Ein Teil dessen, was gesendet wird, ist gekürzt. Öffnen Sie Details und zeigen Sie alles oder genau das, was gesendet wird, um zu bestätigen."
+
+#: src/frame/part-words.tsx
+msgid "passage {number}"
+msgstr "Passage {number}"
 
 #: src/interview/words.ts
 msgid "Passing it on"
@@ -12080,6 +12158,7 @@ msgid "Previous hash"
 msgstr "Vorheriger Hash"
 
 #: src/brain/brain-transcript.tsx
+#: src/frame/part-words.tsx
 msgid "Previous match"
 msgstr "Vorheriger Treffer"
 
@@ -13834,6 +13913,7 @@ msgid "Search the Brain"
 msgstr "Das Gehirn durchsuchen"
 
 #: src/brain/brain-transcript.tsx
+#: src/frame/part-words.tsx
 msgid "Search the transcript"
 msgstr "Im Transkript suchen"
 
@@ -13959,6 +14039,7 @@ msgid "Self-approved: nobody else could approve it"
 msgstr "Selbst freigegeben: Niemand sonst konnte sie freigeben"
 
 #: src/chat/asked-questions.tsx
+#: src/frame/part-words.tsx
 #: src/inbox/item-detail.tsx
 #: src/interview/composer.tsx
 msgid "Send"
@@ -14736,6 +14817,10 @@ msgstr "Quellen, die Sie lesen dürfen"
 #: src/projects/project-dialog.tsx
 msgid "Sparkles"
 msgstr "Funken"
+
+#: src/frame/part-words.tsx
+msgid "Speakers"
+msgstr "Sprechende"
 
 #: src/settings/ai-spend.tsx
 msgid "Spend"
@@ -16805,6 +16890,7 @@ msgid "Track the month-end close"
 msgstr "Den Monatsabschluss im Blick behalten"
 
 #: src/brain/brain-markdown.ts
+#: src/frame/part-words.tsx
 #: src/interview/page.tsx
 #: src/interview/transcript.tsx
 msgid "Transcript"
@@ -18275,6 +18361,10 @@ msgstr "Wer ihn in {name} erreicht"
 #: src/apps/draft-changes.tsx
 msgid "Who sees which rows"
 msgstr "Wer welche Zeilen sieht"
+
+#: src/frame/part-words.tsx
+msgid "Who spoke when"
+msgstr "Wer wann sprach"
 
 #: src/inbox/interviews-item.tsx
 msgid "Who talked"
