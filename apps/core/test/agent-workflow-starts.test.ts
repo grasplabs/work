@@ -18,6 +18,7 @@ import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { greetingOf } from "./json-workflow-apps.ts";
+import { brainAway, keptFromTheBrain } from "./kept-state.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 import { publishDefinition } from "./workflow-publishing.ts";
 
@@ -695,6 +696,42 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
       ending: { status: "completed", code: null },
       returned: true,
       kept: "Workflow run completed.",
+    });
+  });
+
+  it("lets its person confirm again a start refused for now, as what the workflow keeps couldn't be checked", async () => {
+    const person = await signedInApi(idp, "user");
+    const { workflow, builder } = await workflowFor(person.userId);
+    const chats = await personalChatsOf(person.userId);
+    await grantStart(builder, chats.agent.agentId, workflow.id);
+    const chat = await chatOf(chats, person);
+    const by = await person.api.whoami();
+    await keptFromTheBrain(env, workflow.id);
+    const held = await chat.workflows.start(
+      workflow.id,
+      { who: "Ada" },
+      "later"
+    );
+    const [open] = await person.api.heldStarts.list();
+    const away = await outcome(
+      confirmHeldStart(brainAway(env), by, held.held, open?.argsHash ?? "")
+    );
+    const [stillOpen] = await person.api.heldStarts.list();
+    const confirmed = await confirmHeldStart(
+      env,
+      by,
+      held.held,
+      stillOpen?.argsHash ?? ""
+    );
+
+    expect({
+      away,
+      stillOpen: stillOpen?.id === held.held,
+      ended: await endOf(confirmed.run ?? confirmed.start),
+    }).toStrictEqual({
+      away: "workflow.state_unchecked",
+      stillOpen: true,
+      ended: { status: "completed", code: null },
     });
   });
 

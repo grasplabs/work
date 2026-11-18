@@ -1,7 +1,9 @@
 import type { PermissionId } from "@grasp-os/shared/ids";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { and, eq, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import {
   runBrainMemories,
@@ -101,9 +103,16 @@ export const recordRunVersions = async (
   }
 };
 
-/** What each of runs `runIds` was handed, as their evidence keeps it. */
-export const evidenceOfRuns = async (env: Env, runIds: readonly string[]) =>
-  await drizzle(env.DB)
+/**
+ * The query of what the runs `ofRuns` picks (a condition on the run's ID
+ * column) were handed, as their evidence keeps it: for a caller that
+ * reads it in one batch with what names them (workflow-state.ts).
+ */
+export const versionEvidenceQuery = (
+  db: DrizzleD1Database,
+  ofRuns: (runId: typeof runBrainVersions.runId) => SQL | undefined
+) =>
+  db
     .select({
       runId: runBrainVersions.runId,
       producer: runBrainVersions.producer,
@@ -112,7 +121,11 @@ export const evidenceOfRuns = async (env: Env, runIds: readonly string[]) =>
       permissionId: runBrainVersions.permissionId,
     })
     .from(runBrainVersions)
-    .where(inList(runBrainVersions.runId, runIds));
+    .where(ofRuns(runBrainVersions.runId));
+
+/** What each of runs `runIds` was handed, as their evidence keeps it. */
+export const evidenceOfRuns = async (env: Env, runIds: readonly string[]) =>
+  await versionEvidenceQuery(drizzle(env.DB), (runId) => inList(runId, runIds));
 
 /**
  * Adds `memories` (of the shared store), what an entity read handed run
@@ -138,6 +151,20 @@ export const recordRunMemories = async (
     .onConflictDoNothing();
 };
 
+/** `versionEvidenceQuery` for what entity reads rested on. */
+export const memoryEvidenceQuery = (
+  db: DrizzleD1Database,
+  ofRuns: (runId: typeof runBrainMemories.runId) => SQL | undefined
+) =>
+  db
+    .select({
+      runId: runBrainMemories.runId,
+      memoryId: runBrainMemories.memoryId,
+      permissionId: runBrainMemories.permissionId,
+    })
+    .from(runBrainMemories)
+    .where(ofRuns(runBrainMemories.runId));
+
 /**
  * What the entity reads of each of runs `runIds` rested on, as their
  * evidence keeps it.
@@ -146,14 +173,7 @@ export const memoryEvidenceOfRuns = async (
   env: Env,
   runIds: readonly string[]
 ) =>
-  await drizzle(env.DB)
-    .select({
-      runId: runBrainMemories.runId,
-      memoryId: runBrainMemories.memoryId,
-      permissionId: runBrainMemories.permissionId,
-    })
-    .from(runBrainMemories)
-    .where(inList(runBrainMemories.runId, runIds));
+  await memoryEvidenceQuery(drizzle(env.DB), (runId) => inList(runId, runIds));
 
 /**
  * Whether run `runId` keeps any evidence of what it read: a version its

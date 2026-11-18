@@ -16,7 +16,7 @@ import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
-import { workflowStateOf, writeWorkflowState } from "../src/workflow-state.ts";
+import { writeWorkflowState } from "../src/workflow-state.ts";
 import {
   startDetailsPerSweep,
   sweepRunDetails,
@@ -37,6 +37,7 @@ import {
   startedBy,
 } from "./json-workflow-apps.ts";
 import type { Person } from "./json-workflow-apps.ts";
+import { workflowStateOf } from "./kept-state.ts";
 import { runQuarterHourTasks } from "./maintenance.ts";
 import { racingDb } from "./racing-db.ts";
 import { runObject, sleeping, stopped, woken } from "./runs.ts";

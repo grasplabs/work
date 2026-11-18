@@ -19,9 +19,9 @@ import {
 import {
   readWorkflowState,
   resetWorkflowState,
-  workflowStateOf,
   writeWorkflowState,
 } from "../src/workflow-state.ts";
+import { workflowStateOf } from "./kept-state.ts";
 import { auditedDuring, outcome, unique } from "./sign-in.ts";
 
 // What a workflow keeps between its runs (src/workflow-state.ts), from
