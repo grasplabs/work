@@ -3563,6 +3563,10 @@ msgstr "Terug naar {agent}"
 msgid "Back to {destination}"
 msgstr "Terug naar {destination}"
 
+#: src/frame/part-words.tsx
+msgid "Back to Grasp"
+msgstr "Terug naar Grasp"
+
 #: src/dashboard/widget-board.tsx
 msgid "Back to how it began"
 msgstr "Terug naar hoe het begon"
@@ -4988,9 +4992,17 @@ msgstr "Betwist"
 msgid "Continue"
 msgstr "Doorgaan"
 
+#: src/frame/part-words.tsx
+msgid "Continue with {provider}"
+msgstr "Doorgaan met {provider}"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Continue with {signIn}"
 msgstr "Doorgaan met {signIn}"
+
+#: src/frame/part-words.tsx
+msgid "Continue with Grasp staff"
+msgstr "Doorgaan als Grasp-medewerker"
 
 #: src/apps/resource-bindings.tsx
 msgid "Contract"
@@ -5726,6 +5738,10 @@ msgstr "Dicteren"
 #: src/chat/use-dictation.ts
 msgid "Dictation isn't set up here yet. What you typed is kept."
 msgstr "Dicteren is hier nog niet ingesteld. Wat je typte blijft staan."
+
+#: src/frame/part-words.tsx
+msgid "Did not open"
+msgstr "Niet geopend"
 
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/items.ts
@@ -7249,6 +7265,10 @@ msgstr "Grasp vraagt"
 msgid "Grasp can be reached"
 msgstr "Grasp is bereikbaar"
 
+#: src/frame/part-words.tsx
+msgid "Grasp can't be reached right now. Try again in a minute."
+msgstr "Grasp is nu niet bereikbaar. Probeer het over een minuut opnieuw."
+
 #: src/chat/cited-note.tsx
 #: src/chat/global-chat.tsx
 #: src/core.ts
@@ -7256,7 +7276,6 @@ msgstr "Grasp is bereikbaar"
 #: src/interview/api.ts
 #: src/load-from-core.tsx
 #: src/routes/decisions.$decision.tsx
-#: src/routes/sign-in.tsx
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Grasp is nu niet bereikbaar. Probeer het zo opnieuw."
 
@@ -7411,6 +7430,10 @@ msgstr "Grasp merkte dat het dit niet wist"
 msgid "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
 msgstr "Grasp gaat binnenkort voor iedereen open, zodra Stephen met de teams heeft gesproken. Heb je een interviewlink, dan staat die in je e-mail."
 
+#: src/frame/part-words.tsx
+msgid "Grasp opens for everyone soon. If you have an interview link, it is in your email."
+msgstr "Grasp gaat binnenkort voor iedereen open. Heb je een interviewlink, dan staat die in je e-mail."
+
 #: src/workflows/requests/request-detail.tsx
 msgid "Grasp proposes"
 msgstr "Grasp stelt voor"
@@ -7441,6 +7464,7 @@ msgid "Grasp sent this, but its answer was lost: nobody can tell whether it took
 msgstr "Grasp heeft dit verstuurd, maar het antwoord ging verloren: niemand weet of het effect had. Controleer het op {connection} voordat je antwoordt."
 
 #: src/activity/audit-event.tsx
+#: src/frame/part-words.tsx
 msgid "Grasp staff"
 msgstr "Grasp-medewerker"
 
@@ -7523,6 +7547,10 @@ msgstr "Raster van stippen"
 #: src/activity/audit-event.tsx
 msgid "Guest"
 msgstr "Gast"
+
+#: src/frame/part-words.tsx
+msgid "Guest accounts can't sign in."
+msgstr "Gastaccounts kunnen niet inloggen."
 
 #: src/sign-in-errors.ts
 msgid "Guest accounts can't sign in. Use your organization's own account."
@@ -8814,6 +8842,10 @@ msgstr "Laatst uitgevoerd op {when}"
 msgid "Last run"
 msgstr "Laatste run"
 
+#: src/frame/part-words.tsx
+msgid "Last used"
+msgstr "Laatst gebruikt"
+
 #: src/interview/words.ts
 msgid "Last, the numbers and the result."
 msgstr "Tot slot de cijfers en het resultaat."
@@ -9158,6 +9190,10 @@ msgstr "De waarde wordt geladen"
 #: src/settings/section.tsx
 msgid "Loading…"
 msgstr "Laden…"
+
+#: src/frame/part-words.tsx
+msgid "Log in"
+msgstr "Inloggen"
 
 #: src/settings/org-card.tsx
 msgid "Logo"
@@ -9901,6 +9937,10 @@ msgstr "Nieuwe tabel"
 #: src/settings/teams.tsx
 msgid "New team"
 msgstr "Nieuw team"
+
+#: src/frame/part-words.tsx
+msgid "New to Grasp?"
+msgstr "Nieuw bij Grasp?"
 
 #: src/workflows/requests/request-summary.tsx
 msgid "New: “{label}”"
@@ -10716,6 +10756,7 @@ msgstr "niet geldig"
 msgid "Not verified"
 msgstr "Niet geverifieerd"
 
+#: src/frame/part-words.tsx
 #: src/settings/ai-providers.tsx
 msgid "Not working"
 msgstr "Werkt niet"
@@ -11443,6 +11484,14 @@ msgstr "Open: {open}"
 msgid "OpenAI-compatible endpoint"
 msgstr "OpenAI-compatibel endpoint"
 
+#: src/frame/part-words.tsx
+msgid "Opened"
+msgstr "Geopend"
+
+#: src/frame/part-words.tsx
+msgid "Opening {provider}"
+msgstr "{provider} wordt geopend"
+
 #: src/onboarding/platform-reveal.tsx
 msgid "Opening Grasp"
 msgstr "Grasp gaat open"
@@ -11679,10 +11728,18 @@ msgstr "Pagina"
 msgid "Page {current} of {count}"
 msgstr "Pagina {current} van {count}"
 
+#: src/frame/part-words.tsx
+msgid "Page {page}"
+msgstr "Pagina {page}"
+
 #: src/apps/draft-changes.tsx
 msgctxt "files of an App"
 msgid "Pages"
 msgstr "Pagina’s"
+
+#: src/frame/part-words.tsx
+msgid "Pages of {label}"
+msgstr "Pagina’s van {label}"
 
 #: src/frame/part-words.tsx
 msgid "Pages of {name}"
@@ -12095,6 +12152,10 @@ msgstr "Opschoning eerst bekijken"
 #: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
 msgstr "Voorbeeld: wijzigt niets, leest geen echte gegevens"
+
+#: src/frame/part-words.tsx
+msgid "Previous"
+msgstr "Vorige"
 
 #: src/activity/audit-event.tsx
 msgid "Previous hash"
@@ -14463,10 +14524,6 @@ msgstr "Log in om te antwoorden"
 msgid "Sign in to connect {name} now"
 msgstr "Inloggen om {name} nu te koppelen"
 
-#: src/routes/sign-in.tsx
-msgid "Sign in to Grasp"
-msgstr "Inloggen bij Grasp"
-
 #: src/sign-in-options.tsx
 msgid "Sign in with {label}"
 msgstr "Inloggen met {label}"
@@ -14514,6 +14571,10 @@ msgstr "Inloggen laat zien bij welke applicaties mensen inloggen."
 #: src/sign-in-errors.ts
 msgid "Sign-in timed out or was started elsewhere. Try again."
 msgstr "Het inloggen is verlopen of elders gestart. Probeer het opnieuw."
+
+#: src/frame/part-words.tsx
+msgid "Sign-in timed out. Try again."
+msgstr "Het inloggen duurde te lang. Probeer het opnieuw."
 
 #: src/dashboard/signals.tsx
 msgid "Signals by kind"
@@ -15232,6 +15293,14 @@ msgstr "Weghalen"
 msgid "Taking you to the Microsoft sign-in…"
 msgstr "Je gaat naar de aanmelding van Microsoft…"
 
+#: src/frame/part-words.tsx
+msgid "Talk to Grasp"
+msgstr "Praat met Grasp"
+
+#: src/frame/part-words.tsx
+msgid "Talk to us"
+msgstr "Praat met ons"
+
 #: src/brain/brain.ts
 msgid "Talked about in {source}"
 msgstr "Besproken in {source}"
@@ -15415,6 +15484,10 @@ msgstr "Dank je. Ik heb ons team gevraagd {asked} toe te voegen. Voeg die docume
 #: src/onboarding/connect-steps.tsx
 msgid "Thank you. I’ve asked our team to connect {name}. For now, check who leads which team."
 msgstr "Dank je. Ik heb ons team gevraagd {name} te koppelen. Controleer voor nu wie welk team leidt."
+
+#: src/frame/part-words.tsx
+msgid "That account isn't part of your organisation."
+msgstr "Dat account hoort niet bij je organisatie."
 
 #: src/sign-in-errors.ts
 msgid "That account isn't part of your organization."
@@ -17185,10 +17258,6 @@ msgstr "Gebruik de app"
 msgid "Use the default"
 msgstr "Standaard gebruiken"
 
-#: src/routes/sign-in.tsx
-msgid "Use your organization’s account to go on."
-msgstr "Gebruik het account van je organisatie om verder te gaan."
-
 #: src/onboarding/ai-step.tsx
 msgid "Use your own key"
 msgstr "Je eigen sleutel gebruiken"
@@ -18215,6 +18284,10 @@ msgstr "Wie kan antwoorden"
 msgid "Who can change them?"
 msgstr "Wie kan ze wijzigen?"
 
+#: src/frame/part-words.tsx
+msgid "Who can fix this"
+msgstr "Wie dit kan oplossen"
+
 #: src/apps/app-data-model.tsx
 msgid "Who can see and change its records"
 msgstr "Wie de records kan zien en wijzigen"
@@ -18773,6 +18846,10 @@ msgstr "Je komt hier terug op de pagina van {app}."
 msgid "You decide. You can stop when you want, skip any question, and delete everything for 7 days afterwards."
 msgstr "Jij beslist. Je kunt stoppen wanneer je wilt, elke vraag overslaan, en tot 7 dagen daarna alles verwijderen."
 
+#: src/frame/part-words.tsx
+msgid "You don't have access to this organisation. Ask an admin."
+msgstr "Je hebt geen toegang tot deze organisatie. Vraag het een beheerder."
+
 #: src/sign-in-errors.ts
 msgid "You don't have access to this organization. Ask an admin."
 msgstr "Je hebt geen toegang tot deze organisatie. Vraag een beheerder."
@@ -18813,6 +18890,10 @@ msgstr "Je hebt je teruggetrokken. Niets van wat je zei wordt nog gebruikt."
 #: src/interview/transcript.tsx
 msgid "You:"
 msgstr "Jij:"
+
+#: src/frame/part-words.tsx
+msgid "You're offline. Log in when you're back online."
+msgstr "Je bent offline. Log in als je weer online bent."
 
 #: src/knowledge/document.tsx
 msgid "You're reading version {number}, saved {saved}. The current version is {current}."
@@ -18974,6 +19055,10 @@ msgstr "Je rol"
 #: src/workflows/activity-bar.tsx
 msgid "Your run of version {version} ended: {status}"
 msgstr "Je run van versie {version} is afgelopen: {status}"
+
+#: src/frame/part-words.tsx
+msgid "Your session ended. Log in to carry on."
+msgstr "Je sessie is afgelopen. Log in om verder te gaan."
 
 #: src/pages/frame-failure.tsx
 msgid "Your session has ended"

@@ -2,7 +2,8 @@
 
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
-import type { ReactNode } from "react";
+import { TooltipTrigger as TriggerPrimitive } from "@ui-sdk/react/tooltip";
+import type { ReactElement, ReactNode } from "react";
 
 import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
@@ -10,7 +11,9 @@ import { Cross, Icon, Tick } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { Tooltip, TooltipContent } from "../tooltip";
 import { useWords } from "../words/words";
+import { canPress, shownState } from "./reach";
 import type { StepperProps, StepperState, StepperStep } from "./stepper";
 import { stepMarker } from "./stepper.stylex";
 import { stepperWords } from "./words";
@@ -83,6 +86,36 @@ const styles = stylex.create({
   },
   // What the caller places: the stepper's own box, round the drawing (root).
   frame: { minWidth: 0 },
+  // The marks alone, across: a calm pitch for each step instead of the whole width, never wider
+  // than what holds it (on a phone the steps share it, as with their names).
+  // From the first mark's start edge to the last one's end edge; a phone keeps the whole width.
+  pitch: (count: number, mark: string) => ({
+    width: {
+      default: `calc(${count - 1} * ${grasp.stepperPitch} + ${mark})`,
+      [PHONE]: "100%",
+    },
+    maxWidth: "100%",
+  }),
+  // The drawing reaches half a pitch past the frame on each side, less half a mark, so each mark
+  // stands in the middle of its pitch and the first is flush with the content. On a phone the row
+  // is today's: the whole width, each light dot on its column's start edge.
+  pitchRoot: (mark: string) => ({
+    marginInline: {
+      default: `calc((${mark} - ${grasp.stepperPitch}) / 2)`,
+      [PHONE]: 0,
+    },
+  }),
+  // The light look: 1 where its dots stand in their columns' middle, 0 on their start edge.
+  centre: {
+    "--stepper-centre": { default: "1", [PHONE]: "0" },
+  },
+  stepMarksLight: {
+    paddingInlineStart: { default: grasp.space1, [PHONE]: 0 },
+    paddingInlineEnd: { default: grasp.space1, [PHONE]: grasp.space3 },
+  },
+  hitMarksLight: {
+    justifyItems: { default: "center", [PHONE]: "start" },
+  },
   list: {
     position: "relative",
     zIndex: 1,
@@ -146,12 +179,22 @@ const styles = stylex.create({
     width: grasp.stepperDotCurrent,
     height: RING,
   },
+  // The marks alone: as wide as the ring too, so the dot stands in the middle of its pitch and the
+  // line as far from the step before as from the step after. On a phone, as with names.
+  lightMarkPitched: {
+    width: { default: RING, [PHONE]: grasp.stepperDotCurrent },
+  },
   // A finger needs 44px: an unseen area round the press makes up what it is shorter, without
   // making the row taller than what it shows.
   target: {
     position: "absolute",
     insetInline: 0,
     insetBlock: `min(0px, calc((100% - ${grasp.tap}) / 2))`,
+  },
+  // The marks alone: a column may be narrower than a finger (nine steps on a phone), so the
+  // target is 44px wide round the mark's middle as well.
+  targetWide: {
+    insetInline: `min(0px, calc((100% - ${grasp.tap}) / 2))`,
   },
   // Down, the press reaches a little past the round mark on every side, given back by the margin,
   // so its target holds the mark and the words and nothing moves; its ring is on the mark.
@@ -203,6 +246,20 @@ const styles = stylex.create({
     transitionProperty: "box-shadow",
     transitionDuration: grasp.durationHover,
     transitionTimingFunction: grasp.ease,
+  }),
+  // The marks alone: a step that is not a button still takes focus for its tooltip; its ring is on
+  // its mark, with no hover fill (nothing to press).
+  markFocus: (corner: string, shape: string) => ({
+    borderRadius: corner,
+    cornerShape: shape,
+    outline: {
+      default: "none",
+      [stylex.when.ancestor(":focus-visible", stepMarker)]: {
+        default: `${grasp.ringWidth} solid ${grasp.ring}`,
+        [FORCED]: `calc(2 * ${grasp.ringWidth}) solid Highlight`,
+      },
+    },
+    outlineOffset: grasp.ringOffset,
   }),
   nameHover: {
     color: {
@@ -398,8 +455,8 @@ const styles = stylex.create({
   },
   // light: one line between each two steps, stopping short of both: a hairline, or solid in the
   // value colour once the step before it is done.
-  segAcross: (index: number, count: number) => ({
-    insetInlineStart: `calc(${(index / count) * 100}% + ${DOT_X} + ${LINE_OFF})`,
+  segAcross: (index: number, count: number, dot: string) => ({
+    insetInlineStart: `calc(${(index / count) * 100}% + ${dot} + ${LINE_OFF})`,
     width: `calc(100% / ${count} - 2 * ${LINE_OFF})`,
     top: `calc(${DOT_Y} - ${grasp.stepperLine} / 2)`,
     height: grasp.stepperLine,
@@ -454,12 +511,12 @@ const styles = stylex.create({
   out: { opacity: 0 },
   // The working light's room: the line from the current step to the next, inside the mover, so an
   // advance carries it to the next stretch. Hidden in forced colours: the marks carry the state.
-  travelRoomAcross: {
-    insetInlineStart: `calc(${DOT_X} + ${LINE_OFF})`,
+  travelRoomAcross: (dot: string) => ({
+    insetInlineStart: `calc(${dot} + ${LINE_OFF})`,
     width: `calc(100% - 2 * ${LINE_OFF})`,
     top: `calc(${DOT_Y} - ${grasp.stepperLine} / 2)`,
     height: grasp.stepperLine,
-  },
+  }),
   travelRoomDown: (mark: string) => ({
     insetInlineStart: `calc(${mark} / 2 - ${grasp.stepperLine} / 2)`,
     width: grasp.stepperLine,
@@ -578,6 +635,18 @@ const stateOf = (
   current: number
 ): StepperState => step.state ?? placeOf(index, current);
 
+/** The ring a step's mark answers with: a press's (hover and focus), focus alone, or none. */
+type Ring = "press" | "focus" | undefined;
+
+const ringOf = (look: Look, ring: Ring) => {
+  if (ring === "press") {
+    return styles.markPress(markCorner[look], markShape[look]);
+  }
+  return (
+    ring === "focus" && styles.markFocus(markCorner[look], markShape[look])
+  );
+};
+
 const Drawn = ({ on, children }: { on: boolean; children: ReactNode }) => (
   <span {...stylex.props(styles.layer, styles.drawn, on && styles.drawnIn)}>
     {children}
@@ -587,14 +656,16 @@ const Drawn = ({ on, children }: { on: boolean; children: ReactNode }) => (
 /** The light look's mark: the dot, and round the current one its ring while it is not at work. */
 const LightMark = ({
   state,
-  press,
+  ring,
   working,
   across,
+  pitched,
 }: {
   state: StepperState;
-  press: boolean;
+  ring: Ring;
   working: boolean;
   across: boolean;
+  pitched: boolean;
 }) => (
   <span
     aria-hidden="true"
@@ -602,7 +673,8 @@ const LightMark = ({
     {...stylex.props(
       styles.mark(markSize.light),
       across && styles.lightMarkAcross,
-      press && styles.markPress(markCorner.light, markShape.light)
+      pitched && styles.lightMarkPitched,
+      ringOf("light", ring)
     )}
   >
     <span
@@ -623,19 +695,16 @@ const LightMark = ({
 const TileMark = ({
   state,
   number,
-  press,
+  ring,
 }: {
   state: StepperState;
   number: number;
-  press: boolean;
+  ring: Ring;
 }) => (
   <span
     aria-hidden="true"
     data-state={state}
-    {...stylex.props(
-      styles.mark(markSize.dither),
-      press && styles.markPress(markCorner.dither, markShape.dither)
-    )}
+    {...stylex.props(styles.mark(markSize.dither), ringOf("dither", ring))}
   >
     <span {...stylex.props(styles.layer, styles.tile, tileStyles[state])}>
       <span
@@ -666,19 +735,16 @@ const numeralLook = (state: StepperState) => {
 const SerifMark = ({
   state,
   number,
-  press,
+  ring,
 }: {
   state: StepperState;
   number: number;
-  press: boolean;
+  ring: Ring;
 }) => (
   <span
     aria-hidden="true"
     data-state={state}
-    {...stylex.props(
-      styles.mark(markSize.serif),
-      press && styles.markPress(markCorner.serif, markShape.serif)
-    )}
+    {...stylex.props(styles.mark(markSize.serif), ringOf("serif", ring))}
   >
     <span {...stylex.props(styles.layer, styles.numeral, numeralLook(state))}>
       {number}
@@ -700,25 +766,33 @@ const Mark = ({
   look,
   state,
   number,
-  press,
+  ring,
   working,
   across,
+  pitched,
 }: {
   look: Look;
   state: StepperState;
   number: number;
-  press: boolean;
+  ring: Ring;
   working: boolean;
   across: boolean;
+  pitched: boolean;
 }) => {
   if (look === "dither") {
-    return <TileMark state={state} number={number} press={press} />;
+    return <TileMark state={state} number={number} ring={ring} />;
   }
   if (look === "serif") {
-    return <SerifMark state={state} number={number} press={press} />;
+    return <SerifMark state={state} number={number} ring={ring} />;
   }
   return (
-    <LightMark state={state} press={press} working={working} across={across} />
+    <LightMark
+      state={state}
+      ring={ring}
+      working={working}
+      across={across}
+      pitched={pitched}
+    />
   );
 };
 
@@ -737,6 +811,7 @@ const Behind = ({
   current,
   states,
   working,
+  centred,
 }: {
   look: Look;
   across: boolean;
@@ -744,6 +819,7 @@ const Behind = ({
   current: number;
   states: readonly StepperState[];
   working: boolean;
+  centred: boolean;
 }) => {
   const mark = markSize[look];
   const at = Math.min(Math.max(current, 0), Math.max(count - 1, 0));
@@ -801,6 +877,14 @@ const Behind = ({
   // light: the line in its stretches, and the working light on the one after the current step,
   // there only while that step is in progress and has a next step to travel to.
   const travelling = working && lit && at < count - 1;
+  // Where a dot's middle stands: on its column's start edge, or (the marks alone) in its middle;
+  // from the whole row for a stretch of line, from the mover's one column for the light.
+  const lineDot = centred
+    ? `(var(--stepper-centre) * 100% / ${count} / 2 + (1 - var(--stepper-centre)) * ${DOT_X})`
+    : DOT_X;
+  const lightDot = centred
+    ? `(var(--stepper-centre) * 50% + (1 - var(--stepper-centre)) * ${DOT_X})`
+    : DOT_X;
   return (
     <>
       {states.slice(0, -1).map((state, index) => {
@@ -816,7 +900,7 @@ const Behind = ({
               styles.behind,
               styles.seg,
               across
-                ? styles.segAcross(index, count)
+                ? styles.segAcross(index, count, lineDot)
                 : styles.segDown(index, count, mark)
             )}
           >
@@ -842,7 +926,9 @@ const Behind = ({
         <span
           {...stylex.props(
             styles.travelRoom,
-            across ? styles.travelRoomAcross : styles.travelRoomDown(mark)
+            across
+              ? styles.travelRoomAcross(lightDot)
+              : styles.travelRoomDown(mark)
           )}
         >
           <span
@@ -859,6 +945,265 @@ const Behind = ({
   );
 };
 
+/** A click handler, as the tooltip's trigger may lend one. */
+type Press = (event: unknown) => void;
+const isPress = (value: unknown): value is Press => typeof value === "function";
+
+/** What a step's hit is drawn as: a button or a span, with the props its tooltip's trigger lends. */
+type DrawHit = (
+  lent: Record<string, unknown>,
+  lentPress?: Press
+) => ReactElement;
+
+/**
+ * The marks alone: a step's hit is its tooltip's trigger, the name its words. The tooltip repeats
+ * the name the step already says, so a screen reader is not told it twice (as Breadcrumb's name). A
+ * step that is not a button still takes focus, so the keyboard reaches its name.
+ */
+const Tipped = ({
+  name,
+  tipped,
+  focusable,
+  draw,
+}: {
+  name: string;
+  tipped: boolean;
+  focusable: boolean;
+  draw: DrawHit;
+}) => {
+  if (!tipped) {
+    return draw({});
+  }
+  return (
+    <Tooltip>
+      <TriggerPrimitive
+        tabIndex={focusable ? 0 : undefined}
+        render={({
+          type: _type,
+          "aria-describedby": _description,
+          onClick,
+          ...lent
+        }: Record<string, unknown>) =>
+          draw(lent, isPress(onClick) ? onClick : undefined)
+        }
+      />
+      <TooltipContent>{name}</TooltipContent>
+    </Tooltip>
+  );
+};
+
+interface StepItemProps {
+  step: StepperStep;
+  index: number;
+  state: StepperState;
+  /** How its state is said, after its name. */
+  stateWords: string;
+  drawn: Look;
+  across: boolean;
+  labelsHidden: boolean;
+  working: boolean;
+  /** Pressed, it goes to this step: given when the step can be pressed. */
+  onSelect: ((index: number) => void) | undefined;
+  /** The light look across with names: on its column's start edge. */
+  start: boolean;
+  /** The light look's marks alone: in its column's middle, but on a phone. */
+  marksLight: boolean;
+}
+
+/** One step: its mark and its words; a button when it can be pressed; with the marks alone, its tooltip. */
+const StepItem = ({
+  step,
+  index,
+  state,
+  stateWords,
+  drawn,
+  across,
+  labelsHidden,
+  working,
+  onSelect,
+  start,
+  marksLight,
+}: StepItemProps) => {
+  const mark = markSize[drawn];
+  const pressable = onSelect !== undefined;
+  const words = (
+    <span
+      {...stylex.props(
+        styles.words,
+        !across && styles.wordsDown(mark),
+        labelsHidden && visuallyHidden
+      )}
+    >
+      <span
+        {...stylex.props(
+          styles.name,
+          nameStyles[state],
+          across && !labelsHidden && styles.nameFolds,
+          pressable && styles.nameHover
+        )}
+      >
+        {step.label}
+        <span {...stylex.props(visuallyHidden)}>, {stateWords}</span>
+      </span>
+      {!across && step.description !== undefined && (
+        <span {...stylex.props(styles.description)}>{step.description}</span>
+      )}
+    </span>
+  );
+  let ring: Ring;
+  if (pressable) {
+    ring = "press";
+  } else if (labelsHidden) {
+    ring = "focus";
+  }
+  const inside = (
+    <>
+      {pressable && (
+        <span
+          aria-hidden="true"
+          {...stylex.props(styles.target, labelsHidden && styles.targetWide)}
+        />
+      )}
+      <Mark
+        look={drawn}
+        state={state}
+        number={index + 1}
+        ring={ring}
+        working={working}
+        across={across}
+        pitched={marksLight}
+      />
+      {words}
+    </>
+  );
+  const layout = across ? styles.hitAcross : styles.hitDown(mark);
+  const draw: DrawHit = (lent, lentPress) => {
+    if (onSelect !== undefined) {
+      return (
+        <button
+          {...lent}
+          type="button"
+          onClick={(event) => {
+            lentPress?.(event);
+            onSelect(index);
+          }}
+          {...stylex.props(
+            stepMarker,
+            styles.hit,
+            layout,
+            start && styles.hitAcrossStart,
+            marksLight && styles.hitMarksLight,
+            styles.pressable,
+            focus.ring,
+            styles.pressOnMark
+          )}
+        >
+          {inside}
+        </button>
+      );
+    }
+    if (labelsHidden) {
+      return (
+        <span
+          {...lent}
+          {...stylex.props(
+            stepMarker,
+            styles.hit,
+            layout,
+            marksLight && styles.hitMarksLight,
+            styles.pressOnMark
+          )}
+        >
+          {inside}
+        </span>
+      );
+    }
+    return (
+      <span
+        {...stylex.props(styles.hit, layout, start && styles.hitAcrossStart)}
+      >
+        {inside}
+      </span>
+    );
+  };
+  return (
+    <li
+      aria-current={state === "current" ? "step" : undefined}
+      {...stylex.props(
+        styles.step,
+        across && styles.stepAcross,
+        start && styles.stepAcrossStart,
+        marksLight && styles.stepMarksLight
+      )}
+    >
+      <Tipped
+        name={step.label}
+        tipped={labelsHidden}
+        focusable={!pressable}
+        draw={draw}
+      />
+    </li>
+  );
+};
+
+/** Across a phone: the names give way to one line, "Step 2 of 4 · Members", or the finished words. */
+const Fold = ({
+  start,
+  here,
+  step,
+  state,
+  finishedLabel,
+  failedWords,
+}: {
+  start: boolean;
+  here: string | undefined;
+  step: string;
+  state: StepperState | undefined;
+  finishedLabel: string;
+  failedWords: string;
+}) => (
+  <div
+    aria-hidden="true"
+    {...stylex.props(styles.fold, start && styles.foldStart)}
+  >
+    {here === undefined ? (
+      finishedLabel
+    ) : (
+      <>
+        <span {...stylex.props(styles.foldCount)}>{step} · </span>
+        {here}
+        {/* A failed step says so in words too, not by its red mark alone. */}
+        {state === "failed" && (
+          <span {...stylex.props(styles.failed)}>{` · ${failedWords}`}</span>
+        )}
+      </>
+    )}
+  </div>
+);
+
+/**
+ * Where the marks stand. Across, the light look's steps start on their column's edge, under their
+ * names (`start`); with the marks alone every look's mark stands in its column's middle, a pitch
+ * apart, but the light look on a phone (`marksLight`).
+ */
+const geometryOf = (
+  drawn: Look,
+  across: boolean,
+  labelsHidden: boolean,
+  count: number
+) => {
+  const marks = across && labelsHidden;
+  const marksLight = marks && drawn === "light";
+  // The mark's width across: the light look's is its current step's ring.
+  const markAcross = drawn === "light" ? `calc${RING}` : markSize[drawn];
+  return {
+    start: across && drawn === "light" && !labelsHidden,
+    marksLight,
+    frame: marks && styles.pitch(count, markAcross),
+    root: [marks && styles.pitchRoot(markAcross), marksLight && styles.centre],
+  };
+};
+
 export const LookStepper = ({
   steps,
   current = 0,
@@ -868,6 +1213,8 @@ export const LookStepper = ({
   style,
   look = "light",
   onSelect,
+  reached,
+  labelsHidden = false,
   countLabel: countGiven,
   finishedLabel: finishedGiven,
   working = false,
@@ -881,20 +1228,26 @@ export const LookStepper = ({
   const across = orientation === "horizontal";
   const count = steps.length;
   const states = steps.map((step, index) => stateOf(step, index, current));
-  const mark = markSize[drawn];
   const here = steps[current];
   const where =
     here === undefined
       ? finishedLabel
       : `${countLabel(current + 1, count)}: ${here.label}`;
+  const { start, marksLight, frame, root } = geometryOf(
+    drawn,
+    across,
+    labelsHidden,
+    count
+  );
   return (
     <div
       data-slot="stepper"
       data-look={drawn}
       data-working={working && drawn === "light" ? "" : undefined}
-      {...stylex.props(styles.frame, style)}
+      data-labels-hidden={labelsHidden ? "" : undefined}
+      {...stylex.props(styles.frame, frame, style)}
     >
-      <div {...stylex.props(styles.root)}>
+      <div {...stylex.props(styles.root, root)}>
         <ol
           aria-label={label}
           {...stylex.props(
@@ -904,90 +1257,27 @@ export const LookStepper = ({
         >
           {steps.map((step, index) => {
             const state = states[index] ?? "coming";
-            const pressable = onSelect !== undefined && state === "done";
-            const words = (
-              <span
-                {...stylex.props(
-                  styles.words,
-                  !across && styles.wordsDown(mark)
-                )}
-              >
-                <span
-                  {...stylex.props(
-                    styles.name,
-                    nameStyles[state],
-                    across && styles.nameFolds,
-                    pressable && styles.nameHover
-                  )}
-                >
-                  {step.label}
-                  <span {...stylex.props(visuallyHidden)}>, {said[state]}</span>
-                </span>
-                {!across && step.description !== undefined && (
-                  <span {...stylex.props(styles.description)}>
-                    {step.description}
-                  </span>
-                )}
-              </span>
-            );
-            const inside = (
-              <>
-                {pressable && (
-                  <span aria-hidden="true" {...stylex.props(styles.target)} />
-                )}
-                <Mark
-                  look={drawn}
-                  state={state}
-                  number={index + 1}
-                  press={pressable}
-                  working={working}
-                  across={across}
-                />
-                {words}
-              </>
-            );
-            const layout = across ? styles.hitAcross : styles.hitDown(mark);
-            const start = across && drawn === "light";
+            // Reached and come back from: drawn and said as done; the line behind still follows `current`.
+            const shown = shownState(state, index, current, reached);
             return (
-              <li
+              <StepItem
                 key={`${index}-${step.label}`}
-                aria-current={state === "current" ? "step" : undefined}
-                {...stylex.props(
-                  styles.step,
-                  across && styles.stepAcross,
-                  start && styles.stepAcrossStart
-                )}
-              >
-                {pressable ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onSelect(index);
-                    }}
-                    {...stylex.props(
-                      stepMarker,
-                      styles.hit,
-                      layout,
-                      start && styles.hitAcrossStart,
-                      styles.pressable,
-                      focus.ring,
-                      styles.pressOnMark
-                    )}
-                  >
-                    {inside}
-                  </button>
-                ) : (
-                  <span
-                    {...stylex.props(
-                      styles.hit,
-                      layout,
-                      start && styles.hitAcrossStart
-                    )}
-                  >
-                    {inside}
-                  </span>
-                )}
-              </li>
+                step={step}
+                index={index}
+                state={shown}
+                stateWords={said[shown]}
+                drawn={drawn}
+                across={across}
+                labelsHidden={labelsHidden}
+                working={working}
+                onSelect={
+                  canPress(state, index, current, reached)
+                    ? onSelect
+                    : undefined
+                }
+                start={start}
+                marksLight={marksLight}
+              />
             );
           })}
         </ol>
@@ -998,32 +1288,17 @@ export const LookStepper = ({
           current={current}
           states={states}
           working={working}
+          centred={marksLight}
         />
         {across && (
-          <div
-            aria-hidden="true"
-            {...stylex.props(
-              styles.fold,
-              drawn === "light" && styles.foldStart
-            )}
-          >
-            {here === undefined ? (
-              finishedLabel
-            ) : (
-              <>
-                <span {...stylex.props(styles.foldCount)}>
-                  {countLabel(current + 1, count)} ·{" "}
-                </span>
-                {here.label}
-                {/* A failed step says so in words too, not by its red mark alone. */}
-                {states[current] === "failed" && (
-                  <span
-                    {...stylex.props(styles.failed)}
-                  >{` · ${said.failed}`}</span>
-                )}
-              </>
-            )}
-          </div>
+          <Fold
+            start={drawn === "light"}
+            here={here?.label}
+            step={countLabel(current + 1, count)}
+            state={states[current]}
+            finishedLabel={finishedLabel}
+            failedWords={said.failed}
+          />
         )}
         <output {...stylex.props(visuallyHidden)}>{where}</output>
       </div>

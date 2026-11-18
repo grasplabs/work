@@ -29,6 +29,7 @@ import { grasp, media } from "../tokens/tokens.stylex";
 import { ms } from "../tokens/tokens.values";
 import { useWords, withGiven } from "../words/words";
 import { usePanel } from "./context";
+import { PanelTexture } from "./texture";
 import { panelWords } from "./words";
 
 /** One view of the object: a tab with an icon and a word. */
@@ -135,22 +136,10 @@ const styles = stylex.create({
     paddingInline: grasp.inspectorPad,
     minWidth: 0,
   },
-  texture: {
-    position: "absolute",
-    insetInline: 0,
-    top: `calc(-1 * ${grasp.inspectorBar})`,
-    bottom: 0,
-    pointerEvents: "none",
-    opacity: grasp.inspectorDitherStrength,
-    backgroundImage: `radial-gradient(120% 90% at 0% 0%, ${grasp.mint}, transparent 70%)`,
-    maskImage: `radial-gradient(circle, black ${grasp.composerDot}, transparent calc(${grasp.composerDot} + ${grasp.hairline}))`,
-    maskSize: `${grasp.composerDither} ${grasp.composerDither}`,
-    maskRepeat: "repeat",
-    // Forced colours: no texture.
-    display: { default: "block", [media.forced]: "none" },
-  },
+  // The texture (PanelTexture) reaches up behind the bar, so the light starts at the panel's top.
+  texture: { insetBlockStart: `calc(-1 * ${grasp.inspectorBar})` },
   // With no bar above the head, the texture starts at the head's own top.
-  textureTopmost: { top: 0 },
+  textureTopmost: { insetBlockStart: 0 },
   tile: { position: "relative", marginBlockEnd: grasp.space3 },
   title: {
     position: "relative",
@@ -504,10 +493,8 @@ const Head = ({
   return (
     <div data-slot="panel-head" {...stylex.props(styles.head)}>
       {texture && (
-        <span
-          aria-hidden
-          data-slot="panel-texture"
-          {...stylex.props(styles.texture, topmost && styles.textureTopmost)}
+        <PanelTexture
+          layout={topmost ? styles.textureTopmost : styles.texture}
         />
       )}
       {given(icon) && <span {...stylex.props(styles.tile)}>{icon}</span>}

@@ -1187,6 +1187,11 @@
   --grasp-slider-track: 4px;
   /* The thumb of a slider: a white circle with the low lift. */
   --grasp-slider-thumb: 16px;
+  /* Level slider: the brain's dots. */
+  /* Where Grasp is active right now: a dot firing in the Brain's drawings, the word being spoken, the thought in flight. The old kit's #e0542c. A drawing colour, and words at large sizes only: on paper it is about 3.6:1, short of small text. */
+  --grasp-brain-heat: light-dark(oklch(0.627 0.183 36.26), oklch(0.68 0.19 38));
+  /* The hottest dots in a drawing, blended from brain-heat; the old kit's #f6c35a, the same at night. Never words, never a fill of its own. */
+  --grasp-brain-glow: oklch(0.843 0.135 83.03);
   /* Level slider: level slider. */
   /* How tall the track of dots is at the compact size, inside a popup or a menu. */
   --grasp-level-slider-track: 24px;
@@ -1761,6 +1766,8 @@
   --grasp-app-shell-bar: 56px;
   /* The circle that marks a step in a stepper: a chip's height. */
   --grasp-stepper-mark: var(--grasp-chip);
+  /* How far apart a stepper's marks stand when it shows them alone (labelsHidden): calm, and each mark's 44px target clear of the next. */
+  --grasp-stepper-pitch: 56px;
   /* How far a stepper's line stops short of each mark, so it never touches what it joins. */
   --grasp-stepper-line-gap: var(--grasp-space-1);
   /* A stepper's mark as a tile (the dither look): a squircle a little larger than a chip. */
@@ -2005,6 +2012,15 @@
   --grasp-chat-start-gap: var(--grasp-space-8);
   /* The widest the question and the box to ask in run, where a chat starts: the product's Chat page. */
   --grasp-chat-start-width: 48rem;
+  /* Sign in: sign in. */
+  /* The sign-in page's ground under the glass door, and all it shows where the door cannot draw: night in both themes, as the website's login. */
+  --grasp-sign-in-night: var(--grasp-light-night);
+  /* The widest the sign-in page's title and ways in run. */
+  --grasp-sign-in-column: 26rem;
+  /* The width of a way in on the sign-in page: 320px, as the website's. */
+  --grasp-sign-in-ways: 20rem;
+  /* Laid over the glass door while a way in is under the pointer or the keyboard: the green dims a little. */
+  --grasp-sign-in-veil: oklch(0.131 0.021 174.91 / 0.32);
   /* Inspector panel: inspector panel. */
   /* The width of an inspector panel beside a page, as Profound's 421px. */
   --grasp-inspector-width: 420px;

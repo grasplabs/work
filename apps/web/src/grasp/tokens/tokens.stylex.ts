@@ -456,6 +456,9 @@ export const grasp = stylex.defineConsts({
   // Slider: slider.
   sliderTrack: "var(--grasp-slider-track)",
   sliderThumb: "var(--grasp-slider-thumb)",
+  // Level slider: the brain's dots.
+  brainHeat: "var(--grasp-brain-heat)",
+  brainGlow: "var(--grasp-brain-glow)",
   // Level slider: level slider.
   levelSliderTrack: "var(--grasp-level-slider-track)",
   levelSliderTrackRegular: "var(--grasp-level-slider-track-regular)",
@@ -705,6 +708,7 @@ export const grasp = stylex.defineConsts({
   pageTitleWait: "var(--grasp-page-title-wait)",
   appShellBar: "var(--grasp-app-shell-bar)",
   stepperMark: "var(--grasp-stepper-mark)",
+  stepperPitch: "var(--grasp-stepper-pitch)",
   stepperLineGap: "var(--grasp-stepper-line-gap)",
   stepperTile: "var(--grasp-stepper-tile)",
   stepperNumeral: "var(--grasp-stepper-numeral)",
@@ -796,6 +800,11 @@ export const grasp = stylex.defineConsts({
   backdropDitherMask: "var(--grasp-backdrop-dither-mask)",
   chatStartGap: "var(--grasp-chat-start-gap)",
   chatStartWidth: "var(--grasp-chat-start-width)",
+  // Sign in: sign in.
+  signInNight: "var(--grasp-sign-in-night)",
+  signInColumn: "var(--grasp-sign-in-column)",
+  signInWays: "var(--grasp-sign-in-ways)",
+  signInVeil: "var(--grasp-sign-in-veil)",
   // Inspector panel: inspector panel.
   inspectorWidth: "var(--grasp-inspector-width)",
   inspectorBar: "var(--grasp-inspector-bar)",
