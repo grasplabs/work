@@ -1101,16 +1101,27 @@ describe("native sync", () => {
       const spy = vi.spyOn(console, "warn").mockImplementation((...line) => {
         warned.push(line);
       });
+      // Runs a call short of reading every source's changes (claim, read,
+      // commit each, after the run's own three), a minute apart, until the
+      // relist ends: far within its day.
+      const sources = await env.DB.prepare(
+        "SELECT count(*) AS count FROM brain_sync_sources"
+      ).first<{ count: number }>();
+      const left = 3 + 3 * (sources?.count ?? 0) - 1;
+      let minutes = 0;
       try {
-        // Runs too small for every source's changes: a minute each.
-        for (let minute = 0; minute < 30; minute += 1) {
+        for (; minutes < 240; minutes += 1) {
           later(pollMs);
           vi.useFakeTimers({ toFake: ["Date"], now: clockAt });
           try {
             // oxlint-disable-next-line no-await-in-loop -- one run after another, as the clock runs them
-            await runSync(env, { left: 12 });
+            await runSync(env, { left });
           } finally {
             vi.useRealTimers();
+          }
+          // oxlint-disable-next-line no-await-in-loop -- read after each run
+          if (!(await finds(owner.userId, vanished))) {
+            break;
           }
         }
       } finally {
@@ -1122,11 +1133,13 @@ describe("native sync", () => {
         said: JSON.stringify(warned).includes("brain.sync.relist_overdue"),
         saidOf: JSON.stringify(warned).includes(connectionId),
         relisted: await finds(owner.userId, vanished),
+        withinItsDay: minutes < 240,
       }).toStrictEqual({
         overdue: true,
         said: true,
         saidOf: true,
         relisted: false,
+        withinItsDay: true,
       });
     }
   );
