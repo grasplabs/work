@@ -14,12 +14,21 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "../grasp/empty/index.ts";
-import { Search, Settings } from "../grasp/icons/index.ts";
+import { AppWindow, Search, Settings } from "../grasp/icons/index.ts";
 import {
   InputGroup,
   InputGroupInput,
   InputGroupText,
 } from "../grasp/input-group/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { Text } from "../grasp/text/index.ts";
 import { MakeSomethingLink } from "../make/make-link.tsx";
 import { statusOf } from "./app-status.tsx";
 
@@ -37,6 +46,34 @@ const SEARCH_MEASURE = "18rem";
 const styles = stylex.create({
   search: { maxWidth: SEARCH_MEASURE },
 });
+
+/** CONCEPT ONLY: how the overview draws its Apps, as `?cards=` asks. */
+const cards = new URLSearchParams(window.location.search).get("cards");
+
+/** CONCEPT ONLY (?cards=rows): one App as a row with a mark. */
+const AppRow = ({ overview: { app } }: { overview: AppOverview }) => {
+  const { t } = useLingui();
+  const status = statusOf(app);
+  const metaOf = {
+    live: t`Your team uses it`,
+    draft: t`Only you see this`,
+    archived: t({ message: "Archived", context: "an App put away" }),
+  };
+  return (
+    <Item render={<Link params={{ app: app.id }} to="/apps/$app" />}>
+      <ItemMedia icon={AppWindow} />
+      <ItemContent>
+        <ItemTitle>{app.name}</ItemTitle>
+        {app.description === "" ? null : (
+          <ItemDescription>{app.description}</ItemDescription>
+        )}
+      </ItemContent>
+      <Text element="span" size="sm" tone="muted">
+        {metaOf[status]}
+      </Text>
+    </Item>
+  );
+};
 
 /** One App: its card. */
 const OneApp = ({ overview: { app } }: { overview: AppOverview }) => {
@@ -58,9 +95,8 @@ const OneApp = ({ overview: { app } }: { overview: AppOverview }) => {
         },
       ]}
       render={<Link params={{ app: app.id }} to="/apps/$app" />}
-      // Until each version has its picture, the window is quiet and
-      // names the App.
-      labels={{ more: t`More`, empty: app.name }}
+      // CONCEPT ONLY (?cards=quiet): the window quiet, not naming the App.
+      labels={{ more: t`More`, empty: cards === "quiet" ? "" : app.name }}
       meta={metaOf[status]}
       title={app.name}
       {...(app.description === "" ? {} : { description: app.description })}
@@ -143,11 +179,19 @@ export const AppsOverview = ({
             </Empty>
           ) : (
             <section aria-label={t`Apps`}>
-              <AppCardGrid>
-                {shown.map((overview) => (
-                  <OneApp key={overview.app.id} overview={overview} />
-                ))}
-              </AppCardGrid>
+              {cards === "rows" ? (
+                <ItemGroup>
+                  {shown.map((overview) => (
+                    <AppRow key={overview.app.id} overview={overview} />
+                  ))}
+                </ItemGroup>
+              ) : (
+                <AppCardGrid>
+                  {shown.map((overview) => (
+                    <OneApp key={overview.app.id} overview={overview} />
+                  ))}
+                </AppCardGrid>
+              )}
             </section>
           )}
         </>
