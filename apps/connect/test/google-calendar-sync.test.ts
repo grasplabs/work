@@ -3,6 +3,7 @@ import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { connectAccount, ownAccount, someone } from "./connect.ts";
+import { scopeRefusal, syncGrant } from "./google-scopes.ts";
 import { fakeInternet } from "./internet.ts";
 import { fakeProviders } from "./oauth-provider.ts";
 
@@ -18,17 +19,23 @@ const providers = fakeProviders();
 
 const apisHost = "www.googleapis.com";
 const primary = "/calendar/v3/calendars/primary";
+const primaryEntry = "/calendar/v3/users/me/calendarList/primary";
 
 /** What the calendar answers, for each test to set: by sync token ("" for the full listing). */
 const calendar: { pages: Record<string, Record<string, unknown>> } = {
   pages: {},
 };
 
-const internet = fakeInternet((_request, url) => {
+const internet = fakeInternet((request, url) => {
+  // Google answers only what the connection's grant allows.
+  const refused = scopeRefusal(providers, request, url);
+  if (refused !== undefined) {
+    return refused;
+  }
   if (url.hostname !== apisHost) {
     return new Response(null, { status: 404 });
   }
-  if (url.pathname === primary) {
+  if (url.pathname === primary || url.pathname === primaryEntry) {
     return Response.json({ id: "Owner@Acme.test" });
   }
   if (url.pathname === `${primary}/events`) {
@@ -47,7 +54,10 @@ const internet = fakeInternet((_request, url) => {
 const connected = async (): Promise<string> => {
   calendar.pages = {};
   const person = someone();
-  return await connectAccount(providers, person, ownAccount(person, "google"));
+  return await connectAccount(providers, person, {
+    ...ownAccount(person, "google"),
+    granted: syncGrant,
+  });
 };
 
 const request = (
@@ -119,7 +129,10 @@ describe("syncing a person's own calendar", () => {
     expect(
       internet.sent
         .filter(({ host }) => host === apisHost)
-        .every(({ path }) => path.startsWith(primary))
+        .every(
+          ({ path }) =>
+            path.startsWith(primary) || path.startsWith(primaryEntry)
+        )
     ).toBeTruthy();
   });
 

@@ -37,6 +37,15 @@ import { apisHost, googleFailure, googleUrl } from "./google.ts";
 
 const primary = "/calendar/v3/calendars/primary";
 const events = `${primary}/events`;
+/**
+ * The person's own entry for their primary calendar, whose ID is their
+ * address: calendarList.get takes `primary` and needs only
+ * `calendar.calendarlist.readonly`, which the connection holds, while
+ * calendars.get needs `calendar.calendars.readonly` or more, which it
+ * doesn't.
+ * https://developers.google.com/workspace/calendar/api/v3/reference/calendarList/get
+ */
+const primaryEntry = "/calendar/v3/users/me/calendarList/primary";
 
 /** Events asked of Google per page. */
 const calendarPageSize = 250;
@@ -165,14 +174,18 @@ const textOf = (event: CalendarEvent): string =>
 
 /** What one event makes: the event as it now is, or gone. */
 const eventItems = (
-  room: SyncRoom,
+  room: SyncRoom | null,
   owner: SyncReader[],
   event: CalendarEvent
 ): SyncItem[] | "full" => {
   if (event.status === "cancelled") {
     return [{ gone: true, id: event.id, kind: "event" }];
   }
-  const kept = takeContent(room, { type: "text", text: textOf(event) });
+  // Passed over (no room): without its content.
+  const kept =
+    room === null
+      ? { content: null }
+      : takeContent(room, { type: "text", text: textOf(event) });
   if (kept === null) {
     return "full";
   }
@@ -213,14 +226,20 @@ const eventsPage = async (
     ),
     eventsSchema
   );
-  const { items, last, done } = await fillPage(
+  const { items, last, done } = await fillPage({
     room,
-    read.items ?? [],
-    position.after,
-    (event) => `${event.id}@${event.updated ?? ""}`,
+    entries: read.items ?? [],
+    after: position.after,
+    keyOf: (event) => `${event.id}@${event.updated ?? ""}`,
     // oxlint-disable-next-line require-await -- the kit's paging takes a promise
-    async (event) => eventItems(room, owner, event)
-  );
+    itemsFor: async (event) => eventItems(room, owner, event),
+    // An event needs no request of its own: it is never late. Were it,
+    // it would come without its content.
+    passOver: (event) => {
+      const passed = eventItems(null, owner, event);
+      return passed === "full" ? [] : passed;
+    },
+  });
   if (!done) {
     return {
       items,
@@ -254,7 +273,7 @@ export const calendarSync = defineSync({
   name: "calendar",
   kind: "event",
   routes: [
-    { method: "GET", host: apisHost, path: primary },
+    { method: "GET", host: apisHost, path: primaryEntry },
     { method: "GET", host: apisHost, path: events },
   ],
   read: async ({ place, cursor, deadline }) => {
@@ -267,7 +286,7 @@ export const calendarSync = defineSync({
     // Whose calendar: its ID is its owner's address, its one reader.
     const calendar = await getJson(
       room,
-      googleUrl(apisHost, primary),
+      googleUrl(apisHost, primaryEntry),
       calendarSchema
     );
     const owner: SyncReader[] = [
