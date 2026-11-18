@@ -284,6 +284,72 @@ describe("picking a shared connection's places to sync", () => {
     });
   });
 
+  it("keeps the boxes and the save still until the places are read again after a save", async () => {
+    const fake: Core = { held: libraries() };
+    await shown(fake);
+    // The reading after the save is slow.
+    const reading = Promise.withResolvers<boolean>();
+    fake.pending = reading.promise;
+    await click(boxOf("Documents", "Legal"));
+    await click(button("Save the places"));
+    await until(() => fake.held.picks.includes("b!legal"));
+    // Ticked while the places are read again: nothing happens.
+    await click(boxOf("Documents", longSite));
+    const meanwhile = {
+      ticked: boxOf("Documents", longSite)?.getAttribute("aria-checked"),
+      save: button("Save the places")?.disabled,
+    };
+    await act(async () => {
+      reading.resolve(true);
+      await Promise.resolve();
+    });
+    await until(
+      () => boxOf("Documents", "Legal")?.getAttribute("aria-checked") === "true"
+    );
+    expect({
+      meanwhile,
+      after: {
+        ticked: boxOf("Documents", longSite)?.getAttribute("aria-checked"),
+        held: [...fake.held.picks].toSorted(),
+      },
+    }).toStrictEqual({
+      meanwhile: { ticked: "false", save: true },
+      after: { ticked: "false", held: ["b!contracts", "b!legal"] },
+    });
+  });
+
+  it("says the picks changed meanwhile only once it has read them, and offers to read them again when it couldn't", async () => {
+    const fake: Core = { held: libraries() };
+    await shown(fake);
+    // Another admin picks Legal's Documents meanwhile, and the places then
+    // can't be read.
+    fake.held.picks = ["b!contracts", "b!legal"];
+    for (const choice of fake.held.choices) {
+      choice.picked = fake.held.picks.includes(choice.place);
+    }
+    fake.refuseListing = true;
+    await click(boxOf("Documents", longSite));
+    await click(button("Save the places"));
+    await until(() => button("Try again") !== undefined);
+    const failed = {
+      reason: text().includes(unreachable),
+      claimed: text().includes("These are the ones picked now"),
+      boxes: document.querySelectorAll('[role="checkbox"]').length,
+    };
+    fake.refuseListing = false;
+    await click(button("Try again"));
+    await until(() => text().includes("These are the ones picked now"));
+    expect({
+      failed,
+      checked: [
+        ...document.querySelectorAll('[role="checkbox"][aria-checked="true"]'),
+      ].map(nameOf),
+    }).toStrictEqual({
+      failed: { reason: true, claimed: false, boxes: 0 },
+      checked: ["Documents Legal", `Contracts ${longSite}`],
+    });
+  });
+
   it("keeps a refused save's reason and the ticks, even when reading the places again fails too", async () => {
     const fake: Core = { held: libraries(), refuseSave: true };
     const asked = await shown(fake);

@@ -80,11 +80,12 @@ const readPlaces = async (
 
 /**
  * The places of `connectionId` to pick, and a way to read them again: a
- * refused re-read keeps what was read before, and says why beside it.
+ * refused re-read keeps what was read before, and says why beside it,
+ * unless `keep` is false, when it shows the refusal alone, to try again.
  */
 const usePlaces = (
   connectionId: string
-): { read: PlacesRead; reload: () => Promise<void> } => {
+): { read: PlacesRead; reload: (keep?: boolean) => Promise<void> } => {
   const core = useCore();
   const [read, setRead] = useState<PlacesRead>({ state: "loading" });
   useEffect(() => {
@@ -100,10 +101,10 @@ const usePlaces = (
       left = true;
     };
   }, [core, connectionId]);
-  const reload = async (): Promise<void> => {
+  const reload = async (keep = true): Promise<void> => {
     const answer = await readPlaces(core, connectionId);
     setRead((before) =>
-      answer.state === "refused" && before.state === "ready"
+      keep && answer.state === "refused" && before.state === "ready"
         ? { ...before, refused: answer.message }
         : answer
     );
@@ -161,7 +162,11 @@ const PlacesForm = ({
   onSaved: (changed: boolean) => Promise<void>;
 }) => {
   const ids = useId();
-  const { busy, failure, change } = useChange();
+  const { busy: saving, failure, change } = useChange();
+  // From the save until the places are read again: a box ticked meanwhile
+  // would be lost when the form starts again from what is picked now.
+  const [rereading, setRereading] = useState(false);
+  const busy = saving || rereading;
   const before = places.choices
     .filter(({ picked }) => picked)
     .map(({ place }) => place);
@@ -222,6 +227,7 @@ const PlacesForm = ({
         className="self-start"
         disabled={busy || samePlaces(before, picked)}
         onClick={() => {
+          setRereading(true);
           void (async () => {
             let changed = false;
             await change(async (session) => {
@@ -234,6 +240,7 @@ const PlacesForm = ({
               changed = outcome === "changed";
             });
             await onSaved(changed);
+            setRereading(false);
           })();
         }}
         size="sm"
@@ -290,7 +297,8 @@ export const SyncPlaces = ({
 }) => {
   const { t } = useLingui();
   const { read, reload } = usePlaces(connection.id);
-  // A save refused as the picks changed meanwhile: said until the next.
+  // A save refused as the picks changed meanwhile: said, once the places
+  // were read again, until the next save.
   const [changedMeanwhile, setChangedMeanwhile] = useState(false);
   const [retrying, setRetrying] = useState(false);
   if (read.state === "none") {
@@ -338,11 +346,13 @@ export const SyncPlaces = ({
         label={label}
         onSaved={async (changed) => {
           setChangedMeanwhile(changed);
-          await reload();
+          // Another change landed first: what the form shows is stale, so a
+          // failed read shows its refusal alone, to try again.
+          await reload(!changed);
         }}
         places={read.places}
       />
-      {changedMeanwhile ? (
+      {changedMeanwhile && read.refused === undefined ? (
         <p className="text-muted-foreground text-sm">
           <Trans>
             The places picked from {label} were changed in the meantime. These
