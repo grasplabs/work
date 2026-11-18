@@ -30,12 +30,8 @@ import { statusOf } from "./app-status.tsx";
 // search over their names, and Make something for who builds, which
 // starts a chat to make an App (make/make-link.tsx).
 
-// How wide the search grows: Grasp UI has no token for a toolbar
-// field's measure.
-const SEARCH_MEASURE = "18rem";
-
 const styles = stylex.create({
-  search: { maxWidth: SEARCH_MEASURE },
+  search: { maxWidth: "18rem" },
 });
 
 /** One App: its card. */
@@ -96,7 +92,7 @@ export const AppsOverview = ({
         // One Make something a page: with no Apps yet, the empty state's.
         action={
           builds && apps.length > 0 ? (
-            <MakeSomethingLink kind="app" main />
+            <MakeSomethingLink kind="app" />
           ) : undefined
         }
         title={<Trans>Apps</Trans>}
@@ -115,7 +111,7 @@ export const AppsOverview = ({
           </EmptyHeader>
           {builds ? (
             <EmptyContent>
-              <MakeSomethingLink kind="app" main />
+              <MakeSomethingLink kind="app" />
             </EmptyContent>
           ) : null}
         </Empty>
