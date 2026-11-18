@@ -2963,6 +2963,7 @@ const listeningEntry = (
       provenanceDropped: dropped,
       chat: chatOf(call),
       ...workflowRunOf(call),
+      ...platformOf(call),
     },
   }));
 

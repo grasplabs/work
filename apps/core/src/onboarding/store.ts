@@ -4203,9 +4203,15 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Counts a live transcription once it closed: what it held and didn't
-   * hear given back to `who`'s budget on the day it was held
-   * (`transcriptionOpened`). The onboarding's own (`noted`) has the
+   * Counts a live transcription once it closed: what it held and isn't
+   * charged given back to `who`'s budget on the day it was held
+   * (`transcriptionOpened`). Charged is what it heard in whole seconds,
+   * rounded up, as the model gateway charges and audits each socket
+   * (models.ts `chargedSeconds`), and a second at least: every socket
+   * opened may be an upstream session and a model call in the audit log
+   * however little it heard, so opening and closing them runs out of the
+   * day's budget too, after as many sockets as it has seconds. The
+   * onboarding's own (`noted`) has the
    * seconds of audio it heard counted in the onboarding's use, and is
    * noted as it was opened, with how it ended; a member's dictation is
    * neither. Never anything heard.
@@ -4225,7 +4231,8 @@ export class Onboarding extends DurableObject<Env> {
     now: string = new Date().toISOString()
   ): void {
     const seconds = Math.min(counted(session.seconds), session.held);
-    const back = session.held - seconds;
+    const charged = Math.min(Math.max(Math.ceil(seconds), 1), session.held);
+    const back = session.held - charged;
     const { noted } = session;
     const audited = noted !== undefined && noted.note.person === undefined;
     this.ctx.storage.transactionSync(() => {

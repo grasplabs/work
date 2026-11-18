@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { sessionRecheckMs } from "../src/session-check.ts";
 import type { RealtimeSocket } from "./ai-providers-fake.ts";
 import { allEvents, logHead, eventsAfter } from "./audit-events.ts";
 import { platformOpenAiKey } from "./connect-providers.ts";
@@ -61,6 +62,9 @@ import {
 // - Sockets opened side by side on one link, or by one member, each
 //   hearing a day's budget; a member hearing more than an admin did, or an
 //   admin twice; one member's dictation spending another's budget.
+// - Sockets opened and closed with nothing said, each an upstream session
+//   and a model call the gateway audits, costing nothing of the day's
+//   budget, so a loop of them never runs out.
 // - A member's dictation (GRA-1998) audited as the onboarding's, more than
 //   once, as the system's, or counted in the onboarding's use.
 // - Listening with a model the gateway or the rules don't let it use
@@ -343,7 +347,13 @@ const transcriptionAudited = async (head: number) => {
       actor,
       action,
       purpose: detail?.purpose,
+      platform: detail?.platform,
       seconds: detail?.seconds,
+      // What an entry of the onboarding's holds, by name.
+      keys:
+        action === "model.call"
+          ? undefined
+          : Object.keys(detail ?? {}).toSorted(),
     }));
 };
 
@@ -568,6 +578,11 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       "interview.not_participating",
     ],
     ["nobody signed in, without a link", "none", "auth.unauthenticated"],
+    [
+      "a session for an interview alone, without a link",
+      "interviewOnly",
+      "auth.unauthenticated",
+    ],
     ["Grasp's staff who aren't admins, no link", "staff", "role.forbidden"],
     ["audio before it says whose it is", "audio", "transcription.invalid"],
     ["a start the relay doesn't take", "invalid", "transcription.invalid"],
@@ -585,6 +600,15 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
         headers.cookie = await signedIn(idp, "grasp-staff", staffPerson(), {
           coreEnv,
         });
+      } else if (kind === "interviewOnly") {
+        // As signing in for an interview makes one before Grasp's go.
+        const member = await signedInWithRole(idp, "user");
+        await env.DB.prepare(
+          "UPDATE sessions SET interview = 1 WHERE user_id = ?"
+        )
+          .bind(member.userId)
+          .run();
+        headers.cookie = member.session;
       } else if (kind !== "none" && kind !== "signedOut") {
         headers.cookie = ada.cookie;
       }
@@ -607,6 +631,7 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
             signedOut: ada,
             unagreed: ada,
             none: undefined,
+            interviewOnly: undefined,
             staff: undefined,
           }[kind];
           page.start({
@@ -837,8 +862,10 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
             actor: { type: "person", userId },
             action: "model.call",
             purpose: "chat.dictation",
+            platform: "dictation",
             // Whole seconds, rounded up, as the gateway charges.
             seconds: 1,
+            keys: undefined,
           },
         ]);
       });
@@ -915,6 +942,73 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
     }
   );
 
+  it("counts each socket a member opens against their day as the gateway charges it, a second at least, until none is left", async () => {
+    const { session, userId } = await signedInWithRole(idp, "user");
+    // Three seconds left of their day.
+    await onboardingStore(env).transcriptionOpened({
+      who: `user:${userId}:heard`,
+      budget: 30 * 60,
+      most: 30 * 60 - 3,
+    });
+    const head = await logHead();
+
+    const { result } = await relaying(async () => {
+      const left: number[] = [];
+      for (let opened = 0; opened < 3; opened += 1) {
+        // Opened and closed with nothing said, once the last one's close is counted.
+        // oxlint-disable-next-line no-await-in-loop -- one socket after another
+        const { page, maxSeconds } = await vi.waitFor(async () => {
+          const next = await listen({ cookie: session });
+          next.start(memberStart);
+          const message = await next.next();
+          if (message?.type !== "ready") {
+            throw new Error(`Expected ready, got ${message?.type}`);
+          }
+          return { page: next, maxSeconds: message.maxSeconds };
+        });
+        left.push(maxSeconds);
+        page.socket.close(1000, "Done");
+        // oxlint-disable-next-line no-await-in-loop -- one socket after another
+        await page.ended();
+      }
+      // Each is a model call of theirs, however little it heard.
+      const calls = await vi.waitFor(async () => {
+        const audited = await transcriptionAudited(head);
+        expect(audited).toHaveLength(3);
+        return audited.length;
+      });
+      const fourth = await listen({ cookie: session });
+      fourth.start(memberStart);
+      return { left, calls, spent: await refusalOf(fourth) };
+    });
+
+    expect(result).toStrictEqual({
+      left: [3, 2, 1],
+      calls: 3,
+      spent: { errors: ["transcription.limited"], code: 1008 },
+    });
+  });
+
+  it("goes on listening for a member whose role changes while the socket is open", async () => {
+    const { session, userId } = await signedInWithRole(idp, "admin");
+
+    const { result } = await relaying(async () => {
+      const page = await listen({ cookie: session });
+      page.start(memberStart);
+      const ready = await page.next();
+      await env.DB.prepare("UPDATE members SET role = ? WHERE user_id = ?")
+        .bind("user", userId)
+        .run();
+      // Past the next check of who is behind the socket.
+      await scheduler.wait(sessionRecheckMs + 1000);
+      page.socket.send(tenthOfASecond());
+      const partial = await page.next();
+      return [ready?.type, partial?.type];
+    });
+
+    expect(result).toStrictEqual(["ready", "partial"]);
+  });
+
   it("relays for Grasp's staff as the onboarding's, audited when it opens and closes, with nothing heard", async () => {
     const session = await signedIn(idp, "grasp-staff", staffPerson());
     const { userId } = await whoami(session);
@@ -940,19 +1034,25 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
           actor: { type: "staff", userId },
           action: "model.call",
           purpose: "onboarding.transcription",
+          platform: undefined,
           seconds: 1,
+          keys: undefined,
         },
         {
           actor: { type: "staff", userId },
           action: "onboarding.transcription.closed",
           purpose: undefined,
+          platform: undefined,
           seconds: 0,
+          keys: ["ended", "seconds", "session"],
         },
         {
           actor: { type: "staff", userId },
           action: "onboarding.transcription.opened",
           purpose: undefined,
+          platform: undefined,
           seconds: undefined,
+          keys: ["session"],
         },
       ]);
     });

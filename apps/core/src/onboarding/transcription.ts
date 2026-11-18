@@ -126,6 +126,17 @@ import type { Took, TranscriptionSessionNote } from "./store.ts";
 //   socket whose close is never counted keeps what it held. The most a
 //   deployment can hear a day is its members times that, and the
 //   gateway's own limits on Grasp's key stand above it.
+// - Opening and closing sockets with nothing said, each an upstream
+//   session on Grasp's key and a `model.call` in the audit log for none
+//   of the budget: a socket's close counts what the gateway charges, its
+//   seconds rounded up, and a second at least (the store's
+//   `transcriptionClosed`), on a link and for staff too. So a day's
+//   budget is at most as many sockets as it has seconds, 1,800 a person.
+// - Accepted, as decided: dictation is on Grasp's key, so it is in
+//   Grasp's own spend and never in the organization's spend overview or
+//   under its month's limit; what bounds it is the members times 1,800
+//   seconds a day. And someone signed in who has an interview link has
+//   both budgets, the link's for their interview and their own.
 // - Spending someone else's minutes: the budget is keyed by the session's
 //   user ID, never by anything the page sends. The start names no person.
 // - A member removed, erased or signed out while a socket is open: the
