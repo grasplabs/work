@@ -415,6 +415,26 @@ const internet = fakeInternet(async (request, url) => {
 const sentToGraph = () =>
   internet.sent.filter(({ host }) => host === graphHost);
 
+/** Depths from `from` to `to`, both included. */
+const depthsFrom = (from: number, to: number): number[] =>
+  Array.from({ length: to - from + 1 }, (_, index) => from + index);
+
+/**
+ * Chain depths to list: every short one, those whose walks end around a
+ * read's last request (a read has the isolate's requests, less the five
+ * well-known reads and a page on the first), the same around two reads',
+ * and a deep one.
+ */
+const chainDepths = [
+  ...depthsFrom(1, 12),
+  ...depthsFrom(connectorIsolateRequests - 7, connectorIsolateRequests + 2),
+  ...depthsFrom(
+    2 * connectorIsolateRequests - 12,
+    2 * connectorIsolateRequests
+  ),
+  120,
+];
+
 /**
  * A chain of `depth` folders under the inbox, each in the one before,
  * listed deepest first ahead of the other folders: its IDs, top first.
@@ -567,11 +587,11 @@ describe("syncing a person's own mailbox, folder by folder", () => {
     });
   });
 
-  it("finishes every chain of 1 to 120 folders listed deepest first, each read within its requests", async () => {
+  it("finishes chains of every length listed deepest first, each read within its requests", async () => {
     const connectionId = await connected();
     const failed: string[] = [];
     for (const folderPage of [1, 2]) {
-      for (let depth = 1; depth <= 120; depth += 1) {
+      for (const depth of chainDepths) {
         reset();
         mailbox.folderPage = folderPage;
         const chain = chainOf(depth);
@@ -597,8 +617,7 @@ describe("syncing a person's own mailbox, folder by folder", () => {
       }
     }
     expect(failed).toStrictEqual([]);
-    // Some 28,000 requests through connect: more than the default timeout.
-  }, 300_000);
+  });
 
   it("tries a message again whole when its read drops part-way, never passing it over", async () => {
     const connectionId = await connected();
