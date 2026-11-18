@@ -3,12 +3,16 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { onboardingStore } from "../src/onboarding/store.ts";
+import { adminCommands } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
-import { acmeTenant } from "./sign-in-config.ts";
+import { agree, fact, team as teamOnTheList } from "./onboarding-team.ts";
+import { acmeTenant, clientOrigin } from "./sign-in-config.ts";
 import {
   auditedDuring,
   callAuth,
   entraPerson,
+  routed,
   signIn,
   signedInApi,
   unique,
@@ -26,6 +30,8 @@ import {
 // access behind; a team an admin added someone to by hand taken from them.
 
 const idp = mockIdp();
+
+const dayMs = 24 * 60 * 60 * 1000;
 
 type Admin = Awaited<ReturnType<typeof signedInApi>>;
 
@@ -58,6 +64,114 @@ const settingsTeam = async (admin: Admin, name: string): Promise<string> => {
   const { id } = z.object({ id: z.string() }).parse(await made.json());
   return id;
 };
+
+/** Which of a team's columns hold a value, as Better Auth reads its row. */
+const shapeOf = async (id: string) => {
+  const row = await env.DB.prepare("SELECT * FROM teams WHERE id = ?")
+    .bind(id)
+    .first();
+  return Object.fromEntries(
+    Object.entries(row ?? {}).map(([column, value]) => [
+      column,
+      column === "member_count" ? value : value !== null,
+    ])
+  );
+};
+
+/**
+ * `env` with its D1 binding running `land` once, around the first
+ * statement whose SQL `matches`: just before it runs, or just after. Every
+ * statement still runs on the real database, in the order the code under
+ * test sends it; only `land` comes in between, through its own requests.
+ * `landed` says whether it came at all.
+ */
+const landingAt = (
+  matches: RegExp,
+  when: "before" | "after",
+  land: () => Promise<unknown>
+): { coreEnv: Env; landed: () => boolean } => {
+  let landed = false;
+  const once = async (): Promise<void> => {
+    if (!landed) {
+      landed = true;
+      await land();
+    }
+  };
+  const real = new WeakMap<object, D1PreparedStatement>();
+  const runs = new Set<PropertyKey>(["run", "all", "raw", "first"]);
+  const watched = (
+    statement: D1PreparedStatement,
+    query: string
+  ): D1PreparedStatement => {
+    const wrapped = new Proxy(statement, {
+      get: (target, key) => {
+        if (key === "bind") {
+          return (...values: unknown[]) =>
+            watched(target.bind(...values), query);
+        }
+        const value: unknown = Reflect.get(target, key, target);
+        if (typeof value !== "function") {
+          return value;
+        }
+        if (runs.has(key) && matches.test(query)) {
+          return async (...args: unknown[]): Promise<unknown> => {
+            if (when === "before") {
+              await once();
+            }
+            const result: unknown = await Reflect.apply(value, target, args);
+            if (when === "after") {
+              await once();
+            }
+            return result;
+          };
+        }
+        return (...args: unknown[]): unknown =>
+          Reflect.apply(value, target, args);
+      },
+    });
+    real.set(wrapped, statement);
+    return wrapped;
+  };
+  const db = new Proxy(env.DB, {
+    get: (target, key) => {
+      if (key === "prepare") {
+        return (query: string) => watched(target.prepare(query), query);
+      }
+      if (key === "batch") {
+        return async (statements: D1PreparedStatement[]) =>
+          await target.batch(
+            statements.map((statement) => real.get(statement) ?? statement)
+          );
+      }
+      const value: unknown = Reflect.get(target, key, target);
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  return { coreEnv: { ...env, DB: db }, landed: () => landed };
+};
+
+/** An admin's add of `userId` to `teamId` in Settings › Members, on `coreEnv`. */
+const addByHand = async (
+  admin: Admin,
+  teamId: string,
+  userId: string,
+  coreEnv: Env
+): Promise<Response> =>
+  await routed(
+    "/api/auth/organization/add-team-member",
+    {
+      method: "POST",
+      headers: {
+        origin: clientOrigin,
+        cookie: admin.session,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ teamId, userId }),
+    },
+    coreEnv
+  );
 
 describe("the staff list's teams", { timeout: 120_000 }, () => {
   it("are the members' teams: one id each, a new one core's own, made only once the admin confirms", async () => {
@@ -153,7 +267,18 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
     const removed = await callAuth("/organization/remove-team", admin.session, {
       teamId: old,
     });
-    // Its id never comes back: the list sending it again gets a new team.
+    // Its id never comes back, on a draft or a confirm: the list sending it
+    // again gets a team of a new id.
+    const { roster: redrafted } = await admin.api.onboarding.saveRoster({
+      teams: [
+        { id: ops, name: `Operations ${tag}`, lead: null },
+        { id: old, name: `Old ${tag}`, lead: null },
+      ],
+      people: [{ id: `cy-${tag}`, name: "Cy", team: old }],
+    });
+    const drafted = redrafted?.teams.find(
+      ({ name }) => name === `Old ${tag}`
+    )?.id;
     await admin.api.onboarding.confirmRoster({
       teams: [
         { id: ops, name: `Operations ${tag}`, lead: null },
@@ -170,12 +295,14 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
       refused: refused.status,
       removed: removed.status,
       again: again !== undefined && again !== old,
+      drafted: drafted !== undefined && drafted !== old,
     }).toStrictEqual({
       listed: ops,
       read: `Operations ${tag}`,
       refused: 409,
       removed: 200,
       again: true,
+      drafted: true,
     });
   });
 
@@ -500,7 +627,7 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
     });
   });
 
-  it("keep what the admin set for a team on the draft once the confirm gives it its id: held for later, it stays held", async () => {
+  it("keep a team's id from the draft that first names it, so a team held for later on the draft stays held, and sends its people nothing", async () => {
     const admin = await signedInApi(idp, "admin");
     const tag = unique();
     const roster: RosterInput = {
@@ -513,54 +640,244 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
         { id: `lou-${tag}`, name: "Lou", team: "later" },
       ],
     };
-    await admin.api.onboarding.saveRoster(roster);
-    // Held for later while it is a draft's team, under the draft's id.
+    const { roster: drafted } = await admin.api.onboarding.saveRoster(roster);
+    const draftedLater = drafted?.teams.find(
+      ({ name }) => name === `Later ${tag}`
+    )?.id;
+    // Held for later while it is a draft's team, under the id core gave it.
     await admin.api.onboarding.savePlan({
       start: new Date().toISOString().slice(0, 10),
-      later: { later: null },
+      later: { [draftedLater ?? ""]: null },
     });
+    const draftTeams = await membersTeams(admin);
 
+    // The admin's page sends the list as it read it back.
+    if (drafted === null) {
+      throw new Error("The draft wasn't kept");
+    }
     const { roster: kept, plan } =
-      await admin.api.onboarding.confirmRoster(roster);
+      await admin.api.onboarding.confirmRoster(drafted);
     const later = kept?.teams.find(({ name }) => name === `Later ${tag}`);
+    await adminCommands().setAgreements({
+      processing: true,
+      assessment: true,
+      council: "none",
+    });
+    const store = onboardingStore(env);
+    await store.releaseDue();
+    await store.releaseDue(new Date(Date.now() + 60 * dayMs).toISOString());
+    const out = await store.sentLinks();
+    const sent = new Set(out.map(({ person }) => person));
 
     expect({
-      moved: later !== undefined && later.id !== "later",
+      coresOwn: draftedLater !== undefined && draftedLater !== "later",
+      // A draft makes no members' team.
+      inSettings: draftTeams.has(`Later ${tag}`),
+      kept: later?.id,
       does: later?.does,
       lou: kept?.people.find(({ name }) => name === "Lou")?.team,
       held: plan?.later,
+      sent: { oli: sent.has(`oli-${tag}`), lou: sent.has(`lou-${tag}`) },
     }).toStrictEqual({
-      moved: true,
+      coresOwn: true,
+      inSettings: false,
+      kept: draftedLater,
       does: "Plans it",
-      lou: later?.id,
-      held: { [later?.id ?? ""]: null },
+      lou: draftedLater,
+      held: { [draftedLater ?? ""]: null },
+      sent: { oli: true, lou: false },
     });
   });
 
-  it("keep a draft team where the admin placed it on the Brain's map once the confirm gives it its id", async () => {
+  it("count an interview finished while its team was only on a draft for that team once the admin confirms", async () => {
     const admin = await signedInApi(idp, "admin");
-    const tag = unique();
-    const roster: RosterInput = {
-      teams: [{ id: `desk-${tag}`, name: `Desk ${tag}`, lead: null }],
-      people: [{ id: `dee-${tag}`, name: "Dee", team: `desk-${tag}` }],
-    };
-    await admin.api.onboarding.saveRoster(roster);
-    // Placed by the admin while the team is only on the draft.
-    await admin.api.brain.saveTeamGroups([
-      {
-        id: `front-${tag}`,
-        name: "Front office",
-        teamIds: [`team-desk-${tag}`],
-      },
+    const ids = await teamOnTheList(["lea", "max", "mia"]);
+    const store = onboardingStore(env);
+    // Everyone's link out, as days on.
+    await store.releaseDue(new Date(Date.now() + 10 * dayMs).toISOString());
+    const listed = await store.view();
+    if (listed.roster === null) {
+      throw new Error("No staff list");
+    }
+    // Max moves to a team new on a draft, his link in hand.
+    const { roster: drafted } = await admin.api.onboarding.saveRoster({
+      teams: [
+        ...listed.roster.teams,
+        { id: "desk", name: `Desk ${ids.team}`, lead: null },
+      ],
+      people: listed.roster.people.map((person) =>
+        person.id === ids.max ? { ...person, team: "desk" } : person
+      ),
+    });
+    const desk = drafted?.teams.find(
+      ({ name }) => name === `Desk ${ids.team}`
+    )?.id;
+    await agree(ids.max, [
+      fact("f1", "system", "We log every ticket in Zendesk first."),
     ]);
+    if (drafted === null) {
+      throw new Error("The draft wasn't kept");
+    }
 
-    const { roster: kept } = await admin.api.onboarding.confirmRoster(roster);
-    const desk = kept?.teams.find(({ name }) => name === `Desk ${tag}`)?.id;
-    const { teamGroups } = await admin.api.brain.read();
+    await admin.api.onboarding.confirmRoster(drafted);
+    const showing = await store.interviewSources();
+    const sources = showing.map(({ team: of }) => of);
 
     expect({
-      moved: desk !== undefined && desk !== `desk-${tag}`,
-      front: teamGroups.find(({ id }) => id === `front-${tag}`)?.teamIds,
-    }).toStrictEqual({ moved: true, front: [`team-${desk ?? ""}`] });
+      coresOwn: desk !== "desk",
+      counts: sources.includes(desk ?? ""),
+    }).toStrictEqual({
+      coresOwn: true,
+      counts: true,
+    });
+  });
+
+  it("keep a draft team where the admin placed it on the Brain's map once the admin confirms", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const tag = unique();
+    const { roster: drafted } = await admin.api.onboarding.saveRoster({
+      teams: [{ id: `desk-${tag}`, name: `Desk ${tag}`, lead: null }],
+      people: [{ id: `dee-${tag}`, name: "Dee", team: `desk-${tag}` }],
+    });
+    const desk = drafted?.teams[0]?.id ?? "";
+    // Placed by the admin while the team is only on the draft.
+    await admin.api.brain.saveTeamGroups([
+      { id: `front-${tag}`, name: "Front office", teamIds: [`team-${desk}`] },
+    ]);
+    if (drafted === null) {
+      throw new Error("The draft wasn't kept");
+    }
+
+    await admin.api.onboarding.confirmRoster(drafted);
+    const { teamGroups } = await admin.api.brain.read();
+
+    expect(
+      teamGroups.find(({ id }) => id === `front-${tag}`)?.teamIds
+    ).toStrictEqual([`team-${desk}`]);
+  });
+
+  it("make a confirmed team as Better Auth makes one in Settings, under the id the draft gave it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const tag = unique();
+    const settings = await settingsTeam(admin, `Made ${tag}`);
+    const { roster: drafted } = await admin.api.onboarding.saveRoster({
+      teams: [{ id: "listed", name: `Listed ${tag}`, lead: null }],
+      people: [{ id: `ivy-${tag}`, name: "Ivy", team: "listed" }],
+    });
+    if (drafted === null) {
+      throw new Error("The draft wasn't kept");
+    }
+    await admin.api.onboarding.confirmRoster(drafted);
+    const listedId = drafted.teams[0]?.id ?? "";
+    await expect(shapeOf(listedId)).resolves.toStrictEqual(
+      await shapeOf(settings)
+    );
+  });
+
+  it("leave an admin's add theirs when a confirm places the same membership while Better Auth adds it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ann = await signedInApi(idp, "user");
+    const tag = unique();
+    const { roster: first } = await admin.api.onboarding.confirmRoster({
+      teams: [
+        { id: "sales", name: `Sales ${tag}`, lead: null },
+        { id: "finance", name: `Finance ${tag}`, lead: null },
+      ],
+      people: [{ id: "bo", name: "Bo", team: "sales" }],
+    });
+    const idOf = (name: string): string =>
+      first?.teams.find((each) => each.name === `${name} ${tag}`)?.id ?? "";
+    const listed = (annIn: string): RosterInput => ({
+      teams: [
+        { id: idOf("Sales"), name: `Sales ${tag}`, lead: null },
+        { id: idOf("Finance"), name: `Finance ${tag}`, lead: null },
+      ],
+      people: [
+        { id: "bo", name: "Bo", team: idOf("Sales") },
+        { id: "ann", name: "Ann", email: emailOf(ann), team: annIn },
+      ],
+    });
+    // The confirm lands after Better Auth's before-hook, just before it
+    // looks for the membership: it finds the row the confirm made.
+    const landing = landingAt(/from "team_members"/iu, "before", async () => {
+      await admin.api.onboarding.confirmRoster(listed(idOf("Sales")));
+    });
+    const added = await addByHand(
+      admin,
+      idOf("Sales"),
+      ann.userId,
+      landing.coreEnv
+    );
+    // The list moves her: the membership the admin added stays.
+    await admin.api.onboarding.confirmRoster(listed(idOf("Finance")));
+    const teams = await membersTeams(admin);
+
+    expect({
+      landed: landing.landed(),
+      added: added.ok,
+      sales: teams.get(`Sales ${tag}`)?.memberIds.includes(ann.userId),
+      finance: teams.get(`Finance ${tag}`)?.memberIds.includes(ann.userId),
+    }).toStrictEqual({
+      landed: true,
+      added: true,
+      sales: true,
+      finance: true,
+    });
+  });
+
+  it("leave an admin's add back theirs when a confirm moving them lands just after Better Auth's insert", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ann = await signedInApi(idp, "user");
+    const tag = unique();
+    const roster = (annIn: string): RosterInput => ({
+      teams: [
+        { id: "sales", name: `Sales ${tag}`, lead: null },
+        { id: "finance", name: `Finance ${tag}`, lead: null },
+      ],
+      people: [{ id: "ann", name: "Ann", email: emailOf(ann), team: annIn }],
+    });
+    const { roster: first } = await admin.api.onboarding.confirmRoster(
+      roster("sales")
+    );
+    const idOf = (name: string): string =>
+      first?.teams.find((each) => each.name === `${name} ${tag}`)?.id ?? "";
+    const listed = (annIn: string): RosterInput => ({
+      teams: [
+        { id: idOf("Sales"), name: `Sales ${tag}`, lead: null },
+        { id: idOf("Finance"), name: `Finance ${tag}`, lead: null },
+      ],
+      people: [{ id: "ann", name: "Ann", email: emailOf(ann), team: annIn }],
+    });
+    // The list's membership, taken away by hand, then added back by hand.
+    await callAuth("/organization/remove-team-member", admin.session, {
+      teamId: idOf("Sales"),
+      userId: ann.userId,
+    });
+    const landing = landingAt(
+      /insert into "team_members"/iu,
+      "after",
+      async () => {
+        await admin.api.onboarding.confirmRoster(listed(idOf("Finance")));
+      }
+    );
+    const added = await addByHand(
+      admin,
+      idOf("Sales"),
+      ann.userId,
+      landing.coreEnv
+    );
+    const teams = await membersTeams(admin);
+
+    expect({
+      landed: landing.landed(),
+      added: added.ok,
+      sales: teams.get(`Sales ${tag}`)?.memberIds.includes(ann.userId),
+      finance: teams.get(`Finance ${tag}`)?.memberIds.includes(ann.userId),
+    }).toStrictEqual({
+      landed: true,
+      added: true,
+      sales: true,
+      finance: true,
+    });
   });
 });

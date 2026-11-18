@@ -61,7 +61,6 @@ import { requireAdmin } from "@grasp-os/shared/roles";
 import { uploadMaxBytes } from "@grasp-os/shared/uploads";
 import { z } from "zod";
 
-import { moveRegionTeams } from "../brain-team-groups.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
@@ -192,26 +191,17 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         roster
       );
       const by = actorOf(person);
-      // The list names the members' teams (GRA-2055): on a confirm they
-      // are made and renamed first, so the store keeps their ids, and
-      // people join them after; a draft keeps a team new on it in the
-      // store alone.
+      // The list names the members' teams (GRA-2055): each of its teams
+      // keeps one id from the first save that names it (a members' team's,
+      // one the store holds, or a new one core makes); on a confirm its
+      // members' team is made under it, before people join it.
+      const store = onboardingStore(this.#env);
+      const { roster: held } = await store.view();
       const named = await intoMembersTeams(this.#env, parsed, by, {
         make: confirmed,
+        held: held?.teams ?? [],
       });
-      // A team a confirm made a members' team of keeps what was set for
-      // it on the draft (the store's `#moveTeams`): in the list's order.
-      const moved = new Map(
-        parsed.teams.flatMap(({ id }, index) => {
-          const to = named.teams[index]?.id;
-          return to === undefined || to === id ? [] : [[id, to] as const];
-        })
-      );
-      await moveRegionTeams(this.#env, moved);
-      const view = await onboardingStore(this.#env).saveRoster(named, by, {
-        confirmed,
-        moved,
-      });
+      const view = await store.saveRoster(named, by, { confirmed });
       if (confirmed) {
         await keepStaffListPlaces(this.#env, named);
         await placePrimaries(this.#env, by);
