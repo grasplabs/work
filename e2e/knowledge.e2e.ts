@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { pageMaxLimit } from "@grasp-os/shared/knowledge";
 import { uploadMaxBytes } from "@grasp-os/shared/uploads";
 import { expect } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { apiOf, peopleIn, teamMadeBy } from "./people.ts";
@@ -30,6 +30,12 @@ const pageRead = { timeout: 15_000 };
 
 /** The documents that link to the one on the page, each a row that opens it. */
 const usedBy = (page: Page) => page.getByRole("region", { name: "Used by" });
+
+/** A purge's count, by the name it stands under. */
+const count = (dialog: Locator, name: string) =>
+  dialog.locator(
+    `xpath=.//dt[normalize-space()="${name}"]/following-sibling::dd[1]`
+  );
 
 /** The history's row for `version`: the one whose link names it. */
 const versionRow = (page: Page, version: number) =>
@@ -560,9 +566,9 @@ test("an admin purges a person's name from a collection, seeing what goes first,
   await dialog.getByRole("button", { name: "Preview the purge" }).click();
 
   // The preview says what goes, and nothing has changed yet.
-  await expect(dialog.getByText("1 document rewritten")).toBeVisible();
-  await expect(dialog.getByText("2 versions rewritten")).toBeVisible();
-  await expect(dialog.getByText("2 occurrences removed")).toBeVisible();
+  await expect(count(dialog, "Documents rewritten")).toHaveText("1");
+  await expect(count(dialog, "Versions rewritten")).toHaveText("2");
+  await expect(count(dialog, "Occurrences removed")).toHaveText("2");
   const { core: checking, api: check } = apiOf(admin);
   try {
     const before = await check.knowledge.getDocument(documentId);
@@ -577,8 +583,8 @@ test("an admin purges a person's name from a collection, seeing what goes first,
     .getByRole("alertdialog")
     .getByRole("button", { name: "Purge for good" })
     .click();
-  await expect(dialog.getByText("1 document purged")).toBeVisible();
-  await expect(dialog.getByText("2 versions purged")).toBeVisible();
+  await expect(count(dialog, "Documents purged")).toHaveText("1");
+  await expect(count(dialog, "Versions purged")).toHaveText("2");
   await page.keyboard.press("Escape");
 
   // Every version reads without the name.

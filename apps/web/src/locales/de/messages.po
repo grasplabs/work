@@ -603,14 +603,6 @@ msgstr "{documentKinds} und alles, was erklärt, wie Sie arbeiten. Teilen Sie, w
 msgid "{documentKinds}. Connect where they live, and I’ll only read what you share with me."
 msgstr "{documentKinds}. Verbinden Sie, wo sie liegen, und ich lese nur, was Sie mit mir teilen."
 
-#: src/knowledge/purge.tsx
-msgid "{documents, plural, one {# document purged} other {# documents purged}}"
-msgstr "{documents, plural, one {# Dokument bereinigt} other {# Dokumente bereinigt}}"
-
-#: src/knowledge/purge.tsx
-msgid "{documents, plural, one {# document rewritten} other {# documents rewritten}}"
-msgstr "{documents, plural, one {# Dokument wird umgeschrieben} other {# Dokumente werden umgeschrieben}}"
-
 #: src/brain/brain-atlas.ts
 msgid "{documents, plural, one {# document} other {# documents}}"
 msgstr "{documents, plural, one {# Dokument} other {# Dokumente}}"
@@ -902,10 +894,6 @@ msgstr "{measure}: von {from} auf {to}."
 msgid "{memberName} (team)"
 msgstr "{memberName} (Team)"
 
-#: src/knowledge/purge.tsx
-msgid "{memories, plural, one {# memory record redacted or deleted} other {# memory records redacted or deleted}}"
-msgstr "{memories, plural, one {# Erinnerung geschwärzt oder gelöscht} other {# Erinnerungen geschwärzt oder gelöscht}}"
-
 #: src/workflows/saved-ago.tsx
 msgid "{minutes, plural, one {Saved # min ago} other {Saved # min ago}}"
 msgstr "{minutes, plural, one {Vor # Min. gespeichert} other {Vor # Min. gespeichert}}"
@@ -1142,10 +1130,6 @@ msgstr "{needs, plural, one {# braucht Sie} other {# brauchen Sie}}"
 msgid "{number} of {count}"
 msgstr "{number} von {count}"
 
-#: src/knowledge/purge.tsx
-msgid "{occurrences, plural, one {# occurrence removed} other {# occurrences removed}}"
-msgstr "{occurrences, plural, one {# Vorkommen entfernt} other {# Vorkommen entfernt}}"
-
 #: src/brain/brain-atlas.ts
 msgid "{one} and {other} both name the same handover, each from their own side."
 msgstr "{one} und {other} nennen beide dieselbe Übergabe, jeweils von ihrer Seite."
@@ -1173,10 +1157,6 @@ msgstr "{openCount, plural, =0 {Nichts wartet auf Sie} =1 {Nur eine Sache für S
 #: src/connections/http-connections.tsx
 msgid "{origin} · {methods} under {paths} · sent in {header} · added {added}"
 msgstr "{origin} · {methods} unter {paths} · gesendet in {header} · hinzugefügt am {added}"
-
-#: src/knowledge/purge.tsx
-msgid "{originals, plural, one {# uploaded original deleted} other {# uploaded originals deleted}}"
-msgstr "{originals, plural, one {# hochgeladenes Original gelöscht} other {# hochgeladene Originale gelöscht}}"
 
 #: src/inbox/interviews-item.tsx
 msgid "{outCount, plural, one {# out, as a list} other {# out, as a list}}"
@@ -1597,14 +1577,6 @@ msgstr "{unseen} von {total} genannt, nicht im Einsatz gesehen"
 msgid "{value} is already added."
 msgstr "{value} ist bereits hinzugefügt."
 
-#: src/knowledge/purge.tsx
-msgid "{versions, plural, one {# version purged} other {# versions purged}}"
-msgstr "{versions, plural, one {# Version bereinigt} other {# Versionen bereinigt}}"
-
-#: src/knowledge/purge.tsx
-msgid "{versions, plural, one {# version rewritten} other {# versions rewritten}}"
-msgstr "{versions, plural, one {# Version wird umgeschrieben} other {# Versionen werden umgeschrieben}}"
-
 #: src/brain/sources-page.tsx
 msgid "{versions, plural, one {# version} other {# versions}}"
 msgstr "{versions, plural, one {# Version} other {# Versionen}}"
@@ -1943,10 +1915,6 @@ msgstr "Eine Vorliebe"
 #: src/pages/page-files.ts
 msgid "A preview keeps no files."
 msgstr "Eine Vorschau behält keine Dateien."
-
-#: src/knowledge/new-collection.tsx
-msgid "A private collection: nobody else reads it, nor their agents."
-msgstr "Eine private Sammlung: Niemand sonst liest sie, auch keine anderen Agenten."
 
 #: src/projects/project-dialog.tsx
 msgid "A project groups apps and workflows for a process, a team or a goal. Putting something in it shares it with nobody."
@@ -5876,6 +5844,14 @@ msgstr "Dokument nicht gefunden"
 msgid "Documents"
 msgstr "Dokumente"
 
+#: src/knowledge/purge.tsx
+msgid "Documents purged"
+msgstr "Bereinigte Dokumente"
+
+#: src/knowledge/purge.tsx
+msgid "Documents rewritten"
+msgstr "Umgeschriebene Dokumente"
+
 #: src/frame/part-words.tsx
 msgctxt "a filter's operator"
 msgid "does not contain"
@@ -6431,10 +6407,6 @@ msgstr "Alle im Unternehmen lesen deine Antwort, mit deinem Namen."
 #: src/connections/integration-inspector.tsx
 msgid "Everyone in the organization"
 msgstr "Alle in der Organisation"
-
-#: src/knowledge/new-collection.tsx
-msgid "Everyone in the organization, and their agents."
-msgstr "Alle in der Organisation und ihre Agenten."
 
 #: src/brain/share-record.tsx
 msgid "Everyone it is shared with, and their agents, read it as accepted. Yours stays as it is."
@@ -9437,6 +9409,10 @@ msgstr "Mitgliedern des Teams in {field}"
 msgid "Memory"
 msgstr "Gedächtnis"
 
+#: src/knowledge/purge.tsx
+msgid "Memory records redacted or deleted"
+msgstr "Geschwärzte oder gelöschte Erinnerungen"
+
 #: src/frame/part-words.tsx
 msgctxt "the mention menu"
 msgid "Mention"
@@ -11007,6 +10983,10 @@ msgctxt "a kind of field"
 msgid "Number"
 msgstr "Zahl"
 
+#: src/knowledge/purge.tsx
+msgid "Occurrences removed"
+msgstr "Entfernte Vorkommen"
+
 #: src/workflows/figures.tsx
 msgid "of them wait for a decision"
 msgstr "davon warten auf eine Entscheidung"
@@ -12291,10 +12271,6 @@ msgstr "Wird gelöscht"
 #: src/interview/read-back.tsx
 msgid "Put back"
 msgstr "Zurücklegen"
-
-#: src/knowledge/new-document.tsx
-msgid "Put it in folders with a slash, as in handbook/leave."
-msgstr "Mit einem Schrägstrich legen Sie es in Ordner, wie in handbuch/urlaub."
 
 #: src/dashboard/widget-board.tsx
 msgid "Put one back"
@@ -15945,10 +15921,6 @@ msgstr "Das Logo konnte nicht wiederhergestellt werden"
 msgid "The logo could not be removed"
 msgstr "Das Logo konnte nicht entfernt werden"
 
-#: src/knowledge/new-collection.tsx
-msgid "The members of the teams you choose, and their agents."
-msgstr "Die Mitglieder der Teams, die Sie auswählen, und ihre Agenten."
-
 #: src/brain/brain-home.tsx
 msgid "The memory files, skills and uploads your agents read are in <0>Knowledge</0>."
 msgstr "Die Gedächtnisdateien, Skills und hochgeladenen Dateien, die Ihre Agenten lesen, finden Sie unter <0>Wissen</0>."
@@ -17223,6 +17195,10 @@ msgctxt "a file"
 msgid "Uploaded"
 msgstr "Hochgeladen"
 
+#: src/knowledge/purge.tsx
+msgid "Uploaded originals deleted"
+msgstr "Gelöschte hochgeladene Originale"
+
 #: src/activity/audit-words.ts
 msgid "Uploaded to knowledge"
 msgstr "In das Wissen hochgeladen"
@@ -17469,6 +17445,14 @@ msgstr "Versionen"
 msgctxt "a workflow's settings section"
 msgid "Versions"
 msgstr "Versionen"
+
+#: src/knowledge/purge.tsx
+msgid "Versions purged"
+msgstr "Bereinigte Versionen"
+
+#: src/knowledge/purge.tsx
+msgid "Versions rewritten"
+msgstr "Umgeschriebene Versionen"
 
 #: src/interview/closed.tsx
 msgctxt "highest end of a rating of the interview"

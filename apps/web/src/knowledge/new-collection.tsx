@@ -21,12 +21,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "../grasp/dialog/index.ts";
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldLabel,
-} from "../grasp/field/index.ts";
+import { Field, FieldDescription, FieldLabel } from "../grasp/field/index.ts";
 import { Form } from "../grasp/form/index.ts";
 import { Plus } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
@@ -46,21 +41,10 @@ import { useCore } from "../use-core.ts";
 /** Who may read the new collection, as the form offers it. */
 type Audience = Exclude<CollectionAccess, "admins">;
 
-const audienceLabels: Readonly<
-  Record<Audience, { label: MessageDescriptor; description: MessageDescriptor }>
-> = {
-  me: {
-    label: msg`Only me`,
-    description: msg`A private collection: nobody else reads it, nor their agents.`,
-  },
-  teams: {
-    label: msg`Chosen teams`,
-    description: msg`The members of the teams you choose, and their agents.`,
-  },
-  everyone: {
-    label: msg`Everyone`,
-    description: msg`Everyone in the organization, and their agents.`,
-  },
+const audienceLabels: Readonly<Record<Audience, MessageDescriptor>> = {
+  me: msg`Only me`,
+  teams: msg`Chosen teams`,
+  everyone: msg`Everyone`,
 };
 
 const nameMaxLength = 100;
@@ -250,12 +234,7 @@ const CollectionForm = ({ admin }: { admin: boolean }) => {
               {offered.map((one) => (
                 <Field key={one} orientation="horizontal">
                   <RadioGroupItem value={one} />
-                  <FieldContent>
-                    <FieldLabel>{i18n._(audienceLabels[one].label)}</FieldLabel>
-                    <FieldDescription>
-                      {i18n._(audienceLabels[one].description)}
-                    </FieldDescription>
-                  </FieldContent>
+                  <FieldLabel>{i18n._(audienceLabels[one])}</FieldLabel>
                 </Field>
               ))}
             </RadioGroup>
