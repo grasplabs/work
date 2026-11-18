@@ -257,9 +257,11 @@ workflows: {
   offer(workflow: string, args: unknown): Promise<{ offer: string; workflow: string; version: number }>;
   /**
    * The independent workflows (env.workflowBuild) you may follow, of those
-   * the person has a role in.
+   * the person has a role in. \`title\` is the name people gave one, to
+   * call it by when you speak of it; null for none. A workflow is still
+   * referenced by its \`id\` and \`name\`, never by its title.
    */
-  independent(): Promise<{ id: string; name: string; currentVersion: number | null; role: "user" | "builder" }[]>;
+  independent(): Promise<{ id: string; name: string; title: string | null; currentVersion: number | null; role: "user" | "builder" }[]>;
   /**
    * An independent workflow's runs, newest first, at most 50: every run
    * for its builders, the person's own for a user. Their state, never what

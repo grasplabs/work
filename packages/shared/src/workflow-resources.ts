@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { BusinessProcess } from "./business-processes.ts";
+import { askLine } from "./chat.ts";
 import { connectorContractIdSchema } from "./connect.ts";
 import { defineErrorFamily } from "./errors.ts";
 import type { EventSourcesApi } from "./event-sources.ts";
@@ -45,28 +46,18 @@ export const workflowNameSchema = z
 
 export const workflowTitleMaxLength = 100;
 
-// Control characters (Cc: newlines and tabs among them), format characters
-// (Cf: zero-width and bidirectional marks) and the line and paragraph
-// separators: none shows, and some reorder or hide what does.
-const unseenTitleChars = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
-const letterOrDigit = /[\p{L}\p{N}]/u;
-
 /**
- * The name people give a workflow, shown where its `name` would be: one
- * line of free text, trimmed, with a letter or a digit in it and no
- * character that doesn't show, so it never reads as nothing or as another
- * text than it is. Nothing references a workflow by it; `name` stays the
- * key.
+ * The name people give a workflow, shown where its `name` would be:
+ * trimmed, then one line a person reads as what it is, by the rule for
+ * what the agent asks (`askLine`): something that shows, and nothing drawn
+ * as nothing outside a standard emoji, so it never reads as empty or as
+ * another text than it is. Nothing references a workflow by it; `name`
+ * stays the key.
  */
 export const workflowTitleSchema = z
   .string()
   .trim()
-  .min(1)
-  .max(workflowTitleMaxLength)
-  .refine(
-    (title) => !unseenTitleChars.test(title) && letterOrDigit.test(title),
-    "One line with a letter or a digit, and no invisible characters"
-  );
+  .pipe(askLine(workflowTitleMaxLength));
 
 /** What a workflow is called where people read it: its title, or its name. */
 export const workflowLabel = (workflow: {

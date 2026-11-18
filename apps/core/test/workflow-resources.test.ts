@@ -726,14 +726,7 @@ describe("the name people give a workflow", () => {
       none: await outcome(setWorkflowTitle(env, ada, created.id, undefined)),
       // What doesn't show, or reorders what does, is no title.
       unseen: await Promise.all(
-        [
-          "\u200B",
-          "Inbox\u200Btriage",
-          "\u202Eegairt",
-          "Inbox\ntriage",
-          "Inbox\u2028triage",
-          "---",
-        ].map(
+        ["\u200B", "\u3164", "A\u{E0100}", "\u202Eegairt", "Inbox\ntriage"].map(
           async (title) =>
             await outcome(setWorkflowTitle(env, ada, created.id, title))
         )
@@ -777,7 +770,7 @@ describe("the name people give a workflow", () => {
         long: "workflow.resource_invalid",
         number: "workflow.resource_invalid",
         none: "workflow.resource_invalid",
-        unseen: Array.from({ length: 6 }, () => "workflow.resource_invalid"),
+        unseen: Array.from({ length: 5 }, () => "workflow.resource_invalid"),
         atCreate: "workflow.resource_invalid",
       },
       read: { title: "Inbox triage", name },

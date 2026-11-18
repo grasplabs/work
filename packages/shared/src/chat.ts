@@ -574,9 +574,10 @@ export const shownVisibly = (text: string): string =>
 
 /**
  * One line of plain text, as everything asked is: taken as written or
- * refused, never trimmed.
+ * refused, never trimmed. The one rule for a line a person reads as what
+ * it is, a workflow's title too (`workflowTitleSchema`).
  */
-const askLine = (max: number) =>
+export const askLine = (max: number) =>
   z
     .string()
     .max(max)
