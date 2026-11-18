@@ -1,0 +1,328 @@
+import type { BoardReport } from "@grasp-os/shared/dashboard";
+import type { Programme } from "@grasp-os/shared/onboarding";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import type { Ref } from "react";
+
+import { formatDate } from "../format.ts";
+import {
+  Chart,
+  ChartAxis,
+  ChartBar,
+  ChartBarList,
+  ChartGrid,
+  ChartRing,
+  ChartTooltip,
+} from "../grasp/chart/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
+import { PanelTexture } from "../grasp/panel/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { StatsGrid } from "../grasp/stats/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+
+// The weekly report as an artifact, made only of the library's parts:
+// Stats for its figures, Chart, ChartRing and ChartBarList for its
+// charts, SectionCard, Heading and Text for the rest, PanelTexture behind
+// its head. What it shows comes from `dashboard.report()`. The page
+// downloads as a snapshot of exactly this (report-row.tsx). Three looks,
+// for Ruben to choose between (concept branch): one sentence leads; a
+// sheet of charts; a short letter from Grasp.
+
+export type ReportLook = 1 | 2 | 3;
+
+const styles = stylex.create({
+  page: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space6,
+    maxWidth: "48rem",
+    marginInline: "auto",
+    paddingBlock: grasp.space8,
+    paddingInline: grasp.space6,
+    backgroundColor: grasp.paper,
+  },
+  head: {
+    position: "relative",
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space3,
+    padding: grasp.space8,
+    borderRadius: grasp.corner,
+    overflow: "hidden",
+  },
+  over: { position: "relative" },
+  pair: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(18rem, 1fr))",
+    gap: grasp.space4,
+  },
+  chart: { width: "100%" },
+});
+
+const readOf = <T,>(
+  part: { state: "read"; data: T } | { state: "unread"; code: string }
+): T | undefined => (part.state === "read" ? part.data : undefined);
+
+const share = (part: number, whole: number): number =>
+  whole === 0 ? 0 : Math.round((part / whole) * 100);
+
+const sum = (values: readonly number[]): number =>
+  values.reduce((total, value) => total + value, 0);
+
+/** What the report says, worked out once from what core read. */
+interface Week {
+  company: string;
+  week: number;
+  weeks: number;
+  from: string;
+  to: string;
+  total: number;
+  alone: number;
+  completed: number;
+  failed: number;
+  percentAlone: number;
+  days: { day: string; runs: number }[];
+  workflows: { name: string; started: number }[];
+  better: { kind: string; count: number }[];
+}
+
+const weekOf = (
+  report: BoardReport,
+  programme: Programme,
+  company: string,
+  locale: string
+): Week => {
+  const runs = readOf(report.runs);
+  const days = runs?.days ?? [];
+  const total = runs?.runs.total ?? 0;
+  const alone = runs?.runs.withoutPerson ?? 0;
+  const weekday = new Intl.DateTimeFormat(locale, {
+    weekday: "short",
+    timeZone: "UTC",
+  });
+  return {
+    company,
+    week: programme.week,
+    weeks: programme.weeks,
+    from: runs === undefined ? "" : formatDate(runs.from),
+    to: runs === undefined ? "" : formatDate(runs.to),
+    total,
+    alone,
+    completed: sum(days.map((day) => day.completed)),
+    failed: sum(days.map((day) => day.failed)),
+    percentAlone: share(alone, total),
+    days: days.map((day) => ({
+      day: weekday.format(new Date(`${day.day}T12:00:00Z`)),
+      runs: day.completed + day.failed + day.waiting + day.other,
+    })),
+    workflows: (runs?.workflows ?? []).map((each) => ({
+      name: each.name,
+      started: each.started,
+    })),
+    better: (readOf(report.better) ?? []).map((each) => ({
+      kind: each.kind.replaceAll("_", " "),
+      count: each.count,
+    })),
+  };
+};
+
+const Eyebrow = ({ week }: { week: Week }) => {
+  const { t } = useLingui();
+  const { company, from, to, weeks } = week;
+  const number = week.week;
+  return (
+    <Text size="sm" tone="muted">
+      {t`${company} · Week ${number} of ${weeks} · ${from} to ${to}`}
+    </Text>
+  );
+};
+
+const Figures = ({ week }: { week: Week }) => {
+  const { t } = useLingui();
+  const { total, completed, failed, percentAlone } = week;
+  return (
+    <StatsGrid
+      aria-label={t`The week's figures`}
+      columns={4}
+      items={[
+        { title: t`Runs`, value: String(total) },
+        { title: t`Completed`, value: String(completed) },
+        {
+          title: t`Failed`,
+          value: String(failed),
+          ...(failed > 0 ? { tone: "danger" as const } : {}),
+        },
+        { title: t`Without a person`, value: `${percentAlone}%` },
+      ]}
+    />
+  );
+};
+
+const PerDay = ({ week }: { week: Week }) => {
+  const { t } = useLingui();
+  const { total, from, to } = week;
+  return (
+    <SectionCard title={t`Runs per day`}>
+      <Chart
+        aria-label={t`Runs per day`}
+        config={{ runs: { label: t`Runs` } }}
+        data={week.days}
+        layout={styles.chart}
+        summary={t`${total} runs from ${from} to ${to}.`}
+        xKey="day"
+      >
+        <ChartGrid />
+        <ChartAxis side="x" />
+        <ChartAxis side="y" />
+        <ChartBar fill="dither-pixels" series="runs" />
+        <ChartTooltip />
+      </Chart>
+    </SectionCard>
+  );
+};
+
+const Workflows = ({ week }: { week: Week }) => {
+  const { t } = useLingui();
+  const { total } = week;
+  return week.workflows.length === 0 ? null : (
+    <SectionCard title={t`Workflows`}>
+      <ChartBarList
+        aria-label={t`Runs by workflow`}
+        config={{ started: { label: t`Runs` } }}
+        data={week.workflows}
+        fill="dither-dots"
+        layout={styles.chart}
+        nameKey="name"
+        summary={t`Where this week's ${total} runs went.`}
+      />
+    </SectionCard>
+  );
+};
+
+const Better = ({ week }: { week: Week }) => {
+  const { t } = useLingui();
+  return week.better.length === 0 ? null : (
+    <SectionCard title={t`What could be better`}>
+      <ChartBarList
+        aria-label={t`What could be better`}
+        config={{ count: { label: t`Signals` } }}
+        data={week.better}
+        layout={styles.chart}
+        nameKey="kind"
+        summary={t`What Grasp noticed could be better, by kind.`}
+      />
+    </SectionCard>
+  );
+};
+
+const Needed = ({ week }: { week: Week }) => {
+  const { t } = useLingui();
+  const { alone, total } = week;
+  return (
+    <SectionCard title={t`Who was needed`}>
+      <ChartRing
+        aria-label={t`Runs without a person`}
+        caption={t`of runs needed nobody`}
+        config={{ alone: { label: t`Without a person` } }}
+        fill="dither-pixels"
+        layout={styles.chart}
+        summary={t`${alone} of ${total} runs asked no one.`}
+        values={{ alone }}
+        whole={total}
+      />
+    </SectionCard>
+  );
+};
+
+/** Look 1: one sentence leads, on the dither, then the figures and the charts that say it. */
+const OneSentence = ({ week }: { week: Week }) => {
+  const { t } = useLingui();
+  const { percentAlone, total } = week;
+  return (
+    <>
+      <div {...stylex.props(styles.head)}>
+        <PanelTexture />
+        <div {...stylex.props(styles.over)}>
+          <Eyebrow week={week} />
+        </div>
+        <div {...stylex.props(styles.over)}>
+          <Heading level={1} size="xl">
+            {t`${percentAlone}% of this week's ${total} runs needed nobody.`}
+          </Heading>
+        </div>
+      </div>
+      <Figures week={week} />
+      <PerDay week={week} />
+      <Workflows week={week} />
+      <Better week={week} />
+    </>
+  );
+};
+
+/** Look 2: a sheet of charts. */
+const Charts = ({ week }: { week: Week }) => {
+  const { t } = useLingui();
+  return (
+    <>
+      <Eyebrow week={week} />
+      <Heading level={1} size="xl">{t`The week in numbers`}</Heading>
+      <Figures week={week} />
+      <div {...stylex.props(styles.pair)}>
+        <Needed week={week} />
+        <PerDay week={week} />
+      </div>
+      <Workflows week={week} />
+      <Better week={week} />
+    </>
+  );
+};
+
+/** Look 3: a short letter from Grasp, with one chart. */
+const Letter = ({ week }: { week: Week }) => {
+  const { t } = useLingui();
+  const { company, total, completed, failed, percentAlone } = week;
+  const said =
+    total === 0
+      ? t`Nothing ran this week.`
+      : t`${total} runs this week: ${completed} completed and ${failed} failed. ${percentAlone}% of them needed nobody.`;
+  return (
+    <>
+      <Eyebrow week={week} />
+      <Heading level={1} size="xl">{t`Dear ${company},`}</Heading>
+      <Text size="lg" tone="ink">
+        {said}
+      </Text>
+      <PerDay week={week} />
+      <Workflows week={week} />
+      <Text size="lg" tone="ink">
+        {t`— Grasp`}
+      </Text>
+    </>
+  );
+};
+
+export const ReportView = ({
+  report,
+  programme,
+  company,
+  look,
+  ref,
+}: {
+  report: BoardReport;
+  programme: Programme;
+  company: string;
+  look: ReportLook;
+  /** The page itself, for its snapshot. */
+  ref?: Ref<HTMLDivElement>;
+}) => {
+  const { i18n } = useLingui();
+  const week = weekOf(report, programme, company, i18n.locale);
+  return (
+    <div ref={ref} {...stylex.props(styles.page)}>
+      {look === 1 ? <OneSentence week={week} /> : null}
+      {look === 2 ? <Charts week={week} /> : null}
+      {look === 3 ? <Letter week={week} /> : null}
+    </div>
+  );
+};
