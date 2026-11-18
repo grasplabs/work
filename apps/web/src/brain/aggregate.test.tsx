@@ -88,6 +88,10 @@ const lines = () =>
     })
   );
 
+/** What the page says on the line of statement `id`. */
+const basisOf = (id: string) =>
+  document.querySelector(`[data-statement="${id}"]`)?.textContent ?? "";
+
 describe("what the Brain page says of the interviews", () => {
   afterEach(() => {
     act(() => {
@@ -116,6 +120,54 @@ describe("what the Brain page says of the interviews", () => {
       { id: claim.id, basis: true },
       { id: added.id, basis: false },
     ]);
+  });
+
+  it("reads an opinion of the company's as said by five or more people across the company, never quoted, with no team (GRA-1987)", async () => {
+    const opinions: Source = {
+      id: "onb-opinions",
+      kind: "interview",
+      title: "What people across the company say",
+      date: "2026-11-17",
+    };
+    const opinion: Statement = {
+      id: "onb-opinion-0123456789abcdef",
+      kind: "timeSink",
+      text: "Typing invoices in again by hand costs people a lot of time.",
+      sourceId: opinions.id,
+      teamIds: [],
+      toolIds: [],
+    };
+    const claim: Statement = {
+      ...statement("onb-claim-0123456789abcdef", "Tickets wait for days."),
+      kind: "timeSink",
+    };
+    await shown(
+      <StatementsByKind
+        kern={{ interviewed: [], counts: [{ kind: "timeSink", count: 2 }] }}
+        rows={[opinion, claim].map((each) => ({
+          statement: each,
+          place: {
+            source: each === opinion ? opinions : interviews,
+            context: [],
+            own: 0,
+          },
+        }))}
+      />
+    );
+    expect({
+      opinion: basisOf(opinion.id).includes(
+        "Said by five or more people across the company"
+      ),
+      claim: [
+        basisOf(claim.id).includes("How the team works, as its people told it"),
+        basisOf(claim.id).includes("across the company"),
+      ],
+      words: statementWords(opinion.id, opinion.text),
+    }).toStrictEqual({
+      opinion: true,
+      claim: [true, false],
+      words: opinion.text,
+    });
   });
 
   it("offers an admin to remove their own statements, whatever they cite, and never a team's claim", async () => {

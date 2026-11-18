@@ -112,6 +112,7 @@
   --chart-3: #5f7769;
   --chart-4: #8a9d92;
   --chart-5: #34503f;
+  --chart-6: #1d3d31;
   /*
    * The frame: the sidebar is the brand's ink, the page lying on it as a
    * white sheet. On it text is the canvas, and the place you are is a wash
@@ -214,6 +215,7 @@
     --chart-3: #94a89c;
     --chart-4: #6c8277;
     --chart-5: #c9d6cf;
+    --chart-6: #dde7e1;
     --sidebar: #0a1311;
     --sidebar-foreground: #eef4f0;
     --sidebar-primary: #eef4f0;
@@ -326,6 +328,7 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);

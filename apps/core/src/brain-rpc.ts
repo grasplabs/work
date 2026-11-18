@@ -17,7 +17,11 @@ import type {
   Workflow,
   Workspace,
 } from "@grasp-os/shared/brain";
-import { onboardingIdPrefix } from "@grasp-os/shared/brain-records";
+import {
+  companyOpinionIdPrefix,
+  companyOpinionsSourceId,
+  onboardingIdPrefix,
+} from "@grasp-os/shared/brain-records";
 import type {
   BrainRecordInput,
   BrainRecordsAdded,
@@ -65,7 +69,11 @@ import { kickoffSaid, teamNameKey } from "./onboarding/kickoff-company.ts";
 import type { CompanyKickoff } from "./onboarding/kickoff-company.ts";
 import { mondayOf } from "./onboarding/rules.ts";
 import { onboardingStore } from "./onboarding/store.ts";
-import type { StandingClaim, StandingDrawing } from "./onboarding/store.ts";
+import type {
+  StandingClaim,
+  StandingDrawing,
+  StandingOpinion,
+} from "./onboarding/store.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -1007,6 +1015,44 @@ const claimStatements = async (
   );
 
 /**
+ * The company's opinions standing now (onboarding/store.ts
+ * `standingOpinions`, GRA-1987) as the page's statements, for every
+ * member: each of no team, citing the one source of them all
+ * (`opinionsSource`), never who or how many back it. Its id starts with
+ * the onboarding's prefix, so the page never quotes it as someone's words.
+ */
+const opinionStatements = (opinions: readonly StandingOpinion[]): Statement[] =>
+  opinions.map(({ source, kind, text }) => ({
+    id: `${companyOpinionIdPrefix}${source}`,
+    kind,
+    text,
+    sourceId: companyOpinionsSourceId,
+    teamIds: [],
+    toolIds: [],
+  }));
+
+/**
+ * The one source the company's opinions name on the page, while any
+ * stands: no team, no count of anyone, and the day of the earliest one
+ * standing, which a run of five people's changes put together, never one
+ * person's moment. The page words its title in the reader's language.
+ */
+const opinionsSource = (opinions: readonly StandingOpinion[]): Source[] => {
+  const [first] = opinions.map(({ at }) => at).toSorted();
+  return first === undefined
+    ? []
+    : [
+        {
+          id: companyOpinionsSourceId,
+          kind: "interview",
+          title: "What people across the company say",
+          date: first,
+          step: 2,
+        },
+      ];
+};
+
+/**
  * The drawings standing now (onboarding/store.ts `standingDrawings`) as
  * the page's workflows, for every member (GRA-1748): each piece of work in
  * its team with its one drawing, the drawing its baseline, citing the
@@ -1038,6 +1084,8 @@ interface BrainCore {
   kickoff: CompanyKickoff | null;
   records: ReturnType<typeof withSuccessors>;
   teams: Workspace["teams"];
+  /** The one source the company's opinions name, while any stands (`opinionsSource`). */
+  opinions: Source[];
 }
 
 const readBrainCore = async (
@@ -1045,7 +1093,7 @@ const readBrainCore = async (
   person: Pick<Identity, "role">
 ): Promise<BrainCore> => {
   const store = onboardingStore(env);
-  const [facts, kickoff, companyTeams, held, claims, drawings] =
+  const [facts, kickoff, companyTeams, held, claims, drawings, opinions] =
     await Promise.all([
       onboardingFacts(env, person),
       store.companyKickoff(),
@@ -1053,6 +1101,7 @@ const readBrainCore = async (
       readBrainRecords(env),
       store.standingClaims(),
       store.standingDrawings(),
+      store.standingOpinions(),
     ]);
   // An admin reads the roster whole: every team, roles counted and its
   // leads' roles. Everyone else reads the teams as the admin confirmed
@@ -1062,7 +1111,11 @@ const readBrainCore = async (
   const kickoffTeams = await kickoffTeamsOf(kickoff);
   const records = withSuccessors(roster, kickoffTeams, {
     ...held,
-    statements: [...held.statements, ...(await claimStatements(claims))],
+    statements: [
+      ...held.statements,
+      ...(await claimStatements(claims)),
+      ...opinionStatements(opinions),
+    ],
     workflows: [...held.workflows, ...drawingWorkflows(drawings)],
   });
   return {
@@ -1070,6 +1123,7 @@ const readBrainCore = async (
     kickoff,
     records: withoutGoneKickoffTeams(records, kickoffTeams),
     teams: teamsOf(roster, kickoffTeams, records),
+    opinions: opinionsSource(opinions),
   };
 };
 
@@ -1098,7 +1152,7 @@ export const readThinkingBrain = async (
  */
 const recordSources = async (
   env: Env,
-  { facts, kickoff, records, teams }: BrainCore
+  { facts, kickoff, records, teams, opinions }: BrainCore
 ): Promise<Source[]> => {
   const named = new Set(
     [
@@ -1122,7 +1176,7 @@ const recordSources = async (
     facts === null
       ? await sourcesForRecords(env, named)
       : onboardingSources(facts).map(({ source }) => source);
-  return [...sources, ...records.sources];
+  return [...sources, ...opinions, ...records.sources];
 };
 
 /** The brain's workspace, as `person` may read it. */
