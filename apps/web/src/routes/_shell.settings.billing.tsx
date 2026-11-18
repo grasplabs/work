@@ -4,6 +4,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 
 import { Button } from "../grasp/button/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
+import { Section, SectionHeader } from "../grasp/section-header/index.ts";
 import {
   RowAlert,
   SettingRow,
@@ -31,29 +32,35 @@ import {
 // way into Stripe: what would only lead there is left out until it is.
 // Which emails Stripe sends is kept with the details.
 
+/** CONCEPT: the size of a card's title on the page's ground. */
+const TITLE_SIZE = "sm" as const;
+
 /** The plan: none until Grasp links Stripe and sets one up. */
 const Plan = () => {
   const { t } = useLingui();
   return (
-    <SectionCard density="compact" flush title={t`Plan`}>
-      <SettingsRows>
-        <ReadOnlyRow
-          info={t`Grasp links Stripe and sets up your plan with you.`}
-          label={t`Current plan`}
-          value={t`None yet`}
-        />
-        {/* What AI costs this month stands on its own page: the way there. */}
-        <SettingRow label={t`AI spend`}>
-          <Button
-            render={<Link to="/settings/ai-providers" />}
-            size="sm"
-            variant="quiet"
-          >
-            {t`AI and spend`}
-          </Button>
-        </SettingRow>
-      </SettingsRows>
-    </SectionCard>
+    <Section>
+      <SectionHeader size={TITLE_SIZE} title={t`Plan`} />
+      <SectionCard aria-label={t`Plan`} density="compact" flush>
+        <SettingsRows>
+          <ReadOnlyRow
+            info={t`Grasp links Stripe and sets up your plan with you.`}
+            label={t`Current plan`}
+            value={t`None yet`}
+          />
+          {/* What AI costs this month stands on its own page: the way there. */}
+          <SettingRow label={t`AI spend`}>
+            <Button
+              render={<Link to="/settings/ai-providers" />}
+              size="sm"
+              variant="quiet"
+            >
+              {t`AI and spend`}
+            </Button>
+          </SettingRow>
+        </SettingsRows>
+      </SectionCard>
+    </Section>
   );
 };
 
@@ -79,35 +86,38 @@ const BillingPage = () => {
     <>
       <BillingCard billing={billing} canChange={!readOnly} />
       <Plan />
-      <SectionCard density="compact" flush title={t`Billing emails`}>
-        <SettingsRows>
-          {failure === undefined ? null : (
-            <RowAlert variant="danger">{failure}</RowAlert>
-          )}
-          <SettingRow label={t`Email invoices`}>
-            <Switch
-              checked={billing.emailInvoices}
-              label={t`Email invoices`}
-              labelHidden
-              onCheckedChange={(emailInvoices) => {
-                save({ emailInvoices });
-              }}
-              readOnly={readOnly}
-            />
-          </SettingRow>
-          <SettingRow label={t`Email payment receipts`}>
-            <Switch
-              checked={billing.emailReceipts}
-              label={t`Email payment receipts`}
-              labelHidden
-              onCheckedChange={(emailReceipts) => {
-                save({ emailReceipts });
-              }}
-              readOnly={readOnly}
-            />
-          </SettingRow>
-        </SettingsRows>
-      </SectionCard>
+      <Section>
+        <SectionHeader size={TITLE_SIZE} title={t`Billing emails`} />
+        <SectionCard aria-label={t`Billing emails`} density="compact" flush>
+          <SettingsRows>
+            {failure === undefined ? null : (
+              <RowAlert variant="danger">{failure}</RowAlert>
+            )}
+            <SettingRow label={t`Email invoices`}>
+              <Switch
+                checked={billing.emailInvoices}
+                label={t`Email invoices`}
+                labelHidden
+                onCheckedChange={(emailInvoices) => {
+                  save({ emailInvoices });
+                }}
+                readOnly={readOnly}
+              />
+            </SettingRow>
+            <SettingRow label={t`Email payment receipts`}>
+              <Switch
+                checked={billing.emailReceipts}
+                label={t`Email payment receipts`}
+                labelHidden
+                onCheckedChange={(emailReceipts) => {
+                  save({ emailReceipts });
+                }}
+                readOnly={readOnly}
+              />
+            </SettingRow>
+          </SettingsRows>
+        </SectionCard>
+      </Section>
     </>
   );
 };
