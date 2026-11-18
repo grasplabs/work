@@ -176,7 +176,7 @@ import {
   take,
 } from "./pending.ts";
 import type { HeldAction } from "./pending.ts";
-import { erasePersonal } from "./person-erasure.ts";
+import { beginErasure, erasePersonal } from "./person-erasure.ts";
 import { probeBindings } from "./probe.ts";
 import { revocationsByHand } from "./revocations-by-hand.ts";
 import { listSyncPlaces, readSyncPage } from "./sync.ts";
@@ -441,6 +441,10 @@ export default class Connect
     request: ErasePersonal
   ): Promise<{ connections: number }> {
     return await erasePersonal(this.env, request);
+  }
+
+  async beginErasure(request: ErasePersonal): Promise<void> {
+    await beginErasure(this.env, request);
   }
 
   async abandonFlow(state: string): Promise<void> {

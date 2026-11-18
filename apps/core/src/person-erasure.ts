@@ -225,12 +225,15 @@ const identity: ErasureStep = {
         .from(signInAddresses)
         .where(eq(signInAddresses.userId, userId)),
     ]);
-    // Their connections stopped first, as their removal does (it may have
-    // failed, and an erasure needs only the removal): a renewal can then
-    // write no address after the read below. Then their accounts,
-    // disconnected or not, as connect still has them: its own erasure
-    // waits for this one (`connect`). A disconnect that fails leaves this
-    // area pending, for the clock to try again.
+    // In this order, each before the read below: connect told their
+    // erasure began, so no connection of theirs is made from now on, a
+    // flow already under way included; then their connections stopped, as
+    // their removal does (it may have failed, and an erasure needs only
+    // the removal), so no renewal writes an address after the read. Then
+    // their accounts, disconnected or not, as connect still has them: its
+    // own erasure waits for this one (`connect`). A call that fails leaves
+    // this area pending, for the clock to try again.
+    await env.CONNECT.beginErasure({ ownerUserId: userId });
     await env.CONNECT.disconnectPersonal({
       person: null,
       ownerUserIds: [userId],

@@ -8,6 +8,7 @@ import {
 } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import {
   addSource,
@@ -23,7 +24,11 @@ import worker from "../src/index.ts";
 import { says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { objectsHolding, tablesHolding } from "./brain-next-traces.ts";
-import { consentCode, googleAddressUrl } from "./connect-providers.ts";
+import {
+  consentCode,
+  googleAddressUrl,
+  googleHoldUrl,
+} from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -347,6 +352,47 @@ const connectFailing = (method: string): Env["CONNECT"] =>
       return value;
     },
   });
+
+/** The providers Worker's fake of Google, asked at a control URL. */
+const fakeGoogle = async (
+  url: string,
+  init?: RequestInit
+): Promise<Response> => {
+  const providers = testBinding("CONNECT_PROVIDERS");
+  if (
+    typeof providers !== "object" ||
+    providers === null ||
+    !("fetch" in providers) ||
+    typeof providers.fetch !== "function"
+  ) {
+    throw new TypeError("Expected the providers Worker");
+  }
+  const response: unknown = await Reflect.apply(providers.fetch, providers, [
+    url,
+    init,
+  ]);
+  if (!(response instanceof Response)) {
+    throw new TypeError("Expected a response");
+  }
+  return response;
+};
+
+/** Waits, a bounded while, until a held look-up of a Google account's addresses is reached. */
+const exchangeHeld = async (): Promise<void> => {
+  for (let tries = 0; tries < 200; tries += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- until it is reached
+    const response = await fakeGoogle(googleHoldUrl);
+    // oxlint-disable-next-line no-await-in-loop -- until it is reached
+    const body: unknown = await response.json();
+    const { reached } = z.object({ reached: z.boolean() }).parse(body);
+    if (reached) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- until it is reached
+    await scheduler.wait(25);
+  }
+  throw new Error("The held look-up was never reached");
+};
 
 const readersOf = (...readers: SourceReader[]): SourceReaders => ({
   kind: "readers",
@@ -1481,6 +1527,129 @@ describe("readers copied from the source", () => {
         now: account?.verifiedEmail,
         past: account?.pastVerifiedEmails,
       }).toStrictEqual({ now: renamed, past: [alice.email, renamed] });
+    }
+  );
+
+  it(
+    "reads a person's addresses only once their connections can write none: a renewal right after the read confirms nothing",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      const alice = await microsoftMember();
+      const { id: connectionId } = await connectedGoogle(alice);
+      const [local = ""] = alice.email.split("@");
+      // Her removal's disconnect fails: her connection stays connected.
+      const { core: down } = await openRpc(admin.session, {
+        coreEnv: { ...env, CONNECT: connectFailing("disconnectPersonal") },
+      });
+      await outcome(down.authenticate().members.remove(alice.userId));
+      // Connect answers the erasure's read of her accounts, and then, at
+      // once, a renewal tries to confirm B; its own erasure fails for now,
+      // so what the read left is what stays.
+      const racing = new Proxy(env.CONNECT, {
+        get: (target, key) => {
+          if (key === "personalAccounts") {
+            return async (userId: string) => {
+              const read = await target.personalAccounts(userId);
+              await googleGives(local, `${local}-b@acme.test`);
+              await renewedOnly(connectionId);
+              return read;
+            };
+          }
+          if (key === "erasePersonal") {
+            return () => {
+              throw new Error("connect unreachable");
+            };
+          }
+          const value: unknown = Reflect.get(target, key);
+          return value;
+        },
+      });
+      const { core } = await openRpc(admin.session, {
+        coreEnv: { ...env, CONNECT: racing },
+      });
+      await outcome(
+        core.authenticate().members.erase(alice.userId, alice.name)
+      );
+      const after = await env.CONNECT.personalAccounts(alice.userId);
+
+      expect(
+        after.map(({ connected, verifiedEmail }) => ({
+          connected,
+          verifiedEmail,
+        }))
+      ).toStrictEqual([{ connected: false, verifiedEmail: alice.email }]);
+    }
+  );
+
+  it(
+    "writes no connection a callback finishes after the erasure began, for an account renamed A to B, and claims no token",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      // Signed in with Google as A; the same account is renamed B, which a
+      // connection flow under way will be told.
+      const subject = `renamed-${unique()}`;
+      const claims = googlePerson({
+        sub: subject,
+        email: `first-${unique()}@acme.test`,
+      });
+      const session = await signedIn(idp, "google", claims);
+      const { userId: alice } = await whoami(session);
+      const { core } = await openRpc(session);
+      const { url } = await core.authenticate().connections.start({
+        provider: "google",
+        scope: "personal",
+        returnTo: "/integrations",
+      });
+      const flow = new URL(url);
+      // Her callback gets past Google's code exchange, and waits before
+      // connect stores the connection.
+      await fakeGoogle(googleHoldUrl, {
+        method: "POST",
+        body: JSON.stringify({ hold: true }),
+      });
+      const finishing = backFromProvider(session, {
+        code: consentCode(
+          flow,
+          "acme.test",
+          subject,
+          flow.searchParams.get("scope") ?? ""
+        ),
+        state: flow.searchParams.get("state") ?? "",
+      }).then(
+        () => "connected",
+        () => "refused"
+      );
+      try {
+        await exchangeHeld();
+        // Meanwhile she is removed and erased; connect's own part of the
+        // erasure fails for now.
+        await admin.api.members.remove(alice);
+        const { core: erasing } = await openRpc(admin.session, {
+          coreEnv: { ...env, CONNECT: connectFailing("erasePersonal") },
+        });
+        await outcome(
+          erasing.authenticate().members.erase(alice, String(claims.name))
+        );
+      } finally {
+        await fakeGoogle(googleHoldUrl, {
+          method: "POST",
+          body: JSON.stringify({ hold: false }),
+        });
+      }
+      const finished = await finishing;
+      const claimed = await env.DB.prepare(
+        "SELECT count(*) AS n FROM source_reader_tokens WHERE person = ?"
+      )
+        .bind(alice)
+        .first<{ n: number }>();
+
+      expect({
+        finished,
+        connections: await env.CONNECT.personalAccounts(alice),
+        claimed: claimed?.n,
+      }).toStrictEqual({ finished: "refused", connections: [], claimed: 0 });
     }
   );
 
