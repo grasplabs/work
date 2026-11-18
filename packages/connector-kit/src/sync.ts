@@ -236,19 +236,59 @@ export const takeContent = (
 export const mayRequest = (room: SyncRoom): boolean =>
   room.requests > 0 && Date.now() < room.deadline;
 
+/** What one entry of a provider's page gives a sync page. */
+export type EntryItems =
+  | readonly SyncItem[]
+  /** No room or time was left to start it: the next read takes it. */
+  | "full"
+  /** Its own request ran past the page's deadline. */
+  | "late";
+
+/** How a page is filled from one of a provider's pages (`fillPage`). */
+export interface PageFill<Entry> {
+  room: SyncRoom;
+  entries: readonly Entry[];
+  /** The key of the last entry handled, from the cursor; null from the start. */
+  after: string | null;
+  keyOf: (entry: Entry) => string;
+  itemsFor: (entry: Entry) => Promise<EntryItems>;
+  /**
+   * The items of an entry passed over, with no request: what it is,
+   * without its content (`content: null`), or nothing if nothing of it is
+   * known without one.
+   */
+  passOver: (entry: Entry) => readonly SyncItem[];
+}
+
 /**
  * The items of a provider's page `entries` after the one keyed `after`
- * (all of them when it isn't there), until the page is full (`itemsFor`
- * answers "full"): the items, the key of the last entry handled, and
- * whether every one was.
+ * (all of them when it isn't there), until the page is full: the items,
+ * the key of the last entry handled, and whether every one was.
+ *
+ * Every connector's page follows the same rules here, so no read can stall
+ * a source:
+ *
+ * - An entry whose own request ran past the deadline ("late") is left for
+ *   the next page, unless the page holds nothing yet: then it is passed
+ *   over (`passOver`, its content left out), so an entry that is always too
+ *   slow can't stop the source.
+ * - A page that can't even start its first entry ("full": its time ran out
+ *   reading the provider's page) moves nothing on: it fails as throttled,
+ *   without a time, so the caller backs off, never answering the same
+ *   cursor as a page with more to read at once.
  */
-export const fillPage = async <Entry>(
-  room: SyncRoom,
-  entries: readonly Entry[],
-  after: string | null,
-  keyOf: (entry: Entry) => string,
-  itemsFor: (entry: Entry) => Promise<readonly SyncItem[] | "full">
-): Promise<{ items: SyncItem[]; last: string | null; done: boolean }> => {
+export const fillPage = async <Entry>({
+  room,
+  entries,
+  after,
+  keyOf,
+  itemsFor,
+  passOver,
+}: PageFill<Entry>): Promise<{
+  items: SyncItem[];
+  last: string | null;
+  done: boolean;
+}> => {
   const from =
     after === null
       ? 0
@@ -258,10 +298,19 @@ export const fillPage = async <Entry>(
   for (const entry of entries.slice(from)) {
     // oxlint-disable-next-line no-await-in-loop -- one entry after another, within the page's room
     const found = await itemsFor(entry);
-    if (found === "full") {
-      return { items, last, done: false };
+    if (found === "full" || found === "late") {
+      if (!room.empty) {
+        return { items, last, done: false };
+      }
+      if (found === "full") {
+        throw new ToolError("The page's time ran out before it took anything", {
+          code: "throttled",
+        });
+      }
+      items.push(...passOver(entry));
+    } else {
+      items.push(...found);
     }
-    items.push(...found);
     room.empty = false;
     last = keyOf(entry);
   }
