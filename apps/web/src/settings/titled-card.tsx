@@ -18,8 +18,13 @@ import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 //   which Ruben chose (asked of the library).
 
 const styles = stylex.create({
-  // On the rows' start edge: they stand in by a table cell's room.
-  edge: { marginInline: grasp.tableCellInline },
+  // On the rows' start edge: they stand in by a table cell's room. And it
+  // belongs to the card under it: the Section's gap (space-6) closes to
+  // space-2 beneath it, while the page's own room stays above it.
+  edge: {
+    marginInline: grasp.tableCellInline,
+    marginBlockEnd: `calc(${grasp.space2} - ${grasp.sectionGap})`,
+  },
 });
 
 /** A titled Settings card: its title, count and actions above it on the page's ground; the card holds the rows. */
