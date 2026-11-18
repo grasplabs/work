@@ -578,6 +578,7 @@ export const grasp = stylex.defineConsts({
   composerDot: "var(--grasp-composer-dot)",
   composerScaleDot: "var(--grasp-composer-scale-dot)",
   composerScaleGap: "var(--grasp-composer-scale-gap)",
+  composerVoiceRowBand: "var(--grasp-composer-voice-row-band)",
   modelMenuWidth: "var(--grasp-model-menu-width)",
   attachmentMaxWidth: "var(--grasp-attachment-max-width)",
   attachmentThumb: "var(--grasp-attachment-thumb)",
