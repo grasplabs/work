@@ -5,7 +5,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
-import { recallAs } from "../src/brain-next.ts";
+import { readSourceVersionAs, recallAs } from "../src/brain-next.ts";
 import { chatAgentId } from "../src/chats-rpc.ts";
 import { sharedReadHashOf } from "../src/connection-capture-key.ts";
 import { captureRead } from "../src/connection-capture.ts";
@@ -326,6 +326,54 @@ describe("what agents read through a shared connection", setUpTime, () => {
       carl: [],
       othersByAnn: false,
       othersByDana: false,
+    });
+  });
+
+  it("keeps a credential inside a JSON value, on the line after another, redacted before its audience reads it", async () => {
+    const { member, connectionId } = await openToTeam();
+    const token = [
+      "abcd",
+      "efgh",
+      crypto.randomUUID().replaceAll("-", ""),
+    ].join("");
+    // A toolkit's block of JSON whose string has the cookie on the line
+    // after a password, where a line break is `\n` (GRA-1880).
+    const body = JSON.stringify({ body: `password: x\nCookie: sid=${token}` });
+    const query = markerOf();
+    await captureRead(
+      env,
+      {
+        workspaceId: personalWorkspaceId(member),
+        agentId: chatAgentId,
+        chatId: chatIdSchema.parse(crypto.randomUUID()),
+        personId: member,
+        runId: crypto.randomUUID(),
+      },
+      connectionId,
+      "mail.search",
+      { query },
+      {
+        result: {
+          output: JSON.stringify([{ type: "text", text: body }]),
+          provenance: [],
+          keep: true,
+        },
+        readAt: new Date(),
+      }
+    );
+    await captures(connectionId, 1);
+    const key = await keyOf(connectionId, query);
+    const kept = await readSourceVersionAs(env, member, {
+      source: { producer: "connected", id: key.slice("connected:".length) },
+      version: 1,
+    });
+
+    expect({
+      text: kept?.text,
+      token: kept?.text.includes(token),
+    }).toStrictEqual({
+      text: String.raw`{"body":"password: [redacted] [redacted]"}`,
+      token: false,
     });
   });
 
