@@ -25,9 +25,12 @@ test("an admin removes someone, erases them by typing their name, follows it to 
     .getByRole("alertdialog", { name: "Remove Person?" })
     .getByRole("button", { name: "Remove" })
     .click();
-  // The removed stand at the foot of the members list, quiet.
-  const removed = page.getByRole("region", { name: "Members" });
-  const erase = removed.getByRole("button", { name: `Erase ${who}` });
+  // The removed stay in the people's table, a state of their row: Erase is in its menu.
+  const people = page.getByRole("table", { name: "Members" });
+  const removedRow = people.getByRole("row").filter({ hasText: leaving.email });
+  await expect(removedRow).toContainText("Removed");
+  await removedRow.getByRole("button", { name: `Actions for ${who}` }).click();
+  const erase = page.getByRole("menuitem", { name: "Erase…" });
   await expect(erase).toBeVisible();
 
   await erase.click();
@@ -57,18 +60,25 @@ test("an admin removes someone, erases them by typing their name, follows it to 
     .first()
     .click();
 
-  // Their row stays, by name, their address gone from it.
-  await expect(erase).toHaveCount(0);
-  await expect(removed.getByText(/email erased/u).first()).toBeVisible();
+  // Their row stays, by name, their address gone from it, and says they are erased.
+  await expect(people.getByText(leaving.email)).toHaveCount(0);
+  const erasedRows = people
+    .getByRole("row")
+    .filter({ hasText: "Person" })
+    .filter({ hasText: "Erased" });
+  await expect(erasedRows.first()).toBeVisible();
 
   // The company gave their address to someone else: it may sign in again.
   // Someone erased on an earlier try may be listed too, under the same name.
-  const releases = removed.getByRole("button", {
-    name: /^Release address of Person/u,
-  });
-  await expect(releases.first()).toBeVisible();
-  const kept = await releases.count();
-  await releases.first().click();
+  const releasable = people
+    .getByRole("row")
+    .filter({ has: page.getByRole("button", { name: "Actions for Person" }) });
+  const kept = await releasable.count();
+  await releasable
+    .first()
+    .getByRole("button", { name: "Actions for Person" })
+    .click();
+  await page.getByRole("menuitem", { name: "Release address…" }).click();
   const release = page.getByRole("dialog", {
     name: "Let Person’s old address in again?",
   });
@@ -83,5 +93,5 @@ test("an admin removes someone, erases them by typing their name, follows it to 
     .getByRole("button", { name: "Close", exact: true })
     .first()
     .click();
-  await expect(releases).toHaveCount(kept - 1);
+  await expect(releasable).toHaveCount(kept - 1);
 });

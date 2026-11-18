@@ -218,9 +218,8 @@ test("an admin signs someone out everywhere, then removes them, and is told what
   await page.goto("/settings/members");
   const who = `Person (${leaving.email})`;
   const actions = page.getByRole("button", { name: `Actions for ${who}` });
-  const notice = page
-    .getByRole("region", { name: "Members" })
-    .getByRole("status");
+  // What a change did, said over the people's table.
+  const notice = page.getByRole("status").filter({ hasText: /^Person is/u });
 
   await actions.click();
   await page.getByRole("menuitem", { name: "Sign out everywhere" }).click();
@@ -321,11 +320,11 @@ test("invites someone with a role, says what each role may do, and withdraws the
   await dialog.getByRole("button", { name: "Send invites" }).click();
   await expect(dialog).toBeHidden();
 
-  const members = page.getByRole("region", { name: "Members" });
-  await expect(members.getByText(email)).toBeVisible();
-  await expect(
-    members.getByText(/^Invited as Builder by .+ · hasn’t signed in yet$/u)
-  ).toBeVisible();
+  // The invited stand in the people's table, a state of their row.
+  const members = page.getByRole("table", { name: "Members" });
+  const row = members.getByRole("row").filter({ hasText: email });
+  await expect(row).toContainText("Invited");
+  await expect(row).toContainText("Builder");
   await members.getByRole("button", { name: `Actions for ${email}` }).click();
   await page.getByRole("menuitem", { name: "Withdraw invitation" }).click();
   await expect(members.getByText(email)).toHaveCount(0);
