@@ -928,6 +928,7 @@ export const reviewedPersonColumns: Readonly<
   "onboarding.opinion_candidates": ["person"],
   "onboarding.opinion_backers": ["person"],
   "onboarding.opinion_people": ["person"],
+  "onboarding.confirmed_places": ["email"],
   "onboarding.counted": ["person"],
   "onboarding.interview_settings": ["person"],
   "onboarding.interview_states": ["person"],
