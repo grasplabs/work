@@ -1084,6 +1084,75 @@ describe("what a workflow keeps of what its run read", setUpTime, () => {
     });
   });
 
+  it("keeps one hop past retention, not the whole chain: a key carried through three runs keeps its last run and that run's writer, and lets the first run's evidence go", async () => {
+    const { admin, ada } = await people();
+    const word = `ledger${unique().replaceAll(/\W/gu, "")}`;
+    const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+    await sourceSaying(source, `The ${word} closes on Friday.`);
+    const workflow = await keepingWorkflow(ada, admin, recalling);
+    const first = await started(ada, workflow.id, {
+      entity: unique(),
+      ask: word,
+      keep: true,
+    });
+    await ended(ada, workflow.id, first);
+    const carriers: string[] = [];
+    for (const added of [" (b)", " (c)", " (d)"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one run after another
+      const runId = await started(ada, workflow.id, {
+        entity: unique(),
+        ask: added,
+        keep: true,
+        carry: true,
+      });
+      // oxlint-disable-next-line no-await-in-loop -- each ends first
+      await ended(ada, workflow.id, runId);
+      carriers.push(runId);
+    }
+    const read = await evidenceOf(first);
+    const past = Date.now() + 31 * day;
+    for (let sweep = 0; sweep < 3; sweep += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one sweep after another
+      await runQuarterHourTasks({}, new Date(past + sweep * 15 * 60_000));
+    }
+    const ids = [first, ...carriers];
+    const kept = await env.DB.prepare(
+      `SELECT run_id FROM kept_run_evidence WHERE run_id IN (SELECT value FROM json_each(?))`
+    )
+      .bind(JSON.stringify(ids))
+      .all<{ run_id: string }>();
+    const links = await env.DB.prepare(
+      `SELECT run_id, writer_run_id FROM run_state_writers WHERE run_id IN (SELECT value FROM json_each(?))`
+    )
+      .bind(JSON.stringify(ids))
+      .all<{ run_id: string; writer_run_id: string }>();
+    const { entries } = await readWorkflowState(env, ada, workflow.id);
+    const [, second, third, last] = ids;
+
+    expect({
+      read: read > 0,
+      firstAfter: await evidenceOf(first),
+      kept: kept.results
+        .map(({ run_id: id }) => id)
+        .toSorted((a, b) => a.localeCompare(b)),
+      links: links.results.map(({ run_id: run, writer_run_id: writer }) => [
+        run,
+        writer,
+      ]),
+      writer: entries.find(({ key }) => key === "kept")?.runId,
+      shown: entries.find(({ key }) => key === "kept")?.withheld ?? "shown",
+      second: second === undefined ? 0 : await evidenceOf(second),
+    }).toStrictEqual({
+      read: true,
+      firstAfter: 0,
+      kept: [third ?? "", last ?? ""].toSorted((a, b) => a.localeCompare(b)),
+      links: [[last, third]],
+      writer: last,
+      shown: "shown",
+      second: 0,
+    });
+  });
+
   it("refuses a start whose state names a run whose evidence is gone, as a sweep between its read and its admission leaves it", async () => {
     const { admin, ada } = await people();
     const word = `ledger${unique().replaceAll(/\W/gu, "")}`;

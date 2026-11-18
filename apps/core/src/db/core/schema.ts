@@ -2683,7 +2683,9 @@ export const keptRunEvidence = sqliteTable("kept_run_evidence", {
  * evidence too (workflows/resource-reads.ts), one hop, so a copy it
  * carries from that state follows what they read. Identifiers only. Goes
  * with the run's details, unless a key of its workflow's state names the
- * run (`keptRunEvidence`).
+ * run itself; then with the run's release, once no key does
+ * (workflows/retention.ts). A run kept only as another run's writer keeps
+ * none of its own.
  */
 export const runStateWriters = sqliteTable(
   "run_state_writers",

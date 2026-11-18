@@ -391,12 +391,17 @@ const startDetailsRemoved = async (
       .where(
         and(inArray(runChatSources.runId, due), notKept(runChatSources.runId))
       ),
-    // And the runs whose keys it started from: no check of it is left.
-    db
-      .delete(runStateWriters)
-      .where(
-        and(inArray(runStateWriters.runId, due), notKept(runStateWriters.runId))
-      ),
+    // And the runs whose keys it started from, unless a key names it
+    // itself: only that key's check reads them (one hop). Kept only as a
+    // writer of a later run, it keeps no writer of its own, so no chain of
+    // runs is kept behind the last.
+    db.delete(runStateWriters).where(
+      and(
+        inArray(runStateWriters.runId, due),
+        sql`NOT EXISTS (SELECT 1 FROM ${workflowState}
+            WHERE ${workflowState.runId} = ${runStateWriters.runId})`
+      )
+    ),
     // And its inboxes (run-inboxes.ts): a reply from now on is to an
     // address nobody has.
     db.delete(runInboxes).where(inArray(runInboxes.runId, due)),
