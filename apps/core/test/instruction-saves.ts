@@ -42,7 +42,7 @@ export const saveInstructions = async (
 export const keptAgent = async (id = `agent-${crypto.randomUUID()}`) => {
   const now = Date.now();
   await env.DB.prepare(
-    "INSERT INTO agents (id, name, name_key, face, job, instructions, model_role, model, state, made_by, made_at, changed_by, changed_at) VALUES (?, ?, ?, 'stephen', 'Tests.', '', NULL, NULL, 'on', 'test', ?, 'test', ?)"
+    "INSERT INTO agents (id, name, name_key, face, job, model_role, model, state, made_by, made_at, changed_by, changed_at) VALUES (?, ?, ?, 'stephen', 'Tests.', NULL, NULL, 'on', 'test', ?, 'test', ?)"
   )
     .bind(id, `Agent ${id}`, `agent ${id}`.toLowerCase(), now, now)
     .run();

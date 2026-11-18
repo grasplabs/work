@@ -1,4 +1,4 @@
-import { recallBudgetMax } from "@grasp-os/brain-next/contract";
+import { brainOf, recallBudgetMax } from "@grasp-os/brain-next/contract";
 import { routerSecretHeader } from "@grasp-os/shared/router";
 import type { SourceReader } from "@grasp-os/shared/source-readers";
 import {
@@ -13,11 +13,16 @@ import {
   changeSourceReaders,
   readSourceVersionAs,
   recallAs,
+  workBrain,
 } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
+import { inJurisdiction } from "../src/durable-objects.ts";
 import worker from "../src/index.ts";
+import { objectsHolding, tablesHolding } from "./brain-next-traces.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
+import { runMinuteTasks } from "./maintenance.ts";
+import { noProducers } from "./no-producers.ts";
 import { acmeTenant, otherTenant } from "./sign-in-config.ts";
 import {
   coreOrigin,
@@ -473,6 +478,84 @@ describe("readers copied from the source", () => {
           zoe.userId
         ),
       }).toStrictEqual({ zoe: true, entra: false, zoeOutsideDomains: false });
+    }
+  );
+
+  it(
+    "keeps no address or object ID in the Brain or its exports, forgets them at an erasure, and gives a new person with the same address only what is shared with them after",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      const local = `leaver-${unique()}`;
+      const address = `${local}@acme.test`;
+      const leaverClaims = googlePerson({ email: address });
+      const leaver = await whoami(await signedIn(idp, "google", leaverClaims));
+      const colleague = await microsoftMember();
+      const googleReader: SourceReader = {
+        kind: "account",
+        provider: "google",
+        tenant: "acme.test",
+        account: address,
+      };
+      const oldMarker = uniqueWord();
+      const old = await sharedItem(
+        oldMarker,
+        readersOf(googleReader, colleague.account)
+      );
+      const leaverRead = await finds(leaver.userId, old, oldMarker);
+      // A company export, written whole, while the list names them.
+      const shared = brainOf(inJurisdiction(env, env.BRAIN_STORE));
+      const { id: exportId } = await shared.startExport("test");
+      for (let tick = 0; tick < 20; tick += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one tick at a time
+        const status = await shared.exportStatus({ id: exportId });
+        if (status?.state !== "writing") {
+          break;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- one tick at a time
+        await workBrain(env, new Date(), noProducers);
+      }
+      const exportedStatus = await shared.exportStatus({ id: exportId });
+      const exported = exportedStatus?.state;
+      const traces = [local, colleague.oid, String(leaverClaims.sub)];
+      const heldBefore = {
+        tables: await tablesHolding(traces),
+        objects: await objectsHolding(traces),
+      };
+
+      await admin.api.members.remove(leaver.userId);
+      await admin.api.members.erase(leaver.userId, String(leaverClaims.name));
+      await runMinuteTasks();
+      const tokensLeft = await env.DB.prepare(
+        "SELECT count(*) AS n FROM source_reader_tokens WHERE key LIKE ?"
+      )
+        .bind(`%${local}%`)
+        .first<{ n: number }>();
+      await admin.api.members.releaseAddress(address);
+      // Someone new, given the same address.
+      const newcomer = await whoami(
+        await signedIn(idp, "google", googlePerson({ email: address }))
+      );
+      const laterMarker = uniqueWord();
+      const later = await sharedItem(laterMarker, readersOf(googleReader));
+
+      expect({
+        leaverRead,
+        exported,
+        heldBefore,
+        tokensLeft: tokensLeft?.n,
+        newcomerOld: await finds(newcomer.userId, old, oldMarker),
+        newcomerLater: await finds(newcomer.userId, later, laterMarker),
+        colleagueOld: await finds(colleague.userId, old, oldMarker),
+      }).toStrictEqual({
+        leaverRead: true,
+        exported: "done",
+        heldBefore: { tables: [], objects: [] },
+        tokensLeft: 0,
+        newcomerOld: false,
+        newcomerLater: true,
+        colleagueOld: true,
+      });
     }
   );
 

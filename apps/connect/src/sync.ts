@@ -193,6 +193,7 @@ export const listSyncSources = async (
       provider: connections.provider,
       server: connections.server,
       tenant: connections.tenant,
+      accountId: connections.accountId,
       accountEmail: connections.accountEmail,
     })
     .from(connections)
@@ -208,7 +209,15 @@ export const listSyncSources = async (
     .orderBy(asc(connections.id))
     .limit(connectionOwnersMax);
   const sources = rows.flatMap(
-    ({ id, ownerUserId, provider, server, tenant, accountEmail }) => {
+    ({
+      id,
+      ownerUserId,
+      provider,
+      server,
+      tenant,
+      accountId,
+      accountEmail,
+    }) => {
       const manifest = nativeConnector(server)?.manifest;
       if (ownerUserId === null || manifest?.provider !== provider) {
         return [];
@@ -218,7 +227,10 @@ export const listSyncSources = async (
         ownerUserId,
         provider,
         tenant,
-        accountEmail,
+        // As its items' readers name it, and core's reading side
+        // (connections.ts `personalAccounts`): Google by the verified
+        // address, Microsoft by the object ID.
+        account: provider === "google" ? accountEmail : accountId,
         feed,
         place: ownPlace,
       }));

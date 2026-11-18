@@ -589,9 +589,9 @@ export const auditOutboxRejected = sqliteTable(
  * is its workflow resource's ID in `object_id`; an App is its ID in
  * `object_id`: an agent's, to call its functions, with `resource` null; a
  * workflow's, to call one of them, with that function's stable ID in
- * `resource`. `actions` is a JSON array of action names. Rows of kinds
- * the platform removed (a store's, a Knowledge collection's) may remain,
- * which every read takes as not there (`servedSql` in permissions.ts).
+ * `resource`. `actions` is a JSON array of action names. Rows of a kind
+ * the platform removed (a store's) may remain, which every read takes as
+ * not there (`servedSql` in permissions.ts).
  */
 export const permissions = sqliteTable(
   "permissions",
@@ -3477,7 +3477,8 @@ export const connectionBrainErasures = sqliteTable(
  * The sources native sync reads into the Brain (brain-sync.ts, GRA-1758),
  * one row per connection, sync (`feed`) and place: whose connection it is
  * and how to name its items' readers (`provider`, `tenant`,
- * `accountEmail`, as connect last listed them), where its next page reads
+ * `account`, its own account as its items' readers name it, as connect
+ * last listed them), where its next page reads
  * on from (`cursor`, null to list it from the start), the number of its
  * latest listing (`listing`; an item a listing named carries it) and
  * whether that listing is under way (`listingOpen`: from a null cursor
@@ -3499,7 +3500,7 @@ export const brainSyncSources = sqliteTable(
     personId: text("person_id").notNull(),
     provider: text().notNull(),
     tenant: text(),
-    accountEmail: text("account_email"),
+    account: text(),
     cursor: text(),
     listing: integer().notNull(),
     listingOpen: integer("listing_open", { mode: "boolean" }).notNull(),
@@ -3585,9 +3586,9 @@ export const brainSyncDisconnects = sqliteTable(
  * The company's agents an admin made or changed (agents.ts): one row per
  * agent, by the ID its permissions, audit events and instruction file name.
  * `face` is the figure it is drawn with; `job` one line on what it is
- * for; `instructions` no longer read, and written empty: what an agent
- * is told is its instruction file in the Brain (instruction-files.ts),
- * and the column goes in a later release (expand, then contract);
+ * for (what an agent is told is its instruction file in the Brain,
+ * instruction-files.ts; the database's `instructions` column, nullable and
+ * unnamed here, is dropped in a later release: expand, then contract);
  * `modelRole` the role it asks the gateway for, or null for the model a
  * chat would use anyway; `state` whether it answers. No row for the
  * first agent, the organization's: as Grasp ships it.
@@ -3605,7 +3606,6 @@ export const agents = sqliteTable(
     nameKey: text("name_key"),
     face: text().notNull(),
     job: text().notNull(),
-    instructions: text().notNull(),
     modelRole: text("model_role", { enum: modelRoles }),
     /** The model its turns use, `<provider>/<model>`; null: the asker's own. */
     model: text(),
@@ -6050,7 +6050,9 @@ export const workflowResourceProcesses = sqliteTable(
  * over, in the order they were added. `body` is the record as
  * `brainRecordSchema` parsed it, as canonical JSON, so a record sent again
  * compares as the same text. No row names who added it: the audit log does.
- * Never written over, but for a content purge rewriting its words.
+ * The database's `purged_at` column, left from the Knowledge term purge
+ * (gone since GRA-1911), is unnamed here and dropped in a later release
+ * (expand, then contract).
  */
 export const brainRecords = sqliteTable(
   "brain_records",
@@ -6078,13 +6080,6 @@ export const brainRecords = sqliteTable(
     id: text().notNull(),
     body: text().notNull(),
     addedAt: timestamp("added_at").notNull(),
-    /**
-     * When an earlier release's Knowledge term purge last rewrote `body`:
-     * the record is the company's as purged from then on, and the same id
-     * sent again is left as it is, never its words put back
-     * (brain-records.ts `keepRecords`). Nothing sets it any more.
-     */
-    purgedAt: timestamp("purged_at"),
     /**
      * When the record stopped counting: what a replaced kickoff transcript
      * gave the brain, left out of `brain.read`. Nothing sets it any more
@@ -6158,23 +6153,6 @@ export const brainGapStates = sqliteTable("brain_gap_states", {
 // (collections, documents, versions, sections, links, payloads, search).
 // They name Knowledge's collections and documents by ID, with no foreign
 // key: no batch holds both databases.
-
-/**
- * The teams that could read a `teams` collection in Knowledge, gone since
- * GRA-1941: nothing reads or writes it, and S7 of GRA-1735 drops it.
- */
-export const collectionTeams = sqliteTable(
-  "collection_teams",
-  {
-    /** A collection in Knowledge. */
-    collectionId: text("collection_id").notNull(),
-    teamId: text("team_id").notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.collectionId, table.teamId] }),
-    index("collection_teams_team_id_idx").on(table.teamId),
-  ]
-);
 
 /**
  * Which version of each App its entry in Knowledge's Apps collection held,
@@ -6826,4 +6804,20 @@ export const brainOwnStores = sqliteTable("brain_own_stores", {
   notRebuilt: integer("not_rebuilt", { mode: "boolean" }).notNull(),
   /** Whether its SQLite is near what one object holds (`storeNearLimit`). */
   nearLimit: integer("near_limit", { mode: "boolean" }).notNull(),
+});
+
+/**
+ * The token the Brain knows each account on a copied reader list by
+ * (source-readers.ts, GRA-1761), so the Brain never holds an address or an
+ * object ID: `key` is the account as reader lists name it
+ * (`<provider>:<tenant>:<account>`, compared form), `token` random, minted
+ * the first time a list or a reader needs it. Erasing a person deletes the
+ * rows of their accounts (person-erasure.ts `identity`), so lists made
+ * before name a token nobody holds again; a later list naming the address
+ * mints a new one.
+ */
+export const sourceReaderTokens = sqliteTable("source_reader_tokens", {
+  key: text().primaryKey(),
+  token: text().notNull(),
+  createdAt: timestamp("created_at").notNull(),
 });

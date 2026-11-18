@@ -172,8 +172,8 @@ import { skillNeedsOf } from "./skill-needs.ts";
 import type { SkillNeeds } from "./skill-needs.ts";
 import {
   heldPrincipalsOf,
-  principalOfReader,
-  provenAccountsOf,
+  plainPrincipalOf,
+  readerPrincipalsOf,
   signInAccountsRead,
 } from "./source-readers.ts";
 
@@ -274,14 +274,14 @@ const sourceReadersSchema = z.discriminatedUnion("kind", [
     connectionId: connectionIdSchema,
   }),
   // Those the system an item lives in lists as its readers (GRA-1761),
-  // each named as a group no other reader's name can be
-  // (source-readers.ts), short enough for one.
+  // each named as a group no other reader's name can be, an account by
+  // its token (source-readers.ts), short enough for one.
   z.strictObject({
     kind: z.literal("readers"),
     readers: z.array(
       sourceReaderSchema.refine(
         (reader) =>
-          (principalOfReader(reader)?.length ?? 0) <= principalMaxLength,
+          (plainPrincipalOf(reader)?.length ?? 0) <= principalMaxLength,
         { message: "Too long a reader's ID" }
       )
     ),
@@ -808,7 +808,15 @@ const teamGroup = (teamId: string): string =>
 const connectionGroup = (connectionId: string): string =>
   `${connectionPrefix}${checked(connectionIdSchema, connectionId)}`;
 
-const accessOf = (readers: SourceReaders): Access => {
+/**
+ * The Brain's access for `readers`: for a list copied from where a source
+ * lives (`readers`), its groups as `principals` names them
+ * (source-readers.ts `readerPrincipalsOf`, `accessFor`).
+ */
+const accessOf = (
+  readers: SourceReaders,
+  principals: readonly string[] = []
+): Access => {
   switch (readers.kind) {
     case "owner": {
       return { kind: "owner", person: readers.personId };
@@ -829,21 +837,31 @@ const accessOf = (readers: SourceReaders): Access => {
       return { kind: "audience", group: connectionGroup(readers.connectionId) };
     }
     case "readers": {
-      // Each once; a link, or nothing at all, is nobody.
-      const groups = [
-        ...new Set(
-          readers.readers.flatMap((reader) => principalOfReader(reader) ?? [])
-        ),
-      ];
-      return groups.length === 0
+      // A link, or nothing at all, is nobody.
+      return principals.length === 0
         ? { kind: "none" }
-        : { kind: "readers", groups };
+        : { kind: "readers", groups: [...principals] };
     }
     default: {
       throw new Error("Unknown readers");
     }
   }
 };
+
+/**
+ * The Brain's access for `readers`, a copied list's accounts by their
+ * tokens, minted where a list names one first (source-readers.ts).
+ */
+const accessFor = async (
+  env: Pick<Env, "DB">,
+  readers: SourceReaders
+): Promise<Access> =>
+  readers.kind === "readers"
+    ? accessOf(
+        readers,
+        await readerPrincipalsOf(drizzle(env.DB), readers.readers)
+      )
+    : accessOf(readers);
 
 /**
  * Whom a reader reads as: the person, the teams core counts them in and
@@ -904,11 +922,7 @@ const memberGroupsOf = async (
     ],
     audiences,
     accountGroups: asThemselves
-      ? [
-          ...new Set(
-            heldPrincipalsOf(provenAccountsOf(env, signIns, connected))
-          ),
-        ]
+      ? await heldPrincipalsOf(env, db, signIns, connected)
       : [],
   };
 };
@@ -1170,7 +1184,7 @@ export const addSource = async (
   if (problem !== undefined) {
     throw brainSourceErrors.create(problem);
   }
-  const access = accessOf(readers);
+  const access = await accessFor(env, readers);
   const key = sourceKeyOf(source);
   const extract =
     said === undefined
@@ -1234,7 +1248,7 @@ const readersChangeSchema = z.strictObject({
  * alone may read stays in their store until erased.
  */
 export const changeSourceReaders = async (
-  env: BrainEnv,
+  env: BrainEnv & Pick<Env, "DB">,
   changed: {
     source: SourceRef;
     change: string;
@@ -1252,13 +1266,14 @@ export const changeSourceReaders = async (
     );
   }
   refuseOtherConnectionReaders(source, readers);
+  const access = await accessFor(env, readers);
   try {
     const made = await whileNotRestoring(
       async () =>
         await brain(env).changeReaders({
           source: sourceKeyOf(source),
           change,
-          access: accessOf(readers),
+          access,
           ...(readAt === undefined ? {} : { readAt: readAt.getTime() }),
         })
     );
@@ -1290,7 +1305,7 @@ const isUsableVector = (vector: readonly number[]): boolean =>
  * which counts it for staff; recall goes ahead by words and exact parts.
  */
 const meaningOf = async (
-  env: Pick<Env, "EMBEDDER" | "DURABLE_OBJECT_JURISDICTION">,
+  env: Pick<Env, "EMBEDDER" | "MODEL_FILES" | "DURABLE_OBJECT_JURISDICTION">,
   question: string
 ): Promise<Pick<RecallRequest, "meaning" | "withoutMeaning">> => {
   if (question.trim() === "") {
@@ -1299,6 +1314,13 @@ const meaningOf = async (
   const embedded = await questionVectorOf(env, question);
   if (embedded.kind === "vector" && isUsableVector(embedded.vector)) {
     return { meaning: { model: embedded.model, vector: embedded.vector } };
+  }
+  if (embedded.kind === "files_missing") {
+    // Every recall goes so until the files are there: the clock says that
+    // once per isolate (`warmQuestionEmbedder`), and a deployment without
+    // them fails its probe, so a warning per recall would say nothing new.
+    // Staff still count each one.
+    return { withoutMeaning: "failed" };
   }
   const reason = embedded.kind === "none" ? embedded.reason : "unusable";
   log.warn("brain.recall.without_meaning", { reason });
@@ -1326,7 +1348,7 @@ const reachOf = ({ personal, company = false }: Recall): Reach => {
  * `company`, as the company and, of `teams`, those they are in now.
  */
 const recallRequestAs = async (
-  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER">,
+  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER" | "MODEL_FILES">,
   personId: string,
   recall: Recall
 ): Promise<RecallRequest> => {
@@ -1500,7 +1522,9 @@ const usedOf = async (
  * store found and the pack as the stores' contract gives it.
  */
 const packedAs = async (
-  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER" | "WORKSPACES">,
+  env: BrainEnv &
+    ReaderEnv &
+    Pick<Env, "EMBEDDER" | "MODEL_FILES" | "WORKSPACES">,
   personId: string,
   recall: Recall
 ): Promise<{
@@ -1560,7 +1584,9 @@ const packedAs = async (
  * nor handed to the model, code or a page.
  */
 export const recallOwnedAs = async (
-  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER" | "WORKSPACES">,
+  env: BrainEnv &
+    ReaderEnv &
+    Pick<Env, "EMBEDDER" | "MODEL_FILES" | "WORKSPACES">,
   personId: string,
   recall: Recall
 ): Promise<{ pack: RecalledPack; fromOwn: boolean }> => {
@@ -1592,7 +1618,9 @@ export const recallOwnedAs = async (
  * (`recallPassagesAs`).
  */
 export const recallAs = async (
-  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER" | "WORKSPACES">,
+  env: BrainEnv &
+    ReaderEnv &
+    Pick<Env, "EMBEDDER" | "MODEL_FILES" | "WORKSPACES">,
   personId: string,
   recall: Recall
 ): Promise<RecalledPack> => {
@@ -1609,7 +1637,7 @@ export const recallAs = async (
  * SDK's `BrainPack`).
  */
 export const recallPassagesAs = async (
-  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER">,
+  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER" | "MODEL_FILES">,
   personId: string,
   recall: Recall
 ): Promise<RecalledPassages> => {

@@ -31,7 +31,7 @@ CREATE TABLE `brain_sync_sources` (
 	`person_id` text NOT NULL,
 	`provider` text NOT NULL,
 	`tenant` text,
-	`account_email` text,
+	`account` text,
 	`cursor` text,
 	`listing` integer NOT NULL,
 	`listing_open` integer NOT NULL,

@@ -409,7 +409,7 @@
   "@grasp-os/core test/skill-shares.test.ts": 9,
   "@grasp-os/core test/source-deliveries.test.ts": 6.4,
   "@grasp-os/core test/source-event-waits.test.ts": 10.7,
-  "@grasp-os/core test/source-readers.test.ts": 2.0,
+  "@grasp-os/core test/source-readers.test.ts": 4.0,
   "@grasp-os/core test/speech-endpoint.test.ts": 1.9,
   "@grasp-os/core test/speech.test.ts": 2.2,
   "@grasp-os/core test/staff-audit.test.ts": 18.9,

@@ -415,14 +415,14 @@ describe("the new Brain, inside core", { timeout: 60_000 }, () => {
     await expect(recalledAs(reader, "anything")).rejects.toMatchObject(invalid);
   });
 
-  it("holds to its bounds: as many teams as a reader's groups hold beside the company, the members and their account's, and no more", async () => {
+  it("holds to its bounds: as many teams as a reader's groups hold beside the company, the members and their tenant's, and no more", async () => {
     const [atMost, overMost] = await Promise.all([person(), person()]);
     // A member's reader holds the company's group too, and the members'
     // (what members read as themselves alone, a team's claim), and, read
-    // as themselves, the account they sign in with and its tenant's
-    // (source-readers.ts).
-    await inTeams(atMost, readerGroupsMax - 4);
-    await inTeams(overMost, readerGroupsMax - 3);
+    // as themselves, the tenant they sign in from (source-readers.ts; an
+    // account's own only once a copied list names it).
+    await inTeams(atMost, readerGroupsMax - 3);
+    await inTeams(overMost, readerGroupsMax - 2);
     const secret = word();
     const id = await add(secret, { kind: "owner", personId: atMost });
 

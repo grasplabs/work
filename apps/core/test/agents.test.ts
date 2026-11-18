@@ -18,8 +18,8 @@ const keepAgent = async (
 ): Promise<void> => {
   await env.DB.prepare(
     `INSERT INTO agents
-       (id, name, face, job, instructions, model_role, state, made_by, made_at, changed_by, changed_at)
-     VALUES (?, ?, 'claire', 'Chases unpaid invoices.', 'Answer only about invoices.', 'careful', ?, 'admin-1', ?, 'admin-2', ?)`
+       (id, name, face, job, model_role, state, made_by, made_at, changed_by, changed_at)
+     VALUES (?, ?, 'claire', 'Chases unpaid invoices.', 'careful', ?, 'admin-1', ?, 'admin-2', ?)`
   )
     .bind(id, name, state, Date.UTC(2026, 10, 1), Date.UTC(2026, 10, 2))
     .run();

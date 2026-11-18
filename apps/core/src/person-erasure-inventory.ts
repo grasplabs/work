@@ -60,6 +60,12 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.users": { erased: "identity" },
   "core.sessions": { erased: "identity" },
   "core.accounts": { erased: "identity" },
+  // The token the Brain knows each account on a copied reader list by
+  // (source-readers.ts): a person's accounts' rows go with their accounts.
+  // An outsider's stay, the company's record of who its documents were
+  // shared with: telling whether a stored list still names one would take
+  // a read of the Brain's sets.
+  "core.source_reader_tokens": { erased: "identity" },
   "core.members": { erased: "removal" },
   "core.member_removals": { kept: "keeps someone removed out" },
   "core.person_erasures": { kept: "the erasure's own record, by ID" },
@@ -146,7 +152,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.connection_brain_reads": noPerson,
   "core.connection_brain_erasures": { company: "erasures an admin asked for" },
   // Native sync (brain-sync.ts): a source names its connection's person
-  // and account address, deleted by the connect area (and by each
+  // and their own account (`account`), deleted by the connect area (and by each
   // disconnect's drain); its items name keys, the provider's IDs and the
   // Brain's versions, never a reader; a disconnect's record names who
   // disconnected only until the erasure it owed ends, its event written.
@@ -351,7 +357,6 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.build_receipts": noPerson,
   "core.business_store_versions": noPerson,
   "core.channel_signals": noPerson,
-  "core.collection_teams": noPerson,
   "core.dependency_policy": noPerson,
   "core.improvement_signal_computations": noPerson,
   "core.jwks": noPerson,
@@ -737,7 +742,7 @@ export const reviewedPersonColumns: Readonly<
   "core.chat_workflow_offers": ["user_id"],
   "core.connection_brain_audiences": ["changed_by"],
   "core.connection_brain_erasures": ["actor"],
-  "core.brain_sync_sources": ["account_email", "person_id"],
+  "core.brain_sync_sources": ["person_id"],
   "core.brain_sync_disconnects": ["actor"],
   "core.dependency_admission_refusals": ["subject_id", "subject_type"],
   "core.dependency_approvers": [

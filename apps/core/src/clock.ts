@@ -26,7 +26,6 @@ import { inJurisdiction } from "./durable-objects.ts";
 import { warmQuestionEmbedder } from "./embedder.ts";
 import { sweepGuestChats } from "./guests.ts";
 import { sweepHeldStartInputs } from "./held-starts.ts";
-import { sweepLeftUploads } from "./knowledge-uploads.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepModelUsage } from "./model-usage.ts";
 import { settleOnboardingBrain } from "./onboarding/new-brain.ts";
@@ -136,10 +135,6 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "minute",
     run: retryAccessRevocations,
   },
-  // Uploads once made into Knowledge left unended, and the originals due
-  // for deleting, a failure's before uploads stopped among them
-  // (src/knowledge-uploads.ts). Nothing uploads into Knowledge.
-  { name: "knowledge.uploads", period: "minute", run: sweepLeftUploads },
   // Deploys apply migrations first (CI's db:migrate, and the admin's
   // deploy), so `platform_versions` exists. A version running before it
   // does records nothing, and the first run after the migration records

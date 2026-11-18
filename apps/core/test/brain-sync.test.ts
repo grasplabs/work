@@ -763,11 +763,11 @@ describe("native sync", () => {
       );
       const naming = await env.DB.prepare(
         `SELECT
-          (SELECT count(*) FROM brain_sync_sources WHERE person_id = ?1 OR lower(account_email) = lower(?2))
-          + (SELECT count(*) FROM brain_sync_items WHERE instr(lower(coalesce(change, '') || item_id || key || coalesce(part_of, '')), lower(?2)) > 0 OR instr(item_id || key, ?1) > 0)
+          (SELECT count(*) FROM brain_sync_sources WHERE person_id = ?1 OR lower(account) = lower(?2) OR account = ?3)
+          + (SELECT count(*) FROM brain_sync_items WHERE instr(lower(coalesce(change, '') || item_id || key || coalesce(part_of, '')), lower(?2)) > 0 OR instr(lower(coalesce(change, '') || item_id || key || coalesce(part_of, '')), lower(?3)) > 0 OR instr(item_id || key, ?1) > 0)
           AS count`
       )
-        .bind(person.userId, email)
+        .bind(person.userId, email, oid)
         .first<{ count: number }>();
 
       expect({

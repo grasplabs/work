@@ -1,1 +1,0 @@
-ALTER TABLE `accounts` ADD `verified_email` text;

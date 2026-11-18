@@ -141,16 +141,17 @@ export const syncErrors = defineErrorFamily({
 /**
  * One source core's sync run reads (GRA-1758): a connection whose
  * connector has a sync, that sync (`feed`), and the place in it. With
- * what core needs to name the item's readers: the connection's person,
- * provider and tenant, and the account's own email address as the
- * provider's verified sign-in gave it (null when it didn't).
+ * what core needs to name the items' readers: the connection's person,
+ * provider and tenant, and its own account as its items' readers name it
+ * (`account`: Google's address as its verified sign-in gave it,
+ * Microsoft's object ID; null when the provider didn't say).
  */
 export interface SyncSource {
   connectionId: string;
   ownerUserId: string;
   provider: string;
   tenant: string | null;
-  accountEmail: string | null;
+  account: string | null;
   feed: string;
   place: string;
 }

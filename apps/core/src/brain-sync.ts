@@ -37,7 +37,7 @@ import {
 import { inList } from "./db/d1.ts";
 import { localExtractor } from "./files/extract.ts";
 import { brainCallsPerTick } from "./shared-reads.ts";
-import { principalOfReader } from "./source-readers.ts";
+import { plainPrincipalOf } from "./source-readers.ts";
 
 // Native sync's run (GRA-1758; the design is on GRA-1719, the threat
 // model on GRA-1758): pages of a connection's changes, read from connect
@@ -193,7 +193,7 @@ interface Plan {
   store: Store;
   /** The readers of an item in the shared store; none in an own store. */
   readers: SourceReader[];
-  /** Its readers' groups, sorted, as JSON: what its change keys name. */
+  /** Its readers, compared as core compares them, sorted, as JSON: hashed into its change keys, never kept. */
   readersKey: string | null;
 }
 
@@ -214,7 +214,7 @@ const keyOf = async (
 
 const sourceRefOf = (key: string): SourceRef => ({ producer: "sync", id: key });
 
-/** `reader` in the shape the Brain's readers take, its ID in lower case. */
+/** `reader` in the shape core's readers take, under the source's provider and tenant. */
 const namedReader = (
   provider: string,
   tenant: string,
@@ -222,23 +222,13 @@ const namedReader = (
 ): unknown => {
   switch (reader.kind) {
     case "account": {
-      return {
-        kind: "account",
-        provider,
-        tenant,
-        account: reader.id.toLowerCase(),
-      };
+      return { kind: "account", provider, tenant, account: reader.id };
     }
     case "group": {
-      return {
-        kind: "group",
-        provider,
-        tenant,
-        group: reader.id.toLowerCase(),
-      };
+      return { kind: "group", provider, tenant, group: reader.id };
     }
     case "tenant": {
-      return { kind: "tenant", provider, tenant: reader.id.toLowerCase() };
+      return { kind: "tenant", provider, tenant: reader.id };
     }
     case "link": {
       // Whoever has a link: nobody.
@@ -251,14 +241,15 @@ const namedReader = (
 };
 
 /**
- * An item's readers as the Brain's readers (GRA-1761), for the source
- * `source` reads, by its connection's provider and tenant: an account by
- * its address, which counts for the person whose verified address it is;
- * a group, which counts for nobody until core knows its members; a
- * tenant, which counts for everyone holding an account there; a link,
- * which counts for nobody, and anything else the Brain can't name,
- * left out. Never a reader the source didn't list: leaving one out only
- * narrows.
+ * An item's readers as core's readers (GRA-1761), for the source `source`
+ * reads, by its connection's provider and tenant: an account as the
+ * provider names it (Google's verified address, Microsoft's object ID),
+ * which core turns into a token and counts for the person who proved it
+ * is theirs; a group, which counts for nobody until core knows its
+ * members; a tenant, which counts for everyone holding an account there;
+ * a link, which counts for nobody; and anything else the Brain can't
+ * name left out. Never a reader the source didn't list: leaving one out
+ * only narrows.
  */
 export const readersOf = (
   source: Pick<Source, "provider" | "tenant">,
@@ -275,28 +266,47 @@ export const readersOf = (
     if (!parsed.success) {
       return [];
     }
-    const principal = principalOfReader(parsed.data);
-    return principal === undefined || principal.length > principalMaxLength
+    // An account is named by its token; any other by a name that must fit.
+    const name = plainPrincipalOf(parsed.data);
+    return name !== undefined && name.length > principalMaxLength
       ? []
       : [parsed.data];
   });
 };
 
-/** The owner's own account at the source, as its readers name it. */
-const ownerPrincipalOf = (source: Source): string | undefined => {
-  if (source.accountEmail === null) {
-    return undefined;
+/** A reader's parts as core compares them: Unicode NFC, lowercase. */
+const comparable = (part: string): string =>
+  part.normalize("NFC").toLowerCase();
+
+/**
+ * `reader` as one entry of a readers' key, compared as core compares
+ * them; none for a link, which reaches nobody.
+ */
+const readerKeyOf = (reader: SourceReader): string | undefined => {
+  switch (reader.kind) {
+    case "account": {
+      return `account:${comparable(reader.account)}`;
+    }
+    case "group": {
+      return `group:${comparable(reader.group)}`;
+    }
+    case "tenant": {
+      return `tenant:${comparable(reader.tenant)}`;
+    }
+    case "link": {
+      return undefined;
+    }
+    default: {
+      return undefined;
+    }
   }
-  const [owner] = readersOf(source, [
-    { kind: "account", id: source.accountEmail },
-  ]);
-  return owner === undefined ? undefined : principalOfReader(owner);
 };
 
 /**
- * Where `item` goes and who reads it: the owner's own store for mail and
- * events, and for a file whose readers name nobody but its owner (or
- * couldn't be read whole); else the shared store, read by its readers.
+ * Where `item` goes and who reads it: the owner's own store for mail,
+ * events and attachments, and for a file whose readers name nobody but
+ * the connection's own account (or couldn't be read whole); else the
+ * shared store, read by its readers.
  */
 const planOf = (
   source: Source,
@@ -308,14 +318,18 @@ const planOf = (
     return own;
   }
   const readers = readersOf(source, item.readers);
-  const owner = ownerPrincipalOf(source);
-  const groups = [
-    ...new Set(readers.flatMap((reader) => principalOfReader(reader) ?? [])),
+  const owner =
+    source.account === null
+      ? undefined
+      : `account:${comparable(source.account)}`;
+  const keys = [
+    ...new Set(readers.flatMap((reader) => readerKeyOf(reader) ?? [])),
   ].toSorted();
-  if (groups.every((group) => group === owner)) {
+  if (keys.every((key) => key === owner)) {
     return own;
   }
-  return { store: "shared", readers, readersKey: JSON.stringify(groups) };
+  // Only ever hashed into a change key: no row keeps a reader.
+  return { store: "shared", readers, readersKey: JSON.stringify(keys) };
 };
 
 /** The extractor's types, by the type a connector names. */
@@ -1086,7 +1100,7 @@ const refreshSources = async (
       db
         .insert(brainSyncSources)
         .select(
-          sql`SELECT ${listed.connectionId}, ${listed.feed}, ${listed.place}, ${listed.ownerUserId}, ${listed.provider}, ${listed.tenant}, ${listed.accountEmail}, NULL, 1, 1, ${now}, NULL, NULL, NULL, NULL, 0, 0, 0, NULL, 0, ${relists[index] ?? now + relistMs}
+          sql`SELECT ${listed.connectionId}, ${listed.feed}, ${listed.place}, ${listed.ownerUserId}, ${listed.provider}, ${listed.tenant}, ${listed.account}, NULL, 1, 1, ${now}, NULL, NULL, NULL, NULL, 0, 0, 0, NULL, 0, ${relists[index] ?? now + relistMs}
             WHERE NOT ${closed(listed.connectionId)}`
         )
         .onConflictDoUpdate({
@@ -1095,7 +1109,7 @@ const refreshSources = async (
             brainSyncSources.feed,
             brainSyncSources.place,
           ],
-          set: { tenant: listed.tenant, accountEmail: listed.accountEmail },
+          set: { tenant: listed.tenant, account: listed.account },
         })
     );
     const [first, ...rest] = statements;
