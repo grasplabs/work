@@ -51,6 +51,7 @@ import {
 } from "./onboarding/new-brain.ts";
 import { claimSource } from "./onboarding/team-claims.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
+import { proposeAfterRun } from "./skill-proposals.ts";
 import { resultOf, runOf } from "./workflows/resource-runs.ts";
 import { detailsRemoved } from "./workflows/retention.ts";
 import { readAnything } from "./workflows/run-evidence.ts";
@@ -389,6 +390,11 @@ export const producersOf = (env: Env): Producers => ({
       },
       ended: async (outcome) => {
         await auditedBatch(env, db, ending(db, taken, outcome));
+        // A run that landed in its person's own store may be one more of
+        // a streak that proposes a skill to them (skill-proposals.ts).
+        if (producer === "run" && outcome.kind === "added") {
+          await proposeAfterRun(env, id);
+        }
       },
     };
   },

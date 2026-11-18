@@ -6,6 +6,7 @@ import type {
   ListedTeamSkill,
   OwnSkillShare,
   SkillAudienceAsked,
+  SkillProposal,
   SkillShare,
   SkillShareRequest,
   SkillsOverview,
@@ -96,6 +97,22 @@ const shareOf = (
   inUse: false,
 });
 
+/** A skill proposed to the person from 2 runs of `send-report`. */
+const proposalOf = (key: string, name: string): SkillProposal => ({
+  key,
+  name,
+  description: `When you ask for ${name}`,
+  text: `---\nname: ${name}\ndescription: When you ask for ${name}\n---\nAsk which week.\n`,
+  basis: {
+    workflow: { id: "wf-1", name: "send-report" },
+    version: 3,
+    runs: [
+      { id: "run-5", endedAt: new Date("2026-11-16T09:00:00.000Z") },
+      { id: "run-4", endedAt: new Date("2026-11-15T09:00:00.000Z") },
+    ],
+  },
+});
+
 /** Shows the page on a faked core, as an admin or not, refusing saves with `refusal`. */
 const shown = async ({
   admin,
@@ -112,6 +129,7 @@ const shown = async ({
   team = [],
   teamSkills = [],
   from,
+  proposed = [],
 }: {
   admin: boolean;
   /** The opportunity the editor starts with, as an admin drafts it. */
@@ -139,6 +157,8 @@ const shown = async ({
   team?: ListedTeamSkill[];
   /** Every team's skill in use, as an admin is shown them. */
   teamSkills?: DecidedTeamSkill[];
+  /** The skills proposed to the person. */
+  proposed?: SkillProposal[];
 }) => {
   const calls: string[] = [];
   const owned = [own, other];
@@ -150,7 +170,30 @@ const shown = async ({
   };
   const shares: OwnSkillShare[] = [...existing];
   let requests = [waiting];
+  let proposals = [...proposed];
   const skills = {
+    proposals: async (): Promise<SkillProposal[]> => {
+      await Promise.resolve();
+      return [...proposals];
+    },
+    acceptProposal: async (key: string) => {
+      await Promise.resolve();
+      calls.push(`accept ${key}`);
+      const accepted = proposals.find((each) => each.key === key);
+      proposals = proposals.filter((each) => each.key !== key);
+      const skill = {
+        name: accepted?.name ?? "",
+        version: 1,
+        description: accepted?.description ?? "",
+      };
+      owned.push(skill);
+      return skill;
+    },
+    dismissProposal: async (key: string) => {
+      await Promise.resolve();
+      calls.push(`dismiss ${key}`);
+      proposals = proposals.filter((each) => each.key !== key);
+    },
     overview: async (): Promise<SkillsOverview> => {
       await Promise.resolve();
       calls.push("overview");
@@ -489,6 +532,43 @@ describe("the skills page", () => {
         "Connect first: Exact.",
       ].join("\n"),
       calls: ["overview", "save name: client-requests-name-other", "overview"],
+    });
+  });
+
+  it("shows a skill proposed from the person's runs with what it rests on, adds one and dismisses another", async () => {
+    const { calls } = await shown({
+      admin: false,
+      proposed: [
+        proposalOf("key-1", "weekly-report"),
+        proposalOf("key-2", "monthly-report"),
+      ],
+    });
+    const page = document.body.textContent ?? "";
+    await click("Add to your skills");
+    const added = document.body.textContent ?? "";
+    await click("Dismiss");
+    expect({
+      section: page.includes("Proposed for you"),
+      basis: page.includes(
+        "From your last 2 runs of send-report, version 3, which all succeeded"
+      ),
+      text: page.includes("Ask which week."),
+      listedAfterAdd: [...document.querySelectorAll("li")].some((item) =>
+        item.textContent?.startsWith("weekly-report")
+      ),
+      stillProposed: added.includes("monthly-report"),
+      after: document.body.textContent?.includes("Proposed for you"),
+      calls: calls.filter(
+        (call) => call.startsWith("accept") || call.startsWith("dismiss")
+      ),
+    }).toStrictEqual({
+      section: true,
+      basis: true,
+      text: true,
+      listedAfterAdd: true,
+      stillProposed: true,
+      after: false,
+      calls: ["accept key-1", "dismiss key-2"],
     });
   });
 
