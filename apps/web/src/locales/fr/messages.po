@@ -18903,10 +18903,6 @@ msgstr "Vous vous connectez sur la page de {app}."
 msgid "You withdrew. Nothing you said is used from now on."
 msgstr "Vous vous êtes retiré. Rien de ce que vous avez dit n’est utilisé à partir de maintenant."
 
-#: src/interview/transcript.tsx
-msgid "You:"
-msgstr "Vous :"
-
 #: src/knowledge/document.tsx
 msgid "You're reading version {number}, saved {saved}. The current version is {current}."
 msgstr "Vous lisez la version {number}, enregistrée le {saved}. La version actuelle est la {current}."

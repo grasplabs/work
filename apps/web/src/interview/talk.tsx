@@ -1,10 +1,8 @@
 import { interviewPhases } from "@grasp-os/shared/interview-links";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import type { ReactNode } from "react";
 
 import { arrive } from "../grasp/motion/arrive.ts";
 import { Text } from "../grasp/text/index.ts";
@@ -130,30 +128,4 @@ export const Marked = ({
       )
     )}
   </>
-);
-
-/**
- * Something the person said, as their side of a chat: a bubble on the
- * right with a small tail at its foot pointing to them, so it is seen at
- * once whose words these are.
- */
-export const Own = ({
-  children,
-  className,
-}: {
-  children: ReactNode;
-  className?: string;
-}) => (
-  <div className={cn("relative flex justify-end pr-2.5", className)}>
-    <div className="bg-secondary text-secondary-foreground max-w-11/12 rounded-xl rounded-br-xs px-3 py-2 text-left text-sm leading-relaxed wrap-break-word whitespace-pre-wrap">
-      {children}
-    </div>
-    <svg
-      aria-hidden="true"
-      className="fill-secondary absolute right-0 bottom-0 h-3.5 w-2.5"
-      viewBox="0 0 10 14"
-    >
-      <path d="M0 0 C0 7 3 12 10 14 L0 14 Z" />
-    </svg>
-  </div>
 );

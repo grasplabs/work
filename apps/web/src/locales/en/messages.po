@@ -18903,10 +18903,6 @@ msgstr "You sign in on {app}’s own page."
 msgid "You withdrew. Nothing you said is used from now on."
 msgstr "You withdrew. Nothing you said is used from now on."
 
-#: src/interview/transcript.tsx
-msgid "You:"
-msgstr "You:"
-
 #: src/knowledge/document.tsx
 msgid "You're reading version {number}, saved {saved}. The current version is {current}."
 msgstr "You're reading version {number}, saved {saved}. The current version is {current}."
