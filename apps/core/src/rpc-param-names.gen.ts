@@ -152,7 +152,7 @@ export const rpcParamNames: ParamNames = {
     "changeDraftedAgent": ["chatId","make"],
     "confirmHeldCall": ["chatId","id","requestHash"],
     "connectionRequests": ["chatId"],
-    "create": ["title","agentId","make"],
+    "create": ["title","agentId","make","key"],
     "declineHeldCall": ["chatId","id"],
     "denyConnection": ["chatId","id"],
     "efforts": [],
