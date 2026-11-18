@@ -73,11 +73,7 @@ import {
   InviteButton,
 } from "../settings/invitations.tsx";
 import { roleItems, roleLines } from "../settings/roles.ts";
-import {
-  SectionNotLoaded,
-  SettingsError,
-  SettingsLoading,
-} from "../settings/section.tsx";
+import { SectionNotLoaded, SettingsError } from "../settings/section.tsx";
 import { TeamsPanel } from "../settings/teams.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
@@ -756,8 +752,38 @@ const MembersPage = () => {
   );
 };
 
+/**
+ * The people while they load, as the Members pattern has it: the table's
+ * own placeholder rows under its headers, where the people will stand.
+ */
+const MembersLoading = () => {
+  const { t } = useLingui();
+  return (
+    <SectionCard
+      density="compact"
+      flush
+      loading
+      title={t`Members`}
+      variant="grouped"
+    >
+      <DataTable
+        appearance={{ head: HEAD }}
+        columns={[
+          { key: "name", header: t`Name`, value: () => "" },
+          { key: "since", header: t`Since`, value: () => "" },
+          { key: "role", header: t`Role`, align: "end", value: () => "" },
+        ]}
+        label={t`Members`}
+        loading
+        rowKey={() => ""}
+        rows={[]}
+      />
+    </SectionCard>
+  );
+};
+
 export const Route = createFileRoute("/_shell/settings/members")({
-  pendingComponent: SettingsLoading,
+  pendingComponent: MembersLoading,
   errorComponent: SettingsError,
   component: MembersPage,
   loader: async ({ context: { core } }) =>
