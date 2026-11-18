@@ -1,6 +1,11 @@
 // @vitest-environment happy-dom
 import type { Blueprint } from "@grasp-os/shared/apps";
-import type { ChatAgent, ChatMake, ChatQuestion } from "@grasp-os/shared/chat";
+import type {
+  ChatAgent,
+  ChatMake,
+  ChatQuestion,
+  ChatUpdate,
+} from "@grasp-os/shared/chat";
 import { blueprintIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
@@ -25,6 +30,7 @@ import { examplesFor } from "../make/examples.ts";
 import { activeChat } from "./active-chat.ts";
 import { ChatStart } from "./chat-start.tsx";
 import type { MakeIdeas } from "./chat-start.tsx";
+import { onChatsChanged } from "./chats-changed.ts";
 import { GlobalChatProvider } from "./global-chat.tsx";
 import { sendDeadlineMs } from "./use-ask.ts";
 
@@ -89,6 +95,7 @@ const shown = async (
     models = Promise.resolve(["openai/gpt-5"]),
     confirmed = Promise.resolve(true),
     reach,
+    watch = async () => await Promise.withResolvers<never>().promise,
   }: {
     agents?: ChatAgent[];
     named?: string;
@@ -96,6 +103,12 @@ const shown = async (
     models?: Promise<string[]>;
     /** When core confirms a question sent. */
     confirmed?: Promise<unknown>;
+    /** How core answers watching a chat; by default it sends nothing yet. */
+    watch?: (
+      chatId: string,
+      after: number | null,
+      onUpdate: (update: ChatUpdate) => void
+    ) => Promise<unknown>;
     /** Whether the tab's connection reaches core, as it says and changes it. */
     reach?: { now: CoreReach; changed: Set<() => void> };
   } = {}
@@ -115,7 +128,7 @@ const shown = async (
       asked.push(`send ${chatId} ${question.text}`);
       await confirmed;
     },
-    watch: async () => await Promise.withResolvers<never>().promise,
+    watch,
     summary: async () => await Promise.withResolvers<never>().promise,
   };
   const core = {
@@ -362,6 +375,40 @@ describe("Chat's page from Make something", () => {
         "send chat-1 What waits on me today?",
       ],
     });
+  });
+
+  it("tells the chats' list as the answer starts, so its row is marked working then", async () => {
+    let heard = 0;
+    const unheard = onChatsChanged(() => {
+      heard += 1;
+    });
+    // Core's watch says the question's answer runs, and keeps the watch open.
+    await shown(undefined, undefined, {
+      watch: async (_chatId, _after, onUpdate) => {
+        onUpdate({
+          messages: [],
+          partial: null,
+          running: true,
+          stopped: null,
+          held: 0,
+          worked: 0,
+        });
+        return await Promise.withResolvers<never>().promise;
+      },
+    });
+    await act(async () => {
+      typeIn(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+    unheard();
+
+    expect(heard).toBeGreaterThan(0);
   });
 
   it("says a question waits while Grasp is out of reach, and no more once it went", async () => {

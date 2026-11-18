@@ -56,7 +56,7 @@ const useChats = (enabled: boolean): ChatSummary[] => {
     };
     readIf();
     const unsubscribe = router.subscribe("onResolved", readIf);
-    // An answer ended: its chat no longer works.
+    // An answer started or ended: its chat works, or no longer does.
     const unheard = onChatsChanged(readIf);
     return () => {
       unsubscribe();
