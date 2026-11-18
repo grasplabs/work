@@ -4,13 +4,14 @@ import { brainErrors, teamGroupsInputSchema } from "@grasp-os/shared/brain";
 import type { Team, TeamGroup } from "@grasp-os/shared/brain";
 import { requireAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { asc, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { auditedBatch, outboxedWhere } from "./audit-outbox.ts";
 import { brainTeamGroupSaves, brainTeamGroups } from "./db/core/schema.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
+import { intakeIds } from "./onboarding/brain-intake.ts";
 
 // The company's own groups of teams (GRA-1273): the brain's regions, the
 // prototype's `Workspace.teamGroups`. The kickoff's teams (GRA-528) carry
@@ -170,6 +171,47 @@ const placedEver = async (env: Env): Promise<Set<string>> => {
     sql`SELECT DISTINCT team.value AS team FROM ${brainTeamGroupSaves} AS kept, json_each(kept.after) AS region, json_each(region.value, '$.teamIds') AS team`
   );
   return new Set(rows.map(({ team }) => team));
+};
+
+/**
+ * Teams a staff list's confirm gave another id (GRA-2055: a draft's team,
+ * made a members' team), by their staff-list ids: every region names them
+ * by the new one, so a team placed while it was on the draft stays where
+ * it was placed. Called before the store saves the confirmed list, whose
+ * arranging would otherwise find the new id in no region.
+ */
+export const moveRegionTeams = async (
+  env: Env,
+  moved: ReadonlyMap<string, string>
+): Promise<void> => {
+  if (moved.size === 0) {
+    return;
+  }
+  const to = new Map(
+    [...moved].map(([from, into]) => [
+      intakeIds.team(from),
+      intakeIds.team(into),
+    ])
+  );
+  const db = drizzle(env.DB);
+  const rows = await db
+    .select({ id: brainTeamGroups.id, teamIds: brainTeamGroups.teamIds })
+    .from(brainTeamGroups);
+  const [first, ...rest] = rows.flatMap(({ id, teamIds }) => {
+    const before = idsOf(teamIds);
+    const after = before.map((team) => to.get(team) ?? team);
+    return after.some((team, index) => team !== before[index])
+      ? [
+          db
+            .update(brainTeamGroups)
+            .set({ teamIds: JSON.stringify(after) })
+            .where(eq(brainTeamGroups.id, id)),
+        ]
+      : [];
+  });
+  if (first !== undefined) {
+    await db.batch([first, ...rest]);
+  }
 };
 
 /**

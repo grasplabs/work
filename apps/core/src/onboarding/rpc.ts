@@ -61,6 +61,7 @@ import { requireAdmin } from "@grasp-os/shared/roles";
 import { uploadMaxBytes } from "@grasp-os/shared/uploads";
 import { z } from "zod";
 
+import { moveRegionTeams } from "../brain-team-groups.ts";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
@@ -206,6 +207,7 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
           return to === undefined || to === id ? [] : [[id, to] as const];
         })
       );
+      await moveRegionTeams(this.#env, moved);
       const view = await onboardingStore(this.#env).saveRoster(named, by, {
         confirmed,
         moved,

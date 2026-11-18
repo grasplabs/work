@@ -536,4 +536,31 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
       held: { [later?.id ?? ""]: null },
     });
   });
+
+  it("keep a draft team where the admin placed it on the Brain's map once the confirm gives it its id", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const tag = unique();
+    const roster: RosterInput = {
+      teams: [{ id: `desk-${tag}`, name: `Desk ${tag}`, lead: null }],
+      people: [{ id: `dee-${tag}`, name: "Dee", team: `desk-${tag}` }],
+    };
+    await admin.api.onboarding.saveRoster(roster);
+    // Placed by the admin while the team is only on the draft.
+    await admin.api.brain.saveTeamGroups([
+      {
+        id: `front-${tag}`,
+        name: "Front office",
+        teamIds: [`team-desk-${tag}`],
+      },
+    ]);
+
+    const { roster: kept } = await admin.api.onboarding.confirmRoster(roster);
+    const desk = kept?.teams.find(({ name }) => name === `Desk ${tag}`)?.id;
+    const { teamGroups } = await admin.api.brain.read();
+
+    expect({
+      moved: desk !== undefined && desk !== `desk-${tag}`,
+      front: teamGroups.find(({ id }) => id === `front-${tag}`)?.teamIds,
+    }).toStrictEqual({ moved: true, front: [`team-${desk ?? ""}`] });
+  });
 });
