@@ -454,14 +454,18 @@ describe("permissions", () => {
     await admin.api.permissions.request(outlook(app.appId, "ASKED"));
     const gone = await grant(outlook(app.appId, "GONE"));
     await admin.api.permissions.revoke(gone.id);
-    // A grant to read a Knowledge collection, left from before the Brain
-    // replaced Knowledge: no stub, and no Knowledge tools either.
+    // A grant on a store, left from before each App's store was its own:
+    // no stub.
     await env.DB.prepare(
       `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
         actions, binding, status, requested_by, requested_at, granted_by, granted_at)
-       VALUES (?, 'app', ?, 'collection', 'policies', '["read"]', 'POLICIES', 'active', 'test', 0, 'test', 0)`
+       VALUES (?, 'app', ?, 'store', ?, '["read"]', 'POLICIES', 'active', 'test', 0, 'test', 0)`
     )
-      .bind(crypto.randomUUID(), app.appId)
+      .bind(
+        crypto.randomUUID(),
+        app.appId,
+        await storeOfNewApp(env, await admin.api.whoami())
+      )
       .run();
     const other = await newApp(admin.api);
     await grant(outlook(other.appId, "SOMEONE_ELSES"));
@@ -602,22 +606,15 @@ describe("permissions", () => {
   });
 
   // Grants of a kind the platform removed (on a store, left from before
-  // each App's store was its own; on a Knowledge collection, from before
-  // the Brain replaced Knowledge) stay until a later release removes them
+  // each App's store was its own) stay until a later release removes them
   // with their audit events: until then nothing lists or decides one, and
   // nothing fails over one.
-  it.each([
-    ["a store", "store"],
-    ["a Knowledge collection", "collection"],
-  ] as const)(
+  it.each([["a store", "store"]] as const)(
     "leave a grant on %s, left from before, unlisted and undecided",
     async (_kind, objectType) => {
       const admin = await permissionApi("admin");
       const app = await newApp(admin.api);
-      const object =
-        objectType === "store"
-          ? await storeOfNewApp(env, await admin.api.whoami())
-          : "handbook";
+      const object = await storeOfNewApp(env, await admin.api.whoami());
       const left = crypto.randomUUID();
       await env.DB.prepare(
         `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
@@ -644,18 +641,12 @@ describe("permissions", () => {
   // Hidden, a leftover grant would still hold its binding name, and nobody
   // could revoke it to free the name: a request under that name revokes it
   // in its own batch, audited with why.
-  it.each([
-    ["a store", "store"],
-    ["a Knowledge collection", "collection"],
-  ] as const)(
+  it.each([["a store", "store"]] as const)(
     "free a binding name a leftover grant on %s holds, revoking it audited",
     async (_kind, objectType) => {
       const admin = await permissionApi("admin");
       const app = await newApp(admin.api);
-      const object =
-        objectType === "store"
-          ? await storeOfNewApp(env, await admin.api.whoami())
-          : "handbook";
+      const object = await storeOfNewApp(env, await admin.api.whoami());
       const left = crypto.randomUUID();
       await env.DB.prepare(
         `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,

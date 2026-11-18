@@ -1,10 +1,19 @@
 import { brainOf, recallBudgetMax } from "@grasp-os/brain-next/contract";
 import type { Pack } from "@grasp-os/brain-next/contract";
+import {
+  modelFileKey,
+  modelFilesOf,
+  shippedModel,
+} from "@grasp-os/embed/model-files";
 import { brainWithoutMeaningReasons } from "@grasp-os/shared/brain-report";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { calls, poisonWord } from "../../../packages/embed/test/test-models.ts";
+import {
+  calls,
+  poisonWord,
+  putTestModel,
+} from "../../../packages/embed/test/test-models.ts";
 import type {
   BreakableEmbedder,
   Breakage,
@@ -306,6 +315,113 @@ describe("recall by meaning, through core", () => {
         ),
         meaning: 0,
       });
+    }
+  );
+
+  it("answers by words while the model's files are missing, asking the question embedder once and warning of no recall, and by meaning once they are back", async () => {
+    // The question embedder fails as one does without the files, and the
+    // files are gone from the bucket, as on a stack started without them.
+    await questions().breakAs("crash");
+    await Promise.all(
+      modelFilesOf(shippedModel).map(async (file) => {
+        await env.MODEL_FILES.delete(modelFileKey(file));
+      })
+    );
+    const before = await recallCounts();
+    const askedBefore = calls.length;
+    const first = await recalled(withWords);
+    const askedFirst = calls.length;
+    const second = await recalled(withWords);
+    const askedSecond = calls.length;
+    const missing = await recallCounts();
+    await putTestModel(env.MODEL_FILES, shippedModel);
+    await questions().breakAs(null);
+    const back = await recalled(question);
+
+    expect({
+      found: [first, second].map(({ value }) =>
+        value.items.map(({ text, found }) => ({ text, found }))
+      ),
+      warned: [first.warned, second.warned],
+      asked: [askedFirst - askedBefore, askedSecond - askedFirst],
+      without: missing.without - before.without,
+      back: back.value.items
+        .filter(({ text }) => text === english)
+        .map(({ found }) => found),
+      backWarned: back.warned,
+    }).toStrictEqual({
+      found: [
+        [{ text: dutch, found: "words" }],
+        [{ text: dutch, found: "words" }],
+      ],
+      warned: [[], []],
+      asked: [1, 0],
+      without: 2,
+      back: ["meaning"],
+      backWarned: [],
+    });
+  });
+
+  it.for<{
+    when: "after a failed question" | "while the files are missing";
+    bucket: "throws" | "hangs";
+    reason: string;
+  }>([
+    { when: "after a failed question", bucket: "throws", reason: "failed" },
+    { when: "after a failed question", bucket: "hangs", reason: "failed" },
+    { when: "while the files are missing", bucket: "throws", reason: "failed" },
+    // The look at the bucket takes the whole limit, so the question is late.
+    {
+      when: "while the files are missing",
+      bucket: "hangs",
+      reason: "timed_out",
+    },
+  ])(
+    "answers by words within the question's limit when the model files bucket $bucket $when",
+    async ({ when, bucket, reason }) => {
+      const files = env.MODEL_FILES;
+      await questions().breakAs("crash");
+      if (when === "while the files are missing") {
+        await Promise.all(
+          modelFilesOf(shippedModel).map(async (file) => {
+            await files.delete(modelFileKey(file));
+          })
+        );
+        // Core now knows they are missing, and looks at the bucket first.
+        await recalled(withWords);
+      }
+      // A bucket that is down, or one that never answers.
+      const broken = {
+        head: async (): Promise<never> =>
+          bucket === "throws"
+            ? await Promise.reject(new Error("The bucket is down"))
+            : await Promise.withResolvers<never>().promise,
+      };
+      Reflect.set(env, "MODEL_FILES", broken);
+      const startedAt = Date.now();
+      try {
+        const { value, warned } = await recalled(withWords);
+        const tookMs = Date.now() - startedAt;
+        Reflect.set(env, "MODEL_FILES", files);
+        await questions().breakAs(null);
+        const byWords = await withoutMeaning(withWords);
+
+        expect({
+          pack: value,
+          warned,
+          inTime: tookMs < 2000,
+        }).toStrictEqual({
+          pack: byWords,
+          warned: [{ event: "brain.recall.without_meaning", reason }],
+          inTime: true,
+        });
+      } finally {
+        Reflect.set(env, "MODEL_FILES", files);
+        await putTestModel(files, shippedModel);
+        await questions().breakAs(null);
+        // So no later test starts with the files known missing.
+        await recalled(question);
+      }
     }
   );
 

@@ -323,7 +323,7 @@ export const eventsOf = async (action: string, memory: string, count: number) =>
 export const grant = (
   subjectType: "app" | "workflow",
   subject: string,
-  objectType: "connection" | "collection" | "workflow" | "app",
+  objectType: "connection" | "workflow" | "app",
   object: string,
   actions: readonly string[],
   status = "active"

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "8631932b-4293-4831-9132-711493f9c8fa",
+  "id": "c0388866-23a0-458d-af73-7aaa59a96228",
   "prevId": "d5b26316-3a11-4754-930a-330a89e4d444",
   "tables": {
     "access_revocations": {
@@ -986,13 +986,6 @@
         },
         "job": {
           "name": "job",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "instructions": {
-          "name": "instructions",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -4413,13 +4406,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "purged_at": {
-          "name": "purged_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "retired_at": {
           "name": "retired_at",
           "type": "integer",
@@ -5642,46 +5628,6 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "collection_teams": {
-      "name": "collection_teams",
-      "columns": {
-        "collection_id": {
-          "name": "collection_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "team_id": {
-          "name": "team_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "collection_teams_team_id_idx": {
-          "name": "collection_teams_team_id_idx",
-          "columns": [
-            "team_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "collection_teams_collection_id_team_id_pk": {
-          "columns": [
-            "collection_id",
-            "team_id"
-          ],
-          "name": "collection_teams_collection_id_team_id_pk"
-        }
-      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
@@ -8599,91 +8545,6 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "opportunity_dismissals": {
-      "name": "opportunity_dismissals",
-      "columns": {
-        "routine": {
-          "name": "routine",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "evidence": {
-          "name": "evidence",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "opportunity_dismissals_routine_evidence_pk": {
-          "columns": [
-            "routine",
-            "evidence"
-          ],
-          "name": "opportunity_dismissals_routine_evidence_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "opportunity_proposals": {
-      "name": "opportunity_proposals",
-      "columns": {
-        "routine": {
-          "name": "routine",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "evidence": {
-          "name": "evidence",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "proposal": {
-          "name": "proposal",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "opportunity_proposals_routine_evidence_pk": {
-          "columns": [
-            "routine",
-            "evidence"
-          ],
-          "name": "opportunity_proposals_routine_evidence_pk"
-        }
-      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

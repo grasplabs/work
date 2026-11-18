@@ -1867,8 +1867,15 @@
     {
       "idx": 266,
       "version": "6",
-      "when": 1794957578067,
-      "tag": "0266_opportunities",
+      "when": 1794952351848,
+      "tag": "0266_old_brain_leftovers",
+      "breakpoints": true
+    },
+    {
+      "idx": 267,
+      "version": "6",
+      "when": 1794964790327,
+      "tag": "0267_opportunities",
       "breakpoints": true
     }
   ]
