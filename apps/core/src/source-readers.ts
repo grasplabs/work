@@ -1,14 +1,11 @@
-import type { AuditEvent } from "@grasp-os/shared/audit";
-import { connectionOwnersMax } from "@grasp-os/shared/connect";
 import type { PersonalAccount } from "@grasp-os/shared/connect";
 import { toHex } from "@grasp-os/shared/encoding";
-import { errorName } from "@grasp-os/shared/log";
+import { readerProofMaxAgeMs } from "@grasp-os/shared/source-readers";
 import type { SourceReader } from "@grasp-os/shared/source-readers";
 import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
-import type { Held } from "./audit-outbox.ts";
 import { providerIds, signInConfig } from "./auth/config.ts";
 import { accounts, sourceReaderTokens } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
@@ -179,6 +176,7 @@ export const signInAccountsRead = (db: DrizzleD1Database, userId: string) =>
       providerId: accounts.providerId,
       oid: accounts.oid,
       verifiedEmail: accounts.verifiedEmail,
+      verifiedEmailAt: accounts.verifiedEmailAt,
       verifiedTenant: accounts.verifiedTenant,
     })
     .from(accounts)
@@ -198,6 +196,13 @@ interface Account {
   tenant: string;
   account: string;
 }
+
+/**
+ * Whether a proof of an address made at `at` (milliseconds) still counts:
+ * within `readerProofMaxAgeMs`, the one bound every address proof has.
+ */
+const recent = (at: number | null): boolean =>
+  at !== null && Date.now() - at < readerProofMaxAgeMs;
 
 /** Whether `address` is in one of `domains`, after its last `@`. */
 const inDomains = (address: string, domains: readonly string[]): boolean => {
@@ -228,36 +233,59 @@ const readingAccountsOf = (
   return [
     // Each in the tenant its sign-in proved, only while the config names
     // it: a tenant the config moved to is proved by a sign-in through it.
-    ...signIns.flatMap(({ providerId, oid, verifiedEmail, verifiedTenant }) => {
-      const proved = (tenant: string): boolean =>
-        verifiedTenant !== null &&
-        comparable(verifiedTenant) === comparable(tenant);
-      if (
-        providerId === providerIds.entra &&
-        config.entra &&
-        oid !== null &&
-        proved(config.entra.tenantId)
-      ) {
-        return [
-          {
-            provider: "microsoft",
-            tenant: config.entra.tenantId,
-            account: oid,
-          },
-        ];
+    // A sign-in's address, as every proof of an address, only while
+    // confirmed within a day (`recent`): one signed in once and then used
+    // only through a chat app stops counting by it.
+    ...signIns.flatMap(
+      ({ providerId, oid, verifiedEmail, verifiedEmailAt, verifiedTenant }) => {
+        const proved = (tenant: string): boolean =>
+          verifiedTenant !== null &&
+          comparable(verifiedTenant) === comparable(tenant);
+        if (
+          providerId === providerIds.entra &&
+          config.entra &&
+          oid !== null &&
+          proved(config.entra.tenantId)
+        ) {
+          return [
+            {
+              provider: "microsoft",
+              tenant: config.entra.tenantId,
+              account: oid,
+            },
+          ];
+        }
+        return providerId === providerIds.google &&
+          config.google &&
+          proved(config.google.hostedDomain) &&
+          recent(verifiedEmailAt?.getTime() ?? null)
+          ? google(config.google.hostedDomain, verifiedEmail)
+          : [];
       }
-      return providerId === providerIds.google &&
-        config.google &&
-        proved(config.google.hostedDomain)
-        ? google(config.google.hostedDomain, verifiedEmail)
-        : [];
-    }),
-    ...connected.flatMap(({ provider, tenant, accountId, verifiedEmail }) => {
-      if (provider === "microsoft") {
-        return [{ provider, tenant, account: accountId }];
+    ),
+    // A connection's only while connected, and its address only while
+    // the provider confirmed it within a day (`readerProofMaxAgeMs`): an
+    // idle connection, or one needing reconnecting, stops counting by it.
+    ...connected.flatMap(
+      ({
+        provider,
+        tenant,
+        accountId,
+        verifiedEmail,
+        verifiedEmailAt,
+        connected: live,
+      }) => {
+        if (!live) {
+          return [];
+        }
+        if (provider === "microsoft") {
+          return [{ provider, tenant, account: accountId }];
+        }
+        return provider === "google" && recent(verifiedEmailAt)
+          ? google(tenant, verifiedEmail)
+          : [];
       }
-      return provider === "google" ? google(tenant, verifiedEmail) : [];
-    }),
+    ),
   ];
 };
 
@@ -315,8 +343,7 @@ export const heldPrincipalsOf = async (
  * minting each that no list named yet, as the connection proves them:
  * so their erasure finds them by person (`forgetTokens`), whatever address
  * a connection carries and whether or not they ever read by it. Called
- * when a connection is made or made again (connections.ts), and when a
- * renewal finds its address changed (`claimOnAddressChanges`).
+ * when a connection is made or made again (connections.ts).
  */
 export const claimConnectedTokens = async (
   env: Pick<Env, "DB" | "BETTER_AUTH_SECRET">,
@@ -325,14 +352,19 @@ export const claimConnectedTokens = async (
 ): Promise<void> => {
   const keys = await keysOf(
     env,
-    connected.flatMap(({ provider, accountId, verifiedEmail }) => {
-      if (provider === "microsoft") {
-        return [{ provider, account: accountId }];
+    connected.flatMap(
+      ({ provider, accountId, verifiedEmail, connected: live }) => {
+        if (!live) {
+          return [];
+        }
+        if (provider === "microsoft") {
+          return [{ provider, account: accountId }];
+        }
+        return provider === "google" && verifiedEmail !== null
+          ? [{ provider, account: verifiedEmail }]
+          : [];
       }
-      return provider === "google" && verifiedEmail !== null
-        ? [{ provider, account: verifiedEmail }]
-        : [];
-    })
+    )
   );
   if (keys.length === 0) {
     return;
@@ -351,8 +383,9 @@ export const claimConnectedTokens = async (
 };
 
 /**
- * The keys of what core keeps of a person's accounts (`kept`: object IDs,
- * verified addresses and their address), for `forgetTokens`.
+ * The keys of a person's accounts as core and connect keep them (`kept`:
+ * object IDs, verified addresses, their address, and their connections'
+ * accounts, disconnected or not), for `forgetTokens`.
  */
 export const keptAccountKeysOf = async (
   env: Pick<Env, "BETTER_AUTH_SECRET">,
@@ -390,65 +423,3 @@ export const forgetTokens = (
         )
       )
     );
-
-/** A connection whose renewal found its account's address changed, if `event` says so. */
-const changedConnectionOf = (event: AuditEvent): string | undefined =>
-  event.action === "connection.account_changed" &&
-  event.target?.type === "connection"
-    ? event.target.id
-    : undefined;
-
-/**
- * For each of connect's `connection.account_changed` events among
- * `events` (connect's tokens.ts: a renewal confirmed another address, or
- * none), claims again for the connection's owner the tokens of every
- * account they connected (`claimConnectedTokens`), before the event leaves
- * connect's outbox (audit-drains.ts): so the address now confirmed is
- * theirs to be erased by, whether or not they read by it. One whose claim
- * failed is held, and tried again by the next drain.
- */
-export const claimOnAddressChanges = async (
-  env: Pick<Env, "DB" | "BETTER_AUTH_SECRET" | "CONNECT">,
-  events: readonly AuditEvent[]
-): Promise<Held> => {
-  const changed = events.flatMap((event) => {
-    const connectionId = changedConnectionOf(event);
-    return connectionId === undefined ? [] : [{ event, connectionId }];
-  });
-  if (changed.length === 0) {
-    return { ids: [], errors: [] };
-  }
-  const ids = [...new Set(changed.map(({ connectionId }) => connectionId))];
-  const owners = new Map<string, string | null>();
-  for (let at = 0; at < ids.length; at += connectionOwnersMax) {
-    // oxlint-disable-next-line no-await-in-loop -- a page at a time
-    const page = await env.CONNECT.connectionOwners(
-      ids.slice(at, at + connectionOwnersMax)
-    );
-    for (const { id, ownerUserId } of page) {
-      owners.set(id, ownerUserId);
-    }
-  }
-  const settled = await Promise.allSettled(
-    changed.map(async ({ connectionId }) => {
-      const owner = owners.get(connectionId) ?? null;
-      if (owner !== null) {
-        await claimConnectedTokens(
-          env,
-          owner,
-          await env.CONNECT.personalAccounts(owner)
-        );
-      }
-    })
-  );
-  const held = changed.flatMap(({ event }, index) => {
-    const outcome = settled[index];
-    return outcome?.status === "rejected"
-      ? [{ id: event.id, error: errorName(outcome.reason) }]
-      : [];
-  });
-  return {
-    ids: held.map(({ id }) => id),
-    errors: held.map(({ error }) => error),
-  };
-};

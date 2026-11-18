@@ -7,7 +7,7 @@ import {
   waitOnExecutionContext,
 } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
   addSource,
@@ -17,12 +17,16 @@ import {
   workBrain,
 } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
-import { inJurisdiction } from "../src/durable-objects.ts";
+import { personalWorkspaceId } from "../src/chats-rpc.ts";
+import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import worker from "../src/index.ts";
+import { says } from "./agent-chat.ts";
+import { requestGranted } from "./apps.ts";
 import { objectsHolding, tablesHolding } from "./brain-next-traces.ts";
 import { consentCode, googleAddressUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { runMinuteTasks } from "./maintenance.ts";
+import { fakeProvider } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
 import {
   acmeTenant,
@@ -245,7 +249,7 @@ const googleGives = async (
 };
 
 /** Ends `connectionId`'s access token and renews it, as its next use does; then the drain runs. */
-const renewed = async (connectionId: string): Promise<void> => {
+const renewedOnly = async (connectionId: string): Promise<void> => {
   await connectDb()
     .prepare(
       "UPDATE connection_tokens SET access_expires_at = 0 WHERE connection_id = ?"
@@ -260,7 +264,74 @@ const renewed = async (connectionId: string): Promise<void> => {
       cursor: null,
     })
   );
+};
+
+/** As `renewedOnly`, then the clock's drain of what connect recorded. */
+const renewed = async (connectionId: string): Promise<void> => {
+  await renewedOnly(connectionId);
   await runMinuteTasks();
+};
+
+const dayMs = 24 * 60 * 60 * 1000;
+const hourMs = 60 * 60 * 1000;
+
+/** Whether `personId`, as of `at` from now, finds `source` by `marker`. */
+const findsLater = async (
+  laterMs: number,
+  personId: string,
+  source: SourceRef,
+  marker: string
+): Promise<boolean> => {
+  vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + laterMs });
+  try {
+    return await finds(personId, source, marker);
+  } finally {
+    vi.useRealTimers();
+  }
+};
+
+/**
+ * Whether the model saw `secret` in a turn `personId` asked about `topic`
+ * in their own direct message on a chat app, which recalls as them with
+ * no web session.
+ */
+const findsInDirectMessage = async (
+  admin: Awaited<ReturnType<typeof signedInApi>>,
+  personId: string,
+  topic: string,
+  secret: string
+): Promise<boolean> => {
+  const agentId = crypto.randomUUID();
+  await requestGranted(idp, admin, {
+    subject: { type: "agent", agentId },
+    object: { type: "platform" },
+    actions: ["brain"],
+    binding: "BRAIN",
+  });
+  const provider = await fakeProvider(says("Noted."));
+  await workspace(env, personalWorkspaceId(personId)).askThrough(
+    personId,
+    agentId,
+    "slack",
+    `What about ${topic}?`,
+    undefined,
+    { kind: "direct" }
+  );
+  return JSON.stringify(provider.requests.map(({ body }) => body)).includes(
+    secret
+  );
+};
+
+/** Sets when `personId`'s sign-in last confirmed their address to `agoMs` ago. */
+const signInConfirmedAgo = async (
+  personId: string,
+  agoMs: number
+): Promise<void> => {
+  await env.DB.prepare(
+    "UPDATE accounts SET verified_email_at = ? WHERE user_id = ? AND verified_email IS NOT NULL"
+  )
+    .bind(Date.now() - agoMs, personId)
+    .run();
 };
 
 const readersOf = (...readers: SourceReader[]): SourceReaders => ({
@@ -644,7 +715,7 @@ describe("readers copied from the source", () => {
   );
 
   it(
-    "forgets a person's tokens though the Brain held their erasure up and connect's part ran first, and though Google's sign-in was turned off since",
+    "forgets a person's tokens though the Brain held their erasure up, connect's part waiting for it, and though Google's sign-in was turned off since",
     setUpTime,
     async () => {
       const admin = await signedInApi(idp, "admin");
@@ -669,8 +740,8 @@ describe("readers copied from the source", () => {
         })
       );
       const connectorRead = await finds(connector.userId, list, marker);
-      // The Brain's part fails at first: what waits for it waits, and
-      // the rest of the erasure (connect's among it) runs meanwhile.
+      // The Brain's part fails at first: what waits for it waits, connect's
+      // part among it, as it keeps the accounts that part forgets.
       await holdingBrainErasures(true);
       let meanwhile: string[] = [];
       try {
@@ -722,7 +793,7 @@ describe("readers copied from the source", () => {
         ],
       }).toStrictEqual({
         connectorRead: true,
-        meanwhile: ["connect complete", "identity pending"],
+        meanwhile: ["connect pending", "identity pending"],
         areas: [true, true],
         newcomersRead: [false, false],
         tokensHold: [false, false, false],
@@ -1021,6 +1092,188 @@ describe("readers copied from the source", () => {
         moved: { account: false, tenant: false },
         signedIn: { account: true, tenant: true },
       });
+    }
+  );
+
+  it(
+    "stops counting an idle connection's address a day after it was last confirmed",
+    setUpTime,
+    async () => {
+      // Alice's connection, used by nothing: her address is given to a new
+      // hire, and files shared with the new hire name it.
+      const alice = await microsoftMember();
+      const { account: address } = await connectedGoogle(alice);
+      const marker = uniqueWord();
+      const newHiresFile = await sharedItem(marker, readersOf(address));
+
+      expect({
+        now: await finds(alice.userId, newHiresFile, marker),
+        withinTheDay: await findsLater(
+          dayMs - hourMs,
+          alice.userId,
+          newHiresFile,
+          marker
+        ),
+        afterADay: await findsLater(
+          dayMs + hourMs,
+          alice.userId,
+          newHiresFile,
+          marker
+        ),
+      }).toStrictEqual({ now: true, withinTheDay: true, afterADay: false });
+    }
+  );
+
+  it(
+    "stops counting the address of a connection needing reconnecting a day after it was last confirmed",
+    setUpTime,
+    async () => {
+      const alice = await microsoftMember();
+      const { id: connectionId, account: address } =
+        await connectedGoogle(alice);
+      await connectDb()
+        .prepare("UPDATE connections SET status = 'needs_reauth' WHERE id = ?")
+        .bind(connectionId)
+        .run();
+      const marker = uniqueWord();
+      const shared = await sharedItem(marker, readersOf(address));
+
+      expect({
+        now: await finds(alice.userId, shared, marker),
+        afterADay: await findsLater(
+          dayMs + hourMs,
+          alice.userId,
+          shared,
+          marker
+        ),
+      }).toStrictEqual({ now: true, afterADay: false });
+    }
+  );
+
+  it(
+    "keeps counting a connection's address a renewal inside the day confirms again",
+    setUpTime,
+    async () => {
+      const alice = await microsoftMember();
+      const { id: connectionId, account: address } =
+        await connectedGoogle(alice);
+      // Last confirmed 23 hours ago.
+      await connectDb()
+        .prepare("UPDATE connections SET verified_email_at = ? WHERE id = ?")
+        .bind(Date.now() - 23 * hourMs, connectionId)
+        .run();
+      const marker = uniqueWord();
+      const shared = await sharedItem(marker, readersOf(address));
+      const unrenewed = await findsLater(
+        2 * hourMs,
+        alice.userId,
+        shared,
+        marker
+      );
+      await renewed(connectionId);
+
+      expect({
+        unrenewed,
+        renewed: await findsLater(2 * hourMs, alice.userId, shared, marker),
+      }).toStrictEqual({ unrenewed: false, renewed: true });
+    }
+  );
+
+  it(
+    "forgets the token of the address a renewal confirmed, though the person is erased before the drain and never read by it",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      const alice = await microsoftMember();
+      const { id: connectionId } = await connectedGoogle(alice);
+      const [local = ""] = alice.email.split("@");
+      const renamed = `${local}-renamed@acme.test`;
+      // Shared with the address before it was hers.
+      const marker = uniqueWord();
+      const list = await sharedItem(
+        marker,
+        readersOf({
+          kind: "account",
+          provider: "google",
+          tenant: "acme.test",
+          account: renamed,
+        })
+      );
+      await googleGives(local, renamed);
+      // Renewed, then removed and erased before the clock drains it.
+      await renewedOnly(connectionId);
+      await admin.api.members.remove(alice.userId);
+      await admin.api.members.erase(alice.userId, alice.name);
+      await runMinuteTasks();
+      const { userId: newcomer } = await whoami(
+        await signedIn(idp, "google", googlePerson({ email: renamed }))
+      );
+
+      await expect(finds(newcomer, list, marker)).resolves.toBeFalsy();
+    }
+  );
+
+  it(
+    "counts a Google sign-in's address for a day after the sign-in confirmed it, also in a direct-message turn, and again after a new sign-in",
+    setUpTime,
+    async () => {
+      // Bob signs in once, then uses Grasp only through Slack; his address
+      // is then given to a new hire, and files shared with them name it.
+      const admin = await signedInApi(idp, "admin");
+      const bobClaims = googlePerson();
+      const { userId: bob } = await whoami(
+        await signedIn(idp, "google", bobClaims)
+      );
+      const [topic, secret] = [uniqueWord(), uniqueWord()];
+      await sharedItem(
+        `${topic} ${secret}`,
+        readersOf({
+          kind: "account",
+          provider: "google",
+          tenant: "acme.test",
+          account: String(bobClaims.email),
+        })
+      );
+      await signInConfirmedAgo(bob, 23 * hourMs);
+      const at23 = await findsInDirectMessage(admin, bob, topic, secret);
+      await signInConfirmedAgo(bob, 25 * hourMs);
+      const at25 = await findsInDirectMessage(admin, bob, topic, secret);
+      await signedIn(idp, "google", bobClaims);
+
+      expect({
+        at23,
+        at25,
+        signedInAgain: await findsInDirectMessage(admin, bob, topic, secret),
+      }).toStrictEqual({ at23: true, at25: false, signedInAgain: true });
+    }
+  );
+
+  it(
+    "keeps counting the Google address of a person whose connected account confirmed it, though their sign-in's proof lapsed",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      const local = `syncs-${unique()}`;
+      const claims = googlePerson({ sub: local, email: `${local}@acme.test` });
+      const session = await signedIn(idp, "google", claims);
+      const { userId } = await whoami(session);
+      // Their own Google account, connected: the sync keeps it confirmed.
+      await connectedGoogle({ session, email: String(claims.email) });
+      const [topic, secret] = [uniqueWord(), uniqueWord()];
+      await sharedItem(
+        `${topic} ${secret}`,
+        readersOf({
+          kind: "account",
+          provider: "google",
+          tenant: "acme.test",
+          account: String(claims.email),
+        })
+      );
+      await signInConfirmedAgo(userId, 25 * hourMs);
+
+      await expect(
+        findsInDirectMessage(admin, userId, topic, secret)
+      ).resolves.toBeTruthy();
     }
   );
 

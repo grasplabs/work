@@ -1027,7 +1027,8 @@ describe("erasing a person", () => {
           { area: "brain_shared", state: "complete" },
           { area: "identity", state: "pending" },
           { area: "channels", state: "complete" },
-          { area: "connect", state: "complete" },
+          // It keeps the connections' accounts `identity` forgets.
+          { area: "connect", state: "pending" },
           { area: "workspace", state: "complete" },
           { area: "apps", state: "complete" },
           { area: "interview", state: "complete" },

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "669c0a53-677a-4525-aa63-30b0a805e995",
+  "id": "6369ac2f-f89a-4426-9f0a-907518752f7b",
   "prevId": "d0da1ede-103f-4167-8345-b0b7de4c2318",
   "tables": {
     "access_revocations": {
@@ -177,6 +177,13 @@
         "verified_email": {
           "name": "verified_email",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "verified_email_at": {
+          "name": "verified_email_at",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

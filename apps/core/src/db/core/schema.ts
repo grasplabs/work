@@ -109,6 +109,12 @@ export const accounts = sqliteTable(
      */
     verifiedEmail: text("verified_email"),
     /**
+     * When the latest sign-in confirmed `verified_email`: the address
+     * counts only within a day of it (source-readers.ts,
+     * `readerProofMaxAgeMs`), as every proof of an address does.
+     */
+    verifiedEmailAt: timestamp("verified_email_at"),
+    /**
      * The tenant the ID token of the latest sign-in was checked against
      * (Entra's `tid`, Google's `hd`): this account counts as a reader in a
      * copied list only while the sign-in config names that tenant

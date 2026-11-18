@@ -73,6 +73,7 @@ export const reviewedPersonColumns: Readonly<
     "connected_by",
     "owner_user_id",
     "verified_email",
+    "verified_email_at",
   ],
   erased_people: ["user_id"],
   idempotent_calls: ["on_behalf_of", "subject_id", "subject_type"],
