@@ -1,4 +1,5 @@
 import { brainOf } from "@grasp-os/brain-next/contract";
+import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
@@ -17,7 +18,9 @@ import {
 } from "../src/brain-next.ts";
 import type { SourceRef } from "../src/brain-next.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
-import { inJurisdiction } from "../src/durable-objects.ts";
+import { inJurisdiction, workspace } from "../src/durable-objects.ts";
+import { brainVersionRead } from "../src/history-access.ts";
+import { MembersRpc } from "../src/members.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import {
   grantPermission,
@@ -37,6 +40,7 @@ import {
 import {
   candidateRunFor,
   startCandidateRun,
+  sweepCandidateRuns,
 } from "../src/workflows/candidate-runs.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { allEvents } from "./audit-events.ts";
@@ -316,6 +320,77 @@ const nextRunReads = async (by: Member, id: string) => {
     withheld: admitted?.detail?.stateWithheld ?? 0,
   };
 };
+
+/**
+ * Key `kept` of workflow `workflowId`'s state set to `value` by a run a
+ * real chat of `personId`'s started, having read version 1 of `source`:
+ * the run's pin of it, as such a start pins what its chat read
+ * (workflow-starts.ts), kept past its details as a key keeps it. The run's
+ * ID.
+ */
+const keptFromChat = async (
+  workflowId: string,
+  personId: string,
+  source: SourceRef,
+  value: string
+): Promise<string> => {
+  const runId = crypto.randomUUID();
+  const workspaceId = workspaceIdSchema.parse(crypto.randomUUID());
+  const agentId = `agent-${unique()}`;
+  const chat = await workspace(env, workspaceId).createChat(
+    "Questions",
+    personId,
+    agentId
+  );
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO workflow_state (workflow_resource_id, key, value, run_id, updated_at) VALUES (?, 'kept', ?, ?, ?)"
+    ).bind(workflowId, JSON.stringify(value), runId, Date.now()),
+    env.DB.prepare(
+      "INSERT INTO kept_run_evidence (run_id, kept_at) VALUES (?, ?)"
+    ).bind(runId, Date.now()),
+    env.DB.prepare(
+      "INSERT INTO run_chat_sources (run_id, source_id, workspace_id, chat_id, agent_id, person_id) VALUES (?, ?, ?, ?, ?, ?)"
+    ).bind(
+      runId,
+      brainVersionRead({ source, version: 1 }),
+      workspaceId,
+      chat.id,
+      agentId,
+      personId
+    ),
+  ]);
+  return runId;
+};
+
+/**
+ * A test run of workflow `id`'s draft, started by `by`, that returns what
+ * it found kept, after a moment's wait with `hold`: its ID.
+ */
+const testRunOf = async (by: Member, id: string, hold: boolean) => {
+  const { revision } = await workflowDraft(env, by, id);
+  const { runId } = await startCandidateRun(env, by, id, {
+    revision,
+    args: { entity: unique(), ask: "", keep: false, carry: true, hold },
+    fixtures: { docs: { result: { entities: [], next: null } } },
+  });
+  return runId;
+};
+
+/** Test run `runId` of workflow `id` as `by` reads it, once it ended. */
+const testRunShown = async (by: Member, id: string, runId: string) =>
+  await vi.waitFor(
+    async () => {
+      const run = await candidateRunFor(env, by, id, runId);
+      expect(run.endedAt).not.toBeNull();
+      return {
+        status: run.status,
+        result: run.result ?? null,
+        error: run.error?.code ?? null,
+      };
+    },
+    { timeout: 30_000, interval: 100 }
+  );
 
 /** How many rows of evidence core keeps of what run `runId` read. */
 const evidenceOf = async (runId: string): Promise<number> =>
@@ -1087,6 +1162,88 @@ describe("what a workflow keeps of what its run read", setUpTime, () => {
     });
   });
 
+  it("withholds what a run and a test run returned when they froze kept keys with none of the runs that set them recorded, never as if they started from nothing", async () => {
+    const { admin, ada } = await people();
+    const word = `ledger${unique().replaceAll(/\W/gu, "")}`;
+    const passage = `The ${word} closes on Friday.`;
+    const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+    await sourceSaying(source, passage);
+    const workflow = await keepingWorkflow(ada, admin, recalling);
+    await ended(
+      ada,
+      workflow.id,
+      await started(ada, workflow.id, {
+        entity: unique(),
+        ask: word,
+        keep: true,
+      })
+    );
+    const test = await testRunOf(ada, workflow.id, false);
+    const testBefore = await testRunShown(ada, workflow.id, test);
+    const run = await started(ada, workflow.id, {
+      entity: unique(),
+      ask: "",
+      keep: false,
+      carry: true,
+    });
+    await ended(ada, workflow.id, run);
+    const runBefore = await resourceRunFor(env, ada, workflow.id, run);
+
+    // Each froze the key, and every admission records the run that set
+    // it: a row with none breaks that invariant.
+    await env.DB.prepare("DELETE FROM run_state_writers WHERE run_id IN (?, ?)")
+      .bind(test, run)
+      .run();
+    const runAfter = await resourceRunFor(env, ada, workflow.id, run);
+
+    expect({
+      testBefore: testBefore.result,
+      runBefore: runBefore.result,
+      testAfter: await testRunShown(ada, workflow.id, test),
+      runAfter: { result: runAfter.result, error: runAfter.error?.code },
+    }).toStrictEqual({
+      testBefore: { found: passage },
+      runBefore: { found: passage },
+      testAfter: { status: "completed", result: null, error: "brain.revoked" },
+      runAfter: { result: undefined, error: "brain.revoked" },
+    });
+  });
+
+  it("lets a writer's evidence go past retention once the test run that started from its key is swept away", async () => {
+    const { admin, ada } = await people();
+    const word = `ledger${unique().replaceAll(/\W/gu, "")}`;
+    const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+    await sourceSaying(source, `The ${word} closes on Friday.`);
+    const workflow = await keepingWorkflow(ada, admin, recalling);
+    const reader = await started(ada, workflow.id, {
+      entity: unique(),
+      ask: word,
+      keep: true,
+    });
+    await ended(ada, workflow.id, reader);
+    const test = await testRunOf(ada, workflow.id, false);
+    await testRunShown(ada, workflow.id, test);
+    const read = await evidenceOf(reader);
+    // No key names the reader any more: only the test run started from it.
+    await resetWorkflowState(env, ada, workflow.id);
+    const past = new Date(Date.now() + 31 * day);
+
+    // The test run goes after its week, then the reader past its 30 days.
+    await sweepCandidateRuns(env, past);
+    await runQuarterHourTasks({}, past);
+    await runQuarterHourTasks({}, new Date(past.getTime() + 15 * 60 * 1000));
+
+    expect({
+      read: read > 0,
+      test: await outcome(candidateRunFor(env, ada, workflow.id, test)),
+      afterRetention: await evidenceOf(reader),
+    }).toStrictEqual({
+      read: true,
+      test: "workflow.candidate_unavailable",
+      afterRetention: 0,
+    });
+  });
+
   it("keeps one hop past retention, not the whole chain: a key carried through three runs keeps its last run and that run's writer, and lets the first run's evidence go", async () => {
     const { admin, ada } = await people();
     const word = `ledger${unique().replaceAll(/\W/gu, "")}`;
@@ -1156,7 +1313,7 @@ describe("what a workflow keeps of what its run read", setUpTime, () => {
     });
   });
 
-  it("refuses a start whose state names a run whose evidence is gone, as a sweep between its read and its admission leaves it", async () => {
+  it("refuses a start, and a test run, whose state names a run whose evidence is gone, as a sweep between its read and its admission leaves it", async () => {
     const { admin, ada } = await people();
     const word = `ledger${unique().replaceAll(/\W/gu, "")}`;
     const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
@@ -1176,11 +1333,129 @@ describe("what a workflow keeps of what its run read", setUpTime, () => {
       .bind(Date.now(), reader)
       .run();
 
-    await expect(
-      outcome(
+    expect({
+      start: await outcome(
         started(ada, workflow.id, { entity: unique(), ask: "", keep: false })
-      )
-    ).resolves.toBe("workflow.start_denied");
+      ),
+      test: await outcome(testRunOf(ada, workflow.id, false)),
+    }).toStrictEqual({
+      start: "workflow.start_denied",
+      test: "workflow.start_denied",
+    });
+  });
+
+  it("deletes with a person's erasure every key a run of their chat set and every key of a run that started from it, and keeps refusing a run still going that started from it: no pin keeps their ID", async () => {
+    const { admin, ada } = await people();
+    const erik = await person("builder");
+    const members = new MembersRpc(
+      env,
+      async () => await Promise.resolve(admin)
+    );
+    const workflow = await keepingWorkflow(ada, admin, recalling);
+    const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+    const note = `Erik's note ${unique()}`;
+    await sourceSaying(source, `${note}.`);
+    // A run Erik's chat started kept what his chat had read.
+    await keptFromChat(workflow.id, erik.userId, source, note);
+    // One run starts from that copy and waits; another keeps it changed.
+    const waiting = await started(ada, workflow.id, {
+      entity: unique(),
+      ask: " (later)",
+      keep: true,
+      carry: true,
+      hold: true,
+    });
+    const carrier = await started(ada, workflow.id, {
+      entity: unique(),
+      ask: " (seen)",
+      keep: true,
+      carry: true,
+    });
+    await ended(ada, workflow.id, carrier);
+    const before = await keptFor(admin, workflow.id);
+    await members.remove(erik.userId);
+    const removed = await keptFor(admin, workflow.id);
+
+    await members.erase(erik.userId, erik.name);
+
+    const keys = await env.DB.prepare(
+      "SELECT key FROM workflow_state WHERE workflow_resource_id = ?"
+    )
+      .bind(workflow.id)
+      .all<{ key: string }>();
+    const pins = await env.DB.prepare(
+      "SELECT count(*) AS n FROM run_chat_sources WHERE person_id = ?"
+    )
+      .bind(erik.userId)
+      .first<number>("n");
+
+    expect({
+      before,
+      removed,
+      keys: keys.results.map(({ key }) => key),
+      pins,
+      waiting: await ended(ada, workflow.id, waiting),
+      next: await nextRunReads(ada, workflow.id),
+    }).toStrictEqual({
+      before: `${note} (seen)`,
+      removed: "revoked",
+      keys: [],
+      pins: 0,
+      waiting: { status: "failed", error: "brain.revoked" },
+      next: { state: {}, withheld: 0 },
+    });
+  });
+
+  it("withholds what a test run returned of the kept state it started from once what that state's writer read is gone: once its chat's person is removed, and still once they are erased", async () => {
+    const { admin, ada } = await people();
+    const erik = await person("builder");
+    const members = new MembersRpc(
+      env,
+      async () => await Promise.resolve(admin)
+    );
+    const workflow = await keepingWorkflow(ada, admin, recalling);
+    const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+    const note = `Erik's note ${unique()}`;
+    await sourceSaying(source, `${note}.`);
+    // A run Erik's chat started kept what his chat had read.
+    await keptFromChat(workflow.id, erik.userId, source, note);
+    // One test run ends before Erik goes; one runs on through his erasure.
+    const done = await testRunOf(ada, workflow.id, false);
+    const before = await testRunShown(ada, workflow.id, done);
+    const through = await testRunOf(ada, workflow.id, true);
+    await members.remove(erik.userId);
+    const removed = {
+      ada: await testRunShown(ada, workflow.id, done),
+      admin: await testRunShown(admin, workflow.id, done),
+    };
+
+    await members.erase(erik.userId, erik.name);
+
+    const withheld = {
+      status: "completed",
+      result: null,
+      error: "brain.revoked",
+    };
+    expect({
+      before,
+      removed,
+      erased: {
+        ada: await testRunShown(ada, workflow.id, done),
+        admin: await testRunShown(admin, workflow.id, done),
+        throughAda: await testRunShown(ada, workflow.id, through),
+        throughAdmin: await testRunShown(admin, workflow.id, through),
+      },
+    }).toStrictEqual({
+      before: { status: "completed", result: { found: note }, error: null },
+      removed: { ada: withheld, admin: withheld },
+      erased: {
+        ada: withheld,
+        admin: withheld,
+        // It started from Erik's copy, so it failed at its next call.
+        throughAda: { ...withheld, status: "failed" },
+        throughAdmin: { ...withheld, status: "failed" },
+      },
+    });
   });
 
   it("says on a run's page, and a test run's, how many kept values it started without", async () => {

@@ -47,7 +47,7 @@ import {
 import { inList } from "./db/d1.ts";
 import { localExtractor } from "./files/extract.ts";
 import { brainCallsPerTick } from "./shared-reads.ts";
-import { plainPrincipalOf } from "./source-readers.ts";
+import { erasureBegan, plainPrincipalOf } from "./source-readers.ts";
 
 // Native sync's run (GRA-1758; the design is on GRA-1719, the threat
 // model on GRA-1758): pages of a connection's changes, read from connect
@@ -1579,7 +1579,9 @@ const syncPage = async (
 /**
  * The statement that keeps the source of `place` for the sync `of` names
  * (its connection's person, provider, tenant, account and kind), unless a
- * disconnect closed its connection: made from no cursor, or one dropped
+ * disconnect closed its connection or its person's erasure began (a row
+ * naming them, written after their erasure deleted theirs, would outlive
+ * it): made from no cursor, or one dropped
  * before read again from the start; `seenIn`, the places listing that
  * named it last, for a sync that lists places.
  */
@@ -1605,7 +1607,7 @@ const sourceStatement = (
     .insert(brainSyncSources)
     .select(
       sql`SELECT ${of.connectionId}, ${of.feed}, ${place}, ${of.personId}, ${of.provider}, ${of.tenant}, ${of.account}, NULL, 1, 1, ${now}, NULL, NULL, NULL, NULL, 0, 0, 0, NULL, 0, ${relistAt}, NULL, 0, ${of.kind}, 0, 0, ${seenIn}
-        WHERE NOT ${closed(of.connectionId)} AND ${held}`
+        WHERE NOT ${closed(of.connectionId)} AND NOT ${erasureBegan(of.personId)} AND ${held}`
     )
     .onConflictDoUpdate({
       target: [

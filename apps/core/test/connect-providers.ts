@@ -143,6 +143,16 @@ export const stephenGoogleUrl = "https://google-control.test/stephen";
  */
 export const googleAddressUrl = "https://google-control.test/address";
 
+/**
+ * Where tests hold a call to Google mid-way: POST \`{ hold: true, prefix? }\`
+ * holds the next request whose URL starts with \`prefix\` until POST
+ * \`{ hold: false }\`, and then answers it as ever; GET answers
+ * \`{ reached }\`, whether a held one is waiting. By default the look-up of an account's addresses (connect's
+ * account-addresses.ts, which goes on without them): a connection's
+ * finishing, after Google's code exchange and before connect stores it.
+ */
+export const googleHoldUrl = "https://google-control.test/hold";
+
 /** Where tests read how many drafts Graph made for `?mailbox=`: `{ drafts }`. */
 export const graphDraftsUrl = "https://graph-control.test/drafts";
 
@@ -322,6 +332,8 @@ const encoded = (value) =>
   base64Url(new TextEncoder().encode(JSON.stringify(value)));
 /** Each Google account's Workspace domain and address now, by its subject. */
 const googleAccounts = new Map();
+/** A hold on the next look-up of a Google account's addresses, while a test asks for one. */
+let googleHold = null;
 /**
  * Google's token endpoint renewing an account's tokens, as Google does for
  * a grant with \`openid\`: with an ID token for the account as it is now.
@@ -792,6 +804,13 @@ export default {
     if (url.href === ${JSON.stringify(stephenGoogleUrl)}) {
       return await stephenGoogle.control(request);
     }
+    if (googleHold !== null && url.href.startsWith(googleHold.prefix)) {
+      // Polls the flag: workerd refuses to wait on a promise another request made.
+      googleHold.reached = true;
+      while (googleHold?.held === true) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
     const fromStephenGoogle = await stephenGoogle.answer(request, url);
     if (fromStephenGoogle !== undefined) {
       return fromStephenGoogle;
@@ -807,6 +826,23 @@ export default {
       if (answered !== undefined) {
         return answered;
       }
+    }
+    if (url.href === ${JSON.stringify(googleHoldUrl)}) {
+      if (request.method === "GET") {
+        return Response.json({ reached: googleHold?.reached === true });
+      }
+      const { hold, prefix } = await request.json();
+      if (hold) {
+        googleHold = {
+          reached: false,
+          held: true,
+          prefix: prefix ?? "https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs",
+        };
+      } else if (googleHold !== null) {
+        googleHold.held = false;
+        googleHold = null;
+      }
+      return new Response(null, { status: 204 });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(googleAddressUrl)}) {
       const { subject, email } = await request.json();

@@ -94,6 +94,26 @@ const anyLive = async (env: Env, ownerUserId: string): Promise<boolean> => {
 };
 
 /**
+ * Marks `request`'s person's erasure begun (`erased_people`), and nothing
+ * else (`ConnectApi.beginErasure`): every insert of a connection of theirs
+ * refuses them from then on, a flow already under way included.
+ */
+export const beginErasure = async (
+  env: Env,
+  request: unknown
+): Promise<void> => {
+  const { ownerUserId } = connectionErrors.parse(
+    "connection.invalid",
+    erasePersonalSchema,
+    request
+  );
+  await drizzle(env.DB)
+    .insert(erasedPeople)
+    .values({ userId: ownerUserId, beganAt: new Date() })
+    .onConflictDoNothing();
+};
+
+/**
  * Erases everything of `ownerUserId`'s in connect, as core asks once an
  * admin erased them. Safe to ask again: what is gone stays gone. Answers
  * how many of their connections it emptied.
