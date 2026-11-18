@@ -205,8 +205,15 @@ const DiffersText = ({
   differs: NonNullable<Opportunity["differs"]>;
 }) => {
   const seenOnly = formatList(differs.seenOnly);
-  const toldOnly = formatList(differs.toldOnly);
-  if (differs.seenOnly.length === 0 && differs.toldOnly.length === 0) {
+  // Null until a proposal says which systems the description names: then
+  // nothing is said of those described and not seen, nor that they match.
+  const toldOnlyList = differs.toldOnly ?? [];
+  const toldOnly = formatList(toldOnlyList);
+  if (
+    differs.toldOnly !== null &&
+    differs.seenOnly.length === 0 &&
+    toldOnlyList.length === 0
+  ) {
     return (
       <p className="text-sm">
         <Trans>
@@ -222,7 +229,7 @@ const DiffersText = ({
           <Trans>Seen, but not described: {seenOnly}.</Trans>
         </p>
       )}
-      {differs.toldOnly.length === 0 ? null : (
+      {toldOnlyList.length === 0 ? null : (
         <p>
           <Trans>Described, but not seen: {toldOnly}.</Trans>
         </p>

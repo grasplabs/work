@@ -10,7 +10,7 @@ import type {
 } from "@grasp-os/shared/opportunities";
 import { requireAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -76,6 +76,9 @@ import { teamsWithMembers } from "./organization-teams.ts";
 // system. A seen one
 // matching none is an opportunity of its own, seen only: its name its
 // first and last steps, no model asked.
+
+/** What joins a drawing's evidence and what was seen of it, in a paired card's (`pairedEvidenceOf`). */
+const seenAfter = "+seen-";
 
 /** A week of a month: 52 weeks over 12 months. */
 const weeksPerMonth = 52 / 12;
@@ -274,9 +277,18 @@ export const eraseOpportunitiesOn = async (
     db
       .delete(opportunityProposals)
       .where(eq(opportunityProposals.evidence, evidence)),
+    // At the drawing alone, and at it with what was seen of it.
     db
       .delete(opportunityDismissals)
-      .where(eq(opportunityDismissals.evidence, evidence)),
+      .where(
+        or(
+          eq(opportunityDismissals.evidence, evidence),
+          eq(
+            sql`substr(${opportunityDismissals.evidence}, 1, ${evidence.length + seenAfter.length})`,
+            `${evidence}${seenAfter}`
+          )
+        )
+      ),
   ]);
 };
 
@@ -337,21 +349,16 @@ const teamNameKey = (name: string): string =>
   name.normalize("NFC").trim().toLocaleLowerCase();
 
 /**
- * A described routine as a seen one is held to it: its text as every
- * member reads it, and the systems its proposal found there (each named
- * whole in that text, `heldOf`), none before one is kept.
+ * A described routine as a seen one is compared with it: its text as
+ * every member reads it, and the systems its proposal found there (each
+ * named whole in that text, `heldOf`); null before one is kept, when
+ * which systems it names is not known yet.
  */
 interface Described {
   drawing: StandingDrawing;
   text: string;
-  told: readonly string[];
+  told: readonly string[] | null;
 }
-
-/** Whether `described` names `system`: its text names it by catalog name or connector, or a system it was told in is the catalog's. */
-const describes = (described: Described, system: SeenSystem): boolean =>
-  namesWhole(described.text, system.name) ||
-  namesWhole(described.text, system.id) ||
-  described.told.some((told) => namesWhole(system.says, told));
 
 /** A routine seen in a team, with its systems as the catalog names them. */
 interface Seen {
@@ -381,24 +388,45 @@ const seenRoutineOf = (
 });
 
 /**
- * Where `described` and `seen` differ, by system: those seen and not
- * described, and those it was told in and not seen.
+ * How `described` and `seen` compare, by system, the one comparison
+ * pairing and the page both read: a system seen is described when the
+ * text names it whole (by its catalog name or its connector), or a system
+ * the proposal found in the text is the catalog's. Those seen and not
+ * described; those described and not seen, null until a proposal says
+ * which systems the text names (nothing else can tell Excel from a word);
+ * and how many seen are described, which pairing ranks by.
  */
-const differsOf = (
+const comparisonOf = (
   described: Described,
   seen: Seen
-): { seenOnly: string[]; toldOnly: string[] } => ({
-  seenOnly: [
-    ...new Set(
-      seen.systems
-        .filter((system) => !describes(described, system))
-        .map(({ name }) => name)
-    ),
-  ],
-  toldOnly: described.told.filter(
-    (told) => !seen.systems.some(({ says }) => namesWhole(says, told))
-  ),
-});
+): {
+  shared: number;
+  seenOnly: string[];
+  toldOnly: string[] | null;
+} => {
+  const { text, told } = described;
+  const isDescribed = (system: SeenSystem): boolean =>
+    namesWhole(text, system.name) ||
+    namesWhole(text, system.id) ||
+    (told ?? []).some((each) => namesWhole(system.says, each));
+  const describedSystems = seen.systems.filter(isDescribed);
+  return {
+    shared: describedSystems.length,
+    seenOnly: [
+      ...new Set(
+        seen.systems
+          .filter((system) => !describedSystems.includes(system))
+          .map(({ name }) => name)
+      ),
+    ],
+    toldOnly:
+      told === null
+        ? null
+        : told.filter(
+            (each) => !seen.systems.some(({ says }) => namesWhole(says, each))
+          ),
+  };
+};
 
 /**
  * Pairs each seen routine with the described one it is (see the top): of
@@ -422,7 +450,7 @@ const pairsOf = (
       )
       .map((one) => ({
         drawing: one.drawing,
-        shared: each.systems.filter((system) => describes(one, system)).length,
+        shared: comparisonOf(one, each).shared,
       }))
       .filter(({ shared }) => shared > 0)
       .toSorted((one, other) => other.shared - one.shared);
@@ -434,9 +462,38 @@ const pairsOf = (
 };
 
 /**
+ * What a seen routine is made of, as evidence: a hash of its steps with
+ * whether each writes and copies data, and its variants; never its
+ * timings, which move with every week. New activity that changes any of
+ * these is new evidence: an opportunity hidden at the old shows again.
+ */
+const seenShapeOf = async ({ routine }: Seen): Promise<string> =>
+  await sha256Hex(
+    JSON.stringify({
+      steps: routine.steps.map(({ system, step, writes, copied }) => [
+        system,
+        step,
+        writes,
+        copied,
+      ]),
+      variants: routine.variants,
+    })
+  );
+
+/**
+ * A paired card's evidence: the drawing it rests on and what was seen of
+ * it, so either changing shows a hidden one again. Its proposal stays
+ * kept at the drawing alone.
+ */
+const pairedEvidenceOf = async (
+  drawing: StandingDrawing,
+  seen: Seen
+): Promise<string> => `${drawing.source}${seenAfter}${await seenShapeOf(seen)}`;
+
+/**
  * A routine seen only, as an opportunity: named by its first and last
  * steps, keyed by its team and steps, its evidence what it is made of
- * (its steps and variants, not its timings, which move with every week).
+ * (`seenShapeOf`).
  */
 const seenOnlyOf = async (
   seen: Seen,
@@ -444,9 +501,7 @@ const seenOnlyOf = async (
 ): Promise<Omit<Opportunity, "dismissed">> => {
   const { routine, systems } = seen;
   const path = routine.steps.map(({ system, step }) => [system, step]);
-  const shape = await sha256Hex(
-    JSON.stringify({ path, variants: routine.variants })
-  );
+  const shape = await seenShapeOf(seen);
   const pathHash = await sha256Hex(JSON.stringify(path));
   const ends = [routine.steps.at(0), routine.steps.at(-1)].map((step, at) =>
     step === undefined
@@ -611,7 +666,7 @@ export const listOpportunities = async (
     text: drawingText(drawing),
     told:
       kept.proposals.get(keyOf(drawing.workflow, drawing.source))?.systems ??
-      [],
+      null,
   }));
   const pairs = pairsOf(described, seen, rosterNames);
   const paired = new Set(pairs.values());
@@ -639,23 +694,26 @@ export const listOpportunities = async (
         ? null
         : held;
     const pair = pairs.get(drawing);
+    if (pair === undefined) {
+      opportunities.push({
+        ...opportunityOf(drawing, proposal, appNames, connected),
+        dismissed: kept.dismissed.has(key),
+      });
+      continue;
+    }
+    const { seenOnly, toldOnly } = comparisonOf(
+      { drawing, text: drawingText(drawing), told: held?.systems ?? null },
+      pair
+    );
+    // oxlint-disable-next-line no-await-in-loop -- one hash at a time
+    const evidence = await pairedEvidenceOf(drawing, pair);
     opportunities.push({
       ...opportunityOf(drawing, proposal, appNames, connected),
-      ...(pair === undefined
-        ? {}
-        : {
-            basis: "both" as const,
-            seen: seenRoutineOf(pair, catalog),
-            differs: differsOf(
-              {
-                drawing,
-                text: drawingText(drawing),
-                told: held?.systems ?? [],
-              },
-              pair
-            ),
-          }),
-      dismissed: kept.dismissed.has(key),
+      evidence,
+      basis: "both",
+      seen: seenRoutineOf(pair, catalog),
+      differs: { seenOnly, toldOnly },
+      dismissed: kept.dismissed.has(keyOf(drawing.workflow, evidence)),
     });
   }
   return opportunities.toSorted(

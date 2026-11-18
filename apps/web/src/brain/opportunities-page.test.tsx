@@ -178,6 +178,39 @@ describe("Opportunities", () => {
     });
   });
 
+  it("says described and seen use the same systems only once a proposal says which the description names", async () => {
+    const both = (id: number, toldOnly: string[] | null): Opportunity => ({
+      ...proposed(id, `routine ${id}`, "workflow", id),
+      basis: "both",
+      seen: {
+        steps: [
+          {
+            system: "zendesk",
+            step: "tickets.read",
+            hoursAfter: null,
+            copied: false,
+          },
+        ],
+        variants: [],
+      },
+      differs: { seenOnly: [], toldOnly },
+    });
+    await shown([both(2, []), both(1, null)]);
+    const same = "What was described and what was seen use the same systems.";
+
+    expect(
+      [...document.querySelectorAll("li")].flatMap((card) => {
+        const title = card.querySelector("h2")?.textContent;
+        return title === undefined || title === null
+          ? []
+          : [[title, card.textContent?.includes(same) ?? false]];
+      })
+    ).toStrictEqual([
+      ["Routine 2", true],
+      ["Routine 1", false],
+    ]);
+  });
+
   it("names each Draft it for its opportunity, so a list of links tells them apart", async () => {
     await shown([
       proposed(1, "closing the month", "workflow", 9),

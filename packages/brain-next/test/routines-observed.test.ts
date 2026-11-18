@@ -75,6 +75,10 @@ const peopleTake = async (
   return tags;
 };
 
+/** Each routine's steps, by kind alone. */
+const stepsOf = (routines: readonly ObservedRoutine[]) =>
+  routines.map(({ steps }) => steps.map(({ step }) => step));
+
 describe("routines seen in activity", () => {
   it("show what five people of a team did, never what four did", async () => {
     const five = `team:${crypto.randomUUID()}`;
@@ -110,6 +114,39 @@ describe("routines seen in activity", () => {
         },
       ],
       four: [],
+    });
+  });
+
+  it("show a routine that loops, alone or beside another group of steps, the same either way", async () => {
+    const team = `team:${crypto.randomUUID()}`;
+    // Five read a deal, mail about it and read it again: a loop.
+    await peopleTake(team, 5, () => [
+      { system: "crm", step: "deals.read", hour: 0 },
+      { system: "mail", step: "mail.send", hour: 1 },
+      { system: "crm", step: "deals.read", hour: 2 },
+    ]);
+    const alone = await routinesOf(team);
+    // Five others take steps of their own, joined to none of the loop's.
+    const others = await peopleTake(team, 5, () => [
+      { system: "files", step: "files.read", hour: 0 },
+      { system: "sheets", step: "rows.add", hour: 1 },
+    ]);
+    const both = await routinesOf(team);
+    // And gone again: the five others erased.
+    await shared().eraseEvents({ keyId, who: others });
+    const again = await routinesOf(team);
+
+    expect({ alone: stepsOf(alone), both: stepsOf(both) }).toStrictEqual({
+      // Started at its smallest step by key, whatever else the team does.
+      alone: [["deals.read", "mail.send"]],
+      both: [
+        ["deals.read", "mail.send"],
+        ["files.read", "rows.add"],
+      ],
+    });
+    expect({ inBoth: both.at(0), again }).toStrictEqual({
+      inBoth: alone.at(0),
+      again: alone,
     });
   });
 

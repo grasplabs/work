@@ -63,10 +63,11 @@ export interface Opportunity {
   seen: SeenRoutine | null;
   /**
    * Where what was described and what was seen differ, by system: those
-   * seen and not described, and those described and not seen. None
-   * unless it was both.
+   * seen and not described, and those described and not seen, null until
+   * a proposal says which systems the description names. None unless it
+   * was both.
    */
-  differs: { seenOnly: string[]; toldOnly: string[] } | null;
+  differs: { seenOnly: string[]; toldOnly: string[] | null } | null;
   /**
    * What Grasp proposes: none until a model answered. It is asked apart
    * from any list, when the routine is noted, and tried again with

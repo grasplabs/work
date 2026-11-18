@@ -147,24 +147,58 @@ const rankedOf = (moves: ReadonlyMap<string, Move>): Move[] =>
       other.people.size - one.people.size || one.to.localeCompare(other.to)
   );
 
-/** The steps a team's routines start at: those no kept move leads to; else where its most made move starts. */
-const startsOf = (graph: ReadonlyMap<string, Map<string, Move>>): string[] => {
-  const reached = new Set(
-    [...graph.values()].flatMap((moves) => [...moves.keys()])
-  );
-  const starts = [...graph.keys()].filter((from) => !reached.has(from));
-  if (starts.length > 0) {
-    return starts.toSorted();
+/** Every step `from` leads to by kept moves, one or more moves on. */
+const reachOf = (
+  graph: ReadonlyMap<string, Map<string, Move>>,
+  from: string
+): Set<string> => {
+  const reached = new Set<string>();
+  const next = [...(graph.get(from)?.keys() ?? [])];
+  for (let step = next.pop(); step !== undefined; step = next.pop()) {
+    if (!reached.has(step)) {
+      reached.add(step);
+      next.push(...(graph.get(step)?.keys() ?? []));
+    }
   }
-  const [busiest] = [...graph]
-    .flatMap(([from, moves]) =>
-      rankedOf(moves).map((move) => ({ from, people: move.people.size }))
-    )
-    .toSorted(
-      (one, other) =>
-        other.people - one.people || one.from.localeCompare(other.from)
+  return reached;
+};
+
+/**
+ * The steps a team's routines start at: one for each group of steps that
+ * lead to each other (a loop, or a step alone) which no kept move enters
+ * from outside it, so every separate part of a team's activity, a loop
+ * included, has its routine, and activity elsewhere never takes one away.
+ * A group's start is its smallest step by key, so the same events always
+ * give the same routine.
+ */
+const startsOf = (graph: ReadonlyMap<string, Map<string, Move>>): string[] => {
+  const steps = [
+    ...new Set([
+      ...graph.keys(),
+      ...[...graph.values()].flatMap((moves) => [...moves.keys()]),
+    ]),
+  ].toSorted();
+  const reach = new Map(steps.map((step) => [step, reachOf(graph, step)]));
+  const starts = new Set<string>();
+  for (const step of steps) {
+    // The steps it leads to that lead back to it, and itself: in key order.
+    const group = steps.filter(
+      (other) =>
+        other === step ||
+        (reach.get(step)?.has(other) === true &&
+          reach.get(other)?.has(step) === true)
     );
-  return busiest === undefined ? [] : [busiest.from];
+    const entered = steps.some(
+      (other) =>
+        !group.includes(other) &&
+        group.some((mine) => graph.get(other)?.has(mine) === true)
+    );
+    const [first] = group;
+    if (!entered && first !== undefined && graph.has(first)) {
+      starts.add(first);
+    }
+  }
+  return [...starts];
 };
 
 /**

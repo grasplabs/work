@@ -1,3 +1,4 @@
+import type { Opportunity } from "@grasp-os/shared/opportunities";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -239,15 +240,20 @@ interface Step {
   writes: boolean;
 }
 
-/** `first` an hour ago and then `then` now, by each of `people`. */
-const eachTook = (people: readonly string[], first: Step, then: Step) =>
+/** `first` `hours` ago (one by default) and then `then` now, by each of `people`. */
+const eachTook = (
+  people: readonly string[],
+  first: Step,
+  then: Step,
+  hours = 1
+) =>
   people.flatMap((personId) => [
     {
       key: crypto.randomUUID(),
       personId,
       ...first,
       item: null,
-      at: new Date(Date.now() - 3_600_000),
+      at: new Date(Date.now() - hours * 3_600_000),
     },
     { key: crypto.randomUUID(), personId, ...then, item: null, at: new Date() },
   ]);
@@ -790,6 +796,128 @@ describe("opportunities", { timeout: 120_000 }, () => {
           differs: null,
         },
       ],
+    });
+  });
+
+  it("say which systems were described and not seen only once a proposal names them, never that both use the same before", async () => {
+    const { ids } = await drawnTeam("Send the answer from the Excel sheet.");
+    const admin = await signedInApi(idp, "admin");
+    const ops = await membersOf(5);
+    await namedTeam("Ops", ...ops);
+    // Seen in Zendesk alone; the description names Zendesk and Excel.
+    await recordEvents(
+      env,
+      eachTook(
+        ops,
+        { step: "tickets.read", system: "zendesk", writes: false },
+        { step: "tickets.update", system: "zendesk", writes: true }
+      )
+    );
+    const differsNow = async () => {
+      const { tickets } = await ticketsOf(admin.api, ids);
+      return { basis: tickets?.basis, differs: tickets?.differs };
+    };
+    const before = await differsNow();
+    await proposed([
+      proposing({ form: "workflow", systems: ["Zendesk", "Excel"] }),
+    ]);
+    const after = await differsNow();
+    // What was seen goes with its people, so no later test meets it.
+    for (const person of ops) {
+      // oxlint-disable-next-line no-await-in-loop -- one person at a time
+      await eraseEventsOf(env, person);
+    }
+
+    expect({ before, after }).toStrictEqual({
+      // Which systems the description names isn't known yet.
+      before: { basis: "both", differs: { seenOnly: [], toldOnly: null } },
+      after: { basis: "both", differs: { seenOnly: [], toldOnly: ["Excel"] } },
+    });
+  });
+
+  it("show a hidden opportunity again when activity is first seen for it, or copying first is, and not when only a timing moves", async () => {
+    const { ids } = await drawnTeam();
+    const admin = await signedInApi(idp, "admin");
+    const ops = await membersOf(10);
+    await namedTeam("Ops", ...ops);
+    const finance = await membersOf(15);
+    await namedTeam("Finance", ...finance);
+    const ticketsRead = {
+      step: "tickets.read",
+      system: "zendesk",
+      writes: false,
+    } as const;
+    const answered = {
+      step: "mail.send",
+      system: "microsoft",
+      writes: true,
+    } as const;
+    const invoicesRead = {
+      step: "invoices.read",
+      system: "exact",
+      writes: false,
+    } as const;
+    const rows = { step: "rows.add", system: "sheets", writes: false } as const;
+    /** The first opportunity listed now that `where` holds for. */
+    const listedWhere = async (where: (each: Opportunity) => boolean) => {
+      const listed = await admin.api.opportunities.list();
+      return listed.find(where);
+    };
+    const hide = async (opportunity: Opportunity | undefined) => {
+      if (opportunity === undefined) {
+        throw new Error("No opportunity to hide");
+      }
+      const { routine, evidence } = opportunity;
+      await admin.api.opportunities.dismiss({ routine, evidence });
+    };
+    // The tickets, described alone, hidden; then seen for the first time.
+    const described = await listedWhere(
+      ({ team: of, name, basis }) =>
+        of === ids.team &&
+        name === "handling new tickets" &&
+        basis === "described"
+    );
+    await hide(described);
+    await recordEvents(env, eachTook(ops.slice(0, 5), ticketsRead, answered));
+    const seenFirst = await listedWhere(
+      ({ name, basis }) => name === "handling new tickets" && basis === "both"
+    );
+    // Hidden again, and only a timing moves: five more take longer.
+    await hide(seenFirst);
+    await recordEvents(env, eachTook(ops.slice(5), ticketsRead, answered, 5));
+    const pairedTiming = await listedWhere(
+      ({ name }) => name === "handling new tickets"
+    );
+    // Seen only: hidden, then a timing moves, then five copy the data.
+    await recordEvents(env, eachTook(finance.slice(0, 5), invoicesRead, rows));
+    const observed = await listedWhere(({ basis }) => basis === "observed");
+    await hide(observed);
+    await recordEvents(
+      env,
+      eachTook(finance.slice(5, 10), invoicesRead, rows, 5)
+    );
+    const observedOf = async () =>
+      await listedWhere(({ routine }) => routine === observed?.routine);
+    const observedTiming = await observedOf();
+    await recordEvents(
+      env,
+      eachTook(finance.slice(10), invoicesRead, { ...rows, writes: true })
+    );
+    const copied = await observedOf();
+
+    expect({
+      seenFirst: seenFirst?.dismissed,
+      pairedTiming: pairedTiming?.dismissed,
+      observedTiming: observedTiming?.dismissed,
+      copied: {
+        dismissed: copied?.dismissed,
+        copies: copied?.seen?.steps.map(({ copied: copies }) => copies),
+      },
+    }).toStrictEqual({
+      seenFirst: false,
+      pairedTiming: true,
+      observedTiming: true,
+      copied: { dismissed: false, copies: [false, true] },
     });
   });
 
