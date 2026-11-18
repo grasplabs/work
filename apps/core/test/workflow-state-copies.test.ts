@@ -1458,6 +1458,85 @@ describe("what a workflow keeps of what its run read", setUpTime, () => {
     });
   });
 
+  it("says on a run's page, and a test run's, how many kept values it started without", async () => {
+    const { admin, ada } = await people();
+    const word = `ledger${unique().replaceAll(/\W/gu, "")}`;
+    const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+    await sourceSaying(source, `The ${word} closes on Friday.`);
+    const workflow = await keepingWorkflow(ada, admin, recalling);
+    const reader = await started(ada, workflow.id, {
+      entity: unique(),
+      ask: word,
+      keep: true,
+    });
+    await ended(ada, workflow.id, reader);
+    const before = await started(ada, workflow.id, {
+      entity: unique(),
+      ask: unique(),
+      keep: false,
+    });
+    await eraseSource(env, {
+      source,
+      readers: { kind: "none" },
+      reason: "deleted",
+    });
+    const after = await started(ada, workflow.id, {
+      entity: unique(),
+      ask: unique(),
+      keep: false,
+    });
+    const { revision } = await workflowDraft(env, ada, workflow.id);
+    const test = await startCandidateRun(env, ada, workflow.id, {
+      revision,
+      args: {
+        entity: unique(),
+        ask: unique(),
+        keep: false,
+        carry: true,
+        hold: false,
+      },
+      fixtures: {},
+    });
+    const beforeRun = await resourceRunFor(env, ada, workflow.id, before);
+    const afterRun = await resourceRunFor(env, admin, workflow.id, after);
+    const testRun = await candidateRunFor(env, ada, workflow.id, test.runId);
+
+    // Written once, with the start's receipt: never changed after, not
+    // even by the one update a receipt takes (retention removing its
+    // details).
+    const changed = await outcome(
+      env.DB.prepare(
+        "UPDATE workflow_start_receipts SET input = NULL, params = NULL, state_hash = NULL, details_removed_at = ?, state_withheld = 5 WHERE id = ?"
+      )
+        .bind(Date.now(), after)
+        .run()
+    );
+
+    // Nor is the hash of the snapshot it froze: that update clears it, and
+    // never sets another.
+    const rehashed = await outcome(
+      env.DB.prepare(
+        "UPDATE workflow_start_receipts SET input = NULL, params = NULL, state_hash = 'another', details_removed_at = ? WHERE id = ?"
+      )
+        .bind(Date.now(), before)
+        .run()
+    );
+
+    expect({
+      before: beforeRun.stateWithheld,
+      after: afterRun.stateWithheld,
+      test: testRun.stateWithheld,
+      changed: changed.includes("workflow_start_receipts are immutable"),
+      rehashed: rehashed.includes("workflow_start_receipts are immutable"),
+    }).toStrictEqual({
+      before: undefined,
+      after: 1,
+      test: 1,
+      changed: true,
+      rehashed: true,
+    });
+  });
+
   it("checks the runs that set its keys together: what reading the state costs doesn't grow with how many runs set it", async () => {
     const { admin, ada } = await people();
     const word = `ledger${unique().replaceAll(/\W/gu, "")}`;

@@ -1543,6 +1543,13 @@ export const resourceRunFor = async (
     row.status === "running" ? [row.id] : []
   );
   const aiProvider = waits.get(row.id);
+  // How many kept keys it started without, as its receipt froze it.
+  const receipt = await drizzle(env.DB)
+    .select({ stateWithheld: workflowStartReceipts.stateWithheld })
+    .from(workflowStartReceipts)
+    .where(eq(workflowStartReceipts.id, row.id))
+    .get();
+  const stateWithheld = receipt?.stateWithheld ?? null;
   const run: WorkflowResourceRun = {
     id: row.id,
     workflowId: row.workflowResourceId,
@@ -1552,6 +1559,7 @@ export const resourceRunFor = async (
     principal: row.principalId,
     status: row.status,
     ...(aiProvider === undefined ? {} : { aiProvider }),
+    ...(stateWithheld === null ? {} : { stateWithheld }),
     createdAt: row.createdAt.toISOString(),
     endedAt: row.endedAt?.toISOString() ?? null,
   };

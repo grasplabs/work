@@ -438,6 +438,7 @@ export const startCandidateRun = async (
         input: inputText,
         params: paramsText,
         stateHash: snapshot.hash,
+        stateWithheld: readable.withheld > 0 ? readable.withheld : null,
         fixtures: canonicalJson(fixtures),
         status: "starting",
         createdAt,
@@ -736,6 +737,7 @@ export const candidateRunFor = async (
     buildHash: row.buildHash,
     principal: row.principalId,
     status: row.status,
+    ...(row.stateWithheld === null ? {} : { stateWithheld: row.stateWithheld }),
     createdAt: row.createdAt.toISOString(),
     endedAt: row.endedAt?.toISOString() ?? null,
   };
