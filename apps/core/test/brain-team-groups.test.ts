@@ -279,7 +279,16 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
       ],
     };
 
-    await admin.api.brain.saveTeamGroups([]);
+    // Three regions of a staff list before, whose teams are all gone: they
+    // take none of the map's four lobes.
+    const old = unique();
+    await admin.api.onboarding.saveRoster(rosterOf(old));
+    const gone = ["finance", "sales", "support"].map((team, index) => ({
+      id: `gone-${index}-${tag}`,
+      name: `Gone ${index}`,
+      teamIds: [`team-${team}-${old}`],
+    }));
+    await admin.api.brain.saveTeamGroups(gone);
     let ran = false;
     let requests: readonly SentRequest[] = [];
     const events = await auditedDuring(async () => {
@@ -326,8 +335,8 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
       audited: [
         {
           actor: "system",
-          provenance: teamGroups.map((group) => group.id),
-          detail: { arranged: 4, groups: 4, before: 0, save: "string" },
+          provenance: [...gone, ...teamGroups].map((group) => group.id),
+          detail: { arranged: 4, groups: 7, before: 3, save: "string" },
         },
       ],
       namesAudited: false,

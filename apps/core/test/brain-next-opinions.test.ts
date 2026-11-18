@@ -22,6 +22,7 @@ import {
   answeringWith,
   approveAgreed,
   aloneInTheStore,
+  noRegionsOwed,
   onLink,
   openLinkAs,
   participate,
@@ -483,6 +484,8 @@ const alarmOnce = async (
   model: (requests: readonly SentRequest[]) => ProviderReply
 ) => {
   await intakesDone();
+  // So the alarm asks only for the opinions.
+  await noRegionsOwed();
   await runInDurableObject(onboardingStore(env), async (_, state) => {
     await state.storage.deleteAlarm();
   });

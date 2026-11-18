@@ -4200,10 +4200,6 @@ msgstr "Confirmer"
 msgid "Confirm {what}"
 msgstr "Confirmer {what}"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Confirm groups"
-msgstr "Confirmer les groupes"
-
 #: src/decision-confirmation.tsx
 msgid "Confirm your approval"
 msgstr "Confirmez votre approbation"
@@ -6780,10 +6776,6 @@ msgstr "Le chat de Grasp"
 #: src/settings/ai-providers.tsx
 msgid "Grasp's own AI features"
 msgstr "Les fonctionnalités d'IA propres à Grasp"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "Grasp’s proposal counts once you confirm it."
-msgstr "La proposition de Grasp compte dès que vous la confirmez."
 
 #: src/routes/_shell.settings.brain.tsx
 msgid "Group name"
@@ -11037,14 +11029,6 @@ msgctxt "what the Brain remembers about something"
 msgid "Promise"
 msgstr "Engagement"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Propose groups"
-msgstr "Proposer des groupes"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "Proposed"
-msgstr "Proposé"
-
 #: src/brain/brain-nav.tsx
 msgctxt "a group of teams Grasp proposed that no admin confirmed yet"
 msgid "Proposed"
@@ -12345,6 +12329,10 @@ msgstr "Enregistrer en PDF"
 #: src/pages/page-frame.tsx
 msgid "Save first"
 msgstr "Enregistrer d'abord"
+
+#: src/routes/_shell.settings.brain.tsx
+msgid "Save groups"
+msgstr "Enregistrer les groupes"
 
 #: src/settings/ai-providers.tsx
 msgid "Save key"
@@ -14302,8 +14290,8 @@ msgid "The Brain, as each run's person may read it"
 msgstr "Le Cerveau, tel que la personne de chaque exécution peut le lire"
 
 #: src/routes/_shell.settings.brain.tsx
-msgid "The brain's regions: your teams, grouped the way your company is. Grasp can propose groups; they count once you confirm them."
-msgstr "Les régions du Brain : vos équipes, regroupées comme l’est votre entreprise. Grasp peut proposer des groupes ; ils comptent dès que vous les confirmez."
+msgid "The brain's regions: your teams, grouped the way your company is. Grasp groups new teams by itself; rename a group or move a team here."
+msgstr "Les régions du Brain : vos équipes, regroupées comme l’est votre entreprise. Grasp regroupe lui-même les nouvelles équipes ; ici, vous renommez un groupe ou déplacez une équipe."
 
 #: src/workflows/business-process.tsx
 msgid "The business process {name} serves"

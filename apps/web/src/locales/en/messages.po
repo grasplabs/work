@@ -4200,10 +4200,6 @@ msgstr "Confirm"
 msgid "Confirm {what}"
 msgstr "Confirm {what}"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Confirm groups"
-msgstr "Confirm groups"
-
 #: src/decision-confirmation.tsx
 msgid "Confirm your approval"
 msgstr "Confirm your approval"
@@ -6780,10 +6776,6 @@ msgstr "Grasp's chat"
 #: src/settings/ai-providers.tsx
 msgid "Grasp's own AI features"
 msgstr "Grasp's own AI features"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "Grasp’s proposal counts once you confirm it."
-msgstr "Grasp's proposal counts once you confirm it."
 
 #: src/routes/_shell.settings.brain.tsx
 msgid "Group name"
@@ -11037,14 +11029,6 @@ msgctxt "what the Brain remembers about something"
 msgid "Promise"
 msgstr "Promise"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Propose groups"
-msgstr "Propose groups"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "Proposed"
-msgstr "Proposed"
-
 #: src/brain/brain-nav.tsx
 msgctxt "a group of teams Grasp proposed that no admin confirmed yet"
 msgid "Proposed"
@@ -12345,6 +12329,10 @@ msgstr "Save as PDF"
 #: src/pages/page-frame.tsx
 msgid "Save first"
 msgstr "Save first"
+
+#: src/routes/_shell.settings.brain.tsx
+msgid "Save groups"
+msgstr "Save groups"
 
 #: src/settings/ai-providers.tsx
 msgid "Save key"
@@ -14302,8 +14290,8 @@ msgid "The Brain, as each run's person may read it"
 msgstr "The Brain, as each run's person may read it"
 
 #: src/routes/_shell.settings.brain.tsx
-msgid "The brain's regions: your teams, grouped the way your company is. Grasp can propose groups; they count once you confirm them."
-msgstr "The brain's regions: your teams, grouped the way your company is. Grasp can propose groups; they count once you confirm them."
+msgid "The brain's regions: your teams, grouped the way your company is. Grasp groups new teams by itself; rename a group or move a team here."
+msgstr "The brain's regions: your teams, grouped the way your company is. Grasp groups new teams by itself; rename a group or move a team here."
 
 #: src/workflows/business-process.tsx
 msgid "The business process {name} serves"

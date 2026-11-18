@@ -24,6 +24,7 @@ import {
   accountOf,
   approve,
   codeOf,
+  noRegionsOwed,
   onLink,
   openedFor,
 } from "./interview-link.ts";
@@ -248,8 +249,9 @@ const alarmSet = async (): Promise<number | null> =>
     async (_instance, state) => await state.storage.getAlarm()
   );
 
-/** Clears the store's alarm: every one set before has run. */
+/** Clears the store's alarm: every one set before has run, arranging the teams too. */
 const noAlarm = async (): Promise<void> => {
+  await noRegionsOwed();
   await runInDurableObject(onboardingStore(env), async (_instance, state) => {
     await state.storage.deleteAlarm();
   });
