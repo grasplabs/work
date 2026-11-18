@@ -1122,6 +1122,10 @@ msgstr "{name}: aandeel van deze maand"
 msgid "{name}'s pages"
 msgstr "Pagina's van {name}"
 
+#: src/apps/app-section.tsx
+msgid "{name}'s workspace"
+msgstr "Werkruimte van {name}"
+
 #: src/routes/_shell.settings.appearance.tsx
 msgid "{named}, {current}. Switch to {next}"
 msgstr "{named}, {current}. Wissel naar {next}"
@@ -2982,7 +2986,7 @@ msgstr "Nog iets?"
 msgid "App"
 msgstr "App"
 
-#: src/apps/app-workspace.tsx
+#: src/apps/app-section.tsx
 msgctxt "an app's workspace view"
 msgid "App"
 msgstr "App"
@@ -3165,6 +3169,7 @@ msgstr "Goedkeurder voor nieuwe tools benoemd"
 msgid "Approving"
 msgstr "Goedkeuren…"
 
+#: src/apps/app-section.tsx
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
 #: src/dashboard/widget-board.tsx
@@ -4605,7 +4610,7 @@ msgstr "Sluit op {closes}"
 msgid "Closing the books and producing the numbers leadership looks at."
 msgstr "De boeken afsluiten en de cijfers maken waar de directie naar kijkt."
 
-#: src/apps/app-workspace.tsx
+#: src/apps/app-section.tsx
 msgctxt "an app's workspace view"
 msgid "Code"
 msgstr "Code"
@@ -5393,7 +5398,7 @@ msgstr "Dashboard"
 msgid "Data"
 msgstr "Gegevens"
 
-#: src/apps/app-workspace.tsx
+#: src/apps/app-section.tsx
 msgctxt "an app's workspace view"
 msgid "Data"
 msgstr "Gegevens"
@@ -12173,10 +12178,6 @@ msgstr "Druk om de app te gebruiken"
 msgid "Presses \"{words}\""
 msgstr "Drukt op \"{words}\""
 
-#: src/apps/preview-controls.tsx
-msgid "Preview"
-msgstr "Voorbeeld"
-
 #: src/frame/part-words.tsx
 msgid "Preview of your chat background"
 msgstr "Voorbeeld van je chatachtergrond"
@@ -14246,7 +14247,7 @@ msgctxt "a workflow's view"
 msgid "Settings"
 msgstr "Instellingen"
 
-#: src/apps/app-workspace.tsx
+#: src/apps/app-section.tsx
 msgctxt "an app's workspace view"
 msgid "Settings"
 msgstr "Instellingen"
@@ -18711,10 +18712,6 @@ msgstr "Werkruimte"
 msgctxt "settings group"
 msgid "Workspace"
 msgstr "Werkruimte"
-
-#: src/apps/app-workspace.tsx
-msgid "Workspace views"
-msgstr "Weergaven van de werkruimte"
 
 #: src/projects/project-dialog.tsx
 msgid "Wrench"

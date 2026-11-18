@@ -4,18 +4,8 @@ import { useState } from "react";
 
 import { Button } from "../grasp/button/index.ts";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "../grasp/dropdown-menu/index.ts";
-import {
   Desktop,
   External,
-  More,
   Phone,
   Retry,
   Tablet,
@@ -32,9 +22,9 @@ import { useCoreRead } from "./use-core-read.ts";
 
 // The preview's own controls, in the bar's middle beside the views while
 // the App's preview shows (app-workspace.tsx): how wide it is drawn, a
-// Reload, which of the App's pages it shows, and Open in a new tab. On a
-// phone they fold into one menu, without the width, which a phone has
-// already.
+// Reload, which of the App's pages it shows, and Open in a new tab. A
+// phone has none of them: its bar has no room, and its preview is as wide
+// as the phone; the bar's "…" opens the App full page.
 //
 // Core names no pages of an App (its contents say only whether it has
 // any), so the pages are read from its route files, as TanStack Router's
@@ -162,7 +152,6 @@ const styles = stylex.create({
     alignItems: "center",
     gap: grasp.space1,
   },
-  folded: { display: { default: "none", [media.belowPhone]: "flex" } },
   page: { minWidth: grasp.space24 },
 });
 
@@ -206,107 +195,68 @@ export const PreviewControls = ({
   };
   const icons = { desktop: Desktop, tablet: Tablet, phone: Phone };
   return (
-    <>
-      <div {...stylex.props(styles.inline)}>
-        <ToggleGroup
-          aria-label={t`Preview width`}
-          onValueChange={(chosen: unknown[]) => {
-            const picked = widths.find((each) => each === chosen[0]);
-            if (picked !== undefined) {
-              onWidth(picked);
+    <div {...stylex.props(styles.inline)}>
+      <ToggleGroup
+        aria-label={t`Preview width`}
+        onValueChange={(chosen: unknown[]) => {
+          const picked = widths.find((each) => each === chosen[0]);
+          if (picked !== undefined) {
+            onWidth(picked);
+          }
+        }}
+        size="sm"
+        value={[width]}
+      >
+        {widths.map((each) => (
+          <Toggle
+            aria-label={widthLabels[each]}
+            icon={icons[each]}
+            key={each}
+            title={widthLabels[each]}
+            value={each}
+          />
+        ))}
+      </ToggleGroup>
+      <Button
+        aria-label={t`Reload`}
+        icon={Retry}
+        onClick={onReload}
+        size="sm"
+        title={t`Reload`}
+        variant="ghost"
+      />
+      {pages.length > 1 ? (
+        <Select
+          items={pages.map((each) => ({ value: each, label: each }))}
+          layout={styles.page}
+          onValueChange={(value) => {
+            if (typeof value === "string") {
+              onPage(value);
             }
           }}
-          size="sm"
-          value={[width]}
+          value={shown}
         >
-          {widths.map((each) => (
-            <Toggle
-              aria-label={widthLabels[each]}
-              icon={icons[each]}
-              key={each}
-              title={widthLabels[each]}
-              value={each}
-            />
-          ))}
-        </ToggleGroup>
-        <Button
-          aria-label={t`Reload`}
-          icon={Retry}
-          onClick={onReload}
-          size="sm"
-          title={t`Reload`}
-          variant="ghost"
-        />
-        {pages.length > 1 ? (
-          <Select
-            items={pages.map((each) => ({ value: each, label: each }))}
-            layout={styles.page}
-            onValueChange={(value) => {
-              if (typeof value === "string") {
-                onPage(value);
-              }
-            }}
-            value={shown}
-          >
-            <SelectTrigger aria-label={t`Page`} size="sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent />
-          </Select>
-        ) : null}
-        <Button
-          aria-label={t`Open in a new tab`}
-          icon={External}
-          render={
-            <a
-              aria-label={t`Open in a new tab`}
-              href={href}
-              rel="noreferrer"
-              target="_blank"
-            />
-          }
-          size="sm"
-          title={t`Open in a new tab`}
-          variant="ghost"
-        />
-      </div>
-      <div {...stylex.props(styles.folded)}>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            aria-label={t`Preview`}
-            icon={More}
-            size="sm"
-            variant="ghost"
+          <SelectTrigger aria-label={t`Page`} size="sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent />
+        </Select>
+      ) : null}
+      <Button
+        aria-label={t`Open in a new tab`}
+        icon={External}
+        render={
+          <a
+            aria-label={t`Open in a new tab`}
+            href={href}
+            rel="noreferrer"
+            target="_blank"
           />
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem icon={Retry} onSelect={onReload}>
-              {t`Reload`}
-            </DropdownMenuItem>
-            <DropdownMenuItem href={href} icon={External}>
-              {t`Open in a new tab`}
-            </DropdownMenuItem>
-            {pages.length > 1 ? (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuRadioGroup
-                  onValueChange={(value: unknown) => {
-                    if (typeof value === "string") {
-                      onPage(value);
-                    }
-                  }}
-                  value={shown}
-                >
-                  {pages.map((each) => (
-                    <DropdownMenuRadioItem key={each} value={each}>
-                      {each}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </>
-            ) : null}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </>
+        }
+        size="sm"
+        title={t`Open in a new tab`}
+        variant="ghost"
+      />
+    </div>
   );
 };

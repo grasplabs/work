@@ -39,7 +39,6 @@ import {
   SheetDescription,
   SheetFooter,
   SheetTitle,
-  SheetTrigger,
 } from "../grasp/sheet/index.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
 import { Text } from "../grasp/text/index.ts";
@@ -780,25 +779,31 @@ export const ShareWithTeam = ({
       listed.ok ? listed.value : { people: [], teams: [], projects: [] }
     );
   };
+  const openOrClose = (opening: boolean): void => {
+    setOpen(opening);
+    if (opening) {
+      clear();
+      void readCandidates();
+    }
+  };
   return (
-    <Sheet
-      onOpenChange={(opening) => {
-        setOpen(opening);
-        if (opening) {
-          clear();
-          void readCandidates();
-        }
-      }}
-      open={open}
-    >
-      <SheetTrigger
+    <Sheet onOpenChange={openOrClose} open={open}>
+      {/* A Button, not the Sheet's trigger, for its `truncate`: on a
+          phone's bar the words end in an ellipsis, the whole in a tooltip,
+          so it never runs off the screen. BUILDER: SheetTrigger should take
+          Button's `truncate`. */}
+      <Button
         disabled={draft === undefined}
         icon={People}
+        onClick={() => {
+          openOrClose(true);
+        }}
         size="sm"
+        truncate
         variant="ink"
       >
         {pending ? t`Share changes` : t`Share with your team`}
-      </SheetTrigger>
+      </Button>
       <SheetContent closeLabel={t`Close`}>
         <SheetTitle>{t`Share ${name}`}</SheetTitle>
         <SheetDescription>

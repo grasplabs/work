@@ -7,6 +7,7 @@ import { Link, useLocation, useMatchRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { useAgentSection } from "../../agents/agent-section.tsx";
+import { useAppSection } from "../../apps/app-section.tsx";
 import { chatsKey, useChatsWindow } from "../../chat/chat-switcher.tsx";
 import { useRecentChats } from "../../chat/sidebar-chats.tsx";
 import type { CoreConnection } from "../../core-connection.ts";
@@ -395,7 +396,8 @@ export const useGraspSidebar = ({
   const profile = useProfile(core, identity);
   const settingsSection = useSettingsSection(identity);
   const agentSection = useAgentSection();
-  const section = settingsSection ?? agentSection;
+  const appSection = useAppSection(identity);
+  const section = settingsSection ?? agentSection ?? appSection;
   const searching = identity.onboardingOnly !== true;
   return {
     foldLabel: t`Show or hide the sidebar`,

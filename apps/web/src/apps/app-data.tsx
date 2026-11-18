@@ -21,7 +21,7 @@ import { formatDateTime, formatNumber, valueText } from "../format.ts";
 import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { DataTable } from "../grasp/data-table/index.ts";
+import { DataTable, expanding } from "../grasp/data-table/index.ts";
 import type { DataTableColumn } from "../grasp/data-table/index.ts";
 import {
   Dialog,
@@ -48,6 +48,7 @@ import { Field, FieldLabel } from "../grasp/field/index.ts";
 import { FileUpload } from "../grasp/file-upload/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import {
+  AppRecord,
   Database,
   Download,
   Icon,
@@ -60,7 +61,9 @@ import {
   InputGroupInput,
   InputGroupText,
 } from "../grasp/input-group/index.ts";
+import { InspectorPanel } from "../grasp/inspector-panel/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
+import { Link } from "../grasp/link/index.ts";
 import {
   Select,
   SelectContent,
@@ -128,6 +131,11 @@ const styles = stylex.create({
     borderBottomColor: grasp.line,
   },
   spacer: { flexGrow: 1 },
+  // CONCEPT inspector: the table, and the opened record beside it.
+  beside: { display: "flex", flexGrow: 1, minHeight: 0, gap: grasp.space3 },
+  inspector: { flexShrink: 0, width: "22rem", minHeight: 0, overflowY: "auto" },
+  // A button centres its words; a row's name starts where its header does.
+  nameButton: { textAlign: "start" },
   barField: { width: BAR_FIELD, maxWidth: "100%" },
   notes: {
     display: "grid",
@@ -368,6 +376,7 @@ const RecordSheet = ({
   stale,
   onStale,
   onClose,
+  look = "sheet",
 }: {
   app: string;
   table: string;
@@ -376,6 +385,7 @@ const RecordSheet = ({
   stale: boolean;
   onStale: () => void;
   onClose: () => void;
+  look?: "sheet" | "inspector";
 }) => {
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
@@ -426,6 +436,47 @@ const RecordSheet = ({
     void load(null);
   }
   const shown = recordName(record);
+  const fields = (
+    <KeyValueList
+      items={Object.entries(record.fields).map(([field, value]) => ({
+        key: field,
+        value: valueText(value),
+      }))}
+    />
+  );
+  const history =
+    version === null ? null : (
+      <RecordHistory
+        busy={busy}
+        changes={changes}
+        people={people}
+        failure={failure}
+        onOlder={
+          next === null
+            ? undefined
+            : () => {
+                void load(next);
+              }
+        }
+      />
+    );
+  if (look === "inspector") {
+    return (
+      <InspectorPanel
+        aria-label={shown}
+        description={formatDateTime(record.updatedAt)}
+        icon={AppRecord}
+        onClose={onClose}
+        sections={[
+          { id: "fields", label: t`Fields`, content: fields },
+          ...(history === null
+            ? []
+            : [{ id: "history", label: t`History`, content: history }]),
+        ]}
+        title={shown}
+      />
+    );
+  }
   return (
     <Sheet
       onOpenChange={(open) => {
@@ -440,27 +491,8 @@ const RecordSheet = ({
         <SheetDescription>{formatDateTime(record.updatedAt)}</SheetDescription>
         <SheetBody>
           <div {...stylex.props(styles.stack)}>
-            <KeyValueList
-              items={Object.entries(record.fields).map(([field, value]) => ({
-                key: field,
-                value: valueText(value),
-              }))}
-            />
-            {version === null ? null : (
-              <RecordHistory
-                busy={busy}
-                changes={changes}
-                people={people}
-                failure={failure}
-                onOlder={
-                  next === null
-                    ? undefined
-                    : () => {
-                        void load(next);
-                      }
-                }
-              />
-            )}
+            {fields}
+            {history}
           </div>
         </SheetBody>
       </SheetContent>
@@ -669,6 +701,53 @@ const ImportDialog = ({
   );
 };
 
+/**
+ * CONCEPT ONLY (branch feat/apps-bar-concepts): how an opened record shows,
+ * by `?record=`. sheet (today): a sheet over the page. inspector: the
+ * library's Inspector panel beside the table, as its inspector-record
+ * pattern has it. detail: the record's fields open under its row.
+ */
+const recordConcept = (): "sheet" | "inspector" | "detail" => {
+  const asked = new URLSearchParams(window.location.search).get("record");
+  return asked === "inspector" || asked === "detail" ? asked : "sheet";
+};
+
+/** CONCEPT detail: a record's fields, under its row. */
+const recordDetail = (record: AppDataRecord) => (
+  <KeyValueList
+    items={Object.entries(record.fields).map(([field, value]) => ({
+      key: field,
+      value: valueText(value),
+    }))}
+  />
+);
+
+/** CONCEPT detail: the table's props that open a record under its row. */
+const detailOf = () =>
+  recordConcept() === "detail"
+    ? { pieces: [expanding], detail: recordDetail }
+    : {};
+
+/** CONCEPT: whether the opened record stands beside the table. */
+const besideTable = (): boolean => recordConcept() === "inspector";
+
+const minuteMs = 60_000;
+const hourMs = 60 * minuteMs;
+const dayMs = 24 * hourMs;
+
+/** How long ago `value` was ("3 hours ago"), as the page's language says it. */
+const formatAgo = (value: string, now: Date = new Date()): string => {
+  const ago = Math.max(0, now.getTime() - new Date(value).getTime());
+  const say = new Intl.RelativeTimeFormat(i18n.locale, { numeric: "auto" });
+  if (ago >= dayMs) {
+    return say.format(-Math.floor(ago / dayMs), "day");
+  }
+  if (ago >= hourMs) {
+    return say.format(-Math.floor(ago / hourMs), "hour");
+  }
+  return say.format(-Math.floor(ago / minuteMs), "minute");
+};
+
 /** A column of a table's records: the field whose values it shows, and its name in the head. */
 export interface RecordColumn {
   field: string;
@@ -705,18 +784,27 @@ const recordColumns = (
       // The row's name: it wraps in whole words where the row is narrow,
       // as a table's first column does, so it stands in no control's box.
       value: (record) => recordName(record),
+      // Until the library's table opens a row itself, the name is a link
+      // drawn as a button: start-aligned under its header, wrapping in
+      // whole words, with no padding of its own.
       cell: (record) => (
-        <Button
-          onClick={() => {
-            onOpen(record);
-          }}
-          size="xs"
-          // Its whole ID, for whoever looks a record up by it.
-          title={record.id}
-          variant="ghost"
+        <Link
+          render={
+            <button
+              aria-label={recordName(record)}
+              onClick={() => {
+                onOpen(record);
+              }}
+              // Its whole ID, for whoever looks a record up by it.
+              title={record.id}
+              type="button"
+              {...stylex.props(styles.nameButton)}
+            />
+          }
+          variant="standalone"
         >
           {recordName(record)}
-        </Button>
+        </Link>
       ),
     },
     ...columns
@@ -735,10 +823,14 @@ const recordColumns = (
       header: words.changed,
       align: "end",
       value: (record) => record.updatedAt,
+      // How long ago, the full time on hover: the same date five times
+      // over says nothing a row needs.
       cell: (record) => (
-        <Text element="span" size="sm" tone="muted">
-          {formatDateTime(record.updatedAt)}
-        </Text>
+        <span title={formatDateTime(record.updatedAt)}>
+          <Text element="span" size="sm" tone="muted">
+            {formatAgo(record.updatedAt)}
+          </Text>
+        </span>
       ),
     },
   ];
@@ -945,6 +1037,42 @@ const RecordActions = ({
 };
 
 /**
+ * The opened record, where the concept puts it: beside the table
+ * (inspector) or over the page (sheet); nothing where it isn't, or while
+ * none is open.
+ */
+const OpenedRecord = ({
+  where,
+  record,
+  table,
+  ...rest
+}: {
+  where: "beside" | "over";
+  app: string;
+  record: AppDataRecord | undefined;
+  table: string | undefined;
+  version: number | null;
+  stale: boolean;
+  onStale: () => void;
+  onClose: () => void;
+}) => {
+  if (
+    record === undefined ||
+    table === undefined ||
+    besideTable() !== (where === "beside")
+  ) {
+    return null;
+  }
+  return where === "beside" ? (
+    <div {...stylex.props(styles.inspector)}>
+      <RecordSheet {...rest} look="inspector" record={record} table={table} />
+    </div>
+  ) : (
+    <RecordSheet {...rest} record={record} table={table} />
+  );
+};
+
+/**
  * One table's records in a table, a page at a time, read from `source`:
  * the live App's, with find, export and import, the App's version read;
  * or the draft preview's test data. Its columns are the page's
@@ -1026,6 +1154,18 @@ export const TableRecords = ({
       setOpen(found);
     }
   };
+  // The opened record, and how it closes: beside the table or over the page.
+  const opened = {
+    app,
+    onClose: () => {
+      setOpen(undefined);
+    },
+    onStale,
+    record: open,
+    stale,
+    table: read?.table.name,
+    version: live?.version ?? null,
+  };
   const tableColumns = recordColumns(
     columns,
     { record: t`Record`, changed: t`Changed` },
@@ -1058,50 +1198,46 @@ export const TableRecords = ({
         <RecordNotes failure={action.failure} missing={missing} stale={stale} />
       ) : null}
       {instead === undefined ? (
-        <div {...stylex.props(styles.grid)}>
-          <DataTable
-            columns={tableColumns}
-            density="compact"
-            empty={
-              read?.source.kind === "test"
-                ? {
-                    title: t`No example records`,
-                    description: t`Reset the example data to fill it.`,
-                  }
+        <div {...stylex.props(styles.beside)}>
+          <div {...stylex.props(styles.grid)}>
+            <DataTable
+              {...detailOf()}
+              columns={tableColumns}
+              appearance={{ head: "plain" }}
+              density="compact"
+              empty={
+                read?.source.kind === "test"
+                  ? {
+                      title: t`No example records`,
+                      description: t`Reset the example data to fill it.`,
+                    }
+                  : {
+                      title: t`No records yet`,
+                      description: t`They show here as people use the App.`,
+                    }
+              }
+              {...(pages.failure === undefined
+                ? {}
                 : {
-                    title: t`No records yet`,
-                    description: t`They show here as people use the App.`,
-                  }
-            }
-            {...(pages.failure === undefined
-              ? {}
-              : {
-                  failed: { description: pages.failure, onRetry: pages.retry },
-                })}
-            hasMore={pages.more && pages.failure === undefined}
-            label={label}
-            loading={pages.loading}
-            loadingMore={pages.loadingMore}
-            onEndReached={pages.handleEnd}
-            rowKey={(record) => record.id}
-            rows={pages.records}
-            unit={{ one: t`record`, other: t`records` }}
-          />
+                    failed: {
+                      description: pages.failure,
+                      onRetry: pages.retry,
+                    },
+                  })}
+              hasMore={pages.more && pages.failure === undefined}
+              label={label}
+              loading={pages.loading}
+              loadingMore={pages.loadingMore}
+              onEndReached={pages.handleEnd}
+              rowKey={(record) => record.id}
+              rows={pages.records}
+              unit={{ one: t`record`, other: t`records` }}
+            />
+          </div>
+          <OpenedRecord {...opened} where="beside" />
         </div>
       ) : null}
-      {open === undefined || read === undefined ? null : (
-        <RecordSheet
-          app={app}
-          onClose={() => {
-            setOpen(undefined);
-          }}
-          onStale={onStale}
-          record={open}
-          stale={stale}
-          table={read.table.name}
-          version={live?.version ?? null}
-        />
-      )}
+      <OpenedRecord {...opened} where="over" />
       {importing && live !== undefined ? (
         <ImportDialog
           app={app}

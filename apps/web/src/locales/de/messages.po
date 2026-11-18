@@ -1122,6 +1122,10 @@ msgstr "{name}: Anteil in diesem Monat"
 msgid "{name}'s pages"
 msgstr "Seiten von {name}"
 
+#: src/apps/app-section.tsx
+msgid "{name}'s workspace"
+msgstr "Arbeitsbereich von {name}"
+
 #: src/routes/_shell.settings.appearance.tsx
 msgid "{named}, {current}. Switch to {next}"
 msgstr "{named}, {current}. Zu {next} wechseln"
@@ -2982,7 +2986,7 @@ msgstr "Noch etwas?"
 msgid "App"
 msgstr "App"
 
-#: src/apps/app-workspace.tsx
+#: src/apps/app-section.tsx
 msgctxt "an app's workspace view"
 msgid "App"
 msgstr "App"
@@ -3165,6 +3169,7 @@ msgstr "Freigabe für neue Tools benannt"
 msgid "Approving"
 msgstr "Wird genehmigt"
 
+#: src/apps/app-section.tsx
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
 #: src/dashboard/widget-board.tsx
@@ -4605,7 +4610,7 @@ msgstr "Endet am {closes}"
 msgid "Closing the books and producing the numbers leadership looks at."
 msgstr "Den Abschluss machen und die Zahlen erstellen, auf die die Geschäftsleitung schaut."
 
-#: src/apps/app-workspace.tsx
+#: src/apps/app-section.tsx
 msgctxt "an app's workspace view"
 msgid "Code"
 msgstr "Code"
@@ -5393,7 +5398,7 @@ msgstr "Dashboard"
 msgid "Data"
 msgstr "Daten"
 
-#: src/apps/app-workspace.tsx
+#: src/apps/app-section.tsx
 msgctxt "an app's workspace view"
 msgid "Data"
 msgstr "Daten"
@@ -12173,10 +12178,6 @@ msgstr "Drücken, um die App zu nutzen"
 msgid "Presses \"{words}\""
 msgstr "Drückt auf \"{words}\""
 
-#: src/apps/preview-controls.tsx
-msgid "Preview"
-msgstr "Vorschau"
-
 #: src/frame/part-words.tsx
 msgid "Preview of your chat background"
 msgstr "Vorschau Ihres Chat-Hintergrunds"
@@ -14246,7 +14247,7 @@ msgctxt "a workflow's view"
 msgid "Settings"
 msgstr "Einstellungen"
 
-#: src/apps/app-workspace.tsx
+#: src/apps/app-section.tsx
 msgctxt "an app's workspace view"
 msgid "Settings"
 msgstr "Einstellungen"
@@ -18711,10 +18712,6 @@ msgstr "Workspace"
 msgctxt "settings group"
 msgid "Workspace"
 msgstr "Arbeitsbereich"
-
-#: src/apps/app-workspace.tsx
-msgid "Workspace views"
-msgstr "Ansichten des Arbeitsbereichs"
 
 #: src/projects/project-dialog.tsx
 msgid "Wrench"

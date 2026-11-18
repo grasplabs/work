@@ -1122,6 +1122,10 @@ msgstr "{name}: share of this month"
 msgid "{name}'s pages"
 msgstr "{name}'s pages"
 
+#: src/apps/app-section.tsx
+msgid "{name}'s workspace"
+msgstr "{name}'s workspace"
+
 #: src/routes/_shell.settings.appearance.tsx
 msgid "{named}, {current}. Switch to {next}"
 msgstr "{named}, {current}. Switch to {next}"
@@ -2982,7 +2986,7 @@ msgstr "Anything else?"
 msgid "App"
 msgstr "App"
 
-#: src/apps/app-workspace.tsx
+#: src/apps/app-section.tsx
 msgctxt "an app's workspace view"
 msgid "App"
 msgstr "App"
@@ -3165,6 +3169,7 @@ msgstr "Approver for new tools named"
 msgid "Approving"
 msgstr "Approving"
 
+#: src/apps/app-section.tsx
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
 #: src/dashboard/widget-board.tsx
@@ -4605,7 +4610,7 @@ msgstr "Closes {closes}"
 msgid "Closing the books and producing the numbers leadership looks at."
 msgstr "Closing the books and producing the numbers leadership looks at."
 
-#: src/apps/app-workspace.tsx
+#: src/apps/app-section.tsx
 msgctxt "an app's workspace view"
 msgid "Code"
 msgstr "Code"
@@ -5393,7 +5398,7 @@ msgstr "Dashboard"
 msgid "Data"
 msgstr "Data"
 
-#: src/apps/app-workspace.tsx
+#: src/apps/app-section.tsx
 msgctxt "an app's workspace view"
 msgid "Data"
 msgstr "Data"
@@ -12173,10 +12178,6 @@ msgstr "Press to use the app"
 msgid "Presses \"{words}\""
 msgstr "Presses \"{words}\""
 
-#: src/apps/preview-controls.tsx
-msgid "Preview"
-msgstr "Preview"
-
 #: src/frame/part-words.tsx
 msgid "Preview of your chat background"
 msgstr "Preview of your chat background"
@@ -14246,7 +14247,7 @@ msgctxt "a workflow's view"
 msgid "Settings"
 msgstr "Settings"
 
-#: src/apps/app-workspace.tsx
+#: src/apps/app-section.tsx
 msgctxt "an app's workspace view"
 msgid "Settings"
 msgstr "Settings"
@@ -18711,10 +18712,6 @@ msgstr "Workspace"
 msgctxt "settings group"
 msgid "Workspace"
 msgstr "Workspace"
-
-#: src/apps/app-workspace.tsx
-msgid "Workspace views"
-msgstr "Workspace views"
 
 #: src/projects/project-dialog.tsx
 msgid "Wrench"

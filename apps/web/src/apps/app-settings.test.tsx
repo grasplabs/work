@@ -288,8 +288,8 @@ describe(AppSettings, () => {
     document.body.replaceChildren();
   });
 
-  it("lists to its builders the sections only they read, linked within the workspace", async () => {
-    await opened(fakeCore("builder"), "workspace");
+  it("lists to its builders the sections only they read", async () => {
+    await opened(fakeCore("builder"));
     const builder = sections();
     act(() => {
       root?.unmount();
@@ -301,22 +301,22 @@ describe(AppSettings, () => {
       builder: [
         {
           name: "General",
-          to: "/apps/invoice-desk?view=settings&section=general",
+          to: "/apps/invoice-desk/settings?section=general",
           open: true,
         },
         {
           name: "Sharing",
-          to: "/apps/invoice-desk?view=settings&section=sharing",
+          to: "/apps/invoice-desk/settings?section=sharing",
           open: false,
         },
         {
           name: "History",
-          to: "/apps/invoice-desk?view=settings&section=history",
+          to: "/apps/invoice-desk/settings?section=history",
           open: false,
         },
         {
           name: "Webhooks",
-          to: "/apps/invoice-desk?view=settings&section=webhooks",
+          to: "/apps/invoice-desk/settings?section=webhooks",
           open: false,
         },
       ],
