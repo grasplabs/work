@@ -128,9 +128,9 @@ const runningTotal = (
 /**
  * The month's spend at a glance: the total, where it ends at this pace,
  * and the month so far as one area, day by day; one line when nothing was
- * spent. The Spend card shows it over where it went, Billing on its own.
+ * spent. The Spend card shows it over where it went.
  */
-export const SpendSummary = ({ spend }: { spend: ModelMonthSpend }) => {
+const SpendSummary = ({ spend }: { spend: ModelMonthSpend }) => {
   const { t } = useLingui();
   const end = monthEnd(spend.total, spend.month, new Date());
   const ending = end === null ? null : dollars(end);
