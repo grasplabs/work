@@ -6,7 +6,7 @@ import type {
 } from "@grasp-os/shared/knowledge";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useRouter } from "@tanstack/react-router";
+import { Link, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
@@ -17,9 +17,22 @@ import { PageHeading } from "../frame/page.tsx";
 import { RouterLink } from "../frame/router-link.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Collapsible } from "../grasp/collapsible/index.ts";
-import { Edit } from "../grasp/icons/index.ts";
+import { Doc, Edit } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { Section, SectionHeader } from "../grasp/section-header/index.ts";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../grasp/tabs/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { Textarea } from "../grasp/textarea/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
@@ -257,48 +270,53 @@ const Facts = ({
   );
 };
 
-type Linked2 = readonly {
-  collectionId: string;
-  documentId: string;
-  title: string;
-}[];
-
-const part = (label: string, documents: Linked2) =>
-  documents.length === 0 ? null : (
-    <Text size="sm" tone="muted">
-      {`${label} `}
-      {documents.map((document, index) => (
-        <span key={document.documentId}>
-          {index === 0 ? "" : ", "}
-          <RouterLink
-            params={{ collection: document.collectionId }}
-            search={{ doc: document.documentId }}
-            to="/knowledge/$collection"
-            variant="standalone"
-          >
-            {document.title}
-          </RouterLink>
-        </span>
-      ))}
-    </Text>
-  );
-
-const LinksLine = ({
-  links,
-  backlinks,
+/**
+ * Documents as a small section of links to them: what this one
+ * links to, or what links to it. Nothing where there are none.
+ */
+const Related = ({
+  id,
+  title,
+  documents,
 }: {
-  links: readonly { collectionId: string; documentId: string; title: string }[];
-  backlinks: readonly {
+  id: string;
+  title: string;
+  documents: readonly {
     collectionId: string;
     documentId: string;
     title: string;
   }[];
-}) => (
-  <>
-    {part("Links to", links)}
-    {part("Used by", backlinks)}
-  </>
-);
+}) => {
+  if (documents.length === 0) {
+    return null;
+  }
+  return (
+    <Section aria-labelledby={id}>
+      <SectionHeader id={id} size="sm" title={title} />
+      {/* Each one has an address: a link, never a button. */}
+      <ItemGroup aria-label={title}>
+        {documents.map((document) => (
+          <Item
+            key={document.documentId}
+            render={
+              <Link
+                params={{ collection: document.collectionId }}
+                search={{ doc: document.documentId }}
+                to="/knowledge/$collection"
+              />
+            }
+            size="sm"
+          >
+            <ItemMedia icon={Doc} iconLook="inline" />
+            <ItemContent>
+              <ItemTitle>{document.title}</ItemTitle>
+            </ItemContent>
+          </Item>
+        ))}
+      </ItemGroup>
+    </Section>
+  );
+};
 
 /** Says an earlier version is open, with the way back to the current one. */
 const EarlierVersion = ({ doc }: { doc: DocumentRead }) => {
@@ -351,6 +369,7 @@ export const DocumentView = ({
   /** What else the page offers on it, beside Edit and Export. */
   actions?: ReactNode;
 }) => {
+  const { t } = useLingui();
   const [editing, setEditing] = useState(false);
   // An earlier version, opened from the history: read only.
   const earlier = doc.version.number !== doc.currentVersion;
@@ -396,31 +415,47 @@ export const DocumentView = ({
             <Facts collection={collection} doc={doc} />
           </div>
           {earlier ? <EarlierVersion doc={doc} /> : null}
-          {editing ? (
-            <Editor
-              doc={doc}
-              resolve={resolve}
-              onClose={() => {
-                setEditing(false);
-              }}
-            />
-          ) : (
-            <DocumentMarkdown
-              resolve={resolve}
-              text={doc.version.text}
-              title={doc.title}
-            />
-          )}
-          {/* Concept B: reading first; links one line, history folded. */}
-          <LinksLine backlinks={backlinks} links={links} />
-          <Collapsible title={`History · ${versions.length} versions`}>
-            <Timeline
-              doc={doc}
-              me={me}
-              versions={versions}
-              writable={writable}
-            />
-          </Collapsible>
+          {/* Concept C: the document's three views as tabs. */}
+          <Tabs defaultValue="text">
+            <TabsList aria-label="Views of the document">
+              <TabsTrigger value="text">Text</TabsTrigger>
+              <TabsTrigger value="history">
+                {`History ${versions.length}`}
+              </TabsTrigger>
+              <TabsTrigger value="links">
+                {`Links ${links.length + backlinks.length}`}
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="text">
+              {editing ? (
+                <Editor
+                  doc={doc}
+                  resolve={resolve}
+                  onClose={() => {
+                    setEditing(false);
+                  }}
+                />
+              ) : (
+                <DocumentMarkdown
+                  resolve={resolve}
+                  text={doc.version.text}
+                  title={doc.title}
+                />
+              )}
+            </TabsContent>
+            <TabsContent value="history">
+              <Timeline
+                doc={doc}
+                me={me}
+                versions={versions}
+                writable={writable}
+              />
+            </TabsContent>
+            <TabsContent value="links">
+              <Related documents={links} id="links-to" title={t`Links to`} />
+              <Related documents={backlinks} id="used-by" title={t`Used by`} />
+            </TabsContent>
+          </Tabs>
         </div>
       </div>
     </div>
