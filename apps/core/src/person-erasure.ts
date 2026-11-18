@@ -476,18 +476,22 @@ const runs: ErasureStep = {
 };
 
 /**
- * How the interview area knows the erased person `userId`'s identifiers
- * on the staff list (GRA-2055): an address by its keyed hash
- * (`person_erasures`, only while kept under the current key and not
- * released: `byEmail`), a Microsoft object id by the subjects of their
- * accounts while those stay, else by the keyed hashes the identity area
- * keeps of them (`erased_subjects`), whichever area runs first.
+ * The staff list places nobody by the erased person `userId`'s entries
+ * again (GRA-2055): each entry on the list, or place in the confirmed
+ * one, that names them, by the keyed hash of the address that was theirs
+ * (while kept under the current key and not released) or by the
+ * Microsoft object id an entry from the directory carries (as their
+ * accounts name it, or once those went, its keyed hash), is marked erased
+ * and leaves the confirmed places as a new version (`markErased`). A
+ * placing of the list that still had them, under way, writes nothing more
+ * once the new version is claimed. What the store keeps of the entry
+ * stays as it is.
  */
-const identifiersOf = async (
+const unplaceOnList = async (
   env: Env,
   userId: string,
   erasure: { emailHash: string | null; keyVersion: number }
-) => {
+): Promise<void> => {
   const db = drizzle(env.DB);
   const [held, erased] = await db.batch([
     db
@@ -514,65 +518,40 @@ const identifiersOf = async (
   const hashes = new Set(erased.map(({ hash }) => hash));
   const byEmail =
     erasure.emailHash !== null && erasure.keyVersion === emailKeyVersion;
-  return {
-    byEmail,
-    email: async (email: string): Promise<boolean> =>
+  const theirs = async (email: string, oid: string | null) => {
+    if (
       byEmail &&
       email !== "" &&
-      (await emailHashOf(env, email)) === erasure.emailHash,
-    oid: async (oid: string): Promise<boolean> => {
-      const subject = entraSubject(oid);
-      return (
-        subjects.has(subject) || hashes.has(await subjectHashOf(env, subject))
-      );
-    },
+      (await emailHashOf(env, email)) === erasure.emailHash
+    ) {
+      return true;
+    }
+    if (oid === null) {
+      return false;
+    }
+    const subject = entraSubject(oid);
+    return (
+      subjects.has(subject) || hashes.has(await subjectHashOf(env, subject))
+    );
   };
-};
-
-/**
- * The erased person's identifiers (`isTheirs`) out of the onboarding's
- * store (GRA-2055): `found` on their entries, and those its links and
- * mail went to and the confirmed list's places hold too, also once a
- * draft took them off the list (`eraseIdentifiers`). The list without them claimed at once, so a
- * placing of the one that had them, under way, writes nothing more before
- * an address can be released and proved by someone else.
- */
-const eraseIdentifiersOf = async (
-  env: Env,
-  userId: string,
-  isTheirs: Awaited<ReturnType<typeof identifiersOf>>,
-  found: { emails: Set<string>; oids: Set<string> }
-): Promise<void> => {
   const store = onboardingStore(env);
-  for (const email of await store.sentAddresses()) {
-    // oxlint-disable-next-line no-await-in-loop -- one address at a time
-    if (await isTheirs.email(email)) {
-      found.emails.add(email);
-    }
-  }
   const confirmed = await store.confirmedPlaces();
-  for (const { email, entra } of confirmed?.places ?? []) {
-    // oxlint-disable-next-line no-await-in-loop -- one place at a time
-    if (await isTheirs.email(email)) {
-      found.emails.add(email);
-    }
-    // oxlint-disable-next-line no-await-in-loop -- one place at a time
-    if (entra !== null && (await isTheirs.oid(entra.oid))) {
-      found.oids.add(entra.oid);
+  const entries = [
+    ...(await store.rosterEmails()),
+    ...(confirmed?.places ?? []).map(({ person, email, entra }) => ({
+      id: person,
+      email,
+      oid: entra?.oid ?? null,
+    })),
+  ];
+  const theirEntries = new Set<string>();
+  for (const { id, email, oid } of entries) {
+    // oxlint-disable-next-line no-await-in-loop -- one entry at a time
+    if (!theirEntries.has(id) && (await theirs(email, oid))) {
+      theirEntries.add(id);
     }
   }
-  // An address an admin released since this area read it is someone
-  // else's now, and so is a link sent to it since: it stays. Read again
-  // just before the store's transaction.
-  const [still] = await drizzle(env.DB)
-    .select({ emailHash: personErasures.emailHash })
-    .from(personErasures)
-    .where(eq(personErasures.userId, userId));
-  const emails = still?.emailHash === null ? [] : [...found.emails];
-  if (
-    (emails.length > 0 || found.oids.size > 0) &&
-    (await store.eraseIdentifiers({ emails, oids: [...found.oids] }))
-  ) {
+  if (theirEntries.size > 0 && (await store.markErased([...theirEntries]))) {
     await placePrimaries(env, { type: "system" });
   }
 };
@@ -588,8 +567,7 @@ const eraseIdentifiersOf = async (
  * ran first; once an admin released the address, or under an older key, it
  * is found by address no more.
  * Their entry on the list is the company's (Nick's D5): it stays, removed
- * only by an admin, without their address, which the store keeps nowhere
- * after (GRA-2055): an erasure is final.
+ * only by an admin.
  */
 const interview: ErasureStep = {
   area: "interview",
@@ -625,23 +603,18 @@ const interview: ErasureStep = {
     // next holder keeps theirs. Until it has, this throws and the erasure
     // is tried again.
     await eraseOnboardingAccount(env, userId);
-    // Their entries on the list and their places in the confirmed one
-    // (GRA-2055): by the Microsoft object id an entry from the directory
-    // carries, as their accounts name it, or once those went (the identity
-    // area), as its keyed hash does; and by the address that was theirs,
-    // through its keyed hash, unless released or hashed under an older
-    // key. An erasure is final: each goes from the store, and nobody
-    // signing in with it later is placed by it.
-    const isTheirs = await identifiersOf(env, userId, erasure);
-    const emails = new Set<string>();
-    const oids = new Set<string>();
+    await unplaceOnList(env, userId, erasure);
+    // Their address released, or hashed under an older key: they can't be
+    // found on the list by it, and whatever interview they have is left.
+    // Recorded as skipped, never as done.
+    if (erasure.emailHash === null || erasure.keyVersion !== emailKeyVersion) {
+      await marked(db, userId, "interview", "skipped");
+      return;
+    }
     let found = 0;
-    for (const { id, email, oid } of await store.rosterIdentifiers()) {
+    for (const { id, email } of await store.rosterEmails()) {
       // oxlint-disable-next-line no-await-in-loop -- one entry at a time
-      const byEmail = await isTheirs.email(email);
-      // oxlint-disable-next-line no-await-in-loop -- one entry at a time
-      const byOid = oid !== null && (await isTheirs.oid(oid));
-      if (byEmail || byOid) {
+      if ((await emailHashOf(env, email)) === erasure.emailHash) {
         // Only an interview from a link sent before the erasure was asked
         // for (the address may have been released, and a link sent to the
         // entry since, as this ran), and held by them or by nobody: never
@@ -651,24 +624,10 @@ const interview: ErasureStep = {
         await store.eraseInterviewOf(id, userId, sentBy);
         found += 1;
       }
-      if (byEmail) {
-        emails.add(email);
-      }
-      if (byOid && oid !== null) {
-        oids.add(oid);
-      }
-    }
-    await eraseIdentifiersOf(env, userId, isTheirs, { emails, oids });
-    if (!isTheirs.byEmail) {
-      // Their address released, or hashed under an older key: they can't
-      // be found on the list by it, and an interview of theirs under it is
-      // left. Recorded as skipped, never as done.
-      await marked(db, userId, "interview", "skipped");
-      return;
     }
     if (found === 0) {
-      // Not on the list by the address they signed in with, nor by their
-      // account: an interview under another address is left. IDs only.
+      // Not on the list by the address they signed in with: an interview
+      // under another address is left. IDs only.
       log.warn("member.erasure_interview_unmatched", { userId });
     }
     await completed(db, userId, "interview");

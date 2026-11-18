@@ -161,7 +161,6 @@ import {
   spokenKeys,
   linkCodes,
   documents,
-  mailOutbox,
   kickoff,
   links,
   onboarding,
@@ -333,10 +332,24 @@ const kickoffChangesKey = "kickoff_changes";
  */
 const confirmedVersionKey = "confirmed_version";
 
+/**
+ * The teams of the list the admin last confirmed (GRA-2055), by id and
+ * name: what that version's placing makes and names in Settings › Members
+ * (staff-list-teams.ts `placePrimaries`), kept with its places.
+ */
+const confirmedTeamsKey = "confirmed_teams";
+
+const confirmedTeamsSchema = z.array(
+  z.object({ id: z.string(), name: z.string() })
+);
+
 const confirmedPlacesSchema = z.object({
   version: z.int().positive(),
+  teams: confirmedTeamsSchema,
   places: z.array(
     z.object({
+      /** The entry on the list. */
+      person: z.string(),
       /** Lower case; empty when the entry has none to place by. */
       email: z.string(),
       entra: z.object({ tenant: z.string(), oid: z.string() }).nullable(),
@@ -1782,7 +1795,7 @@ export class Onboarding extends DurableObject<Env> {
       this.#erase(person);
       erased.push(person);
       // Off the list, they take part in nothing: no mark of theirs stays,
-      // their withdrawal's neither, nor their erasure's (`eraseIdentifiers`).
+      // their withdrawal's neither, nor their erasure's mark (`markErased`).
       this.#db
         .delete(participations)
         .where(eq(participations.person, person))
@@ -2020,39 +2033,25 @@ export class Onboarding extends DurableObject<Env> {
     });
   }
 
-  /**
-   * Whoever core erased whose entry is still on the list: their link
-   * closed (`#closeAndDeleteHeldBy`), or their address taken from the
-   * entry (`eraseAddress`), whether or not a link went out.
-   */
+  /** Whoever core erased whose entry is still on the list (`#closeAndDeleteHeldBy`). */
   #erasedPeople(): Set<string> {
-    return new Set([
-      ...this.#db
+    return new Set(
+      this.#db
         .select({ person: links.person })
         .from(links)
         .where(isNotNull(links.erasedAt))
         .all()
-        .map(({ person }) => person),
-      ...this.#db
-        .select({ person: erasedPeople.person })
-        .from(erasedPeople)
-        .all()
-        .map(({ person }) => person),
-    ]);
+        .map(({ person }) => person)
+    );
   }
 
-  /** Whether core erased `person` (`#erasedPeople`), and their link is closed for good. */
+  /** Whether core erased `person`, and their link is closed for good. */
   #erased(person: string): boolean {
     return (
       this.#db
         .select({ person: links.person })
         .from(links)
         .where(and(eq(links.person, person), isNotNull(links.erasedAt)))
-        .all().length > 0 ||
-      this.#db
-        .select({ person: erasedPeople.person })
-        .from(erasedPeople)
-        .where(eq(erasedPeople.person, person))
         .all().length > 0
     );
   }
@@ -4946,6 +4945,16 @@ export class Onboarding extends DurableObject<Env> {
   renameTeam(id: string, name: string): void {
     this.ctx.storage.transactionSync(() => {
       this.#db.update(teams).set({ name }).where(eq(teams.id, id)).run();
+      // So the confirmed list's placing never names it back (GRA-2055).
+      const confirmed = this.ctx.storage.kv.get(confirmedTeamsKey);
+      if (confirmed !== undefined) {
+        this.ctx.storage.kv.put(
+          confirmedTeamsKey,
+          confirmedTeamsSchema
+            .parse(confirmed)
+            .map((team) => (team.id === id ? { ...team, name } : team))
+        );
+      }
       const held = this.companyTeams();
       if (held === null || !held.teams.some((team) => team.id === id)) {
         return;
@@ -4982,11 +4991,13 @@ export class Onboarding extends DurableObject<Env> {
       ? null
       : confirmedPlacesSchema.parse({
           version,
+          teams: this.ctx.storage.kv.get(confirmedTeamsKey) ?? [],
           places: this.#db
             .select()
             .from(confirmedPlaces)
             .all()
-            .map(({ email, entraTenant, entraOid, team }) => ({
+            .map(({ person, email, entraTenant, entraOid, team }) => ({
+              person,
               email,
               entra:
                 entraTenant === null || entraOid === null
@@ -5008,11 +5019,25 @@ export class Onboarding extends DurableObject<Env> {
   /** In a confirmed save's transaction: its places, under the next version. */
   #keepConfirmedPlaces(roster: Roster): void {
     const version = this.confirmedVersion() + 1;
+    this.ctx.storage.kv.put(
+      confirmedTeamsKey,
+      roster.teams.map(({ id, name }) => ({ id, name }))
+    );
     this.#db.delete(confirmedPlaces).run();
-    // The first of two entries sharing an address, or an account, keeps it.
+    // The first of two entries sharing an address, or an account, keeps
+    // it; an entry whose person core erased places nobody (`markErased`).
     const addresses = new Set<string>();
     const accounts = new Set<string>();
-    for (const { id, email, entra, team } of roster.people) {
+    const erased = new Set(
+      this.#db
+        .select({ person: erasedPeople.person })
+        .from(erasedPeople)
+        .all()
+        .map(({ person }) => person)
+    );
+    for (const { id, email, entra, team } of roster.people.filter(
+      (person) => !erased.has(person.id)
+    )) {
       const address = email.toLowerCase();
       const account =
         entra === undefined
@@ -5086,91 +5111,46 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * An erased person's identifiers (GRA-2055): their addresses `emails` and
-   * Microsoft object ids `oids`, gone from the store at once, in one
-   * transaction: from their entries on the list, which stay without them,
-   * the company's record of who works where (their ids stay too: what is
-   * keyed by them was erased with their interview), each marked erased
-   * (`erased_people`), and from where the confirmed list places people, as
-   * a new version (`forgetPlaceOf`). An erasure is final: an entry places
-   * nobody until an admin gives it an address again. Whether the confirmed
-   * list had any of them.
+   * The entries `persons` whose person core erased (GRA-2055), marked so
+   * the staff list places nobody by them again, by address or by account,
+   * and out of where the confirmed list places people, as a new version in
+   * the same transaction: a placing of the list that still had them is
+   * stale, and the next claim (`placePrimaries`) makes its writes nothing.
+   * What the store keeps of the entries stays as it is. The mark goes when
+   * an admin takes the entry off the list; an admin who wants a successor
+   * placed adds a new entry. Whether the confirmed list had any of them.
    */
-  eraseIdentifiers(of: {
-    emails: readonly string[];
-    oids: readonly string[];
-  }): boolean {
+  markErased(persons: readonly string[]): boolean {
     return this.ctx.storage.transactionSync(() => {
-      const entries = this.#db
-        .update(people)
-        .set({ email: "", entraTenant: null, entraOid: null })
-        .where(
-          or(
-            inList(
-              sql`lower(${people.email})`,
-              of.emails.map((email) => email.toLowerCase())
-            ),
-            inList(
-              sql`lower(${people.entraOid})`,
-              of.oids.map((oid) => oid.toLowerCase())
-            )
-          )
-        )
-        .returning({ id: people.id })
-        .all();
       const at = new Date().toISOString();
-      for (const { id } of entries) {
+      for (const person of persons) {
         this.#db
           .insert(erasedPeople)
-          .values({ person: id, erasedAt: at })
+          .values({ person, erasedAt: at })
           .onConflictDoNothing()
           .run();
       }
-      // A link sent to the address keeps its record without it, also one
-      // sent as the erasure ran; mail to it goes, sent or not.
-      const addresses = of.emails.map((email) => email.toLowerCase());
-      this.#db
-        .update(links)
-        .set({ sentTo: null })
-        .where(inList(sql`lower(${links.sentTo})`, addresses))
-        .run();
-      this.#db
-        .delete(mailOutbox)
-        .where(inList(sql`lower(${mailOutbox.to})`, addresses))
-        .run();
-      return this.forgetPlaceOf(of);
+      const unplaced = this.#db
+        .delete(confirmedPlaces)
+        .where(inList(confirmedPlaces.person, persons))
+        .returning({ person: confirmedPlaces.person })
+        .all();
+      if (unplaced.length > 0) {
+        this.ctx.storage.kv.put(
+          confirmedVersionKey,
+          this.confirmedVersion() + 1
+        );
+      }
+      return unplaced.length > 0;
     });
   }
 
   /**
-   * Every address a link or a mail of the onboarding went to, for core to
-   * find an erased person's by its keyed hash (person-erasure.ts), also
-   * one no entry has any more: only core asks, and nothing of it leaves
-   * core.
+   * Who is on the list, by their ID, email and Microsoft directory account
+   * (GRA-2055), for core to find someone it erases (person-erasure.ts):
+   * only core asks, and nothing of it leaves core.
    */
-  sentAddresses(): string[] {
-    return [
-      ...new Set([
-        ...this.#db
-          .select({ address: links.sentTo })
-          .from(links)
-          .all()
-          .flatMap(({ address }) => (address === null ? [] : [address])),
-        ...this.#db
-          .select({ address: mailOutbox.to })
-          .from(mailOutbox)
-          .all()
-          .map(({ address }) => address),
-      ]),
-    ];
-  }
-
-  /**
-   * Who is on the list, by their ID, email and Microsoft object id, for
-   * core to find someone it erases (person-erasure.ts): only core asks, and
-   * nothing of it leaves core.
-   */
-  rosterIdentifiers(): { id: string; email: string; oid: string | null }[] {
+  rosterEmails(): { id: string; email: string; oid: string | null }[] {
     return this.#db
       .select({ id: people.id, email: people.email, oid: people.entraOid })
       .from(people)
@@ -9290,21 +9270,6 @@ export class Onboarding extends DurableObject<Env> {
       : { asked, others: pieces.filter(({ id }) => id !== asked.id) };
   }
 
-  /**
-   * Whether the entry `who` a referral names is someone core erased: the
-   * entry (`#erased`), or the address it has (erased-people.ts).
-   */
-  async #namesErased(who: string | null): Promise<boolean> {
-    if (who === null) {
-      return false;
-    }
-    if (this.#erased(who)) {
-      return true;
-    }
-    const email = this.#roster()?.people.find(({ id }) => id === who)?.email;
-    return email !== undefined && (await isErasedEmail(this.env, email));
-  }
-
   async #referOne(personId: string, at: string): Promise<void> {
     const done = () => {
       this.#db.delete(referrals).where(eq(referrals.person, personId)).run();
@@ -9327,15 +9292,12 @@ export class Onboarding extends DurableObject<Env> {
     const { asked, others } = pieces;
     const teamNames = new Map(roster.teams.map(({ id, name }) => [id, name]));
     // Someone erased stays on the list, the company's entry (D5), but is
-    // never named again: by the entry core erased (`#erasedPeople`), its
-    // address gone; or found by an address that was an erased person's,
-    // as their erasure keeps it (erased-people.ts), until an admin
-    // releases it.
+    // never named again: found by the address that was theirs, as their
+    // erasure keeps it (erased-people.ts), until an admin releases it.
     const erased = await erasedEmailsAmong(
       this.env,
       roster.people.map(({ email }) => email)
     );
-    const erasedEntries = this.#erasedPeople();
     const found = await referralOf(
       this.env,
       {
@@ -9344,10 +9306,7 @@ export class Onboarding extends DurableObject<Env> {
         people: roster.people
           .filter(
             ({ id, away, email }) =>
-              id !== personId &&
-              !away &&
-              !erasedEntries.has(id) &&
-              !erased.has(normalizedEmail(email))
+              id !== personId && !away && !erased.has(normalizedEmail(email))
           )
           .map(({ id, name, title, team }) => ({
             id,
@@ -9368,7 +9327,14 @@ export class Onboarding extends DurableObject<Env> {
     // synchronous from here on, so nothing of this object runs between
     // the two; an erasure core records after it comes after the save, and
     // its interview area takes what the save wrote (`eraseInterviewOf`).
-    if (await this.#namesErased(found.who)) {
+    const namedEmail =
+      found.who === null
+        ? undefined
+        : this.#roster()?.people.find(({ id }) => id === found.who)?.email;
+    if (
+      namedEmail !== undefined &&
+      (await isErasedEmail(this.env, namedEmail))
+    ) {
       done();
       return;
     }

@@ -15,6 +15,8 @@ CREATE TABLE `team_primaries` (
 	`team_id` text NOT NULL,
 	`placed_at` integer NOT NULL,
 	`made` integer NOT NULL,
+	`place_key` text NOT NULL,
+	`pending` integer NOT NULL,
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`team_id`) REFERENCES `teams`(`id`) ON UPDATE no action ON DELETE cascade
 );

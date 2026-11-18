@@ -479,9 +479,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "workspace.preview_releases": { erased: "workspace" },
   "workspace.preview_stores": { erased: "workspace" },
   // The onboarding: their interview, by its own deletion.
-  "onboarding.people": {
-    company: "the company's roster (D5), the erased person's address blanked",
-  },
+  "onboarding.people": { company: "the company's roster (D5)" },
   "onboarding.links": { erased: "interview" },
   "onboarding.link_codes": { erased: "interview" },
   "onboarding.interviews": { erased: "interview" },
@@ -492,7 +490,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "onboarding.counted": { kept: "who was counted in the admin's numbers" },
   "onboarding.confirmed_places": { erased: "interview" },
   "onboarding.erased_people": {
-    kept: "which entries on the list were erased, by the entry's id",
+    kept: "which entries on the list place nobody: an entry's id, no identifier",
   },
   "onboarding.asked_about": { erased: "interview" },
   "onboarding.brain_sent": { erased: "interview" },
@@ -514,8 +512,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "onboarding.teams": { company: "the company's roster: a team's lead (D5)" },
   "onboarding.works": { company: "the company's roster: who does what (D5)" },
   "onboarding.mail_outbox": {
-    company:
-      "mail to the roster (D5); an erased person's address leaves it with their mail",
+    company: "mail to the roster (D5), which keeps the address anyway",
   },
   "onboarding.events": { kept: "the onboarding's log, IDs only" },
   "onboarding.counted_works": { company: "who counted a work (D5)" },

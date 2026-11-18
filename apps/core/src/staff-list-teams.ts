@@ -4,6 +4,7 @@ import { teamNameKey } from "@grasp-os/shared/onboarding";
 import { clockLeaseMs } from "@grasp-os/workerflow/clock";
 import type { SQL } from "drizzle-orm";
 import { and, eq, or, sql } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -96,22 +97,19 @@ export interface HeldTeam {
  * id that is neither (a members' team deleted while a save ran) is never
  * kept: no deleted team's id comes back, with what was shared with it. The
  * id never changes after: a team new on a draft is kept under it in the
- * store, and with `make` (the admin confirmed the list) its members' team
- * is made under that same id, and the members' teams are renamed to the
- * names the list gives. A draft writes nothing here, so a draft put right
- * before the confirm leaves no team in Settings › Members. None is ever
- * deleted here, as one may hold what was shared with it. Answers the
- * roster as the store keeps it, and the ids core made for it (`minted`).
+ * store, and once the admin confirms the list its members' team is made
+ * under that same id, and named as the list names it, by that version's
+ * placing (`teamsOf`), never here: nothing is written here, so a draft put
+ * right before the confirm leaves no team in Settings › Members. Answers
+ * the roster as the store keeps it, and the ids core made for it
+ * (`minted`).
  */
 export const intoMembersTeams = async (
   env: Env,
   roster: Roster,
-  actor: AuditActor,
   {
-    make,
     held: heldNow,
   }: {
-    make: boolean;
     /** The store's teams, read only after the members' teams are. */
     held: () => Promise<readonly HeldTeam[]>;
   }
@@ -169,47 +167,6 @@ export const intoMembersTeams = async (
     ...team,
     id: idOf.get(team.id) ?? team.id,
   }));
-  const made = listed.filter(({ id }) => !known.has(id));
-  const renamed = listed.filter(({ id, name }) => {
-    const was = known.get(id);
-    return was !== undefined && was !== name;
-  });
-  if (make && (made.length > 0 || renamed.length > 0)) {
-    const now = new Date();
-    const entry = (action: string, id: string): AuditEntry => ({
-      actor,
-      action,
-      target: { type: "team", id },
-      detail: { via },
-    });
-    const [first, ...rest] = [
-      ...made.flatMap(({ id, name }) => [
-        // As Better Auth's own create-team makes a team, under the id kept,
-        // and only under one never retired: the proof is in this statement,
-        // so no read, however old, makes a deleted team's id again.
-        db
-          .insert(teams)
-          .select(
-            sql`SELECT ${id}, ${name}, 0, ${organizationId}, ${now.getTime()}, ${now.getTime()}
-              WHERE NOT EXISTS (SELECT 1 FROM ${retiredTeamIds} WHERE ${retiredTeamIds.id} = ${id})`
-          )
-          .onConflictDoNothing(),
-        outboxedIfChanged(db, entry("team.created", id)),
-      ]),
-      ...renamed.flatMap(({ id, name }) => [
-        db
-          .update(teams)
-          .set({ name, updatedAt: now })
-          .where(
-            and(eq(teams.id, id), eq(teams.organizationId, organizationId))
-          ),
-        outboxedIfChanged(db, entry("team.updated", id)),
-      ]),
-    ];
-    if (first !== undefined) {
-      await auditedBatch(env, db, [first, ...rest]);
-    }
-  }
   const wasMinted = new Set(mintedHeld.map(({ id }) => id));
   return {
     roster: {
@@ -248,10 +205,16 @@ const membershipKeyOf = async (
     .replace(/=+$/u, "");
 };
 
-/** The team the list last gave someone, and whether the list made that membership itself. */
+/**
+ * The team the list last gave someone (their saved assignment): whether
+ * the list made that membership itself, whether it is still to add
+ * (`pending`), and what the list names them by.
+ */
 export interface Placed {
   teamId: string;
   made: boolean;
+  pending: boolean;
+  placeKey: PlaceKey;
 }
 
 /** One change the list makes to someone's teams, as `placementOf` decides it. */
@@ -260,34 +223,50 @@ interface Placement {
   before: Placed | undefined;
   /** The team the list gives them now; none when it gives them none. */
   after: string | undefined;
+  /** What the list names them by for `after`. */
+  placeKey: PlaceKey | undefined;
+  /** Whether their sign-in proves `placeKey` now: only then is a membership added. */
+  proved: boolean;
   /** The key of the membership in `after` (`membershipKeyOf`). */
   key: string | undefined;
 }
 
 /**
  * The staff list's rule for one person (GRA-2055), decided here alone:
- * nothing automatic overrides what an admin did by hand. The list touches
- * someone's memberships only when the team it gives them changes, from
- * `before` to `after`: then it takes away the old one only if it made it
- * itself (`made`), never one an admin added by hand, and adds the new one,
- * recording whether it made it (an admin may have added it already). It
- * never adds a membership in the team their primary row already names: an
- * admin who took that one away by hand keeps it away. Placings never
- * interleave (`placePrimaries`): each reads under its claim, so what it
- * read stands; what an admin does by hand meanwhile is checked in the
- * statements themselves. Every statement holds only while `holds` (the
- * placing's lease stands). The statements of one person go in one batch, a move's leave
- * and join together; a leave's open-page notice is kept in the batch with
- * it (`revocationsOf`). None when the read saw no change.
+ * nothing automatic overrides what an admin did by hand, and lack of proof
+ * never takes anything away. The list touches someone's memberships only
+ * when the team it gives them changes, from `before` to `after`: then it
+ * takes away the old one only if it made it itself (`made`), never one an
+ * admin added by hand, and adds the new one only while their sign-in
+ * proves who they are (`proved`), recording whether it made it (an admin
+ * may have added it already); unproved, the new team waits as `pending`,
+ * added once they are proved. It never adds a membership in the team
+ * their primary row already names, unless it is pending: an admin who
+ * took that one away by hand keeps it away. Placings never interleave
+ * (`placePrimaries`): each reads under its claim, so what it read stands;
+ * what an admin does by hand meanwhile is checked in the statements
+ * themselves. Every statement holds only while `holds` (the placing's
+ * lease stands). The statements of one person go in one batch, a move's
+ * leave and join together; a leave's open-page notice is kept in the
+ * batch with it (`revocationsOf`).
  */
 export const placementOf = (
   db: DrizzleD1Database,
   actor: AuditActor,
-  { userId, before, after, key }: Placement,
+  { userId, before, after, placeKey, proved, key }: Placement,
   now: Date,
   holds: SQL
 ) => {
-  if (before?.teamId === after) {
+  const moved = before?.teamId !== after;
+  const joins =
+    after !== undefined &&
+    placeKey !== undefined &&
+    key !== undefined &&
+    proved &&
+    (moved || before?.pending === true);
+  const waits =
+    after !== undefined && placeKey !== undefined && !proved && moved;
+  if (!(moved || joins)) {
     return { statements: [], leaves: false };
   }
   const entry = (
@@ -300,7 +279,7 @@ export const placementOf = (
     detail: { userId, via },
   });
   const leave =
-    before === undefined
+    before === undefined || !moved
       ? []
       : (() => {
           const listMade = sql`EXISTS (SELECT 1 FROM ${teamPrimaries} WHERE ${teamPrimaries.userId} = ${userId} AND ${teamPrimaries.teamId} = ${before.teamId} AND ${teamPrimaries.made} = 1)`;
@@ -335,46 +314,70 @@ export const placementOf = (
               : []),
           ];
         })();
-  if (after === undefined || key === undefined) {
-    return { statements: leave, leaves: leave.length > 0 };
-  }
+  // The list's team for them, to add once their sign-in proves who they
+  // are; no membership meanwhile.
+  const wait = waits
+    ? [
+        db
+          .insert(teamPrimaries)
+          .select(
+            sql`SELECT ${userId}, ${after}, ${now.getTime()}, 0, ${placeKey}, 1
+            WHERE ${holds}`
+          )
+          .onConflictDoUpdate({
+            target: teamPrimaries.userId,
+            set: {
+              teamId: sql`excluded.team_id`,
+              placedAt: sql`excluded.placed_at`,
+              made: sql`excluded.made`,
+              placeKey: sql`excluded.place_key`,
+              pending: sql`excluded.pending`,
+            },
+          }),
+      ]
+    : [];
   const memberId = crypto.randomUUID();
-  const isIn = sql`EXISTS (SELECT 1 FROM ${teamMembers} WHERE ${teamMembers.userId} = ${userId} AND ${teamMembers.teamId} = ${after})`;
-  return {
-    leaves: leave.length > 0,
-    statements: [
-      ...leave,
-      // In one statement with the checks: someone removed, or a team
-      // deleted, since the read gets nothing; nor does a membership an
-      // admin added meanwhile, by its pair or Better Auth's key.
-      db
-        .insert(teamMembers)
-        .select(
-          sql`SELECT ${memberId}, ${after}, ${userId}, ${key}, ${now.getTime()}
+  const isIn = sql`EXISTS (SELECT 1 FROM ${teamMembers} WHERE ${teamMembers.userId} = ${userId} AND ${teamMembers.teamId} = ${after ?? ""})`;
+  const join = joins
+    ? [
+        // In one statement with the checks: someone removed, or a team
+        // deleted, since the read gets nothing; nor does a membership an
+        // admin added meanwhile, by its pair or Better Auth's key.
+        db
+          .insert(teamMembers)
+          .select(
+            sql`SELECT ${memberId}, ${after}, ${userId}, ${key}, ${now.getTime()}
             WHERE ${holds}
               AND ${activeMember(userId)}
               AND EXISTS (SELECT 1 FROM ${teams} WHERE ${teams.id} = ${after} AND ${teams.organizationId} = ${organizationId})
               AND NOT ${isIn}`
-        )
-        .onConflictDoNothing(),
-      outboxedIfChanged(db, entry("team.member.added", after)),
-      // Made by the list only if its own insert made the row.
-      db
-        .insert(teamPrimaries)
-        .select(
-          sql`SELECT ${userId}, ${after}, ${now.getTime()},
-              EXISTS (SELECT 1 FROM ${teamMembers} WHERE ${teamMembers.id} = ${memberId})
+          )
+          .onConflictDoNothing(),
+        outboxedIfChanged(db, entry("team.member.added", after)),
+        // Made by the list only if its own insert made the row.
+        db
+          .insert(teamPrimaries)
+          .select(
+            sql`SELECT ${userId}, ${after}, ${now.getTime()},
+              EXISTS (SELECT 1 FROM ${teamMembers} WHERE ${teamMembers.id} = ${memberId}),
+              ${placeKey}, 0
             WHERE ${holds} AND ${isIn}`
-        )
-        .onConflictDoUpdate({
-          target: teamPrimaries.userId,
-          set: {
-            teamId: sql`excluded.team_id`,
-            placedAt: sql`excluded.placed_at`,
-            made: sql`excluded.made`,
-          },
-        }),
-    ],
+          )
+          .onConflictDoUpdate({
+            target: teamPrimaries.userId,
+            set: {
+              teamId: sql`excluded.team_id`,
+              placedAt: sql`excluded.placed_at`,
+              made: sql`excluded.made`,
+              placeKey: sql`excluded.place_key`,
+              pending: sql`excluded.pending`,
+            },
+          }),
+      ]
+    : [];
+  return {
+    statements: [...leave, ...wait, ...join],
+    leaves: leave.length > 0,
   };
 };
 
@@ -385,6 +388,13 @@ export const placementOf = (
  * and object id, which a Microsoft sign-in proves.
  */
 export type PlaceKey = `google:${string}` | `microsoft:${string}`;
+
+/** A place key as `team_primaries.place_key` keeps it. */
+const placeKeySchema = z.custom<PlaceKey>(
+  (value) =>
+    typeof value === "string" &&
+    (value.startsWith("google:") || value.startsWith("microsoft:"))
+);
 
 /** The key of the address `email`, in compared form (`comparable`). */
 export const addressKey = (email: string): PlaceKey =>
@@ -411,9 +421,11 @@ export const keysOfPlace = ({
  * with the key: the one rule of who the staff list places (GRA-2055), for
  * a confirm's placing and for a first sign-in after it. The proof is the
  * one an item's reader list takes (source-readers.ts
- * `provedSignInAccounts`): Google by the address its ID token marked
- * verified, in the company's hosted domain and sign-in domains, confirmed
- * within a day; Microsoft by the object id of a sign-in through the
+ * `provedSignInAccounts`), lasting: Google by the address its ID token
+ * marked verified, in the company's hosted domain and sign-in domains,
+ * whenever that sign-in was (the reader lists' one-day rule is for reading,
+ * checked on every read; a lasting membership never hangs on a proof's
+ * age); Microsoft by the object id of a sign-in through the
  * company's own tenant, against the account the directory read put on the
  * entry, no address compared at all. Never `users.email`, nor Entra's
  * `email` claim, which proves nothing: a Microsoft member whose entry
@@ -475,6 +487,68 @@ export const provedMembersOf = async (
 };
 
 /**
+ * What a placing writes of the confirmed list's teams (`teams`) to the
+ * members' teams (GRA-2055), in its first batch, while its lease stands
+ * (`holds`), so an older confirm never makes or names a team after a
+ * newer one: each team the members' teams don't have yet is made under
+ * its id, as Better Auth's own create-team makes a team, and only under
+ * an id never retired, checked in the statement itself, so no deleted
+ * team's id comes back with what was shared with it; each one named
+ * otherwise takes the list's name. None is ever deleted here, as one may
+ * hold what was shared with it.
+ */
+const teamsOf = async (
+  db: DrizzleD1Database,
+  actor: AuditActor,
+  confirmed: ConfirmedPlaces["teams"],
+  holds: SQL
+): Promise<BatchItem<"sqlite">[]> => {
+  const existing = await db
+    .select({ id: teams.id, name: teams.name })
+    .from(teams)
+    .where(eq(teams.organizationId, organizationId));
+  const known = new Map(existing.map(({ id, name }) => [id, name]));
+  const now = Date.now();
+  const entry = (action: string, id: string): AuditEntry => ({
+    actor,
+    action,
+    target: { type: "team", id },
+    detail: { via },
+  });
+  return confirmed.flatMap(({ id, name }): BatchItem<"sqlite">[] => {
+    const was = known.get(id);
+    if (was === undefined) {
+      return [
+        db
+          .insert(teams)
+          .select(
+            sql`SELECT ${id}, ${name}, 0, ${organizationId}, ${now}, ${now}
+              WHERE ${holds}
+                AND NOT EXISTS (SELECT 1 FROM ${retiredTeamIds} WHERE ${retiredTeamIds.id} = ${id})`
+          )
+          .onConflictDoNothing(),
+        outboxedIfChanged(db, entry("team.created", id)),
+      ];
+    }
+    return was === name
+      ? []
+      : [
+          db
+            .update(teams)
+            .set({ name, updatedAt: new Date(now) })
+            .where(
+              and(
+                eq(teams.id, id),
+                eq(teams.organizationId, organizationId),
+                holds
+              )
+            ),
+          outboxedIfChanged(db, entry("team.updated", id)),
+        ];
+  });
+};
+
+/**
  * `placePrimaries` for one claimed version, under its lease `leaseId`:
  * each current member whose sign-in proved an address or account its list
  * names (`provedMembersOf`) goes in that team, as their primary one; whoever it moved, took off, or no longer
@@ -485,7 +559,7 @@ export const provedMembersOf = async (
 const placeVersion = async (
   env: Env,
   actor: AuditActor,
-  { version, places }: ConfirmedPlaces,
+  { version, places, teams: listTeams }: ConfirmedPlaces,
   leaseId: string
 ): Promise<void> => {
   const db = drizzle(env.DB);
@@ -506,39 +580,64 @@ const placeVersion = async (
         userId: teamPrimaries.userId,
         teamId: teamPrimaries.teamId,
         made: teamPrimaries.made,
+        pending: teamPrimaries.pending,
+        placeKey: teamPrimaries.placeKey,
       })
-      .from(teamPrimaries)
-      .orderBy(teamPrimaries.userId),
+      .from(teamPrimaries),
   ]);
-  const wanted = new Map<string, string>();
+  // What each member's sign-in proves now, of what the list names.
+  const provedBy = new Map<string, PlaceKey[]>();
   for (const { userId, key } of found) {
-    const team = teamOf.get(key);
-    if (team !== undefined && !wanted.has(userId)) {
-      wanted.set(userId, team);
-    }
+    provedBy.set(userId, [...(provedBy.get(userId) ?? []), key]);
   }
   const was = new Map(
-    placed.map(({ userId, teamId, made }) => [userId, { teamId, made }])
+    placed.map(({ userId, placeKey, ...row }) => [
+      userId,
+      { ...row, placeKey: placeKeySchema.parse(placeKey) },
+    ])
   );
+  /**
+   * What the list gives `userId` now: by what it named them by before,
+   * whether or not they prove it now, so lack of proof takes nothing
+   * away; else by what they prove that it names.
+   */
+  const assigned = (userId: string) => {
+    const before = was.get(userId);
+    const proves = provedBy.get(userId) ?? [];
+    if (before !== undefined && teamOf.has(before.placeKey)) {
+      return {
+        after: teamOf.get(before.placeKey),
+        placeKey: before.placeKey,
+        proved: proves.includes(before.placeKey),
+      };
+    }
+    const [placeKey] = proves;
+    return placeKey === undefined
+      ? { after: undefined, placeKey: undefined, proved: false }
+      : { after: teamOf.get(placeKey), placeKey, proved: true };
+  };
   const changes = await Promise.all(
-    [...new Set([...was.keys(), ...wanted.keys()])]
+    [...new Set([...was.keys(), ...provedBy.keys()])]
       // One order every time, so batches are the same on a retry.
       .toSorted()
-      .filter((userId) => was.get(userId)?.teamId !== wanted.get(userId))
-      .map(async (userId): Promise<Placement> => {
-        const after = wanted.get(userId);
-        return {
-          userId,
-          before: was.get(userId),
-          after,
-          key:
-            after === undefined
-              ? undefined
-              : await membershipKeyOf(after, userId),
-        };
+      .flatMap((userId) => {
+        const before = was.get(userId);
+        const { after, placeKey, proved } = assigned(userId);
+        const changed =
+          before?.teamId !== after || (before?.pending === true && proved);
+        return changed ? [{ userId, before, after, placeKey, proved }] : [];
       })
+      .map(async (change): Promise<Placement> => ({
+        ...change,
+        key:
+          change.after === undefined
+            ? undefined
+            : await membershipKeyOf(change.after, change.userId),
+      }))
   );
   const now = new Date();
+  // The teams first, in the first batch: made before anyone joins them.
+  const teamWrites = await teamsOf(db, actor, listTeams, holds);
   const batches = changes.length > 0 ? chunks(changes, peoplePerBatch) : [[]];
   // Each person's change whole in one batch, so a move never ends half
   // done; the batches one after another, each within D1's limits, the
@@ -548,9 +647,10 @@ const placeVersion = async (
     const groups = part.map((change) =>
       placementOf(db, actor, change, now, holds)
     );
+    const first = index === 0 ? teamWrites : [];
     // Where each leaving person's statements start: its notice first.
     const leaves: number[] = [];
-    let at = 1;
+    let at = 1 + first.length;
     for (const { statements, leaves: leaving } of groups) {
       if (leaving) {
         leaves.push(at);
@@ -570,6 +670,7 @@ const placeVersion = async (
         .update(staffListPlaced)
         .set({ leaseUntil: new Date(Date.now() + leaseMs) })
         .where(ours),
+      ...first,
       ...groups.flatMap(({ statements }) => statements),
       // Better Auth's count of each team's members, as its own writes keep
       // it: in the batch that changed them, so a placing that stops after

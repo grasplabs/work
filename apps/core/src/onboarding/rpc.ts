@@ -217,13 +217,13 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
       // The list names the members' teams (GRA-2055): each of its teams
       // keeps one id from the first save that names it (a members' team's,
       // one the store holds, or a new one core makes); on a confirm its
-      // members' team is made under it, before people join it.
+      // placing makes and names its members' team under it, in order with
+      // every other confirm's, before people join it.
       const store = onboardingStore(this.#env);
       const { roster: named, minted } = await intoMembersTeams(
         this.#env,
         parsed,
-        by,
-        { make: confirmed, held: async () => await store.heldTeams() }
+        { held: async () => await store.heldTeams() }
       );
       const view = await store.saveRoster(named, by, { confirmed, minted });
       // Done only once this list, or a newer one, is placed; else it is

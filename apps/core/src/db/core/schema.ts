@@ -544,10 +544,12 @@ export const teamMembers = sqliteTable(
 /**
  * Each member's primary team (GRA-2055): the one the onboarding's staff
  * list last gave them, beside Better Auth's `team_members`, whose rows
- * carry no fields of ours. One per member, by the key. The row stays when
- * an admin takes the membership away by hand, the marker that they did:
- * the list adds it again only when it gives them another team
- * (staff-list-teams.ts `placementOf`).
+ * carry no fields of ours. One per member, by the key: their saved
+ * assignment, which stands while the list names them by `placeKey`,
+ * whether or not their sign-in proves it now. The row stays when an admin
+ * takes the membership away by hand, the marker that they did: the list
+ * adds it again only when it gives them another team (staff-list-teams.ts
+ * `placementOf`).
  */
 export const teamPrimaries = sqliteTable(
   "team_primaries",
@@ -565,6 +567,17 @@ export const teamPrimaries = sqliteTable(
      * one an admin added by hand, before the list or since.
      */
     made: integer({ mode: "boolean" }).notNull(),
+    /**
+     * What the list names them by (staff-list-teams.ts `PlaceKey`): their
+     * entry's address, or its Microsoft directory account.
+     */
+    placeKey: text("place_key").notNull(),
+    /**
+     * Whether the list gave them this team without adding the membership
+     * yet, as nothing proved who they are when it moved them: added once
+     * their sign-in proves it.
+     */
+    pending: integer({ mode: "boolean" }).notNull(),
   },
   (table) => [index("team_primaries_team_id_idx").on(table.teamId)]
 );

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ba204eee-0c44-4b57-b6fa-90390aa02335",
+  "id": "52266158-d950-4d73-bba2-a021995d3609",
   "prevId": "da669a77-dff6-4bd0-9289-95526405397a",
   "tables": {
     "access_revocations": {
@@ -13092,6 +13092,20 @@
         },
         "made": {
           "name": "made",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "place_key": {
+          "name": "place_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "pending": {
+          "name": "pending",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,

@@ -321,20 +321,20 @@ const inDomains = (address: string, domains: readonly string[]): boolean => {
 };
 
 /**
- * The accounts a person's sign-ins (`signIns`) proved are theirs, now:
- * each in the tenant the deployment's sign-in is pinned to (auth/config.ts),
- * only while the config names it. Microsoft's by object ID; Google's by the
- * address its ID token marked verified, only in one of the company's
- * sign-in domains and only while confirmed within a day (`recent`): one
- * signed in once and then used only through a chat app stops counting by
- * it. Entra's address is never proved. The one proof of who someone is by
- * their sign-in, for reading here and for the staff list's places
+ * The accounts a person's sign-ins (`signIns`) proved are theirs: who each
+ * provably is, in the tenant the deployment's sign-in is pinned to
+ * (auth/config.ts), only while the config names it. Microsoft's by object
+ * ID; Google's by the address its ID token marked verified, only in one of
+ * the company's sign-in domains, with when that sign-in confirmed it
+ * (`provedAt`). Entra's address is never proved. The one proof of who
+ * someone is by their sign-in: for reading here only while recent
+ * (`readingAccountsOf`), and lasting for the staff list's places
  * (staff-list-teams.ts `provedMembersOf`).
  */
 export const provedSignInAccounts = (
   env: Pick<Env, "SIGN_IN">,
   signIns: readonly SignIn[]
-): Account[] => {
+): (Account & { provedAt: number | null })[] => {
   const config = signInConfig(env);
   if (config === undefined) {
     return [];
@@ -356,6 +356,7 @@ export const provedSignInAccounts = (
             provider: "microsoft",
             tenant: config.entra.tenantId,
             account: oid,
+            provedAt: null,
           },
         ];
       }
@@ -363,13 +364,13 @@ export const provedSignInAccounts = (
         config.google &&
         verifiedEmail !== null &&
         inDomains(verifiedEmail, config.domains) &&
-        proved(config.google.hostedDomain) &&
-        recent(verifiedEmailAt?.getTime() ?? null)
+        proved(config.google.hostedDomain)
         ? [
             {
               provider: "google",
               tenant: config.google.hostedDomain,
               account: verifiedEmail,
+              provedAt: verifiedEmailAt?.getTime() ?? null,
             },
           ]
         : [];
@@ -398,7 +399,12 @@ const readingAccountsOf = (
       ? [{ provider: "google", tenant, account: address }]
       : [];
   return [
-    ...provedSignInAccounts(env, signIns),
+    // A sign-in's address, as every proof of an address, only while
+    // confirmed within a day (`recent`): one signed in once and then used
+    // only through a chat app stops counting by it.
+    ...provedSignInAccounts(env, signIns).flatMap(({ provedAt, ...account }) =>
+      account.provider === "google" && !recent(provedAt) ? [] : [account]
+    ),
     // A connection's only while connected, and its address only while
     // the provider confirmed it within a day (`readerProofMaxAgeMs`): an
     // idle connection, or one needing reconnecting, stops counting by it.
