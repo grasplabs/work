@@ -1,30 +1,6 @@
-import { Badge } from "@grasp-os/ui/components/badge";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
-import { useLingui } from "@lingui/react/macro";
-import {
-  BellIcon,
-  CalendarOffIcon,
-  CircleCheckIcon,
-  CircleHelpIcon,
-  GitCompareArrowsIcon,
-  GlobeIcon,
-  KeyRoundIcon,
-  LockKeyholeIcon,
-  MailWarningIcon,
-  PencilLineIcon,
-  PlayIcon,
-  RocketIcon,
-  ScaleIcon,
-  ShieldAlertIcon,
-  SparklesIcon,
-  SplitIcon,
-  WorkflowIcon,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 
-import { AppLogo } from "../connections/app-logo.tsx";
-import { ItemMark as DashboardMark } from "../dashboard/dashboard-card.tsx";
 import {
   Agent,
   Alert,
@@ -35,6 +11,7 @@ import {
   Edit,
   Lock,
   Mail,
+  People,
   Play,
   Question,
   Swap,
@@ -43,11 +20,10 @@ import {
   Workflow,
 } from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
-import type { InboxItem, InboxKind } from "./items.ts";
+import type { InboxKind } from "./items.ts";
 
-// The marks of the inbox's items, as the prototype draws them
-// (`components/inbox-kind.tsx`): what each kind is called, its icon, a
-// square for what an item is about, and its kind as a small label.
+// The marks of the inbox's items: what each kind is called, and its icon
+// from Grasp UI's set.
 
 /** What each kind of item that waits on a person is called, in the inbox. */
 export const kindLabel: Record<InboxKind, MessageDescriptor> = {
@@ -66,7 +42,13 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
     message: "Two answers",
     context: "inbox item kind: two sources disagree",
   }),
-  openQuestion: msg({ message: "Open question", context: "inbox item kind" }),
+  openQuestion: msg({ message: "Asked of you", context: "inbox item kind" }),
+  brainQuestion: msg({ message: "Brain question", context: "inbox item kind" }),
+  interviews: msg({ message: "Interviews", context: "inbox item kind" }),
+  everyonesOutcome: msg({
+    message: "Unknown outcome",
+    context: "inbox item kind",
+  }),
   unknownAiTool: msg({ message: "AI tool", context: "inbox item kind" }),
   signInAgain: msg({ message: "Connection", context: "inbox item kind" }),
   externalDomain: msg({ message: "Domain", context: "inbox item kind" }),
@@ -101,34 +83,10 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
   decision: msg({ message: "Decision", context: "inbox item kind" }),
 };
 
-export const kindIcon: Record<InboxKind, LucideIcon> = {
-  checkDrawing: WorkflowIcon,
-  checkProposal: GitCompareArrowsIcon,
-  goLive: RocketIcon,
-  approveChange: PencilLineIcon,
-  confirmResult: CircleCheckIcon,
-  conflict: SplitIcon,
-  openQuestion: CircleHelpIcon,
-  unknownAiTool: SparklesIcon,
-  signInAgain: KeyRoundIcon,
-  externalDomain: GlobeIcon,
-  heldWrite: PencilLineIcon,
-  heldStart: PlayIcon,
-  unknownOutcome: CircleHelpIcon,
-  permissionRequest: LockKeyholeIcon,
-  stoppedSchedule: CalendarOffIcon,
-  packageNotice: ShieldAlertIcon,
-  stoppedEvents: MailWarningIcon,
-  appMessage: BellIcon,
-  bindingApproval: LockKeyholeIcon,
-  decision: ScaleIcon,
-};
-
 /**
- * Each kind's icon from Grasp UI's set, for rows drawn with its Item. Where
- * the set has none of Lucide's (a rocket, a key, a scale, a split, two
- * sources compared, sparkles, a calendar crossed out, a shield, a mail
- * warning), the nearest that says the same.
+ * Each kind's icon from Grasp UI's set, for rows drawn with its Item and
+ * the sidebar's Inbox view. Where the set has no exact one (a rocket, a
+ * key, a scale, sparkles, a shield), the nearest that says the same.
  */
 export const kindMark: Record<InboxKind, IconData> = {
   checkDrawing: Workflow,
@@ -138,6 +96,9 @@ export const kindMark: Record<InboxKind, IconData> = {
   confirmResult: Done,
   conflict: Swap,
   openQuestion: Question,
+  brainQuestion: Question,
+  interviews: People,
+  everyonesOutcome: Question,
   unknownAiTool: Agent,
   signInAgain: Lock,
   externalDomain: Web,
@@ -151,24 +112,4 @@ export const kindMark: Record<InboxKind, IconData> = {
   appMessage: Bell,
   bindingApproval: Lock,
   decision: Checklist,
-};
-
-/** What an item is about, as a square: the app's tile, or the icon of its kind (the dashboard's mark). */
-export const ItemMark = ({ item }: { item: InboxItem }) =>
-  item.logo === undefined ? (
-    <DashboardMark icon={kindIcon[item.kind]} />
-  ) : (
-    <AppLogo name={item.logo.name} size="sm" />
-  );
-
-/** The kind of an item, as a small label with its icon. */
-export const KindPill = ({ kind }: { kind: InboxKind }) => {
-  const { i18n } = useLingui();
-  const Icon = kindIcon[kind];
-  return (
-    <Badge className="flex-none" variant="outline">
-      <Icon data-icon="inline-start" />
-      {i18n._(kindLabel[kind])}
-    </Badge>
-  );
 };

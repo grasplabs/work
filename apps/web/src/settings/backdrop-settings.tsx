@@ -95,12 +95,8 @@ export const BackdropSettings = ({ userId }: { userId: string }) => {
       title={t`Chat background`}
     >
       <SettingsStack>
-        <BackdropPreview
-          aria-label={t`Preview of your chat background`}
-          placeholder={t`Ask anything, or describe a process`}
-          title={t`What should we look at today?`}
-          variant={look}
-        />
+        {/* Its words are the parts' catalogue's (frame/part-words.tsx). */}
+        <BackdropPreview variant={look} />
         <LookTiles
           look={look}
           onLook={(chosen) => {

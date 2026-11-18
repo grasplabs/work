@@ -23,7 +23,7 @@ import { Button } from "../button";
 import { Collapsible } from "../collapsible";
 import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
-import { Alert, Icon, Retry } from "../icons";
+import { Alert, Icon, Retry, Stop } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { useArriving } from "../motion/use-arriving";
@@ -41,8 +41,13 @@ import type { ChatMessageWords } from "./words";
 /** What a caller may style: where the message sits. Never its look. */
 export type ChatMessageLayoutStyle = LayoutStyle;
 
-/** Where an agent's message is: being written, done, or failed. */
-export type ChatMessageStatus = "thinking" | "streaming" | "done" | "failed";
+/** Where an agent's message is: being written, done, stopped part way, or failed. */
+export type ChatMessageStatus =
+  | "thinking"
+  | "streaming"
+  | "done"
+  | "stopped"
+  | "failed";
 
 /** Every prop a ChatMessage takes. */
 export interface ChatMessageProps {
@@ -50,16 +55,21 @@ export interface ChatMessageProps {
   from: "person" | "agent";
   /** The words, or what the message holds. While streaming, what has arrived so far. */
   children?: ReactNode;
-  /** The agent's name over its message ("Assistant"). A person's messages need none. */
+  /** The agent's name ("Assistant"): the message's name for a screen reader. A person's messages need none. */
   name?: string;
   /**
    * Keeps the name off the page while a screen reader still hears who speaks: the message stays
-   * named by `name`, and no name is drawn over it. For a chat with one agent, where its name on
-   * every answer is noise.
-   * @default false
+   * named by `name`, and no name is drawn over it. A chat is drawn so (Ruben, 17 November): its
+   * name on every answer is noise. Set it to `false` only where several agents or people speak in
+   * one conversation, and the name over each message says who.
+   * @default true
    */
   nameHidden?: boolean;
-  /** When it was sent, as people say it ("2 min ago"), small beside the name or under the bubble. */
+  /**
+   * When it was sent, as people say it ("2 min ago"): small and muted at the message's foot, under
+   * its actions, at the message's own edge (the start for the agent, the end for a person). With
+   * none, nothing is drawn and no room is kept.
+   */
   time?: string;
   /** When it was sent, for machines: an ISO date and time ("2026-11-13T14:02"). */
   dateTime?: string;
@@ -70,8 +80,9 @@ export interface ChatMessageProps {
   personLabel?: string;
   /**
    * For an agent's message: `thinking` while it works and has not begun to write, `streaming`
-   * while it is written, `done` once it is, `failed` if it could not be written. A person's
-   * message is always done.
+   * while it is written, `done` once it is, `stopped` when it was stopped part way (the words kept
+   * as written, `stoppedLabel` under them, the actions still offered), `failed` if it could not be
+   * written. A person's message is always done.
    * @default "done"
    */
   status?: ChatMessageStatus;
@@ -111,6 +122,11 @@ export interface ChatMessageProps {
    * @default "Answer ready"
    */
   doneLabel?: string;
+  /**
+   * The words under a message that was stopped part way, said to a screen reader when it stops.
+   * @default "Stopped"
+   */
+  stoppedLabel?: string;
   /**
    * A working mark under the words while the agent writes. Off by default: while text arrives
    * there is nothing but the text, and before the first word the thinking line stands in.
@@ -205,7 +221,10 @@ const styles = stylex.create({
     lineHeight: grasp.textSmLine,
     fontWeight: grasp.weightMedium,
   },
+  // The time at the message's foot, under its actions, at the message's own edge: small, muted,
+  // and as wide as its words, so it never stretches across the column.
   time: {
+    justifySelf: "start",
     color: grasp.muted,
     fontSize: grasp.textXs,
     lineHeight: grasp.textXsLine,
@@ -248,6 +267,17 @@ const styles = stylex.create({
     fontSize: grasp.textSm,
     lineHeight: grasp.textSmLine,
   },
+  // A stopped answer: one quiet line under its words, before its actions.
+  stopped: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifySelf: "start",
+    gap: grasp.space1,
+    margin: 0,
+    color: grasp.muted,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+  },
   failedWords: {
     margin: 0,
     display: "inline-flex",
@@ -274,8 +304,9 @@ const styles = stylex.create({
     // The first button's icon stands under the first letter of the words.
     marginInlineStart: `calc(-1 * (${grasp.controlSm} - ${grasp.iconSm}) / 2)`,
   },
+  // A person's time stands at the bubble's end edge.
   personTime: {
-    paddingInlineEnd: grasp.space2,
+    justifySelf: "end",
   },
   // A person's actions sit under the bubble, at the end, their last icon under its edge.
   personActions: {
@@ -307,6 +338,7 @@ interface Heard {
   thinkingLabel: string | undefined;
   streamingLabel: string;
   doneLabel: string;
+  stoppedLabel: string;
 }
 
 const sameAs = (heard: Heard, now: Heard) =>
@@ -314,7 +346,8 @@ const sameAs = (heard: Heard, now: Heard) =>
   heard.status === now.status &&
   heard.thinkingLabel === now.thinkingLabel &&
   heard.streamingLabel === now.streamingLabel &&
-  heard.doneLabel === now.doneLabel;
+  heard.doneLabel === now.doneLabel &&
+  heard.stoppedLabel === now.stoppedLabel;
 
 /** What the status region says after a change, given the status before it. */
 const sayFor = (now: Heard, before: ChatMessageStatus) => {
@@ -326,6 +359,13 @@ const sayFor = (now: Heard, before: ChatMessageStatus) => {
   }
   if (now.status === "done" && before === "streaming") {
     return now.doneLabel;
+  }
+  // Stopped while it thought or wrote; a message drawn stopped (from history) says nothing.
+  if (
+    now.status === "stopped" &&
+    (before === "streaming" || before === "thinking")
+  ) {
+    return now.stoppedLabel;
   }
   return "";
 };
@@ -423,7 +463,7 @@ const ActionRow = ({
   const person = from === "person";
   if (
     !(filled(copyText) || present(actions)) ||
-    !(person || status === "done")
+    !(person || status === "done" || status === "stopped")
   ) {
     return null;
   }
@@ -448,17 +488,18 @@ const ActionRow = ({
 interface HeadProps {
   name: string | undefined;
   nameHidden: boolean | undefined;
-  time: string | undefined;
-  dateTime: string | undefined;
 }
 
-const Head = ({ name: given, nameHidden, time, dateTime }: HeadProps) => {
-  // Hidden, the name is still the message's name for a screen reader (the article's), not drawn.
-  const name = nameHidden === true ? undefined : given;
-  return filled(name) || filled(time) ? (
+/**
+ * The name over the message, drawn only where several speak (`nameHidden={false}`). Hidden, the
+ * default, it is still the message's name for a screen reader (the article's). The time is never
+ * here: it stands at the message's foot.
+ */
+const Head = ({ name: given, nameHidden = true }: HeadProps) => {
+  const name = nameHidden ? undefined : given;
+  return filled(name) ? (
     <div {...stylex.props(styles.head)}>
-      {filled(name) && <h3 {...stylex.props(styles.name)}>{name}</h3>}
-      <Stamp time={time} dateTime={dateTime} person={false} />
+      <h3 {...stylex.props(styles.name)}>{name}</h3>
     </div>
   ) : null;
 };
@@ -562,6 +603,33 @@ const Failure = ({ label, onRetry, retryLabel }: FailureProps) => (
     )}
   </div>
 );
+
+interface EndingProps extends Omit<FailureProps, "label"> {
+  status: ChatMessageStatus;
+  stoppedLabel: string;
+  failedLabel: FailureProps["label"];
+}
+
+/** How a message that did not end as done ends: Stopped under its words, or its failure. */
+const Ending = ({
+  status,
+  stoppedLabel,
+  failedLabel,
+  onRetry,
+  retryLabel,
+}: EndingProps) => {
+  if (status === "stopped") {
+    return (
+      <p data-slot="chat-message-stopped" {...stylex.props(styles.stopped)}>
+        <Icon icon={Stop} />
+        {stoppedLabel}
+      </p>
+    );
+  }
+  return status === "failed" ? (
+    <Failure label={failedLabel} onRetry={onRetry} retryLabel={retryLabel} />
+  ) : null;
+};
 
 /** Where the last whole sentence of `text` ends. */
 const sentencesEnd = (text: string): number => {
@@ -681,10 +749,10 @@ const useWords = (
   const paced = usePaced(words ?? "", live, options);
   // A part inside that paces its own words says here while they are still arriving.
   const [inside, setInside] = useState(false);
+  // Done or stopped, the words already sent still come out at their pace before the end is said.
+  const ended = status === "done" || status === "stopped";
   const arriving =
-    from === "agent" &&
-    status === "done" &&
-    ((words !== null && !paced.done) || inside);
+    from === "agent" && ended && ((words !== null && !paced.done) || inside);
   useSaidSentences(paced.text, live || arriving);
   // What fades in as it arrives: words paced here, or a part inside that paces its own (Markdown
   // streaming). Text a caller simply puts in, chunk by chunk, is drawn as it comes.
@@ -711,6 +779,7 @@ const givenOf = (
     | "copyLabels"
     | "streamingLabel"
     | "doneLabel"
+    | "stoppedLabel"
     | "thinkingLabel"
     | "thoughtLabel"
   >
@@ -724,6 +793,7 @@ const givenOf = (
   copyFailed: props.copyLabels?.failed,
   streaming: props.streamingLabel,
   done: props.doneLabel,
+  stopped: props.stoppedLabel,
   thinking: props.thinkingLabel,
   thought: props.thoughtLabel,
 });
@@ -747,6 +817,7 @@ export const ChatMessage = ({
   copyLabels,
   streamingLabel,
   doneLabel,
+  stoppedLabel,
   streamingMark = false,
   thinkingLabel,
   thoughtLabel,
@@ -769,6 +840,7 @@ export const ChatMessage = ({
       copyLabels,
       streamingLabel,
       doneLabel,
+      stoppedLabel,
       thinkingLabel,
       thoughtLabel,
     })
@@ -786,6 +858,7 @@ export const ChatMessage = ({
     thinkingLabel: text.thinking,
     streamingLabel: text.streaming,
     doneLabel: text.done,
+    stoppedLabel: text.stopped,
   });
   useKeepFocus(root, from, status);
   const [wordsBox, setWordsBox] = useState<HTMLDivElement | null>(null);
@@ -827,8 +900,8 @@ export const ChatMessage = ({
         {...stylex.props(styles.root, styles.person, layout ?? styleProp)}
       >
         <div {...stylex.props(styles.bubble)}>{children}</div>
-        <Stamp time={time} dateTime={dateTime} person />
         {row}
+        <Stamp time={time} dateTime={dateTime} person />
       </article>
     );
   }
@@ -851,12 +924,7 @@ export const ChatMessage = ({
         focus.words
       )}
     >
-      <Head
-        name={name}
-        nameHidden={nameHidden}
-        time={time}
-        dateTime={dateTime}
-      />
+      <Head name={name} nameHidden={nameHidden} />
       <Thought
         thinking={status === "thinking"}
         thoughts={thoughts}
@@ -883,14 +951,15 @@ export const ChatMessage = ({
         mark={streaming && streamingMark}
         label={text.thinking}
       />
-      {status === "failed" && (
-        <Failure
-          label={text.failed}
-          onRetry={onRetry}
-          retryLabel={text.retry}
-        />
-      )}
+      <Ending
+        status={status}
+        stoppedLabel={text.stopped}
+        failedLabel={text.failed}
+        onRetry={onRetry}
+        retryLabel={text.retry}
+      />
       {row}
+      <Stamp time={time} dateTime={dateTime} person={false} />
       <output {...stylex.props(visuallyHidden)}>{said}</output>
     </article>
   );

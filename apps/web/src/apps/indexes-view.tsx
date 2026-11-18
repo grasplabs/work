@@ -1,46 +1,36 @@
 import type { DataModelTable, IndexUse } from "@grasp-os/shared/data-model";
-import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from "@grasp-os/ui/components/field";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
+
+import { formatList } from "../format.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Checkbox, CheckboxGroup } from "../grasp/checkbox/index.ts";
+import { Field, FieldLabel } from "../grasp/field/index.ts";
+import { Search, Sortable, Trash } from "../grasp/icons/index.ts";
+import type { IconData } from "../grasp/icons/index.ts";
 import {
   Item,
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemDetail,
   ItemGroup,
   ItemMedia,
   ItemTitle,
-} from "@grasp-os/ui/components/item";
-import {
-  RadioGroup,
-  RadioGroupItem,
-} from "@grasp-os/ui/components/radio-group";
+} from "../grasp/item/index.ts";
+import { RadioGroup, RadioGroupItem } from "../grasp/radio-group/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   Select,
   SelectContent,
-  SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@grasp-os/ui/components/select";
-import { Trans, useLingui } from "@lingui/react/macro";
-import {
-  ListOrderedIcon,
-  SearchIcon,
-  TrashIcon,
-  TriangleAlertIcon,
-} from "lucide-react";
-import { useId, useState } from "react";
-import type { ReactNode } from "react";
-
-import { formatList } from "../format.ts";
+} from "../grasp/select/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { ModelOperation } from "./data-model-changes.tsx";
 
 // A table's indexes and its search in an App's Data view, each by its
@@ -48,6 +38,25 @@ import type { ModelOperation } from "./data-model-changes.tsx";
 // that call them (core reads them from the App's code, `IndexUse`). One
 // that nothing uses, and one a query reads that the table lacks, are said
 // plainly. A new one is a field and what it's for, named from its field.
+
+// A form's measure: Grasp UI has no token for a column of cards.
+const VIEW_WIDE = "42rem";
+// The field picker's measure, as the old form had it.
+const FIELD_WIDE = "20rem";
+
+const styles = stylex.create({
+  scroll: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
+  view: {
+    display: "grid",
+    gap: grasp.space6,
+    maxWidth: VIEW_WIDE,
+    padding: grasp.space6,
+  },
+  form: { display: "grid", gap: grasp.space4 },
+  field: { maxWidth: FIELD_WIDE },
+  start: { justifySelf: "start" },
+  missing: { margin: 0, paddingInlineStart: grasp.space4 },
+});
 
 /** The fields an index can order by: its own scalar fields, and when records were added or changed. */
 const orderable = (table: DataModelTable): string[] => [
@@ -74,8 +83,8 @@ const UsedBy = ({ uses }: { uses: IndexUse[] }) => {
   const { t } = useLingui();
   if (uses.length === 0) {
     return (
-      <Badge variant="attention">
-        <Trans>No query uses it yet</Trans>
+      <Badge size="sm" tone="attention">
+        {t`No query uses it yet`}
       </Badge>
     );
   }
@@ -85,7 +94,7 @@ const UsedBy = ({ uses }: { uses: IndexUse[] }) => {
       return pages.length === 0 ? query : t`${query} (on ${routes})`;
     })
   );
-  return <Trans>Used by {queries}</Trans>;
+  return t`Used by ${queries}`;
 };
 
 /** One index or the search: its fields, what uses it, and removing it. */
@@ -98,7 +107,7 @@ const IndexRow = ({
   disabled,
   onRemove,
 }: {
-  icon: ReactNode;
+  icon: IconData;
   title: string;
   name?: string;
   uses: IndexUse[];
@@ -106,12 +115,12 @@ const IndexRow = ({
   disabled: boolean;
   onRemove: () => void;
 }) => (
-  <Item render={<li />} size="sm" variant="row">
-    <ItemMedia variant="icon">{icon}</ItemMedia>
+  <Item size="sm">
+    <ItemMedia icon={icon} />
     <ItemContent>
       <ItemTitle>
         {title}
-        {name === undefined ? null : <Badge variant="secondary">{name}</Badge>}
+        {name === undefined ? null : <ItemDetail>{name}</ItemDetail>}
       </ItemTitle>
       <ItemDescription>
         <UsedBy uses={uses} />
@@ -121,13 +130,12 @@ const IndexRow = ({
       <Button
         aria-label={removeLabel}
         disabled={disabled}
+        icon={Trash}
         onClick={onRemove}
-        size="icon-sm"
+        size="sm"
         title={removeLabel}
         variant="ghost"
-      >
-        <TrashIcon />
-      </Button>
+      />
     </ItemActions>
   </Item>
 );
@@ -143,7 +151,6 @@ const AddIndex = ({
   onChange: (operation: ModelOperation) => Promise<boolean>;
 }) => {
   const { t } = useLingui();
-  const ids = useId();
   const fields = orderable(table);
   const texts = table.fields.flatMap(({ name, type }) =>
     type.kind === "text" ? [name] : []
@@ -161,123 +168,105 @@ const AddIndex = ({
     label: managed[field] ?? field,
   }));
   const ready = kind === "index" ? by !== "" : searched.length > 0;
+  const searching = kind === "search" && searchable;
   return (
-    <form
-      aria-label={t`Add an index`}
-      className="flex flex-col gap-4"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void (async () => {
-          const made = await onChange(
-            kind === "index"
-              ? {
-                  op: "addIndex",
-                  table: table.name,
-                  name: indexNameFor(table, by),
-                  fields: [by],
-                }
-              : {
-                  op: "addIndex",
-                  table: table.name,
-                  fields: searched,
-                  search: true,
-                }
-          );
-          if (made) {
-            setSearched([]);
-          }
-        })();
-      }}
-    >
-      <FieldSet>
-        <FieldLegend>
-          <Trans>Add</Trans>
-        </FieldLegend>
-        <RadioGroup
-          disabled={disabled}
-          onValueChange={(next: unknown) => {
-            setKind(next === "search" ? "search" : "index");
-          }}
-          value={searchable ? kind : "index"}
-        >
-          <Field orientation="horizontal">
-            <RadioGroupItem id={`${ids}-index`} value="index" />
-            <FieldLabel htmlFor={`${ids}-index`}>
-              <Trans>An index, to sort and filter by a field</Trans>
-            </FieldLabel>
-          </Field>
-          {searchable ? (
+    <SectionCard density="compact" title={t`Add`}>
+      <form
+        aria-label={t`Add an index`}
+        onSubmit={(event) => {
+          event.preventDefault();
+          void (async () => {
+            const made = await onChange(
+              kind === "index"
+                ? {
+                    op: "addIndex",
+                    table: table.name,
+                    name: indexNameFor(table, by),
+                    fields: [by],
+                  }
+                : {
+                    op: "addIndex",
+                    table: table.name,
+                    fields: searched,
+                    search: true,
+                  }
+            );
+            if (made) {
+              setSearched([]);
+            }
+          })();
+        }}
+        {...stylex.props(styles.form)}
+      >
+        {searchable ? (
+          <RadioGroup
+            aria-label={t`Add`}
+            disabled={disabled}
+            onValueChange={(next) => {
+              setKind(next === "search" ? "search" : "index");
+            }}
+            value={kind}
+          >
             <Field orientation="horizontal">
-              <RadioGroupItem id={`${ids}-search`} value="search" />
-              <FieldLabel htmlFor={`${ids}-search`}>
-                <Trans>Search, to find records by the words in them</Trans>
+              <RadioGroupItem value="index" />
+              <FieldLabel>{t`An index, to sort and filter by a field`}</FieldLabel>
+            </Field>
+            <Field orientation="horizontal">
+              <RadioGroupItem value="search" />
+              <FieldLabel>
+                {t`Search, to find records by the words in them`}
               </FieldLabel>
             </Field>
-          ) : null}
-        </RadioGroup>
-      </FieldSet>
-      {kind === "index" || !searchable ? (
-        <Field>
-          <FieldLabel htmlFor={`${ids}-by`}>
-            <Trans>Field</Trans>
-          </FieldLabel>
-          <Select
-            disabled={disabled}
-            items={items}
-            onValueChange={(next: unknown) => {
-              if (typeof next === "string") {
-                setBy(next);
-              }
-            }}
-            value={by}
-          >
-            <SelectTrigger
-              aria-label={t`Field`}
-              className="w-full max-w-xs"
-              id={`${ids}-by`}
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {items.map((item) => (
-                <SelectItem key={item.value} value={item.value}>
-                  {item.label}
-                </SelectItem>
+          </RadioGroup>
+        ) : null}
+        {searching ? (
+          <Field>
+            <FieldLabel>{t`Fields to search`}</FieldLabel>
+            <CheckboxGroup>
+              {texts.map((field) => (
+                <Field key={field} orientation="horizontal">
+                  <Checkbox
+                    checked={searched.includes(field)}
+                    disabled={disabled}
+                    onCheckedChange={(checked) => {
+                      const rest = searched.filter((held) => held !== field);
+                      setSearched(checked === true ? [...rest, field] : rest);
+                    }}
+                  />
+                  <FieldLabel>{field}</FieldLabel>
+                </Field>
               ))}
-            </SelectContent>
-          </Select>
-        </Field>
-      ) : (
-        <FieldSet>
-          <FieldLegend variant="label">
-            <Trans>Fields to search</Trans>
-          </FieldLegend>
-          {texts.map((field) => (
-            <Field key={field} orientation="horizontal">
-              <Checkbox
-                checked={searched.includes(field)}
-                disabled={disabled}
-                id={`${ids}-${field}`}
-                onCheckedChange={(checked) => {
-                  const rest = searched.filter((held) => held !== field);
-                  setSearched(checked ? [...rest, field] : rest);
-                }}
-              />
-              <FieldLabel htmlFor={`${ids}-${field}`}>{field}</FieldLabel>
-            </Field>
-          ))}
-        </FieldSet>
-      )}
-      <div>
-        <Button disabled={disabled || !ready} type="submit" variant="outline">
-          {kind === "search" && searchable ? (
-            <Trans>Add search</Trans>
-          ) : (
-            <Trans>Add index</Trans>
-          )}
+            </CheckboxGroup>
+          </Field>
+        ) : (
+          <Field layout={styles.field}>
+            <FieldLabel>{t`Field`}</FieldLabel>
+            <Select
+              disabled={disabled}
+              items={items}
+              onValueChange={(next) => {
+                if (typeof next === "string") {
+                  setBy(next);
+                }
+              }}
+              value={by}
+            >
+              <SelectTrigger aria-label={t`Field`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent />
+            </Select>
+          </Field>
+        )}
+        <Button
+          disabled={disabled || !ready}
+          layout={styles.start}
+          type="submit"
+        >
+          {searching ? t`Add search` : t`Add index`}
         </Button>
-      </div>
-    </form>
+      </form>
+    </SectionCard>
   );
 };
 
@@ -309,89 +298,75 @@ export const IndexesView = ({
   const none = table.indexes.length === 0 && table.searchIndex === null;
   const searched = formatList(table.searchIndex ?? []);
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="flex max-w-2xl flex-col gap-6 p-6">
-        <FieldSet>
-          <FieldLegend>
-            <Trans>Indexes</Trans>
-          </FieldLegend>
-          <FieldDescription>
-            <Trans>
-              An index keeps records in order of a field, so queries that sort
-              or filter by it stay fast. Search finds records by their words.
-            </Trans>
-          </FieldDescription>
-        </FieldSet>
+    <div {...stylex.props(styles.scroll)}>
+      <div {...stylex.props(styles.view)}>
         {missing.length === 0 ? null : (
-          <Alert variant="attention">
-            <TriangleAlertIcon />
-            <AlertDescription>
-              <ul>
-                {missing.map(({ query, index }) => (
-                  <li key={`${query}/${index ?? ""}`}>
-                    {index === null ? (
-                      <Trans>
-                        {query} searches this table, which has no search.
-                      </Trans>
-                    ) : (
-                      <Trans>
-                        {query} reads the index {index}, which this table
-                        doesn’t have.
-                      </Trans>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </AlertDescription>
+          <Alert tone="attention">
+            <ul {...stylex.props(styles.missing)}>
+              {missing.map(({ query, index }) => (
+                <li key={`${query}/${index ?? ""}`}>
+                  {index === null
+                    ? t`${query} searches this table, which has no search.`
+                    : t`${query} reads the index ${index}, which this table doesn’t have.`}
+                </li>
+              ))}
+            </ul>
           </Alert>
         )}
-        {none ? (
-          <p className="text-muted-foreground text-sm">
-            <Trans>The chat adds indexes as it writes the App’s queries.</Trans>
-          </p>
-        ) : (
-          <ItemGroup render={<ul />} variant="card">
-            {table.indexes.map((index) => {
-              const indexName = index.name;
-              return (
+        <SectionCard
+          density="compact"
+          flush={!none}
+          info={t`An index keeps records in order of a field, so queries that sort or filter by it stay fast. Search finds records by their words.`}
+          title={t`Indexes`}
+        >
+          {none ? (
+            <Text size="sm" tone="muted">
+              {t`The chat adds indexes as it writes the App’s queries.`}
+            </Text>
+          ) : (
+            <ItemGroup aria-label={t`Indexes`} separated>
+              {table.indexes.map((index) => {
+                const indexName = index.name;
+                return (
+                  <IndexRow
+                    disabled={disabled}
+                    icon={Sortable}
+                    key={index.name}
+                    name={index.name}
+                    onRemove={() => {
+                      void onChange({
+                        op: "removeIndex",
+                        table: table.name,
+                        name: index.name,
+                      });
+                    }}
+                    removeLabel={t`Remove the index ${indexName}`}
+                    title={formatList(
+                      index.fields.map((field) => managed[field] ?? field)
+                    )}
+                    uses={mine.filter((use) => use.index === index.name)}
+                  />
+                );
+              })}
+              {table.searchIndex === null ? null : (
                 <IndexRow
                   disabled={disabled}
-                  icon={<ListOrderedIcon />}
-                  key={index.name}
-                  name={index.name}
+                  icon={Search}
                   onRemove={() => {
                     void onChange({
                       op: "removeIndex",
                       table: table.name,
-                      name: index.name,
+                      search: true,
                     });
                   }}
-                  removeLabel={t`Remove the index ${indexName}`}
-                  title={formatList(
-                    index.fields.map((field) => managed[field] ?? field)
-                  )}
-                  uses={mine.filter((use) => use.index === index.name)}
+                  removeLabel={t`Remove the search`}
+                  title={t`Search in ${searched}`}
+                  uses={mine.filter((use) => use.index === null)}
                 />
-              );
-            })}
-            {table.searchIndex === null ? null : (
-              <IndexRow
-                disabled={disabled}
-                icon={<SearchIcon />}
-                onRemove={() => {
-                  void onChange({
-                    op: "removeIndex",
-                    table: table.name,
-                    search: true,
-                  });
-                }}
-                removeLabel={t`Remove the search`}
-                title={t`Search in ${searched}`}
-                uses={mine.filter((use) => use.index === null)}
-              />
-            )}
-          </ItemGroup>
-        )}
+              )}
+            </ItemGroup>
+          )}
+        </SectionCard>
         <AddIndex
           disabled={disabled}
           // A new form for each change: the search's fields start again.

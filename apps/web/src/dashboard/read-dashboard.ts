@@ -25,6 +25,7 @@ import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 import { readRequestNames } from "../activity/pending.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
+import { readOutcomes } from "../inbox/everyones-outcomes.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { listWorkflows, openableApps } from "../workflows/reads.ts";
@@ -79,12 +80,18 @@ const partOf = <T>(
  * permission requests are shown with. Reading it marks the
  * notifications it lists as read, as a page that shows them (the
  * dashboard, the inbox) does; the sidebar's list, which only says what
- * waits, reads them with `markShownRead: false`.
+ * waits, reads them with `markShownRead: false`. Everyone's unknown
+ * outcomes are listed only with `everyonesOutcomes` (the inbox showing
+ * them): core records each such read in the audit trail, so the frame's
+ * read, every few minutes, would fill it.
  */
 export const readWaiting = async (
   core: CoreConnection,
   identity: Identity,
-  { markShownRead: marking = true }: { markShownRead?: boolean } = {}
+  {
+    markShownRead: marking = true,
+    everyonesOutcomes: listOutcomes = false,
+  }: { markShownRead?: boolean; everyonesOutcomes?: boolean } = {}
 ): Promise<Waiting> => {
   const feed = await loadFromCore(
     core,
@@ -136,7 +143,25 @@ export const readWaiting = async (
           )
         : asked;
   }
+  // The onboarding, for the admins Settings, Onboarding was for, Grasp's staff included.
+  const interviews = isAdmin(identity.role)
+    ? await loadFromCore(core, async (session) => {
+        const [view, links, programme] = await Promise.all([
+          session.onboarding.view(),
+          session.onboarding.links(),
+          session.onboarding.programme(),
+        ]);
+        return { view, links, stage: programme?.stage ?? null };
+      })
+    : undefined;
+  // Everyone's, for the organization's own admins, as Settings › Unknown outcomes was.
+  const everyonesOutcomes =
+    listOutcomes && decidesRequests(identity)
+      ? await readOutcomes(core)
+      : undefined;
   return {
+    ...(interviews === undefined ? {} : { interviews }),
+    ...(everyonesOutcomes === undefined ? {} : { everyonesOutcomes }),
     held: partOf(feed, "held", (read) =>
       ofKind(read, "heldWrite").map(({ action }) => action)
     ),
@@ -161,6 +186,10 @@ export const readWaiting = async (
       ? {
           bindings: partOf(feed, "bindings", (read) =>
             ofKind(read, "bindingApproval")
+          ),
+          gaps: await loadFromCore(
+            core,
+            async (session) => await session.brain.openGaps()
           ),
         }
       : {}),

@@ -1,48 +1,64 @@
 import { elsewhere, growth } from "@grasp-os/shared/stephen-requests";
 import type { Need, RequestsPage } from "@grasp-os/shared/stephen-requests";
-import { Button } from "@grasp-os/ui/components/button";
-import { Card } from "@grasp-os/ui/components/card";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@grasp-os/ui/components/collapsible";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useEffect, useRef, useState } from "react";
+
+import { formatNumber, formatPercent } from "../../format.ts";
+import { LoadingLines } from "../../frame/page-states.tsx";
+import { Badge } from "../../grasp/badge/index.ts";
+import { Card } from "../../grasp/card/index.ts";
+import { Collapsible } from "../../grasp/collapsible/index.ts";
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
-} from "@grasp-os/ui/components/empty";
+} from "../../grasp/empty/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemDetail,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../../grasp/item/index.ts";
+import { Sheet, SheetContent, SheetTitle } from "../../grasp/sheet/index.ts";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../../grasp/table/index.ts";
 import {
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
-} from "@grasp-os/ui/components/tabs";
-import { cn } from "@grasp-os/ui/lib/utils";
-import { plural } from "@lingui/core/macro";
-import { useLingui } from "@lingui/react/macro";
-import { ChevronRightIcon } from "lucide-react";
-import { useState } from "react";
-
-import { formatNumber, formatPercent } from "../../format.ts";
-import { LoadingLines } from "../../frame/page-states.tsx";
+} from "../../grasp/tabs/index.ts";
+import { Text } from "../../grasp/text/index.ts";
+import { grasp } from "../../grasp/tokens/tokens.stylex.ts";
 import { RequestDetail } from "./request-detail.tsx";
 import type { RequestSubject } from "./request-detail.tsx";
-import { NeedMark, useNeedState, useNeedWhy } from "./request-needs.tsx";
 import {
-  Growth,
-  OpenRow,
-  ToolMark,
-  useRequestNames,
-} from "./request-parts.tsx";
-import { RequestPeople, RequestTeams } from "./request-who.tsx";
+  NeedMark,
+  statusLabels,
+  useNeedState,
+  useNeedWhy,
+} from "./request-needs.tsx";
+import { Growth, ToolMark, useRequestNames } from "./request-parts.tsx";
+import { RequestPeople, RequestTeams, RowName } from "./request-who.tsx";
 
 // The table to work from, under the plan, as the prototype's
 // `request-table.tsx`: one view at a time. Needs you first, a list to work
 // through, with what was fixed or left under Handled; then what people
 // ask, by topic, with the marks of what he did it with, what is new or
 // grew, and how helpful people found it; who asks, by team; and by person.
-// Every row opens the same panel (request-detail.tsx).
+// Every row opens the same panel (request-detail.tsx), beside the table
+// where the page has room for both and in a Sheet otherwise.
 
 type View = "needs" | "asked" | "teams" | "people";
 
@@ -52,59 +68,67 @@ const isView = (value: unknown): value is View =>
   value === "teams" ||
   value === "people";
 
-/**
- * A row: a name, a count and the chevron, with a second cell on a line
- * of its own under them until there is room for it beside the name.
- */
-const grid =
-  "flex flex-wrap items-center gap-x-6 gap-y-1.5 px-6 py-3 @2xl:flex-nowrap";
+/** How wide the page must be for a row to open beside the table. */
+const besideFrom = 60 * 16;
 
-/** A row's cells: the name, the second, the count. */
-const nameCell = "min-w-0 flex-1 @2xl:flex-6";
-const secondCell = "order-last basis-full @2xl:order-none @2xl:flex-5";
-const countCell = "w-18 flex-none text-right tabular-nums";
+const styles = stylex.create({
+  tabs: { paddingInline: grasp.space4, paddingBlockStart: grasp.space2 },
+  inset: { padding: grasp.space4 },
+  handled: { paddingInline: grasp.space2, paddingBlockEnd: grasp.space2 },
+  // A topic's name, with what grew, and how many asked under it.
+  topic: { display: "flex", flexDirection: "column" },
+  named: { display: "flex", alignItems: "center", gap: grasp.space2 },
+  tools: { display: "flex", alignItems: "center", gap: grasp.space2 },
+  // The table and the row opened beside it, as wide as the page lets them be.
+  split: {
+    display: "grid",
+    gridTemplateColumns: `minmax(0, 1fr) ${grasp.inspectorWidth}`,
+    columnGap: grasp.space6,
+    alignItems: "start",
+  },
+});
 
-/** The names of a table's columns, from where there is room for them. */
-const Head = ({
-  first,
-  second,
-  third,
-}: {
-  first: string;
-  second: string;
-  third: string;
-}) => (
-  <li
-    aria-hidden="true"
-    className="text-muted-foreground hidden gap-x-6 px-6 pb-2 text-xs @2xl:flex"
-  >
-    <span className={nameCell}>{first}</span>
-    <span className={secondCell}>{second}</span>
-    <span className={countCell}>{third}</span>
-    <span className="size-4 flex-none" />
-  </li>
-);
+/** A need's status, as a Badge only where it needs someone (open) or is done (fixed). */
+const NeedBadge = ({ need }: { need: Need }) => {
+  const { t, i18n } = useLingui();
+  if (need.status === null) {
+    return (
+      <Badge size="sm" tone="attention">
+        {t({ message: "Open", context: "a need nobody has taken up yet" })}
+      </Badge>
+    );
+  }
+  return need.status.status === "fixed" ? (
+    <Badge size="sm" tone="success">
+      {i18n._(statusLabels.fixed)}
+    </Badge>
+  ) : null;
+};
 
-/** One thing Needs you lists. */
+/** One thing Needs you lists: the whole row opens it. */
 const NeedRow = ({ need, onOpen }: { need: Need; onOpen: () => void }) => {
+  const { t } = useLingui();
   const why = useNeedWhy(need);
   const state = useNeedState(need);
+  const people = need.people ?? need.reach ?? 0;
   return (
-    <OpenRow className={grid} onOpen={onOpen}>
-      <span className={nameCell}>{need.label}</span>
-      <span
-        className={cn(
-          "text-muted-foreground flex min-w-0 items-center gap-2",
-          secondCell
-        )}
-      >
+    <Item
+      render={<button aria-label={need.label} onClick={onOpen} type="button" />}
+      size="sm"
+    >
+      <ItemMedia>
         <NeedMark need={need} />
-        <span className="truncate">{state ?? why}</span>
-      </span>
-      <span className={countCell}>
-        {formatNumber(need.people ?? need.reach ?? 0)}
-      </span>
-    </OpenRow>
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle>
+          {need.label} <NeedBadge need={need} />
+          <ItemDetail>
+            {t`${plural(people, { one: "# person", other: "# people" })}`}
+          </ItemDetail>
+        </ItemTitle>
+        <ItemDescription>{state ?? why}</ItemDescription>
+      </ItemContent>
+    </Item>
   );
 };
 
@@ -119,20 +143,18 @@ const Needs = ({
   const { t } = useLingui();
   if (needs === undefined) {
     return (
-      <div className="mt-3 border-t px-6 py-6">
+      <div {...stylex.props(styles.inset)}>
         <LoadingLines />
       </div>
     );
   }
   if (needs === null) {
     return (
-      <div className="mt-3 border-t">
-        <Empty size="sm">
-          <EmptyHeader>
-            <EmptyDescription>{t`What needs you can't be read right now.`}</EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      </div>
+      <Empty size="section">
+        <EmptyHeader>
+          <EmptyDescription>{t`What needs you can't be read right now.`}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
   const waiting = needs.filter(
@@ -141,23 +163,17 @@ const Needs = ({
   const handled = needs.filter(
     ({ status }) => status !== null && status.status !== "working"
   );
+  const count = formatNumber(handled.length);
   return (
-    <ul className="@container mt-3">
+    <>
       {waiting.length === 0 ? (
-        <li className="border-t">
-          <Empty size="sm">
-            <EmptyHeader>
-              <EmptyDescription>{t`Nothing waits on you.`}</EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        </li>
+        <Empty size="section">
+          <EmptyHeader>
+            <EmptyDescription>{t`Nothing waits on you.`}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
-        <>
-          <Head
-            first={t`What it is`}
-            second={t`Why`}
-            third={t({ message: "People", context: "column" })}
-          />
+        <ItemGroup aria-label={t`What it is`} separated>
           {waiting.map((need) => (
             <NeedRow
               key={need.key}
@@ -167,35 +183,35 @@ const Needs = ({
               }}
             />
           ))}
-        </>
+        </ItemGroup>
       )}
       {handled.length > 0 ? (
-        <Collapsible
-          className="group/handled"
-          render={<li className="border-t" />}
-        >
-          <CollapsibleTrigger render={<Button size="sm" variant="ghost" />}>
-            <ChevronRightIcon
-              aria-hidden="true"
-              className="size-4 transition-transform duration-150 group-data-panel-open/handled:rotate-90"
-            />
-            {t`Handled`}
-            <span className="tabular-nums">{formatNumber(handled.length)}</span>
-          </CollapsibleTrigger>
-          <CollapsibleContent render={<ul className="@container" />}>
-            {handled.map((need) => (
-              <NeedRow
-                key={need.key}
-                need={need}
-                onOpen={() => {
-                  onOpen(need);
-                }}
-              />
-            ))}
-          </CollapsibleContent>
-        </Collapsible>
+        <div {...stylex.props(styles.handled)}>
+          <Collapsible
+            title={
+              <>
+                {t`Handled`}{" "}
+                <Text element="span" size="sm" tone="muted">
+                  {count}
+                </Text>
+              </>
+            }
+          >
+            <ItemGroup aria-label={t`Handled`} separated>
+              {handled.map((need) => (
+                <NeedRow
+                  key={need.key}
+                  need={need}
+                  onOpen={() => {
+                    onOpen(need);
+                  }}
+                />
+              ))}
+            </ItemGroup>
+          </Collapsible>
+        </div>
       ) : null}
-    </ul>
+    </>
   );
 };
 
@@ -205,73 +221,108 @@ const Topics = ({
   onOpen,
 }: {
   page: RequestsPage;
-  onOpen: (topic: string) => void;
+  onOpen: (topic: string, name: string) => void;
 }) => {
   const { t } = useLingui();
   const names = useRequestNames(page);
   const { report, before } = page;
   return (
-    <ul className="@container mt-3">
-      <Head
-        first={t`Topic`}
-        second={t`Done with`}
-        third={t({ message: "Requests", context: "column: billed requests" })}
-      />
-      {report.byTopic.map((topic) => {
-        const { people } = topic;
-        const rated = topic.up + topic.down;
-        const helpful = formatPercent(rated === 0 ? 0 : topic.up / rated);
-        const grew =
-          topic.key === elsewhere || before === null
-            ? null
-            : growth(
-                topic.billed,
-                before.byTopic.find((each) => each.key === topic.key)?.billed ??
-                  0
-              );
-        return (
-          <OpenRow
-            className={grid}
-            key={topic.key}
-            onOpen={
-              topic.key === elsewhere
-                ? undefined
-                : () => {
-                    onOpen(topic.key);
-                  }
-            }
-          >
-            <span className={cn("flex flex-col", nameCell)}>
-              <span className="flex min-w-0 items-baseline gap-2">
-                <span className="truncate">{names.topic(topic.key)}</span>
-                <Growth grew={grew} />
-              </span>
-              <span className="text-muted-foreground truncate text-xs">
-                {rated >= 5
-                  ? t`${plural(people, { one: "# person", other: "# people" })} · ${helpful} helpful`
-                  : t`${plural(people, { one: "# person", other: "# people" })}`}
-              </span>
-            </span>
-            <span
-              className={cn(
-                "hidden items-center gap-1.5 @2xl:flex",
-                secondCell
-              )}
-            >
-              {topic.tools.map((tool) => (
-                <ToolMark
-                  key={tool.key}
-                  label={names.tool(tool.key)}
-                  tool={tool.key}
-                />
-              ))}
-            </span>
-            <span className={countCell}>{formatNumber(topic.billed)}</span>
-          </OpenRow>
-        );
-      })}
-    </ul>
+    <Table aria-label={t`What people ask`}>
+      <TableHeader>
+        <TableRow>
+          <TableHead>{t`Topic`}</TableHead>
+          <TableHead>{t`Done with`}</TableHead>
+          <TableHead align="end">
+            {t({ message: "Requests", context: "column: billed requests" })}
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {report.byTopic.map((topic) => {
+          const { people } = topic;
+          const rated = topic.up + topic.down;
+          const helpful = formatPercent(rated === 0 ? 0 : topic.up / rated);
+          const name = names.topic(topic.key);
+          const grew =
+            topic.key === elsewhere || before === null
+              ? null
+              : growth(
+                  topic.billed,
+                  before.byTopic.find((each) => each.key === topic.key)
+                    ?.billed ?? 0
+                );
+          return (
+            <TableRow key={topic.key}>
+              <TableCell lead>
+                <span {...stylex.props(styles.topic)}>
+                  <span {...stylex.props(styles.named)}>
+                    <RowName
+                      name={name}
+                      onOpen={
+                        topic.key === elsewhere
+                          ? undefined
+                          : () => {
+                              onOpen(topic.key, name);
+                            }
+                      }
+                    />
+                    <Growth grew={grew} />
+                  </span>
+                  <Text element="span" size="xs" tone="muted">
+                    {rated >= 5
+                      ? t`${plural(people, { one: "# person", other: "# people" })} · ${helpful} helpful`
+                      : t`${plural(people, { one: "# person", other: "# people" })}`}
+                  </Text>
+                </span>
+              </TableCell>
+              <TableCell>
+                <span {...stylex.props(styles.tools)}>
+                  {topic.tools.map((tool) => (
+                    <ToolMark
+                      key={tool.key}
+                      label={names.tool(tool.key)}
+                      tool={tool.key}
+                    />
+                  ))}
+                </span>
+              </TableCell>
+              <TableCell align="end">{formatNumber(topic.billed)}</TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
   );
+};
+
+/** Whether the holder is wide enough for a row to open beside the table; it is until measured. */
+const useWide = () => {
+  const holder = useRef<HTMLDivElement>(null);
+  const [wide, setWide] = useState(true);
+  useEffect(() => {
+    const element = holder.current;
+    const watch =
+      element === null || typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(([entry]) => {
+            setWide((entry?.contentRect.width ?? 0) >= besideFrom);
+          });
+    if (element !== null) {
+      watch?.observe(element);
+    }
+    return () => {
+      watch?.disconnect();
+    };
+  }, []);
+  return { holder, wide };
+};
+
+/** The panel's name in a Sheet, as the row that opened it named it. */
+const subjectName = (subject: RequestSubject | undefined): string => {
+  if (subject === undefined) {
+    return "";
+  }
+  return subject.kind === "need" ? subject.need.label : subject.name;
 };
 
 /** The table, and the panel its rows open. */
@@ -297,6 +348,7 @@ export const RequestTable = ({
   onChanged: () => Promise<void>;
 }) => {
   const { t } = useLingui();
+  const { holder, wide } = useWide();
   const waiting = (needs ?? []).filter(
     ({ status }) => status === null || status.status === "working"
   ).length;
@@ -310,78 +362,12 @@ export const RequestTable = ({
   const open = (subject: RequestSubject) => {
     setTrail([subject]);
   };
-  return (
-    <Card>
-      <Tabs
-        onValueChange={(value: unknown) => {
-          if (isView(value)) {
-            setPicked(value);
-          }
-        }}
-        value={view}
-      >
-        <div className="px-6">
-          <TabsList aria-label={t`What the table shows`} variant="line">
-            <TabsTrigger className="flex-none" value="needs">
-              {t({
-                message: "Needs you",
-                context: "Stephen's requests to fix",
-              })}
-              <span className="text-muted-foreground tabular-nums">
-                {formatNumber(waiting)}
-              </span>
-            </TabsTrigger>
-            <TabsTrigger className="flex-none" value="asked">
-              {t`What people ask`}
-            </TabsTrigger>
-            <TabsTrigger className="flex-none" value="teams">
-              {t({ message: "Teams", context: "Stephen's requests by team" })}
-            </TabsTrigger>
-            <TabsTrigger className="flex-none" value="people">
-              {t({
-                message: "People",
-                context: "Stephen's requests by person",
-              })}
-            </TabsTrigger>
-          </TabsList>
-        </div>
-        <TabsContent value="needs">
-          <Needs
-            needs={needs}
-            onOpen={(need) => {
-              open({ kind: "need", need });
-            }}
-          />
-        </TabsContent>
-        <TabsContent value="asked">
-          <Topics
-            onOpen={(topic) => {
-              open({ kind: "topic", id: topic });
-            }}
-            page={page}
-          />
-        </TabsContent>
-        <TabsContent value="teams">
-          <RequestTeams
-            onOpen={(teamId) => {
-              open({ kind: "team", id: teamId });
-            }}
-            page={page}
-          />
-        </TabsContent>
-        <TabsContent value="people">
-          <RequestPeople
-            busy={busy}
-            onOpen={(person) => {
-              open({ kind: "person", id: person });
-            }}
-            onSwitch={onPerPerson}
-            page={page}
-          />
-        </TabsContent>
-      </Tabs>
+  const opened = trail.at(-1);
+  const detail = (framed: boolean) =>
+    opened === undefined ? null : (
       <RequestDetail
         canManage={page.canSetPerPerson}
+        framed={framed}
         onChanged={async () => {
           // What the panel showed changed: the list shows it as it is now.
           setTrail([]);
@@ -401,6 +387,101 @@ export const RequestTable = ({
         team={team}
         trail={trail}
       />
+    );
+  const table = (
+    <Card padding="none">
+      <Tabs
+        onValueChange={(value) => {
+          if (isView(value)) {
+            setPicked(value);
+          }
+        }}
+        value={view}
+      >
+        <div {...stylex.props(styles.tabs)}>
+          <TabsList aria-label={t`What the table shows`}>
+            <TabsTrigger value="needs">
+              {t({
+                message: "Needs you",
+                context: "Stephen's requests to fix",
+              })}{" "}
+              <Text element="span" size="sm" tone="muted">
+                {formatNumber(waiting)}
+              </Text>
+            </TabsTrigger>
+            <TabsTrigger value="asked">{t`What people ask`}</TabsTrigger>
+            <TabsTrigger value="teams">
+              {t({ message: "Teams", context: "Stephen's requests by team" })}
+            </TabsTrigger>
+            <TabsTrigger value="people">
+              {t({
+                message: "People",
+                context: "Stephen's requests by person",
+              })}
+            </TabsTrigger>
+          </TabsList>
+        </div>
+        <TabsContent value="needs">
+          <Needs
+            needs={needs}
+            onOpen={(need) => {
+              open({ kind: "need", need });
+            }}
+          />
+        </TabsContent>
+        <TabsContent value="asked">
+          <Topics
+            onOpen={(topic, name) => {
+              open({ kind: "topic", id: topic, name });
+            }}
+            page={page}
+          />
+        </TabsContent>
+        <TabsContent value="teams">
+          <RequestTeams
+            onOpen={(teamId, name) => {
+              open({ kind: "team", id: teamId, name });
+            }}
+            page={page}
+          />
+        </TabsContent>
+        <TabsContent value="people">
+          <RequestPeople
+            busy={busy}
+            onOpen={(person, name) => {
+              open({ kind: "person", id: person, name });
+            }}
+            onSwitch={onPerPerson}
+            page={page}
+          />
+        </TabsContent>
+      </Tabs>
     </Card>
+  );
+  return (
+    <div ref={holder}>
+      {wide && opened !== undefined ? (
+        <div {...stylex.props(styles.split)}>
+          {table}
+          {detail(true)}
+        </div>
+      ) : (
+        table
+      )}
+      <Sheet
+        onOpenChange={(next) => {
+          if (!next) {
+            setTrail([]);
+          }
+        }}
+        open={!wide && opened !== undefined}
+        size="md"
+      >
+        <SheetContent closeLabel={t`Close`}>
+          <SheetTitle>{subjectName(opened)}</SheetTitle>
+          {wide ? null : detail(false)}
+        </SheetContent>
+      </Sheet>
+    </div>
   );
 };

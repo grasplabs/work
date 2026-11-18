@@ -1,3 +1,4 @@
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 
 import {
@@ -16,6 +17,7 @@ import {
   shimmerAt,
   SPREAD_S,
 } from "../brain/dot-ink.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { headDotCount, headDots, headEar, headPitch } from "./head-dots.ts";
 
 // Grasp's buddy: the head from the prototype's onboarding, Stephen in dots,
@@ -509,6 +511,15 @@ const animate = (element: HTMLCanvasElement): (() => void) => {
   };
 };
 
+const styles = stylex.create({
+  // 128px, never squeezed by the row it stands in.
+  canvas: {
+    width: `calc(${grasp.space16} * 2)`,
+    height: `calc(${grasp.space16} * 2)`,
+    flex: "none",
+  },
+});
+
 /** The buddy, 128px. */
 export const GraspBuddy = () => {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -517,6 +528,6 @@ export const GraspBuddy = () => {
     return element === null ? undefined : animate(element);
   }, []);
   return (
-    <canvas aria-hidden="true" className="size-32 flex-none" ref={canvas} />
+    <canvas aria-hidden="true" ref={canvas} {...stylex.props(styles.canvas)} />
   );
 };

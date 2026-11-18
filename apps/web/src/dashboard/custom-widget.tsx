@@ -6,18 +6,10 @@ import type {
   WidgetState,
   WidgetViewPart,
 } from "@grasp-os/shared/widgets";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/ui/components/table";
-import { cn } from "@grasp-os/ui/lib/utils";
 import type { I18n, MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 
 import { formatNumber } from "../format.ts";
 import {
@@ -28,6 +20,16 @@ import {
   ChartTooltip,
 } from "../grasp/chart/index.ts";
 import { Stat } from "../grasp/stats/index.ts";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../grasp/table/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { BarList } from "./bar-list.tsx";
 import { WidgetBlock } from "./widget-block.tsx";
 
@@ -37,6 +39,17 @@ import { WidgetBlock } from "./widget-block.tsx";
 // the board's own parts and colours. Core works out every number from
 // what the person may see when it reads the widget: the page only draws
 // them, and names what core names by key (a state, a measure).
+
+const styles = stylex.create({
+  part: { display: "flex", flexDirection: "column", gap: grasp.space2 },
+  parts: { display: "flex", flexDirection: "column", gap: grasp.space4 },
+  row: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: grasp.space4,
+  },
+  rowOfThree: { gridTemplateColumns: "repeat(3, minmax(0, 1fr))" },
+});
 
 /** What each measure counts, as a part names it. */
 const measureNames: Record<WidgetMeasure, MessageDescriptor> = {
@@ -82,15 +95,19 @@ const cellText = (cell: WidgetCell, column: WidgetColumn, i18n: I18n) => {
 
 /** What a part with nothing to show says. */
 const NothingToShow = () => (
-  <p className="text-muted-foreground">
+  <Text size="sm" tone="muted">
     <Trans>Nothing to show yet.</Trans>
-  </p>
+  </Text>
 );
 
 /** A part's own label, over it, when it has one. */
 const PartLabel = ({ label }: { label: string | null }) =>
   label === null ? null : (
-    <h3 className="text-muted-foreground text-xs font-medium">{label}</h3>
+    <h3>
+      <Text element="span" size="xs" tone="muted" weight="medium">
+        {label}
+      </Text>
+    </h3>
   );
 
 /** How tall a trend is drawn in a block, in CSS pixels. */
@@ -122,7 +139,7 @@ const Part = ({ part }: { part: WidgetViewPart }) => {
     case "bars": {
       const measure = i18n._(measureNames[part.measure]);
       return (
-        <div className="flex flex-col gap-2">
+        <div {...stylex.props(styles.part)}>
           <PartLabel label={part.label} />
           {part.bars.length === 0 ? (
             <NothingToShow />
@@ -146,7 +163,7 @@ const Part = ({ part }: { part: WidgetViewPart }) => {
     case "trend": {
       const measure = i18n._(measureNames[part.measure]);
       return (
-        <div className="flex flex-col gap-2">
+        <div {...stylex.props(styles.part)}>
           <PartLabel label={part.label} />
           <Chart
             config={{ value: { label: measure } }}
@@ -169,7 +186,7 @@ const Part = ({ part }: { part: WidgetViewPart }) => {
     }
     case "table": {
       return (
-        <div className="flex flex-col gap-2">
+        <div {...stylex.props(styles.part)}>
           <PartLabel label={part.label} />
           {part.rows.length === 0 ? (
             <NothingToShow />
@@ -178,7 +195,14 @@ const Part = ({ part }: { part: WidgetViewPart }) => {
               <TableHeader>
                 <TableRow>
                   {part.columns.map((column) => (
-                    <TableHead key={column}>
+                    <TableHead
+                      align={
+                        column === "workflow" || column === "state"
+                          ? "start"
+                          : "end"
+                      }
+                      key={column}
+                    >
                       {i18n._(columnNames[column])}
                     </TableHead>
                   ))}
@@ -190,14 +214,11 @@ const Part = ({ part }: { part: WidgetViewPart }) => {
                     {row.map((cell, index) => {
                       const column = part.columns[index] ?? "workflow";
                       return (
-                        <TableCell key={column}>
-                          {typeof cell === "number" ? (
-                            <span className="tabular-nums">
-                              {cellText(cell, column, i18n)}
-                            </span>
-                          ) : (
-                            cellText(cell, column, i18n)
-                          )}
+                        <TableCell
+                          align={typeof cell === "number" ? "end" : "start"}
+                          key={column}
+                        >
+                          {cellText(cell, column, i18n)}
                         </TableCell>
                       );
                     })}
@@ -210,14 +231,18 @@ const Part = ({ part }: { part: WidgetViewPart }) => {
       );
     }
     case "text": {
-      return <p className="text-muted-foreground">{part.text}</p>;
+      return (
+        <Text size="sm" tone="muted">
+          {part.text}
+        </Text>
+      );
     }
     case "row": {
       return (
         <div
-          className={cn(
-            "grid gap-4",
-            part.parts.length === 3 ? "grid-cols-3" : "grid-cols-2"
+          {...stylex.props(
+            styles.row,
+            part.parts.length === 3 && styles.rowOfThree
           )}
         >
           {part.parts.map((each, index) => (
@@ -237,14 +262,14 @@ const Part = ({ part }: { part: WidgetViewPart }) => {
 const Parts = ({ widget }: { widget: CustomWidget }) => {
   const { days, parts } = widget.view;
   return (
-    <div className="flex flex-col gap-4">
+    <div {...stylex.props(styles.parts)}>
       {parts.map((part, index) => (
         // A widget's parts are as its spec lists them, and never move.
         <Part key={index} part={part} />
       ))}
-      <p className="text-muted-foreground text-xs">
+      <Text size="xs" tone="muted">
         <Plural one="The last # day" other="The last # days" value={days} />
-      </p>
+      </Text>
     </div>
   );
 };

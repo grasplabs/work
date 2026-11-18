@@ -8,7 +8,30 @@ import type {
   WorkflowActivity,
   WorkflowResourceRun,
 } from "@grasp-os/shared/workflow-resources";
-import { Badge } from "@grasp-os/ui/components/badge";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useEffect, useEffectEvent, useState } from "react";
+
+import { isTransient } from "../core.ts";
+import { ErrorText } from "../error-text.tsx";
+import { formatDateTime } from "../format.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
+import { AgentActivity } from "../grasp/agent-activity/index.ts";
+import type {
+  ActivityState,
+  ActivityStep,
+} from "../grasp/agent-activity/index.ts";
+import { Empty, EmptyDescription, EmptyHeader } from "../grasp/empty/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   Table,
   TableBody,
@@ -16,37 +39,29 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { useEffect, useEffectEvent, useId, useState } from "react";
-
-import { isTransient } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
-import { formatDateTime } from "../format.ts";
-import { NotLoadedState } from "../frame/page-states.tsx";
+} from "../grasp/table/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { ActivityLine, activityKey } from "./activity-bar.tsx";
 import type { Names } from "./activity-bar.tsx";
 import { ItemTest } from "./item-test.tsx";
 import { ListedCount } from "./listed-count.tsx";
-import { OpenRun } from "./resource-runs.tsx";
-import { RunSheet } from "./run-detail.tsx";
-import { runDotOf, runStatusLabels } from "./run-status.ts";
+import { NoRuns, OpenRun } from "./resource-runs.tsx";
+import { RunBeside, RunStatusBadge, useStartedBy } from "./run-detail.tsx";
 import { WorkflowDiagramView } from "./workflow-diagram.tsx";
 
 // A workflow's Traces, for its builders (prototype `inside-traces.tsx`):
 // one thing at a time behind a switch. Runs: a test of the draft on recent
-// real items, then every run, a row each; a row opens beside the page with
+// real items, then every run, a row each; a row opens beside the list with
 // when it ran, how it ended and what it returned or why it failed
 // (run-detail.tsx), then what the run did laid over its own version's
 // diagram, and each step its journal recorded with its state, attempts,
-// loop item and error code (`workflowResources.runTrace`). Activity:
-// everything that happened to the workflow, in full.
+// loop item and error code (`workflowResources.runTrace`), as the
+// library's Agent activity. Activity: everything that happened to the
+// workflow, in full.
 
 /** Which part of Traces shows. */
 export type TracesPart = "runs" | "activity";
@@ -54,10 +69,37 @@ export type TracesPart = "runs" | "activity";
 /** How often a run still going is read again. */
 const followMs = 1500;
 
-/** Ended, or nothing more of it is shown: no need to read it again. */
+/** The width of the runs' card under which each run is a row of its own, its facts under its time. */
+const narrowRuns = "@container runs (width < 40rem)";
+
+const styles = stylex.create({
+  traces: { display: "grid", rowGap: grasp.space6, minWidth: 0 },
+  // The runs measure their own width, whatever the page beside them.
+  runs: { containerName: "runs", containerType: "inline-size" },
+  // Wide: the table; narrow: the rows. One of them shows.
+  wideRuns: { display: { default: "block", [narrowRuns]: "none" } },
+  narrowRuns: { display: { default: "none", [narrowRuns]: "block" } },
+  // Kept, but not shown, while Activity shows.
+  away: { display: "none" },
+  // A run's steps, in the card of its "What it did".
+  did: {
+    display: "grid",
+    rowGap: grasp.space4,
+    paddingBlock: grasp.space3,
+    paddingInline: grasp.inspectorInset,
+    minWidth: 0,
+  },
+  lines: {
+    margin: 0,
+    paddingBlock: grasp.space2,
+    paddingInline: grasp.space4,
+    listStyle: "none",
+  },
+});
+
 /**
  * Where a run is, as a read of its trace says it, for what follows it (the
- * run sheet's facts, run-detail.tsx): its status, and, while a step waits
+ * run panel's facts, run-detail.tsx): its status, and, while a step waits
  * for its AI provider, that wait. A wait begun or ended moves it, as its
  * status, still running, doesn't.
  */
@@ -66,26 +108,19 @@ export const followedState = (trace: WorkflowRunTrace): string =>
     ? trace.status
     : `${trace.status}:${trace.aiProvider.trouble}:${trace.aiProvider.since}`;
 
+/** Ended, or nothing more of it is shown: no need to read it again. */
 const settled = (trace: WorkflowRunTrace): boolean =>
   trace.status === "completed" ||
   trace.status === "failed" ||
   trace.status === "cancelled" ||
   trace.detailsRemoved;
 
-/** The words for a step's state, the diagram's own. */
-const StepState = ({ state }: { state: TraceState }) => {
-  const { t } = useLingui();
-  const label = {
-    reached: t`Reached`,
-    running: t({ message: "Running", context: "an attempt of a step" }),
-    waiting: t`Waiting`,
-    failed: t`Failed`,
-  }[state];
-  return (
-    <Badge variant={state === "failed" ? "destructive" : "secondary"}>
-      {label}
-    </Badge>
-  );
+/** A step's state, as Agent activity says a step's. */
+const activityStates: Readonly<Record<TraceState, ActivityState>> = {
+  reached: "done",
+  running: "working",
+  waiting: "waiting",
+  failed: "failed",
 };
 
 /**
@@ -95,33 +130,37 @@ const StepState = ({ state }: { state: TraceState }) => {
  */
 const failureOf = (code: string): string => expectedMessageOf(code) ?? code;
 
-/** One step its journal recorded: task, loop item, state, attempts, error. */
-const StepLine = ({ step }: { step: TraceStep }) => {
-  const { item, attempts, errorCode } = step;
-  return (
-    <li className="bg-card flex flex-col gap-1 rounded-lg border px-3 py-2">
-      <span className="flex flex-wrap items-center gap-2">
-        <code className="font-medium">{step.task}</code>
-        {item === null ? null : (
-          <span className="text-muted-foreground">
-            <Trans>Item {item}</Trans>
-          </span>
-        )}
-        <StepState state={step.state} />
-        {attempts > 1 ? (
-          <Badge variant="outline">
-            <Plural one="# attempt" other="# attempts" value={attempts} />
-          </Badge>
-        ) : null}
-      </span>
-      <span className="text-muted-foreground text-xs tabular-nums">
-        <time dateTime={step.startedAt}>{formatDateTime(step.startedAt)}</time>
-      </span>
-      {errorCode === null ? null : (
-        <span className="text-destructive">{failureOf(errorCode)}</span>
-      )}
-    </li>
-  );
+/**
+ * The steps its journal recorded, as Agent activity's: the task, with its
+ * loop item, its attempts and when it started in the quiet note after it,
+ * and why it failed as its result.
+ */
+const useActivitySteps = () => {
+  const { t } = useLingui();
+  return (steps: readonly TraceStep[]): ActivityStep[] =>
+    steps.map((step) => {
+      const { item, attempts, errorCode } = step;
+      const notes = [
+        ...(item === null ? [] : [t`Item ${item}`]),
+        ...(attempts > 1
+          ? [
+              t`${plural(attempts, {
+                one: "# attempt",
+                other: "# attempts",
+              })}`,
+            ]
+          : []),
+        formatDateTime(step.startedAt),
+      ];
+      return {
+        id: String(step.ordinal),
+        kind: "tool",
+        title: step.task,
+        state: activityStates[step.state],
+        summary: notes.join(" · "),
+        ...(errorCode === null ? {} : { result: failureOf(errorCode) }),
+      };
+    });
 };
 
 /** What run `runId` did, read again until it ends. */
@@ -137,6 +176,7 @@ const RunTraceDetail = ({
 }) => {
   const core = useCore();
   const { t } = useLingui();
+  const activitySteps = useActivitySteps();
   const [trace, setTrace] = useState<WorkflowRunTrace>();
   const [failure, setFailure] = useState<string>();
   const told = useEffectEvent(onStatus);
@@ -180,23 +220,29 @@ const RunTraceDetail = ({
   }, [core, runId, workflow]);
 
   if (trace === undefined) {
-    return <ErrorText>{failure}</ErrorText>;
+    return failure === undefined ? null : (
+      <div {...stylex.props(styles.did)}>
+        <ErrorText>{failure}</ErrorText>
+      </div>
+    );
   }
   const { version } = trace;
   const states = new Map(trace.tasks.map(({ task, state }) => [task, state]));
   const attempts = new Map(
     trace.tasks.map(({ task, attempts: made }) => [task, made])
   );
+  const stepByStep = t({
+    message: "Step by step",
+    context: "the steps of one run, one under the other",
+  });
   // How it stands is said over it, with its result (run-detail.tsx).
   return (
-    <div className="flex flex-col gap-6">
+    <div {...stylex.props(styles.did)}>
       <ErrorText>{failure}</ErrorText>
       {trace.detailsRemoved ? (
-        <p className="text-muted-foreground">
-          <Trans>
-            The details of this run were removed when its retention ended.
-          </Trans>
-        </p>
+        <Text size="sm" tone="muted">
+          {t`The details of this run were removed when its retention ended.`}
+        </Text>
       ) : (
         <>
           <WorkflowDiagramView
@@ -205,30 +251,27 @@ const RunTraceDetail = ({
             label={t`What the run of version ${version} did`}
             states={states}
           />
-          <section className="flex flex-col gap-2">
-            <h3 className="text-muted-foreground">
-              {t({
-                message: "Step by step",
-                context: "the steps of one run, one under the other",
-              })}
-            </h3>
-            {trace.steps.length === 0 ? (
-              <p className="text-muted-foreground">
-                <Trans>It has recorded no step yet.</Trans>
-              </p>
-            ) : (
-              <ol className="flex flex-col gap-2">
-                {trace.steps.map((step) => (
-                  <StepLine key={step.ordinal} step={step} />
-                ))}
-              </ol>
-            )}
-            {trace.truncated ? (
-              <p className="text-muted-foreground">
-                <Trans>Showing the first part of this run</Trans>
-              </p>
-            ) : null}
-          </section>
+          {/* Said only when nothing is drawn either: a run whose tasks the
+              diagram shows, but that recorded no action, says enough there. */}
+          {trace.steps.length === 0 && trace.tasks.length === 0 ? (
+            <Text size="sm" tone="muted">
+              {t`It has recorded no step yet.`}
+            </Text>
+          ) : null}
+          {trace.steps.length === 0 ? null : (
+            <AgentActivity
+              aria-label={stepByStep}
+              defaultOpen
+              loading={!settled(trace)}
+              steps={activitySteps(trace.steps)}
+              summary={stepByStep}
+            />
+          )}
+          {trace.truncated ? (
+            <Text size="sm" tone="muted">
+              {t`Showing the first part of this run`}
+            </Text>
+          ) : null}
         </>
       )}
     </div>
@@ -239,80 +282,95 @@ const RunTraceDetail = ({
 const RunsTable = ({
   runs,
   names,
+  opened,
   onOpen,
 }: {
   runs: WorkflowResourceRun[];
   names: Names;
+  opened: string | undefined;
   onOpen: (run: WorkflowResourceRun) => void;
 }) => {
   const { t } = useLingui();
-  const captionId = useId();
+  const startedBy = useStartedBy(names);
   if (runs.length === 0) {
-    return (
-      <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
-        <Trans>No runs yet.</Trans>
-      </p>
-    );
+    return <NoRuns />;
   }
   return (
-    <div className="flex flex-col gap-2">
-      <div className="bg-card overflow-hidden rounded-xl border">
-        <Table aria-describedby={captionId}>
-          <TableHeader>
-            <TableRow>
-              <TableHead variant="card">{t`Started`}</TableHead>
-              <TableHead variant="card">{t`Status`}</TableHead>
-              <TableHead variant="card">{t`Version`}</TableHead>
-              <TableHead variant="card">{t`Started by`}</TableHead>
-              <TableHead variant="card">
-                <span className="sr-only">
-                  {t({
+    <SectionCard aria-label={t`Runs`} density="compact" flush>
+      <div {...stylex.props(styles.runs)}>
+        <div {...stylex.props(styles.wideRuns)}>
+          <Table aria-label={t`Runs`}>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t`Started`}</TableHead>
+                <TableHead>{t`Status`}</TableHead>
+                <TableHead>{t`Version`}</TableHead>
+                <TableHead>{t`Started by`}</TableHead>
+                <TableHead
+                  aria-label={t({
                     message: "Open",
                     context: "column: a button that opens a run",
                   })}
-                </span>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+                />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {runs.map((run) => {
+                const started = formatDateTime(run.createdAt);
+                return (
+                  <TableRow chosen={run.id === opened} key={run.id}>
+                    <TableCell lead>{started}</TableCell>
+                    <TableCell>
+                      <RunStatusBadge status={run.status} />
+                    </TableCell>
+                    <TableCell>{run.version}</TableCell>
+                    <TableCell>{startedBy(run.principal)}</TableCell>
+                    <TableCell align="end">
+                      <OpenRun
+                        onOpen={() => {
+                          onOpen(run);
+                        }}
+                        started={started}
+                      />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+        <div {...stylex.props(styles.narrowRuns)}>
+          <ItemGroup aria-label={t`Runs`} separated>
             {runs.map((run) => {
               const started = formatDateTime(run.createdAt);
+              const by = startedBy(run.principal);
+              const { version } = run;
               return (
-                <TableRow key={run.id}>
-                  <TableCell variant="roomy">{started}</TableCell>
-                  <TableCell variant="roomy">
-                    <span className="inline-flex items-center gap-2">
-                      <span
-                        aria-hidden="true"
-                        className={`${runDotOf(run.status)} size-1.75 flex-none rounded-full`}
-                      />
-                      {t(runStatusLabels[run.status])}
+                <Item key={run.id} size="sm">
+                  <ItemContent>
+                    <ItemTitle>{started}</ItemTitle>
+                    <ItemDescription>
+                      {t`Version ${version} · ${by}`}
+                    </ItemDescription>
+                    <span>
+                      <RunStatusBadge status={run.status} />
                     </span>
-                  </TableCell>
-                  <TableCell variant="roomy">{run.version}</TableCell>
-                  <TableCell variant="roomy">
-                    {run.principal === names.me
-                      ? t`You`
-                      : (names.people.get(run.principal) ?? t`Someone else`)}
-                  </TableCell>
-                  <TableCell variant="roomy">
+                  </ItemContent>
+                  <ItemActions>
                     <OpenRun
                       onOpen={() => {
                         onOpen(run);
                       }}
                       started={started}
                     />
-                  </TableCell>
-                </TableRow>
+                  </ItemActions>
+                </Item>
               );
             })}
-          </TableBody>
-        </Table>
+          </ItemGroup>
+        </div>
       </div>
-      <p className="text-muted-foreground" id={captionId}>
-        <Trans>The latest runs, newest first.</Trans>
-      </p>
-    </div>
+    </SectionCard>
   );
 };
 
@@ -324,22 +382,31 @@ const ActivityList = ({
   activity: Loaded<WorkflowActivity[]>;
   names: Names;
 }) => {
+  const { t } = useLingui();
   if (activity.state !== "ready") {
     return <NotLoadedState page={activity} />;
   }
   if (activity.data.length === 0) {
     return (
-      <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
-        <Trans>Nothing has happened yet.</Trans>
-      </p>
+      <Empty size="section">
+        <EmptyHeader>
+          <EmptyDescription>{t`Nothing has happened yet.`}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
+  const label = t({
+    message: "Activity",
+    context: "what a workflow did lately",
+  });
   return (
-    <ol className="bg-card flex flex-col rounded-xl border px-4 py-2">
-      {activity.data.map((row) => (
-        <ActivityLine key={activityKey(row)} names={names} row={row} />
-      ))}
-    </ol>
+    <SectionCard aria-label={label} density="compact" flush>
+      <ol {...stylex.props(styles.lines)}>
+        {activity.data.map((row) => (
+          <ActivityLine key={activityKey(row)} names={names} row={row} />
+        ))}
+      </ol>
+    </SectionCard>
   );
 };
 
@@ -352,8 +419,14 @@ export const Traces = ({
   checkpoint,
   part,
   onPartChange,
+  openRun,
+  onCloseRun,
 }: {
   workflow: string;
+  /** The run the address asks to open, by its ID. */
+  openRun?: string | undefined;
+  /** Clears the run from the address once it is closed. */
+  onCloseRun?: () => void;
   /** Whether the reader is one of the organization's admins. */
   admin: boolean;
   runs: Loaded<WorkflowResourceRun[]>;
@@ -365,11 +438,18 @@ export const Traces = ({
   onPartChange: (part: TracesPart) => void;
 }) => {
   const { t } = useLingui();
-  const [opened, setOpened] = useState<WorkflowResourceRun | null>(null);
+  const [chosen, setChosen] = useState<WorkflowResourceRun | null>(null);
+  // The run the address names (Run's "Open the run"), until one is chosen here.
+  const opened =
+    chosen ??
+    (runs.state === "ready"
+      ? (runs.data.find((run) => run.id === openRun) ?? null)
+      : null);
   // The opened run's status, as its followed trace last said it.
   const [traced, setTraced] = useState<{ runId: string; status: string }>();
+  const openedId = opened === null ? undefined : opened.id;
   return (
-    <div className="flex flex-col gap-6">
+    <div {...stylex.props(styles.traces)}>
       <ToggleGroup
         aria-label={t`What to show of the traces`}
         onValueChange={(value: unknown[]) => {
@@ -381,14 +461,14 @@ export const Traces = ({
         value={[part]}
       >
         {/* Quiet, each with how many, as the prototype has them. */}
-        <ToggleGroupItem value="runs">
+        <Toggle value="runs">
           {t({ message: "Runs", context: "activity of a workflow: what ran" })}
           <ListedCount
             count={runs.state === "ready" ? runs.data.length : undefined}
             of="runs"
           />
-        </ToggleGroupItem>
-        <ToggleGroupItem value="activity">
+        </Toggle>
+        <Toggle value="activity">
           {t({ message: "Activity", context: "what a workflow did lately" })}
           <ListedCount
             count={
@@ -396,41 +476,29 @@ export const Traces = ({
             }
             of="activity"
           />
-        </ToggleGroupItem>
+        </Toggle>
       </ToggleGroup>
       {/* Kept while Activity shows: a test going on stays followed, and
           the answers typed for it stay. */}
-      <div className="flex flex-col gap-6" hidden={part !== "runs"}>
+      <div {...stylex.props(styles.traces, part !== "runs" && styles.away)}>
         {checkpoint === null ? null : (
           <ItemTest revision={checkpoint} workflow={workflow} />
         )}
-        {runs.state === "ready" ? (
-          <RunsTable names={names} onOpen={setOpened} runs={runs.data} />
-        ) : (
-          <NotLoadedState page={runs} />
-        )}
-      </div>
-      {part === "activity" ? (
-        <ActivityList activity={activity} names={names} />
-      ) : null}
-      <RunSheet
-        admin={admin}
-        names={names}
-        onClose={() => {
-          setOpened(null);
-        }}
-        opened={opened}
-        status={
-          traced !== undefined && traced.runId === opened?.id
-            ? traced.status
-            : null
-        }
-        steps={
-          opened === null ? null : (
-            <section className="flex flex-col gap-3">
-              <h3 className="text-muted-foreground">
-                <Trans>What it did</Trans>
-              </h3>
+        <RunBeside
+          admin={admin}
+          names={names}
+          onClose={() => {
+            setChosen(null);
+            onCloseRun?.();
+          }}
+          opened={opened}
+          status={
+            traced !== undefined && traced.runId === openedId
+              ? traced.status
+              : null
+          }
+          steps={
+            opened === null ? null : (
               <RunTraceDetail
                 onStatus={(status) => {
                   setTraced({ runId: opened.id, status });
@@ -438,11 +506,25 @@ export const Traces = ({
                 runId={opened.id}
                 workflow={workflow}
               />
-            </section>
-          )
-        }
-        workflow={workflow}
-      />
+            )
+          }
+          workflow={workflow}
+        >
+          {runs.state === "ready" ? (
+            <RunsTable
+              names={names}
+              onOpen={setChosen}
+              opened={openedId}
+              runs={runs.data}
+            />
+          ) : (
+            <NotLoadedState page={runs} />
+          )}
+        </RunBeside>
+      </div>
+      {part === "activity" ? (
+        <ActivityList activity={activity} names={names} />
+      ) : null}
     </div>
   );
 };

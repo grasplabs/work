@@ -10,56 +10,64 @@ import type {
 } from "@grasp-os/shared/http-connections";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@grasp-os/ui/components/dialog";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
-import { Textarea } from "@grasp-os/ui/components/textarea";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { PlusIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
 import { useId, useRef, useState } from "react";
-import type { ReactNode } from "react";
 
-import { ErrorText } from "../error-text.tsx";
 import {
   formatDate,
   formatDateTime,
   formatList,
   formatNumber,
 } from "../format.ts";
-import { SectionTitle } from "../frame/page.tsx";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../grasp/alert-dialog/index.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import {
+  Dialog,
+  DialogAction,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogTitle,
+} from "../grasp/dialog/index.ts";
+import { Field, FieldDescription, FieldLabel } from "../grasp/field/index.ts";
+import { Form } from "../grasp/form/index.ts";
+import { Plus, Web } from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { KeyValueList } from "../grasp/key-value/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import {
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "../grasp/select/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { Textarea } from "../grasp/textarea/index.ts";
+import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { httpConnectionsOf } from "./integrations.ts";
 import type { HttpListed } from "./integrations.ts";
 import { useChange } from "./use-change.ts";
@@ -129,12 +137,13 @@ const prefixesOf = (text: string): string[] =>
     .filter((line) => line !== "");
 
 /**
- * The form to approve an HTTP connection: what is typed, the credential
- * above all, and why the last try failed live only as long as it is open.
+ * The form to approve an HTTP connection, on Grasp UI's fields: what is
+ * typed, the credential above all, and why the last try failed live only
+ * as long as it is open. Its methods are chosen by seeing, each a toggle.
  */
 const AddHttpForm = ({ onAdded }: { onAdded: () => void }) => {
   const { t } = useLingui();
-  const ids = useId();
+  const id = useId();
   const { busy, failure, change } = useChange();
   const [problem, setProblem] = useState<string>();
   const [name, setName] = useState("");
@@ -150,7 +159,7 @@ const AddHttpForm = ({ onAdded }: { onAdded: () => void }) => {
     const input: HttpConnectionInput = {
       name: name.trim(),
       origin: origin.trim(),
-      // In the order offered, whatever order they were ticked in.
+      // In the order offered, whatever order they were chosen in.
       methods: httpMethods.filter((method) => methods.includes(method)),
       pathPrefixes: prefixesOf(prefixes),
       credential:
@@ -171,168 +180,124 @@ const AddHttpForm = ({ onAdded }: { onAdded: () => void }) => {
     });
   };
 
+  const said = problem ?? failure;
   return (
     <>
-      <DialogHeader>
-        <DialogTitle>
-          <Trans>Add an HTTP connection</Trans>
-        </DialogTitle>
-        <DialogDescription>
-          <Trans>
-            An outside API that Apps and workflows can call through Grasp, once
-            you allow them to: only this origin, with these methods, under these
-            paths.
-          </Trans>
-        </DialogDescription>
-      </DialogHeader>
-      <form
-        className="flex flex-col gap-4"
-        id={`${ids}-form`}
-        onSubmit={(event) => {
-          event.preventDefault();
-          approve();
-        }}
-      >
-        <Field>
-          <FieldLabel htmlFor={`${ids}-name`}>
-            <Trans>Name</Trans>
-          </FieldLabel>
-          <Input
-            autoComplete="off"
-            id={`${ids}-name`}
-            maxLength={httpLimits.nameChars}
-            onChange={(event) => {
-              setName(event.target.value);
-            }}
-            placeholder={t`Billing API`}
-            value={name}
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`${ids}-origin`}>
-            <Trans>Origin</Trans>
-          </FieldLabel>
-          <Input
-            autoComplete="off"
-            id={`${ids}-origin`}
-            inputMode="url"
-            onChange={(event) => {
-              setOrigin(event.target.value);
-            }}
-            placeholder="https://api.example.com"
-            spellCheck={false}
-            type="url"
-            value={origin}
-          />
-          <FieldDescription>
-            <Trans>
-              https:// and a public host name, with nothing after it.
-            </Trans>
-          </FieldDescription>
-        </Field>
-        <FieldSet>
-          <FieldLegend variant="label">
-            <Trans>Methods it allows</Trans>
-          </FieldLegend>
-          <ul className="flex flex-wrap gap-x-4 gap-y-1">
-            {httpMethods.map((method) => (
-              <li key={method}>
-                <label className="flex items-center gap-2 font-mono">
-                  <Checkbox
-                    checked={methods.includes(method)}
-                    onCheckedChange={(checked) => {
-                      const rest = methods.filter((one) => one !== method);
-                      setMethods(checked ? [...rest, method] : rest);
-                    }}
-                  />
-                  {method}
-                </label>
-              </li>
-            ))}
-          </ul>
-        </FieldSet>
-        <Field>
-          <FieldLabel htmlFor={`${ids}-prefixes`}>
-            <Trans>Path prefixes it allows, one per line</Trans>
-          </FieldLabel>
-          <Textarea
-            id={`${ids}-prefixes`}
-            onChange={(event) => {
-              setPrefixes(event.target.value);
-            }}
-            placeholder="/v1/invoices"
-            spellCheck={false}
-            value={prefixes}
-            variant="code"
-          />
-          <FieldDescription>
-            <Trans>Each allows everything under it; / allows all paths.</Trans>
-          </FieldDescription>
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`${ids}-kind`}>
-            <Trans>Credential</Trans>
-          </FieldLabel>
-          <NativeSelect
-            id={`${ids}-kind`}
-            onChange={(event) => {
-              setKind(event.target.value === "bearer" ? "bearer" : "header");
-            }}
-            value={kind}
-          >
-            <NativeSelectOption value="header">
-              {t`A secret in a header`}
-            </NativeSelectOption>
-            <NativeSelectOption value="bearer">
-              {t`A bearer token`}
-            </NativeSelectOption>
-          </NativeSelect>
-        </Field>
-        {kind === "header" ? (
+      <DialogBody>
+        <Form
+          id={id}
+          onSubmit={(event) => {
+            event.preventDefault();
+            approve();
+          }}
+        >
           <Field>
-            <FieldLabel htmlFor={`${ids}-header`}>
-              <Trans>Header name</Trans>
-            </FieldLabel>
+            <FieldLabel>{t`Name`}</FieldLabel>
             <Input
               autoComplete="off"
-              id={`${ids}-header`}
-              maxLength={64}
-              onChange={(event) => {
-                setHeader(event.target.value);
-              }}
-              spellCheck={false}
-              value={header}
+              maxLength={httpLimits.nameChars}
+              onValueChange={setName}
+              placeholder={t`Billing API`}
+              value={name}
             />
           </Field>
-        ) : null}
-        <Field>
-          <FieldLabel htmlFor={`${ids}-secret`}>
-            {kind === "bearer" ? t`Token` : t`Secret`}
-          </FieldLabel>
-          <Input
-            autoComplete="off"
-            id={`${ids}-secret`}
-            maxLength={httpLimits.secretChars}
-            onChange={(event) => {
-              setSecret(event.target.value);
-            }}
-            spellCheck={false}
-            type="password"
-            value={secret}
-          />
-          <FieldDescription>
-            <Trans>
-              At least {shortest} characters. Grasp keeps it sealed and never
-              shows it again, not even to you. To change it, add another
-              connection and revoke this one.
-            </Trans>
-          </FieldDescription>
-        </Field>
-        <ErrorText>{problem ?? failure}</ErrorText>
-      </form>
-      <DialogFooter closeLabel={t`Cancel`} showCloseButton>
-        <Button disabled={busy} form={`${ids}-form`} type="submit">
-          <Trans>Add the connection</Trans>
+          <Field>
+            <FieldLabel>{t`Origin`}</FieldLabel>
+            <Input
+              autoComplete="off"
+              onValueChange={setOrigin}
+              placeholder="https://api.example.com"
+              spellCheck={false}
+              type="url"
+              value={origin}
+            />
+            <FieldDescription>
+              {t`https:// and a public host name, with nothing after it.`}
+            </FieldDescription>
+          </Field>
+          <Field>
+            <FieldLabel>{t`Methods it allows`}</FieldLabel>
+            <ToggleGroup
+              aria-label={t`Methods it allows`}
+              multiple
+              onValueChange={(next: unknown[]) => {
+                setMethods(
+                  httpMethods.filter((method) => next.includes(method))
+                );
+              }}
+              value={methods}
+            >
+              {httpMethods.map((method) => (
+                <Toggle key={method} value={method}>
+                  {method}
+                </Toggle>
+              ))}
+            </ToggleGroup>
+          </Field>
+          <Field>
+            <FieldLabel>{t`Path prefixes it allows, one per line`}</FieldLabel>
+            <Textarea
+              onValueChange={setPrefixes}
+              placeholder="/v1/invoices"
+              rows={3}
+              spellCheck={false}
+              value={prefixes}
+            />
+            <FieldDescription>
+              {t`Each allows everything under it; / allows all paths.`}
+            </FieldDescription>
+          </Field>
+          <Field>
+            <FieldLabel>{t`Credential`}</FieldLabel>
+            <Select
+              items={[
+                { value: "header", label: t`A secret in a header` },
+                { value: "bearer", label: t`A bearer token` },
+              ]}
+              onValueChange={(value) => {
+                setKind(value === "bearer" ? "bearer" : "header");
+              }}
+              value={kind}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent />
+            </Select>
+          </Field>
+          {kind === "header" ? (
+            <Field>
+              <FieldLabel>{t`Header name`}</FieldLabel>
+              <Input
+                autoComplete="off"
+                maxLength={64}
+                onValueChange={setHeader}
+                spellCheck={false}
+                value={header}
+              />
+            </Field>
+          ) : null}
+          <Field>
+            <FieldLabel>{kind === "bearer" ? t`Token` : t`Secret`}</FieldLabel>
+            <Input
+              autoComplete="off"
+              maxLength={httpLimits.secretChars}
+              onValueChange={setSecret}
+              spellCheck={false}
+              type="password"
+              value={secret}
+            />
+            <FieldDescription>
+              {t`At least ${shortest} characters. Grasp keeps it sealed and never shows it again, not even to you. To change it, add another connection and revoke this one.`}
+            </FieldDescription>
+          </Field>
+          {said === undefined ? null : <Alert title={said} variant="danger" />}
+        </Form>
+      </DialogBody>
+      <DialogFooter>
+        <DialogAction>{t`Cancel`}</DialogAction>
+        <Button disabled={busy} form={id} type="submit" variant="ink">
+          {t`Add the connection`}
         </Button>
       </DialogFooter>
     </>
@@ -351,31 +316,34 @@ const AddHttpConnection = () => {
   // takes away the form someone is typing in now.
   const latest = useRef(0);
   return (
-    <Dialog
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (next) {
+    <>
+      <Button
+        icon={Plus}
+        onClick={() => {
           latest.current += 1;
           setOpened(latest.current);
-        }
-      }}
-      open={open}
-    >
-      <DialogTrigger render={<Button variant="outline" />}>
-        <PlusIcon data-icon="inline-start" />
-        <Trans>Add HTTP connection</Trans>
-      </DialogTrigger>
-      <DialogContent closeLabel={t`Close`}>
-        <AddHttpForm
-          key={opened}
-          onAdded={() => {
-            if (latest.current === opened) {
-              setOpen(false);
-            }
-          }}
-        />
-      </DialogContent>
-    </Dialog>
+          setOpen(true);
+        }}
+        size="sm"
+      >
+        {t`Add HTTP connection`}
+      </Button>
+      <Dialog onOpenChange={setOpen} open={open}>
+        <DialogContent closeLabel={t`Close`}>
+          <DialogTitle>{t`Add an HTTP connection`}</DialogTitle>
+          {/* Mounted anew each time it opens: nothing of the last time
+              is left in it, not the credential, nor why an add failed. */}
+          <AddHttpForm
+            key={opened}
+            onAdded={() => {
+              if (latest.current === opened) {
+                setOpen(false);
+              }
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+    </>
   );
 };
 
@@ -383,7 +351,8 @@ const AddHttpConnection = () => {
  * Revoking, once confirmed: its credential goes, and everything that used
  * it loses it. Named with when it was added too: changing a credential
  * means adding another connection, often by the same name, before
- * revoking the old one.
+ * revoking the old one. A failure says so on the dialog's button, and why
+ * under it.
  */
 const Revoke = ({
   name,
@@ -395,75 +364,98 @@ const Revoke = ({
   createdAt: string;
 }) => {
   const { t } = useLingui();
-  const { busy, failure, change } = useChange();
-  const [confirming, setConfirming] = useState(false);
+  const { failure, change } = useChange();
   const added = formatDateTime(createdAt);
   return (
-    <div className="flex flex-col items-end gap-1">
-      <Button
+    <AlertDialog>
+      <AlertDialogTrigger
         aria-label={t`Revoke ${name}, added ${added}`}
-        disabled={busy}
-        onClick={() => {
-          setConfirming(true);
-        }}
         size="sm"
-        variant="outline"
+        variant="ghost"
       >
-        <Trans context="revoke an HTTP connection">Revoke</Trans>
-      </Button>
-      {/* Closed as it is confirmed, and off while it runs, so it is asked
-          once; what goes wrong shows under the button. */}
-      <AlertDialog onOpenChange={setConfirming} open={confirming}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              <Trans>
-                Revoke {name}, added {added}?
-              </Trans>
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              <Trans>
-                Its credential is deleted, and every App and workflow loses it.
-                Add it again to use it again.
-              </Trans>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>
-              <Trans>Cancel</Trans>
-            </AlertDialogCancel>
-            <AlertDialogAction
-              disabled={busy}
-              onClick={() => {
-                setConfirming(false);
-                void change(
-                  async (session) => await session.connections.disconnect(id)
-                );
-              }}
-              variant="destructive"
-            >
-              <Trans>Revoke the connection</Trans>
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <ErrorText>{failure}</ErrorText>
-    </div>
+        {t({ message: "Revoke", context: "revoke an HTTP connection" })}
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogTitle>{t`Revoke ${name}, added ${added}?`}</AlertDialogTitle>
+        <AlertDialogDescription>
+          {t`Its credential is deleted, and every App and workflow loses it. Add it again to use it again.`}
+        </AlertDialogDescription>
+        {failure === undefined ? null : (
+          <Alert title={failure} variant="danger" />
+        )}
+        <AlertDialogFooter>
+          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+          <AlertDialogAction
+            action={async () => {
+              let revoked = false;
+              await change(async (session) => {
+                await session.connections.disconnect(id);
+                revoked = true;
+              });
+              if (!revoked) {
+                throw new Error("Not revoked");
+              }
+            }}
+            failedLabel={t`Couldn't revoke`}
+            variant="danger"
+          >
+            {t`Revoke the connection`}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 };
 
-const Detail = ({ term, children }: { term: string; children: ReactNode }) => (
-  <div className="flex flex-col gap-0.5 sm:flex-row sm:gap-8">
-    <dt className="text-muted-foreground flex-none sm:w-32">{term}</dt>
-    <dd className="min-w-0 break-words">{children}</dd>
-  </div>
-);
+/** One HTTP connection, as a row: where it reaches, what it allows, and for admins Revoke. */
+const HttpRow = ({
+  listed: { connection, http },
+  manages,
+}: {
+  listed: HttpListed;
+  manages: boolean;
+}) => {
+  const { t } = useLingui();
+  const methods = formatList(http.methods);
+  const paths = formatList(http.pathPrefixes);
+  const header = http.credentialHeader;
+  const added = formatDate(connection.createdAt);
+  const { origin } = http;
+  return (
+    <Item size="sm">
+      <ItemMedia icon={Web} />
+      <ItemContent>
+        <ItemTitle>{http.name}</ItemTitle>
+        <ItemDescription>
+          {t`${origin} · ${methods} under ${paths} · sent in ${header} · added ${added}`}
+        </ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        {connection.status === "needs_reauth" ? (
+          <Badge tone="attention">{t`Doesn't work now`}</Badge>
+        ) : null}
+        {manages ? (
+          <Revoke
+            createdAt={connection.createdAt}
+            id={connection.id}
+            name={http.name}
+          />
+        ) : null}
+      </ItemActions>
+    </Item>
+  );
+};
+
+const styles = stylex.create({
+  item: { minWidth: 0, listStyle: "none" },
+  mono: { fontFamily: grasp.fontMono },
+});
 
 /** One HTTP connection: where it reaches, what it allows, and, for admins, revoking it. */
 export const HttpConnectionItem = ({
   listed: { connection, http },
   manages,
-  heading: Heading = "h3",
+  heading = "h3",
 }: {
   listed: HttpListed;
   manages: boolean;
@@ -474,50 +466,60 @@ export const HttpConnectionItem = ({
   const ranOut = connection.status === "needs_reauth";
   const header = http.credentialHeader;
   return (
-    <li className="bg-card flex flex-col gap-4 rounded-xl border p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Heading className="font-medium">{http.name}</Heading>
-        {manages ? (
-          <Revoke
-            createdAt={connection.createdAt}
-            id={connection.id}
-            name={http.name}
-          />
+    <li {...stylex.props(styles.item)}>
+      <SectionCard
+        actions={
+          manages ? (
+            <Revoke
+              createdAt={connection.createdAt}
+              id={connection.id}
+              name={http.name}
+            />
+          ) : undefined
+        }
+        density="compact"
+        headingLevel={heading === "h4" ? 4 : 3}
+        title={http.name}
+      >
+        <KeyValueList
+          items={[
+            { key: t`Origin`, value: http.origin, mono: true },
+            { key: t`Methods`, value: formatList(http.methods), mono: true },
+            {
+              key: t`Paths`,
+              value: formatList(http.pathPrefixes),
+              mono: true,
+            },
+            {
+              key: t`Credential`,
+              value: (
+                <Trans>
+                  Sent in <span {...stylex.props(styles.mono)}>{header}</span>,
+                  never shown
+                </Trans>
+              ),
+            },
+            { key: t`Added on`, value: formatDate(connection.createdAt) },
+          ]}
+          variant="inline"
+        />
+        {ranOut ? (
+          <Text size="sm" tone="muted">
+            <Trans>
+              It doesn&apos;t work now. An admin can revoke it and add it again
+              with a new credential.
+            </Trans>
+          </Text>
         ) : null}
-      </div>
-      <dl className="flex flex-col gap-3">
-        <Detail term={t`Origin`}>
-          <span className="font-mono">{http.origin}</span>
-        </Detail>
-        <Detail term={t`Methods`}>
-          <span className="font-mono">{formatList(http.methods)}</span>
-        </Detail>
-        <Detail term={t`Paths`}>
-          <span className="font-mono">{formatList(http.pathPrefixes)}</span>
-        </Detail>
-        <Detail term={t`Credential`}>
-          <Trans>
-            Sent in <span className="font-mono">{header}</span>, never shown
-          </Trans>
-        </Detail>
-        <Detail term={t`Added on`}>{formatDate(connection.createdAt)}</Detail>
-      </dl>
-      {ranOut ? (
-        <p className="text-muted-foreground">
-          <Trans>
-            It doesn&apos;t work now. An admin can revoke it and add it again
-            with a new credential.
-          </Trans>
-        </p>
-      ) : null}
+      </SectionCard>
     </li>
   );
 };
 
 /**
- * The HTTP connections this person can see, under their own heading, and
- * for admins the way to add one. Nothing for anyone else while there are
- * none.
+ * The HTTP connections this person can see, as a compact card of rows,
+ * and for admins the way to add one at its head. Nothing for anyone else
+ * while there are none.
  */
 export const HttpConnections = ({
   connections,
@@ -541,35 +543,32 @@ export const HttpConnections = ({
     return null;
   }
   return (
-    <section
-      aria-labelledby="integrations-http"
-      className="flex flex-col gap-2"
+    <SectionCard
+      actions={manages ? <AddHttpConnection /> : undefined}
+      aside={
+        shown.length === 0 ? undefined : (
+          <Text element="span" size="sm" tone="muted">
+            {formatNumber(shown.length)}
+          </Text>
+        )
+      }
+      density="compact"
+      flush
+      info={t`Outside APIs an admin approved, by origin, methods and paths. Apps and workflows call them only with a permission.`}
+      infoLabel={t`More about HTTP connections`}
+      title={t`HTTP connections`}
     >
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <SectionTitle
-          count={
-            connections === undefined ? undefined : formatNumber(shown.length)
-          }
-          id="integrations-http"
-        >
-          <Trans>HTTP connections</Trans>
-        </SectionTitle>
-        {manages ? <AddHttpConnection /> : null}
-      </div>
-      <p className="text-muted-foreground">
-        {t`Outside APIs an admin approved, by origin, methods and paths. Apps and workflows call them only with a permission.`}
-      </p>
       {shown.length === 0 ? null : (
-        <ul className="flex flex-col gap-3">
+        <ItemGroup aria-label={t`HTTP connections`} separated>
           {shown.map((listed) => (
-            <HttpConnectionItem
+            <HttpRow
               key={listed.connection.id}
               listed={listed}
               manages={manages}
             />
           ))}
-        </ul>
+        </ItemGroup>
       )}
-    </section>
+    </SectionCard>
   );
 };

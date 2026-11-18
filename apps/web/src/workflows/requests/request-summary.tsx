@@ -2,38 +2,44 @@ import type {
   SummaryVia,
   WeeklySummary,
 } from "@grasp-os/shared/stephen-requests";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-} from "@grasp-os/ui/components/card";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+
+import { formatDay, formatNumber, formatPercent } from "../../format.ts";
+import { Alert } from "../../grasp/alert/index.ts";
+import { Card } from "../../grasp/card/index.ts";
+import { BrandTeams, Mail } from "../../grasp/icons/index.ts";
 import {
   Sheet,
+  SheetBody,
   SheetContent,
   SheetDescription,
-  SheetHeader,
   SheetTitle,
   SheetTrigger,
-} from "@grasp-os/ui/components/sheet";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
-import { useLingui } from "@lingui/react/macro";
-import { MailIcon } from "lucide-react";
-
-import { ErrorText } from "../../error-text.tsx";
-import { formatDay, formatNumber, formatPercent } from "../../format.ts";
+} from "../../grasp/sheet/index.ts";
+import { Text } from "../../grasp/text/index.ts";
+import { Toggle, ToggleGroup } from "../../grasp/toggle/index.ts";
+import { grasp } from "../../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../../use-core-action.ts";
-import { PlaceLogo } from "./request-parts.tsx";
 
 // The weekly summary, as the prototype's `request-summary.tsx`: every
 // Monday morning, to whoever turned it on, in Microsoft Teams from Stephen
 // or by mail, so nobody has to remember to open the page. Shown here as it
 // would arrive, from what core would send now (stephen-summary.ts), with
 // where it goes: off, Teams, or mail.
+
+const styles = stylex.create({
+  body: { display: "flex", flexDirection: "column", gap: grasp.space6 },
+  via: { display: "flex", flexDirection: "column", gap: grasp.space2 },
+  preview: { display: "flex", flexDirection: "column", gap: grasp.space3 },
+  lines: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+    margin: 0,
+    paddingInlineStart: grasp.space4,
+  },
+});
 
 /** The lines of the summary, as it would arrive. */
 const useSummaryLines = (summary: WeeklySummary): string[] => {
@@ -70,6 +76,12 @@ const useSummaryLines = (summary: WeeklySummary): string[] => {
   return lines;
 };
 
+/** Where the summary goes, from a toggle group's pressed values: off when none is. */
+const viaOf = (value: readonly string[]): SummaryVia | null => {
+  const [next] = value;
+  return next === "teams" || next === "email" ? next : null;
+};
+
 /** The summary's preview, and where it goes. */
 export const RequestSummary = ({
   summary,
@@ -90,65 +102,65 @@ export const RequestSummary = ({
     await onChanged();
   };
   return (
-    <Sheet>
-      <SheetTrigger render={<Button variant="outline" />}>
-        <MailIcon data-icon="inline-start" />
+    <Sheet size="md">
+      <SheetTrigger icon={Mail} variant="quiet">
         {t`Weekly summary`}
       </SheetTrigger>
-      <SheetContent
-        className="overflow-y-auto"
-        closeLabel={t`Close`}
-        size="wide"
-      >
-        <SheetHeader className="mr-8">
-          <SheetTitle>{t`Weekly summary`}</SheetTitle>
-          <SheetDescription>{t`Every Monday morning, to you`}</SheetDescription>
-        </SheetHeader>
-        <div className="flex flex-col gap-6 px-4 pb-6">
-          <div className="flex flex-col gap-1">
-            <ToggleGroup
-              aria-label={t`Where the summary goes`}
-              disabled={busy}
-              onValueChange={(value: unknown[]) => {
-                const [next] = value;
-                void choose(next === "teams" || next === "email" ? next : null);
-              }}
-              spacing={0}
-              value={[summary.via ?? "off"]}
-              variant="outline"
-            >
-              <ToggleGroupItem value="off">
-                {t({ message: "Off", context: "weekly summary not sent" })}
-              </ToggleGroupItem>
-              <ToggleGroupItem disabled={!summary.teamsOpen} value="teams">
-                <PlaceLogo place="teams" />
-                Microsoft Teams
-              </ToggleGroupItem>
-              <ToggleGroupItem value="email">
-                <MailIcon />
-                {t`Email`}
-              </ToggleGroupItem>
-            </ToggleGroup>
-            {summary.teamsOpen ? null : (
-              <p className="text-muted-foreground text-xs">
-                {t`Stephen can send it in Microsoft Teams once you've had a chat with him there.`}
-              </p>
-            )}
-            <ErrorText>{failure}</ErrorText>
+      <SheetContent closeLabel={t`Close`}>
+        <SheetTitle>{t`Weekly summary`}</SheetTitle>
+        <SheetDescription>{t`Every Monday morning, to you`}</SheetDescription>
+        <SheetBody>
+          <div {...stylex.props(styles.body)}>
+            <div {...stylex.props(styles.via)}>
+              <ToggleGroup
+                aria-label={t`Where the summary goes`}
+                disabled={busy}
+                onValueChange={(value: string[]) => {
+                  void choose(viaOf(value));
+                }}
+                value={[summary.via ?? "off"]}
+              >
+                <Toggle value="off">
+                  {t({ message: "Off", context: "weekly summary not sent" })}
+                </Toggle>
+                <Toggle
+                  disabled={!summary.teamsOpen}
+                  icon={BrandTeams}
+                  value="teams"
+                >
+                  Microsoft Teams
+                </Toggle>
+                <Toggle icon={Mail} value="email">
+                  {t`Email`}
+                </Toggle>
+              </ToggleGroup>
+              {summary.teamsOpen ? null : (
+                <Text size="xs" tone="muted">
+                  {t`Stephen can send it in Microsoft Teams once you've had a chat with him there.`}
+                </Text>
+              )}
+              {failure === undefined ? null : (
+                <Alert tone="danger">{failure}</Alert>
+              )}
+            </div>
+            <Card padding="md" variant="soft">
+              <div {...stylex.props(styles.preview)}>
+                <Text size="sm" tone="muted">
+                  {t`Stephen · ${from} to ${to}`}
+                </Text>
+                <ul {...stylex.props(styles.lines)}>
+                  {lines.map((line) => (
+                    <li key={line}>
+                      <Text element="span" size="sm">
+                        {line}
+                      </Text>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </Card>
           </div>
-          <Card size="sm">
-            <CardHeader>
-              <CardDescription>{t`Stephen · ${from} to ${to}`}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ul className="flex list-disc flex-col gap-1.5 pl-4">
-                {lines.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
-        </div>
+        </SheetBody>
       </SheetContent>
     </Sheet>
   );

@@ -30,6 +30,8 @@ export interface ChartContextValue {
   /** How each ChartLine is drawn, by its series, so its name at the end matches it. */
   looks?: Readonly<Record<string, ChartLineLook>>;
   setLook?: (series: string, look: ChartLineLook) => void;
+  /** A part that writes values (a y axis, a tooltip) gives its format, so the chart's table writes them alike. */
+  setValueFormat?: (format: (value: number) => string) => void;
 }
 
 /** How a ChartLine is drawn: told apart by weight and dash, never by colour alone. */

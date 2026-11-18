@@ -1,35 +1,40 @@
-import {
-  PageSidebar,
-  PageSidebarBody,
-  PageSidebarTop,
-  PageSidebarRailButton,
-  PageSidebarRailDivider,
-  PageSidebarRailExpand,
-} from "@grasp-os/ui/components/page-sidebar";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link, useMatchRoute } from "@tanstack/react-router";
-import {
-  ActivityIcon,
-  BrainIcon,
-  Building2Icon,
-  ChevronDownIcon,
-  InboxIcon,
-  LibraryIcon,
-  NotebookPenIcon,
-  TargetIcon,
-  UsersIcon,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
+import type { ReactElement, ReactNode } from "react";
 
 import { usePageSidebarFold } from "../frame/page-sidebar.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { focus } from "../grasp/focus/focus.ts";
+import {
+  Brain as BrainMark,
+  Chart,
+  ChevronDown,
+  ChevronRight,
+  Company,
+  Folder as FolderMark,
+  Icon,
+  Inbox,
+  Note as NoteMark,
+  People,
+  Rocket,
+  SidebarToggle,
+} from "../grasp/icons/index.ts";
+import type { IconData } from "../grasp/icons/index.ts";
+import { Separator } from "../grasp/separator/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "../grasp/tooltip/index.ts";
 import { LOBES, TEAM_FOLDER } from "./brain-atlas.ts";
 import type { Atlas, AtlasRegion, RegionId } from "./brain-atlas.ts";
-import { dotClass } from "./brain-colors.ts";
 import { findFolder } from "./brain-sections.ts";
-import { countNotes, folderTree } from "./brain.ts";
-import type { Brain, Folder, Note } from "./brain.ts";
+import { countNotes, folderTree, groupOf } from "./brain.ts";
+import type { Brain, Folder, Group as NoteGroup, Note } from "./brain.ts";
 import { RegionMenu, RegionRename, TeamMenu } from "./region-edit.tsx";
 
 // The brain's navigation, as the prototype has it (`components/brain-nav.tsx`):
@@ -76,33 +81,278 @@ const flip = (previous: Set<string>, key: string): Set<string> => {
 const pathKeys = (note: Note): string[] =>
   note.path.map((_, depth) => note.path.slice(0, depth + 1).join("/"));
 
-const chevron = (expanded: boolean): string =>
-  expanded
-    ? "text-muted-foreground size-3.5 transition-transform"
-    : "text-muted-foreground size-3.5 -rotate-90 transition-transform";
+const PHONE = media.belowTablet;
+const HOVER = media.hover;
+const REDUCED = media.reduced;
 
-const NoteItem = ({ note }: { note: Note }) => (
-  <Link
-    className="text-muted-foreground hover:bg-accent hover:text-foreground data-[status=active]:bg-accent data-[status=active]:text-foreground flex items-center gap-2 rounded-md px-2 py-1 text-sm data-[status=active]:font-medium"
-    params={{ noteId: note.id }}
-    // A piece of work opens on what Grasp knows about it.
-    search={note.kind === "candidate" ? { knowledge: true } : {}}
-    title={note.title}
-    to="/brain/$noteId"
-  >
-    <span
-      aria-hidden="true"
-      className="flex size-3 flex-none items-center justify-center"
-    >
-      <span className={`size-1.5 rounded-full ${dotClass(note.kind)}`} />
-    </span>
-    <span className="min-w-0 flex-1 truncate">{note.title}</span>
-    {/* A source shows how many statements were tagged in it, since statements live there. */}
-    {note.kind === "source" && note.statementIds.length > 0 ? (
-      <span className="text-xs tabular-nums">{note.statementIds.length}</span>
-    ) : null}
-  </Link>
+// The room between the rows of a list.
+const ROW_GAP = `calc(${grasp.space1} / 2)`;
+
+/**
+ * Each kind of note's dot, in the brain's own hue for its group, the same as the atlas and a
+ * note's page draw it (brain-colors.ts): those hues are the brain's, not the theme's.
+ */
+const dots = stylex.create({
+  company: { backgroundColor: grasp.ink },
+  vision: { backgroundColor: "var(--graph-vision)" },
+  teams: { backgroundColor: "var(--graph-teams)" },
+  tools: { backgroundColor: "var(--graph-tools)" },
+  statements: { backgroundColor: "var(--graph-statements)" },
+  candidates: { backgroundColor: "var(--graph-candidates)" },
+  // A gap is hollow, and so is an application nobody named.
+  gaps: {
+    borderWidth: grasp.hairline,
+    borderStyle: "solid",
+    borderColor: "var(--graph-gaps)",
+  },
+  app: {
+    borderWidth: grasp.hairline,
+    borderStyle: "solid",
+    borderColor: "var(--graph-tools)",
+  },
+  sources: { backgroundColor: "var(--graph-sources)" },
+});
+
+const dotOf = (note: Note): keyof typeof dots =>
+  note.kind === "app" ? "app" : (groupOf[note.kind] satisfies NoteGroup);
+
+const styles = stylex.create({
+  // The column beside the page: open, or folded to a rail of icons. On a phone neither shows.
+  aside: {
+    display: { default: "flex", [PHONE]: "none" },
+    flexDirection: "column",
+    flexShrink: 0,
+    boxSizing: "border-box",
+    width: grasp.sidebarWidth,
+    minHeight: 0,
+    overflow: "hidden",
+    borderInlineEndWidth: grasp.hairline,
+    borderInlineEndStyle: "solid",
+    borderInlineEndColor: grasp.line,
+    transitionProperty: { default: "width", [REDUCED]: "none" },
+    transitionDuration: grasp.durationUi,
+    transitionTimingFunction: grasp.ease,
+  },
+  folded: { width: grasp.sidebarRail },
+  rail: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: grasp.space1,
+    minHeight: 0,
+    overflowY: "auto",
+    paddingBlock: grasp.space3,
+  },
+  railLine: { width: grasp.space6, marginBlock: grasp.space1 },
+  // The home, with the way to fold the navigation beside it.
+  top: {
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    gap: grasp.space2,
+    paddingInline: grasp.space3,
+    paddingTop: grasp.space3,
+  },
+  topFirst: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minWidth: 0,
+  },
+  // What the open navigation holds under its top row; it scrolls on its own.
+  body: {
+    display: "flex",
+    flexDirection: "column",
+    gap: ROW_GAP,
+    flexGrow: 1,
+    minHeight: 0,
+    overflowY: "auto",
+    paddingInline: grasp.space3,
+    paddingTop: ROW_GAP,
+    paddingBottom: grasp.space3,
+  },
+  line: { marginBlock: grasp.space2 },
+  // A row of the list: an icon or a dot, the name, what it counts and its controls.
+  row: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space2,
+    boxSizing: "border-box",
+    minHeight: grasp.treeRow,
+    minWidth: 0,
+    paddingInline: grasp.treeRowInset,
+    borderRadius: grasp.treeRowCorner,
+    color: grasp.ink,
+    fontFamily: grasp.fontSans,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    textDecoration: "none",
+    backgroundColor: {
+      default: "transparent",
+      ":hover": { default: null, [HOVER]: grasp.treeFillHover },
+    },
+    transitionProperty: "background-color",
+    transitionDuration: grasp.durationHover,
+    transitionTimingFunction: grasp.ease,
+  },
+  // A note: in the quieter ink, its group's in full colour.
+  note: { color: grasp.muted },
+  // The page that is open.
+  current: {
+    backgroundColor: grasp.treeFillCurrent,
+    color: grasp.ink,
+    fontWeight: grasp.weightMedium,
+  },
+  // A row whose name is a link of its own, with its controls beside it.
+  holder: { paddingInlineEnd: 0 },
+  // The name, as a link or a button that takes the row's room.
+  name: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space2,
+    flexGrow: 1,
+    minWidth: 0,
+    minHeight: grasp.treeRow,
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    color: "inherit",
+    fontFamily: "inherit",
+    fontSize: "inherit",
+    fontWeight: "inherit",
+    lineHeight: "inherit",
+    textAlign: "start",
+    textDecoration: "none",
+    cursor: "pointer",
+  },
+  nameCurrent: { fontWeight: grasp.weightMedium },
+  words: {
+    flexGrow: 1,
+    minWidth: 0,
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+  },
+  mark: { display: "flex", flexShrink: 0, color: grasp.muted },
+  markCurrent: { color: grasp.ink },
+  // The dot of a note, in a box as wide as the space a mark takes.
+  dotBox: {
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    width: grasp.space3,
+    height: grasp.space3,
+  },
+  dot: {
+    boxSizing: "border-box",
+    width: grasp.frameDot,
+    height: grasp.frameDot,
+    borderRadius: grasp.cornerCircle,
+  },
+  count: { flexShrink: 0, fontVariantNumeric: "tabular-nums" },
+  group: {
+    display: "flex",
+    flexDirection: "column",
+    gap: ROW_GAP,
+    paddingTop: grasp.space1,
+  },
+  region: { display: "flex", flexDirection: "column" },
+  // What a region holds, along its one guide line.
+  guide: {
+    display: "flex",
+    flexDirection: "column",
+    gap: ROW_GAP,
+    marginBlock: grasp.space1,
+    marginInlineStart: grasp.space4,
+    paddingInlineStart: grasp.space2,
+    borderInlineStartWidth: grasp.hairline,
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: grasp.line,
+  },
+});
+
+/** An icon in a row: quiet, and in ink on the page that is open. */
+const RowMark = ({ icon, current }: { icon: IconData; current: boolean }) => (
+  <span {...stylex.props(styles.mark, current && styles.markCurrent)}>
+    <Icon icon={icon} />
+  </span>
 );
+
+/** The words of a row, on one line, cut where the row ends. */
+const RowWords = ({ children }: { children: ReactNode }) => (
+  <span {...stylex.props(styles.words)}>{children}</span>
+);
+
+/** What a row counts, small and quiet. */
+const RowCount = ({ value }: { value: number }) => (
+  <span {...stylex.props(styles.count)}>
+    <Text element="span" size="xs" tone="quiet">
+      {value}
+    </Text>
+  </span>
+);
+
+/** The arrow that opens and closes what a row holds. */
+const RowToggle = ({
+  expanded,
+  name,
+  onToggle,
+}: {
+  expanded: boolean;
+  name: string;
+  onToggle: () => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <Button
+      aria-expanded={expanded}
+      aria-label={expanded ? t`Close ${name}` : t`Open ${name}`}
+      icon={expanded ? ChevronDown : ChevronRight}
+      onClick={onToggle}
+      size="xs"
+      variant="ghost"
+    />
+  );
+};
+
+/** Whether a note's own page is the one open. */
+const useNoteOpen = (noteId: string | undefined): boolean => {
+  const matchRoute = useMatchRoute();
+  return (
+    noteId !== undefined &&
+    Boolean(matchRoute({ to: "/brain/$noteId", params: { noteId } }))
+  );
+};
+
+const NoteItem = ({ note }: { note: Note }) => {
+  const current = useNoteOpen(note.id);
+  return (
+    <Link
+      params={{ noteId: note.id }}
+      // A piece of work opens on what Grasp knows about it.
+      search={note.kind === "candidate" ? { knowledge: true } : {}}
+      title={note.title}
+      to="/brain/$noteId"
+      {...stylex.props(
+        styles.row,
+        styles.note,
+        current && styles.current,
+        focus.ring
+      )}
+    >
+      <span aria-hidden="true" {...stylex.props(styles.dotBox)}>
+        <span {...stylex.props(styles.dot, dots[dotOf(note)])} />
+      </span>
+      <RowWords>{note.title}</RowWords>
+      {/* A source shows how many statements were tagged in it, since statements live there. */}
+      {note.kind === "source" && note.statementIds.length > 0 ? (
+        <RowCount value={note.statementIds.length} />
+      ) : null}
+    </Link>
+  );
+};
 
 interface Opening {
   isOpen: (key: string) => boolean;
@@ -119,54 +369,48 @@ const Group = ({
   opening: Opening;
   children: ReactNode;
 }) => {
-  const { t } = useLingui();
   const expanded = opening.isOpen(folder.key);
   const page = folder.note;
   const name = page?.title ?? folder.name;
-  const heading =
-    "text-foreground min-w-0 flex-1 truncate text-left text-sm data-[status=active]:font-medium";
+  const current = useNoteOpen(page?.id);
   return (
-    <div className="flex flex-col gap-0.5 pt-1">
-      <div className="hover:bg-accent has-data-[status=active]:bg-accent flex items-center gap-1 rounded-md px-2 py-1">
+    <div {...stylex.props(styles.group)}>
+      <div
+        {...stylex.props(styles.row, styles.holder, current && styles.current)}
+      >
         {page ? (
           // A group with its own page, such as a source folder, opens it from its name; the arrow folds it.
           <Link
-            className={heading}
             params={{ noteId: page.id }}
             to="/brain/$noteId"
+            {...stylex.props(styles.name, focus.words)}
           >
-            {name}
+            <RowWords>{name}</RowWords>
           </Link>
         ) : (
           <button
             aria-expanded={expanded}
-            className={heading}
             onClick={() => {
               opening.toggle(folder.key);
             }}
             type="button"
+            {...stylex.props(styles.name, focus.words)}
           >
-            {name}
+            <RowWords>{name}</RowWords>
           </button>
         )}
-        <span className="text-muted-foreground text-xs tabular-nums">
-          {countNotes(folder) - (page ? 1 : 0)}
-        </span>
+        <RowCount value={countNotes(folder) - (page ? 1 : 0)} />
         {/* A team's own menu, for an admin: move it to another region. */}
         {folder.key.startsWith("team:") ? (
           <TeamMenu teamId={folder.key.slice("team:".length)} />
         ) : null}
-        <button
-          aria-expanded={expanded}
-          aria-label={expanded ? t`Close ${name}` : t`Open ${name}`}
-          className="flex size-5 flex-none items-center justify-center rounded-sm"
-          onClick={() => {
+        <RowToggle
+          expanded={expanded}
+          name={name}
+          onToggle={() => {
             opening.toggle(folder.key);
           }}
-          type="button"
-        >
-          <ChevronDownIcon className={chevron(expanded)} />
-        </button>
+        />
       </div>
       {children}
     </div>
@@ -199,51 +443,118 @@ const Entries = ({ folder, opening }: { folder: Folder; opening: Opening }) => (
   </>
 );
 
-const topLinkClass =
-  "group hover:bg-accent data-[status=active]:bg-accent flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm data-[status=active]:font-medium";
-
-const TopLinkContent = ({
-  icon: Icon,
-  label,
-}: {
-  icon: LucideIcon;
-  label: string;
-}) => (
-  <>
-    <Icon className="text-muted-foreground group-data-[status=active]:text-foreground size-4 flex-none" />
-    <span className="min-w-0 flex-1 truncate">{label}</span>
-  </>
-);
-
 /** The home and the web, above the parts: an icon and a name. Without a note it is the web. */
 const TopLink = ({
   to,
   icon,
   label,
+  current,
 }: {
   to?: string;
-  icon: LucideIcon;
+  icon: IconData;
   label: string;
-}) =>
-  to === undefined ? (
-    <Link activeOptions={{ exact: true }} className={topLinkClass} to="/brain">
-      <TopLinkContent icon={icon} label={label} />
+  current: boolean;
+}) => {
+  const look = stylex.props(styles.row, current && styles.current, focus.ring);
+  const content = (
+    <>
+      <RowMark current={current} icon={icon} />
+      <RowWords>{label}</RowWords>
+    </>
+  );
+  return to === undefined ? (
+    <Link activeOptions={{ exact: true }} to="/brain" {...look}>
+      {content}
     </Link>
   ) : (
-    <Link className={topLinkClass} params={{ noteId: to }} to="/brain/$noteId">
-      <TopLinkContent icon={icon} label={label} />
+    <Link params={{ noteId: to }} to="/brain/$noteId" {...look}>
+      {content}
     </Link>
   );
+};
+
+/** One of the brain's own pages: its log, its memory, its sources. */
+const PageLink = ({
+  to,
+  icon,
+  label,
+  current,
+}: {
+  to: "/brain/activity" | "/brain/memory" | "/brain/sources";
+  icon: IconData;
+  label: string;
+  current: boolean;
+}) => (
+  <Link
+    to={to}
+    {...stylex.props(styles.row, current && styles.current, focus.ring)}
+  >
+    <RowMark current={current} icon={icon} />
+    <RowWords>{label}</RowWords>
+  </Link>
+);
+
+/** The way to open the navigation again, at the top of the folded rail. */
+const RailButton = ({
+  icon,
+  label,
+  onPress,
+}: {
+  icon: IconData;
+  label: string;
+  onPress: () => void;
+}) => (
+  <Tooltip>
+    <TooltipTrigger
+      aria-label={label}
+      icon={icon}
+      onClick={onPress}
+      variant="ghost"
+    />
+    <TooltipContent side="right">{label}</TooltipContent>
+  </Tooltip>
+);
+
+/**
+ * A place in the folded rail: an icon, named by its tooltip, that is the router's link there, so
+ * it opens in a new tab as any link does.
+ */
+const RailLink = ({
+  icon,
+  label,
+  current = false,
+  link,
+}: {
+  icon: IconData;
+  label: string;
+  current?: boolean;
+  link: ReactElement<Record<string, unknown>>;
+}) => (
+  <Tooltip>
+    <TooltipTrigger
+      render={
+        <Button
+          aria-current={current ? "page" : undefined}
+          aria-label={label}
+          icon={icon}
+          render={link}
+          variant={current ? "quiet" : "ghost"}
+        />
+      }
+    />
+    <TooltipContent side="right">{label}</TooltipContent>
+  </Tooltip>
+);
 
 /** The key a region is opened by in the navigation. */
 const regionKey = (id: RegionId): string => `region:${id}`;
 
 /** Each region's icon: the board's goals, the teams in a lobe, and what came in. */
-const regionIcon = (id: RegionId): LucideIcon => {
+const regionIcon = (id: RegionId): IconData => {
   if (id === "frontal") {
-    return TargetIcon;
+    return Rocket;
   }
-  return id === "stem" ? InboxIcon : UsersIcon;
+  return id === "stem" ? Inbox : People;
 };
 
 /**
@@ -342,8 +653,7 @@ export const BrainNav = ({
   const [renaming, setRenaming] = useState<string>();
   const company = brain.notes.find((candidate) => candidate.kind === "company");
   const activityLabel = t({ message: "Activity", context: "the brain's log" });
-  // Which of the brain's own pages is open, for the folded rail: the open
-  // panel's links mark themselves, a rail button is told.
+  // Which of the brain's own pages is open, for the rail and the rows alike.
   const matchRoute = useMatchRoute();
   const onActivity = Boolean(matchRoute({ to: "/brain/activity" }));
   const onMemory = Boolean(matchRoute({ to: "/brain/memory" }));
@@ -353,6 +663,7 @@ export const BrainNav = ({
     context: "the Brain's sources page",
   });
   const onBrain = Boolean(matchRoute({ to: "/brain" }));
+  const onCompany = company !== undefined && note?.id === company.id;
   let here = new Set<string>();
   if (note) {
     here = new Set(wayTo(note, atlas));
@@ -387,112 +698,144 @@ export const BrainNav = ({
       .map((each) => ({
         region: each,
         folder: regionFolder(each, tree),
-        Icon: regionIcon(each.id),
+        icon: regionIcon(each.id),
       }))
   );
 
   if (collapsed) {
     return (
-      <PageSidebar folded label={t`The brain`}>
-        <PageSidebarRailExpand
-          label={t`Expand the navigation`}
-          onExpand={() => {
-            setCollapsed(false);
-          }}
-        />
-        <PageSidebarRailDivider />
-        {company ? (
-          <PageSidebarRailButton
-            active={note?.id === company.id}
-            label={company.title}
-            render={
-              <Link params={{ noteId: company.id }} to="/brain/$noteId" />
-            }
-          >
-            <Building2Icon />
-          </PageSidebarRailButton>
-        ) : null}
-        <PageSidebarRailButton
-          active={onBrain && shownRegion === undefined}
-          label={t`Brain`}
-          render={<Link activeOptions={{ exact: true }} to="/brain" />}
-        >
-          <BrainIcon />
-        </PageSidebarRailButton>
-        <PageSidebarRailButton
-          active={onActivity}
-          label={activityLabel}
-          render={<Link to="/brain/activity" />}
-        >
-          <ActivityIcon />
-        </PageSidebarRailButton>
-        <PageSidebarRailButton
-          active={onMemory}
-          label={t`Memory`}
-          render={<Link to="/brain/memory" />}
-        >
-          <NotebookPenIcon />
-        </PageSidebarRailButton>
-        <PageSidebarRailButton
-          active={onSources}
-          label={sourcesLabel}
-          render={<Link to="/brain/sources" />}
-        >
-          <LibraryIcon />
-        </PageSidebarRailButton>
-        {regions.map(({ region, Icon }) => (
-          <PageSidebarRailButton
-            active={here.has(regionKey(region.id))}
-            key={region.id}
-            label={region.name}
-            render={<Link search={{ region: region.id }} to="/brain" />}
-          >
-            <Icon />
-          </PageSidebarRailButton>
-        ))}
-      </PageSidebar>
+      <aside
+        aria-label={t`The brain`}
+        {...stylex.props(styles.aside, styles.folded)}
+      >
+        <div {...stylex.props(styles.rail)}>
+          <RailButton
+            icon={SidebarToggle}
+            label={t`Expand the navigation`}
+            onPress={() => {
+              setCollapsed(false);
+            }}
+          />
+          <Separator decorative layout={styles.railLine} />
+          {company ? (
+            <RailLink
+              current={onCompany}
+              icon={Company}
+              label={company.title}
+              link={
+                <Link params={{ noteId: company.id }} to="/brain/$noteId" />
+              }
+            />
+          ) : null}
+          <RailLink
+            current={onBrain && shownRegion === undefined}
+            icon={BrainMark}
+            label={t`Brain`}
+            link={<Link to="/brain" />}
+          />
+          <RailLink
+            current={onActivity}
+            icon={Chart}
+            label={activityLabel}
+            link={<Link to="/brain/activity" />}
+          />
+          <RailLink
+            current={onMemory}
+            icon={NoteMark}
+            label={t`Memory`}
+            link={<Link to="/brain/memory" />}
+          />
+          <RailLink
+            current={onSources}
+            icon={FolderMark}
+            label={sourcesLabel}
+            link={<Link to="/brain/sources" />}
+          />
+          {regions.map(({ region, icon }) => (
+            <RailLink
+              current={here.has(regionKey(region.id))}
+              icon={icon}
+              key={region.id}
+              label={region.name}
+              link={<Link search={{ region: region.id }} to="/brain" />}
+            />
+          ))}
+        </div>
+      </aside>
     );
   }
 
   return (
-    <PageSidebar folded={false} label={t`The brain`}>
+    <aside aria-label={t`The brain`} {...stylex.props(styles.aside)}>
       {/* The home, with the way to fold the navigation beside it: out of the way, where the panel begins. */}
-      <PageSidebarTop
-        fold={{
-          label: t`Fold the navigation`,
-          onFold: () => {
+      <div {...stylex.props(styles.top)}>
+        <div {...stylex.props(styles.topFirst)}>
+          {company ? (
+            <TopLink
+              current={onCompany}
+              icon={Company}
+              label={company.title}
+              to={company.id}
+            />
+          ) : (
+            <TopLink
+              current={onBrain && shownRegion === undefined}
+              icon={BrainMark}
+              label={t`Brain`}
+            />
+          )}
+        </div>
+        <RailButton
+          icon={SidebarToggle}
+          label={t`Fold the navigation`}
+          onPress={() => {
             setCollapsed(true);
-          },
-        }}
-        joined
-      >
+          }}
+        />
+      </div>
+      <div {...stylex.props(styles.body)}>
         {company ? (
-          <TopLink icon={Building2Icon} label={company.title} to={company.id} />
-        ) : (
-          <TopLink icon={BrainIcon} label={t`Brain`} />
-        )}
-      </PageSidebarTop>
-      <PageSidebarBody joined>
-        {company ? <TopLink icon={BrainIcon} label={t`Brain`} /> : null}
-        <Link className={topLinkClass} to="/brain/activity">
-          <TopLinkContent icon={ActivityIcon} label={activityLabel} />
-        </Link>
-        <Link className={topLinkClass} to="/brain/memory">
-          <TopLinkContent icon={NotebookPenIcon} label={t`Memory`} />
-        </Link>
-        <Link className={topLinkClass} to="/brain/sources">
-          <TopLinkContent icon={LibraryIcon} label={sourcesLabel} />
-        </Link>
-        <span aria-hidden="true" className="bg-border my-2 h-px" />
+          <TopLink
+            current={onBrain && shownRegion === undefined}
+            icon={BrainMark}
+            label={t`Brain`}
+          />
+        ) : null}
+        <PageLink
+          current={onActivity}
+          icon={Chart}
+          label={activityLabel}
+          to="/brain/activity"
+        />
+        <PageLink
+          current={onMemory}
+          icon={NoteMark}
+          label={t`Memory`}
+          to="/brain/memory"
+        />
+        <PageLink
+          current={onSources}
+          icon={FolderMark}
+          label={sourcesLabel}
+          to="/brain/sources"
+        />
+        <Separator decorative layout={styles.line} />
 
-        {regions.map(({ region, folder, Icon }) => {
+        {regions.map(({ region, folder, icon }) => {
           const key = regionKey(region.id);
           const expanded = opening.isOpen(key);
           const current = here.has(key);
+          const shown = onBrain && shownRegion === region.id;
           const { name, group } = region;
           return (
-            <div className="flex flex-col" key={key}>
-              <div className="hover:bg-accent has-data-[status=active]:bg-accent flex items-center rounded-md">
+            <div key={key} {...stylex.props(styles.region)}>
+              <div
+                {...stylex.props(
+                  styles.row,
+                  styles.holder,
+                  shown && styles.current
+                )}
+              >
                 {/* The region's name goes to it in the brain; the arrow opens what it holds here. An admin renames it in place. */}
                 {group !== undefined && renaming === group.id ? (
                   <RegionRename
@@ -505,16 +848,16 @@ export const BrainNav = ({
                 ) : (
                   <Link
                     activeOptions={{ includeSearch: true }}
-                    className={
-                      current
-                        ? "group flex min-w-0 flex-1 items-center gap-2.5 py-1.5 pl-2 text-sm font-medium"
-                        : "group flex min-w-0 flex-1 items-center gap-2.5 py-1.5 pl-2 text-sm data-[status=active]:font-medium"
-                    }
                     search={{ region: region.id }}
                     to="/brain"
+                    {...stylex.props(
+                      styles.name,
+                      current && styles.nameCurrent,
+                      focus.words
+                    )}
                   >
-                    <Icon className="text-muted-foreground group-data-[status=active]:text-foreground size-4 flex-none" />
-                    <span className="min-w-0 flex-1 truncate">{name}</span>
+                    <RowMark current={current || shown} icon={icon} />
+                    <RowWords>{name}</RowWords>
                   </Link>
                 )}
                 {group === undefined ? null : (
@@ -526,27 +869,23 @@ export const BrainNav = ({
                     regionId={group.id}
                   />
                 )}
-                <button
-                  aria-expanded={expanded}
-                  aria-label={expanded ? t`Close ${name}` : t`Open ${name}`}
-                  className="flex size-7 flex-none items-center justify-center rounded-md"
-                  onClick={() => {
+                <RowToggle
+                  expanded={expanded}
+                  name={name}
+                  onToggle={() => {
                     opening.toggle(key);
                   }}
-                  type="button"
-                >
-                  <ChevronDownIcon className={chevron(expanded)} />
-                </button>
+                />
               </div>
               {expanded ? (
-                <div className="my-1 ml-4 flex flex-col gap-0.5 border-l pl-2">
+                <div {...stylex.props(styles.guide)}>
                   <Entries folder={folder} opening={opening} />
                 </div>
               ) : null}
             </div>
           );
         })}
-      </PageSidebarBody>
-    </PageSidebar>
+      </div>
+    </aside>
   );
 };

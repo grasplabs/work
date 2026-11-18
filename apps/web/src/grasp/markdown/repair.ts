@@ -193,8 +193,13 @@ const openMarks = (block: string): { open: Open[]; code: number } => {
   return { open, code };
 };
 
-/** A link being written at the end of the block: `[words`, `[words](` or `[words](addr`. */
-const openLink = (block: string): "words" | "address" | null => {
+/**
+ * A link being written at the end of the block: `[words`, `[words]`, `[words](` or `[words](addr`, or its
+ * title still coming, `[words](addr "title` (then what closes it: the title's mark and the bracket).
+ */
+const openLink = (
+  block: string
+): "words" | "bracket" | "address" | '"' | "'" | null => {
   const start = block.lastIndexOf("[");
   if (start === -1 || block[start - 1] === "\\" || block[start + 1] === "^") {
     return null;
@@ -210,7 +215,17 @@ const openLink = (block: string): "words" | "address" | null => {
   if (!rest.includes("]")) {
     return rest.includes("\n\n") ? null : "words";
   }
-  return /^\[[^\]]*\]\([^)\s]*$/u.test(rest) ? "address" : null;
+  // Its words whole, its address not begun: `[words]`.
+  if (/^\[[^\]]*\]$/u.test(rest)) {
+    return "bracket";
+  }
+  if (/^\[[^\]]*\]\([^)\s]*\s*$/u.test(rest)) {
+    return "address";
+  }
+  const title = /^\[[^\]]*\]\([^)\s]*\s+(?<mark>["'])(?:(?!\k<mark>).)*$/u.exec(
+    rest
+  )?.groups?.mark;
+  return title === '"' || title === "'" ? title : null;
 };
 
 /**
@@ -238,8 +253,13 @@ export const repair = (source: string): Repaired => {
   if (link === "words") {
     // No address yet: its words, as words. (`#` leads nowhere, so no link is drawn.)
     close += "](#)";
+  } else if (link === "bracket") {
+    close += "(#)";
   } else if (link === "address") {
     close += ")";
+  } else if (link !== null) {
+    // A title still coming: its own mark closes it, then the bracket.
+    close += `${link})`;
   }
   close += open
     .toReversed()
@@ -252,4 +272,48 @@ export const repair = (source: string): Repaired => {
   // A closing mark closes only right after a word, so the space before it goes.
   const end = from + body.trimEnd().length;
   return { text: text.slice(0, end) + close, kept: Math.min(kept, end) };
+};
+
+// A last line that is a rule of stars or underlines: words, not marks left open.
+const RULE = /^\s{0,3}(?<mark>[*_])(?:\s*\k<mark>){2,}\s*$/u;
+
+/**
+ * An answer cut off part way (stopped), tidied once it will not be written further: a link still
+ * being written at its end goes, its words with it (`[2`, `[the report](https://ex`), and bold,
+ * emphasis, strike-through or code left open are closed. Nothing else is touched, so an answer
+ * that ended whole comes back as it was; inside an open fence the code simply ends.
+ */
+export const tidy = (source: string): string => {
+  if (openFence(source)) {
+    return source;
+  }
+  const blank = source.lastIndexOf("\n\n");
+  const from = blank === -1 ? 0 : blank + 2;
+  const lastLine = source.slice(source.lastIndexOf("\n") + 1);
+  if (RULE.test(lastLine)) {
+    return source;
+  }
+  let text = source;
+  let body = text.slice(from);
+  const { code } = openMarks(body);
+  if (code === -1 && openLink(body) !== null) {
+    // The link from its bracket on, and the bang of an image before it.
+    const start = from + body.lastIndexOf("[");
+    text = text.slice(0, text[start - 1] === "!" ? start - 1 : start).trimEnd();
+    body = text.slice(from);
+  }
+  // Marks at the very end close nothing yet: they go, and what they would close is closed below.
+  const bare = body.replace(/[*_~`]+$/u, "");
+  const { open, code: openCode } = openMarks(bare);
+  const close =
+    (openCode === -1 ? "" : "`") +
+    open
+      .toReversed()
+      .map((entry) => entry.mark)
+      .join("");
+  if (close === "") {
+    return text;
+  }
+  // A closing mark closes only right after a word, so the space before it goes.
+  return text.slice(0, from) + bare.trimEnd() + close;
 };

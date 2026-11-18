@@ -4,23 +4,27 @@ import type {
   DocumentRead,
   VersionSummary,
 } from "@grasp-os/shared/knowledge";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@grasp-os/ui/components/collapsible";
-import { Input } from "@grasp-os/ui/components/input";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
-import { Textarea } from "@grasp-os/ui/components/textarea";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Link, useRouter } from "@tanstack/react-router";
-import { ChevronRightIcon, PencilIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
+import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { ExportMenu } from "../export/export-menu.tsx";
+import { PageHeading } from "../frame/page.tsx";
+import { RouterLink } from "../frame/router-link.tsx";
+import { Alert } from "../grasp/alert/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Collapsible } from "../grasp/collapsible/index.ts";
+import { Edit } from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import { KeyValueList } from "../grasp/key-value/index.ts";
+import { Separator } from "../grasp/separator/index.ts";
+import { Tag } from "../grasp/tag/index.ts";
+import { Textarea } from "../grasp/textarea/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { documentTypeLabel } from "../labels.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { DocumentMarkdown } from "./markdown.tsx";
@@ -36,6 +40,62 @@ import type { ResolveLink } from "./wiki-links.ts";
 // restoring from its history. Every save names the version it was edited
 // from, so a save that would overwrite one made since, in another tab or
 // by someone else, shows that version instead.
+
+const styles = stylex.create({
+  form: { display: "flex", flexDirection: "column", gap: grasp.space3 },
+  newer: { display: "flex", flexDirection: "column", gap: grasp.space2 },
+  start: { alignSelf: "flex-start" },
+  buttons: { display: "flex", flexWrap: "wrap", gap: grasp.space2 },
+  chips: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: grasp.space2,
+    margin: 0,
+    padding: 0,
+    listStyleType: "none",
+  },
+  chip: { minWidth: 0 },
+  earlier: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: grasp.space2,
+  },
+  view: { display: "flex", flex: 1, minWidth: 0, minHeight: 0 },
+  scroll: { flex: 1, minWidth: 0, overflowY: "auto" },
+  column: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space8,
+    boxSizing: "border-box",
+    width: "100%",
+    maxWidth: grasp.pageColumnMeasure,
+    marginInline: "auto",
+    paddingBlock: grasp.space8,
+    paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
+  },
+  actions: { display: "flex", alignItems: "center", gap: grasp.space2 },
+  // Too narrow for the side: the details fold in at the foot instead.
+  foot: {
+    display: { default: "flex", [media.fromRail]: "none" },
+    flexDirection: "column",
+    gap: grasp.space4,
+  },
+  aside: {
+    display: { default: "none", [media.fromRail]: "flex" },
+    flexDirection: "column",
+    flexShrink: 0,
+    boxSizing: "border-box",
+    width: grasp.inspectorWidth,
+    overflowY: "auto",
+    paddingBlock: grasp.space4,
+    paddingInline: grasp.space5,
+    borderInlineStartWidth: grasp.hairline,
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: grasp.line,
+  },
+});
 
 const Editor = ({
   doc,
@@ -85,7 +145,6 @@ const Editor = ({
   };
   return (
     <form
-      className="flex flex-col gap-3"
       onSubmit={(event) => {
         event.preventDefault();
         // With a newer version shown, only the explicit button replaces it.
@@ -93,29 +152,26 @@ const Editor = ({
           void save(base);
         }
       }}
+      {...stylex.props(styles.form)}
     >
       {newer === undefined ? null : (
         <section
           aria-labelledby="newer-version"
-          className="flex flex-col gap-2 rounded-md border p-3"
+          {...stylex.props(styles.newer)}
         >
-          <p
-            className="text-destructive text-sm"
-            id="newer-version"
-            role="alert"
-          >
+          <Alert id="newer-version" tone="danger">
             {t`This document changed since you opened it. Version ${newerVersion} is below; your text is kept. Start again from it, or replace it with your text.`}
-          </p>
+          </Alert>
           <DocumentMarkdown resolve={resolve} text={newer.version.text} />
           <Button
-            className="self-start"
+            layout={styles.start}
             onClick={() => {
               setText(newer.version.text);
               setBase(newer.currentVersion);
               setNewer(undefined);
             }}
             type="button"
-            variant="outline"
+            variant="quiet"
           >
             {t`Start again from version ${newerVersion}`}
           </Button>
@@ -123,24 +179,24 @@ const Editor = ({
       )}
       <Textarea
         aria-label={t`Text`}
-        className="min-h-96"
-        onChange={(event) => {
-          setText(event.target.value);
+        onValueChange={(value) => {
+          setText(value);
         }}
+        rows={16}
         value={text}
       />
       <Input
         aria-label={t`What changed`}
         maxLength={500}
-        onChange={(event) => {
-          setMessage(event.target.value);
+        onValueChange={(value) => {
+          setMessage(value);
         }}
         placeholder={t`What changed`}
         value={message}
       />
-      <div className="flex gap-2">
+      <div {...stylex.props(styles.buttons)}>
         {newer === undefined ? (
-          <Button disabled={busy} type="submit">
+          <Button disabled={busy} type="submit" variant="ink">
             <Trans>Save</Trans>
           </Button>
         ) : (
@@ -150,17 +206,12 @@ const Editor = ({
               void save(newer.currentVersion);
             }}
             type="button"
-            variant="destructive"
+            variant="danger"
           >
             {t`Replace version ${newerVersion} with mine`}
           </Button>
         )}
-        <Button
-          disabled={busy}
-          onClick={onClose}
-          type="button"
-          variant="outline"
-        >
+        <Button disabled={busy} onClick={onClose} type="button" variant="quiet">
           <Trans>Cancel</Trans>
         </Button>
       </div>
@@ -185,33 +236,20 @@ const DocumentChip = ({
   documentId: string;
   title: string;
 }) => (
-  <Link
-    className="bg-muted hover:bg-accent inline-flex max-w-full items-center gap-1.5 rounded-md px-2 py-0.5 text-sm"
-    params={{ collection: collectionId }}
-    search={{ doc: documentId }}
-    to="/knowledge/$collection"
-  >
-    <span
-      aria-hidden="true"
-      className="bg-muted-foreground/60 size-1.5 flex-none rounded-full"
-    />
-    <span className="truncate">{title}</span>
-  </Link>
+  <Tag size="sm">
+    <RouterLink
+      params={{ collection: collectionId }}
+      search={{ doc: documentId }}
+      to="/knowledge/$collection"
+      variant="standalone"
+    >
+      {title}
+    </RouterLink>
+  </Tag>
 );
 
-/** One of a document's properties: its name in a fixed column, then its value. */
-const Property = ({
-  label,
-  children,
-}: {
-  label: ReactNode;
-  children: ReactNode;
-}) => (
-  <div className="flex gap-4">
-    <dt className="text-muted-foreground w-32 flex-none py-0.5">{label}</dt>
-    <dd className="min-w-0 flex-1 py-0.5">{children}</dd>
-  </div>
-);
+/** What a property shows when it has nothing. */
+const none = "–";
 
 /** A document this one links to, by its ID, named as the link names it. */
 interface Linked {
@@ -243,20 +281,31 @@ const linksOf = (text: string, resolve: ResolveLink): Linked[] => {
   return [...found].map(([documentId, title]) => ({ documentId, title }));
 };
 
-/** A part of the page folded at its foot, opened by its title. */
-const Fold = ({ title, children }: { title: string; children: ReactNode }) => (
-  <Collapsible>
-    <CollapsibleTrigger
-      render={<Button className="-ml-2.5" size="sm" variant="ghost" />}
-    >
-      <ChevronRightIcon className="text-muted-foreground transition-transform group-aria-expanded/button:rotate-90" />
-      {title}
-    </CollapsibleTrigger>
-    <CollapsibleContent>
-      <div className="pt-2 pb-4">{children}</div>
-    </CollapsibleContent>
-  </Collapsible>
-);
+/** Documents as a row of chips, or a dash for none. */
+const Chips = ({
+  documents,
+}: {
+  documents: readonly {
+    collectionId: string;
+    documentId: string;
+    title: string;
+  }[];
+}) =>
+  documents.length === 0 ? (
+    none
+  ) : (
+    <ul {...stylex.props(styles.chips)}>
+      {documents.map((document) => (
+        <li key={document.documentId} {...stylex.props(styles.chip)}>
+          <DocumentChip
+            collectionId={document.collectionId}
+            documentId={document.documentId}
+            title={document.title}
+          />
+        </li>
+      ))}
+    </ul>
+  );
 
 /** The document's properties: where it is, its version and review, and what uses it. */
 const Properties = ({
@@ -269,63 +318,44 @@ const Properties = ({
   collection: string;
   links: Linked[];
   backlinks: Backlink[];
-}) => (
-  <dl className="flex flex-col gap-2 text-sm">
-    <Property label={<Trans>Collection</Trans>}>
-      <Link
-        className="hover:underline"
-        params={{ collection: doc.collectionId }}
-        search={{}}
-        to="/knowledge/$collection"
-      >
-        {collection}
-      </Link>
-    </Property>
-    <Property label={<Trans>Path</Trans>}>
-      <span className="break-all">{doc.path}</span>
-    </Property>
-    <Property label={<Trans>Version</Trans>}>
-      <span className="tabular-nums">{doc.version.number}</span>
-    </Property>
-    <Property label={<Trans>Review by</Trans>}>
-      {doc.reviewDate ?? "–"}
-    </Property>
-    <Property label={<Trans>Links to</Trans>}>
-      {links.length === 0 ? (
-        <span className="text-muted-foreground">–</span>
-      ) : (
-        <ul className="flex flex-wrap gap-1.5">
-          {links.map((link) => (
-            <li className="min-w-0" key={link.documentId}>
-              <DocumentChip
-                collectionId={doc.collectionId}
-                documentId={link.documentId}
-                title={link.title}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-    </Property>
-    <Property label={<Trans>Used by</Trans>}>
-      {backlinks.length === 0 ? (
-        <span className="text-muted-foreground">–</span>
-      ) : (
-        <ul className="flex flex-wrap gap-1.5">
-          {backlinks.map((backlink) => (
-            <li className="min-w-0" key={backlink.documentId}>
-              <DocumentChip
-                collectionId={backlink.collectionId}
-                documentId={backlink.documentId}
-                title={backlink.title}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-    </Property>
-  </dl>
-);
+}) => {
+  const { t } = useLingui();
+  return (
+    <KeyValueList
+      items={[
+        {
+          key: t`Collection`,
+          value: (
+            <RouterLink
+              params={{ collection: doc.collectionId }}
+              search={{}}
+              to="/knowledge/$collection"
+              variant="standalone"
+            >
+              {collection}
+            </RouterLink>
+          ),
+        },
+        { key: t`Path`, value: doc.path },
+        { key: t`Version`, value: doc.version.number },
+        { key: t`Review by`, value: doc.reviewDate ?? none },
+        {
+          key: t`Links to`,
+          value: (
+            <Chips
+              documents={links.map((link) => ({
+                ...link,
+                collectionId: doc.collectionId,
+              }))}
+            />
+          ),
+        },
+        { key: t`Used by`, value: <Chips documents={backlinks} /> },
+      ]}
+      variant="stacked"
+    />
+  );
+};
 
 /** Says an earlier version is open, with the way back to the current one. */
 const EarlierVersion = ({ doc }: { doc: DocumentRead }) => {
@@ -337,19 +367,21 @@ const EarlierVersion = ({ doc }: { doc: DocumentRead }) => {
     { day: "numeric", month: "short", year: "numeric" }
   );
   return (
-    <div className="bg-muted flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-lg px-3.5 py-2.5 text-sm">
-      <span>
-        {t`You're reading version ${number}, saved ${saved}. The current version is ${current}.`}
+    <Alert role="none">
+      <span {...stylex.props(styles.earlier)}>
+        <span>
+          {t`You're reading version ${number}, saved ${saved}. The current version is ${current}.`}
+        </span>
+        <RouterLink
+          params={{ collection: doc.collectionId }}
+          search={{ doc: doc.id }}
+          to="/knowledge/$collection"
+          variant="standalone"
+        >
+          <Trans>Back to the current version</Trans>
+        </RouterLink>
       </span>
-      <Link
-        className="font-medium underline-offset-4 hover:underline"
-        params={{ collection: doc.collectionId }}
-        search={{ doc: doc.id }}
-        to="/knowledge/$collection"
-      >
-        <Trans>Back to the current version</Trans>
-      </Link>
-    </div>
+    </Alert>
   );
 };
 
@@ -389,52 +421,40 @@ export const DocumentView = ({
     />
   );
   return (
-    <div className="flex min-h-0 min-w-0 flex-1">
-      <div className="min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-6 py-8 md:px-12">
-          <header className="flex flex-col gap-5">
-            <div className="flex flex-col gap-2.5">
-              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-                <span className="bg-muted text-muted-foreground inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium">
-                  <span
-                    aria-hidden="true"
-                    className="bg-muted-foreground/60 size-1.5 rounded-full"
-                  />
-                  {documentTypeLabel(doc.type)}
-                </span>
-                <div className="flex items-center gap-1.5">
-                  {writable && !editing && !earlier ? (
-                    <Button
-                      onClick={() => {
-                        setEditing(true);
-                      }}
-                      size="sm"
-                      variant="outline"
-                    >
-                      <PencilIcon data-icon="inline-start" />
-                      <Trans>Edit</Trans>
-                    </Button>
-                  ) : null}
-                  {actions}
-                  <ExportMenu
-                    file={{
-                      name: fileNameOf(doc),
-                      title: doc.title,
-                      markdown: () => doc.version.text,
+    <div {...stylex.props(styles.view)}>
+      <div {...stylex.props(styles.scroll)}>
+        <div {...stylex.props(styles.column)}>
+          <PageHeading
+            action={
+              <span {...stylex.props(styles.actions)}>
+                {writable && !editing && !earlier ? (
+                  <Button
+                    icon={Edit}
+                    onClick={() => {
+                      setEditing(true);
                     }}
-                  />
-                </div>
-              </div>
-              <PageHeaderTitle className="wrap-break-word">
-                {doc.title}
-              </PageHeaderTitle>
-              {doc.description === "" ? null : (
-                <p className="text-muted-foreground text-sm leading-relaxed">
-                  {doc.description}
-                </p>
-              )}
-            </div>
-          </header>
+                    size="sm"
+                    variant="quiet"
+                  >
+                    <Trans>Edit</Trans>
+                  </Button>
+                ) : null}
+                {actions}
+                <ExportMenu
+                  file={{
+                    name: fileNameOf(doc),
+                    title: doc.title,
+                    markdown: () => doc.version.text,
+                  }}
+                />
+              </span>
+            }
+            {...(doc.description === ""
+              ? {}
+              : { description: doc.description })}
+            meta={<Badge>{documentTypeLabel(doc.type)}</Badge>}
+            title={doc.title}
+          />
           {earlier ? <EarlierVersion doc={doc} /> : null}
           {editing ? (
             <Editor
@@ -451,17 +471,14 @@ export const DocumentView = ({
               title={doc.title}
             />
           )}
-          {/* Too narrow for the side: the details fold in here instead. */}
-          <div className="border-t pt-4 2xl:hidden">
-            <Fold title={t`Details`}>{details}</Fold>
+          <div {...stylex.props(styles.foot)}>
+            <Separator />
+            <Collapsible title={t`Details`}>{details}</Collapsible>
           </div>
           <Timeline doc={doc} me={me} versions={versions} writable={writable} />
         </div>
       </div>
-      <aside
-        aria-label={t`Details`}
-        className="bg-muted/50 hidden w-96 flex-none flex-col overflow-y-auto border-l px-5 pt-4 pb-6 2xl:flex"
-      >
+      <aside aria-label={t`Details`} {...stylex.props(styles.aside)}>
         {details}
       </aside>
     </div>

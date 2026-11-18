@@ -1,40 +1,39 @@
 import { failureText } from "@grasp-os/shared/errors";
 import { pageMaxLimit } from "@grasp-os/shared/knowledge";
 import {
-  uploadErrors,
   uploadMaxBytes,
   uploadOriginalPath,
   uploadTypes,
 } from "@grasp-os/shared/uploads";
 import type { Upload, UploadStatus } from "@grasp-os/shared/uploads";
-import { buttonVariants } from "@grasp-os/ui/components/button";
-import { Spinner } from "@grasp-os/ui/components/spinner";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { Link, useRouter } from "@tanstack/react-router";
-import {
-  ArrowUpIcon,
-  CircleAlertIcon,
-  DownloadIcon,
-  FileTextIcon,
-} from "lucide-react";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import { useEffect, useId, useRef, useState } from "react";
 
 import { readWithin } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { isTransient, wait } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
+import { FileUpload } from "../grasp/file-upload/index.ts";
+import type { FileUploadStatus } from "../grasp/file-upload/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
+import { Download } from "../grasp/icons/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCore } from "../use-core.ts";
 
-// Uploading a file into a collection, and following it: core answers at
-// once with the upload `pending`, and extracts its text in the background,
+// Uploading a file into a collection, and following it, in the library's
+// file upload: it sends each file as it is dropped or chosen, and its row
+// then says what core does with it. Core answers at once with the upload `pending`, and extracts its text in the background,
 // so the page asks again, less often the longer it takes, until it's
 // ready (a version of the document at the file's name, with a link to its
 // original) or failed, with core's reason. Only the person who uploaded a
 // file can follow it, and only while this page stays open: leaving it
-// stops the asking.
+// stops the asking. Once ready, the row opens its document and downloads
+// its original.
 
 /** How long to wait before asking again, each time; the last one repeats. */
 const followDelaysMs = [500, 1000, 2000, 3000] as const;
@@ -52,6 +51,8 @@ interface Followed {
   upload: Upload;
   /** Why the page stopped following it before it settled. */
   problem?: string;
+  /** Core refused to say: the problem is a failure, not a wait. */
+  refused?: boolean;
 }
 
 /**
@@ -88,7 +89,7 @@ const follow = async (
       onChange(current);
     } catch (error) {
       if (!isTransient(error)) {
-        return { upload: current, problem: failureText(error) };
+        return { upload: current, problem: failureText(error), refused: true };
       }
     }
   }
@@ -110,153 +111,98 @@ const statusLabels: Readonly<Record<UploadStatus, MessageDescriptor>> = {
 };
 
 /**
- * One upload: its status, and once ready, links to its document and its
- * original. `listed` holds the documents the file list shows.
+ * A sent file, as this page knows it: core's upload, followed until it
+ * settles, or why it never reached core.
  */
-const UploadRow = ({
-  upload,
-  problem,
-  listed,
-}: Followed & { listed: ReadonlySet<string> }) => {
-  const { t } = useLingui();
-  const { name } = upload;
-  const status = i18n._(statusLabels[upload.status]);
-  const ready = upload.status === "ready" && upload.documentId !== null;
-  return (
-    <li className="bg-card flex min-h-14 items-center gap-x-3 rounded-lg border py-2 pr-2 pl-2.5 text-sm">
-      <span className="text-muted-foreground grid size-10 flex-none place-items-center">
-        {upload.status === "failed" ? (
-          <CircleAlertIcon className="text-status-attention size-5" />
-        ) : (
-          <FileTextIcon className="size-5" />
-        )}
-      </span>
-      <span className="grid min-w-0 flex-1 gap-0.5">
-        <span className="truncate font-medium" title={upload.name}>
-          {upload.name}
-        </span>
-        <output className="text-muted-foreground text-xs">
-          {upload.failure === null
-            ? status
-            : `${status}: ${upload.failure.message}`}
-        </output>
-        {/* The file list shows its first page only: a name that sorts past it
-          opens from here. */}
-        {ready &&
-        upload.documentId !== null &&
-        !listed.has(upload.documentId) ? (
-          <p className="text-muted-foreground text-xs">
-            {t`It's past the first ${pageMaxLimit} files listed: open it from here.`}
-          </p>
-        ) : null}
-        <ErrorText>{problem}</ErrorText>
-      </span>
-      {ready && upload.documentId !== null ? (
-        <span className="flex items-center gap-1">
-          <Link
-            className={buttonVariants({ size: "sm", variant: "ghost" })}
-            params={{ collection: upload.collectionId }}
-            search={{ doc: upload.documentId }}
-            to="/knowledge/$collection"
-          >
-            {t`Open ${name}`}
-          </Link>
-          {/* Core serves it as an attachment only, to those who may read it. */}
-          <a
-            aria-label={t`Download ${name}`}
-            className={buttonVariants({ size: "icon-sm", variant: "ghost" })}
-            download
-            href={uploadOriginalPath(encodeURIComponent(upload.id))}
-          >
-            <DownloadIcon />
-          </a>
-        </span>
-      ) : (
-        <span />
-      )}
-    </li>
-  );
-};
-
-/** Three sheets of paper, the drop's one picture, fanned wider under a file. */
-const Sheets = ({ dragging }: { dragging: boolean }) => {
-  const sheet =
-    "bg-card text-muted-foreground absolute inset-0 grid origin-bottom place-items-end justify-center rounded-md border pb-1.5 shadow-xs transition-transform duration-300";
-  const lines = (
-    <>
-      <span className="absolute top-2 left-1.75 h-0.5 w-4 rounded-full bg-current opacity-30" />
-      <span className="absolute top-3.25 left-1.75 h-0.5 w-2.75 rounded-full bg-current opacity-30" />
-    </>
-  );
-  return (
-    <span
-      aria-hidden="true"
-      className="relative mx-auto mt-2.5 mb-3.5 block h-11 w-9"
-    >
-      <span
-        className={
-          dragging
-            ? `${sheet} -translate-x-5 -rotate-22`
-            : `${sheet} -translate-x-2 -rotate-10 group-hover:-translate-x-3 group-hover:-rotate-15`
-        }
-      >
-        {lines}
-      </span>
-      <span
-        className={
-          dragging
-            ? `${sheet} translate-x-5 rotate-22`
-            : `${sheet} translate-x-2 rotate-10 group-hover:translate-x-3 group-hover:rotate-15`
-        }
-      >
-        {lines}
-      </span>
-      <span
-        className={dragging ? `${sheet} text-foreground -translate-y-2` : sheet}
-      >
-        {lines}
-        <ArrowUpIcon className="size-3.5" strokeWidth={2} />
-      </span>
-    </span>
-  );
-};
-
-/** A file on its way to core, or why it didn't get there. */
-interface Sending {
-  key: string;
-  name: string;
-  problem?: string;
-}
-
-/** A file being sent: its name, and that it is on its way, or why it failed. */
-const SendingRow = ({ name, problem }: Omit<Sending, "key">) => {
-  const { t } = useLingui();
-  return (
-    <li className="bg-card flex min-h-14 items-center gap-x-3 rounded-lg border py-2 pr-2 pl-2.5 text-sm">
-      <span className="text-muted-foreground grid size-10 flex-none place-items-center">
-        {problem === undefined ? (
-          <Spinner aria-hidden="true" className="size-5" />
-        ) : (
-          <CircleAlertIcon className="text-status-attention size-5" />
-        )}
-      </span>
-      <span className="grid min-w-0 flex-1 gap-0.5">
-        <span className="truncate font-medium" title={name}>
-          {name}
-        </span>
-        {problem === undefined ? (
-          <output className="text-muted-foreground text-xs">{t`Uploading…`}</output>
-        ) : (
-          <ErrorText>{problem}</ErrorText>
-        )}
-      </span>
-    </li>
-  );
-};
+type Tracked = Followed | { problem: string };
 
 /**
- * Uploading files into the collection `collectionId`, and their status;
- * `listed` holds the documents the file list shows.
+ * Sends `file` into the collection: the upload core started, or why it
+ * didn't. Outside the component, as the React Compiler can't compile
+ * `try`/`catch` around a value it returns.
+ */
+const sendFile = async (
+  core: CoreConnection,
+  collectionId: string,
+  file: File
+): Promise<{ started: Upload } | { problem: string }> => {
+  try {
+    const started = await core.withSession(async (session) => {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      return await session.uploads.upload({
+        collectionId,
+        name: file.name,
+        bytes,
+      });
+    });
+    return { started };
+  } catch (error) {
+    return { problem: failureText(error) };
+  }
+};
+
+/** The words a file's row says once it is sent. */
+interface RowWords {
+  /** A ready document past the first page of the file list. */
+  past: string;
+}
+
+/**
+ * What the row of a sent file says: core's reason when it never got
+ * there, the following's problem, else the upload's status (with core's
+ * reason when its reading failed). `listed` holds the documents the file
+ * list shows.
+ */
+const statusOf = (
+  tracked: Tracked | undefined,
+  listed: ReadonlySet<string>,
+  words: RowWords
+): FileUploadStatus | undefined => {
+  if (tracked === undefined) {
+    return undefined;
+  }
+  if (!("upload" in tracked)) {
+    return { line: tracked.problem, tone: "danger" };
+  }
+  const { upload, problem, refused } = tracked;
+  if (problem !== undefined) {
+    return { line: problem, tone: refused === true ? "danger" : "neutral" };
+  }
+  const status = i18n._(statusLabels[upload.status]);
+  if (upload.status === "failed") {
+    const line =
+      upload.failure === null ? status : `${status}: ${upload.failure.message}`;
+    return { line, tone: "danger" };
+  }
+  if (upload.status !== "ready") {
+    return { line: status, working: true };
+  }
+  // The file list shows its first page only: a name that sorts past it
+  // opens from here.
+  const past = upload.documentId !== null && !listed.has(upload.documentId);
+  return { line: past ? words.past : status };
+};
+
+/** The document a sent file made, once it's ready; null before. */
+const readyOf = (
+  tracked: Tracked | undefined
+): { upload: Upload; documentId: string } | null => {
+  const upload =
+    tracked !== undefined && "upload" in tracked ? tracked.upload : undefined;
+  if (upload?.status !== "ready" || upload.documentId === null) {
+    return null;
+  }
+  return { upload, documentId: upload.documentId };
+};
+
+const styles = stylex.create({
+  section: { display: "flex", flexDirection: "column", gap: grasp.space2 },
+});
+
+/**
+ * Uploading files into the collection `collectionId`, and their status,
+ * in the one list of the file upload; `listed` holds the documents the
+ * file list shows.
  */
 export const Uploads = ({
   collectionId,
@@ -266,11 +212,10 @@ export const Uploads = ({
   listed: ReadonlySet<string>;
 }) => {
   const router = useRouter();
-  const inputId = useId();
+  const navigate = useNavigate();
+  const headingId = useId();
   const core = useCore();
-  const [sending, setSending] = useState<Sending[]>([]);
-  const [followed, setFollowed] = useState<Followed[]>([]);
-  const [dragging, setDragging] = useState(false);
+  const [tracked, setTracked] = useState<ReadonlyMap<File, Tracked>>(new Map());
   const { t } = useLingui();
   // Whether the page is still open: nobody sees the status once it isn't.
   const open = useRef(true);
@@ -280,147 +225,84 @@ export const Uploads = ({
       open.current = false;
     };
   }, []);
-  const update = ({ upload, problem }: Followed): void => {
-    setFollowed((all) =>
-      all.map((entry) =>
-        entry.upload.id === upload.id ? { upload, problem } : entry
-      )
-    );
+  const set = (file: File, entry: Tracked): void => {
+    setTracked((all) => new Map(all).set(file, entry));
   };
-  const upload = async (file: File): Promise<void> => {
-    // Each file has its own row from the start, so several can be on their
-    // way at once, each saying how it went.
-    const key = crypto.randomUUID();
-    setSending((all) => [{ key, name: file.name }, ...all]);
-    let started: Upload;
-    try {
-      started = await core.withSession(async (session) => {
-        // Refused here, as core would, before reading and sending it all:
-        // the size the browser reports only saves the trip. Core checks the
-        // bytes that arrive.
-        if (file.size > uploadMaxBytes) {
-          throw uploadErrors.create("upload.too_large");
-        }
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        return await session.uploads.upload({
-          collectionId,
-          name: file.name,
-          bytes,
-        });
-      });
-    } catch (error) {
-      const problem = failureText(error);
-      setSending((all) =>
-        all.map((entry) => (entry.key === key ? { ...entry, problem } : entry))
-      );
-      return;
-    }
-    setSending((all) => all.filter((entry) => entry.key !== key));
-    setFollowed((all) => [{ upload: started }, ...all]);
+  const track = async (file: File, started: Upload): Promise<void> => {
     const end = await follow(
       core,
       started,
       (news) => {
-        update({ upload: news });
+        set(file, { upload: news });
       },
       () => open.current
     );
     if (!open.current) {
       return;
     }
-    update(end);
+    set(file, end);
     if (end.upload.status === "ready") {
       // The file list shows the new document, or its new version.
       await router.invalidate({ sync: true });
     }
   };
-  const accept = Object.keys(uploadTypes)
-    .map((extension) => `.${extension}`)
-    .join(",");
+  // Sends one file, File upload showing it on its way; several can be on
+  // their way at once. Core's refusal shows on its row, in core's words.
+  const send = async (file: File): Promise<void> => {
+    const sent = await sendFile(core, collectionId, file);
+    if ("problem" in sent) {
+      set(file, { problem: sent.problem });
+      return;
+    }
+    set(file, { upload: sent.started });
+    void track(file, sent.started);
+  };
+  const words: RowWords = {
+    past: t`Ready. It's past the first ${pageMaxLimit} files listed: open it from here.`,
+  };
+  const accept = Object.keys(uploadTypes).map((extension) => `.${extension}`);
   return (
-    <section aria-labelledby="uploads" className="flex flex-col gap-2">
-      <h2 className="text-sm font-medium" id="uploads">
-        <Trans>Upload</Trans>
-      </h2>
-      <div
-        className={
-          dragging
-            ? "group bg-muted/30 has-focus-visible:ring-ring/50 border-foreground/40 relative grid min-w-0 rounded-2xl border border-dashed has-focus-visible:ring-3"
-            : "group bg-card hover:bg-muted/50 has-focus-visible:ring-ring/50 relative grid min-w-0 rounded-2xl border border-dashed has-focus-visible:ring-3"
-        }
-        onDragEnter={(event) => {
-          event.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={(event) => {
-          const into = event.relatedTarget;
-          if (!(into instanceof Node && event.currentTarget.contains(into))) {
-            setDragging(false);
+    <section aria-labelledby={headingId} {...stylex.props(styles.section)}>
+      <Heading id={headingId} level={2} size="ui-sm">
+        {t`Upload`}
+      </Heading>
+      <FileUpload
+        accept={accept}
+        actions={(file) => {
+          const ready = readyOf(tracked.get(file));
+          if (ready === null) {
+            return [];
           }
+          const { upload, documentId } = ready;
+          const { name } = upload;
+          return [
+            {
+              label: t`Open ${name}`,
+              onAction: () => {
+                void navigate({
+                  to: "/knowledge/$collection",
+                  params: { collection: upload.collectionId },
+                  search: { doc: documentId },
+                });
+              },
+            },
+            // Core serves it as an attachment only, to those who may read it.
+            {
+              label: t`Download ${name}`,
+              icon: Download,
+              href: uploadOriginalPath(encodeURIComponent(upload.id)),
+            },
+          ];
         }}
-        onDragOver={(event) => {
-          event.preventDefault();
-          event.dataTransfer.dropEffect = "copy";
-        }}
-        onDrop={(event) => {
-          event.preventDefault();
-          setDragging(false);
-          for (const file of event.dataTransfer.files) {
-            void upload(file);
-          }
-        }}
-      >
-        <label
-          className="flex w-full cursor-pointer flex-col items-stretch justify-center rounded-2xl px-5 pt-5.5 pb-6.5 text-center text-sm"
-          htmlFor={inputId}
-        >
-          <Sheets dragging={dragging} />
-          <span className="font-medium">
-            {dragging ? t`Let go to add them` : t`Drop files here`}
-          </span>
-          <span className="text-muted-foreground mt-1">
-            {t`or choose them from your computer`}
-          </span>
-          <span className="text-muted-foreground pt-1.5 text-xs">
-            <Trans>Upload a PDF, Word or Excel file, or captions (.vtt)</Trans>
-          </span>
-          <span className="text-muted-foreground pt-1 text-xs">
-            <Trans>
-              Don’t upload interview recordings or their captions: interviews go
-              through the interview flow.
-            </Trans>
-          </span>
-        </label>
-        <input
-          accept={accept}
-          className="sr-only"
-          id={inputId}
-          multiple
-          onChange={(event) => {
-            const files = [...(event.target.files ?? [])];
-            // Empty again, so the same file can be chosen once more.
-            event.target.value = "";
-            for (const file of files) {
-              void upload(file);
-            }
-          }}
-          type="file"
-        />
-      </div>
-      {sending.length === 0 && followed.length === 0 ? null : (
-        <ul className="flex flex-col gap-2">
-          {sending.map((entry) => (
-            <SendingRow
-              key={entry.key}
-              name={entry.name}
-              problem={entry.problem}
-            />
-          ))}
-          {followed.map((entry) => (
-            <UploadRow key={entry.upload.id} listed={listed} {...entry} />
-          ))}
-        </ul>
-      )}
+        hint={t`Upload a PDF, Word or Excel file, or captions (.vtt)`}
+        maxSize={uploadMaxBytes}
+        multiple
+        status={(file) => statusOf(tracked.get(file), listed, words)}
+        upload={send}
+      />
+      <Text size="xs" tone="muted">
+        {t`Don’t upload interview recordings or their captions: interviews go through the interview flow.`}
+      </Text>
     </section>
   );
 };

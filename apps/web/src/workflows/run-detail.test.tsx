@@ -7,8 +7,9 @@ import { describe, expect, it } from "vite-plus/test";
 import { RunResultView, RunStatusFact } from "./run-detail.tsx";
 
 // What an opened run says of its result: what it returned, or why it
-// failed, as core gave them; for a reader core keeps them from, that only
-// the person it ran for and the admins see them; nothing while it runs.
+// failed, as core gave them (its panel's section names which); for a
+// reader core keeps them from, that only the person it ran for and the
+// admins see them; nothing while it runs.
 
 /** A run that completed, changed by `change`. */
 const run = (
@@ -52,8 +53,8 @@ const statusText = (shown: WorkflowResourceRun): string =>
 
 describe("an opened run's result", () => {
   it("shows what it returned, as JSON", () => {
-    expect(textOf(run({ result: { status: "sent", count: 2 } }))).toBe(
-      'What it returned { "status": "sent", "count": 2 }'
+    expect(textOf(run({ result: { status: "sent", count: 2 } }))).toContain(
+      '{ "status": "sent", "count": 2 }'
     );
   });
 
@@ -65,7 +66,7 @@ describe("an opened run's result", () => {
           error: { code: "workflow.task_failed", message: "The task failed." },
         })
       )
-    ).toBe("Why it failed The task failed. workflow.task_failed");
+    ).toBe("The task failed. workflow.task_failed");
   });
 
   it("tells a reader core keeps the result from who sees it, and says nothing more to one who may", () => {

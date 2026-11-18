@@ -13,6 +13,7 @@ import type {
   OrganizationProviderId,
 } from "@grasp-os/shared/ai-providers";
 import { failureText } from "@grasp-os/shared/errors";
+import { i18n as active } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -24,6 +25,7 @@ import { changeThenRefresh } from "../change-then-refresh.ts";
 import { failureMessage } from "../chat/failure.ts";
 import type { Session } from "../core.ts";
 import { formatDollars } from "../format.ts";
+import { tellProvidersChanged } from "../frame/ai-key-banner.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { BrandIcon } from "../grasp/brand-icon/index.ts";
@@ -249,6 +251,17 @@ const nameOf = (
     : model;
 };
 
+// A custom endpoint has no name of its own: core's label for it is English
+// words, so the page says them in its own language.
+const customEndpoint = msg`OpenAI-compatible endpoint`;
+
+/** A provider's name, in the page's language for a custom endpoint. */
+const providerName = (
+  provider: OrganizationProviderId,
+  label: string
+): string =>
+  provider === "openai-compatible" ? active._(customEndpoint) : label;
+
 /** A key field: a password field, never shown, nor offered by the browser later; its placeholder how the provider's keys start. */
 const KeyInput = ({
   provider,
@@ -328,21 +341,21 @@ const KeyDialog = ({
   const { t } = useLingui();
   const formId = useId();
   const [key, setKey] = useState("");
-  const { label } = provider;
+  const label = providerName(provider.provider, provider.label);
   const save = useAction(
     async () => {
       await onReplace(key);
       setKey("");
       onOpenChange(false);
     },
-    { working: t`Saving`, done: t`Saved`, failed: t`Could not save` }
+    { working: t`Saving`, done: t`Saved`, failed: t`Not saved` }
   );
   const remove = useAction(
     async () => {
       await onDelete();
       onOpenChange(false);
     },
-    { working: t`Deleting`, done: t`Deleted`, failed: t`Could not delete` }
+    { working: t`Deleting`, done: t`Deleted`, failed: t`Not deleted` }
   );
   const failed = save.error ?? remove.error;
   // Why it can't be tested, or why its test failed: nothing while all is well.
@@ -443,7 +456,7 @@ const ProviderRow = ({
   const statusOf = useStatus();
   const [managing, setManaging] = useState(false);
   const test = useTest(provider.provider, testModel ?? undefined);
-  const { label } = provider;
+  const label = providerName(provider.provider, provider.label);
   const last = provider.mask.replace("…", "");
   const status = statusOf(provider.status);
   const testFailure =
@@ -567,7 +580,7 @@ const AddProviderDialog = ({
         close();
       }
     },
-    { working: t`Saving`, done: t`Saved`, failed: t`Could not save` }
+    { working: t`Saving`, done: t`Saved`, failed: t`Not saved` }
   );
   if (provider === undefined) {
     return null;
@@ -622,7 +635,7 @@ const AddProviderDialog = ({
                     <FieldContent>
                       <FieldLabel>
                         <ProviderChoice
-                          label={each.label}
+                          label={providerName(each.provider, each.label)}
                           provider={each.provider}
                         />
                       </FieldLabel>
@@ -720,7 +733,7 @@ const modelItems = (
       : [
           {
             type: "group" as const,
-            label: provider.label,
+            label: providerName(provider.provider, provider.label),
             items: left.map(({ model, name }) => ({
               value: model,
               label: name,
@@ -1124,6 +1137,7 @@ export const AiProvidersSettings = ({
         },
         async () => {
           await router.invalidate({ sync: true });
+          tellProvidersChanged();
         }
       );
       return true;
@@ -1139,6 +1153,7 @@ export const AiProvidersSettings = ({
         },
         async () => {
           await router.invalidate({ sync: true });
+          tellProvidersChanged();
         }
       );
     });

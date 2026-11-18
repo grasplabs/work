@@ -23,6 +23,8 @@ import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { useWords, withGiven } from "../words/words";
+import { linkWords } from "./words";
 
 /** What a caller may style: where the link sits. Never its look. */
 export type LinkLayoutStyle = LayoutStyle;
@@ -168,14 +170,17 @@ export const Link = ({
   render,
   variant = "inline",
   external = false,
-  externalLabel = "opens in a new tab",
+  externalLabel: externalGiven,
   style: styleProp,
   layout,
   target,
   rel,
   ...rest
-}: LinkProps) =>
-  renderElement(
+}: LinkProps) => {
+  const { external: externalLabel } = withGiven(useWords("link", linkWords), {
+    external: externalGiven,
+  });
+  return renderElement(
     "a",
     {
       ...rest,
@@ -211,3 +216,4 @@ export const Link = ({
     },
     render
   );
+};

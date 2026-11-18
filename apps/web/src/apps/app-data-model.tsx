@@ -8,81 +8,78 @@ import type {
   IndexUse,
   PlanField,
 } from "@grasp-os/shared/data-model";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  ModelTableItem,
-  ModelTableList,
-} from "@grasp-os/ui/components/data-model";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
-import {
-  Empty,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import { RecordGridHeader } from "@grasp-os/ui/components/record-grid";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@grasp-os/ui/components/sheet";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import {
-  Columns3Icon,
-  DatabaseIcon,
-  ListOrderedIcon,
-  MoreHorizontalIcon,
-  PlusIcon,
-  Rows3Icon,
-  ShieldIcon,
-  Table2Icon,
-  TrashIcon,
-} from "lucide-react";
-import { useState } from "react";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatCompact } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import {
+  Dialog,
+  DialogAction,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogTitle,
+} from "../grasp/dialog/index.ts";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../grasp/dropdown-menu/index.ts";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../grasp/empty/index.ts";
+import { Field, FieldDescription, FieldLabel } from "../grasp/field/index.ts";
+import {
+  AppRecord,
+  Database,
+  ListView,
+  Lock,
+  More,
+  Plus,
+  Rows,
+  Sortable,
+  Trash,
+} from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemDetail,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import {
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "../grasp/select/index.ts";
+import {
+  Sheet,
+  SheetBody,
+  SheetContent,
+  SheetTitle,
+} from "../grasp/sheet/index.ts";
+import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 import { AccessView } from "./access-view.tsx";
 import { TableRecords } from "./app-data.tsx";
 import { PlanList, planLines, useModelChanges } from "./data-model-changes.tsx";
 import type { ModelChange, ModelOperation } from "./data-model-changes.tsx";
 import { FieldsView } from "./field-editor.tsx";
-import { KindIcon } from "./field-kinds.tsx";
 import { identifierOf } from "./identifier.ts";
 import { IndexesView } from "./indexes-view.tsx";
 import { ResetTestData } from "./reset-test-data.tsx";
@@ -90,19 +87,62 @@ import { useCoreRead } from "./use-core-read.ts";
 
 // An App's data model in its workspace's Data view, as a database studio
 // shows one: the tables in a column, each with how many records it holds,
-// and the open one as a grid whose column headers are its fields and
+// and the open one as a table whose column heads are its fields and
 // whose rows are the test records of the draft's preview, which its
 // builders share, loaded as people scroll; Reset test data clears them
 // for everyone (reset-test-data.tsx). Its
 // Fields view lists the fields, each changed in place with room for all
 // it takes, and adds new ones; who reaches the records and the orders
-// they're read in sit behind the bar's two quieter buttons. Whoever builds the App changes it
+// they're read in sit behind the bar's two quieter toggles. Whoever builds the App changes it
 // here as the chat's agent does, through the definition's own operations,
 // into the App's draft (`apps.drafts.define`): nothing changes for the
 // App's people until the draft is published, and a change that removes,
 // retypes, changes access or needs a value for records is reviewed first
 // (data-model-changes.tsx). While the chat's agent works on the App, the
 // model is read only: two writers would only refuse each other.
+
+// How tall the table list may grow above the table on a narrow screen,
+// and how wide it stands beside it on a wide one: Grasp UI has no token
+// for a side list's measure (app-code.tsx's file tree takes the same).
+const LIST_TALL = "14rem";
+const LIST_WIDE = "15rem";
+
+const styles = stylex.create({
+  studio: {
+    display: "flex",
+    flexDirection: { default: "column", [media.fromTablet]: "row" },
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  tables: {
+    display: "flex",
+    flexDirection: "column",
+    flexShrink: 0,
+    gap: grasp.space2,
+    maxHeight: { default: LIST_TALL, [media.fromTablet]: "none" },
+    width: { default: "auto", [media.fromTablet]: LIST_WIDE },
+    overflowY: "auto",
+    padding: grasp.space2,
+    boxShadow: grasp.edge,
+  },
+  foot: { marginBlockStart: "auto" },
+  plan: { display: "grid", gap: grasp.space2 },
+  wide: { width: "100%" },
+  model: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+    minWidth: 0,
+  },
+  failure: {
+    flexShrink: 0,
+    paddingBlock: grasp.space2,
+    paddingInline: grasp.space3,
+  },
+  padded: { padding: grasp.space4 },
+  form: { display: "grid", gap: grasp.space4 },
+});
 
 /**
  * The tables of the draft preview's test data, with their counts: read
@@ -122,7 +162,7 @@ const showings = ["records", "fields", "access", "indexes"] as const;
 
 type Showing = (typeof showings)[number];
 
-/** The table open: its fields as the grid's columns, its records as rows. */
+/** The table open: its fields as the table's columns, its records as rows. */
 const TableView = ({
   app,
   held,
@@ -152,15 +192,7 @@ const TableView = ({
       app={app}
       columns={table.fields.map((field) => ({
         field: field.name,
-        header: (
-          <RecordGridHeader
-            icon={<KindIcon kind={field.type.kind} />}
-            required={field.required}
-            requiredLabel={t`Required`}
-          >
-            {field.name}
-          </RecordGridHeader>
-        ),
+        header: field.name,
       }))}
       instead={
         {
@@ -207,49 +239,41 @@ const TableView = ({
               );
             }}
             size="sm"
-            spacing={0}
             value={[showing]}
-            variant="outline"
           >
-            <ToggleGroupItem value="records">
-              <Rows3Icon data-icon="inline-start" />
-              <Trans context="a table's records">Records</Trans>
-            </ToggleGroupItem>
-            <ToggleGroupItem value="fields">
-              <Columns3Icon data-icon="inline-start" />
-              <Trans context="a table's fields">Fields</Trans>
-            </ToggleGroupItem>
-            <ToggleGroupItem value="access">
-              <ShieldIcon data-icon="inline-start" />
-              <Trans context="who reaches a table's records">Access</Trans>
-            </ToggleGroupItem>
-            <ToggleGroupItem value="indexes">
-              <ListOrderedIcon data-icon="inline-start" />
-              <Trans context="a table's indexes">Indexes</Trans>
-            </ToggleGroupItem>
+            <Toggle icon={AppRecord} value="records">
+              {t({ message: "Records", context: "a table's records" })}
+            </Toggle>
+            <Toggle icon={ListView} value="fields">
+              {t({ message: "Fields", context: "a table's fields" })}
+            </Toggle>
+            <Toggle icon={Lock} value="access">
+              {t({
+                message: "Access",
+                context: "who reaches a table's records",
+              })}
+            </Toggle>
+            <Toggle icon={Sortable} value="indexes">
+              {t({ message: "Indexes", context: "a table's indexes" })}
+            </Toggle>
           </ToggleGroup>
           <DropdownMenu>
             <DropdownMenuTrigger
+              aria-label={t`Change ${name}`}
               disabled={disabled}
-              render={
-                <Button
-                  aria-label={t`Change ${name}`}
-                  size="icon-sm"
-                  variant="ghost"
-                />
-              }
-            >
-              <MoreHorizontalIcon />
-            </DropdownMenuTrigger>
+              icon={More}
+              size="sm"
+              variant="ghost"
+            />
             <DropdownMenuContent align="start">
               <DropdownMenuItem
-                onClick={() => {
+                icon={Trash}
+                onSelect={() => {
                   void onChange({ op: "removeTable", table: table.name });
                 }}
-                variant="destructive"
+                variant="danger"
               >
-                <TrashIcon />
-                <Trans>Remove table</Trans>
+                {t`Remove table`}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -272,104 +296,88 @@ const NewTableDialog = ({
   onAdd: (operation: ModelOperation) => Promise<boolean>;
 }) => {
   const { t } = useLingui();
+  const formId = useId();
   const [name, setName] = useState("");
   const [mode, setMode] = useState<AppDataAccess>("appMembers");
   const named = identifierOf(name);
-  const items = [
+  const items: { value: AppDataAccess; label: string }[] = [
     { value: "appMembers", label: t`Everyone who uses the App` },
     { value: "owner", label: t`Only the person who added each record` },
     { value: "appBuilders", label: t`Only the App's builders` },
-  ] as const;
+  ];
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="sm:max-w-md" closeLabel={t`Close`}>
-        <DialogHeader>
-          <DialogTitle>
-            <Trans>New table</Trans>
-          </DialogTitle>
-        </DialogHeader>
-        <form
-          className="flex flex-col gap-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (named === "") {
-              return;
-            }
-            void (async () => {
-              const made = await onAdd({
-                op: "addTable",
-                name: named,
-                access: { read: mode, write: mode },
-              });
-              if (made) {
-                setName("");
-                onOpenChange(false);
+      <DialogContent closeLabel={t`Close`}>
+        <DialogTitle>{t`New table`}</DialogTitle>
+        <DialogBody>
+          <form
+            id={formId}
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (named === "") {
+                return;
               }
-            })();
-          }}
-        >
-          <Field>
-            <FieldLabel>
-              <Trans>Name</Trans>
-            </FieldLabel>
-            <Input
-              aria-label={t`Table name`}
-              onChange={(event) => {
-                setName(event.target.value);
-              }}
-              placeholder={t`tasks`}
-              value={name}
-            />
-            {named !== "" && named !== name.trim() ? (
-              <FieldDescription>
-                <Trans>Saved as {named}</Trans>
-              </FieldDescription>
-            ) : null}
-          </Field>
-          <Field>
-            <FieldLabel>
-              <Trans>Who can see and change its records</Trans>
-            </FieldLabel>
-            <Select
-              items={items}
-              onValueChange={(next: unknown) => {
-                const picked = items.find(({ value }) => value === next);
-                if (picked !== undefined) {
-                  setMode(picked.value);
+              void (async () => {
+                const made = await onAdd({
+                  op: "addTable",
+                  name: named,
+                  access: { read: mode, write: mode },
+                });
+                if (made) {
+                  setName("");
+                  onOpenChange(false);
                 }
-              }}
-              value={mode}
-            >
-              <SelectTrigger
-                aria-label={t`Who can see and change its records`}
-                className="w-full"
+              })();
+            }}
+            {...stylex.props(styles.form)}
+          >
+            <Field>
+              <FieldLabel>{t`Name`}</FieldLabel>
+              <Input
+                aria-label={t`Table name`}
+                onValueChange={(value: string) => {
+                  setName(value);
+                }}
+                placeholder={t`tasks`}
+                value={name}
+              />
+              {named !== "" && named !== name.trim() ? (
+                <FieldDescription>{t`Saved as ${named}`}</FieldDescription>
+              ) : null}
+            </Field>
+            <Field>
+              <FieldLabel>{t`Who can see and change its records`}</FieldLabel>
+              <Select
+                items={items}
+                onValueChange={(next) => {
+                  const picked = items.find(({ value }) => value === next);
+                  if (picked !== undefined) {
+                    setMode(picked.value);
+                  }
+                }}
+                value={mode}
               >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {items.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-          <DialogFooter>
-            <Button
-              onClick={() => {
-                onOpenChange(false);
-              }}
-              type="button"
-              variant="outline"
-            >
-              <Trans>Cancel</Trans>
-            </Button>
-            <Button disabled={busy || named === ""} type="submit">
-              <Trans>Create table</Trans>
-            </Button>
-          </DialogFooter>
-        </form>
+                <SelectTrigger
+                  aria-label={t`Who can see and change its records`}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent />
+              </Select>
+            </Field>
+          </form>
+        </DialogBody>
+        <DialogFooter>
+          <DialogAction>{t`Cancel`}</DialogAction>
+          <Button
+            disabled={busy || named === ""}
+            form={formId}
+            type="submit"
+            variant="ink"
+          >
+            {t`Create table`}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -392,34 +400,28 @@ const PublishPlan = ({
     return null;
   }
   return (
-    <>
+    <div {...stylex.props(styles.plan)}>
       <Button
-        className="w-full"
+        layout={styles.wide}
         onClick={() => {
           setOpen(true);
         }}
         size="sm"
-        variant="outline"
       >
-        <Plural
-          one="# change to publish"
-          other="# changes to publish"
-          value={changeCount}
-        />
-        {needs === 0 ? null : (
-          <Badge variant="attention">
-            <Plural one="# needs you" other="# need you" value={needs} />
-          </Badge>
-        )}
+        {t`${plural(changeCount, {
+          one: "# change to publish",
+          other: "# changes to publish",
+        })}`}
       </Button>
+      {needs === 0 ? null : (
+        <Badge tone="attention">
+          {t`${plural(needs, { one: "# needs you", other: "# need you" })}`}
+        </Badge>
+      )}
       <Sheet onOpenChange={setOpen} open={open}>
-        <SheetContent closeLabel={t`Close`} side="right">
-          <SheetHeader>
-            <SheetTitle>
-              <Trans>When you publish</Trans>
-            </SheetTitle>
-          </SheetHeader>
-          <div className="overflow-y-auto px-4 pb-4">
+        <SheetContent closeLabel={t`Close`}>
+          <SheetTitle>{t`When you publish`}</SheetTitle>
+          <SheetBody>
             <PlanList
               lines={lines}
               onAnswer={(field) => {
@@ -427,10 +429,10 @@ const PublishPlan = ({
                 onAnswer(field);
               }}
             />
-          </div>
+          </SheetBody>
         </SheetContent>
       </Sheet>
-    </>
+    </div>
   );
 };
 
@@ -488,7 +490,7 @@ export const AppDataModel = ({
   }
   if (shown === undefined) {
     return (
-      <div className="p-4">
+      <div {...stylex.props(styles.padded)}>
         {read === undefined ? (
           <LoadingLines lines={6} />
         ) : (
@@ -524,73 +526,69 @@ export const AppDataModel = ({
     }
   };
   return (
-    <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-      <nav
-        aria-label={t`Tables`}
-        className="flex max-h-56 flex-none flex-col gap-2 overflow-y-auto border-b p-2 md:max-h-none md:w-56 md:border-e md:border-b-0"
-      >
+    <div {...stylex.props(styles.studio)}>
+      <nav aria-label={t`Tables`} {...stylex.props(styles.tables)}>
         <Button
           disabled={disabled}
+          icon={Plus}
           onClick={() => {
             setCreating(true);
           }}
           size="sm"
-          variant="outline"
         >
-          {running ? (
-            <Spinner data-icon="inline-start" />
-          ) : (
-            <PlusIcon data-icon="inline-start" />
-          )}
-          <Trans>New table</Trans>
+          {t`New table`}
         </Button>
-        <ModelTableList>
+        <ItemGroup>
           {model.tables.map((each) => {
             const records = held?.find(
               ({ name }) => name === each.name
             )?.records;
             return (
-              <ModelTableItem
-                active={each.id === table?.id}
-                icon={<Table2Icon />}
+              <Item
+                current={each.id === table?.id}
                 key={each.id}
-                // How many test records it holds; none for a table the
-                // test data doesn't have yet, or whose records each person
-                // sees only some of.
-                {...(records === undefined || records === null
-                  ? {}
-                  : { meta: formatCompact(records) })}
-                onClick={() => {
-                  setPicked(each.id);
-                }}
+                render={
+                  <button
+                    aria-label={each.name}
+                    onClick={() => {
+                      setPicked(each.id);
+                    }}
+                    type="button"
+                  />
+                }
+                size="sm"
               >
-                {each.name}
-              </ModelTableItem>
+                <ItemMedia icon={Rows} iconLook="inline" />
+                <ItemContent>
+                  <ItemTitle>
+                    {each.name}
+                    {/* How many test records it holds; none for a table
+                        the test data doesn't have yet, or whose records
+                        each person sees only some of. */}
+                    {records === undefined || records === null ? null : (
+                      <ItemDetail>{formatCompact(records)}</ItemDetail>
+                    )}
+                  </ItemTitle>
+                </ItemContent>
+              </Item>
             );
           })}
-        </ModelTableList>
-        <div className="mt-auto">
+        </ItemGroup>
+        <div {...stylex.props(styles.foot)}>
           <PublishPlan onAnswer={answer} plan={plan} />
         </div>
       </nav>
-      <section
-        aria-label={t`Data model`}
-        className="flex min-h-0 min-w-0 flex-1 flex-col"
-      >
+      <section aria-label={t`Data model`} {...stylex.props(styles.model)}>
         {changes.failure === undefined ? null : (
-          <div className="border-b px-3 py-2">
+          <div {...stylex.props(styles.failure)}>
             <ErrorText>{changes.failure}</ErrorText>
           </div>
         )}
         {table === undefined ? (
           <Empty>
             <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <DatabaseIcon />
-              </EmptyMedia>
-              <EmptyTitle>
-                <Trans>No tables yet</Trans>
-              </EmptyTitle>
+              <EmptyMedia icon={Database} />
+              <EmptyTitle>{t`No tables yet`}</EmptyTitle>
             </EmptyHeader>
           </Empty>
         ) : (
@@ -598,7 +596,7 @@ export const AppDataModel = ({
             app={app}
             disabled={disabled}
             held={held}
-            // Each table its own grid, popovers and sheets, read afresh
+            // Each table its own records, popovers and sheets, read afresh
             // once the test data was reset.
             key={`${table.id}/${resets}`}
             onChange={change}

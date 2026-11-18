@@ -1,18 +1,15 @@
 import type { ModelEffort } from "@grasp-os/shared/models";
-import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-import { formatNumber } from "../format.ts";
 import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
-import {
-  Composer,
-  ComposerAdd,
-  ComposerSurface,
+import { Composer, ComposerAdd } from "../grasp/composer/index.ts";
+import type {
+  ComposerAgentOption,
+  ComposerFile,
 } from "../grasp/composer/index.ts";
-import type { ComposerFile } from "../grasp/composer/index.ts";
 import { accepted, useAttachmentWords } from "./chat-files.tsx";
 import type { CardFile } from "./chat-files.tsx";
 import { useOwnComposerLook } from "./composer-look.ts";
@@ -104,6 +101,14 @@ export interface ChatComposerProps {
   disabled?: boolean;
   /** The longest message it takes; a question's by default. */
   maxLength?: number;
+  /**
+   * The agents the plus menu offers (agent-choice.tsx), with the chosen one
+   * (`agent`) and how to choose (`onAgent`): a new chat's box. The first is
+   * the default. None in an open chat, which stays with its agent.
+   */
+  agents?: readonly ComposerAgentOption[];
+  agent?: string;
+  onAgent?: (agent: string) => void;
   /** What takes the text's place while the assistant needs something first: its questions. */
   takeover?: ReactNode;
   /** Escape, or Type instead, leaves the takeover for the text. */
@@ -139,27 +144,6 @@ const noteOf = (noProvider: boolean, problem: string | undefined) => {
   );
 };
 
-/** What the box says as the text nears and reaches its longest, in the page's language. */
-const useLengthWords = () => {
-  const { t } = useLingui();
-  return {
-    maxLengthCountLabel: (length: number, max: number) =>
-      `${formatNumber(length)}/${formatNumber(max)}`,
-    maxLengthCutLabel: (max: number) => {
-      const limit = formatNumber(max);
-      return t`The pasted text was cut at the limit of ${limit} characters`;
-    },
-    maxLengthNearLabel: (max: number) => {
-      const limit = formatNumber(max);
-      return t`Close to the limit of ${limit} characters`;
-    },
-    maxLengthReachedLabel: (max: number) => {
-      const limit = formatNumber(max);
-      return t`The limit of ${limit} characters is reached`;
-    },
-  };
-};
-
 /**
  * Whether Grasp has just finished an answer here: from the moment it stops
  * working until it works again. The Composer plays its halo once for it.
@@ -190,6 +174,32 @@ const activityOf = (
   }
   return answered ? "success" : "idle";
 };
+
+/**
+ * The plus menu's agents, for a new chat's box: the first is the default,
+ * a last row goes to all of them. Nothing where there is nothing to choose.
+ */
+const useAgentMenu = (
+  agents: readonly ComposerAgentOption[],
+  agent: string | undefined,
+  onAgent: ((agent: string) => void) | undefined
+) => {
+  const { t } = useLingui();
+  const [first] = agents;
+  if (onAgent === undefined || first === undefined) {
+    return {};
+  }
+  return {
+    agents: [...agents],
+    all: { label: t`All agents`, href: "/agents" },
+    defaultAgent: first.value,
+    onValueChange: onAgent,
+    value: agent ?? first.value,
+  };
+};
+
+/** No agents to choose from: an open chat's box. */
+const noAgents: readonly ComposerAgentOption[] = [];
 
 /** The box to ask in. Controlled: the page keeps the text and the model. */
 export const ChatComposer = ({
@@ -226,9 +236,11 @@ export const ChatComposer = ({
   maxLength = maxQuestionLength,
   takeover,
   onTakeoverDismiss,
+  agents = noAgents,
+  agent,
+  onAgent,
 }: ChatComposerProps) => {
   const { t } = useLingui();
-  const lengthWords = useLengthWords();
   const attachmentWords = useAttachmentWords("waiting");
   const mentioning = useComposerMentions(mentions, onMentions);
   // No AI provider to call yet: the box takes nothing. Not while the models
@@ -237,6 +249,7 @@ export const ChatComposer = ({
   const answered = useJustAnswered(running);
   const dictating = useDictation(text, onText);
   const look = useOwnComposerLook();
+  const agentMenu = useAgentMenu(agents, agent, onAgent);
   return (
     <Composer
       accent={look.accent}
@@ -247,19 +260,16 @@ export const ChatComposer = ({
       showWorking={showWorking}
       compact={compact}
       attachments={attachmentsOf(files)}
-      attachmentsLabel={t`Files to send`}
       attachmentWords={attachmentWords}
       start={
         onAttach === undefined ? undefined : (
           <ComposerAdd
             accept={accepted}
             kinds={mentioning?.kinds}
-            aria-label={t`Add to the question`}
             onAttach={(chosen) => {
               onAttach(chosen);
             }}
-            uploadLabel={t`Attach a file`}
-            actionsLabel={t`This chat`}
+            {...agentMenu}
           />
         )
       }
@@ -274,7 +284,6 @@ export const ChatComposer = ({
           onModel={onModel}
         />
       }
-      failedLabel={t`Could not send`}
       aria-label={label ?? t`Your question`}
       layout={styles.fill}
       note={noteOf(noProvider, fileProblem ?? failure)}
@@ -297,39 +306,23 @@ export const ChatComposer = ({
       onSendFailedChange={onSendFailedChange}
       mentionItems={mentioning?.items}
       mentionKinds={mentioning?.kinds}
-      mentionsEmptyLabel={t`Nothing found`}
-      mentionsFoundLabel={(count) =>
-        t`${plural(count, { one: "# result", other: "# results" })}`
-      }
-      mentionsLabel={t({ message: "Mention", context: "the mention menu" })}
-      mentionsLoadingLabel={t`Looking`}
-      commandsLabel={t`Commands`}
-      dropLabel={t`Drop to add`}
-      successLabel={t({ message: "Done", context: "an answer is done" })}
-      uploadingLabel={t`Sending waits for the files to upload`}
       mentionsLoading={mentioning?.loading}
       onMention={(item) => {
         mentioning?.onMention(item);
       }}
       maxLength={maxLength}
-      {...lengthWords}
       onValueChange={(value) => {
         onText(value);
         mentioning?.onText(value);
       }}
       placeholder={placeholder ?? t`Ask anything, or describe a process`}
-      sendLabel={t({ message: "Send", context: "send the question" })}
-      stopLabel={t({ message: "Stop", context: "stop the answer" })}
       surface={surface}
       onTakeoverDismiss={onTakeoverDismiss}
       takeover={takeover}
-      top={
-        subject === undefined ? undefined : (
-          <ComposerSurface>{subject}</ComposerSurface>
-        )
-      }
+      // Its other words are the parts' catalogue's (frame/part-words.tsx).
+      // The band above the box: what the chat is about (subject-bar.tsx).
+      top={subject}
       value={text}
-      workingLabel={t`Grasp is answering`}
     />
   );
 };

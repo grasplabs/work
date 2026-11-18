@@ -3,42 +3,38 @@ import { collectionMaxTeams } from "@grasp-os/shared/knowledge";
 import type { CollectionAccess } from "@grasp-os/shared/knowledge";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import { useNavigate } from "@tanstack/react-router";
+import { useId, useState } from "react";
+
+import { ErrorText } from "../error-text.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { Checkbox, CheckboxGroup } from "../grasp/checkbox/index.ts";
 import {
   Dialog,
-  DialogClose,
+  DialogAction,
+  DialogBody,
   DialogContent,
-  DialogDescription,
   DialogFooter,
-  DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@grasp-os/ui/components/dialog";
+} from "../grasp/dialog/index.ts";
 import {
   Field,
   FieldContent,
   FieldDescription,
   FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import {
-  RadioGroup,
-  RadioGroupItem,
-} from "@grasp-os/ui/components/radio-group";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import { Switch } from "@grasp-os/ui/components/switch";
-import { Textarea } from "@grasp-os/ui/components/textarea";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { useNavigate } from "@tanstack/react-router";
-import { PlusIcon } from "lucide-react";
-import { useId, useState } from "react";
-
-import { ErrorText } from "../error-text.tsx";
+} from "../grasp/field/index.ts";
+import { Form } from "../grasp/form/index.ts";
+import { Plus } from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import { RadioGroup, RadioGroupItem } from "../grasp/radio-group/index.ts";
+import { Spinner } from "../grasp/spinner/index.ts";
+import { Switch } from "../grasp/switch/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { Textarea } from "../grasp/textarea/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 
@@ -105,7 +101,13 @@ const useTeams = () => {
   return { teams, read };
 };
 
-/** The teams to share it with, each a checkbox. */
+/** The audience `value` names, if the form offers it. */
+const audienceOf = (
+  offered: readonly Audience[],
+  value: string | null
+): Audience | undefined => offered.find((one) => one === value);
+
+/** The teams to share it with, each a checkbox; at most `collectionMaxTeams`. */
 const TeamChoices = ({
   teams,
   chosen,
@@ -118,7 +120,6 @@ const TeamChoices = ({
   onChange: (chosen: string[]) => void;
 }) => {
   const { t } = useLingui();
-  const ids = useId();
   if (teams.state === "loading") {
     return <Spinner aria-label={t`Reading the teams`} />;
   }
@@ -127,46 +128,37 @@ const TeamChoices = ({
   }
   if (teams.teams.length === 0) {
     return (
-      <FieldDescription>
-        <Trans>The organization has no teams yet.</Trans>
-      </FieldDescription>
+      <Text size="sm" tone="muted">
+        {t`The organization has no teams yet.`}
+      </Text>
     );
   }
   const full = chosen.length >= collectionMaxTeams;
   return (
-    <FieldSet>
-      <FieldLegend variant="label">
-        <Trans>Teams</Trans>
-      </FieldLegend>
-      <ul className="flex max-h-48 flex-col gap-2 overflow-y-auto">
-        {teams.teams.map(({ id, name }) => {
-          const checked = chosen.includes(id);
-          return (
-            <li key={id}>
-              <Field orientation="horizontal">
-                <Checkbox
-                  checked={checked}
-                  disabled={disabled || (full && !checked)}
-                  id={`${ids}-${id}`}
-                  onCheckedChange={(next) => {
-                    const rest = chosen.filter((one) => one !== id);
-                    onChange(next ? [...rest, id] : rest);
-                  }}
-                />
-                <FieldLabel htmlFor={`${ids}-${id}`}>{name}</FieldLabel>
-              </Field>
-            </li>
-          );
-        })}
-      </ul>
-    </FieldSet>
+    <Field>
+      <FieldLabel>{t`Teams`}</FieldLabel>
+      <CheckboxGroup
+        disabled={disabled}
+        onValueChange={(next) => {
+          onChange(next);
+        }}
+        value={[...chosen]}
+      >
+        {teams.teams.map(({ id, name }) => (
+          <Field key={id} orientation="horizontal">
+            <Checkbox disabled={full && !chosen.includes(id)} value={id} />
+            <FieldLabel>{name}</FieldLabel>
+          </Field>
+        ))}
+      </CheckboxGroup>
+    </Field>
   );
 };
 
 /** The form, a fresh one each time the dialog opens. */
 const CollectionForm = ({ admin }: { admin: boolean }) => {
-  const { i18n } = useLingui();
-  const ids = useId();
+  const { t, i18n } = useLingui();
+  const formId = useId();
   const navigate = useNavigate();
   const { busy, failure, run } = useCoreAction();
   const [name, setName] = useState("");
@@ -202,142 +194,112 @@ const CollectionForm = ({ admin }: { admin: boolean }) => {
   };
 
   return (
-    <form
-      className="flex flex-col gap-5"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (complete && !busy) {
-          void create();
-        }
-      }}
-    >
-      <DialogHeader>
-        <DialogTitle>
-          <Trans>New collection</Trans>
-        </DialogTitle>
-        <DialogDescription>
-          <Trans>
-            A collection holds documents Grasp and its agents may read.
-          </Trans>
-        </DialogDescription>
-      </DialogHeader>
-      <Field>
-        <FieldLabel htmlFor={`${ids}-name`}>
-          <Trans>Name</Trans>
-        </FieldLabel>
-        <Input
-          autoComplete="off"
-          data-1p-ignore
-          data-lpignore="true"
-          disabled={busy}
-          id={`${ids}-name`}
-          maxLength={nameMaxLength}
-          onChange={(event) => {
-            setName(event.target.value);
-          }}
-          value={name}
-        />
-      </Field>
-      <Field>
-        <FieldLabel htmlFor={`${ids}-description`}>
-          <Trans>When to use it</Trans>
-        </FieldLabel>
-        <Textarea
-          disabled={busy}
-          id={`${ids}-description`}
-          maxLength={descriptionMaxLength}
-          onChange={(event) => {
-            setDescription(event.target.value);
-          }}
-          rows={3}
-          value={description}
-        />
-        <FieldDescription>
-          <Trans>Agents read this before they look inside.</Trans>
-        </FieldDescription>
-      </Field>
-      <FieldSet>
-        <FieldLegend variant="label">
-          <Trans>Who may read it</Trans>
-        </FieldLegend>
-        <RadioGroup
-          disabled={busy}
-          onValueChange={(value) => {
-            const next = offered.find((one) => one === value);
-            if (next === undefined) {
-              return;
-            }
-            setAccess(next);
-            if (next === "teams") {
-              void readTeams();
+    <>
+      <DialogBody>
+        <Form
+          aria-label={t`New collection`}
+          id={formId}
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (complete && !busy) {
+              void create();
             }
           }}
-          value={access}
         >
-          {offered.map((one) => (
-            <Field key={one} orientation="horizontal">
-              <RadioGroupItem id={`${ids}-${one}`} value={one} />
-              <FieldContent>
-                <FieldLabel htmlFor={`${ids}-${one}`}>
-                  {i18n._(audienceLabels[one].label)}
-                </FieldLabel>
-                <FieldDescription>
-                  {i18n._(audienceLabels[one].description)}
-                </FieldDescription>
-              </FieldContent>
-            </Field>
-          ))}
-        </RadioGroup>
-        {admin ? null : (
-          <FieldDescription>
-            <Trans>
-              Only an admin makes a collection for everyone or for teams.
-            </Trans>
-          </FieldDescription>
-        )}
-      </FieldSet>
-      {access === "teams" ? (
-        <>
-          <TeamChoices
-            chosen={teamIds}
-            disabled={busy}
-            onChange={setTeamIds}
-            teams={teams}
-          />
-          <Field orientation="horizontal">
-            <FieldContent>
-              <FieldLabel htmlFor={`${ids}-sensitive`}>
-                <Trans>Sensitive</Trans>
-              </FieldLabel>
-              <FieldDescription>
-                <Trans>
-                  The model gateway treats what agents read from it as
-                  sensitive.
-                </Trans>
-              </FieldDescription>
-            </FieldContent>
-            <Switch
-              checked={sensitive}
+          <Field>
+            <FieldLabel>{t`Name`}</FieldLabel>
+            <Input
+              autoComplete="off"
+              data-1p-ignore
+              data-lpignore="true"
               disabled={busy}
-              id={`${ids}-sensitive`}
-              onCheckedChange={setSensitive}
+              maxLength={nameMaxLength}
+              onValueChange={setName}
+              value={name}
             />
           </Field>
-        </>
-      ) : null}
-      <ErrorText>{failure}</ErrorText>
+          <Field>
+            <FieldLabel>{t`When to use it`}</FieldLabel>
+            <Textarea
+              disabled={busy}
+              maxLength={descriptionMaxLength}
+              onValueChange={setDescription}
+              rows={3}
+              value={description}
+            />
+            <FieldDescription>
+              {t`Agents read this before they look inside.`}
+            </FieldDescription>
+          </Field>
+          <Field>
+            <FieldLabel>{t`Who may read it`}</FieldLabel>
+            <RadioGroup
+              disabled={busy}
+              onValueChange={(value) => {
+                const next = audienceOf(offered, value);
+                if (next === undefined) {
+                  return;
+                }
+                setAccess(next);
+                if (next === "teams") {
+                  void readTeams();
+                }
+              }}
+              value={access}
+            >
+              {offered.map((one) => (
+                <Field key={one} orientation="horizontal">
+                  <RadioGroupItem value={one} />
+                  <FieldContent>
+                    <FieldLabel>{i18n._(audienceLabels[one].label)}</FieldLabel>
+                    <FieldDescription>
+                      {i18n._(audienceLabels[one].description)}
+                    </FieldDescription>
+                  </FieldContent>
+                </Field>
+              ))}
+            </RadioGroup>
+            {admin ? null : (
+              <FieldDescription>
+                {t`Only an admin makes a collection for everyone or for teams.`}
+              </FieldDescription>
+            )}
+          </Field>
+          {access === "teams" ? (
+            <>
+              <TeamChoices
+                chosen={teamIds}
+                disabled={busy}
+                onChange={setTeamIds}
+                teams={teams}
+              />
+              <Switch
+                checked={sensitive}
+                description={t`The model gateway treats what agents read from it as sensitive.`}
+                disabled={busy}
+                label={t`Sensitive`}
+                onCheckedChange={(checked) => {
+                  setSensitive(checked);
+                }}
+              />
+            </>
+          ) : null}
+          <ErrorText>{failure}</ErrorText>
+        </Form>
+      </DialogBody>
       <DialogFooter>
-        <DialogClose
-          disabled={busy}
-          render={<Button type="button" variant="outline" />}
+        <DialogAction disabled={busy}>{t`Cancel`}</DialogAction>
+        <Button
+          disabled={!complete || busy}
+          form={formId}
+          size="sm"
+          type="submit"
+          variant="ink"
         >
-          <Trans>Cancel</Trans>
-        </DialogClose>
-        <Button disabled={!complete || busy} type="submit">
-          <Trans>Create collection</Trans>
+          {t`Create collection`}
         </Button>
       </DialogFooter>
-    </form>
+    </>
   );
 };
 
@@ -347,11 +309,11 @@ export const NewCollection = ({ identity }: { identity: Identity }) => {
   const [open, setOpen] = useState(false);
   return (
     <Dialog onOpenChange={setOpen} open={open}>
-      <DialogTrigger render={<Button size="sm" variant="outline" />}>
-        <PlusIcon data-icon="inline-start" />
-        <Trans>New collection</Trans>
+      <DialogTrigger icon={Plus} size="sm">
+        {t`New collection`}
       </DialogTrigger>
       <DialogContent closeLabel={t`Close`}>
+        <DialogTitle>{t`New collection`}</DialogTitle>
         {open ? <CollectionForm admin={isAdmin(identity.role)} /> : null}
       </DialogContent>
     </Dialog>

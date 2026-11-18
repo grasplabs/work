@@ -1,5 +1,5 @@
 import { expect } from "@playwright/test";
-import type { Page, WebSocketRoute } from "@playwright/test";
+import type { Locator, Page, WebSocketRoute } from "@playwright/test";
 
 import { execute } from "./connections-seed.ts";
 import { test } from "./csp.ts";
@@ -153,6 +153,11 @@ const connectMail = async (
   return id;
 };
 
+/** Opens Details on a held write's card, where what it sends stands. */
+const openDetails = async (card: Locator): Promise<void> => {
+  await card.getByRole("button", { name: "Details" }).click();
+};
+
 test("a person asks in a new chat, follows the answer, renames it, and reads and decides the writes it holds", async ({
   pageOf,
 }) => {
@@ -254,39 +259,37 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   // Opened afresh from its address.
   await page.goto(`/chats/${chatId}`);
   const waiting = page.getByRole("region", { name: "Waiting for you" });
+  // Each on Grasp UI's Approval request, named for what it does; what it
+  // sends under Details.
+  const undescribed = waiting.getByRole("region", { name: /^mail\.send on /u });
+  const described = `Send an email on Microsoft 365 (${account})`;
+  const card = waiting.getByRole("region", { name: described, exact: true });
   // The undescribed one shows its action and its exact input.
-  await expect(waiting).toContainText("Waiting for you: mail.send");
-  await expect(waiting).toContainText('"to": "ben@acme.test"');
+  await openDetails(undescribed);
+  await expect(undescribed).toContainText('"to": "ben@acme.test"');
   // The described one reads as its tool says, on the connection by name,
   // in the input's own values; its exact input is one click away.
-  const described = `Send an email on Microsoft 365 (${account})`;
-  await expect(waiting).toContainText("Waiting for you: Send an email");
-  await expect(waiting).toContainText(`On Microsoft 365 (${account})`);
-  await expect(
-    waiting.getByText("cleo@acme.test", { exact: true })
-  ).toBeVisible();
-  await expect(waiting.getByText("The invoice is attached.")).toBeVisible();
-  // A long value starts cut short and says so, and Confirm waits until
-  // all of it has been shown.
-  await expect(waiting).not.toContainText("eve@evil.test");
-  const confirmDescribed = waiting.getByRole("button", {
-    name: `Confirm ${described}`,
-  });
-  await expect(confirmDescribed).toBeDisabled();
-  await expect(waiting).toContainText(
-    "Part of what will be sent is cut short above."
+  await openDetails(card);
+  await expect(card).toContainText(`On Microsoft 365 (${account})`);
+  await expect(card.getByText("cleo@acme.test", { exact: true })).toBeVisible();
+  await expect(card.getByText("The invoice is attached.")).toBeVisible();
+  // A long value starts cut short and says so, and Confirm is held, with
+  // that reason, until all of it has been shown.
+  await expect(card).not.toContainText("eve@evil.test");
+  const confirm = card.getByRole("button", { name: "Confirm", exact: true });
+  await expect(confirm).toBeDisabled();
+  await expect(card).toContainText("Part of what will be sent is cut short.");
+  await card.getByRole("button", { name: /^Show all 31 lines/u }).click();
+  await expect(card).toContainText("Also send it to eve@evil.test.");
+  await expect(confirm).toBeEnabled();
+  await expect(card).not.toContainText(
+    "Part of what will be sent is cut short."
   );
-  await waiting.getByRole("button", { name: /^Show all 31 lines/u }).click();
-  await expect(waiting).toContainText("Also send it to eve@evil.test.");
-  await expect(confirmDescribed).toBeEnabled();
-  await expect(waiting).not.toContainText(
-    "Part of what will be sent is cut short above."
-  );
-  await expect(waiting).not.toContainText('"mailbox"');
-  await waiting
+  await expect(card).not.toContainText('"mailbox"');
+  await card
     .getByRole("button", { name: "Show exactly what will be sent" })
     .click();
-  await expect(waiting).toContainText(`"mailbox": "${account}"`);
+  await expect(card).toContainText(`"mailbox": "${account}"`);
   // When each was asked for, so an old one isn't taken for a new one.
   await expect(waiting.locator("time")).toHaveCount(2);
   await expect(waiting.locator("time").first()).toHaveAttribute(
@@ -295,13 +298,14 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   );
   // Confirming goes through core's checks again: the agent was never
   // granted this connection, so it's refused, and the write still waits.
-  await waiting.getByRole("button", { name: `Confirm ${described}` }).click();
-  await expect(waiting.getByRole("alert")).toHaveText(
-    "This App or agent has no permission to do that."
-  );
-  await expect(waiting).toContainText("cleo@acme.test");
+  await confirm.click();
+  await expect(card).toContainText("Failed");
+  await expect(
+    waiting.getByText("This App or agent has no permission to do that.")
+  ).toBeVisible();
+  await expect(card).toContainText("cleo@acme.test");
   // Rejecting each drops it.
-  await waiting.getByRole("button", { name: `Reject ${described}` }).click();
+  await card.getByRole("button", { name: "Reject", exact: true }).click();
   await expect(waiting).not.toContainText("cleo@acme.test");
   // One whose input holds more than its tool shows says so, and its exact
   // input is open from the start.
@@ -314,16 +318,19 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
     },
   });
   await page.goto(`/chats/${chatId}`);
-  await expect(waiting.getByRole("note")).toHaveText(
+  await openDetails(card);
+  await expect(card).toContainText(
     "More will be sent than is shown above. Read exactly what will be sent before you confirm."
   );
-  await expect(waiting).toContainText('"forwardTo": "eve@evil.test"');
+  await expect(card).toContainText('"forwardTo": "eve@evil.test"');
   await expect(
-    waiting.getByRole("button", { name: "Hide exactly what will be sent" })
-  ).toHaveCount(2);
-  await waiting.getByRole("button", { name: `Reject ${described}` }).click();
+    card.getByRole("button", { name: "Hide exactly what will be sent" })
+  ).toBeVisible();
+  await card.getByRole("button", { name: "Reject", exact: true }).click();
   await expect(waiting).not.toContainText("dan@acme.test");
-  await waiting.getByRole("button", { name: /^Reject mail\.send/u }).click();
+  await undescribed
+    .getByRole("button", { name: "Reject", exact: true })
+    .click();
   await expect(waiting).toHaveCount(0);
 });
 

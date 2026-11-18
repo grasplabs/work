@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 
 import { pageMaxLimit } from "@grasp-os/shared/knowledge";
-import { uploadErrors, uploadMaxBytes } from "@grasp-os/shared/uploads";
+import { uploadMaxBytes } from "@grasp-os/shared/uploads";
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
@@ -284,35 +284,38 @@ test("a person uploads a file and follows it through core failing for a moment u
   });
   await page.goto(`/knowledge/${collectionId}`);
   const uploads = page.getByRole("region", { name: "Upload" });
-  const input = uploads.getByLabel("Upload a PDF, Word or Excel file");
+  const input = uploads.locator('input[type="file"]');
+  // A sent file's row in the picker's one list: its status line says what
+  // core does with it, and once it's ready it opens and downloads.
+  const followed = (name: string) =>
+    uploads
+      .getByRole("list", { name: "Files" })
+      .getByRole("listitem")
+      .filter({ hasText: name });
 
-  // A file over the limit is refused with core's reason, in its own row,
-  // before it's sent.
+  // A file over the limit is refused in the picker, before it's sent.
   await input.setInputFiles({
     name: "too-large.pdf",
     mimeType: "application/pdf",
     buffer: Buffer.alloc(uploadMaxBytes + 1),
   });
-  const tooLarge = uploads
-    .getByRole("listitem")
-    .filter({ hasText: "too-large.pdf" });
-  await expect(tooLarge.getByRole("alert")).toHaveText(
-    uploadErrors.create("upload.too_large").message
-  );
-  await expect(uploads.getByRole("listitem")).toHaveCount(1);
+  await expect(
+    uploads
+      .getByRole("listitem")
+      .filter({ hasText: "too-large.pdf is too large." })
+  ).toBeVisible();
+  await expect(followed("too-large.pdf")).toHaveCount(0);
 
   // Core out of reach for its first two asks only costs those turns.
   dropping = 2;
   await input.setInputFiles(fixture("expense-policy.pdf"));
-  const ready = uploads
-    .getByRole("listitem")
-    .filter({ hasText: "expense-policy.pdf" });
+  const ready = followed("expense-policy.pdf");
   // Extraction runs on the engine, in its own isolate.
-  await expect(ready.getByRole("status")).toHaveText("Ready", {
+  // Ready, and nothing else said: no problem from the dropped asks.
+  await expect(ready.getByText("Ready", { exact: true })).toBeVisible({
     timeout: 30_000,
   });
   expect(dropping).toBe(0);
-  await expect(ready.getByRole("alert")).toHaveCount(0);
   await expect(ready.getByText(/past the first/u)).toHaveCount(0);
   // The file list shows the new document.
   await expect(
@@ -327,7 +330,7 @@ test("a person uploads a file and follows it through core failing for a moment u
   expect(href).toMatch(/^\/api\/knowledge\/uploads\/[\w-]+\/original$/u);
   const original = await page.request.get(href ?? "");
   expect(original.headers()["content-disposition"]).toMatch(/^attachment/u);
-  await ready.getByRole("link", { name: "Open expense-policy.pdf" }).click();
+  await ready.getByRole("button", { name: "Open expense-policy.pdf" }).click();
   await expect(
     page.getByRole("heading", { level: 1, name: "expense-policy" })
   ).toBeVisible();
@@ -338,30 +341,28 @@ test("a person uploads a file and follows it through core failing for a moment u
   refusing = true;
   await input.setInputFiles(fixture("travel-policy.docx"));
   await expect(
-    uploads
-      .getByRole("listitem")
-      .filter({ hasText: "travel-policy.docx" })
-      .getByRole("alert")
-  ).toHaveText("There's no such upload, or you can't see it.");
+    followed("travel-policy.docx").getByText(
+      "There's no such upload, or you can't see it.",
+      { exact: true }
+    )
+  ).toBeVisible();
   refusing = false;
 
   // A name that sorts past the listed files opens from its row, and says so.
   await input.setInputFiles(fixture("offices.xlsx"));
-  const past = uploads
-    .getByRole("listitem")
-    .filter({ hasText: "offices.xlsx" });
-  await expect(past.getByRole("status")).toHaveText("Ready", {
-    timeout: 30_000,
-  });
-  await expect(past).toContainText(
-    `It's past the first ${pageMaxLimit} files listed: open it from here.`
-  );
+  const past = followed("offices.xlsx");
+  await expect(
+    past.getByText(
+      `Ready. It's past the first ${pageMaxLimit} files listed: open it from here.`,
+      { exact: true }
+    )
+  ).toBeVisible({ timeout: 30_000 });
   await expect(
     page
       .getByRole("region", { name: "Files" })
       .getByRole("link", { name: "offices.xlsx" })
   ).toHaveCount(0);
-  await past.getByRole("link", { name: "Open offices.xlsx" }).click();
+  await past.getByRole("button", { name: "Open offices.xlsx" }).click();
   await expect(
     page.getByRole("heading", { level: 1, name: "offices", exact: true })
   ).toBeVisible();
@@ -369,14 +370,11 @@ test("a person uploads a file and follows it through core failing for a moment u
 
   await input.setInputFiles(fixture("scan.pdf"));
   await expect(
-    uploads
-      .getByRole("listitem")
-      .filter({ hasText: "scan.pdf" })
-      .getByRole("status")
-  ).toHaveText(
-    "Failed: The file has no text to read: a scan without a text layer has none.",
-    { timeout: 30_000 }
-  );
+    followed("scan.pdf").getByText(
+      "Failed: The file has no text to read: a scan without a text layer has none.",
+      { exact: true }
+    )
+  ).toBeVisible({ timeout: 30_000 });
 });
 
 test("someone who may only read a collection is offered no upload, edit or restore", async ({
@@ -575,6 +573,11 @@ test("an admin purges a person's name from a collection, seeing what goes first,
   }
 
   await dialog.getByRole("button", { name: "Purge for good" }).click();
+  // It asks first, as it can't be undone.
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Purge for good" })
+    .click();
   await expect(dialog.getByText("1 document purged")).toBeVisible();
   await expect(dialog.getByText("2 versions purged")).toBeVisible();
   await page.keyboard.press("Escape");

@@ -117,13 +117,14 @@ const unmount = (): void => {
 };
 
 const offered = (): boolean =>
-  [...document.querySelectorAll("button")].some(
-    (each) => each.textContent?.trim() === "Export definition"
+  [...document.querySelectorAll("button")].some((each) =>
+    each.textContent?.trim().startsWith("Export definition")
   );
 
 const press = async (name: string) => {
-  const button = [...document.querySelectorAll("button")].find(
-    (each) => each.textContent?.trim() === name
+  // A button's words come first; what it says once done or failed follows.
+  const button = [...document.querySelectorAll("button")].find((each) =>
+    each.textContent?.trim().startsWith(name)
   );
   if (button === undefined) {
     throw new TypeError(`No button ${name}`);

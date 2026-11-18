@@ -1,9 +1,8 @@
-import { Label } from "@grasp-os/ui/components/label";
-import { Switch } from "@grasp-os/ui/components/switch";
-import { Trans } from "@lingui/react/macro";
-import { useId, useState } from "react";
+import { useLingui } from "@lingui/react/macro";
+import { useState } from "react";
 
-import { ErrorText } from "../error-text.tsx";
+import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
+import { Switch } from "../grasp/switch/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // Whether people may ask Stephen to start a workflow in their chat app
@@ -19,7 +18,7 @@ export const AskStephen = ({
   workflow: string;
   askable: boolean;
 }) => {
-  const id = useId();
+  const { t } = useLingui();
   const [on, setOn] = useState(askable);
   const { busy, failure, run } = useCoreAction();
   const change = async (next: boolean) => {
@@ -31,28 +30,28 @@ export const AskStephen = ({
       setOn(next);
     }
   };
+  const label = t`Let people ask Stephen to start it`;
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-2">
-        <Switch
-          checked={on}
-          disabled={busy}
-          id={id}
-          onCheckedChange={(next) => {
-            void change(next);
-          }}
-        />
-        <Label htmlFor={id}>
-          <Trans>Let people ask Stephen to start it</Trans>
-        </Label>
-      </div>
-      <p className="text-muted-foreground">
-        <Trans>
-          Stephen can offer it in Microsoft Teams to anyone who may start it. It
-          starts only when they press Start, and runs as them.
-        </Trans>
-      </p>
-      <ErrorText>{failure}</ErrorText>
-    </div>
+    <SettingsRows>
+      <SettingRow
+        info={t`Stephen can offer it in Microsoft Teams to anyone who may start it. It starts only when they press Start, and runs as them.`}
+        label={label}
+        status={busy ? "saving" : "idle"}
+        {...(failure === undefined ? {} : { error: failure })}
+      >
+        {(field) => (
+          <Switch
+            checked={on}
+            disabled={busy}
+            id={field.id}
+            label={label}
+            labelHidden
+            onCheckedChange={(next) => {
+              void change(next);
+            }}
+          />
+        )}
+      </SettingRow>
+    </SettingsRows>
   );
 };

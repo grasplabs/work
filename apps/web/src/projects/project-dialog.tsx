@@ -5,35 +5,33 @@ import {
   projectNameMaxLength,
 } from "@grasp-os/shared/projects";
 import type { ProjectIcon, ProjectSummary } from "@grasp-os/shared/projects";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import { Textarea } from "@grasp-os/ui/components/textarea";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
 import { useId, useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
+import { Button } from "../grasp/button/index.ts";
+import {
+  Dialog,
+  DialogAction,
+  DialogBody,
+  DialogDescription,
+  DialogFooter,
+  DialogContent,
+  DialogTitle,
+} from "../grasp/dialog/index.ts";
+import { Field, FieldLabel } from "../grasp/field/index.ts";
+import { Form } from "../grasp/form/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import { Textarea } from "../grasp/textarea/index.ts";
+import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { projectIconShapes } from "./project-icon.tsx";
 
 // Making a project, or changing one: its name, a line on what it is for,
-// and its icon. A new project holds nothing and nobody else: what goes in
-// it, and who, is added from its page.
+// and its icon, in Grasp UI's dialog. A new project holds nothing and
+// nobody else: what goes in it, and who, is added from its page.
 
 /** Each icon's name, for whoever can't see it. */
 const iconNames: Record<ProjectIcon, MessageDescriptor> = {
@@ -52,7 +50,7 @@ const iconNames: Record<ProjectIcon, MessageDescriptor> = {
 /** What the form starts from: nothing, or the project it changes. */
 type Editing = Pick<ProjectSummary, "id" | "name" | "description" | "icon">;
 
-/** The form, a fresh one for each opening. */
+/** The dialog's panel, a fresh one for each opening. */
 const ProjectForm = ({
   editing,
   onDone,
@@ -61,7 +59,7 @@ const ProjectForm = ({
   onDone: (id: string) => void;
 }) => {
   const { i18n, t } = useLingui();
-  const ids = useId();
+  const formId = useId();
   const { busy, failure, run } = useCoreAction();
   const [name, setName] = useState(editing?.name ?? "");
   const [description, setDescription] = useState(editing?.description ?? "");
@@ -81,114 +79,93 @@ const ProjectForm = ({
       onDone(id);
     }
   };
+  const title = editing === undefined ? t`New project` : t`Change project`;
   return (
-    <form
-      className="flex flex-col gap-5"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (valid && !busy) {
-          void save();
-        }
-      }}
-    >
-      <DialogHeader>
-        <DialogTitle>
-          {editing === undefined ? (
-            <Trans>New project</Trans>
-          ) : (
-            <Trans>Change project</Trans>
-          )}
-        </DialogTitle>
+    <DialogContent>
+      <DialogTitle>{title}</DialogTitle>
+      {/* What a project is, said once, as one is made; changing it, the person knows. */}
+      {editing === undefined ? (
         <DialogDescription>
-          <Trans>
-            A project groups apps and workflows for a process, a team or a goal.
-            Putting something in it shares it with nobody.
-          </Trans>
+          {t`A project groups apps and workflows for a process, a team or a goal. Putting something in it shares it with nobody.`}
         </DialogDescription>
-      </DialogHeader>
-      <Field>
-        <FieldLabel htmlFor={`${ids}-name`}>
-          <Trans>Name</Trans>
-        </FieldLabel>
-        <Input
-          // Not a login: password managers keep out of it.
-          autoComplete="off"
-          data-1p-ignore
-          data-lpignore="true"
-          disabled={busy}
-          id={`${ids}-name`}
-          maxLength={projectNameMaxLength}
-          onChange={(event) => {
-            setName(event.target.value);
-          }}
-          placeholder={t`For example Sell & get paid`}
-          value={name}
-        />
-      </Field>
-      <Field>
-        <FieldLabel htmlFor={`${ids}-description`}>
-          <Trans>What is it for?</Trans>
-        </FieldLabel>
-        <Textarea
-          disabled={busy}
-          id={`${ids}-description`}
-          maxLength={projectDescriptionMaxLength}
-          onChange={(event) => {
-            setDescription(event.target.value);
-          }}
-          rows={2}
-          value={description}
-        />
-      </Field>
-      <Field>
-        <FieldLabel id={`${ids}-icon`}>
-          <Trans>Icon</Trans>
-        </FieldLabel>
-        <ToggleGroup
-          aria-labelledby={`${ids}-icon`}
-          disabled={busy}
-          onValueChange={(value) => {
-            const [next] = value;
-            const chosen = projectIcons.find((each) => each === next);
-            if (chosen !== undefined) {
-              setIcon(chosen);
+      ) : null}
+      <DialogBody>
+        <Form
+          aria-label={title}
+          id={formId}
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (valid && !busy) {
+              void save();
             }
           }}
-          size="sm"
-          value={[icon]}
-          variant="outline"
         >
-          {projectIcons.map((each) => {
-            const Shape = projectIconShapes[each];
-            return (
-              <ToggleGroupItem
-                aria-label={i18n._(iconNames[each])}
-                key={each}
-                value={each}
-              >
-                <Shape />
-              </ToggleGroupItem>
-            );
-          })}
-        </ToggleGroup>
-      </Field>
-      <ErrorText>{failure}</ErrorText>
+          <Field>
+            <FieldLabel>{t`Name`}</FieldLabel>
+            <Input
+              // Not a login: password managers keep out of it.
+              autoComplete="off"
+              data-1p-ignore
+              data-lpignore="true"
+              disabled={busy}
+              maxLength={projectNameMaxLength}
+              onValueChange={setName}
+              placeholder={t`For example Sell & get paid`}
+              required
+              value={name}
+            />
+          </Field>
+          <Field>
+            <FieldLabel>
+              {t({ message: "What it is for", context: "a project" })}
+            </FieldLabel>
+            <Textarea
+              disabled={busy}
+              maxLength={projectDescriptionMaxLength}
+              onValueChange={setDescription}
+              rows={2}
+              value={description}
+            />
+          </Field>
+          <Field>
+            <FieldLabel>{t`Icon`}</FieldLabel>
+            <ToggleGroup
+              aria-label={t`Icon`}
+              disabled={busy}
+              onValueChange={(value) => {
+                const [next] = value;
+                const chosen = projectIcons.find((each) => each === next);
+                if (chosen !== undefined) {
+                  setIcon(chosen);
+                }
+              }}
+              value={[icon]}
+            >
+              {projectIcons.map((each) => (
+                <Toggle
+                  aria-label={i18n._(iconNames[each])}
+                  icon={projectIconShapes[each]}
+                  key={each}
+                  value={each}
+                />
+              ))}
+            </ToggleGroup>
+          </Field>
+        </Form>
+        <ErrorText>{failure}</ErrorText>
+      </DialogBody>
       <DialogFooter>
-        <DialogClose
-          disabled={busy}
-          render={<Button type="button" variant="outline" />}
+        <DialogAction>{t`Cancel`}</DialogAction>
+        <Button
+          disabled={!valid || busy}
+          form={formId}
+          type="submit"
+          variant="ink"
         >
-          <Trans>Cancel</Trans>
-        </DialogClose>
-        <Button disabled={!valid || busy} type="submit">
-          {editing === undefined ? (
-            <Trans>Make project</Trans>
-          ) : (
-            <Trans>Save</Trans>
-          )}
+          {editing === undefined ? t`Make project` : t`Save`}
         </Button>
       </DialogFooter>
-    </form>
+    </DialogContent>
   );
 };
 
@@ -208,16 +185,14 @@ export const ProjectDialog = ({
   editing?: Editing;
 }) => (
   <Dialog onOpenChange={onOpenChange} open={open}>
-    <DialogContent>
-      {open ? (
-        <ProjectForm
-          editing={editing}
-          onDone={(id) => {
-            onOpenChange(false);
-            onDone(id);
-          }}
-        />
-      ) : null}
-    </DialogContent>
+    {open ? (
+      <ProjectForm
+        editing={editing}
+        onDone={(id) => {
+          onOpenChange(false);
+          onDone(id);
+        }}
+      />
+    ) : null}
   </Dialog>
 );

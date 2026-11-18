@@ -131,13 +131,18 @@ describe("a version's definition and source", () => {
 
   it("shows the definition of exactly the version picked, and lists its source files to download", async () => {
     const asked = await shown(true);
-    const select = document.querySelector("select");
-    const latest = select?.value;
+    const choice = document.querySelector<HTMLElement>(
+      '[role="combobox"][aria-label="Version"]'
+    );
+    const latest = choice?.textContent.trim();
     await act(async () => {
-      if (select !== null) {
-        select.value = "1";
-        select.dispatchEvent(new Event("change", { bubbles: true }));
-      }
+      choice?.click();
+      await settled();
+    });
+    await act(async () => {
+      [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+        .find((each) => each.textContent.trim() === "Version 1")
+        ?.click();
       await settled();
     });
     await press("Show its definition");
@@ -146,13 +151,13 @@ describe("a version's definition and source", () => {
     expect({
       latest,
       asked,
-      definition: document.querySelector("pre")?.textContent,
+      definition: document.querySelector("code[data-language]")?.textContent,
       downloads: [...document.querySelectorAll("button")]
         .map((each) => each.getAttribute("aria-label"))
         .filter((label) => label?.startsWith("Download") === true),
     }).toStrictEqual({
       // The latest, until another is picked.
-      latest: "2",
+      latest: "Version 2",
       asked: [
         { definition: "workflow-1", version: 1 },
         { source: "workflow-1", version: 1 },

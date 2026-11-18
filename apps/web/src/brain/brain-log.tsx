@@ -1,23 +1,26 @@
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
-import { Tabs, TabsList, TabsTrigger } from "@grasp-os/ui/components/tabs";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
-import {
-  AudioLinesIcon,
-  CircleDashedIcon,
-  FileTextIcon,
-  RadarIcon,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
 
 import { formatDay } from "../format.ts";
+import { EmptyCard } from "../frame/page.tsx";
+import { Heading } from "../grasp/heading/index.ts";
+import { File, Listening, Question, Search } from "../grasp/icons/index.ts";
+import type { IconData } from "../grasp/icons/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { PageHeader } from "../grasp/page-header/index.ts";
+import { Tabs, TabsList, TabsTrigger } from "../grasp/tabs/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { useBrainData } from "./brain-data.ts";
 import { brainLog, logColumns, logTabs, tabOf } from "./brain-log.ts";
 import type { LogDay, LogDot, LogEntry, LogKind, LogTab } from "./brain-log.ts";
@@ -26,12 +29,161 @@ import { Mark } from "./region-marks.tsx";
 import { SinceLastLook } from "./since-last-look.tsx";
 
 /** What each kind of line looks like. */
-const icons: Record<LogKind, LucideIcon> = {
-  interview: AudioLinesIcon,
-  reading: FileTextIcon,
-  scanning: RadarIcon,
-  question: CircleDashedIcon,
+const icons: Record<LogKind, IconData> = {
+  interview: Listening,
+  reading: File,
+  scanning: Search,
+  question: Question,
 };
+
+/** Room before a line, so it stands right of the spine: the day's dot (24px) and the gap after it. */
+const besideSpine = `calc(${grasp.space6} + ${grasp.space3})`;
+
+const styles = stylex.create({
+  // The brain's own pane that scrolls, its column in the middle.
+  pane: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
+  column: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space6,
+    boxSizing: "border-box",
+    width: "100%",
+    maxWidth: grasp.pageColumnMeasure,
+    marginInline: "auto",
+    paddingInline: {
+      default: grasp.space4,
+      [media.fromPhone]: grasp.space6,
+      [media.fromTablet]: grasp.space12,
+    },
+  },
+  chart: { display: "flex", flexDirection: "column", gap: grasp.space2 },
+  // The days as columns of dots, standing on a hairline.
+  columns: {
+    display: "flex",
+    alignItems: "flex-end",
+    gap: grasp.hairline,
+    height: `calc(${grasp.space24} + ${grasp.space4})`,
+    margin: 0,
+    padding: 0,
+    paddingBlockEnd: grasp.space1,
+    listStyle: "none",
+    borderBlockEndWidth: grasp.hairline,
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: grasp.line,
+  },
+  day: {
+    display: "flex",
+    flexGrow: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    height: "100%",
+  },
+  fill: { width: "100%", height: "100%" },
+  dayButton: {
+    display: "flex",
+    flexDirection: "column-reverse",
+    alignItems: "center",
+    gap: grasp.space1,
+    width: "100%",
+    height: "100%",
+    padding: 0,
+    overflow: "hidden",
+    borderWidth: 0,
+    borderRadius: grasp.cornerMark,
+    outline: "none",
+    cursor: "pointer",
+    backgroundColor: {
+      default: "transparent",
+      ":hover": grasp.ghostFillHover,
+      ":focus-visible": grasp.ghostFillHover,
+    },
+  },
+  dot: {
+    flexShrink: 0,
+    width: "100%",
+    maxWidth: grasp.severityDot,
+    aspectRatio: "1",
+    borderRadius: grasp.cornerCircle,
+    backgroundColor: grasp.ink,
+  },
+  dotOpen: { backgroundColor: grasp.attention },
+  ends: { display: "flex", justifyContent: "space-between" },
+  // The days on a spine of dots.
+  days: {
+    position: "relative",
+    display: "flex",
+    flexDirection: "column",
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  spine: {
+    position: "absolute",
+    insetBlockStart: grasp.space2,
+    insetBlockEnd: 0,
+    insetInlineStart: `calc(${grasp.space3} - ${grasp.hairline})`,
+    borderInlineStartWidth: grasp.ringWidth,
+    borderInlineStartStyle: "dotted",
+    borderInlineStartColor: grasp.line,
+  },
+  dayPart: {
+    position: "relative",
+    display: "flex",
+    flexDirection: "column",
+    paddingBlockEnd: grasp.space4,
+    scrollMarginTop: grasp.space4,
+  },
+  dayHead: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space3,
+    paddingBlock: grasp.space1,
+  },
+  dayDotBox: {
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    width: grasp.space6,
+    height: grasp.space6,
+  },
+  // The day's own dot, ringed in the page's paper so the spine stops at it.
+  dayDot: {
+    width: grasp.space2,
+    height: grasp.space2,
+    borderRadius: grasp.cornerCircle,
+    backgroundColor: grasp.ink,
+    boxShadow: `0 0 0 ${grasp.space1} ${grasp.shellCard}`,
+  },
+  lines: {
+    display: "flex",
+    flexDirection: "column",
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  line: { marginInlineStart: besideSpine },
+  said: { display: "flex", justifyContent: "flex-end", gap: grasp.space1 },
+  saidDot: {
+    width: grasp.space1,
+    height: grasp.space1,
+    borderRadius: grasp.cornerCircle,
+    backgroundColor: grasp.quiet,
+  },
+  aside: { display: "flex", flexShrink: 0 },
+  unseen: {
+    position: "absolute",
+    width: grasp.hairline,
+    height: grasp.hairline,
+    overflow: "hidden",
+    clipPath: "inset(50%)",
+    whiteSpace: "nowrap",
+  },
+});
+
+/** The tab a value of the tabs names, if it names one. */
+const tabFrom = (value: string | null): LogTab | undefined =>
+  logTabs.find((each) => each === value);
 
 /** The most dots a day's column and a line's row draw; past them, more is not more legible. */
 const mostInDay = 14;
@@ -49,13 +201,7 @@ const todayHere = (): string => {
 };
 
 const ColumnDot = ({ dot }: { dot: LogDot }) => (
-  <span
-    className={
-      dot === "open"
-        ? "bg-status-attention aspect-square w-full max-w-1.5 flex-none rounded-full"
-        : "bg-foreground aspect-square w-full max-w-1.5 flex-none rounded-full"
-    }
-  />
+  <span {...stylex.props(styles.dot, dot === "open" && styles.dotOpen)} />
 );
 
 /**
@@ -73,61 +219,56 @@ const DayColumns = ({ days, today }: { days: LogDay[]; today: string }) => {
     return null;
   }
   return (
-    <div className="flex flex-col gap-2">
-      <ol
-        aria-label={t`Day by day`}
-        className="flex h-28 items-end gap-px border-b pb-1"
-      >
+    <div {...stylex.props(styles.chart)}>
+      <ol aria-label={t`Day by day`} {...stylex.props(styles.columns)}>
         {columns.map(({ day, dots }) => {
           const label = day === today ? t`Today` : formatDay(day);
           const count = dots.length;
           // One sentence: the day, and how many things came in on it.
           const summary = t`${plural(count, { one: `${label}: # thing`, other: `${label}: # things` })}`;
           return (
-            <li className="flex h-full min-w-0 flex-1" key={day}>
+            <li key={day} {...stylex.props(styles.day)}>
               {count === 0 ? (
-                <span className="size-full" />
+                <span {...stylex.props(styles.fill)} />
               ) : (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <button
-                        aria-label={summary}
-                        className="hover:bg-muted focus-visible:bg-muted flex size-full flex-col-reverse items-center gap-0.5 overflow-hidden rounded-sm outline-none"
-                        onClick={() => {
-                          document
-                            .querySelector(`#${CSS.escape(dayId(day))}`)
-                            ?.scrollIntoView({
-                              behavior: lessMotion ? "auto" : "smooth",
-                              block: "start",
-                            });
-                        }}
-                        type="button"
-                      />
-                    }
-                  >
-                    {dots.slice(0, mostInDay).map((dot, index) => (
-                      <ColumnDot dot={dot} key={index} />
-                    ))}
-                  </TooltipTrigger>
-                  <TooltipContent>{summary}</TooltipContent>
-                </Tooltip>
+                // The day's own words show as the pointer rests on it, and
+                // are its name: a column of dots holds no words.
+                <button
+                  aria-label={summary}
+                  onClick={() => {
+                    document
+                      .querySelector(`#${CSS.escape(dayId(day))}`)
+                      ?.scrollIntoView({
+                        behavior: lessMotion ? "auto" : "smooth",
+                        block: "start",
+                      });
+                  }}
+                  title={summary}
+                  type="button"
+                  {...stylex.props(styles.dayButton)}
+                >
+                  {dots.slice(0, mostInDay).map((dot, index) => (
+                    <ColumnDot dot={dot} key={index} />
+                  ))}
+                </button>
               )}
             </li>
           );
         })}
       </ol>
-      <div className="text-muted-foreground flex justify-between text-xs">
-        <span>{formatDay(first.day)}</span>
-        <span>
+      <div {...stylex.props(styles.ends)}>
+        <Text element="span" size="xs" tone="muted">
+          {formatDay(first.day)}
+        </Text>
+        <Text element="span" size="xs" tone="muted">
           <Trans>Today</Trans>
-        </span>
+        </Text>
       </div>
     </div>
   );
 };
 
-/** A line's title, as the link that opens it. A week's interviews say how many, and nothing of who. */
+/** A line's title. A week's interviews say how many, and nothing of who. */
 const Title = ({ entry }: { entry: LogEntry }) => {
   const { t } = useLingui();
   const week = entry.interviews?.week ?? 0;
@@ -145,18 +286,7 @@ const Title = ({ entry }: { entry: LogEntry }) => {
   } else if (entry.question?.step === "asked") {
     text = t`Asked: ${title}`;
   }
-  if (entry.opens === undefined) {
-    return <span className="text-sm font-medium text-pretty">{text}</span>;
-  }
-  return (
-    <Link
-      className="text-sm font-medium text-pretty outline-none after:absolute after:inset-0 after:rounded-lg focus-visible:underline"
-      params={{ noteId: entry.opens }}
-      to="/brain/$noteId"
-    >
-      {text}
-    </Link>
-  );
+  return <ItemTitle>{text}</ItemTitle>;
 };
 
 /** Who gave it, and how; for a week's interviews, where what was said is. */
@@ -175,7 +305,7 @@ const By = ({ entry }: { entry: LogEntry }) => {
     text = t`${who}: “${answer}”`;
   }
   return text === undefined || text === "" ? null : (
-    <span className="text-muted-foreground truncate text-xs">{text}</span>
+    <ItemDescription>{text}</ItemDescription>
   );
 };
 
@@ -184,9 +314,11 @@ const Aside = ({ entry }: { entry: LogEntry }) => {
   const { t } = useLingui();
   if (entry.question) {
     return (
-      <span className="mt-2 flex flex-none">
-        <Mark state={entry.question.open ? "open" : "known"} />
-      </span>
+      <ItemActions>
+        <span {...stylex.props(styles.aside)}>
+          <Mark state={entry.question.open ? "open" : "known"} />
+        </span>
+      </ItemActions>
     );
   }
   const { said } = entry;
@@ -194,43 +326,50 @@ const Aside = ({ entry }: { entry: LogEntry }) => {
     return null;
   }
   return (
-    <span
-      className="mt-2.5 flex flex-none justify-end gap-0.5"
-      title={t`What the brain kept of it`}
-    >
-      <span className="sr-only">
-        {t`${plural(said, { one: "# thing said", other: "# things said" })}`}
+    <ItemActions>
+      <span title={t`What the brain kept of it`} {...stylex.props(styles.said)}>
+        <span {...stylex.props(styles.unseen)}>
+          {t`${plural(said, { one: "# thing said", other: "# things said" })}`}
+        </span>
+        {Array.from({ length: Math.min(said, mostSaid) }, (_, index) => (
+          <span
+            aria-hidden="true"
+            key={index}
+            {...stylex.props(styles.saidDot)}
+          />
+        ))}
       </span>
-      {Array.from({ length: Math.min(said, mostSaid) }, (_, index) => (
-        <span
-          aria-hidden="true"
-          className="bg-foreground/50 size-1 rounded-full"
-          key={index}
-        />
-      ))}
-    </span>
+    </ItemActions>
   );
 };
 
 /** One line: what kind of work it was, what it was, who and how, and what it gave the brain. The whole line opens what it is about. */
 const Line = ({ entry }: { entry: LogEntry }) => {
-  const Icon = icons[entry.kind];
+  const parts = (
+    <>
+      <ItemMedia icon={icons[entry.kind]} />
+      <ItemContent>
+        <Title entry={entry} />
+        <By entry={entry} />
+      </ItemContent>
+      <Aside entry={entry} />
+    </>
+  );
+  if (entry.opens === undefined) {
+    return (
+      <Item layout={styles.line} size="sm">
+        {parts}
+      </Item>
+    );
+  }
   return (
-    <li className="flex flex-col">
-      <div className="group hover:bg-muted/60 relative flex items-start gap-3 rounded-lg py-2 pr-2 pl-9">
-        <span
-          aria-hidden="true"
-          className="bg-muted group-hover:bg-background flex size-7 flex-none items-center justify-center rounded-md"
-        >
-          <Icon className="size-3.5" />
-        </span>
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <Title entry={entry} />
-          <By entry={entry} />
-        </span>
-        <Aside entry={entry} />
-      </div>
-    </li>
+    <Item
+      layout={styles.line}
+      render={<Link params={{ noteId: entry.opens }} to="/brain/$noteId" />}
+      size="sm"
+    >
+      {parts}
+    </Item>
   );
 };
 
@@ -238,29 +377,23 @@ const Line = ({ entry }: { entry: LogEntry }) => {
 const Days = ({ days, today }: { days: LogDay[]; today: string }) => {
   const { t } = useLingui();
   return (
-    <ol className="relative flex flex-col">
-      <span
-        aria-hidden="true"
-        className="dots-down dots-down-wide text-muted-foreground/40 absolute top-2 bottom-0 left-2.5 w-1"
-      />
+    <ol {...stylex.props(styles.days)}>
+      <span aria-hidden="true" {...stylex.props(styles.spine)} />
       {days.map(({ day, entries }) => (
-        <li
-          className="relative flex scroll-mt-4 flex-col pb-4"
-          id={dayId(day)}
-          key={day}
-        >
-          <h2 className="flex items-center gap-3 py-1 text-sm font-medium">
-            <span
-              aria-hidden="true"
-              className="flex size-6 flex-none items-center justify-center"
-            >
-              <span className="bg-foreground ring-background size-2 rounded-full ring-4" />
+        <li id={dayId(day)} key={day} {...stylex.props(styles.dayPart)}>
+          <Heading level={2} size="ui-sm">
+            <span {...stylex.props(styles.dayHead)}>
+              <span aria-hidden="true" {...stylex.props(styles.dayDotBox)}>
+                <span {...stylex.props(styles.dayDot)} />
+              </span>
+              {day === today ? t`Today` : formatDay(day)}
             </span>
-            {day === today ? t`Today` : formatDay(day)}
-          </h2>
-          <ul className="flex flex-col">
+          </Heading>
+          <ul {...stylex.props(styles.lines)}>
             {entries.map((entry) => (
-              <Line entry={entry} key={entry.id} />
+              <li key={entry.id}>
+                <Line entry={entry} />
+              </li>
             ))}
           </ul>
         </li>
@@ -301,34 +434,36 @@ export const BrainLog = () => {
     }),
   };
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 sm:px-6 md:px-12">
-        <PageHeaderTitle>
-          <Trans context="the brain's log">Activity</Trans>
-        </PageHeaderTitle>
+    <div {...stylex.props(styles.pane)}>
+      <div {...stylex.props(styles.column)}>
+        <PageHeader title={<Trans context="the brain's log">Activity</Trans>} />
         <SinceLastLook />
         <Tabs
-          onValueChange={(value: LogTab) => {
-            setTab(value);
+          onValueChange={(value) => {
+            const next = tabFrom(value);
+            if (next !== undefined) {
+              setTab(next);
+            }
           }}
           value={tab}
+          variant="line"
         >
-          <TabsList aria-label={t`Show in the log`} variant="line">
+          <TabsList aria-label={t`Show in the log`}>
             {logTabs.map((each) => (
-              <TabsTrigger className="flex-none" key={each} value={each}>
-                {names[each]}
-                <span className="text-muted-foreground tabular-nums">
+              <TabsTrigger key={each} value={each}>
+                {names[each]}{" "}
+                <Text element="span" size="sm" tone="quiet">
                   {counts.get(each) ?? 0}
-                </span>
+                </Text>
               </TabsTrigger>
             ))}
           </TabsList>
         </Tabs>
         <DayColumns days={days} today={today} />
         {days.length === 0 ? (
-          <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
+          <EmptyCard>
             <Trans>Nothing of this kind yet.</Trans>
-          </p>
+          </EmptyCard>
         ) : (
           <Days days={days} today={today} />
         )}

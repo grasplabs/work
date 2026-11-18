@@ -1,4 +1,11 @@
 import type { AppOverview } from "@grasp-os/shared/apps";
+import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
+
+import { Page, PageHeading } from "../frame/page.tsx";
+import { AppCard, AppCardGrid } from "../grasp/app-card/index.ts";
 import {
   Empty,
   EmptyContent,
@@ -6,62 +13,59 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/ui/components/empty";
+} from "../grasp/empty/index.ts";
+import { Search, Settings } from "../grasp/icons/index.ts";
 import {
   InputGroup,
-  InputGroupAddon,
   InputGroupInput,
-} from "@grasp-os/ui/components/input-group";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
-import { LayoutGridIcon, SearchIcon } from "lucide-react";
-import { useState } from "react";
-
-import { formatDate } from "../format.ts";
-import { Page, PageHeading } from "../frame/page.tsx";
+  InputGroupText,
+} from "../grasp/input-group/index.ts";
 import { MakeSomethingLink } from "../make/make-link.tsx";
-import { StatusBadge } from "./app-status.tsx";
+import { statusOf } from "./app-status.tsx";
 
-// The Apps page: every App the person can open, newest first, as a grid of
-// cards (its icon, name, where it stands and when it was made), each
-// opening the live App (/apps/$app). A search over their names, and Make
-// something for who builds, which starts a chat to make an App
-// (make/make-link.tsx).
+// The Apps page: every App the person can open, newest first, as Grasp
+// UI's App cards: its window (quiet, naming the App, until each version
+// has a picture of its own), its name, what it is for and where it
+// stands; the card opens the App (/apps/$app). A
+// search over their names, and Make something for who builds, which
+// starts a chat to make an App (make/make-link.tsx).
 
-/** One App: its card, whose name opens it. */
-const AppCard = ({ overview: { app } }: { overview: AppOverview }) => {
-  const made = formatDate(app.createdAt);
+const styles = stylex.create({
+  search: { maxWidth: "18rem" },
+});
+
+/** One App: its card. */
+const OneApp = ({ overview: { app } }: { overview: AppOverview }) => {
+  const { t } = useLingui();
+  const navigate = useNavigate();
+  const status = statusOf(app);
+  const metaOf = {
+    live: t`Your team uses it`,
+    draft: t`Only you see this`,
+    archived: t({ message: "Archived", context: "an App put away" }),
+  };
   return (
-    <li className="bg-card hover:border-ring/40 relative flex min-w-0 flex-col gap-3 rounded-xl border p-4 transition-colors">
-      <div className="flex items-start gap-3">
-        <span
-          aria-hidden="true"
-          className="bg-muted text-foreground inline-flex size-9 flex-none items-center justify-center rounded-lg"
-        >
-          <LayoutGridIcon className="size-4" />
-        </span>
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <Link
-            className="truncate font-medium outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:underline"
-            params={{ app: app.id }}
-            to="/apps/$app"
-          >
-            {app.name}
-          </Link>
-          {app.description === "" ? null : (
-            <p className="text-muted-foreground line-clamp-2 text-sm">
-              {app.description}
-            </p>
-          )}
-        </div>
-      </div>
-      <div className="text-muted-foreground mt-auto flex items-center gap-2 text-xs">
-        <StatusBadge app={app} />
-        <span className="truncate">
-          <Trans>Made {made}</Trans>
-        </span>
-      </div>
-    </li>
+    <AppCard
+      actions={[
+        {
+          label: t`Settings`,
+          icon: Settings,
+          onSelect: () => {
+            void navigate({
+              to: "/apps/$app/settings",
+              params: { app: app.id },
+            });
+          },
+        },
+      ]}
+      render={<Link params={{ app: app.id }} to="/apps/$app" />}
+      // Until each version has its picture, the window is quiet and
+      // names the App.
+      labels={{ more: t`More`, empty: app.name }}
+      meta={metaOf[status]}
+      title={app.name}
+      {...(app.description === "" ? {} : { description: app.description })}
+    />
   );
 };
 
@@ -99,23 +103,16 @@ export const AppsOverview = ({
         title={<Trans>Apps</Trans>}
       />
       {apps.length === 0 ? (
-        <Empty>
+        <Empty size="page">
           <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <LayoutGridIcon />
-            </EmptyMedia>
-            <EmptyTitle>
-              <Trans>No Apps yet</Trans>
-            </EmptyTitle>
-            <EmptyDescription>
-              {builds ? (
+            <EmptyMedia picture="nothing" />
+            <EmptyTitle>{t`No Apps yet`}</EmptyTitle>
+            {/* Only who builds is told what to do. */}
+            {builds ? (
+              <EmptyDescription>
                 <Trans>Say what you want to build, and Grasp builds it.</Trans>
-              ) : (
-                <Trans>
-                  The Apps your colleagues share with you show here.
-                </Trans>
-              )}
-            </EmptyDescription>
+              </EmptyDescription>
+            ) : null}
           </EmptyHeader>
           {builds ? (
             <EmptyContent>
@@ -125,38 +122,34 @@ export const AppsOverview = ({
         </Empty>
       ) : (
         <>
-          <div className="w-full sm:w-72">
-            <InputGroup>
-              <InputGroupInput
-                aria-label={t`Search the Apps`}
-                onChange={(event) => {
-                  setQuery(event.target.value);
-                }}
-                placeholder={t`Search`}
-                value={query}
-              />
-              <InputGroupAddon>
-                <SearchIcon />
-              </InputGroupAddon>
-            </InputGroup>
-          </div>
+          <InputGroup layout={styles.search}>
+            <InputGroupText icon={Search} />
+            <InputGroupInput
+              aria-label={t`Search the Apps`}
+              onValueChange={(value: string) => {
+                setQuery(value);
+              }}
+              placeholder={t`Search`}
+              value={query}
+            />
+          </InputGroup>
           {shown.length === 0 ? (
             <Empty>
               <EmptyHeader>
-                <EmptyTitle>
+                <EmptyMedia picture="search" />
+                <EmptyDescription>
                   <Trans>No App is called “{asked}”</Trans>
-                </EmptyTitle>
+                </EmptyDescription>
               </EmptyHeader>
             </Empty>
           ) : (
-            <ul
-              aria-label={t`Apps`}
-              className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-            >
-              {shown.map((overview) => (
-                <AppCard key={overview.app.id} overview={overview} />
-              ))}
-            </ul>
+            <section aria-label={t`Apps`}>
+              <AppCardGrid>
+                {shown.map((overview) => (
+                  <OneApp key={overview.app.id} overview={overview} />
+                ))}
+              </AppCardGrid>
+            </section>
           )}
         </>
       )}

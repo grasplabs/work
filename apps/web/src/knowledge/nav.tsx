@@ -1,46 +1,47 @@
 import type { DocumentSummary } from "@grasp-os/shared/knowledge";
 import { pageMaxLimit, searchQueryMaxLength } from "@grasp-os/shared/knowledge";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@grasp-os/ui/components/input-group";
-import {
-  PageSidebar,
-  PageSidebarBody,
-  PageSidebarTop,
-  PageSidebarRailButton,
-  PageSidebarRailDivider,
-  PageSidebarRailExpand,
-} from "@grasp-os/ui/components/page-sidebar";
-import { Spinner } from "@grasp-os/ui/components/spinner";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import {
-  ChevronDownIcon,
-  LibraryIcon,
-  NotebookPenIcon,
-  SearchIcon,
-} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { usePageSidebarFold } from "../frame/page-sidebar.tsx";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { Button } from "../grasp/button/index.ts";
+import {
+  File,
+  Folder as FolderIcon,
+  Home,
+  Note,
+  PanelToggle,
+  Search,
+} from "../grasp/icons/index.ts";
+import {
+  InputGroup,
+  InputGroupInput,
+  InputGroupText,
+} from "../grasp/input-group/index.ts";
+import { Separator } from "../grasp/separator/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import { Tree } from "../grasp/tree/index.ts";
+import type { TreeNode } from "../grasp/tree/index.ts";
+import { loadFromCore, NotLoaded, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
-import { CollectionIcon, CollectionMarks } from "./collection-markers.tsx";
+import { CollectionMarks, collectionIconOf } from "./collection-markers.tsx";
 import type { KnowledgeNavData } from "./nav-data.ts";
 import { countDocuments, folderTree, foldersTo } from "./tree.ts";
 import type { Folder } from "./tree.ts";
 
-// Knowledge's navigation in the page sidebar, in the prototype's look
-// (grasplabs/prototype `components/brain-nav.tsx`): search at the top, the
-// home, the memory files pinned under it, then one entry per collection
-// the person may read, which opens in place to its folders and documents
-// along a thin guide line, a page at a time. The open document is marked
-// and its folders open. It folds to a rail of icons.
+// Knowledge's navigation beside the page, in the prototype's look
+// (grasplabs/prototype `components/brain-nav.tsx`), on Grasp UI's Tree:
+// search at the top, the home, the memory files pinned under it, then one
+// branch per collection the person may read, which opens in place to its
+// folders and documents, a page at a time. The open document is marked
+// and its folders open. The home, the memory files, the collections and
+// the documents are the router's links, so they open in a new tab too;
+// folders and "Show more" are the tree's own actions. It folds to a rail of
+// icons.
 
 /** Where the person is: the collection open, and the document in it. */
 export interface KnowledgeAt {
@@ -60,133 +61,45 @@ interface Listed {
   failure?: Loaded<unknown>;
 }
 
-const entryClass =
-  "flex items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-accent hover:text-foreground aria-[current=page]:bg-accent aria-[current=page]:font-medium aria-[current=page]:text-foreground";
-
-/** One document in the tree. */
-const DocumentItem = ({
-  document,
-  active,
-}: {
-  document: DocumentSummary;
-  active: boolean;
-}) => (
-  <Link
-    aria-current={active ? "page" : undefined}
-    className={entryClass}
-    params={{ collection: document.collectionId }}
-    search={{ doc: document.id }}
-    title={document.path}
-    to="/knowledge/$collection"
-  >
-    <span
-      aria-hidden="true"
-      className="flex size-3 flex-none items-center justify-center"
-    >
-      <span className="bg-muted-foreground/60 size-1.5 rounded-full" />
-    </span>
-    <span className="min-w-0 flex-1 truncate">
-      {document.path.split("/").at(-1)}
-    </span>
-  </Link>
-);
-
-/** A folder as a heading that folds what it holds: its documents, then its folders. */
-const FolderGroup = ({
-  folder,
-  openDoc,
-  isOpen,
-  toggle,
-}: {
-  folder: Folder;
-  openDoc: string | undefined;
-  isOpen: (key: string) => boolean;
-  toggle: (key: string) => void;
-}) => {
-  const { t } = useLingui();
-  const expanded = isOpen(folder.path);
-  const { name } = folder;
-  return (
-    <div className="flex flex-col gap-0.5 pt-1">
-      <button
-        aria-expanded={expanded}
-        aria-label={expanded ? t`Close ${name}` : t`Open ${name}`}
-        className="hover:bg-accent flex items-center gap-1 rounded-md px-2 py-1 text-left"
-        onClick={() => {
-          toggle(folder.path);
-        }}
-        type="button"
-      >
-        <span className="text-foreground min-w-0 flex-1 truncate text-sm">
-          {name}
-        </span>
-        <span className="text-muted-foreground text-xs tabular-nums">
-          {countDocuments(folder)}
-        </span>
-        <ChevronDownIcon
-          aria-hidden="true"
-          className={
-            expanded
-              ? "text-muted-foreground size-3.5 transition-transform"
-              : "text-muted-foreground size-3.5 -rotate-90 transition-transform"
-          }
-        />
-      </button>
-      {expanded ? (
-        <>
-          {folder.documents.map((document) => (
-            <DocumentItem
-              active={document.id === openDoc}
-              document={document}
-              key={document.id}
-            />
-          ))}
-          {folder.folders.map((inner) => (
-            <FolderGroup
-              folder={inner}
-              isOpen={isOpen}
-              key={inner.path}
-              openDoc={openDoc}
-              toggle={toggle}
-            />
-          ))}
-        </>
-      ) : null}
-    </div>
-  );
-};
-
-/** A collection's documents at its root, then its folders. */
-const Entries = ({
-  folder,
-  openDoc,
-  isOpen,
-  toggle,
-}: {
-  folder: Folder;
-  openDoc: string | undefined;
-  isOpen: (key: string) => boolean;
-  toggle: (key: string) => void;
-}) => (
-  <>
-    {folder.documents.map((document) => (
-      <DocumentItem
-        active={document.id === openDoc}
-        document={document}
-        key={document.id}
-      />
-    ))}
-    {folder.folders.map((inner) => (
-      <FolderGroup
-        folder={inner}
-        isOpen={isOpen}
-        key={inner.path}
-        openDoc={openDoc}
-        toggle={toggle}
-      />
-    ))}
-  </>
-);
+const styles = stylex.create({
+  // Beside the page from a tablet's width; on a phone the frame's sheet
+  // holds the tree instead.
+  side: {
+    display: { default: "none", [media.fromTablet]: "flex" },
+    flexDirection: "column",
+    flexShrink: 0,
+    minHeight: 0,
+    borderInlineEndWidth: grasp.hairline,
+    borderInlineEndStyle: "solid",
+    borderInlineEndColor: grasp.line,
+  },
+  open: { width: grasp.sidebarWidth },
+  rail: {
+    alignItems: "center",
+    gap: grasp.space1,
+    paddingBlock: grasp.space2,
+    paddingInline: grasp.space2,
+    overflowY: "auto",
+  },
+  tree: { display: "flex", flexDirection: "column", minHeight: 0, flex: 1 },
+  top: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space1,
+    padding: grasp.space2,
+  },
+  search: { flex: 1, minWidth: 0 },
+  body: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+    flex: 1,
+    minHeight: 0,
+    overflowY: "auto",
+    paddingInline: grasp.space2,
+    paddingBlockEnd: grasp.space4,
+  },
+});
 
 /** The set with `key` added when it was missing, removed when it was there. */
 const flip = (before: ReadonlySet<string>, key: string): Set<string> => {
@@ -207,7 +120,7 @@ const SearchField = () => {
   const [typed, setTyped] = useState(searched ?? "");
   const { t } = useLingui();
   return (
-    <search>
+    <search {...stylex.props(styles.search)}>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -216,14 +129,12 @@ const SearchField = () => {
         }}
       >
         <InputGroup>
-          <InputGroupAddon>
-            <SearchIcon />
-          </InputGroupAddon>
+          <InputGroupText icon={Search} />
           <InputGroupInput
             aria-label={t`Search Knowledge`}
             maxLength={searchQueryMaxLength}
-            onChange={(event) => {
-              setTyped(event.target.value);
+            onValueChange={(value) => {
+              setTyped(value);
             }}
             placeholder={t`Search Knowledge`}
             type="search"
@@ -368,6 +279,158 @@ const useListed = (
   };
 };
 
+/** What an item of the tree that isn't a link does. */
+type Target =
+  | { to: "folder"; value: string }
+  | { to: "more"; collection: string };
+
+/** A collection's page, or a document on it, as the router's link for a row. */
+const linkTo = (collection: string, doc?: string) => (
+  <Link
+    params={{ collection }}
+    search={doc === undefined ? {} : { doc }}
+    to="/knowledge/$collection"
+  />
+);
+
+/** The words the tree's items say that aren't names. */
+interface TreeWords {
+  knowledge: string;
+  loading: string;
+  none: string;
+  more: string;
+  failed: (failure: Loaded<unknown>) => string;
+}
+
+/** A folder's value in the tree: by its collection and path. */
+const folderValue = (collection: string, path: string): string =>
+  `f:${collection}/${path}`;
+
+/** A collection's documents and folders as items, each kept with its target. */
+const entriesOf = (
+  collection: string,
+  folder: Folder,
+  targets: Map<string, Target>
+): TreeNode[] => [
+  ...folder.documents.map((document): TreeNode => ({
+    value: `d:${document.id}`,
+    label: document.path.split("/").at(-1) ?? document.path,
+    icon: File,
+    render: linkTo(document.collectionId, document.id),
+  })),
+  ...folder.folders.map((inner): TreeNode => {
+    const value = folderValue(collection, inner.path);
+    targets.set(value, { to: "folder", value });
+    return {
+      value,
+      label: inner.name,
+      icon: FolderIcon,
+      end: countDocuments(inner),
+      children: entriesOf(collection, inner, targets),
+    };
+  }),
+];
+
+/** A collection's items under it: its documents, or why there are none yet. */
+const listingOf = (
+  collection: string,
+  listing: Listed | undefined,
+  words: TreeWords,
+  targets: Map<string, Target>
+): TreeNode[] => {
+  if (listing === undefined) {
+    return [
+      { value: `loading:${collection}`, label: words.loading, disabled: true },
+    ];
+  }
+  const nodes = entriesOf(collection, folderTree(listing.documents), targets);
+  if (listing.documents.length === 0 && listing.failure === undefined) {
+    nodes.push({
+      value: `none:${collection}`,
+      label: words.none,
+      disabled: true,
+    });
+  }
+  if (listing.failure !== undefined) {
+    nodes.push({
+      value: `failed:${collection}`,
+      label: words.failed(listing.failure),
+      disabled: true,
+    });
+  }
+  if (listing.more) {
+    const value = `more:${collection}`;
+    targets.set(value, { to: "more", collection });
+    nodes.push({ value, label: words.more });
+  }
+  return nodes;
+};
+
+/** The tree's items, and where each leads. */
+const itemsOf = (
+  data: KnowledgeNavData,
+  listed: ReadonlyMap<string, Listed>,
+  opened: ReadonlySet<string>,
+  words: TreeWords
+): { items: TreeNode[]; targets: Map<string, Target> } => {
+  const targets = new Map<string, Target>();
+  const items: TreeNode[] = [
+    {
+      value: "home",
+      label: words.knowledge,
+      icon: Home,
+      render: <Link search={{}} to="/knowledge" />,
+    },
+  ];
+  const memoryFiles =
+    data.memory.state === "ready" ? data.memory.data.files : [];
+  for (const file of memoryFiles) {
+    items.push({
+      value: `m:${file.id}`,
+      label: file.path,
+      icon: Note,
+      render: linkTo(file.collectionId, file.id),
+    });
+  }
+  const collections =
+    data.collections.state === "ready" ? data.collections.data : [];
+  for (const collection of collections) {
+    items.push({
+      value: `c:${collection.id}`,
+      label: collection.name,
+      icon: collectionIconOf(collection),
+      end: <CollectionMarks collection={collection} />,
+      render: linkTo(collection.id),
+      // Only an open collection is read: a closed one waits, empty.
+      children: opened.has(collection.id)
+        ? listingOf(collection.id, listed.get(collection.id), words, targets)
+        : [],
+    });
+  }
+  return { items, targets };
+};
+
+/** The item that is the page open: the document, else the collection, else the home. */
+const currentOf = (at: KnowledgeAt, data: KnowledgeNavData): string => {
+  const doc = at.document?.id;
+  if (doc !== undefined) {
+    const memory =
+      data.memory.state === "ready" &&
+      data.memory.data.files.some(({ id }) => id === doc);
+    return memory ? `m:${doc}` : `d:${doc}`;
+  }
+  return at.collection === undefined ? "home" : `c:${at.collection}`;
+};
+
+/** The folders on the way to the open document, as the tree's values. */
+const foldersOpenAt = (at: KnowledgeAt): string[] => {
+  const { collection, document } = at;
+  if (collection === undefined || document === undefined) {
+    return [];
+  }
+  return foldersTo(document.path).map((path) => folderValue(collection, path));
+};
+
 /** The navigation itself, open: what the sidebar and the phone's sheet show. */
 export const KnowledgeTree = ({
   data,
@@ -378,14 +441,14 @@ export const KnowledgeTree = ({
   at: KnowledgeAt;
   fold?: { label: string; onFold: () => void };
 }) => {
-  const { t } = useLingui();
+  const { t, i18n } = useLingui();
   // The collections and folders open: the way to where the person is opens
   // once, and after that closes like anything else.
   const [opened, setOpened] = useState<ReadonlySet<string>>(
     () => new Set(at.collection === undefined ? [] : [at.collection])
   );
   const [folders, setFolders] = useState<ReadonlySet<string>>(
-    () => new Set(at.document === undefined ? [] : foldersTo(at.document.path))
+    () => new Set(foldersOpenAt(at))
   );
   const [revealed, setRevealed] = useState(at.document?.id);
   if (at.document !== undefined && revealed !== at.document.id) {
@@ -394,143 +457,77 @@ export const KnowledgeTree = ({
     if (collection !== undefined) {
       setOpened((before) => new Set([...before, collection]));
     }
-    setFolders(
-      (before) => new Set([...before, ...foldersTo(at.document?.path ?? "")])
-    );
+    setFolders((before) => new Set([...before, ...foldersOpenAt(at)]));
   }
   const { listed, more } = useListed(opened, at, data);
-  const openDoc = at.document?.id;
-  const memoryFiles =
-    data.memory.state === "ready" ? data.memory.data.files : [];
+  const { items, targets } = itemsOf(data, listed, opened, {
+    knowledge: t`Knowledge`,
+    loading: t`Loading…`,
+    none: t`No files yet.`,
+    more: t`Show more`,
+    failed: (failure) => notLoadedText(failure, i18n) ?? "",
+  });
+  // A row that is a link goes by its link; the rest act here.
+  const run = (value: string): void => {
+    const target = targets.get(value);
+    if (target === undefined) {
+      return;
+    }
+    if (target.to === "folder") {
+      setFolders((before) => flip(before, target.value));
+    } else {
+      more(target.collection);
+    }
+  };
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <PageSidebarTop fold={fold} joined>
+    <div {...stylex.props(styles.tree)}>
+      <div {...stylex.props(styles.top)}>
         <SearchField />
-      </PageSidebarTop>
-      <PageSidebarBody joined>
-        <Link
-          activeOptions={{ exact: true, includeSearch: false }}
-          className="group hover:bg-accent data-[status=active]:bg-accent mt-2 flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm data-[status=active]:font-medium"
-          to="/knowledge"
-        >
-          <LibraryIcon className="text-muted-foreground group-data-[status=active]:text-foreground size-4 flex-none" />
-          <span className="min-w-0 flex-1 truncate">{t`Knowledge`}</span>
-        </Link>
-        {memoryFiles.map((file) => (
-          <Link
-            aria-current={file.id === openDoc ? "page" : undefined}
-            className="group hover:bg-accent aria-[current=page]:bg-accent flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm aria-[current=page]:font-medium"
-            key={file.id}
-            params={{ collection: file.collectionId }}
-            search={{ doc: file.id }}
-            to="/knowledge/$collection"
-          >
-            <NotebookPenIcon className="text-muted-foreground size-4 flex-none" />
-            <span className="min-w-0 flex-1 truncate">{file.path}</span>
-          </Link>
-        ))}
-        <span aria-hidden="true" className="bg-border my-2 h-px" />
+        {fold === undefined ? null : (
+          <Button
+            aria-label={fold.label}
+            icon={PanelToggle}
+            onClick={() => {
+              fold.onFold();
+            }}
+            size="sm"
+            variant="ghost"
+          />
+        )}
+      </div>
+      <div {...stylex.props(styles.body)}>
         <NotLoaded page={data.collections} />
         <NotLoaded page={data.memory} />
-        {data.collections.state === "ready"
-          ? data.collections.data.map((collection) => {
-              const expanded = opened.has(collection.id);
-              const current = collection.id === at.collection;
-              const { name } = collection;
-              const listing = listed.get(collection.id);
-              return (
-                <div className="flex flex-col" key={collection.id}>
-                  <div className="hover:bg-accent has-aria-[current=page]:bg-accent flex items-center rounded-md">
-                    <Link
-                      aria-current={
-                        current && openDoc === undefined ? "page" : undefined
-                      }
-                      className={
-                        current
-                          ? "flex min-w-0 flex-1 items-center gap-2.5 py-1.5 pl-2 text-sm font-medium"
-                          : "flex min-w-0 flex-1 items-center gap-2.5 py-1.5 pl-2 text-sm"
-                      }
-                      params={{ collection: collection.id }}
-                      search={{}}
-                      to="/knowledge/$collection"
-                    >
-                      <CollectionIcon
-                        className="text-muted-foreground size-4 flex-none"
-                        collection={collection}
-                      />
-                      <span className="min-w-0 flex-1 truncate">{name}</span>
-                      <CollectionMarks collection={collection} />
-                    </Link>
-                    <button
-                      aria-expanded={expanded}
-                      aria-label={expanded ? t`Close ${name}` : t`Open ${name}`}
-                      className="flex size-7 flex-none items-center justify-center rounded-md"
-                      onClick={() => {
-                        setOpened((before) => flip(before, collection.id));
-                      }}
-                      type="button"
-                    >
-                      <ChevronDownIcon
-                        className={
-                          expanded
-                            ? "text-muted-foreground size-3.5 transition-transform"
-                            : "text-muted-foreground size-3.5 -rotate-90 transition-transform"
-                        }
-                      />
-                    </button>
-                  </div>
-                  {expanded ? (
-                    <div className="my-1 ml-4 flex flex-col gap-0.5 border-l pl-2">
-                      {listing === undefined ? (
-                        <Spinner
-                          aria-label={t`Loading…`}
-                          className="mx-2 my-1"
-                        />
-                      ) : (
-                        <>
-                          {listing.documents.length === 0 &&
-                          listing.failure === undefined ? (
-                            <p className="text-muted-foreground px-2 py-1 text-sm">
-                              {t`No files yet.`}
-                            </p>
-                          ) : null}
-                          <Entries
-                            folder={folderTree(listing.documents)}
-                            isOpen={(key) => folders.has(key)}
-                            openDoc={openDoc}
-                            toggle={(key) => {
-                              setFolders((before) => flip(before, key));
-                            }}
-                          />
-                          {listing.failure === undefined ? null : (
-                            <NotLoaded page={listing.failure} />
-                          )}
-                          {listing.more ? (
-                            <Button
-                              className="justify-start"
-                              onClick={() => {
-                                more(collection.id);
-                              }}
-                              size="xs"
-                              variant="ghost"
-                            >
-                              {t`Show more`}
-                            </Button>
-                          ) : null}
-                        </>
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })
-          : null}
-      </PageSidebarBody>
+        <Tree
+          aria-label={t`Knowledge`}
+          current={currentOf(at, data)}
+          expandOnPress={false}
+          expanded={[
+            ...[...opened].map((collection) => `c:${collection}`),
+            ...folders,
+          ]}
+          items={items}
+          mode="none"
+          onAction={run}
+          onExpandedChange={(expanded) => {
+            setOpened(
+              new Set(
+                expanded.flatMap((value) =>
+                  value.startsWith("c:") ? [value.slice(2)] : []
+                )
+              )
+            );
+            setFolders(
+              new Set(expanded.filter((value) => value.startsWith("f:")))
+            );
+          }}
+        />
+      </div>
     </div>
   );
 };
 
-/** Knowledge's page sidebar: the tree, or folded, a rail of its collections. */
+/** Knowledge's navigation beside the page: the tree, or folded, a rail of its collections. */
 export const KnowledgeNav = ({
   data,
   at,
@@ -542,27 +539,37 @@ export const KnowledgeNav = ({
   const [folded, setFolded] = usePageSidebarFold("knowledge");
   if (folded) {
     return (
-      <PageSidebar folded label={t`Knowledge`}>
-        <PageSidebarRailExpand
-          label={t`Expand the navigation`}
-          onExpand={() => {
+      <nav
+        aria-label={t`Knowledge`}
+        {...stylex.props(styles.side, styles.rail)}
+      >
+        <Button
+          aria-label={t`Expand the navigation`}
+          icon={PanelToggle}
+          onClick={() => {
             setFolded(false);
           }}
+          size="sm"
+          variant="ghost"
         />
-        <PageSidebarRailDivider />
-        <PageSidebarRailButton
-          active={at.collection === undefined}
-          label={t`Knowledge`}
+        <Separator />
+        <Button
+          aria-current={at.collection === undefined ? "page" : undefined}
+          aria-label={t`Knowledge`}
+          icon={Home}
           render={<Link search={{}} to="/knowledge" />}
-        >
-          <LibraryIcon />
-        </PageSidebarRailButton>
+          size="sm"
+          variant="ghost"
+        />
         {data.collections.state === "ready"
           ? data.collections.data.map((collection) => (
-              <PageSidebarRailButton
-                active={collection.id === at.collection}
+              <Button
+                aria-current={
+                  collection.id === at.collection ? "page" : undefined
+                }
+                aria-label={collection.name}
+                icon={collectionIconOf(collection)}
                 key={collection.id}
-                label={collection.name}
                 render={
                   <Link
                     params={{ collection: collection.id }}
@@ -570,16 +577,16 @@ export const KnowledgeNav = ({
                     to="/knowledge/$collection"
                   />
                 }
-              >
-                <CollectionIcon collection={collection} />
-              </PageSidebarRailButton>
+                size="sm"
+                variant="ghost"
+              />
             ))
           : null}
-      </PageSidebar>
+      </nav>
     );
   }
   return (
-    <PageSidebar folded={false} label={t`Knowledge`}>
+    <nav aria-label={t`Knowledge`} {...stylex.props(styles.side, styles.open)}>
       <KnowledgeTree
         at={at}
         data={data}
@@ -590,6 +597,6 @@ export const KnowledgeNav = ({
           },
         }}
       />
-    </PageSidebar>
+    </nav>
   );
 };

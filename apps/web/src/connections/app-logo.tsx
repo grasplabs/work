@@ -1,40 +1,114 @@
 import { useLingui } from "@lingui/react/macro";
-import { PlusIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
+import { Icon, Plus } from "../grasp/icons/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+
 // An app's tile, as the prototype draws it (`components/app-logo.tsx`): its
-// own logo on a light tile, or its first letter when it has none.
+// own logo on a light tile, or its first letter when it has none. The tile
+// stays light in the dark theme too: a brand's logo is drawn for a light
+// ground.
 
-/**
- * The tile around a logo, by size. `xs` and `inline` sit inside a line of
- * text; `lg` stands on its own, as on a block; `bare` is the logo alone,
- * with no tile behind it, cut round so a row of them has one shape.
- */
-const tileClass = {
-  bare: "inline-flex size-4 flex-none items-center justify-center overflow-hidden rounded-full",
-  lg: "bg-tile flex size-14 flex-none items-center justify-center rounded-2xl border p-3 shadow-xs",
-  default:
-    "bg-tile flex size-9 flex-none items-center justify-center rounded-md border p-1.5",
-  sm: "bg-tile flex size-7 flex-none items-center justify-center rounded-md border p-1",
-  xs: "bg-tile inline-flex size-4 flex-none items-center justify-center overflow-hidden rounded-sm",
-  inline:
-    "bg-tile inline-flex size-5 flex-none items-center justify-center overflow-hidden rounded-md border p-0.5",
-} as const;
+const styles = stylex.create({
+  tile: {
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    boxSizing: "border-box",
+    overflow: "hidden",
+    backgroundColor: grasp.lightPaper,
+    color: grasp.lightInk,
+    cornerShape: grasp.cornerShape,
+  },
+  inText: {
+    display: "inline-flex",
+    verticalAlign: "middle",
+  },
+  edged: {
+    boxShadow: grasp.edge,
+  },
+  /**
+   * The tile around a logo, by size. `xs` and `inline` sit inside a line of
+   * text; `lg` stands on its own, as on a block; `bare` is the logo alone,
+   * with no tile behind it, cut round so a row of them has one shape.
+   */
+  bare: {
+    width: grasp.space4,
+    height: grasp.space4,
+    borderRadius: grasp.cornerCircle,
+    backgroundColor: "transparent",
+    color: grasp.ink,
+  },
+  lg: {
+    width: `calc(${grasp.space12} + ${grasp.space2})`,
+    height: `calc(${grasp.space12} + ${grasp.space2})`,
+    padding: grasp.space3,
+    borderRadius: grasp.corner,
+  },
+  default: {
+    width: `calc(${grasp.space8} + ${grasp.space1})`,
+    height: `calc(${grasp.space8} + ${grasp.space1})`,
+    padding: `calc(${grasp.space1} + ${grasp.space1} / 2)`,
+    borderRadius: grasp.cornerMark,
+  },
+  sm: {
+    width: grasp.space7,
+    height: grasp.space7,
+    padding: grasp.space1,
+    borderRadius: grasp.cornerMark,
+  },
+  xs: {
+    width: grasp.space4,
+    height: grasp.space4,
+    borderRadius: `calc(${grasp.cornerMark} / 2)`,
+  },
+  inline: {
+    width: grasp.space5,
+    height: grasp.space5,
+    padding: `calc(${grasp.space1} / 2)`,
+    borderRadius: grasp.cornerMark,
+  },
+  letter: {
+    fontFamily: grasp.fontSans,
+    fontSize: grasp.textXs,
+    fontWeight: grasp.weightMedium,
+    lineHeight: grasp.textXsLine,
+  },
+  letterInText: {
+    lineHeight: 1,
+  },
+  letterLg: {
+    fontSize: grasp.textLg,
+    lineHeight: grasp.textLgLine,
+  },
+  image: {
+    width: "100%",
+    height: "100%",
+    objectFit: "contain",
+  },
+  // The default tile, dashed and without its light ground: a place for something still to add.
+  add: {
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    boxSizing: "border-box",
+    width: `calc(${grasp.space8} + ${grasp.space1})`,
+    height: `calc(${grasp.space8} + ${grasp.space1})`,
+    borderWidth: grasp.hairline,
+    borderStyle: "dashed",
+    borderColor: grasp.line,
+    borderRadius: grasp.cornerMark,
+    color: grasp.muted,
+  },
+});
 
-type TileSize = keyof typeof tileClass;
+type TileSize = "bare" | "lg" | "default" | "sm" | "xs" | "inline";
 
-/** The default tile, dashed and without its light ground: a place for something still to add. */
-const addTileClass =
-  "flex size-9 flex-none items-center justify-center rounded-md border border-dashed";
-
-const letterClassOf = (size: TileSize, inText: boolean): string => {
-  if (inText) {
-    return "text-tile-foreground text-xs leading-none font-medium";
-  }
-  return size === "lg"
-    ? "text-tile-foreground text-2xl font-medium"
-    : "text-tile-foreground text-xs font-medium";
-};
+/** The sizes drawn with the system's edge: the ones that stand as a tile. */
+const edgedSizes = new Set<TileSize>(["lg", "default", "sm", "inline"]);
 
 /**
  * A brand's own logo on a light tile, or its first letter when it has no
@@ -59,21 +133,35 @@ export const AppLogo = ({
   const inText = size === "xs" || size === "inline" || size === "bare";
   const Tile = inText ? "span" : "div";
   return (
-    <Tile className={tileClass[size]}>
+    <Tile
+      {...stylex.props(
+        styles.tile,
+        inText && styles.inText,
+        edgedSizes.has(size) && styles.edged,
+        styles[size]
+      )}
+    >
       {image === undefined ? (
-        <span aria-hidden="true" className={letterClassOf(size, inText)}>
+        <span
+          aria-hidden="true"
+          {...stylex.props(
+            styles.letter,
+            inText && styles.letterInText,
+            size === "lg" && styles.letterLg
+          )}
+        >
           {name.charAt(0)}
         </span>
       ) : (
         <img
           alt={inText ? "" : t`${name} logo`}
-          className="size-full object-contain"
           decoding="async"
           loading="lazy"
           onError={() => {
             setMissing(image);
           }}
           src={image}
+          {...stylex.props(styles.image)}
         />
       )}
     </Tile>
@@ -85,7 +173,7 @@ export const AppLogo = ({
  * the same tile, dashed and empty, with a plus.
  */
 export const AddLogo = () => (
-  <div aria-hidden="true" className={addTileClass}>
-    <PlusIcon className="size-4" />
+  <div aria-hidden="true" {...stylex.props(styles.add)}>
+    <Icon icon={Plus} />
   </div>
 );

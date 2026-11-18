@@ -267,7 +267,7 @@ export const TeamDialog = ({
           <DialogAction>{t`Cancel`}</DialogAction>
           <DialogAction
             action={save}
-            failedLabel={t`Could not save`}
+            failedLabel={t`Not saved`}
             variant="ink"
             workingLabel={t`Saving`}
           >

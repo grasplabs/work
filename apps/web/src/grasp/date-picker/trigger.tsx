@@ -7,6 +7,8 @@ import { DatePickerTrigger as TriggerPrimitive } from "@ui-sdk/react/date-picker
 
 import { Button } from "../button";
 import { CalendarIcon } from "../icons";
+import { useWords, withGiven } from "../words/words";
+import { datePickerWords } from "./words";
 
 /** UI SDK's trigger props without its children: Button draws its own content. */
 const withoutChildren = (
@@ -51,19 +53,25 @@ export interface DateTriggerProps {
 /** The calendar button of a date field. */
 export const DateTrigger = ({
   label,
-  fallbackLabel = "Choose date",
+  fallbackLabel: fallbackGiven,
   size = "md",
-}: DateTriggerProps) => (
-  <TriggerPrimitive
-    aria-label={label}
-    render={(props: Record<string, unknown>) => (
-      <Button
-        {...withoutChildren(props)}
-        variant="ghost"
-        size={buttonSize[size]}
-        icon={CalendarIcon}
-        aria-label={nameOf(props, label, fallbackLabel)}
-      />
-    )}
-  />
-);
+}: DateTriggerProps) => {
+  const { choose: fallbackLabel } = withGiven(
+    useWords("datePicker", datePickerWords),
+    { choose: fallbackGiven }
+  );
+  return (
+    <TriggerPrimitive
+      aria-label={label}
+      render={(props: Record<string, unknown>) => (
+        <Button
+          {...withoutChildren(props)}
+          variant="ghost"
+          size={buttonSize[size]}
+          icon={CalendarIcon}
+          aria-label={nameOf(props, label, fallbackLabel)}
+        />
+      )}
+    />
+  );
+};

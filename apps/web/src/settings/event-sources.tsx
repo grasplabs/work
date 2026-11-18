@@ -995,8 +995,9 @@ export const EventSourcesSettings = ({
         open={!wide && open !== undefined}
         size="md"
       >
-        <SheetContent>
-          <SheetTitle>{open?.name ?? ""}</SheetTitle>
+        {/* The panel draws the title and the close: the sheet names it only. */}
+        <SheetContent close="none">
+          <SheetTitle hidden>{open?.name ?? ""}</SheetTitle>
           {inspector(false)}
         </SheetContent>
       </Sheet>

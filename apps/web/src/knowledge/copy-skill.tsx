@@ -1,13 +1,16 @@
 import { documentTypeOf, knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { DocumentRead, DocumentSummary } from "@grasp-os/shared/knowledge";
-import { Button } from "@grasp-os/ui/components/button";
-import { Trans } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
-import { CopyIcon } from "lucide-react";
 import { useState } from "react";
 
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { Copy } from "../grasp/icons/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // Copying a Grasp skill into the client's own skills ("Our skills") to
@@ -47,15 +50,32 @@ const copyInto = async (
 export const isSkill = (doc: DocumentRead): boolean =>
   documentTypeOf(doc.type) === "skill";
 
+const styles = stylex.create({
+  // The button, and under it at its end edge why nothing was copied.
+  stack: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: grasp.space1,
+    minWidth: 0,
+  },
+});
+
 /** Why nothing was copied: Our skills has a document at `path` already. */
-const TakenText = ({ path }: { path: string }) => (
-  <output className="text-muted-foreground text-sm">
-    <Trans>Our skills has a skill at {path} already: adapt that one.</Trans>
-  </output>
-);
+const TakenText = ({ path }: { path: string }) => {
+  const { t } = useLingui();
+  return (
+    <output>
+      <Text element="span" size="sm" tone="muted">
+        {t`Our skills has a skill at ${path} already: adapt that one.`}
+      </Text>
+    </output>
+  );
+};
 
 /** "Copy into Our skills", for an admin reading one of Grasp's skills. */
 export const CopySkill = ({ doc }: { doc: DocumentRead }) => {
+  const { t } = useLingui();
   const navigate = useNavigate();
   const { busy, failure, run } = useCoreAction();
   const [taken, setTaken] = useState<string>();
@@ -78,17 +98,16 @@ export const CopySkill = ({ doc }: { doc: DocumentRead }) => {
   };
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div {...stylex.props(styles.stack)}>
       <Button
         disabled={busy}
+        icon={Copy}
         onClick={() => {
           void copy();
         }}
         size="sm"
-        variant="outline"
       >
-        <CopyIcon data-icon="inline-start" />
-        <Trans>Copy into Our skills</Trans>
+        {t`Copy into Our skills`}
       </Button>
       {taken === undefined ? null : <TakenText path={taken} />}
       <ErrorText>{failure}</ErrorText>

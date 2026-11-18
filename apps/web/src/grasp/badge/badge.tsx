@@ -8,6 +8,7 @@
 //   <Badge tone="danger" size="sm">Failed</Badge>
 //   <Badge pending={sending} icon={Tick}>{sending ? "Sending" : "Invited"}</Badge>   working on it
 //   <Badge variant="dot" tone="danger">3 errors</Badge>         how serious, as a dot (once Severity)
+//   <Badge explain="Grasp support can open this workspace until Friday.">Staff access</Badge>
 //
 // `variant="dot"` is how serious something is, as a small dot in the tone's colour beside neutral
 // words, as the Grasp product marks captured logs: a page full of errors is not painted red. Alone
@@ -19,11 +20,13 @@
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
+import { focus } from "../focus/focus";
 import { Icon, Spinner as Turning } from "../icons";
 import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { WithTip } from "../tooltip/lazy-tip";
 import { Dot } from "./dot";
 
 export type BadgeTone = "neutral" | "success" | "attention" | "danger" | "info";
@@ -78,6 +81,12 @@ export interface BadgeProps {
   style?: BadgeLayoutStyle;
   /** Layout only: margins and alignment. The look belongs to the badge. */
   layout?: BadgeLayoutStyle;
+  /**
+   * What the status means, for whoever wonders: the badge becomes a stop for the keyboard and shows
+   * these words in a tooltip on hover and on focus, said as its description. It still looks like a
+   * badge, not a button, and nothing happens when it is pressed. A pill only.
+   */
+  explain?: string;
 }
 
 const turn = stylex.keyframes({
@@ -95,6 +104,9 @@ const styles = stylex.create({
     animationTimingFunction: "linear",
     animationIterationCount: "infinite",
   },
+  // An explained badge: a stop for the keyboard with the shared ring, the help cursor under a
+  // pointer, and no look of a button (no fill or lift on hover).
+  explained: { cursor: "help" },
   badge: {
     [iconVars.size]: grasp.badgeIcon,
     [iconVars.stroke]: grasp.iconStroke,
@@ -197,20 +209,33 @@ export const Badge = ({
   loading: pending = pendingDeprecated,
   style: styleProp,
   layout,
-}: BadgeProps) =>
-  variant === "dot" ? (
-    <Dot tone={tone} named={named} layout={layout ?? styleProp}>
-      {children}
-    </Dot>
-  ) : (
+  explain,
+}: BadgeProps) => {
+  if (variant === "dot") {
+    return (
+      <Dot tone={tone} named={named} layout={layout ?? styleProp}>
+        {children}
+      </Dot>
+    );
+  }
+  const explained = explain !== undefined && explain !== "";
+  // An explained badge carries the tooltip trigger's props: a stop for the keyboard, its words the
+  // badge's description. Without `explain` no tooltip is loaded at all.
+  const pill = (trigger: Record<string, unknown>) => (
     <span
+      {...trigger}
       data-slot="badge"
       data-tone={tone}
       data-pending={pending === true ? "" : undefined}
+      data-explained={explained ? "" : undefined}
+      // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- an explained badge is a stop so its Tooltip (its description) reaches the keyboard too, as Key-value's icon does
+      tabIndex={explained ? 0 : undefined}
       {...stylex.props(
         styles.badge,
         styles[size],
         styles[tone],
+        explained && styles.explained,
+        explained && focus.ring,
         layout ?? styleProp
       )}
     >
@@ -224,3 +249,5 @@ export const Badge = ({
       </span>
     </span>
   );
+  return explained ? <WithTip tooltip={explain} render={pill} /> : pill({});
+};

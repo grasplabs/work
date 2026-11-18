@@ -1145,6 +1145,8 @@
   /* App card: app card. */
   /* The frame: as wide as a laptop's screen, so a window of app fits with its crop. */
   --grasp-app-card-ratio: 16 / 10;
+  /* The frame's tallest: at two columns a card grows to 46rem wide and its frame, at the ratio, to 29rem, half a screen of empty window. Past this the window is cropped lower by the frame's foot. */
+  --grasp-app-card-frame-max: 20rem;
   /* The frame's corner, a squircle: larger than a card's, the frame is the picture. */
   --grasp-app-card-corner: 28px;
   /* The app window's top corners inside the frame. */
@@ -1650,8 +1652,11 @@
   --grasp-chart-line: var(--grasp-mint-deep);
   /* A plain bar's fill. */
   --grasp-chart-plain: var(--grasp-mint-deep);
-  /* The chart's faint grid. */
-  --grasp-chart-grid: var(--grasp-line);
+  /* The chart's grid: its own value, a step above the hairline (line), so the axes' lines read on a white card (Ruben: "no visible axes"). */
+  --grasp-chart-grid: light-dark(
+    oklch(0.29 0.05 162 / 0.18),
+    oklch(0.96 0.02 150 / 0.2)
+  );
   /* The lit cells of a dither fill, near the value. */
   --grasp-chart-dither-lit: var(--grasp-light-mint);
   /* The ground of a dither fill, at the floor: evergreen. */

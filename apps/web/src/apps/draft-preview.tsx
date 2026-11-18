@@ -1,9 +1,23 @@
 import type { AppDraft } from "@grasp-os/shared/app-drafts";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { PreviewFrame } from "../pages/page-frame.tsx";
 import type { FrameFix, PageEnded } from "../pages/page-frame.tsx";
 import type { ReadOnlyShown } from "./app-workspace.tsx";
+
+const styles = stylex.create({
+  // The page's own ground, filling what is left of the workspace.
+  preview: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+    overflow: "hidden",
+    backgroundColor: grasp.paper,
+  },
+});
 
 // The App being built, in its workspace (app-workspace.tsx): the compiled
 // pages of the App's draft, as a preview, on the test data its builders
@@ -52,7 +66,7 @@ export const DraftPreview = ({
   return (
     <section
       aria-label={t`${name}, your version`}
-      className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden"
+      {...stylex.props(styles.preview)}
     >
       <PreviewFrame
         app={app}

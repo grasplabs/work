@@ -1,3 +1,4 @@
+import { citedQuoteMax } from "@grasp-os/shared/chat";
 import type { ChatCitedDocument } from "@grasp-os/shared/chat";
 import { useLingui } from "@lingui/react/macro";
 import { useNavigate } from "@tanstack/react-router";
@@ -86,6 +87,67 @@ const LeavingLink = ({
 /** The links out of Grasp a click may open. */
 const leavingSchemes = new Set(["http", "https", "mailto"]);
 
+/** Whitespace aside, as core compares a quote with its document. */
+const spaced = (words: string): string => words.replaceAll(/\s+/gu, " ").trim();
+
+/**
+ * The passage a citation rests on, for its hover card: the quote its link
+ * gives as its title, but only as core checked it against the document
+ * (a span's `quote`, which core keeps only while the document says it, cut
+ * at `citedQuoteMax`). A quote core didn't keep shows nothing.
+ */
+const checkedQuote = (
+  document: ChatCitedDocument | undefined,
+  title: string | undefined
+): string | undefined => {
+  if (document === undefined || title === undefined) {
+    return undefined;
+  }
+  const given = spaced(title);
+  const same = (quote: string): boolean => {
+    const kept = spaced(quote);
+    // Cut at its longest, only its start is kept.
+    return quote.length >= citedQuoteMax
+      ? given.startsWith(kept)
+      : given === kept;
+  };
+  return (
+    document.spans.find(({ quote }) => quote !== null && same(quote))?.quote ??
+    undefined
+  );
+};
+
+/**
+ * The answer's text with each citation's checked quote back as its link's
+ * title. Core keeps an answer's citations as `[words](grasp:note/<id>)`,
+ * their titles taken out, and gives each quote it checked with where its
+ * link starts (`ChatCitedSpan.at`); a link not found there as core wrote
+ * it is left as it is.
+ */
+const withQuotes = (
+  text: string,
+  cited: readonly ChatCitedDocument[] | undefined
+): string => {
+  const quoted = (cited ?? [])
+    .flatMap(({ documentId, spans }) =>
+      spans.flatMap(({ at, text: words, quote }) =>
+        quote === null
+          ? []
+          : [{ at, link: `[${words}](grasp:note/${documentId})`, quote }]
+      )
+    )
+    // From the end, so each place still stands where core counted it.
+    .toSorted((one, other) => other.at - one.at);
+  let shown = text;
+  for (const { at, link, quote } of quoted) {
+    if (shown.startsWith(link, at)) {
+      const title = quote.replaceAll(/["\\]/gu, "\\$&");
+      shown = `${shown.slice(0, at + link.length - 1)} "${title}")${shown.slice(at + link.length)}`;
+    }
+  }
+  return shown;
+};
+
 /** One of the answer's links, drawn by what `cited` holds. */
 const AnswerLink = ({
   link,
@@ -101,10 +163,11 @@ const AnswerLink = ({
     if (at === undefined || at < 0) {
       return <span>{link.children}</span>;
     }
+    const quote = checkedQuote(cited?.[at], link.title);
     return (
       <>
         <Claim n={at + 1}>{link.children}</Claim>
-        <Citation n={at + 1} />
+        <Citation n={at + 1} {...(quote === undefined ? {} : { quote })} />
       </>
     );
   }
@@ -115,12 +178,16 @@ const AnswerLink = ({
   return <span>{link.children}</span>;
 };
 
-/** A cited document, as Sources lists it: a document of the company's, opened on its collection's page. */
-const sourceOf = ({ title, path, snippet }: ChatCitedDocument): Source => ({
+/**
+ * A cited document, as Sources lists it: a document of the company's,
+ * opened on its collection's page. No quote: Sources holds one a source,
+ * and the document's `snippet` is its start, not the passage cited; each
+ * citation's own quote comes with Grasp UI's Citation.
+ */
+const sourceOf = ({ title, path }: ChatCitedDocument): Source => ({
   kind: "file",
   title,
   origin: path,
-  ...(snippet === "" ? {} : { quote: snippet }),
 });
 
 /**
@@ -131,17 +198,21 @@ const sourceOf = ({ title, path, snippet }: ChatCitedDocument): Source => ({
 export const AnswerWords = ({
   text,
   writing,
+  cut = false,
   cited,
 }: {
   text: string;
   writing: boolean;
+  /** Stopped part way: a link it was still writing goes, an open mark closes. */
+  cut?: boolean;
   cited?: readonly ChatCitedDocument[];
 }) => {
   const navigate = useNavigate();
   const words = (
     <Markdown
       renderLink={(link) => <AnswerLink cited={cited} link={link} />}
-      source={text}
+      cut={cut}
+      source={withQuotes(text, cited)}
       streaming={writing}
     />
   );

@@ -5,28 +5,21 @@ import type {
   TableRowRules,
 } from "@grasp-os/shared/apps";
 import type { Permission } from "@grasp-os/shared/permissions";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@grasp-os/ui/components/collapsible";
-import {
-  Item,
-  ItemContent,
-  ItemGroup,
-  ItemMedia,
-} from "@grasp-os/ui/components/item";
-import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import type { I18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { ChevronRightIcon, KeyRoundIcon, UsersIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
 import { lazy, Suspense } from "react";
 import type { ReactNode } from "react";
 
 import { formatList } from "../format.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { Collapsible } from "../grasp/collapsible/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
+import { Icon, Key, People } from "../grasp/icons/index.ts";
+import { Skeleton } from "../grasp/skeleton/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { PlanList, planLines } from "./data-model-changes.tsx";
 
 // What publishing an App's draft changes, as Publish (publish.tsx) shows
@@ -89,32 +82,61 @@ const changeNames = {
   deleted: msg({ message: "Removed", context: "a file a change removes" }),
 } as const satisfies Record<FileDiff["change"], unknown>;
 
+// How tall a file's change may stand before it scrolls: Grasp UI has no
+// token for a code box's height.
+const DIFF_TALL = "24rem";
+
+const styles = stylex.create({
+  stack: { display: "grid", gap: grasp.space3, minWidth: 0 },
+  tight: { display: "grid", gap: grasp.space1, minWidth: 0 },
+  list: {
+    display: "grid",
+    gap: grasp.space1,
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  path: { fontFamily: grasp.fontMono, overflowWrap: "anywhere" },
+  title: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space2,
+    minWidth: 0,
+  },
+  diff: {
+    maxHeight: DIFF_TALL,
+    overflow: "auto",
+    borderRadius: grasp.corner,
+    boxShadow: grasp.edge,
+  },
+  line: { display: "flex", alignItems: "flex-start", gap: grasp.space2 },
+  start: { display: "grid", justifyItems: "start", gap: grasp.space1 },
+});
+
 /** One changed file, its diff shown once the person opens it. */
 const ChangedFile = ({ diff }: { diff: FileDiff }) => {
   const { i18n } = useLingui();
   return (
-    <Collapsible render={<li />}>
-      <CollapsibleTrigger
-        render={
-          <Button className="w-full justify-start" size="sm" variant="ghost" />
+    <li>
+      <Collapsible
+        title={
+          <span {...stylex.props(styles.title)}>
+            <Text element="span" size="xs">
+              <span {...stylex.props(styles.path)}>{diff.path}</span>
+            </Text>
+            <Badge tone={diff.change === "deleted" ? "danger" : "neutral"}>
+              {i18n._(changeNames[diff.change])}
+            </Badge>
+          </span>
         }
       >
-        <ChevronRightIcon data-icon="inline-start" />
-        <span className="min-w-0 flex-1 truncate text-left font-mono text-xs">
-          {diff.path}
-        </span>
-        <Badge variant={diff.change === "deleted" ? "outline" : "secondary"}>
-          {i18n._(changeNames[diff.change])}
-        </Badge>
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="max-h-96 overflow-auto rounded-lg border">
-          <Suspense fallback={<Skeleton className="h-24" />}>
+        <div {...stylex.props(styles.diff)}>
+          <Suspense fallback={<Skeleton variant="block" />}>
             <CodeDiff diff={diff} />
           </Suspense>
         </div>
-      </CollapsibleContent>
-    </Collapsible>
+      </Collapsible>
+    </li>
   );
 };
 
@@ -126,8 +148,10 @@ export const ChangesSection = ({
   title: ReactNode;
   children: ReactNode;
 }) => (
-  <section className="flex flex-col gap-2">
-    <h3 className="text-sm font-medium">{title}</h3>
+  <section {...stylex.props(styles.tight)}>
+    <Heading level={3} size="ui">
+      {title}
+    </Heading>
     {children}
   </section>
 );
@@ -136,15 +160,15 @@ export const ChangesSection = ({
 export const FileChanges = ({ files }: { files: readonly FileDiff[] }) => {
   const { i18n } = useLingui();
   return (
-    <div className="flex flex-col gap-3">
+    <div {...stylex.props(styles.stack)}>
       {groupOrder.map((group) => {
         const inGroup = files.filter(({ path }) => groupOf(path) === group);
         return inGroup.length === 0 ? null : (
-          <div className="flex flex-col gap-1" key={group}>
-            <span className="text-muted-foreground text-xs">
+          <div key={group} {...stylex.props(styles.tight)}>
+            <Text element="span" size="xs" tone="muted">
               {i18n._(groupNames[group])}
-            </span>
-            <ul className="flex flex-col">
+            </Text>
+            <ul {...stylex.props(styles.list)}>
               {inGroup.map((diff) => (
                 <ChangedFile diff={diff} key={diff.path} />
               ))}
@@ -167,21 +191,21 @@ export const DataChanges = ({
   const migrations = changes.migrations ?? [];
   if (lines.length === 0 && migrations.length === 0) {
     return (
-      <p className="text-muted-foreground">
+      <Text size="sm" tone="muted">
         <Trans>The App&apos;s data stays as it is.</Trans>
-      </p>
+      </Text>
     );
   }
   return (
-    <div className="flex flex-col gap-2">
+    <div {...stylex.props(styles.tight)}>
       <PlanList lines={lines} />
       {migrations.map(({ name, table }) => (
-        <p className="text-muted-foreground" key={name}>
+        <Text key={name} size="sm" tone="muted">
           <Trans>
             The migration {name} rewrites every record of {table} once your team
             has this version.
           </Trans>
-        </p>
+        </Text>
       ))}
     </div>
   );
@@ -221,18 +245,16 @@ const callerText = (permission: Permission, i18n: I18n): string => {
 
 /** Lines of access, each with its icon. */
 const AccessLines = ({ lines }: { lines: { key: string; text: string }[] }) => (
-  <ItemGroup render={<ul />} spacing="tight">
+  <ul {...stylex.props(styles.list)}>
     {lines.map(({ key, text }) => (
-      <Item key={key} render={<li />} size="xs">
-        <ItemMedia variant="icon">
-          <KeyRoundIcon />
-        </ItemMedia>
-        <ItemContent>
-          <span className="text-sm">{text}</span>
-        </ItemContent>
-      </Item>
+      <li key={key} {...stylex.props(styles.line)}>
+        <Icon icon={Key} />
+        <Text element="span" size="sm">
+          {text}
+        </Text>
+      </li>
     ))}
-  </ItemGroup>
+  </ul>
 );
 
 /** Who a table's row rules admit, as one phrase each, listed. */
@@ -259,10 +281,12 @@ const RowRuleWords = ({ rules }: { rules: ReviewedRowRule[] }) => {
 
 /** Each table's row rules: who reads its rows, and who changes them. */
 const RowRules = ({ tables }: { tables: TableRowRules[] }) => (
-  <ul className="flex flex-col gap-2">
+  <ul {...stylex.props(styles.list)}>
     {tables.map(({ table, read, write }) => (
-      <li className="flex flex-col gap-0.5" key={table}>
-        <code className="font-mono text-xs">{table}</code>
+      <li key={table} {...stylex.props(styles.tight)}>
+        <Text element="span" size="xs">
+          <code {...stylex.props(styles.path)}>{table}</code>
+        </Text>
         {read === null ? null : (
           <span>
             <Trans>
@@ -300,11 +324,13 @@ const RowRules = ({ tables }: { tables: TableRowRules[] }) => (
  * whoever publishes it sees that it may.
  */
 const Unread = ({ children }: { children: ReactNode }) => (
-  <div className="flex flex-col items-start gap-1">
-    <Badge variant="attention">
+  <div {...stylex.props(styles.start)}>
+    <Badge tone="attention">
       <Trans>Its code can&apos;t be read</Trans>
     </Badge>
-    <span className="text-muted-foreground">{children}</span>
+    <Text element="span" size="sm" tone="muted">
+      {children}
+    </Text>
   </div>
 );
 
@@ -342,17 +368,17 @@ export const AccessChanges = ({
     changes.handsFilesToWorkflows === false &&
     changes.rowRules !== null;
   return (
-    <div className="flex flex-col gap-3">
+    <div {...stylex.props(styles.stack)}>
       {nothing ? (
-        <p className="text-muted-foreground">
+        <Text size="sm" tone="muted">
           <Trans>Nothing new: it needs no admin.</Trans>
-        </p>
+        </Text>
       ) : null}
       {changes.permissions.length === 0 ? null : (
-        <div className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-xs">
+        <div {...stylex.props(styles.tight)}>
+          <Text element="span" size="xs" tone="muted">
             <Trans>Waits for an admin to grant it</Trans>
-          </span>
+          </Text>
           <AccessLines
             lines={changes.permissions.map((permission) => ({
               key: permission.id,
@@ -362,12 +388,12 @@ export const AccessChanges = ({
         </div>
       )}
       {askedAgain.length === 0 ? null : (
-        <div className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-xs">
+        <div {...stylex.props(styles.tight)}>
+          <Text element="span" size="xs" tone="muted">
             <Trans>
               Works again once an admin grants it again for the new version
             </Trans>
-          </span>
+          </Text>
           <AccessLines
             lines={askedAgain.map(({ permission }) => ({
               key: permission.id,
@@ -377,13 +403,13 @@ export const AccessChanges = ({
         </div>
       )}
       {callersAskedAgain.length === 0 ? null : (
-        <div className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-xs">
+        <div {...stylex.props(styles.tight)}>
+          <Text element="span" size="xs" tone="muted">
             <Trans>
               Workflows that call it again once an admin grants it again for the
               new version
             </Trans>
-          </span>
+          </Text>
           <AccessLines
             lines={callersAskedAgain.map(({ permission }) => ({
               key: permission.id,
@@ -393,12 +419,14 @@ export const AccessChanges = ({
         </div>
       )}
       {changes.readsPeople === true ? (
-        <p className="flex items-center gap-2">
-          <UsersIcon aria-hidden />
-          <Trans>
-            Reads your organization&apos;s people: names, emails and teams.
-          </Trans>
-        </p>
+        <div {...stylex.props(styles.line)}>
+          <Icon icon={People} />
+          <Text element="span" size="sm">
+            <Trans>
+              Reads your organization&apos;s people: names, emails and teams.
+            </Trans>
+          </Text>
+        </div>
       ) : null}
       {changes.readsPeople === null ? (
         <Unread>
@@ -409,9 +437,9 @@ export const AccessChanges = ({
         </Unread>
       ) : null}
       {changes.handsFilesToWorkflows === true ? (
-        <p className="text-muted-foreground">
+        <Text size="sm" tone="muted">
           <Trans>Can hand files people can read to its workflows.</Trans>
-        </p>
+        </Text>
       ) : null}
       {changes.handsFilesToWorkflows === null ? (
         <Unread>
@@ -427,10 +455,10 @@ export const AccessChanges = ({
         </Unread>
       ) : null}
       {changes.rowRules === null || changes.rowRules.length === 0 ? null : (
-        <div className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-xs">
+        <div {...stylex.props(styles.tight)}>
+          <Text element="span" size="xs" tone="muted">
             <Trans>Who sees which rows</Trans>
-          </span>
+          </Text>
           <RowRules tables={changes.rowRules} />
         </div>
       )}

@@ -173,7 +173,7 @@ const allow = (): HTMLElement | null | undefined =>
 
 /** Where the step titled `title` stands. */
 const stepState = (title: string): string | undefined =>
-  [...document.querySelectorAll<HTMLElement>("li[data-state]")].find(
+  [...document.querySelectorAll<HTMLElement>("section[data-state]")].find(
     (each) => each.querySelector("h3")?.textContent === title
   )?.dataset.state;
 
@@ -195,8 +195,9 @@ describe("the connect dialog's steps", () => {
       "idle",
     ]);
 
-    const preselected = document.querySelector<HTMLInputElement>(
-      'input[type="radio"]:checked'
+    // The option chosen already, as a person presses it: its radio.
+    const preselected = document.querySelector<HTMLElement>(
+      '[role="radio"][aria-checked="true"]'
     );
     await press(preselected);
     expect([stepState("Who uses it"), stepState("Sign in")]).toStrictEqual([

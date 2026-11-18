@@ -1,23 +1,36 @@
 import { elsewhere } from "@grasp-os/shared/stephen-requests";
 import type { RequestsPage } from "@grasp-os/shared/stephen-requests";
-import { Button } from "@grasp-os/ui/components/button";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
+
+import { formatNumber } from "../../format.ts";
+import { Button } from "../../grasp/button/index.ts";
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
-} from "@grasp-os/ui/components/empty";
+} from "../../grasp/empty/index.ts";
+import { Search } from "../../grasp/icons/index.ts";
 import {
   InputGroup,
-  InputGroupAddon,
   InputGroupInput,
-} from "@grasp-os/ui/components/input-group";
-import { cn } from "@grasp-os/ui/lib/utils";
-import { useLingui } from "@lingui/react/macro";
-import { SearchIcon } from "lucide-react";
-import { useState } from "react";
-
-import { formatNumber } from "../../format.ts";
-import { OpenRow, ShareBar, useRequestNames } from "./request-parts.tsx";
+  InputGroupText,
+} from "../../grasp/input-group/index.ts";
+import { Link } from "../../grasp/link/index.ts";
+import { Progress } from "../../grasp/progress/index.ts";
+import { FactRow, SettingsRows } from "../../grasp/setting-row/index.ts";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../../grasp/table/index.ts";
+import { Text } from "../../grasp/text/index.ts";
+import { grasp } from "../../grasp/tokens/tokens.stylex.ts";
+import { useRequestNames } from "./request-parts.tsx";
 
 // Who asks Stephen, as the prototype's `request-who.tsx`: by team, how
 // many of its people asked him against how many can, so a team that has
@@ -27,18 +40,47 @@ import { OpenRow, ShareBar, useRequestNames } from "./request-parts.tsx";
 /** Rows of people shown before "Show more": a page's worth. */
 const pageRows = 20;
 
+const styles = stylex.create({
+  // How many asked, and the bar of that share beside it.
+  asked: { display: "flex", alignItems: "center", gap: grasp.space3 },
+  bar: { width: "6rem", flexShrink: 0 },
+  people: { display: "flex", flexDirection: "column" },
+  tools: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: grasp.space3,
+    paddingBlock: grasp.space3,
+    paddingInline: grasp.space4,
+  },
+  search: { width: "100%", maxWidth: "18rem" },
+  more: { paddingBlock: grasp.space2, paddingInline: grasp.space4 },
+  off: { paddingInline: grasp.space4 },
+});
+
 /**
- * A team's row: its name, its requests and the chevron, with how many
- * asked on a line of its own under them until there is room for that and
- * its bar beside the name.
+ * A row's name in a table: words that open what it is about, or plain
+ * words for a row about a folded group, which opens nothing.
  */
-const teamRow =
-  "flex flex-wrap items-center gap-x-6 gap-y-1 px-6 py-3 @2xl:flex-nowrap";
-const nameCell = "min-w-0 flex-1";
-const askedCell =
-  "order-last basis-full @2xl:order-none @2xl:w-36 @2xl:flex-none";
-const barCell = "hidden w-36 flex-none @2xl:block";
-const countCell = "w-18 flex-none text-right tabular-nums";
+export const RowName = ({
+  name,
+  onOpen,
+}: {
+  name: string;
+  onOpen: (() => void) | undefined;
+}) =>
+  onOpen === undefined ? (
+    name
+  ) : (
+    <Link
+      onClick={onOpen}
+      render={<button aria-label={name} type="button" />}
+      variant="standalone"
+    >
+      {name}
+    </Link>
+  );
 
 /** The teams, including the quiet ones; the folded ones are one row that opens nothing. */
 export const RequestTeams = ({
@@ -46,7 +88,7 @@ export const RequestTeams = ({
   onOpen,
 }: {
   page: RequestsPage;
-  onOpen: (teamId: string) => void;
+  onOpen: (teamId: string, name: string) => void;
 }) => {
   const { t } = useLingui();
   const names = useRequestNames(page);
@@ -73,66 +115,74 @@ export const RequestTeams = ({
       .map((row) => ({ ...row, hidden: false })),
   ];
   return (
-    <ul className="@container mt-3">
-      <li
-        aria-hidden="true"
-        className="text-muted-foreground hidden gap-x-6 px-6 pb-2 text-xs @2xl:flex"
-      >
-        <span className={nameCell}>
-          {t({ message: "Team", context: "column" })}
-        </span>
-        <span className={askedCell}>{t`People who asked`}</span>
-        <span className={barCell} />
-        <span className={countCell}>
-          {t({ message: "Requests", context: "column: billed requests" })}
-        </span>
-        <span className="size-4 flex-none" />
-      </li>
-      {rows.map((row) => {
-        const asked = formatNumber(row.people);
-        const of = formatNumber(row.reach);
-        const reach = of;
-        const name = names.team(row.key);
-        let askedText = row.reach > 0 ? t`${asked} of ${of}` : asked;
-        if (row.hidden) {
-          askedText = t`Fewer than five of ${reach} asked him`;
-        }
-        return (
-          <OpenRow
-            className={teamRow}
-            key={row.key}
-            onOpen={
-              row.key === elsewhere || row.hidden
-                ? undefined
-                : () => {
-                    onOpen(row.key);
-                  }
-            }
-          >
-            <span className={cn("truncate", nameCell)}>{name}</span>
-            <span
-              className={cn(
-                "text-muted-foreground text-xs tabular-nums @2xl:text-sm",
-                askedCell
-              )}
-            >
-              {askedText}
-            </span>
-            <span className={barCell}>
-              {row.hidden ? null : (
-                <ShareBar
-                  label={t`Share of ${name} who asked`}
-                  share={row.reach > 0 ? row.people / row.reach : 0}
-                />
-              )}
-            </span>
-            <span className={countCell}>
-              {row.hidden ? null : formatNumber(row.billed)}
-            </span>
-          </OpenRow>
-        );
+    <Table
+      aria-label={t({
+        message: "Teams",
+        context: "Stephen's requests by team",
       })}
-    </ul>
+    >
+      <TableHeader>
+        <TableRow>
+          <TableHead>{t({ message: "Team", context: "column" })}</TableHead>
+          <TableHead>{t`People who asked`}</TableHead>
+          <TableHead align="end">
+            {t({ message: "Requests", context: "column: billed requests" })}
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((row) => {
+          const asked = formatNumber(row.people);
+          const of = formatNumber(row.reach);
+          const reach = of;
+          const name = names.team(row.key);
+          let askedText = row.reach > 0 ? t`${asked} of ${of}` : asked;
+          if (row.hidden) {
+            askedText = t`Fewer than five of ${reach} asked him`;
+          }
+          const opens = row.key !== elsewhere && !row.hidden;
+          return (
+            <TableRow key={row.key}>
+              <TableCell lead>
+                <RowName
+                  name={name}
+                  onOpen={
+                    opens
+                      ? () => {
+                          onOpen(row.key, name);
+                        }
+                      : undefined
+                  }
+                />
+              </TableCell>
+              <TableCell>
+                <span {...stylex.props(styles.asked)}>
+                  {row.hidden ? null : (
+                    <Progress
+                      label={t`Share of ${name} who asked`}
+                      layout={styles.bar}
+                      size="sm"
+                      value={Math.min(
+                        100,
+                        Math.round(
+                          (row.reach > 0 ? row.people / row.reach : 0) * 100
+                        )
+                      )}
+                    />
+                  )}
+                  <Text element="span" size="sm" tone="muted">
+                    {askedText}
+                  </Text>
+                </span>
+              </TableCell>
+              <TableCell align="end">
+                {row.hidden ? null : formatNumber(row.billed)}
+              </TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
   );
 };
 
@@ -149,7 +199,7 @@ export const RequestPeople = ({
   page: RequestsPage;
   busy: boolean;
   onSwitch: (on: boolean) => void;
-  onOpen: (personId: string) => void;
+  onOpen: (personId: string, name: string) => void;
 }) => {
   const { t } = useLingui();
   const names = useRequestNames(page);
@@ -159,34 +209,35 @@ export const RequestPeople = ({
   const { byPerson } = page.report;
   if (byPerson === null) {
     return (
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border-t px-6 py-4">
-        <span className="flex min-w-0 flex-col gap-0.5">
-          <span>
-            {page.settings.requestsPerPerson
-              ? t`Owners see people one by one.`
-              : t`People one by one are off`}
-          </span>
-          <span className="text-muted-foreground">
-            {t`In the Netherlands the works council may need to agree before you turn this on.`}
-          </span>
-        </span>
-        {canSwitch && !page.settings.requestsPerPerson ? (
-          <Button
-            disabled={busy}
-            onClick={() => {
-              onSwitch(true);
-            }}
-            size="sm"
-            variant="outline"
+      <div {...stylex.props(styles.off)}>
+        <SettingsRows>
+          <FactRow
+            help={t`In the Netherlands the works council may need to agree before you turn this on.`}
+            label={
+              page.settings.requestsPerPerson
+                ? t`Owners see people one by one.`
+                : t`People one by one are off`
+            }
           >
-            {t`Show people one by one`}
-          </Button>
-        ) : null}
-        {canSwitch || page.settings.requestsPerPerson ? null : (
-          <span className="text-muted-foreground">
-            {t`An owner can turn this on.`}
-          </span>
-        )}
+            {canSwitch && !page.settings.requestsPerPerson ? (
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  onSwitch(true);
+                }}
+                size="sm"
+                variant="quiet"
+              >
+                {t`Show people one by one`}
+              </Button>
+            ) : null}
+            {canSwitch || page.settings.requestsPerPerson ? null : (
+              <Text element="span" size="sm" tone="muted">
+                {t`An owner can turn this on.`}
+              </Text>
+            )}
+          </FactRow>
+        </SettingsRows>
       </div>
     );
   }
@@ -198,20 +249,17 @@ export const RequestPeople = ({
     );
   const left = formatNumber(rows.length - shown);
   return (
-    <div className="flex flex-col">
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t px-6 py-3">
-        <InputGroup className="sm:max-w-72">
+    <div {...stylex.props(styles.people)}>
+      <div {...stylex.props(styles.tools)}>
+        <InputGroup layout={styles.search}>
+          <InputGroupText icon={Search} />
           <InputGroupInput
             aria-label={t`Search people`}
-            onChange={(event) => {
-              setQuery(event.target.value);
-            }}
+            onValueChange={setQuery}
             placeholder={t`Search people`}
+            type="search"
             value={query}
           />
-          <InputGroupAddon>
-            <SearchIcon />
-          </InputGroupAddon>
         </InputGroup>
         {canSwitch ? (
           <Button
@@ -226,31 +274,46 @@ export const RequestPeople = ({
           </Button>
         ) : null}
       </div>
-      <ul>
-        {rows.slice(0, shown).map((row) => (
-          <OpenRow
-            className="flex items-center gap-x-6 px-6 py-2.5"
-            key={row.key}
-            onOpen={() => {
-              onOpen(row.key);
-            }}
-          >
-            <span className="min-w-0 flex-1 truncate">{row.name}</span>
-            <span className="tabular-nums">{formatNumber(row.billed)}</span>
-          </OpenRow>
-        ))}
-        {rows.length === 0 ? (
-          <li className="border-t">
-            <Empty size="xs">
-              <EmptyHeader>
-                <EmptyDescription>{t`Nobody by that name`}</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          </li>
-        ) : null}
-      </ul>
+      {rows.length === 0 ? (
+        <Empty size="inline">
+          <EmptyHeader>
+            <EmptyDescription>{t`Nobody by that name`}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : (
+        <Table
+          aria-label={t({
+            message: "People",
+            context: "Stephen's requests by person",
+          })}
+        >
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t`Person`}</TableHead>
+              <TableHead align="end">
+                {t({ message: "Requests", context: "column: billed requests" })}
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.slice(0, shown).map((row) => (
+              <TableRow key={row.key}>
+                <TableCell lead>
+                  <RowName
+                    name={row.name}
+                    onOpen={() => {
+                      onOpen(row.key, row.name);
+                    }}
+                  />
+                </TableCell>
+                <TableCell align="end">{formatNumber(row.billed)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
       {rows.length > shown ? (
-        <div className="border-t px-4 py-2">
+        <div {...stylex.props(styles.more)}>
           <Button
             onClick={() => {
               setShown(shown + pageRows * 5);

@@ -646,7 +646,7 @@ describe(ChatThread, () => {
     });
   });
 
-  it("says in its steps' line that an answer was stopped while it wrote, and cuts back a link it was still writing", async () => {
+  it("says an answer was stopped part way, keeping its words without a link it was still writing", async () => {
     await thread([
       asked,
       {
@@ -660,15 +660,19 @@ describe(ChatThread, () => {
         at: "2026-10-27T09:00:05.000Z",
       },
     ]);
-    const steps = document.querySelector(
-      'section[aria-label="What Grasp did"]'
-    )?.textContent;
-    const words = document.querySelector("[data-slot=markdown]")?.textContent;
+    const stopped = document.querySelector<HTMLElement>(
+      'article[data-from="agent"]'
+    );
 
+    await vi.waitFor(() => {
+      expect(document.querySelector("[data-slot=markdown]")?.textContent).toBe(
+        "Four, as the"
+      );
+    });
     expect({
-      stopped: steps?.includes("Stopped while writing"),
-      words,
-    }).toStrictEqual({ stopped: true, words: "Four, as the" });
+      status: stopped?.dataset.status,
+      said: stopped?.textContent.includes("Stopped"),
+    }).toStrictEqual({ status: "stopped", said: true });
   });
 
   it("offers to ask again under an answer with words, and nothing under one without", async () => {

@@ -228,8 +228,9 @@ export interface DataTableProps<Row> {
   /** With the `grouping` piece: the column whose values gather the rows, each group counted. */
   groupBy?: string;
   /**
-   * Where the Undo toasts go, when the page has its own Toaster. Leave it out and the table shows
-   * its own.
+   * Where its toasts go (what an action did, with Undo). Leave it out and they go to the page's
+   * shared `toast`, which the page's one `<Toaster />` draws: the page needs that Toaster, at its
+   * root, outside every layer. Give one only for a host that keeps a queue of its own.
    */
   toaster?: ReturnType<typeof createToaster>;
   /** The rows are on their way: placeholders stand in their place, then the rows fade in. */

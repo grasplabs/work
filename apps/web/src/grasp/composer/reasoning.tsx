@@ -24,6 +24,7 @@ import { grasp, media } from "../tokens/tokens.stylex";
 import { useComposerDisabled } from "./context";
 import { controlStyles } from "./control";
 import { stopEscape } from "./escape";
+import { useComposerWords } from "./words";
 
 /** One level. */
 export interface ComposerReasoningOption {
@@ -258,10 +259,13 @@ export const ComposerReasoning = ({
   value,
   onValueChange,
   label: labelDeprecated,
-  "aria-label": label = labelDeprecated ?? "Reasoning",
+  "aria-label": labelGiven,
   topLight = false,
 }: ComposerReasoningProps) => {
   const disabled = useComposerDisabled();
+  // Its words: the caller's where given, else the product's catalogue (GraspWords), else English.
+  const words = useComposerWords("reasoning");
+  const label = labelGiven ?? labelDeprecated ?? words.label;
   const current = levels.find((level) => level.value === value);
   const lit = topLight && current?.top === true;
   return (

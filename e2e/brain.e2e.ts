@@ -50,7 +50,7 @@ test("a person opens the brain on its atlas, goes into a part of it, opens a not
   ).toBeVisible();
 
   // And back on the atlas where it sits, in hand.
-  await page.getByRole("button", { name: "Show in the brain" }).click();
+  await page.getByRole("link", { name: "Show in the brain" }).click();
   await expect(page).toHaveURL(/\/brain\?note=vision$/u);
   await expect(trail).toContainText("Vision page");
 

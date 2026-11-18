@@ -1,12 +1,5 @@
 import type { ChatMention, ChatMentionKind } from "@grasp-os/shared/chat";
-import type { PromptMentionKind } from "@grasp-os/ui/components/prompt-editor";
 import { useLingui } from "@lingui/react/macro";
-import {
-  AppWindowIcon,
-  SquareSlashIcon,
-  UserIcon,
-  WorkflowIcon,
-} from "lucide-react";
 import { useEffect, useState } from "react";
 
 import type {
@@ -32,31 +25,6 @@ export interface Mentionable {
   label: string;
   description?: string | undefined;
 }
-
-/** Every kind a chip can be: what a question mentions, and a command. */
-type ChipKind = ChatMentionKind | "command";
-
-/**
- * How each kind shows as a chip on the subject bar (subject-bar.tsx), the
- * one place left on the kit's chips: the box is Grasp UI's Composer.
- */
-export const useMentionKinds = (): Record<ChipKind, PromptMentionKind> => {
-  const { t } = useLingui();
-  return {
-    app: { label: t`Apps`, icon: <AppWindowIcon />, tone: "app" },
-    workflow: {
-      label: t`Workflows`,
-      icon: <WorkflowIcon />,
-      tone: "workflow",
-    },
-    person: { label: t`People`, icon: <UserIcon />, tone: "person" },
-    command: {
-      label: t`Commands`,
-      icon: <SquareSlashIcon />,
-      tone: "command",
-    },
-  };
-};
 
 /**
  * What can be mentioned, as core lists it for the person: their Apps,

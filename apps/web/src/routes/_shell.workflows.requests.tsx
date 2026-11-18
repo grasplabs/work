@@ -6,12 +6,6 @@ import type {
   RequestsPage,
   WeeklySummary,
 } from "@grasp-os/shared/stephen-requests";
-import { Card } from "@grasp-os/ui/components/card";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-} from "@grasp-os/ui/components/empty";
 import { useLingui } from "@lingui/react/macro";
 import {
   createFileRoute,
@@ -22,11 +16,11 @@ import { useEffect, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
 import { formatMonth } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
-import { Page, PageHeading } from "../frame/page.tsx";
+import { EmptyCard, Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { Alert } from "../grasp/alert/index.ts";
 import { loadFromCore, orNull } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
@@ -125,18 +119,13 @@ const useAside = (canManage: boolean) => {
 };
 
 /**
- * The page's one line in a card, where the table would be: in the
- * prototype's room around it, the card's own and `sm` together.
+ * Whether the table shows: when the report has requests to show, or
+ * something waits on someone. Needs you follows no filter or span: what
+ * waits stays in reach when the report shows nothing.
  */
-const Note = ({ children }: { children: string }) => (
-  <Card>
-    <Empty size="sm">
-      <EmptyHeader>
-        <EmptyDescription>{children}</EmptyDescription>
-      </EmptyHeader>
-    </Empty>
-  </Card>
-);
+const hasTable = (page: RequestsPage, aside: Aside | undefined): boolean =>
+  (!page.tooFew && page.report.total.requests > 0) ||
+  (aside?.needs?.length ?? 0) > 0;
 
 const RequestsView = ({ page }: { page: RequestsPage }) => {
   const { t } = useLingui();
@@ -203,21 +192,18 @@ const RequestsView = ({ page }: { page: RequestsPage }) => {
         onSetMinutes={setMinutes}
         page={page}
       />
-      <ErrorText>{failure}</ErrorText>
+      {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
       {page.tooFew ? (
-        <Note>{t`Fewer than five people: this isn't shown on its own.`}</Note>
+        <EmptyCard>{t`Fewer than five people: this isn't shown on its own.`}</EmptyCard>
       ) : null}
       {!page.tooFew && page.report.total.requests === 0 ? (
-        <Note>
+        <EmptyCard>
           {page.range === "year"
             ? t`No requests in the last twelve months`
             : t`No requests in ${month}`}
-        </Note>
+        </EmptyCard>
       ) : null}
-      {/* Needs you follows no filter or span: what waits stays in reach
-          when the report shows nothing. */}
-      {(!page.tooFew && page.report.total.requests > 0) ||
-      (aside?.needs?.length ?? 0) > 0 ? (
+      {hasTable(page, aside) ? (
         <RequestTable
           busy={busy}
           needs={aside === undefined ? undefined : aside.needs}

@@ -42,29 +42,23 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   const page = await pageOf(user);
 
   // The list: one of their Microsoft 365 connections ran out, but the
-  // ones beside it work, so it is listed as connected, not as needing
-  // someone to sign in again; its row offers to sign in again. It stays
-  // so when the filter keeps only what is connected.
+  // ones beside it work, so its tile stands among what is connected, not
+  // first as one to sign in to again. Opened beside the list, it offers to
+  // sign in again.
   await page.goto("/integrations");
   const search = page.getByRole("searchbox", { name: "Search integrations" });
   await search.fill("micro");
   await expect(page).toHaveURL(/[?&]q=micro/u);
-  const row = page.getByRole("listitem").filter({
-    has: page.getByRole("link", { name: "Microsoft 365", exact: true }),
-  });
+  const connected = page.getByRole("list", { name: "Connected" });
+  const tile = connected.getByRole("link", { name: /^Microsoft 365/u });
+  await expect(tile).toBeVisible();
+  await expect(tile).not.toContainText("Sign in again");
+  await tile.click();
+  await expect(page).toHaveURL(/[?&]app=native%3Amicrosoft/u);
   await expect(
     page
-      .getByRole("region", { name: /^Connected/u })
-      .getByRole("link", { name: "Microsoft 365", exact: true })
-  ).toBeVisible();
-  await expect(
-    page.getByRole("region", { name: /^Needs someone to sign in again/u })
-  ).toHaveCount(0);
-  await page.getByRole("combobox", { name: "Filter integrations" }).click();
-  await page.getByRole("option", { name: /^Connected/u }).click();
-  await expect(page).toHaveURL(/show=connected/u);
-  await expect(
-    row.getByRole("button", { name: "Sign in to Microsoft 365 again" })
+      .getByRole("complementary", { name: "Microsoft 365, details" })
+      .getByRole("button", { name: "Sign in again" })
   ).toBeVisible();
   // A search that matches nothing says so.
   await search.fill("no such app at all");

@@ -1,78 +1,21 @@
 import type { ChatSummary } from "@grasp-os/shared/chat";
-import { Button } from "@grasp-os/ui/components/button";
-import { Kbd } from "@grasp-os/ui/components/kbd";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
-import { useLingui } from "@lingui/react/macro";
 import { useMatchRoute } from "@tanstack/react-router";
-import { MessagesSquareIcon } from "lucide-react";
-import {
-  createContext,
-  lazy,
-  Suspense,
-  use,
-  useEffect,
-  useEffectEvent,
-  useState,
-} from "react";
+import { createContext, use, useEffect, useEffectEvent, useState } from "react";
 import type { ReactNode } from "react";
 
-import { isShortcut, shortcutLabel } from "../shortcuts.ts";
+import { isShortcut } from "../shortcuts.ts";
 import { chatLink } from "./chat-link.ts";
+import { ChatWindow } from "./chat-window.tsx";
 import { DeleteChatDialog } from "./delete-chat-dialog.tsx";
 
 // The way to the person's chats window (chat-window.tsx) on every page: ⌘K
-// anywhere, and the icon a page's header may show; and the one delete
-// dialog the sidebar's chat rows ask in. The window itself, with
-// its command list, loads the first time it opens.
-
-const ChatWindow = lazy(async () => {
-  const { ChatWindow: window } = await import("./chat-window.tsx");
-  return { default: window };
-});
+// anywhere, and the sidebar's "All chats"; and the one delete
+// dialog the sidebar's chat rows ask in. The window comes with the page,
+// not as a chunk of its own: fetched on the first press, it opened a
+// second late. It opens at once and fills in as core answers.
 
 /** The chats window's key: ⌘K, or Ctrl K off a Mac. */
 export const chatsKey = "k";
-
-/** A quiet icon in the page's header, named by its tooltip. */
-export const HeaderIcon = ({
-  label,
-  shortcut,
-  render,
-  onClick,
-  children,
-}: {
-  label: string;
-  shortcut?: string;
-  /** What it is, when it is a link rather than a button. */
-  render?: React.ReactElement;
-  onClick?: () => void;
-  children: ReactNode;
-}) => (
-  <Tooltip>
-    <TooltipTrigger
-      render={
-        render ?? (
-          <Button
-            aria-label={label}
-            onClick={onClick}
-            size="icon-sm"
-            variant="ghost"
-          />
-        )
-      }
-    >
-      {children}
-    </TooltipTrigger>
-    <TooltipContent>
-      {label}
-      {shortcut === undefined ? null : <Kbd>{shortcut}</Kbd>}
-    </TooltipContent>
-  </Tooltip>
-);
 
 /** Asks to delete a chat, behind the frame's one delete dialog (the sidebar's row menu). */
 const AskDelete = createContext<(chat: ChatSummary) => void>(() => {
@@ -117,7 +60,7 @@ const OpenChats = createContext<(open: boolean) => void>(() => {
 
 /**
  * The frame's chats window, on every page: ⌘K or Ctrl K opens it (and
- * closes it again), as does a page's {@link ChatSwitcherButton}.
+ * closes it again), as does the sidebar's "All chats" ({@link useChatsWindow}).
  */
 export const ChatSwitcherProvider = ({ children }: { children: ReactNode }) => {
   const [open, setOpen] = useState(false);
@@ -154,31 +97,10 @@ export const ChatSwitcherProvider = ({ children }: { children: ReactNode }) => {
           }}
         />
       )}
-      {opened ? (
-        <Suspense fallback={null}>
-          <ChatWindow onOpenChange={setOpen} open={open} />
-        </Suspense>
-      ) : null}
+      {opened ? <ChatWindow onOpenChange={setOpen} open={open} /> : null}
     </OpenChats>
   );
 };
 
 /** Opens (or closes) the frame's chats window, as ⌘K does. */
 export const useChatsWindow = (): ((open: boolean) => void) => use(OpenChats);
-
-/** The quiet icon in a page's header that opens the chats window. */
-export const ChatSwitcherButton = () => {
-  const { t } = useLingui();
-  const setOpen = use(OpenChats);
-  return (
-    <HeaderIcon
-      label={t`Chats`}
-      onClick={() => {
-        setOpen(true);
-      }}
-      shortcut={shortcutLabel(chatsKey)}
-    >
-      <MessagesSquareIcon />
-    </HeaderIcon>
-  );
-};

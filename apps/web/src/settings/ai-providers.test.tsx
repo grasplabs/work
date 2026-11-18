@@ -358,21 +358,15 @@ const confirmation = async (): Promise<HTMLElement> =>
     return yes;
   });
 
-/** Opens `label`'s Manage dialog, where it is tested, its key replaced or deleted. */
+/** Opens `label`'s Manage dialog, where its key is tested, replaced and deleted. */
 const manage = async (label: string): Promise<void> => {
   await press(button(`Manage ${label}`));
 };
 
-/** Closes the open dialog, as a person does with its Close. */
-const closeDialog = async (): Promise<void> => {
-  await press(button("Close"));
-};
-
-/** Tests `label` from its Manage dialog, then closes it. */
-const testProvider = async (label: string): Promise<void> => {
+/** Tests `label`'s key from its Manage dialog. */
+const testKey = async (label: string): Promise<void> => {
   await manage(label);
   await press(dialogButton("Test"));
-  await closeDialog();
 };
 
 /** Deletes `label`'s key from its Manage dialog: a click on the hold asks, and its yes deletes. */
@@ -469,11 +463,10 @@ describe("Settings › AI providers", () => {
   it("tests a provider with one call, says Works on the button, or Failed and why", async () => {
     const working = fakeAiProviders({ connected: [{ provider: "openai" }] });
     await shown(working.api);
-    await manage("OpenAI");
-    await press(dialogButton("Test"));
+    await testKey("OpenAI");
     expect(working.asked).toStrictEqual([["test", "openai", undefined]]);
     await vi.waitFor(() => {
-      expect(dialogButton("Works")).toBeDefined();
+      expect(text()).toContain("Works");
     });
 
     act(() => {
@@ -485,7 +478,7 @@ describe("Settings › AI providers", () => {
       tested: { ok: false, model: "openai/gpt-5-mini", code: "model.failed" },
     });
     await shown(failing.api);
-    await testProvider("OpenAI");
+    await testKey("OpenAI");
     await vi.waitFor(() => {
       expect(text()).toContain(
         "Test failed: The model couldn't answer. Try again."
@@ -660,7 +653,7 @@ describe("Settings › AI providers", () => {
       fallbacks: [],
     });
     // Any change here reads the providers again.
-    await testProvider("OpenAI-compatible endpoint");
+    await testKey("OpenAI-compatible endpoint");
 
     const picked = choice("Default model");
     const shownNow = shownIn(picked);
@@ -680,7 +673,7 @@ describe("Settings › AI providers", () => {
       tested: { ok: false, model: "openai/gpt-5-mini", code: "model.failed" },
     });
     await shown(api);
-    await testProvider("OpenAI");
+    await testKey("OpenAI");
     await vi.waitFor(() => {
       expect(text()).toContain("Test failed");
     });
@@ -758,11 +751,11 @@ describe("Settings › AI providers", () => {
     expect(text()).toContain("GPT-5.4");
     expect(text()).toContain("GPT-5 mini");
     expect(document.querySelectorAll("input, select")).toHaveLength(0);
-    // A button only to read more of a setting, none to change one.
+    // Only the info marks that say more: nothing that manages, tests or changes.
     expect(
-      [...document.querySelectorAll("button")].map(
-        (each) => each.getAttribute("aria-label") ?? wordsOf(each)
+      [...document.querySelectorAll("button")].filter(
+        (each) => each.getAttribute("aria-label") !== "More about this setting"
       )
-    ).toStrictEqual(["More about this setting"]);
+    ).toHaveLength(0);
   });
 });

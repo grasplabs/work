@@ -1,19 +1,16 @@
+import { useLingui } from "@lingui/react/macro";
+import { useState } from "react";
+
 import {
   AlertDialog,
   AlertDialogAction,
-  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button } from "@grasp-os/ui/components/button";
-import { Trans } from "@lingui/react/macro";
-import { RotateCcwIcon } from "lucide-react";
-import { useState } from "react";
-
-import { ErrorText } from "../error-text.tsx";
+} from "../grasp/alert-dialog/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Retry } from "../grasp/icons/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // The test data of an App's draft preview, in the Data view's toolbar
@@ -32,55 +29,48 @@ export const ResetTestData = ({
   app: string;
   onReset: () => void;
 }) => {
+  const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
   const [asking, setAsking] = useState(false);
+  // Refused, it says so in the dialog, which stays open to try again.
   const reset = async (): Promise<void> => {
     const done = await run(async (session) => {
       await session.apps.drafts.resetTestData(app);
       return true;
     });
-    if (done !== undefined) {
-      onReset();
+    if (done === undefined) {
+      throw new Error(failure ?? t`The test data wasn't reset. Try again.`);
     }
+    onReset();
   };
   return (
     <>
       <Button
         disabled={busy}
+        icon={Retry}
         onClick={() => {
           setAsking(true);
         }}
         size="sm"
-        variant="outline"
+        variant="quiet"
       >
-        <RotateCcwIcon data-icon="inline-start" />
-        <Trans>Reset test data</Trans>
+        {t`Reset test data`}
       </Button>
-      <ErrorText>{failure}</ErrorText>
       <AlertDialog onOpenChange={setAsking} open={asking}>
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              <Trans>Reset test data?</Trans>
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              <Trans>
-                Every test record goes, for everyone who builds this App. The
-                App&apos;s live data isn&apos;t touched.
-              </Trans>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+          <AlertDialogTitle>{t`Reset test data?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t`Every test record goes, for everyone who builds this App. The App's live data isn't touched.`}
+          </AlertDialogDescription>
           <AlertDialogFooter>
-            <AlertDialogCancel>
-              <Trans>Cancel</Trans>
-            </AlertDialogCancel>
+            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
             <AlertDialogAction
-              onClick={() => {
-                void reset();
-              }}
-              variant="destructive"
+              action={reset}
+              failedLabel={t`Could not reset`}
+              variant="danger"
+              workingLabel={t`Resetting`}
             >
-              <Trans>Reset</Trans>
+              {t`Reset`}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

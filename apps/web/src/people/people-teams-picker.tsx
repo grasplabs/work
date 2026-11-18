@@ -1,29 +1,21 @@
 import { roleSchema } from "@grasp-os/shared/roles";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@grasp-os/ui/components/command";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { PlusIcon, IdCardIcon, UsersIcon } from "lucide-react";
+import { useLingui } from "@lingui/react/macro";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
 import type { Session } from "../core.ts";
+import type { CommandEntry, CommandItems } from "../grasp/command/index.ts";
+import { Command } from "../grasp/command/index.ts";
+import { People, Plus, Tag } from "../grasp/icons/index.ts";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "../grasp/popover/index.ts";
 import { roleLabel } from "../labels.ts";
 import { usePeopleApart } from "./people-apart.ts";
 import type { PeopleApart } from "./people-apart.ts";
-import { matchTyped, PersonOption } from "./person-picker.tsx";
+import { entriesTyped, personEntry } from "./person-picker.tsx";
 import type { Pickable } from "./person-picker.tsx";
 
 // The organization's people and teams to pick one of: who approves
@@ -94,6 +86,10 @@ export const subjectNamed = (
   return candidates?.teams.find((each) => each.id === id)?.name;
 };
 
+/** A named group of the list, left out while nothing in it is offered. */
+const groupOf = (label: string, items: CommandEntry[]): CommandItems =>
+  items.length === 0 ? [] : [{ type: "group", label, items }];
+
 /**
  * The button that picks someone, and its list of the people and teams
  * (and, with `roles`, the roles) not held yet. `candidates` is null while
@@ -124,6 +120,7 @@ export const PeopleTeamsPicker = ({
 }) => {
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const people =
     candidates?.people.filter(
       ({ id }) => !holding.has(subjectKey({ type: "person", id }))
@@ -139,15 +136,65 @@ export const PeopleTeamsPicker = ({
         (role) => !holding.has(subjectKey({ type: "role", id: role }))
       )
     : [];
-  const pick = (subject: PickedSubject): void => {
-    setOpen(false);
-    onPick(subject);
-  };
+  // Each one offered, by the key it is held under, to pick it by.
+  const offered = new Map<string, PickedSubject>([
+    ...people.map((person): [string, PickedSubject] => [
+      subjectKey({ type: "person", id: person.id }),
+      { type: "person", id: person.id, name: apart.named(person) },
+    ]),
+    ...teams.map((team): [string, PickedSubject] => [
+      subjectKey({ type: "team", id: team.id }),
+      { type: "team", id: team.id, name: team.name },
+    ]),
+    ...offeredRoles.map((role): [string, PickedSubject] => [
+      subjectKey({ type: "role", id: role }),
+      { type: "role", id: role, name: roleLabel(role) },
+    ]),
+  ]);
+  const items: CommandItems = [
+    ...groupOf(
+      t`People`,
+      entriesTyped(
+        people.map((person) => personEntry(person, apart.hint(person))),
+        query
+      )
+    ),
+    ...groupOf(
+      t`Teams`,
+      entriesTyped(
+        teams.map((team) => ({
+          value: subjectKey({ type: "team", id: team.id }),
+          label: team.name,
+          icon: People,
+        })),
+        query
+      )
+    ),
+    ...groupOf(
+      t`Roles`,
+      entriesTyped(
+        offeredRoles.map((role) => {
+          const name = roleLabel(role);
+          return {
+            value: subjectKey({ type: "role", id: role }),
+            label: t`Everyone with the ${name} role`,
+            icon: Tag,
+            keywords: [name],
+          };
+        }),
+        query
+      )
+    ),
+  ];
+  const search = roles
+    ? t`Search people, teams and roles`
+    : t`Search people and teams`;
   return (
     <Popover
       onOpenChange={(next: boolean) => {
         setOpen(next);
         if (next) {
+          setQuery("");
           onOpen?.();
         }
       }}
@@ -155,93 +202,33 @@ export const PeopleTeamsPicker = ({
     >
       <PopoverTrigger
         disabled={disabled}
+        icon={Plus}
         id={buttonId}
-        render={<Button size="sm" variant="outline" />}
+        size="sm"
+        variant="quiet"
       >
-        <PlusIcon />
-        {label}
+        <span>{label}</span>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-72" variant="flush">
-        <Command filter={matchTyped}>
-          <CommandInput
-            placeholder={
-              roles
-                ? t`Search people, teams and roles`
-                : t`Search people and teams`
+      <PopoverContent align="end">
+        <Command
+          aria-label={search}
+          bare
+          empty={t`Nobody else to add.`}
+          filter={false}
+          items={items}
+          loading={candidates === null}
+          loadingLabel={t`Reading people and teams…`}
+          onAction={(value) => {
+            setOpen(false);
+            const subject = offered.get(value);
+            if (subject !== undefined) {
+              onPick(subject);
             }
-          />
-          <CommandList>
-            {candidates === null ? (
-              <div className="text-muted-foreground flex items-center justify-center gap-2 py-6 text-sm">
-                <Spinner />
-                <Trans>Reading people and teams…</Trans>
-              </div>
-            ) : (
-              <>
-                <CommandEmpty>
-                  <Trans>Nobody else to add.</Trans>
-                </CommandEmpty>
-                {people.length === 0 ? null : (
-                  <CommandGroup heading={t`People`}>
-                    {people.map((person) => (
-                      <PersonOption
-                        key={person.id}
-                        hint={apart.hint(person)}
-                        onSelect={() => {
-                          pick({
-                            type: "person",
-                            id: person.id,
-                            name: apart.named(person),
-                          });
-                        }}
-                        person={person}
-                      />
-                    ))}
-                  </CommandGroup>
-                )}
-                {teams.length === 0 ? null : (
-                  <CommandGroup heading={t`Teams`}>
-                    {teams.map((team) => (
-                      <CommandItem
-                        key={team.id}
-                        onSelect={() => {
-                          pick({ type: "team", id: team.id, name: team.name });
-                        }}
-                        keywords={[team.name]}
-                        value={subjectKey({ type: "team", id: team.id })}
-                      >
-                        <UsersIcon className="text-muted-foreground" />
-                        <span className="flex-1 truncate">{team.name}</span>
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                )}
-                {offeredRoles.length === 0 ? null : (
-                  <CommandGroup heading={t`Roles`}>
-                    {offeredRoles.map((role) => {
-                      const name = roleLabel(role);
-                      return (
-                        <CommandItem
-                          key={role}
-                          onSelect={() => {
-                            pick({ type: "role", id: role, name });
-                          }}
-                          keywords={[name]}
-                          value={subjectKey({ type: "role", id: role })}
-                        >
-                          <IdCardIcon className="text-muted-foreground" />
-                          <span className="flex-1 truncate">
-                            {t`Everyone with the ${name} role`}
-                          </span>
-                        </CommandItem>
-                      );
-                    })}
-                  </CommandGroup>
-                )}
-              </>
-            )}
-          </CommandList>
-        </Command>
+          }}
+          onQueryChange={setQuery}
+          placeholder={search}
+          query={query}
+        />
       </PopoverContent>
     </Popover>
   );

@@ -1,36 +1,10 @@
 import type { AuditRecord } from "@grasp-os/shared/audit-log";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@grasp-os/ui/components/tabs";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
 import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
+import { msg, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Await, Link } from "@tanstack/react-router";
-import { ArrowDownUpIcon, InboxIcon, ListFilterIcon } from "lucide-react";
-import { useState } from "react";
+import * as stylex from "@stylexjs/stylex";
+import { Await, Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { actorOf } from "../activity/audit-log.tsx";
 import { actionWords } from "../activity/audit-words.ts";
@@ -39,87 +13,423 @@ import type { LatestActivity } from "../dashboard/activity.tsx";
 import type { Directory } from "../directory.ts";
 import { formatDateTime, formatDayMonth } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
+import { RouterLink } from "../frame/router-link.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
-import { NotLoaded } from "../load-from-core.tsx";
+import { Alert } from "../grasp/alert/index.ts";
+import { Avatar } from "../grasp/avatar/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { BrandIcon } from "../grasp/brand-icon/index.ts";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../grasp/empty/index.ts";
+import { Agent } from "../grasp/icons/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemDetail as ItemNote,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../grasp/tabs/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { KindPill, ItemMark } from "./inbox-kind.tsx";
+import { brandOf } from "./brand-of.ts";
+import { kindLabel, kindMark } from "./inbox-kind.tsx";
 import { ItemDetail } from "./item-detail.tsx";
-import { listed } from "./items.ts";
-import type { Group, InboxItem, Sort } from "./items.ts";
+import { groupOf, listed } from "./items.ts";
+import type { Group, InboxItem } from "./items.ts";
 
-// The inbox, as the prototype's (`routes/inbox.tsx`): what waits on the
-// person, what was done with it, and what Grasp and people did. A wide
-// list of one-line items, the item beside it, and its actions in a bar at
-// the bottom. Items come from items.ts; each action goes through the same
-// calls as the dashboard's pile, so it lands in the audit trail too.
+// The inbox, on Grasp UI: what waits on the person, to work through
+// quickly. The list on one side, by group (what blocks first), and the
+// item on the other, answered in place; on a narrow page one at a time,
+// the item with its way back. The open item is the page's address
+// (`?item=<id>`), as the sidebar's Inbox view and the dashboard lead to
+// it, so a link, Back and a reload keep it. J and K (or the arrow keys in
+// the list) go to the next and the one before. A settled item leaves the
+// list, and the one after it opens in its place. For admins, Activity
+// holds the latest of the audit trail. Items come from items.ts; each
+// action goes through the same calls as the dashboard's pile.
 
-const groupLabel: Record<Group, MessageDescriptor> = {
-  all: msg({ message: "Everything", context: "inbox filter" }),
+/**
+ * The page's own width at which the list and the item stand side by side.
+ * Written out here as in item-detail.tsx: StyleX reads a key only from
+ * the file it is in.
+ */
+const WIDE = "@container inbox (width >= 52rem)";
+
+const styles = stylex.create({
+  page: {
+    containerName: "inbox",
+    containerType: "inline-size",
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space4,
+    width: "100%",
+  },
+  split: {
+    display: "grid",
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      [WIDE]: "minmax(18rem, 24rem) minmax(0, 1fr)",
+    },
+    alignItems: "start",
+    gap: grasp.space4,
+  },
+  list: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space3,
+    minWidth: 0,
+  },
+  // On a narrow page, the list makes way for the item that was opened.
+  listAway: { display: { default: "none", [WIDE]: "flex" } },
+  // The item stays in view while the list beside it scrolls.
+  item: {
+    position: { default: null, [WIDE]: "sticky" },
+    top: 0,
+    maxHeight: { default: null, [WIDE]: "calc(100dvh - 6rem)" },
+    overflowY: { default: null, [WIDE]: "auto" },
+    minWidth: 0,
+  },
+  itemAway: { display: { default: "none", [WIDE]: "block" } },
+  unseen: {
+    position: "absolute",
+    width: grasp.hairline,
+    height: grasp.hairline,
+    overflow: "hidden",
+    clipPath: "inset(50%)",
+    whiteSpace: "nowrap",
+  },
+});
+
+/**
+ * The groups, short enough that the filter fits beside the list. The
+ * sidebar's Inbox view names its rows by these too.
+ */
+export const groupLabel: Record<Group, MessageDescriptor> = {
+  all: msg({ message: "All", context: "inbox filter, short" }),
   workflows: msg({ message: "Workflows", context: "inbox filter" }),
-  brain: msg({ message: "Brain", context: "inbox filter" }),
-  apps: msg({ message: "Apps and connections", context: "inbox filter" }),
+  asked: msg({ message: "Asked of you", context: "inbox filter" }),
+  brain: msg({ message: "Brain", context: "inbox filter, short" }),
+  outcomes: msg({ message: "Unknown outcomes", context: "inbox filter" }),
+  apps: msg({ message: "Apps", context: "inbox filter, short" }),
 };
 
-const groups = ["all", "workflows", "brain", "apps"] as const;
+/** The groups in the filter's order; the address (`?group=`) takes these. */
+export const groupOrder = [
+  "asked",
+  "brain",
+  "outcomes",
+  "workflows",
+  "apps",
+] as const;
 
-const sortLabel: Record<Sort, MessageDescriptor> = {
-  urgent: msg({
-    message: "What blocks first, then newest",
-    context: "inbox sort",
-  }),
-  newest: msg({ message: "Newest first", context: "inbox sort" }),
-  oldest: msg({ message: "Oldest first", context: "inbox sort" }),
+const isGroup = (value: string | null): value is Group =>
+  value === "all" || groupOrder.some((each) => each === value);
+
+/** What a row says under its name: its own words, or its kind and date when it has one. */
+const rowLine = (item: InboxItem, kind: string): string => {
+  if (item.summary !== undefined) {
+    return item.summary;
+  }
+  return item.date === "" ? kind : `${kind} · ${formatDayMonth(item.date)}`;
 };
 
-const sorts = ["urgent", "newest", "oldest"] as const;
-
-const isGroup = (value: string): value is Group =>
-  groups.some((each) => each === value);
-
-const isSort = (value: string): value is Sort =>
-  sorts.some((each) => each === value);
-
-/** A dot for what blocks something; an empty place for the rest, so the dates line up. */
-const UrgentDot = ({ urgent }: { urgent: boolean }) =>
-  urgent ? (
-    <span className="bg-status-attention size-1.75 flex-none rounded-full" />
-  ) : (
-    <span className="size-1.75 flex-none" />
+/** The brand of what an item is about, beside its name, when its name names one. */
+const BrandMark = ({ name }: { name: string | undefined }) => {
+  const brand = name === undefined ? undefined : brandOf(name);
+  return brand === undefined ? null : (
+    <ItemNote>
+      <BrandIcon brand={brand} decorative size="xs" tile={false} />
+    </ItemNote>
   );
+};
 
-/** One item on one line: what it is about, its kind, its date. */
-const ItemRow = ({
-  item,
-  active,
-  onSelect,
+/** Whether a key press belongs to something being typed, not to the inbox. */
+const typing = (target: EventTarget | null): boolean =>
+  target instanceof HTMLElement &&
+  (target.isContentEditable ||
+    target.closest("input, textarea, select, [role='textbox']") !== null);
+
+/**
+ * What waits, grouped as the filter offers it, with the item that is open
+ * marked as the current one; each row a router link to its place.
+ */
+const ItemList = ({
+  list,
+  selected,
+  onOpen,
 }: {
-  item: InboxItem;
-  active: boolean;
-  onSelect: () => void;
-}) => (
-  <button
-    aria-current={active ? "true" : undefined}
-    className={
-      active
-        ? "border-l-foreground bg-accent focus-visible:ring-ring flex h-14 w-full flex-none items-center gap-3 border-b border-l-2 pr-4 pl-3.5 text-left outline-none focus-visible:ring-2"
-        : "hover:bg-muted focus-visible:ring-ring flex h-14 w-full flex-none items-center gap-3 border-b border-l-2 border-l-transparent pr-4 pl-3.5 text-left outline-none focus-visible:ring-2"
+  list: readonly InboxItem[];
+  selected: InboxItem | undefined;
+  onOpen: (id: string, focus: boolean) => void;
+}) => {
+  const { t, i18n } = useLingui();
+  const step = useEffectEvent((event: globalThis.KeyboardEvent) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
+      return;
     }
-    onClick={onSelect}
-    type="button"
-  >
-    <ItemMark item={item} />
-    <span className="flex min-w-0 flex-1 flex-col">
-      <span className="truncate">{item.context}</span>
-    </span>
-    <span className="hidden @md/list:inline-flex">
-      <KindPill kind={item.kind} />
-    </span>
-    <span className="text-muted-foreground w-16 flex-none text-right text-xs tabular-nums">
-      {formatDayMonth(item.date)}
-    </span>
-    <UrgentDot urgent={item.urgent} />
-  </button>
-);
+    const at = list.findIndex(({ id }) => id === selected?.id);
+    const next = list[at + (event.key === "ArrowDown" ? 1 : -1)];
+    if (next !== undefined) {
+      event.preventDefault();
+      onOpen(next.id, true);
+    }
+  });
+  // On the list's own element, not as props: it is no control of its own.
+  const element = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const box = element.current;
+    const key = (event: globalThis.KeyboardEvent) => {
+      step(event);
+    };
+    box?.addEventListener("keydown", key);
+    return () => {
+      box?.removeEventListener("keydown", key);
+    };
+  }, []);
+  return (
+    <div ref={element}>
+      <ItemGroup aria-label={t`What waits on you`} separated>
+        {list.map((item) => (
+          <Item
+            current={item.id === selected?.id}
+            key={item.id}
+            render={
+              <Link
+                from="/inbox"
+                replace
+                search={(before) => ({ ...before, item: item.id })}
+                to="/inbox"
+              />
+            }
+            size="xs"
+          >
+            {item.face === undefined ? (
+              <ItemMedia icon={kindMark[item.kind]} iconLook="inline" />
+            ) : (
+              <ItemMedia>
+                <Avatar name={item.face} size="xs" />
+              </ItemMedia>
+            )}
+            <ItemContent>
+              <ItemTitle>
+                {item.context}
+                <BrandMark name={item.logo?.name} />
+                {item.urgent ? (
+                  <ItemNote>
+                    <Badge size="sm" tone="attention">
+                      <Trans context="inbox: something waits on this item">
+                        Blocks work
+                      </Trans>
+                    </Badge>
+                  </ItemNote>
+                ) : null}
+              </ItemTitle>
+              <ItemDescription>
+                {rowLine(item, i18n._(kindLabel[item.kind]))}
+              </ItemDescription>
+            </ItemContent>
+          </Item>
+        ))}
+      </ItemGroup>
+    </div>
+  );
+};
+
+/** The list and the item beside it, or on a narrow page one at a time. */
+const ToDo = ({
+  items,
+  chosen,
+  group,
+  notLoaded,
+  olderFailures,
+  onSaid,
+}: {
+  items: readonly InboxItem[];
+  chosen: string | undefined;
+  /** The group in view, as the address has it (`?group=`). */
+  group: Group;
+  notLoaded: readonly Loaded<unknown>[];
+  olderFailures: boolean;
+  onSaid: (said: string) => void;
+}) => {
+  const { t, i18n } = useLingui();
+  const navigate = useNavigate();
+  // Where the open item stood, so the one after it opens once it is settled.
+  const [at, setAt] = useState(0);
+  const counts = new Map<Group, number>();
+  for (const item of items) {
+    const each = groupOf[item.kind];
+    counts.set(each, (counts.get(each) ?? 0) + 1);
+  }
+  const shownGroups = groupOrder.filter((each) => counts.has(each));
+  // A group that has emptied falls back to everything.
+  const current = group === "all" || counts.has(group) ? group : "all";
+  const list = listed(items, current, "urgent");
+  const count = list.length;
+  const index = list.findIndex(({ id }) => id === chosen);
+  if (index !== -1 && index !== at) {
+    setAt(index);
+  }
+  const selected =
+    index === -1 ? list[Math.min(at, list.length - 1)] : list[index];
+  // On a narrow page the item takes the list's place once one is asked for.
+  const reading = chosen !== undefined && selected !== undefined;
+
+  const open = (id: string, focus: boolean) => {
+    void navigate({
+      from: "/inbox",
+      to: "/inbox",
+      search: (before) => ({ ...before, item: id }),
+      replace: true,
+    });
+    if (focus) {
+      // The row keeps the focus as the keys move it, as a list's would.
+      requestAnimationFrame(() => {
+        document
+          .querySelector<HTMLAnchorElement>(
+            `a[href$="item=${encodeURIComponent(id)}"]`
+          )
+          ?.focus();
+      });
+    }
+  };
+  const back = () => {
+    void navigate({
+      from: "/inbox",
+      to: "/inbox",
+      search: (before) => ({ ...before, item: undefined }),
+      replace: true,
+    });
+  };
+
+  // J and K anywhere on the page, but not while something is typed.
+  const onKey = useEffectEvent((event: globalThis.KeyboardEvent) => {
+    if (
+      (event.key !== "j" && event.key !== "k") ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.altKey ||
+      typing(event.target)
+    ) {
+      return;
+    }
+    const from = list.findIndex(({ id }) => id === selected?.id);
+    const next = list[from + (event.key === "j" ? 1 : -1)];
+    if (next !== undefined) {
+      event.preventDefault();
+      open(next.id, false);
+    }
+  });
+  useEffect(() => {
+    const listen = (event: globalThis.KeyboardEvent) => {
+      onKey(event);
+    };
+    document.addEventListener("keydown", listen);
+    return () => {
+      document.removeEventListener("keydown", listen);
+    };
+  }, []);
+
+  const failed = notLoaded.flatMap((part) => notLoadedText(part, i18n) ?? []);
+  if (items.length === 0) {
+    return failed.length === 0 ? (
+      <Empty size="lg">
+        <EmptyHeader>
+          <EmptyMedia picture="done" />
+          <EmptyTitle>{t`Nothing waits for you`}</EmptyTitle>
+        </EmptyHeader>
+      </Empty>
+    ) : (
+      <Empty size="lg" tone="danger">
+        <EmptyHeader>
+          <EmptyMedia />
+          <EmptyTitle>{t`The inbox didn't load`}</EmptyTitle>
+          <EmptyDescription>{failed.join(" ")}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
+  }
+  return (
+    <div {...stylex.props(styles.split)}>
+      <div {...stylex.props(styles.list, reading && styles.listAway)}>
+        {failed.map((text) => (
+          <Alert key={text} variant="attention">
+            {text}
+          </Alert>
+        ))}
+        {shownGroups.length < 2 ? null : (
+          <Tabs
+            onValueChange={(value) => {
+              if (isGroup(value)) {
+                // In the address, so the sidebar's views and Back follow it.
+                void navigate({
+                  from: "/inbox",
+                  to: "/inbox",
+                  search: (before) => ({
+                    ...before,
+                    group: value === "all" ? undefined : value,
+                  }),
+                  replace: true,
+                });
+              }
+            }}
+            value={current}
+            variant="segmented"
+          >
+            <TabsList aria-label={t`Show`}>
+              {(["all", ...shownGroups] as const).map((each) => (
+                <TabsTrigger key={each} value={each}>
+                  {i18n._(groupLabel[each])}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        )}
+        <SectionCard
+          density="compact"
+          flush
+          title={t`${plural(count, { one: "# item", other: "# items" })}`}
+        >
+          <ItemList list={list} onOpen={open} selected={selected} />
+        </SectionCard>
+        {olderFailures ? (
+          <Text size="xs" tone="muted">
+            <Trans>
+              Older failed workflows are on the{" "}
+              <RouterLink to="/dashboard">dashboard</RouterLink>.
+            </Trans>
+          </Text>
+        ) : null}
+      </div>
+      <div {...stylex.props(styles.item, !reading && styles.itemAway)}>
+        {selected === undefined ? null : (
+          <ItemDetail
+            item={selected}
+            key={selected.id}
+            onBack={reading ? back : undefined}
+            onSaid={onSaid}
+          />
+        )}
+      </div>
+    </div>
+  );
+};
 
 /** What the activity tab read: the latest of the trail, with the names to show. */
 export interface InboxActivity extends LatestActivity {
@@ -127,6 +437,9 @@ export interface InboxActivity extends LatestActivity {
 }
 
 type Who = "all" | "grasp" | "people";
+
+const isWho = (value: string | null): value is Who =>
+  value === "all" || value === "grasp" || value === "people";
 
 /** Whether Grasp or its agents, Apps and runs did it, rather than a person. */
 const byGrasp = (record: AuditRecord): boolean => {
@@ -153,20 +466,29 @@ const ActivityRow = ({
   const actor =
     record.event === null ? "–" : actorOf(record.event.actor, directory).label;
   return (
-    <li className="flex items-start gap-4 border-b py-3">
-      <span className="text-muted-foreground w-28 flex-none pt-0.5 text-xs tabular-nums">
-        {formatDateTime(record.receivedAt)}
-      </span>
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span>{sentence}</span>
-        <span className="text-muted-foreground">{actor}</span>
-      </div>
-      {record.type === null ? null : (
-        <Badge variant={byGrasp(record) ? "secondary" : "outline"}>
-          {i18n._(typeLabels[record.type])}
-        </Badge>
+    <Item size="xs">
+      {/* Who did it: a person's face, or Grasp's mark for what Grasp and its agents did. */}
+      {byGrasp(record) ? (
+        <ItemMedia icon={Agent} iconLook="inline" />
+      ) : (
+        <ItemMedia>
+          <Avatar name={actor} size="xs" />
+        </ItemMedia>
       )}
-    </li>
+      <ItemContent>
+        <ItemTitle>
+          {sentence}
+          {record.type === null ? null : (
+            <ItemNote>
+              <Badge size="sm">{i18n._(typeLabels[record.type])}</Badge>
+            </ItemNote>
+          )}
+        </ItemTitle>
+        <ItemDescription>
+          {`${actor} · ${formatDateTime(record.receivedAt)}`}
+        </ItemDescription>
+      </ItemContent>
+    </Item>
   );
 };
 
@@ -178,43 +500,45 @@ const ActivityRow = ({
 const ActivityList = ({ activity }: { activity: InboxActivity }) => {
   const { t } = useLingui();
   const [who, setWho] = useState<Who>("all");
-  const shown = activity.records
-    .filter((record) => {
-      if (who === "all") {
-        return true;
-      }
-      return who === "grasp" ? byGrasp(record) : !byGrasp(record);
-    })
-    .slice(0, 100);
+  const shown = activity.records.filter((record) => {
+    if (who === "all") {
+      return true;
+    }
+    return who === "grasp" ? byGrasp(record) : !byGrasp(record);
+  });
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
-      <div className="flex items-center justify-between gap-3">
-        <ToggleGroup
-          aria-label={t`Show activity by`}
-          onValueChange={(value) => {
-            const [next] = value;
-            setWho(next === "grasp" || next === "people" ? next : "all");
-          }}
-          size="sm"
-          value={[who]}
-          variant="outline"
-        >
-          <ToggleGroupItem value="all">
-            <Trans context="activity filter: everyone">All</Trans>
-          </ToggleGroupItem>
-          <ToggleGroupItem value="grasp">Grasp</ToggleGroupItem>
-          <ToggleGroupItem value="people">
-            <Trans context="activity filter: what people did">People</Trans>
-          </ToggleGroupItem>
-        </ToggleGroup>
-        <Link
-          className="text-muted-foreground hover:text-foreground hover:underline"
-          to="/settings/audit"
-        >
-          <Trans>The full audit trail</Trans>
-        </Link>
-      </div>
-      <ul aria-label={t`Latest activity`} className="flex flex-col">
+    <SectionCard
+      actions={
+        <>
+          <Tabs
+            onValueChange={(value) => {
+              if (isWho(value)) {
+                setWho(value);
+              }
+            }}
+            value={who}
+            variant="segmented"
+          >
+            <TabsList aria-label={t`Show activity by`}>
+              <TabsTrigger value="all">
+                <Trans context="activity filter: everyone">All</Trans>
+              </TabsTrigger>
+              <TabsTrigger value="grasp">Grasp</TabsTrigger>
+              <TabsTrigger value="people">
+                <Trans context="activity filter: what people did">People</Trans>
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <RouterLink to="/settings/audit">
+            <Trans>The full audit trail</Trans>
+          </RouterLink>
+        </>
+      }
+      density="compact"
+      flush
+      title={t`Latest activity`}
+    >
+      <ItemGroup aria-label={t`Latest activity`} separated>
         {shown.map((record) => (
           <ActivityRow
             directory={activity.directory}
@@ -222,115 +546,8 @@ const ActivityList = ({ activity }: { activity: InboxActivity }) => {
             record={record}
           />
         ))}
-      </ul>
-    </div>
-  );
-};
-
-/** The list and the item beside it, or on a narrow screen one at a time. */
-const ToDoTab = ({
-  items,
-  chosen,
-  group,
-  sort,
-  olderFailures,
-  onSaid,
-}: {
-  items: readonly InboxItem[];
-  chosen: string | undefined;
-  group: Group;
-  sort: Sort;
-  olderFailures: boolean;
-  onSaid: (said: string) => void;
-}) => {
-  const { t } = useLingui();
-  const list = listed(items, group, sort);
-  // One the page was opened on, as the dashboard leads to it, is open from the start.
-  const [selectedId, setSelectedId] = useState(chosen);
-  // On a narrow screen the item takes the list's place once one is chosen, with a way back.
-  const [reading, setReading] = useState(
-    chosen !== undefined && list.some(({ id }) => id === chosen)
-  );
-  const selected = list.find((item) => item.id === selectedId) ?? list[0];
-  // Once nothing is left to read (the last one decided, or a filter that keeps none), the list comes back.
-  if (reading && selected === undefined) {
-    setReading(false);
-  }
-  return (
-    <div className="@4xl/inbox:grid-cols-inbox grid min-h-0 w-full flex-1 grid-cols-1">
-      {/* Whichever of the two reaches the bottom right corner leaves room at its foot for the chat box: the list while it is alone, the item always. */}
-      <section
-        aria-label={t`What waits on you`}
-        className={
-          reading
-            ? "@container/list hidden min-h-0 flex-col overflow-y-auto border-r @4xl/inbox:flex"
-            : "@container/list flex min-h-0 flex-col overflow-y-auto @4xl/inbox:border-r"
-        }
-      >
-        {list.length === 0 ? (
-          <p className="text-muted-foreground px-5 py-4">
-            <Trans>Nothing waits on you.</Trans>
-          </p>
-        ) : (
-          list.map((item) => (
-            <ItemRow
-              active={item.id === selected?.id}
-              item={item}
-              key={item.id}
-              onSelect={() => {
-                setSelectedId(item.id);
-                setReading(true);
-              }}
-            />
-          ))
-        )}
-        {olderFailures ? (
-          <p className="text-muted-foreground px-5 py-4">
-            <Trans>
-              Older workflows that failed are on the{" "}
-              <Link className="text-foreground underline" to="/dashboard">
-                dashboard
-              </Link>
-              .
-            </Trans>
-          </p>
-        ) : null}
-      </section>
-      <div
-        className={
-          reading
-            ? "@container/item flex min-h-0 flex-col overflow-y-auto"
-            : "@container/item hidden min-h-0 flex-col overflow-y-auto @4xl/inbox:flex"
-        }
-      >
-        {selected === undefined ? (
-          <Empty className="h-full">
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <InboxIcon />
-              </EmptyMedia>
-              <EmptyTitle>
-                <Trans>Nothing waits on you</Trans>
-              </EmptyTitle>
-              <EmptyDescription>
-                <Trans>
-                  What Grasp and its agents do by themselves is under Activity.
-                </Trans>
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        ) : (
-          <ItemDetail
-            item={selected}
-            key={selected.id}
-            onBack={() => {
-              setReading(false);
-            }}
-            onSaid={onSaid}
-          />
-        )}
-      </div>
-    </div>
+      </ItemGroup>
+    </SectionCard>
   );
 };
 
@@ -342,167 +559,76 @@ const ToDoTab = ({
 export const InboxPage = ({
   items,
   chosen,
+  group,
   notLoaded,
   olderFailures,
   activity,
 }: {
   items: readonly InboxItem[];
-  /** The item opened first, by its ID: the list's first when none is, or it waits no more. */
+  /** The item open, by its ID: the list's first when none is, or it waits no more. */
   chosen?: string;
+  /** The group in view, as the address has it; all when it has none. */
+  group?: Exclude<Group, "all">;
   notLoaded: readonly Loaded<unknown>[];
   /** Whether core has failed workflows older than the ones listed: the dashboard shows them. */
   olderFailures: boolean;
   activity: Promise<Loaded<InboxActivity>> | undefined;
 }) => {
   const { t, i18n } = useLingui();
-  const [tab, setTab] = useState("todo");
-  const [group, setGroup] = useState<Group>("all");
-  const [sort, setSort] = useState<Sort>("urgent");
   const [said, setSaid] = useState("");
+  const toDo = (
+    <ToDo
+      chosen={chosen}
+      group={group ?? "all"}
+      items={items}
+      notLoaded={notLoaded}
+      olderFailures={olderFailures}
+      onSaid={setSaid}
+    />
+  );
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Inbox` }]} />
-      {/* As high as the window under the header, so the list and the item each scroll on their own. */}
-      <div className="h-inbox flex min-h-0 flex-col text-sm">
-        <Tabs
-          className="min-h-0 flex-1"
-          onValueChange={(value: string) => {
-            setTab(value);
-          }}
-          spacing="none"
-          value={tab}
-        >
-          {/* With no room beside the tabs, the filter and the order go under them. */}
-          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b px-4 py-3">
-            <TabsList>
+      <div {...stylex.props(styles.page)}>
+        {activity === undefined ? (
+          toDo
+        ) : (
+          <Tabs defaultValue="todo">
+            <TabsList aria-label={t`Inbox`}>
               <TabsTrigger value="todo">
                 <Trans context="inbox tab: what waits on you">To do</Trans>
-                <Badge variant="secondary">{items.length}</Badge>
               </TabsTrigger>
-              <TabsTrigger value="done">
-                <Trans context="inbox tab: what someone dealt with">Done</Trans>
-                <Badge variant="secondary">0</Badge>
+              <TabsTrigger value="activity">
+                <Trans context="inbox tab: what Grasp and people did">
+                  Activity
+                </Trans>
               </TabsTrigger>
-              {activity === undefined ? null : (
-                <TabsTrigger value="activity">
-                  <Trans context="inbox tab: what Grasp and people did">
-                    Activity
-                  </Trans>
-                </TabsTrigger>
-              )}
             </TabsList>
-            {tab === "todo" ? (
-              <div className="flex items-center gap-2">
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={<Button size="sm" variant="outline" />}
-                  >
-                    <ListFilterIcon data-icon="inline-start" />
-                    {group === "all" ? (
-                      <Trans context="inbox: filter button">Filter</Trans>
-                    ) : (
-                      i18n._(groupLabel[group])
-                    )}
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuRadioGroup
-                      onValueChange={(value: string) => {
-                        if (isGroup(value)) {
-                          setGroup(value);
-                        }
-                      }}
-                      value={group}
-                    >
-                      {groups.map((each) => (
-                        <DropdownMenuRadioItem key={each} value={each}>
-                          {i18n._(groupLabel[each])}
-                        </DropdownMenuRadioItem>
-                      ))}
-                    </DropdownMenuRadioGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={<Button size="sm" variant="outline" />}
-                  >
-                    <ArrowDownUpIcon data-icon="inline-start" />
-                    <Trans context="inbox: sort button">Sort</Trans>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuRadioGroup
-                      onValueChange={(value: string) => {
-                        if (isSort(value)) {
-                          setSort(value);
-                        }
-                      }}
-                      value={sort}
-                    >
-                      {sorts.map((each) => (
-                        <DropdownMenuRadioItem key={each} value={each}>
-                          {i18n._(sortLabel[each])}
-                        </DropdownMenuRadioItem>
-                      ))}
-                    </DropdownMenuRadioGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            ) : null}
-          </div>
-
-          {notLoaded.map((part, index) => (
-            <div className="border-b px-5 py-3" key={index}>
-              <NotLoaded page={part} />
-            </div>
-          ))}
-
-          {/* Wide list, narrower item: the list is where an admin works through what waits. The
-            columns follow the room the page has, not the window, so an open sidebar counts. */}
-          <TabsContent
-            className="@container/inbox flex min-h-0 flex-1"
-            value="todo"
-          >
-            <ToDoTab
-              chosen={chosen}
-              group={group}
-              items={items}
-              olderFailures={olderFailures}
-              onSaid={setSaid}
-              sort={sort}
-            />
-          </TabsContent>
-
-          <TabsContent className="min-h-0 flex-1 overflow-y-auto" value="done">
-            {/* Core keeps no record yet of what was done with an item. */}
-            <p className="text-muted-foreground px-6 py-4">
-              <Trans>
-                Nothing dealt with yet. What you decide here shows up in this
-                list, and in the audit trail.
-              </Trans>
-            </p>
-          </TabsContent>
-
-          {activity === undefined ? null : (
-            <TabsContent
-              className="min-h-0 flex-1 overflow-y-auto"
-              value="activity"
-            >
+            <TabsContent value="todo">{toDo}</TabsContent>
+            <TabsContent value="activity">
               <Await fallback={<LoadingLines />} promise={activity}>
                 {(loaded) =>
                   loaded.state === "ready" ? (
                     <ActivityList activity={loaded.data} />
                   ) : (
-                    <div className="px-6 py-4">
-                      <NotLoaded page={loaded} />
-                    </div>
+                    <Empty tone="danger">
+                      <EmptyHeader>
+                        <EmptyMedia />
+                        <EmptyTitle />
+                        <EmptyDescription>
+                          {notLoadedText(loaded, i18n) ?? t`It didn't load`}
+                        </EmptyDescription>
+                      </EmptyHeader>
+                    </Empty>
                   )
                 }
               </Await>
             </TabsContent>
-          )}
-        </Tabs>
+          </Tabs>
+        )}
       </div>
       {/* What was done with an item, for a screen reader: the list only loses it. */}
-      <output className="sr-only">{said}</output>
+      <output {...stylex.props(styles.unseen)}>{said}</output>
     </>
   );
 };

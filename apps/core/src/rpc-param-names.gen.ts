@@ -123,6 +123,7 @@ export const rpcParamNames: ParamNames = {
     "forget": ["target"],
     "forgetPreview": ["target"],
     "goals": [],
+    "openGaps": [],
     "proposeTeamGroups": [],
     "read": [],
     "redactGapAnswer": ["gapId"],
@@ -166,6 +167,7 @@ export const rpcParamNames: ParamNames = {
     "rename": ["chatId","title"],
     "search": ["query"],
     "send": ["chatId","question"],
+    "setProject": ["chatId","project"],
     "summary": ["chatId"],
     "unarchive": ["chatId"],
     "watch": ["chatId","after","onUpdate"],
@@ -400,6 +402,7 @@ export const rpcParamNames: ParamNames = {
   },
   "ProjectsRpc": {
     "addMember": ["id","member"],
+    "connections": ["id"],
     "create": ["project"],
     "file": ["id","file"],
     "get": ["id"],

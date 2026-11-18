@@ -33,6 +33,8 @@ import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
 import { Textarea } from "../textarea";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { useWords, withGiven } from "../words/words";
+import { approvalRequestWords } from "./words";
 
 /** Where a request stands. */
 export type ApprovalStatus =
@@ -123,38 +125,6 @@ export interface ApprovalWords {
   undone: string;
 }
 
-const englishWords: ApprovalWords = {
-  theAgent: "The agent",
-  details: "Details",
-  askForChanges: "Ask for changes",
-  whatShouldChange: "What should change",
-  back: "Back",
-  send: "Send to the agent",
-  decline: "Decline",
-  final: "cannot be undone",
-  sure: "Approve it?",
-  sureFinal: "Approve it? This cannot be undone.",
-  notYet: "Not yet",
-  yes: "Yes",
-  confirm: (yes, approve) =>
-    `${yes}, ${approve.charAt(0).toLowerCase()}${approve.slice(1)}`,
-  signed: (decided, by) => `${decided} by ${by}`,
-  you: "you",
-  undo: "Undo",
-  approving: "Approving",
-  declining: "Declining",
-  sending: "Sending",
-  couldNotApprove: "Could not approve",
-  couldNotDecline: "Could not decline",
-  couldNotSend: "Could not send",
-  approved: "Approved",
-  declined: "Declined",
-  changes: "Changes asked",
-  expired: "Expired",
-  superseded: "Replaced by a newer request",
-  undone: "Undone, waiting again",
-};
-
 /** What a caller may style: where the request sits and how wide it is. Never its look. */
 export type ApprovalRequestLayoutStyle = LayoutStyle;
 
@@ -186,6 +156,12 @@ export interface ApprovalRequestProps {
    * @default "Approve"
    */
   approveLabel?: string;
+  /**
+   * Holds Approve back until the host clears it, with the reason ("Read what will be sent first"):
+   * Approve is drawn out of use but stays in the Tab order, the reason is its description (shown
+   * under the answers and said), and Decline and Ask for changes stay usable.
+   */
+  approveHeld?: string;
   /**
    * Matters enough to ask twice: Approve asks in place first, unless `confirmApproval` asks in
    * its own way.
@@ -246,7 +222,7 @@ const FORCED = media.forced;
 // On a phone the card tightens: less room, a smaller sentence.
 const NARROW = media.belowPhone;
 // A narrow card by its own width, not the window's: Details stands over the answers, which share
-// their row equally. A button is as wide as its widest words ("Could not approve"), so two of them
+// their row equally. A button is as wide as its widest words ("Approved"), so two of them
 // beside Details do not fit a phone.
 const NARROW_CARD = "@container approval (width < 26rem)";
 
@@ -405,6 +381,16 @@ const styles = stylex.create({
       default: null,
       [NARROW_CARD]: "repeat(2, minmax(0, 1fr))",
     },
+  },
+  // Why Approve is held: one quiet line under the row, on the card's own start line (where Details
+  // begins), never alone at the far end under a button.
+  held: {
+    margin: 0,
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+    color: grasp.muted,
+    textAlign: "start",
+    textWrap: "pretty",
   },
   // The answer not pressed fades where it stands while the other works: its room stays.
   away: {
@@ -752,10 +738,13 @@ const Compact = ({
       >
         <Icon icon={marks[status]} />
       </span>
-      <span {...stylex.props(styles.compactAsk)}>
-        {title}
-        {note}
-      </span>
+      {/* With no ask, the decision stands by its mark, not alone at the far end. */}
+      {title === "" && note === "" ? null : (
+        <span {...stylex.props(styles.compactAsk)}>
+          {title}
+          {note}
+        </span>
+      )}
       <span {...stylex.props(styles.compactEnd)}>
         <span>
           <span {...stylex.props(styles.lineDecided)}>
@@ -903,6 +892,9 @@ interface BodyProps extends Omit<
   "words" | "style" | "variant" | "decision"
 > {
   words: ApprovalWords;
+  /** Resolved by ApprovalRequest: the caller's, else the catalogue's. */
+  approveLabel: string;
+  changesPlaceholder: string;
   titleId: string;
   bare: boolean;
   decision: ApprovalDecision;
@@ -1023,6 +1015,9 @@ interface AnswersProps {
   settled: boolean;
   onApprovePress: () => void;
   onBack: () => void;
+  /** Why Approve is held, while it is, and the id of the line that says it. */
+  held?: string;
+  heldId: string;
 }
 
 /** Decline and Approve, or the grave question in their place. The one not pressed fades where it stands. */
@@ -1037,6 +1032,8 @@ const Answers = ({
   settled,
   onApprovePress,
   onBack,
+  held,
+  heldId,
 }: AnswersProps) => {
   if (step === "sure") {
     return (
@@ -1089,8 +1086,14 @@ const Answers = ({
           variant="approve"
           type="button"
           {...approve.status}
-          disabled={answering && approve.state !== "working"}
+          disabled={
+            (answering && approve.state !== "working") || held !== undefined
+          }
+          // Held: out of use but still reached by Tab, so its reason can be heard from it.
+          focusableWhenDisabled={held !== undefined}
+          aria-describedby={held === undefined ? undefined : heldId}
           data-approval-opens="approve"
+          data-held={held === undefined ? undefined : ""}
           onClick={onApprovePress}
         >
           {approveLabel}
@@ -1139,6 +1142,14 @@ const useAnswers = (props: BodyProps, note: string, onSent: () => void) => {
   return { approve, decline, send, answering };
 };
 
+/** Why Approve is held: one quiet line under the row, while it is held and nothing is decided. */
+const HeldLine = ({ id, held }: { id: string; held: string | undefined }) =>
+  held === undefined ? null : (
+    <p id={id} data-slot="approval-held" {...stylex.props(styles.held)}>
+      {held}
+    </p>
+  );
+
 /** The card's waiting body: the ask, the quiet line, Details, and the row of answers. */
 const Body = (props: BodyProps) => {
   const {
@@ -1148,9 +1159,9 @@ const Body = (props: BodyProps) => {
     viewer,
     affects = nothing,
     irreversible = false,
-    approveLabel = "Approve",
+    approveLabel,
     grave = false,
-    changesPlaceholder = "Say what should change",
+    changesPlaceholder,
     confirmApproval,
     onRequestChanges,
   } = props;
@@ -1160,6 +1171,7 @@ const Body = (props: BodyProps) => {
   const holder = useRef<HTMLDivElement>(null);
   const confirming = useRef(false);
   const detailsId = useId();
+  const heldId = useId();
   const { approve, decline, send, answering } = useAnswers(props, note, () => {
     setStep("answers");
   });
@@ -1297,6 +1309,8 @@ const Body = (props: BodyProps) => {
               answering={answering}
               settled={settled}
               onApprovePress={pressApprove}
+              held={props.approveHeld}
+              heldId={heldId}
               onBack={() => {
                 back("sure");
               }}
@@ -1311,6 +1325,10 @@ const Body = (props: BodyProps) => {
           </div>
         </div>
       )}
+      <HeldLine
+        id={heldId}
+        held={settled || step !== "answers" ? undefined : props.approveHeld}
+      />
     </div>
   );
 };
@@ -1432,14 +1450,20 @@ export const ApprovalRequest = (props: ApprovalRequestProps) => {
     title,
     variant = "slip",
     decision: given,
-    viewer = "You",
     viewerPortrait,
     onUndo,
     words: givenWords,
     style: styleProp,
     layout,
   } = props;
-  const words: ApprovalWords = { ...englishWords, ...givenWords };
+  // Its words: the product's, by its catalogue, else English; the caller's words and text props win.
+  const words = withGiven(useWords("approvalRequest", approvalRequestWords), {
+    ...givenWords,
+    approve: props.approveLabel,
+    changesPlaceholder: props.changesPlaceholder,
+    viewer: props.viewer,
+  });
+  const { viewer } = words;
   const titleId = useId();
   const card = useRef<HTMLElement>(null);
   const life = useDecision({
@@ -1490,6 +1514,8 @@ export const ApprovalRequest = (props: ApprovalRequestProps) => {
           key={life.round}
           {...props}
           words={words}
+          approveLabel={words.approve}
+          changesPlaceholder={words.changesPlaceholder}
           titleId={titleId}
           bare={variant === "bare"}
           decision={life.decision}

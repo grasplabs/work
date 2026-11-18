@@ -25,6 +25,9 @@ import type { MenuController, MenuOpenChangeReason } from "@ui-sdk/react/menu";
 import { createContext, useContext, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { useWords, withGiven } from "../words/words";
+import { dropdownMenuWords } from "./words";
+
 /**
  * What an item with work (item.tsx) needs from its menu: the controller that closes it once the work
  * is done, and the words a screen reader hears while the work runs.
@@ -81,9 +84,13 @@ export const DropdownMenu = ({
   children,
   controller,
   onOpenChange,
-  pendingAnnouncement = "Working",
+  pendingAnnouncement: pendingAnnouncementGiven,
   ...rest
 }: DropdownMenuProps) => {
+  const { working: pendingAnnouncement } = withGiven(
+    useWords("dropdownMenu", dropdownMenuWords),
+    { working: pendingAnnouncementGiven }
+  );
   // One of its own when none is passed, so an item can close it once its work is done.
   // oxlint-disable-next-line react/hook-use-state -- made once, never set
   const [own] = useState(() => createMenuController());

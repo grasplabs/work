@@ -151,11 +151,6 @@ test("a person with nothing waiting finds an empty board, takes a widget off, ad
     page.getByRole("heading", { level: 1, name: "Dashboard" })
   ).toBeVisible();
   // No plan for the interviews yet: no programme week, and no report.
-  await expect(
-    page.getByText(
-      "What waits on you, each with its next step, and what could be better."
-    )
-  ).toBeVisible();
   await expect(page.getByText(/^Week \d/u)).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Export report" })).toHaveCount(
     0

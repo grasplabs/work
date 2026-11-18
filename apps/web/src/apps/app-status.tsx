@@ -1,21 +1,20 @@
 import type { App, AppMember } from "@grasp-os/shared/apps";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Badge } from "@grasp-os/ui/components/badge";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
 import { formatList } from "../format.ts";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+} from "../grasp/alert-dialog/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import { Text } from "../grasp/text/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // Where an App (core's App) is in its life, and its builders moving it,
@@ -75,20 +74,20 @@ export const StatusBadge = ({
   const status = statusOf(app);
   if (status === "archived") {
     return (
-      <Badge variant="outline">
+      <Badge>
         <Trans context="an App put away">Archived</Trans>
       </Badge>
     );
   }
   if (status === "draft" || who?.length === 0) {
     return (
-      <Badge variant="attention">
+      <Badge tone="attention">
         <Trans>Only you see this</Trans>
       </Badge>
     );
   }
   return (
-    <Badge variant="passed">
+    <Badge tone="success">
       <UsedBy who={who} />
     </Badge>
   );
@@ -120,23 +119,21 @@ export const ArchiveDialog = ({
 }) => (
   <AlertDialog onOpenChange={onOpenChange} open={open}>
     <AlertDialogContent>
-      <AlertDialogHeader>
-        <AlertDialogTitle>
-          <Trans>Archive {name}?</Trans>
-        </AlertDialogTitle>
-        <AlertDialogDescription>
-          <Trans>
-            An archived App is kept as it is and goes offline: nobody opens its
-            pages, its triggers stop and its unfinished runs are cancelled. A
-            builder can restore it later.
-          </Trans>
-        </AlertDialogDescription>
-      </AlertDialogHeader>
+      <AlertDialogTitle>
+        <Trans>Archive {name}?</Trans>
+      </AlertDialogTitle>
+      <AlertDialogDescription>
+        <Trans>
+          An archived App is kept as it is and goes offline: nobody opens its
+          pages, its triggers stop and its unfinished runs are cancelled. A
+          builder can restore it later.
+        </Trans>
+      </AlertDialogDescription>
       <AlertDialogFooter>
-        <AlertDialogCancel>
+        <AlertDialogAction>
           <Trans>Cancel</Trans>
-        </AlertDialogCancel>
-        <AlertDialogAction onClick={onArchive} variant="destructive">
+        </AlertDialogAction>
+        <AlertDialogAction onClick={onArchive} variant="danger">
           <Trans>Archive</Trans>
         </AlertDialogAction>
       </AlertDialogFooter>
@@ -175,16 +172,16 @@ export const StatusNote = ({
   const status = statusOf(app);
   if (status === "draft") {
     return (
-      <p className="text-muted-foreground">
+      <Text size="sm" tone="muted">
         {t`Only its builders open it, and its triggers don't fire, until it is shared with the team.`}
-      </p>
+      </Text>
     );
   }
   if (status === "archived") {
     return (
-      <p className="text-muted-foreground">
+      <Text size="sm" tone="muted">
         {t`Archived: nobody opens its pages and nothing runs, until a builder restores it.`}
-      </p>
+      </Text>
     );
   }
   return null;

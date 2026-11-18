@@ -7,44 +7,49 @@ import type {
   DefinitionPlan,
   PlanField,
 } from "@grasp-os/shared/data-model";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import {
-  Item,
-  ItemContent,
-  ItemGroup,
-  ItemMedia,
-} from "@grasp-os/ui/components/item";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
-import { Switch } from "@grasp-os/ui/components/switch";
 import type { I18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import {
-  ArchiveIcon,
-  CircleAlertIcon,
-  PlusIcon,
-  ShieldIcon,
-} from "lucide-react";
-import { useState } from "react";
-import type { ReactNode } from "react";
+import { useId, useState } from "react";
 
-import { ErrorText } from "../error-text.tsx";
 import { valueText } from "../format.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { DatePicker } from "../grasp/date-picker/index.ts";
+import {
+  Dialog,
+  DialogAction,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogTitle,
+} from "../grasp/dialog/index.ts";
+import { Field, FieldLabel } from "../grasp/field/index.ts";
+import { Form } from "../grasp/form/index.ts";
+import {
+  Alert as AlertIcon,
+  Archive,
+  Lock,
+  Plus,
+} from "../grasp/icons/index.ts";
+import type { IconData } from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import {
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "../grasp/select/index.ts";
+import { Switch } from "../grasp/switch/index.ts";
+import { Text } from "../grasp/text/index.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // A change of an App's data model from its Data view: what publishing it
@@ -183,11 +188,11 @@ export const planLines = (plan: DefinitionPlan, i18n: I18n): PlanLine[] => [
   ),
 ];
 
-const toneIcons: Record<PlanLine["tone"], ReactNode> = {
-  added: <PlusIcon />,
-  kept: <ArchiveIcon />,
-  access: <ShieldIcon />,
-  needs: <CircleAlertIcon />,
+const toneIcons: Record<PlanLine["tone"], IconData> = {
+  added: Plus,
+  kept: Archive,
+  access: Lock,
+  needs: AlertIcon,
 };
 
 /**
@@ -201,23 +206,25 @@ export const PlanList = ({
   lines: PlanLine[];
   onAnswer?: (field: PlanField) => void;
 }) => (
-  <ItemGroup render={<ul />} spacing="tight">
+  <ItemGroup>
     {lines.map(({ key, tone, text, asks }) => (
-      <Item render={<li />} key={key} size="xs">
-        <ItemMedia variant="icon">{toneIcons[tone]}</ItemMedia>
+      <Item key={key} size="xs">
+        <ItemMedia icon={toneIcons[tone]} iconLook="inline" />
         <ItemContent>
-          <span className="text-sm">{text}</span>
+          <ItemTitle>{text}</ItemTitle>
         </ItemContent>
         {asks === undefined || onAnswer === undefined ? null : (
-          <Button
-            onClick={() => {
-              onAnswer(asks);
-            }}
-            size="xs"
-            variant="outline"
-          >
-            <Trans>Give a value</Trans>
-          </Button>
+          <ItemActions>
+            <Button
+              onClick={() => {
+                onAnswer(asks);
+              }}
+              size="xs"
+              variant="quiet"
+            >
+              <Trans>Give a value</Trans>
+            </Button>
+          </ItemActions>
         )}
       </Item>
     ))}
@@ -276,59 +283,49 @@ const AnswerInput = ({
   const label = t`Value for ${name}`;
   if (field.type.kind === "boolean") {
     return (
-      <Field orientation="horizontal">
-        <Switch
-          aria-label={label}
-          checked={value === "true"}
-          onCheckedChange={(checked) => {
-            onChange(checked ? "true" : "false");
-          }}
-        />
-        <FieldLabel>{field.name}</FieldLabel>
-      </Field>
+      <Switch
+        checked={value === "true"}
+        label={field.name}
+        onCheckedChange={(checked) => {
+          onChange(checked ? "true" : "false");
+        }}
+      />
     );
   }
   if (field.type.kind === "choice") {
-    const items = field.type.values.map((each) => ({
-      value: each,
-      label: each,
-    }));
     return (
       <Select
-        items={items}
-        onValueChange={(next: unknown) => {
-          if (typeof next === "string") {
+        items={field.type.values}
+        onValueChange={(next) => {
+          if (next !== null) {
             onChange(next);
           }
         }}
         value={value === "" ? null : value}
       >
-        <SelectTrigger aria-label={label} className="w-full">
+        <SelectTrigger aria-label={label}>
           <SelectValue placeholder={t`Pick one`} />
         </SelectTrigger>
-        <SelectContent>
-          {items.map((item) => (
-            <SelectItem key={item.value} value={item.value}>
-              {item.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
+        <SelectContent />
       </Select>
     );
   }
-  let type = "text";
-  if (field.type.kind === "number") {
-    type = "number";
-  } else if (field.type.kind === "date") {
-    type = "date";
+  if (field.type.kind === "date") {
+    return (
+      <DatePicker
+        aria-label={label}
+        onValueChange={(next: unknown) => {
+          onChange(typeof next === "string" ? next : "");
+        }}
+        value={value === "" ? null : value}
+      />
+    );
   }
   return (
     <Input
       aria-label={label}
-      onChange={(event) => {
-        onChange(event.target.value);
-      }}
-      type={type}
+      inputMode={field.type.kind === "number" ? "decimal" : undefined}
+      onValueChange={onChange}
       value={value}
     />
   );
@@ -404,6 +401,7 @@ const ReviewDialog = ({
   onClose: () => void;
 }) => {
   const { t, i18n } = useLingui();
+  const formId = useId();
   const [text, setText] = useState("");
   const asks = review?.asks;
   const missing = asks?.name ?? "";
@@ -437,68 +435,72 @@ const ReviewDialog = ({
       }}
       open={review !== undefined}
     >
-      <DialogContent className="sm:max-w-lg" closeLabel={t`Close`}>
-        <DialogHeader>
-          <DialogTitle>
-            <Trans>Before you make this change</Trans>
-          </DialogTitle>
-        </DialogHeader>
-        <form
-          className="flex flex-col gap-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            submit();
-          }}
-        >
-          {lines.length === 0 && asks === undefined ? (
-            <p className="text-sm">
-              <Trans>It changes no record the App holds.</Trans>
-            </p>
-          ) : (
-            <PlanList lines={lines} />
-          )}
-          {asks === undefined ? null : (
-            <Field>
-              <FieldLabel>
-                <Trans>
-                  {table} already holds records. What should the ones without{" "}
-                  {missing} get?
-                </Trans>
-              </FieldLabel>
-              {answerable(asks) ? (
-                <AnswerInput field={asks} onChange={setText} value={text} />
-              ) : (
-                <p className="text-muted-foreground text-sm">
+      <DialogContent closeLabel={t`Close`}>
+        <DialogTitle>
+          <Trans>Before you make this change</Trans>
+        </DialogTitle>
+        <DialogBody>
+          <Form
+            id={formId}
+            onSubmit={(event) => {
+              event.preventDefault();
+              submit();
+            }}
+          >
+            {lines.length === 0 && asks === undefined ? (
+              <Text>
+                <Trans>It changes no record the App holds.</Trans>
+              </Text>
+            ) : (
+              <PlanList lines={lines} />
+            )}
+            {asks === undefined ? null : (
+              <Field>
+                <FieldLabel>
                   <Trans>
-                    A field of this kind can&apos;t be given a value here. Make
-                    it optional, or ask in the chat for a change in code.
+                    {table} already holds records. What should the ones without{" "}
+                    {missing} get?
                   </Trans>
-                </p>
-              )}
-            </Field>
-          )}
-          <ErrorText>{failure}</ErrorText>
-          <DialogFooter>
-            <Button onClick={onClose} type="button" variant="outline">
-              <Trans>Cancel</Trans>
-            </Button>
-            <Button
-              disabled={busy || waiting}
-              type="submit"
-              variant={review?.removes === true ? "destructive" : "default"}
-            >
-              {review?.removes === true ? (
-                <Trans>Remove</Trans>
-              ) : (
-                <Trans>Make the change</Trans>
-              )}
-            </Button>
-          </DialogFooter>
-        </form>
+                </FieldLabel>
+                {answerable(asks) ? (
+                  <AnswerInput field={asks} onChange={setText} value={text} />
+                ) : (
+                  <Text tone="muted">
+                    <Trans>
+                      A field of this kind can&apos;t be given a value here.
+                      Make it optional, or ask in the chat for a change in code.
+                    </Trans>
+                  </Text>
+                )}
+              </Field>
+            )}
+            {failure === undefined ? null : (
+              <Alert title={failure} variant="danger" />
+            )}
+          </Form>
+        </DialogBody>
+        <DialogFooter>
+          <DialogAction>
+            <Trans>Cancel</Trans>
+          </DialogAction>
+          <Button
+            disabled={busy || waiting}
+            form={formId}
+            type="submit"
+            variant={review?.removes === true ? "danger" : "ink"}
+          >
+            {review?.removes === true ? (
+              <Trans>Remove</Trans>
+            ) : (
+              <Trans>Make the change</Trans>
+            )}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 };
+
 /**
  * Making changes of the model of the App's draft of `app`: previewed
  * first, reviewed in a dialog where they remove, retype, change access or

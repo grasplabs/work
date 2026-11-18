@@ -121,11 +121,15 @@ const shown = async (
   return { added };
 };
 
-/** The names of the buttons on the page, dialogs included. */
+/** The words a button shows now: its words at rest, or what it says while working, done or failed. */
+const shownWords = (each: Element): string =>
+  (each.querySelector("[data-shown]") ?? each).textContent?.trim() ?? "";
+
+/** The names of the buttons on the page, dialogs included, but the card's info mark. */
 const buttons = (): string[] =>
-  [...document.querySelectorAll("button")].map(
-    (each) => each.textContent?.trim() ?? ""
-  );
+  [...document.querySelectorAll("button")]
+    .filter((each) => each.getAttribute("aria-label") === null)
+    .map((each) => shownWords(each));
 
 /** Types `value` into `element`, as React hears a person type. */
 const type = async (element: HTMLInputElement, value: string) => {
@@ -140,10 +144,10 @@ const type = async (element: HTMLInputElement, value: string) => {
   });
 };
 
-/** Presses the button named `name`, and lets core answer. */
+/** Presses the last button named `name` (a dialog's, over the page), and lets core answer. */
 const press = async (name: string): Promise<void> => {
-  const button = [...document.querySelectorAll("button")].find(
-    (each) => each.textContent?.trim() === name
+  const button = [...document.querySelectorAll("button")].findLast(
+    (each) => shownWords(each) === name
   );
   await act(async () => {
     button?.click();
@@ -164,11 +168,10 @@ const rowOf = (id: string): string =>
     row.textContent?.includes(`hooks.example.com/${id}`)
   )?.textContent ?? "";
 
-/** The secret the page shows, if it shows one. */
+/** The secret the page shows, if it shows one: its Copy field's value. */
 const secretShown = (): string | undefined =>
-  [...document.querySelectorAll("input")].find(
-    (input) => input.getAttribute("aria-label") === "Secret"
-  )?.value;
+  document.querySelector('[data-slot="copy-field-value"]')?.textContent ??
+  undefined;
 
 describe(AppWebhooks, () => {
   afterEach(takenDown);
@@ -187,8 +190,8 @@ describe(AppWebhooks, () => {
     }
 
     expect(seen).toStrictEqual({
-      admin: ["Approve", "Remove", "Remove", "Add webhook"],
-      builder: ["Remove", "Remove", "Add webhook"],
+      admin: ["Add webhook", "Approve", "Remove", "Remove"],
+      builder: ["Add webhook", "Remove", "Remove"],
     });
   });
 
@@ -209,9 +212,13 @@ describe(AppWebhooks, () => {
     const { added } = await shown({ role: "builder", staff: false }, [], {
       failsAfter: true,
     });
-    const address = document.querySelector<HTMLInputElement>("#webhook-url");
-    if (address === null) {
-      throw new Error("Expected the address field");
+    await press("Add webhook");
+    const label = [...document.querySelectorAll("label")].find((each) =>
+      each.textContent?.startsWith("Address")
+    );
+    const address = document.querySelector(`[id="${label?.htmlFor ?? ""}"]`);
+    if (!(address instanceof HTMLInputElement)) {
+      throw new TypeError("Expected the address field");
     }
 
     await type(address, " https://hooks.example.com/forms ");

@@ -2,11 +2,11 @@ import {
   workflowOwnListed,
   workflowRunsListed,
 } from "@grasp-os/shared/workflow-resources";
-import { TabsCount } from "@grasp-os/ui/components/tabs";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 
 import { formatNumber } from "../format.ts";
+import { Badge } from "../grasp/badge/index.ts";
 
 // How many runs, or activity entries, a workflow has, beside the name of
 // the tab or part that lists them. Core answers the newest only, up to a
@@ -39,8 +39,9 @@ export const ListedCount = ({
     ? t`${shown} entries or more`
     : t`${plural(count, { one: "# entry", other: "# entries" })}`;
   return (
-    <TabsCount label={of === "runs" ? runs : entries}>
+    // A quiet count beside the tab's name, said in words to a screen reader.
+    <Badge aria-label={of === "runs" ? runs : entries} size="sm">
       {capped ? `${shown}+` : shown}
-    </TabsCount>
+    </Badge>
   );
 };

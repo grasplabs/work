@@ -1,6 +1,9 @@
-// The kit's Stat for a figure centred in a ring or a column: Grasp UI's
-// Highlight stands a name over its value, from the start edge.
-import { Stat } from "@grasp-os/ui/components/stat";
+import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import type { ReactNode } from "react";
+
+import { formatEuro } from "../format.ts";
+import { RouterLink } from "../frame/router-link.tsx";
 import {
   Table,
   TableBody,
@@ -8,20 +11,9 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
-// The kit's tooltip on a ring's arcs: Grasp UI's tooltip opens only on its
-// own Button, and its Chart has no ring.
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
-import { cn } from "@grasp-os/ui/lib/utils";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
-import type { ReactNode } from "react";
-
-import { formatEuro } from "../format.ts";
+} from "../grasp/table/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import {
   returnKey,
   returnTotals,
@@ -48,6 +40,12 @@ import { useFull } from "./widget-block.tsx";
 // hand, orange for what needs someone. The prototype's ways to turn a
 // widget (fewer lines, another value, another order) are for widgets Grasp
 // writes, and come with them.
+//
+// The rings are drawn here, not with Grasp UI's ChartRing: that one paints
+// its parts by their order, and these by what each stands for (a goal has a
+// part for each of its workflows, in its stage's colour). A part names
+// itself when pointed at with the drawing's own title, as Grasp UI's
+// tooltip opens only on its own Button.
 
 /** What a mark or a part of a picture stands for. */
 export type Tone = "live" | "coming" | "rest" | "attention";
@@ -61,33 +59,233 @@ const toneOfWay: Record<Way, Tone> = {
 /** A workflow's mark by its stage: green once it is live, light green while it is redesigned or tested, grey before that. */
 const toneOfStage = (stage: Stage): Tone => toneOfWay[wayOf(stage)];
 
-const marks: Record<Tone, string> = {
-  live: "size-2 flex-none rounded-full bg-status-agreed",
-  coming:
-    "size-2 flex-none rounded-full border border-status-agreed bg-return-expected",
-  rest: "size-2 flex-none rounded-full bg-input",
-  attention: "size-2 flex-none rounded-full bg-status-attention",
-};
+/** The board's container widths at which a widget has room to lay out beside itself (Tailwind's `@sm` and `@md`). */
+const WIDE = "@container (min-width: 24rem)";
+const WIDER = "@container (min-width: 28rem)";
+
+/** Each tone's colour, as a mark's fill. */
+const toneFills = stylex.create({
+  live: { backgroundColor: grasp.success },
+  coming: { backgroundColor: grasp.mint },
+  rest: { backgroundColor: grasp.chartQuietFill },
+  attention: { backgroundColor: grasp.attention },
+});
+
+/** Each tone's colour, as a part of a ring. */
+const toneStrokes = stylex.create({
+  live: { stroke: grasp.success },
+  coming: { stroke: grasp.mint },
+  rest: { stroke: grasp.chartQuietFill },
+  attention: { stroke: grasp.attention },
+});
+
+const styles = stylex.create({
+  mark: {
+    flexShrink: 0,
+    width: grasp.space2,
+    height: grasp.space2,
+    borderRadius: grasp.cornerCircle,
+  },
+  // The room a widget lays itself out in: its own width decides, not the window's.
+  room: {
+    containerType: "inline-size",
+    display: "flex",
+    flexDirection: "column",
+    minWidth: 0,
+  },
+  roomBoard: { flexGrow: 1, minHeight: 0 },
+  roomFull: { rowGap: grasp.space8 },
+  ringBox: {
+    position: "relative",
+    display: "block",
+    width: "100%",
+    height: "100%",
+  },
+  ringDrawing: {
+    display: "block",
+    width: "100%",
+    height: "100%",
+    transform: "rotate(-90deg)",
+  },
+  ringMiddle: {
+    position: "absolute",
+    inset: 0,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    textAlign: "center",
+    pointerEvents: "none",
+  },
+  figure: {
+    color: grasp.ink,
+    fontFamily: grasp.fontSans,
+    fontWeight: grasp.weightMedium,
+    fontVariantNumeric: "tabular-nums",
+  },
+  figureFull: { fontSize: grasp.titleMd, lineHeight: grasp.titleMdLine },
+  figureBoard: { fontSize: grasp.textLg, lineHeight: grasp.textLgLine },
+  // Under the figure on the board only once there is room for it.
+  wideOnly: { display: { default: "none", [WIDE]: "inline" } },
+  // The return: its ring beside what it comes to.
+  returnFull: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    columnGap: grasp.space10,
+    rowGap: grasp.space5,
+  },
+  returnBoard: {
+    display: "flex",
+    flexDirection: { default: "column", [WIDE]: "row" },
+    flexGrow: 1,
+    minHeight: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    columnGap: grasp.space8,
+    rowGap: grasp.space3,
+  },
+  returnRingFull: { flexShrink: 0, width: "12rem", height: "12rem" },
+  returnRingBoard: {
+    flexShrink: 0,
+    aspectRatio: "1",
+    height: { default: "7rem", [WIDE]: "100%" },
+    maxHeight: { default: null, [WIDE]: "13rem" },
+  },
+  pieces: { display: "flex", flexDirection: "column", minWidth: 0, margin: 0 },
+  piecesFull: { flexGrow: 1, flexBasis: "14rem" },
+  piecesBoard: {
+    width: { default: "100%", [WIDE]: "auto" },
+    flexGrow: { default: 0, [WIDE]: 1 },
+  },
+  piece: {
+    display: "flex",
+    alignItems: "center",
+    columnGap: grasp.space3,
+    paddingBlock: grasp.space3,
+    borderTopWidth: { default: grasp.hairline, ":first-child": 0 },
+    borderTopStyle: "solid",
+    borderTopColor: grasp.line,
+  },
+  pieceBoard: {
+    paddingBlock: { default: grasp.space2, [WIDE]: grasp.space4 },
+  },
+  pieceName: { flexGrow: 1, minWidth: 0, margin: 0 },
+  pieceNameFull: {
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+  },
+  pieceNameBoard: { textWrap: "pretty" },
+  pieceSays: {
+    flexShrink: 0,
+    margin: 0,
+    fontWeight: grasp.weightMedium,
+    fontVariantNumeric: "tabular-nums",
+  },
+  measured: { color: grasp.success },
+  figures: { fontVariantNumeric: "tabular-nums" },
+  quietFigures: { color: grasp.muted, fontVariantNumeric: "tabular-nums" },
+  strongFigures: {
+    fontWeight: grasp.weightMedium,
+    fontVariantNumeric: "tabular-nums",
+  },
+  workflowCell: {
+    display: "flex",
+    alignItems: "center",
+    columnGap: grasp.space3,
+    minWidth: 0,
+  },
+  // The goals: a ring for each, three abreast.
+  goalsFull: {
+    display: "grid",
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      [WIDER]: "repeat(3, minmax(0, 1fr))",
+    },
+    columnGap: grasp.space6,
+    rowGap: grasp.space8,
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  goalsBoard: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    alignContent: "center",
+    flexGrow: 1,
+    minHeight: 0,
+    columnGap: grasp.space4,
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  goal: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    rowGap: grasp.space3,
+    minWidth: 0,
+    textAlign: "center",
+  },
+  goalRingFull: { flexShrink: 0, width: "9rem", height: "9rem" },
+  goalRingBoard: {
+    flexShrink: 0,
+    aspectRatio: "1",
+    width: "100%",
+    maxWidth: "9rem",
+  },
+  goalTitle: { textWrap: "balance" },
+  goalTitleBoard: {
+    display: "-webkit-box",
+    WebkitBoxOrient: "vertical",
+    WebkitLineClamp: { default: 6, [WIDE]: 3 },
+    overflow: "hidden",
+  },
+  goalWorkflows: {
+    display: "flex",
+    flexDirection: "column",
+    width: "100%",
+    margin: 0,
+    padding: 0,
+    paddingBlockStart: grasp.space3,
+    listStyle: "none",
+    textAlign: "start",
+    borderTopWidth: grasp.hairline,
+    borderTopStyle: "solid",
+    borderTopColor: grasp.line,
+  },
+  goalWorkflow: {
+    display: "flex",
+    alignItems: "baseline",
+    columnGap: grasp.space3,
+    paddingBlock: grasp.space1,
+  },
+  goalWorkflowWords: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minWidth: 0,
+  },
+  legend: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "center",
+    columnGap: grasp.space5,
+    rowGap: grasp.space1,
+    color: grasp.muted,
+  },
+  legendItem: {
+    display: "flex",
+    alignItems: "center",
+    columnGap: grasp.space2,
+  },
+});
 
 export const Mark = ({ tone }: { tone: Tone }) => (
-  <span aria-hidden="true" className={marks[tone]} />
+  <span aria-hidden="true" {...stylex.props(styles.mark, toneFills[tone])} />
 );
-
-/** What a dot or a part of a bar is painted in, by what it stands for. */
-export const fills: Record<Tone, string> = {
-  live: "bg-status-agreed",
-  coming: "border border-status-agreed bg-return-expected",
-  rest: "bg-bar-manual",
-  attention: "bg-status-attention",
-};
-
-/** What a part of a ring is drawn in, by what it stands for. */
-const strokes: Record<Tone, string> = {
-  live: "stroke-status-agreed",
-  coming: "stroke-return-expected",
-  rest: "stroke-bar-manual",
-  attention: "stroke-status-attention",
-};
 
 /**
  * One part of a picture: what it stands for and how much of it it takes.
@@ -108,22 +306,17 @@ interface Piece {
 /** A ring's radius and its line's width, in the units it is drawn in (a box of 100). */
 const ring = { radius: 45, width: 8, gap: 1.6 };
 
-/** What a part says when it is pointed at. */
-const PieceSays = ({ piece }: { piece: Piece }) => (
-  <span className="flex flex-col text-left">
-    <span className="text-foreground font-medium">
-      {piece.name ?? piece.label}
-    </span>
-    {piece.name !== undefined && piece.label !== undefined ? (
-      <span>{piece.label}</span>
-    ) : null}
-    {piece.says === undefined ? null : (
-      <span className="tabular-nums">
-        {[piece.says, piece.per].filter(Boolean).join(" ")}
-      </span>
-    )}
-  </span>
-);
+/** What a part says when it is pointed at, one line under the other. */
+const pieceSays = (piece: Piece): string =>
+  [
+    piece.name ?? piece.label,
+    piece.name === undefined ? undefined : piece.label,
+    piece.says === undefined
+      ? undefined
+      : [piece.says, piece.per].filter(Boolean).join(" "),
+  ]
+    .filter((line) => line !== undefined)
+    .join("\n");
 
 /**
  * A ring: a whole in parts, each as long as its share, with room in its
@@ -147,65 +340,73 @@ const Ring = ({
     longs.slice(0, index).reduce((total, each) => total + each, 0)
   );
   return (
-    <span className="relative block size-full">
+    <span {...stylex.props(styles.ringBox)}>
       <svg
         aria-hidden="true"
-        className="size-full -rotate-90"
         viewBox="0 0 100 100"
+        {...stylex.props(styles.ringDrawing)}
       >
         {shown.map((piece, index) => (
-          <Tooltip key={index}>
-            <TooltipTrigger
-              render={
-                <circle
-                  className={strokes[piece.tone]}
-                  cx="50"
-                  cy="50"
-                  fill="none"
-                  r={ring.radius}
-                  strokeDasharray={`${Math.max((longs[index] ?? 0) - gap, 0.5)} ${round}`}
-                  strokeDashoffset={-(starts[index] ?? 0)}
-                  strokeWidth={ring.width}
-                />
-              }
-            />
-            <TooltipContent side="top" variant="quiet">
-              <PieceSays piece={piece} />
-            </TooltipContent>
-          </Tooltip>
+          <circle
+            cx="50"
+            cy="50"
+            fill="none"
+            key={index}
+            r={ring.radius}
+            strokeDasharray={`${Math.max((longs[index] ?? 0) - gap, 0.5)} ${round}`}
+            strokeDashoffset={-(starts[index] ?? 0)}
+            strokeWidth={ring.width}
+            {...stylex.props(toneStrokes[piece.tone])}
+          >
+            <title>{pieceSays(piece)}</title>
+          </circle>
         ))}
       </svg>
       {children === undefined ? null : (
-        <span className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
-          {children}
-        </span>
+        <span {...stylex.props(styles.ringMiddle)}>{children}</span>
       )}
     </span>
   );
 };
 
-/** What a widget says when it has nothing to show. */
-export const Nothing = ({ children }: { children: ReactNode }) => (
-  <p className="text-muted-foreground">{children}</p>
+/** The figure in a ring's middle, as large as the view it stands in. */
+const RingFigure = ({
+  full,
+  children,
+}: {
+  full: boolean;
+  children: ReactNode;
+}) => (
+  <span
+    {...stylex.props(
+      styles.figure,
+      full ? styles.figureFull : styles.figureBoard
+    )}
+  >
+    {children}
+  </span>
 );
 
-const dash = <span className="text-muted-foreground">—</span>;
+/** What a widget says when it has nothing to show. */
+export const Nothing = ({ children }: { children: ReactNode }) => (
+  <Text tone="muted">{children}</Text>
+);
+
+const dash = (
+  <Text element="span" tone="muted">
+    —
+  </Text>
+);
 
 /** A workflow's name, as the way to its page. */
-const WorkflowLink = ({
-  workflow,
-  className,
-}: {
-  workflow: ReturnWorkflow;
-  className: string;
-}) => (
-  <Link
-    className={className}
+const WorkflowLink = ({ workflow }: { workflow: ReturnWorkflow }) => (
+  <RouterLink
     params={{ workflow: workflow.id }}
     to="/workflows/$workflow"
+    variant="standalone"
   >
     {workflow.name}
-  </Link>
+  </RouterLink>
 );
 
 /** A workflow's mark by its return: green where it is measured, light green where it is expected, grey before. */
@@ -233,6 +434,66 @@ const byReturn = (rows: readonly WorkflowReturn[]): WorkflowReturn[] =>
         returnRank(a) - returnRank(b) ||
         (b.back ?? b.before ?? 0) - (a.back ?? a.before ?? 0)
     );
+
+/** Whether a workflow's return is measured: then it is said in green. */
+const isMeasured = (row: WorkflowReturn): boolean =>
+  row.stage === "live" && row.back !== null;
+
+/** In full, every counted workflow, in columns that say what they are, so no number has to be guessed at. */
+const ReturnTable = ({ rows }: { rows: readonly WorkflowReturn[] }) => (
+  <Table>
+    <TableHeader>
+      <TableRow>
+        <TableHead>
+          <Trans>Workflow</Trans>
+        </TableHead>
+        <TableHead align="end">
+          <Trans>By hand now</Trans>
+        </TableHead>
+        <TableHead align="end">
+          <Trans>With AI</Trans>
+        </TableHead>
+        <TableHead align="end">
+          <Trans context="column: the value of the hours that come free a month">
+            Return
+          </Trans>
+        </TableHead>
+      </TableRow>
+    </TableHeader>
+    <TableBody>
+      {rows.map((row) => (
+        <TableRow key={returnKey(row)}>
+          <TableCell lead>
+            <span {...stylex.props(styles.workflowCell)}>
+              <Mark tone={toneOfReturn(row)} />
+              <WorkflowLink workflow={row.workflow} />
+            </span>
+          </TableCell>
+          <TableCell align="end">
+            <span {...stylex.props(styles.figures)}>
+              {row.before === null ? dash : formatEuro(row.before)}
+            </span>
+          </TableCell>
+          <TableCell align="end">
+            <span {...stylex.props(styles.quietFigures)}>
+              {row.after === null ? dash : formatEuro(row.after)}
+            </span>
+          </TableCell>
+          <TableCell align="end">
+            <span
+              {...stylex.props(
+                styles.strongFigures,
+                isMeasured(row) && styles.measured
+              )}
+            >
+              {row.back === null ? dash : formatEuro(row.back)}
+            </span>
+          </TableCell>
+        </TableRow>
+      ))}
+    </TableBody>
+  </Table>
+);
 
 /**
  * The return in one look: what all the counted work costs by hand a
@@ -286,65 +547,51 @@ export const ReturnChartView = ({
     },
   ];
   return (
-    <>
+    <div
+      {...stylex.props(styles.room, full ? styles.roomFull : styles.roomBoard)}
+    >
       {/* The whole is what the counted work costs by hand; the ring says how much of it comes back. */}
-      <div
-        className={
-          full
-            ? "flex flex-wrap items-center gap-x-10 gap-y-5"
-            : "flex min-h-0 flex-1 flex-col items-center justify-center gap-x-8 gap-y-3 @sm:flex-row"
-        }
-      >
+      <div {...stylex.props(full ? styles.returnFull : styles.returnBoard)}>
         <span
-          className={
-            full
-              ? "size-48 flex-none"
-              : "aspect-square h-28 flex-none @sm:h-full @sm:max-h-52"
-          }
+          {...stylex.props(
+            full ? styles.returnRingFull : styles.returnRingBoard
+          )}
         >
           <Ring pieces={pieces}>
-            <Stat size={full ? "default" : "compact"}>{whole}</Stat>
-            <span
-              className={
-                full
-                  ? "text-muted-foreground"
-                  : "text-muted-foreground hidden @sm:inline"
-              }
+            <RingFigure full={full}>{whole}</RingFigure>
+            <Text
+              element="span"
+              layout={full ? undefined : styles.wideOnly}
+              tone="muted"
             >
               <Trans>by hand, a month</Trans>
-            </span>
+            </Text>
           </Ring>
         </span>
         <dl
-          className={
-            full
-              ? "flex min-w-0 flex-1 basis-56 flex-col"
-              : "flex w-full min-w-0 flex-col @sm:flex-1"
-          }
+          {...stylex.props(
+            styles.pieces,
+            full ? styles.piecesFull : styles.piecesBoard
+          )}
         >
           {pieces.map((piece) => (
             <div
-              className={
-                full
-                  ? "flex items-center gap-2.5 border-t py-2.5 first:border-t-0"
-                  : "flex items-center gap-2.5 border-t py-2 first:border-t-0 @sm:py-4"
-              }
               key={piece.tone}
+              {...stylex.props(styles.piece, !full && styles.pieceBoard)}
             >
               <Mark tone={piece.tone} />
               <dt
-                className={
-                  full
-                    ? "min-w-0 flex-1 truncate"
-                    : "min-w-0 flex-1 text-pretty"
-                }
+                {...stylex.props(
+                  styles.pieceName,
+                  full ? styles.pieceNameFull : styles.pieceNameBoard
+                )}
               >
                 {piece.label}
               </dt>
               <dd
-                className={cn(
-                  "flex-none font-medium tabular-nums",
-                  piece.tone === "live" && "text-status-agreed"
+                {...stylex.props(
+                  styles.pieceSays,
+                  piece.tone === "live" && styles.measured
                 )}
               >
                 {piece.says}
@@ -353,67 +600,8 @@ export const ReturnChartView = ({
           ))}
         </dl>
       </div>
-      {/* In full, every workflow, in columns that say what they are, so no number has to be guessed at. */}
-      {full ? (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>
-                <Trans>Workflow</Trans>
-              </TableHead>
-              <TableHead className="text-right">
-                <Trans>By hand now</Trans>
-              </TableHead>
-              <TableHead className="text-right">
-                <Trans>With AI</Trans>
-              </TableHead>
-              <TableHead className="text-right">
-                <Trans context="column: the value of the hours that come free a month">
-                  Return
-                </Trans>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((row) => (
-              <TableRow key={returnKey(row)}>
-                <TableCell>
-                  <span className="flex min-w-0 items-center gap-2.5">
-                    <Mark tone={toneOfReturn(row)} />
-                    <WorkflowLink
-                      className="min-w-0 truncate hover:underline"
-                      workflow={row.workflow}
-                    />
-                  </span>
-                </TableCell>
-                <TableCell className="text-right">
-                  <span className="tabular-nums">
-                    {row.before === null ? dash : formatEuro(row.before)}
-                  </span>
-                </TableCell>
-                <TableCell className="text-right">
-                  <span className="text-muted-foreground tabular-nums">
-                    {row.after === null ? dash : formatEuro(row.after)}
-                  </span>
-                </TableCell>
-                <TableCell className="text-right">
-                  <span
-                    className={cn(
-                      "font-medium tabular-nums",
-                      row.stage === "live" &&
-                        row.back !== null &&
-                        "text-status-agreed"
-                    )}
-                  >
-                    {row.back === null ? dash : formatEuro(row.back)}
-                  </span>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      ) : null}
-    </>
+      {full ? <ReturnTable rows={rows} /> : null}
+    </div>
   );
 };
 
@@ -433,6 +621,26 @@ const GoalReturn = ({ goal }: { goal: GoalProgress }) => {
     return t`${coming} expected return`;
   }
   return dash;
+};
+
+/** In full, which workflows a goal's count is of: each with its stage, and the way to it. */
+const GoalWorkflows = ({ rows }: { rows: readonly WorkflowReturn[] }) => {
+  const { i18n } = useLingui();
+  return (
+    <ul {...stylex.props(styles.goalWorkflows)}>
+      {rows.map((row) => (
+        <li key={returnKey(row)} {...stylex.props(styles.goalWorkflow)}>
+          <Mark tone={toneOfStage(row.stage)} />
+          <span {...stylex.props(styles.goalWorkflowWords)}>
+            <WorkflowLink workflow={row.workflow} />
+            <Text element="span" tone="muted">
+              {i18n._(stageLabel[row.stage])}
+            </Text>
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
 };
 
 /**
@@ -459,29 +667,20 @@ export const GoalListView = ({ goals }: { goals: readonly GoalProgress[] }) => {
     mapped: t`Only mapped`,
   };
   return (
-    <>
-      <ul
-        className={
-          full
-            ? "grid grid-cols-1 gap-x-6 gap-y-8 @md:grid-cols-3"
-            : "grid min-h-0 flex-1 grid-cols-3 content-center gap-x-4"
-        }
-      >
+    <div
+      {...stylex.props(styles.room, full ? styles.roomFull : styles.roomBoard)}
+    >
+      <ul {...stylex.props(full ? styles.goalsFull : styles.goalsBoard)}>
         {goals.map((goal) => {
           const { live } = goal;
           const count = goal.rows.length;
           const rows = furthestFirst(goal.rows);
           return (
-            <li
-              className="flex min-w-0 flex-col items-center gap-3 text-center"
-              key={goal.id}
-            >
+            <li key={goal.id} {...stylex.props(styles.goal)}>
               <span
-                className={
-                  full
-                    ? "size-36 flex-none"
-                    : "aspect-square w-full max-w-36 flex-none"
-                }
+                {...stylex.props(
+                  full ? styles.goalRingFull : styles.goalRingBoard
+                )}
               >
                 <Ring
                   pieces={rows.map((row) => ({
@@ -491,56 +690,32 @@ export const GoalListView = ({ goals }: { goals: readonly GoalProgress[] }) => {
                     label: i18n._(stageLabel[row.stage]),
                   }))}
                 >
-                  <Stat size={full ? "default" : "compact"}>
-                    {t`${live} of ${count}`}
-                  </Stat>
-                  <span
-                    className={
-                      full
-                        ? "text-muted-foreground"
-                        : "text-muted-foreground hidden @sm:inline"
-                    }
+                  <RingFigure full={full}>{t`${live} of ${count}`}</RingFigure>
+                  <Text
+                    element="span"
+                    layout={full ? undefined : styles.wideOnly}
+                    tone="muted"
                   >
                     <Trans context="how many of a goal's workflows are live, under the count">
                       live
                     </Trans>
-                  </span>
+                  </Text>
                 </Ring>
               </span>
               <span
-                className={
-                  full
-                    ? "text-balance"
-                    : "line-clamp-6 text-balance @sm:line-clamp-3"
-                }
+                {...stylex.props(
+                  styles.goalTitle,
+                  !full && styles.goalTitleBoard
+                )}
               >
                 {goal.title}
               </span>
               {full ? (
                 <>
-                  <span className="text-muted-foreground tabular-nums">
+                  <span {...stylex.props(styles.quietFigures)}>
                     <GoalReturn goal={goal} />
                   </span>
-                  {/* Which workflows the count is of: each with its stage, and the way to it. */}
-                  <ul className="flex w-full flex-col border-t pt-3 text-left">
-                    {rows.map((row) => (
-                      <li
-                        className="flex items-baseline gap-2.5 py-1"
-                        key={returnKey(row)}
-                      >
-                        <Mark tone={toneOfStage(row.stage)} />
-                        <span className="flex min-w-0 flex-1 flex-col">
-                          <WorkflowLink
-                            className="text-pretty hover:underline"
-                            workflow={row.workflow}
-                          />
-                          <span className="text-muted-foreground">
-                            {i18n._(stageLabel[row.stage])}
-                          </span>
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
+                  <GoalWorkflows rows={rows} />
                 </>
               ) : null}
             </li>
@@ -548,15 +723,15 @@ export const GoalListView = ({ goals }: { goals: readonly GoalProgress[] }) => {
         })}
       </ul>
       {full ? (
-        <span className="text-muted-foreground flex flex-wrap items-center justify-center gap-x-5 gap-y-1">
+        <span {...stylex.props(styles.legend)}>
           {(["live", "onTheWay", "mapped"] as const).map((way) => (
-            <span className="flex items-center gap-2" key={way}>
+            <span key={way} {...stylex.props(styles.legendItem)}>
               <Mark tone={toneOfWay[way]} />
               {label[way]}
             </span>
           ))}
         </span>
       ) : null}
-    </>
+    </div>
   );
 };

@@ -11,6 +11,7 @@ export type {
   Source,
   SourceAccess,
   SourceKind,
+  SourceMention,
   SourcePerson,
   SourcesLabels,
   SourceTranscriptLine,

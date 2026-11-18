@@ -1,8 +1,8 @@
 import "./styles.css";
 import { CSPProvider } from "@base-ui/react/csp-provider";
-import { Button } from "@grasp-os/ui/components/button";
 import { i18n } from "@lingui/core";
 import { I18nProvider, useLingui } from "@lingui/react";
+import * as stylex from "@stylexjs/stylex";
 import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -11,6 +11,9 @@ import { CoreConnection } from "./core-connection.ts";
 import { reportError, reportUncaughtErrors } from "./error-reports.ts";
 import { NotFound } from "./frame/page-states.tsx";
 import { PartWords } from "./frame/part-words.tsx";
+import { Button } from "./grasp/button/index.ts";
+import { Text } from "./grasp/text/index.ts";
+import { grasp } from "./grasp/tokens/tokens.stylex.ts";
 import { startI18n } from "./i18n.ts";
 import { RouteError } from "./route-error.tsx";
 import { routeTree } from "./routeTree.gen.ts";
@@ -35,7 +38,7 @@ const router = createRouter({
   context: { core },
   // The page's card scrolls on its own (frame/app-frame.tsx), so a new
   // page starts at the top of it, not only of the window.
-  scrollToTopSelectors: ['[data-slot="app-shell-content"]'],
+  scrollToTopSelectors: ['[data-slot="app-shell-page"]'],
   defaultErrorComponent: RouteError,
   defaultNotFoundComponent: () => <NotFound />,
 });
@@ -76,16 +79,28 @@ if (!root) {
  * as Grasp loaded), there is one thing left to say, and only English to
  * say it in.
  */
+const noWords = stylex.create({
+  page: {
+    display: "flex",
+    minHeight: "100svh",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: grasp.space4,
+    padding: grasp.space6,
+    textAlign: "center",
+  },
+});
+
 const NoWords = () => (
-  <main className="flex min-h-svh flex-col items-center justify-center gap-4 p-6 text-center">
-    <p className="text-muted-foreground text-sm">
+  <main {...stylex.props(noWords.page)}>
+    <Text size="sm" tone="muted">
       Grasp could not load. Check your connection and try again.
-    </p>
+    </Text>
     <Button
       onClick={() => {
         window.location.reload();
       }}
-      variant="outline"
     >
       Try again
     </Button>

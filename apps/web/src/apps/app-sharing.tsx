@@ -7,43 +7,49 @@ import type {
   ViewedApp,
 } from "@grasp-os/shared/apps";
 import type { Identity } from "@grasp-os/shared/rpc";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/ui/components/table";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+} from "../grasp/alert-dialog/index.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { Avatar } from "../grasp/avatar/index.ts";
+import { Folder, Icon, People } from "../grasp/icons/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { ShareAccess } from "../grasp/share-access/index.ts";
+import type { ShareCandidate } from "../grasp/share-access/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { roleLabel } from "../labels.ts";
 import { usePeopleApart } from "../people/people-apart.ts";
 import type { PeopleApart } from "../people/people-apart.ts";
-import { RoleSelect, SharePicker } from "../people/share-picker.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { buildsApp } from "./app-role.ts";
+import { useAppRead } from "./use-app-read.ts";
 
 // Sharing an App (an App's): whom it is open to besides its owner and
 // the admins, as a user (its pages) or a builder (its code, settings and
-// whom it is shared with), on its Members tab and from Share on its bar.
+// whom it is shared with), in its Settings' Sharing, on Grasp UI's Share
+// access: each member with their role at the row's end, and a picker of
+// the people, teams and projects core offers to add several at once.
+// Taking someone off asks first.
 // Its builders share it, change a role and unshare it; everyone with a role
 // in it sees whom it is shared with. Whom to share with comes from
 // `apps.members.candidates`: the organization's people and teams by name,
@@ -89,210 +95,246 @@ export const readMembers = async (
   app: string
 ): Promise<AppMember[]> => await session.apps.members.list(app);
 
-/**
- * Share: the organization's people and teams the App isn't shared with
- * yet, read when it opens, and the role to give whoever is picked.
- */
-export const ShareApp = ({
-  app,
-  members,
-}: {
-  app: App;
-  /** Whom it is shared with now, left out of the list; none while unknown. */
-  members: readonly AppMemberRef[];
-}) => {
-  const { t } = useLingui();
-  const router = useRouter();
-  const { busy, failure, run } = useCoreAction();
-  const [candidates, setCandidates] = useState<ShareCandidates>();
-  // Everyone in the organization, so someone is told apart from a
-  // namesake it is shared with already, or its owner.
-  const apart = usePeopleApart(candidates?.people ?? []);
-  const shared = new Set(members.map(({ type, id }) => `${type}:${id}`));
-  const isOffered = (type: AppMemberRef["type"], id: string): boolean =>
-    !shared.has(`${type}:${id}`) && !(type === "person" && id === app.owner);
-  const read = async (): Promise<void> => {
-    if (candidates !== undefined) {
-      return;
-    }
-    const listed = await run(
-      async (session) => await session.apps.members.candidates(app.id)
-    );
-    if (listed !== undefined) {
-      setCandidates(listed);
-    }
-  };
-  const share = async (member: AppMemberRef, role: AppRole): Promise<void> => {
-    await run(async (session) => {
-      await changeThenRefresh(
-        async () => {
-          await session.apps.members.add(app.id, { ...member, role });
-        },
-        async () => {
-          await router.invalidate({ sync: true });
-        }
-      );
-    });
-  };
-  const offered =
-    candidates === undefined
-      ? undefined
-      : {
-          people: candidates.people.filter(({ id }) => isOffered("person", id)),
-          teams: candidates.teams.filter(({ id }) => isOffered("team", id)),
-          // Only the projects the person builds: sharing with one reaches
-          // everyone in it, which its builders decide.
-          projects: candidates.projects.filter(({ id }) =>
-            isOffered("project", id)
-          ),
-        };
-  return (
-    <div className="flex flex-col items-end gap-1">
-      <SharePicker
-        disabled={busy}
-        failure={failure}
-        empty={<Trans>Nobody else to share with.</Trans>}
-        hintOf={apart.hint}
-        offered={offered}
-        onOpen={() => {
-          void read();
-        }}
-        onPick={(member, role) => {
-          void share(member, role);
-        }}
-        roleHeading={<Trans>Share as</Trans>}
-        roleName={t`Role to share with`}
-      >
-        {/* Its icon alone where its bar is narrow (frame/item-shell.tsx). */}
-        <span className="@max-4xl/bar:sr-only">
-          <Trans>Share</Trans>
-        </span>
-      </SharePicker>
-      <ErrorText>{failure}</ErrorText>
-    </div>
-  );
+const styles = stylex.create({
+  section: { display: "flex", flexDirection: "column", gap: grasp.space3 },
+});
+
+/** The roles to give, from least to most. */
+const roles: readonly AppRole[] = ["user", "builder"];
+
+/** Whom a member is: a person's face, or a team's or project's mark. */
+const Mark = ({ type, name }: { type: AppMemberRef["type"]; name: string }) => {
+  if (type === "person") {
+    return <Avatar decorative name={name} size="xs" />;
+  }
+  return <Icon icon={type === "team" ? People : Folder} />;
 };
 
-/** Someone the App is shared with: their role, and unsharing, for its builders. */
-const MemberRow = ({
+/** The words that say a member's kind, in the page's language. */
+const useMemberWords = (): MemberWords => {
+  const { t } = useLingui();
+  return {
+    team: (team) => t`${team} (team)`,
+    project: (project) => t`Everyone in ${project}`,
+    unnamedProject: t`Everyone in a project you aren’t in`,
+  };
+};
+
+/** A member's or a candidate's key: its kind and its ID, as Share access knows them. */
+const keyOf = ({ type, id }: AppMemberRef): string => `${type}:${id}`;
+
+/** The member a key names, back from Share access. */
+const refOf = (key: string): AppMemberRef | undefined => {
+  const [type, ...rest] = key.split(":");
+  const id = rest.join(":");
+  return type === "person" || type === "team" || type === "project"
+    ? { type, id }
+    : undefined;
+};
+
+/** Who the organization offers to share with: read when Sharing opens, for its builders. */
+const readCandidates = async (
+  session: Session,
+  app: string
+): Promise<ShareCandidates> => await session.apps.members.candidates(app);
+
+/** Everyone the App can be shared with, as Share access offers them. */
+const candidatesOf = (
+  offered: ShareCandidates,
+  owner: string,
+  apart: PeopleApart,
+  words: MemberWords
+): ShareCandidate[] => [
+  // Never the owner, who always opens it.
+  ...offered.people
+    .filter(({ id }) => id !== owner)
+    .map((person) => {
+      const note = apart.hint(person);
+      return {
+        id: keyOf({ type: "person", id: person.id }),
+        name: person.name,
+        kind: "person" as const,
+        ...(note === undefined ? {} : { note }),
+      };
+    }),
+  ...offered.teams.map((team) => ({
+    id: keyOf({ type: "team", id: team.id }),
+    name: words.team(team.name),
+    kind: "team" as const,
+  })),
+  // Only the projects the person builds: sharing with one reaches everyone
+  // in it, which its builders decide.
+  ...offered.projects.map((project) => ({
+    id: keyOf({ type: "project", id: project.id }),
+    name: words.project(project.name),
+    kind: "project" as const,
+  })),
+];
+
+/** Someone the App is shared with, for whoever only looks: their name and role. */
+const MemberRow = ({ name, member }: { name: string; member: AppMember }) => (
+  <Item size="sm">
+    <ItemMedia>
+      <Mark name={member.name ?? name} type={member.type} />
+    </ItemMedia>
+    <ItemContent>
+      <ItemTitle>{name}</ItemTitle>
+    </ItemContent>
+    <ItemActions>
+      <Text element="span" size="sm" tone="muted">
+        {roleLabel(member.role)}
+      </Text>
+    </ItemActions>
+  </Item>
+);
+
+/**
+ * Sharing, for its builders, on Grasp UI's Share access: who it is shared
+ * with at which role, a role to change at each row's end, and a picker of
+ * the organization's people, teams and projects to add several at once.
+ * Taking someone off asks first.
+ */
+const ShareWith = ({
   app,
-  member,
-  editable,
-  apart,
+  members,
+  named,
 }: {
   app: App;
-  member: AppMember;
-  editable: boolean;
-  /** Telling apart the people it is shared with of the same name. */
-  apart: PeopleApart;
+  members: readonly AppMember[];
+  named: (member: AppMember) => string;
 }) => {
   const { t } = useLingui();
   const router = useRouter();
-  const { busy, failure, run } = useCoreAction();
-  const name = memberName(
-    member,
-    {
-      team: (team) => t`${team} (team)`,
-      project: (project) => t`Everyone in ${project}`,
-      unnamedProject: t`Everyone in a project you aren’t in`,
-    },
-    apart
+  const words = useMemberWords();
+  const { failure, run } = useCoreAction();
+  const offered = useAppRead(app.id, readCandidates);
+  const [removing, setRemoving] = useState<AppMember>();
+  // Everyone in the organization, so someone is told apart from a
+  // namesake it is shared with already, or its owner.
+  const apart = usePeopleApart(
+    offered?.state === "ready" ? offered.data.people : []
   );
-  const ref: AppMemberRef = { type: member.type, id: member.id };
   const change = async (
-    action: (
-      session: Parameters<Parameters<typeof run>[0]>[0]
-    ) => Promise<unknown>
-  ): Promise<void> => {
+    action: (session: Session) => Promise<unknown>
+  ): Promise<boolean> => {
+    let done = false;
     await run(async (session) => {
       await changeThenRefresh(
         async () => {
           await action(session);
+          done = true;
         },
         async () => {
           await router.invalidate({ sync: true });
         }
       );
     });
+    return done;
   };
+  const gone = removing === undefined ? "" : named(removing);
   return (
-    <TableRow>
-      <TableCell variant="card">
-        <span className="flex flex-col">
-          {name}
-          <ErrorText>{failure}</ErrorText>
-        </span>
-      </TableCell>
-      <TableCell variant="card">
-        {editable ? (
-          <RoleSelect
-            disabled={busy}
-            label={t`Role of ${name}`}
-            onChange={(role) => {
-              void change(
-                async (session) =>
-                  await session.apps.members.add(app.id, { ...ref, role })
-              );
-            }}
-            role={member.role}
-          />
-        ) : (
-          roleLabel(member.role)
-        )}
-      </TableCell>
-      {editable ? (
-        <TableCell className="text-right" variant="card">
-          <AlertDialog>
-            <AlertDialogTrigger
-              disabled={busy}
-              render={
-                <Button
-                  aria-label={t`Stop sharing with ${name}`}
-                  size="sm"
-                  variant="ghost"
-                />
-              }
-            >
-              <Trans>Unshare</Trans>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>
-                  <Trans>Stop sharing with {name}?</Trans>
-                </AlertDialogTitle>
-                <AlertDialogDescription>
-                  <Trans>
-                    Their open pages of it stop within seconds, and they can no
-                    longer open it. You can share it with them again.
-                  </Trans>
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>
-                  <Trans>Cancel</Trans>
-                </AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={() => {
-                    void change(async (session) => {
-                      await session.apps.members.remove(app.id, ref);
-                    });
-                  }}
-                  variant="destructive"
-                >
-                  <Trans>Stop sharing</Trans>
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </TableCell>
+    <>
+      <ShareAccess
+        candidates={
+          offered?.state === "ready"
+            ? candidatesOf(offered.data, app.owner, apart, words)
+            : []
+        }
+        failedInviteLabel={t`Couldn't share`}
+        levels={roles.map((role) => ({ value: role, label: roleLabel(role) }))}
+        listLabel={t`Shared with`}
+        members={members.map((member) => ({
+          id: keyOf(member),
+          name: named(member),
+          kind: member.type === "team" ? "group" : member.type,
+          level: member.role,
+        }))}
+        onAdd={async (picked, level) => {
+          const role = roles.find((each) => each === level) ?? "user";
+          const refs = picked.ids.flatMap((id) => {
+            const ref = refOf(id);
+            return ref === undefined ? [] : [ref];
+          });
+          const done = await change(async (session) => {
+            for (const ref of refs) {
+              // oxlint-disable-next-line no-await-in-loop -- one share at a time, in the order picked
+              await session.apps.members.add(app.id, { ...ref, role });
+            }
+          });
+          if (!done) {
+            throw new Error("Not shared.");
+          }
+        }}
+        onLevelChange={(id, level) => {
+          const ref = refOf(id);
+          const role = roles.find((each) => each === level);
+          if (ref !== undefined && role !== undefined) {
+            void change(
+              async (session) =>
+                await session.apps.members.add(app.id, { ...ref, role })
+            );
+          }
+        }}
+        onRemove={(id) => {
+          setRemoving(members.find((member) => keyOf(member) === id));
+        }}
+      />
+      {offered !== undefined && offered.state !== "ready" ? (
+        <Alert
+          title={t`Who to share with couldn't be read. Try again in a moment.`}
+          variant="danger"
+        />
       ) : null}
-    </TableRow>
+      {failure === undefined ? null : (
+        <Alert title={failure} variant="danger" />
+      )}
+      <AlertDialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setRemoving(undefined);
+          }
+        }}
+        open={removing !== undefined}
+      >
+        <AlertDialogContent>
+          <AlertDialogTitle>{t`Stop sharing with ${gone}?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t`Their open pages of it stop within seconds, and they can no longer open it. You can share it with them again.`}
+          </AlertDialogDescription>
+          <AlertDialogFooter>
+            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+            <AlertDialogAction
+              action={async () => {
+                if (removing === undefined) {
+                  return;
+                }
+                const ref: AppMemberRef = {
+                  type: removing.type,
+                  id: removing.id,
+                };
+                const done = await change(async (session) => {
+                  await session.apps.members.remove(app.id, ref);
+                });
+                if (!done) {
+                  throw new Error("Still shared.");
+                }
+              }}
+              failedLabel={t`Couldn't stop sharing`}
+              variant="danger"
+            >
+              {t`Stop sharing`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 };
 
 /**
  * Who opens the App: its owner and the admins, who build it, and the
- * people and teams it is shared with, each as a user or a builder.
+ * people, teams and projects it is shared with, each as a user or a
+ * builder. Its builders share it here; everyone else only sees with whom.
  */
 export const AppMembers = ({
   app,
@@ -304,60 +346,40 @@ export const AppMembers = ({
   identity: Identity;
 }) => {
   const { t } = useLingui();
+  const words = useMemberWords();
   const editable = sharesApp(app, identity);
   const apart = usePeopleApart(
     members.flatMap(({ type, id, name }) =>
       type === "person" && name !== null ? [{ id, name }] : []
     )
   );
+  const named = (member: AppMember): string => memberName(member, words, apart);
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="text-muted-foreground">
-          {app.owner === identity.userId
-            ? t`Created by you. It opens for you, the admins, and whoever it is shared with.`
-            : t`It opens for the member who created it, the admins, and whoever it is shared with.`}
-        </p>
-        {editable ? <ShareApp app={app} members={members} /> : null}
-      </div>
+    <div {...stylex.props(styles.section)}>
+      <Text size="sm" tone="muted">
+        {app.owner === identity.userId
+          ? t`Created by you. It opens for you, the admins, and whoever it is shared with.`
+          : t`It opens for the member who created it, the admins, and whoever it is shared with.`}
+      </Text>
+      {editable ? (
+        <ShareWith app={app} members={members} named={named} />
+      ) : null}
       {members.length === 0 ? (
-        <p className="text-muted-foreground">
-          <Trans>It isn’t shared with anyone.</Trans>
-        </p>
-      ) : (
-        <div className="bg-card overflow-hidden rounded-xl border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead variant="card">
-                  <Trans>Shared with</Trans>
-                </TableHead>
-                <TableHead className="w-40" variant="card">
-                  <Trans>Role</Trans>
-                </TableHead>
-                {editable ? (
-                  <TableHead className="w-28" variant="card">
-                    <span className="sr-only">
-                      <Trans>Actions</Trans>
-                    </span>
-                  </TableHead>
-                ) : null}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {members.map((member) => (
-                <MemberRow
-                  apart={apart}
-                  app={app}
-                  editable={editable}
-                  key={`${member.type}:${member.id}`}
-                  member={member}
-                />
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
+        <Text size="sm" tone="muted">
+          {t`It isn’t shared with anyone.`}
+        </Text>
+      ) : null}
+      {!editable && members.length > 0 ? (
+        <ItemGroup aria-label={t`Shared with`} separated>
+          {members.map((member) => (
+            <MemberRow
+              key={keyOf(member)}
+              member={member}
+              name={named(member)}
+            />
+          ))}
+        </ItemGroup>
+      ) : null}
     </div>
   );
 };

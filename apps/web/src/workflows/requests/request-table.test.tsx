@@ -307,7 +307,7 @@ describe("the requests table", () => {
     const { switched } = await shown(pageOf(), []);
 
     await press(button("What people ask"));
-    const topics = [...document.querySelectorAll("li")].map(
+    const topics = [...document.querySelectorAll("tr")].map(
       (each) => each.textContent ?? ""
     );
     await press(button("People"));

@@ -1,19 +1,21 @@
 import type { Identity } from "@grasp-os/shared/rpc";
-import { Button } from "@grasp-os/ui/components/button";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useLocation, useNavigate, useRouter } from "@tanstack/react-router";
-import { XIcon } from "lucide-react";
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
 import { useActiveChat } from "../chat/active-chat.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Cross } from "../grasp/icons/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import {
   lineOf,
   pageOf,
   pointsAt,
   stopBeside,
   tourDue,
-  tourOffer,
   tourOpening,
   tourPages,
   tourStops,
@@ -22,7 +24,6 @@ import type { TourStop } from "./tour-script.ts";
 import {
   endTour,
   setTour,
-  startTour,
   tourAsked,
   tourBegun,
   tourOffered,
@@ -30,6 +31,33 @@ import {
   tourState,
   useTour,
 } from "./tour-state.ts";
+
+const styles = stylex.create({
+  // Stephen's card, in the window's corner, over the page: a popup's surface.
+  card: {
+    position: "fixed",
+    insetInlineEnd: grasp.space4,
+    insetBlockEnd: grasp.space4,
+    insetInlineStart: { default: "auto", [media.belowPhone]: grasp.space4 },
+    zIndex: 50,
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space3,
+    width: { default: "24rem", [media.belowPhone]: "auto" },
+    padding: grasp.space4,
+    borderRadius: grasp.corner,
+    backgroundColor: grasp.popupFill,
+    boxShadow: grasp.popupLift,
+    color: grasp.text,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    outline: "none",
+  },
+  head: { display: "flex", alignItems: "center", gap: grasp.space2 },
+  grow: { flexGrow: 1 },
+  line: { margin: 0 },
+  actions: { display: "flex", justifyContent: "flex-end", gap: grasp.space2 },
+});
 
 // Stephen's tour, in text, over the shell's pages, as the prototype tells
 // it (grasplabs/prototype `components/tour/tour-layer.tsx`) less his voice
@@ -135,76 +163,30 @@ const TourCard = ({
       data-tour-card=""
       ref={card}
       tabIndex={-1}
-      className="bg-popover text-popover-foreground ring-foreground/10 fixed right-4 bottom-4 left-4 z-50 flex flex-col gap-3 rounded-xl p-4 text-sm shadow-md ring-1 outline-none sm:left-auto sm:w-96"
+      {...stylex.props(styles.card)}
     >
-      <div className="flex items-center gap-2">
-        <span className="flex-1 font-medium">Stephen</span>
+      <div {...stylex.props(styles.head)}>
+        <Text element="span" weight="medium">
+          Stephen
+        </Text>
+        <span {...stylex.props(styles.grow)} />
         {progress === undefined ? null : (
-          <span className="text-muted-foreground text-xs">{progress}</span>
+          <Text element="span" size="xs" tone="muted">
+            {progress}
+          </Text>
         )}
         <Button
           aria-label={t`End the tour`}
+          icon={Cross}
           onClick={endTour}
-          size="icon-sm"
+          size="sm"
           variant="ghost"
-        >
-          <XIcon />
-        </Button>
+        />
       </div>
-      <p aria-live="polite">{line}</p>
-      <div className="flex justify-end gap-2">{children}</div>
-    </section>
-  );
-};
-
-/**
- * His offer, on the new chat, as the prototype makes it (grasplabs/
- * prototype `routes/index.tsx`): his question in the greeting's place,
- * in the greeting's serif, and its two answers under it, taking the tour
- * the page's one highlight. The page shows it while the tour is
- * `invited`, which the layer decides.
- */
-export const TourOffer = ({
-  userId,
-  headingId,
-  onDeclined,
-}: {
-  userId: string;
-  /** The new chat's heading's ID, which labels it: his question is it while he asks. */
-  headingId: string;
-  /** "Not now" was pressed: its button is gone, so the page moves focus on. */
-  onDeclined: () => void;
-}) => {
-  const { i18n, t } = useLingui();
-  const pathname = useLocation({ select: (location) => location.pathname });
-  return (
-    <section
-      aria-label={t`Tour of Grasp`}
-      className="flex flex-col items-center gap-6"
-    >
-      <h1 className="type-display" id={headingId}>
-        {i18n._(tourOffer.say)}
-      </h1>
-      <div className="flex flex-wrap justify-center gap-2">
-        <Button
-          onClick={() => {
-            startTour(userId, pathname);
-          }}
-          variant="highlight"
-        >
-          {i18n._(tourOffer.start)}
-        </Button>
-        <Button
-          onClick={() => {
-            tourOffered(userId);
-            endTour();
-            onDeclined();
-          }}
-          variant="ghost"
-        >
-          {i18n._(tourOffer.later)}
-        </Button>
-      </div>
+      <p aria-live="polite" {...stylex.props(styles.line)}>
+        {line}
+      </p>
+      <div {...stylex.props(styles.actions)}>{children}</div>
     </section>
   );
 };
@@ -314,6 +296,7 @@ export const TourLayer = ({ identity }: { identity: Identity }) => {
             tourBegun(userId);
             goTo(0);
           }}
+          variant="ink"
         >
           {i18n._(tourOpening.ready)}
         </Button>
@@ -341,6 +324,7 @@ export const TourLayer = ({ identity }: { identity: Identity }) => {
         onClick={() => {
           step(1);
         }}
+        variant="ink"
       >
         {last ? t({ message: "Done", context: "tour" }) : t`Next`}
       </Button>

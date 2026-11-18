@@ -1,8 +1,10 @@
 import type { Agent, AgentSettings, AgentWake } from "@grasp-os/shared/agents";
 import type { ToolClassAudience } from "@grasp-os/shared/connect";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
-import { Badge } from "@grasp-os/ui/components/badge";
 import { useLingui } from "@lingui/react/macro";
+
+import { Alert } from "../grasp/alert/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
 
 // What the Agents pages say of an agent at a glance (agents-overview.tsx,
 // agent-page.tsx): whether it is on, whom it answers, how much it may do
@@ -10,11 +12,11 @@ import { useLingui } from "@lingui/react/macro";
 // (`connections.agents`, `agentSettings`, `agentWakes`), never worked out
 // anew here.
 
-/** Whether an agent answers, as a badge: filled while it is on. */
+/** Whether an agent answers, as a badge: green while it is on. */
 export const AgentStateBadge = ({ state }: { state: Agent["state"] }) => {
   const { t } = useLingui();
   return (
-    <Badge variant={state === "on" ? "default" : "outline"}>
+    <Badge size="sm" tone={state === "on" ? "success" : "neutral"}>
       {state === "on" ? t`On` : t`Paused`}
     </Badge>
   );
@@ -59,3 +61,7 @@ export const nextWakeAt = (wakes: readonly AgentWake[]): string | undefined =>
     .flatMap(({ nextAt }) => (nextAt === null ? [] : [nextAt]))
     .toSorted()
     .at(0);
+
+/** Why a change to an agent failed, where it was asked; nothing when it didn't. */
+export const AgentFailure = ({ children }: { children: string | undefined }) =>
+  children === undefined ? null : <Alert title={children} variant="danger" />;

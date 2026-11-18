@@ -224,10 +224,29 @@ const opened = async (
 };
 
 /** The App's name field, in General. */
-const nameField = (): HTMLInputElement | null =>
-  document.querySelector<HTMLInputElement>("#app-name");
+/** The field its label names `label`, as a person finds it. */
+const fieldLabelled = (label: string): HTMLInputElement | null => {
+  const named = [...document.querySelectorAll("label")].find(
+    (each) => each.firstChild?.textContent?.trim() === label
+  );
+  const id = named?.htmlFor;
+  return id === undefined || id === ""
+    ? null
+    : document.querySelector<HTMLInputElement>(`[id="${id}"]`);
+};
 
-const nameOf = (element: HTMLElement): string => element.textContent.trim();
+const nameField = (): HTMLInputElement | null => fieldLabelled("Name");
+
+/** What an element says, without a button's hidden words for working or failed. */
+const nameOf = (element: HTMLElement): string => {
+  const copy = element.cloneNode(true);
+  if (copy instanceof HTMLElement) {
+    for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) {
+      hidden.remove();
+    }
+  }
+  return copy.textContent?.trim() ?? "";
+};
 
 const button = (name: string): HTMLButtonElement | undefined =>
   [...document.querySelectorAll("button")].find(
@@ -319,7 +338,7 @@ describe(AppSettings, () => {
   it("shows someone who uses the App its settings to read, and nothing to change", async () => {
     await opened(fakeCore("user"));
 
-    const name = document.querySelector<HTMLInputElement>("#app-name");
+    const name = nameField();
     expect({
       name: name?.value,
       readOnly: name?.readOnly,
@@ -357,7 +376,17 @@ describe(AppSettings, () => {
     await opened(fake, "page", "sharing");
     const before = document.body.textContent.includes("Ann");
 
-    await press("Stop sharing with Ann");
+    // Taking Ann off, from the role at her row's end, asks first.
+    await press("Access for Ann");
+    const remove = [...document.querySelectorAll("[role=option]")].find(
+      (each) => each instanceof HTMLElement && nameOf(each) === "Remove"
+    );
+    await act(async () => {
+      if (remove instanceof HTMLElement) {
+        remove.click();
+      }
+      await Promise.resolve();
+    });
     await press("Stop sharing");
 
     expect({
@@ -394,7 +423,7 @@ describe(AppSettings, () => {
     await opened(fakeCore("builder", { surfacesRefused: true }));
 
     expect({
-      name: document.querySelector<HTMLInputElement>("#app-name")?.value,
+      name: nameField()?.value,
       sections: sections().map(({ name }) => name),
     }).toStrictEqual({
       name: "Invoices",

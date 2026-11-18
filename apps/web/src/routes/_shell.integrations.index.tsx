@@ -1,28 +1,19 @@
-import type { ListedConnection } from "@grasp-os/shared/connect";
+import type { CatalogTool } from "@grasp-os/shared/connect";
 import { catalogGroups } from "@grasp-os/shared/connect-names";
 import type { CatalogGroup } from "@grasp-os/shared/connect-names";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { Button } from "@grasp-os/ui/components/button";
+import type { ConnectionWorkflows } from "@grasp-os/shared/workflows";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@grasp-os/ui/components/input-group";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg, plural } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { Await, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { PlusIcon, SearchIcon } from "lucide-react";
-import { useState } from "react";
+  Await,
+  createFileRoute,
+  Link,
+  useNavigate,
+} from "@tanstack/react-router";
+import { useEffect, useRef, useState } from "react";
 
 import { connectionErrorMessage } from "../connection-errors.ts";
 import { ConnectedDialog } from "../connections/connected-dialog.tsx";
@@ -31,90 +22,125 @@ import {
   HttpConnections,
   httpConnectionsMatching,
 } from "../connections/http-connections.tsx";
-import { IntegrationRow } from "../connections/integration-row.tsx";
-import { IntegrationsBanner } from "../connections/integrations-banner.tsx";
+import { IntegrationInspector } from "../connections/integration-inspector.tsx";
+import { IntegrationTile, TileGrid } from "../connections/integration-tile.tsx";
 import { loadIntegrations } from "../connections/integrations-data.ts";
-import { IntegrationsSection } from "../connections/integrations-section.tsx";
 import {
-  filterCounts,
+  IntegrationsNerves,
+  LINES,
+} from "../connections/integrations-nerves.tsx";
+import {
   integrationsOf,
-  roundedDown,
   sectionsOf,
+  stateOf,
 } from "../connections/integrations.ts";
 import type {
   Integration,
-  IntegrationFilter,
   IntegrationSections,
 } from "../connections/integrations.ts";
 import { RequestAppDialog } from "../connections/request-app-dialog.tsx";
 import { RequestedApps } from "../connections/requested-apps.tsx";
 import { RevocationsByHand } from "../connections/revocations-by-hand.tsx";
 import type { ConnectionUses } from "../connections/workflows-using.tsx";
-import { ErrorText } from "../error-text.tsx";
+import type { CoreConnection } from "../core-connection.ts";
 import { formatNumber } from "../format.ts";
 import { PageLoading } from "../frame/page-states.tsx";
-import { PageHeading } from "../frame/page.tsx";
+import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { Alert } from "../grasp/alert/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Empty, EmptyDescription, EmptyHeader } from "../grasp/empty/index.ts";
+import { visuallyHidden } from "../grasp/hidden/hidden.ts";
+import { ArrowLeft, Plus, Search as SearchIcon } from "../grasp/icons/index.ts";
+import {
+  InputGroup,
+  InputGroupClear,
+  InputGroupInput,
+  InputGroupText,
+} from "../grasp/input-group/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { SectionHeader } from "../grasp/section-header/index.ts";
+import { Sheet, SheetContent, SheetTitle } from "../grasp/sheet/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import type { Loaded } from "../load-from-core.tsx";
 
-// Integrations, as in the prototype (`routes/integrations/index.tsx`): one
-// column of lists by where each app stands. First what someone has to
-// sign in to again (the prototype's first list, what is still to connect,
-// Grasp can't tell: its workflows name connections), then what is
-// connected and used, what is connected though no workflow uses it, and
-// what was asked for; then the catalog's other apps, some 1,500 in all,
-// drawn as they come near. One control filters them all, to what is
-// connected or to one kind of app, and the search narrows them; both are
-// in the address. Each app opens its own page, where it is connected and
-// managed. Core's callback sends a flow that failed back here, with
-// `connectionError=<code>`.
+// Integrations: what Grasp can reach, at a glance. First what is connected,
+// on one card: a brain in dots with a nerve into it for every connected
+// app (integrations-nerves.tsx), live, and under it a tile for each, with
+// the app's own mark and one fact (to sign in to again, first, then how
+// many workflows use it). Then every other app Grasp can connect to,
+// grouped by kind, a few of each with the rest a press away, chosen by its
+// mark; one search narrows both. An app opens beside the list, in the
+// Inspector pattern (a Sheet on a phone), with what Grasp may do in it,
+// who connected it and the workflows that use it; everything rarely
+// changed stays on its own page. Outside APIs an admin approved, the apps
+// people asked for and what an admin still has to revoke by hand follow.
+// Core's callback sends a flow that failed back here with
+// `connectionError=<code>`, and one that worked with `connection=<id>`.
 
-/** What the address holds: the search, the filter, and a failed flow's code. */
+/** What the address holds. */
 interface IntegrationsSearch {
   q?: string;
-  show?: "connected";
+  /** One kind of app, all of it, in place of a few of each. */
   group?: CatalogGroup;
+  /** The app open beside the list, by its key. */
+  app?: string;
   connectionError?: string;
   /** A connection a flow just made, when core sent it back here. */
   connection?: string;
 }
 
-/**
- * How many of the catalog's apps are drawn at first, and with every step
- * further down: the list is some 1,500 long.
- */
+/** How many of a kind's apps show before "Show all", where every kind shows. */
+const perKind = 6;
+
+/** How many apps are drawn at first, and with every step further down. */
 const step = 80;
 
-const filterOf = ({ show, group }: IntegrationsSearch): IntegrationFilter => {
-  if (show !== undefined) {
-    return { show };
-  }
-  return group === undefined ? { show: "all" } : { show: "group", group };
-};
+/**
+ * How wide the page's own box must be for the app beside the list: the
+ * panel, the gap, and room for two columns of tiles.
+ */
+const WIDE = 60 * 16;
 
-/** The search for `choice`, keeping what was searched for. */
-const searchFor = (
-  choice: IntegrationFilter,
-  q: string | undefined
-): IntegrationsSearch => {
-  const kept = q === undefined ? {} : { q };
-  if (choice.show === "group") {
-    return { ...kept, group: choice.group };
-  }
-  return choice.show === "all" ? kept : { ...kept, show: choice.show };
-};
-
-const sameFilter = (one: IntegrationFilter, other: IntegrationFilter) =>
-  one.show === other.show &&
-  (one.show !== "group" ||
-    (other.show === "group" && one.group === other.group));
-
-interface Choice {
-  id: string;
-  filter: IntegrationFilter;
-  label: string;
-  count: number;
-}
+const styles = stylex.create({
+  // The lists, and the app beside them while one is open.
+  split: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    columnGap: grasp.space6,
+    alignItems: "start",
+  },
+  open: {
+    gridTemplateColumns: `minmax(0, 1fr) ${grasp.inspectorWidth}`,
+  },
+  lists: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space6,
+    minWidth: 0,
+  },
+  // The app stays in view beside the list, as tall as the window lets it
+  // be, and scrolls inside.
+  aside: {
+    position: "sticky",
+    insetBlockStart: grasp.space4,
+    height: `calc(100dvh - 2 * ${grasp.space8})`,
+    minHeight: 0,
+  },
+  fill: { height: "100%" },
+  // The brain and its nerves: room for the drawing, which fills it.
+  nerves: {
+    position: "relative",
+    height: "9rem",
+    marginBlockEnd: grasp.space3,
+  },
+  kinds: { display: "flex", flexDirection: "column", gap: grasp.space6 },
+  kind: { display: "flex", flexDirection: "column", gap: grasp.space2 },
+  more: { alignSelf: "start" },
+  mark: { display: "block", height: "1px" },
+});
 
 /** The search, in the address as it is typed. */
 const Search = ({ q }: { q: string | undefined }) => {
@@ -122,7 +148,7 @@ const Search = ({ q }: { q: string | undefined }) => {
   const navigate = useNavigate({ from: "/integrations/" });
   const [text, setText] = useState(q ?? "");
   // The search the address had when the box last followed it: a new one
-  // from elsewhere (the filter, back) replaces what the box shows.
+  // from elsewhere (back) replaces what the box shows.
   const [followed, setFollowed] = useState(q);
   if (q !== followed) {
     setFollowed(q);
@@ -132,10 +158,10 @@ const Search = ({ q }: { q: string | undefined }) => {
   }
   return (
     <InputGroup>
+      <InputGroupText icon={SearchIcon} />
       <InputGroupInput
         aria-label={t`Search integrations`}
-        onChange={(event) => {
-          const typed = event.target.value;
+        onValueChange={(typed) => {
           setText(typed);
           void navigate({
             replace: true,
@@ -149,97 +175,148 @@ const Search = ({ q }: { q: string | undefined }) => {
         type="search"
         value={text}
       />
-      <InputGroupAddon>
-        <SearchIcon />
-      </InputGroupAddon>
+      <InputGroupClear aria-label={t`Clear search`} />
     </InputGroup>
   );
 };
 
-/** The rows of one list. */
-const Rows = ({
-  integrations,
-  identity,
-  uses,
-}: {
-  integrations: readonly Integration[];
-  identity: Identity;
-  uses: ConnectionUses;
-}) =>
-  integrations.map((integration) => (
-    <IntegrationRow
-      identity={identity}
-      integration={integration}
-      key={integration.key}
-      uses={uses}
-    />
-  ));
+/** Whether the page's own box is wide enough for the app beside the list; true until measured. */
+const useWide = () => {
+  const box = useRef<HTMLDivElement>(null);
+  const [wide, setWide] = useState(true);
+  useEffect(() => {
+    const element = box.current;
+    if (element === null || typeof ResizeObserver === "undefined") {
+      return () => {
+        // Nothing was watched.
+      };
+    }
+    const watch = new ResizeObserver(([entry]) => {
+      setWide((entry?.contentRect.width ?? 0) >= WIDE);
+    });
+    watch.observe(element);
+    return () => {
+      watch.disconnect();
+    };
+  }, []);
+  return { box, wide };
+};
+
+/** An app's tools, as one read of them: the same read each time it opens. */
+interface ToolsRead {
+  tools: Promise<Loaded<CatalogTool[]>>;
+}
+
+/** Each app's tools, read once a tab first opens it, kept for as long as the tab is. */
+const toolsRead = new WeakMap<CoreConnection, Map<string, ToolsRead>>();
 
 /**
- * The company's own apps, by where they stand: to sign in to again,
- * connected and used, and connected though no workflow uses them. Which
- * workflows use what comes on its own (`uses`); until it does, every
- * connected app is under Connected.
+ * `integration`'s tools: read now, or the read from before, so the panel
+ * waits for one read, not a new one with every render.
  */
-const OwnSections = ({
+const toolsOf = (core: CoreConnection, integration: Integration): ToolsRead => {
+  const known = toolsRead.get(core) ?? new Map<string, ToolsRead>();
+  toolsRead.set(core, known);
+  const read = known.get(integration.key) ?? {
+    tools: loadFromCore(
+      core,
+      async (session) =>
+        await session.connections.catalogTools(
+          integration.source,
+          integration.id
+        )
+    ),
+  };
+  known.set(integration.key, read);
+  return read;
+};
+
+/** What is connected, every app this person can see, its nerve and its tile. */
+const Connected = ({
   sections,
-  identity,
   uses,
+  open,
 }: {
   sections: IntegrationSections;
-  identity: Identity;
-  uses: ConnectionUses;
+  uses: readonly ConnectionWorkflows[] | undefined;
+  open: string | undefined;
 }) => {
   const { t } = useLingui();
+  const navigate = useNavigate({ from: "/integrations/" });
+  // To sign in to again first: the one thing here to act on.
+  const shown = [...sections.lapsed, ...sections.connected, ...sections.unused];
+  const lines = shown.slice(0, LINES).map((integration) => ({
+    id: integration.key,
+    attention: stateOf(integration) === "needs_reauth",
+  }));
+  const title = t({
+    message: "Connected",
+    context: "apps that are connected",
+  });
   return (
-    <>
-      <IntegrationsSection
-        count={sections.lapsed.length}
-        id="lapsed"
-        title={t`Needs someone to sign in again`}
-      >
-        <Rows identity={identity} integrations={sections.lapsed} uses={uses} />
-      </IntegrationsSection>
-      <IntegrationsSection
-        count={sections.connected.length}
-        id="connected"
-        title={t({
-          message: "Connected",
-          context: "apps that are connected and that workflows use",
-        })}
-      >
-        <Rows
-          identity={identity}
-          integrations={sections.connected}
-          uses={uses}
-        />
-      </IntegrationsSection>
-      <IntegrationsSection
-        count={sections.unused.length}
-        id="unused"
-        title={t`Connected, used by no workflow you can open`}
-      >
-        <Rows identity={identity} integrations={sections.unused} uses={uses} />
-      </IntegrationsSection>
-    </>
+    <SectionCard
+      aside={
+        shown.length === 0 ? undefined : (
+          <Text element="span" size="sm" tone="muted">
+            {formatNumber(shown.length)}
+          </Text>
+        )
+      }
+      density="compact"
+      title={title}
+    >
+      {shown.length === 0 ? (
+        // Nothing connected: one quiet line, as small as the library's
+        // empty gets in a card; the brain shows once it has a nerve to draw.
+        <Empty size="sm">
+          <EmptyHeader>
+            <EmptyDescription>
+              {t`Nothing connected yet. Choose an app below to connect it.`}
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : (
+        <>
+          <div {...stylex.props(styles.nerves)}>
+            <IntegrationsNerves
+              lines={lines}
+              onHold={() => {
+                // The app's tile says its name: nothing to show over the drawing.
+              }}
+              onOpen={(id) => {
+                void navigate({
+                  resetScroll: false,
+                  search: (last) => ({ ...last, app: id }),
+                });
+              }}
+            />
+          </div>
+          <TileGrid label={title}>
+            {shown.map((integration) => (
+              <IntegrationTile
+                integration={integration}
+                key={integration.key}
+                open={integration.key === open}
+                uses={uses}
+              />
+            ))}
+          </TileGrid>
+        </>
+      )}
+    </SectionCard>
   );
 };
 
-/**
- * The catalog's other apps, some 1,500: only the first are drawn, and more
- * as the reader nears the end, so the page opens at once and their logos
- * are fetched as they come into view.
- */
-const MoreApps = ({
-  others,
-  identity,
-  uses,
+/** A run of apps, the first `step` drawn and more as the reader nears its end. */
+const Drawn = ({
+  integrations,
+  label,
+  open,
 }: {
-  others: readonly Integration[];
-  identity: Identity;
-  uses: ConnectionUses;
+  integrations: readonly Integration[];
+  label: string;
+  open: string | undefined;
 }) => {
-  const { t } = useLingui();
   const [drawn, setDrawn] = useState(step);
   // The end of what is drawn: once it is near the page, well before it
   // shows, more is drawn. It is a new mark after every step, so it is
@@ -264,144 +341,161 @@ const MoreApps = ({
   };
   return (
     <>
-      <IntegrationsSection
-        about={t`Every other app Grasp can connect to.`}
-        count={others.length}
-        id="more"
-        title={t({
-          message: "More apps",
-          context: "the catalog's apps nobody connected",
-        })}
-      >
-        <Rows
-          identity={identity}
-          integrations={others.slice(0, drawn)}
-          uses={uses}
+      <TileGrid label={label}>
+        {integrations.slice(0, drawn).map((integration) => (
+          <IntegrationTile
+            integration={integration}
+            key={integration.key}
+            open={integration.key === open}
+          />
+        ))}
+      </TileGrid>
+      {integrations.length > drawn ? (
+        <span
+          aria-hidden="true"
+          key={drawn}
+          ref={watch}
+          {...stylex.props(styles.mark)}
         />
-      </IntegrationsSection>
-      {others.length > drawn ? (
-        <span aria-hidden="true" className="h-px" key={drawn} ref={watch} />
       ) : null}
     </>
   );
 };
 
-/**
- * How many HTTP connections show under `filter` and the search `q`: they
- * list apart, under every filter but a kind of app.
- */
-const httpShownUnder = (
-  filter: IntegrationFilter,
-  connections: readonly ListedConnection[],
-  q: string | undefined
-): number =>
-  filter.show === "group" ? 0 : httpConnectionsMatching(connections, q).length;
-
-/**
- * The filters to choose from, each with how many apps it holds: All and
- * Connected count HTTP connections too, as both list them.
- */
-const useChoices = (
-  integrations: Integration[],
-  connections: readonly ListedConnection[]
-): Choice[] => {
-  const { t, i18n } = useLingui();
-  const counts = filterCounts(integrations, connections);
-  return [
-    {
-      id: "all",
-      filter: { show: "all" },
-      label: t({ message: "All", context: "filter: every integration" }),
-      count: counts.all,
-    },
-    {
-      id: "connected",
-      filter: { show: "connected" },
-      label: t({
-        message: "Connected",
-        context: "filter: the integrations that are connected",
-      }),
-      count: counts.connected,
-    },
-    ...catalogGroups.map((group) => ({
-      id: `group:${group}`,
-      filter: { show: "group" as const, group },
-      label: i18n._(groupLabel[group]),
-      count: counts.groups.get(group) ?? 0,
-    })),
-  ];
-};
-
-const emptyTexts = {
-  search: msg`No integrations match your search.`,
-  connected: msg`Nothing connected yet.`,
-  other: msg`Nothing here yet.`,
-} as const;
-
-/** Why nothing shows: a search or filter that matches nothing, or nothing connected yet. */
-const emptyTextOf = (
-  filter: IntegrationFilter,
-  q: string | undefined
-): MessageDescriptor => {
-  if (q !== undefined) {
-    return emptyTexts.search;
-  }
-  if (filter.show === "connected") {
-    return emptyTexts.connected;
-  }
-  return emptyTexts.other;
-};
-
-/** A filter as the one control says it: its name and count. */
-const labelOf = (choice: Choice): string =>
-  `${choice.label} · ${formatNumber(choice.count)}`;
-
-/** The filters, as one control: a row of them would be several pages wide. */
-const FilterSelect = ({
-  choices,
-  filter,
-  q,
+/** Every kind of app, a few of each, with the rest of a kind a press away. */
+const Kinds = ({
+  others,
+  open,
 }: {
-  choices: Choice[];
-  filter: IntegrationFilter;
-  q: string | undefined;
+  others: readonly Integration[];
+  open: string | undefined;
 }) => {
-  const { t } = useLingui();
-  const navigate = useNavigate({ from: "/integrations/" });
-  const selected =
-    choices.find((choice) => sameFilter(choice.filter, filter)) ?? choices[0];
+  const { t, i18n } = useLingui();
   return (
-    <Select
-      items={choices.map((choice) => ({
-        value: choice.id,
-        label: labelOf(choice),
-      }))}
-      onValueChange={(value) => {
-        const choice = choices.find(({ id }) => id === value);
-        if (choice !== undefined) {
-          void navigate({ search: searchFor(choice.filter, q) });
+    <div {...stylex.props(styles.kinds)}>
+      {catalogGroups.map((group) => {
+        const ofKind = others.filter(
+          (integration) => integration.group === group
+        );
+        if (ofKind.length === 0) {
+          return null;
         }
-      }}
-      value={selected?.id}
-    >
-      <SelectTrigger aria-label={t`Filter integrations`} className="w-full">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectGroup>
-          {choices.map((choice) => (
-            <SelectItem key={choice.id} value={choice.id}>
-              {labelOf(choice)}
-            </SelectItem>
-          ))}
-        </SelectGroup>
-      </SelectContent>
-    </Select>
+        const label = i18n._(groupLabel[group]);
+        const count = ofKind.length;
+        return (
+          <section key={group} {...stylex.props(styles.kind)}>
+            <SectionHeader
+              aside={
+                <Text element="span" size="sm" tone="muted">
+                  {formatNumber(count)}
+                </Text>
+              }
+              headingLevel={3}
+              size="sm"
+              title={label}
+            />
+            <TileGrid label={label}>
+              {ofKind.slice(0, perKind).map((integration) => (
+                <IntegrationTile
+                  integration={integration}
+                  key={integration.key}
+                  open={integration.key === open}
+                />
+              ))}
+            </TileGrid>
+            {count > perKind ? (
+              <Button
+                layout={styles.more}
+                render={
+                  <Link
+                    search={(last) => ({ ...last, group })}
+                    to="/integrations"
+                  />
+                }
+                size="sm"
+                variant="ghost"
+              >
+                {t`${plural(count, { one: `Show the # app in ${label}`, other: `Show all # in ${label}` })}`}
+              </Button>
+            ) : null}
+          </section>
+        );
+      })}
+    </div>
   );
 };
 
 /**
- * The success page for the connection a flow just made, once core sent
+ * Every other app Grasp can connect to: every kind, a few of each; one
+ * kind whole; or, while someone searches, what the search finds.
+ */
+const AddMore = ({
+  others,
+  group,
+  q,
+  open,
+}: {
+  others: readonly Integration[];
+  group: CatalogGroup | undefined;
+  q: string | undefined;
+  open: string | undefined;
+}) => {
+  const { t, i18n } = useLingui();
+  const ofKind =
+    group === undefined
+      ? others
+      : others.filter((integration) => integration.group === group);
+  const title =
+    group === undefined
+      ? t({ message: "Add more", context: "apps that can still be connected" })
+      : i18n._(groupLabel[group]);
+  if (others.length === 0) {
+    return null;
+  }
+  return (
+    <SectionCard
+      actions={
+        group === undefined ? undefined : (
+          <Button
+            icon={ArrowLeft}
+            render={
+              <Link
+                search={(last) => ({ ...last, group: undefined })}
+                to="/integrations"
+              />
+            }
+            size="sm"
+            variant="ghost"
+          >
+            {t`Every kind`}
+          </Button>
+        )
+      }
+      aside={
+        <Text element="span" size="sm" tone="muted">
+          {formatNumber(ofKind.length)}
+        </Text>
+      }
+      density="compact"
+      title={title}
+    >
+      {/* Mounted anew for another search or kind, so it starts at its first apps again. */}
+      {q === undefined && group === undefined ? (
+        <Kinds open={open} others={others} />
+      ) : (
+        <Drawn
+          integrations={ofKind}
+          key={`${group ?? ""}·${q ?? ""}`}
+          label={title}
+          open={open}
+        />
+      )}
+    </SectionCard>
+  );
+};
+
+/**
+ * The success dialog for the connection a flow just made, once core sent
  * the browser back here with it. Only a connection the page lists: anyone
  * can put an ID in a link.
  */
@@ -434,26 +528,88 @@ const Returned = ({
   );
 };
 
+/** The open app: beside the list, or in a Sheet where the page is narrow. */
+const Details = ({
+  integration,
+  identity,
+  uses,
+  core,
+  wide,
+}: {
+  integration: Integration;
+  identity: Identity;
+  uses: ConnectionUses;
+  core: CoreConnection;
+  wide: boolean;
+}) => {
+  const { t } = useLingui();
+  const navigate = useNavigate({ from: "/integrations/" });
+  const close = () => {
+    void navigate({
+      resetScroll: false,
+      search: (last) => ({ ...last, app: undefined }),
+    });
+  };
+  const tools = integration.listed
+    ? toolsOf(core, integration).tools
+    : undefined;
+  if (wide) {
+    return (
+      <div {...stylex.props(styles.aside)}>
+        <IntegrationInspector
+          framed
+          identity={identity}
+          integration={integration}
+          layout={styles.fill}
+          onClose={close}
+          tools={tools}
+          uses={uses}
+        />
+      </div>
+    );
+  }
+  return (
+    <Sheet
+      onOpenChange={(open: boolean) => {
+        if (!open) {
+          close();
+        }
+      }}
+      open
+    >
+      <SheetContent closeLabel={t`Close`}>
+        {/* Named for a screen reader only: the panel's own head says its name. */}
+        <SheetTitle hidden>{integration.name}</SheetTitle>
+        {/* Its own close: the hidden title draws no bar to hold the Sheet's. */}
+        <IntegrationInspector
+          framed={false}
+          identity={identity}
+          integration={integration}
+          onClose={close}
+          tools={tools}
+          uses={uses}
+        />
+      </SheetContent>
+    </Sheet>
+  );
+};
+
 const Integrations = () => {
   const { catalog, connections, requests, toRevoke, uses } =
     Route.useLoaderData();
-  const { identity } = Route.useRouteContext();
-  const search = Route.useSearch();
-  const { q, connectionError, connection } = search;
-  const { t, i18n } = useLingui();
+  const { identity, core } = Route.useRouteContext();
+  const { q, group, app, connectionError, connection } = Route.useSearch();
+  const { t } = useLingui();
+  const { box, wide } = useWide();
   const listed = connections.state === "ready" ? connections.data : undefined;
-  // What is counted before they are read: none.
-  const known = listed ?? [];
   const integrations = integrationsOf(
     catalog.state === "ready" ? catalog.data.entries : [],
-    known
+    listed ?? []
   );
-  const filter = filterOf(search);
-  const choices = useChoices(integrations, known);
   // Before it is known which workflows use what: the sections as they
-  // stand then, and the count of what shows, which doesn't change after.
-  const first = sectionsOf(integrations, filter, q);
-  const httpShown = httpShownUnder(filter, known, q);
+  // stand then; the count of what shows doesn't change after.
+  const first = sectionsOf(integrations, { show: "all" }, q);
+  const httpShown = httpConnectionsMatching(listed ?? [], q).length;
   const shown =
     first.lapsed.length +
     first.connected.length +
@@ -461,7 +617,8 @@ const Integrations = () => {
     first.others.length +
     httpShown;
   const loaded = catalog.state === "ready" && connections.state === "ready";
-  const about = formatNumber(roundedDown(integrations.length));
+  const opened = integrations.find((integration) => integration.key === app);
+  const beside = opened !== undefined && wide;
   const [requesting, setRequesting] = useState(false);
   return (
     <>
@@ -471,128 +628,105 @@ const Integrations = () => {
         open={requesting}
       />
       <SiteHeader crumbs={[{ label: t`Integrations` }]} />
-      <div className="min-h-0 flex-1 overflow-y-auto text-sm" data-scroller>
-        {/* Columns follow the room this area has, not the window. */}
-        <div className="@container mx-auto flex w-full max-w-5xl flex-col gap-8">
-          <PageHeading
-            description={
-              catalog.state === "ready" &&
-              catalog.data.composio === "listed" ? (
-                <Trans>
-                  More than {about} apps your workflows can work in. Grasp only
-                  does what you allow per app.
-                </Trans>
-              ) : (
-                <Trans>
-                  The apps your workflows can work in. Grasp only does what you
-                  allow per app.
-                </Trans>
-              )
-            }
-            title={t`Integrations`}
+      <Page>
+        <PageHeading
+          action={
+            <Button
+              icon={Plus}
+              onClick={() => {
+                setRequesting(true);
+              }}
+              variant="quiet"
+            >
+              {t`Request app`}
+            </Button>
+          }
+          title={t`Integrations`}
+        />
+        <Returned connection={connection} integrations={integrations} />
+        {connectionError === undefined ? null : (
+          <Alert
+            title={connectionErrorMessage(connectionError)}
+            variant="danger"
           />
-          <Returned connection={connection} integrations={integrations} />
-          {connectionError === undefined ? null : (
-            <ErrorText>{connectionErrorMessage(connectionError)}</ErrorText>
-          )}
-          {/* The band, and under it on the right the filter, the search and the way to ask for an app. */}
-          <div className="flex flex-col gap-3">
-            <IntegrationsBanner integrations={integrations} />
-            {identity.staff ? (
-              <p className="text-muted-foreground">
-                <Trans>
-                  Grasp staff can&apos;t connect accounts or change what is
-                  offered here: that is for the organization&apos;s own people.
-                </Trans>
-              </p>
+        )}
+        {identity.staff ? (
+          <Alert
+            title={t`Grasp staff can't connect accounts or change what is offered here: that is for the organization's own people.`}
+          />
+        ) : null}
+        {catalog.state === "ready" &&
+        catalog.data.composio === "unavailable" ? (
+          <Alert
+            title={t`Composio's toolkits can't be listed right now. Try again shortly.`}
+            variant="attention"
+          />
+        ) : null}
+        <RevocationsByHand
+          nameOf={(provider) =>
+            integrations.find(
+              (each) => each.source === "native" && each.id === provider
+            )?.name ?? provider
+          }
+          toDos={toRevoke}
+        />
+        <NotLoaded page={catalog} />
+        <NotLoaded page={connections} />
+        <div ref={box} {...stylex.props(styles.split, beside && styles.open)}>
+          <div {...stylex.props(styles.lists)}>
+            <Search q={q} />
+            <output {...stylex.props(visuallyHidden)}>
+              {q === undefined
+                ? ""
+                : t`${plural(shown, { one: "# integration shown", other: "# integrations shown" })}`}
+            </output>
+            {loaded && shown === 0 ? (
+              <Empty size="section">{t`No integrations match your search.`}</Empty>
             ) : null}
-            {catalog.state === "ready" &&
-            catalog.data.composio === "unavailable" ? (
-              <p className="text-muted-foreground">
-                <Trans>
-                  Composio&apos;s toolkits can&apos;t be listed right now. Try
-                  again shortly.
-                </Trans>
-              </p>
-            ) : null}
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <div className="w-full @md:w-48">
-                <FilterSelect choices={choices} filter={filter} q={q} />
-              </div>
-              <div className="min-w-0 flex-1 @md:w-56 @md:flex-none">
-                <Search q={q} />
-              </div>
-              <Button
-                onClick={() => {
-                  setRequesting(true);
-                }}
-                variant="outline"
+            {q !== undefined && shown === 0 ? null : (
+              <Await
+                fallback={
+                  <Connected open={app} sections={first} uses={undefined} />
+                }
+                promise={uses}
               >
-                <PlusIcon data-icon="inline-start" />
-                <Trans>Request app</Trans>
-              </Button>
-            </div>
-          </div>
-          <RevocationsByHand
-            nameOf={(provider) =>
-              integrations.find(
-                (each) => each.source === "native" && each.id === provider
-              )?.name ?? provider
-            }
-            toDos={toRevoke}
-          />
-          <NotLoaded page={catalog} />
-          <NotLoaded page={connections} />
-          <output className="sr-only">
-            {q !== undefined || filter.show !== "all"
-              ? t`${plural(shown, { one: "# integration shown", other: "# integrations shown" })}`
-              : ""}
-          </output>
-          {loaded && shown === 0 ? (
-            <p className="text-muted-foreground py-16 text-center">
-              {i18n._(emptyTextOf(filter, q))}
-            </p>
-          ) : null}
-          <Await
-            fallback={
-              <OwnSections identity={identity} sections={first} uses={uses} />
-            }
-            promise={uses}
-          >
-            {(read) => (
-              <OwnSections
-                identity={identity}
-                sections={sectionsOf(
-                  integrations,
-                  filter,
-                  q,
-                  read.state === "ready" ? read.data : undefined
-                )}
-                uses={uses}
-              />
+                {(read) => {
+                  const known = read.state === "ready" ? read.data : undefined;
+                  return (
+                    <Connected
+                      open={app}
+                      sections={sectionsOf(
+                        integrations,
+                        { show: "all" },
+                        q,
+                        known
+                      )}
+                      uses={known}
+                    />
+                  );
+                }}
+              </Await>
             )}
-          </Await>
-          {/* Outside APIs an admin approved: no catalog app, so no kind. */}
-          {filter.show === "group" ? null : (
+            <AddMore group={group} open={app} others={first.others} q={q} />
             <HttpConnections
               connections={listed}
               identity={identity}
               search={q}
             />
-          )}
-          {/* The apps asked for have no kind, and none is connected. */}
-          {filter.show === "all" ? (
             <RequestedApps requests={requests} search={q} />
-          ) : null}
-          {/* Mounted anew for another kind or another search, so it starts at its first apps again. */}
-          <MoreApps
-            identity={identity}
-            key={`${JSON.stringify(filter)}·${q ?? ""}`}
-            others={first.others}
-            uses={uses}
-          />
+          </div>
+          {opened === undefined ? null : (
+            <Details
+              core={core}
+              identity={identity}
+              integration={opened}
+              key={opened.key}
+              uses={uses}
+              wide={wide}
+            />
+          )}
         </div>
-      </div>
+      </Page>
     </>
   );
 };
@@ -606,14 +740,14 @@ const textOf = (value: unknown): string | undefined => {
 export const Route = createFileRoute("/_shell/integrations/")({
   validateSearch: (search: Record<string, unknown>): IntegrationsSearch => ({
     q: textOf(search.q),
-    show: search.show === "connected" ? search.show : undefined,
     group: catalogGroups.find((group) => group === search.group),
+    app: textOf(search.app),
     connectionError: textOf(search.connectionError),
     connection: textOf(search.connection),
   }),
-  // Read once: the filters and the search only narrow what was read, so a
-  // new one keeps the page as it is rather than reading it again. A change
-  // reads it again (use-change.ts invalidates it).
+  // Read once: the search, a kind and the open app only narrow what was
+  // read, so a new one keeps the page as it is rather than reading it
+  // again. A change reads it again (use-change.ts invalidates it).
   shouldReload: false,
   loader: async ({ context: { core, identity } }) => ({
     ...(await loadIntegrations(core, identity, { held: false })),

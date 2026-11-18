@@ -28,7 +28,7 @@
 import * as stylex from "@stylexjs/stylex";
 import type { RowData } from "@tanstack/react-table";
 import { usePart, usePrimitive } from "@ui-sdk/react/primitive";
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 
 import { visuallyHidden } from "../hidden/hidden";
@@ -41,24 +41,32 @@ import {
   PaginationNext,
 } from "../pagination";
 import { Table, TableBody, TableHeader } from "../table";
-import { Toaster, createToaster } from "../toast";
+import { toast as pageToast } from "../toast";
+import { useWords, withGiven } from "../words/words";
 import { dataTableAgent } from "./agent";
 import { Bar } from "./bar";
 import { Body } from "./body";
 import { Confirm } from "./confirm";
 import { save, toCsv } from "./csv";
-import { englishFilterWords, fieldsFor } from "./filters";
+import { fieldsFor } from "./filters";
 import { HeadRow } from "./head-row";
 import { styles } from "./styles";
 import { toolsFor } from "./tools";
-import type { DataTableAction, DataTableProps, DataTableUnit } from "./types";
+import type { DataTableAction, DataTableProps } from "./types";
 import { useDataTable } from "./use-data-table";
 import { useEnd } from "./use-end";
 import { useView } from "./use-view";
-import { englishWords } from "./words";
+import { dataTableNotices, dataTableWords, englishFilterWords } from "./words";
 import type { DataTableWords } from "./words";
 
-const rowsUnit: DataTableUnit = { one: "row", other: "rows" };
+/** Says so, once, when the table toasts and the page has no Toaster to draw it. */
+let warned = false;
+const warnWithoutToaster = () => {
+  if (!warned && document.querySelector("[data-slot=toast-region]") === null) {
+    warned = true;
+    console.warn(dataTableNotices.noToaster);
+  }
+};
 
 /** What holds focus now, when it is an element that can take it back. */
 const focused = () =>
@@ -66,19 +74,6 @@ const focused = () =>
   document.activeElement !== document.body
     ? document.activeElement
     : null;
-
-// The toaster a table shows its own Undo toasts in, when the page gives none: one per table,
-// made on its first render and let go when it unmounts.
-const toasters = new Map<string, ReturnType<typeof createToaster>>();
-const toasterFor = (id: string) => {
-  const known = toasters.get(id);
-  if (known !== undefined) {
-    return known;
-  }
-  const made = createToaster();
-  toasters.set(id, made);
-  return made;
-};
 
 /**
  * Rows that replace their placeholders fade in; rows there from the first paint do not. Kept as
@@ -146,18 +141,21 @@ const statusOf = <Row,>(
 /** A Table that sorts, searches, chooses rows and pages through them. */
 export const DataTable = <Row extends RowData>(props: DataTableProps<Row>) => {
   const { label, caption, pageSize, toaster } = props;
-  const unit = props.unit ?? rowsUnit;
-  const words = { ...englishWords, ...props.words };
-  const filterWords = { ...englishFilterWords, ...props.filterWords };
-  const { model, holder } = useDataTable(props);
-  const id = useId();
-  const toast = toaster ?? toasterFor(id);
-  useEffect(
-    () => () => {
-      toasters.delete(id);
-    },
-    [id]
+  // Its words: the product's, by its catalogue, else English; the caller's `words`, `filterWords`
+  // and `unit` still win.
+  const { rows: rowsUnit, ...catalogued } = useWords(
+    "dataTable",
+    dataTableWords
   );
+  const unit = props.unit ?? rowsUnit;
+  const words = withGiven(catalogued, props.words ?? {});
+  const filterWords = withGiven(
+    useWords("dataTableFilters", englishFilterWords),
+    props.filterWords ?? {}
+  );
+  const { model, holder } = useDataTable(props);
+  // The page's Toaster draws the table's toasts (the shared `toast`), or the host's own (`toaster`).
+  const toast = toaster ?? pageToast;
   const [asking, setAsking] = useState<DataTableAction | null>(null);
   // Focus never falls back to the page after an action. What held focus when an action was asked
   // or done takes it back once the change is drawn; if that is gone (the bar leaves when nothing
@@ -207,6 +205,7 @@ export const DataTable = <Row extends RowData>(props: DataTableProps<Row>) => {
     const undo = action.run(keys);
     model.table.resetRowSelection(true);
     const said = words.done(action.label, keys.length, unitFor(keys.length));
+    warnWithoutToaster();
     if (undo === undefined) {
       toast(said);
     } else {
@@ -341,7 +340,6 @@ export const DataTable = <Row extends RowData>(props: DataTableProps<Row>) => {
               setAsking(null);
             }}
           />
-          {toaster === undefined && <Toaster toaster={toast} />}
         </>
       ),
     }

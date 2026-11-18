@@ -1,57 +1,42 @@
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
 import { useLingui } from "@lingui/react/macro";
 
+import { DE, ES, FR, GB, NL } from "./grasp/flags/index.ts";
+import type { FlagData } from "./grasp/flags/index.ts";
+import { LanguageSwitch } from "./grasp/language-switch/index.ts";
 import { chooseLocale, isLocale, localeNames } from "./i18n.ts";
 import type { Locale } from "./i18n.ts";
 
-const languages = Object.entries(localeNames).map(([value, label]) => ({
-  value,
-  label,
-}));
+// The language as Grasp UI's Language switch, compact, in a page's corner
+// where there is no person menu (signing in, a guest's chat). Its words are
+// the parts' catalogue's (frame/part-words.tsx).
 
-/**
- * The language as a small button in a page's corner, where there is no
- * person menu (signing in). Its code says enough, as language buttons do.
- */
+/** The flag that stands for each language Grasp speaks: its home region's. */
+const flags: Record<Locale, FlagData> = {
+  en: GB,
+  de: DE,
+  nl: NL,
+  es: ES,
+  fr: FR,
+};
+
+const languages = Object.entries(localeNames).flatMap(([code, name]) =>
+  isLocale(code) ? [{ code, name, flag: flags[code] }] : []
+);
+
+/** The page's language, chosen as it is picked. */
 export const LanguageButton = () => {
-  const { t, i18n } = useLingui();
-  const locale: Locale = isLocale(i18n.locale) ? i18n.locale : "en";
-  const name = localeNames[locale];
+  const { i18n } = useLingui();
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        aria-label={t`Language: ${name}`}
-        render={<Button size="icon-sm" variant="ghost" />}
-      >
-        {locale.toUpperCase()}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" side="top">
-        <DropdownMenuRadioGroup
-          value={locale}
-          onValueChange={(value: unknown) => {
-            if (isLocale(value)) {
-              void chooseLocale(value);
-            }
-          }}
-        >
-          {languages.map((language) => (
-            <DropdownMenuRadioItem
-              key={language.value}
-              lang={language.value}
-              value={language.value}
-            >
-              {language.label}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <LanguageSwitch
+      look="compact"
+      onValueChange={(code) => {
+        if (isLocale(code)) {
+          void chooseLocale(code);
+        }
+      }}
+      options={languages}
+      size="sm"
+      value={i18n.locale}
+    />
   );
 };

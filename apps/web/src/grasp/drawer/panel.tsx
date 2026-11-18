@@ -11,10 +11,12 @@ import {
 import type { ComponentProps, ReactNode } from "react";
 
 import { focus } from "../focus/focus";
+import { useWords, withGiven } from "../words/words";
 import { drawerMarker } from "./drawer.stylex";
 import { KindContext, useSnaps } from "./kind-context";
 import { useStill } from "./still-context";
 import { drawerStyles as styles } from "./styles";
+import { drawerWords } from "./words";
 
 type ContentPrimitiveProps = ComponentProps<typeof ContentPrimitive>;
 
@@ -43,9 +45,12 @@ const stateOf = (low: boolean, snaps: boolean) => {
 /** The panel, with the shade behind it and the grip at its top. Along the bottom of the window. */
 export const DrawerContent = ({
   children,
-  gripLabel = "Resize",
+  gripLabel: gripLabelGiven,
   ...rest
 }: DrawerContentProps) => {
+  const { resize: gripLabel } = withGiven(useWords("drawer", drawerWords), {
+    resize: gripLabelGiven,
+  });
   const snaps = useSnaps();
   const still = useStill();
   if (still) {

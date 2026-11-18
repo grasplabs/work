@@ -1,99 +1,90 @@
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardRow,
-  CardRowControl,
-  CardRowLabel,
-  CardTitle,
-} from "@grasp-os/ui/components/card";
-import { cn } from "@grasp-os/ui/lib/utils";
-import { useId } from "react";
+import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
-// Settings' building blocks, as in the prototype (`components/settings.tsx`):
-// a section on a card of its own, and its rows.
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { SettingRow } from "../grasp/setting-row/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 
-/** A group of settings on one card: a title, one line on what it is for, then its rows. */
+// Settings' building blocks for Settings › Stephen, on the library: a
+// section is a compact, flush Section card of its own (a picture may
+// stand before its title, as Stephen's face does), and its rows are the
+// library's Setting rows. The rest of Settings uses the library's parts
+// directly (section.tsx says how a Settings page is laid out).
+
+const styles = stylex.create({
+  // A picture in line with the title.
+  named: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: grasp.space2,
+  },
+  // A card's own room, for what is no list of rows.
+  body: { padding: grasp.space4 },
+});
+
+/** A group of settings on one card: a title, more about it behind its info mark, then its rows. */
 export const SettingsSection = ({
   title,
   description,
+  info,
   media,
   action,
   children,
 }: {
   title: string;
+  /** One line under the title. Prefer `info`: the rows stand straight under the title. */
   description?: ReactNode;
-  /** A picture before the title, such as Stephen's head: the title then stands in line with it. */
+  /** What the section is for, behind an info mark beside its title. */
+  info?: string;
+  /** A picture before the title, such as Stephen's face: the title then stands in line with it. */
   media?: ReactNode;
   action?: ReactNode;
   children?: ReactNode;
-}) => {
-  // Named by its title, so it is a region of the page.
-  const id = useId();
-  return (
-    <Card aria-labelledby={id} render={<section />} variant="panel">
-      <CardHeader>
-        <CardTitle>
-          {media === undefined ? (
-            <h2 id={id}>{title}</h2>
-          ) : (
-            <span className="flex items-center gap-3">
-              {media}
-              <h2 id={id}>{title}</h2>
-            </span>
-          )}
-        </CardTitle>
-        {description === undefined ? null : (
-          <CardDescription>{description}</CardDescription>
-        )}
-        {action === undefined ? null : (
-          // Beside a picture and no description, in line with the title, as in the prototype's Stephen card.
-          <CardAction
-            className={cn(
-              media !== undefined && description === undefined && "self-center"
-            )}
-          >
-            {action}
-          </CardAction>
-        )}
-      </CardHeader>
-      {children}
-    </Card>
-  );
-};
+}) => (
+  <SectionCard
+    actions={action}
+    density="compact"
+    description={description}
+    flush
+    info={info}
+    title={
+      media === undefined ? (
+        title
+      ) : (
+        <span {...stylex.props(styles.named)}>
+          {media}
+          {title}
+        </span>
+      )
+    }
+  >
+    {children}
+  </SectionCard>
+);
 
-/** One setting: what it is and why on the left, its control on the right. */
+/** One setting: what it is on the left, its control on the right; more about it behind its info mark. */
 export const SettingsRow = ({
   label,
   description,
-  htmlFor,
+  htmlFor: _htmlFor,
   children,
 }: {
   label: string;
+  /** More about the setting, behind the row's info mark. */
   description?: string;
-  /** The control's id, so the label focuses it. */
+  /**
+   * The control's id. The library's row names its control itself: pass a
+   * control with its own `aria-label`.
+   */
   htmlFor?: string;
   children: ReactNode;
 }) => (
-  <CardRow>
-    <CardRowLabel>
-      {htmlFor === undefined ? (
-        <span>{label}</span>
-      ) : (
-        <label htmlFor={htmlFor}>{label}</label>
-      )}
-      {description === undefined ? null : (
-        <p className="text-muted-foreground">{description}</p>
-      )}
-    </CardRowLabel>
-    <CardRowControl>{children}</CardRowControl>
-  </CardRow>
+  <SettingRow info={description} label={label}>
+    {children}
+  </SettingRow>
 );
 
-/** What fills a section's card below its heading: rows' worth of room. */
+/** What fills a section's card below its heading when it is no list of rows: the card's own room. */
 export const SettingsBody = ({ children }: { children: ReactNode }) => (
-  <CardContent>{children}</CardContent>
+  <div {...stylex.props(styles.body)}>{children}</div>
 );

@@ -16,7 +16,6 @@ import { Doc, Pdf } from "../grasp/icons/index.ts";
 import {
   Sheet,
   SheetBody,
-  SheetDescription,
   SheetFooter,
   SheetContent,
   SheetTitle,
@@ -150,10 +149,8 @@ export const ReportDialog = ({
   return (
     <Sheet onOpenChange={onOpenChange} open={open} size="lg">
       <SheetContent closeLabel={t`Close`}>
+        {/* No description: the report and its two buttons say it all. */}
         <SheetTitle>{title}</SheetTitle>
-        <SheetDescription>
-          {t`What ran, the decisions it asked for, every workflow and what could be better. Keep it as Markdown, or save it as a PDF from the print window.`}
-        </SheetDescription>
         {/* Only while open, so each opening shows the report as it stands. */}
         {open ? (
           <Await fallback={<LoadingLines lines={6} />} promise={reads}>

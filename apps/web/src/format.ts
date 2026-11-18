@@ -30,6 +30,58 @@ export const formatSince = (
   ).format(at);
 };
 
+const minuteMs = 60_000;
+const hourMs = 60 * minuteMs;
+const dayMs = 24 * hourMs;
+
+/**
+ * How long ago `value` was, in its largest whole unit (minutes, hours or
+ * days), as the page's language writes it: `short` for a quiet mark at a
+ * row's end ("5d"), `long` for a screen reader ("5 days").
+ */
+export const formatAge = (
+  value: string | number | Date,
+  now: Date = new Date()
+): { short: string; long: string } => {
+  const ago = Math.max(0, now.getTime() - new Date(value).getTime());
+  let amount = Math.floor(ago / minuteMs);
+  let unit = "minute";
+  if (ago >= dayMs) {
+    amount = Math.floor(ago / dayMs);
+    unit = "day";
+  } else if (ago >= hourMs) {
+    amount = Math.floor(ago / hourMs);
+    unit = "hour";
+  }
+  const say = (unitDisplay: "narrow" | "long") =>
+    new Intl.NumberFormat(i18n.locale, {
+      style: "unit",
+      unit,
+      unitDisplay,
+    }).format(amount);
+  return { short: say("narrow"), long: say("long") };
+};
+
+/**
+ * A time zone's name as the page's language says it ("Central European
+ * Time"), from its IANA name; the IANA name where the browser has none.
+ */
+export const formatZone = (timeZone: string): string => {
+  try {
+    return (
+      new Intl.DateTimeFormat(i18n.locale, {
+        timeZone,
+        timeZoneName: "longGeneric",
+      })
+        .formatToParts(new Date())
+        .find((part) => part.type === "timeZoneName")?.value ?? timeZone
+    );
+  } catch {
+    // A zone this browser doesn't know.
+    return timeZone;
+  }
+};
+
 /** A date as the page's language writes it, such as "3 Oct 2026". */
 export const formatDate = (value: string | number | Date): string =>
   new Intl.DateTimeFormat(i18n.locale, { dateStyle: "medium" }).format(

@@ -209,64 +209,85 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** The choice labelled `label`. */
-const choice = (label: string): HTMLSelectElement => {
-  const found = document.querySelector(`select[aria-label="${label}"]`);
-  if (!(found instanceof HTMLSelectElement)) {
-    throw new TypeError(`No choice ${label}`);
-  }
-  return found;
-};
-
-/** Chooses `value` in `select`, as React hears a person choose it. */
-const choose = async (select: HTMLSelectElement, value: string) => {
-  await act(async () => {
-    const prototype = Reflect.getPrototypeOf(select) ?? {};
-    Reflect.getOwnPropertyDescriptor(prototype, "value")?.set?.call(
-      select,
-      value
-    );
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-    await Promise.resolve();
-  });
-  await settled();
-};
-
-/** Ticks the team named `team` among those for `label`. */
-const tick = async (label: string, team: string) => {
-  const list = document.querySelector(`ul[aria-label="Teams for ${label}"]`);
-  const box = [...(list?.querySelectorAll("label") ?? [])]
-    .find((each) => each.textContent?.trim() === team)
-    ?.querySelector('[role="checkbox"]');
-  if (!(box instanceof HTMLElement)) {
-    throw new TypeError(`No team ${team} for ${label}`);
-  }
-  await act(async () => {
-    box.click();
-    await Promise.resolve();
-  });
-  await settled();
-};
-
-/** The switch named `name`, by its label or the label around it. */
-const toggle = (name: string): HTMLElement => {
-  const found = [...document.querySelectorAll('[role="switch"]')].find(
-    (each) =>
-      each.getAttribute("aria-label") === name ||
-      each.closest("label")?.textContent?.trim() === name
-  );
-  if (!(found instanceof HTMLElement)) {
-    throw new TypeError(`No switch ${name}`);
-  }
-  return found;
-};
-
 const press = async (element: HTMLElement) => {
   await act(async () => {
     element.click();
     await Promise.resolve();
   });
   await settled();
+};
+
+/** What an element says, without what is hidden from a screen reader. */
+const wordsOf = (element: Element): string => {
+  const copy = element.cloneNode(true);
+  if (!(copy instanceof Element)) {
+    return "";
+  }
+  for (const hidden of copy.querySelectorAll("[aria-hidden='true']")) {
+    hidden.remove();
+  }
+  return copy.textContent.trim();
+};
+
+/** The choice labelled `label`: the control that opens its list. */
+const choice = (label: string): HTMLElement => {
+  const found = document.querySelector(
+    `[role="combobox"][aria-label="${label}"]`
+  );
+  if (!(found instanceof HTMLElement)) {
+    throw new TypeError(`No choice ${label}`);
+  }
+  return found;
+};
+
+/** Chooses the option named `name` in `control`, as a person does: opens its list, presses it. */
+const choose = async (control: HTMLElement, name: string) => {
+  await press(control);
+  const list = document.querySelector(
+    `[id="${control.getAttribute("aria-controls") ?? ""}"]`
+  );
+  const option = [
+    ...(list ?? document).querySelectorAll<HTMLElement>('[role="option"]'),
+  ].find((each) => wordsOf(each) === name);
+  if (option === undefined) {
+    throw new TypeError(`No option ${name}`);
+  }
+  await press(option);
+};
+
+/** Ticks the team named `team` among those for `label`. */
+const tick = async (label: string, team: string) => {
+  const list = document.querySelector(`ul[aria-label="Teams for ${label}"]`);
+  const box = [...(list?.querySelectorAll("li") ?? [])]
+    .find((each) => wordsOf(each) === team)
+    ?.querySelector('[role="checkbox"]');
+  if (!(box instanceof HTMLElement)) {
+    throw new TypeError(`No team ${team} for ${label}`);
+  }
+  await press(box);
+};
+
+/** An element's name: its label, the words that label it, or the label around it. */
+const nameOf = (element: Element): string | undefined => {
+  const labelledBy = element.getAttribute("aria-labelledby");
+  const by =
+    labelledBy === null ? null : document.querySelector(`[id="${labelledBy}"]`);
+  return (
+    element.getAttribute("aria-label") ??
+    (by === null ? undefined : wordsOf(by)) ??
+    element.closest("label")?.textContent.trim()
+  );
+};
+
+/** The switch named `name`. */
+const toggle = (name: string): HTMLElement => {
+  const found = [...document.querySelectorAll('[role="switch"]')].find(
+    (each) => nameOf(each) === name
+  );
+  if (!(found instanceof HTMLElement)) {
+    throw new TypeError(`No switch ${name}`);
+  }
+  return found;
 };
 
 /** The button named `name`. */
@@ -295,14 +316,14 @@ describe("Settings › Stephen", () => {
     const { connections, asked } = fakeConnections();
     await shown(connections);
 
-    await choose(choice("Who can talk to him"), "teams");
+    await choose(choice("Who can talk to him"), "Chosen teams");
     // Nothing is saved until a team is chosen.
     const beforeTeam = [...asked];
     await tick("Who can talk to him", "Sales");
     await tick("Who can talk to him", "Support");
     // Teams' panel, opened from its row.
     await press(button("Microsoft Teams"));
-    await choose(choice("Who reaches him in Microsoft Teams"), "nobody");
+    await choose(choice("Who reaches him in Microsoft Teams"), "Nobody yet");
     await press(toggle("Does things for people in Microsoft Teams"));
     // Pausing him asks first.
     await press(toggle("Stephen outside Grasp"));
@@ -330,23 +351,29 @@ describe("Settings › Stephen", () => {
     });
     // What the page shows is what core now holds.
     expect({
-      who: choice("Who can talk to him").value,
-      teams: choice("Who reaches him in Microsoft Teams").value,
+      who: wordsOf(choice("Who can talk to him")),
+      teams: wordsOf(choice("Who reaches him in Microsoft Teams")),
       on: toggle("Stephen outside Grasp").getAttribute("aria-checked"),
-    }).toStrictEqual({ who: "teams", teams: "nobody", on: "false" });
+    }).toStrictEqual({ who: "Chosen teams", teams: "Nobody yet", on: "false" });
   });
 
   it("lets an admin turn a class on for a team, and narrow it for one app, leaving nobody when the last team goes", async () => {
     const { connections, asked } = fakeConnections();
     await shown(connections);
 
-    await choose(choice("Reach others"), "teams");
+    await choose(choice("Reach others"), "Chosen teams");
     await tick("Reach others", "Support");
     await press(button("Microsoft 365"));
-    await choose(choice("Read the company's in Microsoft 365"), "teams");
+    await choose(choice("Read the company's in Microsoft 365"), "Chosen teams");
     await tick("Read the company's in Microsoft 365", "Sales");
     await tick("Read the company's in Microsoft 365", "Sales");
-    await choose(choice("Change their own in Microsoft 365"), "same");
+    // Narrowed, then as for the whole company again: a list never chooses
+    // the value it already holds.
+    await choose(choice("Change their own in Microsoft 365"), "Nobody yet");
+    await choose(
+      choice("Change their own in Microsoft 365"),
+      "As for the whole company"
+    );
 
     expect(asked).toStrictEqual([
       ["class", "reach-others", { who: "teams", teams: [support.teamId] }],
@@ -357,6 +384,7 @@ describe("Settings › Stephen", () => {
         { who: "teams", teams: [sales.teamId] },
       ],
       ["app", "microsoft", "read-company", { who: "nobody" }],
+      ["app", "microsoft", "change-own", { who: "nobody" }],
       ["app", "microsoft", "change-own", { who: "asClass" }],
     ]);
   });
@@ -366,7 +394,7 @@ describe("Settings › Stephen", () => {
     await shown(connections, false);
     const controls = [
       ...document.querySelectorAll<HTMLElement>(
-        'select, [role="switch"], [role="checkbox"]'
+        '[role="combobox"], [role="switch"], [role="checkbox"]'
       ),
     ];
     expect({
@@ -374,7 +402,7 @@ describe("Settings › Stephen", () => {
       enabled: controls.filter(
         (control) =>
           !(
-            (control instanceof HTMLSelectElement && control.disabled) ||
+            control.hasAttribute("disabled") ||
             Object.hasOwn(control.dataset, "disabled") ||
             control.getAttribute("aria-disabled") === "true"
           )

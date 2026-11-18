@@ -16,10 +16,11 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { ChatSwitcherProvider } from "./chat-switcher.tsx";
 
 // The ⌘K window against core's chats as the page reaches them over RPC,
-// faked: it opens with the keys on any page, lists the person's chats by
-// when they were last used, narrows them by title at once as the person
-// types, then to what core found was said, showing where, each chat as
-// core lists it now; and the same keys close it again.
+// faked: it opens with the keys on any page, "New chat" first, the
+// person's chats by the day they were last used, "Archived chats" last;
+// narrows them by title at once as the person types, then to what core
+// found was said, showing where, each chat as core lists it now; archives
+// one from its row; and the same keys close it again.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -53,8 +54,18 @@ const shown = async (
   listed: ChatSummary[] = [board, lease, travel]
 ) => {
   const asked: string[] = [];
+  const archived: string[] = [];
   const chats = {
-    list: async () => await Promise.resolve(listed),
+    list: async (options?: { archived?: boolean }) =>
+      await Promise.resolve(
+        listed.filter(
+          ({ id }) => archived.includes(id) === (options?.archived === true)
+        )
+      ),
+    archive: async (id: string) => {
+      archived.push(id);
+      await Promise.resolve();
+    },
     search: async (query: string) => {
       asked.push(query);
       return await found(query);
@@ -87,27 +98,31 @@ const shown = async (
     );
     await router.load();
   });
-  return { asked };
+  return { asked, archived };
 };
 
 const dialog = (): HTMLElement | null =>
   document.querySelector<HTMLElement>('[role="dialog"]');
 
 /**
- * The chats the window lists, each as its title and any line found under
- * it; when it was used left out.
+ * The rows the window lists, each as its words and any line under them;
+ * when a chat was used, and its More, left out.
  */
 const rows = (): string[] =>
-  [...(dialog()?.querySelectorAll("[cmdk-item]") ?? [])].map((row) => {
+  [...(dialog()?.querySelectorAll('[role="option"]') ?? [])].map((row) => {
     const read = row.cloneNode(true);
     if (!(read instanceof HTMLElement)) {
       return "";
     }
-    for (const time of read.querySelectorAll("time")) {
-      time.remove();
+    for (const left of read.querySelectorAll("time, button")) {
+      left.remove();
     }
-    return (read.textContent ?? "").trim();
+    return read.textContent.trim();
   });
+
+/** The chats among the rows: those between "New chat" and "Archived". */
+const chatRows = (): string[] =>
+  rows().filter((row) => row !== "New chat" && !row.startsWith("Archived"));
 
 const press = async (init: KeyboardEventInit): Promise<void> => {
   await act(async () => {
@@ -116,7 +131,7 @@ const press = async (init: KeyboardEventInit): Promise<void> => {
   });
 };
 
-/** How long the window may take to open: the first time, its code loads first. */
+/** How long the window may take to open and read the chats. */
 const openMs = 5000;
 
 /** Opens the window with `keys`, once it has loaded and read the chats. */
@@ -124,7 +139,7 @@ const openWindow = async (keys: KeyboardEventInit): Promise<void> => {
   await press(keys);
   await vi.waitFor(
     () => {
-      expect(rows().length).toBeGreaterThan(0);
+      expect(chatRows().length).toBeGreaterThan(0);
     },
     { timeout: openMs }
   );
@@ -132,7 +147,7 @@ const openWindow = async (keys: KeyboardEventInit): Promise<void> => {
 
 /** Types `text` into the window's search, as a person would. */
 const type = async (text: string): Promise<void> => {
-  const input = dialog()?.querySelector<HTMLInputElement>("[cmdk-input]");
+  const input = dialog()?.querySelector<HTMLInputElement>("input");
   if (input === undefined || input === null) {
     throw new Error("The window has no search");
   }
@@ -157,24 +172,29 @@ describe("the chats window", () => {
     document.body.replaceChildren();
   });
 
-  it("opens with ⌘K on the person's chats, and narrows them by title, then by what core found was said", async () => {
+  it("opens with ⌘K on the person's chats, and shows what core found was said, where, the words marked", async () => {
     const answer = Promise.withResolvers<ChatSearchHit[]>();
     const { asked } = await shown(async () => await answer.promise);
     expect(dialog()).toBeNull();
 
     await openWindow({ key: "k", metaKey: true });
     expect(rows()).toStrictEqual([
+      "New chat",
       "Board report",
       "Lease of the office",
       "Trip to Lyon",
     ]);
 
-    // By title at once, before core has looked through what was said.
+    // Core's results, as it gives them: none while it looks.
     await type("lease");
-    expect(rows()).toStrictEqual(["Lease of the office"]);
-    await vi.waitFor(() => {
-      expect(asked).toStrictEqual(["lease"]);
-    });
+    expect(rows()).toStrictEqual([]);
+    // Once typing rests: allowed longer, as a full run is slower.
+    await vi.waitFor(
+      () => {
+        expect(asked).toStrictEqual(["lease"]);
+      },
+      { timeout: openMs }
+    );
 
     await act(async () => {
       answer.resolve([
@@ -186,12 +206,22 @@ describe("the chats window", () => {
       ]);
       await answer.promise;
     });
-    expect(rows()).toStrictEqual([
-      "Board report…the lease ends in March",
-      "Lease of the office",
-    ]);
-    expect(dialog()?.querySelector("mark")?.textContent).toBe("lease");
-  });
+    await vi.waitFor(
+      () => {
+        expect(rows()).toStrictEqual([
+          "Board report…the lease ends in March",
+          "Lease of the office",
+        ]);
+      },
+      { timeout: openMs }
+    );
+    // Where it was found, the words marked.
+    expect(
+      dialog()?.querySelector(
+        '[role="option"] mark, [data-slot="command-match"]'
+      )?.textContent
+    ).toBe("lease");
+  }, 20_000);
 
   it("says which chat app a chat came through, and nothing for one started in Grasp", async () => {
     await shown(
@@ -199,10 +229,10 @@ describe("the chats window", () => {
       [board, { ...lease, via: "slack" }, { ...travel, via: "teams" }]
     );
     await openWindow({ key: "k", metaKey: true });
-    expect(rows()).toStrictEqual([
+    expect(chatRows()).toStrictEqual([
       "Board report",
-      "Lease of the officevia Slack ·",
-      "Trip to Lyonvia Microsoft Teams ·",
+      "Lease of the officevia Slack",
+      "Trip to Lyonvia Microsoft Teams",
     ]);
   });
 
@@ -219,13 +249,58 @@ describe("the chats window", () => {
     });
   });
 
-  it("closes again with the same keys", async () => {
-    await shown(async () => await Promise.resolve([]));
+  it("archives a chat from its row's More, which leaves the list", async () => {
+    const { archived } = await shown(async () => await Promise.resolve([]));
+    await openWindow({ key: "k", metaKey: true });
+    const more = dialog()?.querySelector<HTMLElement>(
+      '[aria-label="More for Lease of the office"]'
+    );
+    if (more === undefined || more === null) {
+      throw new Error("No More on the lease's row");
+    }
+    await act(async () => {
+      more.click();
+      await Promise.resolve();
+    });
+    const archive = await vi.waitFor(() => {
+      const item = [
+        ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+      ].find((each) => each.textContent.trim() === "Archive");
+      if (item === undefined) {
+        throw new Error("No Archive in the More");
+      }
+      return item;
+    });
+
+    await act(async () => {
+      archive.click();
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect({ archived, rows: rows() }).toStrictEqual({
+        archived: ["lease"],
+        // "Archived" last, with how many.
+        rows: ["New chat", "Board report", "Trip to Lyon", "Archived1 chat"],
+      });
+    });
+  });
+
+  it("closes again with the same keys, and opens again on the chats as core lists them then", async () => {
+    const listed = [board, lease];
+    await shown(async () => await Promise.resolve([]), listed);
     await openWindow({ key: "k", ctrlKey: true });
 
     await press({ key: "k", ctrlKey: true });
     await vi.waitFor(() => {
       expect(dialog()).toBeNull();
+    });
+
+    // A chat started while it was closed.
+    listed.push(travel);
+    await press({ key: "k", ctrlKey: true });
+    await vi.waitFor(() => {
+      expect(chatRows()).toContain("Trip to Lyon");
     });
   });
 });

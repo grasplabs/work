@@ -7,35 +7,55 @@ import type {
 import type { ModelMonthSpend } from "@grasp-os/shared/models";
 import type { CustomWidget, WidgetProgress } from "@grasp-os/shared/widgets";
 import type { RunActivity, WorkflowSummary } from "@grasp-os/shared/workflows";
-import { Button, buttonVariants } from "@grasp-os/ui/components/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverHeader,
-  PopoverTitle,
-  PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
-// The kit's Stat for a figure centred in a ring or a column: Grasp UI's
-// Highlight stands a name over its value, from the start edge.
-import { Stat } from "@grasp-os/ui/components/stat";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
-import { cn } from "@grasp-os/ui/lib/utils";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Await, Link } from "@tanstack/react-router";
-import { GripVerticalIcon, PlusIcon } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent, ReactNode } from "react";
 import { flushSync } from "react-dom";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatDate } from "../format.ts";
-import { Cross } from "../grasp/icons/index.ts";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+} from "../grasp/alert-dialog/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import type { BadgeTone } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Card } from "../grasp/card/index.ts";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+} from "../grasp/empty/index.ts";
+import { focus } from "../grasp/focus/focus.ts";
+import { visuallyHidden } from "../grasp/hidden/hidden.ts";
+import { Cross, Plus } from "../grasp/icons/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemGroup,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { Link as TextLink } from "../grasp/link/index.ts";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTitle,
+  PopoverTrigger,
+} from "../grasp/popover/index.ts";
+import { Separator } from "../grasp/separator/index.ts";
+import { Stat } from "../grasp/stats/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -57,7 +77,7 @@ import { RunsWidget } from "./runs-widget.tsx";
 import { CouldBeBetter } from "./signals.tsx";
 import type { Signals } from "./signals.tsx";
 import { SpendWidget } from "./spend-widget.tsx";
-import { GoalListView, ReturnChartView, fills } from "./standard-widgets.tsx";
+import { GoalListView, ReturnChartView } from "./standard-widgets.tsx";
 import { ChangeWidget, WidgetAsk } from "./widget-ask.tsx";
 import {
   BlockButton,
@@ -122,20 +142,36 @@ export interface Board {
   spend: Promise<Loaded<ModelMonthSpend>> | undefined;
 }
 
-/** Each state's dot, as the prototype's workflow dots are painted: orange where a person is needed, green once it ran, grey before. */
-const dotFills: Record<WorkflowState, string> = {
-  attention: fills.attention,
-  waiting: "border-2 border-status-attention bg-card",
-  ran: fills.live,
-  notRun: fills.rest,
+/** Each state's dot: amber where a person is needed, green once it ran, grey before. */
+const stateTones: Record<WorkflowState, BadgeTone> = {
+  attention: "attention",
+  waiting: "attention",
+  ran: "success",
+  notRun: "neutral",
 };
 
-/** Each state's mark, as the prototype's marks: a little smaller than its dot. */
-const markFills: Record<WorkflowState, string> = {
-  attention: "bg-status-attention",
-  waiting: "border border-status-attention bg-card",
-  ran: "bg-status-agreed",
-  notRun: "bg-input",
+/**
+ * What each amber state means, on its badge: the two share a colour, so
+ * the badge says which is which when pointed at or reached by keyboard.
+ */
+const stateExplained: Partial<Record<WorkflowState, MessageDescriptor>> = {
+  attention: msg`A run of it failed lately.`,
+  waiting: msg`A run of it waits for a person to decide.`,
+};
+
+/**
+ * Each state's name on the small card's four columns, short enough for
+ * one line, so the four figures under them share a line. The dots' list
+ * keeps the full name for a screen reader.
+ */
+const stateShortNames: Record<WorkflowState, MessageDescriptor> = {
+  attention: msg`Needs attention`,
+  waiting: msg({
+    message: "Waiting",
+    context: "workflows waiting on a person",
+  }),
+  ran: msg`Ran`,
+  notRun: msg`Not run yet`,
 };
 
 /** Each state's name. */
@@ -146,52 +182,196 @@ const stateNames: Record<WorkflowState, MessageDescriptor> = {
   notRun: msg`Not run yet`,
 };
 
-/** A workflow's mark, in its state's tone. */
-const StateMark = ({ state }: { state: WorkflowState }) => (
-  <span
-    aria-hidden="true"
-    className={cn("size-2 flex-none rounded-full", markFills[state])}
-  />
-);
+/** How tall a block on the board is, every one alike. */
+const BLOCK_HEIGHT = "20rem";
+/** Where the board is wide enough for two blocks side by side. */
+const TWO_UP = "@container (width >= 56rem)";
+/** Where a state's name stands beside its workflows, in full. */
+const SIDE_BY_SIDE = "@container (width >= 32rem)";
+/** Where there is room for when each workflow last ran, in full. */
+const ROOM_FOR_DATES = "@container (width >= 28rem)";
+/** A block dragged stands over the others (and over the dots, at 10). */
+const ABOVE = 30;
+/** How much a dragged block is lifted. */
+const LIFTED = "scale(1.02)";
+
+const HOVER = media.hover;
+const COARSE = media.coarse;
+const REDUCED = media.reduced;
+
+const styles = stylex.create({
+  // A workflow's dot, the target that opens it.
+  dot: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: grasp.space4,
+    height: grasp.space4,
+    borderRadius: grasp.cornerCircle,
+  },
+  columns: {
+    display: "grid",
+    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+    columnGap: grasp.space2,
+    height: "100%",
+    margin: 0,
+    padding: 0,
+    paddingBlockStart: grasp.space2,
+    listStyle: "none",
+  },
+  column: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space3,
+    minWidth: 0,
+  },
+  dots: {
+    display: "flex",
+    flexDirection: "column-reverse",
+    alignItems: "flex-start",
+    gap: grasp.space1,
+    flexGrow: 1,
+    minHeight: 0,
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  plainItem: { display: "flex" },
+  count: { display: "flex", flexDirection: "column", gap: grasp.space2 },
+  stages: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space4,
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  stage: {
+    display: "grid",
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      [SIDE_BY_SIDE]: "11rem minmax(0, 1fr)",
+    },
+    columnGap: grasp.space6,
+    rowGap: grasp.space2,
+  },
+  stageName: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space2,
+    alignSelf: "start",
+  },
+  stageRows: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+    minWidth: 0,
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  stageRow: {
+    display: "flex",
+    alignItems: "baseline",
+    gap: grasp.space4,
+  },
+  stageLink: { flexGrow: 1, minWidth: 0 },
+  date: { display: { default: "none", [ROOM_FOR_DATES]: "block" } },
+  board: { containerType: "inline-size" },
+  grid: {
+    display: "grid",
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      [TWO_UP]: "repeat(2, minmax(0, 1fr))",
+    },
+    gap: grasp.space4,
+  },
+  cell: { position: "relative", height: BLOCK_HEIGHT, minWidth: 0 },
+  dragged: { zIndex: ABOVE, cursor: "grabbing", userSelect: "none" },
+  lift: {
+    position: "relative",
+    height: "100%",
+    borderRadius: grasp.corner,
+    transitionProperty: "transform, box-shadow",
+    transitionDuration: { default: grasp.durationUi, [REDUCED]: "0s" },
+    transitionTimingFunction: grasp.ease,
+  },
+  lifted: { transform: LIFTED, boxShadow: grasp.liftHigh },
+  // A block's own buttons, until it is pointed at: there, but unseen.
+  // Seen with the keys in the block, and always where there is no pointer
+  // to point with.
+  atHand: {
+    display: "flex",
+    opacity: {
+      default: 0,
+      [stylex.when.ancestor(":is([data-widget]:hover)")]: {
+        default: 0,
+        [HOVER]: 1,
+      },
+      [stylex.when.ancestor(":is([data-widget]:focus-within)")]: 1,
+      [COARSE]: 1,
+    },
+    transitionProperty: "opacity",
+    transitionDuration: { default: grasp.durationHover, [REDUCED]: "0s" },
+    transitionTimingFunction: grasp.ease,
+  },
+  addSpot: { position: "relative", height: BLOCK_HEIGHT, minWidth: 0 },
+  addBusy: { position: "relative", height: "100%" },
+  addMiddle: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "100%",
+  },
+  back: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space1,
+    paddingBlockStart: grasp.space3,
+  },
+  backList: {
+    display: "flex",
+    flexDirection: "column",
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  wide: { width: "100%" },
+  reset: {
+    display: "flex",
+    justifyContent: "center",
+    paddingBlockStart: grasp.space3,
+  },
+});
 
 /** A workflow's dot that opens it, and names it when pointed at. */
 const WorkflowDot = ({ workflow }: { workflow: WorkflowSummary }) => {
   const { name } = workflow;
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Link
-            aria-label={name}
-            className="focus-visible:ring-ring flex size-4 items-center justify-center rounded-full outline-none focus-visible:ring-2"
-            params={{ workflow: workflow.workflowId }}
-            to="/workflows/$workflow"
-          />
-        }
-      >
-        <span
-          className={cn("size-3 rounded-full", dotFills[stateOf(workflow)])}
-        />
-      </TooltipTrigger>
-      <TooltipContent side="right" variant="quiet">
-        <span className="text-foreground font-medium">{name}</span>
-      </TooltipContent>
-    </Tooltip>
+    <Link
+      aria-label={name}
+      params={{ workflow: workflow.workflowId }}
+      title={name}
+      to="/workflows/$workflow"
+      {...stylex.props(styles.dot, focus.mark)}
+    >
+      <Badge tone={stateTones[stateOf(workflow)]} variant="dot" />
+    </Link>
   );
 };
 
 /** What a widget says when it has nothing to show, with the way to chat, where things are made. */
 const NothingYet = ({ children }: { children: ReactNode }) => (
-  <div className="flex h-full flex-col items-start justify-center gap-3">
-    <p className="text-muted-foreground">{children}</p>
-    <Link
-      className={buttonVariants({ size: "sm", variant: "outline" })}
-      search={{}}
-      to="/"
-    >
-      <Trans>Open Chat</Trans>
-    </Link>
-  </div>
+  <Empty size="section">
+    <EmptyHeader>
+      <EmptyDescription>{children}</EmptyDescription>
+    </EmptyHeader>
+    <EmptyContent>
+      <Button render={<Link search={{}} to="/" />} size="sm">
+        <Trans>Open Chat</Trans>
+      </Button>
+    </EmptyContent>
+  </Empty>
 );
 
 /** When a workflow last ran, or that it never did. */
@@ -217,33 +397,29 @@ const WorkflowTabsView = ({ rows }: { rows: readonly WorkflowSummary[] }) => {
   const states = byState(rows);
   if (!full) {
     return (
-      <ol className="grid h-full grid-cols-4 gap-x-2 pt-2">
+      <ol {...stylex.props(styles.columns)}>
         {workflowStates.map((state) => {
           const here = states[state];
           const name = i18n._(stateNames[state]);
           return (
-            <li
-              className="flex min-w-0 flex-col items-center gap-3"
-              key={state}
-            >
-              <ul
-                aria-label={name}
-                className="flex min-h-0 flex-1 flex-col-reverse items-center gap-1.5"
-              >
+            <li key={state} {...stylex.props(styles.column)}>
+              <ul aria-label={name} {...stylex.props(styles.dots)}>
                 {here.map((workflow) => (
-                  <li className="flex" key={workflow.workflowId}>
+                  <li
+                    key={workflow.workflowId}
+                    {...stylex.props(styles.plainItem)}
+                  >
                     <WorkflowDot workflow={workflow} />
                   </li>
                 ))}
               </ul>
-              <span className="flex w-full flex-col items-center border-t pt-2 text-center">
-                <Stat>{here.length}</Stat>
-                <span
-                  className="text-muted-foreground line-clamp-2 min-h-8 w-full text-xs wrap-anywhere hyphens-auto"
-                  lang={i18n.locale}
-                >
-                  {name}
-                </span>
+              <span {...stylex.props(styles.count)}>
+                <Separator decorative />
+                <Stat
+                  bare
+                  title={i18n._(stateShortNames[state])}
+                  value={String(here.length)}
+                />
               </span>
             </li>
           );
@@ -251,45 +427,60 @@ const WorkflowTabsView = ({ rows }: { rows: readonly WorkflowSummary[] }) => {
       </ol>
     );
   }
+  const shown = workflowStates.filter((state) => states[state].length > 0);
   return (
-    <ol className="flex flex-col">
-      {workflowStates.map((state) => {
+    <ol {...stylex.props(styles.stages)}>
+      {shown.map((state, index) => {
         const here = states[state];
-        if (here.length === 0) {
-          return null;
-        }
         const name = i18n._(stateNames[state]);
+        const explained = stateExplained[state];
         return (
-          <li
-            className="@lg:stage-columns grid grid-cols-1 gap-x-6 gap-y-2 border-t py-4 first:border-t-0 first:pt-0"
-            key={state}
-          >
-            <span className="flex items-center gap-2.5 self-start">
-              <StateMark state={state} />
-              <span className="font-medium">{name}</span>
-              <span className="text-muted-foreground tabular-nums">
-                {here.length}
-              </span>
-            </span>
-            <ul aria-label={name} className="flex min-w-0 flex-col gap-2">
-              {here.map((workflow) => (
-                <li
-                  className="flex items-baseline gap-4"
-                  key={workflow.workflowId}
+          <li key={state} {...stylex.props(styles.count)}>
+            {index === 0 ? null : <Separator decorative />}
+            <span {...stylex.props(styles.stage)}>
+              <span {...stylex.props(styles.stageName)}>
+                <Badge
+                  {...(explained === undefined
+                    ? {}
+                    : { explain: i18n._(explained) })}
+                  tone={stateTones[state]}
+                  variant="dot"
                 >
-                  <Link
-                    className="min-w-0 flex-1 truncate hover:underline"
-                    params={{ workflow: workflow.workflowId }}
-                    to="/workflows/$workflow"
+                  {name}
+                </Badge>
+                <Text element="span" size="sm" tone="muted">
+                  {here.length}
+                </Text>
+              </span>
+              <ul aria-label={name} {...stylex.props(styles.stageRows)}>
+                {here.map((workflow) => (
+                  <li
+                    key={workflow.workflowId}
+                    {...stylex.props(styles.stageRow)}
                   >
-                    {workflow.name}
-                  </Link>
-                  <span className="text-muted-foreground hidden flex-none tabular-nums @md:block">
-                    <LastRun workflow={workflow} />
-                  </span>
-                </li>
-              ))}
-            </ul>
+                    <TextLink
+                      layout={styles.stageLink}
+                      render={
+                        <Link
+                          params={{ workflow: workflow.workflowId }}
+                          to="/workflows/$workflow"
+                        />
+                      }
+                    >
+                      {workflow.name}
+                    </TextLink>
+                    <Text
+                      element="span"
+                      layout={styles.date}
+                      size="sm"
+                      tone="muted"
+                    >
+                      <LastRun workflow={workflow} />
+                    </Text>
+                  </li>
+                ))}
+              </ul>
+            </span>
           </li>
         );
       })}
@@ -322,22 +513,19 @@ const AppsWidget = ({ apps }: { apps: App[] }) => {
   }
   return (
     <WidgetBlock title={title}>
-      <ul className="flex flex-col">
+      <ItemGroup aria-label={title} separated>
         {apps.map((app) => (
-          <li
-            className="flex items-center gap-3 border-t py-2 first:border-t-0 first:pt-0"
+          <Item
             key={app.id}
+            render={<Link params={{ app: app.id }} to="/apps/$app" />}
+            size="xs"
           >
-            <Link
-              className="min-w-0 flex-1 truncate hover:underline"
-              params={{ app: app.id }}
-              to="/apps/$app"
-            >
-              {app.name}
-            </Link>
-          </li>
+            <ItemContent>
+              <ItemTitle>{app.name}</ItemTitle>
+            </ItemContent>
+          </Item>
         ))}
-      </ul>
+      </ItemGroup>
     </WidgetBlock>
   );
 };
@@ -474,13 +662,8 @@ const BoardWidget = ({
   );
 };
 
-/**
- * A block's own buttons, until it is pointed at: there, but unseen. Seen
- * with the keys in the block, and always where there is no pointer to
- * point with.
- */
-const atHand =
-  "flex opacity-0 transition-opacity group-focus-within/block:opacity-100 group-hover/block:opacity-100 pointer-coarse:opacity-100";
+/** The Section card's title row, by which a block is taken. */
+const handleSlot = '[data-slot="section-card-handle"]';
 
 /** How far a press has to move before it is a drag, in pixels: less is a press. */
 const dragFrom = 6;
@@ -539,43 +722,6 @@ interface Press {
 }
 
 /**
- * What a block is moved by: the place to take hold of it, though the
- * mouse can drag it by its title too (with a finger, the only place), and
- * the way to move it with the keys, one place with left and right, one
- * row with up and down.
- */
-const Grip = ({
-  id,
-  title,
-  onKeyDown,
-}: {
-  id: DashboardWidgetId;
-  title: string;
-  onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
-}) => {
-  const { t } = useLingui();
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            aria-label={t`Move ${title}: drag it, or use the arrow keys`}
-            className="cursor-grab touch-none"
-            data-grip={id}
-            onKeyDown={onKeyDown}
-            size="icon-sm"
-            variant="ghost"
-          />
-        }
-      >
-        <GripVerticalIcon />
-      </TooltipTrigger>
-      <TooltipContent>{t`Move`}</TooltipContent>
-    </Tooltip>
-  );
-};
-
-/**
  * Where a widget is added, as the prototype's (`widget-add.tsx`): the last
  * place on the board, always there, an empty card as large as a block with
  * nothing in it but a plus. A press asks what the widget should show, and
@@ -607,73 +753,70 @@ const AddTile = ({
     ...takenOff.map(({ id }) => id),
   ];
   return (
-    <div className="relative h-80 min-w-0">
-      <div aria-busy={making} className="relative h-full">
+    <div {...stylex.props(styles.addSpot)}>
+      <div aria-busy={making} {...stylex.props(styles.addBusy)}>
         {making ? (
           <>
             <MakingDots />
             <WidgetProgressLine progress={progress} />
           </>
         ) : null}
-        <Popover onOpenChange={setOpen} open={open}>
-          <PopoverTrigger
-            render={
-              <button
+        <Card fill padding="none" variant="soft">
+          <div {...stylex.props(styles.addMiddle)}>
+            <Popover onOpenChange={setOpen} open={open}>
+              <PopoverTrigger
                 aria-label={t`Add a widget`}
-                className="peer border-input hover:border-ring focus-visible:ring-ring size-full rounded-xl border border-dashed transition-colors outline-none focus-visible:ring-2"
-                type="button"
+                icon={Plus}
+                size="lg"
+                variant="ghost"
               />
-            }
-          />
-          <PopoverContent className="w-80">
-            <PopoverHeader>
-              <PopoverTitle>
-                <Trans>Add a widget</Trans>
-              </PopoverTitle>
-            </PopoverHeader>
-            <WidgetAsk
-              ask={async (session, asked, told) =>
-                await session.dashboard.makeWidget(asked, told)
-              }
-              label={t`Ask Grasp for a widget`}
-              onBusy={setMaking}
-              onDone={() => {
-                setOpen(false);
-              }}
-              onMade={onMade}
-              onProgress={setProgress}
-              placeholder={t`Which workflows failed most this month?`}
-            />
-            {back.length === 0 ? null : (
-              <div className="flex flex-col gap-1 border-t pt-3">
-                <p className="text-muted-foreground text-xs">
-                  <Trans>Put one back</Trans>
-                </p>
-                <ul className="flex flex-col">
-                  {back.map((id) => (
-                    <li key={id}>
-                      <Button
-                        className="w-full justify-start"
-                        onClick={() => {
-                          setOpen(false);
-                          onAdd(id);
-                        }}
-                        variant="ghost"
-                      >
-                        {titleOf(id)}
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </PopoverContent>
-        </Popover>
-        {/* The plus stands in the middle of the card, and is always seen. */}
-        <PlusIcon
-          aria-hidden="true"
-          className="text-muted-foreground peer-hover:text-foreground peer-focus-visible:text-foreground pointer-events-none absolute top-1/2 left-1/2 size-5 -translate-1/2 transition-colors"
-        />
+              <PopoverContent>
+                <PopoverTitle>
+                  <Trans>Add a widget</Trans>
+                </PopoverTitle>
+                <WidgetAsk
+                  ask={async (session, asked, told) =>
+                    await session.dashboard.makeWidget(asked, told)
+                  }
+                  label={t`Ask Grasp for a widget`}
+                  onBusy={setMaking}
+                  onDone={() => {
+                    setOpen(false);
+                  }}
+                  onMade={onMade}
+                  onProgress={setProgress}
+                  placeholder={t`Which workflows failed most this month?`}
+                />
+                {back.length === 0 ? null : (
+                  <>
+                    <Separator decorative />
+                    <div {...stylex.props(styles.back)}>
+                      <Text size="xs" tone="muted">
+                        <Trans>Put one back</Trans>
+                      </Text>
+                      <ul {...stylex.props(styles.backList)}>
+                        {back.map((id) => (
+                          <li key={id}>
+                            <Button
+                              layout={styles.wide}
+                              onClick={() => {
+                                setOpen(false);
+                                onAdd(id);
+                              }}
+                              variant="ghost"
+                            >
+                              {titleOf(id)}
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </>
+                )}
+              </PopoverContent>
+            </Popover>
+          </div>
+        </Card>
       </div>
     </div>
   );
@@ -684,8 +827,8 @@ const AddTile = ({
  * it is not as it began.
  */
 const ResetLine = ({ onReset }: { onReset: () => void }) => (
-  <div className="flex justify-center pt-3 opacity-70 transition-opacity focus-within:opacity-100 hover:opacity-100">
-    <Button onClick={onReset} size="xs" variant="link">
+  <div {...stylex.props(styles.reset)}>
+    <Button onClick={onReset} size="xs" variant="ghost">
       <Trans>Back to how it began</Trans>
     </Button>
   </div>
@@ -748,6 +891,8 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
     null
   );
   const [dragged, setDragged] = useState<DashboardWidgetId | null>(null);
+  // The widget Grasp made that is asked about before it goes for good.
+  const [asking, setAsking] = useState<DashboardWidgetId | null>(null);
   const grid = useRef<HTMLDivElement>(null);
   const press = useRef<Press | null>(null);
   /** Ends the drag under way, if any, without saving it. */
@@ -902,14 +1047,9 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
     if (event.button !== 0 || !(event.target instanceof Element)) {
       return;
     }
-    const byGrip = event.target.closest("[data-grip]") !== null;
-    // The mouse takes a block by its title too, never by one of its buttons
-    // or links.
-    const byTitle =
-      event.pointerType === "mouse" &&
-      event.target.closest("header") !== null &&
-      event.target.closest("button, a") === null;
-    if (!byGrip && !byTitle) {
+    // A block is taken by its title row (the Section card's handle), never
+    // by one of the buttons beside it.
+    if (event.target.closest(handleSlot) === null) {
       return;
     }
     // One drag at a time: another finger pressing meanwhile takes nothing.
@@ -989,31 +1129,30 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
   };
 
   const missing = missingWidgets(widgets, board.offered);
+  const name = asking === null ? "" : titleOf(asking);
   return (
-    <div className="@container">
-      <div className="grid grid-cols-1 gap-4 @4xl:grid-cols-2" ref={grid}>
+    <div {...stylex.props(styles.board)}>
+      <div ref={grid} {...stylex.props(styles.grid)}>
         {widgets.map((id) => {
           const title = titleOf(id);
           const dragging = dragged === id;
           const changeable = made.get(id);
           return (
             <div
-              className={cn(
-                "group/block relative h-80 min-w-0",
-                dragging && "z-30 cursor-grabbing select-none"
-              )}
               data-widget={id}
               key={id}
               onPointerDown={(event) => {
                 startDrag(id, event);
               }}
+              {...stylex.props(
+                stylex.defaultMarker(),
+                styles.cell,
+                dragging && styles.dragged
+              )}
             >
               <div
                 aria-busy={changing === id}
-                className={cn(
-                  "relative h-full rounded-xl transition duration-200",
-                  dragging && "scale-102 shadow-lg"
-                )}
+                {...stylex.props(styles.lift, dragging && styles.lifted)}
               >
                 {changing === id ? (
                   <>
@@ -1023,16 +1162,14 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
                 ) : null}
                 <WidgetControls
                   value={{
-                    movable: true,
+                    handle: {
+                      label: t`Move ${title}: drag it, or use the arrow keys`,
+                      onKeyDown: (event) => {
+                        moveByKey(id, event);
+                      },
+                    },
                     actions: (
-                      <span className={atHand}>
-                        <Grip
-                          id={id}
-                          onKeyDown={(event) => {
-                            moveByKey(id, event);
-                          }}
-                          title={title}
-                        />
+                      <span {...stylex.props(styles.atHand)}>
                         {changeable === undefined ? null : (
                           <ChangeWidget
                             onBusy={(busy) => {
@@ -1047,7 +1184,11 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
                           icon={Cross}
                           label={t`Take off the dashboard`}
                           onClick={() => {
-                            remove(id);
+                            if (changeable === undefined) {
+                              remove(id);
+                            } else {
+                              setAsking(id);
+                            }
                           }}
                         />
                       </span>
@@ -1076,13 +1217,42 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
           titleOf={titleOf}
         />
       </div>
-      <p aria-live="polite" className="sr-only">
+      <p aria-live="polite" {...stylex.props(visuallyHidden)}>
         {announcement}
       </p>
       <ErrorText>{failure}</ErrorText>
       {differsFromDefault(widgets, board.offered) ? (
         <ResetLine onReset={reset} />
       ) : null}
+      {/* A widget Grasp made goes for good once taken off: it asks first. */}
+      <AlertDialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setAsking(null);
+          }
+        }}
+        open={asking !== null}
+      >
+        <AlertDialogContent>
+          <AlertDialogTitle>{t`Delete ${name}?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t`Grasp made this widget for you. Taken off, it is gone for good.`}
+          </AlertDialogDescription>
+          <AlertDialogFooter>
+            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+            <AlertDialogAction
+              onClick={() => {
+                if (asking !== null) {
+                  remove(asking);
+                }
+              }}
+              variant="danger"
+            >
+              {t`Delete`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

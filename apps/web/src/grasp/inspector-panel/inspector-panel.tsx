@@ -6,22 +6,16 @@ import { Icon, Lock, Plus, Trash } from "../icons";
 import { Panel, PanelHeader, PanelText, PanelView } from "../panel";
 import { PanelSection } from "../panel-section";
 import { RowList, RowListAction, RowListItem } from "../row-list";
+import { useWords, withGiven } from "../words/words";
 import type {
   InspectorPanelProps,
   InspectorPanelWords,
   InspectorRow,
   InspectorSection,
 } from "./types";
+import { englishWords } from "./words";
 
-/** The panel's own words, in English. */
-export const englishWords: InspectorPanelWords = {
-  add: "Add",
-  addTo: (label) => `Add ${label.toLowerCase()}`,
-  remove: (name) => `Remove ${name}`,
-  showAll: (label) => `Show all the ${label.toLowerCase()}`,
-  close: "Close",
-  views: "Views",
-};
+export { englishWords } from "./words";
 
 const noSections: readonly InspectorSection[] = [];
 const noRows: readonly InspectorRow[] = [];
@@ -146,7 +140,11 @@ const nameOf = (props: { "aria-label"?: string; label?: string }) =>
 export const InspectorPanel = (props: InspectorPanelProps) => {
   const { title, icon, views, sections, framed = true } = props;
   const label = nameOf(props);
-  const words = { ...englishWords, ...props.words };
+  // Its words: the product's, by its catalogue, else English; the caller's `words` still win.
+  const words = withGiven(
+    useWords("inspectorPanel", englishWords),
+    props.words ?? {}
+  );
   const tile =
     icon === undefined ? undefined : (
       <IconTile

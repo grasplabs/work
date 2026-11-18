@@ -1,9 +1,43 @@
 import type { MemoryKind } from "@grasp-os/shared/knowledge";
 import { useLingui } from "@lingui/react/macro";
-import type { RefObject } from "react";
+import * as stylex from "@stylexjs/stylex";
+import { Fragment } from "react";
+import type { ReactElement, ReactNode, RefObject } from "react";
+
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 
 // What the Memory page's parts share: a record's kind in words, the
-// record a command's receipt names, and a form's idempotency key.
+// record a command's receipt names, a form's idempotency key, a line of
+// facts about a record, and the room a panel's card gives its words.
+
+const styles = stylex.create({
+  // A sentence in an inspector's card, inset as the card's rows are.
+  cardWords: {
+    margin: 0,
+    paddingBlock: grasp.space3,
+    paddingInline: grasp.inspectorInset,
+  },
+});
+
+/** A fact about a record, under a lasting key. */
+export interface Fact {
+  id: string;
+  fact: ReactElement | string;
+}
+
+/** Facts about a record on one line, a dot between them. */
+export const FactLine = ({ facts }: { facts: readonly Fact[] }) =>
+  facts.map(({ id, fact }, at) => (
+    <Fragment key={id}>
+      {at === 0 ? null : " · "}
+      {fact}
+    </Fragment>
+  ));
+
+/** A sentence in an inspector panel's card, where rows would stand. */
+export const CardWords = ({ children }: { children: ReactNode }) => (
+  <div {...stylex.props(styles.cardWords)}>{children}</div>
+);
 
 /** What kind of thing a record holds, in words. */
 export const KindLabel = ({ kind }: { kind: MemoryKind }) => {

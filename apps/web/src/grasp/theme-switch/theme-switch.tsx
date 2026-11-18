@@ -22,12 +22,13 @@ import { usePart, usePrimitive } from "@ui-sdk/react/primitive";
 import type { LayoutStyle } from "../layout/layout";
 import { useTheme } from "../theme";
 import type { ThemeId, ThemeMode } from "../theme";
+import { useWords, withGiven } from "../words/words";
 import { themeSwitchAgent } from "./agent";
 import { ThemeSwitchIcon } from "./icon";
 import { ThemeSwitchPicker } from "./picker";
 import { ThemeSwitchSegmented } from "./segmented";
 import { switchStyles as styles } from "./styles";
-import { defaultIconLabel, defaultModeWords, defaultThemeWords } from "./words";
+import { defaultThemeWords, themeSwitchWords } from "./words";
 import type { ModeWords, ThemeWords } from "./words";
 
 /** What a caller may style: where the switch sits. Never its look. */
@@ -86,8 +87,8 @@ export interface ThemeSwitchProps {
 export const ThemeSwitch = ({
   form: formDeprecated,
   variant: form = formDeprecated ?? "segmented",
-  label = "Theme",
-  themesLabel = "Colours",
+  label: labelGiven,
+  themesLabel: themesGiven,
   showThemes = true,
   size = "md",
   tileSize = "fill",
@@ -98,8 +99,14 @@ export const ThemeSwitch = ({
   layout,
 }: ThemeSwitchProps) => {
   const controls = useTheme();
+  // Its words: the product's, by its catalogue, else English; the caller's props still win.
+  const words = useWords("themeSwitch", themeSwitchWords);
+  const { label, themes: themesLabel } = withGiven(words, {
+    label: labelGiven,
+    themes: themesGiven,
+  });
   const wordsOfMode = (mode: ThemeMode): ModeWords =>
-    modeWords?.[mode] ?? defaultModeWords[mode];
+    modeWords?.[mode] ?? words[mode];
   const wordsOfTheme = (theme: ThemeId): ThemeWords =>
     themeWords?.[theme] ?? defaultThemeWords(theme);
   const shownMode = controls.mode ?? "system";
@@ -125,7 +132,7 @@ export const ThemeSwitch = ({
   });
 
   const name = (current: ThemeMode, next: ThemeMode): string =>
-    (iconLabel ?? defaultIconLabel)(
+    (iconLabel ?? words.icon)(
       label,
       wordsOfMode(current).name,
       wordsOfMode(next).name

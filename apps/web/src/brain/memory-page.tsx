@@ -1,40 +1,66 @@
 import { failureText } from "@grasp-os/shared/errors";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import {
-  PageHeader,
-  PageHeaderActions,
-  PageHeaderTitle,
-} from "@grasp-os/ui/components/page-header";
-import { Tabs, TabsList, TabsTrigger } from "@grasp-os/ui/components/tabs";
-import { Textarea } from "@grasp-os/ui/components/textarea";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { FileTextIcon } from "lucide-react";
-import { useEffect, useId, useState } from "react";
+import * as stylex from "@stylexjs/stylex";
+import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../grasp/alert-dialog/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import {
+  Dialog,
+  DialogAction,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogTitle,
+  DialogTrigger,
+} from "../grasp/dialog/index.ts";
+import { Empty, EmptyHeader, EmptyTitle } from "../grasp/empty/index.ts";
+import { Field, FieldLabel } from "../grasp/field/index.ts";
+import { File, Note } from "../grasp/icons/index.ts";
+import { InspectorPanel } from "../grasp/inspector-panel/index.ts";
+import type { InspectorSection } from "../grasp/inspector-panel/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { PageHeader } from "../grasp/page-header/index.ts";
+import { Tabs, TabsList, TabsTrigger } from "../grasp/tabs/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { Textarea } from "../grasp/textarea/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { LessonsView } from "./lessons-view.tsx";
-import { recordOf } from "./memory-parts.tsx";
+import { CardWords, FactLine, recordOf } from "./memory-parts.tsx";
+import type { Fact } from "./memory-parts.tsx";
 import { RememberDialog } from "./remember-dialog.tsx";
 import { ShareRecord } from "./share-record.tsx";
 
 // The Brain's memory records, as a person inspects and corrects them
 // (GRA-298; the threat model is on the issue): their own, or the shared
 // records of others their memory reads; and one record's lineage, as far
-// as they may follow it now, with what superseded it. Core decides what
-// they see and what they may change: this page shows what it answers, and
-// offers a correction or a retirement only where core would take it.
+// as they may follow it now, with what superseded it, in the inspector
+// beside the list. Core decides what they see and what they may change:
+// this page shows what it answers, and offers a correction or a
+// retirement only where core would take it. A correction is a dialog's
+// task; a retirement asks first, as nothing brings a record back.
 // Statements, names and titles are text, never markup.
 
 type Knowledge = Session["knowledge"];
@@ -49,6 +75,35 @@ type Read<T> =
   | { state: "loading" }
   | { state: "refused"; message: string }
   | { state: "ready"; data: T };
+
+const styles = stylex.create({
+  // A page of the brain as its log is (brain-log.tsx): in the brain's
+  // column, scrolling on its own, with room at the foot for the chat.
+  scroll: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
+  column: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space6,
+    boxSizing: "border-box",
+    width: "100%",
+    maxWidth: grasp.pageMeasure,
+    marginInline: "auto",
+    paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
+  },
+  // The list, and the record in hand beside it once the page is wide
+  // enough; under it on a narrow one.
+  split: {
+    display: "grid",
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      [media.fromSidebar]: `minmax(0, 1fr) ${grasp.inspectorWidth}`,
+    },
+    gap: grasp.space6,
+    alignItems: "start",
+    minWidth: 0,
+  },
+  list: { display: "grid", gap: grasp.space2, minWidth: 0 },
+});
 
 /**
  * What `read` answers on the person's session, or why not. Outside the
@@ -68,80 +123,94 @@ const readFrom = async <T,>(
   }
 };
 
-const StateBadge = ({ state }: { state: Shown["state"] }) => {
+/** A record's state: accepted, as done, in green; the others in words. */
+const StateMark = ({ state }: { state: Shown["state"] }) => {
   const { t } = useLingui();
   const label = {
     accepted: t({ message: "Accepted", context: "memory record state" }),
     proposed: t({ message: "Proposed", context: "memory record state" }),
     retired: t({ message: "Retired", context: "memory record state" }),
   }[state];
-  return (
-    <Badge variant={state === "accepted" ? "secondary" : "outline"}>
+  return state === "accepted" ? (
+    <Badge size="sm" tone="success">
       {label}
     </Badge>
+  ) : (
+    label
   );
 };
 
-const ScopeBadge = ({ scope }: { scope: Shown["scope"] }) => {
+const ScopeLabel = ({ scope }: { scope: Shown["scope"] }) => {
   const { t } = useLingui();
-  const label = {
+  return {
     person: t({ message: "Yours", context: "memory record scope" }),
     session: t({ message: "This chat", context: "memory record scope" }),
     team: t({ message: "Team", context: "memory record scope" }),
     company: t({ message: "Company", context: "memory record scope" }),
   }[scope];
-  return <Badge variant="outline">{label}</Badge>;
 };
 
-/** A record's statement with what it is: a row to pick, or the one in hand. */
-const RecordLine = ({
+/** What a record is: where it is shared, its state, revision, time and author. */
+const factsOf = (
+  record: Omit<Shown, "by">,
+  by: string | null | undefined
+): Fact[] => [
+  { id: "scope", fact: <ScopeLabel scope={record.scope} /> },
+  { id: "state", fact: <StateMark state={record.state} /> },
+  { id: "revision", fact: <Trans>Revision {record.revision}</Trans> },
+  { id: "at", fact: formatDateTime(record.recordedAt) },
+  ...(by === undefined || by === null
+    ? []
+    : [{ id: "by", fact: <Trans>By {by}</Trans> }]),
+];
+
+/** A record's statement, or that it cites what the person may no longer read. */
+const Statement = ({ record }: { record: Omit<Shown, "by"> }) =>
+  record.withheld === true ? (
+    <Text element="span" tone="muted">
+      <Trans>Cites a source you no longer have access to</Trans>
+    </Text>
+  ) : (
+    record.statement
+  );
+
+/** A record as a row to pick: its statement, and what it is under it. */
+const RecordItem = ({
   record,
   by,
+  note,
   onPick,
-  picked,
+  picked = false,
 }: {
   record: Omit<Shown, "by">;
   by?: string | null;
-  onPick?: () => void;
+  /** A second line, after what it is: how its citation stands. */
+  note?: ReactNode;
+  onPick: () => void;
   picked?: boolean;
 }) => {
-  const body = (
-    <>
-      <span className="min-w-0 text-sm">
-        {record.withheld === true ? (
-          <span className="text-muted-foreground italic">
-            <Trans>Cites a source you no longer have access to</Trans>
-          </span>
-        ) : (
-          record.statement
-        )}
-      </span>
-      <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
-        <ScopeBadge scope={record.scope} />
-        <StateBadge state={record.state} />
-        <span>
-          <Trans>Revision {record.revision}</Trans>
-        </span>
-        <span>{formatDateTime(record.recordedAt)}</span>
-        {by === undefined || by === null ? null : (
-          <span>
-            <Trans>By {by}</Trans>
-          </span>
-        )}
-      </span>
-    </>
-  );
-  return onPick === undefined ? (
-    <div className="flex flex-col gap-1.5">{body}</div>
-  ) : (
-    <button
-      aria-pressed={picked}
-      className="hover:bg-accent aria-pressed:bg-accent flex w-full flex-col items-start gap-1.5 rounded-md px-3 py-2 text-left"
-      onClick={onPick}
-      type="button"
+  const { t } = useLingui();
+  const name =
+    record.withheld === true
+      ? t`Cites a source you no longer have access to`
+      : record.statement;
+  return (
+    <Item
+      current={picked}
+      render={<button aria-label={name} onClick={onPick} type="button" />}
+      size="sm"
     >
-      {body}
-    </button>
+      <ItemMedia icon={Note} iconLook="inline" />
+      <ItemContent>
+        <ItemTitle>
+          <Statement record={record} />
+        </ItemTitle>
+        <ItemDescription>
+          <FactLine facts={factsOf(record, by)} />
+        </ItemDescription>
+        {note === undefined ? null : <ItemDescription>{note}</ItemDescription>}
+      </ItemContent>
+    </Item>
   );
 };
 
@@ -155,44 +224,42 @@ const RestsOn = ({
 }) => {
   if (lineage.restsOn.length === 0) {
     return (
-      <p className="text-muted-foreground text-sm">
-        <Trans>It rests on nothing you can see.</Trans>
-      </p>
+      <CardWords>
+        <Text size="sm" tone="muted">
+          <Trans>It rests on nothing you can see.</Trans>
+        </Text>
+      </CardWords>
     );
   }
   return (
-    <ul className="flex flex-col gap-2">
+    <ItemGroup separated>
       {lineage.restsOn.map((node) =>
         node.kind === "memory" ? (
-          <li
-            className="border-l pl-3"
+          <RecordItem
+            by={node.record.by}
             key={`${node.citedBy}>${node.record.id}`}
-          >
-            <RecordLine
-              by={node.record.by}
-              onPick={() => {
-                onPick(node.record.id);
-              }}
-              record={node.record}
-            />
-            {node.citedRevision === node.record.revision ? null : (
-              <p className="text-muted-foreground px-3 text-xs">
+            note={
+              node.citedRevision === node.record.revision ? undefined : (
                 <Trans>
                   Cited at revision {node.citedRevision}; it is at revision{" "}
                   {node.record.revision} now.
                 </Trans>
-              </p>
-            )}
-          </li>
+              )
+            }
+            onPick={() => {
+              onPick(node.record.id);
+            }}
+            record={node.record}
+          />
         ) : (
-          <li
-            className="flex items-start gap-2 border-l pl-3 text-sm"
+          <Item
             key={`${node.citedBy}>${node.documentId}@${node.version}`}
+            size="sm"
           >
-            <FileTextIcon className="text-muted-foreground mt-0.5 size-4 flex-none" />
-            <span className="flex min-w-0 flex-col">
-              <span className="truncate">{node.title}</span>
-              <span className="text-muted-foreground text-xs">
+            <ItemMedia icon={File} iconLook="inline" />
+            <ItemContent>
+              <ItemTitle>{node.title}</ItemTitle>
+              <ItemDescription>
                 {node.path}
                 {" · "}
                 {node.version === node.currentVersion ? (
@@ -203,16 +270,16 @@ const RestsOn = ({
                     {node.currentVersion} now
                   </Trans>
                 )}
-              </span>
-            </span>
-          </li>
+              </ItemDescription>
+            </ItemContent>
+          </Item>
         )
       )}
-    </ul>
+    </ItemGroup>
   );
 };
 
-/** A correction of one of the person's own records, against its revision. */
+/** The correction's form, a fresh one for each opening. */
 const CorrectForm = ({
   record,
   onDone,
@@ -221,92 +288,127 @@ const CorrectForm = ({
   onDone: (memoryId: string | undefined) => void;
 }) => {
   const { t } = useLingui();
-  const { busy, failure, run } = useCoreAction();
+  const { failure, run } = useCoreAction();
   const [statement, setStatement] = useState(record.statement);
-  const id = useId();
   const changed =
     statement.trim() !== "" && statement.trim() !== record.statement;
-  return (
-    <form
-      className="flex flex-col gap-2"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void (async () => {
-          const receipt = await run(
-            async (session) =>
-              await session.knowledge.memoriesProposeChange(
-                { memoryId: record.id, statement: statement.trim() },
-                {
-                  idempotencyKey: crypto.randomUUID(),
-                  expectedRevision: record.revision,
-                }
-              )
-          );
-          if (receipt !== undefined) {
-            onDone(recordOf(receipt));
+  const correct = async (): Promise<void> => {
+    const receipt = await run(
+      async (session) =>
+        await session.knowledge.memoriesProposeChange(
+          { memoryId: record.id, statement: statement.trim() },
+          {
+            idempotencyKey: crypto.randomUUID(),
+            expectedRevision: record.revision,
           }
-        })();
-      }}
-    >
-      <label className="text-sm font-medium" htmlFor={id}>
-        <Trans>Correct it</Trans>
-      </label>
-      <Textarea
-        id={id}
-        onChange={(event) => {
-          setStatement(event.target.value);
-        }}
-        placeholder={t`What it should say`}
-        value={statement}
-      />
-      {failure === undefined ? null : <ErrorText>{failure}</ErrorText>}
-      <div>
-        <Button disabled={busy || !changed} type="submit">
-          <Trans>Save the correction</Trans>
-        </Button>
-      </div>
-    </form>
+        )
+    );
+    if (receipt === undefined) {
+      // The dialog stays open, with core's reason under the field.
+      throw new Error("The correction wasn't saved.");
+    }
+    onDone(recordOf(receipt));
+  };
+  return (
+    <>
+      <DialogBody>
+        <Field>
+          <FieldLabel>{t`What it should say`}</FieldLabel>
+          <Textarea
+            onValueChange={(value) => {
+              setStatement(value);
+            }}
+            value={statement}
+          />
+        </Field>
+        <ErrorText>{failure}</ErrorText>
+      </DialogBody>
+      <DialogFooter>
+        <DialogAction>{t`Cancel`}</DialogAction>
+        <DialogAction
+          action={correct}
+          disabled={!changed}
+          failedLabel={t`Not saved`}
+          variant="ink"
+          workingLabel={t`Saving`}
+        >
+          {t`Save the correction`}
+        </DialogAction>
+      </DialogFooter>
+    </>
   );
 };
 
-/** Retires a shared record, where core would take it. */
-const RetireButton = ({
+/** A correction of one of the person's own records, against its revision. */
+const CorrectRecord = ({
+  record,
+  onDone,
+}: {
+  record: Shown;
+  onDone: (memoryId: string | undefined) => void;
+}) => {
+  const { t } = useLingui();
+  const [open, setOpen] = useState(false);
+  return (
+    <Dialog onOpenChange={setOpen} open={open}>
+      <DialogTrigger size="xs">{t`Correct it`}</DialogTrigger>
+      <DialogContent closeLabel={t`Close`}>
+        <DialogTitle>{t`Correct it`}</DialogTitle>
+        {open ? <CorrectForm onDone={onDone} record={record} /> : null}
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+/** Retires a record, where core would take it, once the person says so. */
+const RetireRecord = ({
   record,
   onDone,
 }: {
   record: Shown;
   onDone: () => void;
 }) => {
-  const { busy, failure, run } = useCoreAction();
+  const { t } = useLingui();
+  const { failure, run } = useCoreAction();
+  const retire = async (): Promise<void> => {
+    const receipt = await run(
+      async (session) =>
+        await session.knowledge.memoriesRetire(
+          { memoryId: record.id },
+          {
+            idempotencyKey: crypto.randomUUID(),
+            expectedRevision: record.revision,
+          }
+        )
+    );
+    if (receipt === undefined) {
+      // It stays open, with core's reason in it.
+      throw new Error("The record wasn't retired.");
+    }
+    onDone();
+  };
   return (
-    <div className="flex flex-col gap-2">
-      <div>
-        <Button
-          disabled={busy}
-          onClick={() => {
-            void (async () => {
-              const receipt = await run(
-                async (session) =>
-                  await session.knowledge.memoriesRetire(
-                    { memoryId: record.id },
-                    {
-                      idempotencyKey: crypto.randomUUID(),
-                      expectedRevision: record.revision,
-                    }
-                  )
-              );
-              if (receipt !== undefined) {
-                onDone();
-              }
-            })();
-          }}
-          variant="outline"
-        >
-          <Trans>Retire it</Trans>
-        </Button>
-      </div>
-      {failure === undefined ? null : <ErrorText>{failure}</ErrorText>}
-    </div>
+    <AlertDialog>
+      <AlertDialogTrigger size="xs">{t`Retire it`}</AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogTitle>{t`Retire this record?`}</AlertDialogTitle>
+        <AlertDialogDescription>
+          {t`Grasp and your agents stop using it. It stays here, as retired.`}
+        </AlertDialogDescription>
+        <ErrorText>{failure}</ErrorText>
+        <AlertDialogFooter>
+          <AlertDialogAction>{t`Keep it`}</AlertDialogAction>
+          <AlertDialogAction
+            action={retire}
+            failedLabel={t`Not retired`}
+            variant="danger"
+            workingLabel={t`Retiring`}
+          >
+            {t({ message: "Retire", context: "confirm retiring a record" })}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 };
 
@@ -317,12 +419,14 @@ const LineagePanel = ({
   teams,
   onPick,
   onChanged,
+  onClose,
 }: {
   memoryId: string;
   admin: boolean;
   teams: readonly { id: string; name: string }[];
   onPick: (memoryId: string) => void;
   onChanged: (memoryId: string | undefined) => void;
+  onClose: () => void;
 }) => {
   const { t } = useLingui();
   const core = useCore();
@@ -353,7 +457,7 @@ const LineagePanel = ({
     return <ErrorText>{answered.message}</ErrorText>;
   }
   const lineage = answered.data;
-  const { record } = lineage;
+  const { record, supersededBy } = lineage;
   const own = record.by === null;
   const withheld = record.withheld === true;
   const correctable =
@@ -362,59 +466,69 @@ const LineagePanel = ({
   // may no longer read, withheld, only so.
   const retirable =
     record.state !== "retired" && (own || (admin && record.scope !== "person"));
+  const title = withheld
+    ? t`Cites a source you no longer have access to`
+    : record.statement;
+  const sections: InspectorSection[] = [
+    ...(supersededBy === null
+      ? []
+      : [
+          {
+            id: "corrected",
+            label: t`Corrected by`,
+            content: (
+              <ItemGroup>
+                <RecordItem
+                  by={supersededBy.by}
+                  onPick={() => {
+                    onPick(supersededBy.id);
+                  }}
+                  record={supersededBy}
+                />
+              </ItemGroup>
+            ),
+          },
+        ]),
+    {
+      id: "rests-on",
+      label: t`What it rests on`,
+      content: <RestsOn lineage={lineage} onPick={onPick} />,
+    },
+  ];
   return (
-    <section
-      aria-label={
-        withheld
-          ? t`Cites a source you no longer have access to`
-          : record.statement
+    <InspectorPanel
+      actions={
+        <>
+          {correctable ? (
+            <CorrectRecord onDone={onChanged} record={record} />
+          ) : null}
+          {/* One they may correct, they may share: the form says where. */}
+          {correctable ? (
+            <ShareRecord
+              admin={admin}
+              onShared={onChanged}
+              record={record}
+              teams={teams}
+            />
+          ) : null}
+          {retirable ? (
+            <RetireRecord
+              onDone={() => {
+                onChanged(record.id);
+              }}
+              record={record}
+            />
+          ) : null}
+        </>
       }
-      className="flex flex-col gap-5 rounded-lg border p-4"
-    >
-      <RecordLine by={record.by} record={record} />
-      {lineage.supersededBy === null ? null : (
-        <div className="flex flex-col gap-1">
-          <h3 className="text-sm font-medium">
-            <Trans>Corrected by</Trans>
-          </h3>
-          <RecordLine
-            by={lineage.supersededBy.by}
-            onPick={() => {
-              if (lineage.supersededBy !== null) {
-                onPick(lineage.supersededBy.id);
-              }
-            }}
-            record={lineage.supersededBy}
-          />
-        </div>
-      )}
-      <div className="flex flex-col gap-2">
-        <h3 className="text-sm font-medium">
-          <Trans>What it rests on</Trans>
-        </h3>
-        <RestsOn lineage={lineage} onPick={onPick} />
-      </div>
-      {correctable ? (
-        <CorrectForm key={record.revision} onDone={onChanged} record={record} />
-      ) : null}
-      {/* One they may correct, they may share: the form says where. */}
-      {correctable ? (
-        <ShareRecord
-          admin={admin}
-          onShared={onChanged}
-          record={record}
-          teams={teams}
-        />
-      ) : null}
-      {retirable ? (
-        <RetireButton
-          onDone={() => {
-            onChanged(record.id);
-          }}
-          record={record}
-        />
-      ) : null}
-    </section>
+      aria-label={title}
+      icon={Note}
+      meta={factsOf(record, record.by).map(({ fact }) => fact)}
+      onClose={onClose}
+      sections={sections}
+      title={title}
+      words={{ close: t`Close` }}
+    />
   );
 };
 
@@ -449,41 +563,42 @@ const RecordList = ({
       left = true;
     };
   }, [core, among]);
+  if (listed.state === "loading") {
+    return null;
+  }
+  if (listed.state === "refused") {
+    return <ErrorText>{listed.message}</ErrorText>;
+  }
+  if (listed.data.records.length === 0) {
+    return (
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>
+            <Trans>No records yet</Trans>
+          </EmptyTitle>
+        </EmptyHeader>
+      </Empty>
+    );
+  }
   return (
-    <div className="flex flex-col gap-1">
-      {listed.state === "refused" ? (
-        <ErrorText>{listed.message}</ErrorText>
-      ) : null}
-      {listed.state === "ready" && listed.data.records.length === 0 ? (
-        <Empty>
-          <EmptyHeader>
-            <EmptyTitle>
-              <Trans>No records yet</Trans>
-            </EmptyTitle>
-            <EmptyDescription>
-              <Trans>
-                What you and your agents remember, and what others share with
-                you, shows here.
-              </Trans>
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      ) : null}
-      {listed.state === "ready"
-        ? listed.data.records.map((record) => (
-            <RecordLine
-              key={record.id}
-              onPick={() => {
-                onPick(record.id);
-              }}
-              picked={picked === record.id}
-              record={record}
-            />
-          ))
-        : null}
-    </div>
+    <ItemGroup>
+      {listed.data.records.map((record) => (
+        <RecordItem
+          key={record.id}
+          onPick={() => {
+            onPick(record.id);
+          }}
+          picked={picked === record.id}
+          record={record}
+        />
+      ))}
+    </ItemGroup>
   );
 };
+
+/** Whether a tab's value is one of the page's. */
+const tabOf = (value: unknown): Tab =>
+  value === "shared" || value === "lessons" ? value : "mine";
 
 /** The Brain's memory page: the records, and the one in hand. */
 export const MemoryPage = ({
@@ -494,21 +609,18 @@ export const MemoryPage = ({
   /** The teams the person is in, to share their records with. */
   teams: readonly { id: string; name: string }[];
 }) => {
+  const { t } = useLingui();
   const [tab, setTab] = useState<Tab>("mine");
   const [picked, setPicked] = useState<string>();
   // Read again after a change: what changed shows as it is now.
   const [changes, setChanges] = useState(0);
   return (
-    // A page of the brain as its log is (brain-log.tsx): the title in the
-    // serif, the kinds of record as a line of tabs under it, in the brain's
-    // column, with room at the foot for the chat.
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 md:px-12">
-        <PageHeader>
-          <PageHeaderTitle>
-            <Trans>Memory</Trans>
-          </PageHeaderTitle>
-          <PageHeaderActions>
+    // The title in the serif, the kinds of record as a line of tabs under
+    // it, in the brain's column, with room at the foot for the chat.
+    <div {...stylex.props(styles.scroll)}>
+      <div {...stylex.props(styles.column)}>
+        <PageHeader
+          actions={
             <RememberDialog
               onRemembered={(memoryId) => {
                 setTab("mine");
@@ -516,52 +628,62 @@ export const MemoryPage = ({
                 setPicked(memoryId);
               }}
             />
-          </PageHeaderActions>
-        </PageHeader>
-        <Tabs
-          onValueChange={(value: string) => {
-            setTab(value === "shared" || value === "lessons" ? value : "mine");
-            setPicked(undefined);
-          }}
-          value={tab}
-        >
-          <TabsList variant="line">
-            <TabsTrigger className="flex-none" value="mine">
-              <Trans context="memory records: the person's own">Yours</Trans>
-            </TabsTrigger>
-            <TabsTrigger className="flex-none" value="shared">
-              <Trans context="memory records: others' that you read">
-                Shared with you
-              </Trans>
-            </TabsTrigger>
-            <TabsTrigger className="flex-none" value="lessons">
-              <Trans context="the Brain's lessons from repeated failures">
-                Lessons
-              </Trans>
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+          }
+          tabs={
+            <Tabs
+              onValueChange={(value) => {
+                setTab(tabOf(value));
+                setPicked(undefined);
+              }}
+              value={tab}
+            >
+              <TabsList aria-label={t`Memory`}>
+                <TabsTrigger value="mine">
+                  <Trans context="memory records: the person's own">
+                    Yours
+                  </Trans>
+                </TabsTrigger>
+                <TabsTrigger value="shared">
+                  <Trans context="memory records: others' that you read">
+                    Shared with you
+                  </Trans>
+                </TabsTrigger>
+                <TabsTrigger value="lessons">
+                  <Trans context="the Brain's lessons from repeated failures">
+                    Lessons
+                  </Trans>
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          }
+          title={t`Memory`}
+        />
         {tab === "lessons" ? (
           <LessonsView admin={admin} />
         ) : (
-          <div className="grid min-h-0 gap-6 lg:grid-cols-2">
-            <RecordList
-              among={tab}
-              key={`${tab}:${changes}`}
-              onPick={setPicked}
-              picked={picked}
-            />
+          <div {...stylex.props(styles.split)}>
+            <div {...stylex.props(styles.list)}>
+              <RecordList
+                among={tab}
+                key={`${tab}:${changes}`}
+                onPick={setPicked}
+                picked={picked}
+              />
+            </div>
             {picked === undefined ? null : (
               <LineagePanel
                 admin={admin}
-                teams={teams}
                 key={`${picked}:${changes}`}
                 memoryId={picked}
                 onChanged={(memoryId) => {
                   setChanges((count) => count + 1);
                   setPicked(memoryId);
                 }}
+                onClose={() => {
+                  setPicked(undefined);
+                }}
                 onPick={setPicked}
+                teams={teams}
               />
             )}
           </div>

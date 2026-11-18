@@ -295,6 +295,12 @@ const shown = async (
   return router;
 };
 
+/** The asking dialog's confirming action: its last, after Cancel. */
+const confirmation = (): HTMLElement | undefined =>
+  [...document.querySelectorAll<HTMLElement>('[role="alertdialog"] button')].at(
+    -1
+  );
+
 const press = async (element: Element | undefined) => {
   if (!(element instanceof HTMLElement)) {
     throw new TypeError("Nothing to press");
@@ -306,11 +312,12 @@ const press = async (element: Element | undefined) => {
   await settled();
 };
 
+/** A button by its name: the words it shows now (a working answer keeps its others hidden), or its label. */
 const button = (name: string, within: ParentNode = document) =>
   [...within.querySelectorAll("button")].find(
     (each) =>
-      each.textContent?.trim() === name ||
-      each.getAttribute("aria-label") === name
+      (each.querySelector("[data-shown]") ?? each).textContent.trim() ===
+        name || each.getAttribute("aria-label") === name
   );
 
 const menuItem = (name: string) =>
@@ -322,10 +329,15 @@ const menuItem = (name: string) =>
 const section = (id: "app-unpublished" | "app-published") =>
   document.querySelector(`section[aria-labelledby="${id}"]`);
 
-/** What each line of a section says first: its title. */
+/** What each line of a section says first: its title, then what it is marked. */
 const titles = (id: "app-unpublished" | "app-published"): string[] =>
-  [...(section(id)?.querySelectorAll('[data-slot="item-title"]') ?? [])].map(
-    (title) => title.textContent?.trim() ?? ""
+  [...(section(id)?.querySelectorAll('[data-slot="item"]') ?? [])].map((line) =>
+    [
+      line.querySelector(":scope > span > span"),
+      ...line.querySelectorAll('[data-slot="badge"]'),
+    ]
+      .map((part) => part?.textContent.trim() ?? "")
+      .join("")
   );
 
 /** A published version's label, before what it is marked. */
@@ -382,12 +394,7 @@ describe("An App's History", () => {
     ).length;
 
     await press(button("Restore", unpublished));
-    await press(
-      button(
-        "Restore",
-        document.querySelector('[role="alertdialog"]') ?? document
-      )
-    );
+    await press(confirmation());
 
     expect({
       heading: unpublished.querySelector("h3")?.textContent,
@@ -417,19 +424,9 @@ describe("An App's History", () => {
     await press(button("Cancel"));
     const afterCancel = [...asked];
     await press(button("Restore", unpublished));
-    await press(
-      button(
-        "Restore",
-        document.querySelector('[role="alertdialog"]') ?? document
-      )
-    );
+    await press(confirmation());
     await press(button("Undo changes"));
-    await press(
-      button(
-        "Undo changes",
-        document.querySelector('[role="alertdialog"]') ?? document
-      )
-    );
+    await press(confirmation());
 
     expect({ afterCancel, asked }).toStrictEqual({
       afterCancel: [],
@@ -445,16 +442,17 @@ describe("An App's History", () => {
       role: "builder",
       changed: ["src/routes/index.tsx"],
     });
-    await shown(session, person("user-owner", "builder"));
+    const router = await shown(session, person("user-owner", "builder"));
     const preview = [
       ...(section("app-unpublished")?.querySelectorAll("a") ?? []),
     ].find((link) => link.textContent.trim() === "See it");
+    const earlier = preview?.getAttribute("href");
     await press(button("Actions for 26.10.1"));
-    const version = menuItem("See this version");
+    await press(menuItem("See this version"));
 
     expect({
-      point: preview?.getAttribute("href"),
-      version: version?.getAttribute("href"),
+      point: earlier,
+      version: router.state.location.href,
     }).toStrictEqual({
       point: "/apps/app-1?point=3",
       version: "/apps/app-1?version=1",
@@ -471,7 +469,7 @@ describe("An App's History", () => {
     expect({
       asked,
       shown: document
-        .querySelector('[data-slot="sheet-content"]')
+        .querySelector('[role="dialog"]')
         ?.textContent.includes("src/routes/index.tsx"),
     }).toStrictEqual({ asked: [["diff", appId, 2, 3]], shown: true });
   });

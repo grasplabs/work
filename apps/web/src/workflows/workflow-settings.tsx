@@ -7,8 +7,24 @@ import type {
   WorkflowResourceVersion,
   WorkflowState,
 } from "@grasp-os/shared/workflow-resources";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { buttonVariants } from "@grasp-os/ui/components/button";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { Link, useRouter } from "@tanstack/react-router";
+import { useId } from "react";
+
+import { formatDateTime, formatList } from "../format.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
+import { Badge } from "../grasp/badge/index.ts";
+import { Empty } from "../grasp/empty/index.ts";
+import { PageHeader } from "../grasp/page-header/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import {
+  FactRow,
+  SettingRow,
+  SettingsRows,
+} from "../grasp/setting-row/index.ts";
 import {
   Table,
   TableBody,
@@ -16,25 +32,17 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { Link, useRouter } from "@tanstack/react-router";
-import { useId } from "react";
-import type { ReactNode } from "react";
-
-import { formatDateTime, formatList } from "../format.ts";
-import { NotLoadedState } from "../frame/page-states.tsx";
+} from "../grasp/table/index.ts";
+import { TabsLink, TabsNav } from "../grasp/tabs/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
-import {
-  SettingsBody,
-  SettingsRow,
-  SettingsSection,
-} from "../settings/settings-parts.tsx";
 import type { Names } from "./activity-bar.tsx";
 import { AskStephen } from "./ask-stephen.tsx";
-import { ProcessBadge, ProcessPicker } from "./business-process.tsx";
+import {
+  ProcessBadge,
+  ProcessPicker,
+  processCovers,
+} from "./business-process.tsx";
 import { DefinitionEditor } from "./definition-editor.tsx";
 import { DeleteWorkflow } from "./delete-workflow.tsx";
 import { FilesAndApps } from "./files-and-apps.tsx";
@@ -99,23 +107,60 @@ const sectionLabels: Record<WorkflowSettingsSection, MessageDescriptor> = {
   }),
 };
 
+// How wide a section's column grows, as an App's settings have it
+// (apps/app-settings.tsx): Grasp UI has no token for a settings page's
+// measure.
+const SETTINGS_MEASURE = "56rem";
+
+const styles = stylex.create({
+  settings: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+    gap: grasp.space2,
+    paddingTop: grasp.space2,
+  },
+  scroll: { flexGrow: 1, minHeight: 0, minWidth: 0, overflowY: "auto" },
+  column: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space4,
+    width: "100%",
+    maxWidth: SETTINGS_MEASURE,
+    marginInline: "auto",
+    paddingBlock: grasp.space6,
+    paddingInline: grasp.space4,
+    boxSizing: "border-box",
+  },
+  writes: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: grasp.space1,
+  },
+  live: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: grasp.space1,
+  },
+});
+
 /**
  * What a version's model tasks may steer (GRA-718, GRA-727), which no
  * reviewer should have to piece together: each connector's alias and the
  * operations that may write.
  */
 const SteeredWrites = ({ writes }: { writes: readonly SteeredWrite[] }) => {
+  const { t } = useLingui();
   if (writes.length === 0) {
-    return (
-      <span className="text-muted-foreground">
-        <Trans>None</Trans>
-      </span>
-    );
+    return t`None`;
   }
   return (
-    <div className="flex flex-wrap items-center gap-1">
+    <div {...stylex.props(styles.writes)}>
       {writes.map((write) => (
-        <Badge key={write.alias} variant="attention">
+        <Badge key={write.alias} size="sm" tone="attention">
           {`${write.alias}: ${formatList(write.operations)}`}
         </Badge>
       ))}
@@ -134,58 +179,51 @@ const Versions = ({ versions }: { versions: WorkflowResourceVersion[] }) => {
   const captionId = useId();
   if (versions.length === 0) {
     return (
-      <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
-        <Trans>Nothing is published yet.</Trans>
-      </p>
+      <SectionCard aria-label={t`Versions`} density="compact" flush>
+        <Empty size="inline">{t`Nothing is published yet.`}</Empty>
+      </SectionCard>
     );
   }
   return (
-    <div className="flex flex-col gap-2">
-      <div className="bg-card overflow-hidden rounded-xl border">
-        <Table aria-describedby={captionId}>
-          <TableHeader>
-            <TableRow>
-              <TableHead variant="card">{t`Version`}</TableHead>
-              <TableHead variant="card">{t`Definition version`}</TableHead>
-              <TableHead variant="card">{t`Published`}</TableHead>
-              <TableHead variant="card">
-                {t`Writes a model may steer`}
-              </TableHead>
+    <SectionCard
+      aria-label={t`Versions`}
+      density="compact"
+      flush
+      footer={
+        <span id={captionId}>
+          {t`Each of the workflow's model tasks is taken to reach every call the workflow makes.`}
+        </span>
+      }
+    >
+      <Table aria-describedby={captionId} aria-label={t`Versions`}>
+        <TableHeader>
+          <TableRow>
+            <TableHead>{t`Version`}</TableHead>
+            <TableHead>{t`Definition version`}</TableHead>
+            <TableHead>{t`Published`}</TableHead>
+            <TableHead>{t`Writes a model may steer`}</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {versions.map((version) => (
+            <TableRow key={version.version}>
+              <TableCell>{version.version}</TableCell>
+              <TableCell>{version.definitionVersion}</TableCell>
+              <TableCell>{formatDateTime(version.createdAt)}</TableCell>
+              <TableCell>
+                {version.refused === undefined ? (
+                  <SteeredWrites writes={version.modelSteeredWrites} />
+                ) : (
+                  <Badge size="sm" tone="attention">
+                    {t`Made by an earlier platform release: publish it again`}
+                  </Badge>
+                )}
+              </TableCell>
             </TableRow>
-          </TableHeader>
-          <TableBody>
-            {versions.map((version) => (
-              <TableRow key={version.version}>
-                <TableCell variant="roomy">{version.version}</TableCell>
-                <TableCell variant="roomy">
-                  {version.definitionVersion}
-                </TableCell>
-                <TableCell variant="roomy">
-                  {formatDateTime(version.createdAt)}
-                </TableCell>
-                <TableCell variant="roomy">
-                  {version.refused === undefined ? (
-                    <SteeredWrites writes={version.modelSteeredWrites} />
-                  ) : (
-                    <Badge variant="attention">
-                      <Trans>
-                        Made by an earlier platform release: publish it again
-                      </Trans>
-                    </Badge>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-      <p className="text-muted-foreground" id={captionId}>
-        <Trans>
-          Each of the workflow&apos;s model tasks is taken to reach every call
-          the workflow makes.
-        </Trans>
-      </p>
-    </div>
+          ))}
+        </TableBody>
+      </Table>
+    </SectionCard>
   );
 };
 
@@ -227,6 +265,45 @@ export interface WorkflowRead {
   approves: boolean;
 }
 
+/** The business process it serves: its builders pick it, anyone else reads it. */
+const ProcessRow = ({
+  resource,
+  builder,
+}: {
+  resource: WorkflowResource;
+  builder: boolean;
+}) => {
+  const { t, i18n } = useLingui();
+  const router = useRouter();
+  const { process } = resource;
+  const covers = process === null ? undefined : i18n._(processCovers[process]);
+  if (builder) {
+    return (
+      <SettingRow
+        label={t`Business process`}
+        {...(covers === undefined ? {} : { info: covers })}
+      >
+        <ProcessPicker
+          name={resource.name}
+          onChange={() => {
+            void router.invalidate();
+          }}
+          process={process}
+          workflow={resource.id}
+        />
+      </SettingRow>
+    );
+  }
+  return (
+    <FactRow
+      label={t`Business process`}
+      {...(covers === undefined ? {} : { info: covers })}
+    >
+      {process === null ? t`None` : <ProcessBadge process={process} />}
+    </FactRow>
+  );
+};
+
 /** General: what it serves, whose it is, where it stands, and deleting it. */
 const General = ({
   resource,
@@ -237,66 +314,40 @@ const General = ({
   admin,
 }: WorkflowRead) => {
   const { t } = useLingui();
-  const router = useRouter();
   const builder = resource.role === "builder";
   const owner = resource.owner === names.me;
   const status = lifecycle.state === "ready" ? lifecycle.data : undefined;
   return (
     <>
-      <SettingsSection title={t`About`}>
-        <SettingsBody>
-          <SettingsRow label={t`Business process`}>
-            {builder ? (
-              <ProcessPicker
-                name={resource.name}
-                onChange={() => {
-                  void router.invalidate();
-                }}
-                process={resource.process}
-                workflow={resource.id}
-              />
-            ) : (
-              <span>
-                {resource.process === null ? (
-                  <Trans>None</Trans>
-                ) : (
-                  <ProcessBadge process={resource.process} />
-                )}
-              </span>
-            )}
-          </SettingsRow>
-          <SettingsRow label={t`Owner`}>
-            <span>
-              <OwnedBy names={names} owner={resource.owner} />
-            </span>
-          </SettingsRow>
+      <SectionCard density="compact" flush title={t`About`}>
+        <SettingsRows>
+          <ProcessRow builder={builder} resource={resource} />
+          <FactRow label={t`Owner`}>
+            <OwnedBy names={names} owner={resource.owner} />
+          </FactRow>
           {status === undefined ? null : (
-            <SettingsRow label={t`Live`}>
-              <span className="flex flex-col items-end gap-1">
+            <FactRow label={t`Live`}>
+              <span {...stylex.props(styles.live)}>
                 <LiveFacts lifecycle={status} />
                 {status.live?.selfApproved === true ? (
-                  <Badge variant="outline">
-                    <Trans>Self-approved: nobody else could approve it</Trans>
+                  <Badge size="sm">
+                    {t`Self-approved: nobody else could approve it`}
                   </Badge>
                 ) : null}
               </span>
-            </SettingsRow>
+            </FactRow>
           )}
           {savedAt === null ? null : (
-            <SettingsRow label={t`Draft`}>
-              <span>
-                <SavedAgo at={savedAt} />
-              </span>
-            </SettingsRow>
+            <FactRow label={t`Draft`}>
+              <SavedAgo at={savedAt} />
+            </FactRow>
           )}
-        </SettingsBody>
-      </SettingsSection>
+        </SettingsRows>
+      </SectionCard>
       {owner && askable.state === "ready" ? (
-        <SettingsSection title={t`Stephen`}>
-          <SettingsBody>
-            <AskStephen askable={askable.data} workflow={resource.id} />
-          </SettingsBody>
-        </SettingsSection>
+        <SectionCard density="compact" flush title={t`Stephen`}>
+          <AskStephen askable={askable.data} workflow={resource.id} />
+        </SectionCard>
       ) : null}
       <DeleteWorkflow admin={admin} resource={resource} />
     </>
@@ -407,25 +458,25 @@ const SectionLink = ({
   workflow: string;
   section: WorkflowSettingsSection;
   current: boolean;
-  children: ReactNode;
+  children: string;
 }) => (
-  <Link
-    aria-current={current ? "page" : undefined}
-    className={`${buttonVariants({
-      size: "sm",
-      variant: current ? "secondary" : "ghost",
-    })} w-full md:justify-start`}
-    params={{ workflow }}
-    replace
-    search={(held) => ({
-      project: held.project,
-      view: "settings",
-      section,
-    })}
-    to="/workflows/$workflow"
+  <TabsLink
+    current={current}
+    render={
+      <Link
+        params={{ workflow }}
+        replace
+        search={(held) => ({
+          project: held.project,
+          view: "settings",
+          section,
+        })}
+        to="/workflows/$workflow"
+      />
+    }
   >
     {children}
-  </Link>
+  </TabsLink>
 );
 
 /**
@@ -447,28 +498,22 @@ export const WorkflowSettings = ({
   const section =
     asked === undefined || !sections.includes(asked) ? "general" : asked;
   return (
-    <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-      <nav
-        aria-label={t`Settings sections`}
-        className="flex flex-none gap-1 overflow-x-auto border-b p-2 md:w-52 md:flex-col md:overflow-x-visible md:overflow-y-auto md:border-r md:border-b-0 md:p-3"
-      >
+    <div {...stylex.props(styles.settings)}>
+      <TabsNav aria-label={t`Settings sections`}>
         {sections.map((each) => (
-          <span className="flex-none" key={each}>
-            <SectionLink
-              current={each === section}
-              section={each}
-              workflow={read.resource.id}
-            >
-              {i18n._(sectionLabels[each])}
-            </SectionLink>
-          </span>
+          <SectionLink
+            current={each === section}
+            key={each}
+            section={each}
+            workflow={read.resource.id}
+          >
+            {i18n._(sectionLabels[each])}
+          </SectionLink>
         ))}
-      </nav>
-      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-4 py-6 md:px-8">
-          <h2 className="text-lg font-medium">
-            {i18n._(sectionLabels[section])}
-          </h2>
+      </TabsNav>
+      <div {...stylex.props(styles.scroll)}>
+        <div {...stylex.props(styles.column)}>
+          <PageHeader size="md" title={i18n._(sectionLabels[section])} />
           <SectionBody read={read} section={section} />
         </div>
       </div>

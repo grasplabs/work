@@ -22,9 +22,9 @@ import { Sidebar } from "../grasp/sidebar/index.ts";
 import { useInboxGroups, useWaitingItems } from "./sidebar-inbox.tsx";
 
 // The sidebar's Inbox view against core's feed of what waits, faked as the
-// page reaches it over RPC, in Grasp UI's own Sidebar: each item a link to
-// its place in the inbox, by the inbox's groups when there are several, a
-// last row to the whole inbox, a quiet sentence when nothing waits; and
+// page reaches it over RPC, in Grasp UI's own Sidebar: the inbox's views,
+// each to the inbox with that view open, then what waited longest, each to
+// its place in the inbox, a quiet sentence when nothing waits; and
 // listing them marks no notification read, as only the inbox and the
 // dashboard do.
 
@@ -102,15 +102,21 @@ const question: WaitingFeed["items"][number] = {
   },
 };
 
-const shown = async (feed: WaitingFeed) => {
+const admin: Identity = { ...identity, role: "admin" };
+
+const shown = async (feed: WaitingFeed, who: Identity = identity) => {
   const markRead = vi.fn<(ids: string[], upTo: string) => Promise<void>>(
     async () => {
       await Promise.resolve();
     }
   );
+  const listAll = vi.fn<() => Promise<unknown>>(async () => {
+    await Promise.resolve();
+  });
   const session = {
     waiting: { list: async () => await Promise.resolve(feed) },
     notifications: { markRead },
+    unknownOutcomes: { listAll },
   };
   const core = {
     withSession: async <T,>(
@@ -118,7 +124,7 @@ const shown = async (feed: WaitingFeed) => {
     ): Promise<T> => await read(session),
   };
   const Frame = () => {
-    const items = useWaitingItems(identity, true);
+    const items = useWaitingItems(who, true);
     return (
       <>
         <output>{items?.length}</output>
@@ -150,7 +156,7 @@ const shown = async (feed: WaitingFeed) => {
     );
     await router.load();
   });
-  return { markRead };
+  return { markRead, listAll };
 };
 
 /** Each row's link and its name, without its second line. */
@@ -172,22 +178,24 @@ describe("the sidebar's inbox", () => {
     document.body.replaceChildren();
   });
 
-  it("lists what waits, each to its place in the inbox, by the inbox's groups, and the whole inbox last", async () => {
+  it("leads to each of the inbox's views, counted, then to what has waited longest", async () => {
     await shown(feedOf([heldWrite, question]));
     await vi.waitFor(() => {
       expect(counted()).toBe("2");
     });
-    expect(rows().map(({ href }) => href)).toStrictEqual([
-      // The inbox's groups in its order: Brain, then Apps and connections.
+    const links = rows().map(({ href }) => href);
+    // The inbox's views in its filter's order: all, Asked of you, Apps.
+    expect(links.slice(0, 3)).toStrictEqual([
+      "/inbox",
+      "/inbox?group=asked",
+      "/inbox?group=apps",
+    ]);
+    // Then each item, to its place in the inbox.
+    expect(links.slice(3).toSorted()).toStrictEqual([
       "/inbox?item=asked%3Anote-1",
       "/inbox?item=held%3Awrite-1",
-      "/inbox",
     ]);
-    const labels = [...document.querySelectorAll("nav h2, nav [id]")].map(
-      (label) => label.textContent
-    );
-    expect(labels.join(" ")).toMatch(/Brain/u);
-    expect(labels.join(" ")).toMatch(/Apps and connections/u);
+    expect(document.body.textContent).toContain("Waiting longest");
   });
 
   it("marks no notification read by listing it", async () => {
@@ -196,6 +204,14 @@ describe("the sidebar's inbox", () => {
       expect(counted()).toBe("1");
     });
     expect(markRead).not.toHaveBeenCalled();
+  });
+
+  it("lists nobody's unknown outcomes, even for an admin, so the audit trail isn't filled by the frame", async () => {
+    const { listAll } = await shown(feedOf([question]), admin);
+    await vi.waitFor(() => {
+      expect(counted()).toBe("1");
+    });
+    expect(listAll).not.toHaveBeenCalled();
   });
 
   it("says so quietly when nothing waits", async () => {

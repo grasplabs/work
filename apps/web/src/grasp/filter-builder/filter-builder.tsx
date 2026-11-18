@@ -35,6 +35,8 @@ import { iconVars } from "../icons/icon.stylex";
 import { selectPopupStyles as list } from "../select/select";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { popup } from "../tokens/tokens.values";
+import { useWords, withGiven } from "../words/words";
+import { filterBuilderWords } from "./words";
 
 /** One operator a field takes: "is", "is greater than". */
 export interface FilterOperator {
@@ -510,13 +512,6 @@ const Typed = ({
   );
 };
 
-// One object for every FilterBuilder, so the default never changes between renders.
-const englishSegmentLabels = {
-  field: "Filter field",
-  operator: "Filter operator",
-  value: "Filter value",
-};
-
 // The operator a new field keeps: the current one when the field has it, else its default when
 // it has that, else none.
 const carriedOperator = (
@@ -540,14 +535,29 @@ export const FilterBuilder = ({
   fields,
   condition,
   onConditionChange,
-  fieldPlaceholder = "Field",
-  operatorPlaceholder = "Operator",
-  valuePlaceholder = "Value",
+  fieldPlaceholder: fieldGiven,
+  operatorPlaceholder: operatorGiven,
+  valuePlaceholder: valueGiven,
   disabled = false,
   label: labelDeprecated,
-  "aria-label": label = labelDeprecated ?? "Filter condition",
-  segmentLabels = englishSegmentLabels,
+  "aria-label": labelGiven,
+  segmentLabels: segmentGiven,
 }: FilterBuilderProps) => {
+  // Its words: the product's, by its catalogue, else English; the caller's props still win.
+  const words = withGiven(useWords("filterBuilder", filterBuilderWords), {
+    field: fieldGiven,
+    operator: operatorGiven,
+    value: valueGiven,
+    name: labelGiven ?? labelDeprecated,
+    segments: segmentGiven,
+  });
+  const {
+    field: fieldPlaceholder,
+    operator: operatorPlaceholder,
+    value: valuePlaceholder,
+    name: label,
+    segments: segmentLabels,
+  } = words;
   const field = fields.find((entry) => entry.id === condition.fieldId);
   const operators = field?.operators ?? [];
 

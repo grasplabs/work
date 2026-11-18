@@ -140,3 +140,44 @@ export const startInputOf = (
   }
   return { ok: true, input };
 };
+
+/** An empty value of the kind `schema` asks for, to fill in. */
+const blankOf = (schema: unknown): unknown => {
+  const type = isRecord(schema) ? schema.type : undefined;
+  if (type === "string") {
+    return "";
+  }
+  if (type === "number" || type === "integer") {
+    return 0;
+  }
+  if (type === "boolean") {
+    return false;
+  }
+  if (type === "array") {
+    return [];
+  }
+  return type === "object" ? {} : null;
+};
+
+/**
+ * An input `schema` (JSON Schema) as JSON to fill in: its fields, in its
+ * order, each an empty value of its kind, and their names, so a person
+ * typing the input starts from its shape instead of `{}`. Undefined when
+ * it names no fields: then the page can't know what is expected.
+ */
+export const inputSketchOf = (
+  schema: unknown
+): { json: string; keys: string[] } | undefined => {
+  if (!isRecord(schema) || !isRecord(schema.properties)) {
+    return undefined;
+  }
+  const keys = Object.keys(schema.properties);
+  if (keys.length === 0) {
+    return undefined;
+  }
+  const { properties } = schema;
+  const sketch = Object.fromEntries(
+    keys.map((key) => [key, blankOf(properties[key])])
+  );
+  return { json: JSON.stringify(sketch, null, 2), keys };
+};

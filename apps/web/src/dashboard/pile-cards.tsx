@@ -1,15 +1,16 @@
 import type { PendingAction } from "@grasp-os/shared/connect";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { useLingui, Trans } from "@lingui/react/macro";
-import { Link, useRouter } from "@tanstack/react-router";
+import * as stylex from "@stylexjs/stylex";
+import { Link as RouterLink, useRouter } from "@tanstack/react-router";
 
 import {
   askedAgain,
   grantReviewed,
-  objectOf,
+  requestAsker,
+  requestWords,
   reviewedVersion,
   reviewedVersionText,
-  subjectOf,
 } from "../activity/pending.tsx";
 import type { PendingRequests } from "../activity/pending.tsx";
 import { changeThenRefresh } from "../change-then-refresh.ts";
@@ -23,7 +24,9 @@ import {
 } from "../chat/held-writes.tsx";
 import type { Session } from "../core.ts";
 import { formatTime, personName } from "../directory.ts";
-import { formatList } from "../format.ts";
+import { Link } from "../grasp/link/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { PileCard } from "./pile-card.tsx";
 import type { Pile } from "./pile-card.tsx";
@@ -34,6 +37,14 @@ import type { Pile } from "./pile-card.tsx";
 // same calls the chat's held writes and the approvals always made, and the
 // pile is read again however it went: a failed answer may have changed
 // something too.
+
+const styles = stylex.create({
+  details: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space1,
+  },
+});
 
 /**
  * A held write: approving it is for what the person was shown, all of it,
@@ -78,10 +89,7 @@ export const HeldCard = ({
       failure={failure}
       name={
         context.type === "chat" ? (
-          <Link
-            className="hover:underline focus-visible:underline"
-            {...chatLink(context.chatId)}
-          >
+          <Link render={<RouterLink {...chatLink(context.chatId)} />}>
             {who}
           </Link>
         ) : (
@@ -129,29 +137,33 @@ export const RequestDetails = ({
   const requester = personName(directory, request.requestedBy);
   const date = formatTime(request.requestedAt);
   return (
-    <div className="text-muted-foreground flex flex-col gap-1">
-      <p>
+    <div {...stylex.props(styles.details)}>
+      <Text size="sm" tone="muted">
         <Trans>as {binding}</Trans>
-      </p>
+      </Text>
       {request.chat === null ? null : (
-        <p>
+        <Text size="sm" tone="muted">
           <Trans>In one chat only, for {requester}</Trans>
-        </p>
+        </Text>
       )}
-      <p>
+      <Text size="sm" tone="muted">
         <Trans>Version to review: {version}</Trans>
-      </p>
-      <p>
+      </Text>
+      <Text size="sm" tone="muted">
         <Trans>
           Asked by {requester} on {date}
         </Trans>
-      </p>
+      </Text>
       {request.requestedVia === null ? null : (
-        <p>
+        <Text size="sm" tone="muted">
           <Trans>asked for by the agent, in their chat</Trans>
-        </p>
+        </Text>
       )}
-      {again === undefined ? null : <p>{again}</p>}
+      {again === undefined ? null : (
+        <Text size="sm" tone="muted">
+          {again}
+        </Text>
+      )}
     </div>
   );
 };
@@ -174,10 +186,8 @@ export const RequestCard = ({
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   const { t } = useLingui();
-  const subject = subjectOf(request, directory);
-  const object = objectOf(request, directory);
-  const actions = formatList(request.actions);
-  const who = t`${subject}: ${actions} on ${object}`;
+  const subject = requestAsker(request, directory);
+  const who = requestWords(request, directory);
   const decide = async (
     change: (permissions: Session["permissions"]) => Promise<unknown>,
     said: string

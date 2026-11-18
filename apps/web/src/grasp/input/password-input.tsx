@@ -22,8 +22,10 @@ import { focus } from "../focus/focus";
 import { Hide, Icon, Show } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { useWords, withGiven } from "../words/words";
 import { inputStyles, isInvalid, sizeStyles, targetStyles } from "./input";
 import type { InputLayoutStyle, InputSize } from "./input";
+import { inputWords } from "./words";
 
 type PrimitiveProps = ComponentProps<typeof PasswordInputPrimitive>;
 
@@ -143,57 +145,63 @@ export const PasswordInput = ({
   layout,
   "aria-label": ariaLabel,
   placeholder,
-  showLabel = "Show password",
-  hideLabel = "Hide password",
+  showLabel: showLabelGiven,
+  hideLabel: hideLabelGiven,
   ...options
-}: PasswordInputProps) => (
-  <PasswordInputPrimitive
-    {...options}
-    autoComplete={autoComplete}
-    {...stylex.props(styles.box, layout ?? styleProp)}
-  >
-    <span
-      aria-hidden="true"
-      {...stylex.props(inputStyles.target, targetStyles[size])}
-    />
-    <PasswordInputControl
-      aria-label={ariaLabel}
-      placeholder={placeholder}
-      render={(props: Record<string, unknown>, state: PasswordInputState) => (
-        <input
-          {...props}
-          {...stylex.props(
-            inputStyles.input,
-            sizeStyles[size],
-            room[size],
-            !(state.disabled || state.readOnly) && inputStyles.live,
-            state.readOnly && inputStyles.readOnly,
-            state.disabled && inputStyles.disabled,
-            isInvalid(props["aria-invalid"]) && inputStyles.invalid,
-            focus.field
-          )}
-        />
-      )}
-    />
-    <PasswordInputToggle
-      className={(state: PasswordInputState) =>
-        stylex.props(
-          styles.toggle,
-          square[size],
-          focus.ring,
-          state.disabled && inputStyles.disabled
-        ).className
-      }
+}: PasswordInputProps) => {
+  const { showPassword: showLabel, hidePassword: hideLabel } = withGiven(
+    useWords("input", inputWords),
+    { showPassword: showLabelGiven, hidePassword: hideLabelGiven }
+  );
+  return (
+    <PasswordInputPrimitive
+      {...options}
+      autoComplete={autoComplete}
+      {...stylex.props(styles.box, layout ?? styleProp)}
     >
-      {(state: PasswordInputState) => (
-        <>
-          <span aria-hidden="true" {...stylex.props(styles.toggleTarget)} />
-          <Icon
-            icon={state.visible ? Hide : Show}
-            label={state.visible ? hideLabel : showLabel}
+      <span
+        aria-hidden="true"
+        {...stylex.props(inputStyles.target, targetStyles[size])}
+      />
+      <PasswordInputControl
+        aria-label={ariaLabel}
+        placeholder={placeholder}
+        render={(props: Record<string, unknown>, state: PasswordInputState) => (
+          <input
+            {...props}
+            {...stylex.props(
+              inputStyles.input,
+              sizeStyles[size],
+              room[size],
+              !(state.disabled || state.readOnly) && inputStyles.live,
+              state.readOnly && inputStyles.readOnly,
+              state.disabled && inputStyles.disabled,
+              isInvalid(props["aria-invalid"]) && inputStyles.invalid,
+              focus.field
+            )}
           />
-        </>
-      )}
-    </PasswordInputToggle>
-  </PasswordInputPrimitive>
-);
+        )}
+      />
+      <PasswordInputToggle
+        className={(state: PasswordInputState) =>
+          stylex.props(
+            styles.toggle,
+            square[size],
+            focus.ring,
+            state.disabled && inputStyles.disabled
+          ).className
+        }
+      >
+        {(state: PasswordInputState) => (
+          <>
+            <span aria-hidden="true" {...stylex.props(styles.toggleTarget)} />
+            <Icon
+              icon={state.visible ? Hide : Show}
+              label={state.visible ? hideLabel : showLabel}
+            />
+          </>
+        )}
+      </PasswordInputToggle>
+    </PasswordInputPrimitive>
+  );
+};

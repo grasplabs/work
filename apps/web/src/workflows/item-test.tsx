@@ -4,8 +4,17 @@ import type {
   WorkflowItemTest,
   WorkflowItemTestItem,
 } from "@grasp-os/shared/workflow-resources";
-import { Button } from "@grasp-os/ui/components/button";
-import { Label } from "@grasp-os/ui/components/label";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useEffect, useState } from "react";
+
+import { isTransient } from "../core.ts";
+import { ErrorText } from "../error-text.tsx";
+import { formatDateTime } from "../format.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Empty, EmptyDescription, EmptyHeader } from "../grasp/empty/index.ts";
+import { Field, FieldLabel } from "../grasp/field/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   Table,
   TableBody,
@@ -13,16 +22,13 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
-import { Textarea } from "@grasp-os/ui/components/textarea";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { useEffect, useId, useState } from "react";
-
-import { isTransient } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
-import { formatDateTime } from "../format.ts";
+} from "../grasp/table/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { Textarea } from "../grasp/textarea/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCore } from "../use-core.ts";
-import { runDotOf, runStatusLabels } from "./run-status.ts";
+import { RunStatusBadge } from "./run-detail.tsx";
+import { runStatusLabels } from "./run-status.ts";
 
 // "Test on recent items" (GRA-513, prototype `builder-runs.tsx`): the
 // draft's checkpoint runs once on the input of each of the builder's most
@@ -40,36 +46,49 @@ const endedStatuses = new Set(["completed", "failed", "cancelled"]);
 export const itemTestSettled = (test: WorkflowItemTest): boolean =>
   test.items.every(({ run }) => run === null || endedStatuses.has(run.status));
 
+const styles = stylex.create({
+  // The answers, the button and how it went, in the card.
+  form: {
+    display: "grid",
+    rowGap: grasp.space3,
+    justifyItems: "start",
+    padding: grasp.space4,
+  },
+  answers: { justifySelf: "stretch" },
+  result: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: grasp.space1,
+  },
+});
+
 /** How one item went, in words. */
 const ItemResult = ({ item }: { item: WorkflowItemTestItem }) => {
   const { t } = useLingui();
   const { refusal } = item;
   if (refusal !== null) {
     return (
-      <span className="text-muted-foreground">
-        <Trans>Never started: {refusal}</Trans>
-      </span>
+      <Text element="span" size="sm" tone="muted">
+        {t`Never started: ${refusal}`}
+      </Text>
     );
   }
   const { run } = item;
   if (run === null) {
     return (
-      <span className="text-muted-foreground">
-        <Trans>Removed after a week</Trans>
-      </span>
+      <Text element="span" size="sm" tone="muted">
+        {t`Removed after a week`}
+      </Text>
     );
   }
   return (
-    <span className="flex flex-col gap-1">
-      <span className="inline-flex items-center gap-2">
-        <span
-          aria-hidden="true"
-          className={`${runDotOf(run.status)} size-1.75 flex-none rounded-full`}
-        />
-        {t(runStatusLabels[run.status])}
-      </span>
+    <span {...stylex.props(styles.result)}>
+      <RunStatusBadge status={run.status} />
       {run.error === undefined ? null : (
-        <span className="text-muted-foreground">{run.error.message}</span>
+        <Text element="span" size="sm" tone="muted">
+          {run.error.message}
+        </Text>
       )}
     </span>
   );
@@ -77,57 +96,42 @@ const ItemResult = ({ item }: { item: WorkflowItemTestItem }) => {
 
 const ItemTestTable = ({ test }: { test: WorkflowItemTest }) => {
   const { t } = useLingui();
-  const captionId = useId();
   const { draftRevision } = test;
+  const revision = draftRevision;
   if (test.items.length === 0) {
     return (
-      <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
-        <Trans>
-          You have no recent runs whose input is still kept, so there was
-          nothing to test on.
-        </Trans>
-      </p>
+      <Empty size="section">
+        <EmptyHeader>
+          <EmptyDescription>
+            {t`You have no recent runs whose input is still kept, so there was nothing to test on.`}
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
   return (
-    <div className="flex flex-col gap-2">
-      <div className="bg-card overflow-hidden rounded-xl border">
-        <Table aria-describedby={captionId}>
-          <TableHeader>
-            <TableRow>
-              <TableHead variant="card">{t`Real run`}</TableHead>
-              <TableHead variant="card">{t`Its version`}</TableHead>
-              <TableHead variant="card">{t`How it went then`}</TableHead>
-              <TableHead variant="card">
-                {t`Revision ${draftRevision} on it`}
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {test.items.map((item) => (
-              <TableRow key={item.sourceRunId}>
-                <TableCell variant="roomy">
-                  {formatDateTime(item.sourceCreatedAt)}
-                </TableCell>
-                <TableCell variant="roomy">{item.sourceVersion}</TableCell>
-                <TableCell variant="roomy">
-                  {t(runStatusLabels[item.sourceStatus])}
-                </TableCell>
-                <TableCell variant="roomy">
-                  <ItemResult item={item} />
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-      <p className="text-muted-foreground" id={captionId}>
-        <Trans>
-          Newest item first. Nothing was sent or changed: every call was
-          answered from what you gave.
-        </Trans>
-      </p>
-    </div>
+    <Table aria-label={t`Test revision ${revision} on recent items`}>
+      <TableHeader>
+        <TableRow>
+          <TableHead>{t`Real run`}</TableHead>
+          <TableHead>{t`Its version`}</TableHead>
+          <TableHead>{t`How it went then`}</TableHead>
+          <TableHead>{t`Revision ${draftRevision} on it`}</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {test.items.map((item) => (
+          <TableRow key={item.sourceRunId}>
+            <TableCell lead>{formatDateTime(item.sourceCreatedAt)}</TableCell>
+            <TableCell>{item.sourceVersion}</TableCell>
+            <TableCell>{t(runStatusLabels[item.sourceStatus])}</TableCell>
+            <TableCell wrap>
+              <ItemResult item={item} />
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 };
 
@@ -141,8 +145,6 @@ export const ItemTest = ({
 }) => {
   const core = useCore();
   const { t } = useLingui();
-  const headingId = useId();
-  const answersId = useId();
   const [answers, setAnswers] = useState("{}");
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
@@ -225,46 +227,32 @@ export const ItemTest = ({
 
   const most = maxItemTestItems;
   return (
-    <section aria-labelledby={headingId} className="flex flex-col gap-3">
-      <div className="flex flex-col gap-1">
-        <h2 className="font-medium" id={headingId}>
-          <Trans>Test revision {revision} on recent items</Trans>
-        </h2>
-        <p className="text-muted-foreground">
-          <Trans>
-            Runs the draft on the input of your {most} most recent runs. Nothing
-            is sent or changed: each call it makes is answered from what you
-            give here, by the name of its binding.
-          </Trans>
-        </p>
-      </div>
-      <div className="flex flex-col gap-2">
-        <Label htmlFor={answersId}>
-          <Trans>What its calls answer</Trans>
-        </Label>
-        <Textarea
-          id={answersId}
-          onChange={(event) => {
-            setAnswers(event.target.value);
-          }}
-          spellCheck={false}
-          value={answers}
-          variant="code"
-        />
-      </div>
-      <div>
+    <SectionCard
+      density="compact"
+      flush
+      info={t`Runs the draft on the input of your ${most} most recent runs. Nothing is sent or changed: each call it makes is answered from what you give here, by the name of its binding.`}
+      title={t`Test revision ${revision} on recent items`}
+    >
+      <div {...stylex.props(styles.form)}>
+        <Field layout={styles.answers}>
+          <FieldLabel>{t`What its calls answer`}</FieldLabel>
+          <Textarea
+            onValueChange={setAnswers}
+            spellCheck={false}
+            value={answers}
+          />
+        </Field>
         <Button
           disabled={busy || !settled}
           onClick={() => {
             void start();
           }}
-          variant="outline"
         >
           {busy ? t`Starting…` : t`Test on recent items`}
         </Button>
+        <ErrorText>{failure}</ErrorText>
       </div>
-      <ErrorText>{failure}</ErrorText>
       {test === undefined ? null : <ItemTestTable test={test} />}
-    </section>
+    </SectionCard>
   );
 };

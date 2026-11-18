@@ -14,29 +14,34 @@ import {
   firstLineOf,
 } from "@grasp-os/shared/brain-sources";
 import { failureText } from "@grasp-os/shared/errors";
-import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
-import { Card, CardContent } from "@grasp-os/ui/components/card";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import { Input } from "@grasp-os/ui/components/input";
-import { Item, ItemContent, ItemGroup } from "@grasp-os/ui/components/item";
-import {
-  PageHeader,
-  PageHeaderDescription,
-  PageHeaderTitle,
-} from "@grasp-os/ui/components/page-header";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useId, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime, formatList } from "../format.ts";
+import { BrandIcon } from "../grasp/brand-icon/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { Card } from "../grasp/card/index.ts";
+import { Empty, EmptyHeader, EmptyTitle } from "../grasp/empty/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
+import { Cable } from "../grasp/icons/index.ts";
+import { Input } from "../grasp/input/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { PageHeader } from "../grasp/page-header/index.ts";
+import { Tag } from "../grasp/tag/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import { brandOf } from "../inbox/brand-of.ts";
 import { useCore } from "../use-core.ts";
 
 // The Brain's sources, from the new Brain (GRA-1734): what the person may
@@ -79,6 +84,49 @@ const sameSource = (one: BrainSourceRef, other: BrainSourceRef): boolean =>
 /** A source's key, for React. */
 const keyOf = ({ producer, id }: BrainSourceRef): string => `${producer}:${id}`;
 
+const styles = stylex.create({
+  // A page of the brain as its memory is: its own pane that scrolls, the
+  // column in its middle, with room at the foot for the chat.
+  pane: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
+  column: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space8,
+    boxSizing: "border-box",
+    width: "100%",
+    maxWidth: grasp.pageMeasure,
+    marginInline: "auto",
+    paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
+  },
+  section: { display: "flex", flexDirection: "column", gap: grasp.space3 },
+  stack: { display: "flex", flexDirection: "column", gap: grasp.space4 },
+  list: { display: "flex", flexDirection: "column", gap: grasp.space3 },
+  versions: { display: "flex", flexDirection: "column", gap: grasp.space1 },
+  form: { display: "flex", gap: grasp.space2 },
+  grow: { flexGrow: 1, minWidth: 0 },
+  start: { alignSelf: "flex-start" },
+  // The source list and the opened source side by side on a wide page.
+  split: {
+    display: "grid",
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      [media.fromSidebar]: "repeat(2, minmax(0, 1fr))",
+    },
+    alignItems: "start",
+    gap: grasp.space6,
+    minHeight: 0,
+  },
+  // A row's facts: its kind, how it was found, its version.
+  facts: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: grasp.space2,
+  },
+  // Texts are shown as text, with their own line breaks.
+  plain: { whiteSpace: "pre-wrap" },
+});
+
 const ProducerBadge = ({ producer }: { producer: BrainSourceProducer }) => {
   const { t } = useLingui();
   const label = {
@@ -86,7 +134,7 @@ const ProducerBadge = ({ producer }: { producer: BrainSourceProducer }) => {
     chat: t({ message: "Chat", context: "a source of the Brain" }),
     run: t({ message: "Workflow run", context: "a source of the Brain" }),
   }[producer];
-  return <Badge variant="outline">{label}</Badge>;
+  return <Tag size="sm">{label}</Tag>;
 };
 
 const FoundBadge = ({ found }: { found: BrainFoundBy }) => {
@@ -106,7 +154,11 @@ const FoundBadge = ({ found }: { found: BrainFoundBy }) => {
       context: "how search found a passage",
     }),
   }[found];
-  return <Badge variant="secondary">{label}</Badge>;
+  return (
+    <Tag size="sm" variant="outline">
+      {label}
+    </Tag>
+  );
 };
 
 /** The pack, as recall gave it: its passages in its order, what it didn't find, and whether it was cut short. */
@@ -120,35 +172,38 @@ const SearchResults = ({
   const missing = formatList(pack.notFound);
   const heading = useId();
   return (
-    <section aria-labelledby={heading} className="flex flex-col gap-3">
-      <h2 className="text-sm font-medium" id={heading}>
+    <section aria-labelledby={heading} {...stylex.props(styles.section)}>
+      <Heading id={heading} level={2} size="ui-sm">
         <Trans>Results</Trans>
-      </h2>
+      </Heading>
       {pack.items.length === 0 ? (
-        <p className="text-muted-foreground text-sm">
+        <Text size="sm" tone="muted">
           <Trans>Nothing you may read matched.</Trans>
-        </p>
+        </Text>
       ) : (
-        <ItemGroup render={<ol />} spacing="tight">
+        <ItemGroup>
           {pack.items.map((item) => {
             const { version } = item;
             return (
-              <li key={`${keyOf(item.source)}@${version}#${item.position}`}>
-                <Item
-                  onClick={() => {
-                    onOpen(item.source, version);
-                  }}
-                  render={
-                    // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- the passage and its labels are its words, as the Item's children
-                    <button type="button" />
-                  }
-                  size="sm"
-                >
-                  <ItemContent>
-                    <span className="text-sm whitespace-pre-wrap">
-                      {item.text}
-                    </span>
-                    <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
+              <Item
+                key={`${keyOf(item.source)}@${version}#${item.position}`}
+                render={
+                  // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- the passage and its labels are its words, as the Item's children
+                  <button
+                    onClick={() => {
+                      onOpen(item.source, version);
+                    }}
+                    type="button"
+                  />
+                }
+                size="sm"
+              >
+                <ItemContent>
+                  <ItemTitle>
+                    <span {...stylex.props(styles.plain)}>{item.text}</span>
+                  </ItemTitle>
+                  <ItemDescription>
+                    <span {...stylex.props(styles.facts)}>
                       <ProducerBadge producer={item.source.producer} />
                       <FoundBadge found={item.found} />
                       <span>
@@ -160,9 +215,9 @@ const SearchResults = ({
                         </span>
                       )}
                     </span>
-                  </ItemContent>
-                </Item>
-              </li>
+                  </ItemDescription>
+                </ItemContent>
+              </Item>
             );
           })}
         </ItemGroup>
@@ -170,14 +225,14 @@ const SearchResults = ({
       {/* What wasn't found only beside what was: a search that found
           nothing says so once, above. */}
       {pack.items.length === 0 || pack.notFound.length === 0 ? null : (
-        <p className="text-muted-foreground text-sm">
+        <Text size="sm" tone="muted">
           <Trans>Nothing you may read holds {missing}.</Trans>
-        </p>
+        </Text>
       )}
       {pack.truncated ? (
-        <p className="text-muted-foreground text-sm">
+        <Text size="sm" tone="muted">
           <Trans>More was found than fits: these are the best of it.</Trans>
-        </p>
+        </Text>
       ) : null}
     </section>
   );
@@ -191,13 +246,12 @@ const Search = ({
 }) => {
   const { t } = useLingui();
   const core = useCore();
-  const id = useId();
   const [question, setQuestion] = useState("");
   const [result, setResult] = useState<Read<BrainSearchPack>>();
   return (
-    <div className="flex flex-col gap-4">
+    <div {...stylex.props(styles.stack)}>
       <form
-        className="flex gap-2"
+        {...stylex.props(styles.form)}
         onSubmit={(event) => {
           event.preventDefault();
           const asked = question.trim();
@@ -216,15 +270,13 @@ const Search = ({
           })();
         }}
       >
-        <label className="sr-only" htmlFor={id}>
-          <Trans>Search the Brain</Trans>
-        </label>
         <Input
-          id={id}
-          onChange={(event) => {
-            setQuestion(event.target.value);
-          }}
+          aria-label={t`Search the Brain`}
+          layout={styles.grow}
           maxLength={brainQuestionMaxLength}
+          onValueChange={(value) => {
+            setQuestion(value);
+          }}
           placeholder={t`Ask what you're looking for`}
           type="search"
           value={question}
@@ -232,8 +284,9 @@ const Search = ({
         <Button
           disabled={result?.state === "loading" || question.trim() === ""}
           type="submit"
+          variant="ink"
         >
-          <Trans>Search</Trans>
+          {t`Search`}
         </Button>
       </form>
       {result?.state === "refused" ? (
@@ -255,25 +308,44 @@ const Search = ({
 const ConnectionFeeds = ({ connections }: { connections: Connection[] }) => {
   const heading = useId();
   return (
-    <section aria-labelledby={heading} className="flex flex-col gap-3">
-      <h2 className="text-sm font-medium" id={heading}>
+    <section aria-labelledby={heading} {...stylex.props(styles.section)}>
+      <Heading id={heading} level={2} size="ui-sm">
         <Trans>How your connections feed the Brain</Trans>
-      </h2>
+      </Heading>
       {connections.length === 0 ? (
-        <p className="text-muted-foreground text-sm">
+        <Text size="sm" tone="muted">
           <Trans>You have no connections yet.</Trans>
-        </p>
+        </Text>
       ) : (
-        <ul className="flex flex-col gap-1.5 text-sm">
-          {connections.map(({ name }) => (
-            <li key={name}>
-              <Trans>
-                {name}: agents search it live when you ask. The Brain keeps
-                nothing from it.
-              </Trans>
-            </li>
-          ))}
-        </ul>
+        <ItemGroup separated>
+          {connections.map(({ name }) => {
+            const brand = brandOf(name);
+            return (
+              <Item key={name} size="xs">
+                {brand === undefined ? (
+                  <ItemMedia icon={Cable} iconLook="inline" />
+                ) : (
+                  <ItemMedia>
+                    <BrandIcon
+                      brand={brand}
+                      decorative
+                      size="md"
+                      tile={false}
+                    />
+                  </ItemMedia>
+                )}
+                <ItemContent>
+                  <ItemTitle>
+                    <Trans>
+                      {name}: agents search it live when you ask. The Brain
+                      keeps nothing from it.
+                    </Trans>
+                  </ItemTitle>
+                </ItemContent>
+              </Item>
+            );
+          })}
+        </ItemGroup>
       )}
     </section>
   );
@@ -291,35 +363,37 @@ const SourceLine = ({
   const { versions } = listed;
   return (
     <Item
-      onClick={onPick}
+      current={picked}
       render={
         // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- the source's first line and labels are its words, as the Item's children
-        <button aria-pressed={picked} type="button" />
+        <button aria-pressed={picked} onClick={onPick} type="button" />
       }
       size="sm"
     >
       <ItemContent>
-        <span className="min-w-0 text-sm">
+        <ItemTitle>
           {listed.firstLine === "" ? (
-            <span className="text-muted-foreground">
+            <Text element="span" size="sm" tone="muted">
               <Trans>No first line</Trans>
-            </span>
+            </Text>
           ) : (
             listed.firstLine
           )}
-        </span>
-        <span className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
-          <ProducerBadge producer={listed.source.producer} />
-          {listed.personal ? (
-            <Badge variant="outline">
-              <Trans context="a source nobody else may read">Only you</Trans>
-            </Badge>
-          ) : null}
-          <span>{formatDateTime(listed.addedAt)}</span>
-          <span>
-            <Plural one="# version" other="# versions" value={versions} />
+        </ItemTitle>
+        <ItemDescription>
+          <span {...stylex.props(styles.facts)}>
+            <ProducerBadge producer={listed.source.producer} />
+            {listed.personal ? (
+              <Tag size="sm" variant="outline">
+                <Trans context="a source nobody else may read">Only you</Trans>
+              </Tag>
+            ) : null}
+            <span>{formatDateTime(listed.addedAt)}</span>
+            <span>
+              <Plural one="# version" other="# versions" value={versions} />
+            </span>
           </span>
-        </span>
+        </ItemDescription>
       </ItemContent>
     </Item>
   );
@@ -365,44 +439,38 @@ const SourceList = ({
     return (
       <Empty>
         <EmptyHeader>
-          <EmptyTitle>
+          <EmptyTitle headingLevel={3}>
             <Trans>Nothing in the Brain you may read yet</Trans>
           </EmptyTitle>
-          <EmptyDescription>
-            <Trans>
-              Documents and workflow runs show here once they reach the Brain.
-            </Trans>
-          </EmptyDescription>
         </EmptyHeader>
       </Empty>
     );
   }
   return (
-    <div className="flex flex-col gap-3">
-      <p className="text-muted-foreground text-sm">
+    <div {...stylex.props(styles.list)}>
+      <Text size="sm" tone="muted">
         <Trans>
           Those marked Only you are yours alone: nobody else sees them, admins
           included.
         </Trans>
-      </p>
-      <ItemGroup render={<ul />} spacing="tight">
+      </Text>
+      <ItemGroup>
         {sources.map((each) => (
-          <li key={keyOf(each.source)}>
-            <SourceLine
-              listed={each}
-              onPick={() => {
-                onPick(each.source);
-              }}
-              picked={picked !== undefined && sameSource(picked, each.source)}
-            />
-          </li>
+          <SourceLine
+            key={keyOf(each.source)}
+            listed={each}
+            onPick={() => {
+              onPick(each.source);
+            }}
+            picked={picked !== undefined && sameSource(picked, each.source)}
+          />
         ))}
       </ItemGroup>
       {more?.state === "refused" ? <ErrorText>{more.message}</ErrorText> : null}
       {next === null ? null : (
         <Button
-          className="self-start"
           disabled={more?.state === "loading"}
+          layout={styles.start}
           onClick={() => {
             setMore({ state: "loading" });
             void (async () => {
@@ -423,7 +491,6 @@ const SourceList = ({
             })();
           }}
           type="button"
-          variant="outline"
         >
           <Trans>Show more</Trans>
         </Button>
@@ -450,38 +517,45 @@ const VersionList = ({
   const [more, setMore] = useState<Read<BrainSourceVersionPage>>();
   const { before } = page;
   return (
-    <div className="flex flex-col gap-1">
-      <h4 className="text-muted-foreground text-xs font-medium">
+    <div {...stylex.props(styles.versions)}>
+      <Heading level={4} size="ui-sm">
         <Trans>Versions</Trans>
-      </h4>
-      <ItemGroup render={<ul />} spacing="tight">
+      </Heading>
+      <ItemGroup>
         {page.versions.map(({ version, addedAt }) => {
           const added = formatDateTime(addedAt);
           return (
-            <li key={version}>
-              <Item
-                onClick={() => {
-                  onChoose(version);
-                }}
-                render={
-                  // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- the version and its date are its words, as the Item's children
-                  <button aria-pressed={version === shown} type="button" />
-                }
-                size="xs"
-              >
-                <Trans>
-                  Version {version}, added {added}
-                </Trans>
-              </Item>
-            </li>
+            <Item
+              current={version === shown}
+              key={version}
+              render={
+                // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- the version and its date are its words, as the Item's children
+                <button
+                  aria-pressed={version === shown}
+                  onClick={() => {
+                    onChoose(version);
+                  }}
+                  type="button"
+                />
+              }
+              size="xs"
+            >
+              <ItemContent>
+                <ItemTitle>
+                  <Trans>
+                    Version {version}, added {added}
+                  </Trans>
+                </ItemTitle>
+              </ItemContent>
+            </Item>
           );
         })}
       </ItemGroup>
       {more?.state === "refused" ? <ErrorText>{more.message}</ErrorText> : null}
       {before === null ? null : (
         <Button
-          className="self-start"
           disabled={more?.state === "loading"}
+          layout={styles.start}
           onClick={() => {
             setMore({ state: "loading" });
             void (async () => {
@@ -495,8 +569,8 @@ const VersionList = ({
               }
             })();
           }}
+          size="sm"
           type="button"
-          variant="outline"
         >
           <Trans>Older versions</Trans>
         </Button>
@@ -572,25 +646,27 @@ const SourcePanel = ({
       : { state: "loading" };
   const read = text.state === "ready" ? text.data : undefined;
   return (
-    <Card render={<section />} size="sm">
-      <CardContent>
+    <Card element="section" padding="md">
+      <div {...stylex.props(styles.stack)}>
         {versions.state === "ready" && versions.data.versions.length === 0 ? (
-          <p className="text-muted-foreground text-sm">
+          <Text size="sm" tone="muted">
             <Trans>You can&apos;t read this source.</Trans>
-          </p>
+          </Text>
         ) : null}
         {read === undefined || read === null ? null : (
           <>
-            <h3 className="text-sm font-medium">
+            <Heading level={3} size="ui-sm">
               {firstLineOf(read.text) || <Trans>No first line</Trans>}
-            </h3>
-            <p className="text-sm whitespace-pre-wrap">{read.text}</p>
+            </Heading>
+            <Text size="sm">
+              <span {...stylex.props(styles.plain)}>{read.text}</span>
+            </Text>
           </>
         )}
         {text.state === "ready" && text.data === null ? (
-          <p className="text-muted-foreground text-sm">
+          <Text size="sm" tone="muted">
             <Trans>You can&apos;t read this version.</Trans>
-          </p>
+          </Text>
         ) : null}
         {text.state === "refused" ? (
           <ErrorText>{text.message}</ErrorText>
@@ -612,7 +688,7 @@ const SourcePanel = ({
             }}
           />
         ) : null}
-      </CardContent>
+      </div>
     </Card>
   );
 };
@@ -642,26 +718,18 @@ export const SourcesPage = ({
   return (
     // A page of the brain as its memory is (memory-page.tsx): the title in
     // the serif, in the brain's column, with room at the foot for the chat.
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 md:px-12">
-        <PageHeader>
-          <PageHeaderTitle>
-            <Trans context="the Brain's sources page">Sources</Trans>
-          </PageHeaderTitle>
-          <PageHeaderDescription>
-            <Trans>
-              What the Brain keeps that you may read, and search through it as
-              your agents recall it.
-            </Trans>
-          </PageHeaderDescription>
-        </PageHeader>
+    <div {...stylex.props(styles.pane)}>
+      <div {...stylex.props(styles.column)}>
+        <PageHeader
+          title={<Trans context="the Brain's sources page">Sources</Trans>}
+        />
         <Search onOpen={open} />
         <ConnectionFeeds connections={connections} />
-        <section aria-labelledby={heading} className="flex flex-col gap-3">
-          <h2 className="text-sm font-medium" id={heading}>
+        <section aria-labelledby={heading} {...stylex.props(styles.section)}>
+          <Heading id={heading} level={2} size="ui-sm">
             <Trans>Sources you may read</Trans>
-          </h2>
-          <div className="grid min-h-0 gap-6 lg:grid-cols-2">
+          </Heading>
+          <div {...stylex.props(styles.split)}>
             <SourceList
               onPick={(source) => {
                 open(source);

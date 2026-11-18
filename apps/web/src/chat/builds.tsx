@@ -1,12 +1,14 @@
 import type { App } from "@grasp-os/shared/apps";
 import type { ChatWork } from "@grasp-os/shared/chat";
 import { failureText } from "@grasp-os/shared/errors";
-import { Button } from "@grasp-os/ui/components/button";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { TriangleAlertIcon } from "lucide-react";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
+import { Alert } from "../grasp/alert/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
@@ -144,6 +146,15 @@ export const useChatBuilds = (
   };
 };
 
+const styles = stylex.create({
+  body: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: grasp.space2,
+  },
+});
+
 /**
  * Why the builds didn't load, beside the chat, and a way to read them
  * again: the App being built would otherwise be missing without a word.
@@ -155,22 +166,15 @@ export const BuildsFailure = ({ read }: { read: ChatBuildsRead }) => {
     return null;
   }
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border px-3.5 py-3 text-sm">
-      <TriangleAlertIcon
-        aria-hidden="true"
-        className="text-status-attention size-4 flex-none"
-      />
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <p className="font-medium">
-          <Trans>The Apps this chat builds didn&apos;t load.</Trans>
-        </p>
+    <Alert title={t`The Apps this chat builds didn't load.`} tone="attention">
+      <div {...stylex.props(styles.body)}>
         {/* Gone while trying, so the alert is announced again if it fails again. */}
         {retrying ? null : <NotLoaded page={failure} />}
+        <Button disabled={retrying} onClick={retry} size="sm" variant="quiet">
+          {retrying ? t`Trying again…` : t`Try again`}
+        </Button>
       </div>
-      <Button disabled={retrying} onClick={retry} size="sm" variant="outline">
-        {retrying ? t`Trying again…` : t`Try again`}
-      </Button>
-    </div>
+    </Alert>
   );
 };
 

@@ -1,18 +1,36 @@
 import type { CatalogTool, ListedConnection } from "@grasp-os/shared/connect";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { Button } from "@grasp-os/ui/components/button";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { CircleSlashIcon, EyeIcon, PenLineIcon } from "lucide-react";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 
-import { ErrorText } from "../error-text.tsx";
+import { Button } from "../grasp/button/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { SectionHeader } from "../grasp/section-header/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { RowAlert, SettingsRows } from "../settings/section.tsx";
 import type { Integration } from "./integrations.ts";
 import { ToolChoice } from "./tool-choice.tsx";
 import { toolRules, withAllowed, withRead } from "./tool-choices.ts";
 import type { AllowedTool } from "./tool-choices.ts";
 import { useChange } from "./use-change.ts";
+
+const styles = stylex.create({
+  // A group's name in the card's flush rows, on their inset.
+  head: {
+    marginInline: grasp.space4,
+    marginBlockStart: grasp.space3,
+    marginBlockEnd: grasp.space1,
+  },
+});
 
 // Changing what Grasp may do in a connected app from its page (GRA-993), as
 // the prototype's permission list (`components/connection-permissions.tsx`):
@@ -55,10 +73,9 @@ const groups: readonly {
   id: string;
   readOnly: boolean;
   title: MessageDescriptor;
-  icon: typeof EyeIcon;
 }[] = [
-  { id: "read", readOnly: true, title: msg`Reads`, icon: EyeIcon },
-  { id: "change", readOnly: false, title: msg`Changes`, icon: PenLineIcon },
+  { id: "read", readOnly: true, title: msg`Reads` },
+  { id: "change", readOnly: false, title: msg`Changes` },
 ];
 
 /**
@@ -77,20 +94,22 @@ const NoLongerOffered = ({
 }) => {
   const { t } = useLingui();
   return (
-    <li className="flex min-h-11 items-center gap-2 border-b px-3 py-2 last:border-b-0">
-      <span className="text-muted-foreground min-w-0 flex-1 truncate">
-        {name}
-      </span>
-      <Button
-        aria-label={t`Remove ${name}`}
-        disabled={disabled}
-        onClick={onRemove}
-        size="sm"
-        variant="outline"
-      >
-        <Trans>Remove</Trans>
-      </Button>
-    </li>
+    <Item size="xs">
+      <ItemContent>
+        <ItemTitle>{name}</ItemTitle>
+      </ItemContent>
+      <ItemActions>
+        <Button
+          aria-label={t`Remove ${name}`}
+          disabled={disabled}
+          onClick={onRemove}
+          size="sm"
+          variant="ghost"
+        >
+          {t`Remove`}
+        </Button>
+      </ItemActions>
+    </Item>
   );
 };
 
@@ -109,7 +128,7 @@ export const ToolPermissions = ({
   connection: ListedConnection;
   staff: boolean;
 }) => {
-  const { i18n } = useLingui();
+  const { i18n, t } = useLingui();
   const { busy, failure, change } = useChange();
   const allowed = allowedOf(connection);
   const offered = new Set(tools.map(({ name }) => name));
@@ -126,32 +145,28 @@ export const ToolPermissions = ({
     });
   };
   return (
-    <div className="flex flex-col gap-4">
-      <p className="text-muted-foreground">
-        <Trans>
-          A Read tool runs without asking. A call of a Write tool from chat, or
-          from a person using an App, waits for that person to confirm it. Press
-          a tool&apos;s badge to change it. Mark a tool Read only if it changes
-          nothing: marked wrongly, it changes things without asking.
-        </Trans>
-      </p>
+    <>
+      <SettingsRows>
+        <RowAlert variant="neutral">
+          {t`A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it. Press a tool's Read or Write to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking.`}
+        </RowAlert>
+        {failure === undefined ? null : (
+          <RowAlert variant="danger">{failure}</RowAlert>
+        )}
+      </SettingsRows>
       {groups.map((group) => {
         const inGroup = tools.filter(
           ({ readOnly }) => readOnly === group.readOnly
         );
-        const { icon: Icon } = group;
+        const title = i18n._(group.title);
         return inGroup.length === 0 ? null : (
-          <div className="flex flex-col gap-2" key={group.id}>
-            <h3 className="text-muted-foreground flex items-center gap-1.5 text-xs font-medium">
-              <Icon aria-hidden="true" className="size-3.5" />
-              {i18n._(group.title)}
-            </h3>
-            <ul className="bg-card flex flex-col overflow-hidden rounded-xl border">
+          <section key={group.id}>
+            <SectionHeader layout={styles.head} size="sm" title={title} />
+            <ItemGroup aria-label={title} separated>
               {inGroup.map((tool) => (
                 <ToolChoice
                   choice={allowed.find(({ name }) => name === tool.name)}
                   disabled={busy || staff}
-                  idPrefix="integration-tool"
                   key={tool.name}
                   locked={allowed.length === 1}
                   onAllow={(allow) => {
@@ -163,17 +178,18 @@ export const ToolPermissions = ({
                   tool={tool}
                 />
               ))}
-            </ul>
-          </div>
+            </ItemGroup>
+          </section>
         );
       })}
       {gone.length === 0 ? null : (
-        <div className="flex flex-col gap-2">
-          <h3 className="text-muted-foreground flex items-center gap-1.5 text-xs font-medium">
-            <CircleSlashIcon aria-hidden="true" className="size-3.5" />
-            <Trans>No longer offered</Trans>
-          </h3>
-          <ul className="bg-card flex flex-col overflow-hidden rounded-xl border">
+        <section>
+          <SectionHeader
+            layout={styles.head}
+            size="sm"
+            title={t`No longer offered`}
+          />
+          <ItemGroup aria-label={t`No longer offered`} separated>
             {gone.map(({ name }) => (
               <NoLongerOffered
                 disabled={busy || staff || allowed.length === 1}
@@ -184,10 +200,9 @@ export const ToolPermissions = ({
                 }}
               />
             ))}
-          </ul>
-        </div>
+          </ItemGroup>
+        </section>
       )}
-      <ErrorText>{failure}</ErrorText>
-    </div>
+    </>
   );
 };

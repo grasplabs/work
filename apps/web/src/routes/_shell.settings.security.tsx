@@ -207,7 +207,7 @@ const DeviceRow = ({ session }: { session: OwnSession }) => {
                 <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
                 <AlertDialogAction
                   action={signOut}
-                  failedLabel={t`Could not sign out`}
+                  failedLabel={t`Not signed out`}
                   variant="danger"
                 >
                   {t`Sign out`}

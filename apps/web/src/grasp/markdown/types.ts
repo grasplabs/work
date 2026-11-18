@@ -13,4 +13,5 @@ export type FootnoteDefinition = Of<"footnoteDefinition">;
 export type List = Of<"list">;
 export type ListItem = List["children"][number];
 export type Table = Of<"table">;
-export type PhrasingContent = Of<"paragraph">["children"][number];
+export type Paragraph = Of<"paragraph">;
+export type PhrasingContent = Paragraph["children"][number];

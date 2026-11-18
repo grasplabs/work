@@ -1,7 +1,14 @@
 import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 import { failedRunDays } from "@grasp-os/shared/workflows";
 import type { WorkflowSummary } from "@grasp-os/shared/workflows";
-import { buttonVariants } from "@grasp-os/ui/components/button";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import type { ReactElement, ReactNode } from "react";
+
+import { formatDateTime, formatNumber } from "../format.ts";
+import { RouterLink } from "../frame/router-link.tsx";
+import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import {
   Empty,
   EmptyContent,
@@ -9,8 +16,18 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import { Stat } from "@grasp-os/ui/components/stat";
+} from "../grasp/empty/index.ts";
+import { Icon, Workflow } from "../grasp/icons/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { StatsGrid } from "../grasp/stats/index.ts";
 import {
   Table,
   TableBody,
@@ -18,43 +35,54 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
-import { plural } from "@lingui/core/macro";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
-import { ChevronRightIcon, WorkflowIcon } from "lucide-react";
-import type { ReactElement, ReactNode } from "react";
-
-import { formatDateTime, formatNumber } from "../format.ts";
-import { PersonAvatar } from "../people/person-picker.tsx";
-import { ProcessHint } from "./business-process.tsx";
+} from "../grasp/table/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { ProcessTile } from "./business-process.tsx";
 import { handledOf, listsOf } from "./lists.ts";
 import { RunResult } from "./runs.tsx";
 
-// The workflows table, one line a workflow, as the prototype draws it
-// (`components/workflows-overview.tsx`, `workflows-table.tsx`): on the
-// Workflows page, every workflow the person has a role in, in two lists.
-// A line begins with a workflow's icon, naming the process it serves when
-// pointed at.
+// The workflows table, one row a workflow, on the library's Table in a
+// Section card: on the Workflows page, every workflow the person has a role
+// in, in two lists. A row begins with the process it serves (or a
+// workflow's mark), then its name and version; how often it ran, when it
+// last ran, whose it is and where it stands. A table wider than its card
+// scrolls sideways inside it, so no column is lost on a narrow page.
+
+/** The width of the list under which a row shows its status under its name. */
+const narrowList = "@container workflows (width < 40rem)";
+
+const styles = stylex.create({
+  // The list measures its own width, whatever the page beside it.
+  list: { containerName: "workflows", containerType: "inline-size" },
+  // Wide: the table; narrow: the rows. One of them shows.
+  wide: { display: { default: "block", [narrowList]: "none" } },
+  narrow: { display: { default: "none", [narrowList]: "block" } },
+  // The mark and the name with its version under it.
+  lead: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space3,
+    minWidth: 0,
+  },
+  named: { display: "grid", minWidth: 0 },
+  mark: { display: "inline-flex", flexShrink: 0, color: grasp.muted },
+  // The result over the runs that wait or failed.
+  status: { display: "grid", justifyItems: "start", gap: grasp.space1 },
+  stack: { display: "grid", gap: grasp.space6 },
+});
 
 /** When a workflow last ran, or that it never did. */
-const LastRun = ({ workflow }: { workflow: WorkflowSummary }) =>
-  workflow.lastRun === null ? (
-    <span className="text-muted-foreground">
-      <Trans>Never</Trans>
-    </span>
+const LastRun = ({ workflow }: { workflow: WorkflowSummary }) => {
+  const { t } = useLingui();
+  return workflow.lastRun === null ? (
+    <Text tone="muted">{t`Never`}</Text>
   ) : (
-    <span className="tabular-nums">
-      {formatDateTime(workflow.lastRun.createdAt)}
-    </span>
+    formatDateTime(workflow.lastRun.createdAt)
   );
+};
 
-/** A count of a workflow's runs, linking to them on its page's Runs tab. */
+/** A count of a workflow's runs, linking to them on its page's Runs view. */
 const RunCount = ({
   workflow,
   children,
@@ -65,29 +93,28 @@ const RunCount = ({
   /** What the link opens, read out: the count and the workflow, in words. */
   label: string;
 }) => (
-  <Link
+  <RouterLink
     aria-label={label}
-    className="relative z-10 underline-offset-4 hover:underline"
     params={{ workflow: workflow.workflowId }}
     search={{ view: "runs" }}
     to="/workflows/$workflow"
   >
     {children}
-  </Link>
+  </RouterLink>
 );
 
 /**
  * Where a workflow stands: its last run's result, and the runs waiting
- * for a decision or failed lately, each a link to them on the Runs tab.
+ * for a decision or failed lately, each a link to them on the Runs view.
  */
 const Status = ({ workflow }: { workflow: WorkflowSummary }) => {
   const { t } = useLingui();
   const { name, waiting, failed } = workflow;
   const days = failedRunDays;
   return (
-    <div className="flex flex-col items-start gap-0.5">
+    <div {...stylex.props(styles.status)}>
       {workflow.lastRun === null ? (
-        <span className="text-muted-foreground">–</span>
+        <Text tone="muted">–</Text>
       ) : (
         <RunResult
           aiProvider={workflow.lastRun.aiProvider}
@@ -99,7 +126,7 @@ const Status = ({ workflow }: { workflow: WorkflowSummary }) => {
           label={t`${plural(waiting, { one: "# waiting run", other: "# waiting runs" })} of ${name}`}
           workflow={workflow}
         >
-          <Plural one="# waiting" other="# waiting" value={waiting} />
+          {t`${plural(waiting, { one: "# waiting", other: "# waiting" })}`}
         </RunCount>
       )}
       {failed === 0 ? null : (
@@ -107,11 +134,10 @@ const Status = ({ workflow }: { workflow: WorkflowSummary }) => {
           label={t`${plural(failed, { one: "# failed run", other: "# failed runs" })} of ${name}`}
           workflow={workflow}
         >
-          <Plural
-            one={`# failed in the last ${days} days`}
-            other={`# failed in the last ${days} days`}
-            value={failed}
-          />
+          {t`${plural(failed, {
+            one: `# failed in the last ${days} days`,
+            other: `# failed in the last ${days} days`,
+          })}`}
         </RunCount>
       )}
     </div>
@@ -127,75 +153,25 @@ export const processOf = (
   row: WorkflowSummary
 ): BusinessProcess | null => processes?.get(row.workflowId) ?? null;
 
-/**
- * Where a line begins: a workflow's icon, naming the process it serves
- * when pointed at, with the prototype's attention mark on its corner while
- * a run waits for a decision. The mark only repeats what Status says in
- * words.
- */
-const Lead = ({
-  workflow,
-  process,
-}: {
-  workflow: WorkflowSummary;
-  process: BusinessProcess | null;
-}) => (
-  <Tooltip>
-    <TooltipTrigger render={<span className="relative flex-none rounded-lg" />}>
-      <span
-        aria-hidden="true"
-        className="bg-muted text-foreground inline-flex size-7.5 flex-none items-center justify-center rounded-lg"
-      >
-        <WorkflowIcon className="size-4" />
-      </span>
-      {workflow.waiting === 0 ? null : (
-        <span
-          aria-hidden="true"
-          className="bg-card absolute -top-1 -right-1 flex size-3 items-center justify-center rounded-full"
-        >
-          <span className="bg-status-attention size-2 rounded-full" />
-        </span>
-      )}
-    </TooltipTrigger>
-    <TooltipContent className="max-w-64">
-      {process === null ? (
-        <Trans>Workflow</Trans>
-      ) : (
-        <ProcessHint process={process} />
-      )}
-    </TooltipContent>
-  </Tooltip>
-);
-
-/** A workflow's name, opening it: the whole row is its link. */
-const WorkflowLink = ({ workflow }: { workflow: WorkflowSummary }) => (
-  <Link
-    className="truncate outline-none after:absolute after:inset-0 focus-visible:underline"
-    params={{ workflow: workflow.workflowId }}
-    to="/workflows/$workflow"
-  >
-    {workflow.name}
-  </Link>
-);
-
 /** The version new runs run, or that none is published yet. */
-const Version = ({ version }: { version: number | null }) =>
-  version === null ? <Trans>Draft</Trans> : <Trans>Version {version}</Trans>;
+const Version = ({ version }: { version: number | null }) => {
+  const { t } = useLingui();
+  return version === null ? t`Draft` : t`Version ${version}`;
+};
 
-/** A workflow's owner: who created it, named when pointed at. */
+/** A workflow's owner: who created it, as their face, named to a screen reader and when pointed at. */
 const Owner = ({ workflow }: { workflow: WorkflowSummary }) => {
   const name = workflow.owner.name ?? workflow.owner.userId;
   return (
-    <span className="inline-flex" title={name}>
-      <PersonAvatar name={name} />
-      <span className="sr-only">{name}</span>
-    </span>
+    <Avatar name={name} size="xs">
+      <AvatarFallback />
+    </Avatar>
   );
 };
 
 /**
- * A workflow's row: its name and its version under it, its owner, when it
- * last ran and where it stands. The whole row opens it.
+ * A workflow's row: what it serves, its name and its version under it,
+ * how often it ran, when it last ran, its owner and where it stands.
  */
 const WorkflowRow = ({
   workflow,
@@ -203,54 +179,104 @@ const WorkflowRow = ({
 }: {
   workflow: WorkflowSummary;
   process: BusinessProcess | null;
-}) => {
-  const { version } = workflow;
+}) => (
+  <TableRow>
+    <TableCell lead>
+      <span {...stylex.props(styles.lead)}>
+        {process === null ? (
+          <span aria-hidden="true" {...stylex.props(styles.mark)}>
+            <Icon icon={Workflow} />
+          </span>
+        ) : (
+          <ProcessTile process={process} />
+        )}
+        <span {...stylex.props(styles.named)}>
+          <RouterLink
+            params={{ workflow: workflow.workflowId }}
+            to="/workflows/$workflow"
+          >
+            {workflow.name}
+          </RouterLink>
+          <Text size="sm" tone="muted">
+            <Version version={workflow.version} />
+          </Text>
+        </span>
+      </span>
+    </TableCell>
+    <TableCell align="end">{formatNumber(workflow.handled)}</TableCell>
+    <TableCell>
+      <LastRun workflow={workflow} />
+    </TableCell>
+    <TableCell>
+      <Owner workflow={workflow} />
+    </TableCell>
+    <TableCell>
+      <Status workflow={workflow} />
+    </TableCell>
+  </TableRow>
+);
+
+/**
+ * A workflow on a narrow page, as the library's Item: what it serves, its
+ * name and version, and where it stands under them, so its status is never
+ * pushed out of sight. How often and when it ran stay on the wide table.
+ */
+const WorkflowItem = ({
+  workflow,
+  process,
+}: {
+  workflow: WorkflowSummary;
+  process: BusinessProcess | null;
+}) => (
+  <Item size="sm">
+    {process === null ? (
+      <ItemMedia icon={Workflow} iconLook="inline" />
+    ) : (
+      <ItemMedia>
+        <ProcessTile process={process} />
+      </ItemMedia>
+    )}
+    <ItemContent>
+      <ItemTitle>
+        <RouterLink
+          params={{ workflow: workflow.workflowId }}
+          to="/workflows/$workflow"
+        >
+          {workflow.name}
+        </RouterLink>
+      </ItemTitle>
+      <ItemDescription>
+        <Version version={workflow.version} />
+      </ItemDescription>
+      <Status workflow={workflow} />
+    </ItemContent>
+  </Item>
+);
+
+/** What the Workflows page says while nobody can open any workflow. */
+const NoWorkflows = () => {
+  const { t } = useLingui();
   return (
-    <TableRow className="relative">
-      <TableCell variant="roomy">
-        <div className="flex min-w-0 items-center gap-3">
-          <Lead process={process} workflow={workflow} />
-          <div className="flex min-w-0 flex-col gap-0.5">
-            <span className="flex min-w-0 items-center gap-2">
-              <WorkflowLink workflow={workflow} />
-            </span>
-            <span className="text-muted-foreground">
-              <Version version={version} />
-            </span>
-            {/* Narrow, the status's cell is hidden too, as the prototype
-                keeps the name its room: where it stands goes under it. */}
-            <div className="@sm:hidden">
-              <Status workflow={workflow} />
-            </div>
-          </div>
-        </div>
-      </TableCell>
-      <TableCell className="hidden @xl:table-cell" variant="roomy">
-        <span className="tabular-nums">{formatNumber(workflow.handled)}</span>
-      </TableCell>
-      <TableCell className="hidden @2xl:table-cell" variant="roomy">
-        <LastRun workflow={workflow} />
-      </TableCell>
-      <TableCell className="hidden @md:table-cell" variant="roomy">
-        <Owner workflow={workflow} />
-      </TableCell>
-      <TableCell className="hidden @sm:table-cell" variant="roomy">
-        <Status workflow={workflow} />
-      </TableCell>
-      <TableCell>
-        <ChevronRightIcon
-          aria-hidden="true"
-          className="text-muted-foreground mx-auto size-4"
-        />
-      </TableCell>
-    </TableRow>
+    <Empty size="lg">
+      <EmptyHeader>
+        <EmptyMedia icon={Workflow} />
+        <EmptyTitle>{t`No workflows yet`}</EmptyTitle>
+        <EmptyDescription>
+          {t`Workflows are made in chat: describe what should run on its own, and Grasp builds it.`}
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <RouterLink search={{}} to="/">
+          {t`Open Chat`}
+        </RouterLink>
+      </EmptyContent>
+    </Empty>
   );
 };
 
 /**
- * Every workflow the person can open, in the prototype's table
- * (grasplabs/prototype `components/workflows-table.tsx`): its columns
- * follow the table's own width, so as it narrows, the last run folds away.
+ * Every workflow the person can open, in the library's Table: one row a
+ * workflow, its columns as above.
  */
 export const WorkflowsTable = ({
   rows,
@@ -263,133 +289,79 @@ export const WorkflowsTable = ({
   /** What an empty table says; the Workflows page's empty state without it. */
   empty?: ReactElement;
 }) => {
-  if (rows.length === 0 && empty !== undefined) {
-    return empty;
-  }
+  const { t } = useLingui();
   if (rows.length === 0) {
-    return (
-      <div className="bg-card rounded-xl border">
-        <Empty>
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <WorkflowIcon />
-            </EmptyMedia>
-            <EmptyTitle>
-              <Trans>No workflows yet</Trans>
-            </EmptyTitle>
-            <EmptyDescription>
-              <Trans>
-                Workflows are made in chat: describe what should run on its own,
-                and Grasp builds it.
-              </Trans>
-            </EmptyDescription>
-          </EmptyHeader>
-          <EmptyContent>
-            <Link
-              className={buttonVariants({ size: "sm", variant: "outline" })}
-              search={{}}
-              to="/"
-            >
-              <Trans>Open Chat</Trans>
-            </Link>
-          </EmptyContent>
-        </Empty>
-      </div>
-    );
+    return empty ?? <NoWorkflows />;
   }
   return (
-    <div className="bg-card @container overflow-hidden rounded-xl border">
-      <Table className="table-fixed">
-        <TableHeader>
-          <TableRow>
-            <TableHead variant="card">
-              <Trans>Workflow</Trans>
-            </TableHead>
-            <TableHead className="hidden w-32 @xl:table-cell" variant="card">
-              <Trans>Runs a week</Trans>
-            </TableHead>
-            <TableHead className="hidden w-44 @2xl:table-cell" variant="card">
-              <Trans>Last run</Trans>
-            </TableHead>
-            <TableHead className="hidden w-20 @md:table-cell" variant="card">
-              <Trans context="column: who owns a workflow">Owner</Trans>
-            </TableHead>
-            <TableHead className="hidden w-52 @sm:table-cell" variant="card">
-              <Trans context="column: where a workflow stands">Status</Trans>
-            </TableHead>
-            <TableHead className="w-9" variant="card">
-              <span className="sr-only">
-                <Trans context="column: a link that opens the workflow">
-                  Open
-                </Trans>
-              </span>
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
+    <div {...stylex.props(styles.list)}>
+      <div {...stylex.props(styles.wide)}>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t`Workflow`}</TableHead>
+              <TableHead align="end">{t`Runs a week`}</TableHead>
+              <TableHead>{t`Last run`}</TableHead>
+              <TableHead>
+                {t({
+                  message: "Owner",
+                  context: "column: who owns a workflow",
+                })}
+              </TableHead>
+              <TableHead>
+                {t({
+                  message: "Status",
+                  context: "column: where a workflow stands",
+                })}
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <WorkflowRow
+                key={row.workflowId}
+                process={processOf(processes, row)}
+                workflow={row}
+              />
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      <div {...stylex.props(styles.narrow)}>
+        <ItemGroup aria-label={t`Workflows`} separated>
           {rows.map((row) => (
-            <WorkflowRow
+            <WorkflowItem
               key={row.workflowId}
               process={processOf(processes, row)}
               workflow={row}
             />
           ))}
-        </TableBody>
-      </Table>
+        </ItemGroup>
+      </div>
     </div>
   );
 };
 
-/** One of the overview's lists: its name over its table, left out while empty. */
+/** One of the overview's lists: a card with its name over its table, left out while empty. */
 const List = ({
   title,
   rows,
   processes,
 }: {
-  title: ReactNode;
+  title: string;
   rows: WorkflowSummary[];
   processes: WorkflowProcesses | undefined;
 }) =>
   rows.length === 0 ? null : (
-    <section className="flex flex-col gap-3">
-      <h2 className="text-muted-foreground">{title}</h2>
+    <SectionCard density="compact" flush title={title}>
       <WorkflowsTable processes={processes} rows={rows} />
-    </section>
+    </SectionCard>
   );
 
-/** A large number over the words that say what it is; a dash for one nobody counts yet. */
-const Big = ({ value, label }: { value: string | null; label: ReactNode }) => (
-  <div className="flex min-w-0 flex-col-reverse gap-0.5">
-    <dt className="text-muted-foreground">{label}</dt>
-    <Stat render={<dd />}>{value ?? "–"}</Stat>
-  </div>
-);
-
 /**
- * The prototype's three numbers over the lists, for all the workflows
- * together: the runs they completed this week (core's `handled`); the
- * return a month that was measured, and what designs and tests expect on
- * top, are dashes: core measures no return yet, and keeps no designs.
- */
-const Numbers = ({ rows }: { rows: WorkflowSummary[] }) => (
-  <dl className="grid grid-cols-1 gap-x-8 gap-y-4 @xl:grid-cols-3">
-    <Big
-      label={<Trans>runs a week by these workflows</Trans>}
-      value={formatNumber(handledOf(rows))}
-    />
-    <Big label={<Trans>return a month, measured</Trans>} value={null} />
-    <Big
-      label={<Trans>expected on top, from designs and tests</Trans>}
-      value={null}
-    />
-  </dl>
-);
-
-/**
- * `rows` in the overview's two lists, without the numbers over them: at
+ * `rows` in the overview's two lists, without the figure over them: at
  * work, those that have run, the ones waiting on a person first; on the
- * way, those that haven't run yet. Needs you shows its workflows so, as
- * the prototype's does.
+ * way, those that haven't run yet. Needs you shows its workflows so.
  */
 export const WorkflowLists = ({
   rows,
@@ -398,28 +370,21 @@ export const WorkflowLists = ({
   rows: WorkflowSummary[];
   processes?: WorkflowProcesses;
 }) => {
+  const { t } = useLingui();
   const { atWork, onTheWay } = listsOf(rows);
   return (
     <>
-      <List
-        processes={processes}
-        rows={atWork}
-        title={<Trans>At work</Trans>}
-      />
-      <List
-        processes={processes}
-        rows={onTheWay}
-        title={<Trans>On the way</Trans>}
-      />
+      <List processes={processes} rows={atWork} title={t`At work`} />
+      <List processes={processes} rows={onTheWay} title={t`On the way`} />
     </>
   );
 };
 
 /**
- * The Workflows page's list, as the prototype tells it
- * (`components/workflows-overview.tsx`): made for many workflows, its
- * numbers on top, then two lists. At work, those that have run, the ones
- * waiting on a person first; on the way, those that haven't run yet.
+ * The Workflows page's list: the runs these workflows completed this week
+ * (core's `handled`) as a figure, then two lists. The prototype's return a
+ * month and what designs expect on top are left out: core measures no
+ * return yet and keeps no designs, so they were always a dash.
  */
 export const WorkflowsOverview = ({
   rows,
@@ -428,14 +393,22 @@ export const WorkflowsOverview = ({
   rows: WorkflowSummary[];
   processes?: WorkflowProcesses;
 }) => {
+  const { t } = useLingui();
   if (rows.length === 0) {
-    return <WorkflowsTable rows={rows} />;
+    return <NoWorkflows />;
   }
   return (
-    // The container for the numbers' columns: a container query never
-    // applies to the element that is the container.
-    <div className="@container flex flex-col gap-8">
-      <Numbers rows={rows} />
+    <div {...stylex.props(styles.stack)}>
+      <StatsGrid
+        aria-label={t`These workflows, in figures`}
+        columns={3}
+        items={[
+          {
+            title: t`runs a week by these workflows`,
+            value: formatNumber(handledOf(rows)),
+          },
+        ]}
+      />
       <WorkflowLists processes={processes} rows={rows} />
     </div>
   );

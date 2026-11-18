@@ -4,21 +4,26 @@ import type {
   RestsOn,
   WorkKnowledge,
 } from "@grasp-os/shared/work-knowledge";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
-import { cn } from "@grasp-os/ui/lib/utils";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
+import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import { focus } from "../grasp/focus/focus.ts";
+import { Heading } from "../grasp/heading/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "../grasp/tooltip/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -78,6 +83,117 @@ const restsOnKind: Readonly<Record<RestsOn, MessageDescriptor>> = {
   }),
 };
 
+/** Where the page has room for what Grasp is sure of beside the story. */
+const WIDE = media.fromRail;
+
+const styles = stylex.create({
+  page: {
+    display: "flex",
+    flexDirection: { default: "column", [WIDE]: "row" },
+    alignItems: { default: "stretch", [WIDE]: "flex-start" },
+    gap: { default: grasp.space10, [WIDE]: grasp.space16 },
+    width: "100%",
+    maxWidth: `calc(16 * ${grasp.space16})`,
+    marginInline: "auto",
+  },
+  story: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minWidth: 0,
+    maxWidth: `calc(10 * ${grasp.space16})`,
+  },
+  section: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+    paddingBlock: grasp.space6,
+    borderTopWidth: grasp.hairline,
+    borderTopStyle: "solid",
+    borderTopColor: grasp.line,
+    ":first-child": { paddingTop: 0, borderTopWidth: 0 },
+    ":last-child": { paddingBottom: 0 },
+  },
+  told: {
+    margin: 0,
+    fontSize: grasp.textMd,
+    lineHeight: 2,
+    color: grasp.text,
+    textWrap: "pretty",
+  },
+  // The bead after a sentence: a small dot, pointed at for what it rests on.
+  bead: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: grasp.space3,
+    height: grasp.space3,
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    borderRadius: grasp.cornerCircle,
+    backgroundColor: "transparent",
+    verticalAlign: "middle",
+    cursor: "default",
+  },
+  beadDot: {
+    width: grasp.severityDot,
+    height: grasp.severityDot,
+    borderRadius: grasp.cornerCircle,
+    backgroundColor: grasp.muted,
+  },
+  aside: {
+    display: "flex",
+    flexDirection: "column",
+    flexShrink: 0,
+    overflow: "hidden",
+    width: { default: "auto", [WIDE]: `calc(4 * ${grasp.space16})` },
+    position: { default: "static", [WIDE]: "sticky" },
+    top: grasp.space8,
+    borderRadius: grasp.corner,
+    backgroundColor: grasp.raised,
+    boxShadow: grasp.edge,
+  },
+  list: {
+    display: "flex",
+    flexDirection: "column",
+    margin: 0,
+  },
+  fact: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+    paddingBlock: grasp.space3,
+    paddingInline: grasp.space4,
+    borderTopWidth: { default: grasp.hairline, ":first-child": 0 },
+    borderTopStyle: "solid",
+    borderTopColor: grasp.line,
+  },
+  term: {
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+    color: grasp.muted,
+  },
+  value: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: grasp.space2,
+    margin: 0,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    color: grasp.text,
+  },
+  kinds: {
+    display: "flex",
+    flexWrap: "wrap",
+    columnGap: grasp.space3,
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+});
+
 /** "2026-W42" as its week number. */
 const weekNumberOf = (week: string): number => Number(week.slice(-2));
 
@@ -98,7 +214,7 @@ const useBeadText = (sentence: KnownSentence): string => {
   return t`${rests} · ${role}, ${team} · week ${week}`;
 };
 
-/** The bead after a sentence: pointed at, what it rests on. */
+/** The bead after a sentence: pointed at or focused, what it rests on. */
 const Bead = ({ sentence }: { sentence: KnownSentence }) => {
   const said = useBeadText(sentence);
   return (
@@ -107,16 +223,13 @@ const Bead = ({ sentence }: { sentence: KnownSentence }) => {
         render={
           <button
             aria-label={said}
-            className="focus-visible:ring-ring/50 inline-flex size-3 -translate-y-px items-center justify-center rounded-full align-middle outline-none focus-visible:ring-3"
             type="button"
-          />
+            {...stylex.props(styles.bead, focus.ring)}
+          >
+            <span aria-hidden="true" {...stylex.props(styles.beadDot)} />
+          </button>
         }
-      >
-        <span
-          aria-hidden="true"
-          className="bg-foreground/70 size-1.5 rounded-full"
-        />
-      </TooltipTrigger>
+      />
       <TooltipContent>{said}</TooltipContent>
     </Tooltip>
   );
@@ -136,9 +249,11 @@ const Section = ({
   title: string;
   children: ReactNode;
 }) => (
-  <section className="flex flex-col gap-2 py-6 first:pt-0 last:pb-0">
-    <h2 className="font-medium">{title}</h2>
-    <p className="leading-loose text-pretty">{children}</p>
+  <section {...stylex.props(styles.section)}>
+    <Heading level={2} size="ui-sm">
+      {title}
+    </Heading>
+    <p {...stylex.props(styles.told)}>{children}</p>
   </section>
 );
 
@@ -162,27 +277,22 @@ const HowSure = ({
     }
   };
   return (
-    <div className="flex flex-col gap-2 px-4 py-3">
-      <dt className="text-muted-foreground text-xs">
+    <div {...stylex.props(styles.fact)}>
+      <dt {...stylex.props(styles.term)}>
         <Trans>How sure</Trans>
       </dt>
-      <dd className="flex flex-col items-start gap-2">
-        <span className="flex items-center gap-2">
-          <span
-            aria-hidden="true"
-            className={cn(
-              "size-1.5 rounded-full",
-              heard ? "bg-status-agreed" : "bg-status-attention"
-            )}
-          />
-          {heard ? t`Heard from enough people` : t`Waiting for more voices`}
-        </span>
+      <dd {...stylex.props(styles.value)}>
+        {heard ? (
+          <Badge tone="success">{t`Heard from enough people`}</Badge>
+        ) : (
+          <Badge tone="attention">{t`Waiting for more voices`}</Badge>
+        )}
         {known.moreAsked ? (
-          <span className="text-muted-foreground">
+          <Text element="span" size="sm" tone="muted">
             <Trans>
               More people are asked about it in the next interviews.
             </Trans>
-          </span>
+          </Text>
         ) : null}
         {known.canAskMore && !known.moreAsked ? (
           <Button
@@ -191,9 +301,8 @@ const HowSure = ({
               void ask();
             }}
             size="sm"
-            variant="outline"
           >
-            <Trans>Ask more people</Trans>
+            {t`Ask more people`}
           </Button>
         ) : null}
         <ErrorText>{failure}</ErrorText>
@@ -221,14 +330,14 @@ const Known = ({
     (kind) => known.sentences.some(({ restsOn: rests }) => rests === kind)
   );
   return (
-    <div className="@container mx-auto flex w-full max-w-5xl flex-col gap-10 @4xl:flex-row @4xl:items-start @4xl:gap-16">
-      <article className="flex max-w-2xl min-w-0 flex-1 flex-col divide-y">
+    <div {...stylex.props(styles.page)}>
+      <article {...stylex.props(styles.story)}>
         {told.length === 0 ? (
-          <p className="text-muted-foreground">
+          <Text size="md" tone="muted">
             <Trans>
               Grasp knows nothing about this work in its own words yet.
             </Trans>
-          </p>
+          </Text>
         ) : null}
         {told.map((part) => (
           <Section key={part.id} title={i18n._(part.title)}>
@@ -240,18 +349,18 @@ const Known = ({
           </Section>
         ))}
       </article>
-      <aside className="bg-card flex flex-none flex-col overflow-hidden rounded-xl border @4xl:sticky @4xl:top-8 @4xl:w-64">
-        <dl className="flex flex-col divide-y">
+      <aside {...stylex.props(styles.aside)}>
+        <dl {...stylex.props(styles.list)}>
           <HowSure known={known} onChange={onChange} />
           {restsOn.length > 0 ? (
-            <div className="flex flex-col gap-2 px-4 py-3">
-              <dt className="text-muted-foreground text-xs">
+            <div {...stylex.props(styles.fact)}>
+              <dt {...stylex.props(styles.term)}>
                 <Trans context="what a piece of work's knowledge rests on: said, written, seen or done">
                   Rests on
                 </Trans>
               </dt>
-              <dd>
-                <ul className="flex flex-wrap gap-x-3">
+              <dd {...stylex.props(styles.value)}>
+                <ul {...stylex.props(styles.kinds)}>
                   {restsOn.map((kind) => (
                     <li key={kind}>{i18n._(restsOnKind[kind])}</li>
                   ))}

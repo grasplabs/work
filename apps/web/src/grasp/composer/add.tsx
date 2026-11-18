@@ -1,21 +1,25 @@
-// ComposerAdd: the plus at the start of a composer's footer (composer.tsx), after Capy's add menu.
-// "Upload attachment" first, with its keys (Cmd or Ctrl and /, bound while focus is in this
-// composer); then, under a hairline, the kinds of thing that can be added: people, agents, skills,
-// files, or whatever the caller passes. Choosing a kind hands it to `onKind`, which usually opens
-// the mention menu at that kind. Last, under a heading of their own ("This chat"), the actions about
-// this chat rather than this message: instructions, memory, shortcuts. They stand here, not behind a
-// second button, so the footer starts with one plus.
-//
-//   <ComposerAdd onAttach={attach} kinds={kinds} onKind={(kind) => mention(kind)}
-//     actions={actions} onAction={(action) => open(action)} />
-//
-// Built from Grasp's Dropdown menu. Every value is a token (src/tokens).
 "use client";
 
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useRef } from "react";
-import type { RefObject } from "react";
+import {
+  MenuItem,
+  MenuItemIndicator,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSeparator,
+  MenuSub,
+  MenuSubContent,
+  MenuSubTrigger,
+} from "@ui-sdk/react/menu";
+import {
+  Fragment,
+  createElement,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+} from "react";
+import type { ReactNode, RefObject } from "react";
 
 import {
   DropdownMenu,
@@ -25,12 +29,19 @@ import {
   DropdownMenuContent,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  menuStyles,
 } from "../dropdown-menu";
-import { Attach, Plus } from "../icons";
+import { Agent, Attach, ChevronRight, Icon, Plus, Tick } from "../icons";
 import type { IconData } from "../icons";
+import { grasp, media } from "../tokens/tokens.stylex";
+import { popup } from "../tokens/tokens.values";
+import { AgentMarkOf, RowInside, agentMenuStyles } from "./agent";
+import type { ComposerAgentAll, ComposerAgentOption } from "./agent";
+import { useShowChosenAgent } from "./agent-chip";
 import { useComposerDisabled, useOpenMentions } from "./context";
 import { cornerStyles } from "./corner";
 import { stopEscape } from "./escape";
+import { useComposerWords } from "./words";
 
 /** One kind of thing a person can add to a message. */
 export interface ComposerKind {
@@ -91,10 +102,67 @@ export interface ComposerAddProps {
    * @default "Upload attachment"
    */
   uploadLabel?: string;
+  /**
+   * The agents a message can go to, as ComposerAgent takes them. With them and `onValueChange`, a
+   * row "Agent" opens their list, and a chosen agent other than the default shows above the text.
+   */
+  agents?: ComposerAgentOption[];
+  /** The chosen agent's `value`. */
+  value?: string;
+  /** Called with the agent chosen, or with the default one when the chip above the text is removed. */
+  onValueChange?: (value: string) => void;
+  /** A last row in the agents' list, a link to all of them ("All agents"). */
+  all?: ComposerAgentAll;
+  /**
+   * The agent a message goes to when no other is chosen: chosen, it shows no chip above the text.
+   * @default the first agent
+   */
+  defaultAgent?: string;
+  /**
+   * The agents' row's words.
+   * @default "Agent"
+   */
+  agentLabel?: string;
 }
 
 const noKinds: ComposerKind[] = [];
 const noActions: ComposerAddAction[] = [];
+const noAgents: ComposerAgentOption[] = [];
+
+const styles = stylex.create({
+  // The agents' row: a menu item that opens a list beside it, lit while it is open too.
+  agentRow: {
+    backgroundColor: {
+      default: "transparent",
+      ":is([data-highlighted], [data-open])": {
+        default: grasp.itemFillHighlight,
+        [media.forced]: "Highlight",
+      },
+    },
+  },
+  // The chosen agent at the row's end: its mark and its name, quieter than the row's words.
+  chosen: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: grasp.space1,
+    flexShrink: 100,
+    minWidth: 0,
+    marginInlineStart: "auto",
+    color: { default: grasp.muted, [media.forced]: "inherit" },
+    fontWeight: grasp.weightRegular,
+  },
+  chosenName: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  chevron: {
+    display: "inline-flex",
+    flexShrink: 0,
+    color: { default: grasp.muted, [media.forced]: "inherit" },
+  },
+});
 
 // Cmd or Ctrl and / clicks the hidden file input, while focus is in its form. Returns the cleanup.
 const listenForPicker = (picker: RefObject<HTMLInputElement | null>) => {
@@ -119,6 +187,153 @@ const listenForPicker = (picker: RefObject<HTMLInputElement | null>) => {
   };
 };
 
+/** The agents' row and the list it opens beside it: arrows, Enter, Escape back to the row. */
+const AgentsSub = ({
+  agents,
+  value,
+  onValueChange,
+  all,
+  label,
+}: {
+  agents: ComposerAgentOption[];
+  value: string;
+  onValueChange: (value: string) => void;
+  all: ComposerAgentAll | undefined;
+  label: string;
+}) => {
+  const chosen = agents.find((agent) => agent.value === value);
+  return (
+    <MenuSub>
+      <MenuSubTrigger
+        className={stylex.props(menuStyles.item, styles.agentRow).className}
+      >
+        <span
+          aria-hidden="true"
+          data-menu-icon=""
+          {...stylex.props(menuStyles.icon)}
+        >
+          <Icon icon={Agent} />
+        </span>
+        <span {...stylex.props(menuStyles.words)}>{label}</span>
+        {chosen !== undefined && (
+          <span {...stylex.props(styles.chosen)}>
+            <span
+              aria-hidden="true"
+              {...stylex.props(agentMenuStyles.markLine)}
+            >
+              <AgentMarkOf agent={chosen} />
+            </span>
+            <span {...stylex.props(styles.chosenName)}>{chosen.label}</span>
+          </span>
+        )}
+        <span aria-hidden="true" {...stylex.props(styles.chevron)}>
+          <Icon icon={ChevronRight} />
+        </span>
+      </MenuSubTrigger>
+      <MenuSubContent
+        sideOffset={popup.gap}
+        alignOffset={-popup.gap}
+        collisionPadding={popup.gutter}
+        aria-label={label}
+        {...stylex.props(
+          menuStyles.panel,
+          menuStyles.motion,
+          agentMenuStyles.panel
+        )}
+      >
+        <MenuRadioGroup
+          value={value}
+          onValueChange={(next: string) => {
+            onValueChange(next);
+          }}
+        >
+          {agents.map((agent) => (
+            <MenuRadioItem
+              key={agent.value}
+              value={agent.value}
+              label={agent.label}
+              disabled={agent.disabled}
+              closeOnSelect
+              className={stylex.props(agentMenuStyles.row).className}
+            >
+              <RowInside
+                agent={agent}
+                end={
+                  <MenuItemIndicator {...stylex.props(agentMenuStyles.tick)}>
+                    <Icon icon={Tick} />
+                  </MenuItemIndicator>
+                }
+              />
+            </MenuRadioItem>
+          ))}
+        </MenuRadioGroup>
+        {all !== undefined && (
+          <>
+            <MenuSeparator {...stylex.props(agentMenuStyles.separator)} />
+            <MenuItem
+              label={all.label}
+              render={createElement("a", { href: all.href })}
+              className={
+                stylex.props(agentMenuStyles.row, agentMenuStyles.all).className
+              }
+            >
+              {all.label}
+            </MenuItem>
+          </>
+        )}
+      </MenuSubContent>
+    </MenuSub>
+  );
+};
+
+/** Hands the card the chosen agent to show above the text, while it is not the default one. */
+const useChosenAgentChip = (
+  agents: ComposerAgentOption[],
+  value: string | undefined,
+  onValueChange: ((value: string) => void) | undefined,
+  defaultAgent: string | undefined
+) => {
+  const show = useShowChosenAgent();
+  const home = defaultAgent ?? agents[0]?.value;
+  // Before paint, so a chosen agent's chip never shows a frame late.
+  useLayoutEffect(() => {
+    const agent = agents.find((each) => each.value === value);
+    const fallback = agents.find((each) => each.value === home);
+    const shown =
+      agent !== undefined &&
+      fallback !== undefined &&
+      agent.value !== fallback.value &&
+      onValueChange !== undefined;
+    show?.(
+      shown
+        ? {
+            agent,
+            fallback,
+            onRemove: () => {
+              onValueChange(fallback.value);
+            },
+          }
+        : null
+    );
+    return () => {
+      show?.(null);
+    };
+  }, [show, agents, value, home, onValueChange]);
+};
+
+/** The menu's parts that hold something, a hairline between each two. */
+const withHairlines = (parts: ReactNode[]) =>
+  parts.flatMap((part, index) =>
+    index === 0
+      ? [part]
+      : [
+          <Fragment key={`hairline-${index}`}>
+            <DropdownMenuSeparator />
+          </Fragment>,
+          part,
+        ]
+  );
+
 /** The plus menu: upload a file, or add a person, an agent, a skill or a file. */
 export const ComposerAdd = ({
   onAttach,
@@ -126,13 +341,27 @@ export const ComposerAdd = ({
   onKind,
   actions = noActions,
   onAction,
-  actionsLabel = "This chat",
+  actionsLabel: actionsGiven,
   accept,
   label: labelDeprecated,
-  "aria-label": label = labelDeprecated ?? "Add to message",
-  uploadLabel = "Upload attachment",
+  "aria-label": labelGiven,
+  uploadLabel: uploadGiven,
+  agents = noAgents,
+  value,
+  onValueChange,
+  all,
+  defaultAgent,
+  agentLabel: agentGiven,
 }: ComposerAddProps) => {
   const disabled = useComposerDisabled();
+  // Its words: the caller's where given, else the product's catalogue (GraspWords), else English.
+  const words = useComposerWords("add");
+  const actionsLabel = actionsGiven ?? words.actions;
+  const label = labelGiven ?? labelDeprecated ?? words.label;
+  const uploadLabel = uploadGiven ?? words.upload;
+  const agentLabel = agentGiven ?? words.agent;
+  // A chosen agent other than the default shows above the text.
+  useChosenAgentChip(agents, value, onValueChange, defaultAgent);
   // Without its own onKind, a kind opens the composer's mention menu at that kind.
   const openMentions = useOpenMentions();
   const choose = onKind ?? ((kind: string) => openMentions?.(kind));
@@ -176,49 +405,63 @@ export const ComposerAdd = ({
         />
       </span>
       <DropdownMenuContent side="top" align="start" onKeyDown={stopEscape}>
-        {onAttach && (
-          <DropdownMenuItem
-            icon={Attach}
-            shortcut="mod+/"
-            onSelect={() => {
-              picker.current?.click();
-            }}
-          >
-            {uploadLabel}
-          </DropdownMenuItem>
-        )}
-        {onAttach && kinds.length > 0 && <DropdownMenuSeparator />}
-        {kinds.map((kind) => (
-          <DropdownMenuItem
-            key={kind.value}
-            icon={kind.icon}
-            onSelect={() => {
-              choose(kind.value);
-            }}
-          >
-            {kind.label}
-          </DropdownMenuItem>
-        ))}
-        {(Boolean(onAttach) || kinds.length > 0) && actions.length > 0 && (
-          <DropdownMenuSeparator />
-        )}
-        {actions.length > 0 && (
-          <DropdownMenuGroup>
-            <DropdownMenuLabel>{actionsLabel}</DropdownMenuLabel>
-            {actions.map((action) => (
+        {withHairlines(
+          [
+            onAttach && (
               <DropdownMenuItem
-                key={action.value}
-                icon={action.icon}
-                shortcut={action.shortcut}
-                disabled={action.disabled}
+                key="upload"
+                icon={Attach}
+                shortcut="mod+/"
                 onSelect={() => {
-                  onAction?.(action.value);
+                  picker.current?.click();
                 }}
               >
-                {action.label}
+                {uploadLabel}
               </DropdownMenuItem>
-            ))}
-          </DropdownMenuGroup>
+            ),
+            kinds.length > 0 &&
+              kinds.map((kind) => (
+                <DropdownMenuItem
+                  key={kind.value}
+                  icon={kind.icon}
+                  onSelect={() => {
+                    choose(kind.value);
+                  }}
+                >
+                  {kind.label}
+                </DropdownMenuItem>
+              )),
+            agents.length > 0 &&
+              value !== undefined &&
+              onValueChange !== undefined && (
+                <AgentsSub
+                  key="agents"
+                  agents={agents}
+                  value={value}
+                  onValueChange={onValueChange}
+                  all={all}
+                  label={agentLabel}
+                />
+              ),
+            actions.length > 0 && (
+              <DropdownMenuGroup key="actions">
+                <DropdownMenuLabel>{actionsLabel}</DropdownMenuLabel>
+                {actions.map((action) => (
+                  <DropdownMenuItem
+                    key={action.value}
+                    icon={action.icon}
+                    shortcut={action.shortcut}
+                    disabled={action.disabled}
+                    onSelect={() => {
+                      onAction?.(action.value);
+                    }}
+                  >
+                    {action.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
+            ),
+          ].filter(Boolean)
         )}
       </DropdownMenuContent>
     </DropdownMenu>

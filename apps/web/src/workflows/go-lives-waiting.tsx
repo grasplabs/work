@@ -1,4 +1,9 @@
 import type { WorkflowGoLiveWaiting } from "@grasp-os/shared/workflow-lifecycle";
+import { useLingui } from "@lingui/react/macro";
+
+import { formatDateTime } from "../format.ts";
+import { RouterLink } from "../frame/router-link.tsx";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   Table,
   TableBody,
@@ -6,12 +11,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/ui/components/table";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
-import { useId } from "react";
-
-import { formatDateTime } from "../format.ts";
+} from "../grasp/table/index.ts";
 import type { Names } from "./activity-bar.tsx";
 
 // The independent workflows whose version waits for the reader to let it
@@ -28,51 +28,46 @@ export const GoLivesWaiting = ({
   names: Names;
 }) => {
   const { t } = useLingui();
-  const titleId = useId();
   if (waiting.length === 0) {
     return null;
   }
   return (
-    <section aria-labelledby={titleId} className="flex flex-col gap-3">
-      <h2 className="text-muted-foreground" id={titleId}>
-        <Trans>Waiting for you to let them go live</Trans>
-      </h2>
-      <div className="bg-card overflow-hidden rounded-xl border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead variant="card">{t`Workflow`}</TableHead>
-              <TableHead variant="card">{t`Version`}</TableHead>
-              <TableHead variant="card">{t`Asked by`}</TableHead>
-              <TableHead variant="card">{t`Asked on`}</TableHead>
+    <SectionCard
+      density="compact"
+      flush
+      title={t`Waiting for you to let them go live`}
+    >
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>{t`Workflow`}</TableHead>
+            <TableHead>{t`Version`}</TableHead>
+            <TableHead>{t`Asked by`}</TableHead>
+            <TableHead>{t`Asked on`}</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {waiting.map((each) => (
+            <TableRow key={`${each.workflowId}/${each.version}`}>
+              <TableCell lead>
+                <RouterLink
+                  params={{ workflow: each.workflowId }}
+                  to="/workflows/$workflow"
+                >
+                  {each.name}
+                </RouterLink>
+              </TableCell>
+              <TableCell>{each.version}</TableCell>
+              <TableCell>
+                {each.requestedBy === names.me
+                  ? t`You`
+                  : (names.people.get(each.requestedBy) ?? t`Someone else`)}
+              </TableCell>
+              <TableCell>{formatDateTime(each.requestedAt)}</TableCell>
             </TableRow>
-          </TableHeader>
-          <TableBody>
-            {waiting.map((each) => (
-              <TableRow key={`${each.workflowId}/${each.version}`}>
-                <TableCell variant="roomy">
-                  <Link
-                    className="font-medium hover:underline"
-                    params={{ workflow: each.workflowId }}
-                    to="/workflows/$workflow"
-                  >
-                    {each.name}
-                  </Link>
-                </TableCell>
-                <TableCell variant="roomy">{each.version}</TableCell>
-                <TableCell variant="roomy">
-                  {each.requestedBy === names.me
-                    ? t`You`
-                    : (names.people.get(each.requestedBy) ?? t`Someone else`)}
-                </TableCell>
-                <TableCell variant="roomy">
-                  {formatDateTime(each.requestedAt)}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    </section>
+          ))}
+        </TableBody>
+      </Table>
+    </SectionCard>
   );
 };

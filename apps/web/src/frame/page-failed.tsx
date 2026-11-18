@@ -191,7 +191,7 @@ export const PageFailed = ({
     async () => {
       await onRetry();
     },
-    { working: t`Trying again…`, done: t`Loaded`, failed: t`Could not load` }
+    { working: t`Trying again…`, done: t`Loaded`, failed: t`Not loaded` }
   );
   const facts: Record<CoreReach, string> = {
     checking: t`Checking whether Grasp can be reached`,
@@ -229,7 +229,7 @@ export const PageFailed = ({
           <CopyField
             aria-label={t`Reference for support`}
             copiedLabel={t`Copied`}
-            failedLabel={t`Could not copy`}
+            failedLabel={t`Not copied`}
             layout={styles.reference}
             size="sm"
             value={reference}

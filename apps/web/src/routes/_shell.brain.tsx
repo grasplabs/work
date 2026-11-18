@@ -1,4 +1,5 @@
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import {
   createFileRoute,
   Outlet,
@@ -26,6 +27,27 @@ import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+
+const styles = stylex.create({
+  // The navigation and the page beside it, filling the page's card.
+  body: {
+    display: "flex",
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minHeight: 0,
+  },
+  // The brain, a part or a note, over which a note's dots are carried in.
+  page: {
+    position: "relative",
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minWidth: 0,
+  },
+});
 
 // The Brain, as the prototype lays it out (`routes/brain.tsx`): its
 // navigation on the left; on the right the brain itself, an atlas to
@@ -172,10 +194,10 @@ const BrainLayout = () => {
   return (
     <>
       <SiteHeader crumbs={crumbs} />
-      <div className="flex min-h-0 flex-1">
+      <div {...stylex.props(styles.body)}>
         <BrainNav atlas={atlas} brain={brain} note={note} region={region} />
         {/* The brain, a part or a note; and over them, the layer that carries the brain's dots into a note's page. */}
-        <div className="relative flex min-w-0 flex-1 flex-col">
+        <div {...stylex.props(styles.page)}>
           <Outlet />
           <NoteReveal />
         </div>

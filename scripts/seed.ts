@@ -49,6 +49,7 @@ import {
 import type { Session } from "./seed/local.ts";
 import { boardCsv, boards } from "./seed/pages.ts";
 import type { Board } from "./seed/pages.ts";
+import { projects } from "./seed/projects.ts";
 import { seedRuns } from "./seed/runs.ts";
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -144,6 +145,16 @@ const seedPeople = async (): Promise<{
       throw new Error(
         "The core answering at localhost doesn't keep its state in this checkout: run the seed from the checkout `vp run dev` runs from."
       );
+    }
+    // Someone of the seed's removed while the app was tried (Members ›
+    // Remove) can't sign in again, and the product keeps no way back: the
+    // seed brings its own people back, in this checkout's state only.
+    // Their teams are set again below.
+    const comeBack = core.prepare(
+      "DELETE FROM member_removals WHERE user_id IN (SELECT id FROM users WHERE email = ?)"
+    );
+    for (const { email } of people) {
+      comeBack.run(email);
     }
     await mapLimited(people, signInsAtOnce, async ({ email }) => {
       await signInAs(email);
@@ -629,6 +640,60 @@ const seedPermissions = async (
   }
 };
 
+/**
+ * What waits for the admin, so the inbox and the sidebar's Inbox view show
+ * with something in them: two Apps asking to read a Knowledge collection,
+ * asked by their owners through the same call as any request, and left
+ * for an admin to decide. An App that has a permission of that name
+ * already, asked, granted or turned down, is left as it is.
+ */
+const seedWaitingForAdmin = async (
+  sessions: ReadonlyMap<PersonKey, Session>,
+  appIds: ReadonlyMap<string, string>,
+  collectionIds: ReadonlyMap<string, string>
+): Promise<number> => {
+  const adminSession = sessionFor(sessions, admin.key);
+  const asks = [
+    {
+      app: "Record-to-Report",
+      by: "eva",
+      collection: "Finance",
+      binding: "FINANCE_POLICIES",
+    },
+    {
+      app: "Risk-to-Compliance",
+      by: "pieter",
+      collection: "Compliance",
+      binding: "COMPLIANCE_RULES",
+    },
+  ] as const;
+  let asked = 0;
+  for (const { app, by, collection, binding } of asks) {
+    const appId = appIds.get(app);
+    const collectionId = collectionIds.get(collection);
+    if (appId === undefined || collectionId === undefined) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one App at a time
+    const held = await adminSession.api.permissions.list({
+      type: "app",
+      appId,
+    });
+    if (held.some(({ binding: name }) => name === binding)) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one request at a time
+    await sessionFor(sessions, by).api.permissions.request({
+      subject: { type: "app", appId },
+      object: { type: "collection", collectionId },
+      actions: ["read"],
+      binding,
+    });
+    asked += 1;
+  }
+  return asked;
+};
+
 /** The company's first agent, Stephen: core makes him for every organization. */
 const firstAgentId = "organization";
 
@@ -772,6 +837,71 @@ const seedChats = async (
   return created;
 };
 
+/**
+ * The demo projects (scripts/seed/projects.ts), made by an admin, with
+ * their Apps and people; a project already there is left as it is.
+ * Returns how many it made.
+ */
+const seedProjects = async (
+  sessions: ReadonlyMap<PersonKey, Session>,
+  teams: ReadonlyMap<TeamName, string>,
+  appIds: ReadonlyMap<string, string>
+): Promise<number> => {
+  const adminSession = sessionFor(sessions, admin.key);
+  const listed = await adminSession.api.projects.list();
+  const existing = new Set(listed.map(({ name }) => name));
+  const missing = projects.filter(({ name }) => !existing.has(name));
+  for (const seed of missing) {
+    // oxlint-disable-next-line no-await-in-loop -- one project at a time
+    const { id } = await adminSession.api.projects.create({
+      name: seed.name,
+      description: seed.description,
+      icon: seed.icon,
+    });
+    const members = [
+      ...seed.people.map(({ person, role }) => ({
+        type: "person" as const,
+        id: sessionFor(sessions, person).userId,
+        role,
+      })),
+      ...seed.teams.map(({ team, role }) => {
+        const teamId = teams.get(team);
+        if (teamId === undefined) {
+          throw new Error(`No team ${team}`);
+        }
+        return { type: "team" as const, id: teamId, role };
+      }),
+    ];
+    for (const member of members) {
+      // oxlint-disable-next-line no-await-in-loop -- one member at a time
+      await adminSession.api.projects.addMember(id, member);
+    }
+    for (const { app, share } of seed.apps) {
+      const appId = appIds.get(app);
+      if (appId === undefined) {
+        throw new Error(`No App ${app}`);
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one item at a time
+      await adminSession.api.projects.file(id, {
+        item: { type: "app", id: appId },
+        share,
+      });
+    }
+    for (const { by, title } of seed.chats) {
+      const session = sessionFor(sessions, by);
+      // oxlint-disable-next-line no-await-in-loop -- one chat at a time
+      const theirs = await session.api.chats.list();
+      const chat = theirs.find((each) => each.title === title);
+      if (chat === undefined) {
+        throw new Error(`${by} has no chat ${title}`);
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one chat at a time
+      await session.api.chats.setProject(chat.id, id);
+    }
+  }
+  return missing.length;
+};
+
 const main = async (): Promise<void> => {
   console.info("Signing the demo company in…");
   const { sessions, teams } = await seedPeople();
@@ -814,6 +944,12 @@ const main = async (): Promise<void> => {
       console.info(`App ${seed.name}: ${ran}`);
     }
     await seedPermissions(sessions, appIds, collectionIds);
+    const waiting = await seedWaitingForAdmin(sessions, appIds, collectionIds);
+    console.info(
+      waiting === 0
+        ? "The admin's inbox has its requests already"
+        : `${waiting} requests wait for the admin`
+    );
     const read = await seedAgentKnowledge(
       sessionFor(sessions, admin.key),
       collectionIds
@@ -826,6 +962,10 @@ const main = async (): Promise<void> => {
 
     const created = await seedChats(sessions);
     console.info(`${created} new chats`);
+
+    // After the chats: a project files some of its people's own.
+    const made = await seedProjects(sessions, teams, appIds);
+    console.info(`${made} new projects`);
     console.info(
       `Done. Sign in at http://localhost:5173 as ${admin.email} (${admin.name}), or as any of its members (people in scripts/seed/company.ts).`
     );

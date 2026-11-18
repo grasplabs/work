@@ -1,5 +1,7 @@
-// The Theme switch's words: every visible word is a prop, with these English defaults, so a
-// product can translate all of it.
+// The Theme switch's words, in English. The product gives them in its languages through GraspWords
+// (src/words), as the catalogue's `themeSwitch`; a caller's `label`, `themesLabel`, `modeWords` and
+// `iconLabel` still win until the breaking release's step 5. A theme's own name and line come from
+// its definition (src/theme), as a name, not from here.
 import { themes } from "../theme";
 import type { ThemeId, ThemeMode } from "../theme";
 
@@ -33,3 +35,29 @@ export const defaultIconLabel = (
   current: string,
   next: string
 ) => `${label}, ${current}. Switch to ${next}`;
+
+/** The switch's words in the catalogue: its names, the three modes', and the icon button's. */
+export const themeSwitchWords = {
+  /** Its name. */
+  label: "Theme",
+  /** The name of the group of themes, under the modes. */
+  themes: "Colours",
+  ...defaultModeWords,
+  icon: defaultIconLabel,
+};
+
+export type ThemeSwitchCatalogueWords = typeof themeSwitchWords;
+
+declare module "../words/words" {
+  interface GraspWordsCatalog {
+    themeSwitch: ThemeSwitchCatalogueWords;
+  }
+}
+
+/** What it tells an agent that asked for a mode or a theme it does not have: the agent reads English, so these are kept here and not in the catalogue. */
+export const themeSwitchNotices = {
+  noMode: (mode: string, modes: string[]) =>
+    `No mode "${mode}" in Theme. Its modes: ${modes.join(", ")}.`,
+  noTheme: (theme: string, known: string[]) =>
+    `No theme "${theme}" in Theme. Its themes: ${known.join(", ")}.`,
+};

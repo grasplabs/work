@@ -1,93 +1,69 @@
 import type { ProjectSummary } from "@grasp-os/shared/projects";
 import { canBuild } from "@grasp-os/shared/roles";
-import { Button } from "@grasp-os/ui/components/button";
-import { Card, CardContent, CardHeader } from "@grasp-os/ui/components/card";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@grasp-os/ui/components/empty";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { FolderIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 
 import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { Button } from "../grasp/button/index.ts";
+import {
+  Empty,
+  EmptyContent,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../grasp/empty/index.ts";
+import { Plus, Projects as ProjectsIcon } from "../grasp/icons/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemDetail,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
-import { ProjectCountsLine } from "../projects/project-counts.tsx";
+import { projectCountsWords } from "../projects/project-counts.tsx";
 import { ProjectDialog } from "../projects/project-dialog.tsx";
-import { ProjectIcon } from "../projects/project-icon.tsx";
+import { projectIconShapes } from "../projects/project-icon.tsx";
 
-// Projects (GRA-1458), as the prototype's domains (`routes/domains/
-// index.tsx`): the projects the person is in, each a card with its icon,
-// name and what it is for, its hours a week and what it holds that the
-// person may open. Who builds makes one with New project, as an App: its
-// builders decide whom what is shared with it reaches.
+// Projects (GRA-1458): the projects the person is in, one row each, its
+// icon, name and goal, and what it holds that the person may open; the
+// whole row is its link. Who builds makes one with New project. A project
+// is a folder towards a goal: its Apps and workflows, each person's own
+// chats in it, the connections its items use, and the people in it.
 
-/** One project's card; the whole card is its link. */
-const ProjectCard = ({ project }: { project: ProjectSummary }) => (
-  <li className="relative">
-    <Card className="h-full" size="sm">
-      <CardHeader>
-        <div className="flex items-start gap-3">
-          <ProjectIcon icon={project.icon} />
-          <div className="flex min-w-0 flex-col gap-0.5">
-            <Link
-              className="font-medium outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:underline"
-              params={{ projectId: project.id }}
-              to="/projects/$projectId"
-            >
-              {project.name}
-            </Link>
-            {project.description === "" ? null : (
-              <p className="text-muted-foreground line-clamp-2">
-                {project.description}
-              </p>
-            )}
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <ProjectCountsLine counts={project.counts} />
-      </CardContent>
-    </Card>
-  </li>
-);
-
-/** No project yet: making one is a click away. */
-const NoProjects = ({ onMake }: { onMake?: () => void }) => (
-  <Card size="sm">
-    <Empty>
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <FolderIcon />
-        </EmptyMedia>
-        <EmptyTitle>
-          <Trans>No projects yet</Trans>
-        </EmptyTitle>
-        <EmptyDescription>
-          <Trans>
-            Group the apps and workflows of a process, a team or a goal in a
-            project. You see the projects you are in.
-          </Trans>
-        </EmptyDescription>
-      </EmptyHeader>
-      {onMake === undefined ? null : (
-        <EmptyContent>
-          <Button onClick={onMake} size="sm">
-            <PlusIcon data-icon="inline-start" />
-            <Trans>New project</Trans>
-          </Button>
-        </EmptyContent>
-      )}
-    </Empty>
-  </Card>
-);
+/** One project's row: its icon, name, goal, and what it holds. */
+const ProjectRow = ({ project }: { project: ProjectSummary }) => {
+  const counts = projectCountsWords(project.counts);
+  const hasGoal = project.description !== "";
+  return (
+    <Item
+      render={
+        <Link params={{ projectId: project.id }} to="/projects/$projectId" />
+      }
+      size="sm"
+    >
+      <ItemMedia icon={projectIconShapes[project.icon]} />
+      <ItemContent>
+        <ItemTitle>
+          {project.name}
+          {hasGoal && counts !== undefined ? (
+            <ItemDetail>{counts}</ItemDetail>
+          ) : null}
+        </ItemTitle>
+        {hasGoal || counts !== undefined ? (
+          <ItemDescription>
+            {hasGoal ? project.description : counts}
+          </ItemDescription>
+        ) : null}
+      </ItemContent>
+    </Item>
+  );
+};
 
 const Projects = () => {
   const { t } = useLingui();
@@ -98,43 +74,40 @@ const Projects = () => {
   if (page.state !== "ready") {
     return <PageNotLoaded crumbs={[{ label: t`Projects` }]} page={page} />;
   }
-  const make = canBuild(identity.role)
-    ? () => {
+  const builds = canBuild(identity.role);
+  const make = (
+    <Button
+      icon={Plus}
+      onClick={() => {
         setMaking(true);
-      }
-    : undefined;
+      }}
+    >
+      {t`New project`}
+    </Button>
+  );
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Projects` }]} />
       <Page>
         <PageHeading
-          action={
-            make === undefined ? undefined : (
-              <Button onClick={make}>
-                <PlusIcon data-icon="inline-start" />
-                <Trans>New project</Trans>
-              </Button>
-            )
-          }
-          description={
-            <Trans>
-              Apps and workflows grouped by process, team or goal. Putting
-              something in a project shares it with nobody.
-            </Trans>
-          }
+          action={builds && page.data.length > 0 ? make : undefined}
           title={<Trans>Projects</Trans>}
         />
         {page.data.length === 0 ? (
-          <NoProjects onMake={make} />
+          <Empty>
+            <EmptyHeader>
+              <EmptyMedia icon={ProjectsIcon} />
+              {/* What a project is, New project's dialog says as one is made. */}
+              <EmptyTitle>{t`No projects yet`}</EmptyTitle>
+            </EmptyHeader>
+            {builds ? <EmptyContent>{make}</EmptyContent> : null}
+          </Empty>
         ) : (
-          <ul
-            aria-label={t`Projects`}
-            className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
-          >
+          <ItemGroup aria-label={t`Projects`} separated>
             {page.data.map((project) => (
-              <ProjectCard key={project.id} project={project} />
+              <ProjectRow key={project.id} project={project} />
             ))}
-          </ul>
+          </ItemGroup>
         )}
       </Page>
       <ProjectDialog

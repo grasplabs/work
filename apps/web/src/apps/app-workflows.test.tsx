@@ -188,15 +188,23 @@ const press = async (element: Element | undefined) => {
   await settled();
 };
 
+/** The words a button shows now: its words at rest, or what it says while working, done or failed. */
+const shownWords = (each: Element): string =>
+  (each.querySelector("[data-shown]") ?? each).textContent?.trim() ?? "";
+
 const button = (name: string) =>
   [...document.querySelectorAll("button")].findLast(
-    (each) => each.textContent?.trim() === name
+    (each) => shownWords(each) === name
   );
+
+/** A label's words, without the mark a required field shows after them. */
+const words = (label: Element): string =>
+  label.textContent?.trim().replace(/\*$/u, "") ?? "";
 
 /** The field labelled `label`: its control. */
 const field = (label: string) => {
   const named = [...document.querySelectorAll("label")].find(
-    (each) => each.textContent?.trim() === label
+    (each) => words(each) === label
   );
   return [...document.querySelectorAll("input, button")].find(
     (each) => each.id !== "" && each.id === named?.htmlFor
@@ -229,10 +237,10 @@ const type = async (label: string, text: string): Promise<void> => {
   });
 };
 
-/** Each binding listed: its alias, workflow and version. */
+/** Each binding listed: its alias (its row's head), workflow and version. */
 const listed = (): string[][] =>
   [...document.querySelectorAll("tbody tr")].map((row) =>
-    [...row.querySelectorAll("td")]
+    [...row.querySelectorAll("th, td")]
       .slice(0, 3)
       .map((cell) => cell.textContent?.trim() ?? "")
   );

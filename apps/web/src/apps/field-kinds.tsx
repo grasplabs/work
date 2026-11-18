@@ -1,22 +1,23 @@
 import type { FieldKind, FieldType } from "@grasp-os/shared/data-model";
-import type { FieldTypeOption } from "@grasp-os/ui/components/data-model";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
+
 import {
-  AtSignIcon,
-  BracesIcon,
+  Attach,
   CalendarIcon,
-  CircleDotIcon,
-  DollarSignIcon,
-  HashIcon,
-  LinkIcon,
-  PaperclipIcon,
-  ToggleLeftIcon,
-  TypeIcon,
-  UserIcon,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+  Code,
+  Icon,
+  KindCheckbox,
+  KindCurrency,
+  KindNumber,
+  KindSelect,
+  KindText,
+  Link,
+  Mail,
+  Person,
+} from "../grasp/icons/index.ts";
+import type { IconData } from "../grasp/icons/index.ts";
 
 // The kinds of field a person picks in an App's Data view, as a no-code
 // tool names them: each with its icon and what it holds. `other` is a type
@@ -36,19 +37,31 @@ export const pickedKinds = [
   "money",
 ] as const satisfies readonly FieldKind[];
 
-const kindIcons: Record<FieldKind, LucideIcon> = {
-  text: TypeIcon,
-  email: AtSignIcon,
-  number: HashIcon,
-  boolean: ToggleLeftIcon,
+/** A kind as the picker offers it: its value, its words and its icon. */
+export interface KindOption {
+  value: FieldKind;
+  label: string;
+  /** What a field of the kind holds, in a few words. */
+  description: string;
+  icon: IconData;
+}
+
+const kindIcons: Record<FieldKind, IconData> = {
+  text: KindText,
+  email: Mail,
+  number: KindNumber,
+  boolean: KindCheckbox,
   date: CalendarIcon,
-  choice: CircleDotIcon,
-  link: LinkIcon,
-  person: UserIcon,
-  file: PaperclipIcon,
-  money: DollarSignIcon,
-  other: BracesIcon,
+  choice: KindSelect,
+  link: Link,
+  person: Person,
+  file: Attach,
+  money: KindCurrency,
+  other: Code,
 };
+
+/** A kind's icon, as a part takes it (`icon={…}`). */
+export const kindIcon = (kind: FieldKind): IconData => kindIcons[kind];
 
 const kindLabels: Record<FieldKind, MessageDescriptor> = {
   text: msg({ message: "Text", context: "a kind of field" }),
@@ -79,21 +92,21 @@ const kindDescriptions: Record<FieldKind, MessageDescriptor> = {
 };
 
 /** A kind's icon. */
-export const KindIcon = ({ kind }: { kind: FieldKind }) => {
-  const Icon = kindIcons[kind];
-  return <Icon />;
-};
+export const KindIcon = ({ kind }: { kind: FieldKind }) => (
+  <Icon icon={kindIcons[kind]} />
+);
 
 /** The words for each kind, and the picker's options, in the page's language. */
 export const useFieldKinds = () => {
   const { i18n } = useLingui();
   const label = (kind: FieldKind): string => i18n._(kindLabels[kind]);
-  const options: FieldTypeOption[] = pickedKinds.map((kind) => ({
+  const option = (kind: FieldKind): KindOption => ({
     value: kind,
     label: label(kind),
     description: i18n._(kindDescriptions[kind]),
-    icon: <KindIcon kind={kind} />,
-  }));
+    icon: kindIcons[kind],
+  });
+  const options: KindOption[] = pickedKinds.map(option);
   /** What a field of `type` is, in a few words: its kind, a choice's options, a link's table. */
   const describe = (type: FieldType): string => {
     if (type.kind === "link") {
@@ -102,5 +115,5 @@ export const useFieldKinds = () => {
     }
     return label(type.kind);
   };
-  return { label, options, describe };
+  return { label, option, options, describe };
 };

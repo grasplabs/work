@@ -1,12 +1,15 @@
 import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
 import type { Permission } from "@grasp-os/shared/permissions";
-import { Button } from "@grasp-os/ui/components/button";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { KeyboardEvent } from "react";
 
 import type { PendingRequests } from "../activity/pending.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { ChevronLeft, ChevronRight } from "../grasp/icons/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { OutcomeCard } from "./outcome-card.tsx";
 import type { Pile } from "./pile-card.tsx";
 import { HeldCard, RequestCard } from "./pile-cards.tsx";
@@ -25,6 +28,124 @@ import type { Turned } from "./pile.ts";
 // When the last card is dealt with it goes as dots, and the pile is gone;
 // a pile nothing is on isn't shown at all. Nothing moves for whoever asks
 // for less motion: the next card is simply there, and the pile simply goes.
+
+/** The next card comes up out of the pile. */
+const pileUp = stylex.keyframes({
+  from: {
+    opacity: 0,
+    transform: "translateY(10px) scale(0.97)",
+  },
+});
+
+/** The first time in a session, a ring goes twice around the card on top and is gone. */
+const pilePoint = stylex.keyframes({
+  "0%": { opacity: 0, transform: "scale(1)" },
+  "15%": { opacity: 0.9, transform: "scale(1)" },
+  "50%": { opacity: 0, transform: "scale(1.012)" },
+  "65%": { opacity: 0.9, transform: "scale(1)" },
+  "100%": { opacity: 0, transform: "scale(1.012)" },
+});
+
+const styles = stylex.create({
+  frame: {
+    // The card on top reads the pile's own width (pile-card.tsx).
+    containerType: "inline-size",
+    minWidth: 0,
+  },
+  // Room under the card for the edges of the cards under it.
+  stack: {
+    position: "relative",
+    paddingBlockEnd: grasp.space4,
+  },
+  // An edge of a card under the top one, as the card itself is drawn (grasp/card).
+  under: {
+    position: "absolute",
+    height: grasp.space10,
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    backgroundColor: grasp.raised,
+    boxShadow: grasp.liftMedium,
+  },
+  underNext: {
+    insetInline: grasp.space4,
+    insetBlockEnd: grasp.space2,
+  },
+  underAfter: {
+    insetInline: grasp.space8,
+    insetBlockEnd: 0,
+  },
+  top: {
+    position: "relative",
+  },
+  // Still for whoever asks for less motion: the next card is simply there.
+  up: {
+    animationName: { default: pileUp, [media.reduced]: "none" },
+    animationDuration: grasp.durationUi,
+    animationTimingFunction: grasp.ease,
+  },
+  // A ring in the colour of what needs someone, twice around the card and gone. Seen once a
+  // session, so it may take its two seconds; not at all for whoever asks for less motion.
+  point: {
+    position: "absolute",
+    insetInline: 0,
+    insetBlockStart: 0,
+    insetBlockEnd: grasp.space4,
+    zIndex: 10,
+    display: { default: "block", [media.reduced]: "none" },
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    outlineWidth: grasp.ringWidth,
+    outlineStyle: "solid",
+    outlineColor: grasp.attention,
+    pointerEvents: "none",
+    animationName: pilePoint,
+    animationDuration: "2s",
+    animationDelay: "0.5s",
+    animationTimingFunction: "ease-out",
+    animationFillMode: "both",
+  },
+  // Where in the pile the card on top is, between its arrows, in the card's top corner.
+  arrows: {
+    position: "absolute",
+    insetBlockStart: grasp.space3,
+    insetInlineStart: grasp.space3,
+    zIndex: 10,
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space1,
+  },
+  place: {
+    minWidth: `calc(${grasp.space12} + ${grasp.space2})`,
+    textAlign: "center",
+    fontVariantNumeric: "tabular-nums",
+  },
+  skip: {
+    position: "absolute",
+    insetBlockStart: grasp.space3,
+    insetInlineEnd: grasp.space3,
+    zIndex: 10,
+  },
+  // The room the pile had, which closes once its last card has gone as dots.
+  room: {
+    display: "grid",
+    gridTemplateRows: "1fr",
+    transitionProperty: "grid-template-rows, opacity, margin-bottom",
+    transitionDuration: grasp.durationOpen,
+    transitionTimingFunction: grasp.ease,
+  },
+  closed: {
+    gridTemplateRows: "0fr",
+    opacity: 0,
+    marginBlockEnd: `calc(-1 * ${grasp.space6})`,
+  },
+  roomInside: {
+    minHeight: 0,
+  },
+  // As high as the last card stood, there to be seen through, not read.
+  hidden: {
+    visibility: "hidden",
+  },
+});
 
 /** A card of the pile: what it settles. Its id is the same from one read to the next. */
 export type PileItem =
@@ -183,35 +304,35 @@ const PileCorner = ({
   const { t } = useLingui();
   return (
     <>
-      <div className="absolute top-3 left-3 z-10 flex items-center gap-0.5">
+      <div {...stylex.props(styles.arrows)}>
         <Button
           aria-label={t`The one before`}
           disabled={held}
+          icon={ChevronLeft}
           onClick={onBack}
-          size="icon-sm"
+          size="sm"
           variant="ghost"
-        >
-          <ChevronLeftIcon />
-        </Button>
-        <span className="text-muted-foreground min-w-14 text-center text-sm tabular-nums">
-          <Trans>
-            {place} of {count}
-          </Trans>
+        />
+        <span {...stylex.props(styles.place)}>
+          <Text element="span" size="sm" tone="muted">
+            <Trans>
+              {place} of {count}
+            </Trans>
+          </Text>
         </span>
         <Button
           aria-label={t`The next one`}
           disabled={held}
+          icon={ChevronRight}
           onClick={onward}
-          size="icon-sm"
+          size="sm"
           variant="ghost"
-        >
-          <ChevronRightIcon />
-        </Button>
+        />
       </div>
       {/* Skipping is no answer: it stands apart from the yes and the no, in the other corner. */}
       <Button
-        className="absolute top-3 right-3 z-10"
         disabled={held}
+        layout={styles.skip}
         onClick={onSkip}
         size="sm"
         variant="ghost"
@@ -321,17 +442,15 @@ export const TodoPile = ({
     return (
       <div
         aria-hidden="true"
-        className={
-          ending === "closing" ? "pile-room pile-room-closed" : "pile-room"
-        }
         onTransitionEnd={() => {
           setEnding("gone");
         }}
+        {...stylex.props(styles.room, ending === "closing" && styles.closed)}
       >
-        <div className="min-h-0">
-          <div className="relative pb-4">
+        <div {...stylex.props(styles.roomInside)}>
+          <div {...stylex.props(styles.stack)}>
             {/* As high as the last card stood, so nothing under the pile moves until its dots are gone. */}
-            <div className="invisible" inert>
+            <div inert {...stylex.props(styles.hidden)}>
               <TopCard item={last} pile={still} />
             </div>
             {ending === "dots" ? (
@@ -403,37 +522,32 @@ export const TodoPile = ({
         message: "To do",
         context: "dashboard: what waits on you",
       })}
-      className="@container min-w-0"
       onKeyDown={onKeys}
       ref={frame}
+      {...stylex.props(styles.frame)}
     >
-      <div className="relative pb-4">
+      <div {...stylex.props(styles.stack)}>
         {/* The cards under it: an edge of each of the next two, as far as there are. */}
         {count > 2 ? (
           <span
             aria-hidden="true"
-            className="bg-card absolute inset-x-8 bottom-0 h-10 rounded-xl border"
+            {...stylex.props(styles.under, styles.underAfter)}
           />
         ) : null}
         {more ? (
           <span
             aria-hidden="true"
-            className="bg-card absolute inset-x-4 bottom-2 h-10 rounded-xl border"
+            {...stylex.props(styles.under, styles.underNext)}
           />
         ) : null}
-        <div
-          className={
-            moved ? "motion-safe:animate-pile-up relative" : "relative"
-          }
-          key={top.id}
-        >
+        <div key={top.id} {...stylex.props(styles.top, moved && styles.up)}>
           <TopCard item={top} pile={pile} />
         </div>
         {/* A ring in the colour of what needs someone, twice around the card and gone: seen once, in the way of nothing. */}
         {pointing ? (
           <span
             aria-hidden="true"
-            className="ring-status-attention motion-safe:animate-pile-point pointer-events-none absolute inset-x-0 top-0 bottom-4 z-10 hidden rounded-xl ring-2 motion-safe:block"
+            {...stylex.props(styles.point)}
             onAnimationEnd={() => {
               setPointing(false);
             }}

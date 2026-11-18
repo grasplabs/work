@@ -41,6 +41,13 @@ export interface TextareaProps extends Omit<
    */
   rows?: number;
   /**
+   * Words a machine reads, in the system's mono face: a JSON body, a cron line, a prompt's code.
+   * A step smaller, on the same lines, so the field keeps its height; 16px on a touch screen as
+   * every field is. No colours: it is a field, not a code view.
+   * @default false
+   */
+  mono?: boolean;
+  /**
    * Grows and shrinks with its text, up to textarea-height; past that, the text scrolls inside.
    * Turn it off for a fixed height the person can drag taller.
    * @default true
@@ -135,6 +142,11 @@ const styles = stylex.create({
       color: grasp.muted,
       opacity: 1,
     },
+  },
+  // Words a machine reads: the mono face a step smaller, on the same lines.
+  mono: {
+    fontFamily: grasp.fontMono,
+    fontSize: { default: grasp.textXs, [media.typing]: grasp.fieldTextTouch },
   },
   // The least height: `rows` lines and the padding round them (static, one per count, so the
   // server and the browser write the same class), and never under a finger's 44px on a touch screen.
@@ -236,6 +248,7 @@ const isInvalid = (value: unknown) => value === true || value === "true";
 export const Textarea = ({
   rows = 3,
   autoResize = true,
+  mono = false,
   style: styleProp,
   layout,
   ref,
@@ -289,6 +302,7 @@ export const Textarea = ({
           {...props}
           {...stylex.props(
             styles.area,
+            mono && styles.mono,
             rowStyles[Math.min(Math.max(Math.round(rows), 1), 6) - 1],
             autoResize ? styles.grows : styles.drags,
             !(state.disabled || state.readOnly) && styles.live,

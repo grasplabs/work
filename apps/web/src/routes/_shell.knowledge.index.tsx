@@ -5,18 +5,37 @@ import type {
   SearchHit,
 } from "@grasp-os/shared/knowledge";
 import { pageMaxLimit } from "@grasp-os/shared/knowledge";
+import { plural } from "@lingui/core/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { createFileRoute, Link } from "@tanstack/react-router";
+
+import { PageHeading, SectionTitle } from "../frame/page.tsx";
+import { RouterLink } from "../frame/router-link.tsx";
+import {
+  Card,
+  CardDescription,
+  CardLink,
+  CardMedia,
+  CardTitle,
+} from "../grasp/card/index.ts";
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/ui/components/empty";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { FileTextIcon, LibraryIcon, SearchXIcon } from "lucide-react";
-
-import { PageHeading } from "../frame/page.tsx";
+} from "../grasp/empty/index.ts";
+import { File, Folder, Search } from "../grasp/icons/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import {
   CollectionDrawing,
   MemoryDrawing,
@@ -35,6 +54,81 @@ import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 // per collection the person may read, three to a row. Core lists only
 // those, and searches only those; the page shows what it gets.
 
+const styles = stylex.create({
+  scroll: { flex: 1, minWidth: 0, overflowY: "auto" },
+  column: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space10,
+    boxSizing: "border-box",
+    width: "100%",
+    maxWidth: grasp.pageMeasure,
+    marginInline: "auto",
+    paddingBlock: grasp.space8,
+    paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
+  },
+  section: { display: "flex", flexDirection: "column", gap: grasp.space3 },
+  sectionHead: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: grasp.space3,
+  },
+  list: {
+    display: "flex",
+    flexDirection: "column",
+    margin: 0,
+    padding: 0,
+    listStyleType: "none",
+  },
+  hit: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space1,
+    paddingBlock: grasp.space2,
+  },
+  memory: {
+    display: "flex",
+    flexDirection: { default: "column", [media.fromPhone]: "row" },
+    alignItems: { default: "stretch", [media.fromPhone]: "flex-start" },
+    gap: { default: grasp.space3, [media.fromPhone]: grasp.space6 },
+  },
+  memoryPanel: {
+    flexShrink: 0,
+    width: { default: "auto", [media.fromPhone]: `calc(${grasp.space24} * 3)` },
+  },
+  memoryWords: {
+    display: "flex",
+    flexDirection: "column",
+    flex: 1,
+    gap: grasp.space2,
+    minWidth: 0,
+  },
+  files: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space1,
+    margin: 0,
+    padding: 0,
+    listStyleType: "none",
+  },
+  latest: { display: "flex", flexDirection: "column", gap: grasp.space2 },
+  blocks: {
+    display: "grid",
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      [media.fromPhone]: "repeat(2, minmax(0, 1fr))",
+      [media.fromRail]: "repeat(3, minmax(0, 1fr))",
+    },
+    columnGap: grasp.space6,
+    rowGap: grasp.space8,
+    margin: 0,
+    padding: 0,
+    listStyleType: "none",
+  },
+  block: { display: "flex", flexDirection: "column", gap: grasp.space3 },
+});
+
 const SearchResults = ({
   hits,
   collections,
@@ -46,9 +140,7 @@ const SearchResults = ({
     return (
       <Empty>
         <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <SearchXIcon />
-          </EmptyMedia>
+          <EmptyMedia icon={Search} />
           <EmptyTitle>
             <Trans>Nothing matched.</Trans>
           </EmptyTitle>
@@ -63,28 +155,28 @@ const SearchResults = ({
     );
   }
   return (
-    <ol className="-mx-2 flex flex-col">
+    <ol {...stylex.props(styles.list)}>
       {hits.map((hit) => (
         <li
-          className="hover:bg-muted flex flex-col gap-1 rounded-lg px-2 py-2.5"
           key={`${hit.documentId}:${hit.section}`}
+          {...stylex.props(styles.hit)}
         >
-          <Link
-            className="text-sm font-medium hover:underline"
+          <RouterLink
             params={{ collection: hit.collectionId }}
             search={{ doc: hit.documentId }}
             to="/knowledge/$collection"
+            variant="standalone"
           >
             {hit.title}
-          </Link>
-          <span className="text-muted-foreground text-xs">
+          </RouterLink>
+          <Text size="xs" tone="muted">
             {[collections.get(hit.collectionId) ?? hit.path, ...hit.headings]
               .filter((part) => part !== "")
               .join(" › ")}
-          </span>
-          <p className="text-muted-foreground text-sm leading-relaxed">
+          </Text>
+          <Text size="sm" tone="muted">
             {hit.snippet}
-          </p>
+          </Text>
         </li>
       ))}
     </ol>
@@ -95,45 +187,70 @@ const SearchResults = ({
 const MemoryBlock = ({ memory }: { memory: MemoryFiles }) => {
   const { t } = useLingui();
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-6">
-      <div className="sm:w-72 sm:flex-none">
-        <Panel short>
-          <MemoryDrawing />
-        </Panel>
-      </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-2 text-sm">
-        <p className="text-muted-foreground leading-relaxed">
-          <Trans>What every agent has in its context, all the time.</Trans>
-        </p>
-        {memory.files.length === 0 ? (
-          <p className="text-muted-foreground">
-            <Trans>No memory files are written yet.</Trans>
-          </p>
+    <div {...stylex.props(styles.memory)}>
+      <div {...stylex.props(styles.memoryPanel)}>
+        {memory.memory === null ? (
+          <Card>
+            <CardMedia>
+              <Panel short>
+                <MemoryDrawing />
+              </Panel>
+            </CardMedia>
+          </Card>
         ) : (
-          <ul className="flex flex-col gap-1">
+          <CardLink
+            aria-label={t`Memory`}
+            render={
+              <Link
+                params={{ collection: memory.memory }}
+                search={{}}
+                to="/knowledge/$collection"
+              />
+            }
+          >
+            <CardMedia>
+              <Panel short>
+                <MemoryDrawing />
+              </Panel>
+            </CardMedia>
+          </CardLink>
+        )}
+      </div>
+      <div {...stylex.props(styles.memoryWords)}>
+        <Text size="sm" tone="muted">
+          <Trans>What every agent has in its context, all the time.</Trans>
+        </Text>
+        {memory.files.length === 0 ? (
+          <Text size="sm" tone="muted">
+            <Trans>No memory files are written yet.</Trans>
+          </Text>
+        ) : (
+          <ul {...stylex.props(styles.files)}>
             {memory.files.map((file) => (
               <li key={file.id}>
-                <Link
-                  className="font-medium hover:underline"
-                  params={{ collection: file.collectionId }}
-                  search={{ doc: file.id }}
-                  to="/knowledge/$collection"
-                >
-                  {file.path}
-                </Link>{" "}
-                <span className="text-muted-foreground">
-                  {file.collectionId === memory.personal
-                    ? t`(yours)`
-                    : t`(company)`}
-                </span>
+                <Text element="span" size="sm">
+                  <RouterLink
+                    params={{ collection: file.collectionId }}
+                    search={{ doc: file.id }}
+                    to="/knowledge/$collection"
+                    variant="standalone"
+                  >
+                    {file.path}
+                  </RouterLink>{" "}
+                  <Text element="span" size="sm" tone="muted">
+                    {file.collectionId === memory.personal
+                      ? t`(yours)`
+                      : t`(company)`}
+                  </Text>
+                </Text>
               </li>
             ))}
           </ul>
         )}
         {memory.memory === null ? (
-          <p className="text-muted-foreground">
+          <Text size="sm" tone="muted">
             <Trans>An admin hasn&apos;t set up company memory yet.</Trans>
-          </p>
+          </Text>
         ) : null}
       </div>
     </div>
@@ -144,14 +261,15 @@ const MemoryBlock = ({ memory }: { memory: MemoryFiles }) => {
 const latestShown = 3;
 
 /** How many files a collection has, as far as its first page tells. */
-const FileCount = ({ count }: { count: number }) => {
+const useFileCount = (count: number): string => {
+  const { t } = useLingui();
   if (count === 0) {
-    return <Trans>No files yet.</Trans>;
+    return t`No files yet.`;
   }
   if (count === pageMaxLimit) {
-    return <Trans>{count} or more files</Trans>;
+    return t`${count} or more files`;
   }
-  return <Plural one="# file" other="# files" value={count} />;
+  return plural(count, { one: "# file", other: "# files" });
 };
 
 /**
@@ -159,45 +277,38 @@ const FileCount = ({ count }: { count: number }) => {
  * has. Read from its first page: past that (a collection of more than a
  * page) they are the latest of that page, and the count says "or more".
  */
-const LatestDocuments = ({
-  documents,
-}: {
-  documents: DocumentSummary[] | undefined;
-}) => {
-  if (documents === undefined) {
-    return null;
-  }
+const LatestDocuments = ({ documents }: { documents: DocumentSummary[] }) => {
   const latest = documents
     .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .slice(0, latestShown);
-  const count = documents.length;
+  const count = useFileCount(documents.length);
   return (
-    <div className="flex flex-col gap-1.5">
+    <div {...stylex.props(styles.latest)}>
       {latest.length === 0 ? null : (
-        <ul className="-mx-2 flex flex-col">
+        <ItemGroup>
           {latest.map((document) => (
-            <li key={document.id}>
-              <Link
-                className="hover:bg-muted flex items-center gap-2 rounded-md px-2 py-1 text-sm"
-                params={{ collection: document.collectionId }}
-                search={{ doc: document.id }}
-                to="/knowledge/$collection"
-              >
-                <FileTextIcon
-                  aria-hidden="true"
-                  className="text-muted-foreground size-3.5 flex-none"
+            <Item
+              key={document.id}
+              render={
+                <Link
+                  params={{ collection: document.collectionId }}
+                  search={{ doc: document.id }}
+                  to="/knowledge/$collection"
                 />
-                <span className="min-w-0 flex-1 truncate">
-                  {document.title}
-                </span>
-              </Link>
-            </li>
+              }
+              size="xs"
+            >
+              <ItemMedia icon={File} iconLook="inline" />
+              <ItemContent>
+                <ItemTitle>{document.title}</ItemTitle>
+              </ItemContent>
+            </Item>
           ))}
-        </ul>
+        </ItemGroup>
       )}
-      <p className="text-muted-foreground text-xs">
-        <FileCount count={count} />
-      </p>
+      <Text size="xs" tone="muted">
+        {count}
+      </Text>
     </div>
   );
 };
@@ -215,48 +326,48 @@ const CollectionBlocks = ({
     return (
       <Empty>
         <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <LibraryIcon />
-          </EmptyMedia>
+          <EmptyMedia icon={Folder} />
           <EmptyTitle>
             <Trans>There are no collections you can read yet.</Trans>
           </EmptyTitle>
-          <EmptyDescription>
-            <Trans>
-              Collections hold the documents Grasp and its agents may read. An
-              admin shares them with you, or you add your own.
-            </Trans>
-          </EmptyDescription>
         </EmptyHeader>
       </Empty>
     );
   }
   return (
-    <ul className="grid gap-x-6 gap-y-8 sm:grid-cols-2 xl:grid-cols-3">
-      {collections.map((collection) => (
-        <li className="flex flex-col gap-3" key={collection.id}>
-          <Link
-            className="group flex flex-col gap-3"
-            params={{ collection: collection.id }}
-            search={{}}
-            to="/knowledge/$collection"
-          >
-            <Panel>
-              <CollectionDrawing collection={collection} />
-            </Panel>
-            <span className="text-sm font-medium group-hover:underline">
-              {collection.name}
-            </span>
-          </Link>
-          {collection.description === "" ? null : (
-            <p className="text-muted-foreground -mt-2 text-sm leading-relaxed">
-              {collection.description}
-            </p>
-          )}
-          <CollectionMarkers collection={collection} />
-          <LatestDocuments documents={firstPages.get(collection.id)} />
-        </li>
-      ))}
+    <ul {...stylex.props(styles.blocks)}>
+      {collections.map((collection) => {
+        const documents = firstPages.get(collection.id);
+        return (
+          <li key={collection.id} {...stylex.props(styles.block)}>
+            <CardLink
+              render={
+                <Link
+                  params={{ collection: collection.id }}
+                  search={{}}
+                  to="/knowledge/$collection"
+                />
+              }
+            >
+              <CardMedia>
+                <Panel>
+                  <CollectionDrawing collection={collection} />
+                </Panel>
+              </CardMedia>
+              <CardTitle>{collection.name}</CardTitle>
+              {collection.description === "" ? null : (
+                <CardDescription>{collection.description}</CardDescription>
+              )}
+              {/* Who may read it, at the card's foot: badges say, they do
+                  nothing when pressed, so they may stand in the one link. */}
+              <CollectionMarkers collection={collection} />
+            </CardLink>
+            {documents === undefined ? null : (
+              <LatestDocuments documents={documents} />
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 };
@@ -282,34 +393,27 @@ const Knowledge = () => {
       }
       data={nav}
     >
-      <div className="min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-5xl flex-col gap-10 px-6 py-8 md:px-12">
-          <PageHeading
-            description={
-              <Trans>
-                Everything Grasp and its agents may read, in collections: your
-                own, your teams&apos; and your organization&apos;s. Agents read
-                a document when they need it, and always have the memory files
-                in mind.
-              </Trans>
-            }
-            title={<Trans>Knowledge</Trans>}
-          />
+      <div {...stylex.props(styles.scroll)}>
+        <div {...stylex.props(styles.column)}>
+          <PageHeading title={<Trans>Knowledge</Trans>} />
           {results === undefined ? null : (
-            <section aria-labelledby="results" className="flex flex-col gap-3">
-              <h2 className="text-sm font-medium" id="results">
+            <section
+              aria-labelledby="results"
+              {...stylex.props(styles.section)}
+            >
+              <SectionTitle id="results">
                 <Trans>Results</Trans>
-              </h2>
+              </SectionTitle>
               <NotLoaded page={results} />
               {results.state === "ready" ? (
                 <SearchResults collections={names} hits={results.data.hits} />
               ) : null}
             </section>
           )}
-          <section aria-labelledby="memory" className="flex flex-col gap-3">
-            <h2 className="text-sm font-medium" id="memory">
+          <section aria-labelledby="memory" {...stylex.props(styles.section)}>
+            <SectionTitle id="memory">
               <Trans>Memory</Trans>
-            </h2>
+            </SectionTitle>
             <NotLoaded page={memory} />
             {memory.state === "ready" ? (
               <MemoryBlock memory={memory.data} />
@@ -317,12 +421,12 @@ const Knowledge = () => {
           </section>
           <section
             aria-labelledby="collections"
-            className="flex flex-col gap-3"
+            {...stylex.props(styles.section)}
           >
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-sm font-medium" id="collections">
+            <div {...stylex.props(styles.sectionHead)}>
+              <SectionTitle id="collections">
                 <Trans>Collections</Trans>
-              </h2>
+              </SectionTitle>
               <NewCollection identity={identity} />
             </div>
             <NotLoaded page={collections} />

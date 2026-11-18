@@ -7,23 +7,37 @@ import type {
   VersionSummary,
 } from "@grasp-os/shared/knowledge";
 import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@grasp-os/ui/components/empty";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { FileTextIcon, FolderIcon } from "lucide-react";
 
 import type { Session } from "../core.ts";
 import { formatDate } from "../format.ts";
 import { NotFoundState, NotLoadedState } from "../frame/page-states.tsx";
-import { PageHeading } from "../frame/page.tsx";
+import { PageHeading, SectionTitle } from "../frame/page.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
-import { Doc as DocMark, Folder as FolderMark } from "../grasp/icons/index.ts";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../grasp/empty/index.ts";
+import {
+  Doc as DocMark,
+  File,
+  Folder as FolderMark,
+  Icon,
+} from "../grasp/icons/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemDetail,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { CollectionMarkers } from "../knowledge/collection-markers.tsx";
 import { CopySkill, isSkill } from "../knowledge/copy-skill.tsx";
 import { DocumentView } from "../knowledge/document.tsx";
@@ -99,7 +113,43 @@ const loadDocument = async (
   return { doc, versions: history.versions, backlinks: links.backlinks };
 };
 
-/** The collection's files, each a row that opens it. */
+const styles = stylex.create({
+  scroll: { flex: 1, minWidth: 0, overflowY: "auto" },
+  column: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space8,
+    boxSizing: "border-box",
+    width: "100%",
+    maxWidth: grasp.pageMeasure,
+    marginInline: "auto",
+    paddingBlock: grasp.space8,
+    paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
+  },
+  section: { display: "flex", flexDirection: "column", gap: grasp.space2 },
+  sectionHead: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: grasp.space3,
+  },
+  folders: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+    margin: 0,
+    padding: 0,
+    listStyleType: "none",
+  },
+  folder: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space2,
+    minWidth: 0,
+    paddingBlockStart: grasp.space3,
+  },
+});
+
 /**
  * The folders of `tree` that hold documents, the collection itself first,
  * then each folder before the ones in it, in path order.
@@ -109,67 +159,68 @@ const foldersOf = (tree: Folder): Folder[] => [
   ...tree.folders.flatMap((folder) => foldersOf(folder)),
 ];
 
+/** The collection's files, each a row that opens it, by folder. */
 const FileList = ({ documents }: { documents: DocumentSummary[] }) => {
   if (documents.length === 0) {
     return (
       <Empty>
         <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <FileTextIcon />
-          </EmptyMedia>
+          <EmptyMedia icon={File} />
           <EmptyTitle>
             <Trans>This collection has no files yet.</Trans>
           </EmptyTitle>
-          <EmptyDescription>
-            <Trans>
-              Documents written here, and files uploaded to it, show up here for
-              Grasp and its agents to read.
-            </Trans>
-          </EmptyDescription>
         </EmptyHeader>
       </Empty>
     );
   }
   return (
     <>
-      <ul className="-mx-2 flex flex-col">
+      <ul {...stylex.props(styles.folders)}>
         {foldersOf(folderTree(documents)).map((folder) => (
           <li key={folder.path}>
             {folder.path === "" ? null : (
-              <p className="text-muted-foreground flex items-center gap-2 px-2 pt-3 pb-1 text-xs font-medium">
-                <FolderIcon aria-hidden="true" className="size-3.5 flex-none" />
-                <span className="min-w-0 truncate">{folder.path}</span>
-              </p>
+              <span {...stylex.props(styles.folder)}>
+                <Icon icon={FolderMark} />
+                <Text
+                  element="span"
+                  size="xs"
+                  tone="muted"
+                  weight="medium"
+                  wrap="truncate"
+                >
+                  {folder.path}
+                </Text>
+              </span>
             )}
-            <ul className="flex flex-col">
+            <ItemGroup>
               {folder.documents.map((document) => (
-                <li key={document.id}>
-                  <Link
-                    className="hover:bg-muted flex items-center gap-3 rounded-lg px-2 py-2 text-sm"
-                    from="/knowledge/$collection"
-                    search={{ doc: document.id }}
-                  >
-                    <FileTextIcon
-                      aria-hidden="true"
-                      className="text-muted-foreground size-4 flex-none"
+                <Item
+                  key={document.id}
+                  render={
+                    <Link
+                      from="/knowledge/$collection"
+                      search={{ doc: document.id }}
                     />
-                    <span className="min-w-0 flex-1 truncate">
+                  }
+                  size="xs"
+                >
+                  <ItemMedia icon={File} iconLook="inline" />
+                  <ItemContent>
+                    <ItemTitle>
                       {document.path.split("/").at(-1)}
-                    </span>
-                    <span className="text-muted-foreground flex-none text-xs tabular-nums">
-                      {formatDate(document.updatedAt)}
-                    </span>
-                  </Link>
-                </li>
+                      <ItemDetail>{formatDate(document.updatedAt)}</ItemDetail>
+                    </ItemTitle>
+                  </ItemContent>
+                </Item>
               ))}
-            </ul>
+            </ItemGroup>
           </li>
         ))}
       </ul>
       {documents.length === pageMaxLimit ? (
-        <p className="text-muted-foreground text-sm">
+        <Text size="sm" tone="muted">
           <Trans>Showing the first {pageMaxLimit} files.</Trans>
-        </p>
+        </Text>
       ) : null}
     </>
   );
@@ -304,8 +355,8 @@ const CollectionView = () => {
     >
       {/* The collection stays mounted, hidden, while one of its documents
           is open, so uploads on their way keep going and keep their rows. */}
-      <div className="min-w-0 flex-1 overflow-y-auto" hidden={documentOpen}>
-        <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 py-8 md:px-12">
+      <div hidden={documentOpen} {...stylex.props(styles.scroll)}>
+        <div {...stylex.props(styles.column)}>
           <CollectionNotLoaded collection={collection} open={open} />
           {collection.state === "ready" ? (
             <>
@@ -336,11 +387,14 @@ const CollectionView = () => {
                   listed={new Set(paths.values())}
                 />
               ) : null}
-              <section aria-labelledby="files" className="flex flex-col gap-2">
-                <div className="flex items-center justify-between gap-3">
-                  <h2 className="text-sm font-medium" id="files">
+              <section
+                aria-labelledby="files"
+                {...stylex.props(styles.section)}
+              >
+                <div {...stylex.props(styles.sectionHead)}>
+                  <SectionTitle id="files">
                     <Trans>Files</Trans>
-                  </h2>
+                  </SectionTitle>
                   {writable ? (
                     <NewDocument collectionId={collectionId} />
                   ) : null}

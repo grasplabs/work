@@ -14,6 +14,8 @@ import {
   MenuShortcut,
 } from "@ui-sdk/react/menu";
 import type { MenuItemState } from "@ui-sdk/react/menu";
+import { renderElement } from "@ui-sdk/react/primitive";
+import type { RenderProp } from "@ui-sdk/react/primitive";
 import { useShortcutHint } from "@ui-sdk/react/shortcuts";
 import { useRef } from "react";
 import type { ComponentProps } from "react";
@@ -86,6 +88,18 @@ interface WithoutWork {
   closeOnSelect?: boolean;
   action?: undefined;
   failedLabel?: never;
+  /**
+   * Where the item leads: it is then a link, opened by a press, Enter, a middle click or in a new
+   * tab ("Open in a new tab" on its menu). The menu closes as it goes.
+   */
+  href?: string;
+  /**
+   * The element the item is drawn as, for a router's link (`render={<Link to="/apps/spend" />}`): it
+   * takes the item's look, its words and its place in the arrows' order, and keeps its own props.
+   * Without it, an `<a href>` with `href`, else a plain item. Leave `href` out when the router's link
+   * carries the address.
+   */
+  render?: RenderProp;
 }
 
 /**
@@ -101,6 +115,8 @@ interface WithWork {
   action: () => unknown;
   /** The words when the work failed, at the end of the item and to an agent ("Could not publish"). */
   failedLabel: string;
+  href?: never;
+  render?: never;
 }
 
 /** Every prop a DropdownMenuItem takes: these, and the rest of UI SDK's MenuItem. */
@@ -306,6 +322,13 @@ const WorkItem = ({ shared, look, action, failedLabel }: WorkItemProps) => {
   );
 };
 
+/** An item with `href` and no router's link: an <a href> holding the item's inside. */
+const linkTo = (href: string | undefined) =>
+  href === undefined || href === ""
+    ? undefined
+    : (props: Record<string, unknown>) =>
+        renderElement("a", { ...props, href });
+
 const Item = ({
   children,
   icon,
@@ -318,6 +341,8 @@ const Item = ({
   action,
   failedLabel,
   keys,
+  href,
+  render,
   ...rest
 }: DropdownMenuItemProps & { keys?: Keys }) => {
   // The new name wins over the old one (the breaking release's step 1).
@@ -353,6 +378,8 @@ const Item = ({
   return (
     <ItemPrimitive
       {...shared}
+      // A link: the host's router link, or an <a href>; the item's look and keys are the same.
+      render={render ?? linkTo(href)}
       onSelect={onSelect}
       className={(state: MenuItemState) =>
         itemClass(danger, state.highlighted, state.disabled, state.pending)

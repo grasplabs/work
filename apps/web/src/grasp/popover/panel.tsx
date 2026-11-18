@@ -5,7 +5,7 @@
 
 import * as stylex from "@stylexjs/stylex";
 import { PopoverContent as ContentPrimitive } from "@ui-sdk/react/popover";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { ComponentProps, ReactNode } from "react";
 
 import { scroll } from "../scroll/scroll";
@@ -41,9 +41,10 @@ export interface PopoverContentProps extends Omit<
    */
   align?: ContentPrimitiveProps["align"];
   /**
-   * Where focus goes when it opens: the first field or control by default, or the panel itself when
-   * it holds none or was opened by a tap, so no keyboard appears. `"none"` leaves focus on the trigger.
-   * @default "auto"
+   * Where focus goes when it opens. By default the first field or control in it; when it holds
+   * none (words only, a picture), focus stays on the trigger, so no ring frames the panel and
+   * Escape still closes it. `"content"` focuses the panel itself; `"none"` always leaves focus on
+   * the trigger.
    */
   initialFocus?: ContentPrimitiveProps["initialFocus"];
 }
@@ -77,14 +78,48 @@ const watchBody = (
   };
 };
 
-export const PopoverContent = ({ children, ...rest }: PopoverContentProps) => {
+// What can take focus by Tab inside the panel: its first one, if any.
+const TABBABLE =
+  "button:not([disabled]), [href], input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1']), [contenteditable='true']";
+const firstTabbable = (body: HTMLElement): HTMLElement | null => {
+  // The body itself, when it scrolls, is a stop of its own (a region the keys can scroll).
+  if (body.tabIndex >= 0) {
+    return body;
+  }
+  return (
+    [...body.querySelectorAll<HTMLElement>(TABBABLE)].find(
+      (element) => element.getClientRects().length > 0
+    ) ?? null
+  );
+};
+
+export const PopoverContent = ({
+  children,
+  initialFocus,
+  ...rest
+}: PopoverContentProps) => {
   const still = useStill();
   // When the body holds more than it shows, it joins the Tab order as a region named by the title,
   // so the keys can scroll it (WCAG 2.1.1), as a Dialog's body does.
   const [scrolls, setScrolls] = useState(false);
   const [title, setTitle] = useState<string>();
-  const box = (element: HTMLDivElement | null) =>
-    element === null ? undefined : watchBody(element, setTitle, setScrolls);
+  const body = useRef<HTMLDivElement | null>(null);
+  const box = (element: HTMLDivElement | null) => {
+    body.current = element;
+    return element === null
+      ? undefined
+      : watchBody(element, setTitle, setScrolls);
+  };
+  // The default: the first control in it, else the trigger, which holds focus as it opens. Where a
+  // tap left focus on nothing (the page), the panel takes it, as UI SDK's own default does.
+  const firstOrTrigger = () => {
+    const first = body.current === null ? null : firstTabbable(body.current);
+    if (first !== null) {
+      return first;
+    }
+    const held = document.activeElement;
+    return held instanceof HTMLElement && held !== document.body ? held : null;
+  };
   if (still) {
     if (still.phase === "closed") {
       return null;
@@ -101,6 +136,7 @@ export const PopoverContent = ({ children, ...rest }: PopoverContentProps) => {
   return (
     <ContentPrimitive
       {...rest}
+      initialFocus={initialFocus ?? firstOrTrigger}
       sideOffset={popup.popoverGap}
       collisionPadding={popup.gutter}
       {...stylex.props(

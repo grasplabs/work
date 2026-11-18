@@ -247,10 +247,22 @@ const shown = async (
   return asked;
 };
 
-/** The buttons whose text is `text`. */
+/** What an element says: its text, without what is hidden from a screen reader. */
+const wordsOf = (element: Element): string => {
+  const copy = element.cloneNode(true);
+  if (!(copy instanceof Element)) {
+    return "";
+  }
+  for (const hidden of copy.querySelectorAll("[aria-hidden='true']")) {
+    hidden.remove();
+  }
+  return copy.textContent.trim();
+};
+
+/** The buttons whose words are `text`. */
 const buttons = (text: string): HTMLButtonElement[] =>
   [...document.querySelectorAll("button")].filter(
-    (each) => each.textContent.trim() === text
+    (each) => wordsOf(each) === text
   );
 
 /** Presses the `index`th button whose text is `text`, and lets it settle. */
@@ -264,13 +276,73 @@ const press = async (text: string, index = 0): Promise<void> => {
 /** The field labelled `label`. */
 const field = (
   label: string
-): HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null => {
+): HTMLInputElement | HTMLTextAreaElement | null => {
   const labelled = [...document.querySelectorAll("label")].find(
-    (each) => each.textContent.trim() === label
+    (each) => wordsOf(each) === label
   );
-  return labelled === undefined
-    ? null
-    : document.querySelector(`#${CSS.escape(labelled.htmlFor)}`);
+  const found =
+    labelled === undefined
+      ? null
+      : document.querySelector(`#${CSS.escape(labelled.htmlFor)}`);
+  return found instanceof HTMLInputElement ||
+    found instanceof HTMLTextAreaElement
+    ? found
+    : null;
+};
+
+/** The choice labelled `label`: the control that opens its list. */
+const choice = (label: string): HTMLElement | null => {
+  const labelled = [...document.querySelectorAll("label")].find(
+    (each) => wordsOf(each) === label
+  );
+  const found =
+    labelled === undefined
+      ? null
+      : document.querySelector(`#${CSS.escape(labelled.htmlFor)}`);
+  return found instanceof HTMLElement && found.role === "combobox"
+    ? found
+    : null;
+};
+
+/** The options the choice labelled `label` offers, once opened, in its own list. */
+const offeredIn = async (label: string): Promise<HTMLElement[]> => {
+  const control = choice(label);
+  await act(async () => {
+    control?.click();
+    await settled();
+  });
+  const list = document.querySelector(
+    `[id="${control?.getAttribute("aria-controls") ?? ""}"]`
+  );
+  return [
+    ...(list ?? document).querySelectorAll<HTMLElement>('[role="option"]'),
+  ];
+};
+
+/** Presses the option whose words are `name` among `options`, a list already open. */
+const pickFrom = async (
+  options: readonly HTMLElement[],
+  name: string
+): Promise<void> => {
+  const option = options.find((each) => wordsOf(each) === name);
+  if (option === undefined) {
+    throw new TypeError(`No option ${name}`);
+  }
+  await act(async () => {
+    option.click();
+    await settled();
+  });
+};
+
+/** Chooses the option whose words are `name` in the choice labelled `label`, as a person does. */
+const choose = async (label: string, name: string): Promise<void> => {
+  const options = await offeredIn(label);
+  await pickFrom(options, name);
+};
+
+/** Opens the dialog that adds a trigger. */
+const openAdd = async (): Promise<void> => {
+  await press("Add a trigger");
 };
 
 /** Sets the field labelled `label` to `value`, as React hears a person do it. */
@@ -283,17 +355,13 @@ const fill = async (label: string, value: string): Promise<void> => {
         found,
         value
       );
-      found.dispatchEvent(
-        new Event(found instanceof HTMLSelectElement ? "change" : "input", {
-          bubbles: true,
-        })
-      );
+      found.dispatchEvent(new Event("input", { bubbles: true }));
     }
     await settled();
   });
 };
 
-/** Submits the Add a trigger form. */
+/** Submits the Add a trigger dialog's form. */
 const submit = async (): Promise<void> => {
   await act(async () => {
     document
@@ -348,7 +416,8 @@ describe("a workflow's Triggers", () => {
 
   it("adds a schedule with exactly what the builder typed, for the version picked", async () => {
     const asked = await shown(true);
-    await fill("Version it starts", "1");
+    await openAdd();
+    await choose("Version it starts", "Version 1");
     await fill("When, as a cron expression", "30 7 * * *");
     await fill("Time zone", "Europe/Amsterdam");
     await fill(
@@ -375,12 +444,12 @@ describe("a workflow's Triggers", () => {
 
   it("adds a connection's event, offering only the connections that report it", async () => {
     const asked = await shown(true);
-    await fill("What starts it", "connector");
-    await fill("Event", "google.mail.received");
-    const offered = [...(field("Connection")?.querySelectorAll("option") ?? [])]
-      .map(({ value }) => value)
-      .filter((value) => value !== "");
-    await fill("Connection", "connection-google");
+    await openAdd();
+    await choose("What starts it", "An event at a connection");
+    await choose("Event", "New mail in Google");
+    const connections = await offeredIn("Connection");
+    const offered = connections.map((each) => wordsOf(each));
+    await pickFrom(connections, "drive@acme.test");
     await fill(
       "The run's input fields, each from the event as a JSON Pointer, as JSON",
       '{"subject": "/payload/subject"}'
@@ -388,7 +457,7 @@ describe("a workflow's Triggers", () => {
     await submit();
 
     expect({ offered, asked }).toStrictEqual({
-      offered: ["connection-google"],
+      offered: ["drive@acme.test"],
       asked: [
         {
           create: {
@@ -410,7 +479,8 @@ describe("a workflow's Triggers", () => {
   it("adds an email trigger with the mapping typed, and shows one by the part of its address before the @", async () => {
     const asked = await shown(true, false, false, [ownMail]);
     const says = document.body.textContent;
-    await fill("What starts it", "email");
+    await openAdd();
+    await choose("What starts it", "An email to its own address");
     await fill(
       "The run's input fields, each from the message as a JSON Pointer, as JSON",
       '{"subject": "/subject"}'
@@ -439,7 +509,8 @@ describe("a workflow's Triggers", () => {
 
   it("adds an email trigger at the name typed, trimmed", async () => {
     const asked = await shown(true);
-    await fill("What starts it", "email");
+    await openAdd();
+    await choose("What starts it", "An email to its own address");
     await fill("Address, the part before the @", " invoices ");
     await submit();
 
@@ -462,7 +533,7 @@ describe("a workflow's Triggers", () => {
     await shown(false);
 
     expect({
-      add: buttons("Add the trigger").length,
+      add: buttons("Add a trigger").length + buttons("Add the trigger").length,
       turnOff: buttons("Turn off").length,
       // Their own stopped schedule they may still turn off and delete, but
       // not turn on: core runs it only for someone who builds the workflow.
@@ -473,6 +544,7 @@ describe("a workflow's Triggers", () => {
 
   it("keeps what the builder typed to add while they change another trigger", async () => {
     const asked = await shown(true);
+    await openAdd();
     await fill("When, as a cron expression", "30 7 * * *");
     await press("Turn off", 1);
 
@@ -513,7 +585,8 @@ describe("a workflow's Triggers", () => {
     await press("Turn off", 1);
     const afterChange = listReads;
     // An added trigger too: one core saved shows, and isn't added twice.
-    await fill("Version it starts", "1");
+    await openAdd();
+    await choose("Version it starts", "Version 1");
     await fill("When, as a cron expression", "30 7 * * *");
     await fill("Time zone", "Europe/Amsterdam");
     await submit();
@@ -527,16 +600,16 @@ describe("a workflow's Triggers", () => {
 
   it("adds a webhook trigger on the source and event type chosen, by the source's name", async () => {
     const asked = await shown(true, false, false, []);
-    await fill("What starts it", "webhook");
-    const offered = [
-      ...(field("Source")?.querySelectorAll("option") ?? []),
-    ].map((option) => option.textContent);
-    await fill("Source", shop.id);
+    await openAdd();
+    await choose("What starts it", "An event from a webhook source");
+    const sources = await offeredIn("Source");
+    const offered = sources.map((each) => wordsOf(each));
+    await pickFrom(sources, "Shop system");
     await fill("Event type", " order.paid ");
     await submit();
 
     expect({ offered, asked }).toStrictEqual({
-      offered: ["Choose…", "Shop system"],
+      offered: ["Shop system"],
       asked: [
         {
           create: {
@@ -552,7 +625,8 @@ describe("a workflow's Triggers", () => {
 
   it("asks for a source before adding a webhook trigger, and says where sources come from when there are none", async () => {
     const asked = await shown(true, false, false, [], []);
-    await fill("What starts it", "webhook");
+    await openAdd();
+    await choose("What starts it", "An event from a webhook source");
     const text = document.body.textContent;
     await submit();
 

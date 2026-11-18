@@ -7,6 +7,7 @@ import { definePrimitive } from "@ui-sdk/core";
 
 import { isThemeId, isThemeMode } from "../theme";
 import type { ThemeId, ThemeMode } from "../theme";
+import { themeSwitchNotices } from "./words";
 
 interface ThemeSwitchAgentOptions {
   value?: ThemeMode;
@@ -56,7 +57,10 @@ export const themeSwitchAgent = definePrimitive({
         const value = asMode(mode, items);
         if (!isThemeMode(value)) {
           throw new Error(
-            `No mode "${mode}" in Theme. Its modes: ${(items ?? []).map((item) => item.label).join(", ")}.`
+            themeSwitchNotices.noMode(
+              mode,
+              (items ?? []).map((item) => item.label)
+            )
           );
         }
         onValueChange?.(value);
@@ -67,7 +71,10 @@ export const themeSwitchAgent = definePrimitive({
         const value = asMode(theme, themes);
         if (!isThemeId(value)) {
           throw new Error(
-            `No theme "${theme}" in Theme. Its themes: ${(themes ?? []).map((item) => item.label).join(", ")}.`
+            themeSwitchNotices.noTheme(
+              theme,
+              (themes ?? []).map((item) => item.label)
+            )
           );
         }
         onThemeChange?.(value);

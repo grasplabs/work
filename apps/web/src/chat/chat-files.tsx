@@ -45,7 +45,7 @@ export const useAttachmentWords = (
   return {
     uploading: t`Uploading`,
     done: where === "waiting" ? t`Ready to send` : t`Sent`,
-    failed: t`Could not upload`,
+    failed: t`Not sent`,
     retry: t`Try again`,
     remove: t`Remove`,
     size: formatBytes,

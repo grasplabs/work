@@ -3,6 +3,7 @@ import type {
   Permission,
   PermissionSubject,
 } from "@grasp-os/shared/permissions";
+import { nextScheduledRun } from "@grasp-os/shared/workflows";
 import { i18n } from "@lingui/core";
 import { msg, ph } from "@lingui/core/macro";
 
@@ -11,10 +12,12 @@ import {
   appName,
   appsById,
   formatTime,
+  listedOrNone,
   personName,
   readPeople,
 } from "../directory.ts";
 import type { Directory } from "../directory.ts";
+import { formatList, formatZone } from "../format.ts";
 import {
   kindLabels,
   triggerDescription,
@@ -41,11 +44,20 @@ export const readRequestNames = async (
   session: Session,
   requests: Permission[]
 ): Promise<PendingRequests> => {
-  const [apps, people] = await Promise.all([
+  const [apps, people, collections] = await Promise.all([
     session.apps.list(),
     readPeople(session),
+    // For names only: a request for a collection reads by its name.
+    listedOrNone(session.knowledge.listCollections()),
   ]);
-  return { requests, directory: { people, apps: appsById(apps) } };
+  return {
+    requests,
+    directory: {
+      people,
+      apps: appsById(apps),
+      collections: new Map(collections.map(({ id, name }) => [id, name])),
+    },
+  };
 };
 
 /** Workflow `id`, by the name core gave it in `names`, else by its ID. */
@@ -99,8 +111,8 @@ export const subjectOf = (
 };
 
 /**
- * What it asks for: a workflow by its name, connections and collections
- * by ID, as they have no names here.
+ * What it asks for: a workflow or a collection by its name where it was
+ * read, a connection by ID, as it has no name here.
  */
 export const objectOf = (
   { object, actions, workflowNames, functionName }: Permission,
@@ -113,8 +125,9 @@ export const objectOf = (
       : i18n._(msg`Connection ${connectionId}, ${resource}`);
   }
   if (object.type === "collection") {
-    const { collectionId } = object;
-    return i18n._(msg`Collection ${collectionId}`);
+    const collection =
+      directory.collections?.get(object.collectionId) ?? object.collectionId;
+    return i18n._(msg`Collection ${collection}`);
   }
   if (object.type === "app" && object.function !== undefined) {
     // A workflow's permission on one function, by its ID, named by its
@@ -258,4 +271,121 @@ export const grantReviewed = async (
     }
     throw error;
   }
+};
+
+/**
+ * A schedule trigger asking to start its workflow: its workflow's name and
+ * when it next runs, from the request's own fields (the cron read by
+ * croner, through `nextScheduledRun`, skipping a time the clocks skip, as
+ * such a trigger does). Undefined for any other request, or a schedule
+ * with no time to come: then the request reads as every other one.
+ */
+const scheduleOf = (
+  { trigger, object, actions, workflowNames }: Permission,
+  now: Date
+): { workflow: string; next: Date; timeZone: string } | undefined => {
+  const schedule = trigger?.kind === "schedule" ? trigger.schedule : null;
+  const startsWorkflow =
+    object.type === "workflow" &&
+    actions.length === 1 &&
+    actions[0] === "start";
+  if (schedule === null || !startsWorkflow) {
+    return undefined;
+  }
+  const next = nextScheduledRun(schedule, now, "skip");
+  if (next === undefined) {
+    return undefined;
+  }
+  const workflow = workflowNames?.[object.workflowId] ?? object.workflowId;
+  return { workflow, next, timeZone: schedule.timeZone };
+};
+
+/**
+ * Who asks, in one line: a schedule asking to start its workflow by what
+ * it is ("Schedule for invoice-approval"), never its cron; any other as
+ * `subjectOf` names it.
+ */
+export const requestAsker = (
+  request: Permission,
+  directory: Directory,
+  now: Date = new Date()
+): string => {
+  const scheduled = scheduleOf(request, now);
+  if (scheduled === undefined) {
+    return subjectOf(request, directory);
+  }
+  const { workflow } = scheduled;
+  return i18n._(msg`Schedule for ${ph({ workflow })}`);
+};
+
+/**
+ * What a request asks, in one line: who asks, for what, on what; a
+ * schedule asking to start its workflow says so in words, with its next
+ * run in the schedule's own time zone and the page's language.
+ */
+export const requestWords = (
+  request: Permission,
+  directory: Directory,
+  now: Date = new Date()
+): string => {
+  const scheduled = scheduleOf(request, now);
+  if (scheduled !== undefined) {
+    const { workflow, next, timeZone } = scheduled;
+    const when = new Intl.DateTimeFormat(i18n.locale, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone,
+    }).format(next);
+    const zone = formatZone(timeZone);
+    return i18n._(
+      msg`Schedule for ${ph({ workflow })}, next run ${ph({ when })} (${ph({ zone })})`
+    );
+  }
+  const subject = subjectOf(request, directory);
+  const object = objectOf(request, directory);
+  const actions = formatList(request.actions);
+  return i18n._(
+    msg`${ph({ subject })}: ${ph({ actions })} on ${ph({ object })}`
+  );
+};
+
+/**
+ * A request in a list's row: who asks and what, where the request's own
+ * fields say it plainly. A collection is named as the directory knows it,
+ * else "a collection" (the request carries its ID only, never its name);
+ * a schedule as `requestAsker` has it; any other by who asks.
+ */
+export const requestRow = (
+  request: Permission,
+  directory: Directory,
+  now: Date = new Date()
+): string => {
+  const asker = requestAsker(request, directory, now);
+  const { object, actions } = request;
+  if (object.type !== "collection") {
+    return asker;
+  }
+  const reads = actions.includes("read");
+  const writes = actions.includes("write");
+  const named = directory.collections?.get(object.collectionId);
+  if (named === undefined) {
+    if (reads && writes) {
+      return i18n._(msg`${ph({ asker })} may read and change a collection`);
+    }
+    return writes
+      ? i18n._(msg`${ph({ asker })} may change a collection`)
+      : i18n._(msg`${ph({ asker })} may read a collection`);
+  }
+  const collection = named;
+  if (reads && writes) {
+    return i18n._(
+      msg`${ph({ asker })} may read and change ${ph({ collection })}`
+    );
+  }
+  return writes
+    ? i18n._(msg`${ph({ asker })} may change ${ph({ collection })}`)
+    : i18n._(msg`${ph({ asker })} may read ${ph({ collection })}`);
 };

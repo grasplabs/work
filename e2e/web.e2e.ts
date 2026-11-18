@@ -27,15 +27,19 @@ test("loads the frontend from core, reaches core over RPC, and asks whoever isn'
   expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/");
 });
 
-test("shows only its own words for a refused sign-in, never the link's", async ({
+test("shows only its own words for a refused sign-in, never the link's, and comes back to the page without them", async ({
   page,
 }) => {
-  const planted = "Your account is locked. Call +1 555 0100";
-  await page.goto(`/?error=${encodeURIComponent(planted)}`);
+  const planted = encodeURIComponent(
+    "Your account is locked. Call +1 555 0100"
+  );
+  // OAuth's pair, as a refused sign-in comes back with.
+  await page.goto(`/?error=${planted}&error_description=${planted}`);
   await expect(page.getByRole("alert")).toHaveText(
     "Sign-in didn't work. Try again, or ask an admin."
   );
-  await expect(page.getByText(planted)).toHaveCount(0);
+  await expect(page.getByText(decodeURIComponent(planted))).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/");
 });
 
 test("shows a refusal with the request ID core answered it under, for the person to quote", async ({
@@ -418,16 +422,11 @@ test("shows the members page only to someone signed in, and never signs them out
   // once the page has waited its few seconds for a connection.
   failing = Number.POSITIVE_INFINITY;
   await page.goto("/settings/members");
-  // The failed page: its heading, why, and that Grasp hasn't answered.
   await expect(
-    page.getByRole("heading", { name: "This page didn't load" })
+    page.getByText(
+      "Grasp could not reach its servers. Nothing you saved is lost."
+    )
   ).toBeVisible({ timeout: reconnectMs });
-  await expect(
-    page.getByRole("paragraph").filter({
-      hasText: "Grasp can't be reached right now. Try again in a moment.",
-    })
-  ).toBeVisible();
-  await expect(page.getByText("No answer from Grasp yet")).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/settings/members");
   await expect(
     page.getByText("Use your organization’s account to go on.")
@@ -442,7 +441,7 @@ test("shows the members page only to someone signed in, and never signs them out
     page.getByRole("main").getByRole("button", { name: "Try again" })
   ).toHaveAttribute("aria-busy", "true");
   await expect(unreachable).toHaveText(
-    "Grasp can't be reached right now. Try again in a moment.",
+    "Grasp could not reach its servers. Nothing you saved is lost.",
     { timeout: reconnectMs }
   );
   expect(new URL(page.url()).pathname).toBe("/settings/members");

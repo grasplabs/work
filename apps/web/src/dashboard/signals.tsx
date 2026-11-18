@@ -7,31 +7,43 @@ import type {
   ImprovementSignals,
 } from "@grasp-os/shared/signals";
 import { signalWindowDays } from "@grasp-os/shared/signals";
-import { Button } from "@grasp-os/ui/components/button";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { Await, Link, useRouter } from "@tanstack/react-router";
-import {
-  BookOpenIcon,
-  CircleDollarSignIcon,
-  ClockIcon,
-  SearchXIcon,
-  TriangleAlertIcon,
-  UndoIcon,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
+import { Await, useRouter } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatDate } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
+import { RouterLink } from "../frame/router-link.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { iconVars } from "../grasp/icons/icon.stylex.ts";
+import {
+  Alert,
+  Clock,
+  Doc,
+  Icon,
+  Money,
+  Search,
+  Undo,
+} from "../grasp/icons/index.ts";
+import type { IconData } from "../grasp/icons/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+  ItemMedia,
+} from "../grasp/item/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { signalKinds } from "./board.ts";
 import type { SignalKind } from "./board.ts";
-import { ItemMark } from "./dashboard-card.tsx";
 import { WidgetBlock } from "./widget-block.tsx";
 
 // What could be better, from the signals core works out daily: workflows
@@ -45,6 +57,57 @@ import { WidgetBlock } from "./widget-block.tsx";
 // no widget. On the dashboard's widget board, its block counts the
 // signals by kind, and its full view lists every one.
 
+const styles = stylex.create({
+  // The full view's list stands in one frame, a line between its rows.
+  frame: {
+    overflow: "hidden",
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    boxShadow: grasp.edge,
+  },
+  dismiss: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    rowGap: grasp.space1,
+  },
+  kinds: {
+    display: "flex",
+    flexDirection: "column",
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  kind: {
+    display: "flex",
+    alignItems: "center",
+    columnGap: grasp.space3,
+    paddingBlockStart: { default: grasp.space2, ":first-child": 0 },
+    paddingBlockEnd: grasp.space2,
+    borderTopWidth: { default: grasp.hairline, ":first-child": 0 },
+    borderTopStyle: "solid",
+    borderTopColor: grasp.line,
+  },
+  // A kind's mark: its icon in a small square, as an Item's.
+  mark: {
+    [iconVars.size]: grasp.iconSm,
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    width: grasp.controlSm,
+    height: grasp.controlSm,
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    backgroundColor: grasp.quietFill,
+    boxShadow: grasp.edge,
+    color: grasp.muted,
+  },
+  kindName: { flexGrow: 1, minWidth: 0 },
+  count: { fontVariantNumeric: "tabular-nums" },
+  inFull: { display: "flex", flexDirection: "column", rowGap: grasp.space3 },
+});
+
 /** What the dashboard read of the signals: each read on its own, none for someone it doesn't apply to. */
 export interface Signals {
   improvement: ImprovementSignals | undefined;
@@ -56,15 +119,15 @@ export interface Signals {
 /** Each kind of signal's mark and name, as its rows and the block's counts show them. */
 export const signalKindLooks: Record<
   SignalKind,
-  { icon: LucideIcon; name: MessageDescriptor }
+  { icon: IconData; name: MessageDescriptor }
 > = {
-  failing_step: { icon: TriangleAlertIcon, name: msg`Keeps failing` },
-  waiting_for_person: { icon: ClockIcon, name: msg`Waiting for a person` },
-  correction: { icon: UndoIcon, name: msg`Often corrected` },
-  cost_per_run: { icon: CircleDollarSignIcon, name: msg`Model cost` },
-  unanswered_question: { icon: SearchXIcon, name: msg`Unanswered question` },
-  unread_document: { icon: BookOpenIcon, name: msg`Nobody reads it` },
-  overdue_review: { icon: ClockIcon, name: msg`Review overdue` },
+  failing_step: { icon: Alert, name: msg`Keeps failing` },
+  waiting_for_person: { icon: Clock, name: msg`Waiting for a person` },
+  correction: { icon: Undo, name: msg`Often corrected` },
+  cost_per_run: { icon: Money, name: msg`Model cost` },
+  unanswered_question: { icon: Search, name: msg`Unanswered question` },
+  unread_document: { icon: Doc, name: msg`Nobody reads it` },
+  overdue_review: { icon: Clock, name: msg`Review overdue` },
 };
 
 /** A duration in whole days, or hours under a day, as words. */
@@ -97,14 +160,16 @@ const SignalRow = ({
   const { i18n } = useLingui();
   const { icon, name } = signalKindLooks[kind];
   return (
-    <li className="flex min-h-14 items-center gap-3 border-t px-4 py-2">
-      <ItemMark icon={icon} />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="text-muted-foreground text-xs">{i18n._(name)}</span>
-        <span>{children}</span>
-      </div>
-      {action}
-    </li>
+    <Item size="sm">
+      <ItemMedia icon={icon} />
+      <ItemContent>
+        <Text element="span" size="xs" tone="muted">
+          {i18n._(name)}
+        </Text>
+        <Text element="span">{children}</Text>
+      </ItemContent>
+      {action === undefined ? null : <ItemActions>{action}</ItemActions>}
+    </Item>
   );
 };
 
@@ -124,9 +189,9 @@ const About = ({
   }
   const name = appNames.get(app) ?? app;
   return workflow === null ? (
-    <Link className="underline" params={{ app }} to="/apps/$app">
+    <RouterLink params={{ app }} to="/apps/$app">
       {name}
-    </Link>
+    </RouterLink>
   ) : (
     <span>{workflow}</span>
   );
@@ -209,9 +274,10 @@ const ImprovementRow = ({
 /** Dismissing a Knowledge signal until something new comes, as its owner can. */
 const Dismiss = ({ id, label }: { id: string; label: string }) => {
   const router = useRouter();
+  const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div {...stylex.props(styles.dismiss)}>
       <Button
         aria-label={label}
         disabled={busy}
@@ -226,7 +292,10 @@ const Dismiss = ({ id, label }: { id: string; label: string }) => {
         size="xs"
         variant="ghost"
       >
-        <Trans context="put a signal away until something new">Dismiss</Trans>
+        {t({
+          message: "Dismiss",
+          context: "put a signal away until something new",
+        })}
       </Button>
       <ErrorText>{failure}</ErrorText>
     </div>
@@ -237,14 +306,13 @@ const KnowledgeRow = ({ signal }: { signal: KnowledgeSignal }) => {
   const { t } = useLingui();
   const { collection } = signal;
   const where = (
-    <Link
-      className="underline"
+    <RouterLink
       params={{ collection: collection.id }}
       search={{}}
       to="/knowledge/$collection"
     >
       {collection.name}
-    </Link>
+    </RouterLink>
   );
   const { name } = collection;
   const dismiss = (
@@ -264,14 +332,13 @@ const KnowledgeRow = ({ signal }: { signal: KnowledgeSignal }) => {
   }
   const { document } = signal.evidence;
   const doc = (
-    <Link
-      className="underline"
+    <RouterLink
       params={{ collection: collection.id }}
       search={{ doc: document.id }}
       to="/knowledge/$collection"
     >
       {document.title}
-    </Link>
+    </RouterLink>
   );
   if (signal.kind === "unread_document") {
     const { days } = signal.evidence;
@@ -313,9 +380,8 @@ const kindsShown = 4;
 const SignalList = ({ signals }: { signals: Signals }) => {
   const { t } = useLingui();
   return (
-    <div className="overflow-hidden rounded-xl border">
-      {/* Each row draws its line on top: the frame stands for the first. */}
-      <ul aria-label={t`Could be better`} className="-mt-px">
+    <div {...stylex.props(styles.frame)}>
+      <ItemGroup aria-label={t`Could be better`} separated>
         {signals.improvement?.signals.map((signal) => (
           <ImprovementRow
             appNames={signals.appNames}
@@ -326,7 +392,7 @@ const SignalList = ({ signals }: { signals: Signals }) => {
         {signals.knowledge?.signals.map((signal) => (
           <KnowledgeRow key={signal.id} signal={signal} />
         ))}
-      </ul>
+      </ItemGroup>
     </div>
   );
 };
@@ -340,25 +406,29 @@ const SignalKinds = ({ signals }: { signals: Signals }) => {
   ];
   if (all.length === 0) {
     return (
-      <p className="text-muted-foreground">
+      <Text tone="muted">
         <Trans>Nothing to make better right now.</Trans>
-      </p>
+      </Text>
     );
   }
   return (
-    <ul aria-label={t`Signals by kind`} className="flex flex-col">
+    <ul aria-label={t`Signals by kind`} {...stylex.props(styles.kinds)}>
       {signalKinds(all)
         .slice(0, kindsShown)
         .map(({ kind, count }) => (
-          <li
-            className="flex items-center gap-3 border-t py-2 first:border-t-0 first:pt-0"
-            key={kind}
-          >
-            <ItemMark icon={signalKindLooks[kind].icon} />
-            <span className="min-w-0 flex-1 truncate">
-              {i18n._(signalKindLooks[kind].name)}
+          <li key={kind} {...stylex.props(styles.kind)}>
+            <span aria-hidden="true" {...stylex.props(styles.mark)}>
+              <Icon icon={signalKindLooks[kind].icon} />
             </span>
-            <span className="tabular-nums">{count}</span>
+            <Text
+              element="span"
+              layout={styles.kindName}
+              size="sm"
+              wrap="truncate"
+            >
+              {i18n._(signalKindLooks[kind].name)}
+            </Text>
+            <span {...stylex.props(styles.count)}>{count}</span>
           </li>
         ))}
     </ul>
@@ -374,16 +444,16 @@ const SignalsInFull = ({ signals }: { signals: Signals }) => {
       (signals.knowledge?.signals.length ?? 0) ===
     0;
   return (
-    <div className="flex flex-col gap-3">
+    <div {...stylex.props(styles.inFull)}>
       {date === undefined ? null : (
-        <p className="text-muted-foreground">
+        <Text tone="muted">
           <Trans>Worked out daily, last on {date}.</Trans>
-        </p>
+        </Text>
       )}
       {none ? (
-        <p className="text-muted-foreground">
+        <Text tone="muted">
           <Trans>Nothing to make better right now.</Trans>
-        </p>
+        </Text>
       ) : (
         <SignalList signals={signals} />
       )}

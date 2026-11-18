@@ -50,15 +50,10 @@ const DashboardPage = () => {
     <>
       <SiteHeader crumbs={[{ label: t`Dashboard` }]} />
       <Page>
+        {/* The programme's week and stage, with a plan; nothing more: what
+            waits says itself below. */}
         <PageHeading
-          description={
-            line ?? (
-              <Trans>
-                What waits on you, each with its next step, and what could be
-                better.
-              </Trans>
-            )
-          }
+          {...(line === undefined ? {} : { description: line })}
           title={<Trans>Dashboard</Trans>}
         />
         <ToDo identity={identity} waiting={waiting} />

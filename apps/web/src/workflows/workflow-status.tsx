@@ -1,30 +1,32 @@
 import type { WorkflowLifecycle } from "@grasp-os/shared/workflow-lifecycle";
 import { liveStages } from "@grasp-os/shared/workflow-lifecycle";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { ChevronDownIcon, PauseIcon, PlayIcon, SendIcon } from "lucide-react";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatDate, formatList } from "../format.ts";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+} from "../grasp/alert-dialog/index.ts";
+import { Badge } from "../grasp/badge/index.ts";
+import type { BadgeTone } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../grasp/dropdown-menu/index.ts";
+import { Pause, Play, Send } from "../grasp/icons/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { useGrace } from "../use-grace.ts";
@@ -48,6 +50,39 @@ import { useGrace } from "../use-grace.ts";
 
 /** How long a pause can be taken back before core is asked, in seconds. */
 const graceSeconds = 5;
+
+/**
+ * The width of the workflow's bar under which it says its short word
+ * (Draft, Live, Paused), as its views fold (frame/item-shell.tsx).
+ */
+const narrowBar = "@container bar (width < 48rem)";
+
+const styles = stylex.create({
+  row: { display: "flex", alignItems: "center", gap: grasp.space2 },
+  countdown: { display: "flex", alignItems: "center", gap: grasp.space3 },
+  // Capped, so who it runs for never takes the name's room.
+  word: { maxWidth: "16rem" },
+  // Its whole word where the bar has room, its short one where it is narrow.
+  long: { display: { default: null, [narrowBar]: "none" } },
+  short: { display: { default: "none", [narrowBar]: "inline" } },
+  facts: { display: "flex", flexDirection: "column", gap: grasp.space1 },
+  decision: {
+    display: "flex",
+    maxWidth: "24rem",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: grasp.space2,
+  },
+  answers: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: grasp.space2,
+    minWidth: 0,
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+  },
+});
 
 /**
  * The published version a builder may ask to go live: the latest, when it
@@ -111,20 +146,19 @@ const PauseCountdown = ({
 }: {
   left: number;
   onUndo: () => void;
-}) => (
-  <span aria-live="polite" className="flex items-center gap-3 font-medium">
-    <span className="text-muted-foreground flex items-center gap-2 tabular-nums">
-      <span
-        aria-hidden="true"
-        className="bg-status-attention size-1.5 rounded-full motion-safe:animate-pulse"
-      />
-      <Trans>Pauses in {left} s</Trans>
+}) => {
+  const { t } = useLingui();
+  return (
+    <span aria-live="polite" {...stylex.props(styles.countdown)}>
+      <Badge tone="attention" variant="dot">
+        {t`Pauses in ${left} s`}
+      </Badge>
+      <Button onClick={onUndo} size="sm">
+        {t({ message: "Undo", context: "take a pause back before it happens" })}
+      </Button>
     </span>
-    <Button onClick={onUndo} size="sm" variant="outline">
-      <Trans context="take a pause back before it happens">Undo</Trans>
-    </Button>
-  </span>
-);
+  );
+};
 
 /** Asks before pausing, and says what a pause stops and what it doesn't. */
 const PauseQuestion = ({
@@ -142,21 +176,14 @@ const PauseQuestion = ({
   return (
     <AlertDialog onOpenChange={onOpenChange} open={open}>
       <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{t`Pause ${name}?`}</AlertDialogTitle>
-          <AlertDialogDescription>
-            <Trans>
-              Nothing new starts until you resume it: a start is refused while
-              it is paused. Runs already going carry on to their end.
-            </Trans>
-          </AlertDialogDescription>
-        </AlertDialogHeader>
+        <AlertDialogTitle>{t`Pause ${name}?`}</AlertDialogTitle>
+        <AlertDialogDescription>
+          {t`Nothing new starts until you resume it: a start is refused while it is paused. Runs already going carry on to their end.`}
+        </AlertDialogDescription>
         <AlertDialogFooter>
-          <AlertDialogCancel>
-            <Trans>Keep it running</Trans>
-          </AlertDialogCancel>
-          <AlertDialogAction onClick={onPause}>
-            <Trans>Pause it</Trans>
+          <AlertDialogAction>{t`Keep it running`}</AlertDialogAction>
+          <AlertDialogAction onClick={onPause} variant="ink">
+            {t`Pause it`}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -165,23 +192,28 @@ const PauseQuestion = ({
 };
 
 /**
- * The dot beside the status word: attention before it went live, as only
- * its builders try it, and while paused; agreed while it runs.
+ * How the status word stands: attention before it went live, as only its
+ * builders try it, and while paused; success while it runs.
  */
-const dotClass: Readonly<Record<StatusView["shows"], string>> = {
-  stage: "bg-status-attention size-1.5 rounded-full",
-  live: "bg-status-agreed size-1.5 rounded-full",
-  paused: "bg-status-attention size-1.5 rounded-full",
+const tones: Readonly<Record<StatusView["shows"], BadgeTone>> = {
+  stage: "attention",
+  live: "success",
+  paused: "attention",
 };
 
-const StatusDot = ({ shows }: { shows: StatusView["shows"] }) => (
-  <span aria-hidden="true" className={dotClass[shows]} />
+/** Its whole word, or the short one where the bar is narrow. */
+const Word = ({ word, short }: { word: string; short: string }) => (
+  <span>
+    <span {...stylex.props(styles.long)}>{word}</span>
+    <span {...stylex.props(styles.short)}>{short}</span>
+  </span>
 );
 
 /** The status word, and the menu of what the reader may change, if anything. */
 const StatusMenu = ({
   view,
   word,
+  short,
   name,
   busy,
   highlight,
@@ -191,9 +223,11 @@ const StatusMenu = ({
 }: {
   view: StatusView;
   word: string;
+  /** The word where the bar is narrow: Draft, Live or Paused. */
+  short: string;
   name: string;
   busy: boolean;
-  /** Whether it is the page's one lime action. */
+  /** Whether it is the page's one main action. */
   highlight: boolean;
   onPause: () => void;
   onResume: () => void;
@@ -203,54 +237,45 @@ const StatusMenu = ({
   const { askable, canPause, canResume } = view;
   if (!canPause && !canResume && askable === null) {
     return (
-      <span className="flex items-center gap-2 font-medium">
-        <StatusDot shows={view.shows} />
-        <span className="max-w-48 truncate">{word}</span>
-      </span>
+      <Badge tone={tones[view.shows]} variant="dot">
+        <Word short={short} word={word} />
+      </Badge>
     );
   }
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={
-          <Button
-            aria-label={t`${word}. Change whether ${name} runs`}
-            disabled={busy}
-            size="sm"
-            variant={highlight ? "highlight" : "outline"}
-          />
-        }
+        aria-label={t`${word}. Change whether ${name} runs`}
+        chevron
+        disabled={busy}
+        layout={styles.word}
+        size="sm"
+        truncate
+        variant={highlight ? "ink" : "quiet"}
       >
-        <StatusDot shows={view.shows} />
-        {/* Capped, so who it runs for never takes the name's room. */}
-        <span className="max-w-48 truncate">{word}</span>
-        <ChevronDownIcon data-icon="inline-end" />
+        <Word short={short} word={word} />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-64">
-        <DropdownMenuGroup>
-          {canPause ? (
-            <DropdownMenuItem onClick={onPause}>
-              <PauseIcon />
-              <Trans>Pause</Trans>
-            </DropdownMenuItem>
-          ) : null}
-          {canResume ? (
-            <DropdownMenuItem onClick={onResume}>
-              <PlayIcon />
-              <Trans>Resume</Trans>
-            </DropdownMenuItem>
-          ) : null}
-          {askable === null ? null : (
-            <DropdownMenuItem
-              onClick={() => {
-                onAskToGoLive(askable);
-              }}
-            >
-              <SendIcon />
-              <Trans>Ask to run version {askable} for the team</Trans>
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuGroup>
+      <DropdownMenuContent align="start">
+        {canPause ? (
+          <DropdownMenuItem icon={Pause} onSelect={onPause}>
+            {t`Pause`}
+          </DropdownMenuItem>
+        ) : null}
+        {canResume ? (
+          <DropdownMenuItem icon={Play} onSelect={onResume}>
+            {t`Resume`}
+          </DropdownMenuItem>
+        ) : null}
+        {askable === null ? null : (
+          <DropdownMenuItem
+            icon={Send}
+            onSelect={() => {
+              onAskToGoLive(askable);
+            }}
+          >
+            {t`Ask to run version ${askable} for the team`}
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -356,13 +381,21 @@ export const WorkflowStatus = ({
     who === undefined || who.length === 0
       ? t`Runs for your team since ${since}`
       : t`Runs for ${users} since ${since}`;
+  const paused = t({ message: "Paused", context: "a workflow someone paused" });
   const words: Readonly<Record<StatusView["shows"], string>> = {
     stage: t`Only you see this`,
     live: runsFor,
-    paused: t({ message: "Paused", context: "a workflow someone paused" }),
+    paused,
+  };
+  // Where the bar is narrow, one word; the menu's button keeps the whole
+  // one in its name.
+  const shortWords: Readonly<Record<StatusView["shows"], string>> = {
+    stage: t`Draft`,
+    live: t`Live`,
+    paused,
   };
   return (
-    <span className="flex items-center gap-2">
+    <span {...stylex.props(styles.row)}>
       <ErrorText>{failure}</ErrorText>
       <StatusMenu
         busy={busy}
@@ -380,6 +413,7 @@ export const WorkflowStatus = ({
         onResume={() => {
           void change("resume", { revision: lifecycle.revision });
         }}
+        short={shortWords[view.shows]}
         view={view}
         word={words[view.shows]}
       />
@@ -405,19 +439,17 @@ export const LiveFacts = ({ lifecycle }: { lifecycle: WorkflowLifecycle }) => {
   const { waiting, liveVersion, liveSince } = statusOf(lifecycle);
   const since = liveSince === null ? "" : formatDate(liveSince);
   if (liveVersion === null && waiting === null) {
-    return <Trans>It doesn’t run for anyone yet.</Trans>;
+    return t`It doesn’t run for anyone yet.`;
   }
   return (
-    <span className="flex flex-col gap-1">
+    <span {...stylex.props(styles.facts)}>
       {liveVersion === null || liveSince === null ? null : (
         <span>{t`Version ${liveVersion} has run for the team since ${since}`}</span>
       )}
       {waiting === null ? null : (
-        <span className="text-muted-foreground">
-          <Trans>
-            Version {waiting} waits for approval to run for the team
-          </Trans>
-        </span>
+        <Text element="span" size="sm" tone="muted">
+          {t`Version ${waiting} waits for approval to run for the team`}
+        </Text>
       )}
     </span>
   );
@@ -494,38 +526,35 @@ export const GoLiveDecision = ({
     }
   };
   return (
-    <div className="flex max-w-sm flex-col items-start gap-2">
+    <div {...stylex.props(styles.decision)}>
       <fieldset
         aria-label={t`Let version ${version} of ${who} run for the team`}
-        className="flex flex-wrap gap-2"
+        {...stylex.props(styles.answers)}
       >
         <Button
           disabled={busy}
           onClick={() => {
             void decide("approve");
           }}
-          variant="highlight"
+          variant="approve"
         >
-          {choice.change ? (
-            <Trans>Approve the change</Trans>
-          ) : (
-            <Trans>Approve, and it runs for the team</Trans>
-          )}
+          {choice.change
+            ? t`Approve the change`
+            : t`Approve, and it runs for the team`}
         </Button>
         <Button
           disabled={busy}
           onClick={() => {
             void decide("reject");
           }}
-          variant="outline"
         >
-          <Trans>Send back</Trans>
+          {t`Send back`}
         </Button>
       </fieldset>
       {choice.selfApproval ? (
-        <p className="text-muted-foreground">
+        <Text size="sm" tone="muted">
           {t`You asked for this yourself, and nobody else may approve it, so you decide it. It is recorded as self-approved.`}
-        </p>
+        </Text>
       ) : null}
       <ErrorText>{failure}</ErrorText>
     </div>

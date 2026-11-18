@@ -4,34 +4,32 @@ import type {
   Need,
   NeedStatus,
 } from "@grasp-os/shared/stephen-requests";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-} from "@grasp-os/ui/components/card";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@grasp-os/ui/components/dropdown-menu";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouteContext } from "@tanstack/react-router";
-import { ThumbsDownIcon, UsersIcon } from "lucide-react";
 import { useState } from "react";
 
 import { setActiveChat } from "../../chat/active-chat.ts";
 import { openChat } from "../../chat/chat-layout.ts";
 import { readChoice, resolveChoice } from "../../chat/model-choice.ts";
 import type { Session } from "../../core.ts";
-import { ErrorText } from "../../error-text.tsx";
 import { formatDay, formatNumber, formatPercent } from "../../format.ts";
+import { Alert } from "../../grasp/alert/index.ts";
+import { Button } from "../../grasp/button/index.ts";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../../grasp/dropdown-menu/index.ts";
+import { Icon, People, ThumbsDown, Tool } from "../../grasp/icons/index.ts";
+import type { IconData } from "../../grasp/icons/index.ts";
+import { Text } from "../../grasp/text/index.ts";
+import { grasp } from "../../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../../use-core-action.ts";
-import { IconMark, ToolMark } from "./request-parts.tsx";
+import { ToolMark, toolIcon } from "./request-parts.tsx";
 
 // Needs you, as the prototype's `request-needs.tsx`: what five or more
 // people asked that he cannot do yet, questions whose answers are rated
@@ -40,7 +38,7 @@ import { IconMark, ToolMark } from "./request-parts.tsx";
 // the company stands on it and, once fixed, what the fix did since. "Do
 // it" asks Grasp in the corner chat and marks it as being worked on.
 
-const statusLabels = {
+export const statusLabels = {
   working: msg`Working on it`,
   fixed: msg`Fixed`,
   leftAsIs: msg`Leave as it is`,
@@ -125,24 +123,32 @@ export const useNeedState = (need: Need): string | null => {
   return t`Fixed on ${date} · ${done} of ${asked} done since`;
 };
 
+/** The tool a need would take: the brain for what he didn't know, else the first missing one. */
+const toolOf = (need: Need): string | undefined =>
+  need.kind === "unanswered" ? "brain" : need.missing[0]?.id;
+
+/** A need's mark as an icon, for a row or a panel's head that takes one. */
+export const needIcon = (need: Need): IconData => {
+  if (need.kind === "poorAnswer") {
+    return ThumbsDown;
+  }
+  if (need.kind === "quietTeam") {
+    return People;
+  }
+  const tool = toolOf(need);
+  return tool === undefined ? Tool : toolIcon(tool);
+};
+
 /** A need's mark: the tool it would take, a thumb down, the brain, or a team. */
 export const NeedMark = ({ need }: { need: Need }) => {
   const { t } = useLingui();
   if (need.kind === "poorAnswer") {
-    return (
-      <IconMark label={t`Rated down`}>
-        <ThumbsDownIcon />
-      </IconMark>
-    );
+    return <Icon icon={ThumbsDown} label={t`Rated down`} />;
   }
   if (need.kind === "quietTeam") {
-    return (
-      <IconMark label={t`A team`}>
-        <UsersIcon />
-      </IconMark>
-    );
+    return <Icon icon={People} label={t`A team`} />;
   }
-  const tool = need.kind === "unanswered" ? "brain" : need.missing[0]?.id;
+  const tool = toolOf(need);
   return tool === undefined ? null : (
     <ToolMark label={appOf(tool)} tool={tool} />
   );
@@ -210,34 +216,50 @@ export const useAskGrasp = () => {
   };
 };
 
-/** Why it waits, where it stands, and what Grasp proposes. */
-export const NeedPart = ({ need }: { need: Need }) => {
-  const { t } = useLingui();
+const styles = stylex.create({
+  why: { display: "flex", alignItems: "center", gap: grasp.space2 },
+  words: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space1,
+    paddingBlock: grasp.space3,
+    paddingInline: grasp.inspectorInset,
+  },
+  actions: { display: "flex", flexDirection: "column", gap: grasp.space2 },
+  buttons: { display: "flex", flexWrap: "wrap", gap: grasp.space2 },
+});
+
+/** Why it waits and where it stands, in a section's card of a need's panel. */
+export const NeedWhy = ({ need }: { need: Need }) => {
   const why = useNeedWhy(need);
   const state = useNeedState(need);
   return (
-    <div className="flex flex-col gap-4 px-4">
-      <p className="text-muted-foreground flex flex-col gap-1">
-        <span className="flex items-center gap-2">
-          <NeedMark need={need} />
-          <span>{why}</span>
-        </span>
-        {state === null ? null : <span>{state}</span>}
-      </p>
-      {need.proposal !== null || need.proposing ? (
-        <Card size="sm">
-          <CardHeader>
-            <CardDescription>
-              <h3>{t`Grasp proposes`}</h3>
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p>{need.proposal ?? t`Grasp is still working out a proposal.`}</p>
-          </CardContent>
-        </Card>
-      ) : null}
+    <div {...stylex.props(styles.words)}>
+      <span {...stylex.props(styles.why)}>
+        <NeedMark need={need} />
+        <Text element="span" size="sm">
+          {why}
+        </Text>
+      </span>
+      {state === null ? null : (
+        <Text size="sm" tone="muted">
+          {state}
+        </Text>
+      )}
     </div>
   );
+};
+
+/** What Grasp proposes for a need, or that it is still working one out; null when it has none or there is no need. */
+export const useNeedProposal = (need: Need | null): string | null => {
+  const { t } = useLingui();
+  if (need === null) {
+    return null;
+  }
+  if (need.proposal !== null) {
+    return need.proposal;
+  }
+  return need.proposing ? t`Grasp is still working out a proposal.` : null;
 };
 
 /**
@@ -275,23 +297,23 @@ export const NeedActions = ({
       await mark("working");
     }
   };
+  const failed = failure ?? asking.failure;
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex gap-2">
+    <div {...stylex.props(styles.actions)}>
+      <div {...stylex.props(styles.buttons)}>
         <Button
-          className="flex-1"
           disabled={busy || asking.busy}
           onClick={() => {
             void doIt();
           }}
+          size="sm"
+          variant="ink"
         >
           {t`Do it`}
         </Button>
         {canManage ? (
           <DropdownMenu>
-            <DropdownMenuTrigger
-              render={<Button disabled={busy} variant="outline" />}
-            >
+            <DropdownMenuTrigger disabled={busy} size="sm" variant="quiet">
               {current === null ? t`Mark as` : i18n._(statusLabels[current])}
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -300,7 +322,7 @@ export const NeedActions = ({
                 .map((status) => (
                   <DropdownMenuItem
                     key={status}
-                    onClick={() => {
+                    onSelect={() => {
                       void mark(status);
                     }}
                   >
@@ -309,7 +331,7 @@ export const NeedActions = ({
                 ))}
               {current === null ? null : (
                 <DropdownMenuItem
-                  onClick={() => {
+                  onSelect={() => {
                     void mark(null);
                   }}
                 >
@@ -320,7 +342,7 @@ export const NeedActions = ({
           </DropdownMenu>
         ) : null}
       </div>
-      <ErrorText>{failure ?? asking.failure}</ErrorText>
+      {failed === undefined ? null : <Alert tone="danger">{failed}</Alert>}
     </div>
   );
 };

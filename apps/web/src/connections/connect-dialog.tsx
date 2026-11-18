@@ -12,27 +12,45 @@ import type {
 import { failureText } from "@grasp-os/shared/errors";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { AutoHeight, FadeIn } from "@grasp-os/ui/components/auto-height";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-} from "@grasp-os/ui/components/dialog";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { CheckIcon } from "lucide-react";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
 import { LoadingLines } from "../frame/page-states.tsx";
+import { Alert } from "../grasp/alert/index.ts";
+import type { ButtonWords } from "../grasp/button/button.tsx";
+import { Button } from "../grasp/button/index.ts";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "../grasp/dialog/index.ts";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+} from "../grasp/field/index.ts";
+import { visuallyHidden } from "../grasp/hidden/hidden.ts";
+import {
+  Item,
+  ItemContent,
+  ItemGroup,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { arrive } from "../grasp/motion/arrive.ts";
+import { RadioGroup, RadioGroupItem } from "../grasp/radio-group/index.ts";
+import { Spinner } from "../grasp/spinner/index.ts";
+import { Stepper } from "../grasp/stepper/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
-import { AppLogo } from "./app-logo.tsx";
 import type { Integration } from "./integrations.ts";
 import { ToolChoice } from "./tool-choice.tsx";
 import { toolRules, withAllowed, withRead } from "./tool-choices.ts";
@@ -102,84 +120,70 @@ export const signInAgainTarget = (
       canReconnect(connection, integration.offered, identity)
   );
 
+const styles = stylex.create({
+  flow: { display: "grid", gap: grasp.space4 },
+  part: { display: "grid", gap: grasp.space2 },
+  actions: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: grasp.space2,
+  },
+  waiting: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space2,
+    minHeight: grasp.controlMd,
+  },
+  // The tools to choose from, scrolled within the dialog past a few.
+  tools: { maxHeight: "16rem", overflowY: "auto" },
+});
+
+/**
+ * A step's part of the dialog: what it asks. Grasp UI's Stepper above names
+ * the steps and says where they stand, and the dialog's title names a flow
+ * of one, so the step's own name is said only to a screen reader, as the
+ * heading its part sits under: shown, it would say the Stepper's words
+ * again. The Stepper takes a line under each name, not its controls, so
+ * each step's controls stand here, in order.
+ */
+const Step = ({
+  title,
+  state,
+  children,
+}: {
+  title: string;
+  state: StepState;
+  children: ReactNode;
+}) => (
+  <section data-state={state} {...stylex.props(styles.part)}>
+    <h3 {...stylex.props(visuallyHidden)}>{title}</h3>
+    {children}
+  </section>
+);
+
 /** Where a step is: waiting its turn, the one to act on, or done. */
 type StepState = "idle" | "active" | "done";
 
-const ringClass: Readonly<Record<StepState, string>> = {
-  idle: "bg-card text-muted-foreground grid size-6 place-items-center rounded-full border text-xs transition-colors duration-300",
-  active:
-    "border-foreground bg-card grid size-6 place-items-center rounded-full border text-xs font-medium transition-colors duration-300",
-  done: "bg-muted grid size-6 place-items-center rounded-full border border-transparent transition-colors duration-300",
-};
-
-/**
- * A step's number in a ring, as in the prototype (`StepRing`): grey while
- * it waits, dark while it is the one to act on, and a check that pops in
- * once it is done.
- */
-const StepRing = ({ n, state }: { n: number; state: StepState }) => {
+/** The Stepper over a flow's steps, from where each stands; none for one step. */
+const Progress = ({
+  steps,
+}: {
+  steps: readonly { title: string; state: StepState }[];
+}) => {
   const { t } = useLingui();
+  if (steps.length < 2) {
+    return null;
+  }
+  const current = steps.findIndex(({ state }) => state === "active");
   return (
-    <span className={ringClass[state]}>
-      {state === "done" ? (
-        <CheckIcon
-          aria-label={t({
-            message: "Done",
-            context: "a step that is finished",
-          })}
-          className="motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-50 size-3.5 motion-safe:duration-300"
-        />
-      ) : (
-        n
-      )}
-    </span>
+    <Stepper
+      aria-label={t`Steps`}
+      steps={steps.map(({ title }) => ({ label: title }))}
+      value={current === -1 ? steps.length : current}
+    />
   );
 };
-
-/** A step: its ring, its title (muted unless it is the one to act on), and what it asks. */
-const Step = ({
-  n,
-  title,
-  state,
-  last = false,
-  children,
-}: {
-  n: number;
-  title: string;
-  state: StepState;
-  last?: boolean;
-  children: ReactNode;
-}) => (
-  <li className="flex gap-3" data-state={state}>
-    <div className="flex w-6 flex-none flex-col items-center">
-      <StepRing n={n} state={state} />
-      {last ? null : (
-        <span
-          aria-hidden="true"
-          className="my-1 w-px flex-1 border-l border-dashed"
-        />
-      )}
-    </div>
-    <div
-      className={
-        last
-          ? "flex min-w-0 flex-1 flex-col gap-2"
-          : "flex min-w-0 flex-1 flex-col gap-2 pb-5"
-      }
-    >
-      <h3
-        className={
-          state === "active"
-            ? "flex h-6 items-center font-medium transition-colors"
-            : "text-muted-foreground flex h-6 items-center transition-colors"
-        }
-      >
-        {title}
-      </h3>
-      {children}
-    </div>
-  </li>
-);
 
 /**
  * Starting the sign-in at core, which answers with the provider's address
@@ -245,28 +249,27 @@ const Starting = ({
       clearTimeout(timer);
     };
   }, []);
+  const { t } = useLingui();
   return (
-    <div className="flex flex-col gap-2">
-      <output className="flex h-10 items-center gap-2 rounded-lg border px-3">
-        <span className="text-muted-foreground">
-          <Spinner className="size-3.5" />
-        </span>
-        <Trans>Waiting for {app}</Trans>
+    <div {...stylex.props(styles.part)}>
+      <output {...stylex.props(styles.waiting)}>
+        <Spinner aria-hidden />
+        {t`Waiting for ${app}`}
       </output>
       {long ? (
-        <p className="text-muted-foreground">
-          <Trans>
-            Taking long?{" "}
-            <Button
-              disabled={disabled}
-              onClick={onRetry}
-              size="xs"
-              variant="link"
-            >
-              Try again
-            </Button>
-          </Trans>
-        </p>
+        <div {...stylex.props(styles.actions)}>
+          <Text element="span" size="sm" tone="muted">
+            {t`Taking long?`}
+          </Text>
+          <Button
+            disabled={disabled}
+            onClick={onRetry}
+            size="xs"
+            variant="ghost"
+          >
+            {t`Try again`}
+          </Button>
+        </div>
       ) : null}
     </div>
   );
@@ -284,6 +287,7 @@ const Actions = ({
   onClose,
   onStart,
   children,
+  cancel,
 }: {
   app: string;
   /** Which attempt is waiting: each starts the waiting row over. */
@@ -292,25 +296,31 @@ const Actions = ({
   disabled?: boolean;
   onClose: () => void;
   onStart: () => void;
-  children: ReactNode;
+  children: ButtonWords;
+  /** Cancel, in the page's language. */
+  cancel: string;
 }) =>
-  // Each state its own key, so the one that comes in fades in (and each
-  // attempt's waiting row starts over), rather than swapping in place.
+  // Each state its own key, so the one that comes in arrives anew (and
+  // each attempt's waiting row starts over), rather than swapping in place.
   busy ? (
-    <FadeIn key={`starting-${attempt}`}>
+    <div
+      data-slot="fade-in"
+      key={`starting-${attempt}`}
+      {...stylex.props(arrive.in)}
+    >
       <Starting app={app} disabled={disabled} onRetry={onStart} />
-    </FadeIn>
+    </div>
   ) : (
-    <FadeIn key="ready">
-      <div className="flex items-center gap-2">
-        <Button disabled={disabled} onClick={onStart}>
-          {children}
-        </Button>
-        <Button onClick={onClose} variant="outline">
-          <Trans>Cancel</Trans>
-        </Button>
-      </div>
-    </FadeIn>
+    <div
+      data-slot="fade-in"
+      key="ready"
+      {...stylex.props(styles.actions, arrive.in)}
+    >
+      <Button disabled={disabled} onClick={onStart} variant="ink">
+        {children}
+      </Button>
+      <Button onClick={onClose}>{cancel}</Button>
+    </div>
   );
 
 /**
@@ -331,99 +341,85 @@ export const signInHostOf = (integration: Integration): string | undefined => {
   return provider.success ? signInHosts[provider.data] : undefined;
 };
 
-/** What signing in means, in three lines; where it happens, when known. */
-const SignInSteps = ({ app, host }: { app: string; host?: string }) => (
-  <>
-    <p className="text-muted-foreground">
-      <Trans>Signing in happens at {app}. It takes about a minute.</Trans>
-    </p>
-    <ol className="flex flex-col overflow-hidden rounded-lg border">
-      <li className="flex min-h-11 flex-wrap items-center gap-1 border-b px-3 py-2.5">
-        {host === undefined ? (
-          <Trans>You sign in on {app}’s own page.</Trans>
-        ) : (
-          <Trans comment="{host} is the web address of the sign-in page, e.g. login.microsoftonline.com.">
-            You sign in at{" "}
-            <span className="bg-muted rounded-sm border px-1 font-mono text-xs">
-              {host}
-            </span>
-          </Trans>
-        )}
-      </li>
-      <li className="flex min-h-11 items-center border-b px-3 py-2.5">
-        <Trans>You approve there. {app} shows what Grasp asks for.</Trans>
-      </li>
-      <li className="flex min-h-11 items-center px-3 py-2.5">
-        <Trans>You come back to {app}’s page here.</Trans>
-      </li>
-    </ol>
-  </>
-);
+/** What signing in means, in three rows; where it happens, when known. */
+const SignInSteps = ({ app, host }: { app: string; host?: string }) => {
+  const { t } = useLingui();
+  const lines = [
+    host === undefined
+      ? t`You sign in on ${app}’s own page.`
+      : t({
+          message: `You sign in at ${host}`,
+          comment:
+            "{host} is the web address of the sign-in page, e.g. login.microsoftonline.com.",
+        }),
+    t`You approve there. ${app} shows what Grasp asks for.`,
+    t`You come back to ${app}’s page here.`,
+  ];
+  return (
+    <>
+      <Text size="sm" tone="muted">
+        {t`Signing in happens at ${app}. It takes about a minute.`}
+      </Text>
+      <ItemGroup aria-label={t`Signing in`} separated>
+        {lines.map((line) => (
+          <Item key={line} size="xs" variant="outline">
+            <ItemContent>
+              <ItemTitle>{line}</ItemTitle>
+            </ItemContent>
+          </Item>
+        ))}
+      </ItemGroup>
+    </>
+  );
+};
 
-/** One of the scope choice's options: its radio, its name and what it means. */
-const ScopeOption = ({
-  value,
-  scope,
-  onScope,
-  children,
-}: {
-  value: ConnectionScope;
-  scope: ConnectionScope;
-  onScope: (scope: ConnectionScope) => void;
-  children: ReactNode;
-}) => (
-  <label className="has-checked:bg-muted flex cursor-pointer items-start gap-3 border-b px-3 py-2.5 last:border-b-0">
-    <input
-      checked={scope === value}
-      className="accent-primary mt-1"
-      name="scope"
-      onChange={() => {
-        onScope(value);
-      }}
-      // A click on the option already chosen accepts it too, which
-      // changes nothing and so fires no change.
-      onClick={() => {
-        onScope(value);
-      }}
-      type="radio"
-    />
-    <span className="flex flex-col gap-0.5">{children}</span>
-  </label>
-);
-
-/** An admin's choice: connect for themselves, or for everyone. */
+/** An admin's choice: connect for themselves, or for everyone, chosen by its words. */
 const ScopeChoice = ({
   scope,
   onScope,
 }: {
   scope: ConnectionScope;
   onScope: (scope: ConnectionScope) => void;
-}) => (
-  <fieldset className="flex flex-col overflow-hidden rounded-lg border">
-    {/* The step's title says it on screen. */}
-    <legend className="sr-only">
-      <Trans>Who uses it</Trans>
-    </legend>
-    <ScopeOption onScope={onScope} scope={scope} value="personal">
-      <span>
-        <Trans>Just for you</Trans>
-      </span>
-      <span className="text-muted-foreground">
-        <Trans>Only you can use it.</Trans>
-      </span>
-    </ScopeOption>
-    <ScopeOption onScope={onScope} scope={scope} value="shared">
-      <span>
-        <Trans>For everyone</Trans>
-      </span>
-      <span className="text-muted-foreground">
-        <Trans>
-          Your organization uses it through the permissions you grant.
-        </Trans>
-      </span>
-    </ScopeOption>
-  </fieldset>
-);
+}) => {
+  const { t } = useLingui();
+  return (
+    <RadioGroup
+      aria-label={t`Who uses it`}
+      onValueChange={(value) => {
+        onScope(value === "shared" ? "shared" : "personal");
+      }}
+      value={scope}
+    >
+      <Field orientation="horizontal">
+        <RadioGroupItem
+          // A press on the option already chosen accepts it too.
+          onClick={() => {
+            onScope("personal");
+          }}
+          value="personal"
+        />
+        <FieldContent>
+          <FieldLabel>{t`Just for you`}</FieldLabel>
+          <FieldDescription>{t`Only you can use it.`}</FieldDescription>
+        </FieldContent>
+      </Field>
+      <Field orientation="horizontal">
+        <RadioGroupItem
+          onClick={() => {
+            onScope("shared");
+          }}
+          value="shared"
+        />
+        <FieldContent>
+          <FieldLabel>{t`For everyone`}</FieldLabel>
+          <FieldDescription>
+            {t`Your organization uses it through the permissions you grant.`}
+          </FieldDescription>
+        </FieldContent>
+      </Field>
+    </RadioGroup>
+  );
+};
 
 /** The native provider's sign-in: who uses it (an admin chooses), then signing in. */
 const NativeFlow = ({
@@ -471,28 +467,36 @@ const NativeFlow = ({
         app={app}
         attempt={attempt}
         busy={busy}
+        cancel={t`Cancel`}
         onClose={onClose}
         onStart={() => {
           void start();
         }}
       >
-        <Trans>Sign in to {app}</Trans>
+        {t`Sign in to ${app}`}
       </Actions>
-      <ErrorText>{failure}</ErrorText>
+      {failure === undefined ? null : (
+        <Alert title={failure} variant="danger" />
+      )}
     </>
   );
   if (again !== undefined || !isAdmin(identity.role)) {
     return (
-      <ol className="flex flex-col">
-        <Step last n={1} state="active" title={t`Sign in`}>
+      <div {...stylex.props(styles.flow)}>
+        <Step state="active" title={t`Sign in`}>
           {signIn}
         </Step>
-      </ol>
+      </div>
     );
   }
+  const steps = [
+    { title: t`Who uses it`, state: chose ? "done" : "active" },
+    { title: t`Sign in`, state: chose ? "active" : "idle" },
+  ] as const;
   return (
-    <ol className="flex flex-col">
-      <Step n={1} state={chose ? "done" : "active"} title={t`Who uses it`}>
+    <div {...stylex.props(styles.flow)}>
+      <Progress steps={steps} />
+      <Step state={steps[0].state} title={steps[0].title}>
         <ScopeChoice
           onScope={(chosen) => {
             setScope(chosen);
@@ -501,10 +505,10 @@ const NativeFlow = ({
           scope={scope}
         />
       </Step>
-      <Step last n={2} state={chose ? "active" : "idle"} title={t`Sign in`}>
+      <Step state={steps[1].state} title={steps[1].title}>
         {signIn}
       </Step>
-    </ol>
+    </div>
   );
 };
 
@@ -560,84 +564,72 @@ const ComposioFlow = ({
         })
     );
   };
+  const steps = [
+    {
+      title: t`What Grasp may do`,
+      state: allowed.length === 0 ? "active" : "done",
+    },
+    {
+      title: t`Consent and sign in`,
+      state: allowed.length === 0 ? "idle" : "active",
+    },
+  ] as const;
   return (
-    <ol className="flex flex-col">
-      <Step
-        n={1}
-        state={allowed.length === 0 ? "active" : "done"}
-        title={t`What Grasp may do`}
-      >
-        <p className="text-muted-foreground">
-          <Trans>
-            A tool switched on starts as Read where Composio says it only reads;
-            Grasp doesn&apos;t check that. A Read tool runs without asking. A
-            call of a Write tool from chat, or from a person using an App, waits
-            for that person to confirm it; a workflow&apos;s run makes it as one
-            of its steps. Press a tool&apos;s badge to change it. Mark a tool
-            Read only if it changes nothing: marked wrongly, it changes things
-            without asking.
-          </Trans>
-        </p>
+    <div {...stylex.props(styles.flow)}>
+      <Progress steps={steps} />
+      <Step state={steps[0].state} title={steps[0].title}>
+        <Text size="sm" tone="muted">
+          {t`A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's Read or Write to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking.`}
+        </Text>
         {listed === undefined ? <LoadingLines /> : null}
-        <ErrorText>
-          {listed === undefined ? undefined : notLoadedText(listed, i18n)}
-        </ErrorText>
+        {listed === undefined || listed.state === "ready" ? null : (
+          <Alert title={notLoadedText(listed, i18n) ?? ""} variant="danger" />
+        )}
         {tools === undefined ? null : (
-          <FadeIn>
-            <fieldset className="flex flex-col gap-2">
-              <legend className="sr-only">
-                <Trans>Tools to allow</Trans>
-              </legend>
-              <ul className="flex max-h-64 flex-col overflow-y-auto rounded-lg border">
-                {tools.map((tool) => (
-                  <ToolChoice
-                    choice={allowed.find((choice) => choice.name === tool.name)}
-                    key={tool.name}
-                    onAllow={(allow) => {
-                      setAllowed((current) =>
-                        withAllowed(current, tool, allow)
-                      );
-                    }}
-                    onRead={(read) => {
-                      setAllowed((current) =>
-                        withRead(current, tool.name, read)
-                      );
-                    }}
-                    tool={tool}
-                  />
-                ))}
-              </ul>
-            </fieldset>
-          </FadeIn>
+          <div {...stylex.props(styles.tools, arrive.in)}>
+            <ItemGroup aria-label={t`Tools to allow`} separated>
+              {tools.map((tool) => (
+                <ToolChoice
+                  choice={allowed.find((choice) => choice.name === tool.name)}
+                  key={tool.name}
+                  onAllow={(allow) => {
+                    setAllowed((current) => withAllowed(current, tool, allow));
+                  }}
+                  onRead={(read) => {
+                    setAllowed((current) => withRead(current, tool.name, read));
+                  }}
+                  tool={tool}
+                />
+              ))}
+            </ItemGroup>
+          </div>
         )}
       </Step>
-      <Step
-        last
-        n={2}
-        state={allowed.length === 0 ? "idle" : "active"}
-        title={t`Consent and sign in`}
-      >
+      <Step state={steps[1].state} title={steps[1].title}>
         {/* The consent stays as written: core keeps a hash of the exact
             text consented to (connection-list.tsx shows it again). */}
-        <blockquote className="text-muted-foreground border-l-2 pl-3">
+        <Text size="sm" tone="muted">
           {composioConsentText}
-        </blockquote>
+        </Text>
         <SignInSteps app={app} />
         <Actions
           app={app}
           attempt={attempt}
           busy={busy}
+          cancel={t`Cancel`}
           disabled={allowed.length === 0}
           onClose={onClose}
           onStart={() => {
             void connect();
           }}
         >
-          <Trans>Consent and connect</Trans>
+          {t`Consent and connect`}
         </Actions>
-        <ErrorText>{failure}</ErrorText>
+        {failure === undefined ? null : (
+          <Alert title={failure} variant="danger" />
+        )}
       </Step>
-    </ol>
+    </div>
   );
 };
 
@@ -665,56 +657,40 @@ export const ConnectDialog = ({
   const app = integration.name;
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent
-        className="max-h-svh overflow-y-auto sm:max-w-md"
-        closeLabel={t`Close`}
-      >
-        <header className="flex flex-col gap-3">
-          <AppLogo logo={integration.logo} name={app} size="sm" />
-          <div className="flex flex-col gap-1">
-            <DialogTitle>
-              {again === undefined
-                ? t`Connect ${app}`
-                : t`Sign in to ${app} again`}
-            </DialogTitle>
-            <DialogDescription>
-              {integration.source === "native"
-                ? t`Through Grasp's own connector, which keeps the access in your deployment. Your workflows can use it once it is connected, only for what you allow.`
-                : t`Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow.`}
-            </DialogDescription>
-          </div>
-        </header>
-        {/* Only while open, so each opening starts from its first step.
-            The height eases as a step's content changes, and the steps
-            fade in (still, with reduced motion). */}
-        <AutoHeight>
+      <DialogContent closeLabel={t`Close`}>
+        <DialogTitle>
+          {again === undefined ? t`Connect ${app}` : t`Sign in to ${app} again`}
+        </DialogTitle>
+        <DialogDescription>
+          {integration.source === "native"
+            ? t`Through Grasp's own connector, which keeps the access in your deployment. Your workflows can use it once it is connected, only for what you allow.`
+            : t`Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow.`}
+        </DialogDescription>
+        <DialogBody>
+          {/* Only while open, so each opening starts from its first step. */}
           {open && integration.source === "native" ? (
-            <FadeIn>
-              <NativeFlow
-                again={again}
-                identity={identity}
-                integration={integration}
-                onClose={() => {
-                  onOpenChange(false);
-                }}
-                returnTo={
-                  returnTo ?? returnToOf(integration.key, again !== undefined)
-                }
-              />
-            </FadeIn>
+            <NativeFlow
+              again={again}
+              identity={identity}
+              integration={integration}
+              onClose={() => {
+                onOpenChange(false);
+              }}
+              returnTo={
+                returnTo ?? returnToOf(integration.key, again !== undefined)
+              }
+            />
           ) : null}
           {open && integration.source === "composio" ? (
-            <FadeIn>
-              <ComposioFlow
-                integration={integration}
-                onClose={() => {
-                  onOpenChange(false);
-                }}
-                returnTo={returnTo ?? returnToOf(integration.key)}
-              />
-            </FadeIn>
+            <ComposioFlow
+              integration={integration}
+              onClose={() => {
+                onOpenChange(false);
+              }}
+              returnTo={returnTo ?? returnToOf(integration.key)}
+            />
           ) : null}
-        </AutoHeight>
+        </DialogBody>
       </DialogContent>
     </Dialog>
   );

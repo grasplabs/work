@@ -41,6 +41,8 @@ import { Skeleton } from "../skeleton";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { ms } from "../tokens/tokens.values";
 import { TooltipContent } from "../tooltip";
+import { useWords, withGiven } from "../words/words";
+import { keyValueWords } from "./words";
 
 /** What a caller may style: where it sits and how wide it is. */
 export type KeyValueLayoutStyle = LayoutStyle;
@@ -133,14 +135,6 @@ export interface KeyValueLabels {
   /** What a screen reader hears for a value that is still on its way. */
   pending: string;
 }
-
-/** Its words in English: replace any of them through `labels`. */
-const englishLabels: KeyValueLabels = {
-  copy: (name) => `Copy ${name.toLowerCase()}`,
-  copied: "Copied",
-  failed: "Could not copy",
-  pending: "Loading",
-};
 
 const styles = stylex.create({
   list: {
@@ -747,7 +741,7 @@ export const KeyValueList = ({
   names = "shown",
   style,
 }: KeyValueListProps) => {
-  const labels = { ...englishLabels, ...given };
+  const labels = withGiven(useWords("keyValue", keyValueWords), given ?? {});
   const inline = layout === "inline";
   if (
     inline &&

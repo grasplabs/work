@@ -1,6 +1,5 @@
 // @vitest-environment happy-dom
 import type { ChatSummary, ChatUpdate } from "@grasp-os/shared/chat";
-import { Toaster } from "@grasp-os/ui/components/toast";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -16,6 +15,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { Toaster } from "../grasp/toast/index.ts";
 import { activeChat, setActiveChat } from "./active-chat.ts";
 import { chatLink } from "./chat-link.ts";
 import { ChatMoreMenu, ChatPanelTitle } from "./chat-more.tsx";
@@ -129,7 +129,7 @@ const opened = async (
     const { chatId: open } = useParams({ strict: false });
     const shown = all.find(({ id }) => id === open) ?? chat;
     return (
-      <Toaster>
+      <>
         {/* Its own for each chat, as the chat's head keys them. */}
         <ChatPanelTitle chat={shown} key={`title-${shown.id}`} />
         <ChatMoreMenu
@@ -137,7 +137,8 @@ const opened = async (
           key={`menu-${shown.id}`}
           sourceNames={new Map()}
         />
-      </Toaster>
+        <Toaster />
+      </>
     );
   };
   // Each chat at its own page, as in the app (chat-link.ts).
@@ -260,8 +261,11 @@ const typeInto = async (field: HTMLInputElement, text: string) => {
 /** The dialog's button `name`. */
 const dialogButton = (name: string): HTMLButtonElement => {
   const found = [
-    ...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
-  ].find((button) => button.textContent?.trim() === name);
+    ...document.querySelectorAll<HTMLButtonElement>(
+      '[role="dialog"] button, [role="alertdialog"] button'
+    ),
+    // A button's words, then what it says while it works, hidden till then.
+  ].find((button) => button.textContent?.trim().startsWith(name));
   if (found === undefined) {
     throw new Error(`No button ${name} in the dialog`);
   }
@@ -336,9 +340,10 @@ describe("the open chat's name and menu", () => {
     const { writes, router } = await opened(leave);
     await choose("Delete");
     expect(writes).toStrictEqual([]);
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
-      "Delete “Leave”?"
-    );
+    // Asked in an alert dialog first.
+    expect(
+      document.querySelector('[role="alertdialog"]')?.textContent
+    ).toContain("Delete “Leave”?");
     await press(dialogButton("Delete"));
     expect(writes).toStrictEqual(["remove chat-1"]);
     expect(activeChat()).toBeUndefined();

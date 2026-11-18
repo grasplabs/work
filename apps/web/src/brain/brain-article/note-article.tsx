@@ -1,12 +1,14 @@
+import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
+import type { ReactNode } from "react";
+
 import {
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
-} from "@grasp-os/ui/components/tabs";
-import { useState } from "react";
-import type { ReactNode } from "react";
-
+} from "../../grasp/tabs/index.ts";
+import { grasp, media } from "../../grasp/tokens/tokens.stylex.ts";
 import { Fold } from "./kern.tsx";
 
 // A note's page, as the prototype lays it out
@@ -19,6 +21,72 @@ export interface SideTab {
   count?: number;
   content: ReactNode;
 }
+
+/** Where the window has room for the side beside the article. */
+const WIDE = media.fromRail;
+
+const styles = stylex.create({
+  page: {
+    display: "flex",
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  article: {
+    flexGrow: 1,
+    minWidth: 0,
+    overflowY: "auto",
+  },
+  column: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space6,
+    boxSizing: "border-box",
+    width: "100%",
+    maxWidth: `calc(12 * ${grasp.space16})`,
+    marginInline: "auto",
+    paddingTop: grasp.space8,
+    paddingBottom: grasp.space24,
+    paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
+  },
+  // Too narrow for the side: its tabs fold in at the foot of the article instead.
+  folded: {
+    display: { default: "flex", [WIDE]: "none" },
+    flexDirection: "column",
+    gap: grasp.space1,
+    paddingTop: grasp.space4,
+    borderTopWidth: grasp.hairline,
+    borderTopStyle: "solid",
+    borderTopColor: grasp.line,
+  },
+  footer: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space1,
+    paddingTop: grasp.space4,
+    borderTopWidth: grasp.hairline,
+    borderTopStyle: "solid",
+    borderTopColor: grasp.line,
+  },
+  side: {
+    display: { default: "none", [WIDE]: "flex" },
+    flexDirection: "column",
+    flexShrink: 0,
+    boxSizing: "border-box",
+    width: `calc(6 * ${grasp.space16})`,
+    overflowY: "auto",
+    paddingTop: grasp.space3,
+    paddingBottom: grasp.space24,
+    paddingInline: grasp.space5,
+    backgroundColor: grasp.soft,
+    borderInlineStartWidth: grasp.hairline,
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: grasp.line,
+  },
+  count: {
+    marginInlineStart: grasp.space2,
+    color: grasp.muted,
+  },
+});
 
 /**
  * A note's page in the brain. Less is more: the article is the banner, the title, a sentence or the
@@ -42,15 +110,14 @@ export const NoteArticle = ({
   // The tab beside the note: the first, or the one picked.
   const [side, setSide] = useState<string>();
   return (
-    <div className="flex min-h-0 flex-1">
-      <article className="min-w-0 flex-1 overflow-y-auto">
-        <div className="@container mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 pt-8 pb-28 md:px-12">
+    <div {...stylex.props(styles.page)}>
+      <article {...stylex.props(styles.article)}>
+        <div {...stylex.props(styles.column)}>
           {toolbar}
           {header}
           {children}
-          {/* Too narrow for the side: its tabs fold in here instead. */}
           {tabs.length > 0 ? (
-            <div className="flex flex-col gap-1 border-t pt-4 2xl:hidden">
+            <div {...stylex.props(styles.folded)}>
               {tabs.map((tab) => (
                 <Fold count={tab.count} key={tab.value} title={tab.label}>
                   {tab.content}
@@ -59,34 +126,32 @@ export const NoteArticle = ({
             </div>
           ) : null}
           {footer === undefined ? null : (
-            <footer className="flex flex-col gap-1 border-t pt-4">
-              {footer}
-            </footer>
+            <footer {...stylex.props(styles.footer)}>{footer}</footer>
           )}
         </div>
       </article>
-      <aside className="bg-muted/50 hidden w-96 flex-none flex-col overflow-y-auto border-l px-5 pt-3 pb-28 2xl:flex">
+      <aside {...stylex.props(styles.side)}>
         <Tabs
-          onValueChange={(value: string) => {
-            setSide(value);
+          onValueChange={(value) => {
+            if (value !== null) {
+              setSide(value);
+            }
           }}
           value={tabs.some((tab) => tab.value === side) ? side : tabs[0]?.value}
         >
-          <TabsList variant="line">
+          <TabsList>
             {tabs.map((tab) => (
               <TabsTrigger key={tab.value} value={tab.value}>
                 {tab.label}
                 {tab.count === undefined ? null : (
-                  <span className="text-muted-foreground font-normal">
-                    {tab.count}
-                  </span>
+                  <span {...stylex.props(styles.count)}>{tab.count}</span>
                 )}
               </TabsTrigger>
             ))}
           </TabsList>
           {tabs.map((tab) => (
             <TabsContent key={tab.value} value={tab.value}>
-              <div className="pt-4">{tab.content}</div>
+              {tab.content}
             </TabsContent>
           ))}
         </Tabs>

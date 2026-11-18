@@ -1,18 +1,38 @@
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
 
 import { confirmGate } from "./confirm-gate.ts";
 import type { ConfirmGate } from "./confirm-gate.ts";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+} from "./grasp/alert-dialog/index.ts";
+import { grasp } from "./grasp/tokens/tokens.stylex.ts";
+
+const styles = stylex.create({
+  // Where it goes, every character of it: a lookalike address shows.
+  address: {
+    margin: 0,
+    fontFamily: grasp.fontMono,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    overflowWrap: "anywhere",
+    color: grasp.ink,
+  },
+  url: {
+    margin: 0,
+    fontFamily: grasp.fontMono,
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+    overflowWrap: "anywhere",
+    color: grasp.muted,
+  },
+});
 
 // The page's confirmation of a link an App's page asks to open (spec
 // 10.7.7, decision 2 on GRA-259), when the person didn't just click in
@@ -105,25 +125,16 @@ export const LinkConfirmDialog = ({
       open={pending !== undefined}
     >
       <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{t`Open a link outside Grasp?`}</AlertDialogTitle>
-          <AlertDialogDescription>
-            <Trans>
-              This page wants to open another site in a new tab. Open it only if
-              you expected to go there.
-            </Trans>
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <p className="font-mono text-sm break-all">{pending?.origin}</p>
+        <AlertDialogTitle>{t`Open a link outside Grasp?`}</AlertDialogTitle>
+        <AlertDialogDescription>
+          {t`This page wants to open another site in a new tab. Open it only if you expected to go there.`}
+        </AlertDialogDescription>
+        <p {...stylex.props(styles.address)}>{pending?.origin}</p>
         {pending?.url === undefined ? null : (
-          <p className="text-muted-foreground font-mono text-xs break-all">
-            {pending.url}
-          </p>
+          <p {...stylex.props(styles.url)}>{pending.url}</p>
         )}
         <AlertDialogFooter>
-          <AlertDialogCancel>
-            <Trans>Cancel</Trans>
-          </AlertDialogCancel>
+          <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
           <AlertDialogAction
             disabled={ready !== pending}
             onClick={(event) => {
@@ -143,8 +154,9 @@ export const LinkConfirmDialog = ({
             }}
             onKeyDown={press}
             onPointerDown={press}
+            variant="ink"
           >
-            <Trans context="open a link to another site">Open</Trans>
+            {t({ message: "Open", context: "open a link to another site" })}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

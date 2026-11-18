@@ -6,11 +6,13 @@ import { useRef } from "react";
 
 import { Composer } from "../composer/composer";
 import { grasp } from "../tokens/tokens.stylex";
+import { useWords, withGiven } from "../words/words";
 import { defaultScenes } from "./backdrop";
 import type { BackdropLayoutStyle } from "./backdrop";
 import { BackdropField } from "./field";
 import { byNewName, schemeOf } from "./look";
 import type { BackdropLook } from "./look";
+import { backdropPreviewWords } from "./words";
 
 /** Every prop a BackdropPreview takes. */
 export interface BackdropPreviewProps {
@@ -105,14 +107,22 @@ const noSend = () => {
 export const BackdropPreview = ({
   look: lookDeprecated,
   variant,
-  title = "What should we look at today?",
-  placeholder = "Ask anything",
+  title: titleGiven,
+  placeholder: placeholderGiven,
   label: labelDeprecated,
-  "aria-label": label = labelDeprecated ?? "Preview of your chat backdrop",
+  "aria-label": labelGiven,
   scenes = defaultScenes,
   style: styleProp,
   layout,
 }: BackdropPreviewProps) => {
+  const { title, placeholder, label } = withGiven(
+    useWords("backdropPreview", backdropPreviewWords),
+    {
+      title: titleGiven,
+      placeholder: placeholderGiven,
+      label: labelGiven ?? labelDeprecated,
+    }
+  );
   const look = byNewName(
     variant,
     lookDeprecated,

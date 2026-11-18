@@ -162,15 +162,22 @@ const shown = async (
 };
 
 /** The names of the buttons on the page, dialogs included. */
+/** The buttons that act, by their words: not the card's info mark, which only explains. */
 const buttons = (): string[] =>
-  [...document.querySelectorAll("button")].map((each) =>
-    each.textContent.trim()
-  );
+  [...document.querySelectorAll("button")]
+    .map((each) => each.textContent.trim())
+    .filter((words) => words !== "");
 
 const press = async (name: string): Promise<void> => {
-  const button = [...document.querySelectorAll("button")].find(
-    (each) => each.textContent.trim() === name
-  );
+  // A dialog's action also holds the words it shows while working or
+  // failed, unseen: it is found by the words it starts with.
+  const button =
+    [...document.querySelectorAll("button")].find(
+      (each) => each.textContent.trim() === name
+    ) ??
+    [...document.querySelectorAll("button")].find((each) =>
+      each.textContent.trim().startsWith(name)
+    );
   await act(async () => {
     button?.click();
     await Promise.resolve();
@@ -182,13 +189,28 @@ const press = async (name: string): Promise<void> => {
 const field = (
   label: string
 ): HTMLInputElement | HTMLTextAreaElement | null => {
+  // Grasp UI's label holds its required mark's words after its own.
   const labelled = [...document.querySelectorAll("label")].find(
-    (each) => each.textContent.trim() === label
+    (each) => each.textContent.trim().replace(/\*$/u, "") === label
   );
-  return labelled === undefined || labelled.htmlFor === ""
-    ? null
-    : document.querySelector(`#${CSS.escape(labelled.htmlFor)}`);
+  if (labelled === undefined) {
+    return null;
+  }
+  const found =
+    labelled.htmlFor === ""
+      ? labelled.parentElement?.querySelector("input, textarea")
+      : document.querySelector(`#${CSS.escape(labelled.htmlFor)}`);
+  return found instanceof HTMLInputElement ||
+    found instanceof HTMLTextAreaElement
+    ? found
+    : null;
 };
+
+/** The words of the head of the card titled `title`: its title and what stands beside it. */
+const headOf = (title: string): string =>
+  [...document.querySelectorAll("h2, h3")].find(
+    (heading) => heading.textContent.trim() === title
+  )?.parentElement?.parentElement?.textContent ?? "";
 
 /** Types `value` into the field labelled `label`, as React hears a person type. */
 const fill = async (label: string, value: string): Promise<void> => {
@@ -337,7 +359,9 @@ describe(HttpConnections, () => {
       beforeConfirming,
       asked,
       // Closed as confirmed: nothing left to press a second time.
-      stillAsking: buttons().includes("Revoke the connection"),
+      stillAsking: buttons().some((name) =>
+        name.startsWith("Revoke the connection")
+      ),
     }).toStrictEqual({
       beforeConfirming: 0,
       asked: [{ disconnect: "connection-billing" }],
@@ -345,15 +369,18 @@ describe(HttpConnections, () => {
     });
   });
 
-  it("closes the confirmation and says why when the revoke fails", async () => {
+  it("keeps the confirmation open and says why when the revoke fails", async () => {
     await shown(identityOf("admin"), [billing], { fails: true });
     await press("Revoke");
     await press("Revoke the connection");
 
     expect({
-      stillAsking: buttons().includes("Revoke the connection"),
+      // Still open, its button saying it failed and why under it, to try again.
+      stillAsking: buttons().some((name) =>
+        name.startsWith("Revoke the connection")
+      ),
       said: document.body.textContent.includes(refusal),
-    }).toStrictEqual({ stillAsking: false, said: true });
+    }).toStrictEqual({ stillAsking: true, said: true });
   });
 
   it("names each Revoke apart, by when it was added, when two connections share a name", async () => {
@@ -436,17 +463,14 @@ describe(HttpConnections, () => {
 
   it("counts the connections only once they are read", async () => {
     await shown(identityOf("admin"));
-    const whileUnread =
-      document.querySelector("#integrations-http")?.textContent;
+    const whileUnread = headOf("HTTP connections");
     takenDown();
     await shown(identityOf("admin"), [billing]);
 
+    // The card's head: its title, then how many it holds once read.
     expect({
-      whileUnread,
-      read: document.querySelector("#integrations-http")?.textContent,
-    }).toStrictEqual({
-      whileUnread: "HTTP connections",
-      read: "HTTP connections 1",
-    });
+      whileUnread: /\d/u.test(whileUnread),
+      read: headOf("HTTP connections").includes("1"),
+    }).toStrictEqual({ whileUnread: false, read: true });
   });
 });

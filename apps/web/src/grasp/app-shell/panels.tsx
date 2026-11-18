@@ -38,6 +38,7 @@ import { PanelPlaceContext, useFloat } from "./float-window";
 import type { PanelPlacement } from "./float-window";
 import type { PanelPosition } from "./floating";
 import { FOCUSABLE, firstStop, placeOf } from "./focus-place";
+import { useFocusReturn } from "./focus-return";
 import { appShellWords } from "./words";
 
 const NARROW = "@container app-shell (width < 40rem)";
@@ -922,6 +923,8 @@ export const Panels = ({
   const side = useRef<HTMLDivElement>(null);
   const given = panels !== undefined && panels !== null;
   const phase = usePhase(given, open, side, onShown, onGone);
+  // Closed, by their Close, Escape or the host: focus goes back to what opened them, never the body.
+  useFocusReturn(given && open, column);
   // Floating, the panels lie over the page as a window and their side of the group has no width: the
   // page has the column, as with no panels. Never on a phone or full screen.
   const { space, most, measured, shown, tight } = useRoom({

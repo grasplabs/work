@@ -22,6 +22,34 @@ import { AppData } from "./app-data.tsx";
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
+/**
+ * The page's window, which lays out nothing: whatever the table watches
+ * (the mark under its last row) is in view as soon as it's watched, until
+ * it's let go. The table reads only whether an entry is in view.
+ */
+class InView {
+  readonly #heard: (entries: { isIntersecting: boolean }[]) => void;
+  #watching = false;
+
+  constructor(heard: (entries: { isIntersecting: boolean }[]) => void) {
+    this.#heard = heard;
+  }
+
+  observe(): void {
+    this.#watching = true;
+    queueMicrotask(() => {
+      if (this.#watching) {
+        this.#heard([{ isIntersecting: true }]);
+      }
+    });
+  }
+
+  disconnect(): void {
+    this.#watching = false;
+  }
+}
+Reflect.set(globalThis, "IntersectionObserver", InView);
+
 let root: Root | undefined;
 
 /** Takes the page down. */
@@ -243,7 +271,7 @@ describe("an App's data page", () => {
     expect({
       first: document.body.textContent.includes("first's notes"),
       second: document.body.textContent.includes("first's second notes"),
-      rows: document.querySelectorAll('[role="table"] [role="row"]').length,
+      rows: document.querySelectorAll("table tr").length,
     }).toStrictEqual({ first: true, second: true, rows: 3 });
   });
 
@@ -268,11 +296,13 @@ describe("an App's data page", () => {
     });
   });
 
-  it("opens a record by its ID, in a table that declares no fields", async () => {
+  it("opens a record by its ID, in a table that declares no fields, named by its title", async () => {
     await shown();
     await press("Open second");
     await press("second-bare-1");
-    expect(document.body.textContent).toContain("Record second-bare-1");
+    expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe(
+      "second's bare"
+    );
   });
 
   it("forgets a file's preview as soon as another is chosen, Import staying off until that one reads", async () => {

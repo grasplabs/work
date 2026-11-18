@@ -11,54 +11,40 @@ import type {
   RunsPage,
   WorkflowSummary,
 } from "@grasp-os/shared/workflows";
-import {
-  ButtonGroup,
-  ButtonGroupText,
-} from "@grasp-os/ui/components/button-group";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
-import {
-  Tabs,
-  TabsContent,
-  TabsCount,
-  TabsList,
-  TabsTrigger,
-} from "@grasp-os/ui/components/tabs";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { readPeople } from "../directory.ts";
 import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
-import { EmptyCard } from "../frame/page.tsx";
+import { EmptyCard, Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
+import { Badge } from "../grasp/badge/index.ts";
+import {
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "../grasp/select/index.ts";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../grasp/tabs/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { MakeSomethingLink } from "../make/make-link.tsx";
 import { useCore } from "../use-core.ts";
-import {
-  ProcessGlyph,
-  ProcessHint,
-  processNames,
-} from "../workflows/business-process.tsx";
+import { ProcessGlyph, processNames } from "../workflows/business-process.tsx";
 import { RunFiguresView } from "../workflows/figures.tsx";
 import { GoLivesWaiting } from "../workflows/go-lives-waiting.tsx";
 import { needsAttention, processesIn, showsUnder } from "../workflows/lists.ts";
@@ -92,6 +78,28 @@ interface WorkflowsSearch {
 
 const isStatus = (value: unknown): value is RunFilterStatus =>
   runFilterStatuses.some((status) => status === value);
+
+const styles = stylex.create({
+  // The page's parts, one under the other.
+  stack: { display: "grid", gap: grasp.space6, marginTop: grasp.space4 },
+  // The tabs, and the process filter at the row's end.
+  bar: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    columnGap: grasp.space6,
+    rowGap: grasp.space3,
+  },
+  // A filter: what it filters, then the choice.
+  filter: { display: "inline-flex", alignItems: "center", gap: grasp.space2 },
+  // "Status is" on one line before its choice.
+  filterLabel: { whiteSpace: "nowrap" },
+  filters: { display: "flex", flexWrap: "wrap", gap: grasp.space2 },
+  log: { display: "grid", gap: grasp.space4 },
+  // A tab's name and its count.
+  tab: { display: "inline-flex", alignItems: "center", gap: grasp.space2 },
+});
 
 const isProcess = (value: unknown): value is BusinessProcess =>
   businessProcesses.some((process) => process === value);
@@ -132,10 +140,12 @@ const Filter = ({
   const { t } = useLingui();
   const items = [{ value: all, label: t`All` }, ...options];
   return (
-    <ButtonGroup>
-      <ButtonGroupText aria-hidden="true">
-        {t({ message: `${label} is`, context: 'filter: "Place is All"' })}
-      </ButtonGroupText>
+    <span {...stylex.props(styles.filter)}>
+      <span aria-hidden="true" {...stylex.props(styles.filterLabel)}>
+        <Text size="sm" tone="muted">
+          {t({ message: `${label} is`, context: 'filter: "Place is All"' })}
+        </Text>
+      </span>
       <Select
         disabled={disabled}
         items={items}
@@ -147,15 +157,9 @@ const Filter = ({
         <SelectTrigger aria-label={label} size="sm">
           <SelectValue />
         </SelectTrigger>
-        <SelectContent>
-          {items.map((item) => (
-            <SelectItem key={item.value} value={item.value}>
-              {item.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
+        <SelectContent />
       </Select>
-    </ButtonGroup>
+    </span>
   );
 };
 
@@ -168,7 +172,7 @@ const RunFilters = () => {
   };
   const { t } = useLingui();
   return (
-    <div className="flex flex-wrap gap-2">
+    <div {...stylex.props(styles.filters)}>
       <Filter
         label={t`Status`}
         onChange={(status) => {
@@ -276,13 +280,10 @@ const NeedsAttention = ({
     rows.length === 0 &&
     waiting.length === 0;
   return (
-    <div className="mt-4 flex flex-col gap-8">
+    <div {...stylex.props(styles.stack)}>
       {nothing ? (
         <EmptyCard>
-          <Trans>
-            No workflow needs attention: nothing waits for a decision or to go
-            live, nothing failed lately.
-          </Trans>
+          <Trans>Nothing needs you.</Trans>
         </EmptyCard>
       ) : null}
       {workflows.state === "ready" ? null : <NotLoadedState page={workflows} />}
@@ -373,25 +374,17 @@ const ProcessFilter = ({ offered }: { offered: BusinessProcess[] }) => {
           }),
         });
       }}
+      size="sm"
       value={search.process === undefined ? [] : [search.process]}
-      variant="outline"
     >
       {offered.map((process) => (
-        <Tooltip key={process}>
-          <TooltipTrigger
-            render={
-              <ToggleGroupItem
-                aria-label={i18n._(processNames[process])}
-                value={process}
-              />
-            }
-          >
-            <ProcessGlyph process={process} />
-          </TooltipTrigger>
-          <TooltipContent className="max-w-64">
-            <ProcessHint process={process} />
-          </TooltipContent>
-        </Tooltip>
+        <Toggle
+          aria-label={i18n._(processNames[process])}
+          key={process}
+          value={process}
+        >
+          <ProcessGlyph process={process} />
+        </Toggle>
       ))}
     </ToggleGroup>
   );
@@ -401,11 +394,12 @@ const ProcessFilter = ({ offered }: { offered: BusinessProcess[] }) => {
 const WorkflowCount = ({ count }: { count: number | undefined }) => {
   const { t } = useLingui();
   return count === undefined ? null : (
-    <TabsCount
-      label={t`${plural(count, { one: "# workflow", other: "# workflows" })}`}
+    <Badge
+      aria-label={t`${plural(count, { one: "# workflow", other: "# workflows" })}`}
+      size="sm"
     >
       {count}
-    </TabsCount>
+    </Badge>
   );
 };
 
@@ -563,7 +557,7 @@ const RunsLogRead = ({ log }: { log: LogRead }) => {
   const current = read.key === key;
   const filtered = status !== undefined;
   return (
-    <div className="flex flex-col gap-4">
+    <div {...stylex.props(styles.log)}>
       <RunFilters />
       {current ? null : <LoadingLines lines={4} />}
       {current && read.data.runs.state === "ready" ? (
@@ -591,40 +585,41 @@ const Workflows = () => {
   const { lists } = page;
   return (
     <>
-      <SiteHeader
-        // The page's one action, in the bar above it.
-        actions={
-          canBuild(identity.role) ? (
-            <MakeSomethingLink kind="workflow" size="sm" />
-          ) : undefined
-        }
-        crumbs={[{ label: t`Workflows` }]}
-      />
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 text-sm">
-        <h1 className="sr-only">
-          <Trans>Workflows</Trans>
-        </h1>
+      <SiteHeader crumbs={[{ label: t`Workflows` }]} />
+      <Page>
+        <PageHeading
+          action={
+            canBuild(identity.role) ? (
+              <MakeSomethingLink kind="workflow" size="sm" />
+            ) : undefined
+          }
+          title={t`Workflows`}
+        />
         <Tabs
-          onValueChange={(tab: string) => {
+          onValueChange={(tab) => {
             void navigate({
               // The filters are the Runs tab's: the lists keep only their
               // process.
-              search: tabSearch(tab, process),
+              search: tabSearch(tab ?? "workflows", process),
             });
           }}
           value={search.tab ?? "workflows"}
         >
-          <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
-            <TabsList aria-label={t`Show workflows`} variant="line">
+          <div {...stylex.props(styles.bar)}>
+            <TabsList aria-label={t`Show workflows`}>
               <TabsTrigger value="workflows">
-                <Trans context="tab listing every workflow">All</Trans>
-                <WorkflowCount count={countAll(lists, process)} />
+                <span {...stylex.props(styles.tab)}>
+                  <Trans context="tab listing every workflow">All</Trans>
+                  <WorkflowCount count={countAll(lists, process)} />
+                </span>
               </TabsTrigger>
               <TabsTrigger value="needs">
-                <Trans context="tab listing the workflows that need a person">
-                  Needs you
-                </Trans>
-                <WorkflowCount count={countNeeds(lists, process)} />
+                <span {...stylex.props(styles.tab)}>
+                  <Trans context="tab listing the workflows that need a person">
+                    Needs you
+                  </Trans>
+                  <WorkflowCount count={countNeeds(lists, process)} />
+                </span>
               </TabsTrigger>
               <TabsTrigger value="runs">
                 <Trans context="tab listing the runs of workflows">Runs</Trans>
@@ -638,7 +633,7 @@ const Workflows = () => {
           </div>
           <TabsContent value="workflows">
             {page.tab === "workflows" ? (
-              <div className="mt-4 flex flex-col gap-8">
+              <div {...stylex.props(styles.stack)}>
                 {lists.workflows.state === "ready" ? (
                   <ListedWorkflows
                     independent={lists.independent}
@@ -670,7 +665,7 @@ const Workflows = () => {
                 them, as the prototype has it. Only while the tab shows:
                 the lanes read again every so often only then. */}
             {page.tab === "runs" ? (
-              <div className="mt-4 flex flex-col gap-8">
+              <div {...stylex.props(styles.stack)}>
                 {page.today.state === "ready" ? (
                   <TodayLanes
                     processes={lists.processes}
@@ -685,7 +680,7 @@ const Workflows = () => {
             ) : null}
           </TabsContent>
         </Tabs>
-      </div>
+      </Page>
     </>
   );
 };

@@ -1,6 +1,7 @@
-import { toast } from "@grasp-os/ui/components/toast";
 import { useLingui } from "@lingui/react/macro";
 import { useEffect, useState } from "react";
+
+import { toast } from "./grasp/toast/index.ts";
 
 // Copying to the clipboard, the one way the app does it: browsers refuse
 // without focus or permission, so nothing says it copied unless it did.
@@ -39,7 +40,7 @@ export const useCopy = () => {
     if (await copyText(text)) {
       setCopied(true);
     } else {
-      toast.add({ type: "error", title: t`Copying didn't work` });
+      toast.error(t`Copying didn't work`);
     }
   };
   return { copied, copy };

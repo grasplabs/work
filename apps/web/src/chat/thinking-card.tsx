@@ -1,9 +1,7 @@
 import type { ThinkingGround } from "@grasp-os/shared/brain";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
-import { BrainIcon, ChevronRightIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
 
@@ -28,6 +26,10 @@ import type { ThinkingOf } from "../brain/thinking/play.ts";
 import { thinkingMap } from "../brain/thinking/shapes.ts";
 import { usePlayedThinking } from "../brain/thinking/use-thinking.ts";
 import { useWorkHoursText } from "../brain/thinking/work-hours.tsx";
+import { focus } from "../grasp/focus/focus.ts";
+import { ArrowRight, Brain, Icon } from "../grasp/icons/index.ts";
+import { Spinner } from "../grasp/spinner/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 
 // Grasp's thinking where the question was asked (GRA-1283; grasplabs/
 // prototype `components/chat/thinking-card.tsx`): on any page but the
@@ -38,6 +40,59 @@ import { useWorkHoursText } from "../brain/thinking/work-hours.tsx";
 // fitted to the shape and follows it. Once the thinking is done it shows
 // the finding; the whole card opens the brain, where it plays again.
 
+const styles = stylex.create({
+  // The card around the drawing: a link to the brain.
+  card: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+    width: "100%",
+    overflow: "hidden",
+    paddingInline: grasp.space4,
+    paddingBlockStart: grasp.space3,
+    paddingBlockEnd: grasp.space2,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: { default: grasp.line, ":hover": grasp.edge },
+    borderRadius: grasp.corner,
+    backgroundColor: grasp.raised,
+    color: grasp.text,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    textDecorationLine: "none",
+    transitionProperty: "border-color",
+    transitionDuration: grasp.durationHover,
+    transitionTimingFunction: grasp.ease,
+  },
+  head: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: grasp.space2,
+    minHeight: grasp.space10,
+    textAlign: "center",
+    fontWeight: grasp.weightMedium,
+    textWrap: "balance",
+  },
+  // At most two lines of what it thinks about now.
+  line: {
+    display: "-webkit-box",
+    WebkitBoxOrient: "vertical",
+    WebkitLineClamp: 2,
+    overflow: "hidden",
+  },
+  foot: {
+    display: "flex",
+    alignItems: "center",
+    gap: grasp.space2,
+    paddingBlockStart: grasp.space2,
+    borderBlockStartWidth: 1,
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: grasp.line,
+    color: grasp.muted,
+  },
+  grow: { flexGrow: 1 },
+});
 /**
  * A workflow's hours in the card, as text for its SVG: in full, or only
  * the number where the name has no room. Text alone, as SVG paints no
@@ -112,11 +167,12 @@ const ShapeNeuron = ({
   }
   return (
     <g
-      className={cn(
+      // The drawing's own classes (styles.css), kept as it is drawn.
+      className={[
         tone,
         "transition-opacity duration-300 motion-reduce:transition-none",
-        faint && "opacity-30"
-      )}
+        faint ? "opacity-30" : "",
+      ].join(" ")}
     >
       <title>{neuron.label}</title>
       {/* Its soma and dendrites, in its own radius, so it grows where it stands when the shape moves on: the transform is an SVG attribute, which the class's transition eases as it changes. */}
@@ -210,16 +266,13 @@ const Card = ({
   const [from, to] = (played.beat?.thread ?? []).map((id) => byId.get(id));
   return (
     <Link
-      className="group bg-card hover:border-foreground/30 focus-visible:ring-ring/50 flex w-full flex-col gap-2 overflow-hidden rounded-xl border px-4 pt-3 pb-2 text-sm transition-colors duration-200 outline-none focus-visible:ring-3"
       search={{ think: thinkAddress(chatId, thinking.questionId) }}
       to="/brain"
+      {...stylex.props(styles.card, focus.ring)}
     >
-      <span className="flex min-h-10 items-center justify-center gap-2 text-center font-medium text-balance">
-        {played.going ? <Spinner className="size-3.5" /> : null}
-        <span
-          className="animate-in fade-in line-clamp-2 duration-200 motion-reduce:animate-none"
-          key={played.text}
-        >
+      <span {...stylex.props(styles.head)}>
+        {played.going ? <Spinner size="sm" /> : null}
+        <span key={played.text} {...stylex.props(styles.line)}>
           {played.text}
         </span>
       </span>
@@ -272,12 +325,12 @@ const Card = ({
           ))}
         </g>
       </svg>
-      <span className="text-muted-foreground group-hover:text-foreground flex items-center gap-1.5 border-t pt-2">
-        <BrainIcon aria-hidden="true" className="size-4" />
-        <span className="flex-1">
+      <span {...stylex.props(styles.foot)}>
+        <Icon icon={Brain} />
+        <span {...stylex.props(styles.grow)}>
           <Trans>See it in the brain</Trans>
         </span>
-        <ChevronRightIcon aria-hidden="true" className="size-4" />
+        <Icon icon={ArrowRight} />
       </span>
     </Link>
   );
