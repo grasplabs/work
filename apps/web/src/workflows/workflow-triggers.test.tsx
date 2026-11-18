@@ -102,6 +102,7 @@ const shop: EventSource = {
   createdAt: "2026-10-01T09:00:00.000Z",
   createdBy: "admin",
   delivery: null,
+  activity: null,
 };
 
 const ownWebhook: WorkflowTrigger = {

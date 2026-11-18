@@ -1,5 +1,8 @@
 // @vitest-environment happy-dom
-import type { EventSource } from "@grasp-os/shared/event-sources";
+import type {
+  EventSource,
+  EventSourceDelivery,
+} from "@grasp-os/shared/event-sources";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -44,6 +47,17 @@ const shop: EventSource = {
   createdAt: "2026-10-01T09:00:00.000Z",
   createdBy: "admin",
   delivery: { token: "token-0b7c", secret: "active" },
+  activity: { lastEventAt: null, acceptedLastDay: 0, refusedLastDay: 0 },
+};
+
+/** A delivery the shop's source accepted. */
+const paid: EventSourceDelivery = {
+  id: "delivery-1",
+  receivedAt: "2026-10-02T09:00:00.000Z",
+  type: "payment.paid",
+  test: false,
+  triggersStarted: 1,
+  payloadHeld: true,
 };
 
 /**
@@ -78,6 +92,41 @@ const shown = async (
     delete: async (id: string) => {
       await answer({ delete: id }, null);
     },
+    refusals: async (id: string) =>
+      await answer({ refusals: id }, [
+        {
+          reason: "signature" as const,
+          lastDay: 3,
+          lastWeek: 3,
+          lastAt: "2026-10-02T08:00:00.000Z",
+        },
+      ]),
+    deliveries: async (id: string, page?: string) =>
+      await answer(
+        { deliveries: id, page },
+        { deliveries: [paid], next: null }
+      ),
+    delivery: async (id: string, deliveryId: string) =>
+      await answer(
+        { delivery: [id, deliveryId] },
+        { ...paid, payload: { invoice: "INV-42" } }
+      ),
+    sendTest: async (id: string, input: unknown) =>
+      await answer(
+        { sendTest: [id, input] },
+        {
+          delivery: { ...paid, id: "delivery-test", test: true },
+          matched: [
+            {
+              id: "trigger-1",
+              type: "payment.paid",
+              enabled: true,
+              start: "active" as const,
+              workflow: { id: "workflow-1", name: "Book a payment" },
+            },
+          ],
+        }
+      ),
   };
   const core = {
     withSession: async <T,>(
@@ -284,5 +333,63 @@ describe("the Webhooks settings", () => {
       ),
       secret: inputNamed("Secret"),
     }).toStrictEqual({ left: 1, said: true, secret: undefined });
+  });
+
+  it("says what a source received lately, and reads its events, a payload and a test's matches only as each is asked for", async () => {
+    const asked = await shown([
+      {
+        ...shop,
+        activity: {
+          lastEventAt: "2026-10-02T09:00:00.000Z",
+          acceptedLastDay: 4,
+          refusedLastDay: 3,
+        },
+      },
+    ]);
+    const closed = document.body.textContent;
+    const askedClosed = asked.length;
+    await press("Show events");
+    const opened = document.body.textContent;
+    const askedOpened = [...asked];
+    await press("Show payload");
+    const withPayload = document.body.textContent;
+    await typeName("payment.paid");
+    await submit();
+
+    expect({
+      summary:
+        closed.includes("4 events accepted in the last 24 hours.") &&
+        closed.includes("3 refused in the last 24 hours"),
+      askedClosed,
+      askedOpened,
+      refusals: opened.includes(
+        "3 deliveries refused in the last seven days: they weren't signed with this source's secret."
+      ),
+      delivery:
+        opened.includes("payment.paid") &&
+        opened.includes("Started 1 workflow"),
+      payloadBeforeAsked: opened.includes("INV-42"),
+      payload: withPayload.includes("INV-42"),
+      asked: asked.slice(askedOpened.length, askedOpened.length + 2),
+      matched: document.body.textContent.includes(
+        "1 trigger starts on this type, for Book a payment. A test event starts no workflow."
+      ),
+    }).toStrictEqual({
+      summary: true,
+      askedClosed: 0,
+      askedOpened: [
+        { refusals: "source-shop" },
+        { deliveries: "source-shop", page: undefined },
+      ],
+      refusals: true,
+      delivery: true,
+      payloadBeforeAsked: false,
+      payload: true,
+      asked: [
+        { delivery: ["source-shop", "delivery-1"] },
+        { sendTest: ["source-shop", { type: "payment.paid", data: {} }] },
+      ],
+      matched: true,
+    });
   });
 });

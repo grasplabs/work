@@ -1,5 +1,9 @@
 import { eventSourcePath } from "@grasp-os/shared/event-source-path";
-import { eventSourceHeaders } from "@grasp-os/shared/event-sources";
+import {
+  eventSourceHeaders,
+  eventSourceRetention,
+} from "@grasp-os/shared/event-sources";
+import type { EventSourcesApi } from "@grasp-os/shared/event-sources";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
@@ -8,6 +12,12 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { grantPermission, listPermissions } from "../src/permissions.ts";
 import { triggeredRunsPerHour } from "../src/workflows/runs.ts";
+import {
+  listDeliveries,
+  readDelivery,
+  sweepSourceDeliveries,
+} from "../src/workflows/source-deliveries.ts";
+import { sendTestEvent } from "../src/workflows/source-events.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
@@ -264,7 +274,7 @@ describe("an event source", () => {
       token: true,
       listed: { token, secret: "active" },
       secretListed: false,
-      forBuilder: { ...source, delivery: null },
+      forBuilder: { ...source, delivery: null, activity: null },
       builderCreates: "role.forbidden",
       memberLists: "role.forbidden",
       audited: ["event_source.created"],
@@ -687,6 +697,616 @@ describe("an event source", () => {
       retried: 202,
       first: [{ invoice: "INV-1", amount: 120 }],
       second: [{ invoice: "INV-1", amount: 120 }],
+    });
+  });
+});
+
+// What a source received, for its admins to see (workflows/source-
+// deliveries.ts), from its threat model: an unauthenticated sender storing
+// bytes of its own, flooding rows or probing for a source's URL; a sender
+// holding the secret sending more than a source lists; anyone but an
+// admin reading a payload, or an admin reading one unrecorded; a delivery
+// read under another source's ID; a payload or a delivery outliving its
+// window; a test event starting a run; a deleted source keeping anything.
+
+const hourMs = 3_600_000;
+const dayMs = 24 * hourMs;
+
+/** The hours `since` to now covers: one, unless the test ran across one's end. */
+const hoursSince = (since: number): number =>
+  new Set([Math.floor(since / hourMs), Math.floor(Date.now() / hourMs)]).size;
+
+/** What source `source` keeps in the database: its deliveries and its counts. */
+const storedOf = async (source: string) => {
+  const deliveries = await env.DB.prepare(
+    "SELECT id, event_type AS type, test, triggers, payload FROM event_source_deliveries WHERE source_id = ? ORDER BY received_at, id"
+  )
+    .bind(source)
+    .all<{
+      id: string;
+      type: string;
+      test: number;
+      triggers: number;
+      payload: string | null;
+    }>();
+  const counts = await env.DB.prepare(
+    "SELECT outcome, SUM(count) AS count, COUNT(*) AS rows FROM event_source_counts WHERE source_id = ? GROUP BY outcome ORDER BY outcome"
+  )
+    .bind(source)
+    .all<{ outcome: string; count: number; rows: number }>();
+  return { deliveries: deliveries.results, counts: counts.results };
+};
+
+/** How many rows the two tables hold, for every source together. */
+const storedRows = async (): Promise<number> => {
+  const row = await env.DB.prepare(
+    "SELECT (SELECT COUNT(*) FROM event_source_deliveries) + (SELECT COUNT(*) FROM event_source_counts) AS count"
+  ).first<{ count: number }>();
+  return row?.count ?? 0;
+};
+
+/** Moves everything source `source` kept and counted `ms` into the past. */
+const aged = async (source: string, ms: number): Promise<void> => {
+  await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE event_source_deliveries SET received_at = received_at - ? WHERE source_id = ?"
+    ).bind(ms, source),
+    env.DB.prepare(
+      "UPDATE event_source_counts SET hour = hour - ?, last_at = last_at - ? WHERE source_id = ?"
+    ).bind(ms, ms, source),
+  ]);
+};
+
+/** An admin's or a builder's `workflowResources.sources`. */
+type Sources = Pick<EventSourcesApi, "list" | "deliveries">;
+
+/** What source `source` received lately, as `sources` lists it. */
+const activityOf = async (sources: Sources, source: string) => {
+  const listed = await sources.list();
+  return listed.find(({ id }) => id === source)?.activity;
+};
+
+/** The first page of source `source`'s deliveries. */
+const deliveriesOf = async (sources: Sources, source: string) => {
+  const page = await sources.deliveries(source);
+  return page.deliveries;
+};
+
+/** The audit events of `action` on source `source`: their details. */
+const auditedOn = async (source: string, action: string) => {
+  const events = await allEvents();
+  return {
+    details: events
+      .filter((event) => event.action === action && event.target?.id === source)
+      .map(({ detail }) => detail),
+    all: JSON.stringify(events),
+  };
+};
+
+describe("what an event source received", () => {
+  it("lists an accepted delivery with its type and time, its payload an admin's alone to read, audited once without it", async () => {
+    const { admin, source, secret, token } = await newSource();
+    const { builder } = await triggerOn(source.id);
+    const member = await signedInApi(idp, "user");
+    const marker = `INV-${unique()}`;
+    const before = Date.now();
+    const sent = await send(token, secret, eventOf(marker, 7));
+    const after = Date.now();
+    const { sources } = admin.api.workflowResources;
+    const page = await sources.deliveries(source.id);
+    const [listed] = page.deliveries;
+    const read = await sources.delivery(source.id, listed?.id ?? "");
+    const activity = await activityOf(sources, source.id);
+    const theirs = builder.api.workflowResources.sources;
+    const staff = { ...(await deciding()), staff: true };
+    const refused = {
+      builderLists: await outcome(theirs.deliveries(source.id)),
+      builderReads: await outcome(theirs.delivery(source.id, listed?.id ?? "")),
+      builderRefusals: await outcome(theirs.refusals(source.id)),
+      builderTriggers: await outcome(theirs.triggers(source.id)),
+      builderTests: await outcome(
+        theirs.sendTest(source.id, { type: "invoice.paid", data: {} })
+      ),
+      memberLists: await outcome(
+        member.api.workflowResources.sources.deliveries(source.id)
+      ),
+      staffLists: await outcome(listDeliveries(env, staff, source.id)),
+      staffReads: await outcome(
+        readDelivery(env, staff, source.id, listed?.id ?? "")
+      ),
+      staffTests: await outcome(
+        sendTestEvent(env, staff, source.id, { type: "invoice.paid", data: {} })
+      ),
+    };
+    const forBuilder = await activityOf(theirs, source.id);
+    const audited = await auditedOn(source.id, "event_source.delivery.read");
+    const at = new Date(listed?.receivedAt ?? 0).getTime();
+
+    expect({
+      status: sent.status,
+      page: {
+        ...page,
+        deliveries: page.deliveries.map((delivery) => ({
+          ...delivery,
+          id: undefined,
+          receivedAt: undefined,
+        })),
+      },
+      listedHasPayload: JSON.stringify(page).includes(marker),
+      receivedInTime: before <= at && at <= after,
+      read: { ...read, id: read.id === listed?.id, receivedAt: undefined },
+      activity: {
+        ...activity,
+        lastEventAt: activity?.lastEventAt === listed?.receivedAt,
+      },
+      refused,
+      forBuilder,
+      audited: audited.details,
+      payloadAudited: audited.all.includes(marker),
+    }).toStrictEqual({
+      status: 202,
+      page: {
+        deliveries: [
+          {
+            id: undefined,
+            receivedAt: undefined,
+            type: "invoice.paid",
+            test: false,
+            triggersStarted: 1,
+            payloadHeld: true,
+          },
+        ],
+        next: null,
+      },
+      listedHasPayload: false,
+      receivedInTime: true,
+      read: {
+        id: true,
+        receivedAt: undefined,
+        type: "invoice.paid",
+        test: false,
+        triggersStarted: 1,
+        payloadHeld: true,
+        payload: { invoice: marker, amount: 7 },
+      },
+      activity: { lastEventAt: true, acceptedLastDay: 1, refusedLastDay: 0 },
+      refused: {
+        builderLists: "role.forbidden",
+        builderReads: "role.forbidden",
+        builderRefusals: "role.forbidden",
+        builderTriggers: "role.forbidden",
+        builderTests: "role.forbidden",
+        memberLists: "role.forbidden",
+        staffLists: "role.forbidden",
+        staffReads: "role.forbidden",
+        staffTests: "role.forbidden",
+      },
+      forBuilder: null,
+      audited: [{ delivery: listed?.id }],
+      payloadAudited: false,
+    });
+  });
+
+  it("counts a refused delivery by its reason and the hour and keeps nothing of it: fifty are one row, and a URL no source has counts nowhere", async () => {
+    const { admin, source, secret, token } = await newSource();
+    const { sources } = admin.api.workflowResources;
+    const marker = `INV-${unique()}`;
+    const body = eventOf(marker, 1);
+    const forged = new Webhook(
+      `whsec_${btoa("another-secret-of-32-bytes-long!")}`
+    );
+    const since = Date.now();
+    const statuses = new Set<number>();
+    for (let sent = 0; sent < 50; sent += 1) {
+      const id = `msg_${marker}_${sent}`;
+      // One after another, as a sender's flood arrives at one source.
+      // oxlint-disable-next-line no-await-in-loop
+      const response = await send(token, secret, body, {
+        id,
+        signature: forged.sign(id, new Date(), body),
+      });
+      statuses.add(response.status);
+    }
+    const stale = await send(token, secret, body, { skew: -600 });
+    await sources.revokeSecret(source.id);
+    const revoked = await send(token, secret, body);
+    const rows = await storedRows();
+    const unknown = await send("0".repeat(32), secret, body);
+    const rowsAfterUnknown = await storedRows();
+    const stored = await storedOf(source.id);
+    const hours = hoursSince(since);
+    const refusals = await sources.refusals(source.id);
+    const activity = await activityOf(sources, source.id);
+
+    expect({
+      statuses: [...statuses, stale.status, revoked.status, unknown.status],
+      deliveries: stored.deliveries,
+      signatureRows:
+        (stored.counts.find((row) => row.outcome === "signature")?.rows ?? 0) <=
+        hours,
+      counts: stored.counts.map((row) => ({
+        outcome: row.outcome,
+        count: row.count,
+      })),
+      keptAnything: JSON.stringify(stored).includes(marker),
+      unknownWrote: rowsAfterUnknown - rows,
+      refusals: refusals.map(({ lastAt, ...rest }) => ({
+        ...rest,
+        lastAt: new Date(lastAt).getTime() >= since,
+      })),
+      activity,
+    }).toStrictEqual({
+      statuses: [401, 401, 401, 401],
+      deliveries: [],
+      signatureRows: true,
+      counts: [
+        { outcome: "headers", count: 1 },
+        { outcome: "revoked", count: 1 },
+        { outcome: "signature", count: 50 },
+      ],
+      keptAnything: false,
+      unknownWrote: 0,
+      refusals: [
+        { reason: "revoked", lastDay: 1, lastWeek: 1, lastAt: true },
+        { reason: "headers", lastDay: 1, lastWeek: 1, lastAt: true },
+        { reason: "signature", lastDay: 50, lastWeek: 50, lastAt: true },
+      ],
+      activity: { lastEventAt: null, acceptedLastDay: 0, refusedLastDay: 52 },
+    });
+  });
+
+  it("holds a payload for a day and a delivery and its counts for seven, read as gone from then on and deleted on the clock", async () => {
+    const { admin, source, secret, token } = await newSource();
+    const { sources } = admin.api.workflowResources;
+    await send(token, secret, eventOf());
+    await send(token, secret, eventOf(), { skew: -600 });
+    const [fresh] = await deliveriesOf(sources, source.id);
+    const id = fresh?.id ?? "";
+    // A day and an hour on.
+    await aged(source.id, dayMs + hourMs);
+    const [dayOld] = await deliveriesOf(sources, source.id);
+    const readDayOld = await sources.delivery(source.id, id);
+    const activityDayOld = await activityOf(sources, source.id);
+    const refusalsDayOld = await sources.refusals(source.id);
+    const reads = await auditedOn(source.id, "event_source.delivery.read");
+    const beforeSweep = await storedOf(source.id);
+    await sweepSourceDeliveries(env);
+    const afterSweep = await storedOf(source.id);
+    // Seven days and an hour on.
+    await aged(source.id, 6 * dayMs);
+    const weekOld = await sources.deliveries(source.id);
+    const readWeekOld = await outcome(sources.delivery(source.id, id));
+    const activityWeekOld = await activityOf(sources, source.id);
+    const refusalsWeekOld = await sources.refusals(source.id);
+    await sweepSourceDeliveries(env);
+
+    expect({
+      fresh: fresh?.payloadHeld,
+      dayOld: dayOld?.payloadHeld,
+      readDayOld: readDayOld.payload,
+      activityDayOld: {
+        ...activityDayOld,
+        lastEventAt: activityDayOld?.lastEventAt === dayOld?.receivedAt,
+      },
+      refusalsDayOld: refusalsDayOld.map((refusal) => ({
+        ...refusal,
+        lastAt: undefined,
+      })),
+      reads: reads.details,
+      storedBeforeSweep: beforeSweep.deliveries.map(({ payload }) => payload),
+      storedAfterSweep: afterSweep.deliveries.map(({ payload }) => payload),
+      weekOld,
+      readWeekOld,
+      activityWeekOld,
+      refusalsWeekOld,
+      storedAtLast: await storedOf(source.id),
+    }).toStrictEqual({
+      fresh: true,
+      dayOld: false,
+      readDayOld: null,
+      activityDayOld: {
+        lastEventAt: true,
+        acceptedLastDay: 0,
+        refusedLastDay: 0,
+      },
+      refusalsDayOld: [
+        { reason: "headers", lastDay: 0, lastWeek: 1, lastAt: undefined },
+      ],
+      reads: [],
+      storedBeforeSweep: ['{"invoice":"INV-1","amount":120}'],
+      storedAfterSweep: [null],
+      weekOld: { deliveries: [], next: null },
+      readWeekOld: "webhook.delivery_unavailable",
+      activityWeekOld: {
+        lastEventAt: null,
+        acceptedLastDay: 0,
+        refusedLastDay: 0,
+      },
+      refusalsWeekOld: [],
+      storedAtLast: { deliveries: [], counts: [] },
+    });
+  });
+
+  it("answers a delivery read under another source's ID as one that isn't there, auditing nothing", async () => {
+    const { admin, source } = await newSource();
+    const other = await newSource();
+    await send(other.token, other.secret, eventOf());
+    const { sources } = admin.api.workflowResources;
+    const [theirs] = await deliveriesOf(sources, other.source.id);
+    const refused = {
+      underAnother: await outcome(
+        sources.delivery(source.id, theirs?.id ?? "")
+      ),
+      noSuchDelivery: await outcome(
+        sources.delivery(other.source.id, crypto.randomUUID())
+      ),
+      noSuchSource: await outcome(sources.deliveries(crypto.randomUUID())),
+      noSuchPage: await outcome(sources.deliveries(other.source.id, "last")),
+    };
+    const own = await auditedOn(source.id, "event_source.delivery.read");
+    const others = await auditedOn(
+      other.source.id,
+      "event_source.delivery.read"
+    );
+    const reads = [...own.details, ...others.details];
+
+    expect({ listed: theirs?.type, refused, reads }).toStrictEqual({
+      listed: "invoice.paid",
+      refused: {
+        underAnother: "webhook.delivery_unavailable",
+        noSuchDelivery: "webhook.delivery_unavailable",
+        noSuchSource: "webhook.source_unavailable",
+        noSuchPage: "webhook.page_invalid",
+      },
+      reads: [],
+    });
+  });
+
+  it("keeps a test event marked a test and says which triggers match it, starting no run and keeping it for no wait, audited once", async () => {
+    const { admin, source } = await newSource();
+    const granted = await triggerOn(source.id);
+    const waiting = await triggerOn(source.id, { grant: false });
+    const otherType = await triggerOn(source.id, { type: "invoice.voided" });
+    const { sources } = admin.api.workflowResources;
+    const marker = `INV-${unique()}`;
+    const test = await sources.sendTest(source.id, {
+      type: "invoice.paid",
+      data: { invoice: marker, amount: 3 },
+    });
+    const read = await sources.delivery(source.id, test.delivery.id);
+    const invalid = {
+      noType: await outcome(sources.sendTest(source.id, { data: {} })),
+      notAType: await outcome(
+        sources.sendTest(source.id, { type: " invoice.paid", data: {} })
+      ),
+      more: await outcome(
+        sources.sendTest(source.id, {
+          type: "invoice.paid",
+          data: {},
+          headers: {},
+        })
+      ),
+      oversized: await outcome(
+        sources.sendTest(source.id, {
+          type: "invoice.paid",
+          data: { invoice: "x".repeat(70 * 1024) },
+        })
+      ),
+      noSuchSource: await outcome(
+        sources.sendTest(crypto.randomUUID(), {
+          type: "invoice.paid",
+          data: {},
+        })
+      ),
+    };
+    const kept = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM kept_events WHERE source_id = ?"
+    )
+      .bind(source.id)
+      .first<{ count: number }>();
+    const audited = await auditedOn(source.id, "event_source.test_sent");
+    const listed = await deliveriesOf(sources, source.id);
+    const activity = await activityOf(sources, source.id);
+
+    expect({
+      delivery: { ...test.delivery, id: undefined, receivedAt: undefined },
+      matched: test.matched,
+      payload: read.payload,
+      listed: listed.map(({ id, test: marked }) => ({
+        same: id === test.delivery.id,
+        marked,
+      })),
+      invalid,
+      started: [
+        await runInputsOf(granted.trigger.id),
+        await runInputsOf(waiting.trigger.id),
+        await runInputsOf(otherType.trigger.id),
+      ],
+      kept: kept?.count,
+      activity,
+      audited: audited.details,
+      payloadAudited: audited.all.includes(marker),
+    }).toStrictEqual({
+      delivery: {
+        id: undefined,
+        receivedAt: undefined,
+        type: "invoice.paid",
+        test: true,
+        triggersStarted: 0,
+        payloadHeld: true,
+      },
+      matched: [
+        {
+          id: granted.trigger.id,
+          type: "invoice.paid",
+          enabled: true,
+          start: "active",
+          workflow: { id: granted.workflow, name: granted.workflowName },
+        },
+        {
+          id: waiting.trigger.id,
+          type: "invoice.paid",
+          enabled: true,
+          start: "requested",
+          workflow: { id: waiting.workflow, name: waiting.workflowName },
+        },
+      ],
+      payload: { invoice: marker, amount: 3 },
+      listed: [{ same: true, marked: true }],
+      invalid: {
+        noType: "webhook.test_invalid",
+        notAType: "webhook.test_invalid",
+        more: "webhook.test_invalid",
+        oversized: "webhook.test_invalid",
+        noSuchSource: "webhook.source_unavailable",
+      },
+      started: [[], [], []],
+      kept: 0,
+      activity: { lastEventAt: null, acceptedLastDay: 0, refusedLastDay: 0 },
+      audited: [
+        { delivery: test.delivery.id, event: "invoice.paid", matched: 2 },
+      ],
+      payloadAudited: false,
+    });
+  });
+
+  it("lists a source's live triggers with their workflows in one call, for an admin alone", async () => {
+    const { admin, source } = await newSource();
+    const other = await newSource();
+    const paid = await triggerOn(source.id);
+    const voided = await triggerOn(source.id, {
+      type: "invoice.voided",
+      grant: false,
+    });
+    const deleted = await triggerOn(source.id);
+    await triggerOn(other.source.id);
+    await deleted.builder.api.workflowResources.triggers.delete(
+      deleted.trigger.id
+    );
+    await paid.builder.api.workflowResources.triggers.setEnabled(
+      paid.trigger.id,
+      false
+    );
+
+    expect({
+      triggers: await admin.api.workflowResources.sources.triggers(source.id),
+      // Not even its own trigger's builder: what they may see is their
+      // workflow's Triggers tab.
+      forItsBuilder: await outcome(
+        paid.builder.api.workflowResources.sources.triggers(source.id)
+      ),
+      noSuchSource: await outcome(
+        admin.api.workflowResources.sources.triggers(crypto.randomUUID())
+      ),
+    }).toStrictEqual({
+      triggers: [
+        {
+          id: paid.trigger.id,
+          type: "invoice.paid",
+          enabled: false,
+          start: "active",
+          workflow: { id: paid.workflow, name: paid.workflowName },
+        },
+        {
+          id: voided.trigger.id,
+          type: "invoice.voided",
+          enabled: true,
+          start: "requested",
+          workflow: { id: voided.workflow, name: voided.workflowName },
+        },
+      ],
+      forItsBuilder: "role.forbidden",
+      noSuchSource: "webhook.source_unavailable",
+    });
+  });
+
+  it("lists a source's newest deliveries only, a page at a time, and counts every one it accepted", async () => {
+    const { admin, source, secret, token } = await newSource();
+    const { sources } = admin.api.workflowResources;
+    // As many as it lists, older than what comes next.
+    await env.DB.prepare(
+      `WITH RECURSIVE older(nth) AS (
+         SELECT 1 UNION ALL SELECT nth + 1 FROM older WHERE nth < ?)
+       INSERT INTO event_source_deliveries
+       SELECT printf('%036d', nth), ?, ? - nth, 'seeded', 0, 0, NULL FROM older`
+    )
+      .bind(eventSourceRetention.perSource, source.id, Date.now() - hourMs)
+      .run();
+    await send(token, secret, eventOf());
+    await send(token, secret, eventOf("INV-2", 2));
+    const stored = await storedOf(source.id);
+    const first = await sources.deliveries(source.id);
+    const second = await sources.deliveries(source.id, first.next ?? "");
+    const ids = [...first.deliveries, ...second.deliveries].map(({ id }) => id);
+    const times = [...first.deliveries, ...second.deliveries].map(
+      ({ receivedAt }) => receivedAt
+    );
+    const activity = await activityOf(sources, source.id);
+
+    expect({
+      stored: stored.deliveries.length,
+      oldestKept: stored.deliveries[0]?.id,
+      firstPage: first.deliveries.length,
+      newest: first.deliveries.slice(0, 2).map(({ type }) => type),
+      secondPage: second.deliveries.length,
+      more: second.next !== null,
+      distinct: new Set(ids).size,
+      newestFirst: times.toSorted().toReversed().join(",") === times.join(","),
+      accepted: activity?.acceptedLastDay,
+    }).toStrictEqual({
+      stored: eventSourceRetention.perSource,
+      // The two oldest made room for the two that came.
+      oldestKept: String(eventSourceRetention.perSource - 2).padStart(36, "0"),
+      firstPage: eventSourceRetention.pageSize,
+      newest: ["invoice.paid", "invoice.paid"],
+      secondPage: eventSourceRetention.pageSize,
+      more: true,
+      distinct: 2 * eventSourceRetention.pageSize,
+      newestFirst: true,
+      accepted: 2,
+    });
+  });
+
+  it("deletes what a source kept and counted with it, and writes nothing for it after, not even for a delivery it was admitting", async () => {
+    const { admin, source, secret, token } = await newSource();
+    await triggerOn(source.id);
+    const { sources } = admin.api.workflowResources;
+    await send(token, secret, eventOf());
+    await send(token, secret, eventOf(), { skew: -600 });
+    await sources.sendTest(source.id, { type: "invoice.paid", data: {} });
+    const before = await storedOf(source.id);
+    const deleting = racedAt(admitting, async () => {
+      await sources.delete(source.id);
+    });
+    const raced = await send(token, secret, eventOf("INV-2", 2), {
+      coreEnv: deleting,
+    });
+    const after = await send(token, secret, eventOf("INV-3", 3));
+
+    expect({
+      before: {
+        deliveries: before.deliveries.map(({ test }) => test),
+        counts: before.counts.map((row) => ({
+          outcome: row.outcome,
+          count: row.count,
+        })),
+      },
+      statuses: [raced.status, after.status],
+      stored: await storedOf(source.id),
+      listing: await outcome(sources.deliveries(source.id)),
+      refusals: await outcome(sources.refusals(source.id)),
+    }).toStrictEqual({
+      before: {
+        deliveries: [0, 1],
+        counts: [
+          { outcome: "accepted", count: 1 },
+          { outcome: "headers", count: 1 },
+        ],
+      },
+      statuses: [401, 401],
+      stored: { deliveries: [], counts: [] },
+      listing: "webhook.source_unavailable",
+      refusals: "webhook.source_unavailable",
     });
   });
 });

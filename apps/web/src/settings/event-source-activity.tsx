@@ -1,0 +1,416 @@
+import type {
+  EventSource,
+  EventSourceDelivery,
+  EventSourceDeliveryPage,
+  EventSourceRefusals,
+  EventSourceTestResult,
+} from "@grasp-os/shared/event-sources";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@grasp-os/ui/components/dialog";
+import { Input } from "@grasp-os/ui/components/input";
+import { Label } from "@grasp-os/ui/components/label";
+import { Textarea } from "@grasp-os/ui/components/textarea";
+import { plural } from "@lingui/core/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
+import { useRouter } from "@tanstack/react-router";
+import { useId, useState } from "react";
+
+import { ErrorText } from "../error-text.tsx";
+import { formatDateTime, formatList } from "../format.ts";
+import { useCoreAction } from "../use-core-action.ts";
+
+// What a source received, under its row in Settings › Webhooks (core's
+// workflows/source-deliveries.ts): when its last event came and how many
+// it accepted and refused in the last 24 hours, always; and, once opened,
+// why it refused them, its recent deliveries, each payload read on its own
+// (core audits that read, so nothing reads one unasked), and a test event
+// that says which triggers it matches and starts nothing.
+
+/** What an opened source shows: its refusals and its deliveries so far. */
+interface Received {
+  refusals: readonly EventSourceRefusals[];
+  deliveries: readonly EventSourceDelivery[];
+  next: string | null;
+}
+
+/** Why a source refused deliveries, a line for each reason. */
+const Refusals = ({
+  refusals,
+}: {
+  refusals: readonly EventSourceRefusals[];
+}) => {
+  const { t } = useLingui();
+  const lines = refusals.map(({ reason, lastWeek: count }) => {
+    switch (reason) {
+      case "revoked": {
+        return t`${plural(count, { one: "# delivery refused in the last seven days: its secret was revoked.", other: "# deliveries refused in the last seven days: its secret was revoked." })}`;
+      }
+      case "headers": {
+        return t`${plural(count, { one: "# delivery refused in the last seven days: its signing headers were missing or more than five minutes old.", other: "# deliveries refused in the last seven days: their signing headers were missing or more than five minutes old." })}`;
+      }
+      case "signature": {
+        return t`${plural(count, { one: "# delivery refused in the last seven days: it wasn't signed with this source's secret.", other: "# deliveries refused in the last seven days: they weren't signed with this source's secret." })}`;
+      }
+      case "rotated": {
+        return t`${plural(count, { one: "# delivery refused in the last seven days: the secret changed as it arrived.", other: "# deliveries refused in the last seven days: the secret changed as they arrived." })}`;
+      }
+      default: {
+        return reason satisfies never;
+      }
+    }
+  });
+  return (
+    <ul className="flex flex-col gap-1 text-sm">
+      {refusals.map(({ reason }, index) => (
+        <li key={reason}>{lines[index]}</li>
+      ))}
+    </ul>
+  );
+};
+
+/** One delivery: when, its type, what it started, and a way to its payload. */
+const DeliveryRow = ({
+  delivery,
+  busy,
+  onPayload,
+}: {
+  delivery: EventSourceDelivery;
+  busy: boolean;
+  onPayload: () => void;
+}) => {
+  const { t } = useLingui();
+  const { triggersStarted: started, type } = delivery;
+  return (
+    <li className="flex flex-wrap items-center gap-2 py-2 text-sm">
+      <span className="text-muted-foreground">
+        {formatDateTime(delivery.receivedAt)}
+      </span>
+      <code className="font-mono">{type}</code>
+      {delivery.test ? (
+        <Badge variant="outline">
+          <Trans>Test</Trans>
+        </Badge>
+      ) : (
+        <span className="text-muted-foreground">
+          {t`${plural(started, { one: "Started # workflow", other: "Started # workflows" })}`}
+        </span>
+      )}
+      {delivery.payloadHeld ? (
+        <Button
+          aria-label={t`Show the payload of ${type}`}
+          disabled={busy}
+          onClick={onPayload}
+          size="sm"
+          variant="ghost"
+        >
+          <Trans>Show payload</Trans>
+        </Button>
+      ) : (
+        <span className="text-muted-foreground text-xs">
+          <Trans>Payload no longer kept</Trans>
+        </span>
+      )}
+    </li>
+  );
+};
+
+/** A test event for `source`: its type and data, and what it matched. */
+const TestEvent = ({
+  source,
+  onSent,
+}: {
+  source: EventSource;
+  onSent: () => Promise<void>;
+}) => {
+  const ids = useId();
+  const { t } = useLingui();
+  const { busy, failure, run } = useCoreAction();
+  const [type, setType] = useState("");
+  const [data, setData] = useState("{}");
+  const [notJson, setNotJson] = useState(false);
+  const [result, setResult] = useState<EventSourceTestResult>();
+  const send = async (): Promise<void> => {
+    setResult(undefined);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(data);
+    } catch {
+      setNotJson(true);
+      return;
+    }
+    setNotJson(false);
+    const sent = await run(
+      async (session) =>
+        await session.workflowResources.sources.sendTest(source.id, {
+          type: type.trim(),
+          data: parsed,
+        })
+    );
+    if (sent !== undefined) {
+      setResult(sent);
+      await onSent();
+    }
+  };
+  const matched = result?.matched.length ?? 0;
+  const workflows = formatList(
+    result?.matched.map(({ workflow }) => workflow.name) ?? []
+  );
+  return (
+    <form
+      className="flex flex-col gap-2"
+      onSubmit={(submitted) => {
+        submitted.preventDefault();
+        void send();
+      }}
+    >
+      <Label htmlFor={`${ids}-type`}>
+        <Trans>Event type of a test event</Trans>
+      </Label>
+      <Input
+        id={`${ids}-type`}
+        onChange={(changed) => {
+          setType(changed.target.value);
+        }}
+        placeholder="payment.paid"
+        required
+        value={type}
+      />
+      <Label htmlFor={`${ids}-data`}>
+        <Trans>Its data, as JSON</Trans>
+      </Label>
+      <Textarea
+        id={`${ids}-data`}
+        onChange={(changed) => {
+          setData(changed.target.value);
+        }}
+        value={data}
+      />
+      <div>
+        <Button disabled={busy} size="sm" type="submit" variant="outline">
+          <Trans>Send a test event</Trans>
+        </Button>
+      </div>
+      {result === undefined ? null : (
+        <output className="text-sm">
+          {matched === 0
+            ? t`No trigger starts on this type. A test event starts no workflow.`
+            : t`${plural(matched, { one: `# trigger starts on this type, for ${workflows}. A test event starts no workflow.`, other: `# triggers start on this type, for ${workflows}. A test event starts no workflow.` })}`}
+        </output>
+      )}
+      <ErrorText>{notJson ? t`The data isn't JSON.` : failure}</ErrorText>
+    </form>
+  );
+};
+
+/** What an opened source received: refusals, deliveries, a test event. */
+const ReceivedList = ({
+  source,
+  received,
+  busy,
+  failure,
+  onMore,
+  onPayload,
+  onSent,
+}: {
+  source: EventSource;
+  received: Received | undefined;
+  busy: boolean;
+  failure: string | undefined;
+  onMore: (from: string) => void;
+  onPayload: (delivery: EventSourceDelivery) => void;
+  onSent: () => Promise<void>;
+}) => (
+  <div className="flex flex-col gap-3">
+    {received === undefined ? null : (
+      <>
+        <Refusals refusals={received.refusals} />
+        {received.deliveries.length === 0 ? (
+          <p className="text-muted-foreground text-sm">
+            <Trans>No event accepted in the last seven days.</Trans>
+          </p>
+        ) : (
+          <ul className="flex flex-col divide-y">
+            {received.deliveries.map((delivery) => (
+              <DeliveryRow
+                busy={busy}
+                delivery={delivery}
+                key={delivery.id}
+                onPayload={() => {
+                  onPayload(delivery);
+                }}
+              />
+            ))}
+          </ul>
+        )}
+        {received.next === null ? null : (
+          <div>
+            <Button
+              disabled={busy}
+              onClick={() => {
+                onMore(received.next ?? "");
+              }}
+              size="sm"
+              variant="outline"
+            >
+              <Trans>Show older events</Trans>
+            </Button>
+          </div>
+        )}
+      </>
+    )}
+    <ErrorText>{failure}</ErrorText>
+    <TestEvent onSent={onSent} source={source} />
+  </div>
+);
+
+/**
+ * What `source` received lately, for its admin: a line always, and its
+ * refusals, deliveries and a test event once opened, read as it is
+ * opened.
+ */
+export const SourceActivity = ({ source }: { source: EventSource }) => {
+  const { t } = useLingui();
+  const router = useRouter();
+  const { busy, failure, run } = useCoreAction();
+  const [open, setOpen] = useState(false);
+  const [received, setReceived] = useState<Received>();
+  const [payload, setPayload] = useState<string>();
+  const { activity, name } = source;
+  if (activity === null) {
+    return null;
+  }
+
+  /** Reads the refusals and the newest deliveries afresh. */
+  const read = async (): Promise<void> => {
+    const answered = await run(async (session) => {
+      const { sources } = session.workflowResources;
+      const [refusals, page] = await Promise.all([
+        sources.refusals(source.id),
+        sources.deliveries(source.id),
+      ]);
+      return { refusals, ...page };
+    });
+    if (answered !== undefined) {
+      setReceived(answered);
+    }
+  };
+
+  const more = async (from: string): Promise<void> => {
+    const page: EventSourceDeliveryPage | undefined = await run(
+      async (session) =>
+        await session.workflowResources.sources.deliveries(source.id, from)
+    );
+    if (page !== undefined) {
+      setReceived((before) =>
+        before === undefined
+          ? before
+          : {
+              ...before,
+              deliveries: [...before.deliveries, ...page.deliveries],
+              next: page.next,
+            }
+      );
+    }
+  };
+
+  const show = async (delivery: EventSourceDelivery): Promise<void> => {
+    const answered = await run(
+      async (session) =>
+        await session.workflowResources.sources.delivery(source.id, delivery.id)
+    );
+    if (answered !== undefined) {
+      setPayload(JSON.stringify(answered.payload, null, 2));
+    }
+  };
+
+  const last =
+    activity.lastEventAt === null
+      ? undefined
+      : formatDateTime(activity.lastEventAt);
+  const { acceptedLastDay: accepted, refusedLastDay: refused } = activity;
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span>
+          {last === undefined ? (
+            <Trans>No event in the last seven days.</Trans>
+          ) : (
+            <Trans>Last event {last}.</Trans>
+          )}
+        </span>
+        <span className="text-muted-foreground">
+          {t`${plural(accepted, { one: "# event accepted in the last 24 hours.", other: "# events accepted in the last 24 hours." })}`}
+        </span>
+        {refused === 0 ? null : (
+          <Badge variant="attention">
+            {t`${plural(refused, { one: "# refused in the last 24 hours", other: "# refused in the last 24 hours" })}`}
+          </Badge>
+        )}
+        <Button
+          aria-expanded={open}
+          aria-label={
+            open ? t`Hide what ${name} received` : t`Show what ${name} received`
+          }
+          onClick={() => {
+            setOpen(!open);
+            if (!open) {
+              void read();
+            }
+          }}
+          size="sm"
+          variant="ghost"
+        >
+          {open ? <Trans>Hide events</Trans> : <Trans>Show events</Trans>}
+        </Button>
+      </div>
+      {open ? (
+        <ReceivedList
+          busy={busy}
+          failure={failure}
+          onMore={(from) => {
+            void more(from);
+          }}
+          onPayload={(delivery) => {
+            void show(delivery);
+          }}
+          onSent={async () => {
+            await read();
+            await router.invalidate({ sync: true });
+          }}
+          received={received}
+          source={source}
+        />
+      ) : null}
+      <Dialog
+        onOpenChange={(shown) => {
+          if (!shown) {
+            setPayload(undefined);
+          }
+        }}
+        open={payload !== undefined}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              <Trans>Payload</Trans>
+            </DialogTitle>
+            <DialogDescription>
+              <Trans>
+                Kept for 24 hours after the event came. Opening it is recorded
+                in the audit trail.
+              </Trans>
+            </DialogDescription>
+          </DialogHeader>
+          <pre className="overflow-auto font-mono text-sm">{payload}</pre>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};

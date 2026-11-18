@@ -125,8 +125,12 @@ const typeRules: readonly {
   // didn't start.
   { action: "connection.events.dropped", type: "action" },
   { action: "connection.events", type: "config" },
-  // Event sources (core's src/event-sources.ts): an admin creating one,
-  // rotating or revoking its secret, and deleting it.
+  // Event sources (core's src/event-sources.ts): an admin reading the
+  // payload of a delivery one kept and sending one a test event (core's
+  // src/workflows/source-deliveries.ts), then creating one, rotating or
+  // revoking its secret, and deleting it.
+  { action: "event_source.delivery.read", type: "read" },
+  { action: "event_source.test_sent", type: "action" },
   { action: "event_source", type: "config" },
   // An event source's event a workflow's trigger refused for good (core's
   // src/workflows/source-events.ts), or a waiting run refused; its events

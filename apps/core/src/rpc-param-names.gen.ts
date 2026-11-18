@@ -274,9 +274,14 @@ export const rpcParamNames: ParamNames = {
   "EventSourcesRpc": {
     "create": ["input"],
     "delete": ["id"],
+    "deliveries": ["id","page"],
+    "delivery": ["id","deliveryId"],
     "list": [],
+    "refusals": ["id"],
     "revokeSecret": ["id"],
     "rotateSecret": ["id"],
+    "sendTest": ["id","input"],
+    "triggers": ["id"],
   },
   "HeldStartsRpc": {
     "confirm": ["id","argsHash"],
