@@ -82,6 +82,7 @@ import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { ReadOnlyRow } from "./read-only-row.tsx";
 
 // Settings › AI providers, as the library's Settings pattern has it: one
 // compact card per topic, rows inside, every control on one edge and as
@@ -979,7 +980,7 @@ const Models = ({
             )}
           </SettingRow>
         ) : (
-          <FactRow label={t`Default model`}>{defaultName}</FactRow>
+          <ReadOnlyRow label={t`Default model`} value={defaultName} />
         )}
         {choice !== null && defaultModel === null && editable ? (
           <RowAlert variant="attention">
