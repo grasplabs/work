@@ -20,6 +20,7 @@ import { ModelsRpc } from "./models-rpc.ts";
 import { NotificationsRpc } from "./notifications.ts";
 import { OnboardingGateRpc } from "./onboarding/gate-rpc.ts";
 import { OnboardingRpc } from "./onboarding/rpc.ts";
+import { OpportunitiesRpc } from "./opportunities-rpc.ts";
 import { OrgSettingsRpc } from "./org-settings.ts";
 import { OrganizationRpc } from "./organization.ts";
 import { SessionsRpc } from "./own-sessions.ts";
@@ -62,6 +63,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #brainSources: BrainSourcesRpc;
   readonly #skills: SkillsRpc;
   readonly #brainMemories: BrainMemoriesRpc;
+  readonly #opportunities: OpportunitiesRpc;
   readonly #instructions: InstructionsRpc;
   readonly #permissions: PermissionsRpc;
   readonly #resourceBindings: ResourceBindingsRpc;
@@ -109,6 +111,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#brainSources = new BrainSourcesRpc(env, full);
     this.#skills = new SkillsRpc(env, full);
     this.#brainMemories = new BrainMemoriesRpc(env, full);
+    this.#opportunities = new OpportunitiesRpc(env, full);
     this.#instructions = new InstructionsRpc(env, full);
     this.#permissions = new PermissionsRpc(env, full);
     this.#resourceBindings = new ResourceBindingsRpc(env, full);
@@ -213,6 +216,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get brainMemories(): BrainMemoriesRpc {
     return this.#brainMemories;
+  }
+
+  get opportunities(): OpportunitiesRpc {
+    return this.#opportunities;
   }
 
   get instructions(): InstructionsRpc {

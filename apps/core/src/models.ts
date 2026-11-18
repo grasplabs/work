@@ -347,6 +347,13 @@ const sessionShape = {
        * core's own code makes such a call.
        */
       z.strictObject({ platform: z.literal("agent_builder") }),
+      /**
+       * Core's own proposal for a team's routine (opportunities.ts): from
+       * the routine every member reads and the names of the company's
+       * Apps, asked by the onboarding's alarm for no one in particular, as
+       * a system call. Only core's own code makes such a call.
+       */
+      z.strictObject({ platform: z.literal("opportunities") }),
     ])
     .optional(),
   requestId: auditEventSchema.shape.requestId,

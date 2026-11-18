@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { revokePermission } from "../src/permissions.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
+import { sweepWorkflowStartDetails } from "../src/workflows/retention.ts";
 import { grantReviewed } from "./apps.ts";
 import { mockIdpWith } from "./idp.ts";
 import {
@@ -463,11 +464,11 @@ describe(
         expect(shownOf(first.received.at(-1)?.outcome)).toBe("completed");
       }, settles);
       // Its details removed, as the retention sweep removes them.
-      await env.DB.prepare(
-        "UPDATE workflow_start_receipts SET details_removed_at = ?, input = NULL, params = NULL WHERE id = ?"
-      )
-        .bind(Date.now(), handle.runId)
-        .run();
+      await sweepWorkflowStartDetails(
+        env,
+        new Date(Date.now() + 1),
+        new Date()
+      );
       const second = await following(builder, app, lease, watch);
       await vi.waitFor(() => {
         expect(second.received.length).toBeGreaterThan(0);

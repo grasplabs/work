@@ -32,6 +32,16 @@ import {
  */
 const browserPolicyTests = /(?:page-attacks|product-page-scripts)\.e2e\.ts$/u;
 /**
+ * The Brain found by meaning (e2e/brain-meaning.e2e.ts): its stack runs the
+ * model core ships, whose first loads (the question embedder, then each
+ * bulk embedder, copying the 99 MB token table) take the stack's one
+ * workerd thread for long stretches. Beside other tests, and the setup's
+ * platform warm-up, that failed them (November 2026), so it runs in a
+ * project of its own, on a stack of its own in CI, the only one with the
+ * model (.github/workflows/ci.yml).
+ */
+export const brainMeaningTests = /brain-meaning\.e2e\.ts$/u;
+/**
  * Grasp's go (e2e/onboarding.e2e.ts): taking it back closes the deployment,
  * which signs out everyone the other tests signed in. So it runs last, in
  * a project of its own after all the others, one test at a time.
@@ -119,6 +129,7 @@ const parallelProjects: Project[] = [
     name: "chromium",
     use: { ...devices["Desktop Chrome"] },
     testIgnore: [
+      brainMeaningTests,
       onboardingFlowTests,
       onboardingTests,
       interviewTests,
@@ -148,10 +159,17 @@ const parallelProjects: Project[] = [
  */
 const serialProjects = (before: string[]): Project[] => [
   {
+    name: "brain-meaning",
+    use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
+    testMatch: brainMeaningTests,
+    dependencies: before,
+    workers: 1,
+  },
+  {
     name: "onboarding-flow",
     use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
     testMatch: onboardingFlowTests,
-    dependencies: before,
+    dependencies: ["brain-meaning"],
     workers: 1,
   },
   {
@@ -219,7 +237,7 @@ const e2eProjects = (): Project[] => {
     return [{ ...alone, dependencies: [] }];
   }
   throw new Error(
-    `GRASP_E2E_PART is "${part}": leave it unset, or set "parallel", "serial", "onboarding-flow", "onboarding", "interview" or "journeys".`
+    `GRASP_E2E_PART is "${part}": leave it unset, or set "parallel", "serial", "brain-meaning", "onboarding-flow", "onboarding", "interview" or "journeys".`
   );
 };
 
@@ -266,7 +284,7 @@ export default defineConfig({
               'rm -rf "$DEV_PERSIST_TO" &&',
               'cp -R "$E2E_MIGRATED_STATE" "$DEV_PERSIST_TO" &&',
               // The model core ships, when this machine holds its files: in
-              // CI only the part that runs the test by meaning does
+              // CI only the brain-meaning part's does
               // (.github/workflows/ci.yml), so no other stack loads it.
               'node scripts/local-model-files.ts --persist-to "$DEV_PERSIST_TO" -c apps/core/wrangler.jsonc &&',
               "cd apps/core &&",

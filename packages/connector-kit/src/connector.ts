@@ -30,6 +30,8 @@ import {
   stampPattern,
   syncMethod,
   syncParamsSchema,
+  syncPlacesMethod,
+  syncPlacesParamsSchema,
 } from "./manifest.ts";
 import type {
   ActionManifest,
@@ -994,6 +996,14 @@ export const defineConnector = (definition: ConnectorDefinition): Connector => {
           return refusal(id, invalidParams, "No such sync");
         }
         return answer(id, await found.call(params));
+      }
+      case syncPlacesMethod: {
+        const sync = syncPlacesParamsSchema.safeParse(params);
+        const found = sync.success ? syncs.get(sync.data.name) : undefined;
+        if (found?.manifest.places !== "listed") {
+          return refusal(id, invalidParams, "No such sync with places");
+        }
+        return answer(id, await found.places(params));
       }
       default: {
         return refusal(id, methodNotFound, "No such method");

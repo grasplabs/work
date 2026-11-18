@@ -4,6 +4,7 @@ import { log } from "@grasp-os/shared/log";
 import { erasureBegun } from "../brain-hand-overs.ts";
 import { addSource, eraseSource } from "../brain-next.ts";
 import type { Filed, Handed, SourceReaders, SourceRef } from "../brain-next.ts";
+import { eraseOpportunitiesOn } from "../opportunities.ts";
 import { opinionSource } from "./company-opinions.ts";
 import { drawingText, routineFacts } from "./routine.ts";
 import { onboardingStore } from "./store.ts";
@@ -339,6 +340,10 @@ const erase = async (env: Env, owed: OwedErasure): Promise<void> => {
     readers: { kind: "members" },
     reason: "deleted",
   });
+  // What an opportunity keeps of a drawing goes with it (GRA-1750).
+  if (owed.kind === "drawing") {
+    await eraseOpportunitiesOn(env, owed.source);
+  }
 };
 
 /**

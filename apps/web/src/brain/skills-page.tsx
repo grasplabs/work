@@ -1,4 +1,5 @@
 import { failureText } from "@grasp-os/shared/errors";
+import type { Opportunity } from "@grasp-os/shared/opportunities";
 import type {
   CompanySkill,
   DecidedTeamSkill,
@@ -6,6 +7,7 @@ import type {
   ListedTeamSkill,
   OwnSkillShare,
   SkillAudienceAsked,
+  SkillProposal,
   SkillShare,
   SkillShareAudience,
   SkillInUse,
@@ -50,6 +52,7 @@ import {
   PageHeaderTitle,
 } from "@grasp-os/ui/components/page-header";
 import { Textarea } from "@grasp-os/ui/components/textarea";
+import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useEffect, useId, useRef, useState } from "react";
 
@@ -57,14 +60,18 @@ import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
+import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
+import { skillOf, useStartFrom } from "./opportunity-drafts.ts";
 
 // Skills (GRA-1754, GRA-1844): the person's own, which they write, edit
 // and delete, for their own chats alone; asking to share one with the
 // company or one of their teams, which waits for an admin; the company's
 // skills and their teams'; and, for the organization's admins, the shares
 // waiting for them, each with the exact text an approval adds and whom
-// for, and retiring a shared skill. Core holds every rule
+// for, and retiring a shared skill. From an opportunity an admin drafts as
+// a skill (`opportunity`, GRA-1751), the editor starts with a skill for
+// it, to change and save as their own. Core holds every rule
 // (skill-shares.ts): the page only asks. Texts are shown as text, never
 // markup.
 
@@ -791,8 +798,158 @@ const TeamSkills = ({ data }: { data: SkillsOverview | undefined }) => {
 };
 
 /** The skills page: the person's own, their shares, the company's and their teams', and for admins what waits. */
-export const SkillsPage = () => {
+/** A skill proposed to the person, with what it rests on and the exact text adding it saves. */
+const ProposedSkill = ({
+  proposal,
+  busy,
+  onAdd,
+  onDismiss,
+}: {
+  proposal: SkillProposal;
+  busy: boolean;
+  onAdd: () => void;
+  onDismiss: () => void;
+}) => {
+  const { t } = useLingui();
+  const { name, description, text, basis } = proposal;
+  const workflow = basis.workflow.name;
+  const { version } = basis;
+  const count = basis.runs.length;
+  const [latest] = basis.runs;
+  const ended = latest === undefined ? "" : formatDateTime(latest.endedAt);
+  return (
+    <Card render={<li />} size="sm">
+      <CardContent>
+        <span className="text-sm font-medium">{name}</span>
+        <span className="text-muted-foreground text-sm">{description}</span>
+        <p className="text-muted-foreground text-xs">
+          {t`${plural(count, {
+            one: `From your last run of ${workflow}, version ${version}, which succeeded on ${ended}.`,
+            other: `From your last # runs of ${workflow}, version ${version}, which all succeeded, the latest on ${ended}.`,
+          })}`}
+        </p>
+        <p className="text-sm whitespace-pre-wrap">{text}</p>
+        <div className="flex gap-2">
+          <Button disabled={busy} onClick={onAdd} size="sm" type="button">
+            <Trans>Add to your skills</Trans>
+          </Button>
+          <Button
+            disabled={busy}
+            onClick={onDismiss}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            <Trans context="a skill proposed to you">Dismiss</Trans>
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
+/**
+ * The skills Grasp proposes to the person from their own runs that keep
+ * succeeding: shown to them alone, used nowhere until they add one.
+ * Nothing while there are none, or they couldn't be read: the rest of the
+ * page doesn't depend on them.
+ */
+const ProposedSkills = ({ onAdded }: { onAdded: () => void }) => {
   const core = useCore();
+  const heading = useId();
+  const [proposals, setProposals] = useState<Read<SkillProposal[]>>({
+    state: "loading",
+  });
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<string>();
+
+  useEffect(() => {
+    let left = false;
+    const read = async (): Promise<void> => {
+      const answer = await callCore(
+        core,
+        async (skills) => await skills.proposals()
+      );
+      if (!left) {
+        setProposals((current) =>
+          current.state === "loading" ? answer : current
+        );
+      }
+    };
+    void read();
+    return () => {
+      left = true;
+    };
+  }, [core]);
+
+  /** Runs `call`, then reads the proposals again; `added` tells the page to read its skills again. */
+  const settle = (
+    call: (skills: Skills) => Promise<unknown>,
+    added: boolean
+  ) => {
+    setBusy(true);
+    setFailed(undefined);
+    void (async () => {
+      const answer = await callCore(core, call);
+      if (answer.state === "refused") {
+        setFailed(answer.message);
+      } else if (added) {
+        onAdded();
+      }
+      setProposals(
+        await callCore(core, async (skills) => await skills.proposals())
+      );
+      setBusy(false);
+    })();
+  };
+
+  if (proposals.state !== "ready" || proposals.data.length === 0) {
+    return failed === undefined ? null : <ErrorText>{failed}</ErrorText>;
+  }
+  return (
+    <section aria-labelledby={heading} className="flex flex-col gap-3">
+      <h2 className="text-sm font-medium" id={heading}>
+        <Trans>Proposed for you</Trans>
+      </h2>
+      <p className="text-muted-foreground text-sm">
+        <Trans>
+          Drafted from your own runs of a workflow that keep succeeding. Only
+          you see them, and none is used until you add it to your skills.
+        </Trans>
+      </p>
+      {failed === undefined ? null : <ErrorText>{failed}</ErrorText>}
+      <ul className="flex flex-col gap-3">
+        {proposals.data.map((proposal) => (
+          <ProposedSkill
+            busy={busy}
+            key={proposal.key}
+            onAdd={() => {
+              settle(
+                async (skills) => await skills.acceptProposal(proposal.key),
+                true
+              );
+            }}
+            onDismiss={() => {
+              settle(async (skills) => {
+                await skills.dismissProposal(proposal.key);
+              }, false);
+            }}
+            proposal={proposal}
+          />
+        ))}
+      </ul>
+    </section>
+  );
+};
+
+export const SkillsPage = ({
+  opportunity,
+}: {
+  /** The opportunity whose skill the editor starts with, once read. */
+  opportunity?: Promise<Loaded<Opportunity | undefined>> | undefined;
+}) => {
+  const core = useCore();
+  const { i18n } = useLingui();
   const editorId = useId();
   const ownHeading = useId();
   const companyHeading = useId();
@@ -822,6 +979,11 @@ export const SkillsPage = () => {
       focusNext.current = null;
     }
   }, [busy]);
+
+  // The opportunity's skill, once read, fills the editor.
+  useStartFrom(opportunity, (read) => {
+    setText(skillOf(read, i18n));
+  });
 
   useEffect(() => {
     let left = false;
@@ -1042,6 +1204,16 @@ export const SkillsPage = () => {
             ))}
           </ItemGroup>
         </section>
+
+        <ProposedSkills
+          onAdded={() => {
+            void (async () => {
+              show(
+                await callCore(core, async (skills) => await skills.overview())
+              );
+            })();
+          }}
+        />
 
         <AskedShares data={data} />
 

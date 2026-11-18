@@ -343,6 +343,11 @@ export const rpcParamNames: ParamNames = {
     "sharePlaceFile": ["input"],
     "view": [],
   },
+  "OpportunitiesRpc": {
+    "dismiss": ["dismissal"],
+    "list": [],
+    "restore": ["dismissal"],
+  },
   "OrgSettingsRpc": {
     "billing": [],
     "ownAgents": [],
@@ -415,9 +420,12 @@ export const rpcParamNames: ParamNames = {
     "list": ["filter"],
   },
   "SkillsRpc": {
+    "acceptProposal": ["key"],
     "approve": ["id"],
     "decline": ["id"],
+    "dismissProposal": ["key"],
     "overview": [],
+    "proposals": [],
     "read": ["scope","name"],
     "remove": ["name"],
     "retire": ["name","audience"],

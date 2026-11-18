@@ -36,6 +36,7 @@ import {
   newInstructionsSchema,
   newMemoriesSchema,
   newSourceSchema,
+  readersChangeSchema,
   onlyInOwnStore,
   ownEntityRequestSchema,
   profileRequestSchema,
@@ -43,6 +44,9 @@ import {
   ownExportRequestSchema,
   ownExportStartSchema,
   personErasureSchema,
+  proposalRequestSchema,
+  proposalSettleSchema,
+  proposalsRequestSchema,
   sharedPersonErasureSchema,
   writerErasureSchema,
   readableMemoriesRequestSchema,
@@ -126,6 +130,7 @@ import type {
   Access,
   StoreKind,
   NewSource,
+  ReadersChange,
   PersonErasure,
   SharedPersonErasure,
   WriterErasure,
@@ -149,6 +154,11 @@ import type {
   VersionListRequest,
   VersionRequest,
   WorkOverview,
+  ProposalRequest,
+  ProposalSettle,
+  ProposalSources,
+  ProposalsRequest,
+  SkillProposal,
 } from "./contract.ts";
 import migrations from "./db/migrations/migrations.js";
 import {
@@ -235,7 +245,13 @@ import { isRemoved, removeSources } from "./removal.ts";
 import { checkRestore, restoreStatus, startRestore } from "./restore.ts";
 import { isRestoring } from "./restoring.ts";
 import {
+  enqueueProposal,
+  listProposals,
+  settleProposal,
+} from "./skill-proposals.ts";
+import {
   addVersion,
+  changeReaders,
   changeVersion,
   readCurrent,
   readVersion,
@@ -275,6 +291,11 @@ export interface AlarmHost {
   embedders: Embedders;
   /** The host's model's context window, in tokens; null when unknown. */
   contextTokens: number | null;
+  /**
+   * The host's pick of the sources a skill's draft is drawn from
+   * (skill-proposals.ts); a host that gives none has no draft made.
+   */
+  proposalSources?: ProposalSources;
   /**
    * Told the store's overview once each tick ends, done or failed, while
    * the store has its schema and wasn't erased: for the host's health row
@@ -886,6 +907,24 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       await this.#readyToWrite();
       return await this.#unlessErasedMeanwhile(
         async () => await addVersion(this.#sources, adding, { indexed: true })
+      );
+    });
+  }
+
+  /**
+   * Gives a source other readers: a new version with its current text
+   * (sources.ts `changeReaders`), checked as an add is.
+   */
+  async changeReaders(change: ReadersChange): Promise<AddedVersion | null> {
+    const changing = checked(readersChangeSchema, change);
+    if (isWholeKey(changing.source)) {
+      throw new Error(notInstructions);
+    }
+    this.#mayKeep(changing.access);
+    return await this.#changing(async () => {
+      await this.#readyToWrite();
+      return await this.#unlessErasedMeanwhile(
+        async () => await changeReaders(this.#sources, changing)
       );
     });
   }
@@ -1534,9 +1573,13 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     embedders,
     handOvers,
     contextTokens,
+    proposalSources,
   }: WorkRequest): Promise<void> {
     await this.#changing(async () => {
-      await this.#workNow(ask, at, embedders, contextTokens, handOvers);
+      await this.#workNow(ask, at, embedders, contextTokens, {
+        handOvers,
+        proposalSources,
+      });
     });
   }
 
@@ -1546,7 +1589,10 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     at: Date,
     embedders: Embedders,
     contextTokens: number | null,
-    handOvers?: HandOvers
+    {
+      handOvers,
+      proposalSources,
+    }: { handOvers?: HandOvers; proposalSources?: ProposalSources } = {}
   ): Promise<void> {
     await this.#ready();
     const tickAt = checked(tickAtSchema, at);
@@ -1564,21 +1610,25 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         embed: async (request) => await embedders.embed(request),
       },
       tokens,
-      handOvers
+      { handOvers, proposalSources }
     );
   }
 
   /**
    * The tick of `work` at `tickAt`, with the host's checked `embedders`,
-   * and its `handOvers` on the shared store only: hand-overs are queued
-   * there alone (`handOver`).
+   * its `handOvers` on the shared store only (hand-overs are queued there
+   * alone: `handOver`), and its pick of a draft's sources on a person's
+   * own store only.
    */
   async #tick(
     ask: AskModel,
     tickAt: Date,
     embedders: Embedders,
     contextTokens: number | null,
-    handOvers: HandOvers | undefined
+    {
+      handOvers,
+      proposalSources,
+    }: { handOvers?: HandOvers; proposalSources?: ProposalSources }
   ): Promise<void> {
     if (this.#work.restarting) {
       // The store restarts in a moment: the next instance's tick works.
@@ -1601,6 +1651,9 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
         bucket: this.#bucket,
         contextTokens,
         ...(this.#kind.kind === "person" ? { owner: this.#kind.person } : {}),
+        ...(proposalSources === undefined || this.#kind.kind !== "person"
+          ? {}
+          : { proposalSources }),
         ...(handOvers === undefined || this.#kind.kind !== "shared"
           ? {}
           : {
@@ -1659,7 +1712,8 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
               host.ask,
               new Date(),
               host.embedders,
-              host.contextTokens
+              host.contextTokens,
+              { proposalSources: host.proposalSources }
             );
           } finally {
             await this.#report(host);
@@ -2222,6 +2276,51 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
       }
       throw error;
     }
+  }
+
+  /**
+   * Puts a draft of a skill for this person on their own store's queue
+   * (skill-proposals.ts), unless one was drafted under its key already.
+   * Only for that person, by the host when what the sources have in common
+   * changed; refused once the store was erased whole, and by the shared
+   * store.
+   */
+  async proposeSkill(request: ProposalRequest): Promise<void> {
+    const { person, ...asked } = checked(proposalRequestSchema, request);
+    this.#ownOnly(person);
+    await this.#changing(async () => {
+      await this.#readyToWrite();
+      enqueueProposal(this.ctx.storage, asked);
+    });
+  }
+
+  /**
+   * This person's open skill proposals, each only while every version it
+   * rests on is still current and theirs to read (skill-proposals.ts): none
+   * from the shared store, and none once the store was erased whole.
+   */
+  async skillProposals(request: ProposalsRequest): Promise<SkillProposal[]> {
+    const { reader } = checked(proposalsRequestSchema, request);
+    this.#mayRead(reader);
+    if (this.#kind.kind !== "person" || !(await this.#readable())) {
+      return [];
+    }
+    return listProposals(this.ctx.storage.sql, reader);
+  }
+
+  /**
+   * Settles one of this person's proposals as they chose: its key alone is
+   * kept, so nothing is drafted under it again. Only for that person.
+   */
+  async settleSkillProposal(request: ProposalSettle): Promise<void> {
+    const { person, ...asked } = checked(proposalSettleSchema, request);
+    this.#ownOnly(person);
+    if (!(await this.#readable())) {
+      return;
+    }
+    this.ctx.storage.transactionSync(() => {
+      settleProposal(this.ctx.storage.sql, asked);
+    });
   }
 
   /**

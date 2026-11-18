@@ -262,6 +262,8 @@ export const fakeProviders = () => {
     const aliases = account.aliases ?? [];
     return account.provider === "microsoft"
       ? Response.json({
+          // The account's Entra object ID, as Graph's /me answers it.
+          id: account.subject,
           mail: account.email,
           proxyAddresses: [
             `SMTP:${account.email}`,

@@ -10,6 +10,7 @@ import { brainUploadReadersSchema } from "@grasp-os/shared/brain-sources";
 import type { BrainUploadReaders } from "@grasp-os/shared/brain-sources";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { authoritySchema } from "@grasp-os/shared/permissions";
+import type { SourceReader } from "@grasp-os/shared/source-readers";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -22,6 +23,7 @@ import {
   addInstructionFile,
   addSource,
   brainStaffReport,
+  changeSourceReaders,
   eraseSource,
   erasePerson,
   publishAs,
@@ -72,6 +74,7 @@ import { brainSurfaces, membersOf, textOf } from "./brain-next-surfaces.ts";
 import type { Probing } from "./brain-next-surfaces.ts";
 import { chatIdsOf, codeStepTrace } from "./code-step-trace.ts";
 import { mockIdp } from "./idp.ts";
+import type { Claims } from "./idp.ts";
 import { saveInstructions } from "./instruction-saves.ts";
 import { answeringProvider, testModel } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
@@ -120,6 +123,14 @@ import {
 // nobody may read.
 
 const idp = mockIdp();
+
+/** The account `claims` signed in with, as a reader list names it. */
+const accountOf = (claims: Claims): SourceReader => ({
+  kind: "account",
+  provider: "microsoft",
+  tenant: acmeTenant,
+  account: String(claims.oid),
+});
 
 /** Grants the chat agent the Brain permission, once for the file. */
 const chatAgentReadsBrain = chatAgentReadsBrainOnce(idp);
@@ -346,10 +357,11 @@ describe(
       await answeringProvider(() => {});
       // The holder builds Apps, so they can make the outsider a user of
       // two.
-      const [holderApi, { userId: outsider }] = await Promise.all([
-        signedInApi(idp, "builder"),
-        signedInWithRole(idp, "user"),
-      ]);
+      const [holderApi, { userId: outsider, person: outsiderPerson }] =
+        await Promise.all([
+          signedInApi(idp, "builder"),
+          signedInWithRole(idp, "user"),
+        ]);
       const holder = holderApi.userId;
       const secretTeam = await newTeam(holder);
       const ownTeam = await newTeam(outsider);
@@ -379,6 +391,10 @@ describe(
           markerWord(),
         "the holder's own skill": markerWord(),
         "a team's skill the outsider isn't in": markerWord(),
+        "a file the source shares with the holder, by their account":
+          markerWord(),
+        "a file the source shared with the outsider, then with the holder alone":
+          markerWord(),
         "the holder's run": markerWord(),
         "a question in the holder's chat": markerWord(),
         "an answer in the holder's chat": markerWord(),
@@ -428,6 +444,10 @@ describe(
           unsharedReadMarker,
         "the holder's own skill": holderSkillMarker,
         "a team's skill the outsider isn't in": teamSkillMarker,
+        "a file the source shares with the holder, by their account":
+          readersMarker,
+        "a file the source shared with the outsider, then with the holder alone":
+          staleReadersMarker,
         "the holder's run": runMarker,
         "a question in the holder's chat": askedMarker,
         "an answer in the holder's chat": answerMarker,
@@ -808,6 +828,39 @@ describe(
           input: sharedCall,
         })}`,
       };
+      // Readers copied from where a file lives (GRA-1761): the holder by
+      // the account they sign in with, beside a link and a group, which
+      // reach nobody. Its twin, the stale list: first shared with the
+      // outsider too, then with the holder alone; its only version is the
+      // first, which the outsider was among the readers of.
+      const readersId = await add(
+        `Lease terms ${sharedWord} ${readersMarker}`,
+        {
+          kind: "readers",
+          readers: [
+            accountOf(holderApi.person),
+            { kind: "link" },
+            {
+              kind: "group",
+              provider: "microsoft",
+              tenant: acmeTenant,
+              group: `group-${readersMarker}`,
+            },
+          ],
+        }
+      );
+      const staleReadersId = await add(
+        `Lease draft ${sharedWord} ${staleReadersMarker}`,
+        {
+          kind: "readers",
+          readers: [accountOf(outsiderPerson), accountOf(holderApi.person)],
+        }
+      );
+      await changeSourceReaders(env, {
+        source: staleReadersId,
+        change: crypto.randomUUID(),
+        readers: { kind: "readers", readers: [accountOf(holderApi.person)] },
+      });
       const teamSource = `Board minutes ${sharedWord} ${teamMarker}`;
       const teamId = await add(teamSource, {
         kind: "team",
@@ -1172,6 +1225,8 @@ describe(
           toolkitCaptureMarker,
           runCaptureMarker,
           sharedReadMarker,
+          readersMarker,
+          staleReadersMarker,
           toHolderMarker,
           ...instructionMarkers,
           ownUploadMarker,
@@ -1194,6 +1249,8 @@ describe(
           toolkitCaptureId,
           runCaptureId,
           sharedReadId,
+          readersId,
+          staleReadersId,
           runSource,
           turnSource
         ),
@@ -1366,6 +1423,10 @@ describe(
         teamUploadMarker,
         teamSkillMarker,
         sharedMemoryMarker,
+        readersMarker,
+        staleReadersMarker,
+        readersId,
+        staleReadersId,
         instructionMarkers,
         inRecall,
         instructionGroups,
@@ -1970,6 +2031,7 @@ describe(
             world.opinionMarker,
             world.narrowedMarker,
             world.sharedMemoryMarker,
+            world.readersMarker,
             ...holdersOwnProduced(world).markers,
           ],
           hiddenVersions: everyVersionOf(
@@ -1999,6 +2061,8 @@ describe(
           "the company's opinion from the interviews, which code never gets":
             world.opinionMarker,
           "a source narrowed away from the outsider": world.narrowedMarker,
+          "a file the source shares with the holder, which code never reads by their account":
+            world.readersMarker,
           ...holdersOwnProduced(world).forbidden,
         },
         {
@@ -2049,6 +2113,7 @@ describe(
             world.opinionMarker,
             world.narrowedMarker,
             world.sharedMemoryMarker,
+            world.readersMarker,
             ...holdersOwnProduced(world).markers,
           ],
           hiddenVersions: everyVersionOf(
@@ -2080,6 +2145,8 @@ describe(
           "the company's opinion from the interviews, which code never gets":
             world.opinionMarker,
           "a source narrowed away from the outsider": world.narrowedMarker,
+          "a file the source shares with the holder, which code never reads by their account":
+            world.readersMarker,
           ...holdersOwnProduced(world).forbidden,
         },
         {
@@ -2117,6 +2184,7 @@ describe(
           markers: [
             world.ownerMarker,
             world.interviewMarker,
+            world.readersMarker,
             ...holdersOwnProduced(world).markers,
           ],
           hiddenVersions: [],
@@ -2127,6 +2195,8 @@ describe(
         {
           "the holder's own source": world.ownerMarker,
           "the holder's interview": world.interviewMarker,
+          "a file the source shares with the holder, which an App never reads by their account":
+            world.readersMarker,
           ...holdersOwnProduced(world).forbidden,
         },
         { among: surfaces.filter(([name]) => name === "core recallAs") }
@@ -2343,6 +2413,8 @@ describe(
             ...holdersOwnProduced(world).markers,
             world.teamUploadMarker,
             world.sharedMemoryMarker,
+            world.readersMarker,
+            world.staleReadersMarker,
           ],
           hiddenVersions: everyVersionOf(
             ...world.ownerIds,
@@ -2350,7 +2422,9 @@ describe(
             world.noneId,
             world.narrowedId,
             ...holdersOwnProduced(world).sources,
-            world.teamUpload
+            world.teamUpload,
+            world.readersId,
+            world.staleReadersId
           ),
           hiddenUploads: [world.ownUpload.id, world.teamUpload.id],
           hiddenInstructionFiles: [

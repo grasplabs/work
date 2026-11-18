@@ -60,6 +60,17 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.users": { erased: "identity" },
   "core.sessions": { erased: "identity" },
   "core.accounts": { erased: "identity" },
+  // The token the Brain knows each account on a copied reader list by
+  // (source-readers.ts, GRA-1761), under a keyed hash of the account, so
+  // no row holds an address or an object ID: the rows a person claimed by
+  // reading as themselves, and those nobody claimed of the accounts core
+  // keeps of them, go with their accounts. An outsider's stay, the
+  // company's record of who its documents were shared with, naming nobody
+  // readable.
+  "core.source_reader_tokens": { erased: "identity" },
+  // Every address a person's sign-ins proved, for their erasure alone
+  // (source-readers.ts): forgotten with their accounts.
+  "core.sign_in_addresses": { erased: "identity" },
   "core.members": { erased: "removal" },
   "core.member_removals": { kept: "keeps someone removed out" },
   "core.person_erasures": { kept: "the erasure's own record, by ID" },
@@ -144,6 +155,11 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // What agents read through a shared connection, kept for its audience,
   // names no one; who asked to erase it, an admin's act on the company's.
   "core.connection_brain_reads": noPerson,
+  // What Grasp proposes for a team's routine, and which an admin
+  // dismissed, by routine and evidence (opportunities.ts): ids, a form,
+  // step numbers and systems, never who. Who dismissed is in the audit log.
+  "core.opportunity_proposals": noPerson,
+  "core.opportunity_dismissals": noPerson,
   "core.connection_brain_erasures": { company: "erasures an admin asked for" },
   "core.stephen_reach": { company: "settings an admin changed" },
   "core.stephen_places": { company: "settings an admin changed" },
@@ -193,7 +209,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // an erased person's ID (D3).
   "core.run_chat_sources": {
     company:
-      "what a run's chat had read, with the run; its pins keep other people's IDs after their erasure (D3)",
+      "what a run's chat had read, with the run; its pins keep other people's IDs after their erasure (D3). Their own pins go with their erasure, whatever the run's age, each run left an erased pin of no one that keeps it refused (GRA-1996)",
   },
   "core.org_settings": {
     none: "the organization's billing and Pulse settings",
@@ -391,7 +407,8 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // what that run read holds (workflow-state.ts, GRA-1996), so withheld
   // for good once their erasure took it.
   "core.workflow_state": {
-    company: "what a workflow keeps between its runs, as their outputs (D3)",
+    company:
+      "what a workflow keeps between its runs, as their outputs (D3); the keys set by runs their chats started, and by runs that started from those, go with their erasure (GRA-1996)",
   },
   "core.workflow_state_writes": noPerson,
   "core.workflow_state_snapshots": {
@@ -572,11 +589,16 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // anything, so a restore brings nothing back; so a person's own store
   // needs no entry here. The word indexes (migrations, not in the schema)
   // hold the words of these passages and memories, and go with them.
+  // A set copied from where a document lives names each reader's account
+  // by a random token core keeps in its place (source-readers.ts,
+  // `core.source_reader_tokens`, GRA-1761), never by an address or an
+  // object ID: an erased person's token goes with their accounts, and the
+  // sets name one nobody holds again.
   "brainStore.reader_sets": {
-    none: "sets of groups: the shared store refuses a set of one person",
+    company: "who a document is shared with, by token, where it lives",
   },
   "brainStore.reader_set_members": {
-    none: "groups: the shared store refuses a set of one person",
+    company: "who a document is shared with, by token, where it lives",
   },
   "brainStore.files": noPerson,
   "brainStore.source_versions": {
@@ -666,6 +688,12 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "brainStore.memory_ins": noPerson,
   "brainStore.memory_judging": noPerson,
   "brainStore.memory_judging_places": noPerson,
+  "brainStore.proposal_sources": {
+    none: "the sources a person's skill proposals name (skill-proposals.ts): only in their own store, erased whole; the shared store holds none",
+  },
+  "brainStore.skill_proposals": {
+    none: "drafts of a person's own skills (skill-proposals.ts): only in their own store, erased whole; the shared store holds none",
+  },
   "brainStore.own_entity": {
     none: "a person's own store's entity for its person (own-entity.ts): the shared store holds none, and their own store is erased whole",
   },
@@ -694,7 +722,9 @@ export const reviewedPersonColumns: Readonly<
   "brainStore.removed_sources": ["subject"],
   "brainStore.source_subjects": ["group_subject", "subject"],
   "core.access_revocations": ["user_ids"],
-  "core.accounts": ["user_id"],
+  "core.accounts": ["user_id", "verified_email", "verified_email_at"],
+  "core.source_reader_tokens": ["person"],
+  "core.sign_in_addresses": ["user_id"],
   "core.action_invocations": ["person_id"],
   "core.agent_held_starts": ["person_id"],
   "core.agents": ["changed_by", "made_by", "owner_id"],

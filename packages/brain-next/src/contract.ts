@@ -174,12 +174,24 @@ export const versionSchema = z.int().positive();
 
 /**
  * Who may read a source: one person (`owner`: theirs alone, admins
- * included), a named group (`audience`), or nobody, when who may read it
- * isn't known (`none`).
+ * included), a named group (`audience`), anyone in any of several groups
+ * (`readers`: a list the host copied from where the source lives, each
+ * once), or nobody, when who may read it isn't known (`none`). Readers of
+ * one group are that group's audience: the same set, read back as
+ * `audience`.
  */
 export const accessSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("owner"), person: principalSchema }),
   z.strictObject({ kind: z.literal("audience"), group: principalSchema }),
+  z.strictObject({
+    kind: z.literal("readers"),
+    groups: z
+      .array(principalSchema)
+      .min(1)
+      .refine((groups) => new Set(groups).size === groups.length, {
+        message: "Names a group twice",
+      }),
+  }),
   z.strictObject({ kind: z.literal("none") }),
 ]);
 export type Access = z.infer<typeof accessSchema>;
@@ -316,6 +328,23 @@ export const newSourceSchema = z.strictObject({
   readAt: z.int().nonnegative().optional(),
 });
 export type NewSource = z.infer<typeof newSourceSchema>;
+
+/**
+ * A change of who may read a source: the change `change` of `source` as a
+ * new version with the text of its current one and these readers
+ * (`access`). `readAt` as an add's: when the producer read who may read
+ * it, so a late change of an older read never replaces a newer one.
+ * `extract` as an add's: how memories are drawn from the source, for the
+ * new version when it needs drawing (`Brain.changeReaders`).
+ */
+export const readersChangeSchema = z.strictObject({
+  source: sourceIdSchema,
+  change: changeKeySchema,
+  access: accessSchema,
+  readAt: z.int().nonnegative().optional(),
+  extract: extractSchema.optional(),
+});
+export type ReadersChange = z.infer<typeof readersChangeSchema>;
 
 /**
  * An instruction file's text: at most `instructionsMaxLength` UTF-16
@@ -1331,6 +1360,12 @@ export interface WorkRequest {
    * (`contextTokensSchema`). Null when the host doesn't know it.
    */
   contextTokens: number | null;
+  /**
+   * The host's pick of the sources a skill's draft is drawn from, as it
+   * runs (`ProposalSources`): for a person's own store's tick; a store
+   * given none drafts nothing.
+   */
+  proposalSources?: ProposalSources;
 }
 
 /**
@@ -1569,6 +1604,63 @@ export const ownExportStartSchema = ownExportRequestSchema.extend({
   deployment: deploymentSchema,
 });
 export type OwnExportStart = z.infer<typeof ownExportStartSchema>;
+
+/**
+ * Skill proposals (skill-proposals.ts), in a person's own store alone: a
+ * draft of a skill of theirs, written by the host's model from sources of
+ * theirs that keep ending the same way. Its key is the host's, for what
+ * those sources have in common: the SHA-256 of it, as hex, so the store
+ * never names it.
+ */
+export const proposalKeySchema = z.string().regex(/^[0-9a-f]{64}$/u);
+
+/**
+ * A proposal to draft for `person` under `key`, unless one was drafted
+ * under it already: of what the host queued it for (`subject`, the host's
+ * own words, which name no source), and what the host says the sources
+ * have in common (`about`), as long as an instruction file at most. It
+ * names no source: the draft asks the host which, as it runs
+ * (`ProposalSources`).
+ */
+export const proposalRequestSchema = z.strictObject({
+  person: principalSchema,
+  key: proposalKeySchema,
+  about: wellFormedString().min(1).max(instructionsMaxLength),
+  subject: wellFormedString().min(1).max(sourceIdMaxLength),
+});
+export type ProposalRequest = z.infer<typeof proposalRequestSchema>;
+
+/**
+ * The sources a draft is to be drawn from, as the host picks them at the
+ * moment it runs, for what it queued it for (`subject`): at most a read
+ * of current versions (`currentReadMax`); none when its rule doesn't hold
+ * now. Only a person's own store's alarm is given it (`AlarmHost`).
+ */
+export type ProposalSources = (subject: string) => Promise<SourceId[]>;
+
+/** The open proposals of a person's own store, asked by that person. */
+export const proposalsRequestSchema = z.strictObject({
+  reader: personReaderSchema,
+});
+export type ProposalsRequest = z.infer<typeof proposalsRequestSchema>;
+
+/** An open proposal: its key, the `SKILL.md` drafted, and the versions it rests on. */
+export interface SkillProposal {
+  key: string;
+  text: string;
+  restsOn: SourceVersionRef[];
+  draftedAt: Date;
+}
+
+/**
+ * A person settling one of their own proposals, accepted or dismissed
+ * alike: nothing is drafted under its key again.
+ */
+export const proposalSettleSchema = z.strictObject({
+  person: principalSchema,
+  key: proposalKeySchema,
+});
+export type ProposalSettle = z.infer<typeof proposalSettleSchema>;
 
 /** A file of a person's own export, asked by that person. */
 export const ownExportFileRequestSchema = exportFileRequestSchema.extend({
@@ -2963,6 +3055,29 @@ export interface Brain {
    */
   addSource: (source: NewSource) => Promise<AddedVersion>;
   /**
+   * Gives `source` other readers (`change.access`): a new version with the
+   * text of its current one, added as `addSource` adds one, in one
+   * transaction. So narrowing takes effect at once for everything the
+   * Brain answers, history and what was drawn from it included: a reader
+   * reads a version only while among its readers and the current one's.
+   * The producer never reads back the text it takes away. A change added
+   * before answers with the version it made, whatever came since; readers
+   * the current version already has answer with it, writing nothing; a
+   * version added meanwhile is read again, so text is never taken back.
+   * Null for a source with no current version. Access a store may not
+   * keep is refused as an add's is.
+   *
+   * Memories are drawn from the new version, as `extract` says or else as
+   * an item on the queue was drawing the source, only when it needs it:
+   * the old version's drawing hadn't finished, or the change adds a
+   * reader. A memory is read only by a reader of both its version and the
+   * current one, so what was drawn under the old readers is never shown
+   * to a reader the change adds: it is drawn again, for them. A narrowing
+   * whose drawing had finished draws nothing: those who remain read what
+   * was drawn.
+   */
+  changeReaders: (change: ReadersChange) => Promise<AddedVersion | null>;
+  /**
    * Adds a version of an instruction file as `addSource` adds a source,
    * with the same versions, change keys and safe repeats, but kept whole:
    * never cut into chunks or indexed, so recall never returns it. The
@@ -3287,6 +3402,26 @@ export interface Brain {
    * other, alike. Only their own store answers, and only them.
    */
   ownExportFile: (request: OwnExportFileRequest) => Promise<string | null>;
+  /**
+   * Puts a draft of a skill for `person` on their own store's queue
+   * (skill-proposals.ts): the host's model writes it from the current
+   * versions of the sources the host picks as it runs, as that person
+   * reads them, once per key, open or settled. Only their own store takes
+   * it, and only for them.
+   */
+  proposeSkill: (request: ProposalRequest) => Promise<void>;
+  /**
+   * The reader's open skill proposals, each only while every version it
+   * rests on is still current and theirs to read. Only their own store
+   * answers them; the shared store answers none.
+   */
+  skillProposals: (request: ProposalsRequest) => Promise<SkillProposal[]>;
+  /**
+   * Settles one of `person`'s open proposals, accepted or dismissed alike,
+   * keeping its key alone. Only their own store takes it, and only for
+   * them.
+   */
+  settleSkillProposal: (request: ProposalSettle) => Promise<void>;
   /**
    * Starts restoring the company export `id` of `deployment` from the
    * bucket into this shared store, which must hold no version: a part a

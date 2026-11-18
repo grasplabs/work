@@ -702,6 +702,12 @@ export interface WorkflowResourceRun {
    * when. It goes on by itself once calls work.
    */
   aiProvider?: RunAiProviderWait;
+  /**
+   * How many keys of what its workflow kept it started without, if any:
+   * withheld, as the run that set each read what the company may no
+   * longer read, so it read them as unset. A count, never a key or value.
+   */
+  stateWithheld?: number;
   createdAt: string;
   endedAt: string | null;
   /** What it returned, once completed, for those who see its details. */
@@ -1003,6 +1009,8 @@ export interface WorkflowCandidateRun {
   buildHash: string;
   principal: string;
   status: WorkflowRunStatus;
+  /** How many kept keys it started without, if any, as a run says it. */
+  stateWithheld?: number;
   createdAt: string;
   endedAt: string | null;
   /** What it returned, once completed. */

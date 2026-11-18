@@ -101,6 +101,26 @@ export const accounts = sqliteTable(
      * so staff sessions can be checked against the current staff list.
      */
     oid: text(),
+    /**
+     * The address the ID token of the latest sign-in gave and marked
+     * verified (`email_verified`, Google's): what an item's reader list
+     * may name this account by (source-readers.ts). Null for Entra, whose
+     * `email` claim is not verified.
+     */
+    verifiedEmail: text("verified_email"),
+    /**
+     * When the latest sign-in confirmed `verified_email`: the address
+     * counts only within a day of it (source-readers.ts,
+     * `readerProofMaxAgeMs`), as every proof of an address does.
+     */
+    verifiedEmailAt: timestamp("verified_email_at"),
+    /**
+     * The tenant the ID token of the latest sign-in was checked against
+     * (Entra's `tid`, Google's `hd`): this account counts as a reader in a
+     * copied list only while the sign-in config names that tenant
+     * (source-readers.ts).
+     */
+    verifiedTenant: text("verified_tenant"),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },
@@ -5042,10 +5062,18 @@ export const workflowStartReceipts = sqliteTable(
      * read once and frozen: the hash of its snapshot
      * (`workflowStateSnapshots`), which every activation of its run reads
      * (`$state`); null for a start that admits no run, and once retention
-     * removed its details. Last, as the admitting statement writes every
-     * column in order.
+     * removed its details. The admitting statement writes every column in
+     * order.
      */
     stateHash: text("state_hash"),
+    /**
+     * How many keys of what the workflow kept its run started without:
+     * withheld, as the run that set each read what the company may no
+     * longer read (workflow-state.ts `readableStateOf`, GRA-1996); null
+     * for none. The run's page says so. Last, as the admitting statement
+     * writes every column in order.
+     */
+    stateWithheld: integer("state_withheld"),
   },
   (table) => [
     uniqueIndex("workflow_start_receipts_key").on(
@@ -5892,6 +5920,8 @@ export const workflowCandidateRuns = sqliteTable(
      * activation. A test run writes none back.
      */
     stateHash: text("state_hash"),
+    /** How many kept keys it started without, as a start's receipt says. */
+    stateWithheld: integer("state_withheld"),
     fixtures: text().notNull(),
     status: text({
       enum: ["starting", "running", "completed", "failed", "cancelled"],
@@ -6741,3 +6771,77 @@ export const brainOwnStores = sqliteTable("brain_own_stores", {
   /** Whether its SQLite is near what one object holds (`storeNearLimit`). */
   nearLimit: integer("near_limit", { mode: "boolean" }).notNull(),
 });
+
+/**
+ * Every address a person's sign-ins proved (`accounts.verified_email`),
+ * the current one and those a later sign-in replaced (auth.ts): for their
+ * erasure alone, which forgets the reader tokens of each and then these
+ * rows (person-erasure.ts `identity`, source-readers.ts). Nothing reads
+ * it for access: a past address proves nothing.
+ */
+export const signInAddresses = sqliteTable(
+  "sign_in_addresses",
+  {
+    userId: text("user_id").notNull(),
+    address: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.address] })]
+);
+
+/**
+ * The token the Brain knows each account on a copied reader list by
+ * (source-readers.ts, GRA-1761), so the Brain never holds an address or an
+ * object ID, and nor does this table: `key` is a keyed hash of the account
+ * as lists name it (`<provider>:<account>`, compared form), `token` random,
+ * minted the first time a list names the account. `person` is the member
+ * who last proved the account theirs as they read (null until one has):
+ * erasing them deletes their rows (person-erasure.ts `identity`), so the
+ * lists made before name a token nobody holds again; a later list naming
+ * the account mints a new one.
+ */
+export const sourceReaderTokens = sqliteTable(
+  "source_reader_tokens",
+  {
+    key: text().primaryKey(),
+    person: text(),
+    token: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [index("source_reader_tokens_person_idx").on(table.person)]
+);
+
+/**
+ * What Grasp proposes for a team's routine (opportunities.ts, GRA-1750),
+ * at the evidence it rests on: the model's answer, held to what it was
+ * given, kept so it is asked once per evidence. Only while that evidence
+ * stands: an opportunity list forgets the rest. No person's data: a form,
+ * an App's id, systems from the catalog and step numbers.
+ */
+export const opportunityProposals = sqliteTable(
+  "opportunity_proposals",
+  {
+    /** The onboarding's id for the team's piece of work. */
+    routine: text().notNull(),
+    /** The drawing it rests on, by its id in the Brain. */
+    evidence: text().notNull(),
+    /** The proposal, as JSON (opportunities.ts `proposalSchema`). */
+    proposal: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.routine, table.evidence] })]
+);
+
+/**
+ * Opportunities an admin dismissed (opportunities.ts, GRA-1750), each at
+ * the evidence it was shown with: hidden until that changes. Who dismissed
+ * it is in the audit log, not here.
+ */
+export const opportunityDismissals = sqliteTable(
+  "opportunity_dismissals",
+  {
+    routine: text().notNull(),
+    evidence: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.routine, table.evidence] })]
+);

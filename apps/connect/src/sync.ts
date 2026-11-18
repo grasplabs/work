@@ -1,12 +1,19 @@
-import { syncMethod } from "@grasp-os/connector-kit/manifest";
-import { syncResultSchema } from "@grasp-os/connector-kit/sync";
+import { syncMethod, syncPlacesMethod } from "@grasp-os/connector-kit/manifest";
+import type { SyncManifest } from "@grasp-os/connector-kit/manifest";
+import {
+  syncPlacesResultSchema,
+  syncResultSchema,
+} from "@grasp-os/connector-kit/sync";
+import type { SyncFailure } from "@grasp-os/connector-kit/sync";
 import { connectErrors, connectionErrors } from "@grasp-os/shared/connect";
 import {
   ownPlace,
   syncErrors,
   syncPageRequestSchema,
+  syncPlaceSchema,
+  syncPlacesRequestSchema,
 } from "@grasp-os/shared/sync";
-import type { SyncPage } from "@grasp-os/shared/sync";
+import type { SyncPage, SyncPlaces } from "@grasp-os/shared/sync";
 import { and, eq, not } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -28,7 +35,10 @@ import { McpError } from "./mcp.ts";
 //   which adds the token and lets through only the sync's GET routes. The
 //   token is in the egress's props alone, never in the answer.
 // - More read than the connection may sync: a personal connection syncs
-//   only its own account (`own`); a shared one only the places someone
+//   only its own account: `own`, or, for a sync that lists places of the
+//   account itself (a mailbox's folders, `places: "listed"`), one of
+//   those, a single path segment bound to the routes' `{place}`, whose
+//   routes stay in the account; a shared one only the places someone
 //   picked on it, and until picks exist (GRA-1758, PR J), nothing. Checked
 //   before the token is read. A route's `{place}` segment is bound to the
 //   place asked for.
@@ -62,10 +72,50 @@ const connectionOf = async (
     )
     .get();
 
-/** Whether `place` is one the connection may sync. */
-const mayRead = (connection: Connection, place: string): boolean =>
-  // A shared connection syncs only picked places: none yet.
-  connection.scope === "personal" && place === ownPlace;
+/**
+ * Whether `place` is one the connection may sync with `sync`: on a
+ * personal connection, its own account (`own`), or, for a sync that lists
+ * its places, one in a place's alphabet. A shared connection syncs only
+ * picked places: none yet.
+ */
+const mayRead = (
+  connection: Connection,
+  sync: SyncManifest,
+  place: string
+): boolean => {
+  if (connection.scope !== "personal") {
+    return false;
+  }
+  return sync.places === "own"
+    ? place === ownPlace
+    : syncPlaceSchema.safeParse(place).success;
+};
+
+/** The error a connector's failure stands for. */
+const failureError = ({ code, retryAfterSeconds }: SyncFailure): Error => {
+  switch (code) {
+    case "restart": {
+      return syncErrors.create("sync.restart");
+    }
+    case "throttled": {
+      return syncErrors.create(
+        "sync.throttled",
+        retryAfterSeconds === undefined
+          ? undefined
+          : { retryAfterMs: retryAfterSeconds * 1000 }
+      );
+    }
+    case "inactive": {
+      return syncErrors.create("sync.inactive");
+    }
+    case "failed": {
+      return syncErrors.create("sync.provider_failed");
+    }
+    default: {
+      return code satisfies never;
+    }
+  }
+};
 
 /** The page a connector's answer holds, or the error it stands for. */
 const pageOf = (result: unknown): SyncPage => {
@@ -76,41 +126,27 @@ const pageOf = (result: unknown): SyncPage => {
   if ("page" in parsed.data) {
     return parsed.data.page;
   }
-  const { code, retryAfterSeconds } = parsed.data.failure;
-  switch (code) {
-    case "restart": {
-      throw syncErrors.create("sync.restart");
-    }
-    case "throttled": {
-      throw syncErrors.create(
-        "sync.throttled",
-        retryAfterSeconds === undefined
-          ? undefined
-          : { retryAfterMs: retryAfterSeconds * 1000 }
-      );
-    }
-    case "inactive": {
-      throw syncErrors.create("sync.inactive");
-    }
-    case "failed": {
-      throw syncErrors.create("sync.provider_failed");
-    }
-    default: {
-      return code satisfies never;
-    }
-  }
+  throw failureError(parsed.data.failure);
 };
 
-/** One page of a source's changes, from the request's cursor on. */
-export const readSyncPage = async (
-  env: Env,
-  request: unknown
-): Promise<SyncPage> => {
-  const { connectionId, feed, place, cursor } = syncErrors.parse(
-    "sync.invalid",
-    syncPageRequestSchema,
-    request
-  );
+/** The places a connector's answer holds, or the error it stands for. */
+const placesOf = (result: unknown): SyncPlaces => {
+  const parsed = syncPlacesResultSchema.safeParse(result);
+  if (!parsed.success) {
+    throw syncErrors.create("sync.provider_failed");
+  }
+  if ("places" in parsed.data) {
+    return parsed.data;
+  }
+  throw failureError(parsed.data.failure);
+};
+
+/**
+ * The connection `connectionId` and its connector's sync `feed`, if it may
+ * be read: a native connection, not disconnected, of the connector's own
+ * provider.
+ */
+const syncOf = async (env: Env, connectionId: string, feed: string) => {
   const connection = await connectionOf(env, connectionId);
   if (connection === undefined || connection.status === "disconnected") {
     throw syncErrors.create("sync.not_found");
@@ -125,13 +161,23 @@ export const readSyncPage = async (
   if (connector === undefined || sync === undefined) {
     throw syncErrors.create("sync.not_found");
   }
-  if (!mayRead(connection, place)) {
-    throw syncErrors.create("sync.place_refused");
-  }
+  return { connection, connector, sync };
+};
+
+/**
+ * Sends `method` to the connection's sync in a fresh isolate, its egress
+ * held to the sync's routes with `{place}` bound to `place`.
+ */
+const sendToSync = async (
+  env: Env,
+  { connection, connector, sync }: Awaited<ReturnType<typeof syncOf>>,
+  place: string,
+  method: string,
+  params: Record<string, string | null>
+): Promise<unknown> => {
   if (connection.status !== "active") {
     throw syncErrors.create("sync.inactive");
   }
-  let result: unknown;
   try {
     const server = await syncServer(
       env,
@@ -140,7 +186,7 @@ export const readSyncPage = async (
       sync.routes,
       place
     );
-    result = await server.send(syncMethod, { name: feed, place, cursor });
+    return await server.send(method, params);
   } catch (error) {
     // A grant that ran out, or a renewal granted other access, is for its
     // person to reconnect; a renewal the provider didn't answer, or a
@@ -156,5 +202,58 @@ export const readSyncPage = async (
     }
     throw error;
   }
-  return pageOf(result);
+};
+
+/** One page of a source's changes, from the request's cursor on. */
+export const readSyncPage = async (
+  env: Env,
+  request: unknown
+): Promise<SyncPage> => {
+  const { connectionId, feed, place, cursor } = syncErrors.parse(
+    "sync.invalid",
+    syncPageRequestSchema,
+    request
+  );
+  const found = await syncOf(env, connectionId, feed);
+  if (!mayRead(found.connection, found.sync, place)) {
+    throw syncErrors.create("sync.place_refused");
+  }
+  return pageOf(
+    await sendToSync(env, found, place, syncMethod, {
+      name: feed,
+      place,
+      cursor,
+    })
+  );
+};
+
+/**
+ * The places of a connection's sync, each a source of its own: `own` for
+ * a sync of the whole account; the places a sync lists of its own account
+ * (`places: "listed"`), read from the provider, a read at a time from
+ * `cursor` when the list is longer than one read takes; none on a shared
+ * connection until places are picked (GRA-1758, PR J).
+ */
+export const listSyncPlaces = async (
+  env: Env,
+  request: unknown
+): Promise<SyncPlaces> => {
+  const { connectionId, feed, cursor } = syncErrors.parse(
+    "sync.invalid",
+    syncPlacesRequestSchema,
+    request
+  );
+  const found = await syncOf(env, connectionId, feed);
+  if (found.connection.scope !== "personal") {
+    return { places: [], cursor: null };
+  }
+  if (found.sync.places === "own") {
+    return { places: [ownPlace], cursor: null };
+  }
+  return placesOf(
+    await sendToSync(env, found, ownPlace, syncPlacesMethod, {
+      name: feed,
+      cursor,
+    })
+  );
 };

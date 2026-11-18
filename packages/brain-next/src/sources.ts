@@ -17,6 +17,7 @@ import type {
   CurrentRequest,
   NewSource,
   ReadableRequest,
+  ReadersChange,
   SourceVersion,
   SourceVersionRef,
   VersionRequest,
@@ -39,7 +40,12 @@ import {
   subjectOf,
   subjectsOver,
 } from "./erasure.ts";
-import { enqueueExtraction, enqueueExtractionIfDue } from "./extraction.ts";
+import {
+  enqueueExtraction,
+  enqueueExtractionIfDue,
+  isExtracted,
+  queuedExtractOf,
+} from "./extraction.ts";
 import {
   fileKeyOf,
   hashOf,
@@ -50,7 +56,12 @@ import {
   noteWrite,
 } from "./files.ts";
 import { judgeVersion } from "./quotes.ts";
-import { readableSql, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
+import {
+  addsReaders,
+  readableSql,
+  readerSetKeyOf,
+  readerSetOf,
+} from "./reader-sets.ts";
 import { refuseRemoved } from "./removal.ts";
 import { isRestoring } from "./restoring.ts";
 import { removeVectorsOf } from "./vectors.ts";
@@ -762,4 +773,128 @@ export const readCurrent = async (
     .filter(({ source, version }) =>
       now.has(JSON.stringify([source, version]))
     );
+};
+
+/** What a change of readers answers when the text it would keep is gone. */
+const textLost =
+  "The Brain lost the text of the version whose readers it would change";
+
+/**
+ * The version of `source` the change `change` made, if any, else its
+ * current one: its number, file and readers' key.
+ */
+const versionToKeep = (
+  db: DrizzleSqliteDODatabase,
+  source: string,
+  change: string
+):
+  | {
+      made: boolean;
+      row: number;
+      version: number;
+      file: string;
+      readers: string;
+    }
+  | undefined => {
+  const made = db
+    .select(versionFields)
+    .from(sourceChanges)
+    .innerJoin(sourceVersions, eq(sourceVersions.row, sourceChanges.versionRow))
+    .innerJoin(readerSets, eq(readerSets.id, sourceVersions.readerSet))
+    .where(
+      and(eq(sourceChanges.source, source), eq(sourceChanges.change, change))
+    )
+    .get();
+  if (made !== undefined) {
+    return { made: true, ...made };
+  }
+  const current = db
+    .select(versionFields)
+    .from(currentVersions)
+    .innerJoin(
+      sourceVersions,
+      eq(sourceVersions.row, currentVersions.versionRow)
+    )
+    .innerJoin(readerSets, eq(readerSets.id, sourceVersions.readerSet))
+    .where(eq(currentVersions.source, source))
+    .get();
+  return current === undefined ? undefined : { made: false, ...current };
+};
+
+/**
+ * Gives `source` other readers (contract.ts `changeReaders`): a new
+ * version with the text of the version its change made, if it made one
+ * (a repeat, which `addVersion` answers with that version), else of the
+ * current one, over that version (`after`), so an add that lands while
+ * the text is read is never undone: the change is then made again over
+ * it. Readers the current version already has answer with it and
+ * record the change on it, with when it was read, and no new version:
+ * decided without an await, so it holds as answered.
+ */
+export const changeReaders = async (
+  store: SourcesStore,
+  { source, change, access, readAt, extract }: ReadersChange
+): Promise<AddedVersion | null> => {
+  for (;;) {
+    const kept = versionToKeep(store.db, source, change);
+    if (kept === undefined) {
+      return null;
+    }
+    if (!kept.made && kept.readers === readerSetKeyOf(access)) {
+      // The current version is this change too, and keeps when it was
+      // read, so a later change read before it is refused as older
+      // (`newerThan`), as when an add matches the current version
+      // (`madeBefore`). Without an await since it was read: still current.
+      store.db
+        .insert(sourceChanges)
+        .values({
+          source,
+          change,
+          versionRow: kept.row,
+          ...(readAt === undefined ? {} : { readAt: new Date(readAt) }),
+        })
+        .run();
+      return { source, version: kept.version };
+    }
+    // Drawn again only when it needs it (contract.ts `changeReaders`): as
+    // the caller says, or as the queue was drawing the source.
+    const drawing = extract ?? queuedExtractOf(store.storage, source);
+    const draws =
+      drawing !== undefined &&
+      !kept.made &&
+      (!isExtracted(store.storage, source, kept.version) ||
+        addsReaders(kept.readers, access));
+    // oxlint-disable-next-line no-await-in-loop -- again only after another add
+    const text = await textOf(store.bucket, kept.file);
+    if (text === null) {
+      throw new Error(textLost);
+    }
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- again only after another add
+      return await addVersion(
+        store,
+        {
+          source,
+          change,
+          text,
+          access,
+          ...(isThread(store.storage.sql, source) === true
+            ? { thread: true }
+            : {}),
+          ...(readAt === undefined ? {} : { readAt }),
+          ...(kept.made ? {} : { after: kept.version }),
+          ...(draws ? { extract: drawing } : {}),
+        },
+        { indexed: true }
+      );
+    } catch (error) {
+      if (
+        kept.made ||
+        !(error instanceof Error) ||
+        error.message !== staleVersion
+      ) {
+        throw error;
+      }
+    }
+  }
 };

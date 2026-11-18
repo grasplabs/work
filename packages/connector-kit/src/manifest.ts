@@ -174,6 +174,13 @@ export type RecoveryMode = (typeof recoveryModes)[number];
  */
 export const egressHeader = "grasp-egress";
 
+/**
+ * The error a provider's answer fails with once it passes what connect's
+ * egress reads of one answer: its body stops with this message, which a
+ * connector tells apart from any other failure (`isTooLarge` in sync.ts).
+ */
+export const egressTooLargeMessage = "The provider's response is too large";
+
 /** The kinds of answer connect's egress gives itself, as `egressHeader` says. */
 export const egressKind = {
   refused: "refused",
@@ -411,6 +418,12 @@ export const syncNameSchema = z.string().regex(/^[a-z][a-z\d-]{0,63}$/u);
  */
 export const syncManifestSchema = z.strictObject({
   kind: syncItemKindSchema,
+  /**
+   * What it reads of a personal connection: `own`, the whole account; or
+   * `listed`, places of the account the sync lists itself (`syncPlacesMethod`),
+   * each read as a source of its own with its own cursor.
+   */
+  places: z.enum(["own", "listed"]).default("own"),
   routes: z
     .array(routeSchema)
     .min(1)
@@ -431,6 +444,16 @@ export const connectorIsolateRequests = 50;
 
 /** The JSON-RPC method connect asks a connector for a sync page by. */
 export const syncMethod = "grasp-os/sync";
+
+/** The JSON-RPC method connect asks a sync's places by. */
+export const syncPlacesMethod = "grasp-os/sync-places";
+
+/** What connect asks a connector for its sync's places. */
+export const syncPlacesParamsSchema = z.strictObject({
+  name: syncNameSchema,
+  /** Where a listing too long for one read goes on; null from the start. */
+  cursor: syncCursorSchema.nullable(),
+});
 
 /** What connect asks a connector's sync for. */
 export const syncParamsSchema = z.strictObject({
