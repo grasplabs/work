@@ -5,6 +5,7 @@ import {
   syncItemLimits,
   syncItemSchema,
   syncPageSchema,
+  syncPlacesSchema,
   syncReaderSchema,
 } from "@grasp-os/shared/sync";
 import type {
@@ -12,6 +13,7 @@ import type {
   SyncItem,
   SyncItemKind,
   SyncPage,
+  SyncPlaces,
   SyncReader,
 } from "@grasp-os/shared/sync";
 import { z } from "zod";
@@ -23,6 +25,7 @@ import {
   syncManifestSchema,
   syncNameSchema,
   syncParamsSchema,
+  syncPlacesParamsSchema,
 } from "./manifest.ts";
 import type { Route, SyncManifest } from "./manifest.ts";
 
@@ -70,6 +73,13 @@ export const syncResultSchema = z.union([
 ]);
 export type SyncResult = z.infer<typeof syncResultSchema>;
 
+/** A connector's answer to `syncPlacesMethod`: places, or why there are none. */
+export const syncPlacesResultSchema = z.union([
+  syncPlacesSchema,
+  z.strictObject({ failure: syncFailureSchema }),
+]);
+export type SyncPlacesResult = z.infer<typeof syncPlacesResultSchema>;
+
 /**
  * Thrown by a sync's `read` when the provider no longer has the cursor (a
  * 404 or 410 on it): the source is listed again from the start.
@@ -100,6 +110,18 @@ export interface SyncDefinition {
     /** When the page stops taking more, in ms since the epoch (`syncPageLimits.millis`). */
     deadline: number;
   }) => Promise<SyncPage>;
+  /**
+   * The places of the connection's own account it reads, each a source of
+   * its own with its own cursor (a mailbox's folders): none for a sync that
+   * reads the whole account (`own`). A list too long for one read goes on
+   * from `cursor` (none: from the start) in the next; core puts the reads
+   * together, and drops the source of a place it doesn't list any more.
+   */
+  places?: (params: {
+    cursor: string | null;
+    /** When the read stops taking more, in ms since the epoch. */
+    deadline: number;
+  }) => Promise<SyncPlaces>;
 }
 
 /** A sync, as a connector carries it. */
@@ -108,6 +130,8 @@ export interface Sync {
   manifest: SyncManifest;
   /** Answers `syncMethod`'s params with a page or a failure. */
   call: (params: unknown) => Promise<SyncResult>;
+  /** Answers `syncPlacesMethod`'s params with places or a failure. */
+  places: (params: unknown) => Promise<SyncPlacesResult>;
 }
 
 /** The failure an error a sync threw stands for. */
@@ -235,8 +259,27 @@ export const defineSync = (definition: SyncDefinition): Sync => ({
   name: syncNameSchema.parse(definition.name),
   manifest: syncManifestSchema.parse({
     kind: definition.kind,
+    places: definition.places === undefined ? "own" : "listed",
     routes: definition.routes,
   }),
+  places: async (params) => {
+    const asked = syncPlacesParamsSchema.parse(params);
+    if (definition.places === undefined) {
+      return { failure: { code: "failed" } };
+    }
+    let places: unknown;
+    try {
+      places = await definition.places({
+        cursor: asked.cursor,
+        deadline: Date.now() + syncPageLimits.millis,
+      });
+    } catch (error) {
+      return { failure: failureOf(error) };
+    }
+    // A list with one place that isn't one is refused whole.
+    const parsed = syncPlacesSchema.safeParse(places);
+    return parsed.success ? parsed.data : { failure: { code: "failed" } };
+  },
   call: async (params) => {
     const asked = syncParamsSchema.parse(params);
     let page: unknown;
