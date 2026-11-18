@@ -20,9 +20,17 @@ import {
 import {
   Code,
   Copy,
+  Download,
   Folder as FolderIcon,
+  Icon,
+  Search,
   Tick,
 } from "../grasp/icons/index.ts";
+import {
+  InputGroup,
+  InputGroupInput,
+  InputGroupText,
+} from "../grasp/input-group/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { Tree } from "../grasp/tree/index.ts";
@@ -90,6 +98,9 @@ const styles = stylex.create({
     backgroundColor: grasp.raised,
   },
   files: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
     flexShrink: 0,
     maxHeight: { default: TREE_TALL, [media.fromTablet]: "none" },
     width: { default: "auto", [media.fromTablet]: TREE_WIDE },
@@ -149,6 +160,36 @@ const foldersOf = (nodes: readonly TreeNode[]): string[] =>
     node.children === undefined ? [] : [node.value, ...foldersOf(node.children)]
   );
 
+/**
+ * The tree's nodes whose path holds `query`, ignoring case, with the
+ * folders that lead to them; all of them while nothing is asked.
+ */
+const narrowed = (nodes: readonly TreeNode[], query: string): TreeNode[] => {
+  const wanted = query.trim().toLowerCase();
+  if (wanted === "") {
+    return [...nodes];
+  }
+  return nodes.flatMap((node): TreeNode[] => {
+    if (node.children === undefined) {
+      return node.value.toLowerCase().includes(wanted) ? [node] : [];
+    }
+    const children = narrowed(node.children, query);
+    return children.length === 0 ? [] : [{ ...node, children }];
+  });
+};
+
+/** Hands the reader the open file to save, under its own name. */
+const downloadFile = (path: string, text: string): void => {
+  const url = URL.createObjectURL(
+    new Blob([text], { type: "text/plain;charset=utf-8" })
+  );
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = path.split("/").at(-1) ?? path;
+  link.click();
+  URL.revokeObjectURL(url);
+};
+
 /** Where the open file is, folder by folder, as a breadcrumb. */
 const PathCrumbs = ({ path }: { path: string }) => {
   const { t } = useLingui();
@@ -175,9 +216,23 @@ const FileBar = ({ path, text }: { path: string; text: string }) => {
       <PathCrumbs path={path} />
       <span {...stylex.props(styles.lines)}>
         <Text element="span" size="xs" tone="muted">
-          <Plural one="# line" other="# lines" value={lines} />
+          <Plural
+            one="# line, read only"
+            other="# lines, read only"
+            value={lines}
+          />
         </Text>
       </span>
+      <Button
+        aria-label={t`Download the file`}
+        icon={Download}
+        onClick={() => {
+          downloadFile(path, text);
+        }}
+        size="sm"
+        title={t`Download the file`}
+        variant="ghost"
+      />
       <Button
         icon={copied ? Tick : Copy}
         aria-label={copied ? t`Copied` : t`Copy code`}
@@ -222,10 +277,13 @@ const FilesView = ({ files, asked, onAsk }: OpenFile & { files: AppFiles }) => {
     (path) => !isGeneratedServerFile(path)
   );
   const tree = treeOf(paths);
-  const nodes = nodesOf(tree);
-  // Every folder open, a new one too, but those the person folded.
+  const [query, setQuery] = useState("");
+  const nodes = narrowed(nodesOf(tree), query);
+  // Every folder open, a new one too, but those the person folded; all
+  // of them while the tree is narrowed to what was asked.
   const folders = foldersOf(nodes);
   const [folded, setFolded] = useState<string[]>([]);
+  const asking = query.trim() !== "";
   // The one asked for while this version has it, else its config, else
   // the tree's first.
   const file =
@@ -250,13 +308,35 @@ const FilesView = ({ files, asked, onAsk }: OpenFile & { files: AppFiles }) => {
   return (
     <EditorFrame>
       <div {...stylex.props(styles.files)}>
+        <search>
+          <InputGroup>
+            <InputGroupText>
+              <Icon icon={Search} />
+            </InputGroupText>
+            <InputGroupInput
+              aria-label={t`Find a file`}
+              onValueChange={(value: string) => {
+                setQuery(value);
+              }}
+              placeholder={t`Find a file`}
+              type="search"
+              value={query}
+            />
+          </InputGroup>
+        </search>
         <Tree
           aria-label={t`Files`}
-          expanded={folders.filter((folder) => !folded.includes(folder))}
+          expanded={
+            asking
+              ? folders
+              : folders.filter((folder) => !folded.includes(folder))
+          }
           items={nodes}
           mode="single"
           onExpandedChange={(expanded) => {
-            setFolded(folders.filter((folder) => !expanded.includes(folder)));
+            if (!asking) {
+              setFolded(folders.filter((folder) => !expanded.includes(folder)));
+            }
           }}
           onValueChange={(value) => {
             if (typeof value === "string" && !value.startsWith("folder:")) {

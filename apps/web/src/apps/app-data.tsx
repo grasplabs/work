@@ -17,7 +17,7 @@ import type { ReactNode } from "react";
 
 import { downloadCsv } from "../csv.ts";
 import { readPeople } from "../directory.ts";
-import { formatDateTime, valueText } from "../format.ts";
+import { formatDateTime, formatNumber, valueText } from "../format.ts";
 import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
@@ -75,6 +75,7 @@ import {
   SheetTitle,
 } from "../grasp/sheet/index.ts";
 import { Text } from "../grasp/text/index.ts";
+import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
@@ -84,8 +85,8 @@ import { useCoreAction } from "../use-core-action.ts";
 // Reading only, but for an import, which core checks row by row and lands
 // whole or not at all.
 
-// Grasp UI has no token for a toolbar field's measure: the table picker
-// and the find-by-ID field are as wide as the old grid's bar had them.
+// Grasp UI has no token for a toolbar field's measure: the find-by-ID
+// field is as wide as the old grid's bar had it.
 const BAR_FIELD = "14rem";
 
 /**
@@ -1124,7 +1125,6 @@ export const AppData = ({
       </Empty>
     );
   }
-  const items = tables.map(({ name }) => ({ value: name, label: name }));
   return (
     <TableRecords
       app={app}
@@ -1135,21 +1135,29 @@ export const AppData = ({
       label={table.name}
       table={table}
       toolbar={
-        <Select
-          items={items}
-          layout={styles.barField}
-          onValueChange={(value) => {
+        // The App's tables, each with how many records it holds.
+        <ToggleGroup
+          aria-label={t`Table`}
+          onValueChange={(chosen: unknown[]) => {
+            const [value] = chosen;
             if (typeof value === "string") {
               setPicked({ app, table: value });
             }
           }}
-          value={table.name}
+          size="sm"
+          value={[table.name]}
         >
-          <SelectTrigger aria-label={t`Table`} size="sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent />
-        </Select>
+          {tables.map(({ name, records }) => (
+            <Toggle key={name} value={name}>
+              {name}
+              {records === null ? null : (
+                <Text element="span" size="xs" tone="muted">
+                  {formatNumber(records)}
+                </Text>
+              )}
+            </Toggle>
+          ))}
+        </ToggleGroup>
       }
       source={{ kind: "live", version }}
     />

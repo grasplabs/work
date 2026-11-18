@@ -871,8 +871,8 @@ msgid "{left, plural, one {# team here is not interviewed yet.} other {# teams h
 msgstr "{left, plural, one {# équipe ici n’est pas encore interviewée.} other {# équipes ici ne sont pas encore interviewées.}}"
 
 #: src/apps/app-code.tsx
-msgid "{lines, plural, one {# line} other {# lines}}"
-msgstr "{lines, plural, one {# ligne} other {# lignes}}"
+msgid "{lines, plural, one {# line, read only} other {# lines, read only}}"
+msgstr "{lines, plural, one {# ligne, lecture seule} other {# lignes, lecture seule}}"
 
 #: src/settings/teams.tsx
 msgid "{listed} and {rest, plural, one {# other} other {# others}}"
@@ -6002,6 +6002,10 @@ msgstr "Télécharger en PDF"
 msgid "Download Markdown"
 msgstr "Télécharger en Markdown"
 
+#: src/apps/app-code.tsx
+msgid "Download the file"
+msgstr "Télécharger le fichier"
+
 #: src/workflows/workflow-settings.tsx
 #: src/workflows/workflow-status.tsx
 #: src/workflows/workflows-table.tsx
@@ -6779,6 +6783,10 @@ msgstr "Finance et comptabilité"
 #: src/projects/project-chats.tsx
 msgid "Find a chat"
 msgstr "Trouver un chat"
+
+#: src/apps/app-code.tsx
+msgid "Find a file"
+msgstr "Rechercher un fichier"
 
 #: src/apps/app-data.tsx
 msgid "Find a record by its ID"
