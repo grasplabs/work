@@ -583,15 +583,18 @@ export const staffListPlaced = sqliteTable("staff_list_placed", {
 });
 
 /**
- * The ids of every members' team the staff list ever made (GRA-2055):
- * written by the very batch that makes one (staff-list-teams.ts
- * `intoMembersTeams`), kept when the team is deleted. A team row is made
- * only under an id not here, in the same statement, so a deleted team's id
- * is never made again, whatever the onboarding's store still holds.
+ * Team ids that must never be made (again) by the staff list (GRA-2055):
+ * every id the list made a members' team of, written by the batch that
+ * makes it (staff-list-teams.ts `intoMembersTeams`), and every team id
+ * deleted in Settings › Members, written by Better Auth's before-delete
+ * hook (auth/auth.ts). Kept for good. A team row is made only under an id
+ * not here, in the same statement, so a deleted team's id never comes back
+ * with what was shared with it, whatever the onboarding's store holds. An
+ * id recorded for a delete that then failed only keeps the list from
+ * making it: that team still exists, and is read as a members' team.
  */
-export const staffListTeamIds = sqliteTable("staff_list_team_ids", {
+export const retiredTeamIds = sqliteTable("retired_team_ids", {
   id: text().primaryKey(),
-  organizationId: text("organization_id").notNull(),
 });
 
 /**

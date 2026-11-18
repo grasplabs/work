@@ -100,7 +100,7 @@ export const teams = sqliteTable("teams", {
    * The default, minted, is for rows written before this column (or by an
    * older release after a rollback): they keep their ids and what hangs on
    * them, and an id the list has made a team of before is still refused, in
-   * the statement that makes one (`staff_list_team_ids`). Such a release
+   * the statement that makes one (`retired_team_ids`). Such a release
    * stored whatever team id the admin's request sent: its web only ever
    * sent the list's own (`t-<name>`), never a members' team's, but a
    * request made by hand could have (GRA-2055).

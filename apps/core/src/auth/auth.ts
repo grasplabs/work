@@ -49,7 +49,7 @@ import {
 import { mayComeIn, staffMayStay } from "../onboarding/gate.ts";
 import { onboardingStore } from "../onboarding/store.ts";
 import { keepSignInAddress } from "../source-readers.ts";
-import { addedByHand } from "../staff-list-by-hand.ts";
+import { addedByHand, retireTeamId } from "../staff-list-by-hand.ts";
 import { checkClaims } from "./claims.ts";
 import {
   devIdpOrigin,
@@ -1036,6 +1036,9 @@ const createAuth = (
                 message: "The team is on the staff list.",
               });
             }
+            // Its id never comes back from the staff list, with what was
+            // shared with it (staff-list-by-hand.ts `retireTeamId`).
+            await retireTeamId(env, team.id);
           },
         },
       }),

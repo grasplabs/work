@@ -1,11 +1,10 @@
+CREATE TABLE `retired_team_ids` (
+	`id` text PRIMARY KEY NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE `staff_list_placed` (
 	`organization_id` text PRIMARY KEY NOT NULL,
 	`version` integer NOT NULL
-);
---> statement-breakpoint
-CREATE TABLE `staff_list_team_ids` (
-	`id` text PRIMARY KEY NOT NULL,
-	`organization_id` text NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE `team_primaries` (

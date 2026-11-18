@@ -13,7 +13,7 @@ import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember, organizationId } from "./auth/membership-sql.ts";
 import {
   staffListPlaced,
-  staffListTeamIds,
+  retiredTeamIds,
   teamMembers,
   teamPrimaries,
   teams,
@@ -120,13 +120,13 @@ export const intoMembersTeams = async (
       .select({ id: teams.id, name: teams.name })
       .from(teams)
       .where(eq(teams.organizationId, organizationId)),
-    db.select({ id: staffListTeamIds.id }).from(staffListTeamIds),
+    db.select({ id: retiredTeamIds.id }).from(retiredTeamIds),
   ]);
   const held = await heldNow();
   const known = new Map(existing.map(({ id, name }) => [id, name]));
-  // A minted id the list made a members' team of once, and which is no
-  // members' team now, was deleted: it is never kept, and its team gets a
-  // new id. What the store holds under the old id is left on purpose: the
+  // A minted id that is retired (the list made a team of it, or a team of
+  // it was deleted) and is no members' team now was deleted: it is never
+  // kept, and its team gets a new id. What the store holds under the old id is left on purpose: the
   // admin deleted that team, and nothing of it may reach the new one.
   const madeEver = new Set(madeBefore.map(({ id }) => id));
   const mintedHeld = held.filter(
@@ -181,21 +181,17 @@ export const intoMembersTeams = async (
     const [first, ...rest] = [
       ...made.flatMap(({ id, name }) => [
         // As Better Auth's own create-team makes a team, under the id kept,
-        // and only under one the list never made before: the proof is in
-        // this statement, so no read, however old, makes a deleted team's
-        // id again.
+        // and only under one never retired: the proof is in this statement,
+        // so no read, however old, makes a deleted team's id again.
         db
           .insert(teams)
           .select(
             sql`SELECT ${id}, ${name}, 0, ${organizationId}, ${now.getTime()}, ${now.getTime()}
-              WHERE NOT EXISTS (SELECT 1 FROM ${staffListTeamIds} WHERE ${staffListTeamIds.id} = ${id})`
+              WHERE NOT EXISTS (SELECT 1 FROM ${retiredTeamIds} WHERE ${retiredTeamIds.id} = ${id})`
           )
           .onConflictDoNothing(),
         outboxedIfChanged(db, entry("team.created", id)),
-        db
-          .insert(staffListTeamIds)
-          .values({ id, organizationId })
-          .onConflictDoNothing(),
+        db.insert(retiredTeamIds).values({ id }).onConflictDoNothing(),
       ]),
       ...renamed.flatMap(({ id, name }) => [
         db

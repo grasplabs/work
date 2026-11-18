@@ -1315,4 +1315,57 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
     expect(before.sources).toStrictEqual([ids.team]);
     expect(before.works).toBeGreaterThan(0);
   });
+
+  it("never make a Settings team again under its id once it is deleted, though a store row an earlier release wrote still names it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ann = await signedInApi(idp, "user");
+    const tag = unique();
+    const marker = markerWord();
+    const by = { type: "person", userId: admin.userId } as const;
+    const store = onboardingStore(env);
+    const board = await settingsTeam(admin, `Board ${tag}`);
+    await add(`Board minutes ${marker}`, { kind: "team", teamId: board });
+    const listed = rosterSchema.parse({
+      teams: [{ id: board, name: `Board ${tag}`, lead: null }],
+      people: [{ id: "ann", name: "Ann", email: emailOf(ann), team: board }],
+    });
+    // On the list under the Settings team's own id, as an earlier release
+    // could have written it: minted, by the column's default.
+    await store.saveRoster(listed, { type: "system" });
+    await asAnEarlierReleaseWrote();
+    // A stale tab's confirm read the store then...
+    const staleHeld = await store.heldTeams();
+    // ...the admin takes Board off the list and deletes it in Settings...
+    await admin.api.onboarding.saveRoster({
+      teams: [{ id: "desk", name: `Desk ${tag}`, lead: null }],
+      people: [{ id: "bo", name: "Bo", team: "desk" }],
+    });
+    const deleted = await callAuth("/organization/remove-team", admin.session, {
+      teamId: board,
+    });
+    // ...and the stale confirm goes on, Board held and minted.
+    const { roster: named, minted } = await intoMembersTeams(env, listed, by, {
+      make: true,
+      held: async () => await Promise.resolve(staleHeld),
+    });
+    await store.saveRoster(named, by, { confirmed: true, minted });
+    await placePrimaries(env, by);
+    const again = named.teams[0]?.id;
+    const teams = await membersTeams(admin);
+    const texts = await textsFor(ann.userId, marker);
+
+    expect({
+      wasMinted: staleHeld.find(({ id }) => id === board)?.minted,
+      deleted: deleted.status,
+      newId: again !== undefined && again !== board,
+      annIn: teams.get(`Board ${tag}`)?.memberIds.includes(ann.userId),
+      reads: texts.some((text) => text.includes(marker)),
+    }).toStrictEqual({
+      wasMinted: true,
+      deleted: 200,
+      newId: true,
+      annIn: true,
+      reads: false,
+    });
+  });
 });

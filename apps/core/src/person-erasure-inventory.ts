@@ -93,8 +93,8 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.team_members": { erased: "removal" },
   "core.team_primaries": { erased: "removal" },
   "core.staff_list_placed": { none: "a version number, no person" },
-  "core.staff_list_team_ids": {
-    none: "team ids the staff list made, no person",
+  "core.retired_team_ids": {
+    none: "team ids never to be made again, no person",
   },
   "core.sso_providers": { none: "stays empty: providers come from config" },
   "core.permissions": { company: "grants they asked for or gave" },

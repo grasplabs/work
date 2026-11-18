@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "902a545c-81de-4e2e-8dd0-6c4120b46b92",
+  "id": "c7f4847e-869c-4833-81ed-e65b5da1423f",
   "prevId": "be859107-9b5b-4dd8-b861-350f19167227",
   "tables": {
     "access_revocations": {
@@ -10248,6 +10248,23 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "retired_team_ids": {
+      "name": "retired_team_ids",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "run_brain_evidence": {
       "name": "run_brain_evidence",
       "columns": {
@@ -12359,30 +12376,6 @@
         "version": {
           "name": "version",
           "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "staff_list_team_ids": {
-      "name": "staff_list_team_ids",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
