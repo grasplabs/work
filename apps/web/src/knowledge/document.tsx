@@ -6,26 +6,27 @@ import type {
 } from "@grasp-os/shared/knowledge";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useRouter } from "@tanstack/react-router";
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { ExportMenu } from "../export/export-menu.tsx";
+import { formatDay } from "../format.ts";
 import { PageHeading } from "../frame/page.tsx";
 import { RouterLink } from "../frame/router-link.tsx";
 import { Alert } from "../grasp/alert/index.ts";
-import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Collapsible } from "../grasp/collapsible/index.ts";
-import { Edit } from "../grasp/icons/index.ts";
+import { Doc, Edit } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
+import { InspectorPanel } from "../grasp/inspector-panel/index.ts";
+import type { InspectorSection } from "../grasp/inspector-panel/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
 import { Separator } from "../grasp/separator/index.ts";
 import { Tag } from "../grasp/tag/index.ts";
 import { Textarea } from "../grasp/textarea/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
-import { documentTypeLabel } from "../labels.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { DocumentMarkdown } from "./markdown.tsx";
 import { saveOrNewer } from "./save.ts";
@@ -70,8 +71,6 @@ const styles = stylex.create({
     gap: grasp.space8,
     boxSizing: "border-box",
     width: "100%",
-    maxWidth: grasp.pageColumnMeasure,
-    marginInline: "auto",
     paddingBlock: grasp.space8,
     paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
   },
@@ -82,18 +81,14 @@ const styles = stylex.create({
     flexDirection: "column",
     gap: grasp.space4,
   },
-  aside: {
+  // Beside the page once there is room; at its foot before.
+  inspector: {
     display: { default: "none", [media.fromRail]: "flex" },
-    flexDirection: "column",
     flexShrink: 0,
-    boxSizing: "border-box",
     width: grasp.inspectorWidth,
-    overflowY: "auto",
-    paddingBlock: grasp.space4,
-    paddingInline: grasp.space5,
-    borderInlineStartWidth: grasp.hairline,
-    borderInlineStartStyle: "solid",
-    borderInlineStartColor: grasp.line,
+    height: "auto",
+    marginBlock: grasp.space4,
+    marginInlineEnd: grasp.space4,
   },
 });
 
@@ -248,9 +243,6 @@ const DocumentChip = ({
   </Tag>
 );
 
-/** What a property shows when it has nothing. */
-const none = "–";
-
 /** A document this one links to, by its ID, named as the link names it. */
 interface Linked {
   documentId: string;
@@ -281,7 +273,7 @@ const linksOf = (text: string, resolve: ResolveLink): Linked[] => {
   return [...found].map(([documentId, title]) => ({ documentId, title }));
 };
 
-/** Documents as a row of chips, or a dash for none. */
+/** Documents as a row of chips. */
 const Chips = ({
   documents,
 }: {
@@ -291,9 +283,7 @@ const Chips = ({
     title: string;
   }[];
 }) =>
-  documents.length === 0 ? (
-    none
-  ) : (
+  documents.length === 0 ? null : (
     <ul {...stylex.props(styles.chips)}>
       {documents.map((document) => (
         <li key={document.documentId} {...stylex.props(styles.chip)}>
@@ -320,6 +310,10 @@ const Properties = ({
   backlinks: Backlink[];
 }) => {
   const { t } = useLingui();
+  const linked = links.map((link) => ({
+    ...link,
+    collectionId: doc.collectionId,
+  }));
   return (
     <KeyValueList
       items={[
@@ -338,21 +332,105 @@ const Properties = ({
         },
         { key: t`Path`, value: doc.path },
         { key: t`Version`, value: doc.version.number },
-        { key: t`Review by`, value: doc.reviewDate ?? none },
-        {
-          key: t`Links to`,
-          value: (
-            <Chips
-              documents={links.map((link) => ({
-                ...link,
-                collectionId: doc.collectionId,
-              }))}
-            />
-          ),
-        },
-        { key: t`Used by`, value: <Chips documents={backlinks} /> },
+        // What it lacks, it leaves out: nobody acts on a dash.
+        ...(doc.reviewDate === null
+          ? []
+          : [{ key: t`Review by`, value: formatDay(doc.reviewDate) }]),
+        ...(linked.length === 0
+          ? []
+          : [{ key: t`Links to`, value: <Chips documents={linked} /> }]),
+        ...(backlinks.length === 0
+          ? []
+          : [{ key: t`Used by`, value: <Chips documents={backlinks} /> }]),
       ]}
       variant="stacked"
+    />
+  );
+};
+
+/**
+ * Beside the page, the document's details in Grasp UI's inspector: its
+ * file, the collection, version and review date as facts, and what it
+ * links to and what links to it as rows that open them, each only when
+ * there are some.
+ */
+const Inspector = ({
+  doc,
+  collection,
+  links,
+  backlinks,
+}: {
+  doc: DocumentRead;
+  collection: string;
+  links: Linked[];
+  backlinks: Backlink[];
+}) => {
+  const { t } = useLingui();
+  const navigate = useNavigate();
+  const open = (collectionId: string, documentId: string): void => {
+    void navigate({
+      to: "/knowledge/$collection",
+      params: { collection: collectionId },
+      search: { doc: documentId },
+    });
+  };
+  const version = doc.version.number;
+  const review = doc.reviewDate === null ? null : formatDay(doc.reviewDate);
+  const sections: InspectorSection[] = [
+    ...(links.length === 0
+      ? []
+      : [
+          {
+            id: "links",
+            label: t`Links to`,
+            rows: links.map((link) => ({
+              id: link.documentId,
+              name: link.title,
+              icon: Doc,
+              onPress: () => {
+                open(doc.collectionId, link.documentId);
+              },
+            })),
+          },
+        ]),
+    ...(backlinks.length === 0
+      ? []
+      : [
+          {
+            id: "used-by",
+            label: t`Used by`,
+            rows: backlinks.map((backlink) => ({
+              id: backlink.documentId,
+              name: backlink.title,
+              icon: Doc,
+              onPress: () => {
+                open(backlink.collectionId, backlink.documentId);
+              },
+            })),
+          },
+        ]),
+  ];
+  return (
+    <InspectorPanel
+      aria-label={t`Details`}
+      icon={Doc}
+      layout={styles.inspector}
+      meta={[
+        <RouterLink
+          key="collection"
+          params={{ collection: doc.collectionId }}
+          search={{}}
+          to="/knowledge/$collection"
+          variant="standalone"
+        >
+          {collection}
+        </RouterLink>,
+        t`Version ${version}`,
+        ...(review === null ? [] : [t`Review by ${review}`]),
+      ]}
+      sections={sections}
+      title={doc.path.split("/").at(-1) ?? doc.path}
+      words={{ close: t`Close` }}
     />
   );
 };
@@ -412,12 +490,13 @@ export const DocumentView = ({
   const [editing, setEditing] = useState(false);
   // An earlier version, opened from the history: read only.
   const earlier = doc.version.number !== doc.currentVersion;
+  const links = linksOf(doc.version.text, resolve);
   const details = (
     <Properties
       backlinks={backlinks}
       collection={collection}
       doc={doc}
-      links={linksOf(doc.version.text, resolve)}
+      links={links}
     />
   );
   return (
@@ -452,7 +531,6 @@ export const DocumentView = ({
             {...(doc.description === ""
               ? {}
               : { description: doc.description })}
-            meta={<Badge>{documentTypeLabel(doc.type)}</Badge>}
             title={doc.title}
           />
           {earlier ? <EarlierVersion doc={doc} /> : null}
@@ -478,9 +556,12 @@ export const DocumentView = ({
           <Timeline doc={doc} me={me} versions={versions} writable={writable} />
         </div>
       </div>
-      <aside aria-label={t`Details`} {...stylex.props(styles.aside)}>
-        {details}
-      </aside>
+      <Inspector
+        backlinks={backlinks}
+        collection={collection}
+        doc={doc}
+        links={links}
+      />
     </div>
   );
 };

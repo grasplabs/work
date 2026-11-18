@@ -37,11 +37,16 @@ const details = async (page: Page) => {
   return page.getByRole("definition");
 };
 
-/** The history timeline's entry for `version`. */
+/** The history's row for `version`: the one whose link names it. */
 const versionRow = (page: Page, version: number) =>
   page
     .getByRole("region", { name: "History" })
-    .getByRole("listitem", { name: `Version ${version}`, exact: true });
+    .getByRole("listitem")
+    .filter({
+      has: page.getByRole("link", {
+        name: new RegExp(`^Version ${version}(, current)?$`, "u"),
+      }),
+    });
 
 test("a person searches, edits a document, meets a newer version instead of overwriting it, and restores an earlier one", async ({
   pageOf,
@@ -317,11 +322,11 @@ test("a person uploads a file and follows it through core failing for a moment u
   });
   expect(dropping).toBe(0);
   await expect(ready.getByText(/past the first/u)).toHaveCount(0);
-  // The file list shows the new document.
+  // The file list shows the new document, by its title.
   await expect(
     page
       .getByRole("region", { name: "Files" })
-      .getByRole("link", { name: "expense-policy.pdf" })
+      .getByRole("link", { name: "expense-policy", exact: true })
   ).toBeVisible();
   // The original comes back as an attachment, never shown in the page.
   const href = await ready
@@ -360,7 +365,7 @@ test("a person uploads a file and follows it through core failing for a moment u
   await expect(
     page
       .getByRole("region", { name: "Files" })
-      .getByRole("link", { name: "offices.xlsx" })
+      .getByRole("link", { name: "offices", exact: true })
   ).toHaveCount(0);
   await past.getByRole("button", { name: "Open offices.xlsx" }).click();
   await expect(

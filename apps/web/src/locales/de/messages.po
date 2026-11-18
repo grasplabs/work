@@ -4526,6 +4526,7 @@ msgstr "Klippen"
 #: src/dashboard/widget-block.tsx
 #: src/frame/app-frame.tsx
 #: src/frame/part-words.tsx
+#: src/knowledge/document.tsx
 #: src/knowledge/frame.tsx
 #: src/knowledge/new-collection.tsx
 #: src/knowledge/new-document.tsx
@@ -13168,6 +13169,10 @@ msgstr "Prüfen und antworten"
 msgid "Review by"
 msgstr "Prüfen bis"
 
+#: src/knowledge/document.tsx
+msgid "Review by {review}"
+msgstr "Prüfen bis {review}"
+
 #: src/dashboard/signals.tsx
 msgid "Review overdue"
 msgstr "Prüfung überfällig"
@@ -17354,6 +17359,7 @@ msgstr "Version {number}, aktuell"
 #: src/brain/brain.ts
 #: src/brain/sources-page.tsx
 #: src/inbox/item-detail.tsx
+#: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/workflows/version-source.tsx
 #: src/workflows/workflow-triggers.tsx
