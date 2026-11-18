@@ -12,6 +12,8 @@ export const skillErrors = defineErrorFamily({
   "skills.name_erased":
     "You deleted a skill of that name for good: give this one another name.",
   "skills.not_in_team": "You can share a skill only with a team you're in.",
+  "skills.name_taken":
+    "You have a skill of that name already: yours stays as it is.",
 });
 
 /** A skill as the skills page lists it: its name, version and when to use it. */
@@ -168,6 +170,25 @@ export interface SkillsOverview {
  * person on their own session reaches it: agents never write, share or
  * approve a skill.
  */
+/**
+ * A skill Grasp proposes to a person from their own runs of a workflow
+ * that keep succeeding: a draft of their own skill, used nowhere until they
+ * add it. Shown to them alone, with what it rests on: the workflow, the
+ * version their runs ran, and those runs, newest first.
+ */
+export interface SkillProposal {
+  key: string;
+  name: string;
+  description: string;
+  /** The `SKILL.md` adding it saves. */
+  text: string;
+  basis: {
+    workflow: { id: string; name: string };
+    version: number;
+    runs: { id: string; endedAt: Date }[];
+  };
+}
+
 export interface SkillsApi {
   /** Their own skills, the company's, their shares, and for admins the requests. */
   overview: () => Promise<SkillsOverview>;
@@ -199,4 +220,10 @@ export interface SkillsApi {
    * from then on; its versions stay as history.
    */
   retire: (name: string, audience: SkillAudienceAsked) => Promise<void>;
+  /** The skills proposed to them from their own runs, which they haven't added or dismissed. */
+  proposals: () => Promise<SkillProposal[]>;
+  /** Adds the proposal `key` as their own skill. */
+  acceptProposal: (key: string) => Promise<ListedSkill>;
+  /** Dismisses the proposal `key`: it isn't proposed again for the same version of its workflow. */
+  dismissProposal: (key: string) => Promise<void>;
 }

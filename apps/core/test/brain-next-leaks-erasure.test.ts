@@ -218,12 +218,14 @@ describe(
         instructionGroups: ["company"],
       });
       // Their own store was erased whole, and takes nothing from then on:
-      // the surfaces that write a skill of theirs (and decide a share of
-      // one) can only be refused for them, and are probed as the
-      // team-mate.
+      // the surfaces that write a skill of theirs, or ask a draft of one
+      // (and decide a share of one) can only be refused for them, and are
+      // probed as the team-mate.
       const holderWritesOwn = new Set([
         "instructions saveInstructionFile",
         "core addOwnSkill",
+        "core proposeOwnSkill",
+        "store proposeSkill",
         "shares readSkill",
         "shares saveOwnSkill",
         "shares shareOwnSkill",

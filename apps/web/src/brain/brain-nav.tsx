@@ -1,3 +1,4 @@
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import {
   PageSidebar,
   PageSidebarBody,
@@ -7,7 +8,7 @@ import {
   PageSidebarRailExpand,
 } from "@grasp-os/ui/components/page-sidebar";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Link, useMatchRoute } from "@tanstack/react-router";
+import { Link, useMatchRoute, useRouteContext } from "@tanstack/react-router";
 import {
   ActivityIcon,
   BrainIcon,
@@ -17,6 +18,7 @@ import {
   LibraryIcon,
   LightbulbIcon,
   BookOpenIcon,
+  SparklesIcon,
   TargetIcon,
   UsersIcon,
 } from "lucide-react";
@@ -355,6 +357,14 @@ export const BrainNav = ({
     message: "Skills",
     context: "the Brain's skills page",
   });
+  // Opportunities are an admin's (GRA-1750): nobody else gets the link.
+  const { identity } = useRouteContext({ from: "/_shell" });
+  const admin = isMemberAdmin(identity);
+  const onOpportunities = Boolean(matchRoute({ to: "/brain/opportunities" }));
+  const opportunitiesLabel = t({
+    message: "Opportunities",
+    context: "the Brain's opportunities page",
+  });
   const onBrain = Boolean(matchRoute({ to: "/brain" }));
   let here = new Set<string>();
   if (note) {
@@ -450,6 +460,15 @@ export const BrainNav = ({
         >
           <BookOpenIcon />
         </PageSidebarRailButton>
+        {admin ? (
+          <PageSidebarRailButton
+            active={onOpportunities}
+            label={opportunitiesLabel}
+            render={<Link to="/brain/opportunities" />}
+          >
+            <SparklesIcon />
+          </PageSidebarRailButton>
+        ) : null}
         {regions.map(({ region, Icon }) => (
           <PageSidebarRailButton
             active={here.has(regionKey(region.id))}
@@ -496,6 +515,11 @@ export const BrainNav = ({
         <Link className={topLinkClass} to="/brain/skills">
           <TopLinkContent icon={BookOpenIcon} label={skillsLabel} />
         </Link>
+        {admin ? (
+          <Link className={topLinkClass} to="/brain/opportunities">
+            <TopLinkContent icon={SparklesIcon} label={opportunitiesLabel} />
+          </Link>
+        ) : null}
         <span aria-hidden="true" className="bg-border my-2 h-px" />
 
         {regions.map(({ region, folder, Icon }) => {

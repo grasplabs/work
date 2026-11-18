@@ -346,6 +346,7 @@ export const rpcParamNames: ParamNames = {
   "OpportunitiesRpc": {
     "dismiss": ["dismissal"],
     "list": [],
+    "restore": ["dismissal"],
   },
   "OrgSettingsRpc": {
     "billing": [],
@@ -419,9 +420,12 @@ export const rpcParamNames: ParamNames = {
     "list": ["filter"],
   },
   "SkillsRpc": {
+    "acceptProposal": ["key"],
     "approve": ["id"],
     "decline": ["id"],
+    "dismissProposal": ["key"],
     "overview": [],
+    "proposals": [],
     "read": ["scope","name"],
     "remove": ["name"],
     "retire": ["name","audience"],

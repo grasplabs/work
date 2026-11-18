@@ -477,7 +477,7 @@ describe("opportunities", { timeout: 120_000 }, () => {
     });
   });
 
-  it("hide a dismissed opportunity from every admin until its evidence changes", async () => {
+  it("mark a dismissed opportunity for every admin until its evidence changes or an admin restores it", async () => {
     const { ids, sam } = await drawnTeam();
     const { api } = await signedInApi(idp, "admin");
     const other = await signedInApi(idp, "admin");
@@ -485,11 +485,13 @@ describe("opportunities", { timeout: 120_000 }, () => {
     if (tickets === undefined) {
       throw new Error("The tickets were never listed.");
     }
-    await api.opportunities.dismiss({
-      routine: tickets.routine,
-      evidence: tickets.evidence,
-    });
+    const at = { routine: tickets.routine, evidence: tickets.evidence };
+    await api.opportunities.dismiss(at);
     const dismissed = await ticketsOf(other.api, ids);
+    // The other admin restores it, and dismisses it again.
+    await other.api.opportunities.restore(at);
+    const restored = await ticketsOf(api, ids);
+    await other.api.opportunities.dismiss(at);
     // Sam adds to his interview, and the tickets are drawn anew, their
     // last step told otherwise: new evidence.
     await agree(
@@ -503,10 +505,16 @@ describe("opportunities", { timeout: 120_000 }, () => {
     await drawTickets(ids, "Close the ticket once answered.");
     const redrawn = await ticketsOf(api, ids);
     expect({
-      dismissed: dismissed.tickets,
-      back: redrawn.tickets !== undefined,
+      dismissed: dismissed.tickets?.dismissed,
+      restored: restored.tickets?.dismissed,
+      redrawn: redrawn.tickets?.dismissed,
       newEvidence: redrawn.tickets?.evidence !== tickets.evidence,
-    }).toStrictEqual({ dismissed: undefined, back: true, newEvidence: true });
+    }).toStrictEqual({
+      dismissed: true,
+      restored: false,
+      redrawn: false,
+      newEvidence: true,
+    });
   });
 
   it("drop a routine's opportunity as a withdrawal takes its drawing down, and keep nothing of it once the drawing is erased", async () => {
@@ -654,16 +662,17 @@ describe("opportunities", { timeout: 120_000 }, () => {
     });
   });
 
-  it("refuse anyone but an admin, listing or dismissing", async () => {
+  it("refuse anyone but an admin, listing, dismissing or restoring", async () => {
     const { api } = await signedInApi(idp, "user");
+    const at = { routine: "a", evidence: "b" };
     expect({
       list: await outcome(api.opportunities.list()),
-      dismiss: await outcome(
-        api.opportunities.dismiss({ routine: "a", evidence: "b" })
-      ),
+      dismiss: await outcome(api.opportunities.dismiss(at)),
+      restore: await outcome(api.opportunities.restore(at)),
     }).toStrictEqual({
       list: "role.forbidden",
       dismiss: "role.forbidden",
+      restore: "role.forbidden",
     });
   });
 });
