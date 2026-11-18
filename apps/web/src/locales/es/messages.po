@@ -7107,7 +7107,7 @@ msgstr "Dejó de intentar enviar un evento de una aplicación a un webhook"
 
 #: src/workflows/workflow-settings.tsx
 msgid "General"
-msgstr ""
+msgstr "General"
 
 #: src/workflows/workflow-settings.tsx
 msgctxt "a workflow's settings section"

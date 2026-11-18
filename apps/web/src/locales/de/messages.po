@@ -7107,7 +7107,7 @@ msgstr "Hat aufgegeben, ein Ereignis einer App an einen Webhook zu senden"
 
 #: src/workflows/workflow-settings.tsx
 msgid "General"
-msgstr ""
+msgstr "Allgemein"
 
 #: src/workflows/workflow-settings.tsx
 msgctxt "a workflow's settings section"
