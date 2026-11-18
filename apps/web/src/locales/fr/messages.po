@@ -3436,6 +3436,10 @@ msgstr "Peut transmettre à ses workflows des fichiers que les personnes peuvent
 msgid "Can’t be read"
 msgstr "Illisible"
 
+#: src/workflows/kept-state.tsx
+msgid "Can't be shown right now."
+msgstr "Ne peut pas être affiché pour le moment."
+
 #: src/workflows/start-run.tsx
 msgid "Can't offer Run: {unread}"
 msgstr "Impossible de proposer Exécuter : {unread}"
@@ -16914,6 +16918,10 @@ msgstr "Retirer l’invitation de {email}"
 #: src/activity/audit-words.ts
 msgid "Withdrew an invitation"
 msgstr "A retiré une invitation"
+
+#: src/workflows/kept-state.tsx
+msgid "Withheld: the run that kept it read something that is no longer there to read, so later runs start without it."
+msgstr "Retenu : l'exécution qui l'a gardé a lu quelque chose qu'on ne peut plus lire, donc les exécutions suivantes démarrent sans cette valeur."
 
 #: src/brain/memories-page.tsx
 msgid "Without a name"
