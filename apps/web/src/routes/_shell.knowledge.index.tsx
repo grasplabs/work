@@ -8,7 +8,9 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, Link } from "@tanstack/react-router";
 
+import { formatDate } from "../format.ts";
 import { PageHeading } from "../frame/page.tsx";
+import { CardDescription, CardLink, CardTitle } from "../grasp/card/index.ts";
 import {
   Empty,
   EmptyDescription,
@@ -19,7 +21,6 @@ import {
 import { File, Search } from "../grasp/icons/index.ts";
 import {
   Item,
-  ItemActions,
   ItemContent,
   ItemDescription,
   ItemDetail,
@@ -28,14 +29,9 @@ import {
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { Section, SectionHeader } from "../grasp/section-header/index.ts";
-import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
-import {
-  CollectionMarkers,
-  collectionIconOf,
-} from "../knowledge/collection-markers.tsx";
+import { CollectionMarkers } from "../knowledge/collection-markers.tsx";
 import { KnowledgeFrame } from "../knowledge/frame.tsx";
-import type { MemoryFiles } from "../knowledge/memory.ts";
 import { loadKnowledgeNav } from "../knowledge/nav-data.ts";
 import { NewCollection } from "../knowledge/new-collection.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
@@ -160,21 +156,27 @@ const SearchResults = ({
   );
 };
 
-// Concept B: Memory as rows of its files, collections as one list of rows.
-const MemoryRowsB = ({ memory }: { memory: MemoryFiles }) =>
-  memory.files.length === 0 ? (
-    <Text size="sm" tone="muted">
-      No memory files are written yet.
-    </Text>
-  ) : (
-    <ItemGroup separated>
-      {memory.files.map((file) => (
+// Concept C: what changed lately across every collection, then the
+// collections as compact cards; memory is one of the collections.
+const RecentC = ({
+  firstPages,
+  names,
+}: {
+  firstPages: ReadonlyMap<string, DocumentSummary[]>;
+  names: ReadonlyMap<string, string>;
+}) => (
+  <ItemGroup separated>
+    {[...firstPages.values()]
+      .flat()
+      .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, 8)
+      .map((document) => (
         <Item
-          key={file.id}
+          key={document.id}
           render={
             <Link
-              params={{ collection: file.collectionId }}
-              search={{ doc: file.id }}
+              params={{ collection: document.collectionId }}
+              search={{ doc: document.id }}
               to="/knowledge/$collection"
             />
           }
@@ -183,56 +185,48 @@ const MemoryRowsB = ({ memory }: { memory: MemoryFiles }) =>
           <ItemMedia icon={File} iconLook="inline" />
           <ItemContent>
             <ItemTitle>
-              {file.path}
+              {document.title}
               <ItemDetail>
-                {file.collectionId === memory.personal ? "Yours" : "Company"}
+                {`${names.get(document.collectionId) ?? ""} · ${formatDate(document.updatedAt)}`}
               </ItemDetail>
             </ItemTitle>
           </ItemContent>
         </Item>
       ))}
-    </ItemGroup>
-  );
+  </ItemGroup>
+);
 
-const CollectionRowsB = ({
+const CollectionCardsC = ({
   collections,
   firstPages,
 }: {
   collections: Collection[];
   firstPages: ReadonlyMap<string, DocumentSummary[]>;
 }) => (
-  <ItemGroup separated>
+  <ul {...stylex.props(styles.blocks)}>
     {collections.map((collection) => {
       const n = firstPages.get(collection.id)?.length ?? 0;
       return (
-        <Item
-          key={collection.id}
-          render={
-            <Link
-              params={{ collection: collection.id }}
-              search={{}}
-              to="/knowledge/$collection"
-            />
-          }
-          size="sm"
-        >
-          <ItemMedia icon={collectionIconOf(collection)} iconLook="inline" />
-          <ItemContent>
-            <ItemTitle>
-              {collection.name}
-              <ItemDetail>{n === 1 ? "1 file" : `${n} files`}</ItemDetail>
-            </ItemTitle>
-            {collection.description === "" ? null : (
-              <ItemDescription>{collection.description}</ItemDescription>
-            )}
-          </ItemContent>
-          <ItemActions>
+        <li key={collection.id}>
+          <CardLink
+            render={
+              <Link
+                params={{ collection: collection.id }}
+                search={{}}
+                to="/knowledge/$collection"
+              />
+            }
+          >
+            <CardTitle>{collection.name}</CardTitle>
+            <CardDescription>
+              {n === 1 ? "1 file" : `${n} files`}
+            </CardDescription>
             <CollectionMarkers collection={collection} />
-          </ItemActions>
-        </Item>
+          </CardLink>
+        </li>
       );
     })}
-  </ItemGroup>
+  </ul>
 );
 
 const Knowledge = () => {
@@ -240,7 +234,7 @@ const Knowledge = () => {
   const { nav, results, firstPages } = Route.useLoaderData();
   const { q } = Route.useSearch();
   const { identity } = Route.useRouteContext();
-  const { collections, memory } = nav;
+  const { collections } = nav;
   const names = new Map(
     collections.state === "ready"
       ? collections.data.map(({ id, name }) => [id, name])
@@ -268,17 +262,12 @@ const Knowledge = () => {
               ) : null}
             </Section>
           )}
-          <Section aria-labelledby="memory">
-            <SectionHeader
-              description="What every agent has in its context, all the time."
-              id="memory"
-              title={<Trans>Memory</Trans>}
-            />
-            <NotLoaded page={memory} />
-            {memory.state === "ready" ? (
-              <MemoryRowsB memory={memory.data} />
-            ) : null}
-          </Section>
+          {collections.state === "ready" ? (
+            <Section aria-labelledby="recent">
+              <SectionHeader id="recent" title="Recently changed" />
+              <RecentC firstPages={firstPages} names={names} />
+            </Section>
+          ) : null}
           <Section aria-labelledby="collections">
             <SectionHeader
               actions={<NewCollection identity={identity} />}
@@ -287,7 +276,7 @@ const Knowledge = () => {
             />
             <NotLoaded page={collections} />
             {collections.state === "ready" ? (
-              <CollectionRowsB
+              <CollectionCardsC
                 collections={collections.data}
                 firstPages={firstPages}
               />
