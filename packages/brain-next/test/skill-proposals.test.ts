@@ -308,6 +308,69 @@ describe("skill proposals", () => {
     });
   });
 
+  it("takes out a later draft of its key still on the queue when a proposal is settled, so a run's erasure after leaves no row naming it", async () => {
+    const runs = [
+      await sourceOf("Workflow run completed."),
+      await sourceOf("Workflow run completed."),
+    ];
+    const [first = "", later = ""] = runs;
+    const key = await keyOf();
+    await propose(key, [first], draftingModel().ask);
+    // A later draft of the key, queued while the first was drawn and not
+    // run yet: as the queue keeps one (the queue left it waiting beside the
+    // running first, and is paused).
+    await runInDurableObject(own(), (_store, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO work_items
+          (kind, key, payload, priority, added_at, not_before, parked_at)
+        VALUES ('skill.propose', ?, ?, 2, ?, 0, ?)`,
+        key,
+        JSON.stringify({ key, about: 'Workflow "send-report"', sources: runs }),
+        Date.now(),
+        Date.now()
+      );
+    });
+    await own().settleSkillProposal({ person, key });
+    await own().eraseSource({ source: later, reason: "deleted" });
+    const naming = await runInDurableObject(
+      own(),
+      (_store, state) =>
+        state.storage.sql
+          .exec<{ count: number }>(
+            `SELECT
+              (SELECT count(*) FROM work_items WHERE payload LIKE ?1)
+              + (SELECT count(*) FROM proposal_sources WHERE source = ?2)
+              AS count`,
+            `%${later}%`,
+            later
+          )
+          .one().count
+    );
+    expect(naming).toBe(0);
+  });
+
+  it("drafts from runs as long as a source may be, within what one request to the model may hold", async () => {
+    // Each run fills its share of the request: no sentence ends in it, so
+    // it is cut by characters.
+    const long = "lorem ipsum ".repeat(30_000);
+    const sources = [];
+    for (let run = 0; run < 5; run += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      sources.push(await sourceOf(long));
+    }
+    const model = draftingModel();
+    await propose(await keyOf(), sources, model.ask);
+    const [request] = model.asked;
+    const listed = await own().skillProposals({ reader: readerOf() });
+    expect({
+      asked: model.asked.length,
+      within:
+        request !== undefined &&
+        request.system.length + request.input.length <= 1_000_000,
+      listed: listed.length,
+    }).toStrictEqual({ asked: 1, within: true, listed: 1 });
+  });
+
   it("treats an answer a person could never add as one that doesn't fit: what it needs is the host's, not a draft's", async () => {
     const model = draftingModel(`---
 name: weekly-report

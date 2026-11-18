@@ -2276,7 +2276,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     if (!(await this.#readable())) {
       return;
     }
-    settleProposal(this.ctx.storage.sql, asked);
+    stopWorkOn(this.#work, settleProposal(this.ctx.storage, asked));
   }
 
   /**

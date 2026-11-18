@@ -137,6 +137,12 @@ const draftSkillOf = (answer: string): string | null => {
     : null;
 };
 
+/** What separates the routine and each run in what the model is given. */
+const runSeparator = "\n\n";
+
+/** The label before run `index` (from 0) in what the model is given. */
+const labelOf = (index: number): string => `Run ${index + 1}:\n`;
+
 /** What the model is given: the routine, then each run, each cut to its share. */
 const inputOf = (
   about: string,
@@ -144,28 +150,38 @@ const inputOf = (
   contextTokens: number | null
 ): string => {
   const head = `The routine: ${about}`;
+  // What frames the runs (each one's label, and the separators before
+  // them), taken off the room before it is shared out among the runs.
+  const framing = runs
+    .map((_, index) => `${runSeparator}${labelOf(index)}`)
+    .join("");
   const tokens =
     contextTokens === null
       ? null
       : Math.floor(
           (Math.floor(contextTokens / windowShareOfRuns) -
             tokensOf(instructions) -
-            tokensOf(head)) /
+            tokensOf(head) -
+            tokensOf(framing)) /
             runs.length
         );
   if (tokens !== null && tokens <= 0) {
     throw new WorkError("window_too_small");
   }
   const chars = Math.floor(
-    (workRequestMaxLength - instructions.length - head.length) / runs.length
+    (workRequestMaxLength -
+      instructions.length -
+      head.length -
+      framing.length) /
+      runs.length
   );
   return [
     head,
     ...runs.map(
       (text, index) =>
-        `Run ${index + 1}:\n${pieceOf(text, 0, tokens, chars).text}`
+        `${labelOf(index)}${pieceOf(text, 0, tokens, chars).text}`
     ),
-  ].join("\n\n");
+  ].join(runSeparator);
 };
 
 /** The draft of `payload`: the model's answer kept with it, or asked now. */
@@ -349,24 +365,44 @@ export const listProposals = (
 
 /**
  * Settles the open proposal `key`, accepted or dismissed alike (nothing
- * reads which), keeping its key alone, so
+ * reads which), keeping its key alone, in one transaction, and answers the
+ * keys of the queued drafts it took out, for the caller to stop; so
  * nothing is drafted under it again; one settled before stays as it was.
  */
 export const settleProposal = (
-  sql: SqlStorage,
+  storage: DurableObjectStorage,
   { key }: Omit<ProposalSettle, "person">
-): void => {
+): string[] => {
   const settled = proposalKeySchema.parse(key);
-  sql.exec(
-    `UPDATE skill_proposals SET state = 'settled', text = NULL, rests_on = NULL
-    WHERE key = ? AND state = 'open'`,
-    settled
-  );
-  // A settled proposal rests on nothing: what it named goes.
-  sql.exec(
-    `DELETE FROM proposal_sources WHERE proposal = ?
-    AND EXISTS (SELECT 1 FROM skill_proposals WHERE key = ? AND state = 'settled')`,
-    settled,
-    settled
-  );
+  const { sql } = storage;
+  return storage.transactionSync(() => {
+    sql.exec(
+      `UPDATE skill_proposals SET state = 'settled', text = NULL, rests_on = NULL
+      WHERE key = ? AND state = 'open'`,
+      settled
+    );
+    const isSettled =
+      sql
+        .exec(
+          "SELECT 1 FROM skill_proposals WHERE key = ? AND state = 'settled'",
+          settled
+        )
+        .toArray().length > 0;
+    if (!isSettled) {
+      return [];
+    }
+    // A settled proposal rests on nothing: what it named goes, and so does
+    // a later draft of its key still on the queue (one queued while it was
+    // drawn), which would draft nothing and names those sources: whatever
+    // its state, under way too, which the caller stops.
+    sql.exec("DELETE FROM proposal_sources WHERE proposal = ?", settled);
+    return sql
+      .exec<{ key: string }>(
+        "DELETE FROM work_items WHERE kind = ? AND key = ? RETURNING key",
+        proposeKind,
+        settled
+      )
+      .toArray()
+      .map(({ key: draft }) => draft);
+  });
 };
