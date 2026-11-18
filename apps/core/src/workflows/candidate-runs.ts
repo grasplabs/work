@@ -75,7 +75,7 @@ import type { PinnedCandidateRun } from "./engine.ts";
 import { modelCallLimitOf } from "./host.ts";
 import type { RunStep } from "./host.ts";
 import type { CandidateBinding } from "./resource-authority.ts";
-import { requireEndedRunEvidenceReadable } from "./resource-reads.ts";
+import { endedRunResultWithheld } from "./resource-reads.ts";
 import { tracedSteps } from "./resource-run-trace.ts";
 import {
   engineResultOf,
@@ -744,18 +744,20 @@ export const candidateRunFor = async (
   }
   // What it returned or why it failed may hold what the kept state it
   // started from copied: withheld as a run's is (resource-runs.ts), once
-  // what the runs that set that state read is no longer the company's
-  // (GRA-1996), its status and times shown.
-  try {
-    await requireEndedRunEvidenceReadable(env, {
-      runId: row.id,
-      workflowId: row.workflowResourceId,
-      principal: row.principalId,
-    });
-  } catch (error) {
-    if (workflowResourceErrors.codeOf(error) !== "brain.revoked") {
-      throw error;
-    }
+  // what the runs that set that state read is no longer the company's, or
+  // they were never recorded (`endedRunResultWithheld`, GRA-1996), its
+  // status and times shown.
+  if (
+    await endedRunResultWithheld(
+      env,
+      {
+        runId: row.id,
+        workflowId: row.workflowResourceId,
+        principal: row.principalId,
+      },
+      row.stateHash
+    )
+  ) {
     return {
       ...run,
       error: {

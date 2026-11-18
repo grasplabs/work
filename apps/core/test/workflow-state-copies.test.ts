@@ -1162,6 +1162,53 @@ describe("what a workflow keeps of what its run read", setUpTime, () => {
     });
   });
 
+  it("withholds what a run and a test run returned when they froze kept keys with none of the runs that set them recorded, never as if they started from nothing", async () => {
+    const { admin, ada } = await people();
+    const word = `ledger${unique().replaceAll(/\W/gu, "")}`;
+    const passage = `The ${word} closes on Friday.`;
+    const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+    await sourceSaying(source, passage);
+    const workflow = await keepingWorkflow(ada, admin, recalling);
+    await ended(
+      ada,
+      workflow.id,
+      await started(ada, workflow.id, {
+        entity: unique(),
+        ask: word,
+        keep: true,
+      })
+    );
+    const test = await testRunOf(ada, workflow.id, false);
+    const testBefore = await testRunShown(ada, workflow.id, test);
+    const run = await started(ada, workflow.id, {
+      entity: unique(),
+      ask: "",
+      keep: false,
+      carry: true,
+    });
+    await ended(ada, workflow.id, run);
+    const runBefore = await resourceRunFor(env, ada, workflow.id, run);
+
+    // Each froze the key, and every admission records the run that set
+    // it: a row with none breaks that invariant.
+    await env.DB.prepare("DELETE FROM run_state_writers WHERE run_id IN (?, ?)")
+      .bind(test, run)
+      .run();
+    const runAfter = await resourceRunFor(env, ada, workflow.id, run);
+
+    expect({
+      testBefore: testBefore.result,
+      runBefore: runBefore.result,
+      testAfter: await testRunShown(ada, workflow.id, test),
+      runAfter: { result: runAfter.result, error: runAfter.error?.code },
+    }).toStrictEqual({
+      testBefore: { found: passage },
+      runBefore: { found: passage },
+      testAfter: { status: "completed", result: null, error: "brain.revoked" },
+      runAfter: { result: undefined, error: "brain.revoked" },
+    });
+  });
+
   it("lets a writer's evidence go past retention once the test run that started from its key is swept away", async () => {
     const { admin, ada } = await people();
     const word = `ledger${unique().replaceAll(/\W/gu, "")}`;

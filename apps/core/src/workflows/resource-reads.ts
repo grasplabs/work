@@ -9,11 +9,16 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import type { CodeSubject, WorkContext } from "@grasp-os/shared/permissions";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { runOfStepKey } from "@grasp-os/shared/workflows";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { readableMemoriesAs, readableVersionsAs } from "../brain-next.ts";
 import type { PinnedVersionRef } from "../brain-next.ts";
-import { runChatSources, workflowResourceRuns } from "../db/core/schema.ts";
+import {
+  runChatSources,
+  runStateWriters,
+  workflowResourceRuns,
+} from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 import { readableSources } from "../history-access.ts";
 import { authorize } from "../permissions.ts";
@@ -25,6 +30,7 @@ import {
   memoryEvidenceOfRuns,
   stateWritersOfRuns,
 } from "./run-evidence.ts";
+import { snapshotOf } from "./state-snapshots.ts";
 
 // What a run read, checked before anything of the run leaves it: the
 // Brain's versions its recalls pinned (run-evidence.ts) and what the chat
@@ -487,6 +493,43 @@ export const requireEndedRunEvidenceReadable = async (
 };
 
 /**
+ * Whether run `runId`, which froze as it started the state `stateHash`
+ * names (null: none), has the runs that set its keys recorded
+ * (`runStateWriters`), for a reader of what it returned or why it failed.
+ * An invariant, not a path for older rows: every key names the run that
+ * set it (workflow-state.ts), the batch that admits a start or a test run
+ * records each of them (workflow-starts.ts `writersAdmitted`), and they
+ * stay while its details do. A run that froze a key with none recorded
+ * can't be held to what its writers read, ever, so what it returned is
+ * withheld as refused, and logged (GRA-1996). So is one whose snapshot
+ * isn't stored.
+ */
+const frozenWritersRecorded = async (
+  env: Env,
+  runId: string,
+  stateHash: string | null
+): Promise<boolean> => {
+  if (stateHash === null) {
+    return true;
+  }
+  const [snapshot, writer] = await Promise.all([
+    snapshotOf(env, stateHash),
+    drizzle(env.DB)
+      .select({ runId: runStateWriters.runId })
+      .from(runStateWriters)
+      .where(eq(runStateWriters.runId, runId))
+      .limit(1)
+      .get(),
+  ]);
+  const froze = snapshot === undefined || Object.keys(snapshot).length > 0;
+  if (!froze || writer !== undefined) {
+    return true;
+  }
+  log.error("workflow.run_writers_unrecorded", { runId });
+  return false;
+};
+
+/**
  * Whether run `run` may still read what it read
  * (`requireEndedRunEvidenceReadable`): false once refused as
  * `brain.revoked`, for a reader that leaves what it holds out (its files,
@@ -506,6 +549,23 @@ export const runEvidenceHolds = async (
     return false;
   }
 };
+
+/**
+ * Whether what ended run `run`, which froze as it started the state
+ * `stateHash` names, returned or why it failed is withheld as
+ * `brain.revoked`: the runs that set that state weren't recorded
+ * (`frozenWritersRecorded`), or it may no longer read what it read
+ * (`runEvidenceHolds`), its writers' evidence included. For the readers of
+ * a run's and a test run's result (resource-runs.ts `resultOf`,
+ * candidate-runs.ts `candidateRunFor`). Any other failure throws.
+ */
+export const endedRunResultWithheld = async (
+  env: Env,
+  run: Pick<CallingRun, "runId" | "workflowId" | "principal">,
+  stateHash: string | null
+): Promise<boolean> =>
+  !(await frozenWritersRecorded(env, run.runId, stateHash)) ||
+  !(await runEvidenceHolds(env, run));
 
 /**
  * What checking a run's evidence came to for a reader: it holds; it was
