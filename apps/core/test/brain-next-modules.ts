@@ -64,6 +64,13 @@ export const brainModules = {
   // Writing and sharing skills (GRA-1754): its own surface, each export
   // probed as the signed-in person.
   "apps/core/src/skill-shares.ts": "shares",
+  // Skills proposed from a person's own runs (GRA-1756): asks their own
+  // store to draft one with core's proposeOwnSkill, lists theirs with
+  // ownSkillProposalsAs and settles one with settleOwnSkillProposal, whose
+  // probes hold what they answer; adds one with core's addOwnSkill; hands
+  // on beside them only what core's own records say of the person's own
+  // runs.
+  "apps/core/src/skill-proposals.ts": "core",
   // Code's recall: an App's action, a workflow's step and a chat's code;
   // and who knows about a topic, for a chat's code.
   "apps/core/src/brain-recall.ts": "recall",
