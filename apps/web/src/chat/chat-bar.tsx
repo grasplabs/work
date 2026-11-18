@@ -25,7 +25,7 @@ export const ChatBar = () => {
   const { t } = useLingui();
   const { presence, stage, composer, words, view } = useGlobalChat();
   const openHere = useOpenChat();
-  const bar = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLTextAreaElement>(null);
   // Back as the chat closes: the chat had the cursor, which it loses as it
   // goes. Only then: a menu or window closing elsewhere leaves the cursor
   // nowhere for a moment too, and it belongs to what opens next. The cursor
@@ -46,17 +46,17 @@ export const ChatBar = () => {
     let frame = 0;
     const until = performance.now() + returnWithinMs;
     const offer = () => {
-      const box = bar.current?.querySelector("textarea");
+      const field = box.current;
       const { activeElement } = document;
       const lost =
         activeElement === null ||
         activeElement === document.body ||
         activeElement.closest("[data-slot=app-shell-panels]") !== null;
-      if (box === null || box === undefined || !lost) {
+      if (field === null || !lost) {
         return;
       }
-      box.focus();
-      if (document.activeElement !== box && performance.now() < until) {
+      field.focus();
+      if (document.activeElement !== field && performance.now() < until) {
         frame = requestAnimationFrame(offer);
       }
     };
@@ -79,9 +79,10 @@ export const ChatBar = () => {
   const shortcut = shortcutLabel(chatKey);
   const { onAttach } = composer;
   return (
-    <div ref={bar}>
+    <div>
       <ChatComposer
         {...composer}
+        boxRef={box}
         {...(ownChat
           ? {
               footer: (

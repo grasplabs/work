@@ -116,6 +116,7 @@ import {
   ServerStack01Icon,
   Settings01Icon,
   Share08Icon,
+  SheetIcon,
   ShieldAlertIcon,
   SidebarLeftIcon,
   SidebarRightIcon,
@@ -128,7 +129,7 @@ import {
   StarIcon,
   StopIcon,
   Sun03Icon,
-  Table01Icon,
+  TableIcon,
   Tablet01Icon,
   Tag01Icon,
   Task01Icon,
@@ -506,8 +507,8 @@ export const Database: IconData = Database01Icon;
 // Sources of every kind (cloud builder 10): the marks a source's kind wears.
 /** A workflow: steps that run in order, by a schedule or a trigger. WorkflowSquare03Icon. */
 export const Workflow: IconData = WorkflowSquare03Icon;
-/** A table or a query: rows of data. Table01Icon. */
-export const Rows: IconData = Table01Icon;
+/** A table or a query: rows of data, a head row over rows. TableIcon (was Table01Icon, a piece of furniture). */
+export const Rows: IconData = TableIcon;
 /** Code: a file of source, some of its lines. SourceCodeIcon. */
 export const Code: IconData = SourceCodeIcon;
 /** A record in an app: a deal, a ticket, an invoice. Invoice01Icon. */
@@ -568,3 +569,5 @@ export const ThumbsDownFilled: IconData = solidForm(ThumbsDownIcon);
 export const Place: IconData = Location01Icon;
 /** A video call. Video01Icon. */
 export const VideoCall: IconData = Video01Icon;
+/** A spreadsheet: a head row over a grid of cells. SheetIcon. */
+export const Spreadsheet: IconData = SheetIcon;

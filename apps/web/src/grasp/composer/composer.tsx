@@ -16,7 +16,14 @@
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import { Textarea as TextareaPrimitive } from "@ui-sdk/react/textarea";
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import type {
   ClipboardEvent,
   CompositionEvent,
@@ -29,6 +36,7 @@ import type {
   PointerEvent,
   ReactElement,
   ReactNode,
+  Ref,
   RefObject,
   SetStateAction,
   SubmitEvent,
@@ -340,6 +348,18 @@ export interface ComposerProps {
    * @default false
    */
   compact?: boolean;
+  /**
+   * The text field (a <textarea>): `ref.current.focus()` puts the caret in it, in the full card,
+   * `compact` and the one row alike. Null while a takeover holds the card without its text.
+   */
+  ref?: Ref<HTMLTextAreaElement>;
+  /**
+   * Puts the caret in the text as the composer appears, as a page whose one task is to write asks
+   * (a new chat). Focus goes to the text, never to a chip or an action; with a takeover open (a
+   * question, an approval) it goes to the takeover's own control instead.
+   * @default false
+   */
+  autoFocus?: boolean;
   /** The text it starts with. */
   defaultValue?: string;
   /** The text, when you keep it in state. Pair it with `onValueChange`, and clear it in `onSend`. */
@@ -1353,6 +1373,60 @@ const useSuccessCount = (activity: ComposerActivity) => {
   return success;
 };
 
+/** Gives the host's ref the text field: a callback is called, an object's `current` is set. */
+const handTo = (
+  target: Ref<HTMLTextAreaElement> | undefined,
+  element: HTMLTextAreaElement | null
+) => {
+  if (typeof target === "function") {
+    target(element);
+  } else if (target) {
+    target.current = element;
+  }
+};
+
+/** Puts the focus on a takeover's own control: a choice already made, else its first control. */
+const focusTakeover = (card: HTMLFieldSetElement | null) => {
+  // A choice already made first (a question that comes back answered), else the first control.
+  const room = card?.querySelector<HTMLElement>(
+    "[data-slot=composer-takeover-room]"
+  );
+  // A dictation takes it with no ring: the person pressed the microphone, and its cancel shows
+  // a ring only when the keyboard reaches it.
+  const dictating =
+    (room?.querySelector("[data-slot=composer-voice]") ?? null) !== null;
+  // A text question's box comes before its buttons, so the caret lands in it, never on Skip.
+  (
+    room?.querySelector<HTMLElement>("[aria-checked=true]") ??
+    room?.querySelector<HTMLElement>("textarea, button, input")
+  )?.focus({ preventScroll: true, focusVisible: !dictating });
+};
+
+/**
+ * `autoFocus`: as the composer appears, the caret in its text, or a takeover's own control when one
+ * holds the card. Once, at first; never again on a later render.
+ */
+const useAutoFocus = (
+  on: boolean,
+  taken: boolean,
+  card: RefObject<HTMLFieldSetElement | null>,
+  area: RefObject<HTMLTextAreaElement | null>
+) => {
+  const place = useEffectEvent(() => {
+    if (!on) {
+      return;
+    }
+    if (taken) {
+      focusTakeover(card.current);
+    } else {
+      area.current?.focus({ preventScroll: true });
+    }
+  });
+  useEffect(() => {
+    place();
+  }, []);
+};
+
 /**
  * A takeover that arrives while the person is in the card takes the focus with it; when it goes,
  * the focus comes back to the text. Returns the form's focus handlers.
@@ -1373,19 +1447,7 @@ const useTakeoverFocus = (
       focusInside.current ||
       (card.current?.contains(document.activeElement) ?? false);
     if (taken && !hadTakeover.current && here) {
-      // A choice already made first (a question that comes back answered), else the first control.
-      const room = card.current?.querySelector<HTMLElement>(
-        "[data-slot=composer-takeover-room]"
-      );
-      // A dictation takes it with no ring: the person pressed the microphone, and its cancel shows
-      // a ring only when the keyboard reaches it.
-      const dictating =
-        (room?.querySelector("[data-slot=composer-voice]") ?? null) !== null;
-      // A text question's box comes before its buttons, so the caret lands in it, never on Skip.
-      (
-        room?.querySelector<HTMLElement>("[aria-checked=true]") ??
-        room?.querySelector<HTMLElement>("textarea, button, input")
-      )?.focus({ preventScroll: true, focusVisible: !dictating });
+      focusTakeover(card.current);
     }
     if (!taken && hadTakeover.current && here) {
       area.current?.focus({ preventScroll: true });
@@ -2088,7 +2150,7 @@ const useMentions = ({
 type Mentions = ReturnType<typeof useMentions>;
 
 interface FieldProps {
-  area: RefObject<HTMLTextAreaElement | null>;
+  area: (element: HTMLTextAreaElement | null) => void;
   label: string;
   placeholder: string | undefined;
   text: string;
@@ -2583,9 +2645,9 @@ const wordDefaults = (
   pictureRemovedLabel: words.pictureRemoved,
 });
 
-type Resolved = ComposerProps &
+type Resolved = Omit<ComposerProps, "ref"> &
   ReturnType<typeof lookDefaults> &
-  ReturnType<typeof wordDefaults>;
+  ReturnType<typeof wordDefaults> & { hostField?: ComposerProps["ref"] };
 
 /**
  * The footer's microphone and the dictation it hands the card to, from `onDictate` and
@@ -2673,6 +2735,13 @@ const ComposerForm = (props: Resolved) => {
   const files = useFileDrop(props.onAttach, disabled);
   const success = useSuccessCount(activity);
   const focusWatch = useTakeoverFocus(taken, card, area);
+  useAutoFocus(props.autoFocus === true, taken, card, area);
+  // The text field, for the composer's own work and the host's `ref`.
+  const { hostField } = props;
+  const attachField = (element: HTMLTextAreaElement | null) => {
+    area.current = element;
+    handTo(hostField, element);
+  };
   const sending = useSend({
     text,
     prepare: (sent) => [
@@ -2804,7 +2873,7 @@ const ComposerForm = (props: Resolved) => {
 
   const field = (
     <ComposerField
-      area={area}
+      area={attachField}
       label={label}
       placeholder={props.placeholder}
       text={words.shown}
@@ -3012,13 +3081,15 @@ const ComposerForm = (props: Resolved) => {
 };
 
 /** Where a person writes to an assistant: the text, its actions, and send. */
-export const Composer = (props: ComposerProps) => {
+export const Composer = ({ ref, ...props }: ComposerProps) => {
   const words = useComposerWords("composer");
+  // The host's ref on the text, handed on by a name of its own: the form reads its props in render.
   return (
     <ComposerForm
       {...props}
       {...lookDefaults(props)}
       {...wordDefaults(props, words)}
+      hostField={ref}
     />
   );
 };
