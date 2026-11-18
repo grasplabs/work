@@ -384,6 +384,46 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     });
   });
 
+  it("keep a team an admin took out of every region out: the next staff list asks no model for it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const tag = unique();
+    const finance = `team-finance-${tag}`;
+    const sales = `team-sales-${tag}`;
+    const support = `team-support-${tag}`;
+    await alarmed(
+      [
+        arranging({
+          groups: [{ name: "Everyone", teamIds: [finance, sales, support] }],
+        }),
+      ],
+      async () => await admin.api.onboarding.saveRoster(rosterOf(tag))
+    );
+    const arranged = await admin.api.brain.read();
+    const everyone = arranged.teamGroups.find(({ teamIds }) =>
+      teamIds.includes(finance)
+    );
+    // The admin sets Finance to "No group".
+    await admin.api.brain.saveTeamGroups([
+      { id: everyone?.id ?? "", name: "Everyone", teamIds: [sales, support] },
+    ]);
+
+    const { ran, requests } = await alarmed(
+      [arranging({ groups: [{ name: "Money", teamIds: [finance] }] })],
+      async () => await admin.api.onboarding.saveRoster(rosterOf(tag))
+    );
+    const { teamGroups } = await admin.api.brain.read();
+
+    expect({
+      ran,
+      asked: requests.length,
+      regions: teamGroups.map(({ name, teamIds }) => ({ name, teamIds })),
+    }).toStrictEqual({
+      ran: true,
+      asked: 0,
+      regions: [{ name: "Everyone", teamIds: [sales, support] }],
+    });
+  });
+
   it("leave the teams in no region when no model answers, and are tried again after a minute, five and thirty, then given up until the staff list is saved again", async () => {
     const admin = await signedInApi(idp, "admin");
     const tag = unique();
@@ -463,7 +503,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     });
   });
 
-  it("keep what an admin saves while the model answers, and are owed again by a staff list saved meanwhile", async () => {
+  it("keep what an admin saves while the model answers, a team taken out included, and are owed again by a staff list saved meanwhile", async () => {
     const admin = await signedInApi(idp, "admin");
     const tag = unique();
     const finance = `team-finance-${tag}`;
@@ -474,8 +514,11 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
 
     const { requests } = await answeringWith(
       async () => {
-        // While the model answers: the admin places Sales, and saves the
-        // staff list again.
+        // While the model answers: the admin places Sales and Finance,
+        // takes Finance out again, and saves the staff list again.
+        await admin.api.brain.saveTeamGroups([
+          { id: "front", name: "Front office", teamIds: [sales, finance] },
+        ]);
         await admin.api.brain.saveTeamGroups([
           { id: "front", name: "Front office", teamIds: [sales] },
         ]);
@@ -497,7 +540,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
       asked: 1,
       regions: [
         { id: "front", teamIds: [sales] },
-        { id: "group-everyone", teamIds: [finance, support] },
+        { id: "group-everyone", teamIds: [support] },
       ],
       owed: 0,
     });

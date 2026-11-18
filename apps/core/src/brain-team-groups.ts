@@ -4,13 +4,12 @@ import { brainErrors, teamGroupsInputSchema } from "@grasp-os/shared/brain";
 import type { Team, TeamGroup } from "@grasp-os/shared/brain";
 import { requireAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { asc } from "drizzle-orm";
+import { asc, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { auditedBatch, outboxed } from "./audit-outbox.ts";
+import { auditedBatch, outboxedWhere } from "./audit-outbox.ts";
 import { brainTeamGroupSaves, brainTeamGroups } from "./db/core/schema.ts";
-import { statementsWithin } from "./db/d1.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
 
 // The company's own groups of teams (GRA-1273): the brain's regions, the
@@ -20,12 +19,14 @@ import { modelForRole, modelSettings, models } from "./models.ts";
 // rewritten, each change audited. They arrange the teams on the Brain's
 // map; they decide no access.
 //
-// - Who decides: Grasp arranges the teams in no region by itself
-//   (`arrangeTeams`, GRA-1993), and that counts at once: nothing is
+// - Who decides: Grasp arranges the teams never placed in a region by
+//   itself (`arrangeTeams`, GRA-1993), and that counts at once: nothing is
 //   proposed, nothing waits for a confirmation. An admin changes it,
-//   renaming a region or moving a team (`brain.saveTeamGroups`); Grasp
-//   never moves a team that is in a region, so where an admin put one is
-//   final.
+//   renaming a region or moving a team (`brain.saveTeamGroups`). Grasp
+//   never moves a team once placed, by itself or an admin, and "No group"
+//   is a place too: a team an admin took out of every region stays out.
+//   An admin's save that comes while Grasp arranges wins: the arrangement
+//   keeps nothing and is tried again.
 // - When: after an admin saves the staff list, as the onboarding's own
 //   work, from its alarm, tried again after a minute, five and thirty when
 //   it fails (onboarding/store.ts, `arrangeNext`), never in the save's
@@ -87,6 +88,10 @@ export const teamGroupsOf = async (env: Env): Promise<TeamGroup[]> => {
  * Keeps `groups` as the company's, all of them, in their order, in place
  * of `before`, as `actor` did it: the set before and after kept whole, and
  * one audit event naming it, `action`, with `detail` beside the save's.
+ * With `saves`, only while the groups were kept that many times, so no
+ * other change came after what the caller read: every statement holds
+ * itself to that, in the one batch, the save itself last. Returns whether
+ * it kept them.
  */
 const keepGroups = async (
   env: Env,
@@ -96,46 +101,91 @@ const keepGroups = async (
     before,
     groups,
     detail,
+    saves,
   }: {
     actor: AuditActor;
     action: "brain.team_groups.saved" | "brain.team_groups.arranged";
     before: readonly TeamGroup[];
     groups: readonly Group[];
     detail: Record<string, number>;
+    saves?: number;
   }
-): Promise<void> => {
-  const savedAt = new Date();
+): Promise<boolean> => {
+  const savedAt = Date.now();
   const save = crypto.randomUUID();
   const db = drizzle(env.DB);
-  const rows = groups.map(({ id, name, teamIds }, position) => ({
-    id,
-    name,
-    teamIds: JSON.stringify(teamIds),
-    position,
-    confirmedAt: savedAt,
-    savedAt,
-  }));
-  await auditedBatch(env, db, [
-    db.insert(brainTeamGroupSaves).values({
-      id: save,
-      savedAt,
-      before: JSON.stringify(before),
-      after: JSON.stringify(
-        groups.map((group) => ({ ...group, confirmed: true }))
+  const unchanged =
+    saves === undefined
+      ? sql`1`
+      : sql`(SELECT count(*) FROM ${brainTeamGroupSaves}) = ${saves}`;
+  // The rows as one JSON value, one bound parameter however many there are.
+  const rows = JSON.stringify(
+    groups.map(({ id, name, teamIds }) => ({
+      id,
+      name,
+      teamIds: JSON.stringify(teamIds),
+    }))
+  );
+  const results = await auditedBatch(env, db, [
+    db.delete(brainTeamGroups).where(unchanged),
+    db
+      .insert(brainTeamGroups)
+      .select(
+        sql`SELECT json_extract(value, '$.id'), json_extract(value, '$.name'), json_extract(value, '$.teamIds'), key, ${savedAt}, ${savedAt} FROM json_each(${rows}) WHERE ${unchanged}`
       ),
-    }),
-    db.delete(brainTeamGroups),
-    ...statementsWithin(rows, (part) =>
-      db.insert(brainTeamGroups).values(part)
+    outboxedWhere(
+      db,
+      {
+        actor,
+        action,
+        target: { type: "brain", id: "team_groups" },
+        provenance: groups.map(({ id }) => id),
+        detail: {
+          ...detail,
+          groups: groups.length,
+          before: before.length,
+          save,
+        },
+      },
+      unchanged
     ),
-    outboxed(db, {
-      actor,
-      action,
-      target: { type: "brain", id: "team_groups" },
-      provenance: groups.map(({ id }) => id),
-      detail: { ...detail, groups: groups.length, before: before.length, save },
-    }),
+    db
+      .insert(brainTeamGroupSaves)
+      .select(
+        sql`SELECT ${save}, ${savedAt}, ${JSON.stringify(before)}, ${JSON.stringify(
+          groups.map((group) => ({ ...group, confirmed: true }))
+        )} WHERE ${unchanged}`
+      ),
   ]);
+  return (results.at(-1)?.meta.changes ?? 0) > 0;
+};
+
+/**
+ * Every team ever in a region, as the kept sets of groups name them
+ * (`brain_team_group_saves`): one placed, by Grasp or an admin, is never
+ * arranged again, so an admin's "No group" is a place too.
+ */
+const placedEver = async (env: Env): Promise<Set<string>> => {
+  const rows = await drizzle(env.DB).all<{ team: string }>(
+    sql`SELECT DISTINCT team.value AS team FROM ${brainTeamGroupSaves} AS kept, json_each(kept.after) AS region, json_each(region.value, '$.teamIds') AS team`
+  );
+  return new Set(rows.map(({ team }) => team));
+};
+
+/**
+ * The groups as kept now, every team ever placed, and how many times the
+ * groups were kept, counted first: what comes after the count only makes
+ * a write held to it (`keepGroups`) keep nothing.
+ */
+const regionsNow = async (env: Env) => {
+  const [counted] = await drizzle(env.DB).all<{ saves: number }>(
+    sql`SELECT count(*) AS saves FROM ${brainTeamGroupSaves}`
+  );
+  const [groups, ever] = await Promise.all([
+    teamGroupsOf(env),
+    placedEver(env),
+  ]);
+  return { saves: counted?.saves ?? 0, groups, ever };
 };
 
 /**
@@ -215,13 +265,14 @@ const idFor = (name: string, taken: Set<string>): string => {
   return id;
 };
 
-/** Of `teams`, those in none of `groups`. */
+/** Of `teams`, those in none of `groups`, and never placed (`ever`). */
 const inNoRegion = (
   teams: readonly Team[],
-  groups: readonly Group[]
+  groups: readonly Group[],
+  ever: ReadonlySet<string> = new Set()
 ): Team[] => {
   const placed = new Set(groups.flatMap(({ teamIds }) => teamIds));
-  return teams.filter(({ id }) => !placed.has(id));
+  return teams.filter(({ id }) => !placed.has(id) && !ever.has(id));
 };
 
 /** A name as the model may write it again: case and spaces aside. */
@@ -310,38 +361,44 @@ const modelAnswer = async (
 };
 
 /**
- * Arranges every team of the brain in no region (`teams`, as an admin
- * reads them) into the regions, as Grasp: the model's arrangement through
- * the gateway, kept at once, audited. A team in a region stays where it
- * is. Asks no model when every team is in one. Throws when no model
- * answered or the write failed, with nothing changed: the onboarding's
- * alarm tries again (onboarding/store.ts, `arrangeNext`).
+ * Arranges every team of the brain never placed in a region (`teams`, as
+ * an admin reads them) into the regions, as Grasp: the model's arrangement
+ * through the gateway, kept at once, audited. A team in a region stays
+ * where it is, and one an admin took out of every region stays out. Asks
+ * no model when no team was never placed. Throws when no model answered,
+ * the write failed, or the groups changed between reading them after the
+ * answer and writing, with nothing changed: the onboarding's alarm tries
+ * again (onboarding/store.ts, `arrangeNext`).
  */
 export const arrangeTeams = async (
   env: Env,
   teams: () => Promise<readonly Team[]>
 ): Promise<void> => {
-  const [all, held] = await Promise.all([teams(), teamGroupsOf(env)]);
+  const [all, held] = await Promise.all([teams(), regionsNow(env)]);
   const known = new Set(all.map(({ id }) => id));
-  const unplaced = inNoRegion(all, held);
+  const unplaced = inNoRegion(all, held.groups, held.ever);
   if (unplaced.length === 0) {
     return;
   }
-  const answer = await modelAnswer(env, unplaced, shown(held, known));
+  const answer = await modelAnswer(env, unplaced, shown(held.groups, known));
   // Onto the regions as they are now: an admin may have saved them while
   // the model answered, and what they placed stays where they put it.
-  const now = await teamGroupsOf(env);
-  const waiting = inNoRegion(unplaced, now);
-  const groups = arranged(answer, waiting, now, known);
+  const now = await regionsNow(env);
+  const waiting = inNoRegion(unplaced, now.groups, now.ever);
+  const groups = arranged(answer, waiting, now.groups, known);
   const still = inNoRegion(waiting, groups);
   if (still.length === waiting.length) {
     return;
   }
-  await keepGroups(env, {
+  const kept = await keepGroups(env, {
     actor: { type: "system" },
     action: "brain.team_groups.arranged",
-    before: now,
+    before: now.groups,
     groups,
     detail: { arranged: waiting.length - still.length },
+    saves: now.saves,
   });
+  if (!kept) {
+    throw new Error("The regions changed while Grasp arranged the teams.");
+  }
 };
