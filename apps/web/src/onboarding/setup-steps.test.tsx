@@ -192,6 +192,7 @@ const drawn = (
       staff: false,
       expiresAt: "2026-10-15T00:00:00Z",
     },
+    memberTeams: [],
   };
   return page(
     <SetupStepBody

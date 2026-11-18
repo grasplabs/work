@@ -1,4 +1,5 @@
 import type { DirectoryPerson } from "@grasp-os/shared/directory";
+import type { OrganizationTeam } from "@grasp-os/shared/members";
 import {
   onboardingPeopleMax,
   onboardingTeamsMax,
@@ -446,6 +447,36 @@ export const directoryListOf = (
     };
   });
   return { ...rosterOf(entries, noTeam), skipped: 0 };
+};
+
+/** A members' team (Settings › Members), as a staff list's team can be one. */
+export type MemberTeam = Pick<OrganizationTeam, "id" | "name">;
+
+/**
+ * `roster` with its team `from` made the members' team `to` (GRA-2055):
+ * its people go there. When the list has that team already, the two are
+ * one, its lead and whether it takes part as they were; otherwise `from`
+ * takes `to`'s id and name, its lead and the rest as they were.
+ */
+export const intoTeam = (
+  roster: Roster,
+  from: string,
+  to: MemberTeam
+): Roster => {
+  if (from === to.id) {
+    return roster;
+  }
+  const merged = roster.teams.some((team) => team.id === to.id);
+  return {
+    teams: merged
+      ? roster.teams.filter((team) => team.id !== from)
+      : roster.teams.map((team) =>
+          team.id === from ? { ...team, id: to.id, name: to.name } : team
+        ),
+    people: roster.people.map((person) =>
+      person.team === from ? { ...person, team: to.id } : person
+    ),
+  };
 };
 
 /**

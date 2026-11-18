@@ -16965,6 +16965,10 @@ msgid "Which model answers when {name} is asked."
 msgstr "Which model answers when {name} is asked."
 
 #: src/onboarding/setup-steps.tsx
+msgid "Which team {name} is"
+msgstr "Which team {name} is"
+
+#: src/onboarding/setup-steps.tsx
 msgid "Which tools do people actually use?"
 msgstr "Which tools do people actually use?"
 

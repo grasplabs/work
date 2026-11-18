@@ -14,6 +14,7 @@ import {
   StaffListError,
   staffListOf,
   withLeadsFrom,
+  intoTeam,
   withSaved,
 } from "./staff-list.ts";
 
@@ -546,5 +547,75 @@ describe("the leads from the HR platform", () => {
       away: ["Lisa Jansen"],
       taken: true,
     });
+  });
+});
+
+/** A roster's teams, as the admin sees them on the confirm screen. */
+const teamsOf = (kept: Roster) =>
+  kept.teams.map(({ id, name, lead, off }) => ({ id, name, lead, off }));
+
+/** Who is in which team. */
+const peopleOf = (kept: Roster) =>
+  kept.people.map(({ id, team }) => [id, team]);
+
+describe("a staff list's team made one the company has", () => {
+  const roster: Roster = rosterSchema.parse({
+    teams: [
+      { id: "support", name: "Support", lead: "lea" },
+      { id: "service", name: "Customer service", lead: "sam", off: true },
+    ],
+    people: [
+      { id: "lea", name: "Lea", team: "support" },
+      { id: "ona", name: "Ona", team: "support" },
+      { id: "sam", name: "Sam", team: "service" },
+    ],
+  });
+
+  it("takes a members' team's id and name, keeping its lead, when the list has no such team", () => {
+    const kept = intoTeam(roster, "support", { id: "m-1", name: "Helpdesk" });
+    expect({
+      teams: teamsOf(kept),
+      people: peopleOf(kept),
+      valid: rosterSchema.safeParse(kept).success,
+    }).toStrictEqual({
+      teams: [
+        { id: "m-1", name: "Helpdesk", lead: "lea", off: false },
+        { id: "service", name: "Customer service", lead: "sam", off: true },
+      ],
+      people: [
+        ["lea", "m-1"],
+        ["ona", "m-1"],
+        ["sam", "service"],
+      ],
+      valid: true,
+    });
+  });
+
+  it("makes two of the list's teams one, the one picked as it was", () => {
+    const kept = intoTeam(roster, "support", {
+      id: "service",
+      name: "Customer service",
+    });
+    expect({
+      teams: teamsOf(kept),
+      people: peopleOf(kept),
+      valid: rosterSchema.safeParse(kept).success,
+    }).toStrictEqual({
+      teams: [
+        { id: "service", name: "Customer service", lead: "sam", off: true },
+      ],
+      people: [
+        ["lea", "service"],
+        ["ona", "service"],
+        ["sam", "service"],
+      ],
+      valid: true,
+    });
+  });
+
+  it("is the list itself when its team is picked", () => {
+    expect(
+      intoTeam(roster, "support", { id: "support", name: "Support" })
+    ).toBe(roster);
   });
 });
