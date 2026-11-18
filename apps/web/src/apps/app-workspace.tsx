@@ -38,18 +38,14 @@ import {
   AppWindow,
   Archive,
   Chat,
-  Code,
-  Database,
   Expand,
   Link as LinkIcon,
   More,
   People,
-  Settings,
   Sparkles,
 } from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
-import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { PageFrame } from "../pages/page-frame.tsx";
 import type { FrameFix } from "../pages/page-frame.tsx";
@@ -90,9 +86,11 @@ const AppCode = lazy(async () => {
 // An App's workspace, where its builders change it, at the App's own
 // address (/apps/$app): its people get the App itself there. One bar, the
 // App's (frame/item-shell.tsx): back to the Apps, its name and where it
-// stands in plain words ("Only you see this", or who uses it), then what
-// the main area shows (Preview, Code, Data, Settings), "…" and Share with
-// your team, the page's one lime action (publish.tsx). The main area
+// stands in plain words ("Only you see this", or who uses it), the
+// preview's own controls, "…" and Share with your team, the page's one
+// main action (publish.tsx). What the main area shows (the App, Code,
+// Data, Settings' sections) are rows of the sidebar's section, the App's
+// while its workspace is open (app-section.tsx). The main area
 // always shows the App: an App with no page yet asks what it should do
 // (app-start.tsx), and one just made says what to do next, once
 // (made-tip.ts).
@@ -206,70 +204,8 @@ const styles = stylex.create({
   strip: { flexShrink: 0 },
   // A preview drawn narrower than its room, in the middle of it.
   drawn: { width: "100%", marginInline: "auto" },
-  // The views, then the preview's controls, in the bar's middle.
-  middle: { display: "flex", alignItems: "center", gap: grasp.space3 },
   padded: { padding: grasp.space4 },
 });
-
-/** The switch's entries, in order. */
-const views = ["preview", "code", "data", "settings"] as const;
-
-/**
- * App | Code | Data | Settings, as one switch of icons: the chosen view
- * with its name beside its icon, the others its icon alone. Each is an
- * address of its own, gone to on a choice.
- */
-const ViewSwitch = ({ app, view }: { app: string; view: WorkspaceView }) => {
-  const { t } = useLingui();
-  const navigate = useNavigate();
-  const labels: Record<WorkspaceView, string> = {
-    preview: t({ message: "App", context: "an app's workspace view" }),
-    code: t({ message: "Code", context: "an app's workspace view" }),
-    data: t({ message: "Data", context: "an app's workspace view" }),
-    settings: t({ message: "Settings", context: "an app's workspace view" }),
-  };
-  const icons = {
-    preview: AppWindow,
-    code: Code,
-    data: Database,
-    settings: Settings,
-  };
-  return (
-    <ToggleGroup
-      aria-label={t`Workspace views`}
-      onValueChange={(chosen: unknown[]) => {
-        const picked = views.find((each) => each === chosen[0]);
-        if (picked !== undefined) {
-          void navigate({
-            from: "/apps/$app",
-            to: "/apps/$app",
-            params: { app },
-            replace: true,
-            search: (held) => ({
-              env: held.env,
-              project: held.project,
-              view: picked === "preview" ? undefined : picked,
-            }),
-          });
-        }
-      }}
-      size="sm"
-      value={[view]}
-    >
-      {views.map((each) => (
-        <Toggle
-          aria-label={labels[each]}
-          icon={icons[each]}
-          key={each}
-          title={labels[each]}
-          value={each}
-        >
-          {each === view ? labels[each] : undefined}
-        </Toggle>
-      ))}
-    </ToggleGroup>
-  );
-};
 
 /**
  * The rest, under "…": the App's own link, what its team sees (here, and
@@ -415,14 +351,11 @@ const WorkspaceBar = ({
       // In the bar's middle, which goes to a row of its own where the bar
       // is too narrow for it beside the rest; there the views fold to one
       // button where even that row is too narrow (Grasp UI's TabsNav).
-      views={
-        <span {...stylex.props(styles.middle)}>
-          <ViewSwitch app={app.id} view={view} />
-          {view === "preview" && preview !== undefined ? (
-            <PreviewControls {...preview} />
-          ) : null}
-        </span>
-      }
+      // The App's views are rows of the sidebar's section (app-section
+      // .tsx); the bar's middle holds the preview's own controls.
+      {...(view === "preview" && preview !== undefined
+        ? { views: <PreviewControls {...preview} /> }
+        : {})}
     />
   );
 };

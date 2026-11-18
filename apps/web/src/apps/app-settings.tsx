@@ -110,7 +110,7 @@ export const settingsSectionOf = (
 ): AppSettingsSection | undefined =>
   appSettingsSections.find((section) => section === value);
 
-const sectionLabels: Record<AppSettingsSection, MessageDescriptor> = {
+export const sectionLabels: Record<AppSettingsSection, MessageDescriptor> = {
   general: msg({ message: "General", context: "an app's settings section" }),
   sharing: msg({ message: "Sharing", context: "an app's settings section" }),
   history: msg({ message: "History", context: "an app's settings section" }),
@@ -856,11 +856,11 @@ const Webhooks = ({
 
 // --- Options -------------------------------------------------------------
 
-const readSurfaces = async (session: Session, app: string) =>
+export const readSurfaces = async (session: Session, app: string) =>
   await session.pages.surfaces(app);
 
 /** The App's settings surface (spec 34.1), if it declares one. */
-const optionsOf = (
+export const optionsOf = (
   surfaces: Loaded<SurfaceSummary[]> | undefined
 ): SurfaceSummary | undefined =>
   surfaces?.state === "ready"
@@ -887,7 +887,7 @@ const Options = ({
 // --- The settings --------------------------------------------------------
 
 /** The sections `identity` sees of `app`, with Options once core says it declares them. */
-const shownSections = (
+export const shownSections = (
   app: ViewedApp,
   identity: Identity,
   { options }: { options: boolean }
@@ -1033,19 +1033,22 @@ export const AppSettings = ({
   const section = asked ?? "general";
   return (
     <div {...stylex.props(styles.settings)}>
-      <TabsNav aria-label={t`Settings sections`}>
-        {sections.map((each) => (
-          <SectionLink
-            app={app.id}
-            current={each === section}
-            key={each}
-            section={each}
-            within={within}
-          >
-            {i18n._(sectionLabels[each])}
-          </SectionLink>
-        ))}
-      </TabsNav>
+      {/* In the workspace the sections are the sidebar's rows (app-section.tsx). */}
+      {within === "page" ? (
+        <TabsNav aria-label={t`Settings sections`}>
+          {sections.map((each) => (
+            <SectionLink
+              app={app.id}
+              current={each === section}
+              key={each}
+              section={each}
+              within={within}
+            >
+              {i18n._(sectionLabels[each])}
+            </SectionLink>
+          ))}
+        </TabsNav>
+      ) : null}
       <div {...stylex.props(styles.scroll)}>
         <div {...stylex.props(styles.column)}>
           <SectionBody

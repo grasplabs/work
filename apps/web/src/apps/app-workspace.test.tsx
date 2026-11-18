@@ -813,8 +813,8 @@ describe(AppWorkspace, () => {
       await settled();
       seen[who] = {
         name: document.querySelector("h1")?.textContent,
-        views:
-          document.querySelector('[aria-label="Workspace views"]') !== null,
+        controls:
+          document.querySelector('[aria-label="Preview width"]') !== null,
         share: [...document.querySelectorAll("button")].some(
           (each) => nameOf(each) === "Share with your team"
         ),
@@ -827,21 +827,21 @@ describe(AppWorkspace, () => {
     expect(seen).toStrictEqual({
       builder: {
         name: "Invoices",
-        views: true,
+        controls: true,
         share: true,
         chat: true,
         app: false,
       },
       user: {
         name: "Invoices",
-        views: false,
+        controls: false,
         share: false,
         chat: false,
         app: true,
       },
       staff: {
         name: "Invoices",
-        views: false,
+        controls: false,
         share: false,
         chat: false,
         app: true,
@@ -930,30 +930,6 @@ describe(AppWorkspace, () => {
         subject: { kind: "app", id: "invoice-desk" },
       },
     ]);
-  });
-
-  it("switches the main area between Preview, Code, Data and Settings, the one shown marked", async () => {
-    const { router } = await opened(fakeApps().apps);
-
-    const first = [
-      ...document.querySelectorAll('[aria-label="Workspace views"] button'),
-    ].map((each) => ({
-      name: each.getAttribute("aria-label"),
-      shown: each.getAttribute("aria-pressed") === "true",
-    }));
-    await press(button("Code"));
-    expect({
-      first,
-      at: router.state.location.href,
-    }).toStrictEqual({
-      first: [
-        { name: "App", shown: true },
-        { name: "Code", shown: false },
-        { name: "Data", shown: false },
-        { name: "Settings", shown: false },
-      ],
-      at: "/apps/invoice-desk?view=code",
-    });
   });
 
   it("shows the builders' own version, and what the team sees from …, once the team has a version, with the way back", async () => {
@@ -2297,7 +2273,7 @@ describe(AppWorkspace, () => {
       calm: says("It shows here as soon as there is something to see."),
       state: says("Setting up"),
       shareOff: off(share),
-      views: document.querySelector('[aria-label="Workspace views"]'),
+      controls: document.querySelector('[aria-label="Preview width"]'),
       // The preview that failed under it never shows, nor the tip.
       failure: [...document.querySelectorAll("body *")].some(
         (each) =>
@@ -2312,7 +2288,7 @@ describe(AppWorkspace, () => {
       calm: true,
       state: true,
       shareOff: true,
-      views: null,
+      controls: null,
       failure: false,
       fix: false,
       tip: false,
@@ -2387,19 +2363,19 @@ describe(AppWorkspace, () => {
       seen[state] = {
         settingUp: says("Setting up Invoices…"),
         notReady,
-        views:
-          document.querySelector('[aria-label="Workspace views"]') !== null,
+        controls:
+          document.querySelector('[aria-label="Preview width"]') !== null,
         asked: sent.map(({ question }) => question.text),
       };
       takenDown();
     }
 
     expect(seen).toStrictEqual({
-      runs: { settingUp: false, notReady: false, views: true, asked: [] },
+      runs: { settingUp: false, notReady: false, controls: true, asked: [] },
       fails: {
         settingUp: false,
         notReady: true,
-        views: false,
+        controls: false,
         asked: ["Try again to set up Invoices."],
       },
     });
