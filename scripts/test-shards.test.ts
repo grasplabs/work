@@ -90,7 +90,9 @@ describe("splitting the test files between shards", () => {
   it("gives the shards left over to the group whose shards would end last", () => {
     const groups = splitIntoShards(suite, 5).map((shard) => shard[0]?.group);
 
-    expect(groups).toStrictEqual([0, 0, 0, 1, 2]);
+    // The pages' client file runs alone (`aloneSeconds`), and their other
+    // file beside nothing of core's.
+    expect(groups).toStrictEqual([0, 0, 1, 1, 2]);
   });
 
   it("gives a shard left over to a group it shortens, not to one its longest file holds up", () => {

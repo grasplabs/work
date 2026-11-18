@@ -31,12 +31,12 @@ export interface ShardFile {
 /**
  * How many files a shard's runner works through at once, on average: with
  * `projectStartSeconds` and `coreStartSeconds`, what predicted the test
- * step of six merge-queue runs' 180 shards best, within 28 s on average
- * and as often over as under (November 2026). Each of the runner's 6
- * Vitest workers shares its 4 CPUs with the workerd it drives, so fewer
- * than 6.
+ * step of a run's 30 shards over rather than under, by 44 s on average
+ * and never more than 3 s under, once each file's time counted its setup
+ * and import (November 2026). Each of the runner's 6 Vitest workers shares
+ * its 4 CPUs with the workerd it drives, so fewer than 6.
  */
-export const concurrentFiles = 3.5;
+export const concurrentFiles = 4;
 
 /**
  * The least a file is taken to take: loading it and the reset before it,

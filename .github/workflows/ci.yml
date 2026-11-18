@@ -174,13 +174,14 @@ jobs:
   # of every project's test files, split by how long each takes
   # (scripts/test-sequencer.ts, with the times in
   # scripts/test-durations.json), so the shards end together and together
-  # run every file once; `--shard` takes the count from the matrix. Thirty
-  # shards: each about half a minute of setup, up to a minute and a half
-  # before core's first test (its global setup's builds and its runtime's
-  # first load of core) and two to three minutes of tests (November 2026).
-  # Forty ended only about 20 s sooner, as each is then set by that start
-  # and its longest file, and with them a run took more than the account's
-  # 60 concurrent runners (measured: 60 jobs at once, no more), so the
+  # run every file once; `--shard` takes the count from the matrix.
+  # Forty-two shards: each about half a minute of setup, up to a minute
+  # and a half before core's first test (its global setup's builds and its
+  # runtime's first load of core) and two to three minutes of tests. On
+  # thirty, with each file's setup counted, core's shards took up to 360 s
+  # (November 2026, GRA-2052); forty-two plan none over 230 s, about 20
+  # runner-minutes a run more. Forty once ran past the account's 60
+  # concurrent runners while the queue ran the journeys too, so the
   # journeys waited for runners. The split gives each group its shards
   # by when they would end (scripts/test-shards.ts): the brain's group,
   # run alone and its files one at a time, ended the run in 6 of 10 queue
@@ -231,6 +232,18 @@ jobs:
             28,
             29,
             30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
           ]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
