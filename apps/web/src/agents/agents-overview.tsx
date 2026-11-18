@@ -29,7 +29,6 @@ import { Heading } from "../grasp/heading/index.ts";
 import {
   HoverCard,
   HoverCardContent,
-  HoverCardDescription,
   HoverCardTitle,
   HoverCardTrigger,
 } from "../grasp/hover-card/index.ts";
@@ -96,6 +95,9 @@ const styles = stylex.create({
     minHeight: "20rem",
     padding: grasp.space5,
     overflow: "hidden",
+    // The card's own corner: the night is clipped to it.
+    borderRadius: "inherit",
+    cornerShape: grasp.cornerShape,
     isolation: "isolate",
     colorScheme: "dark",
     color: grasp.text,
@@ -103,8 +105,8 @@ const styles = stylex.create({
   // Large, and cropped by the card's end corner.
   figure: {
     position: "absolute",
-    insetBlockEnd: "-3rem",
-    insetInlineEnd: "-3rem",
+    insetBlockEnd: "-3.5rem",
+    insetInlineEnd: "-3.5rem",
     zIndex: 0,
   },
   words: {
@@ -123,7 +125,8 @@ const styles = stylex.create({
     display: "grid",
     justifyItems: "start",
     gap: grasp.space1,
-    maxWidth: "60%",
+    // Clear of the figure, which takes the card's end half at its foot.
+    maxWidth: "40%",
   },
   // Said on the card only where nothing can hover: the HoverCard says it elsewhere.
   touchOnly: {
@@ -406,9 +409,6 @@ const WithDetails = ({
     </HoverCardTrigger>
     <HoverCardContent align="start" side="right" width="content">
       <HoverCardTitle>{shown.name}</HoverCardTitle>
-      {shown.job === "" ? null : (
-        <HoverCardDescription>{shown.job}</HoverCardDescription>
-      )}
       <KeyValueList items={facts.rows} variant="inline" />
     </HoverCardContent>
   </HoverCard>
