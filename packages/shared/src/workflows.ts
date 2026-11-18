@@ -743,6 +743,8 @@ export interface LatestRun {
 export interface WorkflowSummary {
   workflowId: WorkflowResourceId;
   name: string;
+  /** The name people gave it, shown in place of `name`; null for none. */
+  title: string | null;
   /** The version published last, which new runs run; null before the first. */
   version: number | null;
   /** Who owns it: the person who created it. */

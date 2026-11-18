@@ -1,0 +1,1 @@
+ALTER TABLE `workflow_resources` ADD `title` text;

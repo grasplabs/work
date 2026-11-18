@@ -22,6 +22,7 @@ import {
   listWorkflowResources,
   releaseWorkflowName,
   setWorkflowProcess,
+  setWorkflowTitle,
   workflowDefinition,
   workflowVersions,
 } from "../src/workflow-resources.ts";
@@ -682,6 +683,94 @@ describe("the business process a workflow serves", () => {
         {
           actor: { type: "person", userId: ada.userId },
           detail: { process: null, previousProcess: "r2r" },
+        },
+      ],
+    });
+  });
+});
+
+describe("the name people give a workflow", () => {
+  it("is given as it is created or later, changed and cleared by its builders, shown to everyone with a role, audited without its text, and never its key", async () => {
+    const ada = await person("builder");
+    const bob = await person("builder");
+    const name = `triage-${unique()}`;
+    const created = await createWorkflowResource(
+      env,
+      ada,
+      name,
+      "  Email triage  "
+    );
+    const plain = await workflowOf(ada);
+    await shareWorkflowResource(env, ada, created.id, {
+      type: "person",
+      id: bob.userId,
+      role: "user",
+    });
+
+    const listed = await listWorkflowResources(env, bob);
+    const changed = await setWorkflowTitle(
+      env,
+      ada,
+      created.id,
+      "Inbox triage"
+    );
+    const again = await setWorkflowTitle(env, ada, created.id, "Inbox triage");
+    const refused = {
+      user: await outcome(setWorkflowTitle(env, bob, created.id, "Mine")),
+      stranger: await outcome(setWorkflowTitle(env, bob, plain.id, "Mine")),
+      long: await outcome(
+        setWorkflowTitle(env, ada, created.id, "x".repeat(101))
+      ),
+      number: await outcome(setWorkflowTitle(env, ada, created.id, 1)),
+      atCreate: await outcome(
+        createWorkflowResource(env, ada, `long-${unique()}`, "x".repeat(101))
+      ),
+    };
+    const read = await getWorkflowResource(env, bob, created.id);
+    const cleared = await setWorkflowTitle(env, ada, created.id, "  ");
+    const after = await getWorkflowResource(env, bob, created.id);
+    const events = await allEvents();
+
+    expect({
+      created: created.title,
+      plain: plain.title,
+      listed: listed.find(({ id }) => id === created.id)?.title,
+      changed: changed.title,
+      again: again.title,
+      refused,
+      read: { title: read.title, name: read.name },
+      cleared: cleared.title,
+      after: { title: after.title, name: after.name },
+      audited: events
+        .filter(
+          ({ action, target }) =>
+            action === "workflow.title_set" && target?.id === created.id
+        )
+        .map(({ actor, detail }) => ({ actor, detail })),
+    }).toStrictEqual({
+      created: "Email triage",
+      plain: null,
+      listed: "Email triage",
+      changed: "Inbox triage",
+      again: "Inbox triage",
+      refused: {
+        user: "role.forbidden",
+        stranger: "workflow.resource_unavailable",
+        long: "workflow.resource_invalid",
+        number: "workflow.resource_invalid",
+        atCreate: "workflow.resource_invalid",
+      },
+      read: { title: "Inbox triage", name },
+      cleared: null,
+      after: { title: null, name },
+      audited: [
+        {
+          actor: { type: "person", userId: ada.userId },
+          detail: { cleared: false },
+        },
+        {
+          actor: { type: "person", userId: ada.userId },
+          detail: { cleared: true },
         },
       ],
     });

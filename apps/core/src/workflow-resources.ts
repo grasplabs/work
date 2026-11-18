@@ -22,6 +22,7 @@ import {
   workflowNameSchema,
   workflowNamespace,
   workflowResourceErrors,
+  workflowTitleSchema,
 } from "@grasp-os/shared/workflow-resources";
 import type {
   CatalogBindingKind,
@@ -239,6 +240,7 @@ const targetType = "workflow_resource";
 interface Live {
   id: string;
   name: string;
+  title: string | null;
   owner: string;
   currentVersion: number | null;
   createdAt: Date;
@@ -264,6 +266,7 @@ const definitionHashOf = async (definition: unknown): Promise<string> =>
 const liveColumns = {
   id: workflowResources.id,
   name: workflowResources.name,
+  title: workflowResources.title,
   owner: workflowResources.ownerId,
   currentVersion: workflowResources.currentVersion,
   createdAt: workflowResources.createdAt,
@@ -390,6 +393,7 @@ const resourceOf = (
   id: workflow.id,
   namespace: workflowNamespace,
   name: workflow.name,
+  title: workflow.title,
   owner: workflow.owner,
   currentVersion: workflow.currentVersion,
   role,
@@ -468,16 +472,33 @@ const entry = (
 });
 
 /**
+ * A title as given (`workflowTitleSchema`): none, null or only white space
+ * is no title.
+ */
+const titleOf = (input: unknown): string | null =>
+  input === undefined ||
+  input === null ||
+  (typeof input === "string" && input.trim() === "")
+    ? null
+    : workflowResourceErrors.parse(
+        "workflow.resource_invalid",
+        workflowTitleSchema,
+        input
+      );
+
+/**
  * Creates a workflow named `name`, owned by `by`, who must build: its ID
- * minted here, at random, audited with its row. A name any workflow has
- * had is `workflow.name_taken`; a person who has created as many as the
- * quota limits allow, deleted ones included, gets
- * `workflow.resource_limit`. Both refusals are audited.
+ * minted here, at random, audited with its row; `title` is the name people
+ * see, if one is given. A name any workflow has had is
+ * `workflow.name_taken`; a person who has created as many as the quota
+ * limits allow, deleted ones included, gets `workflow.resource_limit`. Both
+ * refusals are audited.
  */
 export const createWorkflowResource = async (
   env: Env,
   by: Acting,
   name: unknown,
+  title?: unknown,
   /** Admits the write, right before it commits: throws to create nothing. */
   admit?: () => Promise<void>
 ): Promise<WorkflowResource> => {
@@ -487,6 +508,7 @@ export const createWorkflowResource = async (
     workflowNameSchema,
     name
   );
+  const given = titleOf(title);
   const cap = quotaLimits(env).workflowResourcesPerPerson;
   const id = crypto.randomUUID();
   const createdAt = new Date();
@@ -512,6 +534,7 @@ export const createWorkflowResource = async (
         id: sql`(SELECT ${id} WHERE (SELECT COUNT(*) FROM workflow_resources
           WHERE owner_id = ${by.userId}) < ${cap})`,
         name: parsed,
+        title: given,
         ownerId: by.userId,
         createdAt,
       }),
@@ -527,10 +550,59 @@ export const createWorkflowResource = async (
     throw error;
   }
   return resourceOf(
-    { id, name: parsed, owner: by.userId, currentVersion: null, createdAt },
+    {
+      id,
+      name: parsed,
+      title: given,
+      owner: by.userId,
+      currentVersion: null,
+      createdAt,
+    },
     ceilingOf(by),
     { process: null, paused: false }
   );
+};
+
+/**
+ * Sets the name people see for workflow `id` to `input`
+ * (`workflowTitleSchema`), or clears it with null or an empty one, for its
+ * builders, as its business process is set: it names nobody and grants
+ * nothing, and `name`, which everything references, stays. The change and
+ * its audit event are one batch; setting what is set changes and records
+ * nothing. The event says whether a title was set or cleared, never its
+ * text.
+ */
+export const setWorkflowTitle = async (
+  env: Env,
+  by: Acting,
+  id: unknown,
+  input: unknown
+): Promise<WorkflowResource> => {
+  const workflow = await requireWorkflowRole(env, by, id, "builder");
+  const title = titleOf(input);
+  if (title !== workflow.title) {
+    const db = drizzle(env.DB);
+    await auditedBatch(env, db, [
+      db
+        .update(workflowResources)
+        .set({ title })
+        .where(eq(workflowResources.id, workflow.id)),
+      outboxed(
+        db,
+        entry(by, "workflow.title_set", workflow.id, {
+          cleared: title === null,
+        })
+      ),
+    ]);
+  }
+  const [process, paused] = await Promise.all([
+    processOf(env, workflow.id),
+    pausedAmong(env, [workflow.id]),
+  ]);
+  return resourceOf({ ...workflow, title }, workflow.role, {
+    process,
+    paused: paused.has(workflow.id),
+  });
 };
 
 /** Workflow `id`, for anyone with a role in it. */

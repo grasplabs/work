@@ -8857,6 +8857,7 @@ msgstr "Meine Version der App ist nicht gestartet. Finde heraus, warum, und behe
 #: src/routes/_shell.settings.workspace.tsx
 #: src/settings/teams.tsx
 #: src/workflows/files-and-apps.tsx
+#: src/workflows/workflow-settings.tsx
 msgid "Name"
 msgstr "Name"
 
@@ -16594,6 +16595,10 @@ msgstr "Was Menschen fragen"
 #: src/agents/agent-page.tsx
 msgid "What people call it, one line on what it is for, and its picture. All three show where people pick an agent."
 msgstr "Wie Personen ihn nennen, eine Zeile dazu, wofür er da ist, und sein Bild. Alle drei erscheinen dort, wo Personen einen Agenten wählen."
+
+#: src/workflows/workflow-settings.tsx
+msgid "What people see instead of {name}."
+msgstr "Was Personen anstelle von {name} sehen."
 
 #: src/dashboard/report.ts
 msgid "What ran"

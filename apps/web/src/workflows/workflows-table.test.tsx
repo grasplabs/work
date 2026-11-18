@@ -25,6 +25,7 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 const independent: WorkflowSummary = {
   workflowId: workflowResourceIdSchema.parse("wf-1"),
   name: "Intake",
+  title: null,
   version: 1,
   owner: { userId: "u1", name: "Ada" },
   lastRun: null,
@@ -95,5 +96,22 @@ describe("the Workflows page's table", () => {
       "waiting /workflows/wf-1?view=runs",
       "failed /workflows/wf-1?view=runs",
     ]);
+  });
+
+  it("calls a workflow by the name people gave it, or else by its own", async () => {
+    await shown([
+      independent,
+      {
+        ...independent,
+        workflowId: workflowResourceIdSchema.parse("wf-2"),
+        name: "email-triage",
+        title: "Email triage",
+      },
+    ]);
+    const names = [...document.querySelectorAll("a")]
+      .filter((link) => link.getAttribute("href")?.includes("?") === false)
+      .map((link) => link.textContent);
+
+    expect(names).toStrictEqual(["Intake", "Email triage"]);
   });
 });
