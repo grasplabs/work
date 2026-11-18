@@ -1406,11 +1406,13 @@ export const events = sqliteTable(
     /**
      * The system the step was in: its connector, as the host's catalog
      * names it (GRA-1764), so a step that writes into another system than
-     * the one before it shows as data copied between them.
+     * the one before it shows as data copied between them. Nullable, as a
+     * column a release adds: the release before keeps events without one
+     * (rolled back to), and routines-observed.ts leaves those out.
      */
-    system: text().notNull(),
-    /** Whether the step changed something in its system. */
-    writes: integer({ mode: "boolean" }).notNull(),
+    system: text(),
+    /** Whether the step changed something in its system: null with `system`. */
+    writes: integer({ mode: "boolean" }),
     /** A MAC of the item's ID, in hex; null when it was on none. */
     item: text(),
     /**

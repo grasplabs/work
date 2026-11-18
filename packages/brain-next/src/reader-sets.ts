@@ -20,6 +20,12 @@ const principalsOf = (access: Access): Principal[] => {
     case "audience": {
       return [{ kind: "group", principal: access.group }];
     }
+    case "readers": {
+      return access.groups.map((group) => ({
+        kind: "group",
+        principal: group,
+      }));
+    }
     case "none": {
       return [];
     }
@@ -52,9 +58,57 @@ export const readerSetKeyOf = (access: Access): string =>
   keyOf(principalsOf(access));
 
 /** A key's principals as {@link keyOf} writes them, before they are checked to be one. */
-const keyPrincipalsSchema = z
-  .array(z.tuple([z.enum(["person", "group"]), z.string()]))
-  .max(1);
+const keyPrincipalsSchema = z.array(
+  z.tuple([z.enum(["person", "group"]), z.string()])
+);
+
+/**
+ * The access `principals` names, as `principalsOf` makes them: none, one
+ * person, or groups alone (one group's audience, or readers of several).
+ * Undefined for any other mix, which no access names.
+ */
+const accessOfPrincipals = (
+  principals: readonly (readonly ["person" | "group", string])[]
+): Access | undefined => {
+  const [first, ...rest] = principals;
+  if (first === undefined) {
+    return { kind: "none" };
+  }
+  if (first[0] === "person") {
+    return rest.length === 0 ? { kind: "owner", person: first[1] } : undefined;
+  }
+  if (rest.length === 0) {
+    return { kind: "audience", group: first[1] };
+  }
+  const groups = principals.flatMap(([kind, principal]) =>
+    kind === "group" ? [principal] : []
+  );
+  return groups.length === principals.length
+    ? { kind: "readers", groups }
+    : undefined;
+};
+
+/**
+ * Whether `access` names a principal the set of readers keyed `before`
+ * doesn't: a change of readers that adds one. A key that isn't one adds
+ * every principal.
+ */
+export const addsReaders = (before: string, access: Access): boolean => {
+  let parsed: unknown = undefined;
+  try {
+    parsed = JSON.parse(before);
+  } catch {
+    return true;
+  }
+  const held = new Set(
+    (keyPrincipalsSchema.safeParse(parsed).data ?? []).map((principal) =>
+      JSON.stringify(principal)
+    )
+  );
+  return principalsOf(access).some(
+    ({ kind, principal }) => !held.has(JSON.stringify([kind, principal]))
+  );
+};
 
 /**
  * The access a set of readers' key names: the inverse of
@@ -73,14 +127,10 @@ export const accessOfKey = (key: string): Access | undefined => {
   if (!principals.success) {
     return undefined;
   }
-  const [principal] = principals.data;
-  let access: Access = { kind: "none" };
-  if (principal?.[0] === "person") {
-    access = { kind: "owner", person: principal[1] };
-  } else if (principal?.[0] === "group") {
-    access = { kind: "audience", group: principal[1] };
-  }
-  return readerSetKeyOf(access) === key ? access : undefined;
+  const access = accessOfPrincipals(principals.data);
+  return access !== undefined && readerSetKeyOf(access) === key
+    ? access
+    : undefined;
 };
 
 /**
@@ -107,6 +157,16 @@ export const readableSql = `readable AS (
 )`;
 
 /**
+ * Most values one statement may bind in SQLite in Durable Objects:
+ * Cloudflare's platform limit ("Maximum bound parameters per query: 100",
+ * https://developers.cloudflare.com/durable-objects/platform/limits/).
+ */
+const boundParametersMax = 100;
+
+/** Most members one insert writes: each binds its set, kind and principal. */
+const membersPerInsert = Math.floor(boundParametersMax / 3);
+
+/**
  * The set of readers `access` names, made the first time it is needed and
  * shared by every item with the same readers after that. Call it in the
  * transaction that writes the item, so a set and its members are whole
@@ -131,9 +191,17 @@ export const readerSetOf = (
     .values({ key })
     .returning({ id: readerSets.id })
     .get();
-  if (principals.length > 0) {
+  // A few at a time: each row binds three values, and a statement may
+  // bind no more than SQLite in Durable Objects allows
+  // (`boundParametersMax`), so a long list goes in several statements of
+  // the same transaction.
+  for (let at = 0; at < principals.length; at += membersPerInsert) {
     db.insert(readerSetMembers)
-      .values(principals.map((principal) => ({ readerSet: id, ...principal })))
+      .values(
+        principals
+          .slice(at, at + membersPerInsert)
+          .map((principal) => ({ readerSet: id, ...principal }))
+      )
       .run();
   }
   return id;

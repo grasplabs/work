@@ -72,6 +72,8 @@ WITH trail AS (
     writes,
     LEAD(writes) OVER w AS next_writes
   FROM events
+  -- Kept by the release before (rolled back to), which names no system.
+  WHERE system IS NOT NULL
   WINDOW w AS (PARTITION BY team, who ORDER BY at, row)
 ),
 moves AS (

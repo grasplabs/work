@@ -2,6 +2,7 @@
 // store's own boundary: which step follows which, held to five distinct
 // people of a team inside the read, worked out again at every read.
 import type { NewEvent, ObservedRoutine } from "@grasp-os/brain-next/contract";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -178,6 +179,31 @@ describe("routines seen in activity", () => {
       { step: "deals.read", writes: false, copied: false },
       { step: "mail.draft", writes: false, copied: false },
     ]);
+  });
+
+  it("leave out events kept by the release before, which name no system", async () => {
+    const team = `team:${crypto.randomUUID()}`;
+    // Five people's steps as the release before keeps them (rolled back
+    // to): its events have no system and no write.
+    await runInDurableObject(shared(), (_store, state) => {
+      for (const who of Array.from({ length: 5 }, personTag)) {
+        for (const [hour, step] of [
+          [0, "deals.read"],
+          [1, "mail.send"],
+        ] as const) {
+          state.storage.sql.exec(
+            "INSERT INTO events (key, team, step, item, who, at) VALUES (?, ?, ?, NULL, ?, ?)",
+            crypto.randomUUID(),
+            team,
+            step,
+            who,
+            base + hour * hourMs
+          );
+        }
+      }
+    });
+
+    await expect(routinesOf(team)).resolves.toStrictEqual([]);
   });
 
   it("fall at the next read once a person's erasure leaves four, and name no one", async () => {

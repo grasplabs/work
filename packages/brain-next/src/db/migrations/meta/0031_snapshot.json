@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "192a9804-1f88-476e-8ecc-f681b38a8937",
+  "id": "34666754-7e81-428b-a336-19da8c0d7601",
   "prevId": "86e9b0d0-0fef-4e73-9aa8-baf0d9cdcd62",
   "tables": {
     "chunk_blocks": {
@@ -808,14 +808,14 @@
           "name": "system",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "writes": {
           "name": "writes",
           "type": "integer",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "item": {

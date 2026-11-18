@@ -2,15 +2,23 @@
 // shared store alone, once per key and team, and an item only as a hash,
 // so nothing readable of it is kept; a tag an erasure closed takes no
 // later event until none could still arrive; and a call under another of
-// the host's keys drops everything made under the old one. Their expiry
-// on the host's clock is core's test (apps/core/test/brain-events.test.ts).
+// the host's keys drops everything made under the old one. An export holds
+// neither events nor closed tags: events are short-lived activity, and
+// restoring one could bring back an erased person's; and a restore of an
+// export clears neither, so an erasure still holds through it. Their
+// expiry on the host's clock is core's test
+// (apps/core/test/brain-events.test.ts).
 import { eventsKeptMs } from "@grasp-os/brain-next/contract";
 import type { NewEvent } from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
+import { exportSettled, tick } from "./export-reads.ts";
 import type { Store } from "./export-reads.ts";
+import { copyOf, restore } from "./store-copy.ts";
+import type { Copy } from "./store-copy.ts";
 
 const shared = (): Store => env.BRAIN_STORE.getByName("brain");
 
@@ -73,7 +81,43 @@ const eventOf = (
     at: new Date().toISOString(),
   }) satisfies NewEvent;
 
+/** Every file of the done export `id`, its manifest first, as text. */
+const exportTextOf = async (id: string): Promise<string> => {
+  const manifest =
+    (await shared().exportFile({ id, file: "manifest.json" })) ?? "";
+  const { parts } = z
+    .object({ parts: z.array(z.object({ file: z.string() })) })
+    .parse(JSON.parse(manifest));
+  const texts = [manifest];
+  for (const { file } of parts) {
+    // oxlint-disable-next-line no-await-in-loop -- a part at a time
+    texts.push((await shared().exportFile({ id, file })) ?? "");
+  }
+  return texts.join("\n");
+};
+
+/** Ticks the shared store until its restore of `id` no longer runs: its state. */
+const restoredState = async (id: string): Promise<string | undefined> => {
+  for (let ticks = 0; ticks < 20; ticks += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    await tick(shared());
+    // oxlint-disable-next-line no-await-in-loop -- a tick at a time
+    const status = await shared().restoreStatus(id);
+    if (status?.state !== "running") {
+      return status?.state;
+    }
+  }
+  return "running";
+};
+
 describe("events", () => {
+  /** The shared store before any test added to it: empty. */
+  let empty: Copy = { tables: [], others: [] };
+
+  beforeAll(async () => {
+    empty = await copyOf(shared());
+  });
+
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -196,5 +240,52 @@ describe("events", () => {
       before: before.map(({ step }) => step),
       after: await stepsFor(team),
     }).toStrictEqual({ before: ["deals.old"], after: ["deals.new"] });
+  });
+
+  it("are never in an export, and a restore of one clears neither them nor the tags an erasure closed", async () => {
+    const team = `team:${crypto.randomUUID()}`;
+    const [kept, closed] = [aTag(), aTag()];
+    const step = `marker.${crypto.randomUUID().slice(0, 8)}`;
+    const source = `test:${crypto.randomUUID()}`;
+    // An export of the company's content, taken before any event.
+    await restore(shared(), empty);
+    await shared().addSource({
+      source,
+      change: crypto.randomUUID(),
+      text: "The company's handbook",
+      access: { kind: "audience", group: "company" },
+    });
+    const { id: before } = await shared().startExport("test");
+    await exportSettled(shared, before);
+    // The store's storage lost, then events kept and a tag closed, then
+    // that export restored.
+    await restore(shared(), empty);
+    await shared().addEvents({
+      keyId,
+      events: [eventOf(team, step, undefined, kept)],
+    });
+    await shared().eraseEvents({ keyId, who: [closed] });
+    await shared().startRestore(before, "test");
+    const restored = await restoredState(before);
+    await shared().addEvents({
+      keyId,
+      events: [eventOf(team, "deals.late", undefined, closed)],
+    });
+    // An export of the store now, events and a closed tag in it.
+    const { id: after } = await shared().startExport("test");
+    await exportSettled(shared, after);
+    const exported = await exportTextOf(after);
+
+    expect({
+      restored,
+      source: await shared().keyState(source),
+      steps: await stepsFor(team),
+      exported: [step, kept, closed].filter((part) => exported.includes(part)),
+    }).toStrictEqual({
+      restored: "done",
+      source: "held",
+      steps: [step],
+      exported: [],
+    });
   });
 });
