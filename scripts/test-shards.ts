@@ -138,17 +138,26 @@ const sharedSecondsOf = (shards: readonly ShardFile[][]): number =>
   Math.max(0, ...shards.filter((shard) => !isAlone(shard)).map(shardSeconds));
 
 /**
- * `files` in the units the split places: a small project's files
- * together (`wholeProjectSeconds`), every other file on its own.
+ * `files` in the units the split places: a file of `aloneSeconds` or more
+ * on its own, so it can run alone, then of the rest a small project's
+ * files together (`wholeProjectSeconds`) and every other file on its own.
+ * Grouped first, a small project's long file went with its short ones.
  */
 const unitsOf = (files: readonly ShardFile[]): ShardFile[][] => {
-  const projects = Map.groupBy(files, ({ project }) => project);
-  return [...projects.values()].flatMap((own) =>
-    workOf(own) / (own[0]?.serial === true ? 1 : concurrentFiles) <=
-    wholeProjectSeconds
-      ? [own]
-      : own.map((file) => [file])
+  const long = files.filter(({ seconds }) => seconds >= aloneSeconds);
+  const projects = Map.groupBy(
+    files.filter(({ seconds }) => seconds < aloneSeconds),
+    ({ project }) => project
   );
+  return [
+    ...long.map((file) => [file]),
+    ...[...projects.values()].flatMap((own) =>
+      workOf(own) / (own[0]?.serial === true ? 1 : concurrentFiles) <=
+      wholeProjectSeconds
+        ? [own]
+        : own.map((file) => [file])
+    ),
+  ];
 };
 
 /**

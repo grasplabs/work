@@ -438,4 +438,22 @@ describe("splitting the test files between shards", () => {
       ["core erasure"],
     ]);
   });
+
+  it("runs a small project's long file on a shard of its own too, not beside the project's short ones", () => {
+    // Together the two are little enough work for the project to go to
+    // one shard whole (`wholeProjectSeconds`).
+    const small = [
+      file("small long", aloneSeconds + 10),
+      file("small short", 10),
+    ];
+    const others = Array.from({ length: 40 }, (_, index) =>
+      file(`core short-${index}`, 10)
+    );
+
+    expect(
+      keysOf(splitIntoShards([...small, ...others], 6)).filter((shard) =>
+        shard.includes("small long")
+      )
+    ).toStrictEqual([["small long"]]);
+  });
 });
