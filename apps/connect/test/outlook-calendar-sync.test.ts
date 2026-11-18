@@ -58,6 +58,13 @@ const start = "";
  * token, a page at a time with a skip token that carries where it is.
  */
 const feedPage = (url: URL, prefer: string): Response => {
+  // calendarView delta takes no `$select` (event-delta): Graph refuses it.
+  if (url.searchParams.has("$select")) {
+    return Response.json(
+      { error: { code: "ErrorInvalidUrlQuery" } },
+      { status: 400 }
+    );
+  }
   const asked = /odata\.maxpagesize=(?<size>\d+)/u.exec(prefer)?.groups?.size;
   const size =
     calendar.honoursPageSize && asked !== undefined
@@ -311,6 +318,41 @@ describe("syncing a person's own calendar", () => {
     }
   );
 
+  it("reads Graph's page from its top again when the event it stopped after changed meanwhile", async () => {
+    const connectionId = await connected();
+    calendar.honoursPageSize = false;
+    calendar.graphPage = 5;
+    // Four such events fill a page's content, inside Graph's page of five.
+    const long = "x".repeat(1.9 * 1024 * 1024);
+    const events = Array.from({ length: 10 }, (_, index) =>
+      event(`e${index}`, { body: { contentType: "text", content: long } })
+    );
+    calendar.feed[start] = { events, end: "t1" };
+    const first = await read(connectionId, null);
+
+    // e3, the last one handled, changes and comes later in the feed now.
+    calendar.feed[start] = {
+      events: [
+        ...events.filter(({ id }) => id !== "e3"),
+        event("e3", {
+          changeKey: "e3-2",
+          body: { contentType: "text", content: long },
+        }),
+      ],
+      end: "t1",
+    };
+    const { items } = await readAll(connectionId, first.cursor);
+    expect({
+      first: first.items.map(({ id }) => id),
+      seen: [
+        ...new Set([...first.items, ...items].map(({ id }) => id)),
+      ].toSorted(),
+    }).toStrictEqual({
+      first: ["e0", "e1", "e2", "e3"],
+      seen: events.map(({ id }) => id).toSorted(),
+    });
+  });
+
   it("lists again when Graph no longer knows the token, or the window is a year old", async () => {
     const connectionId = await connected();
     calendar.feed[start] = { events: [], end: "t1" };
@@ -321,7 +363,7 @@ describe("syncing a person's own calendar", () => {
     await expect(read(connectionId, cursor)).rejects.toMatchObject({
       code: "sync.restart",
     });
-    const old = `e.${Date.now() - year - 60_000}.d.dDE`;
+    const old = `e.${Date.now() - year - 60_000}.d.dDE.`;
     await expect(read(connectionId, old)).rejects.toMatchObject({
       code: "sync.restart",
     });

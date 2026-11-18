@@ -1,16 +1,17 @@
 import { ToolError } from "@grasp-os/connector-kit/connector";
 import {
-  RestartSyncError,
+  cursorPart,
   defineSync,
-  fetchBefore,
-  syncPageLimits,
+  fetchInRoom,
+  fillPage,
+  fromCursorPart,
+  mayRequest,
+  RestartSyncError,
+  syncRoom,
+  takeContent,
 } from "@grasp-os/connector-kit/sync";
-import type {
-  SyncContent,
-  SyncItem,
-  SyncPage,
-  SyncReader,
-} from "@grasp-os/shared/sync";
+import type { SyncRoom } from "@grasp-os/connector-kit/sync";
+import type { SyncItem, SyncPage, SyncReader } from "@grasp-os/shared/sync";
 import { ownPlace } from "@grasp-os/shared/sync";
 import { z } from "zod";
 
@@ -120,47 +121,22 @@ const feedSchema = z.object({
 
 const meSchema = z.object({ id: z.string().min(1) });
 
-/** An event a page stopped after: by its ID and `changeKey`. */
-interface Handled {
-  id: string;
-  changeKey: string;
-}
-
 /**
  * Where a read is: when the listing began (its window's middle), Graph's
  * token to read from (none: the listing's start), and the event of that
- * token's page already handled.
+ * token's page already handled, by its ID and `changeKey` (`keyOf`).
  */
 interface Position {
   began: number;
   token: { kind: "skip" | "delta"; value: string } | null;
-  after: Handled | null;
+  after: string | null;
 }
 
-const base64url = /^[\w-]*$/u;
+/** An event's key in Graph's page: its ID and `changeKey`. */
+const keyOf = ({ id, changeKey }: Event): string => `${id}\n${changeKey ?? ""}`;
 
 const notOurs = (): RestartSyncError =>
   new RestartSyncError("Not a cursor this sync wrote");
-
-const encode = (value: string): string =>
-  btoa(String.fromCodePoint(...new TextEncoder().encode(value)))
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replaceAll("=", "");
-
-const decode = (value: string): string => {
-  if (!base64url.test(value)) {
-    throw notOurs();
-  }
-  try {
-    const binary = atob(value.replaceAll("-", "+").replaceAll("_", "/"));
-    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(
-      Uint8Array.from(binary, (char) => char.codePointAt(0) ?? 0)
-    );
-  } catch {
-    throw notOurs();
-  }
-};
 
 const kinds: Readonly<Record<string, "skip" | "delta" | null>> = {
   s: "skip",
@@ -169,42 +145,35 @@ const kinds: Readonly<Record<string, "skip" | "delta" | null>> = {
 };
 
 /**
- * The cursor of a position: `e.<began>.<s|d|n>.<token>` (a skip token, a
- * delta token, or none) and, inside a page, `.<id>.<changeKey>`.
+ * The cursor of a position: `e.<began>.<s|d|n>.<token>.<after>` (a skip
+ * token, a delta token, or none; the event handled, or none).
  */
 const cursorOf = ({ began, token, after }: Position): string => {
   const kind = token === null ? "n" : token.kind.charAt(0);
-  const at = `e.${began}.${kind}.${encode(token?.value ?? "")}`;
-  return after === null
-    ? at
-    : `${at}.${encode(after.id)}.${encode(after.changeKey)}`;
+  return `e.${began}.${kind}.${cursorPart(token?.value ?? null)}.${cursorPart(after)}`;
 };
 
 /** The position a cursor this sync wrote names; any other starts over. */
 const positionOf = (cursor: string): Position => {
-  const [tag, began = "", kind = "", token = "", ...rest] = cursor.split(".");
-  const time = Number(began);
+  const [tag, began = "", kind = "", token, after, ...rest] = cursor.split(".");
   const tokenKind = Object.hasOwn(kinds, kind) ? kinds[kind] : undefined;
   if (
     tag !== "e" ||
     !/^\d{1,15}$/u.test(began) ||
     tokenKind === undefined ||
-    (rest.length !== 0 && rest.length !== 2)
+    rest.length > 0
   ) {
     throw notOurs();
   }
-  const value = decode(token);
-  if ((tokenKind === null) !== (value === "")) {
+  const value = fromCursorPart(token);
+  if ((tokenKind === null) !== (value === null)) {
     throw notOurs();
   }
-  const [id = "", changeKey = ""] = rest;
   return {
-    began: time,
-    token: tokenKind === null ? null : { kind: tokenKind, value },
-    after:
-      rest.length === 0
-        ? null
-        : { id: decode(id), changeKey: decode(changeKey) },
+    began: Number(began),
+    token:
+      tokenKind === null || value === null ? null : { kind: tokenKind, value },
+    after: fromCursorPart(after),
   };
 };
 
@@ -231,9 +200,8 @@ const isoOf = (time: number): string =>
   new Date(time).toISOString().replace(/\.\d+Z$/u, "Z");
 
 /** One page of the feed: from a token, or the listing's start. */
-const feedPage = async (room: Room, position: Position) => {
+const feedPage = async (room: SyncRoom, position: Position) => {
   const { token, began } = position;
-  room.requests -= 1;
   const url =
     token === null
       ? graphUrl(delta, {
@@ -241,10 +209,8 @@ const feedPage = async (room: Room, position: Position) => {
           endDateTime: isoOf(began + year),
         })
       : graphUrl(delta, { [`$${token.kind}token`]: token.value });
-  // Read whole before the page's deadline (the kit's `fetchBefore`).
-  const response = await fetchBefore(url, room.deadline, {
-    headers: { prefer },
-  });
+  // Read whole before the page's deadline (the kit's `fetchInRoom`).
+  const response = await fetchInRoom(room, url, { headers: { prefer } });
   if (response === "late") {
     return "late";
   }
@@ -296,19 +262,6 @@ const textOf = (event: Event): string => {
   return `${lines.join("\n")}\n\n${event.body?.content ?? ""}`;
 };
 
-/** JSON bytes of `content` in a page. */
-const sizeOf = (content: SyncContent): number =>
-  new TextEncoder().encode(JSON.stringify(content)).byteLength;
-
-/** What a page has left: requests, content bytes, and its deadline. */
-interface Room {
-  requests: number;
-  bytes: number;
-  deadline: number;
-  /** Whether no event is handled yet: the first is always taken. */
-  first: boolean;
-}
-
 const goneOf = (id: string): SyncItem => ({ gone: true, id, kind: "event" });
 
 /**
@@ -316,7 +269,7 @@ const goneOf = (id: string): SyncItem => ({ gone: true, id, kind: "event" });
  * left for it (the page's first takes it without its content).
  */
 const itemOf = (
-  room: Room,
+  room: SyncRoom,
   owner: SyncReader[],
   event: Event
 ): SyncItem | "full" => {
@@ -330,15 +283,10 @@ const itemOf = (
       code: "failed",
     });
   }
-  let content: SyncContent | null = { type: "text", text: textOf(event) };
-  const size = sizeOf(content);
-  if (size > room.bytes) {
-    if (!room.first) {
-      return "full";
-    }
-    content = null;
-  } else {
-    room.bytes -= size;
+  // The kit's `takeContent`: an empty page takes it without content.
+  const taken = takeContent(room, { type: "text", text: textOf(event) });
+  if (taken === null) {
+    return "full";
   }
   return {
     gone: false,
@@ -347,23 +295,11 @@ const itemOf = (
     version: changeKey,
     changedAt,
     title: event.subject ?? "",
-    content,
+    content: taken.content,
     readers: owner,
     changedBy: null,
     partOf: null,
   };
-};
-
-/** Where in Graph's page to go on: after `after`, or at its top. */
-const startOf = (events: readonly Event[], after: Handled | null): number => {
-  if (after === null) {
-    return 0;
-  }
-  const index = events.findIndex(
-    ({ id, changeKey }) =>
-      id === after.id && (changeKey ?? "") === after.changeKey
-  );
-  return index + 1;
 };
 
 /**
@@ -376,15 +312,10 @@ const lastOfEach = (items: readonly SyncItem[]): SyncItem[] => {
 };
 
 /** The person's own Entra object ID, their events' only reader. */
-const ownerOf = async (room: Room): Promise<SyncReader[]> => {
-  room.requests -= 1;
-  const response = await fetchBefore(
-    graphUrl(me, { $select: "id" }),
-    room.deadline,
-    {
-      headers: { prefer },
-    }
-  );
+const ownerOf = async (room: SyncRoom): Promise<SyncReader[]> => {
+  const response = await fetchInRoom(room, graphUrl(me, { $select: "id" }), {
+    headers: { prefer },
+  });
   if (response === "late") {
     throw tooSlow();
   }
@@ -423,7 +354,7 @@ const nextOf = (
  * room: how far it got, the items, and where to go on.
  */
 const takePage = async (
-  room: Room,
+  room: SyncRoom,
   owner: SyncReader[],
   position: Position
 ): Promise<{
@@ -436,44 +367,42 @@ const takePage = async (
   if (feed === "late") {
     // Cut off by the page's deadline: the page answers with what it has,
     // or, holding nothing yet, waits as for a rate limit.
-    if (room.first) {
+    if (room.empty) {
       throw tooSlow();
     }
     return { items: [], at: position, more: true, done: false };
   }
-  const events = feed.value;
-  const start = startOf(events, position.after);
-  const items: SyncItem[] = [];
-  let handled: Event | null = null;
-  for (const event of events.slice(start)) {
-    if (!room.first && Date.now() >= room.deadline) {
-      break;
+  // The kit's `fillPage`: after the event handled, by its key, or from the
+  // top of Graph's page when that event isn't there as it was.
+  const filled = await fillPage(
+    room,
+    feed.value,
+    position.after,
+    keyOf,
+    // oxlint-disable-next-line require-await -- the kit's fillPage takes a promise
+    async (event) => {
+      if (!room.empty && Date.now() >= room.deadline) {
+        return "full";
+      }
+      const item = itemOf(room, owner, event);
+      return item === "full" ? "full" : [item];
     }
-    const item = itemOf(room, owner, event);
-    if (item === "full") {
-      break;
-    }
-    items.push(item);
-    handled = event;
-    room.first = false;
-  }
-  const reached = handled === null ? start : events.indexOf(handled) + 1;
-  if (reached < events.length) {
+  );
+  if (!filled.done) {
     return {
-      items,
-      at:
-        handled === null
-          ? position
-          : {
-              ...position,
-              after: { id: handled.id, changeKey: handled.changeKey ?? "" },
-            },
+      items: filled.items,
+      at: { ...position, after: filled.last },
       more: true,
       done: false,
     };
   }
   const next = nextOf(position, feed);
-  return { items, at: next.position, more: next.more, done: true };
+  return {
+    items: filled.items,
+    at: next.position,
+    more: next.more,
+    done: true,
+  };
 };
 
 /** One page of the person's own calendar from `position` on. */
@@ -485,12 +414,7 @@ const readPage = async (
     // The window has moved a year: list again from the start.
     throw new RestartSyncError("The calendar's window moved");
   }
-  const room: Room = {
-    requests: syncPageLimits.requests,
-    bytes: syncPageLimits.contentBytes,
-    deadline,
-    first: true,
-  };
+  const room = syncRoom(deadline);
   const owner = await ownerOf(room);
   const items: SyncItem[] = [];
   let at = position;
@@ -499,8 +423,7 @@ const readPage = async (
     const page = await takePage(room, owner, at);
     items.push(...page.items);
     ({ at } = page);
-    const roomLeft =
-      room.requests > 0 && (room.first || Date.now() < room.deadline);
+    const roomLeft = room.empty ? room.requests > 0 : mayRequest(room);
     if (!page.done || !page.more || !roomLeft) {
       return {
         items: lastOfEach(items),
