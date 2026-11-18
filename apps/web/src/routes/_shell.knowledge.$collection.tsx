@@ -9,12 +9,13 @@ import type {
 import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 
 import type { Session } from "../core.ts";
 import { formatDate } from "../format.ts";
 import { NotFoundState, NotLoadedState } from "../frame/page-states.tsx";
 import { PageHeading } from "../frame/page.tsx";
+import { RouterLink } from "../frame/router-link.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
 import {
   Empty,
@@ -27,15 +28,15 @@ import {
   File,
   Folder as FolderMark,
 } from "../grasp/icons/index.ts";
-import {
-  Item,
-  ItemContent,
-  ItemDetail,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "../grasp/item/index.ts";
 import { Section, SectionHeader } from "../grasp/section-header/index.ts";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../grasp/table/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { CollectionMarkers } from "../knowledge/collection-markers.tsx";
@@ -153,38 +154,40 @@ const FileList = ({ documents }: { documents: DocumentSummary[] }) => {
       </Empty>
     );
   }
+  // Concept B: the files as a table, compared column by column.
   return (
     <>
-      <ItemGroup separated>
-        {foldersOf(folderTree(documents)).flatMap((folder) =>
-          folder.documents.map((document) => (
-            <Item
-              key={document.id}
-              render={
-                <Link
-                  from="/knowledge/$collection"
-                  search={{ doc: document.id }}
-                />
-              }
-              size="sm"
-            >
-              <ItemMedia icon={File} iconLook="inline" />
-              <ItemContent>
-                <ItemTitle>
-                  {document.title}
-                  <ItemDetail>
-                    {/* A folder that only repeats the title (a skill's
-                        `<name>/SKILL.md`) says nothing more. */}
-                    {folder.path === "" || folder.path === document.title
-                      ? formatDate(document.updatedAt)
-                      : `${folder.path} · ${formatDate(document.updatedAt)}`}
-                  </ItemDetail>
-                </ItemTitle>
-              </ItemContent>
-            </Item>
-          ))
-        )}
-      </ItemGroup>
+      <Table aria-label="Files">
+        <TableHeader>
+          <TableRow>
+            <TableHead>Title</TableHead>
+            <TableHead>Folder</TableHead>
+            <TableHead>File</TableHead>
+            <TableHead>Changed</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {foldersOf(folderTree(documents)).flatMap((folder) =>
+            folder.documents.map((document) => (
+              <TableRow key={document.id}>
+                <TableCell>
+                  <RouterLink
+                    from="/knowledge/$collection"
+                    search={{ doc: document.id }}
+                    to="."
+                    variant="standalone"
+                  >
+                    {document.title}
+                  </RouterLink>
+                </TableCell>
+                <TableCell>{folder.path}</TableCell>
+                <TableCell>{document.path.split("/").at(-1)}</TableCell>
+                <TableCell>{formatDate(document.updatedAt)}</TableCell>
+              </TableRow>
+            ))
+          )}
+        </TableBody>
+      </Table>
       {documents.length === pageMaxLimit ? (
         <Text size="sm" tone="muted">
           <Trans>Showing the first {pageMaxLimit} files.</Trans>
