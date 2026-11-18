@@ -11,7 +11,6 @@ import {
   EmptyTitle,
 } from "../grasp/empty/index.ts";
 import { Lock } from "../grasp/icons/index.ts";
-import { Link } from "../grasp/link/index.ts";
 import { useMemberAdmin } from "../use-member-admin.ts";
 
 // What an AI feature shows while the organization has no AI provider to
@@ -40,7 +39,7 @@ const GoToAiProviders = () => {
 
 /**
  * Connect an AI provider: a link to Settings › AI providers for whoever can,
- * and who to ask for anyone else. `xs` in a thread or under the chat's own box.
+ * and who to ask for anyone else. `xs` in a thread. The box to ask in says it in its own band (chat-composer.tsx).
  */
 export const ConnectAiProvider = ({
   size = "sm",
@@ -66,23 +65,5 @@ export const ConnectAiProvider = ({
         </EmptyContent>
       ) : null}
     </Empty>
-  );
-};
-
-/**
- * Under a one-row box to ask in (the idle bar at a page's foot), while there
- * is no AI provider: one line, never a panel, so nothing covers the page.
- * The way to Settings › AI providers for whoever can connect one, and who
- * to ask for anyone else. The chat itself says more once it opens.
- */
-export const ConnectAiProviderLine = () => {
-  const { t } = useLingui();
-  const canConnect = useMemberAdmin();
-  return canConnect ? (
-    <Link render={<RouterLink to="/settings/ai-providers" />}>
-      {t`Connect an AI provider to start asking`}
-    </Link>
-  ) : (
-    t`Ask your admin to connect an AI provider.`
   );
 };

@@ -1240,10 +1240,6 @@ msgstr "{place, selectordinal, other {, als #. sortiert}}"
 msgid "{place} of {count}"
 msgstr "{place} von {count}"
 
-#: src/tour/tour-layer.tsx
-msgid "{position} of {count}"
-msgstr "{position} von {count}"
-
 #: src/apps/indexes-view.tsx
 msgid "{query} (on {routes})"
 msgstr "{query} (auf {routes})"
@@ -3363,6 +3359,7 @@ msgstr "Darum bitten, Version {askable} für das Team laufen zu lassen"
 msgid "Ask what you're looking for"
 msgstr "Fragen Sie, wonach Sie suchen"
 
+#: src/chat/chat-composer.tsx
 #: src/frame/connect-ai-provider.tsx
 msgid "Ask your admin to connect an AI provider."
 msgstr "Bitten Sie Ihren Admin, einen KI-Anbieter zu verbinden."
@@ -3549,7 +3546,6 @@ msgstr "Verfügbar, über Composio"
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/inbox/item-detail.tsx
 #: src/onboarding/setup-frame.tsx
-#: src/tour/tour-layer.tsx
 #: src/workflows/requests/request-detail.tsx
 msgid "Back"
 msgstr "Zurück"
@@ -4821,7 +4817,7 @@ msgstr "KI-Anbieter verbinden"
 msgid "Connect an AI provider before sending."
 msgstr "Verbinden Sie vor dem Senden einen KI-Anbieter."
 
-#: src/frame/connect-ai-provider.tsx
+#: src/chat/chat-composer.tsx
 msgid "Connect an AI provider to start asking"
 msgstr "Verbinde einen KI-Anbieter, um Fragen zu stellen"
 
@@ -5944,11 +5940,6 @@ msgctxt "stop using the app's preview"
 msgid "Done"
 msgstr "Fertig"
 
-#: src/tour/tour-layer.tsx
-msgctxt "tour"
-msgid "Done"
-msgstr "Fertig"
-
 #: src/brain/work-knowledge.tsx
 msgctxt "what something known rests on: it happened in a run"
 msgid "Done"
@@ -6214,10 +6205,6 @@ msgstr "Zugriff der Grasp-Mitarbeitenden jetzt beenden?"
 #: src/settings/staff-access.tsx
 msgid "End staff access now"
 msgstr "Mitarbeiterzugriff jetzt beenden"
-
-#: src/tour/tour-layer.tsx
-msgid "End the tour"
-msgstr "Rundgang beenden"
 
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
@@ -7193,6 +7180,7 @@ msgstr "Ohne Ton weiter"
 msgid "Go to {time}, {who}"
 msgstr "Zu {time} gehen, {who}"
 
+#: src/chat/chat-composer.tsx
 #: src/frame/connect-ai-provider.tsx
 msgid "Go to AI providers"
 msgstr "Zu den KI-Anbietern"
@@ -7645,10 +7633,6 @@ msgstr "Das ist der Plan"
 msgid "Here's what Grasp will make"
 msgstr "Das wird Grasp bauen"
 
-#: src/tour/tour-script.ts
-msgid "Hey, great to have you here. This can all be a little overwhelming, so I’ll bring you up to speed in just one minute. Are you ready?"
-msgstr "Hallo, schön, dass Sie da sind. Das kann am Anfang viel wirken, deshalb bringe ich Sie in nur einer Minute auf den Stand. Sind Sie bereit?"
-
 #: src/onboarding/setup-steps.tsx
 msgid "Hi {admin}, I’m Stephen"
 msgstr "Hallo {admin}, ich bin Stephen"
@@ -7919,10 +7903,6 @@ msgstr "Ich schreibe auf, was Sie erzählen. Am Ende lese ich es vor, und Sie sa
 #: src/interview/before.tsx
 msgid "I’m {firstName}."
 msgstr "Ich bin {firstName}."
-
-#: src/tour/tour-script.ts
-msgid "I’m ready"
-msgstr "Ich bin bereit"
 
 #: src/onboarding/setup-steps.tsx
 msgid "I’ve handled everything else."
@@ -9941,7 +9921,6 @@ msgstr "Neuer"
 #: src/chat/asked-questions.tsx
 #: src/frame/part-words.tsx
 #: src/settings/event-sources.tsx
-#: src/tour/tour-layer.tsx
 msgid "Next"
 msgstr "Weiter"
 
@@ -10598,7 +10577,6 @@ msgid "Not named by the provider"
 msgstr "Vom Anbieter nicht benannt"
 
 #: src/onboarding/hr-leads.tsx
-#: src/tour/tour-script.ts
 msgid "Not now"
 msgstr "Jetzt nicht"
 
@@ -11140,10 +11118,6 @@ msgstr "Unterwegs"
 msgctxt "links: drawn workflows, opened on the Workflows page"
 msgid "On the Workflows page"
 msgstr "Auf der Seite Workflows"
-
-#: src/tour/tour-script.ts
-msgid "On this page you connect the applications your organization works in. They are the platform’s instruments to build what you need."
-msgstr "Auf dieser Seite verbinden Sie die Anwendungen, mit denen Ihre Organisation arbeitet. Sie sind die Instrumente, mit denen die Plattform baut, was Sie brauchen."
 
 #: src/make/examples.ts
 msgid "Onboard a new hire"
@@ -14900,10 +14874,6 @@ msgstr "App starten"
 msgid "Start the run"
 msgstr "Lauf starten"
 
-#: src/tour/tour-script.ts
-msgid "Start the tour"
-msgstr "Rundgang starten"
-
 #: src/apps/app-workflows.tsx
 msgid "Start with a letter, then use only letters, digits or underscores."
 msgstr "Beginnen Sie mit einem Buchstaben und verwenden Sie dann nur Buchstaben, Ziffern oder Unterstriche."
@@ -15556,10 +15526,6 @@ msgstr "Das war alles von Ihnen. Jetzt spreche ich mit Ihrem Team."
 #: src/onboarding/connect-steps.tsx
 msgid "That’s plenty to start with. Let’s move on."
 msgstr "Damit kann ich gut anfangen. Machen wir weiter."
-
-#: src/tour/tour-script.ts
-msgid "That’s the tour. Ask me anything, on any page. You’ll find me right here."
-msgstr "Das war der Rundgang. Fragen Sie mich gern, auf jeder Seite. Sie finden mich genau hier."
 
 #: src/frame/part-words.tsx
 msgid "The {many} did not load"
@@ -16315,10 +16281,6 @@ msgstr "Es gab nichts rückgängig zu machen: Grasp verwendet das nicht mehr."
 msgid "There's nowhere to share it yet: you're in no team, and in no chat others share."
 msgstr "Sie können es noch nirgends teilen: Sie sind in keinem Team und in keinem Chat, den andere teilen."
 
-#: src/tour/tour-script.ts
-msgid "These are your Apps. Each one is made for a team or a person, with its own pages, data and people, standing on your workflows."
-msgstr "Das sind Ihre Apps. Jede ist für ein Team oder eine Person gemacht, mit eigenen Seiten, Daten und Personen, aufgebaut auf Ihren Workflows."
-
 #: src/brain/forget.tsx
 msgid "These notes rest on nothing else and go too: {named} and {more} more."
 msgstr "Diese Notizen stützen sich auf nichts anderes und gehen mit: {named} und {more} weitere."
@@ -16528,17 +16490,9 @@ msgstr "Dieses Gespräch ging in einem anderen Fenster weiter. Sie sehen jetzt d
 msgid "This is right"
 msgstr "Das stimmt"
 
-#: src/tour/tour-script.ts
-msgid "This is the Brain. Everything I learn about your company comes together here. Every answer and every workflow is built on it."
-msgstr "Das ist das Gehirn. Alles, was ich über Ihr Unternehmen lerne, kommt hier zusammen. Jede Antwort und jeder Workflow baut darauf auf."
-
 #: src/connections/connection-list.tsx
 msgid "This is the consent as Grasp words it now. The audit log keeps a hash of the exact text they were shown."
 msgstr "Dies ist die Zustimmung, wie Grasp sie heute formuliert. Das Prüfprotokoll bewahrt einen Hash des genauen Textes, der angezeigt wurde."
-
-#: src/tour/tour-script.ts
-msgid "This is the work itself, one workflow for each piece of work. You see where the time goes, and what I can take off your hands."
-msgstr "Das ist die Arbeit selbst, ein Workflow für jedes Stück Arbeit. Sie sehen, wohin die Zeit geht und was ich Ihnen abnehmen kann."
 
 #: src/frame/ai-key-banner.tsx
 msgid "This is usually an outage on their side; Grasp keeps retrying."
@@ -16880,10 +16834,6 @@ msgstr "Thema"
 #: src/brain/brain-transcript.tsx
 msgid "Topics"
 msgstr "Themen"
-
-#: src/tour/tour-layer.tsx
-msgid "Tour of Grasp"
-msgstr "Rundgang durch Grasp"
 
 #: src/make/examples.ts
 msgid "Track the month-end close"
@@ -17805,10 +17755,6 @@ msgstr "Woche {week} von {weeks} · {stage}"
 #: src/workflows/requests/request-summary.tsx
 msgid "Weekly summary"
 msgstr "Wochenzusammenfassung"
-
-#: src/tour/tour-script.ts
-msgid "Welcome to Grasp. Shall I show you around? It takes about a minute."
-msgstr "Willkommen bei Grasp. Darf ich Sie kurz herumführen? Das dauert etwa eine Minute."
 
 #: src/workflows/today-lanes.tsx
 msgid "went to people"
