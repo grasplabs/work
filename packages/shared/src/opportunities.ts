@@ -34,7 +34,11 @@ export interface Opportunity {
   hoursPerWeek: number | null;
   /** Where its evidence comes from: what people described in interviews. */
   basis: "described";
-  /** What Grasp proposes: none while it couldn't ask a model (none set up, or the call failed); asked again at the next list. */
+  /**
+   * What Grasp proposes: none until a model answered. It is asked apart
+   * from any list, when the routine is noted, and tried again with
+   * back-off; one given up is asked again once an admin lists.
+   */
   form: OpportunityForm | null;
   /** An existing App that already covers it: then it points there, and proposes nothing new. */
   covers: { app: string; name: string } | null;
