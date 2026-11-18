@@ -47,7 +47,13 @@ const added = Object.fromEntries(
   })
 );
 const vars: unknown = Reflect.get(parsed, "vars");
-const devMain = process.env.CONNECT_DEV_MAIN;
+// Never for a stack that brings a config of its own, as the e2e stack
+// does (`CONNECT_WRANGLER_CONFIG`): a variable left in a shell can't swap
+// the connect its tests run against.
+const devMain =
+  process.env.CONNECT_WRANGLER_CONFIG === undefined
+    ? process.env.CONNECT_DEV_MAIN
+    : undefined;
 const local = {
   ...parsed,
   ...(devMain === undefined ? {} : { main: devMain }),

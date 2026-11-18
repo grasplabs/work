@@ -10,9 +10,12 @@
  * - `/v1/moved` redirects off the origin.
  * - `/v1/slow` answers as `/v1/invoices` does, `slowMs` later: a call
  *   that is under way for a while.
- * - `/v1/dropped` takes the request and never answers it: `answer`
- *   throws, as a fetch whose connection was lost does. A write there may
- *   have been done, and nobody was told.
+ * - `/v1/dropped` takes the whole request, keeps it in `calls`, then
+ *   drops the connection: `answer` throws at once, as a fetch whose
+ *   connection was lost does. The write arrived, and its sender can't
+ *   know.
+ * - `/v1/slow` stops waiting when the request's `signal` aborts, and
+ *   fails with its reason.
  * - Anything else is a 404.
  *
  * Self-contained, with nothing from outside the function: core's tests
@@ -81,7 +84,8 @@ export const outsideApiFake = ({
         return invoices(request.method, body);
       }
       if (url.pathname === "/v1/slow") {
-        await scheduler.wait(slowMs);
+        // Given up on meanwhile: fails with why, as a fetch does.
+        await scheduler.wait(slowMs, { signal: request.signal });
         return invoices(request.method, body);
       }
       if (url.pathname === "/v1/dropped") {
