@@ -96,7 +96,10 @@ const erasedPerPage = 100;
  * connection-audiences.ts); the statement checks it all the same, as
  * every read that trusts an audience does. Decided in the statement that names it, so
  * an erasure that starts after it lists it, and one that started before
- * refuses it. The same record again is the same source, named once.
+ * refuses it. The same record again is the same source, named once,
+ * its read time the latest of its reads (the Sources page's last read),
+ * moved on by the same statement, so only while the connection has an
+ * audience and isn't being erased or closed.
  */
 export const claimSharedRead = async (
   env: Pick<Env, "DB">,
@@ -114,10 +117,14 @@ export const claimSharedRead = async (
         WHERE EXISTS (SELECT 1 FROM ${connectionBrainAudiences} WHERE ${connectionBrainAudiences.connectionId} = ${connection})
           AND NOT EXISTS (SELECT 1 FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connection} AND (${connectionBrainErasures.erasing} = 1 OR ${connectionBrainErasures.closed} = 1))`
     )
-    // Named already: the same source, as it was first named.
+    // Named already: the same source, as it was first named, read last
+    // at the later of its reads (claims of one record may land in any
+    // order).
     .onConflictDoUpdate({
       target: connectionBrainReads.sourceId,
-      set: { sourceId: sql`${connectionBrainReads.sourceId}` },
+      set: {
+        readAt: sql`MAX(${connectionBrainReads.readAt}, excluded.read_at)`,
+      },
     })
     .returning({ sourceId: connectionBrainReads.sourceId });
   return named === undefined
