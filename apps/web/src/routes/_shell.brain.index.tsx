@@ -26,6 +26,7 @@ import type { Brain } from "../brain/brain.ts";
 import type { BrainDots } from "../brain/dot-ink.ts";
 import { useLessMotion } from "../brain/less-motion.ts";
 import { beginNoteReveal } from "../brain/note-reveal.tsx";
+import { NotePeek } from "../brain/peek-concept.tsx";
 import { isRegion } from "../brain/region-id.ts";
 import { useBrainThinking } from "../brain/thinking/brain-thinking.ts";
 import { ThinkingDive } from "../brain/thinking/dive.tsx";
@@ -54,7 +55,7 @@ const textOf = (value: unknown): string | undefined =>
 /** The view in the address: only what reads as one; and an answer's thinking to play again. */
 const validateSearch = (
   search: Record<string, unknown>
-): AtlasView & { think?: string } => {
+): AtlasView & { think?: string; concept?: string } => {
   const group = textOf(search.group);
   const note = textOf(search.note);
   const think = textOf(search.think);
@@ -63,6 +64,9 @@ const validateSearch = (
     ...(group === undefined ? {} : { group }),
     ...(note === undefined ? {} : { note }),
     ...(think === undefined ? {} : { think }),
+    ...(textOf(search.concept) === undefined
+      ? {}
+      : { concept: textOf(search.concept) }),
   };
 };
 
@@ -258,6 +262,9 @@ const AtlasPage = () => {
   const { t } = useLingui();
   const { workspace: ws, brain: read } = useBrainData();
   const search = Route.useSearch();
+  const [peek, setPeek] = useState<string>();
+  // Kept from the first address: moving on the map writes the view alone.
+  const peeking = useRef(search.concept === "c").current;
   const navigate = useNavigate({ from: "/brain/" });
   const reduce = useLessMotion();
   // Grasp's thinking, played over the atlas; what it found stays as new
@@ -327,6 +334,11 @@ const AtlasPage = () => {
   };
   // A note's own page. From its neuron, the camera goes in first and its dots build the page.
   const open = (noteId: string) => {
+    // Concept C: the note opens over the map instead of leaving it.
+    if (peeking) {
+      setPeek(noteId);
+      return;
+    }
     const onMap = neurons.some(
       (each) => each.kind !== "cluster" && each.noteIds[0] === noteId
     );
@@ -455,6 +467,14 @@ const AtlasPage = () => {
         />
       ) : null}
       {dive === undefined ? <AtlasTrail onGo={go} steps={trail} /> : null}
+      <NotePeek
+        brain={brain}
+        noteId={peek}
+        onClose={() => {
+          setPeek(undefined);
+        }}
+        onPeek={setPeek}
+      />
     </BrainAtlas>
   );
 };

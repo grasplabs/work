@@ -53,7 +53,23 @@ import { Button } from "../grasp/button/index.ts";
 import { Collapsible } from "../grasp/collapsible/index.ts";
 import { focus } from "../grasp/focus/focus.ts";
 import { Heading } from "../grasp/heading/index.ts";
-import { Brain as BrainMark } from "../grasp/icons/index.ts";
+import { Brain as BrainMark, Clock } from "../grasp/icons/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { KeyValueList } from "../grasp/key-value/index.ts";
+import { PageHeader } from "../grasp/page-header/index.ts";
+import { SectionHeader } from "../grasp/section-header/index.ts";
+import {
+  Sheet,
+  SheetBody,
+  SheetContent,
+  SheetTitle,
+} from "../grasp/sheet/index.ts";
 import {
   Tabs,
   TabsContent,
@@ -61,7 +77,7 @@ import {
   TabsTrigger,
 } from "../grasp/tabs/index.ts";
 import { Text } from "../grasp/text/index.ts";
-import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 
 // One note, as the prototype has it (`routes/brain/$noteId.tsx`). Where the
@@ -197,6 +213,19 @@ const styles = stylex.create({
     paddingTop: grasp.space4,
   },
   knowledge: { paddingInline: grasp.space6 },
+  calmPane: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
+  calmColumn: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space6,
+    boxSizing: "border-box",
+    width: "100%",
+    maxWidth: grasp.pageColumnMeasure,
+    marginInline: "auto",
+    paddingTop: grasp.space8,
+    paddingBottom: grasp.space24,
+    paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
+  },
 });
 
 /** A name in a property: a chip for a note, or plain words. */
@@ -501,15 +530,11 @@ const mergeRows = (rows: DetailRow[]): DetailRow[] => {
  * its kind. What names it says on hover where: the sentence of a conversation, or the property of
  * a page. Long rows are capped behind "+N".
  */
-const DetailRows = ({
-  note,
-  byId,
-  workspace,
-}: {
-  note: Note;
-  byId: Map<string, Note>;
-  workspace: Workspace;
-}) => {
+const useDetailRows = (
+  note: Note,
+  byId: Map<string, Note>,
+  workspace: Workspace
+): DetailRow[] => {
   const { t } = useLingui();
   // What the article already shows: how many of each kind were said (the tabs over the statements).
   // A team's roles stay: its banner shows its interviewees or its drawing, not the roster's roles.
@@ -639,9 +664,19 @@ const DetailRows = ({
   );
   // What the note is first, then its work, then where it comes from and what is open.
   const order: DetailGroup[] = ["about", "work", "context"];
-  const sorted = order.flatMap((group) =>
-    rows.filter((row) => row.group === group)
-  );
+  return order.flatMap((group) => rows.filter((row) => row.group === group));
+};
+
+const DetailRows = ({
+  note,
+  byId,
+  workspace,
+}: {
+  note: Note;
+  byId: Map<string, Note>;
+  workspace: Workspace;
+}) => {
+  const sorted = useDetailRows(note, byId, workspace);
   return (
     <div {...stylex.props(styles.details)}>
       {sorted.map((row) => (
@@ -1048,6 +1083,162 @@ const WorkTabs = ({ note, children }: { note: Note; children: ReactNode }) => {
   );
 };
 
+/** A note's links, each once, to the notes they name, with where they stand on the note. */
+const linksOf = (rows: DetailRow[], byId: Map<string, Note>) =>
+  rows.flatMap((row) =>
+    row.refs.flatMap((ref) => {
+      const target = ref.to === undefined ? undefined : byId.get(ref.to);
+      return target === undefined
+        ? []
+        : [{ row: row.label, target, reason: row.reasons?.get(target.id) }];
+    })
+  );
+
+/**
+ * Concepts A and B: a note's page without its chrome. The title and its
+ * one line; "Show in the brain" and the download as quiet icons beside the
+ * title; the note's own content. A: what it is connected to as names in
+ * the page, the timeline on request in a sheet. B: the page is how it
+ * connects, one row per note it names with why, grouped by what it is.
+ */
+const CalmNote = ({
+  note,
+  workspace,
+  byId,
+  connections,
+}: {
+  note: Note;
+  workspace: Workspace;
+  byId: Map<string, Note>;
+  connections: "a" | "b";
+}) => {
+  const { t } = useLingui();
+  const [timelineOpen, setTimelineOpen] = useState(false);
+  const rows = useDetailRows(note, byId, workspace);
+  const source = workspace.sources.find((each) => each.id === note.id);
+  const hasTimeline = note.timeline.length > 0 || note.open.length > 0;
+  const links = linksOf(rows, byId);
+  const groups = [...new Set(links.map((link) => link.row))];
+  return (
+    <div {...stylex.props(styles.calmPane)}>
+      <div {...stylex.props(styles.calmColumn)}>
+        <PageHeader
+          actions={
+            <>
+              {hasTimeline ? (
+                <Button
+                  icon={Clock}
+                  onClick={() => {
+                    setTimelineOpen(true);
+                  }}
+                  size="sm"
+                  variant="ghost"
+                >
+                  {t`Timeline`}
+                </Button>
+              ) : null}
+              <Button
+                aria-label={t`Show in the brain`}
+                icon={BrainMark}
+                render={
+                  <Link
+                    search={note.kind === "company" ? {} : { note: note.id }}
+                    to="/brain"
+                  />
+                }
+                size="sm"
+                variant="ghost"
+              />
+              <ExportButton note={note} source={source} />
+            </>
+          }
+          description={note.summary}
+          title={note.title}
+        />
+        {connections === "a" && rows.length > 0 ? (
+          <KeyValueList
+            items={rows.map((row) => ({
+              key: row.label,
+              value: (
+                <Capped>
+                  {row.refs.map((ref, at) => {
+                    const target =
+                      ref.to === undefined ? undefined : byId.get(ref.to);
+                    return target ? (
+                      <NoteChip
+                        key={`${ref.to}-${at}`}
+                        label={ref.label}
+                        note={target}
+                      />
+                    ) : (
+                      <span key={`${ref.label}-${at}`}>{ref.label}</span>
+                    );
+                  })}
+                </Capped>
+              ),
+            }))}
+            variant="inline"
+          />
+        ) : null}
+        {connections === "b"
+          ? groups.map((group) => (
+              <section key={group}>
+                <SectionHeader size="sm" title={group} />
+                <ItemGroup separated>
+                  {links
+                    .filter((link) => link.row === group)
+                    .map((link) => (
+                      <Item
+                        key={`${group}-${link.target.id}`}
+                        render={
+                          <Link
+                            params={{ noteId: link.target.id }}
+                            to="/brain/$noteId"
+                          />
+                        }
+                        size="sm"
+                      >
+                        <ItemContent>
+                          <ItemTitle>{link.target.title}</ItemTitle>
+                          <ItemDescription>
+                            {link.reason ?? link.target.summary}
+                          </ItemDescription>
+                        </ItemContent>
+                      </Item>
+                    ))}
+                </ItemGroup>
+              </section>
+            ))
+          : null}
+        {connections === "b"
+          ? rows
+              .filter((row) => row.refs.every((ref) => ref.to === undefined))
+              .map((row) => (
+                <KeyValueList
+                  items={[
+                    {
+                      key: row.label,
+                      value: row.refs.map((ref) => ref.label).join(", "),
+                    },
+                  ]}
+                  key={row.label}
+                  variant="inline"
+                />
+              ))
+          : null}
+      </div>
+      <Sheet onOpenChange={setTimelineOpen} open={timelineOpen} side="end">
+        <SheetContent>
+          <SheetTitle>{t`Timeline`}</SheetTitle>
+          <SheetBody>
+            <Timeline note={note} />
+          </SheetBody>
+        </SheetContent>
+      </Sheet>
+    </div>
+  );
+};
+
 /**
  * One note, read like a page, the same for every kind (`brain/brain-article/`): the banner of
  * its part with who or what it is, the title and summary, its own text or its conversation, and
@@ -1061,6 +1252,8 @@ const NotePage = () => {
   const { noteId } = Route.useParams();
   const { brain, workspace: read } = useBrainData();
   const { transcript } = Route.useLoaderData();
+  // Concepts for Ruben (concept branch only): ?concept=a or ?concept=b.
+  const { concept } = Route.useSearch();
   const workspace = withTranscript(read, noteId, transcript);
   // The statement a link opened: its id is the address's hash.
   const hash = useLocation({ select: (location) => location.hash });
@@ -1078,6 +1271,20 @@ const NotePage = () => {
       <HomePage
         brain={brain}
         toolbar={<NoteToolbar note={note} source={source} />}
+      />
+    );
+  }
+  const byIdAll = new Map(
+    brain.notes.map((candidate) => [candidate.id, candidate])
+  );
+  if (concept === "a" || concept === "b") {
+    return (
+      <CalmNote
+        byId={byIdAll}
+        connections={concept}
+        key={note.id}
+        note={note}
+        workspace={workspace}
       />
     );
   }
@@ -1105,10 +1312,14 @@ const NotePage = () => {
 
 export const Route = createFileRoute("/_shell/brain/$noteId")({
   // `?knowledge` opens a piece of work on what Grasp knows about it.
-  validateSearch: (search: Record<string, unknown>): { knowledge?: true } =>
-    search.knowledge === true || search.knowledge === "true"
-      ? { knowledge: true }
-      : {},
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { knowledge?: true; concept?: string } => ({
+    ...(search.knowledge === true || search.knowledge === "true"
+      ? { knowledge: true as const }
+      : {}),
+    ...(typeof search.concept === "string" ? { concept: search.concept } : {}),
+  }),
   // The note's transcript, when its source has one: `brain.read`, which the
   // layout read, says only how many turns it has.
   loader: async ({
