@@ -582,6 +582,10 @@ msgstr "{going} of {count}"
 msgid "{hidden, plural, one {Show # more} other {Show # more}}"
 msgstr "{hidden, plural, one {Show # more} other {Show # more}}"
 
+#: src/brain/opportunities-page.tsx
+msgid "{hiddenTitle} is hidden for every admin until its evidence changes."
+msgstr "{hiddenTitle} is hidden for every admin until its evidence changes."
+
 #: src/connections/connection-list.tsx
 msgid "{holder}: {actions} on {resource}"
 msgstr "{holder}: {actions} on {resource}"
@@ -5024,7 +5028,6 @@ msgstr "Disconnected an account"
 msgid "Disconnected on {since}."
 msgstr "Disconnected on {since}."
 
-#: src/brain/opportunities-page.tsx
 #: src/settings/chat-accounts.tsx
 msgid "Dismiss"
 msgstr "Dismiss"
@@ -6851,6 +6854,15 @@ msgstr "Hi {name}, I’m {who}. I’m an AI, and I work for Grasp."
 msgid "Hi everyone,"
 msgstr "Hi everyone,"
 
+#: src/brain/opportunities-page.tsx
+msgctxt "opportunities hidden for every admin"
+msgid "Hidden"
+msgstr "Hidden"
+
+#: src/brain/opportunities-page.tsx
+msgid "Hidden for every admin until their evidence changes, or until one of you shows them again."
+msgstr "Hidden for every admin until their evidence changes, or until one of you shows them again."
+
 #: src/activity/audit-log.tsx
 msgid "Hide"
 msgstr "Hide"
@@ -6862,6 +6874,11 @@ msgstr "Hide exactly what was sent"
 #: src/chat/held-writes.tsx
 msgid "Hide exactly what will be sent"
 msgstr "Hide exactly what will be sent"
+
+#: src/brain/opportunities-page.tsx
+msgctxt "hides an opportunity for every admin until its evidence changes"
+msgid "Hide for every admin"
+msgstr "Hide for every admin"
 
 #: src/workflows/requests/request-who.tsx
 msgid "Hide people one by one"
@@ -12824,6 +12841,11 @@ msgstr "Show"
 msgid "Show activity by"
 msgstr "Show activity by"
 
+#: src/brain/opportunities-page.tsx
+msgctxt "shows a hidden opportunity again for every admin"
+msgid "Show again"
+msgstr "Show again"
+
 #: src/chat/held-writes.tsx
 msgid "Show all {count} lines ({characters} characters)"
 msgstr "Show all {count} lines ({characters} characters)"
@@ -15501,6 +15523,11 @@ msgstr "Under way"
 msgid "Undo"
 msgstr "Undo"
 
+#: src/brain/opportunities-page.tsx
+msgctxt "shows the opportunity just hidden again"
+msgid "Undo"
+msgstr "Undo"
+
 #: src/workflows/workflow-status.tsx
 msgctxt "take a pause back before it happens"
 msgid "Undo"
@@ -16217,8 +16244,8 @@ msgid "What Grasp and its agents do by themselves is under Activity."
 msgstr "What Grasp and its agents do by themselves is under Activity."
 
 #: src/brain/opportunities-page.tsx
-msgid "What Grasp could automate or improve, from how your teams describe their work, the largest first. A dismissed one comes back when its evidence changes."
-msgstr "What Grasp could automate or improve, from how your teams describe their work, the largest first. A dismissed one comes back when its evidence changes."
+msgid "What Grasp could automate or improve, from how your teams describe their work, the largest first. One hidden comes back when its evidence changes."
+msgstr "What Grasp could automate or improve, from how your teams describe their work, the largest first. One hidden comes back when its evidence changes."
 
 #: src/brain/brain-sections.ts
 msgid "What Grasp does not know yet, and who can answer it."

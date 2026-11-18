@@ -42,6 +42,8 @@ export interface Opportunity {
   setup: string[];
   /** The steps (from 1) that touch money, legal matters or customers: a person approves each. */
   personApproves: number[];
+  /** Whether an admin dismissed it at this evidence: hidden for every admin until it changes, or until one restores it. */
+  dismissed: boolean;
 }
 
 /** An opportunity to dismiss, at the evidence it was shown with. */
@@ -53,8 +55,10 @@ export type OpportunityDismissal = z.infer<typeof opportunityDismissalSchema>;
 
 /** Opportunities over `/rpc` (`session.opportunities`): for admins alone. */
 export interface OpportunitiesApi {
-  /** Every opportunity the admin may read, the largest first, dismissed ones left out. */
+  /** Every opportunity the admin may read, the largest first, the dismissed ones marked. */
   list: () => Promise<Opportunity[]>;
-  /** Hides an opportunity until its evidence changes. */
+  /** Hides an opportunity for every admin until its evidence changes. */
   dismiss: (dismissal: OpportunityDismissal) => Promise<void>;
+  /** Shows a dismissed opportunity again, for every admin. */
+  restore: (dismissal: OpportunityDismissal) => Promise<void>;
 }

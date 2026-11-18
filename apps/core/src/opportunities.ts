@@ -7,7 +7,7 @@ import type {
 } from "@grasp-os/shared/opportunities";
 import { requireAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -293,7 +293,7 @@ const opportunityOf = (
   proposal: Proposal | null,
   appNames: ReadonlyMap<string, string>,
   connected: ReadonlySet<string>
-): Opportunity => {
+): Omit<Opportunity, "dismissed"> => {
   const cases = casesPerWeekOf(drawing.drawing);
   const minutes = minutesOf(drawing.drawing);
   return {
@@ -359,7 +359,7 @@ export const proposerOf = (env: Env): Proposer => ({
 
 /**
  * Every opportunity the admin `admin` may read, the largest first (by
- * hours a week; those with none last), dismissed ones left out. Each
+ * hours a week; those with none last), the dismissed ones marked. Each
  * routine standing now, with its proposal: asked of the model the first
  * time at its evidence, then kept. Refused for anyone but an admin.
  */
@@ -380,19 +380,20 @@ export const listOpportunities = async (
   const opportunities: Opportunity[] = [];
   for (const drawing of drawings) {
     const key = keyOf(drawing.workflow, drawing.source);
-    if (!kept.dismissed.has(key)) {
-      // Only what is kept: the proposal is asked apart (`proposerOf`),
-      // never here. One pointing at an App removed since proposes nothing
-      // any more: there is nothing to change.
-      const held = kept.proposals.get(key) ?? null;
-      const proposal =
-        held?.covers !== null &&
-        held?.covers !== undefined &&
-        !appNames.has(held.covers)
-          ? null
-          : held;
-      opportunities.push(opportunityOf(drawing, proposal, appNames, connected));
-    }
+    // Only what is kept: the proposal is asked apart (`proposerOf`), never
+    // here. One pointing at an App removed since proposes nothing any
+    // more: there is nothing to change.
+    const held = kept.proposals.get(key) ?? null;
+    const proposal =
+      held?.covers !== null &&
+      held?.covers !== undefined &&
+      !appNames.has(held.covers)
+        ? null
+        : held;
+    opportunities.push({
+      ...opportunityOf(drawing, proposal, appNames, connected),
+      dismissed: kept.dismissed.has(key),
+    });
   }
   return opportunities.toSorted(
     (one, other) =>
@@ -422,6 +423,37 @@ export const dismissOpportunity = async (
     outboxedIfChanged(db, {
       actor: actorOf(admin),
       action: "opportunity.dismissed",
+      target: { type: "routine", id: routine },
+      detail: { evidence },
+    }),
+  ]);
+};
+
+/**
+ * Shows a dismissed opportunity again, for every admin: its dismissal at
+ * that evidence is forgotten. Recorded in the audit log in the same batch,
+ * once; restoring one not dismissed changes and records nothing. Refused
+ * for anyone but an admin.
+ */
+export const restoreOpportunity = async (
+  env: Env,
+  admin: Identity,
+  { routine, evidence }: OpportunityDismissal
+): Promise<void> => {
+  requireAdmin(admin);
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    db
+      .delete(opportunityDismissals)
+      .where(
+        and(
+          eq(opportunityDismissals.routine, routine),
+          eq(opportunityDismissals.evidence, evidence)
+        )
+      ),
+    outboxedIfChanged(db, {
+      actor: actorOf(admin),
+      action: "opportunity.restored",
       target: { type: "routine", id: routine },
       detail: { evidence },
     }),

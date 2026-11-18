@@ -346,6 +346,7 @@ export const rpcParamNames: ParamNames = {
   "OpportunitiesRpc": {
     "dismiss": ["dismissal"],
     "list": [],
+    "restore": ["dismissal"],
   },
   "OrgSettingsRpc": {
     "billing": [],

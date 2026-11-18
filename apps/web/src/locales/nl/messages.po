@@ -582,6 +582,10 @@ msgstr "{going} van {count}"
 msgid "{hidden, plural, one {Show # more} other {Show # more}}"
 msgstr "{hidden, plural, one {Nog # tonen} other {Nog # tonen}}"
 
+#: src/brain/opportunities-page.tsx
+msgid "{hiddenTitle} is hidden for every admin until its evidence changes."
+msgstr "{hiddenTitle} is verborgen voor alle beheerders tot het bewijs ervoor verandert."
+
 #: src/connections/connection-list.tsx
 msgid "{holder}: {actions} on {resource}"
 msgstr "{holder}: {actions} op {resource}"
@@ -5024,7 +5028,6 @@ msgstr "Een account ontkoppeld"
 msgid "Disconnected on {since}."
 msgstr "Ontkoppeld op {since}."
 
-#: src/brain/opportunities-page.tsx
 #: src/settings/chat-accounts.tsx
 msgid "Dismiss"
 msgstr "Sluiten"
@@ -6851,6 +6854,15 @@ msgstr "Hoi {name}, ik ben {who}. Ik ben een AI en ik werk voor Grasp."
 msgid "Hi everyone,"
 msgstr "Hoi allemaal,"
 
+#: src/brain/opportunities-page.tsx
+msgctxt "opportunities hidden for every admin"
+msgid "Hidden"
+msgstr "Verborgen"
+
+#: src/brain/opportunities-page.tsx
+msgid "Hidden for every admin until their evidence changes, or until one of you shows them again."
+msgstr "Verborgen voor alle beheerders tot het bewijs ervoor verandert, of tot een van jullie ze weer toont."
+
 #: src/activity/audit-log.tsx
 msgid "Hide"
 msgstr "Verbergen"
@@ -6862,6 +6874,11 @@ msgstr "Verberg precies wat is verstuurd"
 #: src/chat/held-writes.tsx
 msgid "Hide exactly what will be sent"
 msgstr "Verberg wat precies wordt verstuurd"
+
+#: src/brain/opportunities-page.tsx
+msgctxt "hides an opportunity for every admin until its evidence changes"
+msgid "Hide for every admin"
+msgstr "Verbergen voor alle beheerders"
 
 #: src/workflows/requests/request-who.tsx
 msgid "Hide people one by one"
@@ -12824,6 +12841,11 @@ msgstr "Tonen"
 msgid "Show activity by"
 msgstr "Activiteit tonen van"
 
+#: src/brain/opportunities-page.tsx
+msgctxt "shows a hidden opportunity again for every admin"
+msgid "Show again"
+msgstr "Weer tonen"
+
 #: src/chat/held-writes.tsx
 msgid "Show all {count} lines ({characters} characters)"
 msgstr "Alle {count} regels tonen ({characters} tekens)"
@@ -15501,6 +15523,11 @@ msgstr "In volle gang"
 msgid "Undo"
 msgstr "Ongedaan maken"
 
+#: src/brain/opportunities-page.tsx
+msgctxt "shows the opportunity just hidden again"
+msgid "Undo"
+msgstr "Ongedaan maken"
+
 #: src/workflows/workflow-status.tsx
 msgctxt "take a pause back before it happens"
 msgid "Undo"
@@ -16217,8 +16244,8 @@ msgid "What Grasp and its agents do by themselves is under Activity."
 msgstr "Wat Grasp en zijn agents zelf doen, staat onder Activiteit."
 
 #: src/brain/opportunities-page.tsx
-msgid "What Grasp could automate or improve, from how your teams describe their work, the largest first. A dismissed one comes back when its evidence changes."
-msgstr "Wat Grasp zou kunnen automatiseren of verbeteren, op basis van hoe je teams hun werk beschrijven, de grootste eerst. Een weggezette kans komt terug zodra het bewijs ervoor verandert."
+msgid "What Grasp could automate or improve, from how your teams describe their work, the largest first. One hidden comes back when its evidence changes."
+msgstr "Wat Grasp zou kunnen automatiseren of verbeteren, op basis van hoe je teams hun werk beschrijven, de grootste eerst. Een verborgen kans komt terug zodra het bewijs ervoor verandert."
 
 #: src/brain/brain-sections.ts
 msgid "What Grasp does not know yet, and who can answer it."

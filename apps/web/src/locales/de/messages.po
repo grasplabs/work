@@ -582,6 +582,10 @@ msgstr "{going} von {count}"
 msgid "{hidden, plural, one {Show # more} other {Show # more}}"
 msgstr "{hidden, plural, one {# weitere anzeigen} other {# weitere anzeigen}}"
 
+#: src/brain/opportunities-page.tsx
+msgid "{hiddenTitle} is hidden for every admin until its evidence changes."
+msgstr "{hiddenTitle} ist für alle Admins ausgeblendet, bis sich die Belege dafür ändern."
+
 #: src/connections/connection-list.tsx
 msgid "{holder}: {actions} on {resource}"
 msgstr "{holder}: {actions} auf {resource}"
@@ -5024,7 +5028,6 @@ msgstr "Ein Konto getrennt"
 msgid "Disconnected on {since}."
 msgstr "Am {since} getrennt."
 
-#: src/brain/opportunities-page.tsx
 #: src/settings/chat-accounts.tsx
 msgid "Dismiss"
 msgstr "Schließen"
@@ -6851,6 +6854,15 @@ msgstr "Hallo {name}, ich bin {who}. Ich bin eine KI und arbeite für Grasp."
 msgid "Hi everyone,"
 msgstr "Hallo zusammen,"
 
+#: src/brain/opportunities-page.tsx
+msgctxt "opportunities hidden for every admin"
+msgid "Hidden"
+msgstr "Ausgeblendet"
+
+#: src/brain/opportunities-page.tsx
+msgid "Hidden for every admin until their evidence changes, or until one of you shows them again."
+msgstr "Für alle Admins ausgeblendet, bis sich ihre Belege ändern oder einer von euch sie wieder anzeigt."
+
 #: src/activity/audit-log.tsx
 msgid "Hide"
 msgstr "Ausblenden"
@@ -6862,6 +6874,11 @@ msgstr "Genau Gesendetes ausblenden"
 #: src/chat/held-writes.tsx
 msgid "Hide exactly what will be sent"
 msgstr "Genau Gesendetes ausblenden"
+
+#: src/brain/opportunities-page.tsx
+msgctxt "hides an opportunity for every admin until its evidence changes"
+msgid "Hide for every admin"
+msgstr "Für alle Admins ausblenden"
 
 #: src/workflows/requests/request-who.tsx
 msgid "Hide people one by one"
@@ -12824,6 +12841,11 @@ msgstr "Anzeigen"
 msgid "Show activity by"
 msgstr "Aktivität anzeigen von"
 
+#: src/brain/opportunities-page.tsx
+msgctxt "shows a hidden opportunity again for every admin"
+msgid "Show again"
+msgstr "Wieder anzeigen"
+
 #: src/chat/held-writes.tsx
 msgid "Show all {count} lines ({characters} characters)"
 msgstr "Alle {count} Zeilen anzeigen ({characters} Zeichen)"
@@ -15501,6 +15523,11 @@ msgstr "Im Gange"
 msgid "Undo"
 msgstr "Rückgängig"
 
+#: src/brain/opportunities-page.tsx
+msgctxt "shows the opportunity just hidden again"
+msgid "Undo"
+msgstr "Rückgängig"
+
 #: src/workflows/workflow-status.tsx
 msgctxt "take a pause back before it happens"
 msgid "Undo"
@@ -16217,8 +16244,8 @@ msgid "What Grasp and its agents do by themselves is under Activity."
 msgstr "Was Grasp und seine Agenten selbst tun, steht unter Aktivität."
 
 #: src/brain/opportunities-page.tsx
-msgid "What Grasp could automate or improve, from how your teams describe their work, the largest first. A dismissed one comes back when its evidence changes."
-msgstr "Was Grasp automatisieren oder verbessern könnte, ausgehend davon, wie deine Teams ihre Arbeit beschreiben, die größten zuerst. Eine verworfene Chance kommt zurück, sobald sich ihre Belege ändern."
+msgid "What Grasp could automate or improve, from how your teams describe their work, the largest first. One hidden comes back when its evidence changes."
+msgstr "Was Grasp automatisieren oder verbessern könnte, ausgehend davon, wie deine Teams ihre Arbeit beschreiben, die größten zuerst. Eine ausgeblendete Chance kommt zurück, sobald sich ihre Belege ändern."
 
 #: src/brain/brain-sections.ts
 msgid "What Grasp does not know yet, and who can answer it."

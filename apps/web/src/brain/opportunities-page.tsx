@@ -24,7 +24,7 @@ import { useEffect, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
-import { formatList } from "../format.ts";
+import { formatDecimal, formatList } from "../format.ts";
 import { useCore } from "../use-core.ts";
 
 // Opportunities (GRA-1750): what Grasp could automate or improve, from how
@@ -56,19 +56,28 @@ const readOpportunities = async (
   }
 };
 
-/** Dismisses `opportunity`; why not, when it wasn't. */
-const dismissing = async (
+/** Hides `opportunity` for every admin, or shows it again; why not, when it wasn't. */
+const acting = async (
   core: CoreConnection,
-  { routine, evidence }: Opportunity
+  { routine, evidence }: Opportunity,
+  hide: boolean
 ): Promise<string | undefined> => {
   try {
     await core.withSession(async (session) => {
-      await session.opportunities.dismiss({ routine, evidence });
+      await (hide
+        ? session.opportunities.dismiss({ routine, evidence })
+        : session.opportunities.restore({ routine, evidence }));
     });
     return undefined;
   } catch (error) {
     return failureText(error);
   }
+};
+
+/** A work's name as a title: starting with a capital, for display alone (it is named in lower case, as an activity: onboarding/team-map.ts). */
+const titleOf = ({ name, local }: Opportunity, locale: string): string => {
+  const title = `${name.slice(0, 1).toLocaleUpperCase(locale)}${name.slice(1)}`;
+  return local === undefined ? title : `${title} (${local})`;
 };
 
 /** What Grasp proposes, as the page names it; none proposed yet, when it couldn't ask a model. */
@@ -108,7 +117,7 @@ const FormBadge = ({ form }: { form: OpportunityForm | null }) => {
 /** One figure of an opportunity, with what it counts under it. */
 const Figure = ({ value, label }: { value: number | null; label: string }) => (
   <div className="flex flex-col gap-1">
-    <Stat render={<dd />}>{value ?? "–"}</Stat>
+    <Stat render={<dd />}>{value === null ? "–" : formatDecimal(value)}</Stat>
     <dt className="text-muted-foreground order-last text-xs">{label}</dt>
   </div>
 );
@@ -124,11 +133,7 @@ const OpportunityCard = ({
   onDismiss: () => void;
 }) => {
   const { t, i18n } = useLingui();
-  const { name, local, steps, covers, setup, personApproves } = opportunity;
-  // A piece of work is named in lower case, as an activity
-  // (onboarding/team-map.ts): a card's title starts with a capital, for
-  // display alone.
-  const title = `${name.slice(0, 1).toLocaleUpperCase(i18n.locale)}${name.slice(1)}`;
+  const { steps, covers, setup, personApproves } = opportunity;
   const approves = new Set(personApproves);
   const systems = formatList(setup);
   const app = covers?.name ?? "";
@@ -139,7 +144,7 @@ const OpportunityCard = ({
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="flex flex-col gap-1">
               <h2 className="text-base font-medium">
-                {local === undefined ? title : `${title} (${local})`}
+                {titleOf(opportunity, i18n.locale)}
               </h2>
               <p className="text-muted-foreground text-sm">
                 <Trans>Described in the team&apos;s interviews.</Trans>
@@ -168,7 +173,7 @@ const OpportunityCard = ({
           )}
           <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm">
             {steps.map((step, at) => (
-              <li key={step}>
+              <li key={`${at}:${step}`}>
                 <span className="mr-2">{step}</span>
                 {approves.has(at + 1) ? (
                   <Badge variant="attention">
@@ -191,7 +196,9 @@ const OpportunityCard = ({
               type="button"
               variant="outline"
             >
-              <Trans>Dismiss</Trans>
+              <Trans context="hides an opportunity for every admin until its evidence changes">
+                Hide for every admin
+              </Trans>
             </Button>
           </div>
         </div>
@@ -200,12 +207,64 @@ const OpportunityCard = ({
   );
 };
 
+/** The opportunities an admin hid, each with a way to show it again. */
+const Dismissed = ({
+  dismissed,
+  busy,
+  onRestore,
+}: {
+  dismissed: readonly Opportunity[];
+  busy: boolean;
+  onRestore: (opportunity: Opportunity) => void;
+}) => {
+  const { i18n } = useLingui();
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="text-sm font-medium">
+        <Trans context="opportunities hidden for every admin">Hidden</Trans>
+      </h2>
+      <p className="text-muted-foreground text-sm">
+        <Trans>
+          Hidden for every admin until their evidence changes, or until one of
+          you shows them again.
+        </Trans>
+      </p>
+      <ul className="flex flex-col gap-2">
+        {dismissed.map((opportunity) => (
+          <li
+            className="flex flex-wrap items-center justify-between gap-3 text-sm"
+            key={opportunity.routine}
+          >
+            <span>{titleOf(opportunity, i18n.locale)}</span>
+            <Button
+              disabled={busy}
+              onClick={() => {
+                onRestore(opportunity);
+              }}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <Trans context="shows a hidden opportunity again for every admin">
+                Show again
+              </Trans>
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+};
+
 /** The admin's Opportunities page. */
 export const OpportunitiesPage = () => {
   const core = useCore();
+  const { i18n } = useLingui();
   const [read, setRead] = useState<Read<Opportunity[]>>({ state: "loading" });
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | undefined>();
+  // The one hidden last on this page, with Undo, until the page is left.
+  const [hidden, setHidden] = useState<Opportunity | undefined>();
 
   useEffect(() => {
     let current = true;
@@ -220,28 +279,37 @@ export const OpportunitiesPage = () => {
     };
   }, [core]);
 
-  const dismiss = (opportunity: Opportunity) => {
+  /** Hides `opportunity` for every admin, or shows it again. */
+  const act = (opportunity: Opportunity, hide: boolean) => {
     setBusy(true);
     setFailed(undefined);
     void (async () => {
-      const refused = await dismissing(core, opportunity);
+      const refused = await acting(core, opportunity, hide);
       setBusy(false);
       if (refused !== undefined) {
         setFailed(refused);
         return;
       }
+      setHidden(hide ? opportunity : undefined);
       setRead((now) =>
         now.state === "ready"
           ? {
               state: "ready",
-              data: now.data.filter(
-                ({ routine }) => routine !== opportunity.routine
+              data: now.data.map((each) =>
+                each.routine === opportunity.routine
+                  ? { ...each, dismissed: hide }
+                  : each
               ),
             }
           : now
       );
     })();
   };
+
+  const all = read.state === "ready" ? read.data : [];
+  const open = all.filter(({ dismissed }) => !dismissed);
+  const dismissed = all.filter(({ dismissed: hiddenNow }) => hiddenNow);
+  const hiddenTitle = hidden === undefined ? "" : titleOf(hidden, i18n.locale);
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -255,7 +323,7 @@ export const OpportunitiesPage = () => {
           <PageHeaderDescription>
             <Trans>
               What Grasp could automate or improve, from how your teams describe
-              their work, the largest first. A dismissed one comes back when its
+              their work, the largest first. One hidden comes back when its
               evidence changes.
             </Trans>
           </PageHeaderDescription>
@@ -264,7 +332,30 @@ export const OpportunitiesPage = () => {
           <ErrorText>{read.message}</ErrorText>
         ) : null}
         {failed === undefined ? null : <ErrorText>{failed}</ErrorText>}
-        {read.state === "ready" && read.data.length === 0 ? (
+        {hidden === undefined ? null : (
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <span>
+              <Trans>
+                {hiddenTitle} is hidden for every admin until its evidence
+                changes.
+              </Trans>
+            </span>
+            <Button
+              disabled={busy}
+              onClick={() => {
+                act(hidden, false);
+              }}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <Trans context="shows the opportunity just hidden again">
+                Undo
+              </Trans>
+            </Button>
+          </div>
+        )}
+        {read.state === "ready" && all.length === 0 ? (
           <Empty>
             <EmptyHeader>
               <EmptyTitle>
@@ -279,20 +370,29 @@ export const OpportunitiesPage = () => {
             </EmptyHeader>
           </Empty>
         ) : null}
-        {read.state === "ready" && read.data.length > 0 ? (
+        {open.length > 0 ? (
           <ul className="flex flex-col gap-4">
-            {read.data.map((opportunity) => (
+            {open.map((opportunity) => (
               <li key={opportunity.routine}>
                 <OpportunityCard
                   busy={busy}
                   onDismiss={() => {
-                    dismiss(opportunity);
+                    act(opportunity, true);
                   }}
                   opportunity={opportunity}
                 />
               </li>
             ))}
           </ul>
+        ) : null}
+        {dismissed.length > 0 ? (
+          <Dismissed
+            busy={busy}
+            dismissed={dismissed}
+            onRestore={(opportunity) => {
+              act(opportunity, false);
+            }}
+          />
         ) : null}
       </div>
     </div>
