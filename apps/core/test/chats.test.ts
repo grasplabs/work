@@ -84,8 +84,8 @@ const keepAgent = async ({
 }): Promise<void> => {
   await env.DB.prepare(
     `INSERT INTO agents
-       (id, name, face, job, instructions, model_role, state, made_by, made_at, changed_by, changed_at)
-     VALUES (?, ?, 'stephen', 'Helps.', '', NULL, ?, 'admin', ?, 'admin', ?)`
+       (id, name, face, job, model_role, state, made_by, made_at, changed_by, changed_at)
+     VALUES (?, ?, 'stephen', 'Helps.', NULL, ?, 'admin', ?, 'admin', ?)`
   )
     .bind(chatAgentId, name, state, Date.now(), Date.now())
     .run();

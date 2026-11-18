@@ -107,8 +107,7 @@ type Key = "lea" | "max" | "mia" | "mo" | "noor" | "pim" | "rik" | "sam";
 /**
  * A team called Ops, led by Lea, with Max, Mia, Mo, Noor and Pim, in an
  * onboarding that started yesterday: five who tell their own work, as many
- * as reach the brain. With `seven`, Rik and Sam too: seven who tell, as a
- * team needs before any of its results are shown (`teamMayClaim`).
+ * as reach the brain. With `seven`, Rik and Sam too: seven who tell.
  */
 const team = async ({ seven = false } = {}) => {
   const store = onboardingStore(env);

@@ -15,6 +15,7 @@ import { embedWithPool } from "@grasp-os/embed/pool";
 import type { PoolReply } from "@grasp-os/embed/pool";
 import { embedQuestion } from "@grasp-os/embed/question";
 import type { QuestionVector } from "@grasp-os/embed/question";
+import { withinTime } from "@grasp-os/shared/deadline";
 import { toHex } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";
 import { deployedModelPrefix } from "@grasp-os/shared/release";
@@ -67,18 +68,6 @@ export const questionEmbedderOf = (
  */
 export const questionVectorMs = 250;
 
-/**
- * `question`'s vector by the question embedder, in core's jurisdiction,
- * within `questionVectorMs` (@grasp-os/embed/question), or why there is none.
- */
-export const questionVectorOf = async (
-  env: Pick<Env, "EMBEDDER" | "DURABLE_OBJECT_JURISDICTION">,
-  question: string
-): Promise<QuestionVector> =>
-  await embedQuestion(questionEmbedderOf(env), question, {
-    timeoutMs: questionVectorMs,
-  });
-
 /** The model core's embedders run, and its build. */
 export const embedderModel = async (): Promise<ModelIdentity> =>
   await modelIdentity(shippedModel);
@@ -125,6 +114,65 @@ export const holdsModelFiles = async (
     )
   );
   return held.every(Boolean);
+};
+
+/**
+ * Whether this isolate last found the model's files missing from
+ * `MODEL_FILES` when a question couldn't be embedded: a local stack
+ * started without them (scripts/local-model-files.ts), or a deployment
+ * whose deploy didn't put them there, which fails its probe.
+ */
+let filesMissing = false;
+
+/**
+ * Whether the model's files are known to be missing from `bucket`, asked
+ * within `ms`: a read that fails or answers late knows nothing, so a
+ * bucket that is down or slow never holds a recall up past its limit.
+ */
+const knownMissing = async (bucket: R2Bucket, ms: number): Promise<boolean> => {
+  try {
+    return !(await withinTime(
+      async () => await holdsModelFiles(bucket),
+      Math.max(0, ms)
+    ));
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * `question`'s vector by the question embedder, in core's jurisdiction,
+ * within `questionVectorMs` (@grasp-os/embed/question), or why there is
+ * none; `files_missing` when the embedder failed for want of the model's
+ * files. Once they are found missing the embedder isn't asked again, each
+ * failing call an error of its own, until they are there: then each
+ * question costs a look at the bucket instead, and the first after they
+ * arrive is embedded. Every look at the bucket is inside the same limit.
+ */
+export const questionVectorOf = async (
+  env: Pick<Env, "EMBEDDER" | "MODEL_FILES" | "DURABLE_OBJECT_JURISDICTION">,
+  question: string
+): Promise<QuestionVector | { kind: "files_missing" }> => {
+  const endsAt = Date.now() + questionVectorMs;
+  const left = (): number => endsAt - Date.now();
+  if (filesMissing) {
+    if (await knownMissing(env.MODEL_FILES, left())) {
+      return { kind: "files_missing" };
+    }
+    filesMissing = false;
+  }
+  const embedded = await embedQuestion(questionEmbedderOf(env), question, {
+    timeoutMs: Math.max(0, left()),
+  });
+  if (
+    embedded.kind === "none" &&
+    embedded.reason === "failed" &&
+    (await knownMissing(env.MODEL_FILES, left()))
+  ) {
+    filesMissing = true;
+    return { kind: "files_missing" };
+  }
+  return embedded;
 };
 
 /**
@@ -193,9 +241,10 @@ let tried = false;
  * minute would copy and clear the whole token table for nothing. The next isolate
  * tries again. On-prem it
  * first copies the model's files from the release directory
- * (`MODEL_SOURCE`). Without the model's files (local dev has no real
- * model, an on-prem release directory may lack them) it says so and does
- * nothing more: a deployment without them fails its probe, never here.
+ * (`MODEL_SOURCE`). Without the model's files (a local stack started
+ * before they were on the machine, scripts/local-model-files.ts; an
+ * on-prem release directory that lacks them) it says so and does nothing
+ * more: a deployment without them fails its probe, never here.
  */
 export const warmQuestionEmbedder = async (env: Env): Promise<void> => {
   if (tried) {

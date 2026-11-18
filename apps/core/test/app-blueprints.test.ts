@@ -253,18 +253,12 @@ describe("blueprints", { timeout: 60_000 }, () => {
     });
   });
 
-  // Knowledge is gone (GRA-1735): a grant on a collection an App holds from
-  // before is never declared, and a blueprint that declared one before is
-  // refused whole, never asked for, and never an internal error.
-  it("ask for no Knowledge collection, whatever an App or a blueprint held from before", async () => {
+  // Knowledge is gone (GRA-1735): a blueprint that declared a grant on a
+  // collection before is refused whole, never asked for, and never an
+  // internal error.
+  it("ask for no Knowledge collection, whatever a blueprint held from before", async () => {
     const owner = await personApi("builder");
     const source = await notesApp(owner);
-    await storedGrant(
-      { type: "app", id: source },
-      { type: "collection", id: "handbook" },
-      ["read"],
-      "HANDBOOK"
-    );
     const { id: blueprint } = await owner.api.apps.blueprints.mark(source, 1);
     const marked = await owner.api.apps.blueprints.list();
     await env.DB.prepare("UPDATE blueprints SET permissions = ? WHERE id = ?")

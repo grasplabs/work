@@ -8,7 +8,7 @@ import { env } from "cloudflare:workers";
  */
 export const storedGrant = async (
   subject: { type: "app" | "agent"; id: string },
-  object: { type: "collection" | "connection" | "platform"; id: string },
+  object: { type: "connection" | "platform"; id: string },
   actions: string[],
   binding: string,
   status: "active" | "requested" = "active"

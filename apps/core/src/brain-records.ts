@@ -68,9 +68,6 @@ import { inList, statementsWithin } from "./db/d1.ts";
 //   the onboarding's; `brain.addRecords` refuses all of them
 //   (`brainRecordInputSchema`). The onboarding keeps what it learned
 //   itself (GRA-1748): none of it is a record here.
-// - A record's words put back: a record an earlier release's term purge
-//   rewrote (`purged_at`) is left as purged when it is sent again under
-//   its id, never its words put back.
 
 /** A record's key across types, as its audit event names it. */
 const keyOf = ({ type, id }: { type: string; id: string }): string =>
@@ -83,8 +80,6 @@ const bodyOf = (record: BrainRecord): string => canonicalJson(record);
 interface Held {
   type: string;
   body: string;
-  /** A purge rewrote it: the same id sent again leaves it as it is. */
-  purged: boolean;
   /**
    * An admin took it out of the brain (brain-forget.ts): the same id sent
    * again leaves it as removed, and nothing new may name it.
@@ -105,7 +100,6 @@ const heldOf = async (
       id: brainRecords.id,
       type: brainRecords.type,
       body: brainRecords.body,
-      purgedAt: brainRecords.purgedAt,
       forgottenAt: brainRecords.forgottenAt,
     })
     .from(brainRecords)
@@ -115,12 +109,11 @@ const heldOf = async (
       sql`${brainRecords.id} IN (SELECT value FROM json_each(${JSON.stringify(wanted)}))`
     );
   return new Map(
-    rows.map(({ id, type, body, purgedAt, forgottenAt }) => [
+    rows.map(({ id, type, body, forgottenAt }) => [
       id,
       {
         type,
         body,
-        purged: purgedAt !== null,
         forgotten: forgottenAt !== null,
       },
     ])
@@ -337,7 +330,7 @@ const freshOf = (
       fresh.push(record);
     } else if (
       stored.type !== record.type ||
-      (!stored.purged && !stored.forgotten && stored.body !== bodyOf(record))
+      (!stored.forgotten && stored.body !== bodyOf(record))
     ) {
       throw brainRecordErrors.create("brain.record_conflict", {
         issues: [`${keyOf(record)}: held already, differently`],
