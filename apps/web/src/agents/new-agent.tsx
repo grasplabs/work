@@ -1,7 +1,8 @@
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { Fragment, useState } from "react";
+import type { ReactNode } from "react";
 
 import { Page, PageHeading } from "../frame/page.tsx";
 import { Button } from "../grasp/button/index.ts";
@@ -11,6 +12,7 @@ import {
   CardMedia,
   CardTitle,
 } from "../grasp/card/index.ts";
+import { ChatMessage } from "../grasp/chat-message/index.ts";
 import {
   Drawer,
   DrawerAction,
@@ -20,6 +22,8 @@ import {
   DrawerContent,
   DrawerTitle,
 } from "../grasp/drawer/index.ts";
+import { Field, FieldLabel } from "../grasp/field/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
 import {
   Item,
   ItemActions,
@@ -35,6 +39,8 @@ import type {
   QuestionKind,
   QuestionOption,
 } from "../grasp/question-tool/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { Textarea } from "../grasp/textarea/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { AgentFailure } from "./agent-facts.tsx";
@@ -55,6 +61,15 @@ import type { FigureLook, FigurePalette } from "./figure/look.ts";
 // a line. Once the last is answered, the whole agent waits in a Drawer, each answer with Change,
 // and Make agent makes it. Core makes it on, reaching nobody and with nothing it may do
 // (agent-builder.ts); the answers then set who may ask it and its schedule, and its page opens.
+
+/** CONCEPT: which way the questions are asked, from `?concept=` in the address. */
+const conceptOf = (): "a" | "b" | "c" | "now" => {
+  const asked =
+    typeof window === "undefined"
+      ? null
+      : new URLSearchParams(window.location.search).get("concept");
+  return asked === "a" || asked === "b" || asked === "c" ? asked : "now";
+};
 
 /** The questions, in the order they are asked. */
 const steps = [
@@ -124,6 +139,37 @@ const styles = stylex.create({
     isolation: "isolate",
   },
   words: { display: "grid", gap: grasp.space1, marginBlockStart: grasp.space3 },
+  // CONCEPT A: the questions as a conversation, the agent forming in its head.
+  chatHead: { display: "flex", alignItems: "center", gap: grasp.space4 },
+  chatWords: { display: "grid", gap: grasp.space1, minWidth: 0 },
+  chat: { display: "grid", gap: grasp.space4 },
+  // CONCEPT B: the question beside the agent taking form.
+  beside: {
+    display: "grid",
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      "@media (width >= 64rem)": "minmax(0, 1fr) 22rem",
+    },
+    alignItems: "start",
+    gap: grasp.space6,
+    width: "100%",
+    maxWidth: "64rem",
+    marginInline: "auto",
+  },
+  besideMain: {
+    display: "grid",
+    minWidth: 0,
+    order: { default: 2, "@media (width >= 64rem)": 1 },
+  },
+  besideCard: {
+    display: "grid",
+    gap: grasp.space4,
+    order: { default: 1, "@media (width >= 64rem)": 2 },
+    position: { default: "static", "@media (width >= 64rem)": "sticky" },
+    insetBlockStart: grasp.space6,
+  },
+  // CONCEPT C: the starting points, as words to begin from.
+  starts: { display: "flex", flexWrap: "wrap", gap: grasp.space2 },
   // The question as wide as the agent's card above it.
   whole: { width: "100%", maxWidth: "none" },
 });
@@ -219,6 +265,134 @@ const Forming = ({ draft }: { draft: Draft }) => {
   );
 };
 
+/** CONCEPT: the page's body, as concept `concept` asks. */
+const Concepted = ({
+  concept,
+  draft,
+  tool,
+  chat,
+  first,
+  describe,
+}: {
+  concept: "a" | "b" | "c" | "now";
+  draft: Draft;
+  tool: ReactNode;
+  chat: readonly {
+    step: Step;
+    short: string;
+    question: string;
+    answer: string;
+  }[];
+  /** Before the first answer, with the Drawer closed. */
+  first: boolean;
+  describe: {
+    described: string;
+    onDescribe: (value: string) => void;
+    onDraft: () => void;
+  };
+}) => {
+  const { t, i18n } = useLingui();
+  const sofar =
+    chat.length === 0 ? null : (
+      <KeyValueList
+        variant="inline"
+        items={chat.map(({ short, answer }) => ({ key: short, value: answer }))}
+      />
+    );
+  let inside = (
+    <div {...stylex.props(styles.column)}>
+      <Forming draft={draft} />
+      {sofar}
+      {tool}
+    </div>
+  );
+  if (concept === "a") {
+    inside = (
+      <div {...stylex.props(styles.column)}>
+        <span {...stylex.props(styles.chatHead)}>
+          <AgentFigure look={draft.look} size="md" state="listening" />
+          <span {...stylex.props(styles.chatWords)}>
+            <Heading level={2} size="ui">
+              {draft.name === "" ? t`The new agent` : draft.name}
+            </Heading>
+            {draft.job === "" ? null : (
+              <Text size="sm" tone="muted">
+                {draft.job}
+              </Text>
+            )}
+          </span>
+        </span>
+        <div {...stylex.props(styles.chat)}>
+          {chat.map((each) => (
+            <Fragment key={each.step}>
+              <ChatMessage from="agent" name="Grasp">
+                {each.question}
+              </ChatMessage>
+              <ChatMessage from="person">{each.answer}</ChatMessage>
+            </Fragment>
+          ))}
+        </div>
+        {tool}
+      </div>
+    );
+  }
+  if (concept === "b") {
+    inside = (
+      <div {...stylex.props(styles.beside)}>
+        <div {...stylex.props(styles.besideMain)}>{tool}</div>
+        <aside {...stylex.props(styles.besideCard)}>
+          <Forming draft={draft} />
+          {sofar}
+        </aside>
+      </div>
+    );
+  }
+  if (concept === "c" && first && draft.job === "") {
+    inside = (
+      <div {...stylex.props(styles.column)}>
+        <Forming draft={draft} />
+        <Field>
+          <FieldLabel>{t`What should it do?`}</FieldLabel>
+          <Textarea
+            onValueChange={(value) => {
+              describe.onDescribe(value);
+            }}
+            placeholder={t`Every Monday, look for invoices more than two weeks overdue and draft a friendly reminder to each client.`}
+            rows={4}
+            value={describe.described}
+          />
+        </Field>
+        <span {...stylex.props(styles.starts)}>
+          {agentTemplates.map((each) => (
+            <Button
+              key={each.key}
+              onClick={() => {
+                describe.onDescribe(i18n._(each.description));
+              }}
+              size="sm"
+              variant="quiet"
+            >
+              {i18n._(each.label)}
+            </Button>
+          ))}
+        </span>
+        <span>
+          <Button
+            disabled={describe.described.trim() === ""}
+            onClick={() => {
+              describe.onDraft();
+            }}
+            variant="ink"
+          >
+            {t`Draft it`}
+          </Button>
+        </span>
+      </div>
+    );
+  }
+  return inside;
+};
+
 /** The new agent's page: the questions, the agent taking form, and the summary in a Drawer. */
 export const NewAgent = ({
   personId,
@@ -239,6 +413,7 @@ export const NewAgent = ({
     {}
   );
   const [reviewing, setReviewing] = useState(false);
+  const [described, setDescribed] = useState("");
   const step: Step = steps[at] ?? "instructions";
   const answer = answers[step];
   const template = agentTemplates.find(({ key }) => key === draft.template);
@@ -326,7 +501,7 @@ export const NewAgent = ({
   };
 
   // Each question as Damsko's Question tool asks it.
-  const question = (() => {
+  const askedOf = (asked: Step): Asked => {
     const byStep: Record<Step, () => Asked> = {
       job: () => ({
         question: t`What should the agent do? Pick a starting point or say it in your own words.`,
@@ -419,8 +594,9 @@ export const NewAgent = ({
         placeholder: t`What it should know and how it should work.`,
       }),
     };
-    return byStep[step]();
-  })();
+    return byStep[asked]();
+  };
+  const question = askedOf(step);
 
   // Where the answer was never touched, the card starts from what the draft already holds.
   const startingAnswer = (): QuestionAnswer => {
@@ -513,56 +689,84 @@ export const NewAgent = ({
   };
 
   const answered = steps.slice(0, reviewing ? steps.length : at);
+  // CONCEPT: which way the questions are asked, from `?concept=` in the address.
+  const concept = conceptOf();
+  const tool = reviewing ? null : (
+    <QuestionTool
+      {...question}
+      failedLabel={t`Couldn't take that answer`}
+      key={step}
+      layout={styles.whole}
+      onBack={
+        at === 0
+          ? undefined
+          : () => {
+              setAt(at - 1);
+            }
+      }
+      onSubmit={submit}
+      onValueChange={keep}
+      {...(step === "instructions"
+        ? {
+            onSkip: () => {
+              setDraft({ ...draft, instructions: "" });
+              setReviewing(true);
+            },
+          }
+        : {})}
+      step={{ index: at, count: steps.length }}
+      submitDisabled={!ready}
+      submitDisabledReason={
+        nameTaken
+          ? t`Another agent has this name`
+          : t`Choose or write an answer first`
+      }
+      submitLabel={last ? t`Review` : t`Next`}
+      value={shown}
+    />
+  );
+  // CONCEPT C: describe it once, and Grasp drafts the whole agent from it.
+  const drafted = (): void => {
+    const said = described.trim();
+    const lower = said.toLowerCase();
+    const near =
+      agentTemplates.find((each) =>
+        i18n
+          ._(each.label)
+          .toLowerCase()
+          .split(" ")
+          .some((word) => word.length > 4 && lower.includes(word.slice(0, 5)))
+      ) ?? agentTemplates[0];
+    const name = freeNames(near)[0] ?? t`New agent`;
+    setDraft({
+      ...draft,
+      template: near?.key,
+      job: said,
+      name,
+      look: lookFromName(name),
+      instructions: near === undefined ? "" : i18n._(near.instructions),
+    });
+    setReviewing(true);
+  };
+  const inside = (
+    <Concepted
+      chat={answered.map((each) => ({
+        step: each,
+        question: askedOf(each).question,
+        short: words.short[each],
+        answer: words.answerOf(each, draft),
+      }))}
+      concept={concept}
+      describe={{ described, onDescribe: setDescribed, onDraft: drafted }}
+      draft={draft}
+      first={at === 0 && !reviewing}
+      tool={tool}
+    />
+  );
   return (
     <Page>
       <PageHeading title={t`New agent`} />
-      <div {...stylex.props(styles.column)}>
-        <Forming draft={draft} />
-        {answered.length === 0 ? null : (
-          <KeyValueList
-            variant="inline"
-            items={answered.map((each) => ({
-              key: words.short[each],
-              value: words.answerOf(each, draft),
-            }))}
-          />
-        )}
-        {/* While the Drawer holds the whole agent, no question stands under it. */}
-        {reviewing ? null : (
-          <QuestionTool
-            {...question}
-            failedLabel={t`Couldn't take that answer`}
-            key={step}
-            layout={styles.whole}
-            onBack={
-              at === 0
-                ? undefined
-                : () => {
-                    setAt(at - 1);
-                  }
-            }
-            onSubmit={submit}
-            onValueChange={keep}
-            {...(step === "instructions"
-              ? {
-                  onSkip: () => {
-                    setDraft({ ...draft, instructions: "" });
-                    setReviewing(true);
-                  },
-                }
-              : {})}
-            step={{ index: at, count: steps.length }}
-            submitDisabled={!ready}
-            submitDisabledReason={
-              nameTaken
-                ? t`Another agent has this name`
-                : t`Choose or write an answer first`
-            }
-            submitLabel={last ? t`Review` : t`Next`}
-            value={shown}
-          />
-        )}
-      </div>
+      {inside}
       <Drawer
         onOpenChange={(open) => {
           setReviewing(open);
