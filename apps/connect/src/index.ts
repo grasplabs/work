@@ -1006,6 +1006,7 @@ export default class Connect
       replayed: done.replayed,
       recovery: done.recovery,
       provenance: done.result.provenance,
+      provider: progress.provider,
       pendingActionId: done.pending?.id ?? held?.id,
       http: progress.http,
     };
