@@ -514,7 +514,10 @@ const heldAfter = (counter: readonly unknown[]): void => {
  * One step of the connection's owner for a change this read counted: the
  * sync's kind and what happened (`file.added`, `mail.removed`), keyed by
  * the change (the same on every repeat, so a page applied twice keeps it
- * once), on the provider's item, when the provider says it changed.
+ * once), on the provider's item, when the provider says it changed. Its
+ * system is the connection's provider, as a call's is (brain-events.ts).
+ * It writes nothing: the sync saw the change in that system, and who made
+ * it there (the owner, a colleague, a sender) it doesn't know.
  */
 const stepped = (
   applying: Applying,
@@ -527,9 +530,10 @@ const stepped = (
     key,
     personId: applying.source.personId,
     step: `${applying.source.kind}.${counter}`,
+    system: applying.source.provider,
+    writes: false,
     item,
     at,
-    // #2428 adds the system and whether the step wrote something: here.
   });
 };
 

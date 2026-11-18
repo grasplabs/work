@@ -72,7 +72,7 @@ const write = (
 });
 
 describe("the audit log", () => {
-  it("records a call with who made it, for whom, and what it read", async () => {
+  it("records a call with who made it, for whom, in which system, and what it read", async () => {
     const connectionId = await addConnection();
     await callAs(
       anna,
@@ -88,6 +88,8 @@ describe("the audit log", () => {
       provenance: ["message-1"],
       detail: {
         action: "mail.list",
+        // The connector, never which connection: the system it was in.
+        provider: "mail",
         onBehalfOf: "user-anna",
         mode: "workflow",
         sideEffect: true,

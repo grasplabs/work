@@ -1710,7 +1710,7 @@ describe("native sync", () => {
         await inStoreOf("brain", (sql) =>
           sql
             .exec<Record<string, SqlStorageValue>>(
-              "SELECT team, step, item FROM events WHERE team IN (?, ?) ORDER BY team",
+              "SELECT team, step, system, writes, item FROM events WHERE team IN (?, ?) ORDER BY team",
               `team:${five}`,
               `team:${four}`
             )
@@ -1729,14 +1729,26 @@ describe("native sync", () => {
       await sync();
 
       expect({
-        kept: kept.map(({ team, step }) => ({ team, step })),
+        kept: kept.map(({ team, step, system, writes }) => ({
+          team,
+          step,
+          system,
+          writes,
+        })),
         itemNamed: kept.every(
           ({ item }) => typeof item === "string" && item !== "note"
         ),
         found: await finds(owner.userId, note),
         again: await eventsOf(),
       }).toStrictEqual({
-        kept: [{ team: `team:${five}`, step: "file.added" }],
+        kept: [
+          {
+            team: `team:${five}`,
+            step: "file.added",
+            system: "microsoft",
+            writes: 0,
+          },
+        ],
         itemNamed: true,
         found: true,
         again: kept,

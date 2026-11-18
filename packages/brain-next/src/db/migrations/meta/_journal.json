@@ -225,6 +225,13 @@
       "when": 1795001400302,
       "tag": "0031_person_erasure_events",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1795012821248,
+      "tag": "0032_events_system",
+      "breakpoints": true
     }
   ]
 }

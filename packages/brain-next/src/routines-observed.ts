@@ -1,0 +1,285 @@
+import { minTeamShown } from "@grasp-os/shared/onboarding";
+
+import type {
+  ObservedRoutine,
+  ObservedRoutineStep,
+  ObservedVariant,
+} from "./contract.ts";
+
+// Routines seen in activity (GRA-1764): the one reader of events
+// (events.ts). Which step usually follows which, worked out by plain
+// counting, the way process mining draws a directly-follows graph: each
+// person's steps in a team, in the order they took them, are their trail,
+// and each step and the one after it on a trail is a move. No model sees
+// any of it. How it keeps to the rule that people are only ever shown
+// what five of them did, and how each way round it is closed:
+//
+// - A move one to four people made: a move counts only when at least
+//   `minTeamShown` distinct people of the team (`who`) made it, held in
+//   the query itself, so no caller can lower it. Steps, timings and
+//   variants are drawn from such moves alone. Five events of one person
+//   are one person.
+// - One person setting a figure: a timing is the middle of each person's
+//   own middle, so someone who made a move a hundred times counts once;
+//   and a step writes (so may show data copied) only when at least
+//   `minTeamShown` of the people who made its move wrote at it.
+// - Something of a person in the answer: never `who`, an item, a time, or
+//   a count of people or of steps; only steps, hours between them, and
+//   variants.
+// - A routine outliving what it rests on: nothing here is kept. Each call
+//   works it out again from the events there are, so after an erasure, an
+//   expiry or an emptied table a routine resting on fewer than five
+//   people is gone at the next call.
+
+/** An hour, in milliseconds: events are kept to it. */
+const hourMs = 60 * 60 * 1000;
+
+/** A step as one value: its system and its kind. */
+const keyOf = (system: string, step: string): string =>
+  JSON.stringify([system, step]);
+
+/** One kept move of one person, at one gap, and how often they made it at that gap. */
+interface MoveRow extends Record<string, SqlStorageValue> {
+  team: string;
+  who: string;
+  system: string;
+  step: string;
+  next_system: string;
+  next_step: string;
+  hours: number;
+  times: number;
+  /** Whether at least `minTeamShown` people took the move's first step writing. */
+  from_writes: number;
+  /** Whether at least `minTeamShown` people took the move's next step writing. */
+  to_writes: number;
+}
+
+/**
+ * Every move at least `minTeamShown` distinct people of its team made, by
+ * person and gap: a move is a step and the next step of the same person in
+ * the same team (by time, then by when it was kept), the same step twice
+ * in a row aside. Whether each of its two steps writes is held to the same
+ * floor: at least `minTeamShown` of the people who made the move wrote at
+ * it, so one person's write never marks a step the others only read at.
+ * Its three parameters are the floor, each time.
+ */
+const keptMovesSql = `
+WITH trail AS (
+  SELECT team, who, system, step, at,
+    LEAD(system) OVER w AS next_system,
+    LEAD(step) OVER w AS next_step,
+    LEAD(at) OVER w AS next_at,
+    writes,
+    LEAD(writes) OVER w AS next_writes
+  FROM events
+  -- Kept by the release before (rolled back to), which names no system.
+  WHERE system IS NOT NULL
+  WINDOW w AS (PARTITION BY team, who ORDER BY at, row)
+),
+moves AS (
+  SELECT team, who, system, step, next_system, next_step,
+    (next_at - at) / ${hourMs} AS hours, writes, next_writes
+  FROM trail
+  WHERE next_step IS NOT NULL
+    AND NOT (next_system = system AND next_step = step)
+),
+kept AS (
+  SELECT team, system, step, next_system, next_step,
+    COUNT(DISTINCT CASE WHEN writes = 1 THEN who END) >= ? AS from_writes,
+    COUNT(DISTINCT CASE WHEN next_writes = 1 THEN who END) >= ? AS to_writes
+  FROM moves
+  GROUP BY team, system, step, next_system, next_step
+  HAVING COUNT(DISTINCT who) >= ?
+)
+SELECT moves.team, moves.who, moves.system, moves.step,
+  moves.next_system, moves.next_step, moves.hours, COUNT(*) AS times,
+  kept.from_writes, kept.to_writes
+FROM moves
+JOIN kept USING (team, system, step, next_system, next_step)
+GROUP BY moves.team, moves.who, moves.system, moves.step,
+  moves.next_system, moves.next_step, moves.hours`;
+
+/** The middle of `values` counted `times` each: the mean of the two middles when even. */
+const middleOf = (counted: ReadonlyMap<number, number>): number => {
+  const sorted = [...counted].toSorted(([one], [other]) => one - other);
+  const total = sorted.reduce((sum, [, times]) => sum + times, 0);
+  /** The value at `place` (from 0) of the sorted whole. */
+  const at = (place: number): number => {
+    let seen = 0;
+    for (const [value, times] of sorted) {
+      seen += times;
+      if (place < seen) {
+        return value;
+      }
+    }
+    return 0;
+  };
+  return total % 2 === 1
+    ? at((total - 1) / 2)
+    : (at(total / 2 - 1) + at(total / 2)) / 2;
+};
+
+/** A move kept in a team: where it goes and each person's gaps on it. */
+interface Move {
+  to: string;
+  /** Each person's gaps, in hours, with how often each. */
+  people: Map<string, Map<number, number>>;
+  /** At least `minTeamShown` of its people wrote at its first step. */
+  fromWrites: boolean;
+  /** At least `minTeamShown` of its people wrote at its next step. */
+  toWrites: boolean;
+}
+
+/** How many hours a move takes: the middle of each person's own middle. */
+const hoursOf = (move: Move): number => {
+  const middles = new Map<number, number>();
+  for (const gaps of move.people.values()) {
+    const middle = middleOf(gaps);
+    middles.set(middle, (middles.get(middle) ?? 0) + 1);
+  }
+  return middleOf(middles);
+};
+
+/** The moves from a step, most people first, then by step. */
+const rankedOf = (moves: ReadonlyMap<string, Move>): Move[] =>
+  [...moves.values()].toSorted(
+    (one, other) =>
+      other.people.size - one.people.size || one.to.localeCompare(other.to)
+  );
+
+/** Every step `from` leads to by kept moves, one or more moves on. */
+const reachOf = (
+  graph: ReadonlyMap<string, Map<string, Move>>,
+  from: string
+): Set<string> => {
+  const reached = new Set<string>();
+  const next = [...(graph.get(from)?.keys() ?? [])];
+  for (let step = next.pop(); step !== undefined; step = next.pop()) {
+    if (!reached.has(step)) {
+      reached.add(step);
+      next.push(...(graph.get(step)?.keys() ?? []));
+    }
+  }
+  return reached;
+};
+
+/**
+ * The steps a team's routines start at: one for each group of steps that
+ * lead to each other (a loop, or a step alone) which no kept move enters
+ * from outside it, so every separate part of a team's activity, a loop
+ * included, has its routine, and activity elsewhere never takes one away.
+ * A group's start is its smallest step by key, so the same events always
+ * give the same routine.
+ */
+const startsOf = (graph: ReadonlyMap<string, Map<string, Move>>): string[] => {
+  const steps = [
+    ...new Set([
+      ...graph.keys(),
+      ...[...graph.values()].flatMap((moves) => [...moves.keys()]),
+    ]),
+  ].toSorted();
+  const reach = new Map(steps.map((step) => [step, reachOf(graph, step)]));
+  const starts = new Set<string>();
+  for (const step of steps) {
+    // The steps it leads to that lead back to it, and itself: in key order.
+    const group = steps.filter(
+      (other) =>
+        other === step ||
+        (reach.get(step)?.has(other) === true &&
+          reach.get(other)?.has(step) === true)
+    );
+    const entered = steps.some(
+      (other) =>
+        !group.includes(other) &&
+        group.some((mine) => graph.get(other)?.has(mine) === true)
+    );
+    const [first] = group;
+    if (!entered && first !== undefined && graph.has(first)) {
+      starts.add(first);
+    }
+  }
+  return [...starts];
+};
+
+/**
+ * The routine starting at `start` in a team's `graph`: each step followed
+ * by the one most people take next, until none or one already on it.
+ */
+const routineFrom = (
+  team: string,
+  start: string,
+  graph: ReadonlyMap<string, Map<string, Move>>,
+  partsOf: (key: string) => { system: string; step: string }
+): ObservedRoutine => {
+  const path = [start];
+  // The move that leads from each step to the next, in order.
+  const taken: Move[] = [];
+  for (;;) {
+    const [next] = rankedOf(graph.get(path.at(-1) ?? "") ?? new Map());
+    if (next === undefined || path.includes(next.to)) {
+      break;
+    }
+    path.push(next.to);
+    taken.push(next);
+  }
+  const steps = path.map((key, at): ObservedRoutineStep => {
+    const { system, step } = partsOf(key);
+    // As the move into it wrote; the first, as the move out of it.
+    const into = at === 0 ? undefined : taken[at - 1];
+    const writes =
+      into === undefined ? (taken[0]?.fromWrites ?? false) : into.toWrites;
+    const before = at === 0 ? undefined : partsOf(path[at - 1] ?? "");
+    return {
+      system,
+      step,
+      writes,
+      hoursAfter: into === undefined ? null : hoursOf(into),
+      copied: writes && before !== undefined && before.system !== system,
+    };
+  });
+  const variants = path.flatMap((key, at): ObservedVariant[] =>
+    rankedOf(graph.get(key) ?? new Map())
+      .filter(({ to }) => to !== path[at + 1])
+      .map(({ to }) => ({ after: at, ...partsOf(to) }))
+  );
+  return { team, steps, variants };
+};
+
+/**
+ * The routines seen in every team's events now: one from each step its
+ * kept moves start at (`startsOf`), each with at least two steps.
+ */
+export const observedRoutines = (sql: SqlStorage): ObservedRoutine[] => {
+  const rows = sql
+    .exec<MoveRow>(keptMovesSql, minTeamShown, minTeamShown, minTeamShown)
+    .toArray();
+  const teams = new Map<string, Map<string, Map<string, Move>>>();
+  // Each step's system and kind, by its key.
+  const parts = new Map<string, { system: string; step: string }>();
+  const partsOf = (key: string) => parts.get(key) ?? { system: "", step: "" };
+  for (const row of rows) {
+    const graph = teams.get(row.team) ?? new Map<string, Map<string, Move>>();
+    teams.set(row.team, graph);
+    const from = keyOf(row.system, row.step);
+    const to = keyOf(row.next_system, row.next_step);
+    const moves = graph.get(from) ?? new Map<string, Move>();
+    graph.set(from, moves);
+    parts.set(from, { system: row.system, step: row.step });
+    parts.set(to, { system: row.next_system, step: row.next_step });
+    const move: Move = moves.get(to) ?? {
+      to,
+      people: new Map<string, Map<number, number>>(),
+      fromWrites: row.from_writes === 1,
+      toWrites: row.to_writes === 1,
+    };
+    moves.set(to, move);
+    const gaps = move.people.get(row.who) ?? new Map<number, number>();
+    move.people.set(row.who, gaps);
+    gaps.set(row.hours, (gaps.get(row.hours) ?? 0) + row.times);
+  }
+  return [...teams]
+    .toSorted(([one], [other]) => one.localeCompare(other))
+    .flatMap(([team, graph]) =>
+      startsOf(graph).map((start) => routineFrom(team, start, graph, partsOf))
+    );
+};

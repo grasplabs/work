@@ -602,6 +602,10 @@ msgstr "{holder}: {actions} on {resource}"
 msgid "{hours, plural, one {# hour a week in all that Grasp can count} other {# hours a week in all that Grasp can count}}"
 msgstr "{hours, plural, one {# hour a week in all that Grasp can count} other {# hours a week in all that Grasp can count}}"
 
+#: src/brain/opportunities-page.tsx
+msgid "{hours, plural, one {# hour after the step before} other {# hours after the step before}}"
+msgstr "{hours, plural, one {# hour after the step before} other {# hours after the step before}}"
+
 #: src/dashboard/signals.tsx
 msgid "{hours, plural, one {# hour} other {# hours}}"
 msgstr "{hours, plural, one {# hour} other {# hours}}"
@@ -945,6 +949,14 @@ msgstr "{number} of {total}"
 msgid "{number}. {step} (a person approves this step)"
 msgstr "{number}. {step} (a person approves this step)"
 
+#: src/brain/opportunity-drafts.ts
+msgid "{number}. {system}: {step}"
+msgstr "{number}. {system}: {step}"
+
+#: src/brain/opportunity-drafts.ts
+msgid "{number}. {system}: {step} (copied from another system)"
+msgstr "{number}. {system}: {step} (copied from another system)"
+
 #: src/brain/brain-atlas.ts
 msgid "{one} and {other} both name the same handover, each from their own side."
 msgstr "{one} and {other} both name the same handover, each from their own side."
@@ -1197,6 +1209,11 @@ msgstr "{subject}: {actions} on {object}"
 #: src/brain/brain-atlas.ts
 msgid "{sunk, plural, one {# of them is a time waster, as the team said it.} other {# of them are time wasters, as the teams said them.}}"
 msgstr "{sunk, plural, one {# of them is a time waster, as the team said it.} other {# of them are time wasters, as the teams said them.}}"
+
+#: src/brain/opportunities-page.tsx
+msgctxt "a system and a step taken in it"
+msgid "{system}: {step}"
+msgstr "{system}: {step}"
 
 #: src/apps/data-model-changes.tsx
 msgid "{table} already holds records. What should the ones without {missing} get?"
@@ -2204,6 +2221,10 @@ msgstr "Advisory"
 #: src/settings/audit-archive.tsx
 msgid "After a run ends. After this, its inputs, outputs and messages are removed."
 msgstr "After a run ends. After this, its inputs, outputs and messages are removed."
+
+#: src/brain/opportunities-page.tsx
+msgid "After step {position}, some go to {system}: {step}"
+msgstr "After step {position}, some go to {system}: {step}"
 
 #: src/routes/_shell.agents.$agent.tsx
 msgid "Agent"
@@ -4497,6 +4518,10 @@ msgstr "Copied from a connected system"
 msgid "Copied from a connected system, version {version}"
 msgstr "Copied from a connected system, version {version}"
 
+#: src/brain/opportunities-page.tsx
+msgid "Copied from another system"
+msgstr "Copied from another system"
+
 #: src/apps/app-settings.tsx
 msgid "Copies"
 msgstr "Copies"
@@ -4951,8 +4976,16 @@ msgid "Describe the App"
 msgstr "Describe the App"
 
 #: src/brain/opportunities-page.tsx
+msgid "Described in the team's interviews, and seen in its activity."
+msgstr "Described in the team's interviews, and seen in its activity."
+
+#: src/brain/opportunities-page.tsx
 msgid "Described in the team's interviews."
 msgstr "Described in the team's interviews."
+
+#: src/brain/opportunities-page.tsx
+msgid "Described, but not seen: {toldOnly}."
+msgstr "Described, but not seen: {toldOnly}."
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
@@ -12644,6 +12677,14 @@ msgctxt "what something known rests on: Grasp saw it in use"
 msgid "Seen"
 msgstr "Seen"
 
+#: src/brain/opportunities-page.tsx
+msgid "Seen in activity"
+msgstr "Seen in activity"
+
+#: src/brain/opportunities-page.tsx
+msgid "Seen in the team's activity."
+msgstr "Seen in the team's activity."
+
 #: src/brain/work-knowledge.tsx
 msgid "Seen in use"
 msgstr "Seen in use"
@@ -12651,6 +12692,10 @@ msgstr "Seen in use"
 #: src/brain/brain.ts
 msgid "Seen in use: not observed through sign-in or Pulse yet"
 msgstr "Seen in use: not observed through sign-in or Pulse yet"
+
+#: src/brain/opportunities-page.tsx
+msgid "Seen, but not described: {seenOnly}."
+msgstr "Seen, but not described: {seenOnly}."
 
 #. Folder of the applications seen in use that no team named
 #: src/brain/brain.ts
@@ -16335,6 +16380,10 @@ msgstr "What every agent should know about the company."
 msgid "What every chat in the company starts with. Only admins change them."
 msgstr "What every chat in the company starts with. Only admins change them."
 
+#: src/brain/opportunity-drafts.ts
+msgid "What five or more of the team were seen doing:"
+msgstr "What five or more of the team were seen doing:"
+
 #: src/brain/work-knowledge.tsx
 msgid "What gets in the way"
 msgstr "What gets in the way"
@@ -16344,8 +16393,8 @@ msgid "What Grasp and its agents do by themselves is under Activity."
 msgstr "What Grasp and its agents do by themselves is under Activity."
 
 #: src/brain/opportunities-page.tsx
-msgid "What Grasp could automate or improve, from how your teams describe their work, the largest first. One hidden comes back when its evidence changes."
-msgstr "What Grasp could automate or improve, from how your teams describe their work, the largest first. One hidden comes back when its evidence changes."
+msgid "What Grasp could automate or improve, from how your teams describe their work and how five or more of a team were seen doing it, the largest first. One hidden comes back when its evidence changes."
+msgstr "What Grasp could automate or improve, from how your teams describe their work and how five or more of a team were seen doing it, the largest first. One hidden comes back when its evidence changes."
 
 #: src/brain/brain-sections.ts
 msgid "What Grasp does not know yet, and who can answer it."
@@ -16689,6 +16738,10 @@ msgstr "What waits on you"
 #: src/routes/_shell.dashboard.tsx
 msgid "What waits on you, each with its next step, and what could be better."
 msgstr "What waits on you, each with its next step, and what could be better."
+
+#: src/brain/opportunities-page.tsx
+msgid "What was described and what was seen use the same systems."
+msgstr "What was described and what was seen use the same systems."
 
 #: src/brain/brain-atlas.ts
 msgid "What was heard, written and connected"
@@ -17127,6 +17180,10 @@ msgstr "Withdrew an invitation"
 #: src/workflows/kept-state.tsx
 msgid "Withheld: the run that kept it read something that is no longer there to read, so later runs start without it."
 msgstr "Withheld: the run that kept it read something that is no longer there to read, so later runs start without it."
+
+#: src/brain/opportunities-page.tsx
+msgid "Within the hour of the step before"
+msgstr "Within the hour of the step before"
 
 #: src/brain/memories-page.tsx
 msgid "Without a name"
