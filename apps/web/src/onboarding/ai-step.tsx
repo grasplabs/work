@@ -9,31 +9,33 @@ import type {
   GraspAiListed,
   OrganizationProviderId,
 } from "@grasp-os/shared/ai-providers";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/ui/components/native-select";
-import {
-  RadioGroup,
-  RadioGroupItem,
-} from "@grasp-os/ui/components/radio-group";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { CheckIcon } from "lucide-react";
-import { useId, useState } from "react";
+import { useState } from "react";
 
 import { failureMessage } from "../chat/failure.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
+import { Button } from "../grasp/button/index.ts";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+} from "../grasp/field/index.ts";
+import { Icon, Tick } from "../grasp/icons/index.ts";
+import { Input, PasswordInput } from "../grasp/input/index.ts";
+import { RadioGroup, RadioGroupItem } from "../grasp/radio-group/index.ts";
+import {
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "../grasp/select/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp as tokens } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { Heading, Onward, Primary } from "./setup-parts.tsx";
 import type { StepVoice } from "./setup-parts.tsx";
@@ -47,6 +49,27 @@ import type { AiReadiness } from "./setup.ts";
 // question, and chooses the model only once it answered. A key that
 // doesn't work is removed again, says why and stays here. Fallback models and a second
 // provider are for Settings › AI providers, which reads the same listing.
+
+const styles = stylex.create({
+  done: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: tokens.space2,
+    margin: 0,
+  },
+  tick: { display: "flex", color: tokens.success },
+  form: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.space5,
+    width: "100%",
+    maxWidth: "24rem",
+    textAlign: "start",
+  },
+  full: { width: "100%" },
+  start: { alignSelf: "flex-start", justifySelf: "start" },
+});
 
 /** The prefix of an OpenAI-compatible endpoint's models, which the organization names. */
 const compatiblePrefix = "openai-compatible/";
@@ -111,6 +134,18 @@ const useWhy = () => {
       : failureMessage(code, i18n);
 };
 
+/** That a model answers, after a tick. */
+const Done = ({ children }: { children: string }) => (
+  <p {...stylex.props(styles.done)}>
+    <span {...stylex.props(styles.tick)}>
+      <Icon icon={Tick} />
+    </span>
+    <Text element="span" tone="muted">
+      {children}
+    </Text>
+  </p>
+);
+
 /** A model is ready for calls: who answers, and the way on. */
 const Connected = ({
   providers,
@@ -128,13 +163,7 @@ const Connected = ({
     return (
       <>
         <Onward>
-          <p className="text-muted-foreground flex items-center justify-center gap-2">
-            <CheckIcon
-              aria-hidden="true"
-              className="text-status-agreed size-4 flex-none"
-            />
-            <span>{t`On Grasp’s AI: ${grasp}`}</span>
-          </p>
+          <Done>{t`On Grasp’s AI: ${grasp}`}</Done>
         </Onward>
         <Primary onClick={onDone}>{t`Continue`}</Primary>
       </>
@@ -144,13 +173,7 @@ const Connected = ({
     <>
       {providers.length === 0 ? null : (
         <Onward>
-          <p className="text-muted-foreground flex items-center justify-center gap-2">
-            <CheckIcon
-              aria-hidden="true"
-              className="text-status-agreed size-4 flex-none"
-            />
-            <span>{t`Connected: ${names}`}</span>
-          </p>
+          <Done>{t`Connected: ${names}`}</Done>
         </Onward>
       )}
       <Primary onClick={onDone}>{t`Continue`}</Primary>
@@ -176,7 +199,6 @@ const ConnectForm = ({
   const { t } = useLingui();
   const router = useRouter();
   const why = useWhy();
-  const ids = useId();
   const { busy, failure, run } = useCoreAction();
   const [chosen, setChosen] = useState<OrganizationProviderId | undefined>();
   const [key, setKey] = useState("");
@@ -233,111 +255,94 @@ const ConnectForm = ({
   return (
     <>
       <Onward>
-        <div className="w-full max-w-sm text-left">
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor={`${ids}-provider`}>{t`Provider`}</FieldLabel>
-              <NativeSelect
-                disabled={busy}
-                id={`${ids}-provider`}
-                onChange={(event) => {
-                  setChosen(
-                    offered.find((each) => each.provider === event.target.value)
-                      ?.provider
-                  );
-                  setPicked(undefined);
-                  setAll(false);
-                  setRefused(undefined);
-                }}
-                value={provider.provider}
-              >
-                {offered.map((each) => (
-                  <NativeSelectOption key={each.provider} value={each.provider}>
-                    {each.label}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-              <FieldDescription>{t`Runs at: ${whereItRuns}`}</FieldDescription>
-            </Field>
-            {custom ? (
-              <Field>
-                <FieldLabel
-                  htmlFor={`${ids}-base-url`}
-                >{t`Base URL`}</FieldLabel>
-                <Input
-                  disabled={busy}
-                  id={`${ids}-base-url`}
-                  inputMode="url"
-                  onChange={(event) => {
-                    setBaseUrl(event.target.value);
-                  }}
-                  placeholder="https://"
-                  type="url"
-                  value={baseUrl}
-                />
-              </Field>
-            ) : null}
-            <Field>
-              <FieldLabel htmlFor={`${ids}-key`}>{t`Key`}</FieldLabel>
+        <div {...stylex.props(styles.form)}>
+          <Field disabled={busy}>
+            <FieldLabel>{t`Provider`}</FieldLabel>
+            <Select
+              disabled={busy}
+              items={offered.map((each) => ({
+                value: each.provider,
+                label: each.label,
+              }))}
+              onValueChange={(value) => {
+                setChosen(
+                  offered.find((each) => each.provider === value)?.provider
+                );
+                setPicked(undefined);
+                setAll(false);
+                setRefused(undefined);
+              }}
+              value={provider.provider}
+            >
+              <SelectTrigger layout={styles.full}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent />
+            </Select>
+            <FieldDescription>{t`Runs at: ${whereItRuns}`}</FieldDescription>
+          </Field>
+          {custom ? (
+            <Field disabled={busy}>
+              <FieldLabel>{t`Base URL`}</FieldLabel>
               <Input
-                autoComplete="off"
-                disabled={busy}
-                id={`${ids}-key`}
-                onChange={(event) => {
-                  setKey(event.target.value);
-                }}
-                spellCheck={false}
-                type="password"
-                value={key}
+                inputMode="url"
+                onValueChange={setBaseUrl}
+                placeholder="https://"
+                type="url"
+                value={baseUrl}
               />
             </Field>
-            {custom ? (
-              <Field>
-                <FieldLabel htmlFor={`${ids}-model`}>{t`Model`}</FieldLabel>
-                <Input
+          ) : null}
+          <Field disabled={busy}>
+            <FieldLabel>{t`Key`}</FieldLabel>
+            <PasswordInput
+              autoComplete="off"
+              onValueChange={setKey}
+              value={key}
+            />
+          </Field>
+          {custom ? (
+            <Field disabled={busy}>
+              <FieldLabel>{t`Model`}</FieldLabel>
+              <Input onValueChange={setNamed} value={named} />
+              <FieldDescription>{t`As your endpoint names it, such as llama-3.3-70b.`}</FieldDescription>
+            </Field>
+          ) : (
+            <Field disabled={busy}>
+              <FieldLabel>{t`Model`}</FieldLabel>
+              <Select
+                disabled={busy}
+                items={models.map((each) => ({
+                  value: each.model,
+                  label: each.name,
+                }))}
+                onValueChange={(value) => {
+                  if (typeof value === "string") {
+                    setPicked(value);
+                  }
+                }}
+                value={listed ?? null}
+              >
+                <SelectTrigger layout={styles.full}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent />
+              </Select>
+              {models.length < provider.models.length ? (
+                <Button
                   disabled={busy}
-                  id={`${ids}-model`}
-                  onChange={(event) => {
-                    setNamed(event.target.value);
+                  layout={styles.start}
+                  onClick={() => {
+                    setAll(true);
                   }}
-                  value={named}
-                />
-                <FieldDescription>{t`As your endpoint names it, such as llama-3.3-70b.`}</FieldDescription>
-              </Field>
-            ) : (
-              <Field>
-                <FieldLabel htmlFor={`${ids}-model`}>{t`Model`}</FieldLabel>
-                <NativeSelect
-                  disabled={busy}
-                  id={`${ids}-model`}
-                  onChange={(event) => {
-                    setPicked(event.target.value);
-                  }}
-                  value={listed ?? ""}
+                  size="sm"
+                  variant="ghost"
                 >
-                  {models.map((each) => (
-                    <NativeSelectOption key={each.model} value={each.model}>
-                      {each.name}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-                {models.length < provider.models.length ? (
-                  <div>
-                    <Button
-                      disabled={busy}
-                      onClick={() => {
-                        setAll(true);
-                      }}
-                      size="sm"
-                      variant="link"
-                    >
-                      {t`Use a different model`}
-                    </Button>
-                  </div>
-                ) : null}
-              </Field>
-            )}
-          </FieldGroup>
+                  {t`Use a different model`}
+                </Button>
+              ) : null}
+            </Field>
+          )}
         </div>
         <ErrorText>{refused ?? failure}</ErrorText>
       </Onward>
@@ -391,7 +396,7 @@ const GraspChoice = ({
   return (
     <>
       <Onward>
-        <p className="text-muted-foreground">{t`Runs at: ${whereItRuns}. A monthly limit applies: once it is reached, AI stops until the next month.`}</p>
+        <Text tone="muted">{t`Runs at: ${whereItRuns}. A monthly limit applies: once it is reached, AI stops until the next month.`}</Text>
         <ErrorText>{failure}</ErrorText>
       </Onward>
       <Primary
@@ -420,7 +425,6 @@ const Asking = ({
   onConnected: () => void;
 }) => {
   const { t } = useLingui();
-  const ids = useId();
   const [whose, setWhose] = useState<Whose>("grasp");
   const { grasp } = listing;
   const model = grasp.model.name;
@@ -438,35 +442,32 @@ const Asking = ({
   return (
     <>
       <Onward>
-        <RadioGroup
-          aria-label={t`Which AI`}
-          className="w-full max-w-sm text-left"
-          onValueChange={(value: unknown) => {
-            if (value === "grasp" || value === "own") {
-              setWhose(value);
-            }
-          }}
-          value={whose}
-        >
-          <Field orientation="horizontal">
-            <RadioGroupItem id={`${ids}-grasp`} value="grasp" />
-            <div className="flex min-w-0 flex-col gap-0.5">
-              <FieldLabel
-                htmlFor={`${ids}-grasp`}
-              >{t`Use Grasp’s AI`}</FieldLabel>
-              <FieldDescription>{t`Nothing to set up. It runs on ${model}, and you pay for what your company uses.`}</FieldDescription>
-            </div>
-          </Field>
-          <Field orientation="horizontal">
-            <RadioGroupItem id={`${ids}-own`} value="own" />
-            <div className="flex min-w-0 flex-col gap-0.5">
-              <FieldLabel
-                htmlFor={`${ids}-own`}
-              >{t`Use your own key`}</FieldLabel>
-              <FieldDescription>{t`Your own contract with Anthropic, OpenAI, Mistral or another provider. You pay them directly.`}</FieldDescription>
-            </div>
-          </Field>
-        </RadioGroup>
+        <div {...stylex.props(styles.form)}>
+          <RadioGroup
+            aria-label={t`Which AI`}
+            onValueChange={(value: unknown) => {
+              if (value === "grasp" || value === "own") {
+                setWhose(value);
+              }
+            }}
+            value={whose}
+          >
+            <Field orientation="horizontal">
+              <RadioGroupItem value="grasp" />
+              <FieldContent>
+                <FieldLabel>{t`Use Grasp’s AI`}</FieldLabel>
+                <FieldDescription>{t`Nothing to set up. It runs on ${model}, and you pay for what your company uses.`}</FieldDescription>
+              </FieldContent>
+            </Field>
+            <Field orientation="horizontal">
+              <RadioGroupItem value="own" />
+              <FieldContent>
+                <FieldLabel>{t`Use your own key`}</FieldLabel>
+                <FieldDescription>{t`Your own contract with Anthropic, OpenAI, Mistral or another provider. You pay them directly.`}</FieldDescription>
+              </FieldContent>
+            </Field>
+          </RadioGroup>
+        </div>
       </Onward>
       {whose === "grasp" ? (
         <GraspChoice grasp={grasp} onConnected={onConnected} />
