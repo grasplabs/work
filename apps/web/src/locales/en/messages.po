@@ -10580,6 +10580,14 @@ msgstr "Not interviewed yet."
 msgid "not invited"
 msgstr "not invited"
 
+#: src/settings/invitations.tsx
+msgid "Not invited: {notInvited}."
+msgstr "Not invited: {notInvited}."
+
+#: src/settings/invitations.tsx
+msgid "Not invited: {notInvited}. {sent, plural, one {The other invitation went.} other {The other # invitations went.}}"
+msgstr "Not invited: {notInvited}. {sent, plural, one {The other invitation went.} other {The other # invitations went.}}"
+
 #: src/brain/brain-source-contents.tsx
 msgid "Not listed"
 msgstr "Not listed"
@@ -11795,6 +11803,10 @@ msgstr "Passing it on"
 #: src/routes/_shell.settings.security.tsx
 msgid "Passwords and two-step sign-in live with your organization’s account."
 msgstr "Passwords and two-step sign-in live with your organization’s account."
+
+#: src/settings/invitations.tsx
+msgid "Paste several at once, split by commas or lines."
+msgstr "Paste several at once, split by commas or lines."
 
 #: src/settings/ai-providers.tsx
 msgid "Paste the key."

@@ -10580,6 +10580,14 @@ msgstr "Aún sin entrevista."
 msgid "not invited"
 msgstr "no invitado"
 
+#: src/settings/invitations.tsx
+msgid "Not invited: {notInvited}."
+msgstr "No invitados: {notInvited}."
+
+#: src/settings/invitations.tsx
+msgid "Not invited: {notInvited}. {sent, plural, one {The other invitation went.} other {The other # invitations went.}}"
+msgstr "No invitados: {notInvited}. {sent, plural, one {La otra invitación se envió.} other {Las otras # invitaciones se enviaron.}}"
+
 #: src/brain/brain-source-contents.tsx
 msgid "Not listed"
 msgstr "No indicados"
@@ -11795,6 +11803,10 @@ msgstr "Traspaso"
 #: src/routes/_shell.settings.security.tsx
 msgid "Passwords and two-step sign-in live with your organization’s account."
 msgstr "Las contraseñas y el inicio de sesión en dos pasos dependen de la cuenta de tu organización."
+
+#: src/settings/invitations.tsx
+msgid "Paste several at once, split by commas or lines."
+msgstr "Pega varias a la vez, separadas por comas o líneas."
 
 #: src/settings/ai-providers.tsx
 msgid "Paste the key."

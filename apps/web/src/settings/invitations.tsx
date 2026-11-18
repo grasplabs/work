@@ -30,7 +30,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../grasp/dropdown-menu/index.ts";
-import { Field, FieldError, FieldLabel } from "../grasp/field/index.ts";
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldLabel,
+} from "../grasp/field/index.ts";
 import { Copy, More, Plus, Trash } from "../grasp/icons/index.ts";
 import {
   Item,
@@ -66,6 +71,9 @@ const isRole = (value: unknown): value is Role =>
 
 /** An email address as a person types one: something, @, a domain with a dot. */
 const addressPattern = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/u;
+
+/** A sentence's own full stop, left out where it stands in brackets within another. */
+const endingStop = /\.$/u;
 
 /** Whether `text` reads as an email address. */
 const isAddress = (text: string): boolean => addressPattern.test(text);
@@ -119,11 +127,14 @@ export const InviteButton = () => {
   const [role, setRole] = useState<Role>("user");
   const [checked, setChecked] = useState(false);
   const [failed, setFailed] = useState<{ email: string; why: string }[]>([]);
+  // How many of the last send went: said beside who did not.
+  const [sent, setSent] = useState(0);
   const reset = (): void => {
     setAddresses([]);
     setRole("user");
     setChecked(false);
     setFailed([]);
+    setSent(0);
   };
   const bad = checked ? addresses.filter((each) => !isAddress(each)) : [];
   const stillFailing = failed.filter(({ email }) => addresses.includes(email));
@@ -135,9 +146,16 @@ export const InviteButton = () => {
     const listed = formatList(bad);
     problem = t`${plural(count, { one: "This is not an email address:", other: "These are not email addresses:" })} ${listed}`;
   } else if (stillFailing.length > 0) {
-    problem = formatList(
-      stillFailing.map(({ email, why }) => `${email}: ${why}`)
+    // A send that went in part says who was invited and who was not, never done nor failed.
+    const notInvited = formatList(
+      stillFailing.map(
+        ({ email, why }) => `${email} (${why.replace(endingStop, "")})`
+      )
     );
+    problem =
+      sent === 0
+        ? t`Not invited: ${notInvited}.`
+        : t`Not invited: ${notInvited}. ${plural(sent, { one: "The other invitation went.", other: "The other # invitations went." })}`;
   }
   const wrongness = (each: string): string | false => {
     if (checked && !isAddress(each)) {
@@ -159,6 +177,7 @@ export const InviteButton = () => {
     if (result.failed.length > 0) {
       setAddresses(result.failed.map(({ email }) => email));
       setFailed(result.failed);
+      setSent(result.sent.length);
       throw new Error("Some invitations were not made.");
     }
   };
@@ -193,7 +212,13 @@ export const InviteButton = () => {
                 placeholder={t`name@company.com`}
                 value={addresses}
               />
-              {problem === "" ? null : <FieldError match>{problem}</FieldError>}
+              {problem === "" ? (
+                <FieldDescription>
+                  {t`Paste several at once, split by commas or lines.`}
+                </FieldDescription>
+              ) : (
+                <FieldError match>{problem}</FieldError>
+              )}
             </Field>
             <Field name="role">
               <FieldLabel>{t`Role`}</FieldLabel>

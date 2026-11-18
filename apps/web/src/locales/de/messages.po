@@ -10580,6 +10580,14 @@ msgstr "Noch nicht interviewt."
 msgid "not invited"
 msgstr "nicht eingeladen"
 
+#: src/settings/invitations.tsx
+msgid "Not invited: {notInvited}."
+msgstr "Nicht eingeladen: {notInvited}."
+
+#: src/settings/invitations.tsx
+msgid "Not invited: {notInvited}. {sent, plural, one {The other invitation went.} other {The other # invitations went.}}"
+msgstr "Nicht eingeladen: {notInvited}. {sent, plural, one {Die andere Einladung ging raus.} other {Die anderen # Einladungen gingen raus.}}"
+
 #: src/brain/brain-source-contents.tsx
 msgid "Not listed"
 msgstr "Nicht aufgeführt"
@@ -11795,6 +11803,10 @@ msgstr "Weitergabe"
 #: src/routes/_shell.settings.security.tsx
 msgid "Passwords and two-step sign-in live with your organization’s account."
 msgstr "Passwörter und Zwei-Schritt-Anmeldung liegen beim Konto Ihrer Organisation."
+
+#: src/settings/invitations.tsx
+msgid "Paste several at once, split by commas or lines."
+msgstr "Fügen Sie mehrere auf einmal ein, getrennt durch Kommas oder Zeilen."
 
 #: src/settings/ai-providers.tsx
 msgid "Paste the key."
