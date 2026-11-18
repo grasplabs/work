@@ -1211,7 +1211,7 @@ export interface ChatsApi {
   efforts: () => Promise<Record<string, ModelEfforts>>;
   /**
    * What people call each of `models()`: its provider's own name for it
-   * ("Claude Sonnet 5"), for any member, since only admins read the
+   * ("Claude Sonnet 4.5"), for any member, since only admins read the
    * providers' catalog. A model the organization named itself, on its
    * OpenAI-compatible endpoint, is called what the organization named it.
    */
