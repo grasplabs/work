@@ -6476,6 +6476,12 @@ export const forgetForAppAs = async (
 //   erasure finds and deletes their events in every team
 //   (`eraseEventsOf`). A member removed but not erased keeps theirs, as
 //   history.
+// - A drain that read a person's teams before their erasure writing after
+//   it: the erasure closes their tags in the Brain, which then refuses an
+//   event under one.
+// - A rotated auth secret, after which no erasure could compute the old
+//   tags: each call names its key (`eventKeyIdLabel`), and the Brain drops
+//   every event and closed tag made under another.
 //
 // The Brain deletes every event past its time on core's clock
 // (`expireEvents`).
@@ -6519,6 +6525,15 @@ const macOf = async (key: CryptoKey, text: string): Promise<string> =>
       await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(text))
     )
   );
+
+/**
+ * What names the keys events are made under, for the Brain (`keyId`): a
+ * MAC of this under the `who` key, which identifies the key without
+ * revealing it. The three event keys derive from the same secret, so one
+ * id stands for all three; when it changes, the Brain drops what was made
+ * under the old ones (its events.ts `underKey`).
+ */
+const eventKeyIdLabel = "grasp-os/brain-event-key-id";
 
 /** `personId`'s tag in team `team` (a group, `teamGroup`), under `whoKey`. */
 const whoOf = async (
@@ -6581,6 +6596,8 @@ export const recordEvents = async (
   for (let start = 0; start < events.length; start += eventsPerAddMax) {
     // oxlint-disable-next-line no-await-in-loop -- one page at a time
     await brain(env).addEvents({
+      // oxlint-disable-next-line no-await-in-loop -- one page at a time
+      keyId: await macOf(whoKey, eventKeyIdLabel),
       events: events.slice(start, start + eventsPerAddMax),
     });
   }
@@ -6603,9 +6620,11 @@ export const eraseEventsOf = async (
   const who = await Promise.all(
     teamRows.map(async ({ id }) => await whoOf(whoKey, person, teamGroup(id)))
   );
+  const keyId = await macOf(whoKey, eventKeyIdLabel);
   for (let start = 0; start < who.length; start += eventsPerAddMax) {
     // oxlint-disable-next-line no-await-in-loop -- one page at a time
     await brain(env).eraseEvents({
+      keyId,
       who: who.slice(start, start + eventsPerAddMax),
     });
   }

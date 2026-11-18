@@ -11,6 +11,9 @@ const shared = (): Store => env.BRAIN_STORE.getByName("brain");
 
 const hourMs = 60 * 60 * 1000;
 
+/** The host's key for events, as one id: the same on every add here. */
+const keyId = "a".repeat(64);
+
 /** Some hours ago, on the hour: inside the time events are kept. */
 const base = Math.floor(Date.now() / hourMs) * hourMs - 200 * hourMs;
 
@@ -65,6 +68,7 @@ const peopleTake = async (
 ): Promise<string[]> => {
   const tags = Array.from({ length: people }, personTag);
   await shared().addEvents({
+    keyId,
     events: tags.flatMap((who, person) => trail(team, who, steps(person))),
   });
   return tags;
@@ -153,7 +157,7 @@ describe("routines seen in activity", () => {
     const team = `team:${crypto.randomUUID()}`;
     const tags = await peopleTake(team, 5, () => dealThenMail(0));
     const before = await routinesOf(team);
-    await shared().eraseEvents({ who: [tags[0] ?? ""] });
+    await shared().eraseEvents({ keyId, who: [tags[0] ?? ""] });
 
     expect({
       shown: before.length,

@@ -1458,6 +1458,12 @@ export type NewEvent = z.infer<typeof newEventSchema>;
 
 /** Events to keep (`Brain.addEvents`). */
 export const newEventsSchema = z.strictObject({
+  /**
+   * Which of the host's keys made the events' keys and tags: an id of it,
+   * never the key. A call under another id than the store last saw first
+   * deletes every event and closed tag (events.ts `underKey`).
+   */
+  keyId: macSchema,
   events: z.array(newEventSchema).min(1).max(eventsPerAddMax),
 });
 export type NewEvents = z.infer<typeof newEventsSchema>;
@@ -1505,6 +1511,8 @@ export interface ObservedRoutine {
 
 /** A person's tags whose events to erase (`Brain.eraseEvents`): one a team. */
 export const eventErasureSchema = z.strictObject({
+  /** As `NewEvents.keyId`. */
+  keyId: macSchema,
   who: z.array(macSchema).min(1).max(eventsPerAddMax),
 });
 export type EventErasure = z.infer<typeof eventErasureSchema>;
@@ -3360,7 +3368,9 @@ export interface Brain {
   /**
    * Keeps events (events.ts), each once by its key and team: a repeat adds
    * nothing. One dated later than now is kept as of now, and one already
-   * older than `eventsKeptMs` is not kept. Nothing reads them back: no
+   * older than `eventsKeptMs`, or under a tag an erasure closed, is not
+   * kept. Under another `keyId` than last time, every event and closed tag
+   * is deleted first. Nothing reads them back: no
    * member answers an event, so they are never in a recall, an export or
    * a figure about one person. The shared store's alone: a person's own
    * store refuses them.
@@ -3372,9 +3382,11 @@ export interface Brain {
    */
   expireEvents: () => Promise<void>;
   /**
-   * Deletes every event whose `who` is one of `request.who`: a person's
-   * erasure, by their tag in each team. The shared store's alone. Safe to
-   * repeat, and answers alike whatever there was.
+   * Deletes every event whose `who` is one of `request.who`, and closes
+   * those tags so no later add keeps an event under one (until
+   * `eventsKeptMs` passes): a person's erasure, by their tag in each team.
+   * The shared store's alone. Safe to repeat, and answers alike whatever
+   * there was.
    */
   eraseEvents: (request: EventErasure) => Promise<void>;
   /**

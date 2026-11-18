@@ -1437,6 +1437,40 @@ export const events = sqliteTable(
 );
 
 /**
+ * The tags of who took events (`events.who`) that an erasure closed
+ * (events.ts `eraseEvents`): an add of an event under one is refused, so a
+ * drain that read a person's teams before their erasure can't bring their
+ * events back after it. Each is kept only as long as an event could live
+ * (`eventsKeptMs` from `at`), then the expiry deletes it. Opaque without
+ * the host's key.
+ */
+export const closedEventTags = sqliteTable(
+  "closed_event_tags",
+  {
+    who: text().primaryKey(),
+    /** When it was closed, in milliseconds. */
+    at: integer().notNull(),
+  },
+  (table) => [index("closed_event_tags_at_idx").on(table.at)]
+);
+
+/**
+ * Which of the host's keys the events' tags and keys are made with, by an
+ * id of it the host gives (a MAC of a fixed label under it), never the
+ * key: one row. A call under another id finds tags no erasure could
+ * compute again, so it first deletes every event and closed tag
+ * (events.ts `underKey`).
+ */
+export const eventKey = sqliteTable(
+  "event_key",
+  {
+    row: integer().primaryKey(),
+    id: text().notNull(),
+  },
+  (table) => [check("event_key_one_row", sql`${table.row} = 1`)]
+);
+
+/**
  * A skill drafted for the person whose own store this is, from sources of
  * theirs that keep ending the same way (skill-proposals.ts), under the
  * host's key for what they have in common. Open, it holds the draft and

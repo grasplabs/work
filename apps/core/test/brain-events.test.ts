@@ -20,11 +20,11 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
-import { recordEvents } from "../src/brain-next.ts";
+import { eraseEventsOf, recordEvents } from "../src/brain-next.ts";
 import { chatOf, codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
-import { newTeam } from "./brain-next-leaks-harness.ts";
+import { newTeam, sharedStore } from "./brain-next-leaks-harness.ts";
 import { inStoreOf } from "./brain-next-out-reads.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection, mailWithSearch } from "./mail-connection.ts";
@@ -66,6 +66,53 @@ const aMember = async (): Promise<string> => {
 /** `count` new members, by their user IDs. */
 const membersOf = async (count: number): Promise<string[]> =>
   await Promise.all(Array.from({ length: count }, aMember));
+
+/** Core's env under a rotated auth secret: other keys. */
+const rotated = (): Env => ({
+  ...env,
+  BETTER_AUTH_SECRET: `rotated-${crypto.randomUUID()}`,
+});
+
+/** The id of core's key the shared store's events are under now. */
+const keyIdKept = async (): Promise<string> =>
+  await inStoreOf(
+    "brain",
+    (sql) =>
+      sql.exec<{ id: string }>("SELECT id FROM event_key WHERE row = 1").one()
+        .id
+  );
+
+/**
+ * Core's database, counting the values each statement binds: D1 binds at
+ * most 100 a statement, so a list bound one value an item would throw.
+ */
+const countingBinds = () => {
+  const bound: number[] = [];
+  const db = new Proxy(env.DB, {
+    get: (target, name): unknown => {
+      const member: unknown = Reflect.get(target, name);
+      if (name !== "prepare" || typeof member !== "function") {
+        return typeof member === "function" ? member.bind(target) : member;
+      }
+      return (query: string) => {
+        const statement = target.prepare(query);
+        return new Proxy(statement, {
+          get: (inner, key): unknown => {
+            const value: unknown = Reflect.get(inner, key);
+            if (key === "bind" && typeof value === "function") {
+              return (...values: unknown[]) => {
+                bound.push(values.length);
+                return inner.bind(...values);
+              };
+            }
+            return typeof value === "function" ? value.bind(inner) : value;
+          },
+        });
+      };
+    },
+  });
+  return { db, bound };
+};
 
 /** An event row's key, item and tag. */
 const parts = (row: Record<string, SqlStorageValue> | undefined) => [
@@ -325,7 +372,7 @@ describe("the Brain's events", setUpTime, () => {
     });
   });
 
-  it("keeps a removed member's events, and erases exactly an erased one's, in every team, leaving the others'", async () => {
+  it("keeps a removed member's events, erases exactly an erased one's in every team, leaving the others', and takes none a late drain brings back", async () => {
     const admin = await signedInApi(idp, "admin");
     const anna = await signedInApi(idp, "user");
     const ben = await aMember();
@@ -339,29 +386,52 @@ describe("the Brain's events", setUpTime, () => {
     ]);
     await recordEvents(env, [
       stepBy(anna.userId, "deals.update"),
-      stepBy(ben, "deals.update"),
+      stepBy(ben, "deals.send"),
       stepBy(three[0] ?? "", "deals.read"),
     ]);
+    // What a drain that read Anna's teams now would write after her
+    // erasure: her step, under her tag, under the same key.
+    const before = await eventsOf(sales);
+    const annaTag = before.find(({ step }) => step === "deals.update")?.who;
+    if (typeof annaTag !== "string") {
+      throw new TypeError("Anna's step was not kept");
+    }
+    const keyId = await keyIdKept();
     await admin.api.members.remove(anna.userId);
     const removed = {
       sales: await stepsOf(sales),
       finance: await stepsOf(finance),
     };
     await admin.api.members.erase(anna.userId, String(anna.person.name));
+    await sharedStore().addEvents({
+      keyId,
+      events: [
+        {
+          key: crypto.randomUUID(),
+          team: `team:${sales}`,
+          step: "deals.late",
+          system: "crm",
+          writes: true,
+          item: null,
+          who: annaTag,
+          at: new Date().toISOString(),
+        },
+      ],
+    });
 
     expect({
       removed,
       erased: { sales: await stepsOf(sales), finance: await stepsOf(finance) },
     }).toStrictEqual({
       removed: {
-        sales: ["deals.update", "deals.update", "deals.read"],
+        sales: ["deals.update", "deals.send", "deals.read"],
         finance: ["deals.update"],
       },
-      erased: { sales: ["deals.update", "deals.read"], finance: [] },
+      erased: { sales: ["deals.send", "deals.read"], finance: [] },
     });
   });
 
-  it("keys an event's key, item and tag by core's own secret: none is the plain SHA-256 of what it is made from, and another secret makes each anew", async () => {
+  it("keys an event's key, item and tag by core's own secret: none is the plain SHA-256 of what it is made from, and a rotated secret makes each anew and drops what the old one made", async () => {
     const anna = await aMember();
     const team = await newTeam(anna, ...(await membersOf(minTeamShown - 1)));
     const group = `team:${team}`;
@@ -375,11 +445,10 @@ describe("the Brain's events", setUpTime, () => {
       at: new Date(),
     };
     await recordEvents(env, [observed]);
-    await recordEvents(
-      { ...env, BETTER_AUTH_SECRET: `another-${crypto.randomUUID()}` },
-      [observed]
-    );
-    const [first, second] = await eventsOf(team);
+    const [first] = await eventsOf(team);
+    await recordEvents(rotated(), [observed]);
+    const after = await eventsOf(team);
+    const [second] = after;
     const plain = new Set(
       await Promise.all(
         [
@@ -393,15 +462,48 @@ describe("the Brain's events", setUpTime, () => {
     );
 
     expect({
-      rows: [first, second].filter(Boolean).length,
+      rows: after.length,
       plain: [...parts(first), ...parts(second)].some(
         (part) => typeof part === "string" && plain.has(part)
       ),
       anew: parts(first).map((part, index) => part !== parts(second)[index]),
     }).toStrictEqual({
-      rows: 2,
+      rows: 1,
       plain: false,
       anew: [true, true, true],
     });
+  });
+
+  it("leaves nothing of a person erased after the secret rotated, whatever was kept before", async () => {
+    const anna = await aMember();
+    const others = await membersOf(minTeamShown - 1);
+    const team = await newTeam(anna, ...others);
+    await recordEvents(env, [
+      stepBy(anna, "deals.update"),
+      stepBy(others[0] ?? "", "deals.read"),
+    ]);
+    const before = await stepsOf(team);
+    await eraseEventsOf(rotated(), anna);
+
+    expect({ before, after: await stepsOf(team) }).toStrictEqual({
+      before: ["deals.update", "deals.read"],
+      after: [],
+    });
+  });
+
+  it("counts the teams of a batch in one bound value, so a person in more than 100 teams still has their step kept", async () => {
+    const person = await aMember();
+    const five = await newTeam(person, ...(await membersOf(minTeamShown - 1)));
+    for (let made = 0; made < 120; made += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one team at a time
+      await newTeam(person);
+    }
+    const { db, bound } = countingBinds();
+    await recordEvents({ ...env, DB: db }, [stepBy(person, "deals.update")]);
+
+    expect({
+      kept: await stepsOf(five),
+      mostBound: Math.max(...bound) < 10,
+    }).toStrictEqual({ kept: ["deals.update"], mostBound: true });
   });
 });
