@@ -137,6 +137,7 @@ import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import type { ModelErrorCode } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import { holdsKnownCredential, redact } from "@grasp-os/shared/redact";
 import { skillErrors } from "@grasp-os/shared/skills";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -6048,6 +6049,64 @@ const codeRememberSchema = z.strictObject({
   statement: memoryText(statementMaxLength),
 });
 
+/**
+ * Whether identifier `value` is a credential by its own shape: a known
+ * key format (`holdsKnownCredential`), or a link (a URL with a host) that
+ * `redact` signs or grants away. Never by a name before it: a `ref`'s
+ * system (`session:…`, `token:ETH`) or an id's own words
+ * (`checkout_session:cs_test_…`) are ordinary ids. An id shaped like a
+ * key (`sk-` and sixteen more letters, digits or dashes) is refused
+ * whatever words it spells, and so is a link with a `code`: neither can
+ * be told from a credential without a rule of our own.
+ */
+const credentialShaped = ({ type, value }: Identifier): boolean => {
+  // A ref's own system names where the id lives, never a credential.
+  const id = type === "ref" ? value.slice(value.indexOf(":") + 1) : value;
+  const link = URL.canParse(id) && new URL(id).host !== "";
+  return holdsKnownCredential(id) || (link && redact(id) !== id);
+};
+
+/**
+ * Why code may not remember `request` (a valid `codeRememberSchema`
+ * request) as it is, as `details.issues` say it (GRA-2003), each by its
+ * path, never its value; none when it may:
+ * - each identifier that is a credential by its own shape
+ *   (`credentialShaped`): an identifier finds an entity, so it is never
+ *   redacted, which would move the memory; refused instead, so a
+ *   credential is never kept as one;
+ * - each name `redact` changes, on an entity given no `id` and no
+ *   identifier: such an entity is found by its names (linking.ts
+ *   `linkedByName`), and two names redacted alike (`Token: ETH`, `Token:
+ *   BTC`) would be one entity. Refused, so two things are never merged;
+ *   given an `id` or an identifier, the name is kept redacted.
+ */
+export const credentialIssues = (request: unknown): string[] => {
+  const parsed = codeRememberSchema.safeParse(request);
+  if (!parsed.success) {
+    return [];
+  }
+  const { id, names, identifiers } = parsed.data.about;
+  const matchedByName = id === undefined && identifiers.length === 0;
+  return [
+    ...identifiers.flatMap((identifier, index) =>
+      credentialShaped(identifier)
+        ? [
+            `about.identifiers.${index}: looks like a password, key, token or signed link, which the Brain never keeps as an identifier. Leave it out, or identify the entity another way.`,
+          ]
+        : []
+    ),
+    ...(matchedByName
+      ? names.flatMap((name, index) =>
+          redact(name) === name
+            ? []
+            : [
+                `about.names.${index}: holds what looks like a password, key or token, and an entity with no id or identifier is found by its names. Leave it out of the name, or give the entity its id or an identifier.`,
+              ]
+        )
+      : []),
+  ];
+};
+
 /** One of its own memories App code forgets (`forgetForAppAs`). */
 const codeForgetSchema = z.strictObject({ memory: memoryIdSchema });
 
@@ -6072,7 +6131,8 @@ export const isCodeWriteRequest = (
   codeWriteRequests[operation].safeParse(input).success;
 
 /**
- * Remembers a fact App `app`'s code says, in the App's word, for the
+ * Remembers a fact App `app`'s code says, in the App's word, its
+ * credentials redacted (`redact`, each text whole), for the
  * member `personId` (admitted to the App by the caller), in the shared
  * store, read by the App's users alone: about an entity the App's code
  * may see (by id), or one an exact identifier finds there, or a new one;
@@ -6090,7 +6150,14 @@ export const rememberForAppAs = async (
   { app, change }: { app: AppId; change: string },
   request: unknown
 ): Promise<{ memory: MemoryId; entity: EntityId; learnedAt: Date }> => {
-  const { about, statement, ...memory } = checked(codeRememberSchema, request);
+  const { about, statement, value, attribute } = checked(
+    codeRememberSchema,
+    request
+  );
+  const issues = credentialIssues(request);
+  if (issues.length > 0) {
+    throw brainSourceErrors.create("brain.request_invalid", { issues });
+  }
   const writer = appWriterOf(app);
   const reader = await codeReaderOf(env, personId, "company", app);
   let added: Awaited<ReturnType<Brain["addMemories"]>>;
@@ -6100,13 +6167,24 @@ export const rememberForAppAs = async (
       access: { kind: "audience", group: appUsersGroup(app) },
       // An entity's id is taken only as the App's code may see it.
       reader,
-      entities: [{ key: "about", ...about }],
+      // Credentials redacted from what is kept and recalled, each text
+      // whole (GRA-2003): code may copy an outside system's answer. The
+      // same request redacts the same, so a repeat of `change` compares
+      // as what was kept.
+      entities: [
+        {
+          key: "about",
+          ...about,
+          names: about.names.map((name) => redact(name)),
+        },
+      ],
       memories: [
         {
           about: "about",
-          ...memory,
+          ...(attribute === undefined ? {} : { attribute }),
+          ...(value === undefined ? {} : { value: redact(value) }),
           type: "fact",
-          statement,
+          statement: redact(statement),
           speaker: { kind: "agent", agent: writer },
           basis: { kind: "writer", writer },
         },
