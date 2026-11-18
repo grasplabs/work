@@ -241,6 +241,14 @@ const proposeWork = defineWork({
         JSON.stringify(drafted.restsOn),
         Date.now()
       );
+      // What it rests on, as it was drawn, for an erasure to find it by,
+      // whatever a later draft of the key named meanwhile.
+      storage.sql.exec(
+        `INSERT OR IGNORE INTO proposal_sources (source, proposal)
+        SELECT json_extract(value, '$.source'), ? FROM json_each(?)`,
+        payload.key,
+        JSON.stringify(drafted.restsOn)
+      );
       return true;
     });
     log.info("brain.skill_proposed", {
@@ -263,9 +271,23 @@ export const enqueueProposal = (
     return;
   }
   // What the draft names, by source, for an erasure to find it by
-  // (`proposal_sources`): in place of what an earlier draft of the key
-  // named. Synchronous with the enqueue, so both land or neither does.
-  storage.sql.exec("DELETE FROM proposal_sources WHERE proposal = ?", key);
+  // (`proposal_sources`), synchronous with the enqueue, so both land or
+  // neither does: in place of what an earlier draft of the key named,
+  // unless one is under way, which still draws from what it named (the
+  // queue leaves it running beside this one): then added to, so every
+  // source a draft of the key may still use stays found. A saved proposal
+  // writes its own (`proposeWork`).
+  const running =
+    storage.sql
+      .exec(
+        "SELECT 1 FROM work_items WHERE kind = ? AND key = ? AND running = 1",
+        proposeKind,
+        key
+      )
+      .toArray().length > 0;
+  if (!running) {
+    storage.sql.exec("DELETE FROM proposal_sources WHERE proposal = ?", key);
+  }
   storage.sql.exec(
     `INSERT OR IGNORE INTO proposal_sources (source, proposal)
     SELECT value, ? FROM json_each(?)`,

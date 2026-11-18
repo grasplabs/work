@@ -246,6 +246,68 @@ describe("skill proposals", () => {
     });
   });
 
+  it("deletes a proposal on the erasure of a run it rests on, though a later draft of its key was queued while it was drawn", async () => {
+    const runs = [
+      await sourceOf("Workflow run completed."),
+      await sourceOf("Workflow run completed."),
+      await sourceOf("Workflow run completed."),
+      await sourceOf("Workflow run completed."),
+      await sourceOf("Workflow run completed."),
+      await sourceOf("Workflow run completed."),
+    ];
+    const [first = ""] = runs;
+    const key = await keyOf();
+    const queue = async (sources: string[]) => {
+      await own().proposeSkill({
+        person,
+        key,
+        about: 'Workflow "send-report"',
+        sources,
+      });
+    };
+    // The model's answer held until the sixth run queued its own draft.
+    const held = Promise.withResolvers<boolean>();
+    const asking = Promise.withResolvers<boolean>();
+    const ask: AskModel = async () => {
+      asking.resolve(true);
+      await held.promise;
+      return { kind: "answer", text: drafted, model: "test/model" };
+    };
+    await queue(runs.slice(0, 5));
+    const ticking = tick(ask);
+    await asking.promise;
+    await queue(runs.slice(1));
+    held.resolve(true);
+    await ticking;
+    const [saved] = await own().skillProposals({ reader: readerOf() });
+    await own().eraseSource({ source: first, reason: "deleted" });
+    const naming = await runInDurableObject(
+      own(),
+      (_store, state) =>
+        state.storage.sql
+          .exec<{ count: number }>(
+            `SELECT
+              (SELECT count(*) FROM skill_proposals
+                WHERE rests_on LIKE ?1 OR state = 'open')
+              + (SELECT count(*) FROM proposal_sources WHERE source = ?2)
+              + (SELECT count(*) FROM work_items WHERE payload LIKE ?1)
+              AS count`,
+            `%${first}%`,
+            first
+          )
+          .one().count
+    );
+    expect({
+      restedOnFirst: saved?.restsOn.map(({ source }) => source),
+      naming,
+      listed: await own().skillProposals({ reader: readerOf() }),
+    }).toStrictEqual({
+      restedOnFirst: runs.slice(0, 5),
+      naming: 0,
+      listed: [],
+    });
+  });
+
   it("treats an answer a person could never add as one that doesn't fit: what it needs is the host's, not a draft's", async () => {
     const model = draftingModel(`---
 name: weekly-report
