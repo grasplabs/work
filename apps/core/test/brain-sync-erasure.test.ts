@@ -1,5 +1,13 @@
 import { env } from "cloudflare:workers";
-import { afterEach, expect, it, vi, describe } from "vite-plus/test";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { runSync } from "../src/brain-sync.ts";
@@ -23,15 +31,22 @@ import {
   syncOn,
   deleteItemsStatement,
   sync,
+  ownSourcesOnly,
+  parkWorkerSources,
 } from "./brain-sync-world.ts";
 import { interleaving } from "./d1-interleaving.ts";
+import { mockIdpWith } from "./idp.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { signedInApi } from "./sign-in.ts";
+
+mockIdpWith(idp);
 
 // Native sync (src/brain-sync.ts, GRA-1758): erasure: an erase a stopped run owed, a person's erasure, and a disconnect's erase. The shared world,
 // fakes and clock are in test/brain-sync-world.ts.
 
 describe("native sync", () => {
+  beforeAll(parkWorkerSources, setUpTime.timeout);
+  beforeEach(ownSourcesOnly);
   afterEach(() => {
     vi.useRealTimers();
   });

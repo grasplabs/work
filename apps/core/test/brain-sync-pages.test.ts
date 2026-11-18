@@ -1,5 +1,13 @@
 import { env } from "cloudflare:workers";
-import { afterEach, expect, it, vi, describe } from "vite-plus/test";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
 import { eraseSource } from "../src/brain-next.ts";
 import { runSync } from "../src/brain-sync.ts";
@@ -21,9 +29,12 @@ import {
   clockAt,
   later,
   sync,
+  ownSourcesOnly,
+  parkWorkerSources,
 } from "./brain-sync-world.ts";
 import { countingBinds } from "./counting-binds.ts";
 import type { DriveWorld } from "./drive-sync-fake.ts";
+import { mockIdpWith } from "./idp.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { signedInApi } from "./sign-in.ts";
 
@@ -34,10 +45,14 @@ const drive = (email: string, marker: string): DriveWorld => ({
   contents: { memo: `Memo ${marker}` },
 });
 
+mockIdpWith(idp);
+
 // Native sync (src/brain-sync.ts, GRA-1758): the ordinary page run and its commit: what a page brings, in what order, once, within D1's bound values, and a throttled read. The shared world,
 // fakes and clock are in test/brain-sync-world.ts.
 
 describe("native sync", () => {
+  beforeAll(parkWorkerSources, setUpTime.timeout);
+  beforeEach(ownSourcesOnly);
   afterEach(() => {
     vi.useRealTimers();
   });

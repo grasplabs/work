@@ -1,5 +1,13 @@
 import { env } from "cloudflare:workers";
-import { afterEach, expect, it, vi, describe } from "vite-plus/test";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
 import { runSync } from "../src/brain-sync.ts";
 import {
@@ -23,8 +31,11 @@ import {
   placeGoneStatement,
   leaveStatement,
   sync,
+  ownSourcesOnly,
+  parkWorkerSources,
 } from "./brain-sync-world.ts";
 import { interleaving } from "./d1-interleaving.ts";
+import { mockIdpWith } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";
 
 const runs = async (count: number) => {
@@ -97,10 +108,14 @@ const restoredDuring = async (pattern: RegExp, secondErase: boolean) => {
   ];
 };
 
+mockIdpWith(idp);
+
 // Native sync (src/brain-sync.ts, GRA-1758): the fence every write carries: a folder's writes against another folder's, against a drop, and an erase against a restore. The shared world,
 // fakes and clock are in test/brain-sync-world.ts.
 
 describe("native sync", () => {
+  beforeAll(parkWorkerSources, setUpTime.timeout);
+  beforeEach(ownSourcesOnly);
   afterEach(() => {
     vi.useRealTimers();
   });

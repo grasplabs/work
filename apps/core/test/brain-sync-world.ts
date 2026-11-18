@@ -8,7 +8,7 @@ import { allEvents } from "./audit-events.ts";
 import { consentCode } from "./connect-providers.ts";
 import { driveSyncControlUrl } from "./drive-sync-fake.ts";
 import type { DriveFile, DriveWorld } from "./drive-sync-fake.ts";
-import { mockIdp } from "./idp.ts";
+import { createIdp } from "./fake-idp.ts";
 import { sampleSyncControlUrl } from "./sample-sync-fake.ts";
 import { acmeTenant, signInConfig } from "./sign-in-config.ts";
 import type { signedInApi } from "./sign-in.ts";
@@ -24,7 +24,12 @@ import { connectDb, testBinding } from "./test-env.ts";
 // throttled run losing or doubling something; one source holding up the
 // others; and a disconnect leaving a copy behind.
 
-export const idp = mockIdp();
+/**
+ * The fake IdP these files sign in with, made once for them all: each file
+ * answers core's calls with it by its own hooks (`mockIdpWith`), as a
+ * module loaded once for several files must.
+ */
+export const idp = createIdp();
 
 /** Signing people in and connecting can be slow on CI. */
 export const setUpTime = { timeout: 90_000 };
@@ -54,6 +59,45 @@ export const driveHolds = async (subject: string, drive: DriveWorld) => {
     method: "POST",
     body: JSON.stringify({ subject, drive }),
   });
+};
+
+/**
+ * The connections the test under way made (`connectSampleFeed`,
+ * `connectDrive`): the only ones whose sources its runs read.
+ */
+const ours = new Set<string>();
+
+/** A time no fake clock of these tests reaches: a source due then is never due in them. */
+const neverDue = Date.parse("2100-01-01T00:00:00.000Z");
+
+/**
+ * Parks every source but the test's own (`ours`), due only at `neverDue`.
+ * Core's test files share their worker's database (`isolate: false`), and
+ * every personal connection any of them made there is a source a run
+ * reads; parked, a test's runs read its own connections alone, whatever
+ * else lives in the worker.
+ */
+const parkOthers = async (): Promise<void> => {
+  await env.DB.prepare(
+    "UPDATE brain_sync_sources SET due_at = ?, relist_at = ? WHERE connection_id NOT IN (SELECT value FROM json_each(?))"
+  )
+    .bind(neverDue, neverDue, JSON.stringify([...ours]))
+    .run();
+};
+
+/**
+ * Before a file's tests (`beforeAll`): the sources of every connection the
+ * worker holds so far listed once, by a run, then parked.
+ */
+export const parkWorkerSources = async (): Promise<void> => {
+  await runSync(env);
+  await parkOthers();
+};
+
+/** Before each test (`beforeEach`): nothing yet its own, everything else parked. */
+export const ownSourcesOnly = async (): Promise<void> => {
+  ours.clear();
+  await parkOthers();
 };
 
 /**
@@ -122,6 +166,7 @@ export const connectSampleFeed = async (
     );
     return await answer.json();
   };
+  ours.add(connection.id);
   return { connectionId: connection.id, post, world, fetchedOf };
 };
 
@@ -197,6 +242,7 @@ export const connectDrive = async (person: Person, drive = emptyDrive()) => {
   if (connection === undefined) {
     throw new Error(`Expected ${email}'s connection`);
   }
+  ours.add(connection.id);
   return { connectionId: connection.id, subject, email };
 };
 
@@ -263,6 +309,7 @@ export const later = (ms: number): void => {
 
 /** Runs the sync as the clock does, at the fake clock's time, on `given`. */
 export const syncOn = async (given: Env): Promise<void> => {
+  await parkOthers();
   vi.useFakeTimers({ toFake: ["Date"], now: clockAt() });
   try {
     await runSync(given);
@@ -275,6 +322,7 @@ export const syncOn = async (given: Env): Promise<void> => {
 export const overlappingRun = async (): Promise<void> => {
   later(pollMs);
   vi.setSystemTime(clockAt());
+  await parkOthers();
   await runSync(env);
 };
 
@@ -312,6 +360,7 @@ export const leaveStatement =
 
 /** Runs the sync as the clock does, at the fake clock's time. */
 export const sync = async (): Promise<void> => {
+  await parkOthers();
   vi.useFakeTimers({ toFake: ["Date"], now: clockAt() });
   try {
     await runSync(env);

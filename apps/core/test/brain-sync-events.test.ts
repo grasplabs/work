@@ -1,6 +1,14 @@
 import { minTeamShown } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
-import { afterEach, expect, it, vi, describe } from "vite-plus/test";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
 import { runSync } from "../src/brain-sync.ts";
 import { newTeam } from "./brain-next-leaks-harness.ts";
@@ -18,18 +26,25 @@ import {
   syncOn,
   commitStatement,
   sync,
+  ownSourcesOnly,
+  parkWorkerSources,
 } from "./brain-sync-world.ts";
 import { interleaving } from "./d1-interleaving.ts";
+import { mockIdpWith } from "./idp.ts";
 import { signedInApi, signedInWithRole } from "./sign-in.ts";
 
 /** A file in the sample feed at `version`. */
 const file = (id: string, text: string, version: string) =>
   mailItem(id, text, { kind: "file", version });
 
+mockIdpWith(idp);
+
 // Native sync (src/brain-sync.ts, GRA-1758): the Brain's events of synced changes. The shared world,
 // fakes and clock are in test/brain-sync-world.ts.
 
 describe("native sync", () => {
+  beforeAll(parkWorkerSources, setUpTime.timeout);
+  beforeEach(ownSourcesOnly);
   afterEach(() => {
     vi.useRealTimers();
   });

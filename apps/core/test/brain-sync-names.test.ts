@@ -1,4 +1,12 @@
-import { afterEach, expect, it, vi, describe } from "vite-plus/test";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
 import {
   idp,
@@ -11,7 +19,10 @@ import {
   finds,
   later,
   sync,
+  ownSourcesOnly,
+  parkWorkerSources,
 } from "./brain-sync-world.ts";
+import { mockIdpWith } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";
 
 const day = async () => {
@@ -26,10 +37,14 @@ const day = async () => {
 /** An item named by a names-only listing: its ID and version, no content. */
 const named = (id: string, version = "1") => mailItem(id, null, { version });
 
+mockIdpWith(idp);
+
 // Native sync (src/brain-sync.ts, GRA-1758): names-only relists and their catch-ups by ID, and attachments across them. The shared world,
 // fakes and clock are in test/brain-sync-world.ts.
 
 describe("native sync", () => {
+  beforeAll(parkWorkerSources, setUpTime.timeout);
+  beforeEach(ownSourcesOnly);
   afterEach(() => {
     vi.useRealTimers();
   });
