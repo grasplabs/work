@@ -130,6 +130,7 @@ const BrainLayout = () => {
   // The brain's log and its sources, each a page of its own beside the brain.
   const activity = Boolean(matchRoute({ to: "/brain/activity" }));
   const sources = Boolean(matchRoute({ to: "/brain/sources" }));
+  const opportunities = Boolean(matchRoute({ to: "/brain/opportunities" }));
   const brainLabel = t`Brain`;
   if (loaded.state !== "ready") {
     return <PageNotLoaded crumbs={[{ label: brainLabel }]} page={loaded} />;
@@ -164,6 +165,16 @@ const BrainLayout = () => {
     crumbs = [
       { label: brainLabel, to: "/brain" },
       { label: t({ message: "Sources", context: "the Brain's sources page" }) },
+    ];
+  } else if (opportunities) {
+    crumbs = [
+      { label: brainLabel, to: "/brain" },
+      {
+        label: t({
+          message: "Opportunities",
+          context: "the Brain's opportunities page",
+        }),
+      },
     ];
   }
   return (

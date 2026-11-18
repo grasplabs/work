@@ -744,6 +744,22 @@ const apply = (
     sql.exec("DELETE FROM removed_sources WHERE source = ?", source);
     const rows = rowsOf(sql, source);
     sources += rows.length > 0 ? 1 : 0;
+    // A skill drafted from it (skill-proposals.ts) goes with it, open,
+    // found through what proposals rest on (`proposal_sources`), by
+    // index. Nothing on the queue names a source: a draft asks which as it
+    // runs. One settled holds nothing of it, and rests on nothing.
+    for (const { proposal } of sql
+      .exec<{ proposal: string }>(
+        "DELETE FROM proposal_sources WHERE source = ? RETURNING proposal",
+        source
+      )
+      .toArray()) {
+      sql.exec(
+        "DELETE FROM skill_proposals WHERE key = ? AND state = 'open'",
+        proposal
+      );
+      sql.exec("DELETE FROM proposal_sources WHERE proposal = ?", proposal);
+    }
     if (hideVersions(sql, source, rows, key)) {
       stopped.push(source);
     }

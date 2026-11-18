@@ -5,7 +5,11 @@ import type {
   Opportunity,
 } from "@grasp-os/shared/opportunities";
 
-import { dismissOpportunity, listOpportunities } from "./opportunities.ts";
+import {
+  dismissOpportunity,
+  listOpportunities,
+  restoreOpportunity,
+} from "./opportunities.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -41,6 +45,16 @@ export class OpportunitiesRpc
         throw requestErrors.create("request.not_found");
       }
       await dismissOpportunity(this.#env, person, parsed.data);
+    });
+  }
+
+  async restore(dismissal: unknown): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      const parsed = opportunityDismissalSchema.safeParse(dismissal);
+      if (!parsed.success) {
+        throw requestErrors.create("request.not_found");
+      }
+      await restoreOpportunity(this.#env, person, parsed.data);
     });
   }
 }
