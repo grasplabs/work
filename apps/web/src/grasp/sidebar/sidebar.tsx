@@ -4,8 +4,10 @@
 import * as stylex from "@stylexjs/stylex";
 import { mergeProps } from "@ui-sdk/react/primitive";
 import {
+  createContext,
   createElement,
   isValidElement,
+  useContext,
   useEffect,
   useId,
   useLayoutEffect,
@@ -26,8 +28,9 @@ import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { useWords } from "../words/words";
 import { useFoldKeys } from "./fold-keys";
-import { SidebarNav } from "./nav";
-import type { SidebarFilter } from "./nav";
+import { guideVars } from "./guide.stylex";
+import { SidebarNav, pathOf } from "./nav";
+import type { GuidePlace, SidebarFilter } from "./nav";
 import { groupsOf } from "./parts";
 import { SidebarProfile } from "./profile";
 import type { SidebarProfileProps } from "./profile";
@@ -326,6 +329,12 @@ export interface SidebarProps {
   tabsLabel?: string;
   /** One quiet sentence where the rows would be, when the list has none ("Nothing needs you yet"). */
   empty?: string;
+  /**
+   * The tree guide on nested rows (a row's own rows, and a folding group's): a stem from the head
+   * with a rounded branch into each row. `false` for none.
+   * @default true
+   */
+  guides?: boolean;
   /** @deprecated Use `layout`. */
   style?: SidebarLayoutStyle;
   /** Layout only: where it sits and how tall it is. */
@@ -339,6 +348,12 @@ const PEEK_AFTER = 120;
 
 /** How long the pointer may be off the peeking sidebar before it goes, in ms. */
 const LEAVE_AFTER = 240;
+
+// The tree guide's measures: the middle of a row's name line, the room from the stem to a step before
+// the words, and the elbow, no larger than that room.
+const NAME_LINE = `calc(${grasp.shellRowBlock} + ${grasp.textSmLine} / 2)`;
+const RUN = `calc(${guideVars.words} - ${grasp.space1} - ${guideVars.stem})`;
+const ELBOW = `min(${guideVars.radius}, ${RUN})`;
 
 const HOVER = media.hover;
 const COARSE = media.coarse;
@@ -748,6 +763,7 @@ const styles = stylex.create({
     listStyle: "none",
   },
   sub: { marginBlockStart: grasp.shellRowGap },
+  nested: { position: "relative" },
   row: {
     position: "relative",
     display: "flex",
@@ -802,6 +818,67 @@ const styles = stylex.create({
   subRow: {
     paddingInlineStart: `calc(${grasp.shellRowInline} + ${grasp.shellIcon} + ${grasp.shellIconGap})`,
   },
+  guideStem: {
+    position: "absolute",
+    insetInlineStart: guideVars.stem,
+    insetBlockStart: `calc(-1 * ${grasp.shellRowGap})`,
+    height: {
+      default: `calc(${grasp.shellRowGap} + ${NAME_LINE} - ${ELBOW})`,
+      [COARSE]: `calc(${grasp.shellRowGap} + ${grasp.tap} / 2 - ${ELBOW})`,
+    },
+    width: 0,
+    borderInlineStartWidth: guideVars.stroke,
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: { default: guideVars.line, [FORCED]: "GrayText" },
+    pointerEvents: "none",
+  },
+  // Below the branch, to the row's foot: the stem carries on to the next row.
+  guideStemOn: {
+    position: "absolute",
+    insetInlineStart: guideVars.stem,
+    insetBlockStart: {
+      default: `calc(${NAME_LINE} - ${ELBOW})`,
+      [COARSE]: `calc(${grasp.tap} / 2 - ${ELBOW})`,
+    },
+    insetBlockEnd: 0,
+    width: 0,
+    borderInlineStartWidth: guideVars.stroke,
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: { default: guideVars.line, [FORCED]: "GrayText" },
+    pointerEvents: "none",
+  },
+  guideBranch: {
+    position: "absolute",
+    insetInlineStart: guideVars.stem,
+    insetBlockStart: {
+      default: `calc(${NAME_LINE} - ${ELBOW})`,
+      [COARSE]: `calc(${grasp.tap} / 2 - ${ELBOW})`,
+    },
+    boxSizing: "border-box",
+    height: ELBOW,
+    width: RUN,
+    borderInlineStartWidth: guideVars.stroke,
+    borderBlockEndWidth: guideVars.stroke,
+    borderStyle: "solid",
+    borderColor: { default: guideVars.line, [FORCED]: "GrayText" },
+    borderBlockStartColor: "transparent",
+    borderInlineEndColor: "transparent",
+    borderEndStartRadius: ELBOW,
+    pointerEvents: "none",
+  },
+  // The path down to the current row, in `path` (the line's colour unless a host sets it).
+  guidePath: {
+    borderInlineStartColor: { default: guideVars.path, [FORCED]: "GrayText" },
+  },
+  guideBranchPath: {
+    borderColor: { default: guideVars.path, [FORCED]: "GrayText" },
+    borderBlockStartColor: "transparent",
+    borderInlineEndColor: "transparent",
+  },
+  // A folding group's rows stand space-3 in from its label: the stem stands under the label's
+  // first letter, and a row with no icon has its words at its own inset.
+  guideInGroup: { [guideVars.stem]: `calc(-1 * ${grasp.space3})` },
+  guideNoIcon: { [guideVars.words]: grasp.shellRowInline },
   // Where the person is. In forced colours the fill is dropped, so a border marks it.
   current: {
     color: grasp.shellText,
@@ -1277,10 +1354,68 @@ const RowLink = ({
 );
 
 /** A group's last, quiet row, to all of its kind ("All chats"). */
-const MoreRow = ({ more, item }: { more: SidebarMore; item: boolean }) => {
+/** A nested row's part of the tree guide: the stem to its branch, the branch, and the stem on to the next row. */
+const Guide = ({
+  last,
+  path,
+}: {
+  last: boolean;
+  path: "above" | "at" | "off";
+}) => (
+  <>
+    <span
+      aria-hidden="true"
+      data-slot="sidebar-guide"
+      {...stylex.props(styles.guideStem, path !== "off" && styles.guidePath)}
+    />
+    <span
+      aria-hidden="true"
+      data-slot="sidebar-guide-branch"
+      {...stylex.props(
+        styles.guideBranch,
+        path === "at" && styles.guideBranchPath
+      )}
+    />
+    {!last && (
+      <span
+        aria-hidden="true"
+        data-slot="sidebar-guide-on"
+        {...stylex.props(
+          styles.guideStemOn,
+          path === "above" && styles.guidePath
+        )}
+      />
+    )}
+  </>
+);
+
+// Whether the Sidebar draws its tree guide (`guides`).
+const GuidesOn = createContext(true);
+
+/** A folding group's row: its li holds its place in the tree guide, under the group's label. */
+const groupLook = (place: GuidePlace | undefined, icon: boolean) =>
+  stylex.props(
+    place !== undefined && [
+      styles.nested,
+      styles.guideInGroup,
+      !icon && styles.guideNoIcon,
+    ]
+  );
+
+const MoreRow = ({
+  more,
+  item,
+  place,
+}: {
+  more: SidebarMore;
+  item: boolean;
+  place: GuidePlace | undefined;
+}) => {
   const { onClick: handleClick } = more;
+  const guides = useContext(GuidesOn);
+  const placed = guides ? place : undefined;
   return (
-    <li>
+    <li {...groupLook(placed, false)}>
       <Linked
         row={more}
         item={item}
@@ -1289,11 +1424,22 @@ const MoreRow = ({ more, item }: { more: SidebarMore; item: boolean }) => {
       >
         <span {...stylex.props(styles.name)}>{more.label}</span>
       </Linked>
+      {placed !== undefined && <Guide last={placed.last} path={placed.path} />}
     </li>
   );
 };
 
-const Row = ({ row, item }: { row: SidebarRow; item: boolean }) => {
+const Row = ({
+  row,
+  item,
+  place,
+}: {
+  row: SidebarRow;
+  item: boolean;
+  place?: GuidePlace | undefined;
+}) => {
+  const guides = useContext(GuidesOn);
+  const placed = guides ? place : undefined;
   const look = stylex.props(
     styles.row,
     hasDetail(row) && styles.rowTall,
@@ -1303,17 +1449,27 @@ const Row = ({ row, item }: { row: SidebarRow; item: boolean }) => {
     focus.inside
   );
   return (
-    <li>
+    <li {...groupLook(placed, row.icon !== undefined)}>
       <RowActions {...row} inList={item}>
         {(extras) => (
           <RowLink row={row} item={item} look={look} extras={extras} />
         )}
       </RowActions>
+      {placed !== undefined && <Guide last={placed.last} path={placed.path} />}
       {row.rows !== undefined && row.rows.length > 0 && (
         <ul {...stylex.props(styles.list, styles.sub)}>
-          {row.rows.map((sub) => (
-            <li key={sub.id ?? `${sub.label}-${sub.href ?? ""}`}>
+          {row.rows.map((sub, index, all) => (
+            <li
+              key={sub.id ?? `${sub.label}-${sub.href ?? ""}`}
+              {...stylex.props(guides && styles.nested)}
+            >
               <SubRow sub={sub} item={item} />
+              {guides && (
+                <Guide
+                  last={index === all.length - 1}
+                  path={pathOf(all, index)}
+                />
+              )}
             </li>
           ))}
         </ul>
@@ -1688,17 +1844,18 @@ const ListArea = ({
         filterRef={filterRef}
         storageKey={section === undefined ? storageKey : section.storageKey}
         keys={keys}
-        renderRow={(row, item) => (
+        renderRow={(row, item, place) => (
           <Row
             key={row.id ?? `${row.label}-${row.href ?? ""}`}
             row={row}
             item={item}
+            place={place}
           />
         )}
-        renderMore={(index, item) => {
+        renderMore={(index, item, place) => {
           const more = shown[index]?.more;
           return more === undefined ? null : (
-            <MoreRow key="more" more={more} item={item} />
+            <MoreRow key="more" more={more} item={item} place={place} />
           );
         }}
       />
@@ -2142,6 +2299,8 @@ export const Sidebar = (props: SidebarProps) => {
   // Its data, or the parts written in it.
   const groups = props.groups ?? groupsOf(props.children);
   return (
-    <SidebarDrawn {...props} groups={groups} {...shellParts(props, shell)} />
+    <GuidesOn.Provider value={props.guides !== false}>
+      <SidebarDrawn {...props} groups={groups} {...shellParts(props, shell)} />
+    </GuidesOn.Provider>
   );
 };

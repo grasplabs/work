@@ -1381,9 +1381,10 @@ const useTakeoverFocus = (
       // a ring only when the keyboard reaches it.
       const dictating =
         (room?.querySelector("[data-slot=composer-voice]") ?? null) !== null;
+      // A text question's box comes before its buttons, so the caret lands in it, never on Skip.
       (
         room?.querySelector<HTMLElement>("[aria-checked=true]") ??
-        room?.querySelector<HTMLElement>("button, input")
+        room?.querySelector<HTMLElement>("textarea, button, input")
       )?.focus({ preventScroll: true, focusVisible: !dictating });
     }
     if (!taken && hadTakeover.current && here) {

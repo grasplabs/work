@@ -47,6 +47,7 @@ export interface SidebarFilter {
 /** A row's words, as the filter reads them. */
 export interface NavRow {
   label: string;
+  current?: boolean;
   keywords?: readonly string[];
   rows?: readonly { label: string }[];
 }
@@ -474,6 +475,24 @@ const onListKey = (
   to.focus();
 };
 
+/** Where a folding group's row stands in its tree guide: the last branch, and on the path to the current row. */
+export interface GuidePlace {
+  last: boolean;
+  path: "above" | "at" | "off";
+}
+
+/** Where row `index` of a list stands on the path to its current row: above it, at it, or off it. */
+export const pathOf = (
+  rows: readonly { current?: boolean }[],
+  index: number
+): GuidePlace["path"] => {
+  const current = rows.findIndex((row) => row.current === true);
+  if (current === -1 || index > current) {
+    return "off";
+  }
+  return index === current ? "at" : "above";
+};
+
 interface NavProps<Row extends NavRow> {
   groups: readonly NavGroup<Row>[];
   label: string;
@@ -483,9 +502,17 @@ interface NavProps<Row extends NavRow> {
   storageKey?: string;
   keys?: "tab" | "list";
   /** Draws a row; `item` marks it as one of the list's items, for `keys="list"`. */
-  renderRow: (row: Row, item: boolean) => ReactElement;
+  renderRow: (
+    row: Row,
+    item: boolean,
+    place: GuidePlace | undefined
+  ) => ReactElement;
   /** Draws the last quiet row of the group at `index` ("All chats"), or nothing. Not while filtering. */
-  renderMore?: (index: number, item: boolean) => ReactElement | null;
+  renderMore?: (
+    index: number,
+    item: boolean,
+    place: GuidePlace | undefined
+  ) => ReactElement | null;
 }
 
 /** The filter field, the system's own (InputGroup): Escape clears it, ↓ moves into the rows. */
@@ -637,6 +664,47 @@ const PartLabel = ({
         </a>
       )}
     </div>
+  );
+};
+
+/**
+ * A group's rows, and its quiet last row. A folding group's rows are nested under its label, so each
+ * knows its place in the tree guide (the Sidebar draws it): the last one ends the stem.
+ */
+const GroupRows = <Row extends NavRow>({
+  rows,
+  index,
+  list,
+  branched,
+  more,
+  renderRow,
+}: {
+  rows: readonly Row[];
+  index: number;
+  list: boolean;
+  branched: boolean;
+  more: NavProps<Row>["renderMore"];
+  renderRow: NavProps<Row>["renderRow"];
+}) => {
+  const last =
+    more?.(index, list, branched ? { last: true, path: "off" } : undefined) ??
+    null;
+  return (
+    <>
+      {rows.map((row, at) =>
+        renderRow(
+          row,
+          list,
+          branched
+            ? {
+                last: at === rows.length - 1 && last === null,
+                path: pathOf(rows, at),
+              }
+            : undefined
+        )
+      )}
+      {last}
+    </>
   );
 };
 
@@ -865,8 +933,14 @@ export const SidebarNav = <Row extends NavRow>({
                 group.collapsible === true && navStyles.listUnder
               )}
             >
-              {rows.map((row) => renderRow(row, list))}
-              {needle === "" && renderMore?.(index, list)}
+              <GroupRows
+                rows={rows}
+                index={index}
+                list={list}
+                branched={group.collapsible === true}
+                more={needle === "" ? renderMore : undefined}
+                renderRow={renderRow}
+              />
             </ul>
           </div>
         );

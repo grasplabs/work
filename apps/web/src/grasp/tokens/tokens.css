@@ -1573,6 +1573,8 @@
   --grasp-shell-icon-gap: 10px;
   /* A row's icon. */
   --grasp-shell-icon: 16px;
+  /* The width of the Sidebar's tree guide, the stem and branches of its nested rows. */
+  --grasp-shell-guide: 2px;
   /* A button that is only an icon in the frame (the sidebar's toggle). */
   --grasp-shell-icon-button: 28px;
   /* A row's corner. */
