@@ -15,6 +15,10 @@ import {
 } from "../grasp/app-preview/words.ts";
 import { appShellPanelWords, appShellWords } from "../grasp/app-shell/words.ts";
 import { approvalRequestWords } from "../grasp/approval-request/words.ts";
+import {
+  artifactViewerBoxWords,
+  englishLabels as artifactViewerWords,
+} from "../grasp/artifact-viewer/words.ts";
 import { audioPlayerWords } from "../grasp/audio-player/words.ts";
 import { avatarGroupWords } from "../grasp/avatar/words.ts";
 import {
@@ -94,6 +98,8 @@ export const englishPartWords: GraspWordsCatalog = {
   agentActivity: agentActivityWords,
   alert: alertWords,
   appBuilding: appBuildingWords,
+  artifactViewer: artifactViewerWords,
+  artifactViewerBox: artifactViewerBoxWords,
   appCard: appCardWords,
   appPreview: appPreviewWords,
   appPreviewFailure: appPreviewFailureWords,
@@ -446,6 +452,63 @@ export const usePartWords = (): GraspWordsCatalog => {
       height: t`Resize the panel's height`,
     },
     alert: { dismiss: t`Dismiss` },
+    // The viewer shows a page (the weekly report) and nothing else here:
+    // the words a person meets in that mode are translated. Comments,
+    // editing, PDF, tables and images are not installed, so their words
+    // stay the library's own until a page uses them.
+    artifactViewer: {
+      ...artifactViewerWords,
+      file: t({
+        message: "File",
+        context: "an opened file's name before it has one",
+      }),
+      untitled: t`Untitled`,
+      opening: (name) =>
+        name === undefined ? t`Opening the file` : t`Opening ${name}`,
+      notOpened: t`It did not open`,
+      didNotLoad: t`The file did not load.`,
+      loadFailed: (status) => t`The file did not load (${status}).`,
+      unknownKind: t`This kind of file does not show here`,
+      download: (name) => t`Download ${name}`,
+      start: t({ message: "Start", context: "the start of a file" }),
+      zoom: (zoom) => (zoom === "fit" ? t`Fit` : `${zoom}%`),
+      previousSection: t`Previous section`,
+      nextSection: t`Next section`,
+      zoomIn: t`Zoom in`,
+      zoomOut: t`Zoom out`,
+      zoomToFit: t`Zoom to fit`,
+      showOutline: t`Show the outline`,
+      hideOutline: t`Hide the outline`,
+      outline: t`Outline`,
+      view: t({
+        message: "View",
+        context: "a file shown as a page or as code",
+      }),
+      preview: t`Preview`,
+      code: t`Code`,
+      showCode: t`Show the code`,
+      showPreview: t`Show the preview`,
+      more: t`More`,
+      shortcuts: t`Keyboard shortcuts`,
+      find: t`Find in the file`,
+      noMatches: t`No matches`,
+      previousMatch: t`Previous match`,
+      nextMatch: t`Next match`,
+      closeFind: t`Close find`,
+      findInPreview: t`Counted in the page's words. Code view marks them in its source.`,
+      usePage: t`Use the page`,
+      usePageHint: t`Press to use the page`,
+      usePageDone: t`Done`,
+      pageLeft: t`This page kept leaving`,
+      pageLeftBody: (times) =>
+        t`It sent itself to another address ${times} times, so it is no longer shown. Its source is in Code view.`,
+    },
+    artifactViewerBox: {
+      file: t({
+        message: "File",
+        context: "an opened file's name before it has one",
+      }),
+    },
     badge: {
       dot: {
         neutral: t({ message: "Note", context: "a badge's dot" }),

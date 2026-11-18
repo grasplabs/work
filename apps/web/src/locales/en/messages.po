@@ -4367,6 +4367,10 @@ msgstr "Close"
 msgid "Close {name}"
 msgstr "Close {name}"
 
+#: src/frame/part-words.tsx
+msgid "Close find"
+msgstr "Close find"
+
 #: src/brain/gap-actions.tsx
 msgid "Close it"
 msgstr "Close it"
@@ -4409,6 +4413,10 @@ msgstr "Closes {closes}"
 #: src/workflows/business-process.tsx
 msgid "Closing the books and producing the numbers leadership looks at."
 msgstr "Closing the books and producing the numbers leadership looks at."
+
+#: src/frame/part-words.tsx
+msgid "Code"
+msgstr "Code"
 
 #: src/apps/app-workspace.tsx
 msgctxt "an app's workspace view"
@@ -5048,6 +5056,10 @@ msgstr "Couldn't share"
 #: src/apps/app-sharing.tsx
 msgid "Couldn't stop sharing"
 msgstr "Couldn't stop sharing"
+
+#: src/frame/part-words.tsx
+msgid "Counted in the page's words. Code view marks them in its source."
+msgstr "Counted in the page's words. Code view marks them in its source."
 
 #: src/connections/integration-facts.ts
 msgctxt "permission group"
@@ -5737,6 +5749,7 @@ msgctxt "download a file"
 msgid "Download"
 msgstr "Download"
 
+#: src/frame/part-words.tsx
 #: src/knowledge/uploads.tsx
 #: src/workflows/run-files.tsx
 msgid "Download {name}"
@@ -6432,6 +6445,11 @@ msgctxt "a kind of field"
 msgid "File"
 msgstr "File"
 
+#: src/frame/part-words.tsx
+msgctxt "an opened file's name before it has one"
+msgid "File"
+msgstr "File"
+
 #: src/apps/app-data.tsx
 msgid "File {where}: {message}"
 msgstr "File {where}: {message}"
@@ -6528,6 +6546,10 @@ msgstr "Find a record by its ID"
 msgid "Find an app or workflow"
 msgstr "Find an app or workflow"
 
+#: src/frame/part-words.tsx
+msgid "Find in the file"
+msgstr "Find in the file"
+
 #: src/settings/team-members-dialog.tsx
 msgid "Find people"
 msgstr "Find people"
@@ -6551,6 +6573,10 @@ msgstr "First I need your staff list."
 #: src/interview/words.ts
 msgid "First, the steps."
 msgstr "First, the steps."
+
+#: src/frame/part-words.tsx
+msgid "Fit"
+msgstr "Fit"
 
 #: src/frame/part-words.tsx
 msgctxt "a preview fitted to its room"
@@ -7374,6 +7400,10 @@ msgstr "Hide password"
 msgid "Hide people one by one"
 msgstr "Hide people one by one"
 
+#: src/frame/part-words.tsx
+msgid "Hide the outline"
+msgstr "Hide the outline"
+
 #: src/chat/package-requests.tsx
 msgctxt "an advisory's severity"
 msgid "High"
@@ -7910,6 +7940,10 @@ msgstr "It changes the App's data: see What changes."
 msgid "It declares no tasks."
 msgstr "It declares no tasks."
 
+#: src/frame/part-words.tsx
+msgid "It did not open"
+msgstr "It did not open"
+
 #: src/settings/ai-providers.tsx
 msgid "It didn't answer."
 msgstr "It didn't answer."
@@ -8055,6 +8089,10 @@ msgstr "It rests on turns you were not part of."
 #: src/workflows/workflow-triggers.tsx
 msgid "It runs as you, and starts nothing until an admin allows it."
 msgstr "It runs as you, and starts nothing until an admin allows it."
+
+#: src/frame/part-words.tsx
+msgid "It sent itself to another address {times} times, so it is no longer shown. Its source is in Code view."
+msgstr "It sent itself to another address {times} times, so it is no longer shown. Its source is in Code view."
 
 #: src/apps/app-workspace.tsx
 msgid "It shows here as soon as there is something to see."
@@ -8413,6 +8451,10 @@ msgstr "Key"
 #: src/export/figure-tiles.tsx
 msgid "Key figures"
 msgstr "Key figures"
+
+#: src/frame/part-words.tsx
+msgid "Keyboard shortcuts"
+msgstr "Keyboard shortcuts"
 
 #: src/apps/resource-bindings.tsx
 msgid "Kind"
@@ -9595,6 +9637,10 @@ msgstr "Next run {when} ({zone})"
 #: src/workflows/workflow-triggers.tsx
 msgid "Next run: {next}"
 msgstr "Next run: {next}"
+
+#: src/frame/part-words.tsx
+msgid "Next section"
+msgstr "Next section"
 
 #: src/onboarding/send-plan-form.tsx
 msgid "Next week"
@@ -11013,6 +11059,10 @@ msgid "Opened"
 msgstr "Opened"
 
 #: src/frame/part-words.tsx
+msgid "Opening {name}"
+msgstr "Opening {name}"
+
+#: src/frame/part-words.tsx
 msgid "Opening {provider}"
 msgstr "Opening {provider}"
 
@@ -11023,6 +11073,10 @@ msgstr "Opening Grasp"
 #: src/routes/guest.tsx
 msgid "Opening the chat…"
 msgstr "Opening the chat…"
+
+#: src/frame/part-words.tsx
+msgid "Opening the file"
+msgstr "Opening the file"
 
 #: src/brain/note-reveal.tsx
 msgid "Opening the note"
@@ -11156,6 +11210,10 @@ msgstr "Our first conversation gave me the big picture. Now I need the details."
 #: src/knowledge/copy-skill.tsx
 msgid "Our skills has a skill at {path} already: adapt that one."
 msgstr "Our skills has a skill at {path} already: adapt that one."
+
+#: src/frame/part-words.tsx
+msgid "Outline"
+msgstr "Outline"
 
 #: src/apps/resource-bindings.tsx
 msgid "Output"
@@ -11657,8 +11715,16 @@ msgid "Press to use the app"
 msgstr "Press to use the app"
 
 #: src/frame/part-words.tsx
+msgid "Press to use the page"
+msgstr "Press to use the page"
+
+#: src/frame/part-words.tsx
 msgid "Presses \"{words}\""
 msgstr "Presses \"{words}\""
+
+#: src/frame/part-words.tsx
+msgid "Preview"
+msgstr "Preview"
 
 #: src/frame/part-words.tsx
 msgid "Preview of your chat background"
@@ -11692,6 +11758,10 @@ msgstr "Previous month"
 #: src/frame/part-words.tsx
 msgid "Previous page"
 msgstr "Previous page"
+
+#: src/frame/part-words.tsx
+msgid "Previous section"
+msgstr "Previous section"
 
 #: src/apps/publish.tsx
 msgid "Problems"
@@ -13829,9 +13899,17 @@ msgstr "Show the apps and workflows"
 msgid "Show the choices"
 msgstr "Show the choices"
 
+#: src/frame/part-words.tsx
+msgid "Show the code"
+msgstr "Show the code"
+
 #: src/settings/ai-providers.tsx
 msgid "Show the models"
 msgstr "Show the models"
+
+#: src/frame/part-words.tsx
+msgid "Show the outline"
+msgstr "Show the outline"
 
 #: src/workflows/requests/request-detail.tsx
 msgid "Show the page for {title}"
@@ -13840,6 +13918,10 @@ msgstr "Show the page for {title}"
 #: src/frame/part-words.tsx
 msgid "Show the people"
 msgstr "Show the people"
+
+#: src/frame/part-words.tsx
+msgid "Show the preview"
+msgstr "Show the preview"
 
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Show the time zones"
@@ -14269,6 +14351,11 @@ msgstr "Starry night"
 
 #: src/interview/sound-check.tsx
 msgctxt "begin the interview"
+msgid "Start"
+msgstr "Start"
+
+#: src/frame/part-words.tsx
+msgctxt "the start of a file"
 msgid "Start"
 msgstr "Start"
 
@@ -15245,6 +15332,14 @@ msgstr "The example data doesn't fit the change"
 msgid "The export didn't work. Try again."
 msgstr "The export didn't work. Try again."
 
+#: src/frame/part-words.tsx
+msgid "The file did not load ({status})."
+msgstr "The file did not load ({status})."
+
+#: src/frame/part-words.tsx
+msgid "The file did not load."
+msgstr "The file did not load."
+
 #: src/onboarding/send-plan-form.tsx
 msgid "The first links go out"
 msgstr "The first links go out"
@@ -15897,6 +15992,10 @@ msgstr "This is what is new."
 msgid "This is your new App, with example data."
 msgstr "This is your new App, with example data."
 
+#: src/frame/part-words.tsx
+msgid "This kind of file does not show here"
+msgstr "This kind of file does not show here"
+
 #: src/settings/chat-accounts.tsx
 msgid "This link can’t be used"
 msgstr "This link can’t be used"
@@ -15987,6 +16086,10 @@ msgstr "This page doesn't exist"
 #: src/frame/page-states.tsx
 msgid "This page is not here"
 msgstr "This page is not here"
+
+#: src/frame/part-words.tsx
+msgid "This page kept leaving"
+msgstr "This page kept leaving"
 
 #: src/pages/frame-failure.tsx
 msgid "This page left its frame and was stopped."
@@ -16504,6 +16607,10 @@ msgid "Until Grasp support sets one, interview links can’t go out by email. Se
 msgstr "Until Grasp support sets one, interview links can’t go out by email. Send each one their link by hand from Interviews."
 
 #: src/frame/part-words.tsx
+msgid "Untitled"
+msgstr "Untitled"
+
+#: src/frame/part-words.tsx
 msgid "Up to {most}."
 msgstr "Up to {most}."
 
@@ -16585,6 +16692,10 @@ msgstr "Use the app"
 #: src/workflows/resource-params.tsx
 msgid "Use the default"
 msgstr "Use the default"
+
+#: src/frame/part-words.tsx
+msgid "Use the page"
+msgstr "Use the page"
 
 #: src/onboarding/ai-step.tsx
 msgid "Use your own key"
@@ -16792,6 +16903,11 @@ msgstr "via {app}"
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Vienna"
 msgstr "Vienna"
+
+#: src/frame/part-words.tsx
+msgctxt "a file shown as a page or as code"
+msgid "View"
+msgstr "View"
 
 #: src/frame/part-words.tsx
 msgctxt "a table's view menu"
@@ -18378,14 +18494,20 @@ msgid "yyyy"
 msgstr "yyyy"
 
 #: src/brain/atlas-overlays.tsx
+#: src/frame/part-words.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom in"
 msgstr "Zoom in"
 
 #: src/brain/atlas-overlays.tsx
+#: src/frame/part-words.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom out"
 msgstr "Zoom out"
+
+#: src/frame/part-words.tsx
+msgid "Zoom to fit"
+msgstr "Zoom to fit"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
