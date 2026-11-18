@@ -9,14 +9,20 @@ import type {
 import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 
 import type { Session } from "../core.ts";
 import { formatDate } from "../format.ts";
 import { NotFoundState, NotLoadedState } from "../frame/page-states.tsx";
 import { PageHeading } from "../frame/page.tsx";
-import { RouterLink } from "../frame/router-link.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogTitle,
+  DialogTrigger,
+} from "../grasp/dialog/index.ts";
 import {
   Empty,
   EmptyHeader,
@@ -27,16 +33,17 @@ import {
   Doc as DocMark,
   File,
   Folder as FolderMark,
+  Upload,
 } from "../grasp/icons/index.ts";
-import { Section, SectionHeader } from "../grasp/section-header/index.ts";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../grasp/table/index.ts";
+  Item,
+  ItemContent,
+  ItemDetail,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
+import { Section, SectionHeader } from "../grasp/section-header/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { CollectionMarkers } from "../knowledge/collection-markers.tsx";
@@ -154,40 +161,43 @@ const FileList = ({ documents }: { documents: DocumentSummary[] }) => {
       </Empty>
     );
   }
-  // Concept B: the files as a table, compared column by column.
   return (
     <>
-      <Table aria-label="Files">
-        <TableHeader>
-          <TableRow>
-            <TableHead>Title</TableHead>
-            <TableHead>Folder</TableHead>
-            <TableHead>File</TableHead>
-            <TableHead>Changed</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {foldersOf(folderTree(documents)).flatMap((folder) =>
-            folder.documents.map((document) => (
-              <TableRow key={document.id}>
-                <TableCell>
-                  <RouterLink
+      {/* Concept C: each folder's files under its own small heading. */}
+      {foldersOf(folderTree(documents)).map((folder) => (
+        <Section key={folder.path} aria-labelledby={`folder-${folder.path}`}>
+          {folder.path === "" ? null : (
+            <SectionHeader
+              headingLevel={3}
+              id={`folder-${folder.path}`}
+              size="sm"
+              title={folder.path}
+            />
+          )}
+          <ItemGroup separated>
+            {folder.documents.map((document) => (
+              <Item
+                key={document.id}
+                render={
+                  <Link
                     from="/knowledge/$collection"
                     search={{ doc: document.id }}
-                    to="."
-                    variant="standalone"
-                  >
+                  />
+                }
+                size="sm"
+              >
+                <ItemMedia icon={File} iconLook="inline" />
+                <ItemContent>
+                  <ItemTitle>
                     {document.title}
-                  </RouterLink>
-                </TableCell>
-                <TableCell>{folder.path}</TableCell>
-                <TableCell>{document.path.split("/").at(-1)}</TableCell>
-                <TableCell>{formatDate(document.updatedAt)}</TableCell>
-              </TableRow>
-            ))
-          )}
-        </TableBody>
-      </Table>
+                    <ItemDetail>{formatDate(document.updatedAt)}</ItemDetail>
+                  </ItemTitle>
+                </ItemContent>
+              </Item>
+            ))}
+          </ItemGroup>
+        </Section>
+      ))}
       {documents.length === pageMaxLimit ? (
         <Text size="sm" tone="muted">
           <Trans>Showing the first {pageMaxLimit} files.</Trans>
@@ -354,7 +364,23 @@ const CollectionView = () => {
                 <SectionHeader
                   actions={
                     writable ? (
-                      <NewDocument collectionId={collectionId} />
+                      <>
+                        <Dialog>
+                          <DialogTrigger icon={Upload} size="sm">
+                            Upload
+                          </DialogTrigger>
+                          <DialogContent closeLabel="Close">
+                            <DialogTitle>Upload</DialogTitle>
+                            <DialogBody>
+                              <Uploads
+                                collectionId={collection.data.collection.id}
+                                listed={new Set(paths.values())}
+                              />
+                            </DialogBody>
+                          </DialogContent>
+                        </Dialog>
+                        <NewDocument collectionId={collectionId} />
+                      </>
                     ) : undefined
                   }
                   id="files"
@@ -362,14 +388,6 @@ const CollectionView = () => {
                 />
                 <FileList documents={collection.data.documents} />
               </Section>
-              {writable ? (
-                <Uploads
-                  // Another collection starts with no uploads to follow.
-                  key={collection.data.collection.id}
-                  collectionId={collection.data.collection.id}
-                  listed={new Set(paths.values())}
-                />
-              ) : null}
             </>
           ) : null}
         </div>
