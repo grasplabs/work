@@ -123,7 +123,7 @@ test("a person searches, edits a document, meets a newer version instead of over
     const results = page.getByRole("region", { name: "Results" });
     const hit = results.getByRole("listitem").filter({ hasText: word });
     await expect(
-      hit.getByText(`${collectionName} › Leave › Parental leave`)
+      hit.getByText(`${collectionName} › Parental leave`)
     ).toBeVisible();
     await hit.getByRole("link", { name: "Leave" }).click();
 
