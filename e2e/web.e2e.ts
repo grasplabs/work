@@ -300,7 +300,8 @@ test("invites someone with a role, says what each role may do, and withdraws the
 
   await page.getByRole("button", { name: "Invite", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Invite people" });
-  const addresses = dialog.getByRole("textbox", { name: "Email addresses" });
+  // Grasp UI's tag input: a combobox, which suggests as it is typed in.
+  const addresses = dialog.getByRole("combobox", { name: "Email addresses" });
   // An address outside the organization's domains: core refuses it, and it stays marked.
   await addresses.fill("someone@elsewhere.test");
   await addresses.press("Enter");
@@ -431,11 +432,11 @@ test("shows the members page only to someone signed in, and never signs them out
 
   // Trying again shows it's trying, then says so again while core fails.
   const unreachable = page.getByRole("alert");
-  await page.getByRole("button", { name: "Try again" }).click();
-  // Busy while it tries: a second press waits for the first.
-  await expect(
-    page.getByRole("button", { name: "Trying again…" })
-  ).toHaveAttribute("aria-busy", "true");
+  const retry = page.getByRole("button", { name: "Try again" });
+  await retry.click();
+  // Busy while it tries, keeping its words (Grasp UI's working button says
+  // "Trying again…" to a screen reader): a second press waits for the first.
+  await expect(retry).toHaveAttribute("aria-busy", "true");
   await expect(unreachable).toHaveText(
     "Grasp could not reach its servers. Nothing you saved is lost.",
     { timeout: reconnectMs }

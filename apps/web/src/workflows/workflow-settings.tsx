@@ -18,7 +18,6 @@ import { formatDateTime, formatList } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { Badge } from "../grasp/badge/index.ts";
 import { Empty } from "../grasp/empty/index.ts";
-import { PageHeader } from "../grasp/page-header/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   FactRow,
@@ -513,7 +512,6 @@ export const WorkflowSettings = ({
       </TabsNav>
       <div {...stylex.props(styles.scroll)}>
         <div {...stylex.props(styles.column)}>
-          <PageHeader size="md" title={i18n._(sectionLabels[section])} />
           <SectionBody read={read} section={section} />
         </div>
       </div>

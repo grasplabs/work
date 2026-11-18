@@ -3004,9 +3004,13 @@ msgstr "Apply it if the sender’s domain is {domain}."
 msgid "Approval"
 msgstr "Approval"
 
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox filter"
+msgid "Approvals"
+msgstr "Approvals"
+
 #: src/apps/app-webhooks.tsx
 #: src/dashboard/pile-cards.tsx
-#: src/inbox/item-detail.tsx
 #: src/workflows/binding-approvals.tsx
 msgid "Approve"
 msgstr "Approve"
@@ -3036,7 +3040,6 @@ msgid "Approve {name}?"
 msgstr "Approve {name}?"
 
 #: src/dashboard/pile-cards.tsx
-#: src/inbox/item-detail.tsx
 msgid "Approve {who}"
 msgstr "Approve {who}"
 
@@ -3126,7 +3129,6 @@ msgid "Approved: {title}"
 msgstr "Approved: {title}"
 
 #: src/dashboard/pile-cards.tsx
-#: src/inbox/item-detail.tsx
 msgid "Approved: {who}."
 msgstr "Approved: {who}."
 
@@ -3149,11 +3151,6 @@ msgstr "Approving"
 #: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.apps.index.tsx
 #: src/settings/stephen-settings.tsx
-msgid "Apps"
-msgstr "Apps"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox filter, short"
 msgid "Apps"
 msgstr "Apps"
 
@@ -4192,6 +4189,11 @@ msgstr "Changes only you see"
 msgid "Changes since {when}"
 msgstr "Changes since {when}"
 
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox filter"
+msgid "Changes we couldn’t confirm"
+msgstr "Changes we couldn’t confirm"
+
 #: src/apps/data-model-changes.tsx
 msgid "Changes who can see and change the records of {table}."
 msgstr "Changes who can see and change the records of {table}."
@@ -4731,6 +4733,7 @@ msgstr "Configuration"
 
 #: src/chat/held-writes.tsx
 #: src/frame/part-words.tsx
+#: src/inbox/item-detail.tsx
 msgid "Confirm"
 msgstr "Confirm"
 
@@ -5691,11 +5694,6 @@ msgstr "Dictate"
 #: src/chat/use-dictation.ts
 msgid "Dictation isn't set up here yet. What you typed is kept."
 msgstr "Dictation isn't set up here yet. What you typed is kept."
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind: a change whose answer was lost"
-msgid "Did it happen?"
-msgstr "Did it happen?"
 
 #: src/dashboard/outcome-card.tsx
 #: src/inbox/items.ts
@@ -7248,6 +7246,10 @@ msgstr "Grasp could not be reached. Try again."
 #: src/routes/_shell.tsx
 msgid "Grasp could not reach its servers. Nothing you saved is lost."
 msgstr "Grasp could not reach its servers. Nothing you saved is lost."
+
+#: src/chat/use-ask.ts
+msgid "Grasp couldn't be reached, so your question wasn't sent. It's kept here: send it again."
+msgstr "Grasp couldn't be reached, so your question wasn't sent. It's kept here: send it again."
 
 #: src/pages/frame-failure.tsx
 msgid "Grasp couldn't confirm this page's code for you. Reload to try again."
@@ -11682,6 +11684,7 @@ msgid "Part of what will be sent is cut short above. Show it all, or exactly wha
 msgstr "Part of what will be sent is cut short above. Show it all, or exactly what will be sent, to confirm."
 
 #: src/chat/held-writes.tsx
+#: src/inbox/item-detail.tsx
 msgid "Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm."
 msgstr "Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm."
 
@@ -12545,7 +12548,6 @@ msgstr "Reference for support"
 
 #: src/chat/held-writes.tsx
 #: src/dashboard/pile-cards.tsx
-#: src/inbox/item-detail.tsx
 msgid "Reject"
 msgstr "Reject"
 
@@ -12561,7 +12563,6 @@ msgid "Reject"
 msgstr "Reject"
 
 #: src/dashboard/pile-cards.tsx
-#: src/inbox/item-detail.tsx
 msgid "Reject {who}"
 msgstr "Reject {who}"
 
@@ -12590,7 +12591,6 @@ msgid "Rejected: {rejected}"
 msgstr "Rejected: {rejected}"
 
 #: src/dashboard/pile-cards.tsx
-#: src/inbox/item-detail.tsx
 msgid "Rejected: {who}."
 msgstr "Rejected: {who}."
 
@@ -16941,6 +16941,11 @@ msgstr "Unbind {alias}?"
 msgid "Unbinding"
 msgstr "Unbinding"
 
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Unconfirmed change"
+msgstr "Unconfirmed change"
+
 #: src/onboarding/interviews-progress.tsx
 msgid "Under 5"
 msgstr "Under 5"
@@ -17023,16 +17028,6 @@ msgstr "Unknown"
 #: src/routes/_shell.settings.security.tsx
 msgid "Unknown device"
 msgstr "Unknown device"
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
-msgid "Unknown outcome"
-msgstr "Unknown outcome"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox filter"
-msgid "Unknown outcomes"
-msgstr "Unknown outcomes"
 
 #: src/brain/brain.ts
 msgid "Unknown source"
@@ -18473,11 +18468,6 @@ msgstr "Workflows"
 
 #: src/brain/brain.ts
 msgctxt "a group of notes in the brain: work worth turning into workflows"
-msgid "Workflows"
-msgstr "Workflows"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox filter"
 msgid "Workflows"
 msgstr "Workflows"
 

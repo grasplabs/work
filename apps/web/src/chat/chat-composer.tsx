@@ -1,7 +1,7 @@
 import type { ModelEffort } from "@grasp-os/shared/models";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
@@ -191,6 +191,37 @@ const useAgentMenu = (
   };
 };
 
+/**
+ * Send, from the box: a press before core has said which models there
+ * are waits for them and goes then, rather than being dropped while Send
+ * looks ready; a press while a question is on its way is that question.
+ */
+const useSendOnceReady = (
+  models: ChatComposerProps["models"],
+  busy: boolean,
+  onSend: () => void | Promise<void>
+): (() => Promise<void>) => {
+  // A press kept until the models are read: nothing to draw, so a ref.
+  const waiting = useRef(false);
+  const send = useEffectEvent(() => {
+    waiting.current = false;
+    void onSend();
+  });
+  const ready = models !== undefined && !busy;
+  useEffect(() => {
+    if (ready && waiting.current) {
+      send();
+    }
+  }, [ready]);
+  return async () => {
+    if (models === undefined) {
+      waiting.current = true;
+    } else if (!busy) {
+      await onSend();
+    }
+  };
+};
+
 /** No agents to choose from: an open chat's box. */
 const noAgents: readonly ComposerAgentOption[] = [];
 
@@ -243,6 +274,7 @@ export const ChatComposer = ({
   const dictating = useDictation(text, onText);
   const look = useOwnComposerLook();
   const agentMenu = useAgentMenu(agents, agent, onAgent);
+  const send = useSendOnceReady(models, busy, onSend);
   return (
     <Composer
       accent={look.accent}
@@ -289,11 +321,7 @@ export const ChatComposer = ({
       }
       // Not removable while the question is on its way with them.
       onRemoveAttachment={busy ? undefined : onRemoveFile}
-      onSend={async () => {
-        if (!busy) {
-          await onSend();
-        }
-      }}
+      onSend={send}
       onStop={onStop}
       sendFailed={sendFailed}
       onSendFailedChange={onSendFailedChange}

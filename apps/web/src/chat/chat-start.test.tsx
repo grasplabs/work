@@ -316,31 +316,27 @@ describe("Chat's page from Make something", () => {
     });
   });
 
-  it("asks nothing before core has said which models there are, and the question waits in the box", async () => {
+  it("sends a question asked before core has said which models there are once it has, with no second press", async () => {
     const models = Promise.withResolvers<string[]>();
     const { asked } = await shown(undefined, undefined, {
       models: models.promise,
     });
-    const ask = async (): Promise<void> => {
-      await act(async () => {
-        box().closest("form")?.requestSubmit();
-        await Promise.resolve();
-      });
-      await settled();
-    };
     await act(async () => {
       typeIn(box(), "What waits on me today?");
       await Promise.resolve();
     });
 
-    await ask();
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
     const early = { asked: [...asked], kept: box().value };
     await act(async () => {
       models.resolve(["openai/gpt-5"]);
       await Promise.resolve();
     });
     await settled();
-    await ask();
 
     expect({ early, asked }).toStrictEqual({
       early: { asked: [], kept: "What waits on me today?" },
@@ -348,6 +344,37 @@ describe("Chat's page from Make something", () => {
         "create What waits on me today? null",
         "send chat-1 What waits on me today?",
       ],
+    });
+  });
+
+  it("says in its own words that a question the connection dropped wasn't sent, never the connection's, and keeps it", async () => {
+    const raw = "WebSocket closed with code 1006";
+    const dropped = Promise.reject(new Error(raw));
+    // Awaited only when the question goes.
+    dropped.catch(() => {});
+    await shown(undefined, undefined, { confirmed: dropped });
+    await act(async () => {
+      typeIn(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+
+    const said = document.body.textContent ?? "";
+    expect({
+      ours: said.includes(
+        "Grasp couldn't be reached, so your question wasn't sent."
+      ),
+      raw: said.includes(raw),
+      kept: box().value,
+    }).toStrictEqual({
+      ours: true,
+      raw: false,
+      kept: "What waits on me today?",
     });
   });
 

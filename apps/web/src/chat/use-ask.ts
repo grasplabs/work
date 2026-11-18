@@ -105,6 +105,10 @@ export const unsentChatFor = (
     ? unsent.id
     : undefined;
 
+/** Whether `error` is a refusal core named with a code, rather than a dropped connection's own. */
+const codedByCore = (error: unknown): boolean =>
+  error instanceof Error && "code" in error && typeof error.code === "string";
+
 /**
  * What the box to ask in needs: the text, model and effort, and asking in
  * `chatId`, or in a new chat named after the question.
@@ -133,6 +137,9 @@ export const useAsk = (
   const [sendFailed, setSendFailed] = useState(false);
   // Core hasn't confirmed the question on its way within the deadline.
   const [late, setLate] = useState(false);
+  // Why the last question didn't go: core's own words for a refusal it
+  // names; ours for anything else (a dropped connection's raw text).
+  const [unsentWhy, setUnsentWhy] = useState<string>();
   // The box's files core already took, by chat: asking again in the same
   // chat names them rather than attaching them twice.
   const attached = useRef(
@@ -203,42 +210,56 @@ export const useAsk = (
     }
     sending.current = true;
     setLate(false);
+    setUnsentWhy(undefined);
     const named = chatMentionsOf(mentioned);
     let created: string | undefined;
-    const call = run(async (session) => {
-      let id = chatId ?? unsentChatFor(unsent.current, question, agentId);
-      if (id === undefined) {
-        ({ id } = await session.chats.create(titleOf(question), agentId, make));
-        created = id;
-      }
-      const askedIn = id;
-      const fileIds: string[] = [];
-      for (const { id: boxId, file } of carried) {
-        const known = attached.current.get(boxId);
-        if (known?.chatId === askedIn) {
-          fileIds.push(known.fileId);
-          continue;
+    const call = run(
+      async (session) => {
+        let id = chatId ?? unsentChatFor(unsent.current, question, agentId);
+        if (id === undefined) {
+          ({ id } = await session.chats.create(
+            titleOf(question),
+            agentId,
+            make
+          ));
+          created = id;
         }
-        // oxlint-disable-next-line no-await-in-loop -- one at a time, in the order they were added
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        // oxlint-disable-next-line no-await-in-loop -- one at a time, in the order they were added
-        const { id: fileId } = await session.chats.attachFile(askedIn, {
-          name: file.name,
-          bytes,
+        const askedIn = id;
+        const fileIds: string[] = [];
+        for (const { id: boxId, file } of carried) {
+          const known = attached.current.get(boxId);
+          if (known?.chatId === askedIn) {
+            fileIds.push(known.fileId);
+            continue;
+          }
+          // oxlint-disable-next-line no-await-in-loop -- one at a time, in the order they were added
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          // oxlint-disable-next-line no-await-in-loop -- one at a time, in the order they were added
+          const { id: fileId } = await session.chats.attachFile(askedIn, {
+            name: file.name,
+            bytes,
+          });
+          attached.current.set(boxId, { chatId: askedIn, fileId });
+          fileIds.push(fileId);
+        }
+        await session.chats.send(askedIn, {
+          text: question,
+          model,
+          ...(effort === undefined ? {} : { effort }),
+          ...(fileIds.length === 0 ? {} : { files: fileIds }),
+          ...(subject === undefined ? {} : { subject }),
+          ...(named.length === 0 ? {} : { mentions: named }),
         });
-        attached.current.set(boxId, { chatId: askedIn, fileId });
-        fileIds.push(fileId);
+        return askedIn;
+      },
+      (reason, error) => {
+        setUnsentWhy(
+          codedByCore(error)
+            ? reason
+            : t`Grasp couldn't be reached, so your question wasn't sent. It's kept here: send it again.`
+        );
       }
-      await session.chats.send(askedIn, {
-        text: question,
-        model,
-        ...(effort === undefined ? {} : { effort }),
-        ...(fileIds.length === 0 ? {} : { files: fileIds }),
-        ...(subject === undefined ? {} : { subject }),
-        ...(named.length === 0 ? {} : { mentions: named }),
-      });
-      return askedIn;
-    });
+    );
     const settled = async (): Promise<boolean> => {
       const sent = await call;
       sending.current = false;
@@ -315,7 +336,7 @@ export const useAsk = (
       busy: busy || models === undefined,
       failure: late
         ? t`Grasp hasn't confirmed your question yet. It's kept here, and goes once Grasp answers.`
-        : failure,
+        : (unsentWhy ?? failure),
       fileProblem,
       files: files.map(({ id, file }) => ({
         id,
