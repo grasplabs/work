@@ -894,7 +894,9 @@ const drawingOf = (stored: string | null): DrawnWork | null =>
 
 /**
  * What nobody who told a piece of work has said yet, each as a kind of
- * answer in words of the store's own (GRA-330): the next interview asks
+ * answer in words of the store's own (GRA-330): what its routine lacks,
+ * as a drawing shows a part from the first person who told it (GRA-1749,
+ * GRA-1987). The next interview asks
  * about these when they come up. Never the drawing's own open questions,
  * which the model writes from what as few as one colleague said, so they
  * could carry that colleague's words, paraphrased, into someone else's
@@ -902,12 +904,16 @@ const drawingOf = (stored: string | null): DrawnWork | null =>
  * Only that an answer is missing is told, never what anyone answered.
  */
 const unknownAnswers: readonly {
-  missing: (told: Told[]) => boolean;
+  missing: (told: Told[], routine: RoutineShows) => boolean;
   ask: string;
 }[] = [
+  // How often, until the team's routine shows it (GRA-1749): its standing
+  // drawing shows only a count of the whole team's, in the drawing's own
+  // period, as checked (brain-intake.ts `volumesOf`), so it is asked
+  // whenever that drawing has none, whatever the lines say.
   {
-    missing: (told) => told.every(({ volume }) => volume === null),
-    ask: "how many come in, in a week or a month",
+    missing: (_told, { teamCount }) => !teamCount,
+    ask: "how many the whole team does, in a week or a month",
   },
   {
     missing: (told) =>
@@ -944,14 +950,23 @@ const unknownAnswers: readonly {
   },
 ];
 
+/** What the standing drawing of a piece of work shows: its routine as members read it. */
+interface RoutineShows {
+  /** Whether it shows how often, as the whole team's count. */
+  teamCount: boolean;
+}
+
 /** What nobody has said yet of a piece of work, for Stephen to ask when it comes up. */
-const stillUnknown = (drawn: DrawnWork | null): string[] => {
+const stillUnknown = (
+  drawn: DrawnWork | null,
+  routine: RoutineShows
+): string[] => {
   const told = Object.values(drawn?.told ?? {});
   if (told.length === 0) {
     return [];
   }
   const asks = unknownAnswers
-    .filter(({ missing }) => missing(told))
+    .filter(({ missing }) => missing(told, routine))
     .map(({ ask }) => ask)
     .slice(0, 4);
   return asks.length === 0
@@ -2428,12 +2443,20 @@ export class Onboarding extends DurableObject<Env> {
    * which could say anything. `work` stays empty until the team's map
    * names their piece of work: Stephen then asks which one it is.
    */
-  turnContext(
+  async turnContext(
     secretMark: string,
     account: string,
     now: string = new Date().toISOString()
-  ): LinkAnswer<TurnContext> {
-    const found = this.#onLink(secretMark, { account }, now, "save");
+  ): Promise<LinkAnswer<TurnContext>> {
+    const first = this.#onLink(secretMark, { account }, now, "save");
+    if (!first.ok) {
+      return first;
+    }
+    // The routine's id is a hash, worked out before anything is read for
+    // the turn: everything after is read at once, the link checked again.
+    const routine = await this.#routineAskedOf(first.value.person.id);
+    // Checked again, not counted again: one request is one call.
+    const found = this.#onLink(secretMark, { account }, now, "save", false);
     if (!found.ok) {
       return found;
     }
@@ -2443,7 +2466,7 @@ export class Onboarding extends DurableObject<Env> {
     if (taking !== null) {
       return refused(taking);
     }
-    return answered(this.#contextOf(person, roster));
+    return answered(this.#contextOf(person, roster, routine));
   }
 
   /**
@@ -2451,15 +2474,56 @@ export class Onboarding extends DurableObject<Env> {
    * whether their link is out or not: the Stephen Lab (lab.ts) keeps it
    * with an interview it plays back. Null for someone not on the roster.
    */
-  contextOf(id: string): TurnContext | null {
+  async contextOf(id: string): Promise<TurnContext | null> {
+    const routine = await this.#routineAskedOf(id);
     const roster = this.#roster();
     const person = roster?.people.find((each) => each.id === id);
     return roster === null || person === undefined
       ? null
-      : this.#contextOf(person, roster);
+      : this.#contextOf(person, roster, routine);
   }
 
-  #contextOf(person: Roster["people"][number], roster: Roster): TurnContext {
+  /**
+   * The Brain's id (`intakeIds.workflow`) of the piece of work `person`
+   * is asked about, when they are asked about one: its routine's.
+   */
+  async #routineAskedOf(person: string): Promise<string | null> {
+    const [row] = this.#db
+      .select({ work: works.id, team: works.team })
+      .from(askedAbout)
+      .innerJoin(works, eq(works.id, askedAbout.work))
+      .where(eq(askedAbout.person, person))
+      .all();
+    return row === undefined
+      ? null
+      : await intakeIds.workflow(row.team, row.work);
+  }
+
+  /**
+   * What the standing drawing of the piece of work `routine` shows: none
+   * standing shows nothing. Only that drawing is read, by its work's id.
+   */
+  #routineShows(routine: string | null): RoutineShows {
+    const [row] =
+      routine === null
+        ? []
+        : this.#db
+            .select({ drawing: brainDrawings.drawing })
+            .from(brainDrawings)
+            .where(and(eq(brainDrawings.workflow, routine), standingDrawing))
+            .limit(1)
+            .all();
+    const drawing = row === undefined ? null : brainDrawingOf(row.drawing);
+    return {
+      teamCount: drawing?.volumes.some(({ of }) => of === "team") ?? false,
+    };
+  }
+
+  #contextOf(
+    person: Roster["people"][number],
+    roster: Roster,
+    routine: string | null
+  ): TurnContext {
     const team = roster.teams.find(({ id }) => id === person.team);
     const lead = roster.people.find(
       ({ id }) => id === team?.lead && id !== person.id
@@ -2475,7 +2539,12 @@ export class Onboarding extends DurableObject<Env> {
     const teamName = team?.name ?? "";
     const known = [
       ...(kind === "lead" ? teamKnown(person.name, teamName, members) : []),
-      ...(kind === "lead" ? [] : stillUnknown(this.#drawingAskedOf(person.id))),
+      ...(kind === "lead"
+        ? []
+        : stillUnknown(
+            this.#drawingAskedOf(person.id),
+            this.#routineShows(routine)
+          )),
       ...(kind === "lead" ? [] : this.#insteadKnown(person)),
       this.interviewBrief(),
       this.documentsBrief(teamName),

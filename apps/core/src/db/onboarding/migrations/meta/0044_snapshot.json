@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "77efc101-26f7-4c83-86f7-48733b10f5de",
+  "id": "85324d13-3544-40ba-90b5-4e5a6d89556e",
   "prevId": "1713d945-678b-41c3-b262-79cfd2d327a1",
   "tables": {
     "approvals": {
@@ -256,6 +256,13 @@
             "team"
           ],
           "isUnique": false
+        },
+        "brain_drawings_workflow": {
+          "name": "brain_drawings_workflow",
+          "columns": [
+            "workflow"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {},
@@ -316,67 +323,6 @@
           "name": "brain_interviews_person",
           "columns": [
             "person"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "brain_opinions": {
-      "name": "brain_opinions",
-      "columns": {
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "record": {
-          "name": "record",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "text": {
-          "name": "text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "at": {
-          "name": "at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "erase": {
-          "name": "erase",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        }
-      },
-      "indexes": {
-        "brain_opinions_record": {
-          "name": "brain_opinions_record",
-          "columns": [
-            "record"
           ],
           "isUnique": false
         }
@@ -1415,162 +1361,6 @@
           "value": "\"onboarding\".\"id\" = 1"
         }
       }
-    },
-    "opinion_backers": {
-      "name": "opinion_backers",
-      "columns": {
-        "record": {
-          "name": "record",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "person": {
-          "name": "person",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "opinion_backers_person": {
-          "name": "opinion_backers_person",
-          "columns": [
-            "person"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "opinion_backers_record_person_pk": {
-          "columns": [
-            "record",
-            "person"
-          ],
-          "name": "opinion_backers_record_person_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "opinion_candidates": {
-      "name": "opinion_candidates",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "team": {
-          "name": "team",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "text": {
-          "name": "text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "person": {
-          "name": "person",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "opinion_candidates_team": {
-          "name": "opinion_candidates_team",
-          "columns": [
-            "team"
-          ],
-          "isUnique": false
-        },
-        "opinion_candidates_person": {
-          "name": "opinion_candidates_person",
-          "columns": [
-            "person"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "opinion_candidates_id_person_pk": {
-          "columns": [
-            "id",
-            "person"
-          ],
-          "name": "opinion_candidates_id_person_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "opinion_inputs": {
-      "name": "opinion_inputs",
-      "columns": {
-        "key": {
-          "name": "key",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "input": {
-          "name": "input",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "opinion_people": {
-      "name": "opinion_people",
-      "columns": {
-        "person": {
-          "name": "person",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "merged_from": {
-          "name": "merged_from",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "run_from": {
-          "name": "run_from",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
     },
     "participations": {
       "name": "participations",
