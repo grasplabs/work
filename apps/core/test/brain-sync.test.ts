@@ -270,6 +270,59 @@ describe("native sync", () => {
   });
 
   it(
+    "finishes an erase a stopped run owed, even while the provider fails every read",
+    setUpTime,
+    async () => {
+      const owner = await signedInApi(idp, "user");
+      const marker = markerOf();
+      const { connectionId, post, world } = await connectSampleFeed(owner, {
+        "": feedPage([mailItem("memo", `Memo ${marker}`)], "m1"),
+        m1: feedPage([], "m1"),
+      });
+      later(pollMs);
+      await sync();
+      await post({
+        "": feedPage([mailItem("memo", `Memo ${marker}`)], "m1"),
+        m1: feedPage([goneItem("memo")], "m2"),
+        m2: feedPage([], "m2"),
+      });
+      // Runs stopped at each step in turn, until one stops between the
+      // removal's record and its erase: all at one time, so a source whose
+      // page is done isn't due again, and each run's stop moves on by a call.
+      // First in the file, so no other test's sources share these runs.
+      let owed = false;
+      later(pollMs);
+      for (let left = 4; left < 80 && !owed; left += 1) {
+        vi.useFakeTimers({ toFake: ["Date"], now: clockAt });
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- one run after another
+          await runSync(env, { left });
+        } finally {
+          vi.useRealTimers();
+        }
+        // oxlint-disable-next-line no-await-in-loop -- read after each run
+        const leaving = await env.DB.prepare(
+          "SELECT count(*) AS count FROM brain_sync_items WHERE connection_id = ? AND leaving IS NOT NULL"
+        )
+          .bind(connectionId)
+          .first<{ count: number }>();
+        owed = (leaving?.count ?? 0) > 0;
+      }
+      const owedFound = await finds(owner.userId, marker);
+      // The provider fails every read from now on.
+      await world({ failing: ["files"] });
+      later(pollMs);
+      await sync();
+
+      expect({
+        owed,
+        owedFound,
+        after: await finds(owner.userId, marker),
+      }).toStrictEqual({ owed: true, owedFound: true, after: false });
+    }
+  );
+
+  it(
     "brings a person's own Drive in on the first run, then only what changed, each where its readers may read it",
     setUpTime,
     async () => {
@@ -1449,12 +1502,16 @@ describe("native sync", () => {
         n1: feedPage([goneItem("note")], "n2"),
         n2: feedPage([], "n2"),
       });
-      // Runs too small to list every mailbox's folders in one: as many
-      // calls as there are syncs listing places, plus the run's own three.
+      // Runs with room for the run's own four calls, one call for each sync
+      // that lists places, and one mail item's page more (claim, read, rows,
+      // the item's key, its add in its owner's store, its record, the
+      // commit: 10): listing every mailbox's folders ahead of the pages on
+      // every run would leave less than one item's page, for good.
       const listings = await env.DB.prepare(
-        "SELECT count(DISTINCT connection_id || ' ' || feed) AS count FROM brain_sync_sources WHERE place = ':places'"
+        "SELECT count(*) AS count FROM brain_sync_sources WHERE place = ':places'"
       ).first<{ count: number }>();
-      const left = 3 + Math.max(listings?.count ?? 0, mailboxes.length);
+      const left =
+        4 + Math.max(listings?.count ?? 0, mailboxes.length) + 10 - 1;
       let removedAt: number | undefined;
       let listedAt: number | undefined;
       for (let run = 0; run < 120 && listedAt === undefined; run += 1) {
@@ -1486,57 +1543,6 @@ describe("native sync", () => {
         removed: removedAt !== undefined && removedAt < 60,
         listed: listedAt !== undefined,
       }).toStrictEqual({ removed: true, listed: true });
-    }
-  );
-
-  it(
-    "finishes an erase a stopped run owed, even while the provider fails every read",
-    setUpTime,
-    async () => {
-      const owner = await signedInApi(idp, "user");
-      const marker = markerOf();
-      const { connectionId, post, world } = await connectSampleFeed(owner, {
-        "": feedPage([mailItem("memo", `Memo ${marker}`)], "m1"),
-        m1: feedPage([], "m1"),
-      });
-      later(pollMs);
-      await sync();
-      await post({
-        "": feedPage([mailItem("memo", `Memo ${marker}`)], "m1"),
-        m1: feedPage([goneItem("memo")], "m2"),
-        m2: feedPage([], "m2"),
-      });
-      // Runs stopped at each step in turn, until one stops between the
-      // removal's record and its erase.
-      let owed = false;
-      for (let left = 4; left < 40 && !owed; left += 1) {
-        later(pollMs);
-        vi.useFakeTimers({ toFake: ["Date"], now: clockAt });
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- one run after another
-          await runSync(env, { left });
-        } finally {
-          vi.useRealTimers();
-        }
-        // oxlint-disable-next-line no-await-in-loop -- read after each run
-        const leaving = await env.DB.prepare(
-          "SELECT count(*) AS count FROM brain_sync_items WHERE connection_id = ? AND leaving IS NOT NULL"
-        )
-          .bind(connectionId)
-          .first<{ count: number }>();
-        owed = (leaving?.count ?? 0) > 0;
-      }
-      const owedFound = await finds(owner.userId, marker);
-      // The provider fails every read from now on.
-      await world({ failing: ["files"] });
-      later(pollMs);
-      await sync();
-
-      expect({
-        owed,
-        owedFound,
-        after: await finds(owner.userId, marker),
-      }).toStrictEqual({ owed: true, owedFound: true, after: false });
     }
   );
 
