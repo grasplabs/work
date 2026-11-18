@@ -452,7 +452,11 @@ export const directoryListOf = (
 /**
  * `read` with each team the saved list has by name (any case) under the
  * saved one's id: core keeps a team under its members' team's id
- * (GRA-2055), never the id a list read here makes of its name.
+ * (GRA-2055), never the id a list read here makes of its name. Every
+ * saved id is its own team's alone: a team the saved list doesn't have
+ * keeps the id read here unless a saved team has it, else takes the next
+ * free one (`-2`, `-3`), so no two teams share an id and no new team
+ * takes on what was kept for another.
  */
 const underSavedIds = (
   read: StaffList["roster"],
@@ -461,12 +465,29 @@ const underSavedIds = (
   const savedIds = new Map(
     saved.teams.map((team) => [teamNameKey(team.name), team.id])
   );
-  const idOf = new Map(
-    read.teams.map((team) => [
-      team.id,
-      savedIds.get(teamNameKey(team.name)) ?? team.id,
-    ])
-  );
+  const idOf = new Map<string, string>();
+  const unmatched: string[] = [];
+  for (const team of read.teams) {
+    const savedId = savedIds.get(teamNameKey(team.name));
+    if (savedId === undefined) {
+      unmatched.push(team.id);
+    } else {
+      idOf.set(team.id, savedId);
+    }
+  }
+  const taken = new Set([...saved.teams.map((team) => team.id), ...unmatched]);
+  for (const id of unmatched) {
+    let free = id;
+    if (saved.teams.some((team) => team.id === id)) {
+      let next = 2;
+      while (taken.has(free)) {
+        free = `${id}-${next}`;
+        next += 1;
+      }
+      taken.add(free);
+    }
+    idOf.set(id, free);
+  }
   return {
     teams: read.teams.map((team) => ({
       ...team,

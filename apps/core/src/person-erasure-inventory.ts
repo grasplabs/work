@@ -479,7 +479,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "workspace.preview_releases": { erased: "workspace" },
   "workspace.preview_stores": { erased: "workspace" },
   // The onboarding: their interview, by its own deletion.
-  "onboarding.people": { company: "the company's roster (D5)" },
+  "onboarding.people": {
+    company: "the company's roster (D5), the erased person's address blanked",
+  },
   "onboarding.links": { erased: "interview" },
   "onboarding.link_codes": { erased: "interview" },
   "onboarding.interviews": { erased: "interview" },

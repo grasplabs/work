@@ -4996,15 +4996,48 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Takes `email` out of where the confirmed list places people
    * (GRA-2055): its person was erased or removed as a member, so nobody
-   * signing in with it is placed by it. The roster's entry stays, the
-   * company's (Nick's D5); the admin's next confirm places it again if
-   * the list still has it.
+   * signing in with it is placed by it. The list without it is a new
+   * version, in the same transaction: a placing of the list that still
+   * had it is stale, and the next claim (`placePrimaries`) makes its
+   * writes nothing. The roster's entry stays, the company's (Nick's D5);
+   * the admin's next confirm places it again if the list still has it.
+   * Whether the list had it.
    */
-  forgetPlaceOf(email: string): void {
-    this.#db
-      .delete(confirmedPlaces)
-      .where(eq(confirmedPlaces.email, email.toLowerCase()))
-      .run();
+  forgetPlaceOf(email: string): boolean {
+    return this.ctx.storage.transactionSync(() => {
+      const forgotten = this.#db
+        .delete(confirmedPlaces)
+        .where(eq(confirmedPlaces.email, email.toLowerCase()))
+        .returning({ email: confirmedPlaces.email })
+        .all();
+      if (forgotten.length > 0) {
+        this.ctx.storage.kv.put(
+          confirmedVersionKey,
+          this.confirmedVersion() + 1
+        );
+      }
+      return forgotten.length > 0;
+    });
+  }
+
+  /**
+   * An erased person's address (GRA-2055), gone from the store at once, in
+   * one transaction: from their entry on the list, which stays without it,
+   * the company's record of who works where (its id stays too: what is
+   * keyed by it was erased with their interview), and from where the
+   * confirmed list places people, as a new version (`forgetPlaceOf`). An
+   * erasure is final: the entry places nobody until an admin gives it an
+   * address again. Whether the confirmed list had it.
+   */
+  eraseAddress(email: string): boolean {
+    return this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(people)
+        .set({ email: "" })
+        .where(sql`lower(${people.email}) = ${email.toLowerCase()}`)
+        .run();
+      return this.forgetPlaceOf(email);
+    });
   }
 
   /** Whether the staff list has the members' team `id` (GRA-2055). */

@@ -12459,6 +12459,10 @@ msgstr "Guardado, pero todavía no pasa la comprobación: en Definición se indi
 msgid "Saved."
 msgstr "Guardado."
 
+#: src/onboarding/setup-steps.tsx
+msgid "Saved. Your people are put in their teams shortly."
+msgstr "Guardado. Tu gente pasará a sus equipos en breve."
+
 #: src/chat/thread.tsx
 msgid "Saving to your memory"
 msgstr "Guardando en tu memoria"

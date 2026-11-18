@@ -1,5 +1,6 @@
 import { dayOf } from "@grasp-os/shared/admin/org-record";
 import { actorOf } from "@grasp-os/shared/audit";
+import type { AuditActor } from "@grasp-os/shared/audit";
 import type {
   DirectoryPeople,
   DirectorySuite,
@@ -180,6 +181,27 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
     return await this.#keepRoster(roster, true);
   }
 
+  /**
+   * Places the confirmed list (`placePrimaries`): whether the version the
+   * store holds now, or a newer one, is placed after. A placing that
+   * failed is logged by its name alone, as a failed query's message holds
+   * its addresses.
+   */
+  async #placedNow(
+    store: ReturnType<typeof onboardingStore>,
+    by: AuditActor
+  ): Promise<boolean> {
+    const version = await store.confirmedVersion();
+    try {
+      await placePrimaries(this.#env, by);
+    } catch (error) {
+      log.error("onboarding.placing_failed", {
+        error: error instanceof Error ? error.name : "unknown",
+      });
+    }
+    return (await placedVersion(this.#env)) >= version;
+  }
+
   async #keepRoster(
     roster: RosterInput,
     confirmed: boolean
@@ -204,24 +226,16 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         { make: confirmed, held: async () => await store.heldTeams() }
       );
       const view = await store.saveRoster(named, by, { confirmed, minted });
+      // Done only once this list, or a newer one, is placed; else it is
+      // saved, and the clock places it (`placeUnplaced`). Placed first,
+      // right after the save, so the clock's minute has the least time to
+      // find it unplaced; nothing below needs it before.
+      const placed = confirmed ? await this.#placedNow(store, by) : true;
       // A team the save took under seven loses its claims in the Brain now,
       // not only by core's clock (onboarding/new-brain.ts).
       await eraseOwedClaimsQuietly(this.#env);
-      if (confirmed) {
-        // Done only once this list, or a newer one, is placed; else it is
-        // saved, and the clock places it (`placeUnplaced`).
-        const version = await store.confirmedVersion();
-        try {
-          await placePrimaries(this.#env, by);
-        } catch (error) {
-          // Its name alone: a failed query's message holds its addresses.
-          log.error("onboarding.placing_failed", {
-            error: error instanceof Error ? error.name : "unknown",
-          });
-        }
-        if ((await placedVersion(this.#env)) < version) {
-          throw onboardingErrors.create("onboarding.teams_follow");
-        }
+      if (!placed) {
+        throw onboardingErrors.create("onboarding.teams_follow");
       }
       return view;
     });

@@ -12459,6 +12459,10 @@ msgstr "Bewaard, maar het doorstaat de controle nog niet: onder Definitie staat 
 msgid "Saved."
 msgstr "Opgeslagen."
 
+#: src/onboarding/setup-steps.tsx
+msgid "Saved. Your people are put in their teams shortly."
+msgstr "Opgeslagen. Je mensen komen zo in hun teams."
+
 #: src/chat/thread.tsx
 msgid "Saving to your memory"
 msgstr "Opslaan in je geheugen"

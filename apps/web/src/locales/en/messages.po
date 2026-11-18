@@ -12459,6 +12459,10 @@ msgstr "Saved, but it doesn't pass yet: Definition says what to fix."
 msgid "Saved."
 msgstr "Saved."
 
+#: src/onboarding/setup-steps.tsx
+msgid "Saved. Your people are put in their teams shortly."
+msgstr "Saved. Your people are put in their teams shortly."
+
 #: src/chat/thread.tsx
 msgid "Saving to your memory"
 msgstr "Saving to your memory"

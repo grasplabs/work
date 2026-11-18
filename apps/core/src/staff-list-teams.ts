@@ -11,18 +11,20 @@ import { z } from "zod";
 import { revocationsOf, tellKept } from "./access-revocations.ts";
 import { appsOwnedOrSharedNow } from "./app-access.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
+import { providerIds } from "./auth/config.ts";
 import { activeMember, organizationId } from "./auth/membership-sql.ts";
 import {
+  accounts,
   staffListPlaced,
   retiredTeamIds,
   teamMembers,
   teamPrimaries,
   teams,
-  users,
 } from "./db/core/schema.ts";
 import { chunks, inList } from "./db/d1.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import type { ConfirmedPlaces } from "./onboarding/store.ts";
+import { comparable, provedSignInAccounts } from "./source-readers.ts";
 
 // One list of teams with one id (GRA-2055): the onboarding's staff list
 // names the members' teams (Better Auth's `teams`), never teams of its
@@ -34,8 +36,10 @@ import type { ConfirmedPlaces } from "./onboarding/store.ts";
 // - Someone placed in a team reads what the team's members read. Only an
 //   admin's confirm places anyone (`placePrimaries`), never a draft save;
 //   only a current member (not removed, checked in the statement itself),
-//   found by the address their company's sign-in verified, never by name
-//   nor by a directory placeholder; every placement and removal audited.
+//   found by an address their sign-in proved (`provedMembersOf`, the
+//   reader lists' proof), never by `users.email`, Entra's `email` claim,
+//   a name or a directory placeholder; every placement and removal
+//   audited.
 // - Nothing automatic overrides what an admin did by hand (`placementOf`):
 //   the list adds a membership only when the team it gives someone
 //   changes, and takes away only one it made itself.
@@ -61,9 +65,6 @@ const keptRowsSchema = z.array(
     afterAppId: z.string().nullable(),
   })
 );
-
-/** The directory's placeholder addresses (auth/directory-members.ts): no sign-in verified them. */
-const placeholderSuffix = "%@directory.invalid";
 
 /** How many people's changes go in one batch: six statements each at most. */
 const peoplePerBatch = 50;
@@ -377,6 +378,54 @@ export const placementOf = (
 };
 
 /**
+ * The current members who proved one of `addresses` (compared form,
+ * `comparable`) is theirs, each with the address: the one rule of who the
+ * staff list places by an address (GRA-2055), for a confirm's placing and
+ * for a first sign-in after it. The proof is the one an item's reader
+ * list takes (source-readers.ts `provedSignInAccounts`): a Google sign-in's
+ * address its ID token marked verified, in the company's hosted domain and
+ * sign-in domains, confirmed within a day. Never `users.email`, nor Entra's
+ * `email` claim, which proves nothing: a Microsoft sign-in keeps no proved
+ * address, so the list places nobody who signs in with Microsoft; an admin
+ * places them by hand.
+ */
+export const provedMembersOf = async (
+  env: Pick<Env, "SIGN_IN">,
+  db: DrizzleD1Database,
+  addresses: readonly string[]
+): Promise<{ userId: string; email: string }[]> => {
+  if (addresses.length === 0) {
+    return [];
+  }
+  const signIns = await db
+    .select({
+      userId: accounts.userId,
+      providerId: accounts.providerId,
+      oid: accounts.oid,
+      verifiedEmail: accounts.verifiedEmail,
+      verifiedEmailAt: accounts.verifiedEmailAt,
+      verifiedTenant: accounts.verifiedTenant,
+    })
+    .from(accounts)
+    .where(
+      and(
+        eq(accounts.providerId, providerIds.google),
+        inList(sql`lower(${accounts.verifiedEmail})`, addresses),
+        activeMember(accounts.userId)
+      )
+    )
+    .orderBy(accounts.userId);
+  const wanted = new Set(addresses);
+  return signIns.flatMap(({ userId, ...signIn }) =>
+    provedSignInAccounts(env, [signIn]).flatMap(({ provider, account }) =>
+      provider === "google" && wanted.has(comparable(account))
+        ? [{ userId, email: comparable(account) }]
+        : []
+    )
+  );
+};
+
+/**
  * `placePrimaries` for one claimed version, under its lease `leaseId`:
  * each current member whose verified address its list names goes in that
  * team, as their primary one; whoever it moved, took off, or no longer
@@ -396,31 +445,25 @@ const placeVersion = async (
     eq(staffListPlaced.leaseId, leaseId)
   );
   const holds = sql`EXISTS (SELECT 1 FROM ${staffListPlaced} WHERE ${ours})`;
-  const teamOf = new Map(places.map(({ email, team }) => [email, team]));
-  const [found, placed] = await db.batch([
-    db
-      .select({ id: users.id, email: users.email })
-      .from(users)
-      .where(
-        and(
-          inList(sql`lower(${users.email})`, [...teamOf.keys()]),
-          sql`${users.email} NOT LIKE ${placeholderSuffix}`,
-          activeMember(users.id)
-        )
-      ),
+  const teamOf = new Map(
+    places.map(({ email, team }) => [comparable(email), team])
+  );
+  const [found, placed] = await Promise.all([
+    provedMembersOf(env, db, [...teamOf.keys()]),
     db
       .select({
         userId: teamPrimaries.userId,
         teamId: teamPrimaries.teamId,
         made: teamPrimaries.made,
       })
-      .from(teamPrimaries),
+      .from(teamPrimaries)
+      .orderBy(teamPrimaries.userId),
   ]);
   const wanted = new Map<string, string>();
-  for (const { id, email } of found) {
-    const team = teamOf.get(email.toLowerCase());
-    if (team !== undefined) {
-      wanted.set(id, team);
+  for (const { userId, email } of found) {
+    const team = teamOf.get(email);
+    if (team !== undefined && !wanted.has(userId)) {
+      wanted.set(userId, team);
     }
   }
   const was = new Map(
@@ -428,6 +471,8 @@ const placeVersion = async (
   );
   const changes = await Promise.all(
     [...new Set([...was.keys(), ...wanted.keys()])]
+      // One order every time, so batches are the same on a retry.
+      .toSorted()
       .filter((userId) => was.get(userId)?.teamId !== wanted.get(userId))
       .map(async (userId): Promise<Placement> => {
         const after = wanted.get(userId);
@@ -443,13 +488,6 @@ const placeVersion = async (
       })
   );
   const now = new Date();
-  const touched = [
-    ...new Set(
-      changes.flatMap(({ before, after }) =>
-        [before?.teamId, after].filter((id) => id !== undefined)
-      )
-    ),
-  ];
   const batches = changes.length > 0 ? chunks(changes, peoplePerBatch) : [[]];
   // Each person's change whole in one batch, so a move never ends half
   // done; the batches one after another, each within D1's limits, the
@@ -468,7 +506,13 @@ const placeVersion = async (
       }
       at += statements.length;
     }
-    const last = index === batches.length - 1;
+    const touched = [
+      ...new Set(
+        part.flatMap(({ before, after }) =>
+          [before?.teamId, after].filter((id) => id !== undefined)
+        )
+      ),
+    ];
     // oxlint-disable-next-line no-await-in-loop -- one batch at a time
     const results = await auditedBatch(env, db, [
       db
@@ -476,20 +520,21 @@ const placeVersion = async (
         .set({ leaseUntil: new Date(Date.now() + leaseMs) })
         .where(ours),
       ...groups.flatMap(({ statements }) => statements),
-      ...(last
+      // Better Auth's count of each team's members, as its own writes keep
+      // it: in the batch that changed them, so a placing that stops after
+      // it leaves no count behind.
+      ...(touched.length > 0
         ? [
-            // Better Auth's count of each team's members, as its own
-            // writes keep it.
-            ...(touched.length > 0
-              ? [
-                  db
-                    .update(teams)
-                    .set({
-                      memberCount: sql`(SELECT count(*) FROM ${teamMembers} WHERE ${teamMembers.teamId} = ${teams.id})`,
-                    })
-                    .where(inList(teams.id, touched)),
-                ]
-              : []),
+            db
+              .update(teams)
+              .set({
+                memberCount: sql`(SELECT count(*) FROM ${teamMembers} WHERE ${teamMembers.teamId} = ${teams.id})`,
+              })
+              .where(inList(teams.id, touched)),
+          ]
+        : []),
+      ...(index === batches.length - 1
+        ? [
             db
               .update(staffListPlaced)
               .set({ placed: version, leaseId: null, leaseUntil: null })

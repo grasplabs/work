@@ -94,6 +94,7 @@ import { eraseOnboardingAccount } from "./onboarding/new-brain.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import type { ErasureAreaName } from "./person-erasure-inventory.ts";
 import { forgetTokens, keptAccountKeysOf } from "./source-readers.ts";
+import { placePrimaries } from "./staff-list-teams.ts";
 import { stopRunsFor } from "./workflows/resource-runs.ts";
 import { erasedChatPin } from "./workflows/run-evidence.ts";
 
@@ -484,7 +485,8 @@ const runs: ErasureStep = {
  * ran first; once an admin released the address, or under an older key, it
  * is found by address no more.
  * Their entry on the list is the company's (Nick's D5): it stays, removed
- * only by an admin; where the confirmed list places their address goes.
+ * only by an admin, without their address, which the store keeps nowhere
+ * after (GRA-2055): an erasure is final.
  */
 const interview: ErasureStep = {
   area: "interview",
@@ -528,6 +530,9 @@ const interview: ErasureStep = {
       return;
     }
     let found = 0;
+    // Their addresses on the list and where the confirmed list places
+    // them, found by the keyed hash, each erased from the store below.
+    const addresses = new Set<string>();
     for (const { id, email } of await store.rosterEmails()) {
       // oxlint-disable-next-line no-await-in-loop -- one entry at a time
       if ((await emailHashOf(env, email)) === erasure.emailHash) {
@@ -538,6 +543,7 @@ const interview: ErasureStep = {
         // A link nobody holds has nothing in the Brain; theirs went above.
         // oxlint-disable-next-line no-await-in-loop -- one entry at a time
         await store.eraseInterviewOf(id, userId, sentBy);
+        addresses.add(email);
         found += 1;
       }
     }
@@ -546,15 +552,26 @@ const interview: ErasureStep = {
       // under another address is left. IDs only.
       log.warn("member.erasure_interview_unmatched", { userId });
     }
-    // Where the confirmed list places their address (GRA-2055), also
-    // once a draft took them off the list: nobody signing in with it is
-    // placed by it.
+    // Their address, from their entry on the list and from where the
+    // confirmed list places people (GRA-2055), also once a draft took them
+    // off the list: an erasure is final, so nobody signing in with it
+    // later is placed by it.
     for (const email of await store.confirmedAddresses()) {
       // oxlint-disable-next-line no-await-in-loop -- one address at a time
       if ((await emailHashOf(env, email)) === erasure.emailHash) {
-        // oxlint-disable-next-line no-await-in-loop -- one address at a time
-        await store.forgetPlaceOf(email);
+        addresses.add(email);
       }
+    }
+    let forgotten = false;
+    for (const email of addresses) {
+      // oxlint-disable-next-line no-await-in-loop -- one address at a time
+      forgotten = (await store.eraseAddress(email)) || forgotten;
+    }
+    if (forgotten) {
+      // The list without it claimed at once: a placing of the one that
+      // had it, under way, writes nothing more, before the address can be
+      // released and proved by someone else.
+      await placePrimaries(env, { type: "system" });
     }
     await completed(db, userId, "interview");
   },

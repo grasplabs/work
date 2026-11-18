@@ -12459,6 +12459,10 @@ msgstr "Enregistré, mais il ne passe pas encore la vérification : Définition 
 msgid "Saved."
 msgstr "Enregistré."
 
+#: src/onboarding/setup-steps.tsx
+msgid "Saved. Your people are put in their teams shortly."
+msgstr "Enregistré. Vos collaborateurs rejoignent leurs équipes sous peu."
+
 #: src/chat/thread.tsx
 msgid "Saving to your memory"
 msgstr "Enregistrement dans votre mémoire"

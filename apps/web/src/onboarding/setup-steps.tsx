@@ -117,7 +117,7 @@ import {
   useSayFollowing,
 } from "./setup-parts.tsx";
 import type { Answer, StepVoice } from "./setup-parts.tsx";
-import { afterAi, openItems, stepIndex } from "./setup.ts";
+import { afterAi, confirmOrg, openItems, stepIndex } from "./setup.ts";
 import type {
   AiReadiness,
   Listening,
@@ -1504,6 +1504,8 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
       ? "before"
       : null
   );
+  // Confirmed now, its people put in their teams only shortly.
+  const [follow, setFollow] = useState(false);
   // What Stephen says of the HR platform, once it was read or could not be.
   const [fromHr, setFromHr] = useState<Answer>();
   const teams = draft.teams
@@ -1622,6 +1624,11 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
             : t`Switch a team off and nobody in it gets a link.`}
         </p>
         <WaitingNote waiting={props.data.view.waiting} />
+        {saved === "now" && follow ? (
+          <p className="text-muted-foreground text-xs">
+            {t`Saved. Your people are put in their teams shortly.`}
+          </p>
+        ) : null}
         <ErrorText>{failure}</ErrorText>
       </Onward>
       {saved === null ? (
@@ -1630,12 +1637,13 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
           onClick={() => {
             void (async () => {
               const kept = await run(
-                async (session) => await session.onboarding.confirmRoster(draft)
+                async (session) => await confirmOrg(session.onboarding, draft)
               );
               if (kept !== undefined) {
                 // Coming back while it stands as confirmed, it still is.
                 orgConfirmed.keep(JSON.stringify(kept.roster), true);
                 await refresh();
+                setFollow(kept.follow);
                 setSaved("now");
               }
             })();

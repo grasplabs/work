@@ -12459,6 +12459,10 @@ msgstr "Gespeichert, besteht die Prüfung aber noch nicht: Unter Definition steh
 msgid "Saved."
 msgstr "Gespeichert."
 
+#: src/onboarding/setup-steps.tsx
+msgid "Saved. Your people are put in their teams shortly."
+msgstr "Gespeichert. Deine Leute kommen in Kürze in ihre Teams."
+
 #: src/chat/thread.tsx
 msgid "Saving to your memory"
 msgstr "Wird in Ihrem Gedächtnis gespeichert"

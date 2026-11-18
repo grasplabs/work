@@ -357,6 +357,39 @@ describe("a staff list shared again", () => {
     ]);
   });
 
+  it("gives each team an id of its own when a saved team kept the id the list makes of another's name", () => {
+    // Saved as Sales once, renamed Revenue since, still under `t-sales`.
+    const savedRevenue: Roster = rosterSchema.parse({
+      teams: [{ id: "t-sales", name: "Revenue", lead: null, off: true }],
+      people: [{ id: "ada", name: "Ada Bos", team: "t-sales" }],
+    });
+    const read = staffListOf(
+      [
+        ["Name", "Email", "Team", "Job"],
+        ["Ada Bos", "ada@x.com", "Revenue", ""],
+        ["Bo Kok", "bo@x.com", "Sales", ""],
+      ],
+      "Other"
+    ).roster;
+    const again = withSaved(read, savedRevenue);
+    const teamOfPerson = (name: string) =>
+      again.people.find((person) => person.name === name)?.team;
+    expect({
+      teams: again.teams.map(({ id, name, off }) => [id, name, off]),
+      ada: teamOfPerson("Ada Bos"),
+      bo: teamOfPerson("Bo Kok"),
+      valid: rosterSchema.safeParse(again).success,
+    }).toStrictEqual({
+      teams: [
+        ["t-sales", "Revenue", true],
+        ["t-sales-2", "Sales", false],
+      ],
+      ada: "t-sales",
+      bo: "t-sales-2",
+      valid: true,
+    });
+  });
+
   it("is the list itself when nothing was saved before", () => {
     expect(withSaved(first, null)).toStrictEqual(first);
   });
