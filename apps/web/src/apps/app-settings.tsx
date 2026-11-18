@@ -193,12 +193,22 @@ export const Read = <T,>({
   );
 };
 
-// How wide a section's column grows: Grasp UI has no token for a
-// settings page's measure.
-const SETTINGS_MEASURE = "56rem";
 const INTEGRATION_MIN = "20rem";
 // How tall the App's own settings stand at least, so its page has room.
 const OPTIONS_TALL = "24rem";
+
+/**
+ * CONCEPT ONLY (branch feat/apps-bar-concepts): the open questions of App
+ * Settings, by `?settings=`. a: five tabs, a danger card at General's
+ * foot, who made it as a row. b: Connections and Webhooks as one tab,
+ * Archive and Remove in the bar's "…", who made it gone. c: History as a
+ * view of its own in the bar, Archive and Remove in both places, who made
+ * it as a row.
+ */
+export const settingsConcept = (): "a" | "b" | "c" => {
+  const asked = new URLSearchParams(window.location.search).get("settings");
+  return asked === "b" || asked === "c" ? asked : "a";
+};
 
 const styles = stylex.create({
   settings: {
@@ -215,10 +225,7 @@ const styles = stylex.create({
     flexDirection: "column",
     gap: grasp.space4,
     width: "100%",
-    maxWidth: SETTINGS_MEASURE,
-    marginInline: "auto",
     paddingBlock: grasp.space6,
-    paddingInline: grasp.space4,
     boxSizing: "border-box",
   },
   actions: {
@@ -396,44 +403,52 @@ const ForBuilders = ({
   const { currentVersion } = app;
   return (
     <>
-      <SectionCard
-        info={t`Its definition to keep or move, and a blueprint others can start from.`}
-        infoLabel={t`More about copies`}
-        title={t`Copies`}
-      >
-        <div {...stylex.props(styles.actions)}>
-          <ExportDefinition app={app} identity={identity} />
+      <SectionCard density="compact" flush title={t`Copies`} variant="grouped">
+        <SettingsRows>
+          <FactRow label={t`Definition`}>
+            <ExportDefinition app={app} identity={identity} />
+          </FactRow>
           {canBuild(identity.role) && currentVersion !== null ? (
-            <SaveAsBlueprint
-              app={app.id}
-              name={app.name}
-              version={currentVersion}
-            />
+            <FactRow label={t`Blueprint`}>
+              <SaveAsBlueprint
+                app={app.id}
+                name={app.name}
+                version={currentVersion}
+              />
+            </FactRow>
           ) : null}
-          {currentVersion === null ? (
-            <Text size="sm" tone="muted">
-              {t`Once it has a version, it can be copied.`}
-            </Text>
-          ) : null}
-        </div>
+        </SettingsRows>
       </SectionCard>
       {app.archived || identity.staff || !isAdmin(identity.role) ? null : (
         <SectionCard
+          density="compact"
           info={t`Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records.`}
           infoLabel={t`More about its data`}
           title={t`Its data`}
+          variant="grouped"
         >
           <ResetAppData app={app} />
         </SectionCard>
       )}
-      <SectionCard
-        info={t`An archived App is kept as it was and goes offline: nobody opens it, its triggers stop and its unfinished runs are cancelled. A builder can restore it, as a draft.`}
-        infoLabel={t`More about putting it away`}
-        title={t`Putting it away`}
-      >
-        <PuttingAway app={app} />
-        <RemoveApp app={app} identity={identity} />
-      </SectionCard>
+      {settingsConcept() === "b" ? null : (
+        <SectionCard
+          density="compact"
+          flush
+          info={t`An archived App is kept as it was and goes offline: nobody opens it, its triggers stop and its unfinished runs are cancelled. A builder can restore it, as a draft.`}
+          infoLabel={t`More about putting it away`}
+          title={t`Putting it away`}
+          variant="grouped"
+        >
+          <SettingsRows>
+            <FactRow label={t`Archive`}>
+              <PuttingAway app={app} />
+            </FactRow>
+            <FactRow label={t`Remove`}>
+              <RemoveApp app={app} identity={identity} />
+            </FactRow>
+          </SettingsRows>
+        </SectionCard>
+      )}
     </>
   );
 };
@@ -509,12 +524,7 @@ const GeneralForm = ({
   const date = formatDateTime(app.createdAt);
   return (
     <>
-      <Text size="sm" tone="muted">
-        {person === undefined
-          ? t`Made on ${date}.`
-          : t`Made by ${person} on ${date}.`}
-      </Text>
-      <SectionCard flush title={t`About`}>
+      <SectionCard density="compact" flush title={t`About`} variant="grouped">
         <SettingsRows>
           <SettingRow label={t`Name`}>
             {(field) => (
@@ -557,6 +567,34 @@ const GeneralForm = ({
               <StatusNote app={app} />
             </div>
           </FactRow>
+          <FactRow
+            info={t`Who answers for the App: who is asked about it and decides what changes.`}
+            label={t({ message: "Owner", context: "who answers for an app" })}
+          >
+            {/* The platform's one owner control, as a workflow's line has it. */}
+            <AppOwner
+              // Not read for someone who doesn't build it, who only looks.
+              answerers={builds ? eligible : (eligible ?? [])}
+              disabled={disabled}
+              onPick={(responsible) => {
+                change({ responsible });
+              }}
+              onRetry={() => {
+                void router.invalidate();
+              }}
+              owner={{
+                id: app.responsible,
+                name: personName(app.responsible),
+              }}
+            />
+          </FactRow>
+          {settingsConcept() === "b" ? null : (
+            <FactRow label={t`Made`}>
+              <Text size="sm">
+                {person === undefined ? date : t`${person}, ${date}`}
+              </Text>
+            </FactRow>
+          )}
           <SettingRow
             info={t`Shown with the App. It opens the App to nobody: who may use it is who it is shared with.`}
             label={t`Made for`}
@@ -597,28 +635,6 @@ const GeneralForm = ({
             <RowAlert variant="danger">{failure}</RowAlert>
           )}
         </SettingsRows>
-      </SectionCard>
-      <SectionCard
-        info={t`Who answers for the App: who is asked about it and decides what changes.`}
-        infoLabel={t`More about the owner`}
-        title={t({ message: "Owner", context: "who answers for an app" })}
-      >
-        {/* The platform's one owner control, as a workflow's line has it. */}
-        <AppOwner
-          // Not read for someone who doesn't build it, who only looks.
-          answerers={builds ? eligible : (eligible ?? [])}
-          disabled={disabled}
-          onPick={(responsible) => {
-            change({ responsible });
-          }}
-          onRetry={() => {
-            void router.invalidate();
-          }}
-          owner={{
-            id: app.responsible,
-            name: personName(app.responsible),
-          }}
-        />
       </SectionCard>
       {builds ? (
         <ForBuilders app={app} identity={identity} />
@@ -953,7 +969,15 @@ const SectionBody = ({
     return <AppHistory app={app} identity={identity} />;
   }
   if (section === "connections") {
-    return <Connections app={app} builds={builds} identity={identity} />;
+    // CONCEPT b: Webhooks under Connections, one tab for what it reaches.
+    return settingsConcept() === "b" ? (
+      <>
+        <Connections app={app} builds={builds} identity={identity} />
+        <Webhooks app={app} identity={identity} />
+      </>
+    ) : (
+      <Connections app={app} builds={builds} identity={identity} />
+    );
   }
   if (section === "webhooks") {
     return <Webhooks app={app} identity={identity} />;
@@ -1034,17 +1058,23 @@ export const AppSettings = ({
   return (
     <div {...stylex.props(styles.settings)}>
       <TabsNav aria-label={t`Settings sections`}>
-        {sections.map((each) => (
-          <SectionLink
-            app={app.id}
-            current={each === section}
-            key={each}
-            section={each}
-            within={within}
-          >
-            {i18n._(sectionLabels[each])}
-          </SectionLink>
-        ))}
+        {sections
+          .filter(
+            (each) =>
+              !(settingsConcept() === "b" && each === "webhooks") &&
+              !(settingsConcept() === "c" && each === "history")
+          )
+          .map((each) => (
+            <SectionLink
+              app={app.id}
+              current={each === section}
+              key={each}
+              section={each}
+              within={within}
+            >
+              {i18n._(sectionLabels[each])}
+            </SectionLink>
+          ))}
       </TabsNav>
       <div {...stylex.props(styles.scroll)}>
         <div {...stylex.props(styles.column)}>

@@ -38,6 +38,7 @@ import {
   AppWindow,
   Archive,
   Chat,
+  Clock,
   Code,
   Database,
   Expand,
@@ -46,6 +47,7 @@ import {
   People,
   Settings,
   Sparkles,
+  Trash,
 } from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
@@ -59,7 +61,7 @@ import { AppData } from "./app-data.tsx";
 import { ConfirmChange, useDraftChange } from "./app-history.tsx";
 import type { Asked } from "./app-history.tsx";
 import { AppLinkDialog } from "./app-own-link.tsx";
-import { AppSettings, Read } from "./app-settings.tsx";
+import { AppSettings, Read, settingsConcept } from "./app-settings.tsx";
 import type { AppSettingsSection } from "./app-settings.tsx";
 import { readMembers, sharesApp } from "./app-sharing.tsx";
 import { AppStart } from "./app-start.tsx";
@@ -235,6 +237,11 @@ const ViewSwitch = ({ app, view }: { app: string; view: WorkspaceView }) => {
     data: Database,
     settings: Settings,
   };
+  // CONCEPT c: History as a view of its own in the bar.
+  const historyView = settingsConcept() === "c";
+  const onHistory =
+    view === "settings" &&
+    new URLSearchParams(window.location.search).get("section") === "history";
   return (
     <ToggleGroup
       aria-label={t`Workspace views`}
@@ -255,7 +262,7 @@ const ViewSwitch = ({ app, view }: { app: string; view: WorkspaceView }) => {
         }
       }}
       size="sm"
-      value={[view]}
+      value={[onHistory ? "history" : view]}
     >
       {views.map((each) => (
         <Toggle
@@ -265,9 +272,33 @@ const ViewSwitch = ({ app, view }: { app: string; view: WorkspaceView }) => {
           title={labels[each]}
           value={each}
         >
-          {each === view ? labels[each] : undefined}
+          {each === view && !onHistory ? labels[each] : undefined}
         </Toggle>
       ))}
+      {historyView ? (
+        <Toggle
+          aria-label={t`History`}
+          icon={Clock}
+          onClick={() => {
+            void navigate({
+              from: "/apps/$app",
+              to: "/apps/$app",
+              params: { app },
+              replace: true,
+              search: (held) => ({
+                env: held.env,
+                project: held.project,
+                view: "settings",
+                section: "history",
+              }),
+            });
+          }}
+          title={t`History`}
+          value="history"
+        >
+          {onHistory ? t`History` : undefined}
+        </Toggle>
+      ) : null}
     </ToggleGroup>
   );
 };
@@ -331,6 +362,34 @@ const MoreMenu = ({
             >
               {t`Open full page`}
             </DropdownMenuItem>
+          ) : null}
+          {settingsConcept() === "b" && !app.archived ? (
+            <>
+              <DropdownMenuItem
+                icon={Archive}
+                render={
+                  <Link
+                    params={{ app: app.id }}
+                    search={{ section: "general" }}
+                    to="/apps/$app/settings"
+                  />
+                }
+              >
+                {t`Archive`}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                icon={Trash}
+                render={
+                  <Link
+                    params={{ app: app.id }}
+                    search={{ section: "general" }}
+                    to="/apps/$app/settings"
+                  />
+                }
+              >
+                {t`Remove`}
+              </DropdownMenuItem>
+            </>
           ) : null}
           {chatId === undefined ? null : (
             <DropdownMenuItem

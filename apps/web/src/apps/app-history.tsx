@@ -1079,13 +1079,8 @@ export const AppHistory = ({
       {buildsApp(app, identity) && !app.archived ? (
         <Unpublished app={app.id} />
       ) : null}
-      <Section aria-labelledby="app-published">
-        <SectionHeader
-          headingLevel={3}
-          id="app-published"
-          size="sm"
-          title={t`Versions`}
-        />
+      {/* No "Versions" heading under a tab called History: a title said twice. */}
+      <Section aria-label={t`Versions`}>
         <Card padding="none">
           <Published app={app} identity={identity} />
         </Card>
