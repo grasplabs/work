@@ -98,6 +98,19 @@ export interface SyncDefinition {
     cursor: string | null;
     /** When the page stops taking more, in ms since the epoch (`syncPageLimits.millis`). */
     deadline: number;
+    /**
+     * A names-only listing (core's daily pass over mail and calendar):
+     * from the start, list calls only, each item with its ID and version,
+     * no content and no readers, ending with `more: false` and never going
+     * on into the change feed. A sync without one reads as it always does.
+     */
+    names: boolean;
+    /**
+     * Those items alone, in full, or `gone` (what a names-only listing
+     * found unknown or held without content); null for a read from the
+     * cursor. The answer's cursor isn't used.
+     */
+    ids: readonly string[] | null;
   }) => Promise<SyncPage>;
   /**
    * The places of the connection's own account it reads, each a source of
@@ -166,6 +179,8 @@ export const defineSync = (definition: SyncDefinition): Sync => ({
         place: asked.place,
         cursor: asked.cursor,
         deadline: Date.now() + syncPageLimits.millis,
+        names: asked.names === true,
+        ids: asked.ids ?? null,
       });
     } catch (error) {
       return { failure: failureOf(error) };

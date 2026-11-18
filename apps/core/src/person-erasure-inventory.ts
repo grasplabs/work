@@ -158,6 +158,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // disconnected only until the erasure it owed ends, its event written.
   "core.brain_sync_sources": { erased: "connect" },
   "core.brain_sync_items": noPerson,
+  "core.brain_sync_catch_ups": noPerson,
   "core.brain_sync_disconnects": {
     company: "disconnects and the erasures they owed, by IDs",
   },

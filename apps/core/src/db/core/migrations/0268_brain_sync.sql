@@ -1,3 +1,11 @@
+CREATE TABLE `brain_sync_catch_ups` (
+	`connection_id` text NOT NULL,
+	`feed` text NOT NULL,
+	`place` text NOT NULL,
+	`item_id` text NOT NULL,
+	PRIMARY KEY(`connection_id`, `feed`, `place`, `item_id`)
+);
+--> statement-breakpoint
 CREATE TABLE `brain_sync_disconnects` (
 	`connection_id` text PRIMARY KEY NOT NULL,
 	`request` text NOT NULL,
@@ -12,6 +20,7 @@ CREATE TABLE `brain_sync_items` (
 	`connection_id` text NOT NULL,
 	`feed` text NOT NULL,
 	`item_id` text NOT NULL,
+	`place` text NOT NULL,
 	`key` text NOT NULL,
 	`generation` integer NOT NULL,
 	`store` text,
@@ -22,11 +31,13 @@ CREATE TABLE `brain_sync_items` (
 	`listing` integer NOT NULL,
 	`leaving` text,
 	`leaving_store` text,
+	`held_since` integer,
 	PRIMARY KEY(`connection_id`, `feed`, `item_id`)
 );
 --> statement-breakpoint
 CREATE INDEX `brain_sync_items_store_idx` ON `brain_sync_items` (`connection_id`,`store`);--> statement-breakpoint
 CREATE INDEX `brain_sync_items_leaving_idx` ON `brain_sync_items` (`connection_id`,`feed`,`leaving`);--> statement-breakpoint
+CREATE INDEX `brain_sync_items_place_idx` ON `brain_sync_items` (`connection_id`,`feed`,`place`);--> statement-breakpoint
 CREATE INDEX `brain_sync_items_part_of_idx` ON `brain_sync_items` (`connection_id`,`feed`,`part_of`);--> statement-breakpoint
 CREATE TABLE `brain_sync_sources` (
 	`connection_id` text NOT NULL,
@@ -52,6 +63,9 @@ CREATE TABLE `brain_sync_sources` (
 	`relist_at` integer NOT NULL,
 	`relist_since` integer,
 	`leaves_owed` integer NOT NULL,
+	`kind` text NOT NULL,
+	`dropped` integer NOT NULL,
+	`relist_catch_up` integer NOT NULL,
 	PRIMARY KEY(`connection_id`, `feed`, `place`)
 );
 --> statement-breakpoint

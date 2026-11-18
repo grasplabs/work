@@ -451,6 +451,14 @@ export const syncParamsSchema = z.strictObject({
   place: z.string().min(1).max(256),
   /** Null for the first listing. */
   cursor: syncCursorSchema.nullable(),
+  /** A names-only listing (`SyncPageRequest.names`). */
+  names: z.boolean().optional(),
+  /** Those items alone, in full (`SyncPageRequest.ids`): one request each at most. */
+  ids: z
+    .array(z.string().min(1).max(1024))
+    .min(1)
+    .max(connectorIsolateRequests)
+    .optional(),
 });
 export type SyncParams = z.infer<typeof syncParamsSchema>;
 

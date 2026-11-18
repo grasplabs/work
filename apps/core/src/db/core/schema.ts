@@ -3492,7 +3492,11 @@ export const connectionBrainErasures = sqliteTable(
  * (`relistAt`), and when the one under way was due to start
  * (`relistSince`), by which an overdue relist is seen; and whether an
  * item of it may still be leaving a key a stopped run left unerased
- * (`leavesOwed`), cleared when a page commits.
+ * (`leavesOwed`), cleared when a page commits. The kind of items it
+ * brings (`kind`: mail and events relist names only), whether its place
+ * is no longer listed (`dropped`: read no more, its keys erased by the
+ * clock, then the row deleted), and whether its relist is fetching what
+ * its names-only listing found unknown or changed (`relistCatchUp`).
  */
 export const brainSyncSources = sqliteTable(
   "brain_sync_sources",
@@ -3520,6 +3524,9 @@ export const brainSyncSources = sqliteTable(
     relistAt: timestamp("relist_at").notNull(),
     relistSince: timestamp("relist_since"),
     leavesOwed: integer("leaves_owed", { mode: "boolean" }).notNull(),
+    kind: text({ enum: ["mail", "file", "event"] }).notNull(),
+    dropped: integer({ mode: "boolean" }).notNull(),
+    relistCatchUp: integer("relist_catch_up", { mode: "boolean" }).notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.connectionId, table.feed, table.place] }),
@@ -3529,7 +3536,8 @@ export const brainSyncSources = sqliteTable(
 
 /**
  * Each item native sync handed the Brain (brain-sync.ts), by connection,
- * sync and the provider's ID of it: its source's key under `sync:`
+ * sync and the provider's ID of it (unique within the connection), the
+ * place whose source added it (`place`): its source's key under `sync:`
  * (`key`, its `generation` the key's middle part, one up each time the
  * item leaves the Brain, so a key erased is never added to again), the
  * store it is in now (`own`, `shared`, or null when it is in neither),
@@ -3539,7 +3547,9 @@ export const brainSyncSources = sqliteTable(
  * message), the listing that last named it, and the key it is leaving
  * (`leaving`, in the store `leavingStore`): named here before the Brain
  * erases it, so an erase a stopped run left is finished on its next read,
- * and a disconnect's erasure finds it. Never its readers: each
+ * and a disconnect's erasure finds it; and since when its removal is held
+ * (`heldSince`: gone from one place of a sync that lists places, kept
+ * until the others have read, so a move between two leaves no hole). Never its readers: each
  * page gives them to the Brain again, so nothing here names a person.
  * Core names a key here before the Brain is given it, so a disconnect's
  * erasure finds every key it gave.
@@ -3550,6 +3560,7 @@ export const brainSyncItems = sqliteTable(
     connectionId: text("connection_id").notNull(),
     feed: text().notNull(),
     itemId: text("item_id").notNull(),
+    place: text().notNull(),
     key: text().notNull(),
     generation: integer().notNull(),
     store: text({ enum: ["own", "shared"] }),
@@ -3560,6 +3571,7 @@ export const brainSyncItems = sqliteTable(
     listing: integer().notNull(),
     leaving: text(),
     leavingStore: text("leaving_store", { enum: ["own", "shared"] }),
+    heldSince: timestamp("held_since"),
   },
   (table) => [
     primaryKey({ columns: [table.connectionId, table.feed, table.itemId] }),
@@ -3569,11 +3581,37 @@ export const brainSyncItems = sqliteTable(
       table.feed,
       table.leaving
     ),
+    index("brain_sync_items_place_idx").on(
+      table.connectionId,
+      table.feed,
+      table.place
+    ),
     index("brain_sync_items_part_of_idx").on(
       table.connectionId,
       table.feed,
       table.partOf
     ),
+  ]
+);
+
+/**
+ * What a source's names-only relist (brain-sync.ts) found unknown, held
+ * without content, or at another version than held, by the provider's ID:
+ * fetched once in full after that listing, then forgotten. Emptied when a
+ * relist starts, so a relist catches up at most once.
+ */
+export const brainSyncCatchUps = sqliteTable(
+  "brain_sync_catch_ups",
+  {
+    connectionId: text("connection_id").notNull(),
+    feed: text().notNull(),
+    place: text().notNull(),
+    itemId: text("item_id").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.connectionId, table.feed, table.place, table.itemId],
+    }),
   ]
 );
 

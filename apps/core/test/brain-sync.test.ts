@@ -107,7 +107,22 @@ const connectSampleFeed = async (
     .prepare("UPDATE connections SET server = 'sample-sync' WHERE id = ?")
     .bind(connection.id)
     .run();
-  return { connectionId: connection.id, post };
+  /** Replaces the parts of the account's world `parts` names (test/sample-sync-fake.ts). */
+  const world = async (parts: Record<string, unknown>) => {
+    await providers.fetch(sampleSyncControlUrl, {
+      method: "POST",
+      body: JSON.stringify({ subject, ...parts }),
+    });
+  };
+  /** The items requests that reached `folder`, each its IDs. */
+  const fetchedOf = async (folder: string): Promise<unknown> => {
+    const asked = new URLSearchParams({ subject, folder });
+    const answer = await providers.fetch(
+      `${sampleSyncControlUrl}?${asked.toString()}`
+    );
+    return await answer.json();
+  };
+  return { connectionId: connection.id, post, world, fetchedOf };
 };
 
 /** A message in a mailbox, or a part of one (`partOf`), as a sync item. */
@@ -131,6 +146,16 @@ const mailItem = (
   readers: more.readers ?? null,
   changedBy: null,
   partOf: more.partOf ?? null,
+});
+
+/** A message that went away, as a sync item. */
+const goneItem = (id: string) => ({ gone: true, id, kind: "mail" });
+
+/** A page of a feed: `changes`, read on from `next`, nothing more. */
+const feedPage = (changes: unknown[], next: string) => ({
+  changes,
+  next,
+  more: false,
 });
 
 /** A Drive nobody changes: nothing to list, nothing changing. */
@@ -1140,6 +1165,241 @@ describe("native sync", () => {
         saidOf: true,
         relisted: false,
         withinItsDay: true,
+      });
+    }
+  );
+
+  it(
+    "keeps one source per listed place: a new one from no cursor, a dropped one's copies erased, a failed listing changing nothing",
+    setUpTime,
+    async () => {
+      const owner = await signedInApi(idp, "user");
+      const [inboxed, archived] = [markerOf(), markerOf()];
+      const quiet = { changes: [], next: "q", more: false };
+      const { world } = await connectSampleFeed(owner, { "": quiet, q: quiet });
+      const folder = (id: string, text: string) => ({
+        changes: {
+          "": { changes: [mailItem(id, text)], next: "f1", more: false },
+          f1: { changes: [], next: "f1", more: false },
+        },
+      });
+      const folders = {
+        inbox: folder("inbox/a", `Invoice ${inboxed}`),
+        archive: folder("archive/b", `Contract ${archived}`),
+      };
+      await world({ places: ["inbox"], folders });
+      later(pollMs);
+      await sync();
+      const first = [
+        await finds(owner.userId, inboxed),
+        await finds(owner.userId, archived),
+      ];
+      // A folder made since: a new source, read from the start.
+      await world({ places: ["inbox", "archive"] });
+      later(pollMs);
+      await sync();
+      const added = await finds(owner.userId, archived);
+      // The folders couldn't be listed: nothing changes.
+      await world({ places: null });
+      later(pollMs);
+      await sync();
+      const failed = [
+        await finds(owner.userId, inboxed),
+        await finds(owner.userId, archived),
+      ];
+      // The folder deleted: its source and every copy it made go.
+      await world({ places: ["inbox"] });
+      later(pollMs);
+      await sync();
+
+      expect({
+        first,
+        added,
+        failed,
+        dropped: [
+          await finds(owner.userId, inboxed),
+          await finds(owner.userId, archived),
+        ],
+      }).toStrictEqual({
+        first: [true, false],
+        added: true,
+        failed: [true, true],
+        dropped: [true, false],
+      });
+    }
+  );
+
+  it(
+    "never loses a message moved between two folders for a run, read in either order, and lets a deleted one go",
+    setUpTime,
+    async () => {
+      const owner = await signedInApi(idp, "user");
+      const marks = { m: markerOf(), m2: markerOf(), m3: markerOf() };
+      const message = (folder: string, name: keyof typeof marks) =>
+        mailItem(`${folder}/${name}`, `Mail ${marks[name]}`);
+      const quiet = { changes: [], next: "q", more: false };
+      const { world } = await connectSampleFeed(owner, { "": quiet, q: quiet });
+      // Folder pages by position, each step adding the next.
+      const a: Record<string, unknown> = {
+        "": feedPage(
+          [message("a", "m"), message("a", "m2"), message("a", "m3")],
+          "a1"
+        ),
+        a1: feedPage([], "a1"),
+      };
+      const b: Record<string, unknown> = {
+        "": feedPage([], "b1"),
+        b1: feedPage([], "b1"),
+      };
+      const set = async (failing: string[]) => {
+        await world({
+          places: ["a", "b"],
+          folders: { a: { changes: a }, b: { changes: b } },
+          failing,
+        });
+      };
+      await set([]);
+      later(pollMs);
+      await sync();
+      /** Whether the owner reads each message now, after one more run. */
+      const run = async () => {
+        later(pollMs);
+        await sync();
+        return {
+          m: await finds(owner.userId, marks.m),
+          m2: await finds(owner.userId, marks.m2),
+          m3: await finds(owner.userId, marks.m3),
+        };
+      };
+      const seen: Record<string, unknown>[] = [];
+      // Moved from a to b, a read first: b fails (backing off) meanwhile.
+      a.a1 = feedPage([goneItem("a/m")], "a2");
+      a.a2 = feedPage([], "a2");
+      b.b1 = feedPage([message("b", "m")], "b2");
+      b.b2 = feedPage([], "b2");
+      await set(["b"]);
+      seen.push(await run());
+      await set([]);
+      seen.push(await run(), await run());
+      // Moved from a to b again, b read first: a fails meanwhile.
+      a.a2 = feedPage([goneItem("a/m2")], "a3");
+      a.a3 = feedPage([], "a3");
+      b.b2 = feedPage([message("b", "m2")], "b3");
+      b.b3 = feedPage([], "b3");
+      await set(["a"]);
+      seen.push(await run());
+      await set([]);
+      seen.push(await run(), await run());
+      // Deleted for good from a, nothing new anywhere.
+      a.a3 = feedPage([goneItem("a/m3")], "a4");
+      a.a4 = feedPage([], "a4");
+      await set([]);
+      const held = await run();
+      const later1 = await run();
+      const later2 = await run();
+
+      expect({
+        moved: seen.map(({ m, m2 }) => ({ m, m2 })),
+        deleted: [held.m3, later2.m3],
+        stillThere: [later1.m, later1.m2],
+      }).toStrictEqual({
+        moved: [
+          { m: true, m2: true },
+          { m: true, m2: true },
+          { m: true, m2: true },
+          { m: true, m2: true },
+          { m: true, m2: true },
+          { m: true, m2: true },
+        ],
+        deleted: [true, false],
+        stillThere: [true, true],
+      });
+    }
+  );
+
+  it(
+    "relists mail by names once a day: keeps what it holds, fetches what changed or is new once, and takes out what went",
+    setUpTime,
+    async () => {
+      const owner = await signedInApi(idp, "user");
+      const marks = {
+        kept: markerOf(),
+        changed: markerOf(),
+        changedNow: markerOf(),
+        unknown: markerOf(),
+        went: markerOf(),
+      };
+      const quiet = { changes: [], next: "q", more: false };
+      const { world, fetchedOf } = await connectSampleFeed(owner, {
+        "": quiet,
+        q: quiet,
+      });
+      const changes = {
+        "": {
+          changes: [
+            mailItem("a/kept", `Kept ${marks.kept}`),
+            mailItem("a/changed", `Draft ${marks.changed}`),
+            mailItem("a/went", `Gone ${marks.went}`),
+          ],
+          next: "c1",
+          more: false,
+        },
+        c1: { changes: [], next: "c1", more: false },
+      };
+      const named = (id: string, version = "1") =>
+        mailItem(id, null, { version });
+      await world({
+        places: ["a"],
+        folders: {
+          a: {
+            changes,
+            // A names-only listing: what is there, by ID and version.
+            names: {
+              "": {
+                changes: [
+                  named("a/kept"),
+                  named("a/changed", "2"),
+                  named("a/unknown"),
+                ],
+                next: "n",
+                more: false,
+              },
+            },
+            items: {
+              "a/changed": mailItem("a/changed", `Final ${marks.changedNow}`, {
+                version: "2",
+              }),
+              "a/unknown": mailItem("a/unknown", `Late ${marks.unknown}`),
+            },
+          },
+        },
+      });
+      later(pollMs);
+      await sync();
+      const before = await finds(owner.userId, marks.kept);
+      // A day on: the relist, its catch-up, and a run after it.
+      later(24 * 60 * 60 * 1000);
+      await sync();
+      later(pollMs);
+      await sync();
+      later(pollMs);
+      await sync();
+
+      expect({
+        before,
+        kept: await finds(owner.userId, marks.kept),
+        changed: await finds(owner.userId, marks.changedNow),
+        unknown: await finds(owner.userId, marks.unknown),
+        went: await finds(owner.userId, marks.went),
+        fetched: await fetchedOf("a"),
+      }).toStrictEqual({
+        before: true,
+        kept: true,
+        changed: true,
+        unknown: true,
+        went: false,
+        // Only what it didn't hold at the version named, once.
+        fetched: [["a/changed", "a/unknown"]],
       });
     }
   );

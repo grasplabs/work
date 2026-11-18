@@ -159,6 +159,20 @@ export const syncPageRequestSchema = z.strictObject({
   place: z.string().min(1).max(256),
   /** Null for the first listing. */
   cursor: syncCursorSchema.nullable(),
+  /**
+   * A names-only listing (core's daily pass over mail and calendar): from
+   * the start, with list calls only, each item named by its ID and
+   * version with no content and no readers, ending with nothing more and
+   * never going on into the change feed.
+   */
+  names: z.boolean().optional(),
+  /**
+   * Those items alone, read in full as a page reads them, or `gone`: what
+   * a names-only listing found unknown or held without content. At most
+   * one per request a page may send (connect checks it, by the connector
+   * kit's `connectorIsolateRequests`); the answer's cursor isn't used.
+   */
+  ids: z.array(sourceIdSchema).min(1).optional(),
 });
 export type SyncPageRequest = z.input<typeof syncPageRequestSchema>;
 
@@ -177,12 +191,14 @@ export const syncErrors = defineErrorFamily({
 });
 
 /**
- * One source core's sync run reads (GRA-1758): a connection whose
- * connector has a sync, that sync (`feed`), and the place in it. With
- * what core needs to name the items' readers: the connection's person,
- * provider and tenant, and its own account as its items' readers name it
- * (`account`: Google's address as its verified sign-in gave it,
- * Microsoft's object ID; null when the provider didn't say).
+ * One sync core's sync run reads (GRA-1758): a connection whose connector
+ * has a sync (`feed`), what kind of items it brings, and whether it reads
+ * the whole account (`own`) or places it lists of it (`listed`, each its
+ * own source: `listSyncPlaces`). With what core needs to name the items'
+ * readers: the connection's person, provider and tenant, and its own
+ * account as its items' readers name it (`account`: Google's address as
+ * its verified sign-in gave it, Microsoft's object ID; null when the
+ * provider didn't say).
  */
 export interface SyncSource {
   connectionId: string;
@@ -191,7 +207,8 @@ export interface SyncSource {
   tenant: string | null;
   account: string | null;
   feed: string;
-  place: string;
+  kind: SyncItemKind;
+  places: "own" | "listed";
 }
 
 /** A page of the sources there are to sync, and where the next page starts. */

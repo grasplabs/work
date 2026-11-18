@@ -1,4 +1,8 @@
-import { syncMethod, syncPlacesMethod } from "@grasp-os/connector-kit/manifest";
+import {
+  connectorIsolateRequests,
+  syncMethod,
+  syncPlacesMethod,
+} from "@grasp-os/connector-kit/manifest";
 import type { SyncManifest } from "@grasp-os/connector-kit/manifest";
 import {
   syncPlacesResultSchema,
@@ -10,6 +14,7 @@ import {
   connectionErrors,
   connectionOwnersMax,
 } from "@grasp-os/shared/connect";
+import type { Json } from "@grasp-os/shared/json";
 import {
   ownPlace,
   syncErrors,
@@ -183,7 +188,7 @@ const sendToSync = async (
   { connection, connector, sync }: Awaited<ReturnType<typeof syncOf>>,
   place: string,
   method: string,
-  params: Record<string, string | null>
+  params: Record<string, Json>
 ): Promise<unknown> => {
   if (connection.status !== "active") {
     throw syncErrors.create("sync.inactive");
@@ -219,11 +224,15 @@ export const readSyncPage = async (
   env: Env,
   request: unknown
 ): Promise<SyncPage> => {
-  const { connectionId, feed, place, cursor } = syncErrors.parse(
+  const { connectionId, feed, place, cursor, names, ids } = syncErrors.parse(
     "sync.invalid",
     syncPageRequestSchema,
     request
   );
+  // One request each at most, within what a page may send.
+  if (ids !== undefined && ids.length > connectorIsolateRequests) {
+    throw syncErrors.create("sync.invalid");
+  }
   const found = await syncOf(env, connectionId, feed);
   if (!mayRead(found.connection, found.sync, place)) {
     throw syncErrors.create("sync.place_refused");
@@ -233,6 +242,8 @@ export const readSyncPage = async (
       name: feed,
       place,
       cursor,
+      ...(names === undefined ? {} : { names }),
+      ...(ids === undefined ? {} : { ids: [...ids] }),
     })
   );
 };
@@ -266,10 +277,11 @@ export const listSyncPlaces = async (
 };
 
 /**
- * A page of the sources core's sync run reads (GRA-1758), by connection
- * ID after `after`: each sync of each person's own native connection that
- * is active, of someone whose erasure hasn't begun, whose connector is
- * for the connection's provider, in its own account (`own`). A shared
+ * A page of the syncs core's sync run reads (GRA-1758), by connection ID
+ * after `after`: each sync of each person's own native connection that is
+ * active, of someone whose erasure hasn't begun, whose connector is for
+ * the connection's provider, with its kind and whether it reads the whole
+ * account or places it lists (`listSyncPlaces`). A shared
  * connection syncs only places picked on it: none yet (`mayRead`). A page
  * holds at most `connectionOwnersMax` connections, as connect's other
  * pages of connections for core.
@@ -319,18 +331,21 @@ export const listSyncSources = async (
       if (ownerUserId === null || manifest?.provider !== provider) {
         return [];
       }
-      return Object.keys(manifest.syncs ?? {}).map((feed): SyncSource => ({
-        connectionId: id,
-        ownerUserId,
-        provider,
-        tenant,
-        // As its items' readers name it, and core's reading side
-        // (connections.ts `personalAccounts`): Google by the verified
-        // address, Microsoft by the object ID.
-        account: provider === "google" ? accountEmail : accountId,
-        feed,
-        place: ownPlace,
-      }));
+      return Object.entries(manifest.syncs ?? {}).map(
+        ([feed, sync]): SyncSource => ({
+          connectionId: id,
+          ownerUserId,
+          provider,
+          tenant,
+          // As its items' readers name it, and core's reading side
+          // (connections.ts `personalAccounts`): Google by the verified
+          // address, Microsoft by the object ID.
+          account: provider === "google" ? accountEmail : accountId,
+          feed,
+          kind: sync.kind,
+          places: sync.places,
+        })
+      );
     }
   );
   return {
