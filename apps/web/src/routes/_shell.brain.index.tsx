@@ -24,6 +24,7 @@ import type { Atlas, RegionId } from "../brain/brain-atlas.ts";
 import { useBrainData } from "../brain/brain-data.ts";
 import type { Brain } from "../brain/brain.ts";
 import type { BrainDots } from "../brain/dot-ink.ts";
+import { FrontAsParts, FrontWithOpen } from "../brain/front-concepts.tsx";
 import { useLessMotion } from "../brain/less-motion.ts";
 import { beginNoteReveal } from "../brain/note-reveal.tsx";
 import { isRegion } from "../brain/region-id.ts";
@@ -54,7 +55,7 @@ const textOf = (value: unknown): string | undefined =>
 /** The view in the address: only what reads as one; and an answer's thinking to play again. */
 const validateSearch = (
   search: Record<string, unknown>
-): AtlasView & { think?: string } => {
+): AtlasView & { think?: string; concept?: string } => {
   const group = textOf(search.group);
   const note = textOf(search.note);
   const think = textOf(search.think);
@@ -63,6 +64,9 @@ const validateSearch = (
     ...(group === undefined ? {} : { group }),
     ...(note === undefined ? {} : { note }),
     ...(think === undefined ? {} : { think }),
+    ...(textOf(search.concept) === undefined
+      ? {}
+      : { concept: textOf(search.concept) }),
   };
 };
 
@@ -397,7 +401,12 @@ const AtlasPage = () => {
     };
   });
 
-  return (
+  // Concepts for Ruben: ?concept=b or ?concept=c (concept branch only).
+  const { concept } = search;
+  if (concept === "c") {
+    return <FrontAsParts atlas={atlas} />;
+  }
+  const drawing = (
     <BrainAtlas
       atlas={atlas}
       brain={brain}
@@ -456,6 +465,11 @@ const AtlasPage = () => {
       ) : null}
       {dive === undefined ? <AtlasTrail onGo={go} steps={trail} /> : null}
     </BrainAtlas>
+  );
+  return concept === "b" ? (
+    <FrontWithOpen atlas={atlas}>{drawing}</FrontWithOpen>
+  ) : (
+    drawing
   );
 };
 
