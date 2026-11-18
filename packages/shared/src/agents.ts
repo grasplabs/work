@@ -111,6 +111,14 @@ export interface AgentSettings {
 export const ownAgentsMax = 10;
 
 /**
+ * Most text one agent's documents hold together, in UTF-8 bytes. It
+ * protects core's database, which keeps every document's text and which
+ * anyone with an agent of their own writes to; it says nothing of how
+ * many documents an agent may be given.
+ */
+export const agentDocumentsTextMaxBytes = 10 * 1024 * 1024;
+
+/**
  * A document an admin gave an agent to answer from: a file whose text
  * core read once and keeps, never the file itself. The agent reads it in
  * any chat it answers, as the company's word on its job, so whoever may

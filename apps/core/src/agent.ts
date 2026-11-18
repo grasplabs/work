@@ -748,7 +748,7 @@ const documentsNote = (
           .map(({ id, name, type }) => `- ${name} (${id}, ${type})`),
         ...(documents.length > turnDocumentsMax
           ? [
-              "More documents than these: list them all with `env.chat.documents()`.",
+              `${documents.length - turnDocumentsMax} more documents than these: list them all with \`env.chat.documents()\`.`,
             ]
           : []),
       ];

@@ -1,7 +1,9 @@
+import { agentDocumentsTextMaxBytes } from "@grasp-os/shared/agents";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { turnDocumentsMax } from "../src/agent.ts";
+import { chatFileTextMaxBytes } from "../src/chat-files.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { codeResults, codeStep, model, says } from "./agent-chat.ts";
@@ -15,7 +17,8 @@ import { outcome, signedInApi } from "./sign-in.ts";
 // answers. These start from the ways it can fail: someone who isn't the
 // company's own admin adding, listing or removing one; a document told
 // to, or read by, another agent; two under one name, or a file that isn't
-// what its name says, taken; every one of many named in each turn; a
+// what its name says, taken; every one of many named in each turn; more
+// text kept than an agent holds, by files added one by one or at once; a
 // deleted agent's documents left behind, or one added to it after; a
 // change unrecorded, or recorded with the file's name or words.
 
@@ -195,8 +198,7 @@ describe("an agent's documents", slow, () => {
       oldestFirst: "a.md",
     });
 
-    // A turn names the first of them and says how to list the rest, which
-    // the agent's code does.
+    // A turn names the first of them, and the agent's code lists them all.
     const code =
       "export default async (self, env) => (await env.chat.documents()).length;";
     const provider = await fakeProvider(codeStep(code), says("Done."));
@@ -210,13 +212,55 @@ describe("an agent's documents", slow, () => {
     expect({
       named: named.length,
       first: named[0]?.name,
-      toldOfMore: asked.includes("More documents than these"),
+      lastNamed: asked.includes(listed.at(-1)?.id ?? ""),
       counted: counted?.text.endsWith(String(turnDocumentsMax + 1)),
     }).toStrictEqual({
       named: turnDocumentsMax,
       first: "a.md",
-      toldOfMore: true,
+      lastNamed: false,
       counted: true,
+    });
+  });
+
+  it("hold together no more text than an agent keeps, however they are added, until one is removed", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const claire = await agentFor(admin, "Claire");
+    const add = async (name: string, bytes: Uint8Array) =>
+      await outcome(
+        admin.api.connections.addAgentDocument(claire.id, { name, bytes })
+      );
+    // Each as much text as one document holds.
+    const large = utf8("a".repeat(chatFileTextMaxBytes));
+    const room = agentDocumentsTextMaxBytes / chatFileTextMaxBytes;
+
+    // All at once, one more than there is room for: the insert itself
+    // holds the most, so they never pass together.
+    const filled = await Promise.all(
+      Array.from(
+        { length: room + 1 },
+        async (_each, index) => await add(`large-${index}.txt`, large)
+      )
+    );
+    const past = await add("small.txt", utf8("one more word"));
+    const keptWhenFull = await admin.api.connections.agentDocuments(claire.id);
+    const [first] = keptWhenFull;
+    if (first === undefined) {
+      throw new Error("No document was kept");
+    }
+    await admin.api.connections.removeAgentDocument(claire.id, first.id);
+
+    expect({
+      added: filled.filter((ended) => ended === "ok").length,
+      refused: filled.filter((ended) => ended !== "ok"),
+      past,
+      keptWhenFull: keptWhenFull.length,
+      afterRemoving: await add("small.txt", utf8("one more word")),
+    }).toStrictEqual({
+      added: room,
+      refused: ["agent.documents_full"],
+      past: "agent.documents_full",
+      keptWhenFull: room,
+      afterRemoving: "ok",
     });
   });
 

@@ -1,4 +1,5 @@
 import { agentErrors } from "@grasp-os/shared/agent";
+import { agentDocumentsTextMaxBytes } from "@grasp-os/shared/agents";
 import type { AgentDocument } from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -41,7 +42,9 @@ import type { LocalExtractorEnv } from "./files/extract.ts";
 // left unaudited.
 //
 // An agent keeps as many documents as it is given. What bounds them is
-// each file's size, as a chat's file (chat-files.ts), and how many a turn
+// each file's size, as a chat's file (chat-files.ts), the text they hold
+// together (`agentDocumentsTextMaxBytes`: core's database keeps it, and
+// anyone with an agent of their own adds to it), and how many a turn
 // names (agent.ts): the agent's code lists the rest.
 
 /** A document's ID, as core makes them. */
@@ -191,14 +194,16 @@ const sameOrNamed = async (
  * Gives the agent `agentId` the file `file` as a document, read as a
  * chat's file is. Throws `agent.unknown`, why a file can't be read in a
  * document's words (`agent.document_unsupported`, `_too_large`, `_busy`),
- * and `agent.document_named` when the agent has another file by that
- * name. The same file added again is answered with the document it
- * already is.
+ * `agent.document_named` when the agent has another file by that name,
+ * and `agent.documents_full` when its documents would together hold more
+ * text than {@link agentDocumentsTextMaxBytes}. The same file added again
+ * is answered with the document it already is.
  *
  * The insert itself holds what was checked before the file was read: the
- * agent wasn't deleted and is still whose it was (never one erased with
- * its owner meanwhile, whose row is gone). Reading a file takes a while,
- * and either may have changed since.
+ * agent wasn't deleted, is still whose it was (never one erased with its
+ * owner meanwhile, whose row is gone), and has room for the text, so
+ * files added at once never pass together. Reading a file takes a while,
+ * and any of these may have changed since.
  */
 export const addAgentDocument = async (
   env: Env & LocalExtractorEnv,
@@ -212,6 +217,19 @@ export const addAgentDocument = async (
   if (named !== undefined) {
     return await sameOrNamed(env, id, named, read.text);
   }
+  const textBytes = new TextEncoder().encode(read.text).byteLength;
+  const db = drizzle(env.DB);
+  // The text the agent's documents hold together, with this one's.
+  const together = sql`(SELECT coalesce(sum(length(CAST(${agentDocuments.text} AS BLOB))), 0) FROM ${agentDocuments} WHERE ${agentDocuments.agentId} = ${id}) + ${textBytes}`;
+  const full = async (): Promise<boolean> => {
+    const row = await db.get<{ bytes: number }>(
+      sql`SELECT ${together} AS bytes`
+    );
+    return row.bytes > agentDocumentsTextMaxBytes;
+  };
+  if (await full()) {
+    throw agentErrors.create("agent.documents_full");
+  }
   const document = {
     id: crypto.randomUUID(),
     name: read.name,
@@ -219,8 +237,8 @@ export const addAgentDocument = async (
     bytes: read.bytes,
     addedAt: new Date(),
   };
-  const db = drizzle(env.DB);
-  const holds = sql`NOT EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${id} AND ${agents.state} = 'deleted')
+  const holds = sql`${together} <= ${agentDocumentsTextMaxBytes}
+    AND NOT EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${id} AND ${agents.state} = 'deleted')
     AND (${id} = ${firstAgentId} OR EXISTS (SELECT 1 FROM ${agents} WHERE ${agents.id} = ${id} AND ${agents.ownerId} IS ${ownerId}))`;
   try {
     await auditedBatch(env, db, [
@@ -253,9 +271,16 @@ export const addAgentDocument = async (
   }
   const kept = await readAgentDocument(env, id, document.id);
   if (kept === undefined) {
-    // The insert's condition failed: deleted, or no longer whose it was,
-    // since the checks.
-    throw agentErrors.create("agent.unknown");
+    // The insert's condition failed. This very file, added at once by
+    // another call: the same answer as that call got.
+    const now = await documentNamed(env, id, read.name);
+    if (now !== undefined) {
+      return await sameOrNamed(env, id, now, read.text);
+    }
+    // Full, or deleted or no longer whose it was, since the checks.
+    throw agentErrors.create(
+      (await full()) ? "agent.documents_full" : "agent.unknown"
+    );
   }
   return documentOf({ ...document });
 };

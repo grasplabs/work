@@ -1,4 +1,4 @@
-import { ownAgentsMax } from "./agents.ts";
+import { agentDocumentsTextMaxBytes, ownAgentsMax } from "./agents.ts";
 import {
   chatFileMaxBytes,
   chatFilesMax,
@@ -44,6 +44,7 @@ export const agentErrors = defineErrorFamily({
   "agent.document_busy":
     "The document's text couldn't be read just now. Add it again in a moment.",
   "agent.document_unknown": "The agent has no such document.",
+  "agent.documents_full": `The agent's documents together hold as much text as an agent keeps (${agentDocumentsTextMaxBytes / 1024 / 1024} MB). Remove one first.`,
   "agent.document_named":
     "The agent already has another document with that name. Remove it first, or rename the file.",
   // An agent's wake-ups (core's agent-wakes.ts).
