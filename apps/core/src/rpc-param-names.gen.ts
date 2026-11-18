@@ -343,6 +343,10 @@ export const rpcParamNames: ParamNames = {
     "sharePlaceFile": ["input"],
     "view": [],
   },
+  "OpportunitiesRpc": {
+    "dismiss": ["dismissal"],
+    "list": [],
+  },
   "OrgSettingsRpc": {
     "billing": [],
     "ownAgents": [],

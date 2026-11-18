@@ -56,7 +56,8 @@ export interface SpendInput {
           | "dashboard_widgets"
           | "stephen_requests"
           | "provider_test"
-          | "agent_builder";
+          | "agent_builder"
+          | "opportunities";
       };
   /** The App's model binding the call is made through. */
   binding?: { app: string; alias: string };
