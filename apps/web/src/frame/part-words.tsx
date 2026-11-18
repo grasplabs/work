@@ -25,11 +25,13 @@ import { badgeWords } from "../grasp/badge/words.ts";
 import { breadcrumbWords } from "../grasp/breadcrumb/words.ts";
 import { buttonWords } from "../grasp/button/words.ts";
 import { calendarWords } from "../grasp/calendar/words.ts";
+import { carouselWords } from "../grasp/carousel/words.ts";
 import { chatMessageWords } from "../grasp/chat-message/words.ts";
 import { codeBlockWords } from "../grasp/code-block/words.ts";
 import { comboboxWords } from "../grasp/combobox/words.ts";
 import { commandWords } from "../grasp/command/words.ts";
 import { composerWords } from "../grasp/composer/words.ts";
+import { connectionRowWords } from "../grasp/connection-row/words.ts";
 import { contextMenuWords } from "../grasp/context-menu/words.ts";
 import { copyFieldWords } from "../grasp/copy-field/words.ts";
 import {
@@ -61,6 +63,7 @@ import { settingRowWords } from "../grasp/setting-row/words.ts";
 import { shareAccessWords } from "../grasp/share-access/words.ts";
 import { sheetWords } from "../grasp/sheet/words.ts";
 import { sidebarWords } from "../grasp/sidebar/words.ts";
+import { signInWords } from "../grasp/sign-in/words.ts";
 import { sourcesWords } from "../grasp/sources/words.ts";
 import { stepperWords } from "../grasp/stepper/words.ts";
 import { tagInputWords } from "../grasp/tag-input/words.ts";
@@ -146,6 +149,9 @@ export const englishPartWords: GraspWordsCatalog = {
   themeSwitch: themeSwitchWords,
   thread: threadWords,
   toaster: toasterWords,
+  carousel: carouselWords,
+  connectionRow: connectionRowWords,
+  signIn: signInWords,
 };
 
 /** Every installed part's words in the page's language, from its Lingui catalog. */
@@ -427,6 +433,7 @@ export const usePartWords = (): GraspWordsCatalog => {
       float: t`Float over the page`,
       dock: t`Dock beside the page`,
       page: t`Open as a page`,
+      more: t`More actions`,
       expand: t`Full screen`,
       collapse: t`Leave full screen`,
       width: t`Resize the panel's width`,
@@ -881,6 +888,42 @@ export const usePartWords = (): GraspWordsCatalog => {
     tag: {
       remove: t`Remove`,
       removeNamed: (words) => t`Remove ${words}`,
+    },
+    carousel: {
+      previous: t`Previous`,
+      next: t`Next`,
+      pages: (label) => t`Pages of ${label}`,
+      page: (page) => t`Page ${page}`,
+    },
+    connectionRow: {
+      whoCanFix: t`Who can fix this`,
+      notWorking: t`Not working`,
+    },
+    signIn: {
+      // The product's name: never translated.
+      brand: "Grasp",
+      title: t`Log in`,
+      way: (provider) => t`Continue with ${provider}`,
+      leaving: (provider) => t`Opening ${provider}`,
+      opened: t`Opened`,
+      notOpened: t`Did not open`,
+      lastUsed: t`Last used`,
+      staff: t`Continue with Grasp staff`,
+      staffTitle: t`Grasp staff`,
+      guestTitle: t`Talk to Grasp`,
+      back: t`Back to Grasp`,
+      foot: t`New to Grasp?`,
+      footAction: t`Talk to us`,
+      notices: {
+        ended: t`Your session ended. Log in to carry on.`,
+        soon: t`Grasp opens for everyone soon. If you have an interview link, it is in your email.`,
+        offline: t`You're offline. Log in when you're back online.`,
+        notMember: t`That account isn't part of your organisation.`,
+        guest: t`Guest accounts can't sign in.`,
+        timedOut: t`Sign-in timed out. Try again.`,
+        noAccess: t`You don't have access to this organisation. Ask an admin.`,
+        unreachable: t`Grasp can't be reached right now. Try again in a minute.`,
+      },
     },
     toaster: {
       name: t`Notifications`,
