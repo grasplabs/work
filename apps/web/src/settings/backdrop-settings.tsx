@@ -92,6 +92,7 @@ export const BackdropSettings = ({ userId }: { userId: string }) => {
           {t`Randomize`}
         </Button>
       }
+      density="compact"
       title={t`Chat background`}
     >
       <SettingsStack>
