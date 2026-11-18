@@ -4210,6 +4210,7 @@ msgstr "Reclama facturas impagadas"
 
 #: src/agents/agent-page.tsx
 #: src/agents/agents-overview.tsx
+#: src/chat/chat-panel.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/settings/ai-spend.tsx
 msgid "Chat"
