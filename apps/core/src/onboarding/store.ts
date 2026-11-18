@@ -2387,7 +2387,8 @@ export class Onboarding extends DurableObject<Env> {
     // The routine's id is a hash, worked out before anything is read for
     // the turn: everything after is read at once, the link checked again.
     const routine = await this.#routineAskedOf(first.value.person.id);
-    const found = this.#onLink(secretMark, { account }, now, "save");
+    // Checked again, not counted again: one request is one call.
+    const found = this.#onLink(secretMark, { account }, now, "save", false);
     if (!found.ok) {
       return found;
     }
@@ -2430,15 +2431,23 @@ export class Onboarding extends DurableObject<Env> {
       : await intakeIds.workflow(row.team, row.work);
   }
 
-  /** What the standing drawing of the piece of work `routine` shows: none standing shows nothing. */
+  /**
+   * What the standing drawing of the piece of work `routine` shows: none
+   * standing shows nothing. Only that drawing is read, by its work's id.
+   */
   #routineShows(routine: string | null): RoutineShows {
-    const standing =
+    const [row] =
       routine === null
-        ? undefined
-        : this.standingDrawings().find(({ workflow }) => workflow === routine);
+        ? []
+        : this.#db
+            .select({ drawing: brainDrawings.drawing })
+            .from(brainDrawings)
+            .where(and(eq(brainDrawings.workflow, routine), standingDrawing))
+            .limit(1)
+            .all();
+    const drawing = row === undefined ? null : brainDrawingOf(row.drawing);
     return {
-      teamCount:
-        standing?.drawing.volumes.some(({ of }) => of === "team") ?? false,
+      teamCount: drawing?.volumes.some(({ of }) => of === "team") ?? false,
     };
   }
 
