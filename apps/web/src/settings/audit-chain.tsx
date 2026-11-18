@@ -31,6 +31,7 @@ import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { ReadOnlyRow } from "./read-only-row.tsx";
 import { SectionNotLoaded } from "./section.tsx";
 
 const styles = stylex.create({
@@ -114,11 +115,13 @@ const Outcome = ({
     );
   }
   if (ended === null) {
-    return <FactRow label={t`Last check`}>{t`Not checked yet`}</FactRow>;
+    return <ReadOnlyRow label={t`Last check`} value={t`Not checked yet`} />;
   }
   const time = formatDateTime(ended.finishedAt);
   if (ended.ok && ended.through === 0) {
-    return <FactRow label={t`Last check`}>{t`Nothing to check yet`}</FactRow>;
+    return (
+      <ReadOnlyRow label={t`Last check`} value={t`Nothing to check yet`} />
+    );
   }
   if (ended.ok) {
     const entries = ended.through;

@@ -3,10 +3,11 @@ import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { useEffect, useState } from "react";
 
-import { FactRow, RowAlert } from "../grasp/setting-row/index.ts";
+import { RowAlert } from "../grasp/setting-row/index.ts";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
+import { ReadOnlyRow } from "./read-only-row.tsx";
 
 // Settings › Audit trail › Integrity and archive: how long Grasp keeps what
 // it records (`audit.retention`), as facts in the dialog. The archive
@@ -38,21 +39,21 @@ export const RetentionView = ({
   const { auditDays, archiveDays, runDays } = retention.data;
   return (
     <>
-      <FactRow help={t`Then events move to the archive.`} label={t`In the log`}>
-        {dayCount(auditDays)}
-      </FactRow>
-      <FactRow
-        help={t`From when each event was recorded; then deleted.`}
+      <ReadOnlyRow
+        info={t`Then events move to the archive.`}
+        label={t`In the log`}
+        value={dayCount(auditDays)}
+      />
+      <ReadOnlyRow
+        info={t`From when each event was recorded; then deleted.`}
         label={t`In the archive`}
-      >
-        {dayCount(archiveDays)}
-      </FactRow>
-      <FactRow
-        help={t`After a run ends; then its inputs, outputs and messages go.`}
+        value={dayCount(archiveDays)}
+      />
+      <ReadOnlyRow
+        info={t`After a run ends; then its inputs, outputs and messages go.`}
         label={t`Workflow run details`}
-      >
-        {dayCount(runDays)}
-      </FactRow>
+        value={dayCount(runDays)}
+      />
     </>
   );
 };

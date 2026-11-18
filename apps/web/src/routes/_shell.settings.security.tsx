@@ -1,7 +1,6 @@
 import type { SignInOption } from "@grasp-os/shared/rpc";
 import type { OwnSession, SessionDevice } from "@grasp-os/shared/sign-in";
 import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
@@ -22,7 +21,6 @@ import { BrandIcon } from "../grasp/brand-icon/index.ts";
 import type { Brand } from "../grasp/brand-icon/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Desktop, Phone } from "../grasp/icons/index.ts";
-import { Input } from "../grasp/input/index.ts";
 import {
   Item,
   ItemActions,
@@ -33,7 +31,7 @@ import {
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
+import { SettingsRows } from "../grasp/setting-row/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import {
@@ -42,6 +40,7 @@ import {
 } from "../settings/chat-accounts.tsx";
 import type { ChatAccounts } from "../settings/chat-accounts.tsx";
 import { pendingChatLink } from "../settings/chat-link.ts";
+import { ReadOnlyRow } from "../settings/read-only-row.tsx";
 import {
   SectionNotLoaded,
   SettingsError,
@@ -63,11 +62,6 @@ import { useCore } from "../use-core.ts";
 // waits in this tab a card offers to confirm or turn it down; once linked,
 // the account stands among the rows. Never for Grasp staff, who aren't the
 // company's people. Devices show the newest ten, and all on a press.
-
-const styles = stylex.create({
-  // The value fills the rows' shared control column.
-  control: { width: "100%" },
-});
 
 /** The staff's own way in (core's `providerIds.staff`): not the organization's. */
 const staffProvider = "grasp-staff";
@@ -263,21 +257,12 @@ const Security = () => {
     <>
       <SectionCard density="compact" flush title={t`Sign-in`}>
         <SettingsRows>
-          <SettingRow
+          <ReadOnlyRow
             info={t`Passwords and two-step sign-in live with your organization’s account.`}
             infoLabel={t`More about signing in`}
             label={t`Signed in with`}
-          >
-            {(field) => (
-              <Input
-                {...field}
-                layout={styles.control}
-                readOnly
-                size="sm"
-                value={signedInWith}
-              />
-            )}
-          </SettingRow>
+            value={signedInWith}
+          />
         </SettingsRows>
         {chat?.state === "ready" ? (
           <LinkedChatAccounts accounts={chat.data.accounts} />

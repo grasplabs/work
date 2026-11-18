@@ -10,7 +10,6 @@ import {
   InputGroupInput,
   InputGroupText,
 } from "../grasp/input-group/index.ts";
-import { Input } from "../grasp/input/index.ts";
 import { LanguageSwitch } from "../grasp/language-switch/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
@@ -18,6 +17,7 @@ import { chooseLocale, isLocale, localeNames } from "../i18n.ts";
 import type { Locale } from "../i18n.ts";
 import { roleLabel } from "../labels.ts";
 import { ProfileName } from "../settings/profile-name.tsx";
+import { ReadOnlyRow } from "../settings/read-only-row.tsx";
 import { SettingsError } from "../settings/section.tsx";
 
 // Settings › Profile: who the person is in Grasp and the language it
@@ -44,21 +44,6 @@ const flags: Record<Locale, FlagData> = {
 
 const languages = Object.entries(localeNames).flatMap(([code, name]) =>
   isLocale(code) ? [{ code, name, flag: flags[code] }] : []
-);
-
-/** A value this person reads here but doesn't change, in a field that only reads. */
-const ReadOnlyRow = ({ label, value }: { label: string; value: string }) => (
-  <SettingRow label={label}>
-    {(field) => (
-      <Input
-        {...field}
-        layout={styles.control}
-        readOnly
-        size="sm"
-        value={value}
-      />
-    )}
-  </SettingRow>
 );
 
 /** Their sign-in's email, which only reads, with their role at its end. */
