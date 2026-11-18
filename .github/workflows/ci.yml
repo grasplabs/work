@@ -274,7 +274,7 @@ jobs:
       # one before had ended, up to two minutes a group. Six shards took
       # 14 to 16 minutes (October 2026, GRA-1094). No shard's time can be
       # shorter than its longest file's, so split a file that sets it
-      # rather than adding shards. A file of 100 s or more runs on a shard
+      # rather than adding shards. A file of 120 s or more runs on a shard
       # of its own (scripts/test-shards.ts, `aloneSeconds`): packed beside
       # others, the new Brain's leak test slowed to six minutes and its
       # shard ran out of this step (November 2026). Refresh the durations

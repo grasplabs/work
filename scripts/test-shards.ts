@@ -118,12 +118,13 @@ export const wholeProjectSeconds = 2 * projectStartSeconds;
  * time is what it took beside a shard's other files, sharing the runner's
  * CPUs with them, and alone it takes a fraction of that: the new Brain's
  * leak test took 224 to 376 s beside 174 other files of core's, and 72 s
- * on a laptop alone (November 2026). Counted as running at that time
- * beside others, it set the time every shard of its group was filled up
- * to, so they all slowed to it again, and one ran past its step's
- * timeout.
+ * on a laptop alone, 159 s on a shard alone (November 2026). Counted as
+ * running at that time beside others, it set the time every shard of its
+ * group was filled up to, so they all slowed to it again, and one ran
+ * past its step's timeout. At 100 s, 18 files of 42 shards ran alone, a
+ * minute or more of each shard unused.
  */
-export const aloneSeconds = 100;
+export const aloneSeconds = 120;
 
 /** Whether `shard` is one file that takes `aloneSeconds` or longer, alone. */
 const isAlone = (shard: readonly ShardFile[]): boolean =>
