@@ -865,6 +865,26 @@ describe("when a link opens", () => {
     });
   });
 
+  it("counts each turn of an interview once against its link's sixty calls a minute", async () => {
+    const { store, ids, secrets } = await running();
+    const { sha256Hex } = await import("@grasp-os/shared/encoding");
+    const oli = await sha256Hex(secrets.oli);
+    const now = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+    const account = `account-${ids.oli}`;
+    // Opened once: one call.
+    await store.openLink(oli, { account, address: emailOf(ids.oli) }, now);
+    const codes: string[] = [];
+    for (let turn = 0; turn < 60; turn += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one turn after another
+      const answer = await store.turnContext(oli, account, now);
+      codes.push(answer.ok ? "ok" : answer.code);
+    }
+    // Calls 2 to 60 are turns; the sixty-first call, the last turn, waits.
+    expect({
+      limitedAt: codes.indexOf("interview.limited"),
+    }).toStrictEqual({ limitedAt: 59 });
+  });
+
   it("never counts someone else's calls against a link: theirs answer as a made-up link's, call after call, and its person is never held up (L3, L11)", async () => {
     const { secrets, me } = await running();
     const admin = await signedInAs("ada@acme.test");

@@ -4,13 +4,16 @@ import {
   defineSync,
   fetchInRoom,
   fillPage,
+  fromInPagePart,
+  inPagePart,
+  startOfPage,
   fromCursorPart,
   mayRequest,
   RestartSyncError,
   syncRoom,
   takeContent,
 } from "@grasp-os/connector-kit/sync";
-import type { SyncRoom } from "@grasp-os/connector-kit/sync";
+import type { InPage, SyncRoom } from "@grasp-os/connector-kit/sync";
 import type { SyncItem, SyncPage, SyncReader } from "@grasp-os/shared/sync";
 import { ownPlace } from "@grasp-os/shared/sync";
 import { z } from "zod";
@@ -123,13 +126,13 @@ const meSchema = z.object({ id: z.string().min(1) });
 
 /**
  * Where a read is: when the listing began (its window's middle), Graph's
- * token to read from (none: the listing's start), and the event of that
- * token's page already handled, by its ID and `changeKey` (`keyOf`).
+ * token to read from (none: the listing's start), and where it is inside
+ * that token's page (the kit's `InPage`, events keyed by `keyOf`).
  */
 interface Position {
   began: number;
   token: { kind: "skip" | "delta"; value: string } | null;
-  after: string | null;
+  at: InPage;
 }
 
 /** An event's key in Graph's page: its ID and `changeKey`. */
@@ -145,17 +148,17 @@ const kinds: Readonly<Record<string, "skip" | "delta" | null>> = {
 };
 
 /**
- * The cursor of a position: `e.<began>.<s|d|n>.<token>.<after>` (a skip
- * token, a delta token, or none; the event handled, or none).
+ * The cursor of a position: `e.<began>.<s|d|n>.<token>.<at>` (a skip
+ * token, a delta token, or none; where it is in the token's page).
  */
-const cursorOf = ({ began, token, after }: Position): string => {
+const cursorOf = ({ began, token, at }: Position): string => {
   const kind = token === null ? "n" : token.kind.charAt(0);
-  return `e.${began}.${kind}.${cursorPart(token?.value ?? null)}.${cursorPart(after)}`;
+  return `e.${began}.${kind}.${cursorPart(token?.value ?? null)}.${inPagePart(at)}`;
 };
 
 /** The position a cursor this sync wrote names; any other starts over. */
 const positionOf = (cursor: string): Position => {
-  const [tag, began = "", kind = "", token, after, ...rest] = cursor.split(".");
+  const [tag, began = "", kind = "", token, at, ...rest] = cursor.split(".");
   const tokenKind = Object.hasOwn(kinds, kind) ? kinds[kind] : undefined;
   if (
     tag !== "e" ||
@@ -173,7 +176,7 @@ const positionOf = (cursor: string): Position => {
     began: Number(began),
     token:
       tokenKind === null || value === null ? null : { kind: tokenKind, value },
-    after: fromCursorPart(after),
+    at: fromInPagePart(at),
   };
 };
 
@@ -355,7 +358,7 @@ const nextOf = (
         next === undefined
           ? tokenOf(end ?? "", "delta")
           : tokenOf(next, "skip"),
-      after: null,
+      at: startOfPage,
     },
     more: next !== undefined,
   };
@@ -389,7 +392,7 @@ const takePage = async (
   const filled = await fillPage({
     room,
     entries: feed.value,
-    after: position.after,
+    at: position.at,
     keyOf,
     // oxlint-disable-next-line require-await -- the kit's fillPage takes a promise
     itemsFor: async (event) => {
@@ -404,7 +407,7 @@ const takePage = async (
   if (!filled.done) {
     return {
       items: filled.items,
-      at: { ...position, after: filled.last },
+      at: { ...position, at: filled.at },
       more: true,
       done: false,
     };
@@ -463,7 +466,7 @@ export const calendarSync = defineSync({
     }
     return await readPage(
       cursor === null
-        ? { began: Date.now(), token: null, after: null }
+        ? { began: Date.now(), token: null, at: startOfPage }
         : positionOf(cursor),
       deadline
     );

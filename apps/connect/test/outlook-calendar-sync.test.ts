@@ -363,7 +363,7 @@ describe("syncing a person's own calendar", () => {
     await expect(read(connectionId, cursor)).rejects.toMatchObject({
       code: "sync.restart",
     });
-    const old = `e.${Date.now() - year - 60_000}.d.dDE.`;
+    const old = `e.${Date.now() - year - 60_000}.d.dDE.~`;
     await expect(read(connectionId, old)).rejects.toMatchObject({
       code: "sync.restart",
     });
