@@ -4,6 +4,7 @@ import { segment } from "@grasp-os/connector-kit/provider";
 import {
   RestartSyncError,
   defineSync,
+  fetchBefore,
   syncPageLimits,
 } from "@grasp-os/connector-kit/sync";
 import type {
@@ -246,21 +247,54 @@ interface Room {
   first: boolean;
 }
 
-/** No room left for a message: the page stops before it. */
-class FullError extends Error {
-  constructor() {
-    super("No room left in the page");
-    this.name = "FullError";
+/**
+ * Why a page stops before a message: no room left in it (`full`), or a
+ * read the page's deadline cut off (`late`).
+ */
+class StopError extends Error {
+  readonly why: "full" | "late";
+
+  constructor(why: "full" | "late") {
+    super(
+      why === "full"
+        ? "No room left in the page"
+        : "Graph didn't answer before the page's deadline"
+    );
+    this.name = "StopError";
+    this.why = why;
   }
 }
 
-/** A GET to Graph, within the page's requests. */
+/** Whether `error` stops the page for `why`. */
+const stops = (error: unknown, why: "full" | "late"): boolean =>
+  error instanceof StopError && error.why === why;
+
+/**
+ * What a read the page can't go without (the owner, the folders, the
+ * listing) stands for when it is late: Graph is slow, and the page waits
+ * as for a rate limit.
+ */
+const tooSlow = (): ToolError =>
+  new ToolError("Microsoft 365 didn't answer in time", {
+    code: "unavailable",
+  });
+
+/**
+ * A GET to Graph, within the page's requests, its whole answer read before
+ * the page's deadline (the kit's `fetchBefore`); a `late` stop when cut off.
+ */
 const get = async (room: Room, url: URL): Promise<Response> => {
   if (room.requests <= 0) {
-    throw new FullError();
+    throw new StopError("full");
   }
   room.requests -= 1;
-  return await fetch(url, { headers: { prefer } });
+  const response = await fetchBefore(url, room.deadline, {
+    headers: { prefer },
+  });
+  if (response === "late") {
+    throw new StopError("late");
+  }
+  return response;
 };
 
 /** Graph's JSON answer to a GET that must succeed. */
@@ -435,7 +469,7 @@ const take = (room: Room, content: SyncContent): SyncContent | null => {
     if (isEmpty(room) || room.first) {
       return null;
     }
-    throw new FullError();
+    throw new StopError("full");
   }
   room.bytes -= size;
   return content;
@@ -484,35 +518,32 @@ const bytesOf = async (
     if (room.first) {
       return null;
     }
-    throw new FullError();
+    throw new StopError("full");
   }
-  room.requests -= 1;
   let response: Response;
   try {
-    response = await fetch(
+    response = await get(
+      room,
       graphUrl(
         `${messages}/${segment(message)}/attachments/${segment(attachment.id)}/$value`
-      ),
-      {
-        headers: { prefer },
-        signal: AbortSignal.timeout(Math.max(room.deadline - Date.now(), 0)),
-      }
+      )
     );
-    if (!response.ok) {
-      if (isUnreadable(response)) {
-        await response.body?.cancel();
-        return null;
-      }
-      throw await graphFailure(response);
-    }
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    return bytes.byteLength > maxReadBytes ? null : bytes;
   } catch (error) {
-    if (error instanceof DOMException && error.name === "TimeoutError") {
+    // Late: the page's first message takes the file without its content,
+    // any later one is left to the next page.
+    if (stops(error, "late") && room.first) {
       return null;
     }
-    throw error;
+    throw stops(error, "late") ? new StopError("full") : error;
   }
+  if (isUnreadable(response)) {
+    return null;
+  }
+  if (!response.ok) {
+    throw await graphFailure(response);
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  return bytes.byteLength > maxReadBytes ? null : bytes;
 };
 
 /** What a page reads every message against. */
@@ -523,7 +554,7 @@ interface Mailbox {
 
 /**
  * A message, as items: the message and each file attachment, or gone, or
- * nothing (a draft). Throws `Full` when the page has no room for all of
+ * nothing (a draft). Throws a `full` stop when the page has no room for all of
  * it: a message is taken whole or not at all.
  * https://learn.microsoft.com/en-us/graph/api/message-get?view=graph-rest-1.0
  */
@@ -683,8 +714,16 @@ const handle = async (
   try {
     return await itemsOf(room, mailbox, listed);
   } catch (error) {
-    if (error instanceof FullError && !room.first) {
+    if (stops(error, "full") && !room.first) {
       return "full";
+    }
+    if (stops(error, "late")) {
+      // Left to the next page; as the page's first, it can't be read in
+      // time and can't hold the sync: it goes away, and comes back when it
+      // next changes or at the daily relisting.
+      return room.first
+        ? [{ gone: true, id: listed.id, kind: "mail" }]
+        : "full";
     }
     throw error;
   }
@@ -701,11 +740,14 @@ const readPage = async (
     deadline,
     first: true,
   };
-  const mailbox: Mailbox = {
-    owner: await ownerOf(room),
-    folders: await knownFolders(room),
-  };
-  const listing = await resume(room, position);
+  let mailbox: Mailbox;
+  let listing: Listing;
+  try {
+    mailbox = { owner: await ownerOf(room), folders: await knownFolders(room) };
+    listing = await resume(room, position);
+  } catch (error) {
+    throw stops(error, "late") ? tooSlow() : error;
+  }
   const items: SyncItem[] = [];
   let at = position;
   for (;;) {
@@ -714,10 +756,18 @@ const readPage = async (
       if (listing.next === null) {
         return { items, cursor: cursorOf(at), more: false };
       }
-      // oxlint-disable-next-line no-await-in-loop -- the listing's next page
-      const { page } = await listingPage(room, listing.next);
-      listing.entries = page.value;
-      listing.next = nextLink(page);
+      let next: Awaited<ReturnType<typeof listingPage>>;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- the listing's next page
+        next = await listingPage(room, listing.next);
+      } catch (error) {
+        if (stops(error, "late") || stops(error, "full")) {
+          return { items, cursor: cursorOf(at), more: true };
+        }
+        throw error;
+      }
+      listing.entries = next.page.value;
+      listing.next = nextLink(next.page);
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- one message after another, within the page's room

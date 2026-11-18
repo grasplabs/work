@@ -81,7 +81,55 @@ const listedAt = "2026-11-17T10:00:00Z";
  * unquoted `delta(token=…)` form of Microsoft's delta page, and the delta
  * link at the end, in its `delta?(token='…')` form or the `?token=` form.
  */
+/**
+ * The driveItem properties Graph knows (the driveItem resource page): a
+ * `$select` of anything else is refused, as Graph refuses it.
+ */
+const driveItemProperties = new Set([
+  "audio",
+  "bundle",
+  "content",
+  "createdBy",
+  "createdDateTime",
+  "cTag",
+  "deleted",
+  "description",
+  "eTag",
+  "file",
+  "fileSystemInfo",
+  "folder",
+  "id",
+  "image",
+  "lastModifiedBy",
+  "lastModifiedDateTime",
+  "location",
+  "malware",
+  "name",
+  "package",
+  "parentReference",
+  "pendingOperations",
+  "photo",
+  "publication",
+  "remoteItem",
+  "root",
+  "searchResult",
+  "shared",
+  "sharepointIds",
+  "size",
+  "specialFolder",
+  "video",
+  "webDavUrl",
+  "webUrl",
+]);
+
 const feedPage = (url: URL): Response => {
+  const selected = (url.searchParams.get("$select") ?? "").split(",");
+  if (selected.some((name) => name !== "" && !driveItemProperties.has(name))) {
+    return Response.json(
+      { error: { code: "invalidRequest" } },
+      { status: 400 }
+    );
+  }
   const [token = "", skip = "0"] = (url.searchParams.get("token") ?? "").split(
     "~"
   );
@@ -226,7 +274,7 @@ describe("syncing a person's own OneDrive", () => {
           id: "folder-1",
           name: "Plans",
           folder: { childCount: 1 },
-          sharing: { owner: {} },
+          shared: { owner: {} },
         },
         file("price-list", { name: "Price list.docx" }),
         file("video", { size: 5 * 1024 * 1024 }),
@@ -352,7 +400,7 @@ describe("syncing a person's own OneDrive", () => {
       entries: [
         // The drive's root, shared at the top of its hierarchy: no reason
         // to list again.
-        { id: "root-id", root: {}, folder: {}, sharing: {} },
+        { id: "root-id", root: {}, folder: {}, shared: {} },
         // Unshared, its eTag the same: still a new version, as its
         // readers were read again.
         file("plan"),
@@ -478,6 +526,36 @@ describe("syncing a person's own OneDrive", () => {
   });
 
   it(
+    "leaves a file whose permissions are late to the next page, and lets it go when it is first",
+    { timeout: 120_000 },
+    async () => {
+      const connectionId = await connected();
+      drive.feed[start] = {
+        entries: [file("a"), file("slow"), file("b")],
+        end: "t1",
+      };
+      drive.permissions = { a: ownerOnly, slow: ownerOnly, b: ownerOnly };
+      drive.contents = { a: "a", slow: "slow", b: "b" };
+      // Always past the page's deadline, and past the 30 s connect waits.
+      drive.slow = { path: `${drivePath}/items/slow/permissions`, ms: 35_000 };
+      const first = await read(connectionId, null);
+      // Its readers can't be confirmed, and it can't hold the sync.
+      const second = await read(connectionId, first.cursor);
+      drive.slow = undefined;
+      const third = await read(connectionId, second.cursor);
+      expect({
+        first: first.items.map(({ id }) => id),
+        second: second.items,
+        third: third.items.map(({ id }) => id),
+      }).toStrictEqual({
+        first: ["a"],
+        second: [{ gone: true, id: "slow", kind: "file" }],
+        third: ["b"],
+      });
+    }
+  );
+
+  it(
     "gives up a download at the page's deadline, so a slow file can never stall the sync",
     { timeout: 60_000 },
     async () => {
@@ -516,15 +594,15 @@ describe("syncing a person's own OneDrive", () => {
     // A facet that isn't empty (shared with more, or merely the root of a
     // hierarchy) is no reason to list again.
     drive.feed[listedAt] = {
-      entries: [{ ...plans, sharing: { owner: {} } }],
+      entries: [{ ...plans, shared: { owner: {} } }],
       end: "t2",
     };
     const shared = await read(connectionId, listed.cursor);
 
     // Unshared: only the folder comes back, with an emptied facet. The
     // relisting's catch-up sees an emptied facet again, and goes on.
-    drive.feed.t2 = { entries: [{ ...plans, sharing: {} }], end: "t3" };
-    drive.feed[listedAt] = { entries: [{ ...plans, sharing: {} }], end: "t3" };
+    drive.feed.t2 = { entries: [{ ...plans, shared: {} }], end: "t3" };
+    drive.feed[listedAt] = { entries: [{ ...plans, shared: {} }], end: "t3" };
     drive.feed.t3 = { entries: [], end: "t3" };
     drive.permissions = { plan: ownerOnly };
     const items: SyncItem[] = [];

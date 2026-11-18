@@ -4,6 +4,7 @@ import { segment } from "@grasp-os/connector-kit/provider";
 import {
   RestartSyncError,
   defineSync,
+  fetchBefore,
   syncPageLimits,
 } from "@grasp-os/connector-kit/sync";
 import type {
@@ -61,7 +62,7 @@ import {
 // and the `resyncChanges…` codes) lists the drive again from the start.
 //
 // Readers are re-read from the item's own permissions every time it comes
-// in the feed, never taken from delta's `sharing` facet, and a file's
+// in the feed, never taken from delta's `shared` facet, and a file's
 // version includes them, so changed readers are always a new version,
 // whether or not Graph's eTag moves with them.
 //
@@ -72,9 +73,16 @@ import {
 // (https://learn.microsoft.com/en-us/onedrive/developer/rest-api/concepts/scan-guidance):
 // when a folder is unshared, the folder comes back, not its files. "In
 // cases where the sharing change is to remove sharing from an item you
-// will find an empty sharing facet" (the same page). So a folder (not the
-// drive's root) that comes after the first listing with an EMPTY sharing
-// facet relists the drive, which reads every file's permissions again:
+// will find an empty sharing facet" (the same page). The facet's property
+// is `shared`: the driveItem resource lists "shared | shared | Indicates
+// that the item was shared with others and provides information about the
+// shared state of the item", its JSON representation has `"shared": {
+// "@odata.type": "microsoft.graph.shared" }`, and no property is named
+// `sharing` there
+// (https://learn.microsoft.com/en-us/graph/api/resources/driveitem?view=graph-rest-1.0);
+// the delta and scan pages name "the sharing facet" in prose only, with no
+// JSON of it. So a folder (not the drive's root) that comes after the
+// first listing with an EMPTY `shared` facet relists the drive, which reads every file's permissions again:
 // first the round of changes it came in is read to its end, so nothing
 // that round holds is lost, then the drive is listed again, then caught up
 // from when that listing began. A facet that isn't empty (a share added
@@ -95,6 +103,10 @@ import {
 // a day stale.
 //
 // NEEDS A REAL TENANT TO CONFIRM (not documented by Microsoft):
+// - That "an empty sharing facet" in a delta answer under
+//   `hierarchicalsharing` is an empty `shared` object, the facet's only
+//   documented property; the pages give no JSON of it. If it comes some
+//   other way, an unshared folder's files wait for the daily relisting.
 // - Whether a change to one file's sharing alone puts it in the delta
 //   feed. Microsoft documents a marker for sharing changes only with
 //   `Prefer: deltashowsharingchanges`, which needs `Sites.FullControl.All`,
@@ -105,7 +117,7 @@ import {
 //   person's own drive the person owns every item, so this needs an admin
 //   to take the drive's ownership away.
 // - A folder that moves changes the readers its files inherit; it comes
-//   without a `sharing` facet when it inherits, and its files don't come
+//   without a `shared` facet when it inherits, and its files don't come
 //   ("renaming a folder doesn't result in any descendants of the folder
 //   being returned"): at most a day stale.
 // - Whether Graph honours `deltaExcludeParent`. If not, the parents of
@@ -192,14 +204,14 @@ const entrySchema = z.object({
   remoteItem: z.unknown().optional(),
   folder: z.unknown().optional(),
   root: z.unknown().optional(),
-  sharing: z.unknown().optional(),
+  shared: z.unknown().optional(),
   parentReference: z.object({ driveId: z.string().nullish() }).nullish(),
   lastModifiedBy: z.object({ user: identitySchema }).nullish(),
 });
 type Entry = z.infer<typeof entrySchema>;
 
 const entryFields =
-  "id,name,eTag,lastModifiedDateTime,size,file,folder,root,sharing,deleted,remoteItem,parentReference,lastModifiedBy";
+  "id,name,eTag,lastModifiedDateTime,size,file,folder,root,shared,deleted,remoteItem,parentReference,lastModifiedBy";
 
 const feedSchema = z.object({
   value: z.array(entrySchema),
@@ -372,15 +384,27 @@ interface Room {
   first: boolean;
 }
 
-/** A GET to Graph: its answer, or the ToolError a failure stands for. */
+/**
+ * A GET to Graph, its whole answer read before the page's deadline (the
+ * kit's `fetchBefore`): "late" when the deadline cut it off.
+ */
 const get = async (
   room: Room,
   url: URL,
-  init?: RequestInit
-): Promise<Response> => {
+  init: Pick<RequestInit, "headers"> = {}
+): Promise<Response | "late"> => {
   room.requests -= 1;
-  return await fetch(url, init);
+  return await fetchBefore(url, room.deadline, init);
 };
+
+/**
+ * What a read the page can't go without (the drive, the feed) stands for
+ * when it is late: Graph is slow, and the page waits as for a rate limit.
+ */
+const tooSlow = (): ToolError =>
+  new ToolError("Microsoft 365 didn't answer in time", {
+    code: "unavailable",
+  });
 
 /** Graph's JSON answer to a GET that must succeed. */
 const getJson = async <Schema extends z.ZodType>(
@@ -389,6 +413,9 @@ const getJson = async <Schema extends z.ZodType>(
   schema: Schema
 ): Promise<z.output<Schema>> => {
   const response = await get(room, url);
+  if (response === "late") {
+    throw tooSlow();
+  }
   if (!response.ok) {
     throw await graphFailure(response);
   }
@@ -434,8 +461,10 @@ const feedPage = async (room: Room, token: string | null) => {
       },
     }
   );
+  if (response === "late") {
+    throw tooSlow();
+  }
   if (response.status === 410 || (response.status === 404 && token !== null)) {
-    await response.body?.cancel();
     throw new RestartSyncError();
   }
   if (!response.ok) {
@@ -506,20 +535,23 @@ const settled = (readers: SyncReader[]): SyncReader[] => {
 /**
  * Who may open an item: its owner and every permission's readers; null
  * when Graph pages them (not documented), since a list read in part is
- * never guessed; "gone" when Graph refuses them or no longer has the item.
+ * never guessed; "gone" when Graph refuses them or no longer has the item;
+ * "late" when the page's deadline cut the read off.
  * https://learn.microsoft.com/en-us/graph/api/driveitem-list-permissions?view=graph-rest-1.0
  */
 const readersOf = async (
   room: Room,
   owner: string,
   id: string
-): Promise<SyncReader[] | null | "gone"> => {
+): Promise<SyncReader[] | null | "gone" | "late"> => {
   const response = await get(
     room,
     graphUrl(`${drive}/items/${segment(id)}/permissions`)
   );
+  if (response === "late") {
+    return "late";
+  }
   if (isUnreadable(response)) {
-    await response.body?.cancel();
     return "gone";
   }
   if (!response.ok) {
@@ -560,30 +592,6 @@ const noRoom = (room: Room): Read =>
  */
 const late = (room: Room): Read => (room.first ? { content: null } : "full");
 
-/**
- * A file's download and its bytes, given up at the page's deadline: a slow
- * file never holds a page past it.
- */
-const download = async (
-  room: Room,
-  url: URL
-): Promise<Response | Uint8Array | "late"> => {
-  room.requests -= 1;
-  try {
-    const response = await fetch(url, {
-      signal: AbortSignal.timeout(Math.max(room.deadline - Date.now(), 0)),
-    });
-    return response.ok
-      ? new Uint8Array(await response.arrayBuffer())
-      : response;
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "TimeoutError") {
-      return "late";
-    }
-    throw error;
-  }
-};
-
 /** Whether a file of `size` bytes may fit what's left of the page. */
 const mayFit = (room: Room, size: number): boolean =>
   // Base64 is a third larger than the bytes.
@@ -604,20 +612,20 @@ const contentOf = async (room: Room, entry: Entry): Promise<Read> => {
   if (Date.now() >= room.deadline) {
     return late(room);
   }
-  const bytes = await download(
+  const response = await get(
     room,
     graphUrl(`${drive}/items/${segment(entry.id)}/content`)
   );
-  if (bytes === "late") {
+  if (response === "late") {
     return late(room);
   }
-  if (bytes instanceof Response) {
-    if (isUnreadable(bytes)) {
-      await bytes.body?.cancel();
-      return "gone";
-    }
-    throw await graphFailure(bytes);
+  if (isUnreadable(response)) {
+    return "gone";
   }
+  if (!response.ok) {
+    throw await graphFailure(response);
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
   if (bytes.byteLength > maxReadBytes) {
     return { content: null };
   }
@@ -700,6 +708,12 @@ const itemOf = async (
   if (readers === "gone") {
     return goneOf(entry.id);
   }
+  if (readers === "late") {
+    // Left to the next page; as the page's first, its readers can't be
+    // confirmed and it can't hold the sync: it goes away, and comes back
+    // when it next changes or at the daily relisting.
+    return room.first ? goneOf(entry.id) : "full";
+  }
   const read = await contentOf(room, entry);
   if (read === "full") {
     return "full";
@@ -744,15 +758,15 @@ const lastOfEach = (items: readonly SyncItem[]): SyncItem[] => {
 
 /**
  * Whether an entry says a folder was unshared: a folder, not the drive's
- * root, with an empty `sharing` facet (see above).
+ * root, with an empty `shared` facet (see above).
  */
 const isUnsharedFolder = (entry: Entry): boolean =>
   entry.folder !== undefined &&
   entry.folder !== null &&
   (entry.root === undefined || entry.root === null) &&
-  typeof entry.sharing === "object" &&
-  entry.sharing !== null &&
-  Object.keys(entry.sharing).length === 0;
+  typeof entry.shared === "object" &&
+  entry.shared !== null &&
+  Object.keys(entry.shared).length === 0;
 
 /**
  * Where the feed goes on once Graph's page is done: its next page, or,
