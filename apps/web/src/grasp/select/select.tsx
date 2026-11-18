@@ -49,6 +49,7 @@ import { scroll } from "../scroll/scroll";
 import { grasp, media } from "../tokens/tokens.stylex";
 // UI SDK places a popup in pixels: popup-gap and popup-gutter, as the generator writes them.
 import { popup } from "../tokens/tokens.values";
+import { wrap } from "../wrap/wrap";
 import { selectPopupMarker } from "./select.stylex";
 
 const SCROLLS = "@supports (animation-timeline: scroll())";
@@ -389,7 +390,6 @@ const styles = stylex.create({
     flexGrow: 1,
     minWidth: 0,
     overflowWrap: "anywhere",
-    hyphens: "auto",
   },
   // truncate: one line, ending in an ellipsis; never hyphenated or broken inside a word.
   valueCut: {
@@ -781,6 +781,7 @@ export const SelectValue = ({ placeholder }: SelectValueProps) => {
       className={(value: SelectValueState) =>
         className(
           styles.value,
+          wrap.words,
           truncate && styles.valueCut,
           value.placeholder && styles.placeholder
         )

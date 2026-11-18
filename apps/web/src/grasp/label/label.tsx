@@ -16,6 +16,7 @@ import type { ComponentProps, ReactNode } from "react";
 
 import type { LayoutStyle } from "../layout/layout";
 import { grasp } from "../tokens/tokens.stylex";
+import { wrap } from "../wrap/wrap";
 
 /** What a caller may style: where the label sits. Never its type or colour. */
 export type LabelLayoutStyle = LayoutStyle;
@@ -31,9 +32,9 @@ export const labelStyles = stylex.create({
     lineHeight: grasp.textSmLine,
     fontWeight: grasp.weightMedium,
     color: grasp.ink,
-    // A long Dutch name breaks inside the word, hyphenated under lang="nl". Never cut off.
+    // A long Dutch name breaks inside the word, hyphenated under lang="nl" (src/wrap, where the
+    // label is drawn). Never cut off.
     overflowWrap: "anywhere",
-    hyphens: "auto",
     cursor: "default",
     // A field that is out of use takes its label with it.
     opacity: { default: 1, ":is([data-disabled])": grasp.dim },
@@ -91,7 +92,7 @@ export const Label = ({
   <LabelPrimitive
     {...rest}
     data-slot="label"
-    {...stylex.props(labelStyles.label, layout ?? styleProp)}
+    {...stylex.props(labelStyles.label, wrap.words, layout ?? styleProp)}
   >
     {children}
     {required && <RequiredMark />}

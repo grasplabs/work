@@ -31,6 +31,7 @@ import { fieldMarker } from "../field/field.stylex";
 import { RequiredMark, labelStyles } from "../label/label";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { wrap } from "../wrap/wrap";
 import { choiceMarker, choiceVars } from "./choice.stylex";
 import { rowStyles } from "./row";
 
@@ -134,7 +135,7 @@ const GroupedRow = ({
           id={name}
           htmlFor={box}
           data-disabled={off}
-          {...stylex.props(labelStyles.label)}
+          {...stylex.props(labelStyles.label, wrap.words)}
         >
           {label}
           {mark}
@@ -143,13 +144,20 @@ const GroupedRow = ({
           <p
             id={said}
             data-disabled={off}
-            {...stylex.props(noteStyles.note, noteStyles.description)}
+            {...stylex.props(
+              noteStyles.note,
+              wrap.words,
+              noteStyles.description
+            )}
           >
             {description}
           </p>
         )}
         {says && (
-          <p id={wrong} {...stylex.props(noteStyles.note, noteStyles.error)}>
+          <p
+            id={wrong}
+            {...stylex.props(noteStyles.note, wrap.words, noteStyles.error)}
+          >
             {error}
           </p>
         )}
@@ -211,7 +219,7 @@ export const ChoiceRow = ({
         <FieldLabelPrimitive
           id={name}
           htmlFor={box}
-          {...stylex.props(labelStyles.label)}
+          {...stylex.props(labelStyles.label, wrap.words)}
         >
           {label}
           {mark}

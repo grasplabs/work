@@ -30,6 +30,7 @@ import { Spinner } from "../spinner";
 import { spinnerVars } from "../spinner/spinner.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { useWords } from "../words/words";
+import { wrap } from "../wrap/wrap";
 import { buttonMarker, layerMarker } from "./button.stylex";
 import { HoldFill, holdLook } from "./hold-fill";
 import { HoldContext, assignRef, useHoldLabels } from "./use-hold";
@@ -269,7 +270,6 @@ const styles = stylex.create({
     // column it stands in. It is never cut off, unless the caller asks for `truncate` (cut, below).
     whiteSpace: "normal",
     overflowWrap: "anywhere",
-    hyphens: "auto",
     userSelect: "none",
     WebkitTapHighlightColor: "transparent",
     touchAction: "manipulation",
@@ -993,6 +993,7 @@ const lookOf = ({
   stylex.props(
     buttonMarker,
     styles.base,
+    wrap.words,
     styles[size],
     styles.inGroup,
     iconOnly && styles.square,
