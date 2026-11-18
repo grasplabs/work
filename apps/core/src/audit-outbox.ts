@@ -560,6 +560,28 @@ export const outboxed = (db: DrizzleD1Database, entry: AuditEntry) => {
 };
 
 /**
+ * `outboxedEventWhere` with `detail` fields whose values SQL computes in
+ * the statement that stores the event (`json_set`), so a count reads what
+ * the batch's earlier statements and every writer before them left, never
+ * an earlier read of it.
+ */
+export const outboxedEventWithDetailWhere = (
+  db: DrizzleD1Database,
+  event: AuditEvent,
+  detail: Readonly<Record<string, SQL>>,
+  condition: SQL
+) => {
+  const fields = Object.entries(detail).map(
+    ([field, value]) => sql`, ${`$.detail.${field}`}, ${value}`
+  );
+  return db
+    .insert(auditOutbox)
+    .select(
+      sql`SELECT ${event.id}, json_set(${JSON.stringify(event)}${sql.join(fields)}), ${Date.now()} WHERE ${condition}`
+    );
+};
+
+/**
  * `outboxedWhere` for an event made already (`createAuditEvent`), so the
  * batch's later statements can tell by its ID whether it was stored
  * (`storedEvent`).

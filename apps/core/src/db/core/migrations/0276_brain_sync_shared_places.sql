@@ -28,10 +28,11 @@ CREATE TABLE `__new_brain_sync_sources` (
 	`relist_catch_up` integer NOT NULL,
 	`seen_in` integer,
 	`last_error_at` integer,
+	`picks_version` integer,
 	PRIMARY KEY(`connection_id`, `feed`, `place`)
 );
 --> statement-breakpoint
-INSERT INTO `__new_brain_sync_sources`("connection_id", "feed", "place", "person_id", "provider", "tenant", "account", "cursor", "listing", "listing_open", "due_at", "lease_id", "lease_until", "last_success_at", "last_error", "added", "changed", "removed", "relist_cursor", "relisting", "relist_at", "relist_since", "leaves_owed", "kind", "dropped", "relist_catch_up", "seen_in", "last_error_at") SELECT "connection_id", "feed", "place", "person_id", "provider", "tenant", "account", "cursor", "listing", "listing_open", "due_at", "lease_id", "lease_until", "last_success_at", "last_error", "added", "changed", "removed", "relist_cursor", "relisting", "relist_at", "relist_since", "leaves_owed", "kind", "dropped", "relist_catch_up", "seen_in", "last_error_at" FROM `brain_sync_sources`;--> statement-breakpoint
+INSERT INTO `__new_brain_sync_sources`("connection_id", "feed", "place", "person_id", "provider", "tenant", "account", "cursor", "listing", "listing_open", "due_at", "lease_id", "lease_until", "last_success_at", "last_error", "added", "changed", "removed", "relist_cursor", "relisting", "relist_at", "relist_since", "leaves_owed", "kind", "dropped", "relist_catch_up", "seen_in", "last_error_at", "picks_version") SELECT "connection_id", "feed", "place", "person_id", "provider", "tenant", "account", "cursor", "listing", "listing_open", "due_at", "lease_id", "lease_until", "last_success_at", "last_error", "added", "changed", "removed", "relist_cursor", "relisting", "relist_at", "relist_since", "leaves_owed", "kind", "dropped", "relist_catch_up", "seen_in", "last_error_at", "picks_version" FROM `brain_sync_sources`;--> statement-breakpoint
 DROP TABLE `brain_sync_sources`;--> statement-breakpoint
 ALTER TABLE `__new_brain_sync_sources` RENAME TO `brain_sync_sources`;--> statement-breakpoint
 PRAGMA foreign_keys=ON;--> statement-breakpoint

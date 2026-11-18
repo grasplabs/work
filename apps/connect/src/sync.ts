@@ -531,12 +531,16 @@ export const syncPlaceChoices = async (
  * (`sync.picks_changed`), with nothing changed. The same set again
  * changes and records nothing. A place no longer picked is refused from
  * the next read on, and is no longer among the sync's places, so core's
- * sync run drops it and erases what it brought.
+ * sync run drops it and erases what it brought. Answers the picks, and
+ * the connection's version of them (`syncPicksVersion`), one up with each
+ * save that changed them: core hides what a save un-picked only for a
+ * version newer than the last it hid for, so an older save that lands
+ * late never drops a newer choice.
  */
 export const pickSyncPlaces = async (
   env: Env,
   request: unknown
-): Promise<{ places: string[] }> => {
+): Promise<{ places: string[]; version: number }> => {
   const { person, connectionId, feed, from, places } = syncErrors.parse(
     "sync.invalid",
     pickSyncPlacesSchema,
@@ -566,17 +570,19 @@ export const pickSyncPlaces = async (
   const after = new Set(places);
   const same =
     from.length === places.length && from.every((place) => after.has(place));
+  /** The connection's version of its picks, as it is now. */
+  const versionNow = sql<number>`coalesce((SELECT ${connections.syncPicksVersion} FROM ${connections} WHERE ${connections.id} = ${connectionId}), 0)`;
   if (same) {
     // Nothing to change: still, never answer a page left open as if
     // what it shows were what is held.
     const now = await db
-      .select({ unchanged: sql<number>`${unchanged}` })
+      .select({ unchanged: sql<number>`${unchanged}`, version: versionNow })
       .from(sql`(SELECT 1)`)
       .get();
     if (now?.unchanged !== 1) {
-      await changed();
+      return await changed();
     }
-    return { places };
+    return { places, version: now.version };
   }
   // What came and went, counted in the same transaction as the write, from
   // the picks it replaces.
@@ -595,7 +601,7 @@ export const pickSyncPlaces = async (
   // The change is made only once its event is written, and its event only
   // while the picks are the ones the page started from: one transaction.
   const recorded = sql`EXISTS (SELECT 1 FROM ${auditOutbox} WHERE ${auditOutbox.id} = ${event.id})`;
-  const [written] = await db.batch([
+  const [written, [bumped]] = await db.batch([
     db
       .insert(auditOutbox)
       .select(
@@ -612,6 +618,15 @@ export const pickSyncPlaces = async (
           .where(unchanged)
       )
       .returning({ id: auditOutbox.id }),
+    // A version that only grows, one up with the change, in its
+    // transaction: what core's hide of the places it un-picks goes by.
+    db
+      .update(connections)
+      .set({
+        syncPicksVersion: sql`coalesce(${connections.syncPicksVersion}, 0) + 1`,
+      })
+      .where(and(eq(connections.id, connectionId), recorded))
+      .returning({ version: connections.syncPicksVersion }),
     db
       .delete(syncPicks)
       .where(
@@ -640,10 +655,11 @@ export const pickSyncPlaces = async (
       )
       .onConflictDoNothing(),
   ]);
-  if (written.length === 0) {
-    await changed();
+  const version = bumped?.version ?? null;
+  if (written.length === 0 || version === null) {
+    return await changed();
   }
-  return { places };
+  return { places, version };
 };
 
 /**

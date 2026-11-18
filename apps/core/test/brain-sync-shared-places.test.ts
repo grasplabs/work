@@ -1,4 +1,5 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import {
   afterEach,
@@ -14,7 +15,9 @@ import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { addSource } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { syncForStaff } from "../src/brain-sync.ts";
+import { personOf } from "../src/connections.ts";
 import { completeOwedErasures } from "../src/shared-reads.ts";
+import { pickSyncPlaces } from "../src/sync-picks.ts";
 import { allEvents } from "./audit-events.ts";
 import { chooseAudience } from "./brain-audiences.ts";
 import { newTeam } from "./brain-next-leaks-harness.ts";
@@ -38,7 +41,9 @@ import {
 import type { Person } from "./brain-sync-world.ts";
 import { interleaving } from "./d1-interleaving.ts";
 import { mockIdpWith } from "./idp.ts";
+import { acmeTenant } from "./sign-in-config.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
+import { connectDb } from "./test-env.ts";
 
 mockIdpWith(idp);
 
@@ -57,6 +62,14 @@ mockIdpWith(idp);
 
 /** The sample connector's sync of picked places (its `sites`). */
 const feed = "sites";
+
+/** An un-pick's hide taking the sync's places listing (brain-sync.ts `droppedExcept`). */
+const takeListingStatement =
+  /^update "brain_sync_sources" set "lease_id" = \?, "lease_until" = \?, "picks_version"/u;
+
+/** The end of an erasure of a connection's records (shared-reads.ts `ended`). */
+const erasureEndStatement =
+  /^update "connection_brain_erasures" set "erasing" = \?/u;
 
 /** `admin` picks `places` on `connectionId`, from the picks held now. */
 const pick = async (
@@ -546,8 +559,127 @@ describe("native sync of a shared connection's picked places", () => {
     }
   );
 
-  it("still reads a reader's own and the company's, and all but the last places, when their audiences hold more picked places than a reader can", async () => {
+  it(
+    "never drops a place a newer save picks when an older save's hide lands after it",
+    setUpTime,
+    async () => {
+      const [one, two, member] = await Promise.all([
+        signedInApi(idp, "admin"),
+        signedInApi(idp, "admin"),
+        signedInApi(idp, "user"),
+      ]);
+      const [a, b] = [`site-${unique()}`, `site-${unique()}`];
+      const kept = markerOf();
+      const { connectionId } = await connectSharedSites(one, {
+        [a]: markerOf(),
+        [b]: kept,
+      });
+      await chooseAudience(one.api, connectionId, { kind: "everyone" });
+      await pick(one, connectionId, [a, b]);
+      await syncAll();
+      const before = await finds(member.userId, kept);
+      const identity: Identity = {
+        userId: one.userId,
+        email: String(one.person.email),
+        name: "Admin",
+        role: "admin",
+        teams: [],
+        staff: false,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      };
+      // The first admin saves `a` alone; between connect's save and its
+      // hide, the second admin picks `a` and `b` again, hide and all.
+      let landed = false;
+      await pickSyncPlaces(
+        interleaving(
+          { pattern: takeListingStatement, bound: connectionId },
+          async () => {
+            landed = true;
+            await pick(two, connectionId, [a, b]);
+          }
+        ),
+        identity,
+        async () => await personOf(env, identity),
+        { connectionId, feed, from: [a, b], places: [a] }
+      );
+      const atSave = await finds(member.userId, kept);
+      await syncAll();
+
+      expect({
+        landed,
+        before,
+        atSave,
+        after: await finds(member.userId, kept),
+        kept: await heldBy(connectionId),
+      }).toStrictEqual({
+        landed: true,
+        before: true,
+        atSave: true,
+        after: true,
+        kept: { [a]: 1, [b]: 1 },
+      });
+    }
+  );
+
+  it(
+    "reports in its end every copy an erase erased, one the sync erased as the erasure ended included",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      const site = `site-${unique()}`;
+      const { connectionId } = await connectSharedSites(admin, {
+        [site]: markerOf(),
+      });
+      await chooseAudience(admin.api, connectionId, { kind: "everyone" });
+      await pick(admin, connectionId, [site]);
+      await syncAll();
+      await admin.api.connections.eraseBrainReads(connectionId);
+      // The step that ends the erasure reads it, then the sync run erases
+      // its last copy, and counts it, just before that end lands.
+      await completeOwedErasures(
+        interleaving(
+          { pattern: erasureEndStatement, bound: connectionId },
+          async () => {
+            await sync();
+          }
+        )
+      );
+      const events = await allEvents();
+
+      expect({
+        kept: await heldBy(connectionId),
+        erased: events
+          .filter(
+            ({ action, target }) =>
+              action === "brain.shared_reads.erased" &&
+              target?.id === connectionId
+          )
+          .map(({ detail }) => detail),
+      }).toStrictEqual({ kept: {}, erased: [{ sources: 1 }] });
+    }
+  );
+
+  it("still reads a reader's own, the company's and what their provider groups are given, and all but the last places, when their audiences hold more picked places than a reader can", async () => {
     const reader = await signedInApi(idp, "user");
+    // A Microsoft group of the reader's, as their own connection's latest
+    // read of their groups names it (source-readers.ts `heldPrincipalsOf`).
+    const providerGroup = crypto.randomUUID();
+    const connectedAt = Date.now();
+    await connectDb()
+      .prepare(
+        "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tenant, account_id, reader_groups, reader_groups_at, created_at, updated_at) VALUES (?, 'microsoft', 'personal', ?, 'active', 'native', 'microsoft-365', ?, ?, ?, ?, ?, ?)"
+      )
+      .bind(
+        crypto.randomUUID(),
+        reader.userId,
+        acmeTenant,
+        String(reader.person.oid),
+        JSON.stringify([providerGroup]),
+        connectedAt,
+        connectedAt,
+        connectedAt
+      )
+      .run();
     const word = markerOf();
     // Two connections everyone may read, kept in the reverse of their
     // order by ID, so only an ordered read holds the first one's places
@@ -595,6 +727,7 @@ describe("native sync of a shared connection's picked places", () => {
       const marks = {
         own: markerOf(),
         company: markerOf(),
+        group: markerOf(),
         firstsLast: markerOf(),
         lastsFirst: markerOf(),
         lastsLast: markerOf(),
@@ -608,6 +741,22 @@ describe("native sync of a shared connection's picked places", () => {
         { producer: "upload", id: unique() },
         { kind: "everyone" },
         marks.company
+      );
+      // Shared at its source with that group of theirs (GRA-1761).
+      await add(
+        { producer: "upload", id: unique() },
+        {
+          kind: "readers",
+          readers: [
+            {
+              kind: "group",
+              provider: "microsoft",
+              tenant: acmeTenant,
+              group: providerGroup,
+            },
+          ],
+        },
+        marks.group
       );
       const placeCopy = async (
         connectionId: string,
@@ -627,6 +776,9 @@ describe("native sync of a shared connection's picked places", () => {
       expect({
         own: await finds(reader.userId, marks.own),
         company: await finds(reader.userId, marks.company),
+        // Their provider group before any place: what their source gives
+        // them never goes for what an admin picked.
+        group: await finds(reader.userId, marks.group),
         // The first connection's places, all of them, then the last's, as
         // many as there is room for: its last place goes unread.
         firstsLast: await finds(reader.userId, marks.firstsLast),
@@ -635,6 +787,7 @@ describe("native sync of a shared connection's picked places", () => {
       }).toStrictEqual({
         own: true,
         company: true,
+        group: true,
         firstsLast: true,
         lastsFirst: true,
         lastsLast: false,

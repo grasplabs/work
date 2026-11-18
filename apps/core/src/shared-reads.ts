@@ -21,6 +21,7 @@ import { z } from "zod";
 import {
   auditedBatch,
   outboxedEventWhere,
+  outboxedEventWithDetailWhere,
   uuidFromHash,
 } from "./audit-outbox.ts";
 import { erasingAtOnce, eraseSources } from "./brain-next-origins.ts";
@@ -343,7 +344,17 @@ const ended = async (
           sql`NOT EXISTS (SELECT 1 FROM ${brainSyncItems} WHERE ${brainSyncItems.connectionId} = ${connectionId})`
         )
       ),
-    outboxedEventWhere(db, event, sql`changes() > 0`),
+    // How many it erased as the row says it now, in the statement that
+    // records it: the sync run may have erased a last copy, and counted
+    // it, after the row above was read (brain-sync.ts `eraseDroppedPlace`).
+    outboxedEventWithDetailWhere(
+      db,
+      event,
+      {
+        sources: sql`(SELECT ${connectionBrainErasures.erased} FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connectionId} AND ${connectionBrainErasures.request} = ${request} AND ${connectionBrainErasures.generation} = ${generation})`,
+      },
+      sql`changes() > 0`
+    ),
   ]);
 };
 

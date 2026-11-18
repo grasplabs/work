@@ -2235,7 +2235,7 @@ const sourceStatement = (
 ) =>
   insert(
     brainSyncSources,
-    sql`SELECT ${of.connectionId}, ${of.feed}, ${place}, ${of.personId}, ${of.provider}, ${of.tenant}, ${of.account}, NULL, 1, 1, ${now}, NULL, NULL, NULL, NULL, 0, 0, 0, NULL, 0, ${relistAt}, NULL, 0, ${of.kind}, 0, 0, ${seenIn}, NULL`,
+    sql`SELECT ${of.connectionId}, ${of.feed}, ${place}, ${of.personId}, ${of.provider}, ${of.tenant}, ${of.account}, NULL, 1, 1, ${now}, NULL, NULL, NULL, NULL, 0, 0, 0, NULL, 0, ${relistAt}, NULL, 0, ${of.kind}, 0, 0, ${seenIn}, NULL, NULL`,
     of.personId === null
       ? sql`NOT ${closed(of.connectionId)}`
       : sql`NOT ${closed(of.connectionId)} AND NOT ${erasureBegan(of.personId)}`
@@ -2431,12 +2431,17 @@ const listPlaces = async (
  * `sharedPlacesRead`; its copies erased by the clock,
  * `completeDroppedPlaces`), then the listing started again from nothing,
  * due now, its lease given up. Only a shared connection's (no person).
+ * With `version`, the version of the picks `keep` is (connect's, one up
+ * with each save): taken only for a version newer than the last one hid
+ * for, which it records, so a save that lands late, after a newer one hid,
+ * drops nothing.
  */
 const droppedExcept = (
   db: Database,
   of: Pick<Source, "connectionId" | "feed">,
   keep: readonly string[],
-  token: string
+  token: string,
+  version?: number
 ) => {
   const now = Date.now();
   const write = writesOf({
@@ -2450,9 +2455,14 @@ const droppedExcept = (
   return [
     db
       .update(brainSyncSources)
-      .set({ leaseId: token, leaseUntil: new Date(now + leaseMs) })
+      .set({
+        leaseId: token,
+        leaseUntil: new Date(now + leaseMs),
+        ...(version === undefined ? {} : { picksVersion: version }),
+      })
       .where(
-        sql`${sourceRowOf(of, placesListing)} AND ${brainSyncSources.personId} IS NULL AND ${brainSyncSources.dropped} = 0`
+        sql`${sourceRowOf(of, placesListing)} AND ${brainSyncSources.personId} IS NULL AND ${brainSyncSources.dropped} = 0
+          AND ${version === undefined ? sql`1 = 1` : sql`coalesce(${brainSyncSources.picksVersion}, 0) < ${version}`}`
       ),
     write.update(
       brainSyncSources,
@@ -2477,7 +2487,9 @@ const droppedExcept = (
  * more is kept of it (a page's fence holds only while its place is not
  * dropped: `writesOf`); its copies are erased by the clock
  * (`completeDroppedPlaces`). The sync's places listing starts again, due
- * now, so a place picked now is read soon.
+ * now, so a place picked now is read soon. Only for picks newer than the
+ * last whose hide ran (`version`, connect's): an older save's hide that
+ * lands late, after a newer one's, drops nothing the newer one picks.
  */
 export const hideUnpickedPlaces = async (
   env: Pick<Env, "DB">,
@@ -2485,11 +2497,23 @@ export const hideUnpickedPlaces = async (
     connectionId,
     feed,
     picks,
-  }: { connectionId: string; feed: string; picks: readonly string[] }
+    version,
+  }: {
+    connectionId: string;
+    feed: string;
+    picks: readonly string[];
+    version: number;
+  }
 ): Promise<void> => {
   const db = drizzle(env.DB);
   await db.batch(
-    droppedExcept(db, { connectionId, feed }, picks, crypto.randomUUID())
+    droppedExcept(
+      db,
+      { connectionId, feed },
+      picks,
+      crypto.randomUUID(),
+      version
+    )
   );
 };
 

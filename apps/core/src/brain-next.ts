@@ -954,7 +954,12 @@ const withPlaces = async (
     if (connectionIdSchema.safeParse(connectionId).success) {
       // oxlint-disable-next-line no-await-in-loop -- a hash, no call
       const group = await placeGroupOf(connectionId, feed, place);
-      groups.set(connectionId, [...(groups.get(connectionId) ?? []), group]);
+      const ofConnection = groups.get(connectionId);
+      if (ofConnection === undefined) {
+        groups.set(connectionId, [group]);
+      } else {
+        ofConnection.push(group);
+      }
     }
   }
   return audiences.map((audience) => ({
@@ -1084,10 +1089,11 @@ const asHeld = (
  * The reader's groups from `groups` (their own, before the connections')
  * and `audiences` (withConnections), with `accountGroups` and the provider
  * groups sources name (`sourceGroups`), as a reader holds them (`asHeld`):
- * the places picked on shared connections go with the provider groups,
- * past their own, so a person whose audiences hold more picked places
- * than a reader can hold beside their own groups still reads everything
- * else, and only the places last in order go unread.
+ * their own first, then the provider groups, then the places picked on
+ * shared connections, last. So past the bound, only the last places go
+ * unread, for those whose audiences hold more of them than fit: a bulk
+ * grant an admin made, which an admin can narrow. Never what a source
+ * shares with a group of the person's own, which nothing else gives them.
  */
 const readerGroupsOf = (
   groups: readonly string[],
@@ -1098,7 +1104,7 @@ const readerGroupsOf = (
   const shared = withConnections(groups, audiences);
   return asHeld(
     [...shared.groups, ...accountGroups],
-    [...shared.places, ...sourceGroups]
+    [...sourceGroups, ...shared.places]
   );
 };
 

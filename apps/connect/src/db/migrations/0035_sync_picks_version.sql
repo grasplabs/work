@@ -1,0 +1,1 @@
+ALTER TABLE `connections` ADD `sync_picks_version` integer;

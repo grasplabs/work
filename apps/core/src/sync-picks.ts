@@ -119,7 +119,9 @@ export const readSyncPlaces = async (
  * picks held are no longer `from`, and records the change in the audit
  * log. Then, before it answers, every place no longer picked is hidden in
  * the Brain at once (brain-sync.ts `hideUnpickedPlaces`), so the admin's
- * save is never answered while an un-picked place can still be read.
+ * save is never answered while an un-picked place can still be read; by
+ * the version of the picks connect answers, so an older save's hide that
+ * lands after a newer one's drops nothing the newer one picks.
  */
 export const pickSyncPlaces = async (
   env: Env,
@@ -137,12 +139,17 @@ export const pickSyncPlaces = async (
     pickSchema,
     request
   );
-  await env.CONNECT.pickSyncPlaces({
+  const { version } = await env.CONNECT.pickSyncPlaces({
     person: await person(),
     connectionId,
     feed,
     from,
     places,
   });
-  await hideUnpickedPlaces(env, { connectionId, feed, picks: places });
+  await hideUnpickedPlaces(env, {
+    connectionId,
+    feed,
+    picks: places,
+    version,
+  });
 };
