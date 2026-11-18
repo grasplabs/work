@@ -13,6 +13,7 @@ import {
   addConnection,
   auditEvents,
   connectAccount,
+  heldPicks,
   mailboxAccount,
   ownAccount,
   someone,
@@ -252,6 +253,7 @@ const pick = async (
     person,
     connectionId,
     feed: "sites",
+    from: await heldPicks(connectionId, "sites"),
     places: picked,
   });
 
@@ -460,7 +462,7 @@ describe("a shared connection's picked places", () => {
     });
   });
 
-  it("records what each of two admins picking at once changed, from the picks their write replaced", async () => {
+  it("refuses a save from a page another admin's pick made stale, changing nothing, and records both", async () => {
     const { admin, connectionId } = await sharedConnection();
     await pick(admin, connectionId, ["sales", "legal"]);
     const other = someone("admin");
@@ -491,21 +493,30 @@ describe("a shared connection's picked places", () => {
     };
     const { length: before } = await picksRecorded(connectionId);
 
-    await pickSyncPlaces(racing, {
-      person: admin,
-      connectionId,
-      feed: "sites",
-      places: ["sales"],
-    });
+    // This admin's page started from Sales and Legal.
+    const from = await heldPicks(connectionId, "sites");
+    const outcome = await outcomeOf(
+      async () =>
+        await pickSyncPlaces(racing, {
+          person: admin,
+          connectionId,
+          feed: "sites",
+          from,
+          places: ["sales"],
+        })
+    );
 
     const recordedAfter = await picksRecorded(connectionId);
     expect({
       raced,
+      outcome,
       listed: await places({ connectionId, feed: "sites", cursor: null }),
       recorded: recordedAfter.slice(before),
     }).toStrictEqual({
       raced: true,
-      listed: { places: ["sales"], cursor: null },
+      outcome: "sync.picks_changed",
+      // The other admin's Board stays: the stale page undid nothing.
+      listed: { places: ["board"], cursor: null },
       recorded: [
         {
           actor: other.userId,
@@ -517,19 +528,56 @@ describe("a shared connection's picked places", () => {
             removed: 2,
           },
         },
-        // Against Board, which the other admin's pick left, not against
-        // the Sales and Legal it read before.
         {
           actor: admin.userId,
           detail: {
             feed: "sites",
-            outcome: "ok",
-            places: 1,
-            added: 1,
-            removed: 1,
+            outcome: "refused",
+            reason: "sync.picks_changed",
           },
         },
       ],
+    });
+  });
+
+  it("keeps a picked place a page didn't show when a save leaves it alone, and refuses a save from picks that aren't held", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    await pick(admin, connectionId, ["sales", "legal"]);
+    // Legal is no longer listed, but still picked: a page starts from
+    // every pick, ticks Board, and leaves Legal as it was.
+    provider.sites = { "": { sites: [sales, board] } };
+    const shown = await exports.default.syncPlaceChoices({
+      person: admin,
+      connectionId,
+      feed: "sites",
+      cursor: null,
+    });
+    await exports.default.pickSyncPlaces({
+      person: admin,
+      connectionId,
+      feed: "sites",
+      from: shown?.picks ?? [],
+      places: [...(shown?.picks ?? []), "board"],
+    });
+    const stale = await outcomeOf(
+      async () =>
+        await exports.default.pickSyncPlaces({
+          person: admin,
+          connectionId,
+          feed: "sites",
+          from: ["sales"],
+          places: ["sales"],
+        })
+    );
+    const held = await heldPicks(connectionId, "sites");
+    expect({
+      started: [...(shown?.picks ?? [])].toSorted(),
+      held: held.toSorted(),
+      stale,
+    }).toStrictEqual({
+      started: ["legal", "sales"],
+      held: ["board", "legal", "sales"],
+      stale: "sync.picks_changed",
     });
   });
 
@@ -544,6 +592,7 @@ describe("a shared connection's picked places", () => {
             person: admin,
             connectionId,
             feed: "folders",
+            from: [],
             places: ["inbox"],
           })
       ),
@@ -622,6 +671,7 @@ describe("a shared connection's picked places", () => {
           { place: "legal", title: "Legal Team", within: null, picked: true },
           { place: "board", title: longName, within: null, picked: false },
         ],
+        picks: ["legal"],
         cursor: null,
       },
       member: "role.forbidden",
@@ -650,6 +700,7 @@ describe("a shared connection's picked places", () => {
           { place: "legal", title: "Legal", within: null, picked: false },
           { place: "board", title: "Board", within: null, picked: false },
         ],
+        picks: [],
         cursor: null,
       },
       own: null,

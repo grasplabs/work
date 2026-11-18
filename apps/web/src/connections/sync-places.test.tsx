@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import type { SharedSyncPlaces } from "@grasp-os/shared/connect";
+import { syncErrors } from "@grasp-os/shared/sync";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -19,13 +20,14 @@ import { SyncPlaces } from "./sync-places.tsx";
 // The places of a shared connection an admin picks to sync into the
 // Brain, on its card beside its Brain audience. These start from what an
 // admin must not miss: that everyone in the audience will read everything
-// in a picked place; a save that core refused looking as if it went
-// through; a site's libraries told apart only by a cut name; an empty
-// list looking like a failure.
+// in a picked place; a save from a stale page undoing another admin's
+// pick, or dropping a pick the page didn't show; a save that core refused
+// looking as if it went through; two libraries a screen reader can't
+// tell apart; an empty list, or a slow one, looking like a failure.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
-const shared: CatalogConnection = {
+const microsoft: CatalogConnection = {
   id: "c1",
   source: "native",
   provider: "microsoft",
@@ -45,36 +47,58 @@ type Asked = [string, ...unknown[]][];
 
 /** The refusal's words, as core gives them. */
 const refusal = "Only the company's admins pick what syncs.";
+const unreachable = "Grasp can't be reached right now.";
+
+/** How core answers, for each test to set. */
+interface Core {
+  /** What connect holds: the listing, and every pick. */
+  held: SharedSyncPlaces;
+  /** Refuse the next save outright. */
+  refuseSave?: boolean;
+  /** Refuse every listing from the next on. */
+  refuseListing?: boolean;
+  /** A listing that hasn't answered yet: resolved by the test. */
+  pending?: Promise<boolean>;
+}
 
 let root: Root | undefined;
 
-/**
- * Shows the picker for `shared` with core holding `places`, and records
- * what the page asks it; `refusing` has core refuse a save.
- */
+/** Shows the picker for `connection` with core as `fake` says, and records what the page asks. */
 const shown = async (
-  places: SharedSyncPlaces,
-  refusing = false
+  fake: Core,
+  connection: CatalogConnection = microsoft
 ): Promise<Asked> => {
-  const held = structuredClone(places);
   const asked: Asked = [];
   const session = {
     connections: {
       syncPlaces: async (...given: unknown[]) => {
         asked.push(["syncPlaces", ...given]);
-        return await Promise.resolve(structuredClone(held));
+        await fake.pending;
+        if (fake.refuseListing === true) {
+          throw new Error(unreachable);
+        }
+        return structuredClone(fake.held);
       },
       pickSyncPlaces: async (request: {
         connectionId: string;
         feed: string;
+        from: string[];
         places: string[];
       }) => {
         asked.push(["pickSyncPlaces", request]);
         await Promise.resolve();
-        if (refusing) {
+        if (fake.refuseSave === true) {
           throw new Error(refusal);
         }
-        for (const choice of held.choices) {
+        // As connect: only from the picks held now.
+        const held = [...fake.held.picks].toSorted();
+        if (
+          JSON.stringify([...request.from].toSorted()) !== JSON.stringify(held)
+        ) {
+          throw syncErrors.create("sync.picks_changed");
+        }
+        fake.held.picks = [...request.places];
+        for (const choice of fake.held.choices) {
           choice.picked = request.places.includes(choice.place);
         }
       },
@@ -85,7 +109,7 @@ const shown = async (
       await action(session),
   };
   const rootRoute = createRootRoute({
-    component: () => <SyncPlaces connection={shared} label={label} />,
+    component: () => <SyncPlaces connection={connection} label={label} />,
   });
   const router = createRouter({
     routeTree: rootRoute,
@@ -109,30 +133,39 @@ const shown = async (
   return asked;
 };
 
-/** Ticks the box of the place named `title`. */
-const tick = async (title: string): Promise<void> => {
-  const named = [...document.querySelectorAll("label")].find(
-    (each) => each.textContent === title
+/** An element's accessible name, as its `aria-labelledby` makes it. */
+const nameOf = (element: Element): string =>
+  (element.getAttribute("aria-labelledby") ?? "")
+    .split(" ")
+    .map((id) => document.querySelector(`#${id}`)?.textContent ?? "")
+    .join(" ")
+    .trim();
+
+/** The checkbox named `title` (and `within`, when given). */
+const boxOf = (title: string, within?: string): HTMLElement | undefined =>
+  [...document.querySelectorAll<HTMLElement>('[role="checkbox"]')].find(
+    (box) =>
+      nameOf(box) === (within === undefined ? title : `${title} ${within}`)
   );
-  const box = document.querySelector<HTMLElement>(
-    `[id="${named?.getAttribute("for") ?? ""}"]`
-  );
+
+/** Clicks `element`, and lets the page answer. */
+const click = async (element: Element | undefined): Promise<void> => {
   await act(async () => {
-    box?.click();
+    if (element instanceof HTMLElement) {
+      element.click();
+    }
     await Promise.resolve();
   });
 };
 
-/** Presses the save button, and waits until `settled` holds. */
-const save = async (settled: () => boolean): Promise<void> => {
-  const button = [...document.querySelectorAll("button")].find(
-    (each) => each.textContent === "Save the places"
+/** The button reading `text`. */
+const button = (text: string): HTMLButtonElement | undefined =>
+  [...document.querySelectorAll("button")].find(
+    (each) => each.textContent === text
   );
-  await act(async () => {
-    button?.click();
-    await Promise.resolve();
-  });
-  // Each try lets React render what core answered before looking.
+
+/** Waits until `settled` holds, letting React render what core answered each time. */
+const until = async (settled: () => boolean): Promise<void> => {
   await vi.waitFor(async () => {
     await act(async () => {
       await Promise.resolve();
@@ -143,12 +176,17 @@ const save = async (settled: () => boolean): Promise<void> => {
   });
 };
 
-const longSite = `Sales and marketing ${"of the northern region ".repeat(14)}`;
+const text = (): string => document.body.textContent ?? "";
 
-const libraries: SharedSyncPlaces = {
+const longSite =
+  `Sales and marketing ${"of the northern region ".repeat(14)}`.trim();
+
+/** Two sites, each with its own "Documents"; Contracts picked. */
+const libraries = (): SharedSyncPlaces => ({
   feed: "libraries",
   choices: [
     { place: "b!docs", title: "Documents", within: longSite, picked: false },
+    { place: "b!legal", title: "Documents", within: "Legal", picked: false },
     {
       place: "b!contracts",
       title: "Contracts",
@@ -156,9 +194,8 @@ const libraries: SharedSyncPlaces = {
       picked: true,
     },
   ],
-};
-
-const text = (): string => document.body.textContent ?? "";
+  picks: ["b!contracts"],
+});
 
 describe("picking a shared connection's places to sync", () => {
   afterEach(() => {
@@ -169,57 +206,144 @@ describe("picking a shared connection's places to sync", () => {
     document.body.replaceChildren();
   });
 
-  it("says before anything is picked that the audience reads everything in a picked place, and shows each place whole", async () => {
-    await shown(libraries);
+  it("says before anything is picked that the audience reads everything in a picked place, and names each place with its site", async () => {
+    await shown({ held: libraries() });
+    const boxes = [...document.querySelectorAll('[role="checkbox"]')];
     expect({
       consequence: text().includes(
         `Everyone you let read ${label} in the Brain will be able to read everything in the places you pick, because the permissions in ${label} are not copied.`
       ),
-      // Each library by its own name, with its site in whole beside it.
-      documents: text().includes("Documents"),
-      site: text().includes(longSite.trim()),
-    }).toStrictEqual({ consequence: true, documents: true, site: true });
+      // A screen reader tells the two "Documents" apart by their site.
+      names: boxes.map(nameOf),
+    }).toStrictEqual({
+      consequence: true,
+      names: [
+        `Documents ${longSite}`,
+        "Documents Legal",
+        `Contracts ${longSite}`,
+      ],
+    });
   });
 
-  it("saves the places ticked, the whole set, and shows what core holds after", async () => {
-    const asked = await shown(libraries);
-    await tick("Documents");
-    await tick("Contracts");
-    await save(
+  it("saves only what was ticked and unticked, from every pick held, a pick the listing didn't show included", async () => {
+    const held = libraries();
+    // Picked, but this listing doesn't show it.
+    held.picks = ["b!contracts", "b!archive"];
+    const fake: Core = { held };
+    const asked = await shown(fake);
+    await click(boxOf("Documents", "Legal"));
+    await click(boxOf("Contracts", longSite));
+    await click(button("Save the places"));
+    await until(
       () => asked.filter(([method]) => method === "syncPlaces").length === 2
     );
-    expect(
-      asked.filter(([method]) => method === "pickSyncPlaces")
-    ).toStrictEqual([
-      [
-        "pickSyncPlaces",
-        { connectionId: "c1", feed: "libraries", places: ["b!docs"] },
-      ],
-    ]);
-    // Read again after the save.
-    expect(asked.filter(([method]) => method === "syncPlaces")).toHaveLength(2);
-  });
-
-  it("keeps a refused save's reason on the page, and the places as ticked", async () => {
-    await shown(libraries, true);
-    await tick("Documents");
-    await save(() => document.querySelector('[role="alert"]') !== null);
     expect({
-      reason: document.querySelector('[role="alert"]')?.textContent,
-      stillTicked:
-        document
-          .querySelector('[data-slot="checkbox"][data-checked]')
-          ?.parentElement?.textContent?.includes("Documents") ?? false,
-    }).toStrictEqual({ reason: refusal, stillTicked: true });
+      saved: asked.filter(([method]) => method === "pickSyncPlaces"),
+      held: [...fake.held.picks].toSorted(),
+    }).toStrictEqual({
+      saved: [
+        [
+          "pickSyncPlaces",
+          {
+            connectionId: "c1",
+            feed: "libraries",
+            from: ["b!contracts", "b!archive"],
+            places: ["b!archive", "b!legal"],
+          },
+        ],
+      ],
+      held: ["b!archive", "b!legal"],
+    });
   });
 
-  it("says so when the account can open no place, rather than an empty list", async () => {
-    await shown({ feed: "shared-drives", choices: [] });
+  it("shows what is picked now, and says why, when another admin's change landed first", async () => {
+    const fake: Core = { held: libraries() };
+    await shown(fake);
+    // Another admin picks Legal's Documents meanwhile.
+    fake.held.picks = ["b!contracts", "b!legal"];
+    for (const choice of fake.held.choices) {
+      choice.picked = fake.held.picks.includes(choice.place);
+    }
+    await click(boxOf("Documents", longSite));
+    await click(button("Save the places"));
+    await until(() => text().includes("changed in the meantime"));
+    const checked = [
+      ...document.querySelectorAll('[role="checkbox"][aria-checked="true"]'),
+    ].map(nameOf);
+    expect({
+      // Nothing of this page's was saved over the other admin's pick.
+      held: [...fake.held.picks].toSorted(),
+      checked,
+      said: text().includes(
+        `The places picked from ${label} were changed in the meantime. These are the ones picked now: pick again if you still want to change them.`
+      ),
+    }).toStrictEqual({
+      held: ["b!contracts", "b!legal"],
+      checked: ["Documents Legal", `Contracts ${longSite}`],
+      said: true,
+    });
+  });
+
+  it("keeps a refused save's reason and the ticks, even when reading the places again fails too", async () => {
+    const fake: Core = { held: libraries(), refuseSave: true };
+    const asked = await shown(fake);
+    await click(boxOf("Documents", longSite));
+    fake.refuseListing = true;
+    await click(button("Save the places"));
+    await until(
+      () => asked.filter(([method]) => method === "syncPlaces").length === 2
+    );
+    await until(() => document.querySelectorAll('[role="alert"]').length === 2);
+    expect({
+      reasons: [...document.querySelectorAll('[role="alert"]')].map(
+        (alert) => alert.textContent
+      ),
+      stillTicked: boxOf("Documents", longSite)?.getAttribute("aria-checked"),
+    }).toStrictEqual({
+      reasons: [refusal, unreachable],
+      stillTicked: "true",
+    });
+  });
+
+  it("says it is reading while a large listing takes its reads, and lets a failed one be tried again", async () => {
+    const listing = Promise.withResolvers<boolean>();
+    const fake: Core = { held: libraries(), pending: listing.promise };
+    const asked = await shown(fake);
+    const reading = text().includes(`Reading the places ${label} can open…`);
+    fake.refuseListing = true;
+    await act(async () => {
+      listing.resolve(true);
+      await Promise.resolve();
+    });
+    await until(() => button("Try again") !== undefined);
+    const failed = text().includes(unreachable);
+    fake.refuseListing = false;
+    await click(button("Try again"));
+    await until(() => boxOf("Contracts", longSite) !== undefined);
+    expect({
+      reading,
+      failed,
+      reads: asked.filter(([method]) => method === "syncPlaces").length,
+    }).toStrictEqual({ reading: true, failed: true, reads: 2 });
+  });
+
+  it("says what the account can't open, in its own provider's words, rather than showing an empty list", async () => {
+    await shown(
+      { held: { feed: "shared-drives", choices: [], picks: [] } },
+      { ...microsoft, provider: "google" }
+    );
     expect({
       empty: text().includes("Nothing to copy into the Brain yet"),
-      saves: [...document.querySelectorAll("button")].some(
-        (button) => button.textContent === "Save the places"
+      google: text().includes(
+        `The account connected as ${label} can't open any shared drives.`
       ),
-    }).toStrictEqual({ empty: true, saves: false });
+      sharePoint: text().includes("SharePoint"),
+      saves: button("Save the places") !== undefined,
+    }).toStrictEqual({
+      empty: true,
+      google: true,
+      sharePoint: false,
+      saves: false,
+    });
   });
 });

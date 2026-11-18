@@ -790,12 +790,18 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
   syncPlaces: (connectionId: string) => Promise<SharedSyncPlaces | null>;
   /**
    * Sets which places of the shared connection the sync `feed` reads: the
-   * whole set, replacing the one before. Admins only, never Grasp staff;
-   * audited.
+   * whole set, replacing the one before, from the picks the page started
+   * from. Admins only, never Grasp staff; audited, refusals too.
    */
   pickSyncPlaces: (request: {
     connectionId: string;
     feed: string;
+    /**
+     * The picks the page started from (`SharedSyncPlaces.picks`): refused
+     * (`sync.picks_changed`), with nothing changed, once another change
+     * landed meanwhile.
+     */
+    from: string[];
     places: string[];
   }) => Promise<void>;
 }
@@ -816,6 +822,11 @@ export interface SharedSyncPlaces {
     within: string | null;
     picked: boolean;
   }[];
+  /**
+   * Every place picked now, those the listing doesn't show too: what a
+   * save starts from, so it never drops a pick the page didn't show.
+   */
+  picks: string[];
 }
 
 // The catalog: everything an admin can connect, in one list. Native

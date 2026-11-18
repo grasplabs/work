@@ -3,7 +3,12 @@ import type { SyncPage } from "@grasp-os/shared/sync";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { connectAccount, mailboxAccount, someone } from "./connect.ts";
+import {
+  connectAccount,
+  heldPicks,
+  mailboxAccount,
+  someone,
+} from "./connect.ts";
 import { fakeInternet } from "./internet.ts";
 import { fakeProviders } from "./oauth-provider.ts";
 
@@ -384,6 +389,7 @@ const pick = async (
     person: admin,
     connectionId,
     feed,
+    from: await heldPicks(connectionId, feed),
     places,
   });
 
@@ -428,13 +434,18 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
     const { admin, connectionId } = await sharedConnection();
     await pick(admin, connectionId, [salesContracts.id, legalDocs.id]);
 
+    const choices = await exports.default.syncPlaceChoices({
+      person: admin,
+      connectionId,
+      feed,
+      cursor: null,
+    });
     expect({
-      choices: await exports.default.syncPlaceChoices({
-        person: admin,
-        connectionId,
-        feed,
-        cursor: null,
-      }),
+      // Every pick, in no order of note.
+      choices:
+        choices === null
+          ? null
+          : { ...choices, picks: [...choices.picks].toSorted() },
       places: await exports.default.listSyncPlaces({
         connectionId,
         feed,
@@ -463,6 +474,7 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
             picked: true,
           },
         ],
+        picks: [salesContracts.id, legalDocs.id].toSorted(),
         cursor: null,
       },
       places: { places: [salesContracts.id, legalDocs.id], cursor: null },
@@ -512,8 +524,8 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
       perRead.push(
         internet.sent.filter(({ host }) => host === graphHost).length - before
       );
-      listed.push(...answer.choices.map(({ place }) => place));
-      ({ cursor } = answer);
+      listed.push(...(answer?.choices ?? []).map(({ place }) => place));
+      cursor = answer?.cursor ?? null;
       if (cursor === null) {
         break;
       }

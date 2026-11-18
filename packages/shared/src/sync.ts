@@ -216,6 +216,11 @@ export const syncPlaceChoicesSchema = z.strictObject({
   /** The sync whose places these are, as picks name it. */
   feed: z.string().regex(/^[a-z][a-z\d-]{0,63}$/u, "Not a sync's name"),
   choices: z.array(syncChoiceSchema.extend({ picked: z.boolean() })),
+  /**
+   * Every place picked for the sync now, those this listing doesn't show
+   * too: what a save starts from (`pickSyncPlacesSchema`'s `from`).
+   */
+  picks: z.array(syncPlaceSchema),
   cursor: syncCursorSchema.nullable(),
 });
 export type SyncPlaceChoices = z.infer<typeof syncPlaceChoicesSchema>;
@@ -267,6 +272,12 @@ export const pickSyncPlacesSchema = z.strictObject({
   person: connectionPersonSchema,
   connectionId: z.string().min(1).max(128),
   feed: z.string().regex(/^[a-z][a-z\d-]{0,63}$/u, "Not a sync's name"),
+  /**
+   * The picks the admin's page started from (`SyncPlaceChoices.picks`):
+   * refused (`sync.picks_changed`), with nothing changed, once another
+   * change landed meanwhile, so a page left open never undoes one.
+   */
+  from: syncPicksSchema,
   places: syncPicksSchema,
 });
 export type PickSyncPlaces = z.input<typeof pickSyncPlacesSchema>;
@@ -277,6 +288,8 @@ export const syncErrors = defineErrorFamily({
   "sync.inactive": "This connection needs reconnecting before it can sync.",
   "sync.place_refused":
     "That place isn't the connection's own account or a place picked on it.",
+  "sync.picks_changed":
+    "The places picked were changed in the meantime: look at them again.",
   "sync.not_shared":
     "Places are picked only on a connection shared with the company.",
   "sync.restart":

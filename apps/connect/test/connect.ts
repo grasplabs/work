@@ -342,3 +342,16 @@ export const auditEvents = () => {
     },
   };
 };
+
+/** The places picked on `connectionId` for its sync `feed`, as connect holds them. */
+export const heldPicks = async (
+  connectionId: string,
+  feed: string
+): Promise<string[]> => {
+  const { results } = await env.DB.prepare(
+    "SELECT place FROM sync_picks WHERE connection_id = ? AND feed = ?"
+  )
+    .bind(connectionId, feed)
+    .all<{ place: string }>();
+  return results.map(({ place }) => place);
+};

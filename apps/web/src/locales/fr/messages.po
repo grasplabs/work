@@ -11357,6 +11357,14 @@ msgstr "Lecture de ses instructions…"
 msgid "Reading people and teams…"
 msgstr "Lecture des personnes et des équipes…"
 
+#: src/connections/sync-places.tsx
+msgid "Reading the places"
+msgstr "Lecture des emplacements"
+
+#: src/connections/sync-places.tsx
+msgid "Reading the places {label} can open…"
+msgstr "Lecture des emplacements que {label} peut ouvrir…"
+
 #: src/chat/thread.tsx
 msgid "Reading the workspace"
 msgstr "Lecture de l’espace de travail"
@@ -14111,8 +14119,12 @@ msgid "The {top} that spent most; more spent less."
 msgstr "Les {top} qui ont le plus dépensé ; d’autres ont dépensé moins."
 
 #: src/connections/sync-places.tsx
-msgid "The account connected as {label} can't open any shared drives or SharePoint libraries."
-msgstr "Le compte connecté en tant que {label} ne peut ouvrir aucun drive partagé ni aucune bibliothèque SharePoint."
+msgid "The account connected as {label} can't open any shared drives."
+msgstr "Le compte connecté en tant que {label} ne peut ouvrir aucun drive partagé."
+
+#: src/connections/sync-places.tsx
+msgid "The account connected as {label} can't open any SharePoint document libraries."
+msgstr "Le compte connecté en tant que {label} ne peut ouvrir aucune bibliothèque de documents SharePoint."
 
 #: src/routes/_shell.settings.security.tsx
 msgid "The account you signed in with."
@@ -14625,6 +14637,10 @@ msgstr "La personne dans {field}"
 #: src/apps/access-view.tsx
 msgid "the person who added it"
 msgstr "la personne qui l’a ajouté"
+
+#: src/connections/sync-places.tsx
+msgid "The places picked from {label} were changed in the meantime. These are the ones picked now: pick again if you still want to change them."
+msgstr "Les emplacements choisis dans {label} ont été modifiés entre-temps. Voici ceux choisis maintenant : choisissez à nouveau si vous voulez encore les modifier."
 
 #: src/apps/resource-bindings.tsx
 msgid "The platform's statistics"
@@ -15514,6 +15530,7 @@ msgstr "Essayer"
 #: src/chat/builds.tsx
 #: src/chat/chat-panel.tsx
 #: src/chat/thread.tsx
+#: src/connections/sync-places.tsx
 #: src/decision-card.tsx
 #: src/frame/page-states.tsx
 #: src/frame/setting-up.tsx

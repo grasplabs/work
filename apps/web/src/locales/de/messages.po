@@ -11357,6 +11357,14 @@ msgstr "Liest seine Anweisungen…"
 msgid "Reading people and teams…"
 msgstr "Personen und Teams werden gelesen…"
 
+#: src/connections/sync-places.tsx
+msgid "Reading the places"
+msgstr "Orte werden gelesen"
+
+#: src/connections/sync-places.tsx
+msgid "Reading the places {label} can open…"
+msgstr "Die Orte, die {label} öffnen kann, werden gelesen…"
+
 #: src/chat/thread.tsx
 msgid "Reading the workspace"
 msgstr "Workspace wird gelesen"
@@ -14111,8 +14119,12 @@ msgid "The {top} that spent most; more spent less."
 msgstr "Die {top} mit den höchsten Ausgaben; weitere haben weniger ausgegeben."
 
 #: src/connections/sync-places.tsx
-msgid "The account connected as {label} can't open any shared drives or SharePoint libraries."
-msgstr "Das als {label} verbundene Konto kann keine geteilten Ablagen und keine SharePoint-Bibliotheken öffnen."
+msgid "The account connected as {label} can't open any shared drives."
+msgstr "Das als {label} verbundene Konto kann keine geteilten Ablagen öffnen."
+
+#: src/connections/sync-places.tsx
+msgid "The account connected as {label} can't open any SharePoint document libraries."
+msgstr "Das als {label} verbundene Konto kann keine SharePoint-Dokumentbibliotheken öffnen."
 
 #: src/routes/_shell.settings.security.tsx
 msgid "The account you signed in with."
@@ -14625,6 +14637,10 @@ msgstr "Die Person in {field}"
 #: src/apps/access-view.tsx
 msgid "the person who added it"
 msgstr "die Person, die ihn hinzugefügt hat"
+
+#: src/connections/sync-places.tsx
+msgid "The places picked from {label} were changed in the meantime. These are the ones picked now: pick again if you still want to change them."
+msgstr "Die aus {label} ausgewählten Orte wurden inzwischen geändert. Diese sind jetzt ausgewählt: Wählen Sie erneut, wenn Sie sie noch ändern möchten."
 
 #: src/apps/resource-bindings.tsx
 msgid "The platform's statistics"
@@ -15514,6 +15530,7 @@ msgstr "Versuchen"
 #: src/chat/builds.tsx
 #: src/chat/chat-panel.tsx
 #: src/chat/thread.tsx
+#: src/connections/sync-places.tsx
 #: src/decision-card.tsx
 #: src/frame/page-states.tsx
 #: src/frame/setting-up.tsx

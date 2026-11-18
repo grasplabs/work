@@ -11357,6 +11357,14 @@ msgstr "Leyendo sus instrucciones…"
 msgid "Reading people and teams…"
 msgstr "Leyendo personas y equipos…"
 
+#: src/connections/sync-places.tsx
+msgid "Reading the places"
+msgstr "Leyendo los lugares"
+
+#: src/connections/sync-places.tsx
+msgid "Reading the places {label} can open…"
+msgstr "Leyendo los lugares que {label} puede abrir…"
+
 #: src/chat/thread.tsx
 msgid "Reading the workspace"
 msgstr "Leyendo el espacio de trabajo"
@@ -14111,8 +14119,12 @@ msgid "The {top} that spent most; more spent less."
 msgstr "Los {top} que más gastaron; otros gastaron menos."
 
 #: src/connections/sync-places.tsx
-msgid "The account connected as {label} can't open any shared drives or SharePoint libraries."
-msgstr "La cuenta conectada como {label} no puede abrir ninguna unidad compartida ni biblioteca de SharePoint."
+msgid "The account connected as {label} can't open any shared drives."
+msgstr "La cuenta conectada como {label} no puede abrir ninguna unidad compartida."
+
+#: src/connections/sync-places.tsx
+msgid "The account connected as {label} can't open any SharePoint document libraries."
+msgstr "La cuenta conectada como {label} no puede abrir ninguna biblioteca de documentos de SharePoint."
 
 #: src/routes/_shell.settings.security.tsx
 msgid "The account you signed in with."
@@ -14625,6 +14637,10 @@ msgstr "La persona en {field}"
 #: src/apps/access-view.tsx
 msgid "the person who added it"
 msgstr "quien lo añadió"
+
+#: src/connections/sync-places.tsx
+msgid "The places picked from {label} were changed in the meantime. These are the ones picked now: pick again if you still want to change them."
+msgstr "Los lugares elegidos de {label} cambiaron mientras tanto. Estos son los elegidos ahora: elige de nuevo si aún quieres cambiarlos."
 
 #: src/apps/resource-bindings.tsx
 msgid "The platform's statistics"
@@ -15514,6 +15530,7 @@ msgstr "Intentar"
 #: src/chat/builds.tsx
 #: src/chat/chat-panel.tsx
 #: src/chat/thread.tsx
+#: src/connections/sync-places.tsx
 #: src/decision-card.tsx
 #: src/frame/page-states.tsx
 #: src/frame/setting-up.tsx

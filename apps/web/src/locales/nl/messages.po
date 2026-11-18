@@ -11357,6 +11357,14 @@ msgstr "Leest zijn instructies…"
 msgid "Reading people and teams…"
 msgstr "Mensen en teams worden gelezen…"
 
+#: src/connections/sync-places.tsx
+msgid "Reading the places"
+msgstr "Plekken worden gelezen"
+
+#: src/connections/sync-places.tsx
+msgid "Reading the places {label} can open…"
+msgstr "De plekken die {label} kan openen worden gelezen…"
+
 #: src/chat/thread.tsx
 msgid "Reading the workspace"
 msgstr "Werkruimte wordt gelezen"
@@ -14111,8 +14119,12 @@ msgid "The {top} that spent most; more spent less."
 msgstr "De {top} die het meest uitgaven; andere gaven minder uit."
 
 #: src/connections/sync-places.tsx
-msgid "The account connected as {label} can't open any shared drives or SharePoint libraries."
-msgstr "Het account dat als {label} is verbonden, kan geen gedeelde drives of SharePoint-bibliotheken openen."
+msgid "The account connected as {label} can't open any shared drives."
+msgstr "Het account dat als {label} is verbonden, kan geen gedeelde drives openen."
+
+#: src/connections/sync-places.tsx
+msgid "The account connected as {label} can't open any SharePoint document libraries."
+msgstr "Het account dat als {label} is verbonden, kan geen SharePoint-documentbibliotheken openen."
 
 #: src/routes/_shell.settings.security.tsx
 msgid "The account you signed in with."
@@ -14625,6 +14637,10 @@ msgstr "De persoon in {field}"
 #: src/apps/access-view.tsx
 msgid "the person who added it"
 msgstr "wie het heeft toegevoegd"
+
+#: src/connections/sync-places.tsx
+msgid "The places picked from {label} were changed in the meantime. These are the ones picked now: pick again if you still want to change them."
+msgstr "De plekken die uit {label} zijn gekozen, zijn intussen gewijzigd. Deze zijn nu gekozen: kies opnieuw als je ze nog wilt wijzigen."
 
 #: src/apps/resource-bindings.tsx
 msgid "The platform's statistics"
@@ -15514,6 +15530,7 @@ msgstr "Proberen"
 #: src/chat/builds.tsx
 #: src/chat/chat-panel.tsx
 #: src/chat/thread.tsx
+#: src/connections/sync-places.tsx
 #: src/decision-card.tsx
 #: src/frame/page-states.tsx
 #: src/frame/setting-up.tsx

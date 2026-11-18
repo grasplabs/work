@@ -11357,6 +11357,14 @@ msgstr "Reading its instructions…"
 msgid "Reading people and teams…"
 msgstr "Reading people and teams…"
 
+#: src/connections/sync-places.tsx
+msgid "Reading the places"
+msgstr "Reading the places"
+
+#: src/connections/sync-places.tsx
+msgid "Reading the places {label} can open…"
+msgstr "Reading the places {label} can open…"
+
 #: src/chat/thread.tsx
 msgid "Reading the workspace"
 msgstr "Reading the workspace"
@@ -14111,8 +14119,12 @@ msgid "The {top} that spent most; more spent less."
 msgstr "The {top} that spent most; more spent less."
 
 #: src/connections/sync-places.tsx
-msgid "The account connected as {label} can't open any shared drives or SharePoint libraries."
-msgstr "The account connected as {label} can't open any shared drives or SharePoint libraries."
+msgid "The account connected as {label} can't open any shared drives."
+msgstr "The account connected as {label} can't open any shared drives."
+
+#: src/connections/sync-places.tsx
+msgid "The account connected as {label} can't open any SharePoint document libraries."
+msgstr "The account connected as {label} can't open any SharePoint document libraries."
 
 #: src/routes/_shell.settings.security.tsx
 msgid "The account you signed in with."
@@ -14625,6 +14637,10 @@ msgstr "The person in {field}"
 #: src/apps/access-view.tsx
 msgid "the person who added it"
 msgstr "the person who added it"
+
+#: src/connections/sync-places.tsx
+msgid "The places picked from {label} were changed in the meantime. These are the ones picked now: pick again if you still want to change them."
+msgstr "The places picked from {label} were changed in the meantime. These are the ones picked now: pick again if you still want to change them."
 
 #: src/apps/resource-bindings.tsx
 msgid "The platform's statistics"
@@ -15514,6 +15530,7 @@ msgstr "Try"
 #: src/chat/builds.tsx
 #: src/chat/chat-panel.tsx
 #: src/chat/thread.tsx
+#: src/connections/sync-places.tsx
 #: src/decision-card.tsx
 #: src/frame/page-states.tsx
 #: src/frame/setting-up.tsx

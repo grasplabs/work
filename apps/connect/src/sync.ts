@@ -499,24 +499,27 @@ export const syncPlaceChoices = async (
       ...choice,
       picked: picks.has(choice.place),
     })),
+    picks: [...picks],
     cursor: listed.cursor,
   };
 };
 
 /**
  * Sets the places a shared connection's sync reads to `places`, as one of
- * the company's admins picked them: the whole set, replacing the one
- * before, with one audit event (how many places, how many came and went)
- * in the same batch. The same set again changes and records nothing. A
- * place no longer picked is refused from the next read on, and is no
- * longer among the sync's places, so core's sync run drops it and erases
- * what it brought.
+ * the company's admins picked them, from the picks their page started
+ * from (`from`): the whole set, replacing the one before, with one audit
+ * event (how many places, how many came and went) in the same batch, and
+ * only while the picks held are still `from`; else refused
+ * (`sync.picks_changed`), with nothing changed. The same set again
+ * changes and records nothing. A place no longer picked is refused from
+ * the next read on, and is no longer among the sync's places, so core's
+ * sync run drops it and erases what it brought.
  */
 export const pickSyncPlaces = async (
   env: Env,
   request: unknown
 ): Promise<{ places: string[] }> => {
-  const { person, connectionId, feed, places } = syncErrors.parse(
+  const { person, connectionId, feed, from, places } = syncErrors.parse(
     "sync.invalid",
     pickSyncPlacesSchema,
     request
@@ -524,13 +527,41 @@ export const pickSyncPlaces = async (
   await refuseUnlessAdmin(env, person, connectionId, feed);
   await pickableOrRefused(env, person, connectionId, feed);
   const db = drizzle(env.DB);
-  // One value, so the set's size is bounded by D1's, not a statement's
+  const changed = async (): Promise<never> => {
+    await auditRefusal(
+      env,
+      person,
+      "connection.sync_places",
+      { feed, outcome: "refused", reason: "sync.picks_changed" },
+      connectionId
+    );
+    throw syncErrors.create("sync.picks_changed");
+  };
+  // One value each, so a set's size is bounded by D1's, not a statement's
   // bound parameters (`syncPicksSchema`).
   const asked = JSON.stringify(places);
-  const held = sql`(SELECT ${syncPicks.place} FROM ${syncPicks} WHERE ${syncPicks.connectionId} = ${connectionId} AND ${syncPicks.feed} = ${feed})`;
+  const started = JSON.stringify(from);
+  const ofSync = sql`${syncPicks.connectionId} = ${connectionId} AND ${syncPicks.feed} = ${feed}`;
+  const held = sql`(SELECT ${syncPicks.place} FROM ${syncPicks} WHERE ${ofSync})`;
+  // The picks held are exactly the ones the admin's page started from.
+  const unchanged = sql`(SELECT count(*) FROM ${held}) = ${from.length} AND NOT EXISTS (SELECT 1 FROM ${syncPicks} WHERE ${ofSync} AND ${syncPicks.place} NOT IN (SELECT value FROM json_each(${started})))`;
+  const after = new Set(places);
+  const same =
+    from.length === places.length && from.every((place) => after.has(place));
+  if (same) {
+    // Nothing to change: still, never answer a page left open as if
+    // what it shows were what is held.
+    const now = await db
+      .select({ unchanged: sql<number>`${unchanged}` })
+      .from(sql`(SELECT 1)`)
+      .get();
+    if (now?.unchanged !== 1) {
+      await changed();
+    }
+    return { places };
+  }
   // What came and went, counted in the same transaction as the write, from
-  // the picks it replaces: two admins picking at once each record what
-  // their own write changed.
+  // the picks it replaces.
   const added = sql`(SELECT count(*) FROM json_each(${asked}) WHERE value NOT IN ${held})`;
   const removed = sql`(SELECT count(*) FROM ${held} AS kept WHERE kept.place NOT IN (SELECT value FROM json_each(${asked})))`;
   const event = createAuditEvent(
@@ -543,29 +574,34 @@ export const pickSyncPlaces = async (
     }),
     "connect"
   );
-  await db.batch([
-    // Recorded only when the picks change: the same set again records
-    // nothing.
-    db.insert(auditOutbox).select(
-      db
-        .select({
-          id: sql<string>`${event.id}`.as("id"),
-          event:
-            sql<string>`json_set(${JSON.stringify(event)}, '$.detail.added', ${added}, '$.detail.removed', ${removed})`.as(
-              "event"
-            ),
-          createdAt: sql<Date>`${Date.now()}`.as("created_at"),
-        })
-        .from(sql`(SELECT 1)`)
-        .where(sql`${added} > 0 OR ${removed} > 0`)
-    ),
+  // The change is made only once its event is written, and its event only
+  // while the picks are the ones the page started from: one transaction.
+  const recorded = sql`EXISTS (SELECT 1 FROM ${auditOutbox} WHERE ${auditOutbox.id} = ${event.id})`;
+  const [written] = await db.batch([
+    db
+      .insert(auditOutbox)
+      .select(
+        db
+          .select({
+            id: sql<string>`${event.id}`.as("id"),
+            event:
+              sql<string>`json_set(${JSON.stringify(event)}, '$.detail.added', ${added}, '$.detail.removed', ${removed})`.as(
+                "event"
+              ),
+            createdAt: sql<Date>`${Date.now()}`.as("created_at"),
+          })
+          .from(sql`(SELECT 1)`)
+          .where(unchanged)
+      )
+      .returning({ id: auditOutbox.id }),
     db
       .delete(syncPicks)
       .where(
         and(
           eq(syncPicks.connectionId, connectionId),
           eq(syncPicks.feed, feed),
-          sql`${syncPicks.place} NOT IN (SELECT value FROM json_each(${asked}))`
+          sql`${syncPicks.place} NOT IN (SELECT value FROM json_each(${asked}))`,
+          recorded
         )
       ),
     db
@@ -579,12 +615,15 @@ export const pickSyncPlaces = async (
             pickedAt: sql<Date>`${Date.now()}`.as("picked_at"),
           })
           .from(sql`json_each(${asked})`)
-          // SQLite reads `ON CONFLICT` after a bare `SELECT … FROM` as a
-          // join's: a `WHERE` ends the `SELECT` (sqlite.org/lang_upsert.html,
-          // "Parsing Ambiguity").
-          .where(sql`true`)
+          // A `WHERE` also ends the `SELECT`, so SQLite reads `ON CONFLICT`
+          // as the insert's (sqlite.org/lang_upsert.html, "Parsing
+          // Ambiguity").
+          .where(recorded)
       )
       .onConflictDoNothing(),
   ]);
+  if (written.length === 0) {
+    await changed();
+  }
   return { places };
 };

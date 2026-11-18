@@ -4,6 +4,7 @@ import { consentCode, stephenGoogleUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { signInConfig } from "./sign-in-config.ts";
 import {
+  auditedDuring,
   openRpc,
   outcome,
   routed,
@@ -107,6 +108,7 @@ describe("picking a shared connection's places to sync", setUpTime, () => {
     await admin.api.connections.pickSyncPlaces({
       connectionId,
       feed: "shared-drives",
+      from: before?.picks ?? [],
       places: [ours[0] ?? "", ours[59] ?? ""],
     });
     const after = await admin.api.connections.syncPlaces(connectionId);
@@ -147,9 +149,36 @@ describe("picking a shared connection's places to sync", setUpTime, () => {
     const pick = {
       connectionId: shared,
       feed: "shared-drives",
+      from: [],
       places: ["sales"],
     };
 
+    // Refused in core, before connect: recorded here, one event each.
+    const memberRefused: string[] = [];
+    const refusals = await auditedDuring(async () => {
+      memberRefused.push(
+        await outcome(member.api.connections.syncPlaces(shared)),
+        await outcome(member.api.connections.pickSyncPlaces(pick))
+      );
+    });
+
+    expect({
+      memberRefused,
+      recorded: refusals
+        .filter(({ action }) => action === "connection.sync_places")
+        .map(({ actor, target, detail }) => ({
+          actor: "userId" in actor ? actor.userId : actor.type,
+          target: target?.id,
+          detail,
+        })),
+    }).toStrictEqual({
+      memberRefused: ["role.forbidden", "role.forbidden"],
+      recorded: Array.from({ length: 2 }, () => ({
+        actor: member.userId,
+        target: shared,
+        detail: { outcome: "refused", reason: "role.forbidden" },
+      })),
+    });
     expect({
       shared: await admin.api.connections.syncPlaces(shared),
       personal: await admin.api.connections.syncPlaces(personal),
@@ -157,8 +186,6 @@ describe("picking a shared connection's places to sync", setUpTime, () => {
       pickedOnToolkit: await outcome(
         admin.api.connections.pickSyncPlaces(pick)
       ),
-      memberLists: await outcome(member.api.connections.syncPlaces(shared)),
-      memberPicks: await outcome(member.api.connections.pickSyncPlaces(pick)),
       staffLists: await outcome(staff.connections.syncPlaces(shared)),
       staffPicks: await outcome(staff.connections.pickSyncPlaces(pick)),
       // A place that steps out of one path segment never leaves core.
@@ -169,11 +196,46 @@ describe("picking a shared connection's places to sync", setUpTime, () => {
       shared: null,
       personal: null,
       pickedOnToolkit: "sync.not_found",
-      memberLists: "role.forbidden",
-      memberPicks: "role.forbidden",
       staffLists: "role.forbidden",
       staffPicks: "role.forbidden",
       outOfPlace: "sync.invalid",
     });
+  });
+
+  it("refuses a save from a page another admin's pick made stale, and keeps that pick", async () => {
+    const [first, second] = await Promise.all([
+      signedInApi(idp, "admin"),
+      signedInApi(idp, "admin"),
+    ]);
+    const connectionId = await sharedGoogle(first);
+    const prefix = `drive-${unique()}`;
+    const zero = `${prefix}-0`;
+    const one = `${prefix}-1`;
+    await driveHeld(zero);
+    await driveHeld(one);
+    // Both admins open the page.
+    const firstPage = await first.api.connections.syncPlaces(connectionId);
+    const secondPage = await second.api.connections.syncPlaces(connectionId);
+    // The second picks drive 1.
+    await second.api.connections.pickSyncPlaces({
+      connectionId,
+      feed: "shared-drives",
+      from: secondPage?.picks ?? [],
+      places: [one],
+    });
+    // The first, on the page from before, ticks drive 0 and saves.
+    const stale = await outcome(
+      first.api.connections.pickSyncPlaces({
+        connectionId,
+        feed: "shared-drives",
+        from: firstPage?.picks ?? [],
+        places: [zero],
+      })
+    );
+    const now = await first.api.connections.syncPlaces(connectionId);
+    expect({
+      stale,
+      picks: [...(now?.picks ?? [])].toSorted(),
+    }).toStrictEqual({ stale: "sync.picks_changed", picks: [one] });
   });
 });
