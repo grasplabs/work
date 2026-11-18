@@ -933,6 +933,10 @@ msgstr "{needs, plural, one {# braucht dich} other {# brauchen dich}}"
 msgid "{number} of {total}"
 msgstr "{number} von {total}"
 
+#: src/brain/opportunity-drafts.ts
+msgid "{number}. {step} (a person approves this step)"
+msgstr "{number}. {step} (eine Person gibt diesen Schritt frei)"
+
 #: src/brain/brain-atlas.ts
 msgid "{one} and {other} both name the same handover, each from their own side."
 msgstr "{one} und {other} nennen beide dieselbe Übergabe, jeweils von ihrer Seite."
@@ -3573,6 +3577,10 @@ msgstr "Jetzt weitermachen"
 msgid "Cases a week"
 msgstr "Fälle pro Woche"
 
+#: src/brain/opportunity-drafts.ts
+msgid "Cases a week: {cases}."
+msgstr "Fälle pro Woche: {cases}."
+
 #: src/settings/audit-chain.tsx
 msgid "Chain check"
 msgstr "Kettenprüfung"
@@ -4257,6 +4265,7 @@ msgid "Connect another account"
 msgstr "Weiteres Konto verbinden"
 
 #: src/brain/opportunities-page.tsx
+#: src/brain/opportunity-drafts.ts
 msgid "Connect first: {systems}."
 msgstr "Zuerst verbinden: {systems}."
 
@@ -5181,6 +5190,19 @@ msgstr "Tabelle als Markdown herunterladen"
 #: src/workflows/workflows-table.tsx
 msgid "Draft"
 msgstr "Entwurf"
+
+#: src/brain/opportunity-drafts.ts
+msgid "Draft a workflow for the opportunity “{title}”."
+msgstr "Entwirf einen Workflow für die Chance „{title}“."
+
+#: src/brain/opportunity-drafts.ts
+msgid "Draft an App for the opportunity “{title}”."
+msgstr "Entwirf eine App für die Chance „{title}“."
+
+#: src/brain/opportunities-page.tsx
+msgctxt "drafts what an opportunity proposes"
+msgid "Draft it"
+msgstr "Entwerfen"
 
 #: src/settings/stephen-settings.tsx
 msgid "Drafts, events and files of their own, after they press a card."
@@ -6933,6 +6955,10 @@ msgstr "4 Sekunden gedrückt halten"
 msgid "Hours a week"
 msgstr "Stunden pro Woche"
 
+#: src/brain/opportunity-drafts.ts
+msgid "Hours a week by hand: {hours}."
+msgstr "Stunden pro Woche von Hand: {hours}."
+
 #: src/brain/thinking/work-hours.tsx
 msgid "Hours not known yet"
 msgstr "Stunden noch nicht bekannt"
@@ -6978,6 +7004,10 @@ msgstr "Wie oft"
 msgid "How sure"
 msgstr "Wie sicher"
 
+#: src/brain/opportunity-drafts.ts
+msgid "How the team does it today:"
+msgstr "So macht das Team es heute:"
+
 #. Under a statement put together from the interviews
 #. Under a statement put together from the interviews
 #: src/brain/aggregate.tsx
@@ -7008,6 +7038,10 @@ msgstr "Wie diese App gebaut ist und worauf man beim Ändern achten muss."
 #: src/interview/closed.tsx
 msgid "How was talking to {who}?"
 msgstr "Wie war das Gespräch mit {who}?"
+
+#: src/brain/opportunity-drafts.ts
+msgid "How we handle “{title}”, step by step."
+msgstr "Wie wir „{title}“ erledigen, Schritt für Schritt."
 
 #: src/brain/goals-editor.tsx
 msgid "How we notice it"

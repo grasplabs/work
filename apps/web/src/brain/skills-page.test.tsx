@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { Opportunity } from "@grasp-os/shared/opportunities";
 import type {
   DecidedTeamSkill,
   ListedSkill,
@@ -30,7 +31,8 @@ import { SkillsPage } from "./skills-page.tsx";
 // The skills page, against core's `skills` as the page reaches it over
 // RPC, faked: the person's own skills, saved from the editor and shared;
 // the company's; and, for an admin, a share waiting with the exact text
-// approving it adds, approved from the page; a refusal is said.
+// approving it adds, approved from the page; a refusal is said. From an
+// opportunity an admin drafts as a skill, the editor starts with it.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -109,8 +111,11 @@ const shown = async ({
   teams = [],
   team = [],
   teamSkills = [],
+  from,
 }: {
   admin: boolean;
+  /** The opportunity the editor starts with, as an admin drafts it. */
+  from?: Opportunity;
   refusal?: string;
   /** The person's shares already there. */
   existing?: OwnSkillShare[];
@@ -256,7 +261,15 @@ const shown = async ({
   const page = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: SkillsPage,
+    component: () => (
+      <SkillsPage
+        opportunity={
+          from === undefined
+            ? undefined
+            : Promise.resolve({ state: "ready", data: from })
+        }
+      />
+    ),
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
@@ -389,6 +402,51 @@ describe("the skills page", () => {
       replaces: true,
       calls: ["overview", "approve share-1", "overview"],
       after: true,
+    });
+  });
+
+  it("starts the editor with a skill for an opportunity an admin drafts, saved as their own", async () => {
+    const { calls } = await shown({
+      admin: true,
+      from: {
+        routine: "work-1",
+        evidence: "drawing-1",
+        name: "beantwoorden van klantvragen: één per dag",
+        team: "team-1",
+        steps: ["Read the question", "Answer from the handbook"],
+        casesPerWeek: null,
+        hoursPerWeek: null,
+        basis: "described",
+        form: "skill",
+        covers: null,
+        setup: [],
+        personApproves: [2],
+        dismissed: false,
+      },
+    });
+    const drafted = editor().value;
+
+    await click("Save");
+
+    expect({ drafted, calls }).toStrictEqual({
+      drafted: [
+        "---",
+        "name: beantwoorden-van-klantvragen-een-per-dag",
+        'description: "How we handle “Beantwoorden van klantvragen: één per dag”, step by step."',
+        "---",
+        "",
+        "# Beantwoorden van klantvragen: één per dag",
+        "",
+        "1. Read the question",
+        "2. Answer from the handbook (a person approves this step)",
+      ].join("\n"),
+      // Nothing else was asked: saved as the admin's own skill, which
+      // sharing would then ask an admin to approve.
+      calls: [
+        "overview",
+        "save name: beantwoorden-van-klantvragen-een-per-dag",
+        "overview",
+      ],
     });
   });
 
