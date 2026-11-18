@@ -25,6 +25,7 @@ import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
 import { EmptyCard, Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { Badge } from "../grasp/badge/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   Select,
   SelectContent,
@@ -55,6 +56,7 @@ import { TodayLanes } from "../workflows/today-lanes.tsx";
 import {
   WorkflowsOverview,
   WorkflowLists,
+  WorkflowsTable,
   processOf,
 } from "../workflows/workflows-table.tsx";
 import type { WorkflowProcesses } from "../workflows/workflows-table.tsx";
@@ -70,6 +72,8 @@ import type { WorkflowProcesses } from "../workflows/workflows-table.tsx";
 // it means. A new workflow is the page's action, in the bar above it.
 
 interface WorkflowsSearch {
+  /** Which concept shows, for Ruben to choose (never merged). */
+  concept?: "a" | "b" | "c";
   tab?: "needs" | "runs";
   /** On the lists: the business process whose workflows show. */
   process?: BusinessProcess;
@@ -685,6 +689,167 @@ const Workflows = () => {
   );
 };
 
+// ---- Concepts, for Ruben to choose between (never merged) ----------------
+
+/** The workflows under the chosen process, the ones that need someone first. */
+const conceptRows = (
+  lists: Lists,
+  process: BusinessProcess | undefined
+): WorkflowSummary[] =>
+  lists.workflows.state === "ready"
+    ? lists.workflows.data
+        .filter((row) => showsUnder(process, processOf(lists.processes, row)))
+        .toSorted(
+          (a, b) => Number(needsAttention(b)) - Number(needsAttention(a))
+        )
+    : [];
+
+/** The page's heading, as every concept keeps it. */
+const ConceptHeading = () => {
+  const { t } = useLingui();
+  const { identity } = Route.useRouteContext();
+  return (
+    <>
+      <SiteHeader crumbs={[{ label: t`Workflows` }]} />
+      <PageHeading
+        action={
+          canBuild(identity.role) ? (
+            <MakeSomethingLink kind="workflow" size="sm" />
+          ) : undefined
+        }
+        title={t`Workflows`}
+      />
+    </>
+  );
+};
+
+/** A: one table. No tabs; the go-lives waiting over every workflow in one table, the ones that need someone first. Runs live on each workflow's page. */
+const ConceptOneTable = () => {
+  const page = Route.useLoaderData();
+  const { process } = Route.useSearch();
+  const { identity } = Route.useRouteContext();
+  const { lists } = page;
+  return (
+    <Page>
+      <ConceptHeading />
+      <div {...stylex.props(styles.stack)}>
+        <ProcessFilter offered={offeredOf(lists.workflows, lists.processes)} />
+        {lists.goLives.state === "ready" ? (
+          <GoLivesWaiting
+            names={{ people: page.people ?? new Map(), me: identity.userId }}
+            waiting={lists.goLives.data}
+          />
+        ) : null}
+        {lists.workflows.state === "ready" ? (
+          <WorkflowsTable
+            processes={lists.processes}
+            rows={conceptRows(lists, process)}
+          />
+        ) : (
+          <NotLoadedState page={lists.workflows} />
+        )}
+      </div>
+    </Page>
+  );
+};
+
+/** B: what needs you, then everything. Two tabs, Workflows and Runs; Workflows opens on what needs you over every workflow. */
+const ConceptNeedsFirst = () => {
+  const { t } = useLingui();
+  const page = Route.useLoaderData();
+  const { process } = Route.useSearch();
+  const { identity } = Route.useRouteContext();
+  const { lists } = page;
+  const every = conceptRows(lists, process);
+  const needs = every.filter((row) => needsAttention(row));
+  return (
+    <Page>
+      <ConceptHeading />
+      <Tabs value="workflows">
+        <div {...stylex.props(styles.bar)}>
+          <TabsList aria-label={t`Show workflows`}>
+            <TabsTrigger value="workflows">{t`Workflows`}</TabsTrigger>
+            <TabsTrigger value="runs">
+              <Trans context="tab listing the runs of workflows">Runs</Trans>
+            </TabsTrigger>
+          </TabsList>
+          <ProcessFilter
+            offered={offeredOf(lists.workflows, lists.processes)}
+          />
+        </div>
+        <TabsContent value="workflows">
+          <div {...stylex.props(styles.stack)}>
+            {needs.length > 0 ? (
+              <SectionCard
+                density="compact"
+                flush
+                title={t({
+                  message: "Needs you",
+                  context: "tab listing the workflows that need a person",
+                })}
+              >
+                <WorkflowsTable processes={lists.processes} rows={needs} />
+              </SectionCard>
+            ) : null}
+            {lists.goLives.state === "ready" ? (
+              <GoLivesWaiting
+                names={{
+                  people: page.people ?? new Map(),
+                  me: identity.userId,
+                }}
+                waiting={lists.goLives.data}
+              />
+            ) : null}
+            <SectionCard density="compact" flush title={t`All workflows`}>
+              <WorkflowsTable processes={lists.processes} rows={every} />
+            </SectionCard>
+          </div>
+        </TabsContent>
+      </Tabs>
+    </Page>
+  );
+};
+
+/** C: today first. No tabs; today's runs in time over every workflow, the ones that need someone first. The runs log goes to each workflow's page. */
+const ConceptToday = () => {
+  const page = Route.useLoaderData();
+  const { process } = Route.useSearch();
+  const { lists } = page;
+  return (
+    <Page>
+      <ConceptHeading />
+      <div {...stylex.props(styles.stack)}>
+        {page.today?.state === "ready" ? (
+          <TodayLanes processes={lists.processes} today={page.today.data} />
+        ) : null}
+        {lists.workflows.state === "ready" ? (
+          <WorkflowsTable
+            processes={lists.processes}
+            rows={conceptRows(lists, process)}
+          />
+        ) : (
+          <NotLoadedState page={lists.workflows} />
+        )}
+      </div>
+    </Page>
+  );
+};
+
+/** The page, or the concept the address asks for. */
+const WorkflowsOrConcept = () => {
+  const { concept } = Route.useSearch();
+  if (concept === "a") {
+    return <ConceptOneTable />;
+  }
+  if (concept === "b") {
+    return <ConceptNeedsFirst />;
+  }
+  if (concept === "c") {
+    return <ConceptToday />;
+  }
+  return <Workflows />;
+};
+
 /** The business process each workflow serves, by its ID. */
 const processesOf = (
   independent: Loaded<WorkflowResource[]>
@@ -736,6 +901,9 @@ const searchOf = (search: Record<string, unknown>): WorkflowsSearch => ({
     ? { process: search.process }
     : {}),
   ...(isStatus(search.status) ? { status: search.status } : {}),
+  ...(search.concept === "a" || search.concept === "b" || search.concept === "c"
+    ? { concept: search.concept }
+    : {}),
 });
 
 export const Route = createFileRoute("/_shell/workflows/")({
@@ -745,22 +913,31 @@ export const Route = createFileRoute("/_shell/workflows/")({
   // choosing either reads neither the lists nor today's lanes again. A
   // refresh runs the loader, which reads the log for the address's
   // filters again too.
-  loaderDeps: ({ search: { tab } }) => ({ tab }),
+  loaderDeps: ({ search: { tab, concept } }) => ({ tab, concept }),
   // Every tab reads the lists, as the tabs count them; besides, each tab
   // reads only what it shows, and each read says on its own why it failed.
-  loader: async ({ context: { core }, deps: { tab }, location }) => {
+  loader: async ({ context: { core }, deps: { tab, concept }, location }) => {
     if (tab !== "runs") {
-      const [lists, people] = await Promise.all([
+      const [lists, people, today] = await Promise.all([
         readLists(core),
         // Names only, on Needs you: IDs stand in for anyone not listed in
         // time.
-        tab === "needs" ? loadFromCore(core, readPeople) : undefined,
+        tab === "needs" || concept !== undefined
+          ? loadFromCore(core, readPeople)
+          : undefined,
+        concept === "c"
+          ? loadFromCore(
+              core,
+              async (session) => await session.workflows.today()
+            )
+          : undefined,
       ]);
       return {
         tab: tab === "needs" ? ("needs" as const) : ("workflows" as const),
         lists,
         people:
           people?.state === "ready" ? people.data : new Map<string, string>(),
+        today,
       };
     }
     // The log's read starts now, beside the others, and isn't waited for:
@@ -778,5 +955,5 @@ export const Route = createFileRoute("/_shell/workflows/")({
     ]);
     return { tab: "runs" as const, lists, today, log, activity };
   },
-  component: Workflows,
+  component: WorkflowsOrConcept,
 });

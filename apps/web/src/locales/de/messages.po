@@ -2678,6 +2678,10 @@ msgstr "Alle Schritte erledigt"
 msgid "All teams"
 msgstr "Alle Teams"
 
+#: src/routes/_shell.workflows.index.tsx
+msgid "All workflows"
+msgstr "Alle Workflows"
+
 #: src/connections/http-connections.tsx
 msgid "Allow at least one method."
 msgstr "Erlauben Sie mindestens eine Methode."
