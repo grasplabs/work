@@ -18,6 +18,7 @@ import {
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
+import { Button } from "../grasp/button/index.ts";
 import {
   Dialog,
   DialogAction,
@@ -41,6 +42,15 @@ import {
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
+import { SectionHeader } from "../grasp/section-header/index.ts";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../grasp/table/index.ts";
 import { Tabs, TabsList, TabsTrigger } from "../grasp/tabs/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { Textarea } from "../grasp/textarea/index.ts";
@@ -48,7 +58,7 @@ import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { LessonsView } from "./lessons-view.tsx";
-import { CardWords, FactLine, recordOf } from "./memory-parts.tsx";
+import { CardWords, FactLine, KindLabel, recordOf } from "./memory-parts.tsx";
 import type { Fact } from "./memory-parts.tsx";
 import { RememberDialog } from "./remember-dialog.tsx";
 import { ShareRecord } from "./share-record.tsx";
@@ -537,6 +547,93 @@ const LineagePanel = ({
   );
 };
 
+/** Concept B: the records under their kind. */
+const RecordsByKind = ({
+  records,
+  picked,
+  onPick,
+}: {
+  records: Page["records"];
+  picked: string | undefined;
+  onPick: (memoryId: string) => void;
+}) => {
+  const kinds = [...new Set(records.map((record) => record.kind))];
+  return (
+    <>
+      {kinds.map((kind) => (
+        <section key={kind}>
+          <SectionHeader size="sm" title={<KindLabel kind={kind} />} />
+          <ItemGroup separated>
+            {records
+              .filter((record) => record.kind === kind)
+              .map((record) => (
+                <RecordItem
+                  key={record.id}
+                  onPick={() => {
+                    onPick(record.id);
+                  }}
+                  picked={picked === record.id}
+                  record={record}
+                />
+              ))}
+          </ItemGroup>
+        </section>
+      ))}
+    </>
+  );
+};
+
+/** Concept C: the records as a table. */
+const RecordTable = ({
+  records,
+  onPick,
+}: {
+  records: Page["records"];
+  onPick: (memoryId: string) => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>{t`What`}</TableHead>
+          <TableHead>{t`Kind`}</TableHead>
+          <TableHead>{t`Who reads it`}</TableHead>
+          <TableHead>{t`State`}</TableHead>
+          <TableHead>{t`Recorded`}</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {records.map((record) => (
+          <TableRow key={record.id}>
+            <TableCell>
+              <Button
+                onClick={() => {
+                  onPick(record.id);
+                }}
+                size="sm"
+                variant="ghost"
+              >
+                <Statement record={record} />
+              </Button>
+            </TableCell>
+            <TableCell>
+              <KindLabel kind={record.kind} />
+            </TableCell>
+            <TableCell>
+              <ScopeLabel scope={record.scope} />
+            </TableCell>
+            <TableCell>
+              <StateMark state={record.state} />
+            </TableCell>
+            <TableCell>{formatDateTime(record.recordedAt)}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+};
+
 /**
  * The records of `among`, newest first, to pick one from. Keyed by what it
  * lists and the changes made: a change lists them again, as they are now.
@@ -545,7 +642,9 @@ const RecordList = ({
   among,
   picked,
   onPick,
+  concept,
 }: {
+  concept?: string | undefined;
   among: Among;
   picked: string | undefined;
   onPick: (memoryId: string) => void;
@@ -585,6 +684,18 @@ const RecordList = ({
       </Empty>
     );
   }
+  if (concept === "b") {
+    return (
+      <RecordsByKind
+        onPick={onPick}
+        picked={picked}
+        records={listed.data.records}
+      />
+    );
+  }
+  if (concept === "c") {
+    return <RecordTable onPick={onPick} records={listed.data.records} />;
+  }
   return (
     <ItemGroup>
       {listed.data.records.map((record) => (
@@ -609,8 +720,11 @@ const tabOf = (value: unknown): Tab =>
 export const MemoryPage = ({
   admin,
   teams,
+  concept,
 }: {
   admin: boolean;
+  /** Concepts for Ruben (concept branch only). */
+  concept?: string | undefined;
   /** The teams the person is in, to share their records with. */
   teams: readonly { id: string; name: string }[];
 }) => {
@@ -675,6 +789,7 @@ export const MemoryPage = ({
             <div {...stylex.props(styles.list)}>
               <RecordList
                 among={tab}
+                concept={concept}
                 key={`${tab}:${changes}`}
                 onPick={setPicked}
                 picked={picked}

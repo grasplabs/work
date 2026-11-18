@@ -8,9 +8,19 @@ import { MemoryPage } from "../brain/memory-page.tsx";
 
 const Memory = () => {
   const { identity } = Route.useRouteContext();
-  return <MemoryPage admin={isMemberAdmin(identity)} teams={identity.teams} />;
+  const { concept } = Route.useSearch();
+  return (
+    <MemoryPage
+      admin={isMemberAdmin(identity)}
+      concept={concept}
+      teams={identity.teams}
+    />
+  );
 };
 
 export const Route = createFileRoute("/_shell/brain/memory")({
+  // Concepts for Ruben (concept branch only): ?concept=b or ?concept=c.
+  validateSearch: (search: Record<string, unknown>): { concept?: string } =>
+    typeof search.concept === "string" ? { concept: search.concept } : {},
   component: Memory,
 });
