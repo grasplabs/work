@@ -68,6 +68,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // company's record of who its documents were shared with, naming nobody
   // readable.
   "core.source_reader_tokens": { erased: "identity" },
+  // The groups copied reader lists name (source-readers.ts, GRA-1761): a
+  // provider's group IDs, which name no person.
+  "core.source_reader_groups": noPerson,
   // Every address a person's sign-ins proved, for their erasure alone
   // (source-readers.ts): forgotten with their accounts.
   "core.sign_in_addresses": { erased: "identity" },

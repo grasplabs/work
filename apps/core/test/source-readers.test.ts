@@ -2441,6 +2441,87 @@ describe("groups copied from the source", () => {
   );
 
   it(
+    "lets someone in more groups than a reader can hold find their own, the company's, and what is shared with one of their groups, and nothing shared with a group they aren't in",
+    setUpTime,
+    async () => {
+      const person = await microsoftMember();
+      // In order, the last is the one a bound on their groups would leave
+      // out first.
+      const theirs = Array.from({ length: 1100 }, () =>
+        crypto.randomUUID()
+      ).toSorted();
+      const oneOfTheirs = theirs.at(-1) ?? "";
+      await inGroups(person.oid, theirs);
+      await connectedMicrosoft(person);
+      await groupsRead(await connectionTo(person.oid));
+      const markers = {
+        own: uniqueWord(),
+        company: uniqueWord(),
+        shared: uniqueWord(),
+        notShared: uniqueWord(),
+      };
+      const own = await sharedItem(markers.own, {
+        kind: "owner",
+        personId: person.userId,
+      });
+      const company = await sharedItem(markers.company, { kind: "everyone" });
+      const shared = await sharedItem(
+        markers.shared,
+        readersOf(entraGroup(oneOfTheirs))
+      );
+      const notShared = await sharedItem(
+        markers.notShared,
+        readersOf(entraGroup(crypto.randomUUID()))
+      );
+
+      expect({
+        own: await finds(person.userId, own, markers.own),
+        company: await finds(person.userId, company, markers.company),
+        shared: await finds(person.userId, shared, markers.shared),
+        notShared: await finds(person.userId, notShared, markers.notShared),
+      }).toStrictEqual({
+        own: true,
+        company: true,
+        shared: true,
+        notShared: false,
+      });
+    }
+  );
+
+  it(
+    "still answers someone in more groups that sources name than a reader can hold, leaving out only groups past what it holds",
+    setUpTime,
+    async () => {
+      const person = await microsoftMember();
+      const theirs = Array.from({ length: 1050 }, () => crypto.randomUUID());
+      await inGroups(person.oid, theirs);
+      await connectedMicrosoft(person);
+      await groupsRead(await connectionTo(person.oid));
+      const markers = {
+        own: uniqueWord(),
+        company: uniqueWord(),
+        everyGroup: uniqueWord(),
+      };
+      const own = await sharedItem(markers.own, {
+        kind: "owner",
+        personId: person.userId,
+      });
+      const company = await sharedItem(markers.company, { kind: "everyone" });
+      // Shared with every one of their groups: each is one a source names.
+      const everyGroup = await sharedItem(
+        markers.everyGroup,
+        readersOf(...theirs.map((group) => entraGroup(group)))
+      );
+
+      expect({
+        own: await finds(person.userId, own, markers.own),
+        company: await finds(person.userId, company, markers.company),
+        everyGroup: await finds(person.userId, everyGroup, markers.everyGroup),
+      }).toStrictEqual({ own: true, company: true, everyGroup: true });
+    }
+  );
+
+  it(
     "keeps nothing of a read for an address Google gave someone else while the account's token was still fresh",
     setUpTime,
     async () => {
