@@ -1232,6 +1232,7 @@ msgid "{person} revoked {alias} for version {version}"
 msgstr "{person} revoked {alias} for version {version}"
 
 #. Who connected the app, then the day they did.
+#: src/apps/app-settings.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{person}, {date}"
 msgstr "{person}, {date}"
@@ -9212,13 +9213,13 @@ msgstr "Lower-case letters and digits, with single dashes between them; not the 
 msgid "Lowest"
 msgstr "Lowest"
 
+#: src/apps/app-settings.tsx
+msgid "Made"
+msgstr "Made"
+
 #: src/activity/audit-words.ts
 msgid "Made a webhook source a new secret"
 msgstr "Made a webhook source a new secret"
-
-#: src/apps/app-settings.tsx
-msgid "Made by {person} on {date}."
-msgstr "Made by {person} on {date}."
 
 #: src/workflows/workflow-settings.tsx
 msgid "Made by an earlier platform release: publish it again"
@@ -9227,10 +9228,6 @@ msgstr "Made by an earlier platform release: publish it again"
 #: src/apps/app-settings.tsx
 msgid "Made for"
 msgstr "Made for"
-
-#: src/apps/app-settings.tsx
-msgid "Made on {date}."
-msgstr "Made on {date}."
 
 #: src/dashboard/report.ts
 msgid "Made with Grasp on {date}"
