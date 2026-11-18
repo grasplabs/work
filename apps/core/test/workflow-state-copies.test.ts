@@ -1,4 +1,5 @@
 import { brainOf } from "@grasp-os/brain-next/contract";
+import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
@@ -17,7 +18,9 @@ import {
 } from "../src/brain-next.ts";
 import type { SourceRef } from "../src/brain-next.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
-import { inJurisdiction } from "../src/durable-objects.ts";
+import { inJurisdiction, workspace } from "../src/durable-objects.ts";
+import { brainVersionRead } from "../src/history-access.ts";
+import { MembersRpc } from "../src/members.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import {
   grantPermission,
@@ -312,6 +315,48 @@ const nextRunReads = async (by: Member, id: string) => {
     state: frozen === null ? null : z.json().parse(JSON.parse(frozen)),
     withheld: admitted?.detail?.stateWithheld ?? 0,
   };
+};
+
+/**
+ * Key `kept` of workflow `workflowId`'s state set to `value` by a run a
+ * real chat of `personId`'s started, having read version 1 of `source`:
+ * the run's pin of it, as such a start pins what its chat read
+ * (workflow-starts.ts), kept past its details as a key keeps it. The run's
+ * ID.
+ */
+const keptFromChat = async (
+  workflowId: string,
+  personId: string,
+  source: SourceRef,
+  value: string
+): Promise<string> => {
+  const runId = crypto.randomUUID();
+  const workspaceId = workspaceIdSchema.parse(crypto.randomUUID());
+  const agentId = `agent-${unique()}`;
+  const chat = await workspace(env, workspaceId).createChat(
+    "Questions",
+    personId,
+    agentId
+  );
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO workflow_state (workflow_resource_id, key, value, run_id, updated_at) VALUES (?, 'kept', ?, ?, ?)"
+    ).bind(workflowId, JSON.stringify(value), runId, Date.now()),
+    env.DB.prepare(
+      "INSERT INTO kept_run_evidence (run_id, kept_at) VALUES (?, ?)"
+    ).bind(runId, Date.now()),
+    env.DB.prepare(
+      "INSERT INTO run_chat_sources (run_id, source_id, workspace_id, chat_id, agent_id, person_id) VALUES (?, ?, ?, ?, ?, ?)"
+    ).bind(
+      runId,
+      brainVersionRead({ source, version: 1 }),
+      workspaceId,
+      chat.id,
+      agentId,
+      personId
+    ),
+  ]);
+  return runId;
 };
 
 /** How many rows of evidence core keeps of what run `runId` read. */
@@ -1178,6 +1223,68 @@ describe("what a workflow keeps of what its run read", setUpTime, () => {
         started(ada, workflow.id, { entity: unique(), ask: "", keep: false })
       )
     ).resolves.toBe("workflow.start_denied");
+  });
+
+  it("deletes with a person's erasure every key a run of their chat set and every key of a run that started from it, and keeps refusing a run still going that started from it: no pin keeps their ID", async () => {
+    const { admin, ada } = await people();
+    const erik = await person("builder");
+    const members = new MembersRpc(
+      env,
+      async () => await Promise.resolve(admin)
+    );
+    const workflow = await keepingWorkflow(ada, admin, recalling);
+    const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+    const note = `Erik's note ${unique()}`;
+    await sourceSaying(source, `${note}.`);
+    // A run Erik's chat started kept what his chat had read.
+    await keptFromChat(workflow.id, erik.userId, source, note);
+    // One run starts from that copy and waits; another keeps it changed.
+    const waiting = await started(ada, workflow.id, {
+      entity: unique(),
+      ask: " (later)",
+      keep: true,
+      carry: true,
+      hold: true,
+    });
+    const carrier = await started(ada, workflow.id, {
+      entity: unique(),
+      ask: " (seen)",
+      keep: true,
+      carry: true,
+    });
+    await ended(ada, workflow.id, carrier);
+    const before = await keptFor(admin, workflow.id);
+    await members.remove(erik.userId);
+    const removed = await keptFor(admin, workflow.id);
+
+    await members.erase(erik.userId, erik.name);
+
+    const keys = await env.DB.prepare(
+      "SELECT key FROM workflow_state WHERE workflow_resource_id = ?"
+    )
+      .bind(workflow.id)
+      .all<{ key: string }>();
+    const pins = await env.DB.prepare(
+      "SELECT count(*) AS n FROM run_chat_sources WHERE person_id = ?"
+    )
+      .bind(erik.userId)
+      .first<number>("n");
+
+    expect({
+      before,
+      removed,
+      keys: keys.results.map(({ key }) => key),
+      pins,
+      waiting: await ended(ada, workflow.id, waiting),
+      next: await nextRunReads(ada, workflow.id),
+    }).toStrictEqual({
+      before: `${note} (seen)`,
+      removed: "revoked",
+      keys: [],
+      pins: 0,
+      waiting: { status: "failed", error: "brain.revoked" },
+      next: { state: {}, withheld: 0 },
+    });
   });
 
   it("checks the runs that set its keys together: what reading the state costs doesn't grow with how many runs set it", async () => {

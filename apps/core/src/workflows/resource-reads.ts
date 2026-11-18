@@ -20,6 +20,7 @@ import { authorize } from "../permissions.ts";
 import { runAuthority, runContext } from "./resource-authority.ts";
 import type { CallingRun } from "./resource-authority.ts";
 import {
+  erasedChatPin,
   evidenceOfRuns,
   memoryEvidenceOfRuns,
   stateWritersOfRuns,
@@ -137,13 +138,23 @@ const readOf = (
  * read, for its person, something it had read then (GRA-1093,
  * workflow-starts.ts): as the chat's own history check decides it
  * (`readableSources`), under the chat's agent and person as they are
- * now: one check per chat, however many runs it started.
+ * now: one check per chat, however many runs it started. A run whose chat's
+ * person was erased (`erasedChatPin`) may read none of it, ever, unasked.
  */
 const chatPinsChecked = async (
   env: Env,
-  rows: EvidenceRead["pins"],
+  allRows: EvidenceRead["pins"],
   checked: Checked
 ): Promise<void> => {
+  const erased = new Set(
+    allRows
+      .filter(({ sourceId }) => sourceId === erasedChatPin.sourceId)
+      .map(({ runId }) => runId)
+  );
+  for (const runId of erased) {
+    checked.refused.add(runId);
+  }
+  const rows = allRows.filter(({ runId }) => !erased.has(runId));
   // Each run's pins are its one chat's: its first row names it.
   const chatOf = new Map<string, string>();
   for (const row of rows) {

@@ -536,23 +536,29 @@ const referralWhileErased = async (erased: "max" | "pim") => {
 
 /**
  * A key of workflow `workflowId`'s state set by a new run, and that run's
- * evidence kept past its details, as a key keeps it: with the pin of a
- * real chat of `personId`'s when given, as a start from that chat pins
- * what it read (workflow-starts.ts). The run's ID.
+ * evidence kept past its details, as a key keeps it, unless the run is
+ * `recent` (within its 30 days): with the pin of a real chat of
+ * `personId`'s when given, as a start from that chat pins what it read
+ * (workflow-starts.ts). The run's ID.
  */
 const keptKey = async (
   workflowId: string,
   key: string,
-  personId?: string
+  personId?: string,
+  recent = false
 ): Promise<string> => {
   const runId = crypto.randomUUID();
   await env.DB.batch([
     env.DB.prepare(
       "INSERT INTO workflow_state (workflow_resource_id, key, value, run_id, updated_at) VALUES (?, ?, ?, ?, ?)"
     ).bind(workflowId, key, JSON.stringify(`${key} value`), runId, Date.now()),
-    env.DB.prepare(
-      "INSERT INTO kept_run_evidence (run_id, kept_at) VALUES (?, ?)"
-    ).bind(runId, Date.now()),
+    ...(recent
+      ? []
+      : [
+          env.DB.prepare(
+            "INSERT INTO kept_run_evidence (run_id, kept_at) VALUES (?, ?)"
+          ).bind(runId, Date.now()),
+        ]),
   ]);
   if (personId !== undefined) {
     const workspaceId = workspaceIdSchema.parse(crypto.randomUUID());
@@ -582,7 +588,7 @@ const keptKey = async (
 };
 
 describe("erasing a person", () => {
-  it("deletes every kept value a run of their chats set and their pins kept with it, leaving other people's: withheld once they are removed, gone once erased", async () => {
+  it("deletes every kept value a run of their chats set and every pin of theirs, whatever the run's age, leaving other people's: withheld once they are removed, gone once erased", async () => {
     const { admin, person } = await removedPerson();
     const other = await signedInApi(idp, "builder");
     const by = {
@@ -596,7 +602,8 @@ describe("erasing a person", () => {
       by,
       `keeps-${crypto.randomUUID().slice(0, 8)}`
     );
-    const theirs = await keptKey(workflow.id, "theirs", person.userId);
+    await keptKey(workflow.id, "theirs", person.userId);
+    await keptKey(workflow.id, "recent", person.userId, true);
     const others = await keptKey(workflow.id, "others", other.userId);
     await keptKey(workflow.id, "plain");
     const removed = await readWorkflowState(env, by, workflow.id);
@@ -608,26 +615,30 @@ describe("erasing a person", () => {
     )
       .bind(workflow.id)
       .all<{ key: string }>();
-    const pins = await env.DB.prepare(
-      "SELECT run_id, person_id FROM run_chat_sources WHERE run_id IN (?, ?)"
+    const theirPins = await env.DB.prepare(
+      "SELECT count(*) AS n FROM run_chat_sources WHERE person_id = ?"
     )
-      .bind(theirs, others)
-      .all<{ run_id: string; person_id: string }>();
+      .bind(person.userId)
+      .first<number>("n");
+    const otherPins = await env.DB.prepare(
+      "SELECT count(*) AS n FROM run_chat_sources WHERE run_id = ? AND person_id = ?"
+    )
+      .bind(others, other.userId)
+      .first<number>("n");
     const shown = await readWorkflowState(env, by, workflow.id);
     const next = await readableStateOf(env, workflow.id, admin.userId);
 
     expect({
-      removed: removed.entries.find(({ key }) => key === "theirs")?.withheld,
+      removed: removed.entries
+        .filter(({ key }) => key === "theirs" || key === "recent")
+        .map(({ withheld }) => withheld),
       keys: keys.results.map(({ key }) => key),
-      theirPins: pins.results.filter(
-        ({ person_id: id }) => id === person.userId
-      ).length,
-      otherPins: pins.results.filter(({ person_id: id }) => id === other.userId)
-        .length,
+      theirPins,
+      otherPins,
       shown: shown.entries.map(({ key }) => key),
       next: Object.keys(next.values),
     }).toStrictEqual({
-      removed: "revoked",
+      removed: ["revoked", "revoked"],
       keys: ["others", "plain"],
       theirPins: 0,
       otherPins: 1,
