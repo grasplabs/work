@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ad6f8439-d8db-4c25-91cf-388ac6b95eb9",
+  "id": "61a8a8ce-384c-4388-b6bc-eaec314605f1",
   "prevId": "c0388866-23a0-458d-af73-7aaa59a96228",
   "tables": {
     "access_revocations": {
@@ -11498,6 +11498,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "person": {
+          "name": "person",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "token": {
           "name": "token",
           "type": "text",
@@ -11513,7 +11520,15 @@
           "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "source_reader_tokens_person_idx": {
+          "name": "source_reader_tokens_person_idx",
+          "columns": [
+            "person"
+          ],
+          "isUnique": false
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

@@ -135,6 +135,16 @@ export const readableSql = `readable AS (
 )`;
 
 /**
+ * Most values one statement may bind in SQLite in Durable Objects:
+ * Cloudflare's platform limit ("Maximum bound parameters per query: 100",
+ * https://developers.cloudflare.com/durable-objects/platform/limits/).
+ */
+const boundParametersMax = 100;
+
+/** Most members one insert writes: each binds its set, kind and principal. */
+const membersPerInsert = Math.floor(boundParametersMax / 3);
+
+/**
  * The set of readers `access` names, made the first time it is needed and
  * shared by every item with the same readers after that. Call it in the
  * transaction that writes the item, so a set and its members are whole
@@ -159,9 +169,17 @@ export const readerSetOf = (
     .values({ key })
     .returning({ id: readerSets.id })
     .get();
-  if (principals.length > 0) {
+  // A few at a time: each row binds three values, and a statement may
+  // bind no more than SQLite in Durable Objects allows
+  // (`boundParametersMax`), so a long list goes in several statements of
+  // the same transaction.
+  for (let at = 0; at < principals.length; at += membersPerInsert) {
     db.insert(readerSetMembers)
-      .values(principals.map((principal) => ({ readerSet: id, ...principal })))
+      .values(
+        principals
+          .slice(at, at + membersPerInsert)
+          .map((principal) => ({ readerSet: id, ...principal }))
+      )
       .run();
   }
   return id;

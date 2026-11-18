@@ -3,6 +3,7 @@ import { routerSecretHeader } from "@grasp-os/shared/router";
 import type { SourceReader } from "@grasp-os/shared/source-readers";
 import {
   createExecutionContext,
+  runInDurableObject,
   waitOnExecutionContext,
 } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -65,6 +66,7 @@ const microsoftMember = async () => {
     account,
     oid: String(person.oid),
     email: String(person.email),
+    name: String(person.name),
   };
 };
 
@@ -171,6 +173,47 @@ const finds = async (
   });
   return items.some(
     ({ source: found, text }) => found.id === source.id && text.includes(marker)
+  );
+};
+
+/** Whether any row of core's token table holds `text`, an address or an ID. */
+const tokensHold = async (text: string): Promise<boolean> => {
+  const { results } = await env.DB.prepare(
+    "SELECT * FROM source_reader_tokens"
+  ).all();
+  return JSON.stringify(results).toLowerCase().includes(text.toLowerCase());
+};
+
+/** The newcomer given `address` once an admin released it: signed in with Google under it. */
+const newcomerAt = async (
+  admin: {
+    api: { members: { releaseAddress: (email: string) => Promise<unknown> } };
+  },
+  address: string
+): Promise<string> => {
+  await admin.api.members.releaseAddress(address);
+  const { userId } = await whoami(
+    await signedIn(idp, "google", googlePerson({ email: address }))
+  );
+  return userId;
+};
+
+/**
+ * Holds every person's erasure in the Brain's shared store (`held`), as a
+ * Brain failing or restoring would: what waits for it waits too.
+ */
+const holdingBrainErasures = async (held: boolean): Promise<void> => {
+  await runInDurableObject(
+    inJurisdiction(env, env.BRAIN_STORE).getByName("brain"),
+    (_instance, state) => {
+      state.storage.sql.exec(
+        held
+          ? `CREATE TRIGGER IF NOT EXISTS test_hold_person BEFORE INSERT ON erasures
+            WHEN NEW.kind = 'person'
+            BEGIN SELECT RAISE(ABORT, 'held by the test'); END`
+          : "DROP TRIGGER IF EXISTS test_hold_person"
+      );
+    }
   );
 };
 
@@ -360,7 +403,7 @@ describe("readers copied from the source", () => {
   );
 
   it(
-    "reaches the tenant's accounts for a tenant, never through a group, another tenant, or code acting for someone",
+    "reaches the tenant's accounts for a tenant, never through a group, another system, another tenant's everyone, or code acting for someone",
     setUpTime,
     async () => {
       const member = await microsoftMember();
@@ -389,13 +432,15 @@ describe("readers copied from the source", () => {
             tenant: acmeTenant,
             group: `group-${unique()}`,
           },
-          // Their object ID, in another tenant.
+          // Their object ID, but as a Google account's: another system's.
           {
             kind: "account",
-            provider: "microsoft",
-            tenant: otherTenant,
+            provider: "google",
+            tenant: "acme.test",
             account: member.oid,
-          }
+          },
+          // Another tenant's everyone.
+          { kind: "tenant", provider: "microsoft", tenant: otherTenant }
         )
       );
 
@@ -526,16 +571,9 @@ describe("readers copied from the source", () => {
       await admin.api.members.remove(leaver.userId);
       await admin.api.members.erase(leaver.userId, String(leaverClaims.name));
       await runMinuteTasks();
-      const tokensLeft = await env.DB.prepare(
-        "SELECT count(*) AS n FROM source_reader_tokens WHERE key LIKE ?"
-      )
-        .bind(`%${local}%`)
-        .first<{ n: number }>();
-      await admin.api.members.releaseAddress(address);
+      const tokensHeld = await tokensHold(local);
       // Someone new, given the same address.
-      const newcomer = await whoami(
-        await signedIn(idp, "google", googlePerson({ email: address }))
-      );
+      const newcomer = { userId: await newcomerAt(admin, address) };
       const laterMarker = uniqueWord();
       const later = await sharedItem(laterMarker, readersOf(googleReader));
 
@@ -543,7 +581,7 @@ describe("readers copied from the source", () => {
         leaverRead,
         exported,
         heldBefore,
-        tokensLeft: tokensLeft?.n,
+        tokensHeld,
         newcomerOld: await finds(newcomer.userId, old, oldMarker),
         newcomerLater: await finds(newcomer.userId, later, laterMarker),
         colleagueOld: await finds(colleague.userId, old, oldMarker),
@@ -551,11 +589,161 @@ describe("readers copied from the source", () => {
         leaverRead: true,
         exported: "done",
         heldBefore: { tables: [], objects: [] },
-        tokensLeft: 0,
+        tokensHeld: false,
         newcomerOld: false,
         newcomerLater: true,
         colleagueOld: true,
       });
+    }
+  );
+
+  it(
+    "forgets a person's tokens though the Brain held their erasure up and connect's part ran first, and though Google's sign-in was turned off since",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      // Signed in with Microsoft, with their own Google connected: they
+      // read what is shared with that Google account.
+      const connector = await microsoftMember();
+      const { account: connectorsGoogle } = await connectedGoogle(connector);
+      // Signed in with Google, and never reads what is shared with them.
+      const googleLocal = `goer-${unique()}`;
+      const googleClaims = googlePerson({ email: `${googleLocal}@acme.test` });
+      const googleMember = await whoami(
+        await signedIn(idp, "google", googleClaims)
+      );
+      const marker = uniqueWord();
+      const list = await sharedItem(
+        marker,
+        readersOf(connectorsGoogle, {
+          kind: "account",
+          provider: "google",
+          tenant: "acme.test",
+          account: String(googleClaims.email),
+        })
+      );
+      const connectorRead = await finds(connector.userId, list, marker);
+      // The Brain's part fails at first: what waits for it waits, and
+      // the rest of the erasure (connect's among it) runs meanwhile.
+      await holdingBrainErasures(true);
+      let meanwhile: string[] = [];
+      try {
+        for (const { userId, name } of [
+          { userId: connector.userId, name: connector.name },
+          { userId: googleMember.userId, name: String(googleClaims.name) },
+        ]) {
+          // oxlint-disable-next-line no-await-in-loop -- one person at a time
+          await admin.api.members.remove(userId);
+          // oxlint-disable-next-line no-await-in-loop -- one person at a time
+          await outcome(admin.api.members.erase(userId, name));
+        }
+        await runMinuteTasks();
+        const { erasure } = await admin.api.members.erasure(connector.userId);
+        meanwhile = (erasure?.areas ?? [])
+          .filter(({ area }) => area === "connect" || area === "identity")
+          .map(({ area, state }) => `${area} ${state}`)
+          .toSorted();
+      } finally {
+        await holdingBrainErasures(false);
+      }
+      // Then Google's sign-in is turned off, and the erasure finishes.
+      await runMinuteTasks({
+        SIGN_IN: withSignIn({ google: undefined }).SIGN_IN,
+      });
+      const areas = await Promise.all(
+        [connector.userId, googleMember.userId].map(async (userId) => {
+          const { erasure } = await admin.api.members.erasure(userId);
+          return erasure?.areas.every(({ state }) => state === "complete");
+        })
+      );
+      // Whoever is given their addresses later reads nothing of the list.
+      const newcomers = [
+        await newcomerAt(admin, connector.email),
+        await newcomerAt(admin, String(googleClaims.email)),
+      ];
+
+      expect({
+        connectorRead,
+        meanwhile,
+        areas,
+        newcomersRead: await Promise.all(
+          newcomers.map(async (userId) => await finds(userId, list, marker))
+        ),
+        tokensHold: [
+          await tokensHold(connector.email),
+          await tokensHold(googleLocal),
+          await tokensHold(connector.oid),
+        ],
+      }).toStrictEqual({
+        connectorRead: true,
+        meanwhile: ["connect complete", "identity pending"],
+        areas: [true, true],
+        newcomersRead: [false, false],
+        tokensHold: [false, false, false],
+      });
+    }
+  );
+
+  it(
+    "keeps the token a colleague holds when an erased person's stored address was theirs before",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      const colleagueAddress = `kept-${unique()}@acme.test`;
+      // Signed in with Google once under the address that is now the
+      // colleague's: their account keeps it, stale.
+      const leaverClaims = googlePerson();
+      const leaver = await whoami(await signedIn(idp, "google", leaverClaims));
+      await env.DB.prepare(
+        "UPDATE accounts SET verified_email = ? WHERE user_id = ?"
+      )
+        .bind(colleagueAddress, leaver.userId)
+        .run();
+      const colleague = await whoami(
+        await signedIn(idp, "google", googlePerson({ email: colleagueAddress }))
+      );
+      const marker = uniqueWord();
+      const list = await sharedItem(
+        marker,
+        readersOf({
+          kind: "account",
+          provider: "google",
+          tenant: "acme.test",
+          account: colleagueAddress,
+        })
+      );
+      const before = await finds(colleague.userId, list, marker);
+      await admin.api.members.remove(leaver.userId);
+      await admin.api.members.erase(leaver.userId, String(leaverClaims.name));
+      await runMinuteTasks();
+
+      expect({
+        before,
+        after: await finds(colleague.userId, list, marker),
+      }).toStrictEqual({ before: true, after: true });
+    }
+  );
+
+  it(
+    "keeps a list of 250 readers whose one member here reads it",
+    setUpTime,
+    async () => {
+      const member = await microsoftMember();
+      const marker = uniqueWord();
+      const source = await sharedItem(
+        marker,
+        readersOf(
+          ...Array.from({ length: 249 }, (): SourceReader => ({
+            kind: "account",
+            provider: "google",
+            tenant: "acme.test",
+            account: `someone-${unique()}@acme.test`,
+          })),
+          member.account
+        )
+      );
+
+      await expect(finds(member.userId, source, marker)).resolves.toBeTruthy();
     }
   );
 

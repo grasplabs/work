@@ -1,15 +1,14 @@
 import type { PersonalAccount } from "@grasp-os/shared/connect";
+import { toHex } from "@grasp-os/shared/encoding";
 import type { SourceReader } from "@grasp-os/shared/source-readers";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
-import {
-  directoryProviderId,
-  providerIds,
-  signInConfig,
-} from "./auth/config.ts";
+import { providerIds, signInConfig } from "./auth/config.ts";
 import { accounts, sourceReaderTokens } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
+import { derivedHmacKey } from "./derived-keys.ts";
 
 // Readers copied from where an item lives (GRA-1761; the threat model and
 // the decisions are on the issue). A sync hands core each item's readers as
@@ -26,19 +25,24 @@ import { inList } from "./db/d1.ts";
 // address), counted only from a Google ID token that marked it verified,
 // under the company's hosted domain and in one of its sign-in domains.
 // Entra's address is never verified, so a Microsoft reader is never
-// matched by one. An account is compared in Unicode NFC and lowercase on
-// both sides.
+// matched by one. An account is compared in Unicode NFC and lowercase.
+// An object ID or an address names one account wherever it is listed, so
+// the tenant a list names it in is not part of it.
 //
-// The Brain never holds an account: core gives it a random token in its
-// place (`source_reader_tokens`), one per account, minted the first time a
-// list names it, whether or not anyone here holds it yet, so a colleague
-// who signs in later reads what was shared with them before. Erasing a
-// person deletes their accounts' tokens with their accounts
-// (person-erasure.ts `identity`): every list made before names a token
-// nobody holds again, and a later list naming the same address mints a new
-// one, which only whoever then proves that address holds. A token of an
-// account nobody here ever holds (an outsider's) stays: telling whether a
-// stored list still names it would take a read of the Brain's sets.
+// Neither the Brain nor core keeps an account as such: core gives the
+// Brain a random token in its place (`source_reader_tokens`), one per
+// account, under a keyed hash of the account (`keyOf`, a key derived from
+// the deployment's auth secret for this alone). A token is minted the first
+// time a list names its account, whether or not anyone here holds it yet,
+// so a colleague who signs in later reads what was shared with them
+// before. Whoever reads as themselves claims the tokens of the accounts
+// they prove (`person`), the latest of them if two do; erasing a person
+// deletes the tokens they claimed, and those of the accounts core keeps of
+// them that nobody claimed (person-erasure.ts `identity`), never one a
+// colleague claimed. Every list made before then names a token nobody
+// holds again, and a later list naming the account mints a new one. An
+// erased person's address can be proved by nobody until an admin releases
+// it (erased-people.ts), and an object ID is never anyone else's.
 //
 // A reassigned address (a leaver's given to someone new, without an
 // erasure) reads a list that still names it until the sync reads that list
@@ -54,16 +58,41 @@ import { inList } from "./db/d1.ts";
 const comparable = (part: string): string =>
   part.normalize("NFC").toLowerCase();
 
-/** An account someone proved is theirs, or a list names: the system, its tenant and what lists name it by. */
-interface Account {
-  provider: string;
-  tenant: string;
-  account: string;
-}
+/** What the key of `source_reader_tokens` is derived for, and nothing else. */
+const keyPurpose = "source-readers.account.v1";
 
-/** `account` as `source_reader_tokens` keys it: its parts compared, joined by ":". */
-const keyOf = ({ provider, tenant, account }: Account): string =>
-  `${provider}:${comparable(tenant)}:${comparable(account)}`;
+/**
+ * The account `account` at `provider` as `source_reader_tokens` keys it:
+ * a keyed hash (HMAC-SHA256) of the two, compared, so the table holds no
+ * account itself.
+ */
+const keyOf = async (
+  env: Pick<Env, "BETTER_AUTH_SECRET">,
+  provider: string,
+  account: string
+): Promise<string> => {
+  const key = await derivedHmacKey(env, keyPurpose, ["sign"]);
+  const signed = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(`${provider}:${comparable(account)}`)
+  );
+  return toHex(new Uint8Array(signed));
+};
+
+/** The keys of `wanted`, each once. */
+const keysOf = async (
+  env: Pick<Env, "BETTER_AUTH_SECRET">,
+  wanted: readonly { provider: string; account: string }[]
+): Promise<string[]> => [
+  ...new Set(
+    await Promise.all(
+      wanted.map(
+        async ({ provider, account }) => await keyOf(env, provider, account)
+      )
+    )
+  ),
+];
 
 /** The Brain's group of everyone in `tenant` at `provider`. */
 const tenantPrincipal = (provider: string, tenant: string): string =>
@@ -99,29 +128,29 @@ export const plainPrincipalOf = (reader: SourceReader): string | undefined => {
  * The Brain's groups of `readers`, each once: each account's token,
  * minted now where it has none, and each group's and tenant's name. For
  * the producer of a list (brain-next.ts `addSource`, `changeSourceReaders`):
- * one batch however long the list.
+ * one batch however long the list, each statement binding the list as one
+ * value, as D1 binds at most 100 a query ("Maximum bound parameters per
+ * query", Cloudflare's D1 limits).
  */
 export const readerPrincipalsOf = async (
-  db: DrizzleD1Database,
+  env: Pick<Env, "DB" | "BETTER_AUTH_SECRET">,
   readers: readonly SourceReader[]
 ): Promise<string[]> => {
-  const keys = [
-    ...new Set(
-      readers.flatMap((reader) =>
-        reader.kind === "account" ? [keyOf(reader)] : []
-      )
-    ),
-  ];
+  const keys = await keysOf(
+    env,
+    readers.flatMap((reader) => (reader.kind === "account" ? [reader] : []))
+  );
   const plain = readers.flatMap((reader) => plainPrincipalOf(reader) ?? []);
   if (keys.length === 0) {
     return [...new Set(plain)];
   }
   const minted = JSON.stringify(keys.map((key) => [key, crypto.randomUUID()]));
+  const db = drizzle(env.DB);
   const [, tokens] = await db.batch([
     db
       .insert(sourceReaderTokens)
       .select(
-        sql`SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), ${Date.now()}
+        sql`SELECT json_extract(value, '$[0]'), NULL, json_extract(value, '$[1]'), ${Date.now()}
           FROM json_each(${minted}) WHERE true`
       )
       .onConflictDoNothing(),
@@ -137,9 +166,8 @@ export const readerPrincipalsOf = async (
 
 /**
  * The read of the accounts the person `userId` signs in with, for one
- * batch with their membership (brain-next.ts `memberGroupsOf`) and for
- * their erasure: the Microsoft and Google ones the sign-in made from a
- * verified ID token.
+ * batch with their membership (brain-next.ts `memberGroupsOf`): the
+ * Microsoft and Google ones the sign-in made from a verified ID token.
  */
 export const signInAccountsRead = (db: DrizzleD1Database, userId: string) =>
   db
@@ -159,13 +187,12 @@ export const signInAccountsRead = (db: DrizzleD1Database, userId: string) =>
 /** A sign-in account as `signInAccountsRead` reads it. */
 type SignIn = Awaited<ReturnType<typeof signInAccountsRead>>[number];
 
-/**
- * Whether no part of `account` holds ":", which joins them, as no reader
- * list's does (`sourceReaderSchema`): one that does is no account any list
- * names.
- */
-const whole = (account: Account): boolean =>
-  [account.tenant, account.account].every((part) => !part.includes(":"));
+/** An account someone proved is theirs: the system, its tenant and what lists name it by. */
+interface Account {
+  provider: string;
+  tenant: string;
+  account: string;
+}
 
 /** Whether `address` is in one of `domains`, after its last `@`. */
 const inDomains = (address: string, domains: readonly string[]): boolean => {
@@ -174,92 +201,87 @@ const inDomains = (address: string, domains: readonly string[]): boolean => {
 };
 
 /**
- * Every account a person proved is theirs, as lists name it: their
- * sign-in accounts (`signIns`), in the tenant the deployment's sign-in is
- * pinned to (auth/config.ts), and the suite accounts they connected as
- * their own (`connected`), each with whether it counts for reading now
- * (`reads`): a connection still connected, and a Google address in one of
- * the company's sign-in domains. Microsoft's by object ID, Google's by
- * verified address.
+ * The accounts a person proved are theirs and that count for reading now:
+ * their sign-in accounts (`signIns`), in the tenant the deployment's
+ * sign-in is pinned to (auth/config.ts), and the suite accounts they
+ * connected as their own (`connected`). Microsoft's by object ID; Google's
+ * by verified address, only in one of the company's sign-in domains.
  */
-const accountsOf = (
+const readingAccountsOf = (
   env: Pick<Env, "SIGN_IN">,
   signIns: readonly SignIn[],
   connected: readonly PersonalAccount[]
-): (Account & { reads: boolean })[] => {
+): Account[] => {
   const config = signInConfig(env);
   if (config === undefined) {
     return [];
   }
-  const google = (tenant: string, address: string | null, live: boolean) =>
-    address === null
-      ? []
-      : [
-          {
-            provider: "google",
-            tenant,
-            account: address,
-            reads: live && inDomains(address, config.domains),
-          },
-        ];
-  const all: (Account & { reads: boolean })[] = [
+  const google = (tenant: string, address: string | null): Account[] =>
+    address !== null && inDomains(address, config.domains)
+      ? [{ provider: "google", tenant, account: address }]
+      : [];
+  return [
     ...signIns.flatMap(({ providerId, oid, verifiedEmail }) => {
-      // The object ID the directory made them under too (its accounts are
-      // read only for their erasure): proved by no sign-in of theirs, so
-      // it reads nothing.
-      const directory = providerId === directoryProviderId;
-      if (
-        (providerId === providerIds.entra || directory) &&
-        config.entra &&
-        oid !== null
-      ) {
+      if (providerId === providerIds.entra && config.entra && oid !== null) {
         return [
           {
             provider: "microsoft",
             tenant: config.entra.tenantId,
             account: oid,
-            reads: !directory,
           },
         ];
       }
       return providerId === providerIds.google && config.google
-        ? google(config.google.hostedDomain, verifiedEmail, true)
+        ? google(config.google.hostedDomain, verifiedEmail)
         : [];
     }),
-    ...connected.flatMap(
-      ({ provider, tenant, accountId, verifiedEmail, connected: live }) => {
-        if (provider === "microsoft") {
-          return [{ provider, tenant, account: accountId, reads: live }];
-        }
-        return provider === "google" ? google(tenant, verifiedEmail, live) : [];
+    ...connected.flatMap(({ provider, tenant, accountId, verifiedEmail }) => {
+      if (provider === "microsoft") {
+        return [{ provider, tenant, account: accountId }];
       }
-    ),
+      return provider === "google" ? google(tenant, verifiedEmail) : [];
+    }),
   ];
-  return all.filter(whole);
 };
 
 /**
- * The Brain's groups a person holds by the accounts they proved are
- * theirs (`signIns`, `connected`) and count for reading now: each
- * account's token, in one indexed read, and its tenant's name. An account
- * no list ever named has no token, and holds nothing.
+ * The Brain's groups the member `userId` holds, reading as themselves, by
+ * the accounts they proved are theirs (`signIns`, `connected`): each
+ * account's token and its tenant's name. One batch: they claim the
+ * tokens of those accounts (`person`, written only where it changes), and
+ * their tokens are read. Nothing is minted: an account no list named has
+ * no token, and holds nothing.
  */
 export const heldPrincipalsOf = async (
-  env: Pick<Env, "SIGN_IN">,
-  db: DrizzleD1Database,
+  env: Pick<Env, "DB" | "SIGN_IN" | "BETTER_AUTH_SECRET">,
+  userId: string,
   signIns: readonly SignIn[],
   connected: readonly PersonalAccount[]
 ): Promise<string[]> => {
-  const reading = accountsOf(env, signIns, connected).filter(
-    ({ reads }) => reads
-  );
+  const reading = readingAccountsOf(env, signIns, connected);
   if (reading.length === 0) {
     return [];
   }
-  const tokens = await db
-    .select({ token: sourceReaderTokens.token })
-    .from(sourceReaderTokens)
-    .where(inList(sourceReaderTokens.key, reading.map(keyOf)));
+  const keys = await keysOf(env, reading);
+  const db = drizzle(env.DB);
+  const [, tokens] = await db.batch([
+    db
+      .update(sourceReaderTokens)
+      .set({ person: userId })
+      .where(
+        and(
+          inList(sourceReaderTokens.key, keys),
+          or(
+            isNull(sourceReaderTokens.person),
+            ne(sourceReaderTokens.person, userId)
+          )
+        )
+      ),
+    db
+      .select({ token: sourceReaderTokens.token })
+      .from(sourceReaderTokens)
+      .where(inList(sourceReaderTokens.key, keys)),
+  ]);
   return [
     ...new Set([
       ...tokens.map(({ token }) => tokenPrincipal(token)),
@@ -271,23 +293,42 @@ export const heldPrincipalsOf = async (
 };
 
 /**
- * Deletes the tokens of every account the person proved is theirs
- * (`signIns`, `connected`, disconnected ones and addresses outside the
- * company's domains too), for their erasure, in the batch that deletes
- * their accounts (person-erasure.ts `identity`): every list naming them
- * names a token nobody holds from then on.
+ * The keys of what core keeps of a person's accounts (`kept`: object IDs,
+ * verified addresses and their address), for `forgetTokens`.
+ */
+export const keptAccountKeysOf = async (
+  env: Pick<Env, "BETTER_AUTH_SECRET">,
+  kept: {
+    objectIds: readonly string[];
+    addresses: readonly string[];
+  }
+): Promise<string[]> =>
+  await keysOf(env, [
+    ...kept.objectIds.map((account) => ({ provider: "microsoft", account })),
+    ...kept.addresses.map((account) => ({ provider: "google", account })),
+  ]);
+
+/**
+ * Deletes the tokens the person `userId` claimed, and those nobody claimed
+ * of the accounts core keeps of them (`keptKeys`, `keptAccountKeysOf`), for
+ * their erasure, in the batch that deletes their accounts
+ * (person-erasure.ts `identity`): by what core stored, never by connect or
+ * the sign-in config now. A token a colleague claimed stays theirs,
+ * whatever address of the person's was stale.
  */
 export const forgetTokens = (
-  env: Pick<Env, "SIGN_IN">,
   db: DrizzleD1Database,
-  signIns: readonly SignIn[],
-  connected: readonly PersonalAccount[]
+  userId: string,
+  keptKeys: readonly string[]
 ) =>
   db
     .delete(sourceReaderTokens)
     .where(
-      inList(
-        sourceReaderTokens.key,
-        accountsOf(env, signIns, connected).map(keyOf)
+      or(
+        eq(sourceReaderTokens.person, userId),
+        and(
+          isNull(sourceReaderTokens.person),
+          inList(sourceReaderTokens.key, keptKeys)
+        )
       )
     );

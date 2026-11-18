@@ -230,4 +230,114 @@ describe("giving a source other readers", () => {
       "The Brain refused it: what only one person may read is kept in that person's own store"
     );
   });
+
+  it("keeps a list of 250 readers, each of whom reads it", async () => {
+    const groups = Array.from({ length: 250 }, () => `group:${unique()}`);
+    const source = await added(
+      { kind: "readers", groups },
+      "Company handbook for every reader"
+    );
+
+    expect({
+      first: await currentOf(source, inGroup(groups[0] ?? "")),
+      last: await currentOf(source, inGroup(groups.at(-1) ?? "")),
+      outsider: await currentOf(source, inGroup(`group:${unique()}`)),
+    }).toStrictEqual({
+      first: "Company handbook for every reader",
+      last: "Company handbook for every reader",
+      outsider: null,
+    });
+  });
+
+  it("refuses an older list once a newer one confirmed the readers it has", async () => {
+    const [alice, bob] = [`group:${unique()}`, `group:${unique()}`];
+    const source = `test:${unique()}`;
+    await store().addSource({
+      source,
+      change: unique(),
+      text: "Board pack",
+      access: { kind: "readers", groups: [alice] },
+      readAt: 1,
+    });
+    // Read again at 3: Alice alone, as before.
+    const confirmed = await store().changeReaders({
+      source,
+      change: unique(),
+      access: { kind: "readers", groups: [alice] },
+      readAt: 3,
+    });
+    // Read at 2, arriving late: Alice and Bob.
+    const late = await store().changeReaders({
+      source,
+      change: unique(),
+      access: { kind: "readers", groups: [alice, bob] },
+      readAt: 2,
+    });
+
+    expect({
+      confirmed,
+      late,
+      bob: await currentOf(source, inGroup(bob)),
+    }).toStrictEqual({
+      confirmed: { source, version: 1 },
+      late: { source, version: 1, newer: true },
+      bob: null,
+    });
+  });
+
+  it("takes a newer narrowing over an older widening, whichever arrives first", async () => {
+    const [alice, bob] = [`group:${unique()}`, `group:${unique()}`];
+    const both: Access = { kind: "readers", groups: [alice, bob] };
+    const narrowed: Access = { kind: "readers", groups: [alice] };
+    const inOrder = `test:${unique()}`;
+    const reversed = `test:${unique()}`;
+    for (const source of [inOrder, reversed]) {
+      // oxlint-disable-next-line no-await-in-loop -- one source at a time
+      await store().addSource({
+        source,
+        change: unique(),
+        text: "Pricing sheet",
+        access: narrowed,
+        readAt: 1,
+      });
+    }
+    // The widening read at 2, then the narrowing read at 3.
+    await store().changeReaders({
+      source: inOrder,
+      change: unique(),
+      access: both,
+      readAt: 2,
+    });
+    await store().changeReaders({
+      source: inOrder,
+      change: unique(),
+      access: narrowed,
+      readAt: 3,
+    });
+    // The narrowing first, then the widening arriving late.
+    await store().changeReaders({
+      source: reversed,
+      change: unique(),
+      access: narrowed,
+      readAt: 3,
+    });
+    const late = await store().changeReaders({
+      source: reversed,
+      change: unique(),
+      access: both,
+      readAt: 2,
+    });
+
+    expect({
+      late: late?.newer ?? false,
+      inOrder: await currentOf(inOrder, inGroup(bob)),
+      reversed: await currentOf(reversed, inGroup(bob)),
+      alice: await currentOf(reversed, inGroup(alice)),
+    }).toStrictEqual({
+      late: true,
+      inOrder: null,
+      reversed: null,
+      alice: "Pricing sheet",
+    });
+  });
 });
