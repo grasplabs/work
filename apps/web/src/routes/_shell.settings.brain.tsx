@@ -1,5 +1,4 @@
 import type { Team, TeamGroup } from "@grasp-os/shared/brain";
-import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
 import {
@@ -11,7 +10,7 @@ import {
 } from "@grasp-os/ui/components/select";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { PlusIcon, SparklesIcon } from "lucide-react";
+import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
@@ -29,11 +28,11 @@ import { useCoreAction } from "../use-core-action.ts";
 // (core's brain-team-groups.ts). The prototype keeps its groups as data
 // and has no page for them; this one is in its settings' language: a
 // card with the groups, each named in a field, and every team beside the
-// group it is in. Grasp proposes groups on an admin's ask; nothing counts
-// until an admin confirms the set, which core keeps whole, with the set
-// before it. For admins; core refuses anyone else.
+// group it is in. Grasp arranges new teams into groups by itself; here an
+// admin renames a group or moves a team, and core keeps the set whole,
+// with the set before it. For admins; core refuses anyone else.
 
-/** A group as the admin is shaping it: no `confirmed` until it is saved. */
+/** A group as the admin is shaping it. */
 type Draft = Omit<TeamGroup, "confirmed">;
 
 /** No group, in a team's choice of group. */
@@ -104,7 +103,7 @@ const TeamRow = ({
   );
 };
 
-/** The groups, named, and the teams in them, to confirm as a whole. */
+/** The groups, named, and the teams in them, to save as a whole. */
 const TeamGroups = ({
   teams,
   held,
@@ -118,19 +117,8 @@ const TeamGroups = ({
   const [groups, setGroups] = useState<Draft[]>(() =>
     held.map(({ id, name, teamIds }) => ({ id, name, teamIds }))
   );
-  const proposed = held.some((group) => !group.confirmed);
   const unnamed = groups.some(({ name }) => name.trim() === "");
-  const propose = (): void => {
-    void (async () => {
-      const next = await run(
-        async (session) => await session.brain.proposeTeamGroups()
-      );
-      if (next !== undefined) {
-        await router.invalidate();
-      }
-    })();
-  };
-  const confirm = (): void => {
+  const save = (): void => {
     void (async () => {
       // A group with no team in it is left out: a group holds teams.
       const kept = groups
@@ -146,18 +134,7 @@ const TeamGroups = ({
   };
   return (
     <SettingsSection
-      action={
-        <Button
-          disabled={busy || teams.length === 0}
-          onClick={propose}
-          size="sm"
-          variant="outline"
-        >
-          <SparklesIcon data-icon="inline-start" />
-          <Trans>Propose groups</Trans>
-        </Button>
-      }
-      description={t`The brain's regions: your teams, grouped the way your company is. Grasp can propose groups; they count once you confirm them.`}
+      description={t`The brain's regions: your teams, grouped the way your company is. Grasp groups new teams by itself; rename a group or move a team here.`}
       title={t`Groups of teams`}
     >
       {teams.length === 0 ? (
@@ -170,29 +147,21 @@ const TeamGroups = ({
         <>
           <SettingsBody>
             {groups.map((group) => (
-              <div className="flex items-center gap-2" key={group.id}>
-                <Input
-                  aria-label={t`Group name`}
-                  disabled={busy}
-                  maxLength={80}
-                  onChange={(event) => {
-                    const { value } = event.target;
-                    setGroups(
-                      groups.map((each) =>
-                        each.id === group.id ? { ...each, name: value } : each
-                      )
-                    );
-                  }}
-                  value={group.name}
-                />
-                {held.some(
-                  ({ id, confirmed }) => id === group.id && !confirmed
-                ) ? (
-                  <Badge variant="secondary">
-                    <Trans>Proposed</Trans>
-                  </Badge>
-                ) : null}
-              </div>
+              <Input
+                aria-label={t`Group name`}
+                key={group.id}
+                disabled={busy}
+                maxLength={80}
+                onChange={(event) => {
+                  const { value } = event.target;
+                  setGroups(
+                    groups.map((each) =>
+                      each.id === group.id ? { ...each, name: value } : each
+                    )
+                  );
+                }}
+                value={group.name}
+              />
             ))}
             <div>
               <Button
@@ -228,13 +197,8 @@ const TeamGroups = ({
           </SettingsBody>
           <div className="flex flex-wrap items-center justify-end gap-3 border-t px-5 py-3">
             <ErrorText>{failure}</ErrorText>
-            {proposed ? (
-              <span className="text-muted-foreground">
-                <Trans>Grasp’s proposal counts once you confirm it.</Trans>
-              </span>
-            ) : null}
-            <Button disabled={busy || unnamed} onClick={confirm} size="sm">
-              <Trans>Confirm groups</Trans>
+            <Button disabled={busy || unnamed} onClick={save} size="sm">
+              <Trans>Save groups</Trans>
             </Button>
           </div>
         </>
@@ -257,12 +221,10 @@ const BrainSettings = () => {
   return (
     <TeamGroups
       held={teamGroups}
-      // Read again after a proposal or a save: the groups as core kept
-      // them, any change not confirmed set aside.
+      // Read again after a save: the groups as core kept them, any change
+      // not saved set aside.
       key={teamGroups
-        .map(({ id, name, teamIds, confirmed }) =>
-          [id, name, teamIds.join(","), confirmed].join(":")
-        )
+        .map(({ id, name, teamIds }) => [id, name, teamIds.join(",")].join(":"))
         .join("|")}
       teams={teams}
     />

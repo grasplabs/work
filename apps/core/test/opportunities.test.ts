@@ -14,6 +14,7 @@ import {
   aloneInTheStore,
   answering,
   answeringWith,
+  noRegionsOwed,
   onLink,
 } from "./interview-link.ts";
 import {
@@ -163,6 +164,8 @@ const listedThenAlarmed = async (
   replies: ProviderReply[]
 ) => {
   const store = onboardingStore(env);
+  // So the alarm asks only the proposal.
+  await noRegionsOwed();
   await runInDurableObject(store, async (instance, state) => {
     await state.storage.deleteAlarm();
     // The fixture holds the alarm with a spy on it: taken off, so the

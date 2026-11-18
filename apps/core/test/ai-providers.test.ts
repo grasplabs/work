@@ -868,9 +868,11 @@ describe("AI providers", { timeout: 60_000 }, () => {
       }).toStrictEqual({ models: ["gpt-5.4"], ticketsByPim: true });
     });
 
-    it("proposes the company's groups of teams with the organization's default model", async () => {
+    it("arranges the company's teams into regions with the organization's default model", async () => {
       const key = await connected(openaiCase);
       const { admin: by } = await admin();
+      // Arranged here, as the store's alarm would, never by itself.
+      await holdAlarm();
       const tag = unique();
       await by.api.onboarding.saveRoster(
         await teamsMade({
@@ -899,20 +901,21 @@ describe("AI providers", { timeout: 60_000 }, () => {
         ),
       ]);
 
-      const groups = await by.api.brain.proposeTeamGroups();
+      await onboardingStore(env).arrangeNext();
 
+      const { teamGroups } = await by.api.brain.read();
       const sent = await carrying(key);
       expect({
         models: sent.map(
           ({ body }) =>
             z.object({ model: z.string() }).parse(JSON.parse(body)).model
         ),
-        proposed: groups
-          .filter(({ confirmed }) => !confirmed)
+        arranged: teamGroups
+          .filter(({ name }) => name === "Customers")
           .map(({ teamIds }) => teamIds.toSorted()),
       }).toStrictEqual({
         models: ["gpt-5.4"],
-        proposed: [[sales, support].toSorted()],
+        arranged: [[sales, support].toSorted()],
       });
     });
   });
