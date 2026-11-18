@@ -318,6 +318,44 @@ describe("picking a shared connection's places to sync", () => {
     });
   });
 
+  it("says the picks changed meanwhile only beside the places read after it, never during the reading", async () => {
+    const fake: Core = { held: libraries() };
+    const asked = await shown(fake);
+    // Another admin picks Legal's Documents meanwhile; reading the places
+    // again after the save is slow.
+    fake.held.picks = ["b!contracts", "b!legal"];
+    for (const choice of fake.held.choices) {
+      choice.picked = fake.held.picks.includes(choice.place);
+    }
+    const reading = Promise.withResolvers<boolean>();
+    fake.pending = reading.promise;
+    await click(boxOf("Documents", longSite));
+    await click(button("Save the places"));
+    const notice = "These are the ones picked now";
+    // The save was refused, and the page is reading the places again.
+    await until(
+      () => asked.filter(([method]) => method === "syncPlaces").length === 2
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const whileReading = text().includes(notice);
+    await act(async () => {
+      reading.resolve(true);
+      await Promise.resolve();
+    });
+    await until(() => text().includes(notice));
+    expect({
+      whileReading,
+      checked: [
+        ...document.querySelectorAll('[role="checkbox"][aria-checked="true"]'),
+      ].map(nameOf),
+    }).toStrictEqual({
+      whileReading: false,
+      checked: ["Documents Legal", `Contracts ${longSite}`],
+    });
+  });
+
   it("says the picks changed meanwhile only once it has read them, and offers to read them again when it couldn't", async () => {
     const fake: Core = { held: libraries() };
     await shown(fake);

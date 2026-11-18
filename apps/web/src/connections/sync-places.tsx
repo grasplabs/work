@@ -345,14 +345,17 @@ export const SyncPlaces = ({
         key={key}
         label={label}
         onSaved={async (changed) => {
-          setChangedMeanwhile(changed);
+          // Said only beside what was read after it: never while the form
+          // still shows the admin's own ticks.
+          setChangedMeanwhile(false);
           // Another change landed first: what the form shows is stale, so a
           // failed read shows its refusal alone, to try again.
           await reload(!changed);
+          setChangedMeanwhile(changed);
         }}
         places={read.places}
       />
-      {changedMeanwhile && read.refused === undefined ? (
+      {changedMeanwhile ? (
         <p className="text-muted-foreground text-sm">
           <Trans>
             The places picked from {label} were changed in the meantime. These
