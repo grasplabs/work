@@ -205,43 +205,46 @@ const OpenList = ({
   const rest = sources.length - fold;
   return (
     <>
-      <div {...stylex.props(styles.head)}>
+      <div {...stylex.props(styles.head, styles.openHead)}>
         {/* The count as a figure: "Sources · 12", not the word said twice. */}
         <Heading
           id={headingId}
           tabIndex={-1}
-          {...stylex.props(styles.heading, focus.inside)}
+          {...stylex.props(styles.heading, styles.headHeading, focus.inside)}
         >
           {heading} · {sources.length}
         </Heading>
-        <ToggleGroup
-          aria-label={labels.order}
-          size="sm"
-          value={[order]}
-          onValueChange={(values: string[]) => {
-            const [next] = values;
-            if (next === "relevance" || next === "kind") {
-              setList((now) => ({ ...now, order: next }));
-            }
-          }}
-        >
-          <Toggle value="relevance">{labels.byRelevance}</Toggle>
-          <Toggle value="kind">{labels.byKind}</Toggle>
-        </ToggleGroup>
-      </div>
-      <Rows shared={shared} order={order} fold={fold} all={all} />
-      <div {...stylex.props(styles.head)}>
-        {rest > 0 && order === "relevance" ? (
-          <Button variant="ghost" size="sm" onClick={onFold}>
-            {all ? labels.showFewer : labels.showMore(rest)}
-          </Button>
-        ) : (
-          <span />
-        )}
+        {/* The order, then the close, at the head's end. Narrow, the close stays on the heading's
+            line and the order takes its own line under it, so nothing stands alone. */}
+        <div {...stylex.props(styles.order)}>
+          <ToggleGroup
+            aria-label={labels.order}
+            size="sm"
+            value={[order]}
+            onValueChange={(values: string[]) => {
+              const [next] = values;
+              if (next === "relevance" || next === "kind") {
+                setList((now) => ({ ...now, order: next }));
+              }
+            }}
+          >
+            <Toggle value="relevance">{labels.byRelevance}</Toggle>
+            <Toggle value="kind">{labels.byKind}</Toggle>
+          </ToggleGroup>
+        </div>
         <Button variant="ghost" size="sm" onClick={onClose}>
           {labels.close}
         </Button>
       </div>
+      <Rows shared={shared} order={order} fold={fold} all={all} />
+      {/* The foot is there only for "Show more" or "Show fewer": never an empty row. */}
+      {rest > 0 && order === "relevance" && (
+        <div {...stylex.props(styles.foot)}>
+          <Button variant="ghost" size="sm" onClick={onFold}>
+            {all ? labels.showFewer : labels.showMore(rest)}
+          </Button>
+        </div>
+      )}
     </>
   );
 };

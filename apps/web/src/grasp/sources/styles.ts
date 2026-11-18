@@ -175,6 +175,20 @@ export const sourceStyles = stylex.create({
     justifyContent: "space-between",
     gap: grasp.space2,
   },
+  // The open list's head: the heading, the order switch, "Fold them away", in one row. Under 26rem
+  // (they need about 24) the order switch takes its own line under the heading and the close.
+  openHead: { containerType: "inline-size", containerName: "source-list-head" },
+  headHeading: { flexGrow: 1 },
+  order: {
+    display: "flex",
+    order: { default: 0, "@container source-list-head (width < 26rem)": 1 },
+    flexBasis: {
+      default: "auto",
+      "@container source-list-head (width < 26rem)": "100%",
+    },
+  },
+  // Under the rows, only for "Show more" or "Show fewer", at the start.
+  foot: { display: "flex", alignItems: "center", justifyContent: "flex-start" },
   heading: {
     margin: 0,
     fontFamily: grasp.fontSans,
