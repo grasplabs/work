@@ -69,6 +69,8 @@ import {
   stephenSummaries,
   stephenSummaryReaders,
   teamMembers,
+  staffListPlaces,
+  teamPrimaries,
   users,
   workflowDecisionConfirmations,
   apps as appRegistry,
@@ -280,6 +282,8 @@ const identity: ErasureStep = {
       db
         .delete(appVisitorSessions)
         .where(eq(appVisitorSessions.address, theirAddress)),
+      // Where the staff list placed their address (GRA-2055).
+      db.delete(staffListPlaces).where(eq(staffListPlaces.email, theirAddress)),
       db
         .update(users)
         .set({
@@ -625,6 +629,8 @@ const channels: ErasureStep = {
       ...theirInvitations,
       db.delete(notifications).where(eq(notifications.personId, userId)),
       db.delete(teamMembers).where(eq(teamMembers.userId, userId)),
+      // And the team the staff list gave them (GRA-2055).
+      db.delete(teamPrimaries).where(eq(teamPrimaries.userId, userId)),
       // The cards still to be pressed of their requests, then the requests.
       db
         .delete(stephenRequestCards)

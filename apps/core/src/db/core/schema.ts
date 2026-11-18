@@ -542,6 +542,55 @@ export const teamMembers = sqliteTable(
 );
 
 /**
+ * Each member's primary team (GRA-2055): the one the onboarding's staff
+ * list last gave them, beside Better Auth's `team_members`, whose rows
+ * carry no fields of ours. One per member, by the key. The row stays when
+ * an admin takes the membership away by hand, the marker that they did:
+ * the list adds it again only when it gives them another team
+ * (staff-list-teams.ts `placementOf`).
+ */
+export const teamPrimaries = sqliteTable(
+  "team_primaries",
+  {
+    userId: text("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    placedAt: timestamp("placed_at").notNull(),
+    /**
+     * Whether the list made the membership itself: only then does it take
+     * it away when it moves them (staff-list-teams.ts `placementOf`), never
+     * one an admin added by hand, before the list or since.
+     */
+    made: integer({ mode: "boolean" }).notNull(),
+  },
+  (table) => [index("team_primaries_team_id_idx").on(table.teamId)]
+);
+
+/**
+ * Where the staff list the admin last confirmed puts each address
+ * (GRA-2055): the team of everyone on it with an email, folded to lower
+ * case, whether they have an account yet or not. Replaced whole by each
+ * confirm, never by a draft save; read by the one rule that places members
+ * in their primary team (staff-list-teams.ts `placePrimaries`), at the
+ * confirm and at each sign-in. The first of two people sharing an address
+ * keeps it.
+ */
+export const staffListPlaces = sqliteTable(
+  "staff_list_places",
+  {
+    email: text().primaryKey(),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    confirmedAt: timestamp("confirmed_at").notNull(),
+  },
+  (table) => [index("staff_list_places_team_id_idx").on(table.teamId)]
+);
+
+/**
  * Part of the SSO plugin's model, and stays empty: sign-in providers come
  * only from deployment config, and registering one in-product is refused.
  */

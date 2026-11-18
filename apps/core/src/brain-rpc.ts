@@ -150,12 +150,13 @@ const rosterSourceId = "src-roster";
 const kickoffSourceId = "src-kickoff";
 
 /**
- * Ids by where they come from. A roster team keeps its own id (letters,
- * digits, - and _), so the others take a `.` it can't have, and never
- * meet one of its.
+ * Ids by where they come from. A roster team is the members' team it is,
+ * by its id (letters, digits, - and _: `intakeIds.team`), so the others
+ * take a `.` it can't have, or the onboarding's `onb-` (kickoff teams),
+ * and never meet one of its.
  */
 const ids = {
-  rosterTeam: (id: string) => `team-${id}`,
+  rosterTeam: intakeIds.team,
   leadInterview: (rosterTeamId: string) => `src.lead-${rosterTeamId}`,
   document: (id: string) => `src.document-${id}`,
   documentTool: (slug: string) => `tool.document-${slug}`,

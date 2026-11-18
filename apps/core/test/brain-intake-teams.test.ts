@@ -73,7 +73,7 @@ const statementsFor = async (
 ): Promise<string[]> => {
   const brain = await api.brain.read();
   return brain.statements
-    .filter(({ teamIds }) => teamIds.includes(`team-${ids.team}`))
+    .filter(({ teamIds }) => teamIds.includes(ids.team))
     .map(({ text }) => text)
     .toSorted();
 };
@@ -660,7 +660,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
         member.api.brain.read(),
         member.api.brain.thinking(),
       ]);
-      const teamId = `team-${ids.team}`;
+      const teamId = ids.team;
       return {
         page: page.statements
           .filter(({ teamIds }) => teamIds.includes(teamId))
@@ -723,7 +723,7 @@ describe("what a team said, put together", { timeout: 120_000 }, () => {
     expect({
       statements: await statementsFor(member.api, ids),
       drawn: workflows
-        .filter(({ teamId }) => teamId === `team-${ids.team}`)
+        .filter(({ teamId }) => teamId === ids.team)
         .map(({ name }) => name),
     }).toStrictEqual({
       statements: ["Tickets come in through Zendesk."],

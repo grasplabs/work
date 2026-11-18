@@ -1486,10 +1486,17 @@ export class Onboarding extends DurableObject<Env> {
   async saveRoster(
     roster: Roster,
     by: AuditActor,
-    { confirmed = true }: { confirmed?: boolean } = {}
+    {
+      confirmed = true,
+      minted = new Set(),
+    }: {
+      confirmed?: boolean;
+      /** The ids of `roster`'s teams core made for the list (`teams.minted`). */
+      minted?: ReadonlySet<string>;
+    } = {}
   ): Promise<OnboardingView> {
     return await this.#fallenFirst(
-      async () => await this.#saveRosterOnce(roster, by, { confirmed })
+      async () => await this.#saveRosterOnce(roster, by, { confirmed, minted })
     );
   }
 
@@ -1497,13 +1504,14 @@ export class Onboarding extends DurableObject<Env> {
   async #saveRosterOnce(
     roster: Roster,
     by: AuditActor,
-    { confirmed = true }: { confirmed?: boolean } = {}
+    { confirmed, minted }: { confirmed: boolean; minted: ReadonlySet<string> }
   ): Promise<OnboardingView> {
     const fresh = await this.#freshCodes(roster);
     const said = this.ctx.storage.transactionSync(() => {
       const before = this.#roster();
       const { removed, erased } = this.#writeRoster(roster, fresh, {
         late: false,
+        minted,
       });
       this.#dueAgain(teamsBack(before, roster, { confirmed }));
       if (confirmed) {
@@ -1649,7 +1657,7 @@ export class Onboarding extends DurableObject<Env> {
   #writeRoster(
     roster: Roster,
     fresh: readonly { person: string; linkId: string; mark: string }[],
-    { late }: { late: boolean },
+    { late, minted }: { late: boolean; minted: ReadonlySet<string> },
     now: string = new Date().toISOString()
   ): { removed: number; erased: string[] } {
     const kept = new Set(roster.people.map((person) => person.id));
@@ -1682,6 +1690,7 @@ export class Onboarding extends DurableObject<Env> {
         .values({
           ...team,
           position,
+          minted: minted.has(team.id),
           mappedAt: was?.mappedAt ?? null,
           // What its map drew, kept apart from what the admin wrote (GRA-1748).
           mappedDoes: was?.mappedDoes ?? null,
@@ -4876,6 +4885,49 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * A team renamed in Settings › Members (GRA-2055): the staff list names
+   * the members' teams, so its name there follows at once, and so does
+   * what every member reads of the company's teams, given to the Brain
+   * anew (`#keepConfirmed`). Nothing when the list has no such team.
+   */
+  renameTeam(id: string, name: string): void {
+    this.ctx.storage.transactionSync(() => {
+      this.#db.update(teams).set({ name }).where(eq(teams.id, id)).run();
+      const held = this.companyTeams();
+      if (held === null || !held.teams.some((team) => team.id === id)) {
+        return;
+      }
+      this.#keepConfirmed(
+        held.at,
+        held.teams.map((team) => (team.id === id ? { ...team, name } : team))
+      );
+    });
+    this.#deliverAudit();
+  }
+
+  /**
+   * The staff list's teams as the store holds them (GRA-2055): their ids,
+   * names, and whether core made each id for the list (`teams.minted`).
+   */
+  heldTeams(): { id: string; name: string; minted: boolean }[] {
+    return this.#db
+      .select({ id: teams.id, name: teams.name, minted: teams.minted })
+      .from(teams)
+      .all();
+  }
+
+  /** Whether the staff list has the members' team `id` (GRA-2055). */
+  listsTeam(id: string): boolean {
+    return (
+      this.#db
+        .select({ id: teams.id })
+        .from(teams)
+        .where(eq(teams.id, id))
+        .all().length > 0
+    );
+  }
+
+  /**
    * The roster as Grasp's staff read it: what each team does as its lead's
    * map drew it, where it did (`mappedDoes`), else as the admin described
    * it. Staff's alone (admin-snapshot.ts); never a member's, never the
@@ -4940,7 +4992,11 @@ export class Onboarding extends DurableObject<Env> {
    * teams, as a version saying so, so it never keeps listing them.
    */
   #rosterConfirmed(at: string): void {
-    const confirmed = this.#confirmedTeams();
+    this.#keepConfirmed(at, this.#confirmedTeams());
+  }
+
+  /** `#rosterConfirmed`'s keeping of `confirmed`, as confirmed at `at`. */
+  #keepConfirmed(at: string, confirmed: CompanyTeam[]): void {
     this.ctx.storage.kv.put(rosterConfirmedKey, { at, teams: confirmed });
     const before = this.#rosterHanded();
     if (confirmed.length === 0 && before === null) {

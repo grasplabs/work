@@ -14,6 +14,7 @@ import {
   StaffListError,
   staffListOf,
   withLeadsFrom,
+  intoTeam,
   withSaved,
 } from "./staff-list.ts";
 
@@ -263,6 +264,9 @@ describe("the teams and people in a staff list", () => {
   });
 });
 
+/** A team's id as core keeps it: its members' team's (GRA-2055), never the list's. */
+const membersId = (team: string): string => `members-${team}`;
+
 describe("a staff list shared again", () => {
   const rows = [
     ["Name", "Email", "Team", "Team lead"],
@@ -280,12 +284,14 @@ describe("a staff list shared again", () => {
   const saved: Roster = rosterSchema.parse({
     teams: first.teams.map((team) => ({
       ...team,
+      id: membersId(team.id),
       off: team.name === "Board",
       lead: team.name === "Sales" ? idOf("Sam Visser") : team.lead,
       does: team.name === "Ops" ? "Plans the routes" : "",
     })),
     people: first.people.map((person) => ({
       ...person,
+      team: membersId(person.team),
       away: person.name === "Sam Visser",
     })),
   });
@@ -297,11 +303,17 @@ describe("a staff list shared again", () => {
       saved
     );
     expect(
-      again.teams.map((team) => [team.name, team.off, team.lead, team.does])
+      again.teams.map((team) => [
+        team.name,
+        team.id,
+        team.off,
+        team.lead,
+        team.does,
+      ])
     ).toStrictEqual([
-      ["Sales", false, idOf("Sam Visser"), ""],
-      ["Ops", false, null, "Plans the routes"],
-      ["Board", true, null, ""],
+      ["Sales", membersId(teamOf("Sales")), false, idOf("Sam Visser"), ""],
+      ["Ops", membersId(teamOf("Ops")), false, null, "Plans the routes"],
+      ["Board", membersId(teamOf("Board")), true, null, ""],
     ]);
     expect(
       again.people.map((person) => [person.name, person.away])
@@ -320,9 +332,9 @@ describe("a staff list shared again", () => {
       row[0] === "Sam Visser" ? ["Sam Visser", "sam@x.com", "Ops", ""] : row
     );
     const again = withSaved(staffListOf(moved, "Other").roster, saved);
-    expect(again.teams.find((team) => team.id === teamOf("Sales"))?.lead).toBe(
-      idOf("Lea Bakker")
-    );
+    expect(
+      again.teams.find((team) => team.id === membersId(teamOf("Sales")))?.lead
+    ).toBe(idOf("Lea Bakker"));
     expect(rosterSchema.safeParse(again).success).toBeTruthy();
   });
 
@@ -471,21 +483,25 @@ describe("the leads from the HR platform", () => {
       "Other"
     ).roster;
     const [service, finance] = before.teams;
+    // As core keeps it: under the members' teams' ids (GRA-2055).
     const saved: Roster = {
       teams: before.teams.map((team) =>
         team.id === finance?.id
           ? {
               ...team,
+              id: membersId(team.id),
               lead:
                 before.people.find(({ name }) => name === "Joost Smit")?.id ??
                 null,
               off: true,
             }
-          : team
+          : { ...team, id: membersId(team.id) }
       ),
-      people: before.people.map((person) =>
-        person.name === "Lisa Jansen" ? { ...person, away: true } : person
-      ),
+      people: before.people.map((person) => ({
+        ...person,
+        team: membersId(person.team),
+        away: person.name === "Lisa Jansen",
+      })),
     };
     // HiBob knows who reports to whom in customer service, not in finance.
     const fromHr = directoryListOf(
@@ -529,11 +545,81 @@ describe("the leads from the HR platform", () => {
       taken: rosterSchema.safeParse(merged).success,
     }).toStrictEqual({
       teams: [
-        { id: service?.id, lead: "Daan Bakker", off: false },
-        { id: finance?.id, lead: "Joost Smit", off: true },
+        { id: membersId(service?.id ?? ""), lead: "Daan Bakker", off: false },
+        { id: membersId(finance?.id ?? ""), lead: "Joost Smit", off: true },
       ],
       away: ["Lisa Jansen"],
       taken: true,
     });
+  });
+});
+
+/** A roster's teams, as the admin sees them on the confirm screen. */
+const teamsOf = (kept: Roster) =>
+  kept.teams.map(({ id, name, lead, off }) => ({ id, name, lead, off }));
+
+/** Who is in which team. */
+const peopleOf = (kept: Roster) =>
+  kept.people.map(({ id, team }) => [id, team]);
+
+describe("a staff list's team made one the company has", () => {
+  const roster: Roster = rosterSchema.parse({
+    teams: [
+      { id: "support", name: "Support", lead: "lea" },
+      { id: "service", name: "Customer service", lead: "sam", off: true },
+    ],
+    people: [
+      { id: "lea", name: "Lea", team: "support" },
+      { id: "ona", name: "Ona", team: "support" },
+      { id: "sam", name: "Sam", team: "service" },
+    ],
+  });
+
+  it("takes a members' team's id and name, keeping its lead, when the list has no such team", () => {
+    const kept = intoTeam(roster, "support", { id: "m-1", name: "Helpdesk" });
+    expect({
+      teams: teamsOf(kept),
+      people: peopleOf(kept),
+      valid: rosterSchema.safeParse(kept).success,
+    }).toStrictEqual({
+      teams: [
+        { id: "m-1", name: "Helpdesk", lead: "lea", off: false },
+        { id: "service", name: "Customer service", lead: "sam", off: true },
+      ],
+      people: [
+        ["lea", "m-1"],
+        ["ona", "m-1"],
+        ["sam", "service"],
+      ],
+      valid: true,
+    });
+  });
+
+  it("makes two of the list's teams one, the one picked as it was", () => {
+    const kept = intoTeam(roster, "support", {
+      id: "service",
+      name: "Customer service",
+    });
+    expect({
+      teams: teamsOf(kept),
+      people: peopleOf(kept),
+      valid: rosterSchema.safeParse(kept).success,
+    }).toStrictEqual({
+      teams: [
+        { id: "service", name: "Customer service", lead: "sam", off: true },
+      ],
+      people: [
+        ["lea", "service"],
+        ["ona", "service"],
+        ["sam", "service"],
+      ],
+      valid: true,
+    });
+  });
+
+  it("is the list itself when its team is picked", () => {
+    expect(
+      intoTeam(roster, "support", { id: "support", name: "Support" })
+    ).toBe(roster);
   });
 });

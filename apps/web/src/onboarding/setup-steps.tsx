@@ -126,6 +126,7 @@ import type {
   SetupStep,
 } from "./setup.ts";
 import {
+  intoTeam,
   csvRows,
   directoryListOf,
   exampleList,
@@ -133,6 +134,7 @@ import {
   staffListOf,
   withSaved,
 } from "./staff-list.ts";
+import type { MemberTeam } from "./staff-list.ts";
 import {
   noteHeard,
   orgConfirmed,
@@ -184,6 +186,8 @@ export interface SetupData {
   /** What Grasp's AI has to call; null when core can't say. */
   ai: AiReadiness | null;
   identity: Identity;
+  /** The members' teams (Settings › Members), which a staff list's team can be. */
+  memberTeams: MemberTeam[];
 }
 
 /** Whether the admin has Grasp's mail to let through: it sends, from a sender core names. */
@@ -1484,6 +1488,55 @@ const Pulse = (props: StepProps) => (
   <PulseStep {...connectProps(props)} lines={useHeadlines(props).pulse} />
 );
 
+/**
+ * Which team a staff list's team is (GRA-2055): its own, under the name the
+ * list gives it, or one the company has already (Settings › Members), which
+ * its people then join.
+ */
+const TeamPick = ({
+  team,
+  memberTeams,
+  onPick,
+}: {
+  team: Roster["teams"][number];
+  memberTeams: readonly MemberTeam[];
+  onPick: (to: MemberTeam) => void;
+}) => {
+  const { t } = useLingui();
+  const { name } = team;
+  const options = [
+    { value: team.id, label: name },
+    ...memberTeams
+      .filter(({ id }) => id !== team.id)
+      .map(({ id, name: label }) => ({ value: id, label })),
+  ];
+  return (
+    <Select
+      items={options}
+      onValueChange={(value: unknown) => {
+        const to = options.find((option) => option.value === value);
+        if (to !== undefined) {
+          onPick({ id: to.value, name: to.label });
+        }
+      }}
+      value={team.id}
+    >
+      <SelectTrigger aria-label={t`Which team ${name} is`} className="w-full">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectGroup>
+          {options.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+      </SelectContent>
+    </Select>
+  );
+};
+
 const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
   const { t } = useLingui();
   const lines = useHeadlines(props).leads;
@@ -1563,15 +1616,14 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
                 key={team.id}
               >
                 <div className="flex min-w-0 flex-col">
-                  <span
-                    className={cn(
-                      "truncate",
-                      team.off &&
-                        "text-muted-foreground decoration-border line-through"
-                    )}
-                  >
-                    {name}
-                  </span>
+                  <TeamPick
+                    memberTeams={props.data.memberTeams}
+                    onPick={(to) => {
+                      setSaved(null);
+                      redraft(intoTeam(draft, team.id, to));
+                    }}
+                    team={team}
+                  />
                   <span className="text-muted-foreground text-xs">
                     {plural(count, { one: "# person", other: "# people" })}
                   </span>

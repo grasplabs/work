@@ -60,6 +60,7 @@ import {
   sessions,
   skillShares,
   teamMembers,
+  teamPrimaries,
   users,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
@@ -278,6 +279,9 @@ const recordRemoval = async (
       .returning({ userId: memberRemovals.userId }),
     outboxedIfChanged(db, memberEntry(by, "member.removed", memberId, userId)),
     db.delete(teamMembers).where(and(eq(teamMembers.userId, userId), removed)),
+    db
+      .delete(teamPrimaries)
+      .where(and(eq(teamPrimaries.userId, userId), removed)),
     db
       .delete(members)
       .where(

@@ -13,6 +13,21 @@ export const useTeamChange = (refresh: () => Promise<void>) => {
   const { t } = useLingui();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
+  /** What a refusal core explains says, if it is one. */
+  const refusalOf = (error: unknown): string | undefined => {
+    if (!(error instanceof TeamChangeError)) {
+      return undefined;
+    }
+    if (error.status === 403) {
+      return t`Only admins can change teams.`;
+    }
+    // A team on the onboarding's staff list is deleted only once it is
+    // off it (core's auth.ts, GRA-2055).
+    if (error.status === 409) {
+      return t`This team is on the staff list. Take it off there first.`;
+    }
+    return undefined;
+  };
   const run = async (
     change: () => Promise<void>,
     failed: string
@@ -23,10 +38,7 @@ export const useTeamChange = (refresh: () => Promise<void>) => {
     try {
       await changeThenRefresh(change, refresh);
     } catch (error) {
-      refused =
-        error instanceof TeamChangeError && error.status === 403
-          ? t`Only admins can change teams.`
-          : failed;
+      refused = refusalOf(error) ?? failed;
     }
     setFailure(refused);
     setBusy(false);

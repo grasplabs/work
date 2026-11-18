@@ -49,6 +49,7 @@ import {
 import { mayComeIn, staffMayStay } from "../onboarding/gate.ts";
 import { onboardingStore } from "../onboarding/store.ts";
 import { keepSignInAddress } from "../source-readers.ts";
+import { addedByHand, placePrimaries } from "../staff-list-teams.ts";
 import { checkClaims } from "./claims.ts";
 import {
   devIdpOrigin,
@@ -391,6 +392,23 @@ const interviewInvites = async (
 };
 
 /**
+ * Puts a member signing in in the team the confirmed staff list names for
+ * their verified address (GRA-2055), by the confirm's own rule
+ * (staff-list-teams.ts `placementOf`): someone with no account at the
+ * confirm joins their team now. A failure keeps nobody from signing in;
+ * it places nobody, and the next sign-in or confirm tries again.
+ */
+const placeAtSignIn = async (env: Env, userId: string): Promise<void> => {
+  try {
+    await placePrimaries(env, { type: "system" }, userId);
+  } catch (error) {
+    log.error("auth.staff_list_place_failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+};
+
+/**
  * Folds the user Better Auth just made for a first Microsoft sign-in into
  * the member the directory made for the same Entra object id, the one
  * their sign-in's verified ID token names: their account moves to that
@@ -619,7 +637,11 @@ const startSession = async <T extends { expiresAt: Date; userId: string }>(
           })
         : session.userId;
     // For members.
-    return (await ensureMember(env, config, userId))
+    const member = await ensureMember(env, config, userId);
+    if (member) {
+      await placeAtSignIn(env, userId);
+    }
+    return member
       ? {
           data: {
             ...session,
@@ -999,6 +1021,20 @@ const createAuth = (
         // App shared with it away: their hosts tell the open pages to
         // look again (access-revocations.ts).
         organizationHooks: {
+          // A membership an admin adds by hand is theirs, though the staff
+          // list once made it: the list never takes it away (GRA-2055,
+          // staff-list-teams.ts `placementOf`). Marked before Better Auth's
+          // insert, so a confirm landing after the insert never takes the
+          // admin's new row; and again after it, so a confirm that placed
+          // them there in between (Better Auth then finds that row) leaves
+          // it the admin's too. An add that fails, or finds the membership
+          // there already, leaves it the admin's all the same.
+          beforeAddTeamMember: async ({ teamMember }) => {
+            await addedByHand(env, teamMember.teamId, teamMember.userId);
+          },
+          afterAddTeamMember: async ({ teamMember }) => {
+            await addedByHand(env, teamMember.teamId, teamMember.userId);
+          },
           afterRemoveTeamMember: async ({ teamMember }) => {
             await teamAccessMayHaveDropped(env, teamMember.teamId, [
               teamMember.userId,
@@ -1006,6 +1042,21 @@ const createAuth = (
           },
           afterDeleteTeam: async ({ team }) => {
             await teamGone(env, team.id);
+          },
+          // The onboarding's staff list names these same teams (GRA-2055,
+          // staff-list-teams.ts): a rename shows on it at once, and a team
+          // on it is taken off there first, so it never names one gone.
+          afterUpdateTeam: async ({ team }) => {
+            if (team !== null) {
+              await onboardingStore(env).renameTeam(team.id, team.name);
+            }
+          },
+          beforeDeleteTeam: async ({ team }) => {
+            if (await onboardingStore(env).listsTeam(team.id)) {
+              throw new APIError("CONFLICT", {
+                message: "The team is on the staff list.",
+              });
+            }
           },
         },
       }),

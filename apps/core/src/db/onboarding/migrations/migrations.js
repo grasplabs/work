@@ -45,6 +45,7 @@ import m0042 from './0042_team_results_from_shared_lines.sql';
 import m0043 from './0043_team_work_from_the_first_teller.sql';
 import m0044 from './0044_drawings_by_work.sql';
 import m0045 from './0045_cooing_fabian_cortez.sql';
+import m0046 from './0046_team_minted.sql';
 
   export default {
     journal,
@@ -94,7 +95,8 @@ m0041,
 m0042,
 m0043,
 m0044,
-m0045
+m0045,
+m0046
     }
   }
   

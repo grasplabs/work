@@ -74,6 +74,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // Every address a person's sign-ins proved, for their erasure alone
   // (source-readers.ts): forgotten with their accounts.
   "core.sign_in_addresses": { erased: "identity" },
+  "core.staff_list_places": { erased: "identity" },
   "core.members": { erased: "removal" },
   "core.member_removals": { kept: "keeps someone removed out" },
   "core.person_erasures": { kept: "the erasure's own record, by ID" },
@@ -91,6 +92,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.invitations": { erased: "channels" },
   "core.teams": { none: "member_count is a count" },
   "core.team_members": { erased: "removal" },
+  "core.team_primaries": { erased: "removal" },
   "core.sso_providers": { none: "stays empty: providers come from config" },
   "core.permissions": { company: "grants they asked for or gave" },
   "core.apps": { company: "Apps they own or changed" },
@@ -856,6 +858,8 @@ export const reviewedPersonColumns: Readonly<
   "core.stephen_summaries": ["person_id"],
   "core.stephen_summary_readers": ["person_id"],
   "core.team_members": ["user_id"],
+  "core.staff_list_places": ["email"],
+  "core.team_primaries": ["user_id"],
   "core.teams": ["member_count"],
   "core.tool_class_settings": ["changed_by"],
   "core.trigger_resource_versions": ["principal_binding"],

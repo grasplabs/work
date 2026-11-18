@@ -68,6 +68,7 @@ import type {
   SetupPath,
   SetupStep,
 } from "../onboarding/setup.ts";
+import type { MemberTeam } from "../onboarding/staff-list.ts";
 import { wasHeard } from "../onboarding/visit.ts";
 import { signInErrorSearch } from "../sign-in-errors.ts";
 import { useCore } from "../use-core.ts";
@@ -625,6 +626,8 @@ interface Loaded {
   hr: OnboardingHr | null;
   /** What Grasp's AI has to call; null when core can't say. */
   ai: AiReadiness | null;
+  /** The members' teams (Settings › Members), which the staff list's teams are. */
+  memberTeams: MemberTeam[];
 }
 
 export const Route = createFileRoute("/setup")({
@@ -689,6 +692,7 @@ export const Route = createFileRoute("/setup")({
         ai,
         place,
         flow,
+        memberTeams,
       ] = await Promise.all([
         session.onboarding.view(),
         session.onboarding.links(),
@@ -703,6 +707,7 @@ export const Route = createFileRoute("/setup")({
         aiReadinessOf(session),
         session.onboarding.place(),
         session.onboarding.flow(),
+        session.members.teams(),
       ]);
       return {
         view,
@@ -718,6 +723,7 @@ export const Route = createFileRoute("/setup")({
         ai,
         place,
         flow,
+        memberTeams: memberTeams.map(({ id, name }) => ({ id, name })),
       };
     }),
   component: Setup,
