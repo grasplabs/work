@@ -211,10 +211,11 @@ export const threadStyles = stylex.create({
 export const threadPlaces = stylex.create({
   height: (height: string) => ({ height }),
   at: (start: string) => ({ transform: `translateY(${start})` }),
-  // Room kept under a sent message: the box is at least as tall as puts that message at the top
-  // of the view (a little under its edge), so the answer under it grows into space.
+  // Room kept under a sent message: the box is at least as tall as puts that message (or the day
+  // line straight above it) at the top of the view, below the top's fade (the scroller's scroll
+  // padding, space-16), so it reads whole and the answer under it grows into space.
   room: (start: string) => ({
-    minHeight: `calc(${start} + 100% - ${grasp.space4})`,
+    minHeight: `calc(${start} + 100% - ${grasp.space16})`,
   }),
   // The lead, set straight on the box as it changes (thread.stylex.ts).
   lead: (lead: string) => ({ [threadVars.lead]: lead }),

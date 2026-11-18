@@ -99,7 +99,8 @@ export interface ThreadProps<T extends ThreadItemBase> {
    */
   startAt?: "end" | "unread";
   /**
-   * The id of the message the person just sent. It goes to the top of the view, and the room
+   * The id of the message the person just sent. It goes to the top of the view, below the top's
+   * fade and whole, with its day line when one stands straight above it; and the room
    * under it is kept for the answer, so the answer grows into space instead of pushing the page
    * up a line at a time. Once the answer is taller than that room, the thread follows it as ever.
    * The thread needs a height of its own for this (a fixed one, or its place in a layout that
@@ -580,20 +581,24 @@ const useViewHeight = (scroller: RefObject<HTMLDivElement | null>) => {
  * Where the sent message starts, when room can be kept under it: its row is drawn, and the
  * scroller has a height of its own. A scroller that is only as tall as its messages has no view
  * to keep room in (the room is a share of its height, and would make it taller for ever), so there
- * the thread simply follows its end.
+ * the thread simply follows its end. With a day line straight above it (the first message of a
+ * day, or of a new chat), the room is reckoned from that line, so the day stays in view with it.
  */
 const sentStart = (
   answerTo: string | undefined,
-  placed: readonly { key: string; start: number }[],
+  placed: readonly { key: string; start: number; index: number }[],
   view: number | null,
   size: number
 ) => {
   if (answerTo === undefined || view === null || Math.abs(view - size) <= 2) {
     return null;
   }
-  return (
-    placed.find((place) => place.key === `message-${answerTo}`)?.start ?? null
-  );
+  const sent = placed.find((place) => place.key === `message-${answerTo}`);
+  if (sent === undefined) {
+    return null;
+  }
+  const above = placed.find((place) => place.index === sent.index - 1);
+  return above?.key.startsWith("date-") === true ? above.start : sent.start;
 };
 
 /**

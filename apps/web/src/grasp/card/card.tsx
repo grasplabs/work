@@ -26,7 +26,7 @@ import { focus } from "../focus/focus";
 import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
-import { cardLinkMarker } from "./markers.stylex";
+import { cardLinkMarker, cardVars } from "./markers.stylex";
 
 /** What a caller may style: where the card sits and how wide it is. Never its look. */
 export type CardLayoutStyle = LayoutStyle;
@@ -124,9 +124,9 @@ const styles = stylex.create({
     overflow: "hidden",
     alignContent: { default: "start", ":has(> :only-child)": "stretch" },
   },
-  none: { padding: 0 },
-  md: { padding: grasp.space4 },
-  lg: { padding: grasp.space6 },
+  none: { padding: 0, [cardVars.inset]: "0px" },
+  md: { padding: grasp.space4, [cardVars.inset]: grasp.space4 },
+  lg: { padding: grasp.space6, [cardVars.inset]: grasp.space6 },
   // Palermo's title and body: 18 on 24, then 15 on 20 right under it. Its own tracking, so a
   // host page's heading rules never reach it; it wraps as words do, not balanced.
   title: {
@@ -153,7 +153,9 @@ const styles = stylex.create({
   media: {
     display: "block",
     overflow: "hidden",
-    borderRadius: `calc(${grasp.corner} - ${grasp.space2})`,
+    // Concentric with the card: the card's corner less its padding, and never under the smallest
+    // corner (corner-mark), which a 20px card with 16px padding would otherwise go to (4px).
+    borderRadius: `max(${grasp.cornerMark}, calc(${grasp.corner} - ${cardVars.inset}))`,
     cornerShape: grasp.cornerShape,
     opacity: {
       default: 1,
