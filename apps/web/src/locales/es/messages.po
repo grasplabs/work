@@ -406,6 +406,10 @@ msgstr "{count, plural, one {Volver a la pregunta} other {Volver a las # pregunt
 msgid "{count, plural, one {Company Brain, read only. This App can recall what everyone in the company may read and what the team {teamNames} may read, as far as the person it works for is in that team, and look up the entities and memories everyone in the company may read. Only people in that team can use it, its owner and admins too. It can never write to the Brain. Every read is recorded} other {Company Brain, read only. This App can recall what everyone in the company may read and what the teams {teamNames} may read, as far as the person it works for is in them, and look up the entities and memories everyone in the company may read. Only people in all of them can use it, its owner and admins too. It can never write to the Brain. Every read is recorded}}"
 msgstr "{count, plural, one {Company Brain, solo lectura. Esta App puede recuperar lo que todos en la empresa pueden leer y lo que el equipo {teamNames} puede leer, en la medida en que la persona para la que trabaja esté en ese equipo, y consultar las entidades y los recuerdos que todos en la empresa pueden leer. Solo las personas de ese equipo pueden usarla, también su propietario y los administradores. Nunca puede escribir en el Brain. Cada lectura queda registrada} other {Company Brain, solo lectura. Esta App puede recuperar lo que todos en la empresa pueden leer y lo que los equipos {teamNames} pueden leer, en la medida en que la persona para la que trabaja esté en ellos, y consultar las entidades y los recuerdos que todos en la empresa pueden leer. Solo las personas que estén en todos ellos pueden usarla, también su propietario y los administradores. Nunca puede escribir en el Brain. Cada lectura queda registrada}}"
 
+#: src/brain/skills-page.tsx
+msgid "{count, plural, one {From your last run of {workflow}, version {version}, which succeeded on {ended}.} other {From your last # runs of {workflow}, version {version}, which all succeeded, the latest on {ended}.}}"
+msgstr "{count, plural, one {De tu última ejecución de {workflow}, versión {version}, que salió bien el {ended}.} other {De tus últimas # ejecuciones de {workflow}, versión {version}, que salieron todas bien, la última el {ended}.}}"
+
 #: src/drafts/share-with-team.tsx
 msgid "{count, plural, one {It can't be shared yet: # problem} other {It can't be shared yet: # problems}}"
 msgstr "{count, plural, one {Aún no se puede compartir: # problema} other {Aún no se puede compartir: # problemas}}"
@@ -2061,6 +2065,10 @@ msgstr "Añadir esta programación"
 #: src/projects/file-item-dialog.tsx
 msgid "Add to {projectName}"
 msgstr "Añadir a {projectName}"
+
+#: src/brain/skills-page.tsx
+msgid "Add to your skills"
+msgstr "Añadir a tus skills"
 
 #: src/apps/app-webhooks.tsx
 msgid "Add webhook"
@@ -5036,6 +5044,11 @@ msgstr "Desconectada el {since}."
 msgid "Dismiss"
 msgstr "Cerrar"
 
+#: src/brain/skills-page.tsx
+msgctxt "a skill proposed to you"
+msgid "Dismiss"
+msgstr "Descartar"
+
 #: src/apps/app-workspace.tsx
 msgid "Dismiss the tip"
 msgstr "Cerrar el consejo"
@@ -5181,6 +5194,10 @@ msgstr "Descargar tabla como Markdown"
 #: src/workflows/workflows-table.tsx
 msgid "Draft"
 msgstr "Borrador"
+
+#: src/brain/skills-page.tsx
+msgid "Drafted from your own runs of a workflow that keep succeeding. Only you see them, and none is used until you add it to your skills."
+msgstr "Redactadas a partir de tus propias ejecuciones de un workflow que siguen saliendo bien. Solo tú las ves, y ninguna se usa hasta que la añades a tus skills."
 
 #: src/settings/stephen-settings.tsx
 msgid "Drafts, events and files of their own, after they press a card."
@@ -10990,6 +11007,10 @@ msgstr "Propuesto"
 msgctxt "a link Grasp proposed that nobody confirmed yet"
 msgid "Proposed"
 msgstr "Propuesto"
+
+#: src/brain/skills-page.tsx
+msgid "Proposed for you"
+msgstr "Propuestas para ti"
 
 #: src/activity/audit-words.ts
 msgid "Proposed packages"
