@@ -40,6 +40,7 @@ import {
 import {
   candidateRunFor,
   startCandidateRun,
+  sweepCandidateRuns,
 } from "../src/workflows/candidate-runs.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { allEvents } from "./audit-events.ts";
@@ -1158,6 +1159,41 @@ describe("what a workflow keeps of what its run read", setUpTime, () => {
       keptPast: true,
       afterErasure: "revoked",
       afterReset: 0,
+    });
+  });
+
+  it("lets a writer's evidence go past retention once the test run that started from its key is swept away", async () => {
+    const { admin, ada } = await people();
+    const word = `ledger${unique().replaceAll(/\W/gu, "")}`;
+    const source: SourceRef = { producer: "upload", id: crypto.randomUUID() };
+    await sourceSaying(source, `The ${word} closes on Friday.`);
+    const workflow = await keepingWorkflow(ada, admin, recalling);
+    const reader = await started(ada, workflow.id, {
+      entity: unique(),
+      ask: word,
+      keep: true,
+    });
+    await ended(ada, workflow.id, reader);
+    const test = await testRunOf(ada, workflow.id, false);
+    await testRunShown(ada, workflow.id, test);
+    const read = await evidenceOf(reader);
+    // No key names the reader any more: only the test run started from it.
+    await resetWorkflowState(env, ada, workflow.id);
+    const past = new Date(Date.now() + 31 * day);
+
+    // The test run goes after its week, then the reader past its 30 days.
+    await sweepCandidateRuns(env, past);
+    await runQuarterHourTasks({}, past);
+    await runQuarterHourTasks({}, new Date(past.getTime() + 15 * 60 * 1000));
+
+    expect({
+      read: read > 0,
+      test: await outcome(candidateRunFor(env, ada, workflow.id, test)),
+      afterRetention: await evidenceOf(reader),
+    }).toStrictEqual({
+      read: true,
+      test: "workflow.candidate_unavailable",
+      afterRetention: 0,
     });
   });
 
