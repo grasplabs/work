@@ -134,12 +134,16 @@ test("a question core never confirms says it wasn't sent, and keeps it in the bo
 }) => {
   const { user } = peopleIn("chatUnheard");
   const page = await pageOf(user);
-  // Core's answer to a send never comes back: the RPC socket passes all
-  // else, but not the send.
+  // Core never answers the send: from the send on, what the page sends
+  // is held back whole rather than the send alone dropped (a gap in the
+  // RPC stream makes core close the socket), so core simply hears nothing
+  // more from the page.
   await page.routeWebSocket(/\/rpc/u, (socket) => {
     const server = socket.connectToServer();
+    let holding = false;
     socket.onMessage((message) => {
-      if (!String(message).includes('"chats","send"')) {
+      holding ||= String(message).includes('"chats","send"');
+      if (!holding) {
         server.send(message);
       }
     });
