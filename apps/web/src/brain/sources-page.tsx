@@ -845,7 +845,7 @@ const ConnectionFeeds = ({ connections }: { connections: Connection[] }) => {
             </Trans>
           </p>
           <ul className="flex flex-col gap-2 text-sm">
-            {connections.map(({ name, keepsReads }) => (
+            {connections.map(({ name, keepsReads, activityGap }) => (
               <li className="flex flex-col" key={name}>
                 <span>{name}</span>
                 <span className="text-muted-foreground">
@@ -859,6 +859,14 @@ const ConnectionFeeds = ({ connections }: { connections: Connection[] }) => {
                     <Trans>Searched live, nothing kept.</Trans>
                   )}
                 </span>
+                {activityGap === true ? (
+                  <span className="text-muted-foreground">
+                    <Trans>
+                      A gap: this connection can’t tell Grasp what changed in
+                      it, so Grasp sees only what is done there through Grasp.
+                    </Trans>
+                  </span>
+                ) : null}
               </li>
             ))}
           </ul>

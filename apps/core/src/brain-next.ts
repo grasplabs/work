@@ -17,6 +17,7 @@ import {
   changeReused,
   listPageMax,
   erasureReasons,
+  eventsPerAddMax,
   exportFileNameSchema,
   exportIdSchema,
   handOversMax,
@@ -56,6 +57,7 @@ import type {
   Extract as BrainExtract,
   Access,
   AskModel,
+  NewEvent,
   AttributeRule,
   Brain,
   ContestedCursor,
@@ -126,7 +128,7 @@ import type {
 import { brainSourceErrors, firstLineOf } from "@grasp-os/shared/brain-sources";
 import { brainConnectionIdSchema } from "@grasp-os/shared/connect";
 import { withinTime } from "@grasp-os/shared/deadline";
-import { sha256Hex } from "@grasp-os/shared/encoding";
+import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -139,7 +141,11 @@ import type { InstructionFileRef } from "@grasp-os/shared/instruction-files";
 import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import type { ModelErrorCode } from "@grasp-os/shared/models";
-import { permissionErrors } from "@grasp-os/shared/permissions";
+import { minTeamShown } from "@grasp-os/shared/onboarding";
+import {
+  permissionActionSchema,
+  permissionErrors,
+} from "@grasp-os/shared/permissions";
 import { holdsKnownCredential, redact } from "@grasp-os/shared/redact";
 import { skillErrors } from "@grasp-os/shared/skills";
 import { sourceReaderSchema } from "@grasp-os/shared/source-readers";
@@ -154,9 +160,13 @@ import {
   ownStoresTotals,
 } from "./brain-own-stores.ts";
 import type { OwnStoreHealth } from "./brain-own-stores.ts";
-import { largeEnoughAudiences } from "./brain-share-audiences.ts";
+import {
+  largeEnoughAudiences,
+  teamsOfAtLeast,
+} from "./brain-share-audiences.ts";
 import { audiencesRead } from "./connection-audiences.ts";
 import type { ConnectionAudience } from "./connection-audiences.ts";
+import { derivedHmacKey } from "./derived-keys.ts";
 import { inJurisdiction, workspace } from "./durable-objects.ts";
 import {
   embedInBulk,
@@ -167,6 +177,7 @@ import {
 import { parseModelRef } from "./model-catalog.ts";
 import { brainSpendByPurpose, spendMonth } from "./model-spend.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
+import { teamsWithMembers } from "./organization-teams.ts";
 import { organizationTimeZone } from "./organization.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { shippedSkills } from "./shipped-skills.ts";
@@ -6606,4 +6617,184 @@ export const forgetForAppAs = async (
   } catch (error) {
     throw refusedAs(error);
   }
+};
+
+// Events (GRA-1763): what happened in people's work, kept by the Brain to
+// find routines in, never read back by anyone (@grasp-os/brain-next's
+// events.ts). A producer names the person who did a step; core turns them
+// into their teams here, from its own records read now, and hands the
+// Brain only those teams' groups, never the person. The ways an event
+// could still point at one person, and how each is closed:
+//
+// - A small team's events are its few people's trail: an event is kept
+//   only for a team of at least `minTeamShown` current members now, the
+//   floor every figure about people holds to. A smaller team, no team, or
+//   someone no longer a member, gives none, so a person's erasure has
+//   nothing of theirs to find.
+// - A row joined back to the audit log, or an item to its system: the
+//   event's key is a MAC of the producer's key (for a call, its audit
+//   event's id) and the team, and the item a MAC of its ID, each under a
+//   key of core's own (`derivedHmacKey`), so whoever holds the Brain's
+//   rows alone can't compute either.
+// - A call pinned by its time: the Brain keeps each to the hour.
+// - Figures from five events of one person, and events outliving their
+//   person: each event carries who took it as a MAC of the person and the
+//   team under a third key (`eventWhoPurpose`), so figures can count
+//   distinct people, no tag can be computed or matched to a person
+//   without core's key (one person's tags in two teams differ, though one
+//   call's events in each of their teams co-occur), and a person's
+//   erasure finds and deletes their events in every team
+//   (`eraseEventsOf`). A member removed but not erased keeps theirs, as
+//   history.
+// - A drain that read a person's teams before their erasure writing after
+//   it: the erasure closes their tags in the Brain, which then refuses an
+//   event under one.
+// - A rotated auth secret, after which no erasure could compute the old
+//   tags: each call names its key (`eventKeyIdLabel`), and the Brain drops
+//   every event and closed tag made under another.
+//
+// The Brain deletes every event past its time on core's clock
+// (`expireEvents`).
+
+/** What the key of each event's MAC is derived for (`derivedHmacKey`). */
+const eventKeyPurpose = "grasp-os/brain-event-key/v1";
+
+/** What the key of each event item's MAC is derived for (`derivedHmacKey`). */
+const eventItemPurpose = "grasp-os/brain-event-item/v1";
+
+/** What the key of each event's tag of who took it is derived for (`derivedHmacKey`). */
+const eventWhoPurpose = "grasp-os/brain-event-who/v1";
+
+const observedStepSchema = z.strictObject({
+  /** The producer's key for the step, the same on every retry. */
+  key: changeSchema,
+  personId: idSchema,
+  /** What kind of step: a connection's action, as connect bounds it. */
+  step: permissionActionSchema,
+  item: wellFormedString().min(1).nullable(),
+  at: z.date(),
+});
+
+/**
+ * One step a person took, as a producer hands it to `recordEvents`: its
+ * key, the same on every retry; who took it, turned into their teams and
+ * never kept; what kind of step (a connection's action); the ID of the
+ * item it was on as its system names it, or null; and when, which the
+ * Brain keeps to the hour.
+ */
+export type ObservedStep = z.infer<typeof observedStepSchema>;
+
+/** `text`'s HMAC-SHA256 under `key`, in hex. */
+const macOf = async (key: CryptoKey, text: string): Promise<string> =>
+  toHex(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(text))
+    )
+  );
+
+/**
+ * What names the keys events are made under, for the Brain (`keyId`): a
+ * MAC of this under the `who` key, which identifies the key without
+ * revealing it. The three event keys derive from the same secret, so one
+ * id stands for all three; when it changes, the Brain drops what was made
+ * under the old ones (its events.ts `underKey`).
+ */
+const eventKeyIdLabel = "grasp-os/brain-event-key-id";
+
+/** `personId`'s tag in team `team` (a group, `teamGroup`), under `whoKey`. */
+const whoOf = async (
+  whoKey: CryptoKey,
+  personId: string,
+  team: string
+): Promise<string> => await macOf(whoKey, JSON.stringify([personId, team]));
+
+/**
+ * Keeps `steps` as the Brain's events, one per team each person is in
+ * now that has at least `minTeamShown` current members: safe to repeat,
+ * as each is kept once by its key and team. Server-side, for producers
+ * alone: nothing answers them back.
+ */
+export const recordEvents = async (
+  env: BrainEnv & ReaderEnv & Pick<Env, "BETTER_AUTH_SECRET">,
+  steps: readonly ObservedStep[]
+): Promise<void> => {
+  const observed = checked(z.array(observedStepSchema), steps);
+  const db = drizzle(env.DB);
+  const teamsOf = new Map<string, string[]>();
+  for (const personId of new Set(observed.map((step) => step.personId))) {
+    // oxlint-disable-next-line no-await-in-loop -- one person at a time
+    const [membership, memberTeams] = await db.batch(memberReads(db, personId));
+    const member = memberFrom(personId, membership, memberTeams);
+    teamsOf.set(personId, member?.teams.map(({ id }) => id) ?? []);
+  }
+  const large = await teamsOfAtLeast(
+    env.DB,
+    [...new Set([...teamsOf.values()].flat())],
+    minTeamShown
+  );
+  const [keyKey, itemKey, whoKey] = await Promise.all([
+    derivedHmacKey(env, eventKeyPurpose, ["sign"]),
+    derivedHmacKey(env, eventItemPurpose, ["sign"]),
+    derivedHmacKey(env, eventWhoPurpose, ["sign"]),
+  ]);
+  const events: NewEvent[] = [];
+  for (const { key, personId, step, item, at } of observed) {
+    // oxlint-disable-next-line no-await-in-loop -- one MAC at a time
+    const marked = item === null ? null : await macOf(itemKey, item);
+    for (const teamId of teamsOf.get(personId) ?? []) {
+      if (large.has(teamId)) {
+        const team = teamGroup(teamId);
+        events.push({
+          // oxlint-disable-next-line no-await-in-loop -- one MAC at a time
+          key: await macOf(keyKey, JSON.stringify([key, team])),
+          team,
+          step,
+          item: marked,
+          // oxlint-disable-next-line no-await-in-loop -- one MAC at a time
+          who: await whoOf(whoKey, personId, team),
+          at: at.toISOString(),
+        });
+      }
+    }
+  }
+  for (let start = 0; start < events.length; start += eventsPerAddMax) {
+    // oxlint-disable-next-line no-await-in-loop -- one page at a time
+    await brain(env).addEvents({
+      // oxlint-disable-next-line no-await-in-loop -- one page at a time
+      keyId: await macOf(whoKey, eventKeyIdLabel),
+      events: events.slice(start, start + eventsPerAddMax),
+    });
+  }
+};
+
+/**
+ * Deletes every event `personId` took, in whichever team: their tag for
+ * each of the organization's teams, as core keeps them now, since they may
+ * have left one. A team deleted since is no longer known: its events of
+ * theirs go only with their time (`eventsKeptMs`). For their erasure
+ * (person-erasure.ts); safe to repeat.
+ */
+export const eraseEventsOf = async (
+  env: Env,
+  personId: string
+): Promise<void> => {
+  const person = checked(idSchema, personId);
+  const teamRows = await teamsWithMembers(env);
+  const whoKey = await derivedHmacKey(env, eventWhoPurpose, ["sign"]);
+  const who = await Promise.all(
+    teamRows.map(async ({ id }) => await whoOf(whoKey, person, teamGroup(id)))
+  );
+  const keyId = await macOf(whoKey, eventKeyIdLabel);
+  for (let start = 0; start < who.length; start += eventsPerAddMax) {
+    // oxlint-disable-next-line no-await-in-loop -- one page at a time
+    await brain(env).eraseEvents({
+      keyId,
+      who: who.slice(start, start + eventsPerAddMax),
+    });
+  }
+};
+
+/** Deletes every event the Brain keeps past its time: core's clock runs it. */
+export const expireEvents = async (env: BrainEnv): Promise<void> => {
+  await brain(env).expireEvents();
 };

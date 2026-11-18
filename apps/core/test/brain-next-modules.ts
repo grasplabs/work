@@ -21,8 +21,12 @@ export const brainModules = {
   "apps/core/src/agent-app-access.ts": "agentApps",
   // The skills' rules (GRA-1826): its own surface, each export probed.
   "apps/core/src/brain-skills.ts": "skills",
-  // Runs core's workBrain on the clock, and hands nothing of it on.
+  // Runs core's workBrain and expireEvents on the clock, and hands nothing
+  // of them on.
   "apps/core/src/clock.ts": "core",
+  // Keeps the tool calls connect audited as events with core's
+  // recordEvents, which answers nothing.
+  "apps/core/src/brain-events.ts": "core",
   // Answers the staff with core's brainStaffReport, actOnBrainForStaff and
   // brainErasureForStaff, through their schemas.
   "apps/core/src/brain-report.ts": "core",
