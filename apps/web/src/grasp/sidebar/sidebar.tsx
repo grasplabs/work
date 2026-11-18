@@ -28,6 +28,7 @@ import { useWords } from "../words/words";
 import { useFoldKeys } from "./fold-keys";
 import { SidebarNav } from "./nav";
 import type { SidebarFilter } from "./nav";
+import { groupsOf } from "./parts";
 import { SidebarProfile } from "./profile";
 import type { SidebarProfileProps } from "./profile";
 import { RowActions, rowActionsRoom } from "./row-actions";
@@ -92,6 +93,12 @@ export interface SidebarRow extends SidebarSubRow {
   /** Short words at the row's end, quiet, instead of a count: when it happened ("2m"). */
   end?: string;
   /**
+   * Its name in the regular weight, not the places' medium: for a row that is a thing (a chat, a
+   * document), in a list of them, not a place in the product.
+   * @default false
+   */
+  quiet?: boolean;
+  /**
    * What a screen reader hears of `end` ("2 minutes ago").
    * @default `end`
    */
@@ -117,8 +124,11 @@ export interface SidebarMore {
   onClick?: (event: MouseEvent<HTMLElement>) => void;
 }
 
-/** A run of rows, with a label over it when it is not the main one. */
-export interface SidebarGroup {
+/**
+ * A run of rows, as data: what a `section`'s `groups` (and the older shape's `groups`) hold. In a
+ * Sidebar's own list, write a SidebarGroup part instead.
+ */
+export interface SidebarGroupEntry {
   /**
    * The name of a part this group starts, over its label: a level above the group labels, for a
    * long list in a few parts ("Docs", "Components"). The groups after it belong to it until the
@@ -166,7 +176,7 @@ export interface SidebarSection {
   /** The Back row at the top: a link to the parent or the last main page. */
   back: SidebarBack;
   /** Its rows, in runs, top to bottom, as the main list's `groups`. */
-  groups: readonly SidebarGroup[];
+  groups: readonly SidebarGroupEntry[];
   /** Where its groups' folds are kept in localStorage, apart from the main list's. */
   storageKey?: string;
   /** What its rows are, said to a screen reader as a navigation landmark. @default `title` */
@@ -180,8 +190,13 @@ export type SidebarLayoutStyle = LayoutStyle;
 
 /** Every prop a Sidebar takes. */
 export interface SidebarProps {
-  /** The rows, in runs, top to bottom. */
-  groups: readonly SidebarGroup[];
+  /** Its SidebarGroups, top to bottom; or leave it out and give `groups`. */
+  children?: ReactNode;
+  /**
+   * The rows as data, in runs, top to bottom: for a list built from data in one place. Or write the
+   * parts as children. When both are given, `groups` wins.
+   */
+  groups?: readonly SidebarGroupEntry[];
   /**
    * What stands at the top start: the product's mark, or a link home holding it. The head gives it
    * a 20px box (shell-mark), and an svg or img passed here fills that box, even one with no width or
@@ -888,6 +903,8 @@ const styles = stylex.create({
   },
   // A group's last row, to all of its kind: quieter than the rows, in the muted ink and regular
   // weight, its words where the rows' names start.
+  // A row that is a thing, not a place: its name a weight lighter.
+  quiet: { fontWeight: grasp.weightRegular },
   more: {
     color: {
       default: grasp.muted,
@@ -1280,6 +1297,7 @@ const Row = ({ row, item }: { row: SidebarRow; item: boolean }) => {
   const look = stylex.props(
     styles.row,
     hasDetail(row) && styles.rowTall,
+    row.quiet === true && styles.quiet,
     hasActions(row) && rowActionsRoom,
     row.current === true && styles.current,
     focus.inside
@@ -1596,7 +1614,7 @@ const opensFromPeek = (next: boolean, open: boolean, peeking: boolean) =>
   next && !open && peeking;
 
 /** Whether a list has no rows at all. */
-const isEmpty = (groups: readonly SidebarGroup[]) =>
+const isEmpty = (groups: readonly SidebarGroupEntry[]) =>
   groups.every((group) => group.rows.length === 0);
 
 /** Back, drawn as one of the sidebar's rows, with the chevron that points back. */
@@ -1619,7 +1637,7 @@ interface ListAreaProps {
   id: string;
   list: string;
   area: RefObject<HTMLDivElement | null>;
-  groups: readonly SidebarGroup[];
+  groups: readonly SidebarGroupEntry[];
   section: SidebarSection | undefined;
   tabs: readonly SidebarTab[] | undefined;
   tab: string | undefined;
@@ -1819,7 +1837,7 @@ const SidebarDrawn = ({
   onOpen,
   onPeek,
   beside,
-}: SidebarProps & ShellExtras) => {
+}: SidebarProps & ShellExtras & { groups: readonly SidebarGroupEntry[] }) => {
   const words = useWords("sidebar", sidebarWords);
   const label = nameOf(named, labelDeprecated, words.name);
   const searchLabel = searchGiven ?? words.search;
@@ -2121,5 +2139,9 @@ const shellParts = (
 /** A product's main navigation down the start, that folds away and peeks back in. */
 export const Sidebar = (props: SidebarProps) => {
   const shell = useSidebarInShell();
-  return <SidebarDrawn {...props} {...shellParts(props, shell)} />;
+  // Its data, or the parts written in it.
+  const groups = props.groups ?? groupsOf(props.children);
+  return (
+    <SidebarDrawn {...props} groups={groups} {...shellParts(props, shell)} />
+  );
 };

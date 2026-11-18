@@ -1,6 +1,8 @@
 // A panel's head, for what the host puts in App shell's panels (a chat): one bar's height, the
 // panel's name at its start, then the control that switches it between beside the page and floating
-// over it, a link to its own page where the host has one, and the host's own actions. Floating, the
+// over it, a link to its own page where the host has one, and the host's own actions. When the name
+// would fall under about eight letters, the head's own full screen and page link fold into one More
+// menu; the switch and the host's actions stay. Floating, the
 // head is what moves the window: dragged (from the head, never from what the panel holds), or
 // focused and moved with the arrow keys; Escape goes back to the page.
 //
@@ -11,7 +13,7 @@
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
-import { use, useEffect, useId, useState } from "react";
+import { isValidElement, use, useEffect, useId, useRef, useState } from "react";
 import type {
   KeyboardEvent,
   ReactElement,
@@ -20,6 +22,8 @@ import type {
 } from "react";
 
 import { Button } from "../button";
+import { DropdownMenuMore } from "../dropdown-menu";
+import type { DropdownMenuAction } from "../dropdown-menu";
 import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
 import {
@@ -89,12 +93,25 @@ const styles = stylex.create({
   // Floating, a press on the name's room (not on its words) goes through to the handle under it.
   passThrough: { pointerEvents: "none" },
   title: { display: "flex", flexGrow: 1, minWidth: 0 },
+  // The name's least room before the head folds its own controls: about eight of its letters, in
+  // its own type (AppShellPanelTitle's). Out of sight and out of the flow; only measured.
+  floor: {
+    position: "absolute",
+    visibility: "hidden",
+    pointerEvents: "none",
+    width: "8ch",
+    fontSize: grasp.textXs,
+    fontWeight: grasp.weightMedium,
+  },
   actions: {
     display: "flex",
     alignItems: "center",
     gap: grasp.space1,
     flexShrink: 0,
   },
+  // The head's own controls (full screen, the page's link), side by side as the others.
+  own: { display: "flex", alignItems: "center", gap: grasp.space1 },
+  gone: { display: "none" },
   // The name itself takes presses again inside the room that passes them through.
   takesPresses: { pointerEvents: "auto" },
   // The switch has nothing to switch on a phone, where both placements are the same panels.
@@ -190,6 +207,7 @@ const HeadControls = ({
   pageRender,
   expanded,
   onExpandedChange,
+  folded,
 }: {
   setPlacement?: (placement: PanelPlacement) => void;
   next: PanelPlacement;
@@ -197,8 +215,31 @@ const HeadControls = ({
   pageRender?: ReactElement;
   expanded: boolean;
   onExpandedChange?: (expanded: boolean) => void;
+  folded: boolean;
 }) => {
   const words = useWords("app-shell-panel", appShellPanelWords);
+  const page = pageHref !== undefined || pageRender !== undefined;
+  // Folded, full screen and the page's link stand in one More menu, in that order; the switch stays.
+  const more: DropdownMenuAction[] = [];
+  if (folded && onExpandedChange !== undefined) {
+    more.push({
+      label: expanded ? words.collapse : words.expand,
+      icon: expanded ? ExitFullScreen : Expand,
+      onSelect: () => {
+        onExpandedChange(!expanded);
+      },
+    });
+  }
+  if (folded && page) {
+    more.push({
+      label: words.page,
+      icon: External,
+      href: pageHref,
+      render: isValidElement<Record<string, unknown>>(pageRender)
+        ? pageRender
+        : undefined,
+    });
+  }
   return (
     <>
       {setPlacement !== undefined && (
@@ -214,29 +255,88 @@ const HeadControls = ({
           />
         </span>
       )}
-      {onExpandedChange !== undefined && (
-        <Button
-          variant="ghost"
-          size="sm"
-          icon={expanded ? ExitFullScreen : Expand}
-          aria-label={expanded ? words.collapse : words.expand}
-          aria-pressed={expanded}
-          onClick={() => {
-            onExpandedChange(!expanded);
-          }}
-        />
+      {more.length > 0 && (
+        <DropdownMenuMore actions={more} label={words.more} />
       )}
-      {(pageHref !== undefined || pageRender !== undefined) && (
-        <Button
-          variant="ghost"
-          size="sm"
-          icon={External}
-          aria-label={words.page}
-          render={pageRender ?? <a href={pageHref} aria-label={words.page} />}
-        />
-      )}
+      <span
+        data-head-own=""
+        {...stylex.props(styles.own, folded && styles.gone)}
+      >
+        {onExpandedChange !== undefined && (
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={expanded ? ExitFullScreen : Expand}
+            aria-label={expanded ? words.collapse : words.expand}
+            aria-pressed={expanded}
+            onClick={() => {
+              onExpandedChange(!expanded);
+            }}
+          />
+        )}
+        {page && (
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={External}
+            aria-label={words.page}
+            render={pageRender ?? <a href={pageHref} aria-label={words.page} />}
+          />
+        )}
+      </span>
     </>
   );
+};
+
+/**
+ * Whether the head folds its own controls (full screen, the page's link) into one More menu: when
+ * the name's room falls under its floor (about eight letters) with them out. It comes back out only
+ * when the name would keep its floor with them out again, so it never flips at one width.
+ */
+const useFoldHead = (head: HTMLElement | null, foldable: boolean) => {
+  const [folded, setFolded] = useState(false);
+  // What folding gives the name: the two controls and the gap after them, less the More button.
+  const gives = useRef(0);
+  useEffect(() => {
+    const measure = (element: HTMLElement) => {
+      const title = element.querySelector<HTMLElement>("[data-head-title]");
+      const floor =
+        element
+          .querySelector<HTMLElement>("[data-head-floor]")
+          ?.getBoundingClientRect().width ?? 0;
+      const own = element.querySelector<HTMLElement>("[data-head-own]");
+      if (title === null) {
+        return;
+      }
+      const room = title.getBoundingClientRect().width;
+      setFolded((was) => {
+        if (!was) {
+          if (own !== null && own.getClientRects().length > 0) {
+            const box = own.getBoundingClientRect();
+            const after =
+              own.nextElementSibling?.getBoundingClientRect().left ?? box.right;
+            const first =
+              own.firstElementChild?.getBoundingClientRect().width ?? 0;
+            gives.current = after - box.left - first;
+          }
+          return room < floor;
+        }
+        return room - gives.current < floor;
+      });
+    };
+    const watch = (element: HTMLElement) => {
+      measure(element);
+      const observer = new ResizeObserver(() => {
+        measure(element);
+      });
+      observer.observe(element);
+      return () => {
+        observer.disconnect();
+      };
+    };
+    return head !== null && foldable ? watch(head) : undefined;
+  }, [head, foldable]);
+  return foldable && folded;
 };
 
 /** The head of what stands in App shell's panels: its name, the placement switch, and your actions. */
@@ -249,13 +349,22 @@ export const AppShellPanelHead = ({
   onExpandedChange,
 }: AppShellPanelHeadProps) => {
   const place = use(PanelPlaceContext);
+  const [head, setHead] = useState<HTMLDivElement | null>(null);
+  // Only two or more of its own controls fold: one in a menu would save nothing.
+  const folded = useFoldHead(
+    head,
+    onExpandedChange !== undefined &&
+      (pageHref !== undefined || pageRender !== undefined)
+  );
   const words = useWords("app-shell-panel", appShellPanelWords);
   const { setPlacement, handleMovePress, handleMoveKey } = place;
   const hint = useId();
   const next = place.placement === "floating" ? "docked" : "floating";
   return (
     <div
+      ref={setHead}
       data-slot="app-shell-panel-head"
+      data-folded={folded ? "" : undefined}
       data-floating={place.floating ? "" : undefined}
       {...stylex.props(
         styles.head,
@@ -287,7 +396,13 @@ export const AppShellPanelHead = ({
           {words.moveHint}
         </span>
       )}
+      <span
+        aria-hidden="true"
+        data-head-floor=""
+        {...stylex.props(styles.floor)}
+      />
       <div
+        data-head-title=""
         {...stylex.props(
           styles.title,
           styles.above,
@@ -304,6 +419,7 @@ export const AppShellPanelHead = ({
           pageRender={pageRender}
           expanded={expanded}
           onExpandedChange={onExpandedChange}
+          folded={folded}
         />
         {actions}
       </div>

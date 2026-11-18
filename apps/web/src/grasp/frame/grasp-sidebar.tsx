@@ -1,9 +1,8 @@
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-// The kit's mark: Grasp UI has no Grasp mark yet.
-import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link, useLocation, useMatchRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
@@ -25,8 +24,10 @@ import { appSplat } from "../../pages/app-address.ts";
 import { groupedSectionsFor } from "../../settings/sections.ts";
 import { shortcutLabel } from "../../shortcuts.ts";
 import { useWorkflowsWaiting } from "../../workflows/nav-item.tsx";
+import { iconVars } from "../icons/icon.stylex.ts";
 import {
   AgentPerson,
+  BrandGrasp,
   AppPanels,
   AppWindow,
   Bell,
@@ -44,14 +45,21 @@ import {
   SignOut,
   Sun,
   Swap,
+  Icon,
 } from "../icons/index.ts";
 import type {
-  SidebarGroup,
+  SidebarGroupEntry,
   SidebarMenuEntry,
   SidebarProfileProps,
   SidebarProps,
   SidebarSection,
 } from "../sidebar/index.ts";
+import { grasp } from "../tokens/tokens.stylex.ts";
+
+const styles = stylex.create({
+  // The head's mark fills the sidebar's 20px mark box, as an icon of that size.
+  mark: { [iconVars.size]: grasp.shellMark },
+});
 
 // The product's sidebar: Grasp UI's Sidebar (grasp/sidebar), filled with
 // the product's sections, the Apps' own entries, and the person's menu.
@@ -78,7 +86,7 @@ const useGroups = (
   identity: Identity,
   tab: SidebarView,
   waitingItems: readonly InboxItem[] | undefined
-): SidebarGroup[] => {
+): SidebarGroupEntry[] => {
   const { t } = useLingui();
   const matchRoute = useMatchRoute();
   const waiting = waitingItems?.length;
@@ -96,7 +104,7 @@ const useGroups = (
   const at = (to: string, fuzzy = true) => matchRoute({ to, fuzzy }) !== false;
   const inWorkflows = at("/workflows");
   const onRequests = at("/workflows/requests");
-  const sections: SidebarGroup = {
+  const sections: SidebarGroupEntry = {
     rows: [
       {
         label: t`Chat`,
@@ -168,7 +176,7 @@ const useGroups = (
     ],
   };
   // The Apps' own entries (spec 34.1), a group of their own; none when there are none.
-  const fromApps: SidebarGroup[] =
+  const fromApps: SidebarGroupEntry[] =
     apps.length === 0
       ? []
       : [
@@ -204,7 +212,7 @@ const useGroups = (
         ];
   // The person's recent chats: a group of their own under the product's
   // sections, named, so they never stand between the sections.
-  const chats: SidebarGroup[] =
+  const chats: SidebarGroupEntry[] =
     recent.length === 0
       ? []
       : [
@@ -392,7 +400,11 @@ export const useGraspSidebar = ({
   return {
     foldLabel: t`Show or hide the sidebar`,
     groups,
-    head: <GraspMark aria-hidden />,
+    head: (
+      <span {...stylex.props(styles.mark)}>
+        <Icon icon={BrandGrasp} />
+      </span>
+    ),
     "aria-label": t`Sidebar`,
     navLabel: t`Main`,
     onOpenChange,

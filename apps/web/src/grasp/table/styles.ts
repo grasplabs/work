@@ -103,8 +103,8 @@ export const tableStyles = stylex.create({
     borderCollapse: "collapse",
     borderSpacing: 0,
     fontFamily: grasp.fontSans,
-    fontSize: grasp.tableText,
-    lineHeight: grasp.tableTextLine,
+    fontSize: tableVars.text,
+    lineHeight: tableVars.line,
     color: grasp.text,
     // Figures line up from row to row.
     fontVariantNumeric: "tabular-nums",

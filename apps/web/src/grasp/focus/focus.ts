@@ -53,6 +53,8 @@ const KEY_IN =
   ":has(:is(input, textarea):focus-visible:not([data-focus-pointer]))";
 const ANY_KEY_IN = ":has(:focus-visible:not([data-focus-pointer]))";
 const ANY_IN = ":has(:is(input, textarea):focus-visible)";
+const KEY_IN_EDITABLE =
+  ":has(:is(input, textarea):not(:read-only):focus-visible:not([data-focus-pointer]))";
 
 /**
  * Marks an element a pointer press focuses with data-focus-pointer, and takes it off when it loses
@@ -182,6 +184,40 @@ export const focus = stylex.create({
     // The keyboard's focus: the field's own focus look (its halo) becomes its rest, the ring alone shows.
     "--grasp-field-focus": { default: null, [KEY]: grasp.fieldRest },
     "--grasp-field-focus-invalid": { default: null, [KEY]: grasp.fieldInvalid },
+  },
+  // A read-only field: it takes focus, so its words can be selected and copied, but it shows no
+  // ring, which would invite typing; the field's own hairline goes a step stronger instead (its
+  // readOnly style). In forced colours, where that hairline is dropped, the system's line shows it.
+  fieldRead: {
+    outline: {
+      default: "none",
+      ":focus-visible": { default: "none", [media.forced]: forcedLine },
+    },
+    outlineOffset: {
+      default: grasp.ringOffset,
+      [media.forced]: grasp.ringOffsetMark,
+    },
+  },
+  // fieldWithin for a group whose input may be read only (Input group): the ring only round an
+  // input open for typing; a read-only one shows focus by the group's hairline, as fieldRead.
+  fieldWithinEditable: {
+    outline: {
+      default: "none",
+      [ANY_IN]: { default: "none", [media.forced]: forcedLine },
+      [KEY_IN_EDITABLE]: { default: line, [media.forced]: forcedLine },
+    },
+    outlineOffset: {
+      default: grasp.ringOffset,
+      [media.forced]: grasp.ringOffsetMark,
+    },
+    "--grasp-field-focus": {
+      default: null,
+      [KEY_IN_EDITABLE]: grasp.fieldRest,
+    },
+    "--grasp-field-focus-invalid": {
+      default: null,
+      [KEY_IN_EDITABLE]: grasp.fieldInvalid,
+    },
   },
   // A field whose box sits flush in a surface (Command's search): the ring drawn just inside it.
   fieldInside: {
