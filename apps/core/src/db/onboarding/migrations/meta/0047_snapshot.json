@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "faaf256b-797e-4e17-9ab9-540289798887",
+  "id": "81c12af0-0ec0-4b03-b2bf-0dc746db3463",
   "prevId": "58a72173-efdc-41cf-94fc-bace806ccaf5",
   "tables": {
     "approvals": {
@@ -732,6 +732,30 @@
         },
         "at": {
           "name": "at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "erased_people": {
+      "name": "erased_people",
+      "columns": {
+        "person": {
+          "name": "person",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "erased_at": {
+          "name": "erased_at",
           "type": "text",
           "primaryKey": false,
           "notNull": true,

@@ -933,3 +933,15 @@ export const confirmedPlaces = sqliteTable("confirmed_places", {
   email: text().primaryKey(),
   team: text().notNull(),
 });
+
+/**
+ * The entries on the list whose person core erased (GRA-2055), by the
+ * entry's id: the entry stays, the company's, without its address
+ * (`eraseAddress`), and is never named, given a link or placed again
+ * until an admin takes it off the list, as a link core erased is
+ * (`links.erased_at`); this holds the entries no link went out to as well.
+ */
+export const erasedPeople = sqliteTable("erased_people", {
+  person: text().primaryKey(),
+  erasedAt: text("erased_at").notNull(),
+});

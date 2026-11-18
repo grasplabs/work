@@ -526,7 +526,11 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
       // teams carry: what their observed routines name (GRA-2035).
       theirs: theirs.teams.map(({ id }) => id),
       events: events
-        .filter(({ action }) => action.startsWith("team.member."))
+        .filter(
+          ({ action, detail }) =>
+            action.startsWith("team.member.") &&
+            [ann.userId, removed.userId].includes(String(detail?.userId))
+        )
         .map(({ action, target, detail }) => ({
           action,
           target: target?.id,

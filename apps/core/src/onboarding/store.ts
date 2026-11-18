@@ -148,6 +148,7 @@ import {
   brainTeams,
   confirmedPlaces,
   countedPeople,
+  erasedPeople,
   countedWorks,
   drawFailures,
   referrals,
@@ -1763,10 +1764,14 @@ export class Onboarding extends DurableObject<Env> {
       this.#erase(person);
       erased.push(person);
       // Off the list, they take part in nothing: no mark of theirs stays,
-      // their withdrawal's neither.
+      // their withdrawal's neither, nor their erasure's (`eraseAddress`).
       this.#db
         .delete(participations)
         .where(eq(participations.person, person))
+        .run();
+      this.#db
+        .delete(erasedPeople)
+        .where(eq(erasedPeople.person, person))
         .run();
       this.#db.delete(linkCodes).where(eq(linkCodes.person, person)).run();
       this.#db.delete(links).where(eq(links.person, person)).run();
@@ -1997,25 +2002,39 @@ export class Onboarding extends DurableObject<Env> {
     });
   }
 
-  /** Whoever core erased whose entry is still on the list (`#closeAndDeleteHeldBy`). */
+  /**
+   * Whoever core erased whose entry is still on the list: their link
+   * closed (`#closeAndDeleteHeldBy`), or their address taken from the
+   * entry (`eraseAddress`), whether or not a link went out.
+   */
   #erasedPeople(): Set<string> {
-    return new Set(
-      this.#db
+    return new Set([
+      ...this.#db
         .select({ person: links.person })
         .from(links)
         .where(isNotNull(links.erasedAt))
         .all()
-        .map(({ person }) => person)
-    );
+        .map(({ person }) => person),
+      ...this.#db
+        .select({ person: erasedPeople.person })
+        .from(erasedPeople)
+        .all()
+        .map(({ person }) => person),
+    ]);
   }
 
-  /** Whether core erased `person`, and their link is closed for good. */
+  /** Whether core erased `person` (`#erasedPeople`), and their link is closed for good. */
   #erased(person: string): boolean {
     return (
       this.#db
         .select({ person: links.person })
         .from(links)
         .where(and(eq(links.person, person), isNotNull(links.erasedAt)))
+        .all().length > 0 ||
+      this.#db
+        .select({ person: erasedPeople.person })
+        .from(erasedPeople)
+        .where(eq(erasedPeople.person, person))
         .all().length > 0
     );
   }
@@ -5031,11 +5050,20 @@ export class Onboarding extends DurableObject<Env> {
    */
   eraseAddress(email: string): boolean {
     return this.ctx.storage.transactionSync(() => {
-      this.#db
+      const entries = this.#db
         .update(people)
         .set({ email: "" })
         .where(sql`lower(${people.email}) = ${email.toLowerCase()}`)
-        .run();
+        .returning({ id: people.id })
+        .all();
+      const at = new Date().toISOString();
+      for (const { id } of entries) {
+        this.#db
+          .insert(erasedPeople)
+          .values({ person: id, erasedAt: at })
+          .onConflictDoNothing()
+          .run();
+      }
       return this.forgetPlaceOf(email);
     });
   }
@@ -9163,6 +9191,21 @@ export class Onboarding extends DurableObject<Env> {
       : { asked, others: pieces.filter(({ id }) => id !== asked.id) };
   }
 
+  /**
+   * Whether the entry `who` a referral names is someone core erased: the
+   * entry (`#erased`), or the address it has (erased-people.ts).
+   */
+  async #namesErased(who: string | null): Promise<boolean> {
+    if (who === null) {
+      return false;
+    }
+    if (this.#erased(who)) {
+      return true;
+    }
+    const email = this.#roster()?.people.find(({ id }) => id === who)?.email;
+    return email !== undefined && (await isErasedEmail(this.env, email));
+  }
+
   async #referOne(personId: string, at: string): Promise<void> {
     const done = () => {
       this.#db.delete(referrals).where(eq(referrals.person, personId)).run();
@@ -9185,12 +9228,15 @@ export class Onboarding extends DurableObject<Env> {
     const { asked, others } = pieces;
     const teamNames = new Map(roster.teams.map(({ id, name }) => [id, name]));
     // Someone erased stays on the list, the company's entry (D5), but is
-    // never named again: found by the address that was theirs, as their
-    // erasure keeps it (erased-people.ts), until an admin releases it.
+    // never named again: by the entry core erased (`#erasedPeople`), its
+    // address gone; or found by an address that was an erased person's,
+    // as their erasure keeps it (erased-people.ts), until an admin
+    // releases it.
     const erased = await erasedEmailsAmong(
       this.env,
       roster.people.map(({ email }) => email)
     );
+    const erasedEntries = this.#erasedPeople();
     const found = await referralOf(
       this.env,
       {
@@ -9199,7 +9245,10 @@ export class Onboarding extends DurableObject<Env> {
         people: roster.people
           .filter(
             ({ id, away, email }) =>
-              id !== personId && !away && !erased.has(normalizedEmail(email))
+              id !== personId &&
+              !away &&
+              !erasedEntries.has(id) &&
+              !erased.has(normalizedEmail(email))
           )
           .map(({ id, name, title, team }) => ({
             id,
@@ -9220,14 +9269,7 @@ export class Onboarding extends DurableObject<Env> {
     // synchronous from here on, so nothing of this object runs between
     // the two; an erasure core records after it comes after the save, and
     // its interview area takes what the save wrote (`eraseInterviewOf`).
-    const namedEmail =
-      found.who === null
-        ? undefined
-        : this.#roster()?.people.find(({ id }) => id === found.who)?.email;
-    if (
-      namedEmail !== undefined &&
-      (await isErasedEmail(this.env, namedEmail))
-    ) {
+    if (await this.#namesErased(found.who)) {
       done();
       return;
     }

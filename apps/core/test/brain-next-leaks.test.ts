@@ -3356,8 +3356,9 @@ describe(
     // draft, nor someone moved out since.
     it("gives a team's source to whom the confirmed staff list puts in the team, and to nobody a draft names or the list moved out", async () => {
       const admin = await signedInApi(idp, "admin");
-      const ann = await signedInApi(idp, "user");
-      const ben = await signedInApi(idp, "user");
+      // Placed by the address their Google sign-in proved.
+      const ann = await signedInApi(idp, "user", "google");
+      const ben = await signedInApi(idp, "user", "google");
       const tag = unique();
       const marker = markerWord();
       const annEmail = String(ann.person.email);

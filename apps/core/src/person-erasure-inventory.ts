@@ -491,6 +491,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "onboarding.interview_states": { erased: "interview" },
   "onboarding.counted": { kept: "who was counted in the admin's numbers" },
   "onboarding.confirmed_places": { erased: "interview" },
+  "onboarding.erased_people": {
+    kept: "which entries on the list were erased, by the entry's id",
+  },
   "onboarding.asked_about": { erased: "interview" },
   "onboarding.brain_sent": { erased: "interview" },
   "onboarding.opinion_candidates": { erased: "interview" },
@@ -931,6 +934,7 @@ export const reviewedPersonColumns: Readonly<
   "onboarding.opinion_backers": ["person"],
   "onboarding.opinion_people": ["person"],
   "onboarding.confirmed_places": ["email"],
+  "onboarding.erased_people": ["person"],
   "onboarding.counted": ["person"],
   "onboarding.interview_settings": ["person"],
   "onboarding.interview_states": ["person"],

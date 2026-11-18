@@ -83,7 +83,8 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
   it("clears the page of someone the staff list takes out of the team the App is shared with, by the clock when telling the pages failed after the confirm's batch", async () => {
     const opened = await openedApp();
     const admin = await personApi("admin");
-    const ann = await personApi("user");
+    // Placed by the address their Google sign-in proved.
+    const ann = await personApi("user", "google");
     const tag = unique();
     const names = ["B", "C"].map((letter) => `${letter} ${tag}`);
     const email = z.string().parse(ann.person.email);
