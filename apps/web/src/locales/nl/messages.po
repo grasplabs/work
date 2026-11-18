@@ -11126,10 +11126,6 @@ msgstr "Op {where}"
 msgid "On a later day"
 msgstr "Op een latere dag"
 
-#: src/workflows/overview-concepts.tsx
-msgid "On a schedule"
-msgstr "Volgens schema"
-
 #: src/onboarding/ai-step.tsx
 msgid "On Grasp’s AI: {grasp}"
 msgstr "Op de AI van Grasp: {grasp}"
@@ -11682,6 +11678,7 @@ msgctxt "a project's owner"
 msgid "Owner"
 msgstr "Eigenaar"
 
+#: src/workflows/overview-concepts.tsx
 #: src/workflows/workflows-table.tsx
 msgctxt "column: who owns a workflow"
 msgid "Owner"
@@ -11782,10 +11779,6 @@ msgstr "Deel {n} van {count}"
 #: src/interview/page.tsx
 msgid "Part {n} of {parts}: {label}"
 msgstr "Deel {n} van {parts}: {label}"
-
-#: src/workflows/overview-concepts.tsx
-msgid "Part of an App"
-msgstr "Deel van een App"
 
 #: src/routes/_shell.brain.sections.$sectionId.tsx
 msgid "Part of the brain not found"
@@ -13522,6 +13515,7 @@ msgstr "Loopt of geannuleerd"
 msgid "runs"
 msgstr "runs"
 
+#: src/workflows/overview-concepts.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/runs.tsx
 msgid "Runs"
@@ -14952,10 +14946,6 @@ msgstr "Een chat gestart"
 msgid "Started by"
 msgstr "Gestart door"
 
-#: src/workflows/overview-concepts.tsx
-msgid "Started by a person"
-msgstr "Door een persoon gestart"
-
 #: src/activity/audit-words.ts
 msgid "Started following a connection late: changes before then weren't read"
 msgstr "Te laat begonnen een verbinding te volgen: eerdere wijzigingen zijn niet gelezen"
@@ -15363,6 +15353,7 @@ msgstr "taken"
 #: src/brain/brain.ts
 #: src/inbox/interviews-item.tsx
 #: src/onboarding/interviews-progress.tsx
+#: src/workflows/overview-concepts.tsx
 msgid "Team"
 msgstr "Team"
 
@@ -16883,6 +16874,7 @@ msgid "Tool"
 msgstr "Tool"
 
 #: src/brain/brain.ts
+#: src/workflows/overview-concepts.tsx
 msgid "Tools"
 msgstr "Tools"
 
@@ -18175,14 +18167,6 @@ msgstr "Wanneer er een e-mail op zijn eigen adres binnenkomt"
 msgid "When an email arrives for {localPart}"
 msgstr "Wanneer er een e-mail binnenkomt voor {localPart}"
 
-#: src/workflows/overview-concepts.tsx
-msgid "When an email comes in"
-msgstr "Als er een e-mail binnenkomt"
-
-#: src/workflows/overview-concepts.tsx
-msgid "When another system calls"
-msgstr "Als een ander systeem aanroept"
-
 #: src/interview/words.ts
 msgid "When it goes differently"
 msgstr "Als het anders gaat"
@@ -18536,6 +18520,7 @@ msgstr "Bepaald hoe kennis wordt gebruikt"
 msgid "Worked out what could be improved"
 msgstr "Bepaald wat er beter kan"
 
+#: src/workflows/overview-concepts.tsx
 #: src/workflows/workflows-table.tsx
 msgid "workflow"
 msgstr "workflow"
@@ -18547,6 +18532,7 @@ msgstr "workflow"
 #: src/inbox/items.ts
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/workflows/go-lives-waiting.tsx
+#: src/workflows/overview-concepts.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Workflow"
@@ -18597,6 +18583,7 @@ msgstr "Weergaven van de workflow"
 msgid "workflow.json"
 msgstr "workflow.json"
 
+#: src/workflows/overview-concepts.tsx
 #: src/workflows/workflows-table.tsx
 msgid "workflows"
 msgstr "workflows"
@@ -18617,6 +18604,7 @@ msgstr "workflows"
 #: src/routes/_shell.workflows.requests.tsx
 #: src/routes/decisions.$decision.tsx
 #: src/settings/stephen-settings.tsx
+#: src/workflows/overview-concepts.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Workflows"
 msgstr "Workflows"
