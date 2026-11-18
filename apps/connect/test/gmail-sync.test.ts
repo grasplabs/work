@@ -103,6 +103,7 @@ const message = (
     attached?: boolean;
     /** The body's parts instead of one plain-text part. */
     body?: Record<string, unknown>;
+    subject?: string;
   } = {}
 ): Record<string, unknown> => ({
   id,
@@ -114,7 +115,7 @@ const message = (
     headers: [
       { name: "From", value: "Supplier <Sales@Supplier.test>" },
       { name: "To", value: "owner@acme.test" },
-      { name: "Subject", value: `Quote ${id}` },
+      { name: "Subject", value: fields.subject ?? `Quote ${id}` },
     ],
     parts: [
       fields.body ?? {
@@ -383,13 +384,35 @@ describe("syncing a person's own mailbox", () => {
     expect(seen).toStrictEqual(["m1", "m2", "m3"]);
   });
 
+  it("keeps the mailbox going when a subject is longer than an item's title holds", async () => {
+    const connectionId = await connected();
+    // A folded Subject header can be longer than a title may be.
+    const subject = "Re: ".repeat(300);
+    mail.listed = ["long"];
+    mail.messages = { long: message("long", { subject }) };
+    const { items } = await read(connectionId, null);
+    const [item] = items;
+    // The title cut to what it holds; the whole subject in its text.
+    expect(item?.gone === false ? item.title : null).toBe(
+      subject.slice(0, 1024)
+    );
+    expect(
+      item?.gone === false && item.content?.type === "text"
+        ? item.content.text.includes(`Subject: ${subject}`)
+        : false
+    ).toBeTruthy();
+  });
+
   it("passes over a message that is always too slow, so the mailbox moves on", async () => {
     const connectionId = await connected();
     mail.listed = ["slow", "next"];
     mail.messages = { slow: message("slow"), next: message("next") };
     // Slow on every read, and first in its page.
     mail.slow = { path: `${users}/messages/slow`, ms: 20_000 };
-    const first = await read(connectionId, null);
+    // Late once: nothing yet; late twice in a row: passed over.
+    const once = await read(connectionId, null);
+    expect(once.items).toStrictEqual([]);
+    const first = await read(connectionId, once.cursor);
     expect(first.items).toStrictEqual([
       expect.objectContaining({
         id: "slow",

@@ -12,11 +12,18 @@ import {
   fetchInRoom,
   fillPage,
   fromCursorPart,
+  fromInPagePart,
+  inPagePart,
   mayRequest,
+  startOfPage,
   syncRoom,
   takeContent,
 } from "@grasp-os/connector-kit/sync";
-import type { EntryItems, SyncRoom } from "@grasp-os/connector-kit/sync";
+import type {
+  EntryItems,
+  InPage,
+  SyncRoom,
+} from "@grasp-os/connector-kit/sync";
 import type {
   SyncContent,
   SyncItem,
@@ -123,22 +130,22 @@ interface Entry {
 
 /**
  * Where a read is: listing the messages, or reading the history from
- * `start`; in Gmail's page `token`, after the entry keyed `after`.
+ * `start`; in Gmail's page `token`, where in it (`at`).
  */
 interface Position {
   phase: "list" | "history";
   start: string;
   token: string | null;
-  after: string | null;
+  at: InPage;
 }
 
-const cursorOf = ({ phase, start, token, after }: Position): string =>
-  `${phase === "list" ? "l" : "h"}.${cursorPart(start)}.${cursorPart(token)}.${cursorPart(after)}`;
+const cursorOf = ({ phase, start, token, at }: Position): string =>
+  `${phase === "list" ? "l" : "h"}.${cursorPart(start)}.${cursorPart(token)}.${inPagePart(at)}`;
 
 /** The position a cursor this sync wrote names; any other starts over. */
 const positionOf = (cursor: string): Position => {
   const [phase, ...parts] = cursor.split(".");
-  const [start, token, after] = parts.map(fromCursorPart);
+  const [start, token] = parts.slice(0, 2).map(fromCursorPart);
   if (
     (phase === "l" || phase === "h") &&
     parts.length === 3 &&
@@ -149,7 +156,7 @@ const positionOf = (cursor: string): Position => {
       phase: phase === "l" ? "list" : "history",
       start,
       token: token ?? null,
-      after: after ?? null,
+      at: fromInPagePart(parts[2]),
     };
   }
   throw new RestartSyncError("Not a cursor this sync wrote");
@@ -585,10 +592,10 @@ const listPage = async (
     act: "read",
   }));
   const fetched: Fetched = new Map();
-  const { items, last, done } = await fillPage({
+  const { items, at, done } = await fillPage({
     room,
     entries,
-    after: position.after,
+    at: position.at,
     keyOf: ({ key }) => key,
     itemsFor: async (entry) => await entryItems(room, owner, fetched, entry),
     passOver: (entry) => passedOver(owner, fetched, entry),
@@ -596,7 +603,7 @@ const listPage = async (
   if (!done) {
     return {
       items,
-      cursor: cursorOf({ ...position, after: last }),
+      cursor: cursorOf({ ...position, at }),
       more: true,
     };
   }
@@ -606,8 +613,13 @@ const listPage = async (
     items,
     cursor: cursorOf(
       next === ""
-        ? { phase: "history", start: position.start, token: null, after: null }
-        : { ...position, token: next, after: null }
+        ? {
+            phase: "history",
+            start: position.start,
+            token: null,
+            at: startOfPage,
+          }
+        : { ...position, token: next, at: startOfPage }
     ),
     more: true,
   };
@@ -630,10 +642,10 @@ const historyPage = async (
     historySchema
   );
   const fetched: Fetched = new Map();
-  const { items, last, done } = await fillPage({
+  const { items, at, done } = await fillPage({
     room,
     entries: historyEntries(read.history),
-    after: position.after,
+    at: position.at,
     keyOf: ({ key }) => key,
     itemsFor: async (entry) => await entryItems(room, owner, fetched, entry),
     passOver: (entry) => passedOver(owner, fetched, entry),
@@ -641,7 +653,7 @@ const historyPage = async (
   if (!done) {
     return {
       items,
-      cursor: cursorOf({ ...position, after: last }),
+      cursor: cursorOf({ ...position, at }),
       more: true,
     };
   }
@@ -653,13 +665,13 @@ const historyPage = async (
           phase: "history",
           start: read.historyId,
           token: null,
-          after: null,
+          at: startOfPage,
         }),
         more: false,
       }
     : {
         items,
-        cursor: cursorOf({ ...position, token: next, after: null }),
+        cursor: cursorOf({ ...position, token: next, at: startOfPage }),
         more: true,
       };
 };
@@ -697,7 +709,12 @@ export const gmailSync = defineSync({
     ];
     const position: Position =
       cursor === null
-        ? { phase: "list", start: profile.historyId, token: null, after: null }
+        ? {
+            phase: "list",
+            start: profile.historyId,
+            token: null,
+            at: startOfPage,
+          }
         : positionOf(cursor);
     return position.phase === "list"
       ? await listPage(room, owner, position)
