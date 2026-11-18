@@ -394,6 +394,12 @@ interface Applying {
   skipped: number;
   /** Which cursor the page was read from. */
   stream: Stream;
+  /**
+   * The page's counters as stored, this read's included: as the claimed
+   * row had them, each one up as this read counts it, so the commit needs
+   * no read of its own (the run holds the source alone).
+   */
+  counts: { added: number; changed: number; removed: number };
 }
 
 /**
@@ -411,6 +417,15 @@ const stillHeld = ({ source, leaseId }: Applying): SQL =>
 /** That a disconnect closed `connectionId` for the sync, as SQL. */
 const closed = (connectionId: SQL | string): SQL =>
   sql`EXISTS (SELECT 1 FROM ${brainSyncDisconnects} WHERE ${brainSyncDisconnects.connectionId} = ${connectionId})`;
+
+/** The source's row, while `applying`'s run holds it, as SQL. */
+const heldSource = (applying: Applying) =>
+  and(
+    eq(brainSyncSources.connectionId, applying.source.connectionId),
+    eq(brainSyncSources.feed, applying.source.feed),
+    eq(brainSyncSources.place, applying.source.place),
+    eq(brainSyncSources.leaseId, applying.leaseId)
+  );
 
 /** One of the page's counters, one up, while the run holds the source. */
 const counted = (
@@ -441,6 +456,16 @@ const heldAfter = (counter: readonly unknown[]): void => {
   }
 };
 
+/** `counter` one up in what this read knows of the page's counters, once stored. */
+const countedIn = (
+  applying: Applying,
+  counter: "added" | "changed" | "removed",
+  stored: readonly unknown[]
+): void => {
+  heldAfter(stored);
+  applying.counts[counter] += 1;
+};
+
 /** The Brain's readers of `row`'s source as it was added: whose store it is in. */
 const addedReaders = (applying: Applying, store: Store): SourceReaders =>
   store === "own"
@@ -448,35 +473,143 @@ const addedReaders = (applying: Applying, store: Store): SourceReaders =>
     : { kind: "none" };
 
 /**
- * Takes `row`'s item out of the Brain: its key erased in the store it is
- * in, then the row moved to its next key, in no store, with the page's
- * removal counted.
+ * Erases the key `row` is leaving (`leaving`, in `leavingStore`), then
+ * forgets that it was: the second half of `leave`, finished on a later
+ * read when a stopped run left it (`finishOwedLeaves`). Safe to repeat:
+ * erasing an erased key changes nothing.
  */
-const leave = async (applying: Applying, row: Item): Promise<Item> => {
+const finishLeaving = async (applying: Applying, row: Item): Promise<Item> => {
   const { env, db, budget } = applying;
-  if (row.store === null) {
+  if (row.leaving === null || row.leavingStore === null) {
     return row;
   }
-  spend(budget, row.store === "own" ? 2 : 1);
+  spend(budget, row.leavingStore === "own" ? 2 : 1);
   await eraseSource(env, {
-    source: sourceRefOf(row.key),
-    readers: addedReaders(applying, row.store),
+    source: sourceRefOf(row.leaving),
+    readers: addedReaders(applying, row.leavingStore),
     reason: "deleted",
   });
+  spend(budget, 1);
+  heldAfter(
+    await db
+      .update(brainSyncItems)
+      .set({ leaving: null, leavingStore: null })
+      .where(
+        sql`${itemWhere(applying, row.itemId)} AND ${brainSyncItems.leaving} = ${row.leaving} AND ${stillHeld(applying)}`
+      )
+      .returning({ key: brainSyncItems.key })
+  );
+  return { ...row, leaving: null, leavingStore: null };
+};
+
+/**
+ * Takes `row`'s item out of the Brain. First, in one batch with the
+ * page's removal counted, the row moves to its next key, in no store,
+ * naming the key it leaves; only then is that key erased
+ * (`finishLeaving`). So a run stopped between the two (its budget, a
+ * failed write, a lost lease, a killed isolate) leaves a row that says
+ * what is still owed, never one that claims a key the Brain erased, and
+ * the next read of the source erases it before anything else.
+ */
+const leave = async (applying: Applying, row: Item): Promise<Item> => {
+  const { db, budget } = applying;
+  if (row.store === null) {
+    return await finishLeaving(applying, row);
+  }
   const generation = row.generation + 1;
   const key = await keyOf(row.connectionId, row.feed, row.itemId, generation);
+  const left = {
+    store: null,
+    generation,
+    key,
+    change: null,
+    version: null,
+    marker: null,
+    leaving: row.key,
+    leavingStore: row.store,
+  };
   spend(budget, 1);
-  const [, counter] = await db.batch([
+  const [, owed, counter] = await db.batch([
     db
       .update(brainSyncItems)
-      .set({ store: null, generation, key, change: null, version: null })
+      .set(left)
       .where(
         sql`${itemWhere(applying, row.itemId)} AND ${brainSyncItems.generation} = ${row.generation} AND ${stillHeld(applying)}`
       ),
+    db
+      .update(brainSyncSources)
+      .set({ leavesOwed: true })
+      .where(heldSource(applying)),
     counted(applying, "removed"),
   ]);
-  heldAfter(counter);
-  return { ...row, store: null, generation, key, change: null, version: null };
+  heldAfter(owed.meta.changes > 0 ? counter : []);
+  countedIn(applying, "removed", counter);
+  return await finishLeaving(applying, { ...row, ...left });
+};
+
+/**
+ * Finishes every erase a stopped run left owed on the source
+ * (`finishLeaving`), before anything of the page is applied: only when
+ * the source says one may be (`leavesOwed`), so a page with nothing to
+ * do reads nothing for it.
+ */
+const finishOwedLeaves = async (applying: Applying): Promise<void> => {
+  const { db, budget, source } = applying;
+  if (!source.leavesOwed) {
+    return;
+  }
+  for (;;) {
+    spend(budget, 1);
+    // oxlint-disable-next-line no-await-in-loop -- a page at a time
+    const owed = await db
+      .select()
+      .from(brainSyncItems)
+      .where(
+        and(
+          eq(brainSyncItems.connectionId, source.connectionId),
+          eq(brainSyncItems.feed, source.feed),
+          isNotNull(brainSyncItems.leaving)
+        )
+      )
+      .limit(erasedPerPage);
+    if (owed.length === 0) {
+      return;
+    }
+    for (const row of owed) {
+      // oxlint-disable-next-line no-await-in-loop -- in order, within the budget
+      await finishLeaving(applying, row);
+    }
+  }
+};
+
+/**
+ * Moves `row` to its next key without erasing anything: for a key the
+ * Brain refused as erased already (a restore of the Brain, or an erase
+ * whose record a stopped run lost), so the item is added again under a
+ * key never erased instead of waiting for good.
+ */
+const nextKey = async (applying: Applying, row: Item): Promise<Item> => {
+  const generation = row.generation + 1;
+  const key = await keyOf(row.connectionId, row.feed, row.itemId, generation);
+  const moved = {
+    store: null,
+    generation,
+    key,
+    change: null,
+    version: null,
+    marker: null,
+  };
+  spend(applying.budget, 1);
+  heldAfter(
+    await applying.db
+      .update(brainSyncItems)
+      .set(moved)
+      .where(
+        sql`${itemWhere(applying, row.itemId)} AND ${brainSyncItems.generation} = ${row.generation} AND ${stillHeld(applying)}`
+      )
+      .returning({ key: brainSyncItems.key })
+  );
+  return { ...row, ...moved };
 };
 
 /**
@@ -508,6 +641,14 @@ const leaveParts = async (
     await leave(applying, part);
   }
 };
+
+/**
+ * A hash of `item`'s change marker, as its row keeps it: names no reader
+ * and no content, and tells a page that passes over an item held at that
+ * version from one that changed it.
+ */
+const markerOf = async (item: { version: string }): Promise<string> =>
+  await sha256Hex(item.version);
 
 /** A change key: a hash of what makes a version this one. */
 const changeOf = async (parts: readonly unknown[]): Promise<string> =>
@@ -553,7 +694,7 @@ const changeReaders = async (
       ),
     counted(applying, "changed"),
   ]);
-  heldAfter(counter);
+  countedIn(applying, "changed", counter);
   return { ...row, version: made.version };
 };
 
@@ -578,7 +719,7 @@ const claim = async (
   const [claimed] = await db
     .insert(brainSyncItems)
     .select(
-      sql`SELECT ${source.connectionId}, ${source.feed}, ${itemId}, ${key}, ${generation}, ${plan.store}, NULL, NULL, ${item.partOf}, ${source.listing}
+      sql`SELECT ${source.connectionId}, ${source.feed}, ${itemId}, ${key}, ${generation}, ${plan.store}, NULL, NULL, NULL, ${item.partOf}, ${source.listing}, NULL, NULL
         WHERE ${stillHeld(applying)} AND NOT ${closed(source.connectionId)}`
     )
     .onConflictDoUpdate({
@@ -612,7 +753,8 @@ const add = async (
   given: Item | undefined,
   item: Extract<SyncItem, { gone: false }>,
   plan: Plan,
-  text: string
+  text: string,
+  again = false
 ): Promise<void> => {
   const { env, db, budget, source, readAt } = applying;
   const change = await changeOf([
@@ -660,17 +802,29 @@ const add = async (
       readAt,
     }));
   } catch (error) {
-    const code = brainSourceErrors.codeOf(error);
-    if (code === "brain.source_erased") {
-      // A disconnect, or its person's erasure, closed it meanwhile.
+    if (brainSourceErrors.codeOf(error) !== "brain.source_erased") {
+      throw error;
+    }
+    // A key this source named, erased all the same: its next key, once.
+    // A disconnect that closed the connection refuses that key's claim;
+    // a person's erasure, which disconnects, too.
+    if (again) {
       throw new SyncStoppedError("lost");
     }
-    throw error;
+    await add(
+      applying,
+      await nextKey(applying, claimed),
+      item,
+      plan,
+      text,
+      true
+    );
+    return;
   }
   spend(budget, 1);
   const recorded = db
     .update(brainSyncItems)
-    .set({ change, version })
+    .set({ change, version, marker: await markerOf(item) })
     .where(
       sql`${itemWhere(applying, item.id)} AND ${brainSyncItems.generation} = ${claimed.generation} AND ${stillHeld(applying)}`
     )
@@ -683,14 +837,10 @@ const add = async (
     heldAfter(await recorded);
     return;
   }
-  const [, counter] = await db.batch([
-    recorded,
-    counted(
-      applying,
-      claimed.version === null && version === 1 ? "added" : "changed"
-    ),
-  ]);
-  heldAfter(counter);
+  const counter =
+    claimed.version === null && version === 1 ? "added" : "changed";
+  const [, stored] = await db.batch([recorded, counted(applying, counter)]);
+  countedIn(applying, counter, stored);
 };
 
 /** The rows of the page's items, by the provider's ID. */
@@ -760,6 +910,7 @@ const sweep = async (applying: Applying): Promise<void> => {
  */
 const apply = async (applying: Applying, page: SyncPage): Promise<void> => {
   const { db, budget, source } = applying;
+  await finishOwedLeaves(applying);
   const rows = await rowsOf(applying, page.items);
   if ((source.listingOpen || source.relisting) && rows.size > 0) {
     // Named while a listing is under way, by it or by a change since,
@@ -809,10 +960,17 @@ const apply = async (applying: Applying, page: SyncPage): Promise<void> => {
         // Counted by the read that commits the page, which meets every
         // item of it: never twice.
         applying.skipped += 1;
-      } else {
-        // oxlint-disable-next-line no-await-in-loop -- in order, within the budget
-        await leave(applying, row);
+        continue;
       }
+      // oxlint-disable-next-line no-await-in-loop -- in order, within the budget
+      if (row.marker === (await markerOf(item))) {
+        // Passed over at the version the Brain holds (its content late,
+        // or not read this time): kept as it is.
+        continue;
+      }
+      // Changed to something the Brain can't take: out.
+      // oxlint-disable-next-line no-await-in-loop -- in order, within the budget
+      await leave(applying, row);
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- in order, within the budget
@@ -838,15 +996,6 @@ const appliedEvent = (
     "core"
   );
 
-/** The source's row, while `applying`'s run holds it, as SQL. */
-const heldSource = (applying: Applying) =>
-  and(
-    eq(brainSyncSources.connectionId, applying.source.connectionId),
-    eq(brainSyncSources.feed, applying.source.feed),
-    eq(brainSyncSources.place, applying.source.place),
-    eq(brainSyncSources.leaseId, applying.leaseId)
-  );
-
 /**
  * Moves the source's cursor past `page`, once it is applied, in one batch
  * with the page's one event (if it did anything): its counters reset,
@@ -854,20 +1003,7 @@ const heldSource = (applying: Applying) =>
  * once while there is more, and its lease given up.
  */
 const commit = async (applying: Applying, page: SyncPage): Promise<void> => {
-  const { env, db, budget, source } = applying;
-  spend(budget, 1);
-  const counts = await db
-    .select({
-      added: brainSyncSources.added,
-      changed: brainSyncSources.changed,
-      removed: brainSyncSources.removed,
-    })
-    .from(brainSyncSources)
-    .where(heldSource(applying))
-    .get();
-  if (counts === undefined) {
-    throw new SyncStoppedError("lost");
-  }
+  const { env, db, budget, source, counts } = applying;
   const now = Date.now();
   const cursorMoved =
     applying.stream === "changes"
@@ -880,6 +1016,7 @@ const commit = async (applying: Applying, page: SyncPage): Promise<void> => {
           relistCursor: page.cursor,
           relisting: page.more,
           relistAt: new Date(page.more ? now : await nextRelistAt(source, now)),
+          ...(page.more ? {} : { relistSince: null }),
         };
   const moved = db
     .update(brainSyncSources)
@@ -892,6 +1029,8 @@ const commit = async (applying: Applying, page: SyncPage): Promise<void> => {
       added: 0,
       changed: 0,
       removed: 0,
+      // Every leave this page owed is done: its erases ran before this.
+      leavesOwed: false,
     })
     .where(heldSource(applying))
     .returning({ leaseId: brainSyncSources.leaseId });
@@ -964,6 +1103,35 @@ const retryAfterOf = (error: unknown): number => {
 };
 
 /**
+ * How long `source`'s relist is past its day at `now`: the one under way
+ * by when it was due to start, else the next by when it is due; 0 while
+ * within it.
+ */
+const overdueBy = (source: Source, now: number): number => {
+  const since = source.relisting
+    ? (source.relistSince ?? source.relistAt)
+    : source.relistAt;
+  return Math.max(0, now - since.getTime() - relistMs);
+};
+
+/**
+ * How many sources' relists are past their day now, for the staff's view
+ * of the Brain (brain-report.ts): where it is not 0, a reader list can be
+ * staler than a day.
+ */
+export const overdueRelists = async (env: Pick<Env, "DB">): Promise<number> => {
+  const late = Date.now() - relistMs;
+  const row = await drizzle(env.DB)
+    .select({ count: sql<number>`count(*)` })
+    .from(brainSyncSources)
+    .where(
+      sql`CASE WHEN ${brainSyncSources.relisting} = 1 THEN coalesce(${brainSyncSources.relistSince}, ${brainSyncSources.relistAt}) ELSE ${brainSyncSources.relistAt} END < ${late}`
+    )
+    .get();
+  return row?.count ?? 0;
+};
+
+/**
  * Starts `applying`'s daily relist, unless a listing is under way already
  * (the first, or a restart's), which is one: then the relist waits for
  * its next day. A relist is a listing of its own number, from the start.
@@ -979,7 +1147,12 @@ const startRelist = async (applying: Applying): Promise<boolean> => {
   }
   const [started] = await db
     .update(brainSyncSources)
-    .set({ relisting: true, relistCursor: null, listing: source.listing + 1 })
+    .set({
+      relisting: true,
+      relistCursor: null,
+      listing: source.listing + 1,
+      relistSince: source.relistAt,
+    })
     .where(heldSource(applying))
     .returning();
   if (started === undefined) {
@@ -1012,13 +1185,26 @@ const syncPage = async (
     readAt: new Date(),
     skipped: 0,
     stream,
+    counts: {
+      added: source.added,
+      changed: source.changed,
+      removed: source.removed,
+    },
   };
-  if (
-    stream === "relist" &&
-    !source.relisting &&
-    !(await startRelist(applying))
-  ) {
-    return;
+  if (stream === "relist") {
+    const overdue = overdueBy(source, Date.now());
+    if (overdue > 0) {
+      // A relist past its day: the bound on a stale reader list is broken
+      // for this source until it ends (`overdueRelists` counts them).
+      log.warn("brain.sync.relist_overdue", {
+        connectionId: source.connectionId,
+        feed: source.feed,
+        overdueMs: overdue,
+      });
+    }
+    if (!source.relisting && !(await startRelist(applying))) {
+      return;
+    }
   }
   let page: SyncPage;
   spend(budget, 1);
@@ -1100,7 +1286,7 @@ const refreshSources = async (
       db
         .insert(brainSyncSources)
         .select(
-          sql`SELECT ${listed.connectionId}, ${listed.feed}, ${listed.place}, ${listed.ownerUserId}, ${listed.provider}, ${listed.tenant}, ${listed.account}, NULL, 1, 1, ${now}, NULL, NULL, NULL, NULL, 0, 0, 0, NULL, 0, ${relists[index] ?? now + relistMs}
+          sql`SELECT ${listed.connectionId}, ${listed.feed}, ${listed.place}, ${listed.ownerUserId}, ${listed.provider}, ${listed.tenant}, ${listed.account}, NULL, 1, 1, ${now}, NULL, NULL, NULL, NULL, 0, 0, 0, NULL, 0, ${relists[index] ?? now + relistMs}, NULL, 0
             WHERE NOT ${closed(listed.connectionId)}`
         )
         .onConflictDoUpdate({
@@ -1125,9 +1311,12 @@ const refreshSources = async (
 /**
  * Claims the next source to read, unless its connection was closed by a
  * disconnect or another run holds it: this run's until `leaseMs` from
- * now, with the cursor to follow. Every source whose changes are due
- * comes first, the one due longest first, so a relist never holds up a
- * change; then a relist's page, the one waiting longest first.
+ * now, with the cursor to follow: whichever has waited longest since it
+ * was due, a source's changes or a relist's page, changes on a tie. So a
+ * relist is never held up for good by changes that came due after it
+ * (with more sources than a run reads, changes alone would fill every
+ * run and the relist's day would pass), and a change waits behind no
+ * relist page that came due after it.
  */
 const claimNext = async (
   db: Database,
@@ -1144,18 +1333,30 @@ const claimNext = async (
         WHERE (due.due_at <= ${now} OR due.relist_at <= ${now})
           AND (due.lease_until IS NULL OR due.lease_until <= ${now})
           AND NOT ${closed(sql`due.connection_id`)}
-        ORDER BY due.due_at > ${now},
-          CASE WHEN due.due_at <= ${now} THEN due.due_at ELSE due.relist_at END,
+        ORDER BY CASE
+            WHEN due.due_at <= ${now} AND due.relist_at <= ${now} THEN min(due.due_at, due.relist_at)
+            WHEN due.due_at <= ${now} THEN due.due_at
+            ELSE due.relist_at
+          END,
+          due.due_at > ${now},
           due.connection_id, due.feed, due.place
         LIMIT 1)`
     )
     .returning();
-  return claimed === undefined
-    ? undefined
-    : {
-        source: claimed,
-        stream: claimed.dueAt.getTime() <= now ? "changes" : "relist",
-      };
+  if (claimed === undefined) {
+    return undefined;
+  }
+  // The cursor that has waited longest; its changes on a tie.
+  const changesAt = claimed.dueAt.getTime();
+  const relistAt = claimed.relistAt.getTime();
+  const changesDue = changesAt <= now;
+  return {
+    source: claimed,
+    stream:
+      changesDue && (relistAt > now || changesAt <= relistAt)
+        ? "changes"
+        : "relist",
+  };
 };
 
 /** A disconnect that stopped a person's own connection, for the sync's erasure. */
@@ -1245,23 +1446,27 @@ export const stepSyncErasure = async (
     // oxlint-disable-next-line no-await-in-loop -- a page at a time
     const page = await db
       .select({
-        itemId: brainSyncItems.itemId,
         key: brainSyncItems.key,
-        feed: brainSyncItems.feed,
+        store: brainSyncItems.store,
+        leaving: brainSyncItems.leaving,
+        leavingStore: brainSyncItems.leavingStore,
       })
       .from(brainSyncItems)
       .where(
-        and(
-          eq(brainSyncItems.connectionId, connectionId),
-          eq(brainSyncItems.store, "shared")
-        )
+        sql`${brainSyncItems.connectionId} = ${connectionId} AND (${brainSyncItems.store} = 'shared' OR ${brainSyncItems.leavingStore} = 'shared')`
       )
       .orderBy(asc(brainSyncItems.feed), asc(brainSyncItems.itemId))
       .limit(erasedPerPage);
     if (page.length === 0) {
       break;
     }
-    for (const { key } of page) {
+    // Its key in the shared store, and the one it was leaving there when a
+    // run stopped, if any.
+    const keys = page.flatMap(({ key, store, leaving, leavingStore }) => [
+      ...(store === "shared" ? [key] : []),
+      ...(leavingStore === "shared" && leaving !== null ? [leaving] : []),
+    ]);
+    for (const key of keys) {
       spend(budget, 1);
       // oxlint-disable-next-line no-await-in-loop -- within the budget
       await eraseSource(env, {
@@ -1378,21 +1583,27 @@ export const runSync = async (env: Env, given?: Budget): Promise<void> => {
         await syncPage(env, db, source, leaseId, budget, stream);
       } catch (error) {
         if (stoppedFor(error, "budget")) {
-          // What was done is in its rows: the page is read again next run.
+          // What was done is in its rows: the page is read again next run,
+          // still due since when it was, so it keeps its turn.
           // oxlint-disable-next-line no-await-in-loop -- ends the run
-          await release({ db, source, leaseId, stream }, Date.now());
+          await release(
+            { db, source, leaseId, stream },
+            (stream === "changes" ? source.dueAt : source.relistAt).getTime()
+          );
           return;
         }
-        if (!stoppedFor(error, "lost")) {
-          log.warn("brain.sync.page_failed", {
-            connectionId: source.connectionId,
-            errorName: errorName(error),
-          });
-          // oxlint-disable-next-line no-await-in-loop -- one source at a time
-          await release({ db, source, leaseId, stream }, Date.now() + pollMs, {
-            lastError: "sync.failed",
-          });
-        }
+        // Any other stop: logged, and the source given up (only while
+        // this run still holds it), due again at the next run, its cursor
+        // where it was. Never left held until its lease runs out.
+        const lost = stoppedFor(error, "lost");
+        log.warn(lost ? "brain.sync.page_stopped" : "brain.sync.page_failed", {
+          connectionId: source.connectionId,
+          errorName: errorName(error),
+        });
+        // oxlint-disable-next-line no-await-in-loop -- one source at a time
+        await release({ db, source, leaseId, stream }, Date.now() + pollMs, {
+          lastError: lost ? "sync.lost" : "sync.failed",
+        });
       }
     }
   } catch (error) {

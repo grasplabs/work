@@ -3488,8 +3488,11 @@ export const connectionBrainErasures = sqliteTable(
  * far in the Brain (`added`, `changed`, `removed`), counted once each,
  * whichever run did it, for the page's one audit event. Beside it, the
  * daily full relist: its own cursor (`relistCursor`), whether one is under
- * way (`relisting`), and when its next page is due, or the next one
- * starts (`relistAt`).
+ * way (`relisting`), when its next page is due, or the next one starts
+ * (`relistAt`), and when the one under way was due to start
+ * (`relistSince`), by which an overdue relist is seen; and whether an
+ * item of it may still be leaving a key a stopped run left unerased
+ * (`leavesOwed`), cleared when a page commits.
  */
 export const brainSyncSources = sqliteTable(
   "brain_sync_sources",
@@ -3515,6 +3518,8 @@ export const brainSyncSources = sqliteTable(
     relistCursor: text("relist_cursor"),
     relisting: integer({ mode: "boolean" }).notNull(),
     relistAt: timestamp("relist_at").notNull(),
+    relistSince: timestamp("relist_since"),
+    leavesOwed: integer("leaves_owed", { mode: "boolean" }).notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.connectionId, table.feed, table.place] }),
@@ -3529,8 +3534,12 @@ export const brainSyncSources = sqliteTable(
  * item leaves the Brain, so a key erased is never added to again), the
  * store it is in now (`own`, `shared`, or null when it is in neither),
  * the change last added (null while an add is under way), the Brain's
- * version of it as last answered, the item it is part of (an attachment's
- * message), and the listing that last named it. Never its readers: each
+ * version of it as last answered, a hash of the provider's change marker
+ * it was added at (`marker`), the item it is part of (an attachment's
+ * message), the listing that last named it, and the key it is leaving
+ * (`leaving`, in the store `leavingStore`): named here before the Brain
+ * erases it, so an erase a stopped run left is finished on its next read,
+ * and a disconnect's erasure finds it. Never its readers: each
  * page gives them to the Brain again, so nothing here names a person.
  * Core names a key here before the Brain is given it, so a disconnect's
  * erasure finds every key it gave.
@@ -3546,12 +3555,20 @@ export const brainSyncItems = sqliteTable(
     store: text({ enum: ["own", "shared"] }),
     change: text(),
     version: integer(),
+    marker: text(),
     partOf: text("part_of"),
     listing: integer().notNull(),
+    leaving: text(),
+    leavingStore: text("leaving_store", { enum: ["own", "shared"] }),
   },
   (table) => [
     primaryKey({ columns: [table.connectionId, table.feed, table.itemId] }),
     index("brain_sync_items_store_idx").on(table.connectionId, table.store),
+    index("brain_sync_items_leaving_idx").on(
+      table.connectionId,
+      table.feed,
+      table.leaving
+    ),
     index("brain_sync_items_part_of_idx").on(
       table.connectionId,
       table.feed,

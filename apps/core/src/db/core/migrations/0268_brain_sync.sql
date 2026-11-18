@@ -17,12 +17,16 @@ CREATE TABLE `brain_sync_items` (
 	`store` text,
 	`change` text,
 	`version` integer,
+	`marker` text,
 	`part_of` text,
 	`listing` integer NOT NULL,
+	`leaving` text,
+	`leaving_store` text,
 	PRIMARY KEY(`connection_id`, `feed`, `item_id`)
 );
 --> statement-breakpoint
 CREATE INDEX `brain_sync_items_store_idx` ON `brain_sync_items` (`connection_id`,`store`);--> statement-breakpoint
+CREATE INDEX `brain_sync_items_leaving_idx` ON `brain_sync_items` (`connection_id`,`feed`,`leaving`);--> statement-breakpoint
 CREATE INDEX `brain_sync_items_part_of_idx` ON `brain_sync_items` (`connection_id`,`feed`,`part_of`);--> statement-breakpoint
 CREATE TABLE `brain_sync_sources` (
 	`connection_id` text NOT NULL,
@@ -46,6 +50,8 @@ CREATE TABLE `brain_sync_sources` (
 	`relist_cursor` text,
 	`relisting` integer NOT NULL,
 	`relist_at` integer NOT NULL,
+	`relist_since` integer,
+	`leaves_owed` integer NOT NULL,
 	PRIMARY KEY(`connection_id`, `feed`, `place`)
 );
 --> statement-breakpoint

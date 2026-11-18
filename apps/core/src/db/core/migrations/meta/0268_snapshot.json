@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "1c8f5365-607f-47d5-a3d9-d165894e51f5",
+  "id": "ac1c52b9-b6fd-46ec-ac46-1abef3a1d111",
   "prevId": "ad6f8439-d8db-4c25-91cf-388ac6b95eb9",
   "tables": {
     "access_revocations": {
@@ -4663,6 +4663,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "marker": {
+          "name": "marker",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "part_of": {
           "name": "part_of",
           "type": "text",
@@ -4676,6 +4683,20 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "leaving": {
+          "name": "leaving",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "leaving_store": {
+          "name": "leaving_store",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -4684,6 +4705,15 @@
           "columns": [
             "connection_id",
             "store"
+          ],
+          "isUnique": false
+        },
+        "brain_sync_items_leaving_idx": {
+          "name": "brain_sync_items_leaving_idx",
+          "columns": [
+            "connection_id",
+            "feed",
+            "leaving"
           ],
           "isUnique": false
         },
@@ -4856,6 +4886,20 @@
         },
         "relist_at": {
           "name": "relist_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "relist_since": {
+          "name": "relist_since",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "leaves_owed": {
+          "name": "leaves_owed",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,

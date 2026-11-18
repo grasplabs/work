@@ -3,8 +3,8 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
-import { recallAs } from "../src/brain-next.ts";
-import { runSync } from "../src/brain-sync.ts";
+import { eraseSource, recallAs } from "../src/brain-next.ts";
+import { overdueRelists, runSync } from "../src/brain-sync.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode } from "./connect-providers.ts";
 import { driveSyncControlUrl } from "./drive-sync-fake.ts";
@@ -113,16 +113,21 @@ const connectSampleFeed = async (
 /** A message in a mailbox, or a part of one (`partOf`), as a sync item. */
 const mailItem = (
   id: string,
-  text: string,
-  more: { kind?: "mail" | "file"; partOf?: string; readers?: unknown } = {}
+  text: string | null,
+  more: {
+    kind?: "mail" | "file";
+    partOf?: string;
+    readers?: unknown;
+    version?: string;
+  } = {}
 ) => ({
   gone: false,
   id,
   kind: more.kind ?? "mail",
-  version: "1",
+  version: more.version ?? "1",
   changedAt: "2026-11-12T09:00:00.000Z",
   title: id,
-  content: { type: "text", text },
+  content: text === null ? null : { type: "text", text },
   readers: more.readers ?? null,
   changedBy: null,
   partOf: more.partOf ?? null,
@@ -837,6 +842,292 @@ describe("native sync", () => {
         relisted: await finds(owner.userId, vanished),
         change: await finds(owner.userId, added),
       }).toStrictEqual({ afterRestart: true, relisted: false, change: true });
+    }
+  );
+
+  it(
+    "applies a page that removes and passes over, stopped at each step, and takes back what comes again",
+    setUpTime,
+    async () => {
+      const [owner, colleague] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "user"),
+      ]);
+      const quiet = { changes: [], next: "c", more: false };
+      await connectSampleFeed(colleague, { "": quiet, c: quiet });
+      const [kept, mail, file, late] = [
+        markerOf(),
+        markerOf(),
+        markerOf(),
+        markerOf(),
+      ];
+      const tenant = [{ kind: "tenant", id: acmeTenant }];
+      const shared = (id: string, text: string | null, version = "1") =>
+        mailItem(id, text, { kind: "file", readers: tenant, version });
+      const first = {
+        changes: [
+          mailItem("kept", `Kept ${kept}`),
+          mailItem("mail", `Mail ${mail}`),
+          shared("file", `File ${file}`),
+          shared("late", `Late ${late}`),
+        ],
+        next: "p2",
+        more: false,
+      };
+      const { post } = await connectSampleFeed(owner, {
+        "": first,
+        p2: { changes: [], next: "p2", more: false },
+      });
+      later(pollMs);
+      await sync();
+      // A message and a shared file gone, a file passed over at the
+      // version held (its content late): stopped at each step in turn.
+      await post({
+        "": first,
+        p2: {
+          changes: [
+            { gone: true, id: "mail", kind: "mail" },
+            { gone: true, id: "file", kind: "file" },
+            shared("late", null),
+          ],
+          next: "p3",
+          more: false,
+        },
+        p3: { changes: [], next: "p3", more: false },
+      });
+      later(pollMs);
+      for (let left = 6; left < 40; left += 1) {
+        vi.useFakeTimers({ toFake: ["Date"], now: clockAt });
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- one run after another, as the clock runs them
+          await runSync(env, { left });
+        } finally {
+          vi.useRealTimers();
+        }
+      }
+      later(pollMs);
+      await sync();
+      const removed = {
+        mail: await finds(owner.userId, mail),
+        file: await finds(colleague.userId, file),
+        late: await finds(colleague.userId, late),
+        kept: await finds(owner.userId, kept),
+      };
+      // The message out of the bin as it was, the file at a new version,
+      // the late one with its content after all.
+      await post({
+        "": first,
+        p2: { changes: [], next: "p3", more: false },
+        p3: {
+          changes: [
+            mailItem("mail", `Mail ${mail}`),
+            shared("file", `File ${file}`, "2"),
+            shared("late", `Late ${late}`),
+          ],
+          next: "p4",
+          more: false,
+        },
+        p4: { changes: [], next: "p4", more: false },
+      });
+      later(pollMs);
+      await sync();
+
+      expect({
+        removed,
+        back: {
+          mail: await finds(owner.userId, mail),
+          file: await finds(colleague.userId, file),
+          late: await finds(colleague.userId, late),
+        },
+      }).toStrictEqual({
+        removed: { mail: false, file: false, late: true, kept: true },
+        back: { mail: true, file: true, late: true },
+      });
+    }
+  );
+
+  it(
+    "takes an item back that returns after a removal stopped at any step",
+    setUpTime,
+    async () => {
+      const [owner, colleague] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "user"),
+      ]);
+      const quiet = { changes: [], next: "c", more: false };
+      await connectSampleFeed(colleague, { "": quiet, c: quiet });
+      const [mail, file] = [markerOf(), markerOf()];
+      const tenant = [{ kind: "tenant", id: acmeTenant }];
+      const message = mailItem("mail", `Mail ${mail}`);
+      const fileAt = (version: string) =>
+        mailItem("file", `File ${file} ${version}`, {
+          kind: "file",
+          readers: tenant,
+          version,
+        });
+      const first = 6;
+      const { post } = await connectSampleFeed(owner, {
+        "": { changes: [message, fileAt("1")], next: `c${first}`, more: false },
+        [`c${first}`]: { changes: [], next: `c${first}`, more: false },
+      });
+      later(pollMs);
+      await sync();
+      // For each step in turn: the message and the file go, the run stops
+      // there, and the same position then names them back (the message as
+      // it was, out of the bin; the file at a new version).
+      const missing: number[] = [];
+      for (let left = first; left < 30; left += 1) {
+        const at = `c${left}`;
+        const next = { changes: [], next: `c${left + 1}`, more: false };
+        // oxlint-disable-next-line no-await-in-loop -- one step after another
+        await post({
+          [at]: {
+            changes: [
+              { gone: true, id: "mail", kind: "mail" },
+              { gone: true, id: "file", kind: "file" },
+            ],
+            next: `d${left}`,
+            more: false,
+          },
+        });
+        later(pollMs);
+        vi.useFakeTimers({ toFake: ["Date"], now: clockAt });
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- one step after another
+          await runSync(env, { left });
+        } finally {
+          vi.useRealTimers();
+        }
+        const back = {
+          changes: [message, fileAt(String(left))],
+          next: `c${left + 1}`,
+          more: false,
+        };
+        // oxlint-disable-next-line no-await-in-loop -- one step after another
+        await post({ [at]: back, [`d${left}`]: back, [`c${left + 1}`]: next });
+        later(pollMs);
+        // oxlint-disable-next-line no-await-in-loop -- one step after another
+        await sync();
+        if (
+          // oxlint-disable-next-line no-await-in-loop -- read after each step
+          !(await finds(owner.userId, mail)) ||
+          // oxlint-disable-next-line no-await-in-loop -- read after each step
+          !(await finds(colleague.userId, `${file} ${left}`))
+        ) {
+          missing.push(left);
+        }
+      }
+
+      expect(missing).toStrictEqual([]);
+    }
+  );
+
+  it(
+    "adds an item again under its next key when the Brain erased the one it held",
+    setUpTime,
+    async () => {
+      const owner = await signedInApi(idp, "user");
+      const marker = markerOf();
+      const memo = (version: string) =>
+        mailItem("memo", `Memo ${marker} ${version}`, { version });
+      const { connectionId, post } = await connectSampleFeed(owner, {
+        "": { changes: [memo("1")], next: "e1", more: false },
+        e1: { changes: [], next: "e1", more: false },
+      });
+      later(pollMs);
+      await sync();
+      // Erased in the Brain from outside the sync (a staff erasure, a
+      // restore that replays one): the row still names the key.
+      const held = await env.DB.prepare(
+        "SELECT key FROM brain_sync_items WHERE connection_id = ? AND item_id = 'memo'"
+      )
+        .bind(connectionId)
+        .first<{ key: string }>();
+      await eraseSource(env, {
+        source: { producer: "sync", id: held?.key ?? "" },
+        readers: { kind: "owner", personId: owner.userId },
+        reason: "deleted",
+      });
+      await post({
+        "": { changes: [memo("1")], next: "e1", more: false },
+        e1: { changes: [memo("2")], next: "e2", more: false },
+        e2: { changes: [], next: "e2", more: false },
+      });
+      later(pollMs);
+      await sync();
+
+      await expect(finds(owner.userId, `${marker} 2`)).resolves.toBeTruthy();
+    }
+  );
+
+  it(
+    "finishes an overdue relist when changes alone would fill every run, and says it is overdue",
+    setUpTime,
+    async () => {
+      const [owner, ...others] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "user"),
+        signedInApi(idp, "user"),
+        signedInApi(idp, "user"),
+      ]);
+      for (const other of others) {
+        // oxlint-disable-next-line no-await-in-loop -- one connection at a time
+        await connectDrive(other);
+      }
+      const { connectionId, subject, email } = await connectDrive(owner);
+      const vanished = markerOf();
+      const feed = { "110": { changes: [], newStartPageToken: "110" } };
+      await driveHolds(subject, {
+        start: "110",
+        owned: [docFile("vanished", email)],
+        changes: feed,
+        contents: { vanished: `Pitch ${vanished}` },
+      });
+      later(pollMs);
+      await sync();
+      // Deleted with no signal: only the relist's end takes it out.
+      await driveHolds(subject, {
+        start: "110",
+        owned: [],
+        changes: feed,
+        contents: {},
+      });
+      // Two days on, its relist past its day.
+      later(2 * 24 * 60 * 60 * 1000);
+      vi.useFakeTimers({ toFake: ["Date"], now: clockAt });
+      const overdue = await overdueRelists(env);
+      vi.useRealTimers();
+      const warned: unknown[] = [];
+      const spy = vi.spyOn(console, "warn").mockImplementation((...line) => {
+        warned.push(line);
+      });
+      try {
+        // Runs too small for every source's changes: a minute each.
+        for (let minute = 0; minute < 30; minute += 1) {
+          later(pollMs);
+          vi.useFakeTimers({ toFake: ["Date"], now: clockAt });
+          try {
+            // oxlint-disable-next-line no-await-in-loop -- one run after another, as the clock runs them
+            await runSync(env, { left: 12 });
+          } finally {
+            vi.useRealTimers();
+          }
+        }
+      } finally {
+        spy.mockRestore();
+      }
+
+      expect({
+        overdue: overdue > 0,
+        said: JSON.stringify(warned).includes("brain.sync.relist_overdue"),
+        saidOf: JSON.stringify(warned).includes(connectionId),
+        relisted: await finds(owner.userId, vanished),
+      }).toStrictEqual({
+        overdue: true,
+        said: true,
+        saidOf: true,
+        relisted: false,
+      });
     }
   );
 

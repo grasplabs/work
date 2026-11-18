@@ -28,6 +28,7 @@ import {
   brainErasureForStaff,
   brainStaffReport,
 } from "./brain-next.ts";
+import { overdueRelists } from "./brain-sync.ts";
 import { consoleSigned } from "./console-signed.ts";
 import type { ConsoleRefusal } from "./console-signed.ts";
 import { errorResponse } from "./errors.ts";
@@ -125,7 +126,13 @@ export const brainReportResponse = async (
     detail: {},
   });
   // Only what the schema names leaves core, whatever was built.
-  return answer(brainReportSchema.parse(await brainStaffReport(env)));
+  const [report, overdue] = await Promise.all([
+    brainStaffReport(env),
+    overdueRelists(env),
+  ]);
+  return answer(
+    brainReportSchema.parse({ ...report, sync: { overdueRelists: overdue } })
+  );
 };
 
 /**
