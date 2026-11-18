@@ -1213,7 +1213,8 @@ type CoreCodeMember = "codeCardAs" | "codeEntitiesAs" | "isCodeEntitiesRequest";
 type CoreAppMember =
   | "rememberForAppAs"
   | "forgetForAppAs"
-  | "isCodeWriteRequest";
+  | "isCodeWriteRequest"
+  | "credentialIssues";
 
 // Exports (GRA-1755). A company's export holds what the company holds,
 // markers among them, by design: it is for an admin, and core's route
@@ -8011,6 +8012,30 @@ const coreAppWrites = {
         writer: hidden,
       }),
       await is("an operation of the markers", hidden, { memory: hidden }),
+    ];
+  },
+  // Pure: why a request's identifiers are refused, naming each by its
+  // place, never what it holds.
+  credentialIssues: async ({ markers }) => {
+    const issues = async (name: string, value: string) =>
+      await answer(name, async () => {
+        await Promise.resolve();
+        return coreBrain.credentialIssues({
+          about: {
+            kind: "customer",
+            identifiers: [{ type: "ref", value }],
+          },
+          statement: "Plain",
+        });
+      });
+    const hidden = markers.join("-");
+    return [
+      await issues("an id of the markers", `crm:${hidden}`),
+      await issues("a key of the markers", `crm:ghp_${hidden}`),
+      await issues(
+        "a signed link of the markers",
+        `files:https://example.com/${hidden}?sig=${hidden}`
+      ),
     ];
   },
 } satisfies Record<CoreAppMember, Probe>;

@@ -64,7 +64,7 @@ describe(noteMarkdown, () => {
     );
   });
 
-  it("never quotes a team’s claim, and says it rests on five or more people", () => {
+  it("never quotes a team’s claim, and says it is how the team works, with no count of people", () => {
     const claimId = "onb-st-0123456789abcdef0123456789abcdef";
     const team = note("team-service");
     const [first] = team.timeline;
@@ -98,10 +98,10 @@ describe(noteMarkdown, () => {
     };
     const text = noteMarkdown(claim, options);
     expect(text).toContain(
-      "# Tickets come in through Zendesk\n\n*Said by five or more people*\n"
+      "# Tickets come in through Zendesk\n\n*How the team works, as its people told it*\n"
     );
     expect(text).toContain(
-      `  - [Tickets come in through Zendesk](https://grasp.example/brain/onb-src-ops#${claimId}) (Said by five or more people)`
+      `  - [Tickets come in through Zendesk](https://grasp.example/brain/onb-src-ops#${claimId}) (How the team works, as its people told it)`
     );
     expect(text).toContain(
       "  - [“Every email is routed by hand”](https://grasp.example/brain/src-service#st-inbox)"

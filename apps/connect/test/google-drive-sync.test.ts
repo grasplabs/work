@@ -2,8 +2,10 @@ import { syncErrors } from "@grasp-os/shared/sync";
 import type { SyncPageRequest } from "@grasp-os/shared/sync";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { connectAccount, ownAccount, someone } from "./connect.ts";
+import { scopeRefusal, syncGrant } from "./google-scopes.ts";
 import { fakeInternet } from "./internet.ts";
 import { fakeProviders } from "./oauth-provider.ts";
 
@@ -35,6 +37,8 @@ interface Drive {
   changes: Record<string, Record<string, unknown>>;
   /** Each file's content, by ID. */
   contents: Record<string, string>;
+  /** A file's version now, by ID, when it moved since it was listed or changed. */
+  versions: Record<string, string>;
   /** Answers every request instead, when it answers. */
   answer?: (url: URL) => Response | undefined;
   /**
@@ -44,13 +48,20 @@ interface Drive {
   slow?: { path: string; ms: number };
 }
 
-const drive: Drive = { start: "100", owned: [], changes: {}, contents: {} };
+const drive: Drive = {
+  start: "100",
+  owned: [],
+  changes: {},
+  contents: {},
+  versions: {},
+};
 
 const reset = (): void => {
   drive.start = "100";
   drive.owned = [];
   drive.changes = {};
   drive.contents = {};
+  drive.versions = {};
   drive.answer = undefined;
   drive.slow = undefined;
 };
@@ -77,7 +88,31 @@ const stalled = (ms: number): Response =>
     })
   );
 
-const internet = fakeInternet((_request, url) => {
+const fileVersion = z.looseObject({ id: z.string(), version: z.string() });
+const changesPage = z.looseObject({
+  changes: z.array(z.looseObject({ file: fileVersion.nullish() })).nullish(),
+});
+
+/** A file's version now: as it moved, else as the change feed or the listing last gave it. */
+const versionOf = (id: string): string => {
+  const changed = Object.values(drive.changes)
+    .flatMap((page) => changesPage.parse(page).changes ?? [])
+    .flatMap(({ file }) => (file?.id === id ? [file.version] : []));
+  const listed = fileVersion.safeParse(
+    drive.owned.find((file) => file.id === id)
+  );
+  return (
+    drive.versions[id] ??
+    changed.at(-1) ??
+    (listed.success ? listed.data.version : "")
+  );
+};
+
+const internet = fakeInternet((request, url) => {
+  const refused = scopeRefusal(providers, request, url);
+  if (refused !== undefined) {
+    return refused;
+  }
   if (drive.slow?.path === url.pathname) {
     return stalled(drive.slow.ms);
   }
@@ -101,22 +136,30 @@ const internet = fakeInternet((_request, url) => {
   if (path === "/drive/v3/files") {
     return listing(url);
   }
-  const [id] = path.slice("/drive/v3/files/".length).split("/");
-  const content = drive.contents[id ?? ""];
-  return content === undefined
-    ? Response.json({ error: { code: 404 } }, { status: 404 })
-    : new Response(content);
+  const [id = "", exported] = path.slice("/drive/v3/files/".length).split("/");
+  const content = drive.contents[id];
+  if (content === undefined) {
+    return Response.json({ error: { code: 404 } }, { status: 404 });
+  }
+  if (exported === "export" || url.searchParams.get("alt") === "media") {
+    return new Response(content);
+  }
+  // A file's metadata: its version as it now is.
+  return Response.json({ version: versionOf(id) });
 });
 
 /** What reached Google. */
 const sentToGoogle = () =>
   internet.sent.filter(({ host }) => host === apisHost);
 
-/** Someone's own Google account, connected. */
-const connected = async (): Promise<string> => {
+/** Someone's own Google account, connected with what the sync holds (`granted`). */
+const connected = async (granted = syncGrant): Promise<string> => {
   reset();
   const person = someone();
-  return await connectAccount(providers, person, ownAccount(person, "google"));
+  return await connectAccount(providers, person, {
+    ...ownAccount(person, "google"),
+    granted,
+  });
 };
 
 const request = (
@@ -350,6 +393,8 @@ describe("syncing a person's own Drive", () => {
         size: undefined,
       }),
     ];
+    // Its metadata answers its version; its export, as asked.
+    drive.contents = { prices: "" };
     // Google's CSV export holds the first sheet only.
     drive.answer = (url) =>
       url.pathname === "/drive/v3/files/prices/export"
@@ -406,6 +451,37 @@ describe("syncing a person's own Drive", () => {
     ]);
     const second = await read(connectionId, first.cursor);
     expect(second.items.map(({ id }) => id)).toStrictEqual(["next"]);
+  });
+
+  it("never puts a file's new bytes under the version it was listed at", async () => {
+    const connectionId = await connected();
+    drive.owned = [ownedFile("edited"), ownedFile("kept")];
+    drive.contents = { edited: "new words", kept: "k" };
+    // Edited between the listing and its download: the change feed brings
+    // the new version.
+    drive.versions = { edited: "4" };
+    const { items } = await read(connectionId, null);
+    expect(items.map(({ id }) => id)).toStrictEqual(["kept"]);
+  });
+
+  it("fails as throttled, never an unchanged page, when Google's listing is slower than a page may take", async () => {
+    const connectionId = await connected();
+    drive.owned = [ownedFile("file-0")];
+    drive.contents = { "file-0": "f" };
+    drive.slow = { path: "/drive/v3/files", ms: 20_000 };
+    await expect(read(connectionId, null)).rejects.toMatchObject({
+      code: "sync.throttled",
+    });
+  });
+
+  it("asks for reconnecting when the connection's grant can't read the Drive", async () => {
+    // Only what the classes on by default ask: no `drive.readonly`.
+    const connectionId = await connected(
+      syncGrant.replace(" https://www.googleapis.com/auth/drive.readonly", "")
+    );
+    await expect(read(connectionId, null)).rejects.toMatchObject({
+      code: "sync.inactive",
+    });
   });
 
   it("lists again when Google no longer has the cursor, or it isn't one the sync wrote", async () => {

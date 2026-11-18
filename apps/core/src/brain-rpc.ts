@@ -17,10 +17,7 @@ import type {
   Workflow,
   Workspace,
 } from "@grasp-os/shared/brain";
-import {
-  onboardingIdPrefix,
-  purgedMarker,
-} from "@grasp-os/shared/brain-records";
+import { onboardingIdPrefix } from "@grasp-os/shared/brain-records";
 import type {
   BrainRecordInput,
   BrainRecordsAdded,
@@ -165,14 +162,6 @@ const dayOf = (iso: string): string => iso.slice(0, 10);
 /** A team's name as two sources can both mean it: trimmed, any case. */
 const nameKey = teamNameKey;
 
-/**
- * Whether teams of `name` may be joined by it: not one a purge rewrote
- * (its terms replaced by `purgedMarker`), which could name an unrelated
- * team the same way.
- */
-const joinable = (name: string): boolean =>
-  !name.toLowerCase().includes(purgedMarker.toLowerCase());
-
 /** A tool's name as an id part: its letters and digits, any case, joined by `-`; empty when it has none. */
 const slugOf = (name: string): string =>
   name
@@ -204,19 +193,19 @@ interface CameIn {
 
 /**
  * Each team's interviews while its results may show, as the one source
- * its claims and drawings name (onboarding/brain-intake.ts): how many of
- * its people agreed, and the week the first did, never who.
+ * its claims and drawings name (onboarding/brain-intake.ts): the week the
+ * first agreed, never who, nor how many: a team's work shows from the
+ * first person who told it (GRA-1987), so a count would say whose it is.
  */
 const teamInterviews = async (env: Env): Promise<CameIn[]> => {
   const teams = await onboardingStore(env).interviewSources();
   return await Promise.all(
-    teams.map(async ({ team, name, people, since }) => ({
+    teams.map(async ({ team, name, since }) => ({
       source: {
         id: await intakeIds.interviews(team),
         kind: "interview",
         title: `Interviews with ${name}`,
         date: mondayOf(since),
-        how: people === 1 ? "1 person" : `${people} people`,
         step: 2,
         interviewee: "employee",
         teamIds: [ids.rosterTeam(team)],
@@ -274,12 +263,7 @@ type TeamsByName = ReadonlyMap<string, string>;
 
 /** The first of `teams` of each name: the roster's before the records'. */
 const teamsByName = (teams: readonly Team[]): TeamsByName =>
-  new Map(
-    teams
-      .filter(({ name }) => joinable(name))
-      .toReversed()
-      .map(({ id, name }) => [nameKey(name), id])
-  );
+  new Map(teams.toReversed().map(({ id, name }) => [nameKey(name), id]));
 
 /** The ids of the brain's teams `names` name, once each; names it has no team for are left out. */
 const teamIdsNamed = (
@@ -775,14 +759,12 @@ const withKickoffTeams = (
   const byName = new Map<string, Team>();
   for (const team of [...roster, ...own]) {
     const key = nameKey(team.name);
-    if (joinable(team.name) && !byName.has(key)) {
+    if (!byName.has(key)) {
       byName.set(key, team);
     }
   }
   const alone = kickoff.filter((team) => {
-    const into = joinable(team.name)
-      ? byName.get(nameKey(team.name))
-      : undefined;
+    const into = byName.get(nameKey(team.name));
     if (into === undefined) {
       return true;
     }
@@ -1094,8 +1076,8 @@ const readBrainCore = async (
 /**
  * The brain's teams, what they said and its workflows, as `person` may
  * read them, as `readBrain` reads them: what a step of a chat's thinking
- * may name (agent-thinking.ts). What a team said is a claim five or more
- * of its people made, or none.
+ * may name (agent-thinking.ts). What a team said is a claim of how it
+ * works, from what its people shared as how it works (GRA-1987), or none.
  */
 export const readThinkingBrain = async (
   env: Env,

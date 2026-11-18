@@ -929,7 +929,7 @@ export const statementWords = (statementId: string, text: string): string =>
 /** What a team's claim rests on, in words: for where `ClaimBasis` can't go, such as the Markdown export. */
 export const teamClaimBasis = (): string =>
   t({
-    message: "Said by five or more people",
+    message: "How the team works, as its people told it",
     comment: "Under a statement put together from the interviews",
   });
 

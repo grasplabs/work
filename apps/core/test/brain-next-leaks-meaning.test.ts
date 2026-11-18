@@ -1,6 +1,6 @@
 import { recallBudgetMax, recallLimit } from "@grasp-os/brain-next/contract";
 import type { WorkOverview } from "@grasp-os/brain-next/contract";
-import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import {
   beforeAll,
@@ -40,6 +40,7 @@ import {
   meaningSurfaces,
   findingsOf,
   ownStoreOf,
+  settledOwnStores,
   answersOf,
   recalledByMeaning,
   join,
@@ -169,38 +170,19 @@ const embeddedOf = async (
 /** The queue's clock for ticks of this file: only forward. */
 const clock = { at: Date.now() };
 
-/** Most ticks the shared store, or a person's own, may take to embed. */
+/** Most ticks the shared store may take to embed. */
 const embedTicksMost = 50;
 
 /**
- * Runs each of `people`'s own stores' alarms until they sleep, then ticks
- * the shared store, as core's clock does, until everything it holds is
+ * Each of `people`'s own stores settled (`settledOwnStores`), then the
+ * shared store ticked, as core's clock does, until everything it holds is
  * embedded, nothing waits and no erasure is under way: the shared store's
- * embedding then. Fails, naming the store, when a person's own store
- * still wakes after `embedTicksMost` alarms, or sleeps with a passage of
- * its own not embedded.
+ * embedding then.
  */
 const allEmbedded = async (
   people: readonly string[]
 ): Promise<WorkOverview["embedding"]> => {
-  for (const person of people) {
-    let awake = true;
-    for (let run = 0; awake && run < embedTicksMost; run += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one alarm after another
-      awake = await runDurableObjectAlarm(ownStoreOf(person));
-    }
-    // oxlint-disable-next-line no-await-in-loop -- one store at a time
-    const { embedding } = await ownStoreOf(person).workOverview();
-    const done =
-      embedding.chunks === 0 ||
-      (embedding.rebuilt &&
-        embedding.embedded + embedding.unembeddable === embedding.chunks);
-    if (awake || !done) {
-      throw new Error(
-        `person:${person}'s own store wasn't embedded in ${embedTicksMost} alarms: ${JSON.stringify(embedding)}`
-      );
-    }
-  }
+  await settledOwnStores(people);
   for (let ticks = 0; ticks < embedTicksMost; ticks += 1) {
     clock.at = Math.max(clock.at, Date.now()) + 60_000;
     // oxlint-disable-next-line no-await-in-loop -- one tick at a time, as core's clock
