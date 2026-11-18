@@ -5673,6 +5673,7 @@ msgctxt "workflow status"
 msgid "Designed"
 msgstr "Repensé"
 
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Desktop"
 msgstr "Ordinateur"
@@ -11368,6 +11369,7 @@ msgstr "Ouvrir Fichiers et applications"
 msgid "Open full page"
 msgstr "Ouvrir en pleine page"
 
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Open in a new tab"
 msgstr "Ouvrir dans un nouvel onglet"
@@ -11691,6 +11693,10 @@ msgstr "Paquets"
 msgid "Packages of {name} were revoked as malware"
 msgstr "Des paquets de {name} ont été révoqués comme logiciels malveillants"
 
+#: src/apps/preview-controls.tsx
+msgid "Page"
+msgstr "Page"
+
 #: src/frame/part-words.tsx
 msgctxt "one page of a form"
 msgid "Page"
@@ -11980,6 +11986,10 @@ msgstr "Connexions personnelles"
 msgid "Personal Knowledge and memories"
 msgstr "Connaissances personnelles et souvenirs"
 
+#: src/apps/preview-controls.tsx
+msgid "Phone"
+msgstr "Téléphone"
+
 #: src/frame/part-words.tsx
 msgctxt "a screen width"
 msgid "Phone"
@@ -12105,6 +12115,10 @@ msgstr "Appuyez pour utiliser l’app"
 msgid "Presses \"{words}\""
 msgstr "Appuie sur \"{words}\""
 
+#: src/apps/preview-controls.tsx
+msgid "Preview"
+msgstr "Aperçu"
+
 #: src/frame/part-words.tsx
 msgid "Preview of your chat background"
 msgstr "Aperçu de l’arrière-plan de votre chat"
@@ -12112,6 +12126,10 @@ msgstr "Aperçu de l’arrière-plan de votre chat"
 #: src/knowledge/purge.tsx
 msgid "Preview the purge"
 msgstr "Prévisualiser la purge"
+
+#: src/apps/preview-controls.tsx
+msgid "Preview width"
+msgstr "Largeur de l’aperçu"
 
 #: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
@@ -12672,6 +12690,7 @@ msgid "Release address…"
 msgstr "Libérer l’adresse…"
 
 #: src/apps/app-data.tsx
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Reload"
 msgstr "Recharger"
@@ -15204,6 +15223,7 @@ msgstr "Nom de la table"
 msgid "Tables"
 msgstr "Tables"
 
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Tablet"
 msgstr "Tablette"

@@ -6,6 +6,8 @@ import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { PreviewFrame } from "../pages/page-frame.tsx";
 import type { FrameFix, PageEnded } from "../pages/page-frame.tsx";
 import type { ReadOnlyShown } from "./app-workspace.tsx";
+import { previewWidths } from "./preview-controls.tsx";
+import type { PreviewWidth } from "./preview-controls.tsx";
 
 const styles = stylex.create({
   // The page's own ground, filling what is left of the workspace.
@@ -16,6 +18,8 @@ const styles = stylex.create({
     minHeight: 0,
     overflow: "hidden",
     backgroundColor: grasp.paper,
+    width: "100%",
+    marginInline: "auto",
   },
 });
 
@@ -36,6 +40,8 @@ const styles = stylex.create({
  */
 export const DraftPreview = ({
   app,
+  at,
+  width,
   draft,
   name,
   shown,
@@ -45,6 +51,10 @@ export const DraftPreview = ({
   onFix,
 }: {
   app: string;
+  /** The page it shows; its first while none was picked. */
+  at?: string | undefined;
+  /** How wide it is drawn. */
+  width?: PreviewWidth;
   /** The App's draft; none until it is read. */
   draft: AppDraft | undefined;
   name: string;
@@ -66,10 +76,11 @@ export const DraftPreview = ({
   return (
     <section
       aria-label={t`${name}, your version`}
-      {...stylex.props(styles.preview)}
+      {...stylex.props(styles.preview, previewWidths[width ?? "desktop"])}
     >
       <PreviewFrame
         app={app}
+        at={at}
         key={`${app}:${point ?? ""}:${version ?? ""}`}
         point={point}
         version={version}

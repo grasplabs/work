@@ -5673,6 +5673,7 @@ msgctxt "workflow status"
 msgid "Designed"
 msgstr "Ontworpen"
 
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Desktop"
 msgstr "Desktop"
@@ -11368,6 +11369,7 @@ msgstr "Bestanden en apps openen"
 msgid "Open full page"
 msgstr "Volledige pagina openen"
 
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Open in a new tab"
 msgstr "Openen in een nieuw tabblad"
@@ -11691,6 +11693,10 @@ msgstr "Pakketten"
 msgid "Packages of {name} were revoked as malware"
 msgstr "Pakketten van {name} zijn ingetrokken als malware"
 
+#: src/apps/preview-controls.tsx
+msgid "Page"
+msgstr "Pagina"
+
 #: src/frame/part-words.tsx
 msgctxt "one page of a form"
 msgid "Page"
@@ -11980,6 +11986,10 @@ msgstr "Persoonlijke koppelingen"
 msgid "Personal Knowledge and memories"
 msgstr "Persoonlijke Kennis en herinneringen"
 
+#: src/apps/preview-controls.tsx
+msgid "Phone"
+msgstr "Telefoon"
+
 #: src/frame/part-words.tsx
 msgctxt "a screen width"
 msgid "Phone"
@@ -12105,6 +12115,10 @@ msgstr "Druk om de app te gebruiken"
 msgid "Presses \"{words}\""
 msgstr "Drukt op \"{words}\""
 
+#: src/apps/preview-controls.tsx
+msgid "Preview"
+msgstr "Voorbeeld"
+
 #: src/frame/part-words.tsx
 msgid "Preview of your chat background"
 msgstr "Voorbeeld van je chatachtergrond"
@@ -12112,6 +12126,10 @@ msgstr "Voorbeeld van je chatachtergrond"
 #: src/knowledge/purge.tsx
 msgid "Preview the purge"
 msgstr "Opschoning eerst bekijken"
+
+#: src/apps/preview-controls.tsx
+msgid "Preview width"
+msgstr "Breedte van het voorbeeld"
 
 #: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
@@ -12672,6 +12690,7 @@ msgid "Release address…"
 msgstr "Adres vrijgeven…"
 
 #: src/apps/app-data.tsx
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Reload"
 msgstr "Opnieuw laden"
@@ -15204,6 +15223,7 @@ msgstr "Tabelnaam"
 msgid "Tables"
 msgstr "Tabellen"
 
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Tablet"
 msgstr "Tablet"

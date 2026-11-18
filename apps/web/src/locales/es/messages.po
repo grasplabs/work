@@ -5673,6 +5673,7 @@ msgctxt "workflow status"
 msgid "Designed"
 msgstr "Diseñado"
 
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Desktop"
 msgstr "Escritorio"
@@ -11368,6 +11369,7 @@ msgstr "Abrir Archivos y apps"
 msgid "Open full page"
 msgstr "Abrir a página completa"
 
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Open in a new tab"
 msgstr "Abrir en una pestaña nueva"
@@ -11691,6 +11693,10 @@ msgstr "Paquetes"
 msgid "Packages of {name} were revoked as malware"
 msgstr "Se han revocado paquetes de {name} por malware"
 
+#: src/apps/preview-controls.tsx
+msgid "Page"
+msgstr "Página"
+
 #: src/frame/part-words.tsx
 msgctxt "one page of a form"
 msgid "Page"
@@ -11980,6 +11986,10 @@ msgstr "Conexiones personales"
 msgid "Personal Knowledge and memories"
 msgstr "Conocimiento personal y recuerdos"
 
+#: src/apps/preview-controls.tsx
+msgid "Phone"
+msgstr "Teléfono"
+
 #: src/frame/part-words.tsx
 msgctxt "a screen width"
 msgid "Phone"
@@ -12105,6 +12115,10 @@ msgstr "Pulsa para usar la app"
 msgid "Presses \"{words}\""
 msgstr "Pulsa \"{words}\""
 
+#: src/apps/preview-controls.tsx
+msgid "Preview"
+msgstr "Vista previa"
+
 #: src/frame/part-words.tsx
 msgid "Preview of your chat background"
 msgstr "Vista previa del fondo de tu chat"
@@ -12112,6 +12126,10 @@ msgstr "Vista previa del fondo de tu chat"
 #: src/knowledge/purge.tsx
 msgid "Preview the purge"
 msgstr "Ver la depuración antes"
+
+#: src/apps/preview-controls.tsx
+msgid "Preview width"
+msgstr "Ancho de la vista previa"
 
 #: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
@@ -12672,6 +12690,7 @@ msgid "Release address…"
 msgstr "Liberar dirección…"
 
 #: src/apps/app-data.tsx
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Reload"
 msgstr "Recargar"
@@ -15204,6 +15223,7 @@ msgstr "Nombre de la tabla"
 msgid "Tables"
 msgstr "Tablas"
 
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Tablet"
 msgstr "Tableta"

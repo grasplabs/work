@@ -5673,6 +5673,7 @@ msgctxt "workflow status"
 msgid "Designed"
 msgstr "Designed"
 
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Desktop"
 msgstr "Desktop"
@@ -11368,6 +11369,7 @@ msgstr "Open Files and apps"
 msgid "Open full page"
 msgstr "Open full page"
 
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Open in a new tab"
 msgstr "Open in a new tab"
@@ -11691,6 +11693,10 @@ msgstr "Packages"
 msgid "Packages of {name} were revoked as malware"
 msgstr "Packages of {name} were revoked as malware"
 
+#: src/apps/preview-controls.tsx
+msgid "Page"
+msgstr "Page"
+
 #: src/frame/part-words.tsx
 msgctxt "one page of a form"
 msgid "Page"
@@ -11980,6 +11986,10 @@ msgstr "Personal connections"
 msgid "Personal Knowledge and memories"
 msgstr "Personal Knowledge and memories"
 
+#: src/apps/preview-controls.tsx
+msgid "Phone"
+msgstr "Phone"
+
 #: src/frame/part-words.tsx
 msgctxt "a screen width"
 msgid "Phone"
@@ -12105,6 +12115,10 @@ msgstr "Press to use the app"
 msgid "Presses \"{words}\""
 msgstr "Presses \"{words}\""
 
+#: src/apps/preview-controls.tsx
+msgid "Preview"
+msgstr "Preview"
+
 #: src/frame/part-words.tsx
 msgid "Preview of your chat background"
 msgstr "Preview of your chat background"
@@ -12112,6 +12126,10 @@ msgstr "Preview of your chat background"
 #: src/knowledge/purge.tsx
 msgid "Preview the purge"
 msgstr "Preview the purge"
+
+#: src/apps/preview-controls.tsx
+msgid "Preview width"
+msgstr "Preview width"
 
 #: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
@@ -12672,6 +12690,7 @@ msgid "Release address…"
 msgstr "Release address…"
 
 #: src/apps/app-data.tsx
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Reload"
 msgstr "Reload"
@@ -15204,6 +15223,7 @@ msgstr "Table name"
 msgid "Tables"
 msgstr "Tables"
 
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Tablet"
 msgstr "Tablet"

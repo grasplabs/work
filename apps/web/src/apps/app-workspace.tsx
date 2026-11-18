@@ -38,15 +38,18 @@ import {
   AppWindow,
   Archive,
   Chat,
+  Code,
+  Database,
   Expand,
   Link as LinkIcon,
   More,
   People,
+  Settings,
   Sparkles,
 } from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
-import { TabsLink, TabsNav } from "../grasp/tabs/nav.tsx";
+import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { PageFrame } from "../pages/page-frame.tsx";
 import type { FrameFix } from "../pages/page-frame.tsx";
@@ -64,6 +67,15 @@ import { StatusBadge, useStatusMove, userNames } from "./app-status.tsx";
 import { DraftPreview } from "./draft-preview.tsx";
 import { fixQuestion } from "./fix-with-grasp.ts";
 import { dismissMadeTip, showsMadeTip } from "./made-tip.ts";
+import {
+  PreviewControls,
+  previewWidths,
+  usePreviewControls,
+} from "./preview-controls.tsx";
+import type {
+  PreviewControlsProps,
+  PreviewWidth,
+} from "./preview-controls.tsx";
 import { ChangesLine, ShareWithTeam, showsChangesLine } from "./publish.tsx";
 import { hasChanges, useAppDraft } from "./use-app-draft.ts";
 import { readTables, useAppRead } from "./use-app-read.ts";
@@ -192,47 +204,70 @@ const styles = stylex.create({
   },
   unseen: { opacity: 0 },
   strip: { flexShrink: 0 },
+  // A preview drawn narrower than its room, in the middle of it.
+  drawn: { width: "100%", marginInline: "auto" },
+  // The views, then the preview's controls, in the bar's middle.
+  middle: { display: "flex", alignItems: "center", gap: grasp.space3 },
   padded: { padding: grasp.space4 },
 });
 
 /** The switch's entries, in order. */
 const views = ["preview", "code", "data", "settings"] as const;
 
-/** Preview | Code | Data | Settings: links, so each is an address of its own. */
+/**
+ * App | Code | Data | Settings, as one switch of icons: the chosen view
+ * with its name beside its icon, the others its icon alone. Each is an
+ * address of its own, gone to on a choice.
+ */
 const ViewSwitch = ({ app, view }: { app: string; view: WorkspaceView }) => {
   const { t } = useLingui();
+  const navigate = useNavigate();
   const labels: Record<WorkspaceView, string> = {
     preview: t({ message: "App", context: "an app's workspace view" }),
     code: t({ message: "Code", context: "an app's workspace view" }),
     data: t({ message: "Data", context: "an app's workspace view" }),
     settings: t({ message: "Settings", context: "an app's workspace view" }),
   };
+  const icons = {
+    preview: AppWindow,
+    code: Code,
+    data: Database,
+    settings: Settings,
+  };
   return (
-    <TabsNav aria-label={t`Workspace views`} variant="segmented">
+    <ToggleGroup
+      aria-label={t`Workspace views`}
+      onValueChange={(chosen: unknown[]) => {
+        const picked = views.find((each) => each === chosen[0]);
+        if (picked !== undefined) {
+          void navigate({
+            from: "/apps/$app",
+            to: "/apps/$app",
+            params: { app },
+            replace: true,
+            search: (held) => ({
+              env: held.env,
+              project: held.project,
+              view: picked === "preview" ? undefined : picked,
+            }),
+          });
+        }
+      }}
+      size="sm"
+      value={[view]}
+    >
       {views.map((each) => (
-        <TabsLink
-          current={each === view}
+        <Toggle
+          aria-label={labels[each]}
+          icon={icons[each]}
           key={each}
-          render={
-            <Link
-              // The App's own view has no `view` in its address: said
-              // so, so the router's own match marks it only there.
-              activeOptions={{ explicitUndefined: true }}
-              params={{ app }}
-              replace
-              search={(held) => ({
-                env: held.env,
-                project: held.project,
-                view: each === "preview" ? undefined : each,
-              })}
-              to="/apps/$app"
-            />
-          }
+          title={labels[each]}
+          value={each}
         >
-          {labels[each]}
-        </TabsLink>
+          {each === view ? labels[each] : undefined}
+        </Toggle>
       ))}
-    </TabsNav>
+    </ToggleGroup>
   );
 };
 
@@ -326,10 +361,13 @@ const WorkspaceBar = ({
   settingUp = false,
   chatId,
   onShared,
+  preview,
 }: {
   app: ViewedApp;
   back: Crumb;
   view: WorkspaceView;
+  /** The preview's own controls, beside the views while it shows. */
+  preview?: PreviewControlsProps | undefined;
   identity: Pick<Identity, "staff">;
   /** The App's changes, as read last; none while they are read, or archived. */
   draft: AppDraft | undefined;
@@ -377,7 +415,14 @@ const WorkspaceBar = ({
       // In the bar's middle, which goes to a row of its own where the bar
       // is too narrow for it beside the rest; there the views fold to one
       // button where even that row is too narrow (Grasp UI's TabsNav).
-      views={<ViewSwitch app={app.id} view={view} />}
+      views={
+        <span {...stylex.props(styles.middle)}>
+          <ViewSwitch app={app.id} view={view} />
+          {view === "preview" && preview !== undefined ? (
+            <PreviewControls {...preview} />
+          ) : null}
+        </span>
+      }
     />
   );
 };
@@ -674,6 +719,8 @@ const SetUpOver = ({ failed, name }: { failed: boolean; name: string }) => (
  */
 const PreviewArea = ({
   app,
+  at,
+  width,
   draft,
   shown,
   running,
@@ -682,6 +729,9 @@ const PreviewArea = ({
   onChanged,
 }: {
   app: App;
+  /** The page it shows; its first while none was picked. */
+  at: string | undefined;
+  width: PreviewWidth;
   /** The App's draft; none until it is read. */
   draft: AppDraft | undefined;
   shown: ReadOnlyShown | undefined;
@@ -752,8 +802,10 @@ const PreviewArea = ({
       >
         <DraftPreview
           app={app.id}
+          at={at}
           draft={draft}
           key={tries}
+          width={width}
           name={name}
           onEnded={(end) => {
             if (end.status === "failed") {
@@ -791,9 +843,14 @@ const PreviewArea = ({
  */
 const LivePreview = ({
   app,
+  at,
+  width,
   building,
 }: {
   app: App;
+  /** The page it shows; its first while none was picked. */
+  at: string | undefined;
+  width: PreviewWidth;
   building?: { running: boolean };
 }) => {
   const { t } = useLingui();
@@ -814,10 +871,11 @@ const LivePreview = ({
   return (
     <section
       aria-label={t`${name}, as your team sees it`}
-      {...stylex.props(styles.column)}
+      {...stylex.props(styles.column, styles.drawn, previewWidths[width])}
     >
       <PageFrame
         app={app.id}
+        at={at}
         bare
         embedded
         onEnded={(end) => {
@@ -1125,6 +1183,11 @@ const Building = ({
     !theirs &&
     sharesApp(app, identity) &&
     showsChangesLine(app, draft, members ?? []);
+  const { controls, width, page, reloads } = usePreviewControls(
+    app,
+    theirs,
+    draft
+  );
   return (
     <ItemShell
       bar={
@@ -1137,6 +1200,7 @@ const Building = ({
           members={members}
           onShared={reread}
           pending={changesLine}
+          preview={controls}
           running={busy}
           settingUp={settingUp}
           view={view}
@@ -1167,12 +1231,20 @@ const Building = ({
         identity={identity}
         preview={
           theirs ? (
-            <LivePreview app={app} building={{ running }} key="live" />
+            <LivePreview
+              app={app}
+              at={page}
+              building={{ running }}
+              key={`live/${reloads}`}
+              width={width}
+            />
           ) : (
             <PreviewArea
               app={app}
+              at={page}
               draft={draft}
-              key={`${shownKey(shown)}/${resets}`}
+              key={`${shownKey(shown)}/${resets}/${reloads}`}
+              width={width}
               onChanged={reread}
               onFrame={onFrame}
               running={running}

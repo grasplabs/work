@@ -814,7 +814,7 @@ describe(AppWorkspace, () => {
       seen[who] = {
         name: document.querySelector("h1")?.textContent,
         views:
-          document.querySelector('nav[aria-label="Workspace views"]') !== null,
+          document.querySelector('[aria-label="Workspace views"]') !== null,
         share: [...document.querySelectorAll("button")].some(
           (each) => nameOf(each) === "Share with your team"
         ),
@@ -933,25 +933,27 @@ describe(AppWorkspace, () => {
   });
 
   it("switches the main area between Preview, Code, Data and Settings, the one shown marked", async () => {
-    await opened(fakeApps().apps);
+    const { router } = await opened(fakeApps().apps);
 
-    const views = document.querySelector('nav[aria-label="Workspace views"]');
-    expect(
-      [...(views?.querySelectorAll("a") ?? [])].map((link) => ({
-        name: link.textContent,
-        to: link.getAttribute("href"),
-        shown: link.getAttribute("aria-current") === "page",
-      }))
-    ).toStrictEqual([
-      { name: "App", to: "/apps/invoice-desk", shown: true },
-      { name: "Code", to: "/apps/invoice-desk?view=code", shown: false },
-      { name: "Data", to: "/apps/invoice-desk?view=data", shown: false },
-      {
-        name: "Settings",
-        to: "/apps/invoice-desk?view=settings",
-        shown: false,
-      },
-    ]);
+    const first = [
+      ...document.querySelectorAll('[aria-label="Workspace views"] button'),
+    ].map((each) => ({
+      name: each.getAttribute("aria-label"),
+      shown: each.getAttribute("aria-pressed") === "true",
+    }));
+    await press(button("Code"));
+    expect({
+      first,
+      at: router.state.location.href,
+    }).toStrictEqual({
+      first: [
+        { name: "App", shown: true },
+        { name: "Code", shown: false },
+        { name: "Data", shown: false },
+        { name: "Settings", shown: false },
+      ],
+      at: "/apps/invoice-desk?view=code",
+    });
   });
 
   it("shows the builders' own version, and what the team sees from …, once the team has a version, with the way back", async () => {
@@ -2295,7 +2297,7 @@ describe(AppWorkspace, () => {
       calm: says("It shows here as soon as there is something to see."),
       state: says("Setting up"),
       shareOff: off(share),
-      views: document.querySelector('nav[aria-label="Workspace views"]'),
+      views: document.querySelector('[aria-label="Workspace views"]'),
       // The preview that failed under it never shows, nor the tip.
       failure: [...document.querySelectorAll("body *")].some(
         (each) =>
@@ -2386,7 +2388,7 @@ describe(AppWorkspace, () => {
         settingUp: says("Setting up Invoices…"),
         notReady,
         views:
-          document.querySelector('nav[aria-label="Workspace views"]') !== null,
+          document.querySelector('[aria-label="Workspace views"]') !== null,
         asked: sent.map(({ question }) => question.text),
       };
       takenDown();
