@@ -9,8 +9,10 @@ import { SourcesPage } from "../brain/sources-page.tsx";
 
 const Sources = () => {
   const { workspace } = useBrainData();
+  const { concept } = Route.useSearch();
   return (
     <SourcesPage
+      concept={concept}
       connections={workspace.connections.filter(
         ({ status }) => status === "connected"
       )}
@@ -19,5 +21,8 @@ const Sources = () => {
 };
 
 export const Route = createFileRoute("/_shell/brain/sources")({
+  // Concepts for Ruben (concept branch only): ?concept=b or ?concept=c.
+  validateSearch: (search: Record<string, unknown>): { concept?: string } =>
+    typeof search.concept === "string" ? { concept: search.concept } : {},
   component: Sources,
 });

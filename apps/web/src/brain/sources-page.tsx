@@ -25,6 +25,7 @@ import { formatDateTime, formatList } from "../format.ts";
 import { BrandIcon } from "../grasp/brand-icon/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Card } from "../grasp/card/index.ts";
+import { Collapsible } from "../grasp/collapsible/index.ts";
 import { Empty, EmptyHeader, EmptyTitle } from "../grasp/empty/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import { Cable } from "../grasp/icons/index.ts";
@@ -694,7 +695,10 @@ const SourcePanel = ({
 /** The Brain's sources page: search, how connections feed it, and the sources. */
 export const SourcesPage = ({
   connections,
+  concept,
 }: {
+  /** Concepts for Ruben (concept branch only). */
+  concept?: string | undefined;
   /** The person's connections, each one they have connected. */
   connections: Connection[];
 }) => {
@@ -707,6 +711,7 @@ export const SourcesPage = ({
     opening: number;
   }>();
   const heading = useId();
+  const { t } = useLingui();
   const open = (source: BrainSourceRef, version?: number) => {
     const opening = (opened?.opening ?? 0) + 1;
     setOpened(
@@ -721,9 +726,23 @@ export const SourcesPage = ({
         <PageHeader
           title={<Trans context="the Brain's sources page">Sources</Trans>}
         />
-        <Search onOpen={open} />
+        {concept === "c" ? null : <Search onOpen={open} />}
         <ConnectionFeeds connections={connections} />
-        <section aria-labelledby={heading} {...stylex.props(styles.section)}>
+        {concept === "b" ? (
+          <Collapsible title={t`Every source you may read`} variant="raised">
+            <SourceList
+              onPick={(source) => {
+                open(source);
+              }}
+              picked={opened?.source}
+            />
+          </Collapsible>
+        ) : null}
+        <section
+          aria-labelledby={heading}
+          hidden={concept === "b"}
+          {...stylex.props(styles.section)}
+        >
           <Heading id={heading} level={2} size="ui-sm">
             <Trans>Sources you may read</Trans>
           </Heading>
