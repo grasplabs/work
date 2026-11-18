@@ -248,7 +248,8 @@ const Facts = ({
   const next = nextWakeAt(wakes);
   const nextMoment = next === undefined ? "" : moment(next);
   return (
-    <SectionCard density="compact" flush title={t`Details`}>
+    // No title: the page's own title names what these facts are of.
+    <SectionCard aria-label={t`Details`} density="compact" flush>
       <SettingsRows>
         <FactRow label={t`What it is for`}>
           {agent.job === "" ? t`No job written yet` : agent.job}
@@ -366,11 +367,12 @@ const Access = ({
   }
   return (
     <>
-      <SectionCard density="compact" flush title={t`Who may use it`}>
+      {/* No title: its one row says it, and the side nav says "Access". */}
+      <SectionCard aria-label={t`Who may use it`} density="compact" flush>
         <SettingsRows>
           <SettingRow
             info={t`Nobody outside it can ask it anything, in Grasp or a chat app.`}
-            label={t`${name} answers`}
+            label={t`Who may use it`}
           >
             {() => (
               <AudienceControl

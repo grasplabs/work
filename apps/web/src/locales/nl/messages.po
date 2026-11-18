@@ -957,10 +957,6 @@ msgstr "{name} (optioneel)"
 msgid "{name} (team)"
 msgstr "{name} (team)"
 
-#: src/agents/agent-page.tsx
-msgid "{name} answers"
-msgstr "{name} antwoordt"
-
 #: src/settings/teams.tsx
 msgid "{name} couldn't be deleted. Try again."
 msgstr "{name} kon niet worden verwijderd. Probeer het opnieuw."
