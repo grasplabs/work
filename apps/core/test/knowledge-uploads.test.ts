@@ -10,9 +10,9 @@ import { auditedDuring, openRpc, outcome, signedInApi } from "./sign-in.ts";
 // The files once uploaded into Knowledge, which is gone (GRA-1941): core's
 // rows of them and their originals in R2 (src/knowledge-uploads.ts). A
 // person's erasure forgets every one they made, wherever they made it,
-// and deletes the originals before its `brain` area reads as complete;
-// the clock forgets those left unended. Nothing uploads into Knowledge any
-// more; the uploads here are as those uploads left them.
+// and deletes the originals before its `brain` area reads as complete.
+// Nothing uploads into Knowledge any more; the uploads here are as those
+// uploads left them.
 
 const idp = mockIdp();
 
@@ -32,12 +32,10 @@ interface Left {
   uploadId: string;
 }
 
-/** How an upload into Knowledge was left: its state, and when it last changed. */
+/** How an upload into Knowledge was left: its state. */
 interface LeftAs {
   path: string;
   status: "pending" | "extracting" | "saving" | "ready" | "failed";
-  /** When it was recorded and last changed: now, unless given. */
-  at?: number;
 }
 
 /**
@@ -47,9 +45,10 @@ interface LeftAs {
 const leftUpload = async (
   person: { userId: string },
   collectionId: string,
-  { path, status, at = Date.now() }: LeftAs
+  { path, status }: LeftAs
 ): Promise<Left> => {
   const uploadId = crypto.randomUUID();
+  const at = Date.now();
   const bytes = new TextEncoder().encode(`The file ${path}`);
   await env.FILES.put(originalKey(collectionId, uploadId), bytes);
   await env.DB.prepare(
@@ -240,105 +239,38 @@ describe("the files a person once uploaded into Knowledge, as they are erased", 
 });
 
 describe("uploads into Knowledge whose originals were deleted with Knowledge", () => {
-  it("are still forgotten, by a person's erasure and by the clock, without a failure", async () => {
+  it("are still forgotten by a person's erasure, without a failure", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "user");
     const collectionId = crypto.randomUUID();
-    const anHourAgo = Date.now() - 60 * 60_000;
     const theirs = await leftUpload(person, collectionId, {
       path: "Gone.xlsx",
       status: "ready",
     });
-    const unended = await leftUpload(admin, collectionId, {
-      path: "Unended.xlsx",
-      status: "pending",
-      at: anHourAgo,
-    });
     // The account's deletion of `knowledge/` in the files bucket, as the
-    // cutover's last step asks: the rows stay, pointing at nothing.
-    await env.FILES.delete(
-      [theirs, unended].map(({ uploadId }) =>
-        originalKey(collectionId, uploadId)
-      )
-    );
+    // cutover's last step asks: the row stays, pointing at nothing.
+    await env.FILES.delete(originalKey(collectionId, theirs.uploadId));
     await admin.api.members.remove(person.userId);
 
     const erased = await admin.api.members.erase(
       person.userId,
       String(person.person.name)
     );
-    await runMinuteTasks();
 
     expect({
       done: typeof erased.completedAt,
       area: await brainArea(person.userId),
-      kept: await keptOf([theirs, unended]),
+      kept: await keptOf([theirs]),
       cleanups: await env.DB.prepare(
-        "SELECT count(*) AS count FROM upload_cleanups WHERE upload_id IN (?, ?)"
+        "SELECT count(*) AS count FROM upload_cleanups WHERE upload_id = ?"
       )
-        .bind(theirs.uploadId, unended.uploadId)
+        .bind(theirs.uploadId)
         .first<{ count: number }>(),
     }).toStrictEqual({
       done: "string",
       area: { state: "complete" },
       kept: 0,
       cleanups: { count: 0 },
-    });
-  });
-});
-
-describe("uploads into Knowledge left behind", () => {
-  it("are forgotten by the clock once unchanged for a while, their originals deleted, a failure's recorded cleanup too, and tried again while R2 refuses", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const collectionId = crypto.randomUUID();
-    const anHourAgo = Date.now() - 60 * 60_000;
-    const left = await Promise.all(
-      (["pending", "extracting", "saving"] as const).map(
-        async (status) =>
-          await leftUpload(admin, collectionId, {
-            path: `${status}.xlsx`,
-            status,
-            at: anHourAgo,
-          })
-      )
-    );
-    // Taken a moment ago by the release before, which may yet store its
-    // original: left alone.
-    const fresh = await leftUpload(admin, collectionId, {
-      path: "Fresh.xlsx",
-      status: "pending",
-    });
-    // A failure that recorded its original's delete, cut short before R2
-    // deleted it.
-    const failed = await leftUpload(admin, collectionId, {
-      path: "Failed.xlsx",
-      status: "failed",
-      at: anHourAgo,
-    });
-    await env.DB.prepare(
-      "INSERT INTO upload_cleanups (key, upload_id, created_at) VALUES (?, ?, ?)"
-    )
-      .bind(
-        originalKey(collectionId, failed.uploadId),
-        failed.uploadId,
-        anHourAgo
-      )
-      .run();
-    const swept = [...left, failed];
-    await runMinuteTasks({ FILES: refusingDeletes() });
-    const whileRefused = await storedOf(swept);
-    await runMinuteTasks();
-
-    expect({
-      whileRefused,
-      stored: await storedOf(swept),
-      kept: await keptOf(left),
-      fresh: [await keptOf([fresh]), await storedOf([fresh])],
-    }).toStrictEqual({
-      whileRefused: 4,
-      stored: 0,
-      kept: 0,
-      fresh: [1, 1],
     });
   });
 });

@@ -2,6 +2,7 @@ import type { PendingAction } from "@grasp-os/shared/connect";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { useLingui, Trans } from "@lingui/react/macro";
 import { Link, useRouter } from "@tanstack/react-router";
+import { useId } from "react";
 
 import {
   grantReviewed,
@@ -49,7 +50,17 @@ export const HeldCard = ({
   const { busy, failure, run } = useCoreAction();
   const { t } = useLingui();
   const shown = useShown(action);
+  const withheldId = useId();
   const who = useHeldName(action);
+  // Nobody approves what they can't read: withheld, it is only rejected.
+  const withheld = action.withheld !== undefined;
+  // The line that says why Approve waits, if it does.
+  let approveWaitsOn: string | undefined;
+  if (withheld) {
+    approveWaitsOn = withheldId;
+  } else if (shown.unseen) {
+    approveWaitsOn = shown.unseenId;
+  }
   const connection = action.connectionName ?? action.connectionId;
   const decide = async (
     decision: (session: Session) => Promise<unknown>,
@@ -72,7 +83,13 @@ export const HeldCard = ({
   return (
     <PileCard
       busy={busy}
-      details={<HeldWriteDetails action={action} shown={shown} />}
+      details={
+        <HeldWriteDetails
+          action={action}
+          shown={shown}
+          withheldId={withheldId}
+        />
+      }
       failure={failure}
       name={
         context.type === "chat" ? (
@@ -100,8 +117,8 @@ export const HeldCard = ({
         label: t`Approve`,
         name: t`Approve ${who}`,
         does: t`Grasp makes this change on ${connection}, with exactly what is shown.`,
-        disabled: shown.unseen,
-        describedBy: shown.unseen ? shown.unseenId : undefined,
+        disabled: withheld || shown.unseen,
+        describedBy: approveWaitsOn,
         onPress: async () => {
           await decide(confirmHeld(action), t`Approved: ${who}.`);
         },

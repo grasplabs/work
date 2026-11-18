@@ -488,11 +488,7 @@ export interface AiProviderListed extends AiProviderKey {
 }
 
 /** Grasp's own AI features, which Grasp pays for, on its own keys. */
-export const aiPlatformFeatures = [
-  "conversion",
-  "transcription",
-  "speech",
-] as const;
+export const aiPlatformFeatures = ["transcription", "speech"] as const;
 export type AiPlatformFeature = (typeof aiPlatformFeatures)[number];
 
 /**
@@ -502,11 +498,8 @@ export type AiPlatformFeature = (typeof aiPlatformFeatures)[number];
  */
 export interface AiPlatformUse {
   feature: AiPlatformFeature;
-  /**
-   * The provider, and where it runs; none when the deployment does it
-   * itself (document conversion: every upload is read on the deployment).
-   */
-  provider: { id: AiProviderId; label: string; whereItRuns: string } | null;
+  /** The provider, and where it runs. */
+  provider: { id: AiProviderId; label: string; whereItRuns: string };
 }
 
 /**
@@ -599,8 +592,8 @@ export interface AiProvidersListing {
   /** The models its calls use, as they stand; none until an admin chose. */
   choice: AiModelChoiceNow | null;
   /**
-   * Who handles Grasp's own AI features (document conversion,
-   * transcription, speech), on Grasp's keys.
+   * Who handles Grasp's own AI features (transcription, speech), on
+   * Grasp's keys.
    */
   platform: AiPlatformUse[];
 }

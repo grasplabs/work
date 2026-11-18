@@ -1358,6 +1358,15 @@ export interface ActionDescription {
 export const heldInSchema = z.enum(["grasp", "chat_app"]);
 export type HeldIn = z.infer<typeof heldInSchema>;
 
+/**
+ * Why a held action's or an unknown outcome's input isn't shown
+ * (`PendingAction.withheld`): `revoked` once the run that made the call
+ * may no longer read what it read; `unchecked` while that can't be checked
+ * (Grasp can't reach what it needs right now), until a later read shows
+ * it.
+ */
+export type InputWithheld = "revoked" | "unchecked";
+
 /** A held action, as the person it waits for sees it. */
 export interface PendingAction {
   id: string;
@@ -1396,15 +1405,23 @@ export interface PendingAction {
   /** The key its answer is kept under: a repeat of the call gets it. */
   idempotencyKey: string;
   /**
-   * The exact input it runs with once confirmed, as JSON text: always
-   * there for the person to see, whatever `description` shows.
+   * The exact input it runs with once confirmed, as JSON text: there for
+   * the person to see, whatever `description` shows; empty while
+   * `withheld`.
    */
   input: string;
   /**
    * SHA-256 of its resource and input: confirming names it, so only what
-   * the person was shown runs.
+   * the person was shown runs. Empty while `withheld`.
    */
   inputHash: string;
+  /**
+   * Present when its input isn't shown (no `description`, `input`,
+   * `inputHash` or `attachments` with it), its run having read what it may
+   * no longer read, or that not checked: it can't be confirmed, only
+   * declined, which sends nothing.
+   */
+  withheld?: InputWithheld;
   /**
    * The files it attaches, each by name, type, size and digest (GRA-887):
    * only a native action that takes files has any. Confirming it needs
@@ -1668,8 +1685,17 @@ export interface UnknownOutcome {
   resource: string | null;
   /** As `PendingAction.description`, of the input it was sent with. */
   description?: ActionDescription;
-  /** The exact input it was sent with, as JSON text, while connect has it. */
+  /**
+   * The exact input it was sent with, as JSON text, while connect has it;
+   * null while `withheld` too.
+   */
   input: string | null;
+  /**
+   * Present when what was sent isn't shown (no `description` or `input`
+   * with it), as `PendingAction.withheld`: only "it happened", which sends
+   * nothing, is taken.
+   */
+  withheld?: InputWithheld;
   /** When it was first sent, ISO 8601. */
   sentAt: string;
   /**

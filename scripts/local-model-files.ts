@@ -67,7 +67,8 @@ if (args["persist-to"] === undefined || args.config === undefined) {
 }
 
 const files = modelFilesOf(shippedModel);
-if (files.every(isCached)) {
+const cached = await Promise.all(files.map(isCached));
+if (cached.every(Boolean)) {
   // Only the bucket, in the state wrangler dev keeps under `--persist-to`
   // (its `v3`): nothing else of core starts.
   const scratch = mkdtempSync(path.join(tmpdir(), "local-model-files-"));

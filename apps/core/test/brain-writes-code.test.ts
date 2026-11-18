@@ -395,10 +395,8 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
     const mailbox = await appOf(ada, admin);
     const reaching = await appOf(ada, admin);
     const reached = await appOf(ada, admin);
-    // Granted a Knowledge collection before the Brain replaced it, and,
-    // besides, one also reaching an App that can't be placed.
-    const knowledge = await appOf(ada, admin);
-    const knowledgeAndMore = await appOf(ada, admin);
+    // One reaching an App that can't be placed.
+    const cantPlace = await appOf(ada, admin);
     // A personal connection, granted and then revoked: it still counts.
     const connection = `connection-mailbox-${unique()}`;
     const now = Date.now();
@@ -422,17 +420,7 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
       // Reaching starts a workflow that calls the other App's functions.
       grant("app", reaching.app, "workflow", workflow, ["start"]),
       grant("workflow", workflow, "app", reached.app, ["call"]),
-      grant("app", knowledge.app, "collection", `collection-${unique()}`, [
-        "read",
-      ]),
-      grant(
-        "app",
-        knowledgeAndMore.app,
-        "collection",
-        `collection-${unique()}`,
-        ["read"]
-      ),
-      grant("app", knowledgeAndMore.app, "workflow", unplaced, ["start"]),
+      grant("app", cantPlace.app, "workflow", unplaced, ["start"]),
       grant("workflow", unplaced, "app", crypto.randomUUID(), ["call"]),
     ]);
 
@@ -443,16 +431,13 @@ describe("an App's code remembers and forgets for its users", setUpTime, () => {
       mailbox: await tried(mailbox),
       reaching: await tried(reaching),
       reached: await tried(reached),
-      knowledge: await tried(knowledge),
-      knowledgeAndMore: await tried(knowledgeAndMore),
+      cantPlace: await tried(cantPlace),
     }).toStrictEqual({
       teamBrain: { failed: "permission.brain_write_reach" },
       mailbox: { failed: "permission.brain_write_reach" },
       reaching: { failed: "permission.brain_write_reach" },
       reached: { failed: "permission.brain_write_reach" },
-      knowledge: { failed: "permission.brain_write_reach" },
-      // The grant that lasts, whatever else can't be placed now.
-      knowledgeAndMore: { failed: "permission.brain_write_reach" },
+      cantPlace: { failed: "permission.brain_write_unplaced" },
     });
   });
 

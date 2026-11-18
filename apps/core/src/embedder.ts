@@ -15,6 +15,7 @@ import { embedWithPool } from "@grasp-os/embed/pool";
 import type { PoolReply } from "@grasp-os/embed/pool";
 import { embedQuestion } from "@grasp-os/embed/question";
 import type { QuestionVector } from "@grasp-os/embed/question";
+import { withinTime } from "@grasp-os/shared/deadline";
 import { toHex } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";
 import { deployedModelPrefix } from "@grasp-os/shared/release";
@@ -124,31 +125,49 @@ export const holdsModelFiles = async (
 let filesMissing = false;
 
 /**
+ * Whether the model's files are known to be missing from `bucket`, asked
+ * within `ms`: a read that fails or answers late knows nothing, so a
+ * bucket that is down or slow never holds a recall up past its limit.
+ */
+const knownMissing = async (bucket: R2Bucket, ms: number): Promise<boolean> => {
+  try {
+    return !(await withinTime(
+      async () => await holdsModelFiles(bucket),
+      Math.max(0, ms)
+    ));
+  } catch {
+    return false;
+  }
+};
+
+/**
  * `question`'s vector by the question embedder, in core's jurisdiction,
  * within `questionVectorMs` (@grasp-os/embed/question), or why there is
  * none; `files_missing` when the embedder failed for want of the model's
  * files. Once they are found missing the embedder isn't asked again, each
  * failing call an error of its own, until they are there: then each
  * question costs a look at the bucket instead, and the first after they
- * arrive is embedded.
+ * arrive is embedded. Every look at the bucket is inside the same limit.
  */
 export const questionVectorOf = async (
   env: Pick<Env, "EMBEDDER" | "MODEL_FILES" | "DURABLE_OBJECT_JURISDICTION">,
   question: string
 ): Promise<QuestionVector | { kind: "files_missing" }> => {
+  const endsAt = Date.now() + questionVectorMs;
+  const left = (): number => endsAt - Date.now();
   if (filesMissing) {
-    if (!(await holdsModelFiles(env.MODEL_FILES))) {
+    if (await knownMissing(env.MODEL_FILES, left())) {
       return { kind: "files_missing" };
     }
     filesMissing = false;
   }
   const embedded = await embedQuestion(questionEmbedderOf(env), question, {
-    timeoutMs: questionVectorMs,
+    timeoutMs: Math.max(0, left()),
   });
   if (
     embedded.kind === "none" &&
     embedded.reason === "failed" &&
-    !(await holdsModelFiles(env.MODEL_FILES))
+    (await knownMissing(env.MODEL_FILES, left()))
   ) {
     filesMissing = true;
     return { kind: "files_missing" };
