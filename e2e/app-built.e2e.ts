@@ -106,7 +106,10 @@ test("a builder makes an App from what they want done, shares it with their team
     })
     .check();
   await sharing.getByRole("button", { name: "Share", exact: true }).click();
-  await expect(page.getByText("Shared with Person")).toBeVisible(built);
+  // Shared, the workspace shows it as the team sees it.
+  await expect(
+    page.getByRole("region", { name: `${appPlanned}, as your team sees it` })
+  ).toBeVisible(built);
 
   // They use the live App: none of the preview's contacts, then theirs.
   const used = await pageOf(user);

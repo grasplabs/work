@@ -47,6 +47,12 @@ const moveUp = async (page: Page, name: string, place: number) => {
 
 test.use({ trace: "retain-on-failure", actionTimeout: read.timeout });
 
+/** The new field's name, in its form. */
+const fieldName = (page: Page) =>
+  page
+    .getByRole("form", { name: "New field" })
+    .getByRole("textbox", { name: "Name", exact: true });
+
 test("a builder creates a table and its fields in the Data view, and sees them in the App's draft", async ({
   pageOf,
 }) => {
@@ -80,7 +86,7 @@ test("a builder creates a table and its fields in the Data view, and sees them i
   const kinds = page.getByRole("list", { name: "Kinds of field" });
   const fields = page.getByRole("list", { name: "Fields" });
   await kinds.getByRole("listitem").filter({ hasText: /^Text/u }).click();
-  await page.getByLabel("Field name").fill("title");
+  await fieldName(page).fill("title");
   await page.getByRole("switch", { name: "Required" }).click();
   await page.getByRole("button", { name: "Add field" }).last().click();
   await expect(fields.getByRole("button", { name: /^title/u })).toBeVisible(
@@ -91,7 +97,7 @@ test("a builder creates a table and its fields in the Data view, and sees them i
     .getByRole("listitem")
     .filter({ hasText: /^Choice/u })
     .click();
-  await page.getByLabel("Field name").fill("status");
+  await fieldName(page).fill("status");
   await page.getByLabel("New option").fill("Open");
   await page.getByLabel("New option").press("Enter");
   await page.getByLabel("New option").fill("Done");

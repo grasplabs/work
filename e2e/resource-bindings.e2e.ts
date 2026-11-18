@@ -113,6 +113,6 @@ test("an admin binds an App's AI to a model, with no budget of its own, and revo
   await expect(
     building
       .getByRole("region", { name: "Resources" })
-      .getByRole("article", { name: "ai" })
+      .getByRole("region", { name: "ai", exact: true })
   ).toContainText(unbound);
 });

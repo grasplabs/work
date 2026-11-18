@@ -304,9 +304,9 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   const mailboxCard = cardOf(page, "Microsoft 365", mailbox);
   await expect(mailboxCard).toContainText("Active, for the whole company");
   const holder = mailboxCard.getByRole("listitem").filter({ hasText: appName });
-  await expect(holder).toContainText(
-    `App ${appName}: mail.read on the whole connection`
-  );
+  // Which App holds it, and what it may do there.
+  await expect(holder).toContainText(`App ${appName}`);
+  await expect(holder).toContainText("mail.read on the whole connection");
   await expect(holder).toHaveCount(1);
   await holder
     .getByRole("button", { name: `Revoke App ${appName}'s permission` })
