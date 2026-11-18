@@ -21,13 +21,13 @@ import {
   InputGroupInput,
   InputGroupText,
 } from "../grasp/input-group/index.ts";
-import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   RowAlert,
   SettingRow,
   SettingsRows,
 } from "../grasp/setting-row/index.ts";
 import { useCore } from "../use-core.ts";
+import { TitledCard } from "./titled-card.tsx";
 import { controlStyles } from "./workspace-name.tsx";
 
 // Settings › Workspace › Grasp staff access, for the company's admins,
@@ -116,7 +116,7 @@ export const StaffAccessSection = ({
   }
   const until = formatDateTime(staff.until);
   return (
-    <SectionCard
+    <TitledCard
       {...(editable
         ? { actions: <EndStaffAccess onFailure={setFailure} /> }
         : {})}
@@ -158,6 +158,6 @@ export const StaffAccessSection = ({
           )}
         </SettingRow>
       </SettingsRows>
-    </SectionCard>
+    </TitledCard>
   );
 };

@@ -20,6 +20,7 @@ import {
 } from "../settings/section.tsx";
 import { SignInRow } from "../settings/sign-in-settings.tsx";
 import { StaffAccessSection } from "../settings/staff-access.tsx";
+import { TitledCard } from "../settings/titled-card.tsx";
 import {
   controlStyles,
   useOrganizationChange,
@@ -230,9 +231,9 @@ const StaffAccess = ({
     return <StaffAccessSection editable={editable} staff={read.data} />;
   }
   return (
-    <SectionCard density="compact" title={t`Grasp staff access`}>
+    <TitledCard density="compact" title={t`Grasp staff access`}>
       <SectionNotLoaded page={read} />
-    </SectionCard>
+    </TitledCard>
   );
 };
 
@@ -246,9 +247,9 @@ const Workspace = () => {
       {page.state === "ready" ? (
         <WorkspaceSettings canChange={editable} organization={page.data} />
       ) : (
-        <SectionCard density="compact" title={t`Organization`}>
+        <TitledCard density="compact" title={t`Organization`}>
           <SectionNotLoaded page={page} />
-        </SectionCard>
+        </TitledCard>
       )}
       {staff === undefined ? null : (
         <StaffAccess editable={editable} read={staff} />

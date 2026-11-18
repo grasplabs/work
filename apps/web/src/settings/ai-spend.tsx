@@ -17,7 +17,6 @@ import {
   ChartGrid,
   ChartTooltip,
 } from "../grasp/chart/index.ts";
-import { SectionCard } from "../grasp/section-card/index.ts";
 import { RowAlert } from "../grasp/setting-row/index.ts";
 import { Stat } from "../grasp/stats/index.ts";
 import { Text } from "../grasp/text/index.ts";
@@ -25,6 +24,7 @@ import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { dollars, monthEnd } from "./money.ts";
 import { SectionNotLoaded } from "./section.tsx";
+import { TitledCard } from "./titled-card.tsx";
 
 // Settings › AI and spend, its last card: what the models cost this month
 // on the organization's keys (core's `models.spend()` and the Apps' model
@@ -182,9 +182,9 @@ export const SpendCard = ({
   const { t, i18n } = useLingui();
   if (spend.state !== "ready") {
     return (
-      <SectionCard density="compact" title={t`Spend`}>
+      <TitledCard density="compact" title={t`Spend`}>
         <SectionNotLoaded page={spend} />
-      </SectionCard>
+      </TitledCard>
     );
   }
   const month = spend.data;
@@ -199,7 +199,7 @@ export const SpendCard = ({
     ({ model }) => model === null
   );
   return (
-    <SectionCard density="compact" title={t`Spend`}>
+    <TitledCard density="compact" title={t`Spend`}>
       <div {...stylex.props(styles.body)}>
         <SpendSummary spend={month} />
         {month.total === 0 ? null : (
@@ -236,6 +236,6 @@ export const SpendCard = ({
           );
         })}
       </div>
-    </SectionCard>
+    </TitledCard>
   );
 };

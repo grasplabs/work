@@ -8,10 +8,10 @@ import {
   useComposerLook,
 } from "../chat/composer-look.ts";
 import { Composer } from "../grasp/composer/index.ts";
-import { SectionCard } from "../grasp/section-card/index.ts";
 import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
 import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { TitledCard } from "./titled-card.tsx";
 
 // Settings → Appearance: how the chat's box draws Grasp at work (the
 // person's look, chat/composer-look.ts). One box, live and at work in the
@@ -36,7 +36,7 @@ export const ComposerSettings = ({ userId }: { userId: string }) => {
   const accents = { light: t`Light`, mint: t`Mint`, lavender: t`Lavender` };
   const edges = { smooth: t`Smooth`, dither: t`Dither` };
   return (
-    <SectionCard density="compact" flush title={t`Chat box`}>
+    <TitledCard density="compact" flush title={t`Chat box`}>
       <div aria-hidden inert {...stylex.props(styles.preview)}>
         <Composer
           accent={look.accent}
@@ -89,6 +89,6 @@ export const ComposerSettings = ({ userId }: { userId: string }) => {
           </ToggleGroup>
         </SettingRow>
       </SettingsRows>
-    </SectionCard>
+    </TitledCard>
   );
 };

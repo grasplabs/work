@@ -3,7 +3,6 @@ import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
 
 import { Button } from "../grasp/button/index.ts";
-import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   RowAlert,
   SettingRow,
@@ -19,6 +18,7 @@ import {
   SettingsError,
   SettingsLoading,
 } from "../settings/section.tsx";
+import { TitledCard } from "../settings/titled-card.tsx";
 
 // Settings → Billing, for admins: the billing details as a card at its
 // head (settings/billing-card.tsx), their form in a dialog from its one
@@ -35,7 +35,7 @@ import {
 const Plan = () => {
   const { t } = useLingui();
   return (
-    <SectionCard density="compact" flush title={t`Plan`}>
+    <TitledCard density="compact" flush title={t`Plan`}>
       <SettingsRows>
         <ReadOnlyRow
           info={t`Grasp links Stripe and sets up your plan with you.`}
@@ -53,7 +53,7 @@ const Plan = () => {
           </Button>
         </SettingRow>
       </SettingsRows>
-    </SectionCard>
+    </TitledCard>
   );
 };
 
@@ -68,9 +68,9 @@ const BillingPage = () => {
   );
   if (page.state !== "ready") {
     return (
-      <SectionCard density="compact" title={t`Plan`}>
+      <TitledCard density="compact" title={t`Plan`}>
         <SectionNotLoaded page={page} />
-      </SectionCard>
+      </TitledCard>
     );
   }
   // Only the organization's own admins change them; Grasp staff read them.
@@ -79,7 +79,7 @@ const BillingPage = () => {
     <>
       <BillingCard billing={billing} canChange={!readOnly} />
       <Plan />
-      <SectionCard density="compact" flush title={t`Billing emails`}>
+      <TitledCard density="compact" flush title={t`Billing emails`}>
         <SettingsRows>
           {failure === undefined ? null : (
             <RowAlert variant="danger">{failure}</RowAlert>
@@ -107,7 +107,7 @@ const BillingPage = () => {
             />
           </SettingRow>
         </SettingsRows>
-      </SectionCard>
+      </TitledCard>
     </>
   );
 };

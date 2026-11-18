@@ -72,7 +72,6 @@ import {
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
-import { SectionCard } from "../grasp/section-card/index.ts";
 import { Sheet, SheetContent, SheetTitle } from "../grasp/sheet/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -80,6 +79,7 @@ import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { SectionNotLoaded, SettingsStack } from "./section.tsx";
+import { TitledCard } from "./titled-card.tsx";
 
 // Settings › Incoming events, for the organization's own admins: the event
 // sources outside systems send events to (core's event-sources.ts), one per
@@ -938,7 +938,7 @@ export const EventSourcesSettings = ({
       />
     );
   const list = (
-    <SectionCard
+    <TitledCard
       actions={sources.length > 0 ? addButton("quiet") : null}
       density="compact"
       flush
@@ -978,7 +978,7 @@ export const EventSourcesSettings = ({
           ))}
         </ItemGroup>
       ) : null}
-    </SectionCard>
+    </TitledCard>
   );
   return (
     <div ref={holder}>

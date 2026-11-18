@@ -69,7 +69,6 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "../grasp/popover/index.ts";
-import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   Select,
   SelectTrigger,
@@ -93,6 +92,7 @@ import {
   SettingsLoading,
 } from "../settings/section.tsx";
 import { TeamsPanel } from "../settings/teams.tsx";
+import { TitledCard } from "../settings/titled-card.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 
@@ -507,7 +507,7 @@ const MembersList = ({
   );
   const nobody = found.length === 0 && left.length === 0;
   return (
-    <SectionCard
+    <TitledCard
       actions={
         <>
           <RolesButton />
@@ -612,7 +612,7 @@ const MembersList = ({
           ) : null}
         </SettingsRows>
       )}
-    </SectionCard>
+    </TitledCard>
   );
 };
 
@@ -635,9 +635,9 @@ const MembersPage = () => {
           removed={page.data.removed}
         />
       ) : (
-        <SectionCard density="compact" title={t`Members`}>
+        <TitledCard density="compact" title={t`Members`}>
           <SectionNotLoaded page={page} />
-        </SectionCard>
+        </TitledCard>
       )}
       {/* Core refuses the teams to anyone else. */}
       {/* Read again whenever the people change, so a removed person leaves the teams' faces too. */}

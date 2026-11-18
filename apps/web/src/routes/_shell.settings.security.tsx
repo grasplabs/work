@@ -30,7 +30,6 @@ import {
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
-import { SectionCard } from "../grasp/section-card/index.ts";
 import { SettingsRows } from "../grasp/setting-row/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -47,6 +46,7 @@ import {
   SettingsLoading,
   TitleLine,
 } from "../settings/section.tsx";
+import { TitledCard } from "../settings/titled-card.tsx";
 import { useCore } from "../use-core.ts";
 
 // Settings › Security, as the library's Settings pattern has it (like
@@ -194,9 +194,9 @@ const Devices = ({ sessions }: { sessions: Loaded<OwnSession[]> }) => {
   const [showAll, setShowAll] = useState(false);
   if (sessions.state !== "ready") {
     return (
-      <SectionCard density="compact" title={t`Devices`}>
+      <TitledCard density="compact" title={t`Devices`}>
         <SectionNotLoaded page={sessions} />
-      </SectionCard>
+      </TitledCard>
     );
   }
   const devices = sessions.data.length;
@@ -216,7 +216,7 @@ const Devices = ({ sessions }: { sessions: Loaded<OwnSession[]> }) => {
       ? shown
       : [here, ...shown.filter((session) => session !== here)];
   return (
-    <SectionCard
+    <TitledCard
       density="compact"
       flush
       footer={
@@ -239,7 +239,7 @@ const Devices = ({ sessions }: { sessions: Loaded<OwnSession[]> }) => {
           <DeviceRow key={session.id} session={session} />
         ))}
       </ItemGroup>
-    </SectionCard>
+    </TitledCard>
   );
 };
 
@@ -255,7 +255,7 @@ const Security = () => {
   });
   return (
     <>
-      <SectionCard density="compact" flush title={t`Sign-in`}>
+      <TitledCard density="compact" flush title={t`Sign-in`}>
         <SettingsRows>
           <ReadOnlyRow
             info={t`Passwords and two-step sign-in live with your organization’s account.`}
@@ -267,7 +267,7 @@ const Security = () => {
         {chat?.state === "ready" ? (
           <LinkedChatAccounts accounts={chat.data.accounts} />
         ) : null}
-      </SectionCard>
+      </TitledCard>
       {chat === undefined || !waiting ? null : <PendingChatLink chat={chat} />}
       <Devices sessions={sessions} />
     </>
