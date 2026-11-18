@@ -2,8 +2,6 @@ import { decisionErrors } from "@grasp-os/shared/decisions";
 import type { DecisionView } from "@grasp-os/shared/decisions";
 import { failureText } from "@grasp-os/shared/errors";
 import type { Identity, SignInOption } from "@grasp-os/shared/rpc";
-// The kit's mark: Grasp UI has no Grasp mark yet (the sidebar's is the same).
-import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
 import { i18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -31,6 +29,8 @@ import { Button } from "../grasp/button/index.ts";
 import { CodeBlock } from "../grasp/code-block/index.ts";
 import { Field, FieldLabel } from "../grasp/field/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
+import { iconVars } from "../grasp/icons/icon.stylex.ts";
+import { BrandGrasp, Icon } from "../grasp/icons/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
 import type { KeyValueItem } from "../grasp/key-value/index.ts";
 import { Link } from "../grasp/link/index.ts";
@@ -66,6 +66,8 @@ const styles = stylex.create({
     textAlign: "center",
     backgroundColor: grasp.paper,
     color: grasp.text,
+    // The mark as wide as before: the library's sits in the icon's square.
+    [iconVars.size]: grasp.avatarXs,
   },
   inFrame: {
     display: "flex",
@@ -323,7 +325,7 @@ const DecisionCard = ({ decision }: { decision: DecisionView }) => {
 /** A page of its own, for someone not signed in or when core is away. */
 const OnItsOwn = ({ children }: { children: ReactNode }) => (
   <main {...stylex.props(styles.alone)}>
-    <GraspMark className="size-6" />
+    <Icon icon={BrandGrasp} />
     {children}
   </main>
 );

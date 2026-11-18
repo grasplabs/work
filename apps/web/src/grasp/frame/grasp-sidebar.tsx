@@ -1,9 +1,8 @@
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-// The kit's mark: Grasp UI has no Grasp mark yet.
-import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link, useLocation, useMatchRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
@@ -25,8 +24,10 @@ import { appSplat } from "../../pages/app-address.ts";
 import { groupedSectionsFor } from "../../settings/sections.ts";
 import { shortcutLabel } from "../../shortcuts.ts";
 import { useWorkflowsWaiting } from "../../workflows/nav-item.tsx";
+import { iconVars } from "../icons/icon.stylex.ts";
 import {
   AgentPerson,
+  BrandGrasp,
   AppPanels,
   AppWindow,
   Bell,
@@ -44,6 +45,7 @@ import {
   SignOut,
   Sun,
   Swap,
+  Icon,
 } from "../icons/index.ts";
 import type {
   SidebarGroup,
@@ -52,6 +54,12 @@ import type {
   SidebarProps,
   SidebarSection,
 } from "../sidebar/index.ts";
+import { grasp } from "../tokens/tokens.stylex.ts";
+
+const styles = stylex.create({
+  // The head's mark fills the sidebar's 20px mark box, as an icon of that size.
+  mark: { [iconVars.size]: grasp.shellMark },
+});
 
 // The product's sidebar: Grasp UI's Sidebar (grasp/sidebar), filled with
 // the product's sections, the Apps' own entries, and the person's menu.
@@ -392,7 +400,11 @@ export const useGraspSidebar = ({
   return {
     foldLabel: t`Show or hide the sidebar`,
     groups,
-    head: <GraspMark aria-hidden />,
+    head: (
+      <span {...stylex.props(styles.mark)}>
+        <Icon icon={BrandGrasp} />
+      </span>
+    ),
     "aria-label": t`Sidebar`,
     navLabel: t`Main`,
     onOpenChange,

@@ -7,13 +7,12 @@ import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
-import { formatList } from "../format.ts";
 import { Combobox } from "../grasp/combobox/index.ts";
-import { Input } from "../grasp/input/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { OrgCard } from "../settings/org-card.tsx";
 import {
   SectionNotLoaded,
   SettingsError,
@@ -23,15 +22,13 @@ import { SignInRow } from "../settings/sign-in-settings.tsx";
 import { StaffAccessSection } from "../settings/staff-access.tsx";
 import {
   controlStyles,
-  LogoField,
-  NameField,
   useOrganizationChange,
   useSaveWords,
 } from "../settings/workspace-name.tsx";
 
-// Settings → Workspace: the organization's name and the time zone it
-// works in, which its admins change, and where its data lives, which the
-// deployment decides. Everyone sees them; core refuses a change from
+// Settings → Workspace: the organization's card at its head (its logo,
+// its name, and what the deployment decides: settings/org-card.tsx), then
+// the time zone it works in, which its admins change. Everyone sees them; core refuses a change from
 // anyone but the organization's own admins, and everyone else sees the
 // values read-only; for admins, how people sign in, as one of its rows
 // (settings/sign-in-settings.tsx). Then, for admins, Grasp's staff access
@@ -113,29 +110,6 @@ const zones: { value: string; label: MessageDescriptor }[] = [
     label: msg({ message: "Athens", comment: "A time zone, by its city" }),
   },
 ];
-/** A fact of the workspace nobody changes here, in a field that only reads. */
-const ReadOnlyRow = ({
-  label,
-  info,
-  value,
-}: {
-  label: string;
-  info: string;
-  value: string;
-}) => (
-  <SettingRow info={info} label={label}>
-    {(field) => (
-      <Input
-        {...field}
-        layout={controlStyles.fill}
-        readOnly
-        size="sm"
-        value={value}
-      />
-    )}
-  </SettingRow>
-);
-
 /** `timeZone`'s offset from UTC now, such as "GMT+2", in the reader's language. */
 const offsetOf = (timeZone: string, locale: string): string =>
   new Intl.DateTimeFormat(locale, { timeZone, timeZoneName: "shortOffset" })
@@ -228,31 +202,18 @@ const WorkspaceSettings = ({
 }) => {
   const { t } = useLingui();
   return (
-    <SectionCard density="compact" flush title={t`Organization`}>
-      <SettingsRows>
-        <NameField canChange={canChange} name={organization.name} />
-        <LogoField
-          canChange={canChange}
-          logo={organization.logo}
-          name={organization.name}
-        />
-        <TimeZoneField canChange={canChange} timeZone={organization.timeZone} />
-        {/* With the @ an address has, so a domain reads as where people sign in from. */}
-        <ReadOnlyRow
-          info={t`People sign in with an address in these. To change them, ask your Grasp contact.`}
-          label={t`Sign-in domains`}
-          value={formatList(
-            organization.signInDomains.map((domain) => `@${domain}`)
-          )}
-        />
-        <SignInRow />
-        <ReadOnlyRow
-          info={t`Everything Grasp stores for you stays here.`}
-          label={t`Data location`}
-          value={t`European Union`}
-        />
-      </SettingsRows>
-    </SectionCard>
+    <>
+      <OrgCard canChange={canChange} organization={organization} />
+      <SectionCard aria-label={t`Settings`} density="compact" flush>
+        <SettingsRows>
+          <TimeZoneField
+            canChange={canChange}
+            timeZone={organization.timeZone}
+          />
+          <SignInRow />
+        </SettingsRows>
+      </SectionCard>
+    </>
   );
 };
 
