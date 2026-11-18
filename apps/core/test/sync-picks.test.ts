@@ -1,5 +1,9 @@
+import type { Identity } from "@grasp-os/shared/rpc";
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { personOf } from "../src/connections.ts";
+import { readSyncPlaces } from "../src/sync-picks.ts";
 import { consentCode, stephenGoogleUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { signInConfig } from "./sign-in-config.ts";
@@ -131,6 +135,80 @@ describe("picking a shared connection's places to sync", setUpTime, () => {
         { place: ours[59], title: ours[59], picked: true },
       ],
     });
+  });
+
+  it("ticks every box from the one set of picks a save starts from, when the picks change while the listing is read", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const connectionId = await sharedGoogle(admin);
+    // More shared drives than one read of connect lists: the listing takes
+    // several reads, and the last drive comes in a later one.
+    const prefix = `drive-${unique()}`;
+    const ours = Array.from({ length: 60 }, (_, index) => `${prefix}-${index}`);
+    for (const drive of ours) {
+      // oxlint-disable-next-line no-await-in-loop -- one drive after another, in Google's order
+      await driveHeld(drive);
+    }
+    const [first, last] = [ours[0] ?? "", ours[59] ?? ""];
+    const held = await admin.api.connections.syncPlaces(connectionId);
+    await admin.api.connections.pickSyncPlaces({
+      connectionId,
+      feed: "shared-drives",
+      from: held?.picks ?? [],
+      places: [first],
+    });
+    // Another admin moves the pick to the last drive once the listing's
+    // first read has answered.
+    let changed = false;
+    const syncPlaceChoices = async (
+      request: Parameters<Env["CONNECT"]["syncPlaceChoices"]>[0]
+    ) => {
+      const answer = await env.CONNECT.syncPlaceChoices(request);
+      if (!changed) {
+        changed = true;
+        await admin.api.connections.pickSyncPlaces({
+          connectionId,
+          feed: "shared-drives",
+          from: [first],
+          places: [last],
+        });
+      }
+      return answer;
+    };
+    const racing = new Proxy(env.CONNECT, {
+      get: (target, key) => {
+        if (key === "syncPlaceChoices") {
+          return syncPlaceChoices;
+        }
+        const value: unknown = Reflect.get(target, key);
+        // An RPC stub's method, called on the stub: never its `bind`,
+        // which the stub would take for a method of connect's.
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+    const identity: Identity = {
+      userId: admin.userId,
+      email: String(admin.person.email),
+      name: "Admin",
+      role: "admin",
+      teams: [],
+      staff: false,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+    const read = await readSyncPlaces(
+      { ...env, CONNECT: racing },
+      identity,
+      async () => await personOf(env, identity),
+      connectionId
+    );
+    expect({
+      changed,
+      from: read?.picks,
+      ticked: (read?.choices ?? [])
+        .filter(({ place, picked }) => picked && place.startsWith(prefix))
+        .map(({ place }) => place),
+    }).toStrictEqual({ changed: true, from: [first], ticked: [first] });
   });
 
   it("answers no places for a connection that syncs none, and lets nobody but the company's admins list or pick", async () => {

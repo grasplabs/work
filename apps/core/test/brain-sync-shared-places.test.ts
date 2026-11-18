@@ -1,146 +1,56 @@
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
-import { addSource, recallAs } from "../src/brain-next.ts";
+import { addSource } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
-import { runSync } from "../src/brain-sync.ts";
 import { completeOwedErasures } from "../src/shared-reads.ts";
 import { allEvents } from "./audit-events.ts";
 import { chooseAudience } from "./brain-audiences.ts";
 import { newTeam } from "./brain-next-leaks-harness.ts";
-import { consentCode } from "./connect-providers.ts";
-import { mockIdp } from "./idp.ts";
-import { sampleSyncControlUrl } from "./sample-sync-fake.ts";
-import { acmeTenant } from "./sign-in-config.ts";
-import { outcome, routed, signedInApi, unique } from "./sign-in.ts";
-import { connectDb, testBinding } from "./test-env.ts";
+import { inStoreOf } from "./brain-next-out-reads.ts";
+import {
+  connectSharedSites,
+  finds,
+  idp,
+  later,
+  markerOf,
+  ownSourcesOnly,
+  parkWorkerSources,
+  pollMs,
+  setUpTime,
+  sitesHeld,
+  syncOn,
+} from "./brain-sync-world.ts";
+import type { Person } from "./brain-sync-world.ts";
+import { mockIdpWith } from "./idp.ts";
+import { outcome, signedInApi, unique } from "./sign-in.ts";
+
+mockIdpWith(idp);
 
 // What native sync copies from the places an admin picked on a shared
 // connection (brain-sync.ts, GRA-1719), through core's RPC, the real
 // connect and its sample sync connector, with the provider mocked at its
-// host (test/sample-sync-fake.ts). These start from the threat model on
+// host (test/sample-sync-fake.ts); the shared world, fakes and clock are
+// in test/brain-sync-world.ts. These start from the threat model on
 // GRA-1719: a place's files, whose permissions aren't read, kept for
 // whoever connected it; kept for anyone outside the connection's Brain
 // audience, or at all while it is nobody; an un-picked place still read
 // after the admin's save answered, or brought back by a listing that read
-// the picks before; a disconnect leaving a copy; and another producer or
-// connection writing for a place's group.
-
-const idp = mockIdp();
-
-/** Signing people in and connecting can be slow on CI. */
-const setUpTime = { timeout: 90_000 };
-
-const budget = { tokens: 2000 };
-
-/** When the clock runs the sync next: its period, a minute. */
-const pollMs = 60_000;
+// the picks before; copies an admin's "Erase what the Brain kept" or a
+// disconnect leaves; and another producer or connection writing for a
+// place's group.
 
 /** The sample connector's sync of picked places (its `sites`). */
 const feed = "sites";
-
-type Person = Awaited<ReturnType<typeof signedInApi>>;
-
-const isFetcher = (value: unknown): value is Fetcher =>
-  typeof value === "object" && value !== null && "fetch" in value;
-
-/** A word nothing else holds. */
-const markerOf = (): string => `shared${unique().replaceAll("-", "")}`;
-
-/** A file of a site, its readers unread (as a shared drive's are), as a sync item. */
-const fileOf = (id: string, text: string) => ({
-  gone: false,
-  id,
-  kind: "file",
-  version: "1",
-  changedAt: "2026-11-18T09:00:00.000Z",
-  title: id,
-  content: { type: "text", text },
-  readers: null,
-  changedBy: null,
-  partOf: null,
-});
-
-/**
- * Has the account `subject` hold the sites `sites`, each one file with its
- * marker, in its `version`, as the sample sync connector reads them.
- */
-const sitesHeld = async (
-  subject: string,
-  sites: Record<string, string>,
-  version = "1"
-): Promise<void> => {
-  const providers = testBinding("CONNECT_PROVIDERS");
-  if (!isFetcher(providers)) {
-    throw new TypeError("Expected the providers Worker");
-  }
-  await providers.fetch(sampleSyncControlUrl, {
-    method: "POST",
-    body: JSON.stringify({
-      subject,
-      sites: Object.keys(sites).map((id) => ({ id, name: id })),
-      siteFeeds: Object.fromEntries(
-        Object.entries(sites).map(([site, marker]) => [
-          site,
-          {
-            "": {
-              changes: [
-                { ...fileOf(`${site}-plan`, `Plan ${marker}`), version },
-              ],
-              next: "1",
-              more: false,
-            },
-            "1": { changes: [], next: "1", more: false },
-          },
-        ])
-      ),
-    }),
-  });
-};
-
-/**
- * A Microsoft 365 account `admin` connects for the company, read by the
- * sample sync connector, whose sites are `sites`, each holding one file
- * with its marker: its connection, and the account's subject.
- */
-const sharedSites = async (
-  admin: Person,
-  sites: Record<string, string>
-): Promise<{ connectionId: string; subject: string }> => {
-  const subject = `shared-${unique()}`;
-  await sitesHeld(subject, sites);
-  const { url } = await admin.api.connections.start({
-    provider: "microsoft",
-    scope: "shared",
-  });
-  const authorization = new URL(url);
-  const query = new URLSearchParams({
-    code: consentCode(
-      authorization,
-      acmeTenant,
-      subject,
-      "openid profile email offline_access User.Read Files.Read.All Sites.Read.All"
-    ),
-    state: authorization.searchParams.get("state") ?? "",
-  });
-  await routed(`/api/connections/callback?${query.toString()}`, {
-    headers: { cookie: admin.session },
-  });
-  const listed = await admin.api.connections.list();
-  const connection = listed.find(
-    ({ accountName }) => accountName === `${subject}@acme.test`
-  );
-  if (connection === undefined) {
-    throw new Error("Expected the shared Microsoft connection");
-  }
-  // Read by the sample sync connector instead of the suite's own.
-  await connectDb()
-    .prepare("UPDATE connections SET server = 'sample-sync' WHERE id = ?")
-    .bind(connection.id)
-    .run();
-  return { connectionId: connection.id, subject };
-};
 
 /** `admin` picks `places` on `connectionId`, from the picks held now. */
 const pick = async (
@@ -157,18 +67,6 @@ const pick = async (
   });
 };
 
-/** Whether `personId`, reading as themselves, finds `marker`. */
-const finds = async (personId: string, marker: string): Promise<boolean> => {
-  const { items } = await recallAs(env, personId, {
-    personal: true,
-    question: marker,
-    budget,
-  });
-  return items.some(
-    ({ found, text }) => found !== "meaning" && text.includes(marker)
-  );
-};
-
 /** How many of `connectionId`'s items the sync holds, by place. */
 const heldBy = async (
   connectionId: string
@@ -181,18 +79,19 @@ const heldBy = async (
   return Object.fromEntries(results.map(({ place, count }) => [place, count]));
 };
 
-/** The time the clock's next run of the sync is at. */
-let clockAt = Date.now();
+/** How many events the shared store holds. */
+const eventsHeld = async (): Promise<number> =>
+  await inStoreOf(
+    "brain",
+    (sql) =>
+      sql.exec<{ count: number }>("SELECT count(*) AS count FROM events").one()
+        .count
+  );
 
-/** Runs the sync as the clock does, a minute after the last run, with `given` in place of `env`. */
+/** One run of the sync as the clock does, a poll after the last, on `given`. */
 const sync = async (given: Env = env): Promise<void> => {
-  clockAt = Math.max(clockAt, Date.now()) + pollMs;
-  vi.useFakeTimers({ toFake: ["Date"], now: clockAt });
-  try {
-    await runSync(given);
-  } finally {
-    vi.useRealTimers();
-  }
+  later(pollMs);
+  await syncOn(given);
 };
 
 /** Runs the sync until the picked places are listed and read: the listing, then each place's page. */
@@ -202,12 +101,14 @@ const syncAll = async (given: Env = env): Promise<void> => {
 };
 
 describe("native sync of a shared connection's picked places", () => {
+  beforeAll(parkWorkerSources, setUpTime.timeout);
+  beforeEach(ownSourcesOnly);
   afterEach(() => {
     vi.useRealTimers();
   });
 
   it(
-    "keeps a picked place for the connection's audience alone, never for whoever connected it, and nothing while the audience is nobody",
+    "keeps a picked place for the connection's audience alone, never for whoever connected it, nothing while the audience is nobody, and no one's steps",
     setUpTime,
     async () => {
       const [admin, seller, outsider] = await Promise.all([
@@ -219,7 +120,7 @@ describe("native sync of a shared connection's picked places", () => {
       const [picked, unpicked] = [markerOf(), markerOf()];
       const site = `site-${unique()}`;
       const other = `site-${unique()}`;
-      const { connectionId } = await sharedSites(admin, {
+      const { connectionId } = await connectSharedSites(admin, {
         [site]: picked,
         [other]: unpicked,
       });
@@ -233,10 +134,13 @@ describe("native sync of a shared connection's picked places", () => {
         kind: "team",
         teamId: sales,
       });
+      const eventsBefore = await eventsHeld();
       await syncAll();
 
       expect({
         whileNobody,
+        // A shared place's changes are no one person's steps: none kept.
+        events: (await eventsHeld()) - eventsBefore,
         kept: await heldBy(connectionId),
         seller: [await finds(seller.userId, picked)],
         // Connected it, but not in the audience: its files aren't theirs.
@@ -246,6 +150,7 @@ describe("native sync of a shared connection's picked places", () => {
         unpicked: await finds(seller.userId, unpicked),
       }).toStrictEqual({
         whileNobody: {},
+        events: 0,
         kept: { [site]: 1 },
         seller: [true],
         admin: false,
@@ -265,7 +170,7 @@ describe("native sync of a shared connection's picked places", () => {
       ]);
       const [first, second] = [markerOf(), markerOf()];
       const [one, two] = [`site-${unique()}`, `site-${unique()}`];
-      const { connectionId } = await sharedSites(admin, {
+      const { connectionId } = await connectSharedSites(admin, {
         [one]: first,
         [two]: second,
       });
@@ -312,7 +217,7 @@ describe("native sync of a shared connection's picked places", () => {
       ]);
       const [first, second] = [markerOf(), markerOf()];
       const [one, two] = [`site-${unique()}`, `site-${unique()}`];
-      const { connectionId } = await sharedSites(admin, {
+      const { connectionId } = await connectSharedSites(admin, {
         [one]: first,
         [two]: second,
       });
@@ -382,7 +287,9 @@ describe("native sync of a shared connection's picked places", () => {
       ]);
       const marker = markerOf();
       const site = `site-${unique()}`;
-      const { connectionId } = await sharedSites(admin, { [site]: marker });
+      const { connectionId } = await connectSharedSites(admin, {
+        [site]: marker,
+      });
       await chooseAudience(admin.api, connectionId, { kind: "everyone" });
       await pick(admin, connectionId, [site]);
       await syncAll();
@@ -424,7 +331,7 @@ describe("native sync of a shared connection's picked places", () => {
       ]);
       const [old, fresh] = [markerOf(), markerOf()];
       const site = `site-${unique()}`;
-      const { connectionId, subject } = await sharedSites(admin, {
+      const { connectionId, subject } = await connectSharedSites(admin, {
         [site]: old,
       });
       await chooseAudience(admin.api, connectionId, { kind: "everyone" });
@@ -482,7 +389,9 @@ describe("native sync of a shared connection's picked places", () => {
       ]);
       const marker = markerOf();
       const site = `site-${unique()}`;
-      const { connectionId } = await sharedSites(admin, { [site]: marker });
+      const { connectionId } = await connectSharedSites(admin, {
+        [site]: marker,
+      });
       await chooseAudience(admin.api, connectionId, { kind: "everyone" });
       const seen: boolean[] = [];
       for (let round = 0; round < 3; round += 1) {

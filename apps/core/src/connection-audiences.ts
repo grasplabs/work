@@ -99,6 +99,13 @@ export const sharedPlacesRead = (db: DrizzleD1Database) =>
         ne(brainSyncSources.place, placesListing),
         sql`EXISTS (SELECT 1 FROM ${connectionBrainAudiences} WHERE ${connectionBrainAudiences.connectionId} = ${brainSyncSources.connectionId})`
       )
+    )
+    // In one order, so a reader past the bound of groups leaves out the
+    // same places each read (brain-next.ts `readerGroupsOf`).
+    .orderBy(
+      brainSyncSources.connectionId,
+      brainSyncSources.feed,
+      brainSyncSources.place
     );
 
 /** Every shared connection's Brain audience, as an admin last chose it. */

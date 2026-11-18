@@ -37,6 +37,10 @@ import { recordPlatformUpdate } from "./platform-updates.ts";
 import { sweepReleases } from "./release-retention.ts";
 import { completeOwedErasures } from "./shared-reads.ts";
 import { reconcileSkills } from "./skill-shares.ts";
+import {
+  readerGroupQueriesPerTick,
+  readerGroupRequestsPerTick,
+} from "./source-readers.ts";
 import { sweepSpokenLines } from "./speech-cache.ts";
 import { sendStephenSummaries } from "./stephen-summary.ts";
 import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
@@ -206,6 +210,19 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // model's files copied from the release directory first
   // (src/embedder.ts).
   { name: "embed.warm", period: "minute", run: warmQuestionEmbedder },
+  // The groups each person's own suite account is in, read again once its
+  // token was minted since, which copied reader lists' groups count them
+  // in (connect's src/reader-groups.ts, source-readers.ts).
+  {
+    name: "brain.reader_groups",
+    period: "minute",
+    run: async (env) => {
+      await env.CONNECT.readReaderGroups({
+        requests: readerGroupRequestsPerTick,
+        queries: readerGroupQueriesPerTick,
+      });
+    },
+  },
   // Connect's own clock armed, if nothing has (connect's src/clock.ts).
   {
     name: "connect.clock",

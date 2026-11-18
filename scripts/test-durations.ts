@@ -1,10 +1,12 @@
 // Records how long each test file takes, for the split between CI's
 // shards (scripts/test-shards.ts), from the shards' test-progress
-// artifacts (scripts/stall-reporter.ts writes them):
+// artifacts (scripts/stall-reporter.ts writes them), of the merge
+// queue's last passing runs, which run every shard:
 //
-//   gh run download <run> -n test-progress-1-of-6 -D runs/<run>-1
-//   ...
-//   vp run test:durations runs/*/test-progress.log
+//   gh run list --workflow ci.yml --event merge_group --status success \
+//     --limit 5 --json databaseId -q '.[].databaseId' |
+//     xargs -I{} gh run download {} -p 'test-progress-*' -D runs/{}
+//   vp run test:durations runs/*/*/test-progress.log
 //
 // Several runs make it steadier: each file takes the median of the runs
 // it passed in. A run where a file failed a test gives it no time: a test
@@ -16,7 +18,7 @@ import { fileURLToPath } from "node:url";
 
 import { z } from "zod";
 
-import { byKey } from "./test-shards.ts";
+import { aloneSeconds, byKey } from "./test-shards.ts";
 
 /**
  * A project's name in a progress log: Vitest names a browser project's
@@ -115,6 +117,11 @@ const median = (values: readonly number[]): number => {
 /**
  * `known` updated from `logs`: each file the logs name takes the median of
  * its times in them, rounded to a tenth of a second; the rest keep theirs.
+ * A file the split runs on a shard of its own (`aloneSeconds`) keeps its
+ * time from a log of it alone: alone it runs faster than beside others,
+ * and that time would put it back beside them, where it slows again. The
+ * new Brain's leak test by meaning took 95 s alone and 261 s once the next
+ * split put it beside 76 other files (November 2026).
  */
 export const updatedDurations = (
   known: Readonly<Record<string, number>>,
@@ -122,7 +129,12 @@ export const updatedDurations = (
 ): Record<string, number> => {
   const runs = new Map<string, number[]>();
   for (const log of logs) {
-    for (const [key, seconds] of fileSecondsIn(log)) {
+    const files = fileSecondsIn(log);
+    const [only] = files.keys();
+    if (files.size === 1 && (known[only ?? ""] ?? 0) >= aloneSeconds) {
+      continue;
+    }
+    for (const [key, seconds] of files) {
       runs.set(key, [...(runs.get(key) ?? []), seconds]);
     }
   }

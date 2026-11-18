@@ -33,7 +33,6 @@ import {
   handOverResultSchema,
   isWholeKey,
   memoriesRequestSchema,
-  eventErasureSchema,
   newEventsSchema,
   newInstructionsSchema,
   newMemoriesSchema,
@@ -74,8 +73,8 @@ import {
   versionRequestSchema,
 } from "./contract.ts";
 import type {
-  EventErasure,
   NewEvents,
+  ObservedRoutine,
   RetireWrittenRequest,
   VersionChange,
   VersionChangeRequest,
@@ -202,7 +201,7 @@ import {
   sourcesWithoutCurrent,
 } from "./erasure.ts";
 import type { ErasureStore } from "./erasure.ts";
-import { addEvents, eraseEvents, expireEvents } from "./events.ts";
+import { addEvents, expireEvents } from "./events.ts";
 import {
   exportFile,
   exportStatus,
@@ -249,6 +248,7 @@ import { addMemories } from "./remember.ts";
 import { isRemoved, removeSources } from "./removal.ts";
 import { checkRestore, restoreStatus, startRestore } from "./restore.ts";
 import { isRestoring } from "./restoring.ts";
+import { observedRoutines } from "./routines-observed.ts";
 import {
   enqueueProposal,
   listProposals,
@@ -1384,14 +1384,16 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     addEvents(this.ctx.storage, keyId, events, Date.now());
   }
 
-  /** Deletes the events of a person's tags (events.ts): their erasure. */
-  async eraseEvents(request: EventErasure): Promise<void> {
-    const { keyId, who } = checked(eventErasureSchema, request);
+  /**
+   * The routines seen in each team's events now (routines-observed.ts),
+   * each held to `minTeamShown` distinct people inside the read itself.
+   */
+  async observedRoutines(): Promise<ObservedRoutine[]> {
     if (this.#kind.kind === "person") {
       throw new Error(sharedOnly);
     }
-    await this.#readyToWrite();
-    eraseEvents(this.ctx.storage, keyId, who, Date.now());
+    await this.#ready();
+    return observedRoutines(this.ctx.storage.sql);
   }
 
   /** Deletes every event past its time (events.ts), by the store's clock. */
@@ -1423,7 +1425,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
    * (`erasePerson`).
    */
   async erasePersonShared(request: SharedPersonErasure): Promise<void> {
-    const { person, identifiers, reason } = checked(
+    const { person, identifiers, reason, events } = checked(
       sharedPersonErasureSchema,
       request
     );
@@ -1432,7 +1434,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     }
     await this.#changing(async () => {
       await this.#readyToWrite();
-      await erasePersonShared(this.#erasures, { person, identifiers, reason });
+      await erasePersonShared(this.#erasures, {
+        person,
+        identifiers,
+        reason,
+        ...(events === undefined ? {} : { events }),
+      });
     });
   }
 

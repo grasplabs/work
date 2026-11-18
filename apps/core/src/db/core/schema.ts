@@ -3482,7 +3482,7 @@ export const connectionBrainAudiences = sqliteTable(
  * `connected` kind: written before the Brain is given the key, so every key
  * the Brain holds of a connection is named here, for its erasure to find.
  * `generation` is the connection's erasure generation it was kept in
- * (`connection_brain_erasures`); `read_at` when it was first read.
+ * (`connection_brain_erasures`); `read_at` when it was last read.
  */
 export const connectionBrainReads = sqliteTable(
   "connection_brain_reads",
@@ -3590,7 +3590,7 @@ export const brainSyncSources = sqliteTable(
     primaryKey({ columns: [table.connectionId, table.feed, table.place] }),
     index("brain_sync_sources_due_idx").on(table.dueAt),
     // The live places of shared connections, read with every read of the
-    // Brain (brain-next.ts `memberGroupsOf`).
+    // Brain (connection-audiences.ts `sharedPlacesRead`).
     index("brain_sync_sources_person_idx").on(table.personId, table.dropped),
   ]
 );
@@ -3610,7 +3610,10 @@ export const brainSyncSources = sqliteTable(
  * erases it, so an erase a stopped run left is finished on its next read,
  * and a disconnect's erasure finds it; and since when its removal is held
  * (`heldSince`: gone from one place of a sync that lists places, kept
- * until the others have read, so a move between two leaves no hole). Never its readers: each
+ * until the others have read, so a move between two leaves no hole), and
+ * when a page last saved a change of it (`savedAt`: one saved since its
+ * source last committed a page is the uncommitted page's own, whose step
+ * a replay of that page records again). Never its readers: each
  * page gives them to the Brain again, so nothing here names a person.
  * Core names a key here before the Brain is given it, so a disconnect's
  * erasure finds every key it gave.
@@ -3633,6 +3636,7 @@ export const brainSyncItems = sqliteTable(
     leaving: text(),
     leavingStore: text("leaving_store", { enum: ["own", "shared"] }),
     heldSince: timestamp("held_since"),
+    savedAt: timestamp("saved_at"),
   },
   (table) => [
     primaryKey({ columns: [table.connectionId, table.feed, table.itemId] }),
@@ -3694,6 +3698,9 @@ export const brainSyncDisconnects = sqliteTable(
     requestedAt: timestamp("requested_at").notNull(),
     erasing: integer({ mode: "boolean" }).notNull(),
     erased: integer().notNull(),
+    /** The run that holds the erase, until when: its token (brain-sync.ts `takeErasure`). */
+    leaseId: text("lease_id"),
+    leaseUntil: timestamp("lease_until"),
   },
   (table) => [index("brain_sync_disconnects_erasing_idx").on(table.erasing)]
 );
@@ -6251,23 +6258,27 @@ export const brainTeamGroups = sqliteTable("brain_team_groups", {
   teamIds: text("team_ids").notNull(),
   /** Its place in the company's order. */
   position: integer().notNull(),
-  /** When an admin confirmed it; null while it is only Grasp's proposal. */
+  /**
+   * When it was kept: set on every row, as every group counts (GRA-1993).
+   * Kept for the release before, which reads a row without it as a
+   * proposal (expand, then contract).
+   */
   confirmedAt: timestamp("confirmed_at"),
   savedAt: timestamp("saved_at").notNull(),
 });
 
 /**
- * Each time an admin confirmed the groups of teams (brain-team-groups.ts):
- * the groups whole, as they were before and as confirmed, so an earlier
- * set can be put back. Never changed or deleted; the audit event of the
- * save names its id, and who saved it.
+ * Each time an admin saved the groups of teams, or Grasp arranged them
+ * (brain-team-groups.ts): the groups whole, as they were before and after,
+ * so an earlier set can be put back. Never changed or deleted; the audit
+ * event of the change names its id, and who made it.
  */
 export const brainTeamGroupSaves = sqliteTable("brain_team_group_saves", {
   id: text().primaryKey(),
   savedAt: timestamp("saved_at").notNull(),
   /** The groups before, as JSON: each one's id, name, teams and whether confirmed. */
   before: text().notNull(),
-  /** The groups as confirmed, as JSON, the same way. */
+  /** The groups after, as JSON, the same way. */
   after: text().notNull(),
 });
 
@@ -6982,6 +6993,19 @@ export const sourceReaderTokens = sqliteTable(
   },
   (table) => [index("source_reader_tokens_person_idx").on(table.person)]
 );
+
+/**
+ * Every group of a provider's that a copied reader list ever named
+ * (source-readers.ts `readerPrincipalsOf`, GRA-1761), by the Brain's name
+ * of it (`group:<provider>:<tenant>:<group>`), written before the list
+ * reaches the Brain. A person reads as only those of their own groups
+ * that are here (`heldPrincipalsOf`): the groups sources are shared with,
+ * however many groups they are in. A group is no person; nothing is
+ * removed, as a name no source holds any more costs a reader nothing.
+ */
+export const sourceReaderGroups = sqliteTable("source_reader_groups", {
+  name: text().primaryKey(),
+});
 
 /**
  * What Grasp proposes for a team's routine (opportunities.ts, GRA-1750),

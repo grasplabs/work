@@ -54,11 +54,7 @@ import {
   stepsOf,
 } from "./brain-records.ts";
 import type { HeldRecords, OnboardingHeld } from "./brain-records.ts";
-import {
-  proposeTeamGroups,
-  saveTeamGroups,
-  teamGroupsOf,
-} from "./brain-team-groups.ts";
+import { saveTeamGroups, teamGroupsOf } from "./brain-team-groups.ts";
 import { askMorePeople, workKnowledge } from "./brain-work.ts";
 import { mayHoldCapturesOf } from "./connection-capture-key.ts";
 import { catalogEntries, personOf } from "./connections.ts";
@@ -1148,6 +1144,16 @@ const readBrainCore = async (
 };
 
 /**
+ * The brain's teams, every one, as an admin reads them: the ones its
+ * regions may name (brain-team-groups.ts). The one place that says which
+ * teams the Brain has, for regrouping them and for arranging them.
+ */
+export const brainTeams = async (env: Env): Promise<Team[]> => {
+  const { teams } = await readBrainCore(env, { role: "admin" });
+  return teams;
+};
+
+/**
  * The brain's teams, what they said and its workflows, as `person` may
  * read them, as `readBrain` reads them: what a step of a chat's thinking
  * may name (agent-thinking.ts). What a team said is a claim of how it
@@ -1370,24 +1376,6 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
     );
   }
 
-  /** The brain's teams as `person` reads them. */
-  async #teams(person: Identity): Promise<Team[]> {
-    const { teams } = await readBrain(this.#env, person);
-    return teams;
-  }
-
-  async proposeTeamGroups(): Promise<TeamGroup[]> {
-    return await withPerson(
-      this.#check,
-      async (person) =>
-        await proposeTeamGroups(
-          this.#env,
-          person,
-          async () => await this.#teams(person)
-        )
-    );
-  }
-
   async saveTeamGroups(groups: unknown): Promise<TeamGroup[]> {
     return await withPerson(
       this.#check,
@@ -1396,7 +1384,7 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
           this.#env,
           person,
           groups,
-          async () => await this.#teams(person)
+          async () => await brainTeams(this.#env)
         )
     );
   }

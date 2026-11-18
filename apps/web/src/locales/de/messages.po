@@ -602,6 +602,10 @@ msgstr "{holder}: {actions} auf {resource}"
 msgid "{hours, plural, one {# hour a week in all that Grasp can count} other {# hours a week in all that Grasp can count}}"
 msgstr "{hours, plural, one {# Stunde pro Woche in allem, was Grasp zählen kann} other {# Stunden pro Woche in allem, was Grasp zählen kann}}"
 
+#: src/brain/opportunities-page.tsx
+msgid "{hours, plural, one {# hour after the step before} other {# hours after the step before}}"
+msgstr "{hours, plural, one {# Stunde nach dem Schritt davor} other {# Stunden nach dem Schritt davor}}"
+
 #: src/dashboard/signals.tsx
 msgid "{hours, plural, one {# hour} other {# hours}}"
 msgstr "{hours, plural, one {# Stunde} other {# Stunden}}"
@@ -945,6 +949,14 @@ msgstr "{number} von {total}"
 msgid "{number}. {step} (a person approves this step)"
 msgstr "{number}. {step} (eine Person gibt diesen Schritt frei)"
 
+#: src/brain/opportunity-drafts.ts
+msgid "{number}. {system}: {step}"
+msgstr "{number}. {system}: {step}"
+
+#: src/brain/opportunity-drafts.ts
+msgid "{number}. {system}: {step} (copied from another system)"
+msgstr "{number}. {system}: {step} (aus einem anderen System übertragen)"
+
 #: src/brain/brain-atlas.ts
 msgid "{one} and {other} both name the same handover, each from their own side."
 msgstr "{one} und {other} nennen beide dieselbe Übergabe, jeweils von ihrer Seite."
@@ -1197,6 +1209,11 @@ msgstr "{subject}: {actions} auf {object}"
 #: src/brain/brain-atlas.ts
 msgid "{sunk, plural, one {# of them is a time waster, as the team said it.} other {# of them are time wasters, as the teams said them.}}"
 msgstr "{sunk, plural, one {# davon ist ein Zeitfresser, wie das Team es sagte.} other {# davon sind Zeitfresser, wie die Teams es sagten.}}"
+
+#: src/brain/opportunities-page.tsx
+msgctxt "a system and a step taken in it"
+msgid "{system}: {step}"
+msgstr "{system}: {step}"
 
 #: src/apps/data-model-changes.tsx
 msgid "{table} already holds records. What should the ones without {missing} get?"
@@ -2204,6 +2221,10 @@ msgstr "Sicherheitshinweis"
 #: src/settings/audit-archive.tsx
 msgid "After a run ends. After this, its inputs, outputs and messages are removed."
 msgstr "Nach dem Ende eines Laufs. Danach werden seine Eingaben, Ausgaben und Nachrichten entfernt."
+
+#: src/brain/opportunities-page.tsx
+msgid "After step {position}, some go to {system}: {step}"
+msgstr "Nach Schritt {position} gehen manche zu {system}: {step}"
 
 #: src/routes/_shell.agents.$agent.tsx
 msgid "Agent"
@@ -4204,10 +4225,6 @@ msgstr "Bestätigen"
 msgid "Confirm {what}"
 msgstr "{what} bestätigen"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Confirm groups"
-msgstr "Gruppen bestätigen"
-
 #: src/decision-confirmation.tsx
 msgid "Confirm your approval"
 msgstr "Genehmigung bestätigen"
@@ -4496,6 +4513,10 @@ msgstr "Aus einem verbundenen System kopiert"
 #: src/brain/memories-page.tsx
 msgid "Copied from a connected system, version {version}"
 msgstr "Aus einem verbundenen System kopiert, Version {version}"
+
+#: src/brain/opportunities-page.tsx
+msgid "Copied from another system"
+msgstr "Aus einem anderen System übertragen"
 
 #: src/apps/app-settings.tsx
 msgid "Copies"
@@ -4955,8 +4976,16 @@ msgid "Describe the App"
 msgstr "Beschreiben Sie die App"
 
 #: src/brain/opportunities-page.tsx
+msgid "Described in the team's interviews, and seen in its activity."
+msgstr "In den Interviews des Teams beschrieben und in seiner Aktivität gesehen."
+
+#: src/brain/opportunities-page.tsx
 msgid "Described in the team's interviews."
 msgstr "In den Interviews des Teams beschrieben."
+
+#: src/brain/opportunities-page.tsx
+msgid "Described, but not seen: {toldOnly}."
+msgstr "Beschrieben, aber nicht gesehen: {toldOnly}."
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
@@ -6805,10 +6834,6 @@ msgstr "Grasps Chat"
 #: src/settings/ai-providers.tsx
 msgid "Grasp's own AI features"
 msgstr "Grasps eigene KI-Funktionen"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "Grasp’s proposal counts once you confirm it."
-msgstr "Der Vorschlag von Grasp gilt, sobald Sie ihn bestätigen."
 
 #: src/routes/_shell.settings.brain.tsx
 msgid "Group name"
@@ -11066,14 +11091,6 @@ msgctxt "what the Brain remembers about something"
 msgid "Promise"
 msgstr "Zusage"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Propose groups"
-msgstr "Gruppen vorschlagen"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "Proposed"
-msgstr "Vorgeschlagen"
-
 #: src/brain/brain-nav.tsx
 msgctxt "a group of teams Grasp proposed that no admin confirmed yet"
 msgid "Proposed"
@@ -12383,6 +12400,10 @@ msgstr "Als PDF speichern"
 msgid "Save first"
 msgstr "Zuerst speichern"
 
+#: src/routes/_shell.settings.brain.tsx
+msgid "Save groups"
+msgstr "Gruppen speichern"
+
 #: src/settings/ai-providers.tsx
 msgid "Save key"
 msgstr "Schlüssel speichern"
@@ -12668,6 +12689,14 @@ msgctxt "what something known rests on: Grasp saw it in use"
 msgid "Seen"
 msgstr "Gesehen"
 
+#: src/brain/opportunities-page.tsx
+msgid "Seen in activity"
+msgstr "In der Aktivität gesehen"
+
+#: src/brain/opportunities-page.tsx
+msgid "Seen in the team's activity."
+msgstr "In der Aktivität des Teams gesehen."
+
 #: src/brain/work-knowledge.tsx
 msgid "Seen in use"
 msgstr "Im Einsatz gesehen"
@@ -12675,6 +12704,10 @@ msgstr "Im Einsatz gesehen"
 #: src/brain/brain.ts
 msgid "Seen in use: not observed through sign-in or Pulse yet"
 msgstr "In Nutzung erkannt: noch nicht über Anmeldung oder Pulse beobachtet"
+
+#: src/brain/opportunities-page.tsx
+msgid "Seen, but not described: {seenOnly}."
+msgstr "Gesehen, aber nicht beschrieben: {seenOnly}."
 
 #. Folder of the applications seen in use that no team named
 #: src/brain/brain.ts
@@ -14351,8 +14384,8 @@ msgid "The Brain, as each run's person may read it"
 msgstr "Das Gehirn, so wie die Person jedes Laufs es lesen darf"
 
 #: src/routes/_shell.settings.brain.tsx
-msgid "The brain's regions: your teams, grouped the way your company is. Grasp can propose groups; they count once you confirm them."
-msgstr "Die Bereiche des Brains: Ihre Teams, so gruppiert wie Ihr Unternehmen. Grasp kann Gruppen vorschlagen; sie gelten, sobald Sie sie bestätigen."
+msgid "The brain's regions: your teams, grouped the way your company is. Grasp groups new teams by itself; rename a group or move a team here."
+msgstr "Die Bereiche des Brains: Ihre Teams, so gruppiert wie Ihr Unternehmen. Grasp gruppiert neue Teams selbst; hier benennen Sie eine Gruppe um oder verschieben ein Team."
 
 #: src/workflows/business-process.tsx
 msgid "The business process {name} serves"
@@ -16372,6 +16405,10 @@ msgstr "Was jeder Agent über das Unternehmen wissen sollte."
 msgid "What every chat in the company starts with. Only admins change them."
 msgstr "Womit jeder Chat im Unternehmen beginnt. Nur Admins ändern sie."
 
+#: src/brain/opportunity-drafts.ts
+msgid "What five or more of the team were seen doing:"
+msgstr "Was bei fünf oder mehr Personen des Teams zu sehen war:"
+
 #: src/brain/work-knowledge.tsx
 msgid "What gets in the way"
 msgstr "Was im Weg steht"
@@ -16381,8 +16418,8 @@ msgid "What Grasp and its agents do by themselves is under Activity."
 msgstr "Was Grasp und seine Agenten selbst tun, steht unter Aktivität."
 
 #: src/brain/opportunities-page.tsx
-msgid "What Grasp could automate or improve, from how your teams describe their work, the largest first. One hidden comes back when its evidence changes."
-msgstr "Was Grasp automatisieren oder verbessern könnte, ausgehend davon, wie deine Teams ihre Arbeit beschreiben, die größten zuerst. Eine ausgeblendete Chance kommt zurück, sobald sich ihre Belege ändern."
+msgid "What Grasp could automate or improve, from how your teams describe their work and how five or more of a team were seen doing it, the largest first. One hidden comes back when its evidence changes."
+msgstr "Was Grasp automatisieren oder verbessern könnte, danach, wie Ihre Teams ihre Arbeit beschreiben und wie fünf oder mehr Personen eines Teams sie tatsächlich erledigen, das Größte zuerst. Eine ausgeblendete kommt zurück, sobald sich ihre Grundlage ändert."
 
 #: src/brain/brain-sections.ts
 msgid "What Grasp does not know yet, and who can answer it."
@@ -16726,6 +16763,10 @@ msgstr "Was auf Sie wartet"
 #: src/routes/_shell.dashboard.tsx
 msgid "What waits on you, each with its next step, and what could be better."
 msgstr "Was auf Sie wartet, jeweils mit dem nächsten Schritt, und was besser gehen könnte."
+
+#: src/brain/opportunities-page.tsx
+msgid "What was described and what was seen use the same systems."
+msgstr "Beschriebenes und Gesehenes nutzen dieselben Systeme."
 
 #: src/brain/brain-atlas.ts
 msgid "What was heard, written and connected"
@@ -17164,6 +17205,10 @@ msgstr "Hat eine Einladung zurückgezogen"
 #: src/workflows/kept-state.tsx
 msgid "Withheld: the run that kept it read something that is no longer there to read, so later runs start without it."
 msgstr "Zurückgehalten: Der Lauf, der dies behalten hat, hat etwas gelesen, das nicht mehr zu lesen ist, daher starten spätere Läufe ohne diesen Wert."
+
+#: src/brain/opportunities-page.tsx
+msgid "Within the hour of the step before"
+msgstr "Innerhalb einer Stunde nach dem Schritt davor"
 
 #: src/brain/memories-page.tsx
 msgid "Without a name"

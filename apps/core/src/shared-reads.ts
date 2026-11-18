@@ -12,7 +12,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorName, log } from "@grasp-os/shared/log";
 import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -26,7 +26,6 @@ import {
 import { erasingAtOnce, eraseSources } from "./brain-next-origins.ts";
 import {
   brainSyncItems,
-  brainSyncSources,
   connectionBrainAudiences,
   connectionBrainErasures,
   connectionBrainReads,
@@ -63,13 +62,13 @@ import { inList } from "./db/d1.ts";
 //
 // What native sync copied from the places picked on the connection
 // (brain-sync.ts, GRA-1719) is part of what the Brain kept of it, so an
-// erasure erases it too (GRA-2066): as it starts, the connection's sync
-// sources go, so its picked places (still picked) are read again from
-// nothing once an admin chooses an audience; the sync run erases every
-// key they gave the Brain and forgets their rows, each counted in the
-// erasure (brain-sync.ts `stepReadsErasure`); and the erasure ends only
-// once none is left (`ended`). Nothing is copied meanwhile, as nothing is
-// kept without an audience.
+// erasure erases it too (GRA-2066): while it is under way, the sync run
+// drops every place picked on the connection (brain-sync.ts
+// `dropErasedPlaces`) and erases what each copied, each copy counted in
+// the erasure; the erasure ends only once none is left (`ended`). The
+// places stay picked, and are read again from nothing once an admin
+// chooses an audience. Nothing is copied meanwhile, as nothing is kept
+// without an audience.
 //
 // A disconnect also closes the connection here for good (`closed`): no
 // audience is opened on it again, whatever was checked before the
@@ -109,7 +108,10 @@ const erasedPerPage = 100;
  * connection-audiences.ts); the statement checks it all the same, as
  * every read that trusts an audience does. Decided in the statement that names it, so
  * an erasure that starts after it lists it, and one that started before
- * refuses it. The same record again is the same source, named once.
+ * refuses it. The same record again is the same source, named once,
+ * its read time the latest of its reads (the Sources page's last read),
+ * moved on by the same statement, so only while the connection has an
+ * audience and isn't being erased or closed.
  */
 export const claimSharedRead = async (
   env: Pick<Env, "DB">,
@@ -127,10 +129,14 @@ export const claimSharedRead = async (
         WHERE EXISTS (SELECT 1 FROM ${connectionBrainAudiences} WHERE ${connectionBrainAudiences.connectionId} = ${connection})
           AND NOT EXISTS (SELECT 1 FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connection} AND (${connectionBrainErasures.erasing} = 1 OR ${connectionBrainErasures.closed} = 1))`
     )
-    // Named already: the same source, as it was first named.
+    // Named already: the same source, as it was first named, read last
+    // at the later of its reads (claims of one record may land in any
+    // order).
     .onConflictDoUpdate({
       target: connectionBrainReads.sourceId,
-      set: { sourceId: sql`${connectionBrainReads.sourceId}` },
+      set: {
+        readAt: sql`MAX(${connectionBrainReads.readAt}, excluded.read_at)`,
+      },
     })
     .returning({ sourceId: connectionBrainReads.sourceId });
   return named === undefined
@@ -221,11 +227,10 @@ interface ErasureRequest {
 
 /**
  * The statements that start the erasure `request` of what the Brain kept
- * through its connection, for one batch: its audience gone, its native
- * sync's sources gone (read again from nothing once an audience is
- * chosen), and, unless one is under way or this request started already,
- * the next generation marked under way. The statement after them sees
- * whether it started (`changes()`). A request started once never starts again, so a repeat
+ * through its connection, for one batch: its audience gone, and, unless
+ * one is under way or this request started already, the next generation
+ * marked under way. The statement after them sees whether it started
+ * (`changes()`). A request started once never starts again, so a repeat
  * erases nothing kept after it ended.
  */
 const startStatements = (
@@ -236,14 +241,6 @@ const startStatements = (
     db
       .delete(connectionBrainAudiences)
       .where(eq(connectionBrainAudiences.connectionId, connectionId)),
-    db
-      .delete(brainSyncSources)
-      .where(
-        and(
-          eq(brainSyncSources.connectionId, connectionId),
-          isNull(brainSyncSources.personId)
-        )
-      ),
     db
       .insert(connectionBrainErasures)
       .values({
@@ -310,7 +307,7 @@ interface Budget {
  * all erased, with its one event, in one batch: its count as the row has
  * it now, and only if it is still that erasure, under way, no older
  * record was named since (none can be, while it is under way), and no
- * copy its native sync made is left (brain-sync.ts `stepReadsErasure`).
+ * copy its native sync made is left (brain-sync.ts `dropErasedPlaces`).
  */
 const ended = async (
   env: Env,

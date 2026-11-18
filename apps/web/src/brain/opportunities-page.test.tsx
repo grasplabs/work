@@ -52,6 +52,8 @@ const proposed = (
   casesPerWeek: 10,
   hoursPerWeek,
   basis: "described",
+  seen: null,
+  differs: null,
   form,
   covers: null,
   setup: [],
@@ -146,6 +148,67 @@ describe("Opportunities", () => {
       // Read once; picking makes nothing and asks no model.
       calls: ["list"],
     });
+  });
+
+  it("offers no Draft it on an opportunity only seen in activity while nothing is proposed for it", async () => {
+    await shown([
+      {
+        ...proposed(1, "exact invoices.read → sheets rows.add", null, 0),
+        steps: [],
+        casesPerWeek: null,
+        hoursPerWeek: null,
+        basis: "observed",
+        seen: {
+          steps: [
+            {
+              system: "exact",
+              step: "invoices.read",
+              hoursAfter: null,
+              copied: false,
+            },
+            { system: "sheets", step: "rows.add", hoursAfter: 1, copied: true },
+          ],
+          variants: [],
+        },
+      },
+    ]);
+
+    expect(drafts()).toStrictEqual({
+      "Exact invoices.read → sheets rows.add": null,
+    });
+  });
+
+  it("says described and seen use the same systems only once a proposal says which the description names", async () => {
+    const both = (id: number, toldOnly: string[] | null): Opportunity => ({
+      ...proposed(id, `routine ${id}`, "workflow", id),
+      basis: "both",
+      seen: {
+        steps: [
+          {
+            system: "zendesk",
+            step: "tickets.read",
+            hoursAfter: null,
+            copied: false,
+          },
+        ],
+        variants: [],
+      },
+      differs: { seenOnly: [], toldOnly },
+    });
+    await shown([both(2, []), both(1, null)]);
+    const same = "What was described and what was seen use the same systems.";
+
+    expect(
+      [...document.querySelectorAll("li")].flatMap((card) => {
+        const title = card.querySelector("h2")?.textContent;
+        return title === undefined || title === null
+          ? []
+          : [[title, card.textContent?.includes(same) ?? false]];
+      })
+    ).toStrictEqual([
+      ["Routine 2", true],
+      ["Routine 1", false],
+    ]);
   });
 
   it("names each Draft it for its opportunity, so a list of links tells them apart", async () => {

@@ -27,7 +27,10 @@ export const sampleSyncControlUrl = "https://sample-sync-control.test/feed";
  * `placePages` pages the folder list by position (`{ folders, next }`,
  * 410 for a position it has none for), in place of `places`;
  * `folders` maps each folder to `{ changes, names, items }`, its pages by
- * position and its items by ID; a folder in `failing` answers 500, and so
+ * position and its items by ID, and, for a connector that reads no names
+ * or IDs, `ignores: true` (a names-only listing answers its change feed
+ * from the position asked, items by ID its first page), or, for one that
+ * answers only some of the IDs asked, `itemsMax`; a folder in `failing` answers 500, and so
  * does the `files` feed while `failing` names `files`. Every
  * items request is kept, by folder: GET the control URL with `subject`
  * and `folder` for them.
@@ -66,14 +69,23 @@ export const sampleSyncFake = () => {
       return new Response(null, { status: 500 });
     }
     const held = field(field(world, "folders"), folder);
+    const ignores = field(held, "ignores") === true;
     if (what !== "items") {
       return pageOr410(
-        field(field(held, what), url.searchParams.get("from") ?? "")
+        field(
+          field(held, ignores ? "changes" : what),
+          url.searchParams.get("from") ?? ""
+        )
       );
     }
-    const ids = url.searchParams.getAll("id");
+    const asked = url.searchParams.getAll("id");
     const key = `${subject} ${folder}`;
-    fetched.set(key, [...(fetched.get(key) ?? []), ids]);
+    fetched.set(key, [...(fetched.get(key) ?? []), asked]);
+    if (ignores) {
+      return pageOr410(field(field(held, "changes"), ""));
+    }
+    const most = field(held, "itemsMax");
+    const ids = typeof most === "number" ? asked.slice(0, most) : asked;
     return Response.json({
       changes: ids.map(
         (id) =>

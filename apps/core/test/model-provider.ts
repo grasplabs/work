@@ -262,6 +262,36 @@ const isStephenRequests = (body: unknown): boolean => {
   return stephenRequestsOpenings.some((opening) => text.includes(opening));
 };
 
+/**
+ * Replies to Grasp arranging the Brain's teams into regions
+ * (src/brain-team-groups.ts), in the order a test queued them, apart from
+ * every provider's script. The onboarding's alarm asks it after any test
+ * saves a staff list, and again a minute and five later when it fails,
+ * so it would take a reply another call was scripted for, or a later
+ * test's. A function is called as the request comes, before its reply.
+ * Once none is left, an arrangement that places no team, which ends it.
+ */
+export const arrangementReplies: (
+  | ProviderReply
+  | (() => Promise<ProviderReply>)
+)[] = [];
+
+/** What each arrangement sent the provider, oldest first. */
+export const arrangementCalls: unknown[] = [];
+
+const arrangesNothing: ProviderReply = {
+  text: JSON.stringify({ groups: [] }),
+  inputTokens: 10,
+  outputTokens: 5,
+};
+
+/** How the arrangement's instructions begin: the provider sees no purpose. */
+const arrangementOpening = "You group a company's teams into its departments";
+
+/** Whether a request's body is Grasp arranging the Brain's teams. */
+const isArrangement = (body: unknown): boolean =>
+  (JSON.stringify(body) ?? "").includes(arrangementOpening);
+
 const nothingToLookUp: ProviderReply = {
   text: JSON.stringify({ query: null }),
   inputTokens: 10,
@@ -346,6 +376,13 @@ export const answeringProvider = async (
           ? (stephenJudgeReplies.shift() ?? answeredIt)
           : (stephenRequestReplies.shift() ?? sortsNothing)
       );
+      return;
+    }
+    if (isArrangement(body)) {
+      arrangementCalls.push(body);
+      const queued = arrangementReplies.shift() ?? arrangesNothing;
+      const reply = typeof queued === "function" ? await queued() : queued;
+      await answerWith(taken.id, taken.path, reply);
       return;
     }
     const controller = new AbortController();

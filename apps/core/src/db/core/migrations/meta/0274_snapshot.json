@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7eefa9a3-1df4-41ff-94dc-1cb00a917b11",
-  "prevId": "ad857049-bf19-4f42-a8b2-f6c7f2fdba51",
+  "id": "7c83f101-f451-4b73-81f7-db4f8290c3ff",
+  "prevId": "f3e92352-01c5-469a-8899-5847c3480767",
   "tables": {
     "access_revocations": {
       "name": "access_revocations",
@@ -4650,6 +4650,20 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "lease_id": {
+          "name": "lease_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lease_until": {
+          "name": "lease_until",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -4773,6 +4787,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "saved_at": {
+          "name": "saved_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -4854,7 +4875,7 @@
           "name": "person_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "provider": {
@@ -5024,14 +5045,6 @@
           "name": "brain_sync_sources_due_idx",
           "columns": [
             "due_at"
-          ],
-          "isUnique": false
-        },
-        "brain_sync_sources_person_idx": {
-          "name": "brain_sync_sources_person_idx",
-          "columns": [
-            "person_id",
-            "dropped"
           ],
           "isUnique": false
         }
@@ -12170,6 +12183,23 @@
           "isUnique": false
         }
       },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "source_reader_groups": {
+      "name": "source_reader_groups",
+      "columns": {
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

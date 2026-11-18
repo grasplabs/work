@@ -15,6 +15,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { tagsPerStatement } from "../src/events.ts";
 import { exportSettled, tick } from "./export-reads.ts";
 import type { Store } from "./export-reads.ts";
 import { copyOf, restore } from "./store-copy.ts";
@@ -58,6 +59,126 @@ const keyId = "a".repeat(64);
 /** A tag of who took a step, as the host makes one: 64 hex digits. */
 const aTag = (): string => crypto.randomUUID().replaceAll("-", "").repeat(2);
 
+/**
+ * A person's erasure in the shared store, of someone with no card, with
+ * the events under `who` (their tag in one team), made under `under`.
+ */
+const erasedTags = async (
+  who: string | string[],
+  under = keyId
+): Promise<void> => {
+  await shared().erasePersonShared({
+    person: `person-${crypto.randomUUID()}`,
+    identifiers: [],
+    reason: "person_erased",
+    events: { keyId: under, who: typeof who === "string" ? [who] : who },
+  });
+};
+
+/** How many working rows of erasures' event tags the shared store keeps. */
+const workingTags = async (): Promise<number> =>
+  await runInDurableObject(
+    shared(),
+    (_instance, state) =>
+      state.storage.sql
+        .exec<{ rows: number }>(
+          "SELECT count(*) AS rows FROM person_erasure_events"
+        )
+        .one().rows
+  );
+
+/**
+ * Where a held ledger write is (`ledgerHeld`): a plain object both sides
+ * poll, so no promise is settled from another request's context.
+ */
+interface Hold {
+  entered: boolean;
+  released: boolean;
+}
+
+/** Waits until `ready` says so, polling, at most 10 s. */
+const until = async (ready: () => boolean): Promise<void> => {
+  for (let look = 0; !ready(); look += 1) {
+    if (look === 1000) {
+      throw new Error("Waited 10 s");
+    }
+    // oxlint-disable-next-line no-await-in-loop -- until it is ready
+    await scheduler.wait(10);
+  }
+};
+
+/**
+ * The shared store's ledger writes held: a write of the entry whose key
+ * ends in `held` marks `hold.entered` and waits until `hold.released`;
+ * every other goes through. Each write's last body, by its key, in
+ * `bodies`.
+ */
+const ledgerHeld = async (
+  held: string,
+  hold: Hold,
+  bodies: Map<string, string>
+): Promise<void> => {
+  const bucket = env.BRAIN_OBJECTS;
+  await runInDurableObject(shared(), (instance) => {
+    const objectEnv: unknown = Reflect.get(instance, "env");
+    if (typeof objectEnv !== "object" || objectEnv === null) {
+      throw new TypeError("The store has no env");
+    }
+    Reflect.set(instance, "env", {
+      ...objectEnv,
+      BRAIN_OBJECTS: new Proxy(bucket, {
+        get: (target, name): unknown =>
+          name === "put"
+            ? async (key: string, body: string) => {
+                if (key.endsWith(held)) {
+                  hold.entered = true;
+                  await until(() => hold.released);
+                }
+                bodies.set(key, body);
+                return await target.put(key, body);
+              }
+            : Reflect.get(target, name, target),
+      }),
+    });
+  });
+};
+
+/** The keys of the person erasures the shared store hasn't confirmed, oldest first. */
+const unconfirmed = async (): Promise<string[]> =>
+  await runInDurableObject(shared(), (_instance, state) =>
+    state.storage.sql
+      .exec<{ key: string }>(
+        "SELECT key FROM erasures WHERE kind = 'person' AND confirmed = 0 ORDER BY key"
+      )
+      .toArray()
+      .map(({ key }) => key)
+  );
+
+/** The shared store's ledger writes failing (`broken`), or working again. */
+const ledgerBroken = async (broken: boolean): Promise<void> => {
+  const bucket = env.BRAIN_OBJECTS;
+  await runInDurableObject(shared(), (instance) => {
+    const objectEnv: unknown = Reflect.get(instance, "env");
+    if (typeof objectEnv !== "object" || objectEnv === null) {
+      throw new TypeError("The store has no env");
+    }
+    Reflect.set(instance, "env", {
+      ...objectEnv,
+      BRAIN_OBJECTS: broken
+        ? new Proxy(bucket, {
+            get: (target, name): unknown =>
+              name === "put"
+                ? async () => {
+                    await Promise.resolve();
+                    throw new Error("Broken by the test");
+                  }
+                : Reflect.get(target, name, target),
+          })
+        : bucket,
+    });
+  });
+};
+
 /** The steps of the events the shared store keeps for `team`, in order. */
 const stepsFor = async (team: string): Promise<unknown[]> => {
   const rows = await keptFor(team);
@@ -74,6 +195,8 @@ const eventOf = (
     key,
     team,
     step,
+    system: "crm",
+    writes: false,
     item: null,
     who,
     at: new Date().toISOString(),
@@ -144,11 +267,13 @@ describe("events", () => {
       ownExpiry: await outcome(async () => {
         await own.expireEvents();
       }),
+      ownRoutines: await outcome(async () => await own.observedRoutines()),
     }).toStrictEqual({
       sales: [{ team: sales, step: "deals.update", item: null }],
       finance: [{ team: finance, step: "deals.update", item: null }],
       ownAdd: refused,
       ownExpiry: refused,
+      ownRoutines: refused,
     });
   });
 
@@ -185,7 +310,7 @@ describe("events", () => {
         eventOf(team, "deals.read", undefined, other),
       ],
     });
-    await shared().eraseEvents({ keyId, who: [erased] });
+    await erasedTags(erased);
     // The late write: the same person's step, made from teams read
     // before the erasure.
     await shared().addEvents({
@@ -205,7 +330,7 @@ describe("events", () => {
   it("keep a closed tag only as long as an event under it could arrive", async () => {
     const team = `team:${crypto.randomUUID()}`;
     const erased = aTag();
-    await shared().eraseEvents({ keyId, who: [erased] });
+    await erasedTags(erased);
     const later = Date.now() + eventsKeptMs + 60_000;
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(later);
@@ -225,7 +350,7 @@ describe("events", () => {
       keyId,
       events: [eventOf(team, "deals.old", undefined, kept)],
     });
-    await shared().eraseEvents({ keyId, who: [closed] });
+    await erasedTags(closed);
     const before = await keptFor(team);
     await shared().addEvents({
       keyId: "b".repeat(64),
@@ -260,7 +385,7 @@ describe("events", () => {
       keyId,
       events: [eventOf(team, step, undefined, kept)],
     });
-    await shared().eraseEvents({ keyId, who: [closed] });
+    await erasedTags(closed);
     await shared().startRestore(before, "test");
     const restored = await restoredState(before);
     await shared().addEvents({
@@ -283,5 +408,206 @@ describe("events", () => {
       steps: [step],
       exported: [],
     });
+  });
+
+  it("stay erased through a restore of the store's storage to before the erasure: the replay takes the person's events again and closes their tag", async () => {
+    const team = `team:${crypto.randomUUID()}`;
+    const [erased, other] = [aTag(), aTag()];
+    await shared().addEvents({
+      keyId,
+      events: [
+        eventOf(team, "deals.update", undefined, erased),
+        eventOf(team, "deals.read", undefined, other),
+      ],
+    });
+    const before = await copyOf(shared());
+    await erasedTags(erased);
+    // An older copy of the storage comes back: the store replays the
+    // ledger as it starts.
+    await restore(shared(), before);
+    await shared().addEvents({
+      keyId,
+      events: [
+        eventOf(team, "deals.late", undefined, erased),
+        eventOf(team, "deals.late", undefined, other),
+      ],
+    });
+
+    await expect(stepsFor(team)).resolves.toStrictEqual([
+      "deals.read",
+      "deals.late",
+    ]);
+  });
+
+  it("leave nothing of an erased person after a restore to before a rotation of the host's key: the replay drops what the old key made", async () => {
+    const team = `team:${crypto.randomUUID()}`;
+    const [oldTag, newTag, other] = [aTag(), aTag(), aTag()];
+    const rotated = "c".repeat(64);
+    // The person's and a colleague's events under the key before.
+    await shared().addEvents({
+      keyId,
+      events: [
+        eventOf(team, "deals.update", undefined, oldTag),
+        eventOf(team, "deals.read", undefined, other),
+      ],
+    });
+    const before = await copyOf(shared());
+    // The key rotated, then the person erased under the new one: their old
+    // tag is one no erasure can compute any more.
+    await shared().addEvents({
+      keyId: rotated,
+      events: [eventOf(team, "deals.new", undefined, other)],
+    });
+    await erasedTags(newTag, rotated);
+    await restore(shared(), before);
+    const replayed = await stepsFor(team);
+    await shared().addEvents({
+      keyId: rotated,
+      events: [
+        eventOf(team, "deals.late", undefined, newTag),
+        eventOf(team, "deals.kept", undefined, other),
+      ],
+    });
+
+    expect({ replayed, after: await stepsFor(team) }).toStrictEqual({
+      replayed: [],
+      after: ["deals.kept"],
+    });
+  });
+
+  it("erase as many tags as the company has teams, past what one statement binds, keep none of them once the erasure is written, and replay them all after a restore", async () => {
+    const team = `team:${crypto.randomUUID()}`;
+    // Past what one statement binds twice over: as one list, more than
+    // Durable Object SQLite's 2 MB string.
+    const tags = Array.from({ length: tagsPerStatement * 2 + 2 }, () => aTag());
+    const first = tags[0] ?? "";
+    const last = tags.at(-1) ?? "";
+    await shared().addEvents({
+      keyId,
+      events: [
+        eventOf(team, "deals.first", undefined, first),
+        eventOf(team, "deals.last", undefined, last),
+      ],
+    });
+    const before = await copyOf(shared());
+    await erasedTags(tags);
+    const left = await workingTags();
+    await restore(shared(), before);
+    await shared().addEvents({
+      keyId,
+      events: [
+        eventOf(team, "deals.late", undefined, first),
+        eventOf(team, "deals.late", undefined, last),
+      ],
+    });
+
+    expect({ left, steps: await stepsFor(team) }).toStrictEqual({
+      left: 0,
+      steps: [],
+    });
+  });
+
+  it("keep an erasure's tags until its ledger entry is written, and write them from those when the first write failed", async () => {
+    const team = `team:${crypto.randomUUID()}`;
+    const erased = aTag();
+    await shared().addEvents({
+      keyId,
+      events: [eventOf(team, "deals.update", undefined, erased)],
+    });
+    const before = await copyOf(shared());
+    await ledgerBroken(true);
+    let failed: unknown;
+    try {
+      await erasedTags(erased);
+    } catch (error) {
+      failed = error instanceof Error ? error.message : error;
+    } finally {
+      await ledgerBroken(false);
+    }
+    const whileUnwritten = await workingTags();
+    // The tick writes the entry the erasure couldn't, from those rows.
+    await tick(shared());
+    const written = await workingTags();
+    await restore(shared(), before);
+    await shared().addEvents({
+      keyId,
+      events: [eventOf(team, "deals.late", undefined, erased)],
+    });
+
+    expect({
+      failed,
+      whileUnwritten,
+      written,
+      steps: await stepsFor(team),
+    }).toStrictEqual({
+      failed: "The Brain could not record the erasure: erase it again",
+      whileUnwritten: 1,
+      written: 0,
+      steps: [],
+    });
+  });
+
+  it("keep a retried erasure's events in its ledger entry when the retry confirms it while the tick waits on an earlier one", async () => {
+    const team = `team:${crypto.randomUUID()}`;
+    const [tagA, tagB] = [aTag(), aTag()];
+    const [annaId, benId] = [
+      `person-${crypto.randomUUID()}`,
+      `person-${crypto.randomUUID()}`,
+    ];
+    const erase = async (person: string, who: string) => {
+      await shared().erasePersonShared({
+        person,
+        identifiers: [],
+        reason: "person_erased",
+        events: { keyId, who: [who] },
+      });
+    };
+    await shared().addEvents({
+      keyId,
+      events: [
+        eventOf(team, "deals.anna", undefined, tagA),
+        eventOf(team, "deals.ben", undefined, tagB),
+      ],
+    });
+    const before = await copyOf(shared());
+    // Both erasures recorded, neither written to the ledger.
+    await ledgerBroken(true);
+    for (const [person, tag] of [
+      [annaId, tagA],
+      [benId, tagB],
+    ] as const) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
+        await erase(person, tag);
+      } catch {
+        // Recorded, its entry not written: the tick or a retry writes it.
+      }
+    }
+    const [annaKey = "", benKey = ""] = await unconfirmed();
+    // The tick takes both, and waits on Anna's write; meanwhile Ben's
+    // erasure is retried and written; then Anna's write goes on.
+    const hold: Hold = { entered: false, released: false };
+    const bodies = new Map<string, string>();
+    await ledgerHeld(annaKey, hold, bodies);
+    const ticking = tick(shared());
+    await until(() => hold.entered);
+    await erase(benId, tagB);
+    hold.released = true;
+    await ticking;
+    await ledgerBroken(false);
+    const benBody = [...bodies].find(([key]) => key.endsWith(benKey))?.[1];
+    await restore(shared(), before);
+    await shared().addEvents({
+      keyId,
+      events: [
+        eventOf(team, "deals.late", undefined, tagA),
+        eventOf(team, "deals.late", undefined, tagB),
+      ],
+    });
+
+    expect({
+      benBody: benBody?.includes(tagB),
+      steps: await stepsFor(team),
+    }).toStrictEqual({ benBody: true, steps: [] });
   });
 });
