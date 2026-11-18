@@ -12,14 +12,13 @@ import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useNavigate, useRouter } from "@tanstack/react-router";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { readWithin } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { isTransient, wait } from "../core.ts";
 import { FileUpload } from "../grasp/file-upload/index.ts";
 import type { FileUploadStatus } from "../grasp/file-upload/index.ts";
-import { Heading } from "../grasp/heading/index.ts";
 import { Download } from "../grasp/icons/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -213,7 +212,6 @@ export const Uploads = ({
 }) => {
   const router = useRouter();
   const navigate = useNavigate();
-  const headingId = useId();
   const core = useCore();
   const [tracked, setTracked] = useState<ReadonlyMap<File, Tracked>>(new Map());
   const { t } = useLingui();
@@ -262,10 +260,8 @@ export const Uploads = ({
   };
   const accept = Object.keys(uploadTypes).map((extension) => `.${extension}`);
   return (
-    <section aria-labelledby={headingId} {...stylex.props(styles.section)}>
-      <Heading id={headingId} level={2} size="ui-sm">
-        {t`Upload`}
-      </Heading>
+    // The drop area says what it is for: the section is named, not headed.
+    <section aria-label={t`Upload`} {...stylex.props(styles.section)}>
       <FileUpload
         accept={accept}
         actions={(file) => {
