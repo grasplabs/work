@@ -7,13 +7,9 @@ import { brainTeams } from "../src/brain-rpc.ts";
 import { arrangeTeams } from "../src/brain-team-groups.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { mockIdp } from "./idp.ts";
-import {
-  aloneInTheStore,
-  answering,
-  answeringWith,
-  holdAlarm,
-} from "./interview-link.ts";
-import type { ProviderReply, SentRequest } from "./model-provider.ts";
+import { aloneInTheStore, answering, holdAlarm } from "./interview-link.ts";
+import { arrangementCalls, arrangementReplies } from "./model-provider.ts";
+import type { ProviderReply } from "./model-provider.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
 // The company's own groups of teams, the brain's regions (core's
@@ -73,16 +69,43 @@ const arranging = (answer: unknown): ProviderReply => ({
 /** A minute, the first wait before arranging is tried again. */
 const minute = 60_000;
 
+/** A reply to the arrangement, or a call made as its request comes (model-provider.ts). */
+type Arranging = ProviderReply | (() => Promise<ProviderReply>);
+
+/** No answer: refused, as a provider that failed. */
+const refused: ProviderReply = {
+  status: 500,
+  body: { error: "Refused by the test" },
+};
+
+/**
+ * What `run` returns while the organization's provider answers Grasp's
+ * arrangements with `replies` (`arrangementReplies`, apart from any other
+ * call's script; then arranging nothing), and what each arrangement sent
+ * the model meanwhile.
+ */
+const arrangingWith = async <T>(
+  replies: Arranging[],
+  run: () => Promise<T>
+) => {
+  arrangementReplies.length = 0;
+  arrangementReplies.push(...replies);
+  const from = arrangementCalls.length;
+  try {
+    const { result } = await answering([], run);
+    return { result, requests: arrangementCalls.slice(from) };
+  } finally {
+    arrangementReplies.length = 0;
+  }
+};
+
 /**
  * `save` (of the staff list), with no alarm set before it, and then the
  * onboarding store's own alarm, as the save set it, while the model
  * answers `replies`; then the alarm is held again. Whether the save set
  * it, and the requests the model got.
  */
-const alarmed = async (
-  replies: ProviderReply[],
-  save: () => Promise<unknown>
-) => {
+const alarmed = async (replies: Arranging[], save: () => Promise<unknown>) => {
   const store = onboardingStore(env);
   await runInDurableObject(store, async (instance, state) => {
     await state.storage.deleteAlarm();
@@ -91,7 +114,7 @@ const alarmed = async (
     vi.spyOn(instance, "alarm").mockRestore();
   });
   try {
-    const { requests, result } = await answering(replies, async () => {
+    const { requests, result } = await arrangingWith(replies, async () => {
       await save();
       return await runDurableObjectAlarm(store);
     });
@@ -300,7 +323,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     }));
     await admin.api.brain.saveTeamGroups(gone);
     let ran = false;
-    let requests: readonly SentRequest[] = [];
+    let requests: readonly unknown[] = [];
     const events = await auditedDuring(async () => {
       ({ ran, requests } = await alarmed(
         [arranging(answer)],
@@ -308,7 +331,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
       ));
     });
     const { teamGroups } = await admin.api.brain.read();
-    const sent = JSON.stringify(requests.map(({ body }) => body));
+    const sent = JSON.stringify(requests);
     const arranged = events.filter(
       ({ action }) => action === "brain.team_groups.arranged"
     );
@@ -439,7 +462,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     const tag = unique();
     const store = onboardingStore(env);
     const failed = await alarmed(
-      [],
+      [refused],
       async () => await admin.api.onboarding.saveRoster(rosterOf(tag))
     );
     const afterFailure = await admin.api.brain.read();
@@ -450,11 +473,11 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     );
     const start = Date.now();
     // Not before its minute; then again after five minutes and thirty.
-    const tooSoon = await answering(
+    const tooSoon = await arrangingWith(
       [],
       async () => await store.arrangeNext(start + 1000)
     );
-    const tries = await answering([], async () => [
+    const tries = await arrangingWith([refused, refused, refused], async () => [
       await store.arrangeNext(start + minute + 1000),
       await store.arrangeNext(start + 7 * minute),
       await store.arrangeNext(start + 40 * minute),
@@ -522,21 +545,23 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     await admin.api.onboarding.saveRoster(rosterOf(tag));
     const store = onboardingStore(env);
 
-    const { requests } = await answeringWith(
-      async () => {
-        // While the model answers: the admin places Sales and Finance,
-        // takes Finance out again, and saves the staff list again.
-        await admin.api.brain.saveTeamGroups([
-          { id: "front", name: "Front office", teamIds: [sales, finance] },
-        ]);
-        await admin.api.brain.saveTeamGroups([
-          { id: "front", name: "Front office", teamIds: [sales] },
-        ]);
-        await admin.api.onboarding.saveRoster(rosterOf(tag));
-        return arranging({
-          groups: [{ name: "Everyone", teamIds: [finance, sales, support] }],
-        });
-      },
+    const { requests } = await arrangingWith(
+      [
+        async () => {
+          // While the model answers: the admin places Sales and Finance,
+          // takes Finance out again, and saves the staff list again.
+          await admin.api.brain.saveTeamGroups([
+            { id: "front", name: "Front office", teamIds: [sales, finance] },
+          ]);
+          await admin.api.brain.saveTeamGroups([
+            { id: "front", name: "Front office", teamIds: [sales] },
+          ]);
+          await admin.api.onboarding.saveRoster(rosterOf(tag));
+          return arranging({
+            groups: [{ name: "Everyone", teamIds: [finance, sales, support] }],
+          });
+        },
+      ],
       async () => await store.arrangeNext()
     );
     const { teamGroups } = await admin.api.brain.read();
@@ -603,9 +628,9 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     const faulty: Env = { ...env, DB: db };
     const savesBefore = await keptSets();
 
-    let refused = "";
+    let refusal = "";
     const events = await auditedDuring(async () => {
-      await answering(
+      await arrangingWith(
         [
           arranging({
             groups: [{ name: "Everyone", teamIds: [finance, sales, support] }],
@@ -615,7 +640,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
           try {
             await arrangeTeams(faulty, async () => await brainTeams(env));
           } catch (error) {
-            refused = error instanceof Error ? error.message : String(error);
+            refusal = error instanceof Error ? error.message : String(error);
           }
         }
       );
@@ -626,7 +651,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     expect({
       injected,
       // Thrown, so the onboarding's alarm keeps it owed and tries again.
-      refused,
+      refusal,
       regions: teamGroups.map(({ id, teamIds }) => ({ id, teamIds })),
       saves: savesAfter - savesBefore,
       arranged: events.filter(
@@ -636,7 +661,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
         .length,
     }).toStrictEqual({
       injected: 1,
-      refused: "The regions changed while Grasp arranged the teams.",
+      refusal: "The regions changed while Grasp arranged the teams.",
       regions: [{ id: "front", teamIds: [sales] }],
       saves: 1,
       arranged: 0,
@@ -649,7 +674,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     const member = await signedInApi(idp, "user");
     const tag = unique();
 
-    const { requests, result } = await answering([], async () => {
+    const { requests, result } = await arrangingWith([], async () => {
       await admin.api.onboarding.saveRoster(rosterOf(tag));
       return [await admin.api.brain.read(), await member.api.brain.read()];
     });
