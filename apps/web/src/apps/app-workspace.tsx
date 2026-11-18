@@ -76,6 +76,7 @@ import type {
   PreviewControlsProps,
   PreviewWidth,
 } from "./preview-controls.tsx";
+import { ConceptEnd, conceptOf } from "./publish-concepts.tsx";
 import { ChangesLine, ShareWithTeam, showsChangesLine } from "./publish.tsx";
 import { hasChanges, useAppDraft } from "./use-app-draft.ts";
 import { readTables, useAppRead } from "./use-app-read.ts";
@@ -385,6 +386,8 @@ const WorkspaceBar = ({
   onShared?: () => void;
 }) => {
   const { archived } = app;
+  // CONCEPT ONLY: the bar's end as concept A, B or C draws it.
+  const concept = conceptOf();
   if (settingUp) {
     return <SettingUpBar back={back} name={app.name} />;
   }
@@ -393,7 +396,15 @@ const WorkspaceBar = ({
       actions={
         <>
           <MoreMenu app={app} changing={hasChanges(draft)} chatId={chatId} />
-          {sharesApp(app, identity) ? (
+          {sharesApp(app, identity) && concept !== undefined ? (
+            <ConceptEnd
+              app={app}
+              concept={concept}
+              draft={draft}
+              members={members ?? []}
+            />
+          ) : null}
+          {sharesApp(app, identity) && concept === undefined ? (
             <ShareWithTeam
               app={app}
               draft={draft}
