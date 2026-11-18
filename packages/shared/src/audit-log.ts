@@ -59,6 +59,9 @@ const typeRules: readonly {
   { action: "connection.connect", type: "config" },
   // An admin changing which tools a connected app allows (GRA-993).
   { action: "connection.tools", type: "config" },
+  // An admin picking which places of a shared connection sync into the
+  // Brain (shared drives, document libraries).
+  { action: "connection.sync_places", type: "config" },
   // Connect sending, editing or deleting a message as the client's own bot
   // on a chat platform, or refusing a request core's chat adapters sent.
   { action: "channel.call", type: "action" },

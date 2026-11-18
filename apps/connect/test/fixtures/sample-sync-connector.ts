@@ -111,5 +111,50 @@ export default defineConnector({
         return { items: feed.changes, cursor: feed.next, more: feed.more };
       },
     }),
+    // Places of a shared connection an admin picks (shared drives,
+    // libraries), listed with their names, each read from its own feed,
+    // the route's `{place}` bound to it.
+    defineSync({
+      name: "sites",
+      kind: "file",
+      routes: [
+        { method: "GET", host: sampleHost, path: "/v1/sites" },
+        { method: "GET", host: sampleHost, path: "/v1/sites/{place}/changes" },
+      ],
+      choices: async ({ cursor }) => {
+        const url = new URL(`${api}/v1/sites`);
+        if (cursor !== null) {
+          url.searchParams.set("from", cursor);
+        }
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`The provider answered ${response.status}`);
+        }
+        const { sites, next } = z
+          .object({
+            sites: z.array(z.object({ id: z.string(), name: z.string() })),
+            next: z.string().nullish(),
+          })
+          .parse(await response.json());
+        return {
+          choices: sites.map(({ id, name }) => ({ place: id, title: name })),
+          cursor: next ?? null,
+        };
+      },
+      read: async ({ place, cursor }) => {
+        const url = new URL(
+          `${api}/v1/sites/${encodeURIComponent(place)}/changes`
+        );
+        if (cursor !== null) {
+          url.searchParams.set("from", cursor);
+        }
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`The provider answered ${response.status}`);
+        }
+        const feed = feedSchema.parse(await response.json());
+        return { items: feed.changes, cursor: feed.next, more: feed.more };
+      },
+    }),
   ],
 });

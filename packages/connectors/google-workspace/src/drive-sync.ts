@@ -37,7 +37,8 @@ import { apisHost, googleFailure, googleUrl } from "./google.ts";
 // with them is synced by its owner's connection, once, with the whole
 // reader list only an owner sees (Google gives readers and commenters no
 // detailed permissions). Shared drives come only through a shared
-// connection's picked places (GRA-1758, PR J).
+// connection's picked places (shared-drive-sync.ts), which read one shared
+// drive each through the same steps, scoped to that drive (`Scope`).
 //
 // How it reads (Google's "Manage changes"): first the change feed's start
 // token, then the listing of every owned file, then the change feed from
@@ -111,7 +112,7 @@ const fileSchema = z.object({
   lastModifyingUser: z.object({ emailAddress: z.string().nullish() }).nullish(),
   permissions: z.array(permissionSchema).nullish(),
 });
-type DriveFile = z.infer<typeof fileSchema>;
+export type DriveFile = z.infer<typeof fileSchema>;
 
 const fileFields =
   "id,name,mimeType,size,modifiedTime,version,trashed,ownedByMe,driveId,lastModifyingUser(emailAddress),permissions(type,emailAddress,domain,allowFileDiscovery,deleted)";
@@ -136,6 +137,27 @@ const changesSchema = z.object({
   nextPageToken: z.string().nullish(),
   newStartPageToken: z.string().nullish(),
 });
+
+/**
+ * What a read covers: the query parameters that hold each Drive call to
+ * it, which of the files Drive gives back are in it, and who may open one.
+ * The person's own Drive (`ownDrive`), or one shared drive
+ * (shared-drive-sync.ts).
+ */
+export interface Scope {
+  /** `files.list`'s parameters: its corpora and query. */
+  listing: Readonly<Record<string, string>>;
+  /** `changes.getStartPageToken`'s. */
+  start: Readonly<Record<string, string>>;
+  /** `changes.list`'s. */
+  changes: Readonly<Record<string, string>>;
+  /** `files.get`'s, for a file's metadata or bytes. */
+  file: Readonly<Record<string, string>>;
+  /** Whether a file is one this read syncs; else it comes as gone. */
+  holds: (file: DriveFile) => boolean;
+  /** Who may open a file, as the item names them. */
+  readers: (file: DriveFile) => SyncReader[] | null;
+}
 
 /**
  * Where a read is: listing the files, or reading the change feed; in
@@ -238,6 +260,19 @@ const isOwned = (file: DriveFile): boolean =>
   (file.driveId ?? null) === null &&
   file.trashed !== true;
 
+/** The person's own Drive: every file they own in My Drive. */
+const ownDrive: Scope = {
+  listing: {
+    corpora: "user",
+    q: `'me' in owners and trashed = false and mimeType != '${folderMimeType}'`,
+  },
+  start: {},
+  changes: {},
+  file: {},
+  holds: isOwned,
+  readers: readersOf,
+};
+
 /** How a file's content is read: exported, its own bytes, or not at all. */
 const howToRead = (
   file: DriveFile
@@ -272,6 +307,7 @@ const versionSchema = z.object({ version: z.string() });
  */
 const versionNow = async (
   room: SyncRoom,
+  scope: Scope,
   path: string
 ): Promise<{ version: string } | "gone" | "late"> => {
   if (!mayRequest(room)) {
@@ -279,7 +315,7 @@ const versionNow = async (
   }
   const response = await fetchInRoom(
     room,
-    googleUrl(apisHost, path, { fields: "version" })
+    googleUrl(apisHost, path, { ...scope.file, fields: "version" })
   );
   if (response === "late") {
     return "late";
@@ -327,14 +363,17 @@ const noRoom = (room: SyncRoom): Read =>
 /** A file's bytes as it is now, or what a read found instead. */
 const download = async (
   room: SyncRoom,
+  scope: Scope,
   path: string,
   how: { export: string } | { media: true }
 ): Promise<Uint8Array | Read> => {
   const response = await fetchInRoom(
     room,
+    // `files.export` takes only `mimeType`
+    // (https://developers.google.com/workspace/drive/api/reference/rest/v3/files/export).
     "export" in how
       ? googleUrl(apisHost, `${path}/export`, { mimeType: how.export })
-      : googleUrl(apisHost, path, { alt: "media" })
+      : googleUrl(apisHost, path, { ...scope.file, alt: "media" })
   );
   // Given up at the deadline: the kit's paging decides (`fillPage`).
   if (response === "late") {
@@ -368,10 +407,11 @@ const download = async (
  */
 const sameVersion = async (
   room: SyncRoom,
+  scope: Scope,
   path: string,
   file: DriveFile
 ): Promise<Read | null> => {
-  const now = await versionNow(room, path);
+  const now = await versionNow(room, scope, path);
   if (now === "late") {
     return { late: true };
   }
@@ -382,7 +422,11 @@ const sameVersion = async (
 };
 
 /** A file's content, if the page has room for it. */
-const contentOf = async (room: SyncRoom, file: DriveFile): Promise<Read> => {
+const contentOf = async (
+  room: SyncRoom,
+  scope: Scope,
+  file: DriveFile
+): Promise<Read> => {
   const how = howToRead(file);
   if (how === null) {
     return { content: null };
@@ -396,11 +440,11 @@ const contentOf = async (room: SyncRoom, file: DriveFile): Promise<Read> => {
     return noRoom(room);
   }
   const path = `${files}/${segment(file.id)}`;
-  const bytes = await download(room, path, how);
+  const bytes = await download(room, scope, path, how);
   if (!(bytes instanceof Uint8Array)) {
     return bytes;
   }
-  const changed = await sameVersion(room, path, file);
+  const changed = await sameVersion(room, scope, path, file);
   if (changed !== null) {
     return changed;
   }
@@ -414,6 +458,7 @@ const contentOf = async (room: SyncRoom, file: DriveFile): Promise<Read> => {
 
 /** A file that is there, as an item, with `content`. */
 const itemOf = (
+  scope: Scope,
   file: DriveFile,
   changedAt: string,
   content: SyncContent | null
@@ -425,7 +470,7 @@ const itemOf = (
   changedAt,
   title: file.name,
   content,
-  readers: readersOf(file),
+  readers: scope.readers(file),
   changedBy: file.lastModifyingUser?.emailAddress?.toLowerCase() ?? null,
   partOf: null,
 });
@@ -436,27 +481,32 @@ const goneOf = (id: string): SyncItem => ({ gone: true, id, kind: "file" });
  * What a file is without reading its content: nothing for a folder, gone
  * when this connection no longer syncs it, else the item without content.
  */
-const withoutContent = (file: DriveFile, changedAt: string): SyncItem[] => {
+const withoutContent = (
+  scope: Scope,
+  file: DriveFile,
+  changedAt: string
+): SyncItem[] => {
   if (file.mimeType === folderMimeType) {
     return [];
   }
-  if (!isOwned(file)) {
+  if (!scope.holds(file)) {
     return [goneOf(file.id)];
   }
-  return [itemOf(file, changedAt, null)];
+  return [itemOf(scope, file, changedAt, null)];
 };
 
 /** The item a file now is, read with its content when it is synced. */
 const fileItem = async (
   room: SyncRoom,
+  scope: Scope,
   file: DriveFile,
   changedAt: string
 ): Promise<EntryItems> => {
-  const known = withoutContent(file, changedAt);
+  const known = withoutContent(scope, file, changedAt);
   if (known.length === 0 || known[0]?.gone === true) {
     return known;
   }
-  const read = await contentOf(room, file);
+  const read = await contentOf(room, scope, file);
   if ("full" in read) {
     return "full";
   }
@@ -468,12 +518,13 @@ const fileItem = async (
   }
   return "gone" in read
     ? [goneOf(file.id)]
-    : [itemOf(file, changedAt, read.content)];
+    : [itemOf(scope, file, changedAt, read.content)];
 };
 
-/** One page of the listing of every file the person owns. */
+/** One page of the listing of every file the scope holds. */
 const listPage = async (
   room: SyncRoom,
+  scope: Scope,
   position: Extract<Position, { phase: "list" }>
 ): Promise<SyncPage> => {
   const listed = await getJson(
@@ -482,8 +533,7 @@ const listPage = async (
       apisHost,
       files,
       {
-        corpora: "user",
-        q: `'me' in owners and trashed = false and mimeType != '${folderMimeType}'`,
+        ...scope.listing,
         // An order no edit changes, so a file kept in place stays after the
         // ones before it.
         orderBy: "createdTime",
@@ -499,8 +549,9 @@ const listPage = async (
     entries: listed.files ?? [],
     at: position.at,
     keyOf: (file) => file.id,
-    itemsFor: async (file) => await fileItem(room, file, file.modifiedTime),
-    passOver: (file) => withoutContent(file, file.modifiedTime),
+    itemsFor: async (file) =>
+      await fileItem(room, scope, file, file.modifiedTime),
+    passOver: (file) => withoutContent(scope, file, file.modifiedTime),
   });
   if (!done) {
     return {
@@ -530,7 +581,7 @@ const changeKey = (change: Change): string =>
   `${change.file?.id ?? change.fileId ?? ""}@${change.time}`;
 
 /** What a change makes without reading content: gone, nothing, or the file's item. */
-const changeWithoutContent = (change: Change): SyncItem[] => {
+const changeWithoutContent = (scope: Scope, change: Change): SyncItem[] => {
   const id = change.file?.id ?? change.fileId;
   if (id === null || id === undefined) {
     return [];
@@ -542,26 +593,29 @@ const changeWithoutContent = (change: Change): SyncItem[] => {
   ) {
     return [goneOf(id)];
   }
-  return withoutContent(change.file, change.time);
+  return withoutContent(scope, change.file, change.time);
 };
 
 /** The item a change makes: the file as it now is, gone, or none. */
 const changeItem = async (
   room: SyncRoom,
+  scope: Scope,
   change: Change
 ): Promise<EntryItems> =>
   change.file === null || change.file === undefined || change.removed === true
-    ? changeWithoutContent(change)
-    : await fileItem(room, change.file, change.time);
+    ? changeWithoutContent(scope, change)
+    : await fileItem(room, scope, change.file, change.time);
 
 /** One page of the change feed. */
 const changesPage = async (
   room: SyncRoom,
+  scope: Scope,
   position: Extract<Position, { phase: "changes" }>
 ): Promise<SyncPage> => {
   const changed = await getJson(
     room,
     googleUrl(apisHost, changes, {
+      ...scope.changes,
       pageToken: position.token,
       pageSize: String(googlePageSize),
       fields: `nextPageToken,newStartPageToken,changes(fileId,removed,time,file(${fileFields}))`,
@@ -573,8 +627,8 @@ const changesPage = async (
     entries: changed.changes ?? [],
     at: position.at,
     keyOf: changeKey,
-    itemsFor: async (change) => await changeItem(room, change),
-    passOver: changeWithoutContent,
+    itemsFor: async (change) => await changeItem(room, scope, change),
+    passOver: (change) => changeWithoutContent(scope, change),
   });
   if (!done) {
     return {
@@ -604,42 +658,58 @@ const changesPage = async (
   };
 };
 
+/** The routes a read of files sends: the change feed, the listing, a file. */
+export const fileRoutes = [
+  { method: "GET", host: apisHost, path: `${changes}/startPageToken` },
+  { method: "GET", host: apisHost, path: changes },
+  { method: "GET", host: apisHost, path: files },
+  { method: "GET", host: apisHost, path: `${files}/{item}` },
+  { method: "GET", host: apisHost, path: `${files}/{item}/export` },
+] as const;
+
+/**
+ * One page of what `scope` holds from `cursor` on (from the start when
+ * null), within `room`: first where its change feed stands, then the
+ * listing, then the change feed from that start.
+ */
+export const readFiles = async (
+  scope: Scope,
+  cursor: string | null,
+  room: SyncRoom
+): Promise<SyncPage> => {
+  if (cursor === null) {
+    // Where the change feed stands before anything is listed.
+    const { startPageToken } = await getJson(
+      room,
+      googleUrl(apisHost, `${changes}/startPageToken`, scope.start),
+      startSchema
+    );
+    return await listPage(room, scope, {
+      phase: "list",
+      start: startPageToken,
+      token: null,
+      at: startOfPage,
+    });
+  }
+  const position = positionOf(cursor);
+  return position.phase === "list"
+    ? await listPage(room, scope, position)
+    : await changesPage(room, scope, position);
+};
+
 /** The person's own Drive: every file they own, its changes and its readers. */
 export const driveSync = defineSync({
   name: "drive",
   kind: "file",
-  routes: [
-    { method: "GET", host: apisHost, path: `${changes}/startPageToken` },
-    { method: "GET", host: apisHost, path: changes },
-    { method: "GET", host: apisHost, path: files },
-    { method: "GET", host: apisHost, path: `${files}/{item}` },
-    { method: "GET", host: apisHost, path: `${files}/{item}/export` },
-  ],
+  routes: fileRoutes,
   read: async ({ place, cursor, deadline }) => {
     if (place !== ownPlace) {
-      // Picked shared drives come with picks (GRA-1758, PR J).
+      // Shared drives are read by shared-drive-sync.ts, on a shared
+      // connection, picked.
       throw new ToolError("This sync reads the person's own Drive only", {
         code: "failed",
       });
     }
-    const room = syncRoom(deadline);
-    if (cursor === null) {
-      // Where the change feed stands before anything is listed.
-      const { startPageToken } = await getJson(
-        room,
-        googleUrl(apisHost, `${changes}/startPageToken`),
-        startSchema
-      );
-      return await listPage(room, {
-        phase: "list",
-        start: startPageToken,
-        token: null,
-        at: startOfPage,
-      });
-    }
-    const position = positionOf(cursor);
-    return position.phase === "list"
-      ? await listPage(room, position)
-      : await changesPage(room, position);
+    return await readFiles(ownDrive, cursor, syncRoom(deadline));
   },
 });

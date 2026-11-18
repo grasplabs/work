@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { connectionPersonSchema } from "./connect.ts";
 import { defineErrorFamily } from "./errors.ts";
 
 // Native sync (GRA-1758, GRA-1759): what one synced item is, whichever
@@ -158,6 +159,30 @@ export const syncPlacesSchema = z.strictObject({
 });
 export type SyncPlaces = z.infer<typeof syncPlacesSchema>;
 
+/** Longest name of a place an admin is shown to pick from. */
+export const syncChoiceTitleLength = 256;
+
+/**
+ * A place of a shared connection an admin may pick for a sync (a shared
+ * drive, a document library), as its connector lists what the connected
+ * account can see: its ID and its name, which is only ever shown.
+ */
+export const syncChoiceSchema = z.strictObject({
+  place: syncPlaceSchema,
+  title: z.string().max(syncChoiceTitleLength),
+});
+export type SyncChoice = z.infer<typeof syncChoiceSchema>;
+
+/**
+ * The places a sync of a shared connection can read (`places: "picked"`),
+ * a read at a time: where the listing goes on (`cursor`), null once whole.
+ */
+export const syncChoicesSchema = z.strictObject({
+  choices: z.array(syncChoiceSchema),
+  cursor: syncCursorSchema.nullable(),
+});
+export type SyncChoices = z.infer<typeof syncChoicesSchema>;
+
 /** What core asks connect for: the places of one connection's sync. */
 export const syncPlacesRequestSchema = z.strictObject({
   connectionId: z.string().min(1).max(128),
@@ -182,7 +207,61 @@ export const syncPageRequestSchema = z.strictObject({
 });
 export type SyncPageRequest = z.input<typeof syncPageRequestSchema>;
 
-/** Why a page couldn't be read. */
+/**
+ * A sync's places of a shared connection, for its admin to pick from: as
+ * its connector lists them, each with whether it is picked.
+ */
+export const syncPlaceChoicesSchema = z.strictObject({
+  choices: z.array(syncChoiceSchema.extend({ picked: z.boolean() })),
+  cursor: syncCursorSchema.nullable(),
+});
+export type SyncPlaceChoices = z.infer<typeof syncPlaceChoicesSchema>;
+
+/**
+ * Most bytes a set of picks takes as JSON: connect writes it as one value,
+ * and D1 takes at most 2,000,000 bytes in a string
+ * (https://developers.cloudflare.com/d1/platform/limits/).
+ */
+const picksMaxBytes = 2_000_000;
+
+/**
+ * The places of a shared connection a sync reads, as its admin picks them:
+ * the whole set, replacing the one before, each once.
+ */
+export const syncPicksSchema = z
+  .array(syncPlaceSchema)
+  .refine((places) => new Set(places).size === places.length, {
+    message: "A place picked twice",
+  })
+  .refine(
+    (places) =>
+      new TextEncoder().encode(JSON.stringify(places)).byteLength <=
+      picksMaxBytes,
+    { message: "More places than one write takes" }
+  );
+
+/**
+ * What core asks connect for: the places the admin `person` may pick for a
+ * sync of a shared connection, a read at a time from `cursor`.
+ */
+export const syncPlaceChoicesRequestSchema = z.strictObject({
+  person: connectionPersonSchema,
+  connectionId: z.string().min(1).max(128),
+  feed: z.string().regex(/^[a-z][a-z\d-]{0,63}$/u, "Not a sync's name"),
+  cursor: syncCursorSchema.nullable(),
+});
+export type SyncPlaceChoicesRequest = z.input<
+  typeof syncPlaceChoicesRequestSchema
+>;
+
+/** What core asks connect for: the admin `person` picks a sync's places. */
+export const pickSyncPlacesSchema = z.strictObject({
+  person: connectionPersonSchema,
+  connectionId: z.string().min(1).max(128),
+  feed: z.string().regex(/^[a-z][a-z\d-]{0,63}$/u, "Not a sync's name"),
+  places: syncPicksSchema,
+});
+export type PickSyncPlaces = z.input<typeof pickSyncPlacesSchema>;
 export const syncErrors = defineErrorFamily({
   "sync.invalid": "That isn't a valid request for a page of a sync.",
   "sync.not_found":
@@ -190,6 +269,8 @@ export const syncErrors = defineErrorFamily({
   "sync.inactive": "This connection needs reconnecting before it can sync.",
   "sync.place_refused":
     "That place isn't the connection's own account or a place picked on it.",
+  "sync.not_shared":
+    "Places are picked only on a connection shared with the company.",
   "sync.restart":
     "The source no longer knows that cursor: list it again from the start.",
   "sync.throttled": "The provider is throttling reads: try again later.",

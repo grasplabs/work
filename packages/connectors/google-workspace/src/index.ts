@@ -8,6 +8,7 @@ import { driveTools } from "./drive.ts";
 import { gmailSync } from "./gmail-sync.ts";
 import { gmailTools } from "./gmail.ts";
 import { apisHost, gmailHost, sheetsHost } from "./google.ts";
+import { sharedDriveSync } from "./shared-drive-sync.ts";
 import { sheetsTools } from "./sheets.ts";
 
 /**
@@ -26,7 +27,9 @@ import { sheetsTools } from "./sheets.ts";
  *
  * It syncs the person's own Drive (drive-sync.ts), on `drive.readonly`,
  * mailbox (gmail-sync.ts), on `gmail.modify`, and primary calendar
- * (calendar-sync.ts), on `calendar.events`, for the Brain.
+ * (calendar-sync.ts), on `calendar.events`, for the Brain; and, on a
+ * shared connection, the shared drives an admin picked
+ * (shared-drive-sync.ts), on `drive.readonly`.
  */
 export default defineConnector({
   name: "google-workspace",
@@ -49,5 +52,5 @@ export default defineConnector({
     ...sheetsTools,
     ...draftTools,
   ],
-  syncs: [driveSync, gmailSync, calendarSync],
+  syncs: [driveSync, gmailSync, calendarSync, sharedDriveSync],
 });

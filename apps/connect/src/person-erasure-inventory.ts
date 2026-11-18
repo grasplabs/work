@@ -44,6 +44,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   given_up_revocations: {
     kept: "revokes given up on, by connection ID, for admins to do by hand",
   },
+  sync_picks: {
+    none: "places of shared connections picked to sync, by connection ID",
+  },
   ai_provider_keys: { none: "the organization's own AI provider keys" },
   http_connections: {
     none: "the organization's approved outside APIs and their sealed credentials",

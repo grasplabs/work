@@ -225,6 +225,13 @@
       "when": 1794777930640,
       "tag": "0031_slim_the_santerians",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1794998848013,
+      "tag": "0032_bitter_sinister_six",
+      "breakpoints": true
     }
   ]
 }

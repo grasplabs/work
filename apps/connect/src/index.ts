@@ -72,7 +72,11 @@ import type {
   NpmMalwareReports,
   NpmMetadata,
 } from "@grasp-os/shared/packages";
-import type { SyncPage, SyncPlaces } from "@grasp-os/shared/sync";
+import type {
+  SyncPage,
+  SyncPlaceChoices,
+  SyncPlaces,
+} from "@grasp-os/shared/sync";
 import type { ClockRegistration } from "@grasp-os/workerflow/clock";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
@@ -178,7 +182,12 @@ import type { HeldAction } from "./pending.ts";
 import { erasePersonal } from "./person-erasure.ts";
 import { probeBindings } from "./probe.ts";
 import { revocationsByHand } from "./revocations-by-hand.ts";
-import { listSyncPlaces, readSyncPage } from "./sync.ts";
+import {
+  listSyncPlaces,
+  pickSyncPlaces,
+  readSyncPage,
+  syncPlaceChoices,
+} from "./sync.ts";
 import { webhookPost } from "./webhooks.ts";
 
 // The egress handler of native connectors' isolates (src/connectors.ts).
@@ -620,6 +629,19 @@ export default class Connect
   /** The places of a connection's sync, each a source of its own. */
   async listSyncPlaces(request: unknown): Promise<SyncPlaces> {
     return await listSyncPlaces(this.env, request);
+  }
+
+  /**
+   * What an admin may pick for a shared connection's sync (shared drives,
+   * document libraries), a read at a time, each with whether it is picked.
+   */
+  async syncPlaceChoices(request: unknown): Promise<SyncPlaceChoices> {
+    return await syncPlaceChoices(this.env, request);
+  }
+
+  /** An admin's picks of a shared connection's places to sync. Audited. */
+  async pickSyncPlaces(request: unknown): Promise<{ places: string[] }> {
+    return await pickSyncPlaces(this.env, request);
   }
 
   // Generated connector contracts (src/contracts.ts): what an App's

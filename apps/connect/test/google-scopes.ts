@@ -51,6 +51,9 @@ interface ScopeRule {
 }
 
 const rules: readonly ScopeRule[] = [
+  // drives.list and drives.get: `drive` or `drive.readonly` only.
+  // https://developers.google.com/workspace/drive/api/reference/rest/v3/drives/list
+  { path: /^\/drive\/v3\/drives(?:\/[^/]+)?$/u, scopes: driveContent },
   {
     path: /^\/drive\/v3\/changes(?:\/startPageToken)?$/u,
     scopes: driveMetadata,

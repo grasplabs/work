@@ -497,6 +497,29 @@ export const connectionTokens = sqliteTable("connection_tokens", {
 });
 
 /**
+ * A place of a shared connection an admin picked for one of its
+ * connector's syncs (`places: "picked"`: a shared drive, a document
+ * library): the only places that sync reads of it (sync.ts). Who picked
+ * is in the audit log, not here.
+ */
+export const syncPicks = sqliteTable(
+  "sync_picks",
+  {
+    connectionId: text("connection_id")
+      .notNull()
+      .references(() => connections.id),
+    /** The connector's sync, such as `shared-drives`. */
+    feed: text().notNull(),
+    /** The place's ID at the provider, as the sync listed it. */
+    place: text().notNull(),
+    pickedAt: timestamp("picked_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.connectionId, table.feed, table.place] }),
+  ]
+);
+
+/**
  * A revoke at its provider still owed for a connection's grant (GRA-1191,
  * GRA-1196): the provider was down, or refused, when the connection was
  * disconnected (`disconnected`), or its tokens went while the grant was

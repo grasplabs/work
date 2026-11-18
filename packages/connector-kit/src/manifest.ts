@@ -419,11 +419,14 @@ export const syncNameSchema = z.string().regex(/^[a-z][a-z\d-]{0,63}$/u);
 export const syncManifestSchema = z.strictObject({
   kind: syncItemKindSchema,
   /**
-   * What it reads of a personal connection: `own`, the whole account; or
-   * `listed`, places of the account the sync lists itself (`syncPlacesMethod`),
-   * each read as a source of its own with its own cursor.
+   * What it reads: of a personal connection, `own`, the whole account, or
+   * `listed`, places of the account the sync lists itself
+   * (`syncPlacesMethod`); of a shared connection, `picked`, the places of
+   * the connected account an admin picked from those it lists (shared
+   * drives, document libraries). Each place is read as a source of its
+   * own with its own cursor.
    */
-  places: z.enum(["own", "listed"]).default("own"),
+  places: z.enum(["own", "listed", "picked"]).default("own"),
   routes: z
     .array(routeSchema)
     .min(1)

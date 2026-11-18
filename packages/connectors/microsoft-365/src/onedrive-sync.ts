@@ -351,7 +351,7 @@ const positionOf = (cursor: string): Position => {
  */
 const quotedToken = /\(token='?(?<token>[^')]+)'?\)/u;
 
-const tokenOf = (link: string): string => {
+export const tokenOf = (link: string): string => {
   let url: URL;
   try {
     url = new URL(link);
@@ -427,7 +427,7 @@ const isUnreadable = (response: Response): boolean =>
   response.status === 403 || response.status === 404;
 
 /** Graph's own time of an answer (its `Date` header), as a timestamp token. */
-const timeOf = (response: Response): string => {
+export const timeOf = (response: Response): string => {
   const time = Date.parse(response.headers.get("date") ?? "");
   if (Number.isNaN(time)) {
     throw new ToolError("Graph's answer has no Date", { code: "failed" });

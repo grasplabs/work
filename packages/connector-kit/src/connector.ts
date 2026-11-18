@@ -1000,7 +1000,7 @@ export const defineConnector = (definition: ConnectorDefinition): Connector => {
       case syncPlacesMethod: {
         const sync = syncPlacesParamsSchema.safeParse(params);
         const found = sync.success ? syncs.get(sync.data.name) : undefined;
-        if (found?.manifest.places !== "listed") {
+        if (found === undefined || found.manifest.places === "own") {
           return refusal(id, invalidParams, "No such sync with places");
         }
         return answer(id, await found.places(params));
