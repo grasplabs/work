@@ -59,17 +59,56 @@ const asData = async (url: string): Promise<string> => {
 /** Every font file the page's styles name, by its address. */
 const fontUrl = /url\("?(?<path>[^")]+\.woff2)"?\)/gu;
 
+/** Selectors that style the document itself, which the page sits in. */
+const documentWide = /(?:^|[\s,(])(?::root|html|body|\*)(?=$|[\s,.:[)])/u;
+
+/** Whether a selector picks anything in the page, or styles the document it stands in. */
+const picks = (selector: string, page: HTMLElement): boolean => {
+  if (documentWide.test(selector)) {
+    return true;
+  }
+  // State the snapshot never shows (hover, focus) is dropped with its selector.
+  const plain = selector.replaceAll(/::?[a-z-]+(?:\([^)]*\))?/gu, "");
+  try {
+    return plain.trim() === "" || page.querySelector(plain) !== null;
+  } catch {
+    return true;
+  }
+};
+
 /**
- * The page as a file of its own: its markup, with every style the page has
+ * A style rule as the page needs it: kept when it picks something in the
+ * page, or styles the document; an at-rule with only its rules that do;
+ * fonts, animations and custom properties whole. Empty when none is needed.
+ */
+const usedRule = (rule: CSSRule, page: HTMLElement): string => {
+  if (rule instanceof CSSStyleRule) {
+    return picks(rule.selectorText, page) ? rule.cssText : "";
+  }
+  if (rule instanceof CSSGroupingRule) {
+    const inner = [...rule.cssRules]
+      .map((each) => usedRule(each, page))
+      .filter((css) => css !== "");
+    if (inner.length === 0) {
+      return "";
+    }
+    const head = rule.cssText.slice(0, rule.cssText.indexOf("{"));
+    return `${head}{${inner.join("\n")}}`;
+  }
+  return rule.cssText;
+};
+
+/**
+ * The page as a file of its own: its markup, with the styles it uses
  * written in and its fonts carried as data, so it opens the same offline.
  */
 const snapshot = async (page: HTMLElement, title: string): Promise<string> => {
   const sheets = [...document.styleSheets].flatMap((sheet) => {
     try {
-      return [...sheet.cssRules].map((rule) => ({
-        css: rule.cssText,
-        base: sheet.href ?? location.href,
-      }));
+      return [...sheet.cssRules].flatMap((rule) => {
+        const css = usedRule(rule, page);
+        return css === "" ? [] : [{ css, base: sheet.href ?? location.href }];
+      });
     } catch {
       return [];
     }

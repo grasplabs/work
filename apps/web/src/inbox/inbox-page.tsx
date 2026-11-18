@@ -37,9 +37,9 @@ import {
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
-import { KeyValueList } from "../grasp/key-value/index.ts";
 import { PanelSection } from "../grasp/panel-section/index.ts";
 import { Panel, PanelHeader, PanelView } from "../grasp/panel/index.ts";
+import { RowList, RowListItem } from "../grasp/row-list/index.ts";
 import {
   Sheet,
   SheetBody,
@@ -113,6 +113,11 @@ const styles = stylex.create({
     borderInlineEndStyle: "solid",
     borderInlineEndColor: grasp.line,
     paddingInlineEnd: grasp.space4,
+  },
+  // The item in the inspector, on its left edge.
+  decide: {
+    paddingInline: grasp.inspectorPad,
+    paddingBlockStart: grasp.space2,
   },
   // The inspector stays in view while the list beside it scrolls.
   panel: {
@@ -218,7 +223,7 @@ const ItemList = ({
   }, []);
   return (
     <div ref={element}>
-      <ItemGroup aria-label={t`What waits on you`} separated>
+      <ItemGroup aria-label={t`What waits on you`}>
         {list.map((item) => (
           <Item
             current={item.id === selected?.id}
@@ -401,15 +406,17 @@ const Sections = (shape: ShapeProps) => {
   const facts = shape.selected?.facts ?? [];
   return (
     <>
-      <PanelSection card={false} label={t`To decide`}>
+      {/* The request is the one title here: the row already names its kind. */}
+      <div {...stylex.props(styles.decide)}>
         <Detail {...shape} />
-      </PanelSection>
+      </div>
       {facts.length === 0 ? null : (
         <PanelSection label={t`Facts`}>
-          <KeyValueList
-            items={facts.map(({ label, value }) => ({ key: label, value }))}
-            variant="inline"
-          />
+          <RowList aria-label={t`Facts`}>
+            {facts.map(({ label, value }) => (
+              <RowListItem detail={label} key={label} name={value} />
+            ))}
+          </RowList>
         </PanelSection>
       )}
     </>
@@ -454,7 +461,7 @@ const Inspector = (shape: ShapeProps) => {
       {wide && selected !== undefined ? (
         <div {...stylex.props(styles.panel)}>
           <Panel aria-label={kind}>
-            <PanelHeader actions={head} texture title={kind} />
+            <PanelHeader actions={head} texture />
             <PanelView>
               <Sections {...shape} />
             </PanelView>

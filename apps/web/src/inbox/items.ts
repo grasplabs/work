@@ -19,7 +19,6 @@ import type {
 import { plural, t } from "@lingui/core/macro";
 
 import {
-  requestNextRun,
   requestRow,
   requestAsker,
   requestWords,
@@ -317,7 +316,6 @@ const requestItems = (pending: PendingRequests): InboxItem[] =>
   pending.requests.map((request) => {
     const { directory } = pending;
     const who = requestWords(request, directory);
-    const { binding } = request;
     return {
       asker: requestAsker(request, directory),
       id: `request:${request.id}`,
@@ -326,13 +324,7 @@ const requestItems = (pending: PendingRequests): InboxItem[] =>
       // The row says who asks and, where the request says it plainly, what.
       context: requestRow(request, directory),
       body: [],
-      facts: [
-        // A schedule's name in code ("START") says no more than its title.
-        ...(requestNextRun(request) === undefined
-          ? [{ label: t`Binding`, value: binding }]
-          : []),
-        { label: t`Asked`, value: formatDateTime(request.requestedAt) },
-      ],
+      facts: [{ label: t`Asked`, value: formatDateTime(request.requestedAt) }],
       about:
         request.subject.type === "app"
           ? {
