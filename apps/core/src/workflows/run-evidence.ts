@@ -8,7 +8,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import {
   runBrainMemories,
   runBrainVersions,
-  runChatSources,
+  runStateWriters,
   workflowResourceRuns,
 } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
@@ -178,8 +178,9 @@ export const memoryEvidenceOfRuns = async (
 /**
  * Whether run `runId` keeps any evidence of what it read: a version its
  * recalls were handed, a memory its entity reads rested on (GRA-1985),
- * what the chat that started it had read (`runChatSources`), or that it
- * kept a read through a connection in its person's own store
+ * what the chat that started it had read (`runChatSources`), or so does a
+ * run whose kept state it started from (`runStateWriters`, one hop); or
+ * that it kept a read through a connection in its person's own store
  * (`markCaptured`, GRA-1828). What it returned may then copy what can
  * later be erased or narrowed, so the Brain keeps only how it ended
  * (brain-sources.ts, GRA-1996). One statement.
@@ -189,13 +190,29 @@ export const readAnything = async (
   runId: string
 ): Promise<boolean> => {
   const [row] = await drizzle(env.DB).all<{ read: number }>(
-    sql`SELECT (EXISTS (SELECT 1 FROM ${runBrainVersions} WHERE ${runBrainVersions.runId} = ${runId})
-      OR EXISTS (SELECT 1 FROM ${runBrainMemories} WHERE ${runBrainMemories.runId} = ${runId})
-      OR EXISTS (SELECT 1 FROM ${runChatSources} WHERE ${runChatSources.runId} = ${runId})
+    sql`WITH read_by(id) AS (SELECT ${runId}
+        UNION SELECT writer_run_id FROM run_state_writers WHERE run_id = ${runId})
+      SELECT (EXISTS (SELECT 1 FROM run_brain_versions WHERE run_id IN (SELECT id FROM read_by))
+      OR EXISTS (SELECT 1 FROM run_brain_memories WHERE run_id IN (SELECT id FROM read_by))
+      OR EXISTS (SELECT 1 FROM run_chat_sources WHERE run_id IN (SELECT id FROM read_by))
       OR EXISTS (SELECT 1 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${runId} AND ${workflowResourceRuns.capturedAt} IS NOT NULL)) AS read`
   );
   return row?.read === 1;
 };
+
+/**
+ * The runs whose keys each of runs `runIds` started from
+ * (`runStateWriters`, GRA-1996): one statement, the list bound as one
+ * value.
+ */
+export const stateWritersOfRuns = async (env: Env, runIds: readonly string[]) =>
+  await drizzle(env.DB)
+    .select({
+      runId: runStateWriters.runId,
+      writerRunId: runStateWriters.writerRunId,
+    })
+    .from(runStateWriters)
+    .where(inList(runStateWriters.runId, runIds));
 
 /**
  * Marks run `runId` as one that kept a read through a connection in its

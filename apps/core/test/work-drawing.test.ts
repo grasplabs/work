@@ -279,7 +279,7 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
   // store's own alarm, set whenever a team falls due, would try first.
   beforeEach(aloneInTheStore);
 
-  it("is drawn from three agreed interviews, keeps each person's numbers apart, and tells the next interview only what nobody has said yet, never a colleague's words", async () => {
+  it("is drawn from three agreed interviews, keeps each person's numbers apart, and tells the next interview only what its routine lacks, never a colleague's words", async () => {
     const store = onboardingStore(env);
     const ids = await team();
     const { tickets } = await mapped(ids);
@@ -410,8 +410,10 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
       // Noor does it too and hasn't talked: three of four.
       known: { approved: 3, state: "mapping" },
       before: false,
+      // Max gave only his own count and Mia didn't say whose: a routine
+      // shows only the whole team's, so it is still asked (GRA-1749).
       after:
-        "Nobody has said yet, so ask when it comes up: where it waits, and for what; what they look at to decide; who gets it after them; what done right looks like.",
+        "Nobody has said yet, so ask when it comes up: how many the whole team does, in a week or a month; where it waits, and for what; what they look at to decide; who gets it after them.",
       openQuestions: [],
       saidByMo: false,
       due: [],

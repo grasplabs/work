@@ -806,5 +806,102 @@ export const brainDrawings = sqliteTable(
   (table) => [
     index("brain_drawings_record").on(table.record),
     index("brain_drawings_team").on(table.team),
+    // A turn reads the drawing of the work it is about, alone.
+    index("brain_drawings_workflow").on(table.workflow),
+  ]
+);
+
+/**
+ * What one team's lines only counted anonymously say, put together
+ * (GRA-1987, onboarding/company-opinions.ts): a candidate for the
+ * company's opinions, one row for each person whose line was checked to
+ * say it. Read by nothing but the company's merge of them: never the
+ * Brain, a page, staff or a log, as one may rest on a single person. Goes
+ * with the person (`#erase`), and with what they said once it no longer
+ * counts.
+ */
+export const opinionCandidates = sqliteTable(
+  "opinion_candidates",
+  {
+    /** The candidate's id, from its team and its words. */
+    id: text().notNull(),
+    /** The team whose lines it was put together from: only so they are put together anew as one. */
+    team: text().notNull(),
+    text: text().notNull(),
+    person: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.id, table.person] }),
+    index("opinion_candidates_team").on(table.team),
+    index("opinion_candidates_person").on(table.person),
+  ]
+);
+
+/**
+ * What the company's opinions were last put together from (GRA-1987): a
+ * hash of exactly what a model was given, by what it was given for
+ * (`team:<id>`, a team's candidates; `merge`, the company's merge), so an
+ * input that didn't change asks no model again. A hash over people's
+ * lines and ids: it goes whenever what it was taken over loses one of
+ * them (the store's `#forgetOpinionsOf`), and all of it once the company
+ * can have no opinions.
+ */
+export const opinionInputs = sqliteTable("opinion_inputs", {
+  key: text().primaryKey(),
+  input: text().notNull(),
+});
+
+/**
+ * What each person's lines only counted anonymously were (a hash) when
+ * the company's opinions were last put together from them (`mergedFrom`),
+ * and when the run under way began (`runFrom`, null while none runs): a
+ * run starts once five people's differ from what was last merged, and
+ * takes in only what was agreed before it began (GRA-1987). Goes with the
+ * person, and with what they said once it no longer counts.
+ */
+export const opinionPeople = sqliteTable("opinion_people", {
+  person: text().primaryKey(),
+  mergedFrom: text("merged_from"),
+  runFrom: text("run_from"),
+});
+
+/**
+ * Each opinion of the company given to the Brain (GRA-1987): what five or
+ * more people across the company say, in a company where seven or more
+ * have a line only counted anonymously, given to the Brain as a source of
+ * its own (`opinion:<source>`) under an id minted here each time it
+ * stands. It has no team. Who backs it is noted here alone
+ * (`opinion_backers`). Once a change drops it, it is marked to be erased
+ * (`erase`), then taken out of use and erased in the Brain, all before
+ * that change commits; the row goes once the Brain's erasure returned.
+ */
+export const brainOpinions = sqliteTable(
+  "brain_opinions",
+  {
+    /** The source's id in the Brain (`opinion:<source>`), minted here. */
+    source: text().primaryKey(),
+    /** The opinion's own id, from its words: whom it rests on is noted under it. */
+    record: text().notNull(),
+    /** What kind of thing it says, as the Brain page groups it. */
+    kind: text().$type<StatementKind>().notNull(),
+    text: text().notNull(),
+    /** The day it was put together (ISO 8601): a run of five people's changes, never one person's moment. */
+    at: text().notNull(),
+    /** Whether it is to be erased: set once, never cleared. */
+    erase: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [index("brain_opinions_record").on(table.record)]
+);
+
+/** Who each of the company's opinions rests on (`brain_opinions.record`): never in the Brain. */
+export const opinionBackers = sqliteTable(
+  "opinion_backers",
+  {
+    record: text().notNull(),
+    person: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.record, table.person] }),
+    index("opinion_backers_person").on(table.person),
   ]
 );

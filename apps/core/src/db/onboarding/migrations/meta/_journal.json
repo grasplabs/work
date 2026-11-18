@@ -309,6 +309,20 @@
       "when": 1794939453222,
       "tag": "0043_team_work_from_the_first_teller",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1794965876287,
+      "tag": "0044_drawings_by_work",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "6",
+      "when": 1794988425849,
+      "tag": "0045_cooing_fabian_cortez",
+      "breakpoints": true
     }
   ]
 }
