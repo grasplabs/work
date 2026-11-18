@@ -334,6 +334,20 @@ const signInConfirmedAgo = async (
     .run();
 };
 
+/** Connect as it is, but for `method`, which fails as an unreachable connect does. */
+const connectFailing = (method: string): Env["CONNECT"] =>
+  new Proxy(env.CONNECT, {
+    get: (target, key) => {
+      if (key === method) {
+        return () => {
+          throw new Error("connect unreachable");
+        };
+      }
+      const value: unknown = Reflect.get(target, key);
+      return value;
+    },
+  });
+
 const readersOf = (...readers: SourceReader[]): SourceReaders => ({
   kind: "readers",
   readers,
@@ -1403,6 +1417,70 @@ describe("readers copied from the source", () => {
         first: await finds(atFirst, firstList, firstMarker),
         second: await finds(atSecond, secondList, secondMarker),
       }).toStrictEqual({ first: false, second: false });
+    }
+  );
+
+  it(
+    "stops a person's connections before the erasure reads their addresses, though a failed removal left them connected",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      const alice = await microsoftMember();
+      const { id: connectionId } = await connectedGoogle(alice);
+      const [local = ""] = alice.email.split("@");
+      // The removal's disconnect fails: her connection stays connected.
+      const { core: down } = await openRpc(admin.session, {
+        coreEnv: { ...env, CONNECT: connectFailing("disconnectPersonal") },
+      });
+      const removed = await outcome(
+        down.authenticate().members.remove(alice.userId)
+      );
+      // The erasure starts; connect's own part fails for now, so what
+      // `identity` read is all that stands between them.
+      const { core: erasing } = await openRpc(admin.session, {
+        coreEnv: { ...env, CONNECT: connectFailing("erasePersonal") },
+      });
+      await outcome(
+        erasing.authenticate().members.erase(alice.userId, alice.name)
+      );
+      const afterIdentity = await env.CONNECT.personalAccounts(alice.userId);
+      // Google renames her account; a renewal tries to confirm it.
+      await googleGives(local, `${local}-b@acme.test`);
+      await renewedOnly(connectionId);
+      const afterRenewal = await env.CONNECT.personalAccounts(alice.userId);
+
+      expect({
+        removed,
+        afterIdentity: afterIdentity.map(({ connected }) => connected),
+        afterRenewal: afterRenewal.map(({ verifiedEmail }) => verifiedEmail),
+      }).toStrictEqual({
+        removed: "member.connections_pending",
+        afterIdentity: [false],
+        afterRenewal: [alice.email],
+      });
+    }
+  );
+
+  it(
+    "keeps each address a connection lost once, however often it comes back",
+    setUpTime,
+    async () => {
+      const alice = await microsoftMember();
+      const { id: connectionId } = await connectedGoogle(alice);
+      const [local = ""] = alice.email.split("@");
+      const renamed = `${local}-b@acme.test`;
+      for (const address of [renamed, alice.email, renamed]) {
+        // oxlint-disable-next-line no-await-in-loop -- one renewal at a time
+        await googleGives(local, address);
+        // oxlint-disable-next-line no-await-in-loop -- one renewal at a time
+        await renewed(connectionId);
+      }
+      const [account] = await env.CONNECT.personalAccounts(alice.userId);
+
+      expect({
+        now: account?.verifiedEmail,
+        past: account?.pastVerifiedEmails,
+      }).toStrictEqual({ now: renamed, past: [alice.email, renamed] });
     }
   );
 

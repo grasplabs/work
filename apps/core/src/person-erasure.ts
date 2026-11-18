@@ -225,8 +225,16 @@ const identity: ErasureStep = {
         .from(signInAddresses)
         .where(eq(signInAddresses.userId, userId)),
     ]);
-    // Their connections' accounts too, disconnected or not, as connect
-    // still has them: its own erasure waits for this one (`connect`).
+    // Their connections stopped first, as their removal does (it may have
+    // failed, and an erasure needs only the removal): a renewal can then
+    // write no address after the read below. Then their accounts,
+    // disconnected or not, as connect still has them: its own erasure
+    // waits for this one (`connect`). A disconnect that fails leaves this
+    // area pending, for the clock to try again.
+    await env.CONNECT.disconnectPersonal({
+      person: null,
+      ownerUserIds: [userId],
+    });
     const connected = await env.CONNECT.personalAccounts(userId);
     const keptKeys = await keptAccountKeysOf(env, {
       objectIds: [

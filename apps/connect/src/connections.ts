@@ -389,11 +389,15 @@ export const personalAccounts = async (
 /**
  * A connection's past addresses once its confirmed address becomes
  * `next`, as SQL for the update that sets it: the address it held is
- * kept (`past_verified_emails`) when `next` replaces or clears it, so its
- * person's erasure still finds it. Read in the same statement, before the
+ * kept (`past_verified_emails`) when `next` replaces or clears it, once
+ * however often it comes back, so its person's erasure still finds it. Read in the same statement, before the
  * update changes it.
  */
 export const pastAddressesAfter = (next: string | null): SQL =>
   sql`CASE WHEN ${connections.verifiedEmail} IS NOT NULL AND ${connections.verifiedEmail} IS NOT ${next}
+      AND NOT EXISTS (
+        SELECT 1 FROM json_each(coalesce(${connections.pastVerifiedEmails}, '[]'))
+        WHERE value = ${connections.verifiedEmail}
+      )
     THEN json_insert(coalesce(${connections.pastVerifiedEmails}, '[]'), '$[#]', ${connections.verifiedEmail})
     ELSE ${connections.pastVerifiedEmails} END`;
