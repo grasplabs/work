@@ -113,7 +113,7 @@ const flip = (before: ReadonlySet<string>, key: string): Set<string> => {
 };
 
 /** Search, in the navigation's top row: core's search, on the home page. */
-export const SearchField = () => {
+const SearchField = () => {
   const navigate = useNavigate();
   // On the results, the box starts from what was searched.
   const { q: searched } = useSearch({ strict: false });
@@ -401,10 +401,17 @@ const itemsOf = (
       icon: collectionIconOf(collection),
       end: <CollectionMarks collection={collection} />,
       render: linkTo(collection.id),
-      // Only an open collection is read: a closed one waits, empty.
-      children: opened.has(collection.id)
-        ? listingOf(collection.id, listed.get(collection.id), words, targets)
-        : [],
+      // Concept C: the collections alone; each one's page lists its files.
+      ...(opened.size < 0
+        ? {
+            children: listingOf(
+              collection.id,
+              listed.get(collection.id),
+              words,
+              targets
+            ),
+          }
+        : {}),
     });
   }
   return { items, targets };

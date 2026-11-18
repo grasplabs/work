@@ -48,7 +48,6 @@ import { CollectionMarkers } from "../knowledge/collection-markers.tsx";
 import { KnowledgeFrame } from "../knowledge/frame.tsx";
 import type { MemoryFiles } from "../knowledge/memory.ts";
 import { loadKnowledgeNav } from "../knowledge/nav-data.ts";
-import { SearchField } from "../knowledge/nav.tsx";
 import { NewCollection } from "../knowledge/new-collection.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 
@@ -385,7 +384,6 @@ const Knowledge = () => {
       <div {...stylex.props(styles.scroll)}>
         <div {...stylex.props(styles.column)}>
           <PageHeading title={<Trans>Knowledge</Trans>} />
-          <SearchField />
           {results === undefined ? null : (
             <Section aria-labelledby="results">
               <SectionHeader id="results" title={<Trans>Results</Trans>} />
