@@ -123,11 +123,12 @@ describe("routines seen in activity", () => {
 
   it("show a variant five took, and a timing no one person sets", async () => {
     const team = `team:${crypto.randomUUID()}`;
-    // Six read a deal and mail; one of them mails nine hours later, again
-    // and again. Five others read a deal and update it in the CRM.
+    // Six read a deal and mail; one of them mails nine hours later, ten
+    // times, all in the past: pooled, their nine would be the middle of
+    // all fifteen gaps; as one person's, it is one of six.
     await peopleTake(team, 6, (person) =>
       person === 0
-        ? Array.from({ length: 20 }, (_, at) => dealThenMail(at * 20, 9)).flat()
+        ? Array.from({ length: 10 }, (_, at) => dealThenMail(at * 15, 9)).flat()
         : dealThenMail(0)
     );
     await peopleTake(team, 5, () => [
@@ -151,6 +152,32 @@ describe("routines seen in activity", () => {
       // Written in the system it was read in: no copy.
       variants: [{ after: 0, system: "crm", step: "deals.update" }],
     });
+  });
+
+  it("mark a step as writing only when five of its people wrote at it, never by one person's write", async () => {
+    const team = `team:${crypto.randomUUID()}`;
+    // Five read a deal and draft a mail without changing anything; a sixth
+    // drafts one mail that did change something, once.
+    await peopleTake(team, 5, () => [
+      { system: "crm", step: "deals.read", hour: 0 },
+      { system: "mail", step: "mail.draft", hour: 1 },
+    ]);
+    await peopleTake(team, 1, () => [
+      { system: "crm", step: "deals.read", hour: 0 },
+      { system: "mail", step: "mail.draft", writes: true, hour: 1 },
+    ]);
+    const [routine] = await routinesOf(team);
+
+    expect(
+      routine?.steps.map(({ step, writes, copied }) => ({
+        step,
+        writes,
+        copied,
+      }))
+    ).toStrictEqual([
+      { step: "deals.read", writes: false, copied: false },
+      { step: "mail.draft", writes: false, copied: false },
+    ]);
   });
 
   it("fall at the next read once a person's erasure leaves four, and name no one", async () => {

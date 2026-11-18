@@ -2,6 +2,7 @@
 import type { Blueprint } from "@grasp-os/shared/apps";
 import type { ChatAgent, ChatMake, ChatQuestion } from "@grasp-os/shared/chat";
 import { blueprintIdSchema } from "@grasp-os/shared/ids";
+import type { Opportunity } from "@grasp-os/shared/opportunities";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { typeInPrompt } from "@grasp-os/ui/testing";
@@ -29,8 +30,10 @@ import { GlobalChatProvider } from "./global-chat.tsx";
 
 // Chat's own page from Make something: ideas to start from in place of the
 // questions (an App's blueprints, a workflow's starting sentences), each
-// only filling the box, nothing made; the first question makes the chat
-// with what to make, which the chat keeps. Core is faked at its session.
+// only filling the box, nothing made; from an opportunity an admin drafts,
+// the box starts with its brief, nothing asked until it is sent; the
+// first question makes the chat with what to make, which the chat keeps.
+// Core is faked at its session.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -76,14 +79,39 @@ const agent = (id: string, name: string): ChatAgent => ({
   own: false,
 });
 
+/** A team's routine as an admin reads it on Opportunities. */
+const opportunity: Opportunity = {
+  routine: "work-1",
+  evidence: "drawing-1",
+  name: "handling client requests",
+  local: "klantverzoeken afhandelen",
+  team: "team-1",
+  steps: ["Read the request", "Look it up in Exact", "Send the quote"],
+  casesPerWeek: 50,
+  hoursPerWeek: 20.8,
+  basis: "described",
+  seen: null,
+  differs: null,
+  form: "workflow",
+  covers: null,
+  setup: ["Exact"],
+  personApproves: [3],
+  dismissed: false,
+};
+
 /**
  * Chat's page, from Make something `make` with `ideas`, against a fake
- * core whose person may talk to `agents`; the address naming `named`.
+ * core whose person may talk to `agents`; the address naming `named`, and
+ * the opportunity `from` whose brief the box starts with.
  */
 const shown = async (
   make?: ChatMake,
   ideas?: MakeIdeas,
-  { agents = [], named }: { agents?: ChatAgent[]; named?: string } = {}
+  {
+    agents = [],
+    named,
+    from,
+  }: { agents?: ChatAgent[]; named?: string; from?: Opportunity } = {}
 ) => {
   const asked: string[] = [];
   const chats = {
@@ -130,7 +158,18 @@ const shown = async (
   const page = createRoute({
     getParentRoute: () => shell,
     path: "/",
-    component: () => <ChatStart agent={named} ideas={read} make={make} />,
+    component: () => (
+      <ChatStart
+        agent={named}
+        ideas={read}
+        make={make}
+        opportunity={
+          from === undefined
+            ? undefined
+            : Promise.resolve({ state: "ready", data: from })
+        }
+      />
+    ),
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([shell.addChildren([page])]),
@@ -222,6 +261,40 @@ describe("Chat's page from Make something", () => {
       ],
       box: "Keep track of the month-end close: who does what, and remind people when they're late.",
       asked: [],
+    });
+  });
+
+  it("starts the box with the brief of an opportunity an admin drafts, and asks nothing until it is sent", async () => {
+    const { asked } = await shown({ kind: "workflow" }, undefined, {
+      from: opportunity,
+    });
+    const before = [...asked];
+    const brief = [
+      "Draft a workflow for the opportunity “Handling client requests (klantverzoeken afhandelen)”.",
+      "How the team does it today:",
+      "1. Read the request",
+      "2. Look it up in Exact",
+      "3. Send the quote (a person approves this step)",
+      "Cases a week: 50.",
+      "Hours a week by hand: 20.8.",
+      "Connect first: Exact.",
+    ];
+
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({ before, asked }).toStrictEqual({
+      before: [],
+      // Make something's own chat, made to make a workflow and named
+      // after the brief's first words, its first question the brief, a
+      // paragraph a line.
+      asked: [
+        'create Draft a workflow for the opportunity “Handling client requests (klantverzoeken … {"kind":"workflow"}',
+        `send chat-1 ${brief.join("\n")}`,
+      ],
     });
   });
 

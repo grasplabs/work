@@ -96,6 +96,6 @@ export const nativeItemReads: Readonly<
  * tell Grasp what changed in it (core's brain-rpc.ts shows it as a gap).
  */
 export const nativeSyncs: Readonly<Record<string, readonly string[]>> = {
-  "google": ["drive", "gmail"],
-  "microsoft": ["drive"],
+  "google": ["calendar", "drive", "gmail"],
+  "microsoft": ["calendar", "drive", "mail"],
 };

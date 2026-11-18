@@ -414,6 +414,10 @@ msgstr "{count, plural, one {D'après votre dernière exécution de {workflow}, 
 msgid "{count, plural, one {It can't be shared yet: # problem} other {It can't be shared yet: # problems}}"
 msgstr "{count, plural, one {Il ne peut pas encore être partagé : # problème} other {Il ne peut pas encore être partagé : # problèmes}}"
 
+#: src/workflows/run-detail.tsx
+msgid "{count, plural, one {It started without # kept value: the run that kept it read something that is no longer there to read.} other {It started without # kept values: the runs that kept them read something that is no longer there to read.}}"
+msgstr "{count, plural, one {Elle a démarré sans # valeur gardée : l'exécution qui l'a gardée a lu quelque chose qu'on ne peut plus lire.} other {Elle a démarré sans # valeurs gardées : les exécutions qui les ont gardées ont lu quelque chose qu'on ne peut plus lire.}}"
+
 #: src/brain/thinking/use-thinking.ts
 msgid "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
 msgstr "{count, plural, one {Lecture de # workflow} other {Lecture de # workflows}}"
@@ -940,6 +944,10 @@ msgstr "{needs, plural, one {# vous attend} other {# vous attendent}}"
 #: src/chat/asked-questions.tsx
 msgid "{number} of {total}"
 msgstr "{number} sur {total}"
+
+#: src/brain/opportunity-drafts.ts
+msgid "{number}. {step} (a person approves this step)"
+msgstr "{number}. {step} (une personne valide cette étape)"
 
 #: src/brain/brain-atlas.ts
 msgid "{one} and {other} both name the same handover, each from their own side."
@@ -3598,6 +3606,10 @@ msgstr "Continuer maintenant"
 msgid "Cases a week"
 msgstr "Cas par semaine"
 
+#: src/brain/opportunity-drafts.ts
+msgid "Cases a week: {cases}."
+msgstr "Cas par semaine : {cases}."
+
 #: src/settings/audit-chain.tsx
 msgid "Chain check"
 msgstr "Vérification de la chaîne"
@@ -4282,6 +4294,7 @@ msgid "Connect another account"
 msgstr "Connecter un autre compte"
 
 #: src/brain/opportunities-page.tsx
+#: src/brain/opportunity-drafts.ts
 msgid "Connect first: {systems}."
 msgstr "Connectez d'abord : {systems}."
 
@@ -5223,6 +5236,24 @@ msgstr "Télécharger le tableau en Markdown"
 #: src/workflows/workflows-table.tsx
 msgid "Draft"
 msgstr "Brouillon"
+
+#: src/brain/opportunity-drafts.ts
+msgid "Draft a workflow for the opportunity “{title}”."
+msgstr "Rédige un brouillon de workflow pour l’opportunité « {title} »."
+
+#: src/brain/opportunity-drafts.ts
+msgid "Draft an App for the opportunity “{title}”."
+msgstr "Rédige un brouillon d’App pour l’opportunité « {title} »."
+
+#: src/brain/opportunities-page.tsx
+msgctxt "drafts what an opportunity proposes"
+msgid "Draft it"
+msgstr "En faire un brouillon"
+
+#: src/brain/opportunities-page.tsx
+msgctxt "drafts what an opportunity proposes, named for it"
+msgid "Draft it for “{title}”"
+msgstr "En faire un brouillon : « {title} »"
 
 #: src/brain/skills-page.tsx
 msgid "Drafted from your own runs of a workflow that keep succeeding. Only you see them, and none is used until you add it to your skills."
@@ -6979,6 +7010,10 @@ msgstr "Maintenez 4 secondes"
 msgid "Hours a week"
 msgstr "Heures par semaine"
 
+#: src/brain/opportunity-drafts.ts
+msgid "Hours a week by hand: {hours}."
+msgstr "Heures par semaine à la main : {hours}."
+
 #: src/brain/thinking/work-hours.tsx
 msgid "Hours not known yet"
 msgstr "Heures pas encore connues"
@@ -7024,6 +7059,10 @@ msgstr "À quelle fréquence"
 msgid "How sure"
 msgstr "Quelle certitude"
 
+#: src/brain/opportunity-drafts.ts
+msgid "How the team does it today:"
+msgstr "Comment l’équipe s’y prend aujourd’hui :"
+
 #. Under a statement put together from the interviews
 #. Under a statement put together from the interviews
 #: src/brain/aggregate.tsx
@@ -7054,6 +7093,10 @@ msgstr "Comment cette App est construite et ce qu’il faut garder en tête pour
 #: src/interview/closed.tsx
 msgid "How was talking to {who}?"
 msgstr "Comment s’est passé l’échange avec {who} ?"
+
+#: src/brain/opportunity-drafts.ts
+msgid "How we handle “{title}”, step by step."
+msgstr "Comment nous traitons « {title} », étape par étape."
 
 #: src/brain/goals-editor.tsx
 msgid "How we notice it"

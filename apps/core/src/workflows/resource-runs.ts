@@ -81,7 +81,7 @@ import { admitAttempt, triggeredAccountOf } from "./quotas.ts";
 import { callingRunOf } from "./resource-authority.ts";
 import type { CallingRun } from "./resource-authority.ts";
 import {
-  requireEndedRunEvidenceReadable,
+  endedRunResultWithheld,
   requireResourceRunEvidenceReadable,
 } from "./resource-reads.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
@@ -1274,7 +1274,10 @@ export const resultOf = async (
   // The sweep's mark on its receipt too: details removed once stay removed,
   // whatever the retention says after.
   const receipt = await drizzle(env.DB)
-    .select({ detailsRemovedAt: workflowStartReceipts.detailsRemovedAt })
+    .select({
+      detailsRemovedAt: workflowStartReceipts.detailsRemovedAt,
+      stateHash: workflowStartReceipts.stateHash,
+    })
     .from(workflowStartReceipts)
     .where(eq(workflowStartReceipts.id, row.id))
     .get();
@@ -1299,18 +1302,21 @@ export const resultOf = async (
   if (removed) {
     return { error: { code: row.failureCode, message: removedText } };
   }
-  // What it returned or why it failed may hold what it recalled: withheld
-  // once the company may no longer read that, as before it ended.
-  try {
-    await requireEndedRunEvidenceReadable(env, {
-      runId: row.id,
-      workflowId: row.workflowResourceId,
-      principal: row.principalId,
-    });
-  } catch (error) {
-    if (workflowResourceErrors.codeOf(error) !== "brain.revoked") {
-      throw error;
-    }
+  // What it returned or why it failed may hold what it recalled, or what
+  // the kept state it started from copied: withheld once the company may
+  // no longer read that, as before it ended, or once the runs that set
+  // that state weren't recorded (`endedRunResultWithheld`, GRA-1996).
+  if (
+    await endedRunResultWithheld(
+      env,
+      {
+        runId: row.id,
+        workflowId: row.workflowResourceId,
+        principal: row.principalId,
+      },
+      receipt?.stateHash ?? null
+    )
+  ) {
     return {
       error: {
         code: "brain.revoked",
@@ -1537,6 +1543,13 @@ export const resourceRunFor = async (
     row.status === "running" ? [row.id] : []
   );
   const aiProvider = waits.get(row.id);
+  // How many kept keys it started without, as its receipt froze it.
+  const receipt = await drizzle(env.DB)
+    .select({ stateWithheld: workflowStartReceipts.stateWithheld })
+    .from(workflowStartReceipts)
+    .where(eq(workflowStartReceipts.id, row.id))
+    .get();
+  const stateWithheld = receipt?.stateWithheld ?? null;
   const run: WorkflowResourceRun = {
     id: row.id,
     workflowId: row.workflowResourceId,
@@ -1546,6 +1559,7 @@ export const resourceRunFor = async (
     principal: row.principalId,
     status: row.status,
     ...(aiProvider === undefined ? {} : { aiProvider }),
+    ...(stateWithheld === null ? {} : { stateWithheld }),
     createdAt: row.createdAt.toISOString(),
     endedAt: row.endedAt?.toISOString() ?? null,
   };

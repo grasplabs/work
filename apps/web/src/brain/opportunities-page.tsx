@@ -7,7 +7,7 @@ import type {
   SeenStep,
 } from "@grasp-os/shared/opportunities";
 import { Badge } from "@grasp-os/ui/components/badge";
-import { Button } from "@grasp-os/ui/components/button";
+import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import { Card, CardContent } from "@grasp-os/ui/components/card";
 import {
   Empty,
@@ -30,13 +30,17 @@ import type { CoreConnection } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDecimal, formatList } from "../format.ts";
 import { useCore } from "../use-core.ts";
+import { draftOf, titleOf } from "./opportunity-drafts.ts";
 
 // Opportunities (GRA-1750): what Grasp could automate or improve, from how
 // the company's teams describe their work and how five or more of a team
 // were seen doing it (GRA-1764), for admins. Each is one of a team's
 // routines, the largest first, with what it rests on and what Grasp
-// proposes; an admin dismisses one until its evidence changes. Core holds
-// every rule (opportunities.ts): the page only asks.
+// proposes; an admin dismisses one until its evidence changes, or drafts
+// it (GRA-1751): an App or a workflow in Make something's chat, a skill on
+// Skills, each started with what the card shows, under the admin's own
+// name (opportunity-drafts.ts). Core holds every rule (opportunities.ts):
+// the page only asks.
 
 /** What a call to core came to. */
 type Read<T> =
@@ -77,12 +81,6 @@ const acting = async (
   } catch (error) {
     return failureText(error);
   }
-};
-
-/** A work's name as a title: starting with a capital, for display alone (it is named in lower case, as an activity: onboarding/team-map.ts). */
-const titleOf = ({ name, local }: Opportunity, locale: string): string => {
-  const title = `${name.slice(0, 1).toLocaleUpperCase(locale)}${name.slice(1)}`;
-  return local === undefined ? title : `${title} (${local})`;
 };
 
 /** What Grasp proposes, as the page names it; none proposed yet, when it couldn't ask a model. */
@@ -242,6 +240,50 @@ const Figure = ({ value, label }: { value: number | null; label: string }) => (
   </div>
 );
 
+/**
+ * Draft it: Make something's chat for an App or a workflow, its box
+ * filled with the opportunity's brief, or Skills' editor filled with a
+ * skill for it; none for a change or a connection alone. Nothing is made
+ * or asked of a model until the admin sends or saves it.
+ */
+const DraftLink = ({ opportunity }: { opportunity: Opportunity }) => {
+  const { t, i18n } = useLingui();
+  const draft = draftOf(opportunity.form);
+  if (draft === null) {
+    return null;
+  }
+  // Named for its opportunity, so a list of the page's links tells them
+  // apart; it starts with the words it shows.
+  const title = titleOf(opportunity, i18n.locale);
+  const named = t({
+    message: `Draft it for “${title}”`,
+    context: "drafts what an opportunity proposes, named for it",
+  });
+  const label = (
+    <Trans context="drafts what an opportunity proposes">Draft it</Trans>
+  );
+  const { routine } = opportunity;
+  return draft.kind === "skill" ? (
+    <Link
+      aria-label={named}
+      className={buttonVariants({ size: "sm" })}
+      search={{ opportunity: routine }}
+      to="/brain/skills"
+    >
+      {label}
+    </Link>
+  ) : (
+    <Link
+      aria-label={named}
+      className={buttonVariants({ size: "sm" })}
+      search={{ make: draft.kind, opportunity: routine }}
+      to="/"
+    >
+      {label}
+    </Link>
+  );
+};
+
 /** One opportunity, as its card shows it. */
 const OpportunityCard = ({
   opportunity,
@@ -312,7 +354,8 @@ const OpportunityCard = ({
           )}
           {seen === null ? null : <SeenSection seen={seen} />}
           {differs === null ? null : <DiffersText differs={differs} />}
-          <div>
+          <div className="flex flex-wrap gap-2">
+            <DraftLink opportunity={opportunity} />
             <Button
               disabled={busy}
               onClick={onDismiss}
