@@ -4527,7 +4527,6 @@ msgstr "Falaises"
 #: src/dashboard/widget-block.tsx
 #: src/frame/app-frame.tsx
 #: src/frame/part-words.tsx
-#: src/knowledge/document.tsx
 #: src/knowledge/frame.tsx
 #: src/knowledge/new-collection.tsx
 #: src/knowledge/new-document.tsx
@@ -4628,7 +4627,6 @@ msgid "Colleagues talked"
 msgstr "Collègues entendus"
 
 #: src/apps/app-access-requests.tsx
-#: src/knowledge/document.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Collection"
 msgstr "Collection"
@@ -5687,7 +5685,6 @@ msgstr "Ordinateur"
 #: src/agents/agent-page.tsx
 #: src/chat/approval-words.ts
 #: src/inbox/item-detail.tsx
-#: src/knowledge/document.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 #: src/settings/event-sources.tsx
 #: src/workflows/run-detail.tsx
@@ -11765,10 +11762,6 @@ msgstr "Collez la clé."
 msgid "Paste the new key."
 msgstr "Collez la nouvelle clé."
 
-#: src/knowledge/document.tsx
-msgid "Path"
-msgstr "Chemin"
-
 #: src/connections/http-connections.tsx
 msgid "Path prefixes it allows, one per line"
 msgstr "Préfixes de chemin autorisés, un par ligne"
@@ -13146,10 +13139,6 @@ msgstr "Examiner"
 #: src/inbox/item-detail.tsx
 msgid "Review and answer"
 msgstr "Examiner et répondre"
-
-#: src/knowledge/document.tsx
-msgid "Review by"
-msgstr "À relire avant le"
 
 #: src/knowledge/document.tsx
 msgid "Review by {review}"
@@ -17301,7 +17290,6 @@ msgstr "Vérifié jusqu'à {entries}"
 
 #: src/apps/app-workflows.tsx
 #: src/inbox/items.ts
-#: src/knowledge/document.tsx
 #: src/workflows/go-lives-waiting.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx

@@ -60,7 +60,9 @@ const Saved = ({
     month: "short",
     year: "numeric",
   });
-  const who = version.author === me ? t`You` : version.author;
+  // A person's own saves are "You"; another author can't be named here
+  // yet (core gives an id), and an id is never shown: then only what changed.
+  const who = version.author === me ? t`You` : null;
   const said = [
     who,
     restoredFrom === null

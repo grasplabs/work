@@ -28,14 +28,8 @@ const fixture = (name: string): string =>
 /** How long a Knowledge page may take to read everything it shows. */
 const pageRead = { timeout: 15_000 };
 
-/**
- * A document's details, opened from the foot of its page, where they fold
- * on a window too narrow for the side (the tests' 1280px).
- */
-const details = async (page: Page) => {
-  await page.getByRole("button", { name: "Details", exact: true }).click();
-  return page.getByRole("definition");
-};
+/** The documents that link to the one on the page, each a row that opens it. */
+const usedBy = (page: Page) => page.getByRole("region", { name: "Used by" });
 
 /** The history's row for `version`: the one whose link names it. */
 const versionRow = (page: Page, version: number) =>
@@ -164,16 +158,16 @@ test("a person searches, edits a document, meets a newer version instead of over
     await expect(
       page.getByRole("heading", { level: 1, name: "Pay" }).first()
     ).toBeVisible();
-    const payDetails = await details(page);
-    await payDetails.getByRole("link", { name: "Leave", exact: true }).click();
+    await usedBy(page)
+      .getByRole("button", { name: "Leave", exact: true })
+      .click();
     await expect(
       page
         .getByRole("heading", { level: 1, name: "Leave", exact: true })
         .first()
     ).toBeVisible();
-    const leaveDetails = await details(page);
     await expect(
-      leaveDetails.getByRole("link", { name: "Pay", exact: true })
+      usedBy(page).getByRole("button", { name: "Pay", exact: true })
     ).toBeVisible();
 
     // An edit is a new version, with what changed.

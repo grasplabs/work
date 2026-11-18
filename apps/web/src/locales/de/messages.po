@@ -4527,7 +4527,6 @@ msgstr "Klippen"
 #: src/dashboard/widget-block.tsx
 #: src/frame/app-frame.tsx
 #: src/frame/part-words.tsx
-#: src/knowledge/document.tsx
 #: src/knowledge/frame.tsx
 #: src/knowledge/new-collection.tsx
 #: src/knowledge/new-document.tsx
@@ -4628,7 +4627,6 @@ msgid "Colleagues talked"
 msgstr "Kollegen gesprochen"
 
 #: src/apps/app-access-requests.tsx
-#: src/knowledge/document.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Collection"
 msgstr "Sammlung"
@@ -5687,7 +5685,6 @@ msgstr "Desktop"
 #: src/agents/agent-page.tsx
 #: src/chat/approval-words.ts
 #: src/inbox/item-detail.tsx
-#: src/knowledge/document.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 #: src/settings/event-sources.tsx
 #: src/workflows/run-detail.tsx
@@ -11765,10 +11762,6 @@ msgstr "Fügen Sie den Schlüssel ein."
 msgid "Paste the new key."
 msgstr "Fügen Sie den neuen Schlüssel ein."
 
-#: src/knowledge/document.tsx
-msgid "Path"
-msgstr "Pfad"
-
 #: src/connections/http-connections.tsx
 msgid "Path prefixes it allows, one per line"
 msgstr "Erlaubte Pfadpräfixe, eines pro Zeile"
@@ -13146,10 +13139,6 @@ msgstr "Prüfen"
 #: src/inbox/item-detail.tsx
 msgid "Review and answer"
 msgstr "Prüfen und antworten"
-
-#: src/knowledge/document.tsx
-msgid "Review by"
-msgstr "Prüfen bis"
 
 #: src/knowledge/document.tsx
 msgid "Review by {review}"
@@ -17301,7 +17290,6 @@ msgstr "Geprüft bis {entries}"
 
 #: src/apps/app-workflows.tsx
 #: src/inbox/items.ts
-#: src/knowledge/document.tsx
 #: src/workflows/go-lives-waiting.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx

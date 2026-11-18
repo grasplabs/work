@@ -17,14 +17,11 @@ import { PageHeading } from "../frame/page.tsx";
 import { RouterLink } from "../frame/router-link.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Collapsible } from "../grasp/collapsible/index.ts";
 import { Doc, Edit } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
-import { InspectorPanel } from "../grasp/inspector-panel/index.ts";
-import type { InspectorSection } from "../grasp/inspector-panel/index.ts";
-import { KeyValueList } from "../grasp/key-value/index.ts";
-import { Separator } from "../grasp/separator/index.ts";
-import { Tag } from "../grasp/tag/index.ts";
+import { RowList, RowListItem } from "../grasp/row-list/index.ts";
+import { Section, SectionHeader } from "../grasp/section-header/index.ts";
+import { Text } from "../grasp/text/index.ts";
 import { Textarea } from "../grasp/textarea/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
@@ -36,8 +33,9 @@ import type { ResolveLink } from "./wiki-links.ts";
 // One document, read like a note in the prototype's brain
 // (grasplabs/prototype `routes/brain/$noteId.tsx`): its kind, title and
 // when to use it, then its text, and its history as a timeline below it.
-// Its details (where it is, what it links to and what links to it, its
-// review date) sit beside it, or fold in at its foot on a narrower window. Where the person may change it: an editor, and
+// Its facts (the collection, the file, the version, its review date) stand
+// in a line under its title; what it links to and what links to it, in a
+// small section each under its text. Where the person may change it: an editor, and
 // restoring from its history. Every save names the version it was edited
 // from, so a save that would overwrite one made since, in another tab or
 // by someone else, shows that version instead.
@@ -47,15 +45,6 @@ const styles = stylex.create({
   newer: { display: "flex", flexDirection: "column", gap: grasp.space2 },
   start: { alignSelf: "flex-start" },
   buttons: { display: "flex", flexWrap: "wrap", gap: grasp.space2 },
-  chips: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: grasp.space2,
-    margin: 0,
-    padding: 0,
-    listStyleType: "none",
-  },
-  chip: { minWidth: 0 },
   earlier: {
     display: "flex",
     flexWrap: "wrap",
@@ -75,21 +64,8 @@ const styles = stylex.create({
     paddingInline: { default: grasp.space6, [media.fromTablet]: grasp.space12 },
   },
   actions: { display: "flex", alignItems: "center", gap: grasp.space2 },
-  // Too narrow for the side: the details fold in at the foot instead.
-  foot: {
-    display: { default: "flex", [media.fromRail]: "none" },
-    flexDirection: "column",
-    gap: grasp.space4,
-  },
-  // Beside the page once there is room; at its foot before.
-  inspector: {
-    display: { default: "none", [media.fromRail]: "flex" },
-    flexShrink: 0,
-    width: grasp.inspectorWidth,
-    height: "auto",
-    marginBlock: grasp.space4,
-    marginInlineEnd: grasp.space4,
-  },
+  // The title, and its facts close under it.
+  head: { display: "flex", flexDirection: "column", gap: grasp.space2 },
 });
 
 const Editor = ({
@@ -221,28 +197,6 @@ const fileNameOf = (doc: DocumentRead): string => {
   return name.endsWith(".md") ? name.slice(0, -3) : name;
 };
 
-/** A document another one links to, or that links to it, as a chip. */
-const DocumentChip = ({
-  collectionId,
-  documentId,
-  title,
-}: {
-  collectionId: string;
-  documentId: string;
-  title: string;
-}) => (
-  <Tag size="sm">
-    <RouterLink
-      params={{ collection: collectionId }}
-      search={{ doc: documentId }}
-      to="/knowledge/$collection"
-      variant="standalone"
-    >
-      {title}
-    </RouterLink>
-  </Tag>
-);
-
 /** A document this one links to, by its ID, named as the link names it. */
 interface Linked {
   documentId: string;
@@ -273,165 +227,78 @@ const linksOf = (text: string, resolve: ResolveLink): Linked[] => {
   return [...found].map(([documentId, title]) => ({ documentId, title }));
 };
 
-/** Documents as a row of chips. */
-const Chips = ({
+/**
+ * The facts under the title, in one quiet line: the collection, the file,
+ * the version and when to review it.
+ */
+const Facts = ({
+  doc,
+  collection,
+}: {
+  doc: DocumentRead;
+  collection: string;
+}) => {
+  const { t } = useLingui();
+  const version = doc.version.number;
+  const review = doc.reviewDate === null ? null : formatDay(doc.reviewDate);
+  return (
+    <Text size="sm" tone="muted">
+      <RouterLink
+        params={{ collection: doc.collectionId }}
+        search={{}}
+        to="/knowledge/$collection"
+        variant="standalone"
+      >
+        {collection}
+      </RouterLink>
+      {` · ${doc.path.split("/").at(-1) ?? doc.path} · `}
+      {t`Version ${version}`}
+      {review === null ? null : ` · ${t`Review by ${review}`}`}
+    </Text>
+  );
+};
+
+/**
+ * Documents as a small section of rows that open them: what this one
+ * links to, or what links to it. Nothing where there are none.
+ */
+const Related = ({
+  id,
+  title,
   documents,
 }: {
+  id: string;
+  title: string;
   documents: readonly {
     collectionId: string;
     documentId: string;
     title: string;
   }[];
-}) =>
-  documents.length === 0 ? null : (
-    <ul {...stylex.props(styles.chips)}>
-      {documents.map((document) => (
-        <li key={document.documentId} {...stylex.props(styles.chip)}>
-          <DocumentChip
-            collectionId={document.collectionId}
-            documentId={document.documentId}
-            title={document.title}
-          />
-        </li>
-      ))}
-    </ul>
-  );
-
-/** The document's properties: where it is, its version and review, and what uses it. */
-const Properties = ({
-  doc,
-  collection,
-  links,
-  backlinks,
-}: {
-  doc: DocumentRead;
-  collection: string;
-  links: Linked[];
-  backlinks: Backlink[];
 }) => {
-  const { t } = useLingui();
-  const linked = links.map((link) => ({
-    ...link,
-    collectionId: doc.collectionId,
-  }));
-  return (
-    <KeyValueList
-      items={[
-        {
-          key: t`Collection`,
-          value: (
-            <RouterLink
-              params={{ collection: doc.collectionId }}
-              search={{}}
-              to="/knowledge/$collection"
-              variant="standalone"
-            >
-              {collection}
-            </RouterLink>
-          ),
-        },
-        { key: t`Path`, value: doc.path },
-        { key: t`Version`, value: doc.version.number },
-        // What it lacks, it leaves out: nobody acts on a dash.
-        ...(doc.reviewDate === null
-          ? []
-          : [{ key: t`Review by`, value: formatDay(doc.reviewDate) }]),
-        ...(linked.length === 0
-          ? []
-          : [{ key: t`Links to`, value: <Chips documents={linked} /> }]),
-        ...(backlinks.length === 0
-          ? []
-          : [{ key: t`Used by`, value: <Chips documents={backlinks} /> }]),
-      ]}
-      variant="stacked"
-    />
-  );
-};
-
-/**
- * Beside the page, the document's details in Grasp UI's inspector: its
- * file, the collection, version and review date as facts, and what it
- * links to and what links to it as rows that open them, each only when
- * there are some.
- */
-const Inspector = ({
-  doc,
-  collection,
-  links,
-  backlinks,
-}: {
-  doc: DocumentRead;
-  collection: string;
-  links: Linked[];
-  backlinks: Backlink[];
-}) => {
-  const { t } = useLingui();
   const navigate = useNavigate();
-  const open = (collectionId: string, documentId: string): void => {
-    void navigate({
-      to: "/knowledge/$collection",
-      params: { collection: collectionId },
-      search: { doc: documentId },
-    });
-  };
-  const version = doc.version.number;
-  const review = doc.reviewDate === null ? null : formatDay(doc.reviewDate);
-  const sections: InspectorSection[] = [
-    ...(links.length === 0
-      ? []
-      : [
-          {
-            id: "links",
-            label: t`Links to`,
-            rows: links.map((link) => ({
-              id: link.documentId,
-              name: link.title,
-              icon: Doc,
-              onPress: () => {
-                open(doc.collectionId, link.documentId);
-              },
-            })),
-          },
-        ]),
-    ...(backlinks.length === 0
-      ? []
-      : [
-          {
-            id: "used-by",
-            label: t`Used by`,
-            rows: backlinks.map((backlink) => ({
-              id: backlink.documentId,
-              name: backlink.title,
-              icon: Doc,
-              onPress: () => {
-                open(backlink.collectionId, backlink.documentId);
-              },
-            })),
-          },
-        ]),
-  ];
+  if (documents.length === 0) {
+    return null;
+  }
   return (
-    <InspectorPanel
-      aria-label={t`Details`}
-      icon={Doc}
-      layout={styles.inspector}
-      meta={[
-        <RouterLink
-          key="collection"
-          params={{ collection: doc.collectionId }}
-          search={{}}
-          to="/knowledge/$collection"
-          variant="standalone"
-        >
-          {collection}
-        </RouterLink>,
-        t`Version ${version}`,
-        ...(review === null ? [] : [t`Review by ${review}`]),
-      ]}
-      sections={sections}
-      title={doc.path.split("/").at(-1) ?? doc.path}
-      words={{ close: t`Close` }}
-    />
+    <Section aria-labelledby={id}>
+      <SectionHeader id={id} size="sm" title={title} />
+      <RowList aria-labelledby={id}>
+        {documents.map((document) => (
+          <RowListItem
+            icon={Doc}
+            key={document.documentId}
+            name={document.title}
+            onPress={() => {
+              void navigate({
+                to: "/knowledge/$collection",
+                params: { collection: document.collectionId },
+                search: { doc: document.documentId },
+              });
+            }}
+          />
+        ))}
+      </RowList>
+    </Section>
   );
 };
 
@@ -490,49 +357,47 @@ export const DocumentView = ({
   const [editing, setEditing] = useState(false);
   // An earlier version, opened from the history: read only.
   const earlier = doc.version.number !== doc.currentVersion;
-  const links = linksOf(doc.version.text, resolve);
-  const details = (
-    <Properties
-      backlinks={backlinks}
-      collection={collection}
-      doc={doc}
-      links={links}
-    />
-  );
+  const links = linksOf(doc.version.text, resolve).map((link) => ({
+    ...link,
+    collectionId: doc.collectionId,
+  }));
   return (
     <div {...stylex.props(styles.view)}>
       <div {...stylex.props(styles.scroll)}>
         <div {...stylex.props(styles.column)}>
-          <PageHeading
-            action={
-              <span {...stylex.props(styles.actions)}>
-                {writable && !editing && !earlier ? (
-                  <Button
-                    icon={Edit}
-                    onClick={() => {
-                      setEditing(true);
+          <div {...stylex.props(styles.head)}>
+            <PageHeading
+              action={
+                <span {...stylex.props(styles.actions)}>
+                  {writable && !editing && !earlier ? (
+                    <Button
+                      icon={Edit}
+                      onClick={() => {
+                        setEditing(true);
+                      }}
+                      size="sm"
+                      variant="quiet"
+                    >
+                      <Trans>Edit</Trans>
+                    </Button>
+                  ) : null}
+                  {actions}
+                  <ExportMenu
+                    file={{
+                      name: fileNameOf(doc),
+                      title: doc.title,
+                      markdown: () => doc.version.text,
                     }}
-                    size="sm"
-                    variant="quiet"
-                  >
-                    <Trans>Edit</Trans>
-                  </Button>
-                ) : null}
-                {actions}
-                <ExportMenu
-                  file={{
-                    name: fileNameOf(doc),
-                    title: doc.title,
-                    markdown: () => doc.version.text,
-                  }}
-                />
-              </span>
-            }
-            {...(doc.description === ""
-              ? {}
-              : { description: doc.description })}
-            title={doc.title}
-          />
+                  />
+                </span>
+              }
+              {...(doc.description === ""
+                ? {}
+                : { description: doc.description })}
+              title={doc.title}
+            />
+            <Facts collection={collection} doc={doc} />
+          </div>
           {earlier ? <EarlierVersion doc={doc} /> : null}
           {editing ? (
             <Editor
@@ -549,19 +414,11 @@ export const DocumentView = ({
               title={doc.title}
             />
           )}
-          <div {...stylex.props(styles.foot)}>
-            <Separator />
-            <Collapsible title={t`Details`}>{details}</Collapsible>
-          </div>
+          <Related documents={links} id="links-to" title={t`Links to`} />
+          <Related documents={backlinks} id="used-by" title={t`Used by`} />
           <Timeline doc={doc} me={me} versions={versions} writable={writable} />
         </div>
       </div>
-      <Inspector
-        backlinks={backlinks}
-        collection={collection}
-        doc={doc}
-        links={links}
-      />
     </div>
   );
 };
