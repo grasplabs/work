@@ -762,7 +762,7 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
     });
   });
 
-  it("leave one primary, rightly marked, when a second confirm lands before the first one's writes: the same team or another", async () => {
+  it("never apply an older confirm after a newer one that landed before its writes: the newer list stands, every event says so", async () => {
     const admin = await signedInApi(idp, "admin");
     const ann = await signedInApi(idp, "user");
     const bea = await signedInApi(idp, "user");
@@ -789,8 +789,8 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
     });
     const sales = idOf("Sales");
     const finance = idOf("Finance");
-    // Ann: both confirms give Sales. Bea: the second gives Finance, the
-    // first Sales; the first one's writes land last.
+    // Ann: both confirms give Sales. Bea: the newer gives Finance, the
+    // older Sales, whose writes would land last.
     const landing = landingAt(
       /insert into "team_primaries"/iu,
       "before",
@@ -843,18 +843,10 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
       landed: true,
       overlapped: {
         ann: [{ team: sales, made: 1 }],
-        bea: [{ team: sales, made: 1 }],
+        bea: [{ team: finance, made: 1 }],
       },
-      // The second confirm placed both; the first then took Bea out of
-      // the Finance the second made, named as such, and put her in Sales.
-      // Ann's join changed nothing and her leave found nothing: neither
-      // says anything.
-      events: [
-        "team.member.added finance bea",
-        "team.member.added sales ann",
-        "team.member.added sales bea",
-        "team.member.removed finance bea",
-      ],
+      // The newer confirm placed both; the older one then wrote nothing.
+      events: ["team.member.added finance bea", "team.member.added sales ann"],
       rejected: 0,
       ann: [`Finance ${tag}`],
       bea: [`Finance ${tag}`],
@@ -985,7 +977,7 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
       held: async () => await Promise.resolve(staleHeld),
     });
     await store.saveRoster(named, by, { confirmed: true, minted });
-    await placePrimaries(env, named, by);
+    await placePrimaries(env, by);
     const again = named.teams.find(({ name }) => name === `Board ${tag}`)?.id;
     const teams = await membersTeams(admin);
     const texts = await textsFor(ann.userId, marker);
@@ -1063,7 +1055,7 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
     });
   });
 
-  it("count each team's members by what a confirm's batch did, though another confirm moved them in between", async () => {
+  it("count each team's members as the newer confirm left them, when it lands inside an older one", async () => {
     const admin = await signedInApi(idp, "admin");
     const ann = await signedInApi(idp, "user");
     const tag = unique();
@@ -1090,7 +1082,7 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
       ],
     });
     // This confirm read Ann in A and moves her to B; just before its
-    // writes, another moved her to C.
+    // writes, a newer one moved her to C: C stands.
     const landing = landingAt(
       /insert into "team_primaries"/iu,
       "before",
@@ -1111,9 +1103,116 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
       landed: true,
       results: [
         { name: names[0], counted: 0, members: 0 },
-        { name: names[1], counted: 1, members: 1 },
-        { name: names[2], counted: 0, members: 0 },
+        { name: names[1], counted: 0, members: 0 },
+        { name: names[2], counted: 1, members: 1 },
       ],
     });
+  });
+
+  it("never apply a confirm that saved its list before a newer one but placed after it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ann = await signedInApi(idp, "user");
+    const tag = unique();
+    const { roster: first } = await admin.api.onboarding.confirmRoster({
+      teams: [
+        { id: "sales", name: `Sales ${tag}`, lead: null },
+        { id: "finance", name: `Finance ${tag}`, lead: null },
+      ],
+      people: [{ id: "bo", name: "Bo", team: "sales" }],
+    });
+    const idOf = (name: string): string =>
+      first?.teams.find((each) => each.name === `${name} ${tag}`)?.id ?? "";
+    const listed = (annIn: string): RosterInput => ({
+      teams: [
+        { id: idOf("Sales"), name: `Sales ${tag}`, lead: null },
+        { id: idOf("Finance"), name: `Finance ${tag}`, lead: null },
+      ],
+      people: [
+        { id: "bo", name: "Bo", team: idOf("Sales") },
+        { id: "ann", name: "Ann", email: emailOf(ann), team: annIn },
+      ],
+    });
+    // Confirm A has saved Sales and pauses before it places; B saves
+    // Finance and finishes; A goes on.
+    const landing = landingAt(
+      /insert into "staff_list_placed"/iu,
+      "before",
+      async () => {
+        await admin.api.onboarding.confirmRoster(listed(idOf("Finance")));
+      }
+    );
+    const audited = await auditedDuring(async () => {
+      await confirmOn(admin, landing.coreEnv, listed(idOf("Sales")));
+    });
+    const { roster: saved } = await admin.api.onboarding.view();
+    const teams = await membersTeams(admin);
+    const sales = idOf("Sales");
+
+    expect({
+      landed: landing.landed(),
+      // A placed nothing, not even for a moment: B's placing is all there is.
+      events: audited
+        .filter(({ action }) => action.startsWith("team.member."))
+        .map(
+          ({ action, target }) =>
+            `${action} ${target?.id === sales ? "sales" : "finance"}`
+        ),
+      list: saved?.people.find(({ id }) => id === "ann")?.team,
+      sales: teams.get(`Sales ${tag}`)?.memberIds.includes(ann.userId),
+      finance: teams.get(`Finance ${tag}`)?.memberIds.includes(ann.userId),
+      primaries: await primariesOf(ann.userId),
+    }).toStrictEqual({
+      landed: true,
+      events: ["team.member.added finance"],
+      list: idOf("Finance"),
+      sales: false,
+      finance: true,
+      primaries: [{ team: idOf("Finance"), made: 1 }],
+    });
+  });
+
+  it("never add back what an admin took away by hand from the team someone's primary already names", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ann = await signedInApi(idp, "user");
+    const tag = unique();
+    const listed = (ids: string[], annIn: number): RosterInput => ({
+      teams: ["A", "B"].map((letter, index) => ({
+        id: ids[index] ?? letter,
+        name: `${letter} ${tag}`,
+        lead: null,
+      })),
+      people: [
+        { id: "ann", name: "Ann", email: emailOf(ann), team: ids[annIn] ?? "" },
+      ],
+    });
+    const { roster: first } = await admin.api.onboarding.confirmRoster(
+      listed(["A", "B"], 0)
+    );
+    const ids = ["A", "B"].map(
+      (letter) =>
+        first?.teams.find(({ name }) => name === `${letter} ${tag}`)?.id ?? ""
+    );
+    // This confirm read Ann's primary A and moves her to B. Just before
+    // its writes, another confirm placed her in B and an admin took her
+    // out of B by hand.
+    const landing = landingAt(
+      /insert into "team_primaries"/iu,
+      "before",
+      async () => {
+        await admin.api.onboarding.confirmRoster(listed(ids, 1));
+        await callAuth("/organization/remove-team-member", admin.session, {
+          teamId: ids[1],
+          userId: ann.userId,
+        });
+      }
+    );
+    await confirmOn(admin, landing.coreEnv, listed(ids, 1));
+    const teams = await membersTeams(admin);
+
+    expect({
+      landed: landing.landed(),
+      inB: teams.get(`B ${tag}`)?.memberIds.includes(ann.userId),
+      inA: teams.get(`A ${tag}`)?.memberIds.includes(ann.userId),
+    }).toStrictEqual({ landed: true, inB: false, inA: false });
   });
 });

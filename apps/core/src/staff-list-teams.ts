@@ -1,17 +1,18 @@
-import { createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { teamNameKey } from "@grasp-os/shared/onboarding";
+import type { SQL } from "drizzle-orm";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { teamAccessMayHaveDropped } from "./access-revocations.ts";
+import { revocationsOf, tellKept } from "./access-revocations.ts";
+import { appsOwnedOrSharedNow } from "./app-access.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember, organizationId } from "./auth/membership-sql.ts";
 import {
-  auditOutbox,
+  staffListPlaced,
   staffListTeamIds,
   teamMembers,
   teamPrimaries,
@@ -19,6 +20,8 @@ import {
   users,
 } from "./db/core/schema.ts";
 import { chunks, inList } from "./db/d1.ts";
+import { onboardingStore } from "./onboarding/store.ts";
+import type { ConfirmedPlaces } from "./onboarding/store.ts";
 
 // One list of teams with one id (GRA-2055): the onboarding's staff list
 // names the members' teams (Better Auth's `teams`), never teams of its
@@ -44,6 +47,18 @@ import { chunks, inList } from "./db/d1.ts";
 //   id from the first save that names it, and everything keys by it.
 // - A team the admin only drafted: made at the confirm, never before, so a
 //   draft fixed before it leaves no team behind.
+
+/** The open-page notices a leave keeps (`revocationsOf`), as its rows read back. */
+const keptRowsSchema = z.array(
+  z.object({
+    id: z.string(),
+    appId: z.string().nullable(),
+    userIds: z.array(z.string()).nullable(),
+    attempts: z.number(),
+    createdAt: z.date(),
+    afterAppId: z.string().nullable(),
+  })
+);
 
 /** The memberships a leave's delete returns (`placementOf`). */
 const leftRowsSchema = z.array(
@@ -253,26 +268,28 @@ interface Placement {
 /**
  * The staff list's rule for one person (GRA-2055), decided here alone:
  * nothing automatic overrides what an admin did by hand. The list touches
- * someone's memberships only when the team it gives them changes, to
- * `after`: then it takes away the one its primary row says it made itself
- * (`made`), never one an admin added by hand, and adds the new one,
- * recording whether it made it (an admin may have added it already).
- * While the list gives the same team, it does nothing: a membership an
- * admin took away by hand stays away, its primary row the marker of that.
- * Every decision is made in the statement that writes, from the rows as
- * they are then, never from what was read before: a confirm landing in
- * between is built on, so two at once leave one primary, rightly marked.
- * The statements of one person go in one batch, the leave and the join of
- * a move together. None when the read saw no change.
+ * someone's memberships only when the team it gives them changes, from
+ * `before` to `after`: then it takes away the old one only if it made it
+ * itself (`made`), never one an admin added by hand, and adds the new one,
+ * recording whether it made it (an admin may have added it already). It
+ * never adds a membership in the team their primary row already names: an
+ * admin who took that one away by hand keeps it away. Confirms never
+ * interleave (`placePrimaries`), so what they read stands; what an admin
+ * does by hand meanwhile is checked in the statements themselves. Every
+ * statement holds only while `holds` (this confirm's version is the one
+ * placed). The statements of one person go in one batch, a move's leave
+ * and join together; a leave's open-page notice is kept in the batch with
+ * it (`revocationsOf`). None when the read saw no change.
  */
 export const placementOf = (
   db: DrizzleD1Database,
   actor: AuditActor,
   { userId, before, after, key }: Placement,
-  now: Date
+  now: Date,
+  holds: SQL
 ) => {
   if (before?.teamId === after) {
-    return [];
+    return { statements: [], leaves: false };
   }
   const entry = (
     action: "team.member.added" | "team.member.removed",
@@ -283,96 +300,107 @@ export const placementOf = (
     target: { type: "team", id: teamId },
     detail: { userId, via },
   });
-  // The team whose membership the list made, as its primary row says now,
-  // when it is not the one the list gives them.
-  const listMade = sql`(SELECT ${teamPrimaries.teamId} FROM ${teamPrimaries}
-    WHERE ${teamPrimaries.userId} = ${userId} AND ${teamPrimaries.made} = 1
-      ${after === undefined ? sql`` : sql`AND ${teamPrimaries.teamId} <> ${after}`})`;
-  // Its team is set by the statement that keeps it (`json_set` below).
-  const removed = createAuditEvent(
-    entry("team.member.removed", before?.teamId ?? after ?? userId),
-    "core"
-  );
-  const leave = [
-    // First in the person's statements: `placePrimaries` reads what it left.
-    db
-      .delete(teamMembers)
-      .where(
-        and(
-          eq(teamMembers.userId, userId),
-          sql`${teamMembers.teamId} = ${listMade}`
-        )
-      )
-      .returning({ teamId: teamMembers.teamId, userId: teamMembers.userId }),
-    // Its event names the team the statement above left, as it was then.
-    db.insert(auditOutbox).select(
-      sql`SELECT ${removed.id}, json_set(${JSON.stringify(removed)}, '$.target.id', ${listMade}), ${now.getTime()}
-          WHERE changes() > 0`
-    ),
-    ...(after === undefined
-      ? [db.delete(teamPrimaries).where(eq(teamPrimaries.userId, userId))]
-      : []),
-  ];
+  const isPrimary = (teamId: string) =>
+    sql`EXISTS (SELECT 1 FROM ${teamPrimaries} WHERE ${teamPrimaries.userId} = ${userId} AND ${teamPrimaries.teamId} = ${teamId})`;
+  const leave =
+    before === undefined
+      ? []
+      : (() => {
+          const listMade = sql`EXISTS (SELECT 1 FROM ${teamPrimaries} WHERE ${teamPrimaries.userId} = ${userId} AND ${teamPrimaries.teamId} = ${before.teamId} AND ${teamPrimaries.made} = 1)`;
+          const isInBefore = sql`EXISTS (SELECT 1 FROM ${teamMembers} WHERE ${teamMembers.userId} = ${userId} AND ${teamMembers.teamId} = ${before.teamId})`;
+          return [
+            // First, while the membership is still there to say what it
+            // reached: a notice for each App they reach now, which the
+            // clock tells if the pages aren't told after this commits.
+            revocationsOf(
+              db,
+              appsOwnedOrSharedNow(userId),
+              [userId],
+              sql`${holds} AND ${listMade} AND ${isInBefore}`
+            ),
+            db
+              .delete(teamMembers)
+              .where(
+                and(
+                  eq(teamMembers.userId, userId),
+                  eq(teamMembers.teamId, before.teamId),
+                  listMade,
+                  holds
+                )
+              )
+              .returning({
+                teamId: teamMembers.teamId,
+                userId: teamMembers.userId,
+              }),
+            outboxedIfChanged(db, entry("team.member.removed", before.teamId)),
+            ...(after === undefined
+              ? [
+                  db
+                    .delete(teamPrimaries)
+                    .where(and(eq(teamPrimaries.userId, userId), holds)),
+                ]
+              : []),
+          ];
+        })();
   if (after === undefined || key === undefined) {
-    return leave;
+    return { statements: leave, leaves: leave.length > 0 };
   }
   const memberId = crypto.randomUUID();
   const isIn = sql`EXISTS (SELECT 1 FROM ${teamMembers} WHERE ${teamMembers.userId} = ${userId} AND ${teamMembers.teamId} = ${after})`;
-  return [
-    ...leave,
-    // In one statement with the checks: someone removed, or a team
-    // deleted, since the read gets nothing; nor does a membership an
-    // admin added meanwhile, by its pair or Better Auth's key.
-    db
-      .insert(teamMembers)
-      .select(
-        sql`SELECT ${memberId}, ${after}, ${userId}, ${key}, ${now.getTime()}
-          WHERE ${activeMember(userId)}
-            AND EXISTS (SELECT 1 FROM ${teams} WHERE ${teams.id} = ${after} AND ${teams.organizationId} = ${organizationId})
-            AND NOT ${isIn}`
-      )
-      .onConflictDoNothing(),
-    outboxedIfChanged(db, entry("team.member.added", after)),
-    // Made by the list only if its own insert made the row; a primary row
-    // already on this team keeps what it says (a confirm in between made it).
-    db
-      .insert(teamPrimaries)
-      .select(
-        sql`SELECT ${userId}, ${after}, ${now.getTime()},
-            EXISTS (SELECT 1 FROM ${teamMembers} WHERE ${teamMembers.id} = ${memberId})
-          WHERE ${isIn}`
-      )
-      .onConflictDoUpdate({
-        target: teamPrimaries.userId,
-        set: {
-          made: sql`CASE WHEN ${teamPrimaries.teamId} = excluded.team_id THEN ${teamPrimaries.made} ELSE excluded.made END`,
-          teamId: sql`excluded.team_id`,
-          placedAt: sql`excluded.placed_at`,
-        },
-      }),
-  ];
+  return {
+    leaves: leave.length > 0,
+    statements: [
+      ...leave,
+      // In one statement with the checks: someone removed, or a team
+      // deleted, since the read gets nothing; nor does a membership an
+      // admin added meanwhile, by its pair or Better Auth's key; nor one in
+      // the team their primary row already names.
+      db
+        .insert(teamMembers)
+        .select(
+          sql`SELECT ${memberId}, ${after}, ${userId}, ${key}, ${now.getTime()}
+            WHERE ${holds}
+              AND ${activeMember(userId)}
+              AND EXISTS (SELECT 1 FROM ${teams} WHERE ${teams.id} = ${after} AND ${teams.organizationId} = ${organizationId})
+              AND NOT ${isIn}
+              AND NOT ${isPrimary(after)}`
+        )
+        .onConflictDoNothing(),
+      outboxedIfChanged(db, entry("team.member.added", after)),
+      // Made by the list only if its own insert made the row.
+      db
+        .insert(teamPrimaries)
+        .select(
+          sql`SELECT ${userId}, ${after}, ${now.getTime()},
+              EXISTS (SELECT 1 FROM ${teamMembers} WHERE ${teamMembers.id} = ${memberId})
+            WHERE ${holds} AND ${isIn} AND NOT ${isPrimary(after)}`
+        )
+        .onConflictDoUpdate({
+          target: teamPrimaries.userId,
+          set: {
+            teamId: sql`excluded.team_id`,
+            placedAt: sql`excluded.placed_at`,
+            made: sql`excluded.made`,
+          },
+        }),
+    ],
+  };
 };
 
 /**
- * Puts each person on the confirmed `roster` who is a member now in their
- * team, as their primary one, found by the address their sign-in
- * verified; and moves out of the team it gave them before whoever the
- * list moved, took off, or no longer finds by their address, by the one
- * rule (`placementOf`). Each change audited.
+ * `placePrimaries` for one claimed version: each current member whose
+ * verified address its list names goes in that team, as their primary
+ * one; whoever it moved, took off, or no longer finds leaves the team it
+ * gave them before, by the one rule (`placementOf`). Each change audited.
  */
-export const placePrimaries = async (
+const placeVersion = async (
   env: Env,
-  roster: Roster,
-  actor: AuditActor
+  actor: AuditActor,
+  { version, places }: ConfirmedPlaces
 ): Promise<void> => {
   const db = drizzle(env.DB);
-  const teamOf = new Map<string, string>();
-  for (const { email, team } of roster.people) {
-    const address = email.toLowerCase();
-    if (address !== "" && !teamOf.has(address)) {
-      teamOf.set(address, team);
-    }
-  }
+  const holds = sql`EXISTS (SELECT 1 FROM ${staffListPlaced} WHERE ${staffListPlaced.organizationId} = ${organizationId} AND ${staffListPlaced.version} = ${version})`;
+  const teamOf = new Map(places.map(({ email, team }) => [email, team]));
   const [found, placed] = await db.batch([
     db
       .select({ id: users.id, email: users.email })
@@ -419,29 +447,39 @@ export const placePrimaries = async (
       })
   );
   const now = new Date();
-  // What the batches actually left, by the leaves' own returned rows: a
-  // confirm in between may have moved someone, so never the read's guess.
+  // What the batches actually left, by the leaves' own returned rows.
   const left: { teamId: string; userId: string }[] = [];
   // Each person's change whole in one batch: a move never ends half done.
   for (const part of chunks(changes, peoplePerBatch)) {
-    const groups = part
-      .map((change) => placementOf(db, actor, change, now))
-      .filter((group) => group.length > 0);
-    // Where each person's statements start in the batch: their leave.
-    const starts: number[] = [];
+    const groups = part.map((change) =>
+      placementOf(db, actor, change, now, holds)
+    );
+    // Where each leaving person's statements start: its notice, then its
+    // removal.
+    const leaves: number[] = [];
     let at = 0;
-    for (const group of groups) {
-      starts.push(at);
-      at += group.length;
+    for (const { statements, leaves: leaving } of groups) {
+      if (leaving) {
+        leaves.push(at);
+      }
+      at += statements.length;
     }
-    const [first, ...rest] = groups.flat();
+    const [first, ...rest] = groups.flatMap(({ statements }) => statements);
     if (first !== undefined) {
       // Batches one after another, each within D1's limits.
       // oxlint-disable-next-line no-await-in-loop
       const results = await auditedBatch(env, db, [first, ...rest]);
-      for (const start of starts) {
-        left.push(...leftRowsSchema.parse(results[start]));
+      const kept = leaves.flatMap((start) =>
+        keptRowsSchema.parse(results[start])
+      );
+      for (const start of leaves) {
+        left.push(...leftRowsSchema.parse(results[start + 1]));
       }
+      // As Better Auth's own removal does (auth.ts): leaving a team can
+      // take a role in an App away, so its open pages look again; told
+      // once the batch committed, and by the clock if not now.
+      // oxlint-disable-next-line no-await-in-loop
+      await tellKept(env, kept);
     }
   }
   const touched = [
@@ -459,34 +497,47 @@ export const placePrimaries = async (
       })
       .where(inList(teams.id, touched));
   }
-  // As Better Auth's own removal does (auth.ts): leaving a team can take a
-  // role in an App shared with it away, so its open pages look again.
-  const leavers = new Map<string, string[]>();
-  for (const { teamId, userId } of left) {
-    leavers.set(teamId, [...(leavers.get(teamId) ?? []), userId]);
-  }
-  await Promise.all(
-    [...leavers].map(async ([teamId, userIds]) => {
-      await teamAccessMayHaveDropped(env, teamId, userIds);
-    })
-  );
 };
 
 /**
- * An admin adds `userId` to `teamId` by hand (Settings › Members), called
- * before Better Auth's insert: where that is the team the list gives them,
- * the membership is theirs from now on, and the list never takes it away
- * (`placementOf`), though the add fail or find it there already.
+ * Puts the members of the list the admin last confirmed in their teams
+ * (GRA-2055), from the onboarding store's confirmed places, never from a
+ * request: a confirm at a time, and never an older one after a newer one.
+ * It claims its version in D1 first (`staff_list_placed`), only when it is
+ * newer than the one placed, reads after that claim, and writes only
+ * while the claim stands: a newer confirm's claim makes the rest of an
+ * older one's writes nothing, and the newer one reads what the older one
+ * wrote. Placed, it looks at the store again and places a newer list, if
+ * one came meanwhile, so the members' teams end as the last confirmed
+ * list says.
  */
-export const addedByHand = async (
+export const placePrimaries = async (
   env: Env,
-  teamId: string,
-  userId: string
+  actor: AuditActor
 ): Promise<void> => {
-  await drizzle(env.DB)
-    .update(teamPrimaries)
-    .set({ made: false })
-    .where(
-      and(eq(teamPrimaries.userId, userId), eq(teamPrimaries.teamId, teamId))
-    );
+  const db = drizzle(env.DB);
+  const store = onboardingStore(env);
+  let confirmed = await store.confirmedPlaces();
+  while (confirmed !== null) {
+    const { version } = confirmed;
+    // oxlint-disable-next-line no-await-in-loop -- one confirmed list at a time
+    const [claimed] = await db
+      .insert(staffListPlaced)
+      .values({ organizationId, version })
+      .onConflictDoUpdate({
+        target: staffListPlaced.organizationId,
+        set: { version },
+        setWhere: sql`${staffListPlaced.version} < ${version}`,
+      })
+      .returning({ version: staffListPlaced.version });
+    if (claimed === undefined) {
+      // This list or a newer one is placed, or being placed.
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one confirmed list at a time
+    await placeVersion(env, actor, confirmed);
+    // oxlint-disable-next-line no-await-in-loop -- one confirmed list at a time
+    const latest = await store.confirmedPlaces();
+    confirmed = latest?.version === version ? null : latest;
+  }
 };

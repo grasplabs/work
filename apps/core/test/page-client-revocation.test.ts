@@ -4,6 +4,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { retryAccessRevocations } from "../src/access-revocations.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { newTeam } from "./admin-teams.ts";
 import { requestGranted } from "./apps.ts";
@@ -79,63 +80,58 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
   });
 
-  it("clears the page of someone the staff list takes out of the team the App is shared with, though another confirm put them there just before", async () => {
+  it("clears the page of someone the staff list takes out of the team the App is shared with, by the clock when the confirm failed just after", async () => {
     const opened = await openedApp();
     const admin = await personApi("admin");
     const ann = await personApi("user");
     const tag = unique();
-    const names = ["A", "B", "C"].map((letter) => `${letter} ${tag}`);
+    const names = ["B", "C"].map((letter) => `${letter} ${tag}`);
     const email = z.string().parse(ann.person.email);
-    const { roster: first } = await admin.api.onboarding.confirmRoster({
+    const listed = (ids: readonly string[], annIn: number) => ({
       teams: names.map((name, index) => ({
-        id: `t${index}`,
+        id: ids[index] ?? `t${index}`,
         name,
         lead: null,
       })),
-      people: [{ id: "ann", name: "Ann", email, team: "t0" }],
+      people: [{ id: "ann", name: "Ann", email, team: ids[annIn] ?? "t1" }],
     });
+    const { roster: first } = await admin.api.onboarding.confirmRoster(
+      listed(["t0", "t1"], 1)
+    );
     const ids = names.map(
       (name) => first?.teams.find((team) => team.name === name)?.id ?? ""
     );
-    const listed = (annIn: number) => ({
-      teams: names.map((name, index) => ({
-        id: ids[index] ?? "",
-        name,
-        lead: null,
-      })),
-      people: [{ id: "ann", name: "Ann", email, team: ids[annIn] ?? "" }],
-    });
     await admin.api.apps.members.add(opened.app, {
       type: "team",
-      id: ids[2] ?? "",
+      id: ids[1] ?? "",
       role: "user",
     });
-    // This confirm read Ann in A and moves her to B. Just before its
-    // writes, another moved her to C, the App's team, and she opened it.
-    let follower: Awaited<ReturnType<typeof followedList>> | undefined;
-    const landing = landingAt(
-      /insert into "team_primaries"/iu,
-      "before",
-      async () => {
-        await admin.api.onboarding.confirmRoster(listed(2));
-        const { lease } = await ann.api.pages.open(opened.app);
-        follower = await followedList(opened, ann.api.pages, lease);
-      }
-    );
+    const { lease } = await ann.api.pages.open(opened.app);
+    const follower = await followedList(opened, ann.api.pages, lease);
+    // The confirm takes Ann out of C, the App's team; the database goes
+    // away just after that batch commits, before any page is told.
+    const landing = landingAt(/delete from "team_members"/iu, "after", () => {
+      throw new Error("The database went away");
+    });
     const { core } = await openRpc(admin.session, {
       coreEnv: landing.coreEnv,
     });
+    let failed = false;
     try {
       using session = core.authenticate();
-      await session.onboarding.confirmRoster(listed(1));
+      await session.onboarding.confirmRoster(listed(ids, 0));
+    } catch {
+      failed = true;
     } finally {
       core[Symbol.dispose]();
     }
+    // The clock tells what the batch kept.
+    await retryAccessRevocations(env);
 
-    expect(landing.landed()).toBeTruthy();
-    if (follower === undefined) {
-      throw new Error("Ann's page never opened");
-    }
+    expect({ landed: landing.landed(), failed }).toStrictEqual({
+      landed: true,
+      failed: true,
+    });
     await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
   });
 

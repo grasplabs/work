@@ -49,7 +49,7 @@ import {
 import { mayComeIn, staffMayStay } from "../onboarding/gate.ts";
 import { onboardingStore } from "../onboarding/store.ts";
 import { keepSignInAddress } from "../source-readers.ts";
-import { addedByHand } from "../staff-list-teams.ts";
+import { addedByHand } from "../staff-list-by-hand.ts";
 import { checkClaims } from "./claims.ts";
 import {
   devIdpOrigin,

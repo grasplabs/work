@@ -200,7 +200,7 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
       );
       const view = await store.saveRoster(named, by, { confirmed, minted });
       if (confirmed) {
-        await placePrimaries(this.#env, named, by);
+        await placePrimaries(this.#env, by);
       }
       // A team the save took under seven loses its claims in the Brain now,
       // not only by core's clock (onboarding/new-brain.ts).

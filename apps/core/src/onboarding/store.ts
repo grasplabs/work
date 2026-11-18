@@ -325,6 +325,21 @@ const queuedKey = "forget_lines_queued";
 const kickoffChangesKey = "kickoff_changes";
 
 /**
+ * Where the list the admin last confirmed puts each address, by the
+ * version of that confirm (`confirmedPlaces`): the first of two people
+ * sharing an address keeps it.
+ */
+const confirmedPlacesKey = "confirmed_places";
+
+const confirmedPlacesSchema = z.object({
+  version: z.int().positive(),
+  places: z.array(z.object({ email: z.string(), team: z.string() })),
+});
+
+/** What `confirmedPlaces` answers. */
+export type ConfirmedPlaces = z.infer<typeof confirmedPlacesSchema>;
+
+/**
  * The company's teams as the admin last confirmed them (`#rosterConfirmed`):
  * when, and each confirmed team taking part, its name, the admin's own
  * description and its head count. What every member reads on the Brain
@@ -1517,6 +1532,7 @@ export class Onboarding extends DurableObject<Env> {
       if (confirmed) {
         this.#confirmed(before, roster);
         this.#rosterConfirmed(new Date().toISOString());
+        this.#keepConfirmedPlaces(roster);
       } else {
         this.#holdNew(before, roster);
       }
@@ -4914,6 +4930,32 @@ export class Onboarding extends DurableObject<Env> {
       .select({ id: teams.id, name: teams.name, minted: teams.minted })
       .from(teams)
       .all();
+  }
+
+  /**
+   * Where the list the admin last confirmed puts each address (GRA-2055):
+   * by a version that only grows, one per confirmed save, so a placement
+   * from an older list never applies after a newer one
+   * (staff-list-teams.ts `placePrimaries`). Null before any confirm.
+   */
+  confirmedPlaces(): ConfirmedPlaces | null {
+    const held = this.ctx.storage.kv.get(confirmedPlacesKey);
+    return held === undefined ? null : confirmedPlacesSchema.parse(held);
+  }
+
+  /** In a confirmed save's transaction: its places, under the next version. */
+  #keepConfirmedPlaces(roster: Roster): void {
+    const teamOf = new Map<string, string>();
+    for (const { email, team } of roster.people) {
+      const address = email.toLowerCase();
+      if (address !== "" && !teamOf.has(address)) {
+        teamOf.set(address, team);
+      }
+    }
+    this.ctx.storage.kv.put(confirmedPlacesKey, {
+      version: (this.confirmedPlaces()?.version ?? 0) + 1,
+      places: [...teamOf].map(([email, team]) => ({ email, team })),
+    });
   }
 
   /** Whether the staff list has the members' team `id` (GRA-2055). */

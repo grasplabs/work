@@ -570,6 +570,19 @@ export const teamPrimaries = sqliteTable(
 );
 
 /**
+ * The last confirmed staff list whose places were put into the members'
+ * teams (GRA-2055), by the onboarding store's version of it: one row for
+ * the company. A placement claims its version here before it reads, only
+ * when it is newer, and every statement it writes holds only while the
+ * row still names it (staff-list-teams.ts `placePrimaries`): an older
+ * confirm never applies after a newer one.
+ */
+export const staffListPlaced = sqliteTable("staff_list_placed", {
+  organizationId: text("organization_id").primaryKey(),
+  version: integer().notNull(),
+});
+
+/**
  * The ids of every members' team the staff list ever made (GRA-2055):
  * written by the very batch that makes one (staff-list-teams.ts
  * `intoMembersTeams`), kept when the team is deleted. A team row is made
