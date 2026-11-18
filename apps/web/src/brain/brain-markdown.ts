@@ -108,7 +108,7 @@ export const noteMarkdown = (
   };
   /** A link to where something was said in a source. */
   const quoteLink = (text: string, sourceId: string, statementId: string) =>
-    `[${inline(statementWords(statementId, text))}](${baseUrl}/brain/${pathPart(sourceId)}#${pathPart(statementId)})${isTeamClaim(statementId) ? ` (${inline(teamClaimBasis())})` : ""}`;
+    `[${inline(statementWords(statementId, text))}](${baseUrl}/brain/${pathPart(sourceId)}#${pathPart(statementId)})${isTeamClaim(statementId) ? ` (${inline(teamClaimBasis(statementId))})` : ""}`;
   const eventLine = (entry: NoteEvent) => [
     `- **${formatDay(entry.date)}** · ${link({ label: entry.title, to: entry.to, workflowId: entry.workflowId })}${given(entry.detail) ? ` · ${inline(entry.detail)}` : ""}`,
     ...entry.quotes.map(
@@ -129,7 +129,7 @@ export const noteMarkdown = (
     "",
     // A team's claim says what it rests on, as the page does.
     ...(note.kind === "statement" && isTeamClaim(note.id)
-      ? [`*${inline(teamClaimBasis())}*`, ""]
+      ? [`*${inline(teamClaimBasis(note.id))}*`, ""]
       : []),
     escapeMarkdown(note.summary),
     "",

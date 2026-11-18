@@ -6237,6 +6237,10 @@ msgid "From the company's vision, version {version}"
 msgstr "De la visión de la empresa, versión {version}"
 
 #: src/brain/memories-page.tsx
+msgid "From what people across the company say, version {version}"
+msgstr "De lo que dicen personas de toda la empresa, versión {version}"
+
+#: src/brain/memories-page.tsx
 msgid "From what your team said, version {version}"
 msgstr "De lo que dijo tu equipo, versión {version}"
 
@@ -12089,6 +12093,13 @@ msgctxt "what something known rests on: people said it"
 msgid "Said"
 msgstr "Dicho"
 
+#. Under a statement put together from what people across the company told, only counted anonymously
+#. Under a statement put together from what people across the company told, only counted anonymously
+#: src/brain/aggregate.tsx
+#: src/brain/brain.ts
+msgid "Said by five or more people across the company"
+msgstr "Dicho por cinco o más personas de toda la empresa"
+
 #: src/brain/work-knowledge.tsx
 msgid "Said in an interview"
 msgstr "Dicho en una entrevista"
@@ -16311,6 +16322,15 @@ msgstr "Lo que te espera"
 #: src/workflows/requests/request-table.tsx
 msgid "What needs you can't be read right now."
 msgstr "Ahora no se puede leer lo que te necesita."
+
+#: src/brain/brain.ts
+msgid "What people across the company say"
+msgstr "Lo que dicen las personas de toda la empresa"
+
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "What people across the company say"
+msgstr "Lo que dicen las personas de toda la empresa"
 
 #: src/workflows/requests/request-table.tsx
 msgid "What people ask"

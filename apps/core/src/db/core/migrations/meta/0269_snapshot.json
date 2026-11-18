@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0e85ec24-ce9d-4ab8-8e6b-6d19bc7860a7",
+  "id": "d0da1ede-103f-4167-8345-b0b7de4c2318",
   "prevId": "d0fb311d-a8d4-478d-8561-f59e2a7eb166",
   "tables": {
     "access_revocations": {
@@ -10557,6 +10557,46 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "run_state_writers": {
+      "name": "run_state_writers",
+      "columns": {
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "writer_run_id": {
+          "name": "writer_run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "run_state_writers_writer_idx": {
+          "name": "run_state_writers_writer_idx",
+          "columns": [
+            "writer_run_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "run_state_writers_run_id_writer_run_id_pk": {
+          "columns": [
+            "run_id",
+            "writer_run_id"
+          ],
+          "name": "run_state_writers_run_id_writer_run_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "sdk_artifact_candidates": {
       "name": "sdk_artifact_candidates",
       "columns": {
@@ -13454,13 +13494,6 @@
         "state_hash": {
           "name": "state_hash",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "state_withheld": {
-          "name": "state_withheld",
-          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -16569,13 +16602,6 @@
         "state_hash": {
           "name": "state_hash",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "state_withheld": {
-          "name": "state_withheld",
-          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

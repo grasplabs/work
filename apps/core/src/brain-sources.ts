@@ -38,12 +38,14 @@ import {
 } from "./brain-run-sources.ts";
 import { brainHandOvers, workflowStartReceipts } from "./db/core/schema.ts";
 import { workspace } from "./durable-objects.ts";
+import { opinionSource } from "./onboarding/company-opinions.ts";
 import {
   claimOf,
   drawingOf,
   drawingSource,
   kickoffOf,
   kickoffSource,
+  opinionOf,
   rosterOf,
   rosterSource,
 } from "./onboarding/new-brain.ts";
@@ -270,6 +272,8 @@ const producers: Record<
   claim: { source: claimSource, read: claimOf, ofPerson: null },
   // A drawing's id is minted by the onboarding too, and names nobody.
   drawing: { source: drawingSource, read: drawingOf, ofPerson: null },
+  // An opinion's id is minted by the onboarding too, and names nobody.
+  opinion: { source: opinionSource, read: opinionOf, ofPerson: null },
   // The kickoff's id is minted by the onboarding, one a kickoff, and names
   // nobody.
   kickoff: { source: kickoffSource, read: kickoffOf, ofPerson: null },

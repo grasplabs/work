@@ -1,8 +1,9 @@
 ALTER TABLE `workflow_candidate_runs` ADD `state_withheld` integer;--> statement-breakpoint
 ALTER TABLE `workflow_start_receipts` ADD `state_withheld` integer;--> statement-breakpoint
 -- How many kept keys a start's run started without is written once, with
--- its receipt, and never changes (workflow-state.ts): the trigger that
--- keeps a receipt as it was written now covers it too.
+-- its receipt, and never changes (workflow-state.ts), and the hash of the
+-- snapshot it froze only goes with the receipt's details (retention.ts):
+-- the trigger that keeps a receipt as it was written now covers both.
 DROP TRIGGER `workflow_start_receipts_immutable_update`;
 --> statement-breakpoint
 CREATE TRIGGER `workflow_start_receipts_immutable_update` BEFORE UPDATE ON `workflow_start_receipts`
@@ -29,6 +30,7 @@ WHEN NOT (
 	AND NEW.`details_removed_at` IS NOT NULL
 	AND NEW.`input` IS NULL
 	AND NEW.`params` IS NULL
+	AND NEW.`state_hash` IS NULL
 ) BEGIN
 	SELECT RAISE(ABORT, 'workflow_start_receipts are immutable');
 END;
