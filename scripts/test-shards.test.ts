@@ -54,6 +54,61 @@ const suite: ShardFile[] = [
 const keysOf = (shards: ShardFile[][]): string[][] =>
   shards.map((shard) => shard.map(({ key }) => key).toSorted());
 
+/** Numbers from 0 to 1 from `seed`, the same on every run (Park–Miller). */
+const randomFrom = (seed: number): (() => number) => {
+  const modulus = 2_147_483_647;
+  let state = seed;
+  return () => {
+    state = (state * 48_271) % modulus;
+    return state / modulus;
+  };
+};
+
+/** `files` in an order `seed` picks. */
+const shuffled = (files: readonly ShardFile[], seed: number): ShardFile[] => {
+  const random = randomFrom(seed);
+  return files
+    .map((each) => ({ each, at: random() }))
+    .toSorted((a, b) => a.at - b.at)
+    .map(({ each }) => each);
+};
+
+/** The keys of `files`, sorted. */
+const sortedKeys = (files: readonly ShardFile[]): string[] =>
+  files.map(({ key }) => key).toSorted();
+
+/** What the sequencer takes a file nobody timed yet to take: a median. */
+const untimedSeconds = 2.3;
+
+/**
+ * A suite of CI's size, from `seed`: about 1,000 to 1,300 files of 26 projects in
+ * three groups, one of them serial, some projects small enough to go to
+ * one shard whole, times in tenths of a second as the durations keep them,
+ * a few long files and a tenth untimed. Unsorted, a split of the eighth
+ * (1,158 files) changed with the order of its files at 30 and 42 shards,
+ * and again with one untimed file added to each project.
+ */
+const generatedSuite = (seed: number): ShardFile[] => {
+  const random = randomFrom(seed);
+  return Array.from({ length: 26 }, (_, index) => index).flatMap((index) => {
+    let group = 2;
+    if (index < 23) {
+      group = index < 20 ? 0 : 1;
+    }
+    const count = index % 5 === 0 ? 3 : 10 + Math.floor(random() * 90);
+    return Array.from({ length: count }, (__, at) => {
+      const untimed = random() < 0.1;
+      const long = random() < 0.05;
+      const seconds = long ? random() * 150 : random() * random() * 12;
+      return file(
+        `p${index} test/f${at}.test.ts`,
+        untimed ? untimedSeconds : Math.round(seconds * 10) / 10,
+        { group, serial: group === 2 }
+      );
+    });
+  });
+};
+
 describe("splitting the test files between shards", () => {
   it("runs every file in exactly one shard", () => {
     const shards = splitIntoShards(suite, 4);
@@ -64,11 +119,36 @@ describe("splitting the test files between shards", () => {
     );
   });
 
-  it("splits the same files the same way, whatever order they come in", () => {
-    expect(keysOf(splitIntoShards(suite.toReversed(), 4))).toStrictEqual(
-      keysOf(splitIntoShards(suite, 4))
-    );
-  });
+  it(
+    "splits a suite of CI's size the same way in whatever order its files come, each file in exactly one shard",
+    { timeout: 120_000 },
+    () => {
+      const big = generatedSuite(8);
+      // A file nobody timed yet in every project, as the sequencer times it.
+      const withNew = [
+        ...big,
+        ...[...Map.groupBy(big, ({ project }) => project).values()].flatMap(
+          (own) =>
+            own.slice(0, 1).map((first) => ({
+              ...first,
+              key: `${first.project} test/new.test.ts`,
+              seconds: untimedSeconds,
+            }))
+        ),
+      ];
+      for (const files of [big, withNew]) {
+        for (const count of [30, 42]) {
+          const plan = keysOf(splitIntoShards(files, count));
+          expect(plan.flat().toSorted()).toStrictEqual(sortedKeys(files));
+          for (let seed = 1; seed <= 12; seed += 1) {
+            expect(
+              keysOf(splitIntoShards(shuffled(files, seed), count))
+            ).toStrictEqual(plan);
+          }
+        }
+      }
+    }
+  );
 
   it("puts the longest files of a group in different shards", () => {
     const shards = keysOf(splitIntoShards(suite, 5));
@@ -334,17 +414,28 @@ describe("splitting the test files between shards", () => {
     const short = Array.from({ length: 40 }, (_, index) =>
       file(`core short-${index}`, 10)
     );
+    const withShorts = (count: number): string[][] =>
+      keysOf(splitIntoShards([...long, ...short], count)).map((shard) =>
+        shard.filter((key) => !key.includes("short"))
+      );
+
     // With a shard to spare, each long file alone and the short ones
-    // spread over the rest; without, the last long file beside them.
+    // spread over the rest; with none, the longest go alone first and the
+    // shortest of them runs beside the short ones.
     expect(
       keysOf(splitIntoShards([...long, ...short], 6)).filter((shard) =>
-        shard.every((key) => !key.includes("short"))
+        shard.some((key) => !key.includes("short"))
       )
     ).toStrictEqual([["core leaks"], ["core interviews"], ["core erasure"]]);
     expect(
-      splitIntoShards([...long, ...short], 3)
-        .map((shard) => shard.length)
-        .toSorted((a, b) => a - b)
+      keysOf(splitIntoShards([...long, ...short], 3)).map(
+        (shard) => shard.length
+      )
     ).toStrictEqual([1, 1, 41]);
+    expect(withShorts(3)).toStrictEqual([
+      ["core leaks"],
+      ["core interviews"],
+      ["core erasure"],
+    ]);
   });
 });

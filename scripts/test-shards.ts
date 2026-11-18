@@ -174,16 +174,30 @@ export const runsInFirstShard = ({ key, browser }: ShardFile): boolean =>
 const keyOfUnit = (unit: readonly ShardFile[]): string => unit[0]?.key ?? "";
 
 /**
+ * `files` by key. Every runner computes the split alone, from the files in
+ * whatever order Vitest found them, which isn't the same on two runners:
+ * the order a unit's or a shard's times are added in changes the sum in
+ * its last bit, and with it which of two shards that tie a file goes to.
+ * From the same order, every runner adds the same numbers in the same
+ * order, and every tie falls the same way: by the shards' order, which
+ * follows the keys. So the split is a function of the set of files and
+ * their times alone. Unsorted, a plan that left a file in no shard, or in
+ * two, was a matter of the order Vitest found the files in.
+ */
+const byFileKey = (files: readonly ShardFile[]): ShardFile[] =>
+  files.toSorted((a, b) => byKey(a.key, b.key));
+
+/**
  * `files` spread over `count` shards: the longest unit first, each into
  * the shard it lengthens least, and of shards it lengthens alike, the one
- * with the least work.
+ * with the least work, then the first.
  */
 export const spreadOver = (
   files: readonly ShardFile[],
   count: number
 ): ShardFile[][] => {
   const shards: ShardFile[][] = Array.from({ length: count }, () => []);
-  const units = unitsOf(files);
+  const units = unitsOf(byFileKey(files));
   const pinned = (unit: readonly ShardFile[]): boolean =>
     unit.some(runsInFirstShard);
   for (const unit of units.filter(pinned)) {
@@ -196,22 +210,24 @@ export const spreadOver = (
     );
   // Each long file to a shard of its own while one is left for the rest
   // (`aloneSeconds`), longest first.
-  let alone = 0;
+  const alone = new Set<number>();
   const others = longestFirst.filter((unit) => {
     const free = shards.findIndex((shard) => shard.length === 0);
-    const lone = isAlone(unit) && free !== -1 && alone + 1 < count;
+    const lone = isAlone(unit) && free !== -1 && alone.size + 1 < count;
     if (lone) {
       shards[free]?.push(...unit);
-      alone += 1;
+      alone.add(free);
     }
     return !lone;
   });
   for (const unit of others) {
-    let best = 0;
+    let best = shards.findIndex((_, index) => !alone.has(index));
     let bestSeconds = Number.POSITIVE_INFINITY;
     let bestWork = Number.POSITIVE_INFINITY;
     for (const [index, shard] of shards.entries()) {
-      if (isAlone(shard)) {
+      // A shard a long file was given alone, not one a long file happens
+      // to be the first in.
+      if (alone.has(index)) {
         continue;
       }
       const seconds = shardSeconds([...shard, ...unit]);
@@ -242,13 +258,14 @@ export const spreadOver = (
  * whose shards would end last, of those that end later than their longest
  * unit alone would: a group held up by one long file (the compiler's
  * longest build) gains nothing from more, which then go where they help.
- * The same files always split the same way, on every runner.
+ * The same files always split the same way, on every runner, in whatever
+ * order they come (`byFileKey`).
  */
 export const splitIntoShards = (
   files: readonly ShardFile[],
   count: number
 ): ShardFile[][] => {
-  const groups = Map.groupBy(files, ({ group }) => group);
+  const groups = Map.groupBy(byFileKey(files), ({ group }) => group);
   const order = [...groups.keys()].toSorted((a, b) => a - b);
   if (count < order.length) {
     throw new Error(
