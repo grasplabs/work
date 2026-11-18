@@ -11,6 +11,7 @@ import { LoadingLines } from "../frame/page-states.tsx";
 import {
   Breadcrumb,
   BreadcrumbItem,
+  BreadcrumbLink,
   BreadcrumbList,
   BreadcrumbPage,
 } from "../grasp/breadcrumb/index.ts";
@@ -179,11 +180,11 @@ const PathCrumbs = ({ path }: { path: string }) => {
         {path.split("/").map((label, at, all) => (
           // A path's folders can repeat a name: its place tells them apart.
           <BreadcrumbItem key={all.slice(0, at + 1).join("/")}>
-            {/* Only the file itself is the current page; its folders are words. */}
+            {/* Only the file itself is the current page; its folders are names, not links. */}
             {at === all.length - 1 ? (
               <BreadcrumbPage>{label}</BreadcrumbPage>
             ) : (
-              label
+              <BreadcrumbLink>{label}</BreadcrumbLink>
             )}
           </BreadcrumbItem>
         ))}
