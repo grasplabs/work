@@ -22,6 +22,7 @@ import type { ReactNode, RefObject } from "react";
 
 import { Button } from "../button";
 import { Alert, Cross, Icon, Mic, MicOff, Retry, Tick } from "../icons";
+import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { useComposerListen } from "./context";
 import { useStill } from "./still-context";
@@ -135,7 +136,7 @@ const styles = stylex.create({
   word: {
     color: grasp.ink,
     transitionProperty: "color",
-    transitionDuration: { default: "200ms", [media.reduced]: "0s" },
+    transitionDuration: simply.mark,
     transitionTimingFunction: grasp.ease,
   },
   interim: { color: grasp.muted },
@@ -168,9 +169,9 @@ const styles = stylex.create({
     alignItems: "center",
     paddingBlockEnd: 0,
     transitionProperty: "padding-block-end",
-    transitionDuration: { default: "220ms", [media.reduced]: "0s" },
+    transitionDuration: simply.ui,
     transitionTimingFunction: grasp.ease,
-    transitionDelay: { default: "100ms", [media.reduced]: "0s" },
+    transitionDelay: simply.stagger,
   },
   bandOpen: { paddingBlockEnd: grasp.controlSm, transitionDelay: "0s" },
   // A state's words in the band's place (Silence, Muted, A part unheard, Asking), from its start.

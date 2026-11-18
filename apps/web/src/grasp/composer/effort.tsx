@@ -4,14 +4,10 @@ import * as stylex from "@stylexjs/stylex";
 import { useId } from "react";
 
 import { focus } from "../focus/focus";
-import { Icon, Tick } from "../icons";
+import { visuallyHidden } from "../hidden/hidden";
 import { iconVars } from "../icons/icon.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
-import { LevelWords } from "./reasoning";
 import type { ComposerReasoningOption } from "./reasoning";
-
-/** How the levels are drawn: a list of rows, or one segmented control. */
-export type ComposerEffortLook = "rows" | "segments";
 
 /** Every prop a ComposerEffort takes. */
 export interface ComposerEffortProps {
@@ -23,8 +19,6 @@ export interface ComposerEffortProps {
   onValueChange: (value: string) => void;
   /** Its heading, and the radio group's name ("Effort"). */
   label: string;
-  /** Rows or segments. */
-  look: ComposerEffortLook;
 }
 
 const styles = stylex.create({
@@ -53,42 +47,6 @@ const styles = stylex.create({
     margin: 0,
     opacity: 0,
     cursor: "pointer",
-  },
-  rows: {
-    display: "grid",
-    gap: 0,
-  },
-  row: {
-    position: "relative",
-    display: "flex",
-    alignItems: "center",
-    gap: grasp.space2,
-    boxSizing: "border-box",
-    minHeight: { default: grasp.controlSm, [media.coarse]: grasp.tap },
-    paddingBlock: grasp.space1,
-    paddingInline: grasp.space2,
-    borderRadius: `min(${grasp.corner}, calc(${grasp.controlSm} / 2))`,
-    cornerShape: grasp.cornerShape,
-    backgroundColor: {
-      default: "transparent",
-      ":hover": { default: null, [media.hover]: grasp.itemFillHighlight },
-    },
-    color: grasp.ink,
-    fontFamily: grasp.fontSans,
-    fontSize: grasp.textSm,
-    lineHeight: grasp.textSmLine,
-    // The chosen level's name a step firmer, beside its tick; its note stays quiet.
-    fontWeight: {
-      default: grasp.weightRegular,
-      ":is([data-checked])": grasp.weightMedium,
-    },
-    cursor: "pointer",
-  },
-  tick: {
-    display: "inline-flex",
-    flexShrink: 0,
-    width: grasp.iconSm,
-    marginInlineStart: "auto",
   },
   // The segmented look: Toggle group's soft track, the chosen segment raised on it.
   track: {
@@ -169,13 +127,12 @@ const Choice = ({
   />
 );
 
-/** The levels as radio rows or segments, under their heading. */
+/** The levels as segments, under their heading. */
 export const ComposerEffort = ({
   levels,
   value,
   onValueChange,
   label,
-  look,
 }: ComposerEffortProps) => {
   const name = useId();
   const heading = useId();
@@ -185,67 +142,51 @@ export const ComposerEffort = ({
       role="radiogroup"
       aria-labelledby={heading}
       data-slot="composer-effort"
-      data-look={look}
+      data-look="segments"
       {...stylex.props(styles.root)}
     >
       <p id={heading} {...stylex.props(styles.heading)}>
         {label}
       </p>
-      {look === "rows" ? (
-        <div {...stylex.props(styles.rows)}>
-          {levels.map((level) => (
-            <label
-              key={level.value}
-              data-checked={level.value === value || undefined}
-              {...stylex.props(styles.row, focus.within)}
-            >
-              <Choice
-                level={level}
-                name={name}
-                checked={level.value === value}
-                onValueChange={onValueChange}
-                noteId={
-                  level.note === undefined || level.note === ""
-                    ? undefined
-                    : `${name}-${level.value}`
-                }
-              />
-              <LevelWords level={level} noteId={`${name}-${level.value}`} />
-              <span aria-hidden="true" {...stylex.props(styles.tick)}>
-                {level.value === value ? <Icon icon={Tick} /> : null}
-              </span>
-            </label>
-          ))}
-        </div>
-      ) : (
-        <>
-          <div {...stylex.props(styles.track)}>
-            {levels.map((level) => (
-              <label
-                key={level.value}
-                data-checked={level.value === value || undefined}
-                {...stylex.props(
-                  styles.segment,
-                  level.value === value && styles.segmentOn,
-                  focus.within
-                )}
+      <div {...stylex.props(styles.track)}>
+        {levels.map((level) => (
+          <label
+            key={level.value}
+            data-checked={level.value === value || undefined}
+            {...stylex.props(
+              styles.segment,
+              level.value === value && styles.segmentOn,
+              focus.within
+            )}
+          >
+            <Choice
+              level={level}
+              name={name}
+              checked={level.value === value}
+              onValueChange={onValueChange}
+              noteId={
+                level.note === undefined || level.note === ""
+                  ? undefined
+                  : `${name}-${level.value}`
+              }
+            />
+            <span aria-hidden="true">{level.label}</span>
+            {/* Each level's note describes its radio; only the chosen one's shows, under the track. */}
+            {level.note !== undefined && level.note !== "" && (
+              <span
+                id={`${name}-${level.value}`}
+                {...stylex.props(visuallyHidden)}
               >
-                <Choice
-                  level={level}
-                  name={name}
-                  checked={level.value === value}
-                  onValueChange={onValueChange}
-                />
-                <span aria-hidden="true">{level.label}</span>
-              </label>
-            ))}
-          </div>
-          {chosen?.note !== undefined && chosen.note !== "" && (
-            <p aria-hidden="true" {...stylex.props(styles.note)}>
-              {chosen.note}
-            </p>
-          )}
-        </>
+                {level.note}
+              </span>
+            )}
+          </label>
+        ))}
+      </div>
+      {chosen?.note !== undefined && chosen.note !== "" && (
+        <p aria-hidden="true" {...stylex.props(styles.note)}>
+          {chosen.note}
+        </p>
       )}
     </div>
   );

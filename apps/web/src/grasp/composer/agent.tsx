@@ -141,7 +141,6 @@ const styles = stylex.create({
     alignContent: "start",
     padding: grasp.space1,
     overflowY: "auto",
-    overscrollBehavior: "contain",
   },
   // An agent's row: its mark on the name's line, its name, and its quiet line under it.
   row: {

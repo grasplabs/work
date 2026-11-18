@@ -58,4 +58,3 @@ export type {
   ComposerAgentOption,
   ComposerAgentProps,
 } from "./agent";
-export type { ComposerEffortLook } from "./effort";

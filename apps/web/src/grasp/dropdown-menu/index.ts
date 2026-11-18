@@ -18,6 +18,8 @@ export type { DropdownMenuGroupProps } from "./group";
 export { DropdownMenuLabel } from "./label";
 export type { DropdownMenuLabelProps } from "./label";
 export { DropdownMenuSeparator } from "./separator";
+export { DropdownMenuMore } from "./more";
+export type { DropdownMenuAction, DropdownMenuMoreProps } from "./more";
 export type { DropdownMenuSeparatorProps } from "./separator";
 // The look, for the menus built from these parts (Context menu, Menubar).
 export { menuStyles } from "./styles";

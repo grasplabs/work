@@ -20,6 +20,7 @@ import { menuStyles } from "../dropdown-menu/styles";
 import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
 import { ChevronDown, Icon, Tick } from "../icons";
+import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { useComposerDisabled } from "./context";
 import { controlStyles } from "./control";
@@ -49,31 +50,6 @@ const travel = stylex.keyframes({
 });
 
 const styles = stylex.create({
-  // The levels' scale: a dot for each, filled up to this one, a ring beyond. Filled and ring tell
-  // them apart without colour; both hold 3:1 against the menu and the footer.
-  scale: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: grasp.composerScaleGap,
-    flexShrink: 0,
-  },
-  scaleEnd: {
-    marginInlineStart: "auto",
-    paddingInlineStart: grasp.space4,
-  },
-  dot: {
-    boxSizing: "border-box",
-    width: grasp.composerScaleDot,
-    height: grasp.composerScaleDot,
-    borderWidth: grasp.hairline,
-    borderStyle: "solid",
-    borderColor: { default: grasp.muted, [media.forced]: "currentColor" },
-    borderRadius: "50%",
-  },
-  dotOn: {
-    borderColor: "currentColor",
-    backgroundColor: "currentColor",
-  },
   // The chosen level's tick, at the row's start; its room is kept on every row, so the words
   // stand in one column and the scale never moves.
   chosen: {
@@ -124,7 +100,7 @@ const styles = stylex.create({
     animationTimingFunction: "linear",
     animationIterationCount: "infinite",
     transitionProperty: "opacity",
-    transitionDuration: { default: grasp.durationUi, [media.reduced]: "0s" },
+    transitionDuration: simply.ui,
     transitionTimingFunction: grasp.ease,
   },
   // The row's own parts stand over its ground.
@@ -155,37 +131,6 @@ const styles = stylex.create({
     color: grasp.ink,
   },
 });
-
-/**
- * A level's place among the levels, as dots: `at` of `count` filled.
- * @deprecated The level is said in a word now (Ruben, 17 November); nothing in the Composer draws
- * this. Kept until the breaking release's step 9.
- */
-export const Scale = ({
-  at,
-  count,
-  end = false,
-  over = false,
-}: {
-  at: number;
-  count: number;
-  end?: boolean;
-  over?: boolean;
-}) => (
-  <span
-    aria-hidden="true"
-    data-slot="composer-reasoning-scale"
-    data-at={at + 1}
-    {...stylex.props(styles.scale, end && styles.scaleEnd, over && styles.over)}
-  >
-    {Array.from({ length: count }, (_, index) => (
-      <span
-        key={index}
-        {...stylex.props(styles.dot, index <= at && styles.dotOn)}
-      />
-    ))}
-  </span>
-);
 
 /** The working light round a footer control, for the top level chosen (here and in model-effort.tsx). */
 export const LitEdge = () => (

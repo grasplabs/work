@@ -18,7 +18,6 @@ import { ChipTip } from "./chip-tip";
 import { useComposerDisabled } from "./context";
 import { controlStyles } from "./control";
 import { ComposerEffort } from "./effort";
-import type { ComposerEffortLook } from "./effort";
 import { stopEscape } from "./escape";
 import type { ComposerModelMaker, ComposerModelOption } from "./model";
 import { LitEdge } from "./reasoning";
@@ -68,12 +67,6 @@ export interface ComposerModelEffortProps {
    * @default "This model has one level of effort."
    */
   noEffortLabel?: string;
-  /**
-   * How the surface shows the levels: a list of rows (each name, its note, a tick on the chosen),
-   * or one segmented control with every level's name.
-   * @default "rows"
-   */
-  effortLook?: ComposerEffortLook;
   /**
    * At the strongest level (a level's `top`), the working light round the chip. Off, the word
    * "Max" says it alone.
@@ -546,21 +539,19 @@ const readChoice = (
   };
 };
 
-/** The effort: every level by name, as rows or segments, or for a model with one level a line that says so. */
+/** The effort: every level by name on segments, or for a model with one level a line that says so. */
 const EffortPart = ({
   levels,
   value,
   onValueChange,
   label,
   noneLabel,
-  look,
 }: {
   levels: ComposerReasoningOption[];
   value: string;
   onValueChange: (value: string) => void;
   label: string;
   noneLabel: string;
-  look: ComposerEffortLook;
 }) => (
   <div {...stylex.props(styles.effort)}>
     {levels.length > 1 ? (
@@ -569,7 +560,6 @@ const EffortPart = ({
         value={value}
         onValueChange={onValueChange}
         label={label}
-        look={look}
       />
     ) : (
       <p {...stylex.props(styles.none)}>{noneLabel}</p>
@@ -590,7 +580,6 @@ export const ComposerModelEffort = ({
   modelLabel: modelGiven,
   effortLabel: effortGiven,
   noEffortLabel: noEffortGiven,
-  effortLook = "rows",
   topLight = false,
 }: ComposerModelEffortProps) => {
   const disabled = useComposerDisabled();
@@ -730,7 +719,6 @@ export const ComposerModelEffort = ({
               onValueChange={onEffortChange}
               label={effortLabel}
               noneLabel={noEffortLabel}
-              look={effortLook}
             />
           )}
         </div>

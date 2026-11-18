@@ -3,19 +3,12 @@
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
-import type { RenderProp } from "@ui-sdk/react/primitive";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import { AppBuilding } from "../app-building";
-import {
-  DropdownMenu,
-  DropdownMenuItem,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from "../dropdown-menu";
-import { More } from "../icons";
-import type { IconData } from "../icons";
+import { DropdownMenuMore } from "../dropdown-menu";
+import type { DropdownMenuAction } from "../dropdown-menu";
 import { styles } from "./styles";
 
 /**
@@ -78,29 +71,8 @@ export interface AppCardLive {
 /** What the window shows: a screenshot of the app (the default kind), or the app running. */
 export type AppCardPreview = AppCardImage | AppCardLive;
 
-/** One action in the card's "…" menu. */
-export interface AppCardAction {
-  /** Its words ("Rename", "Duplicate"). */
-  label: string;
-  /** Runs when it is chosen. */
-  onSelect?: () => void;
-  /** An icon before the words. Import it from the icons entry (`@/components/grasp/icons`). */
-  icon?: IconData;
-  /** A step that cannot be undone, in the danger colour. */
-  danger?: boolean;
-  /** Shown, but not chosen now. */
-  disabled?: boolean;
-  /**
-   * Where it leads ("Settings"): the item is then a link, opened by a press, Enter, a middle click
-   * or in a new tab, as Dropdown menu's item is. The menu closes as it goes.
-   */
-  href?: string;
-  /**
-   * The link a router draws (`<Link to="…" />`), in place of an `<a href>`: it takes the item's look,
-   * words and place in the arrows' order. Leave `href` out when the router's link carries the address.
-   */
-  render?: RenderProp;
-}
+/** One action in the card's "…" menu: the library's one shape for an action that folds into a menu. */
+export type AppCardAction = DropdownMenuAction;
 
 /** The cleanup of an effect that started nothing. */
 const keep = () => {
@@ -483,30 +455,6 @@ interface MoreMenuProps {
 /** The "…" button at the title row's end, its own press over the card's link, and its menu. */
 export const MoreMenu = ({ actions, label }: MoreMenuProps) => (
   <span {...stylex.props(styles.more)}>
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        icon={More}
-        aria-label={label}
-        variant="ghost"
-        size="sm"
-      />
-      <DropdownMenuContent align="end">
-        {actions.map((action) => (
-          <DropdownMenuItem
-            key={action.label}
-            icon={action.icon}
-            variant={action.danger === true ? "danger" : undefined}
-            disabled={action.disabled}
-            href={action.href}
-            render={action.render}
-            onSelect={() => {
-              action.onSelect?.();
-            }}
-          >
-            {action.label}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <DropdownMenuMore actions={actions} label={label} />
   </span>
 );

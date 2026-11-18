@@ -403,10 +403,13 @@ const hosted = (
 };
 
 const LinkInline = ({ node, context }: { node: Linked; context: Context }) => {
-  // A link still being written (its end closed by repair.ts) is held back, words and all, until its
-  // address has arrived: a citation's number never shows as words first, then turns into its mark.
+  // Where a part around Markdown draws links itself (MarkdownLinks: Sources' citations), a link still
+  // being written (its end closed by repair.ts) is held back, words and all, until its address has
+  // arrived: a citation's number never shows as words first, then turns into its mark. Anywhere
+  // else its words show as they come, as words, with its arrow's room kept (below).
   if (
     context.streaming &&
+    context.around !== null &&
     context.base + (node.position?.end.offset ?? 0) > context.kept
   ) {
     return null;
@@ -434,6 +437,7 @@ const LinkInline = ({ node, context }: { node: Linked; context: Context }) => {
     const coming = context.streaming && !context.inLink && isComing(url);
     return coming ? (
       <>
+        <span aria-hidden="true" {...stylex.props(styles.linkLead)} />
         {words}
         <span
           aria-hidden="true"

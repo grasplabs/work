@@ -160,9 +160,16 @@ export const markdownStyles = stylex.create({
   // A footnote's mark in the sentence, and the notes at the foot.
   // The room a link's arrow takes (Link's mark and the gap before it), kept while the link is
   // still being written.
+  // The room a link still being written keeps for what the whole one will have: Link's quarter step
+  // before its words (its ring's room), and after them the arrow, its gap and the quarter step after.
+  // So neither its words nor what follows moves when the address is whole.
+  linkLead: {
+    display: "inline-block",
+    width: `calc(${grasp.space1} / 4)`,
+  },
   arrowRoom: {
     display: "inline-block",
-    width: `calc(${grasp.linkMarkGap} + ${grasp.linkMark})`,
+    width: `calc(${grasp.linkMarkGap} + ${grasp.linkMark} + ${grasp.space1} / 4)`,
   },
   footnoteMark: {
     fontSize: grasp.textXs,

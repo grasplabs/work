@@ -14,6 +14,8 @@ export const appShellWords = {
   closePanel: "Close the panel",
   /** On a phone, the button that sets the panels aside for the page and brings them back. */
   togglePanel: "Show or hide the panel",
+  /** The bar's More button, once its `actionItems` fold into it for want of room. */
+  more: "More actions",
 };
 
 export type AppShellWords = typeof appShellWords;

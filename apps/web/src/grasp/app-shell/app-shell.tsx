@@ -16,6 +16,7 @@ import {
 import type { MouseEvent, ReactNode, RefObject, UIEvent } from "react";
 
 import { Button } from "../button";
+import type { DropdownMenuAction } from "../dropdown-menu";
 import { focus } from "../focus/focus";
 import { Cross, Icon, PanelToggle, SidebarToggle } from "../icons";
 import type { LayoutStyle } from "../layout/layout";
@@ -79,8 +80,14 @@ export interface AppShellProps {
   end?: ReactNode;
   /** @deprecated Use `end`. */
   trailing?: ReactNode;
-  /** At the end of the frame's page bar: the page's own buttons. */
+  /** At the end of the frame's page bar: the page's own buttons, or a TabsNav of its views. */
   actions?: ReactNode;
+  /**
+   * The page's buttons as items the frame's bar can fold into one More menu when room runs out, the
+   * last (the main one) staying out. Give the buttons here or in `actions`, not both; a TabsNav goes
+   * in `actions` beside these. AppShellBar takes the same.
+   */
+  actionItems?: readonly DropdownMenuAction[];
   /**
    * The shell's width under which the sidebar leaves its column for the phone's menu (the menu
    * button, the sheet, the crumbs' narrow rules, all together): `40rem`, a phone; `64rem`, a tablet
@@ -1270,6 +1277,7 @@ type CardProps = Pick<
   | "trailing"
   | "end"
   | "actions"
+  | "actionItems"
   | "brand"
   | "brandIn"
   | "middle"
@@ -1451,6 +1459,7 @@ const frameBarEmpty = ({
   crumbs,
   trailing,
   actions,
+  actionItems,
   middle,
   brand,
   brandIn,
@@ -1461,6 +1470,7 @@ const frameBarEmpty = ({
   | "crumbs"
   | "trailing"
   | "actions"
+  | "actionItems"
   | "middle"
   | "brand"
   | "brandIn"
@@ -1470,6 +1480,7 @@ const frameBarEmpty = ({
   (crumbs === undefined || crumbs.length === 0) &&
   isNone(trailing) &&
   isNone(actions) &&
+  (actionItems === undefined || actionItems.length === 0) &&
   isNone(middle) &&
   (isNone(brand) || brandIn === "sidebar");
 
@@ -1533,6 +1544,7 @@ const ShellCard = ({
   trailing: trailingDeprecated,
   end: trailing = trailingDeprecated,
   actions,
+  actionItems,
   brand,
   brandIn,
   middle,
@@ -1562,6 +1574,7 @@ const ShellCard = ({
       crumbs,
       trailing,
       actions,
+      actionItems,
       middle,
       brand,
       brandIn,
@@ -1645,6 +1658,7 @@ const ShellCard = ({
             middle={middle}
             phoneMiddle={phoneMiddle}
             actions={actions}
+            actionItems={actionItems}
             breadcrumbLabel={breadcrumbLabel}
           />
         </div>

@@ -5,6 +5,9 @@ import * as stylex from "@stylexjs/stylex";
 import { createElement, isValidElement, useEffect, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
+import { Button } from "../button";
+import { DropdownMenuMore } from "../dropdown-menu";
+import type { DropdownMenuAction } from "../dropdown-menu";
 import { focus } from "../focus/focus";
 import { simply } from "../motion/simply.stylex";
 import { Skeleton } from "../skeleton";
@@ -68,8 +71,20 @@ export interface AppShellBarProps {
    * @default "bar"
    */
   phoneMiddle?: "bar" | "sheet";
-  /** At the end: the page's own buttons. */
+  /** At the end: the page's own buttons, or a TabsNav of its views. It shrinks, once the bar is tight, as far as its parts fold. */
   actions?: ReactNode;
+  /**
+   * At the end, after `actions`: the page's buttons as items the bar can fold. Drawn as buttons while
+   * there is room; when there is not (after the crumbs and `actions` have given way), they fold from
+   * the first into one More menu, in order, links as links. The last, the page's main action, stays
+   * out. Give the buttons here or in `actions`, not both; a TabsNav goes in `actions` beside these.
+   */
+  actionItems?: readonly DropdownMenuAction[];
+  /**
+   * The More button's name.
+   * @default "More actions"
+   */
+  moreLabel?: string;
   /**
    * The name of the crumbs' navigation, said to a screen reader.
    * @default "Breadcrumb"
@@ -277,8 +292,10 @@ const styles = stylex.create({
   // overflow-clip-margin: Chromium computes a calc() there to 0 and cut the ring (F01).
   // Never narrower than the page's crumb at its least (F02): the page's name keeps its stub inside
   // the nav's clip, and what does not fit beside it gives way (the bar's measure, `fitCrumbs`).
+  // The crumbs go whole only at the very last, in a bar that holds more than a phone has room for
+  // (fitBar): the page's name stands as its heading under the bar.
   nav: {
-    display: "flex",
+    display: { default: "flex", ":is([data-gone])": "none" },
     minWidth: `calc(${PAGE_LEAST} + 2 * ${RING_REACH})`,
     overflow: "clip",
     padding: RING_REACH,
@@ -568,11 +585,35 @@ const styles = stylex.create({
     gap: grasp.space3,
     marginInlineStart: "auto",
   },
+  // The action items: never shrinking, each whole or folded away into More, which shows once any has.
+  items: {
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    gap: grasp.space2,
+  },
+  item: {
+    display: { default: "flex", ":is([data-folded])": "none" },
+    flexShrink: 0,
+  },
+  itemWords: {
+    display: { default: "flex", [stylex.when.ancestor("[data-bare]")]: "none" },
+  },
+  itemBare: {
+    display: { default: "none", [stylex.when.ancestor("[data-bare]")]: "flex" },
+  },
+  more: {
+    display: { default: "none", ":is([data-shown])": "flex" },
+    flexShrink: 0,
+  },
   actions: {
     display: "flex",
     alignItems: "center",
     gap: grasp.space2,
-    minWidth: { default: null, [stylex.when.ancestor("[data-tight]")]: 0 },
+    minWidth: {
+      default: null,
+      [stylex.when.ancestor("[data-tight]")]: "var(--bar-actions-least, 0px)",
+    },
     overflowX: {
       default: null,
       [stylex.when.ancestor("[data-tight]")]: "auto",
@@ -784,7 +825,39 @@ const isCut = (words: HTMLElement) => {
 };
 
 /** Whether anything in the bar runs past its end. */
-const overflows = (bar: HTMLElement) => bar.scrollWidth > bar.clientWidth + 1;
+/**
+ * Whether anything at the bar's end stands past the bar's own edge, either way round. (The shell's
+ * buttons hang into the bar's padding by design, so its content edge is not the limit.)
+ */
+const endPast = (bar: HTMLElement) => {
+  const tail = bar.querySelector<HTMLElement>("[data-bar-tail]");
+  if (tail === null) {
+    return false;
+  }
+  const box = bar.getBoundingClientRect();
+  const start = box.left;
+  const end = box.right;
+  return [...tail.querySelectorAll<HTMLElement>("button, a")].some(
+    (control) => {
+      if (
+        control.getClientRects().length === 0 ||
+        control.closest("[inert], [aria-hidden=true]") !== null
+      ) {
+        return false;
+      }
+      const at = control.getBoundingClientRect();
+      return at.right > end + 1 || at.left < start - 1;
+    }
+  );
+};
+
+/**
+ * Whether the bar runs past its room: its scroll is wider than it, or its end (the shell's buttons
+ * after the page's actions) stands past its edge, which the bar's own clip hides from the scroll's
+ * measure.
+ */
+const overflows = (bar: HTMLElement) =>
+  bar.scrollWidth > bar.clientWidth + 1 || endPast(bar);
 
 /** Whether a crumb at its least did not fit the crumbs' room: it wrapped past their one line
  * (`crumbs`), under the nav's clip. */
@@ -887,16 +960,116 @@ const fitRows = (bar: HTMLElement) => {
  * whole box and nothing leaves the bar.
  */
 const tighten = (bar: HTMLElement) => {
+  // The actions' floor: a TabsNav among them folds to one button, and no further.
+  const actions = bar.querySelector<HTMLElement>("[data-bar-actions]");
+  if (actions !== null) {
+    const folds = [
+      ...actions.querySelectorAll<HTMLElement>("[data-tabs-fold] button"),
+    ].map((button) => button.getBoundingClientRect().width);
+    actions.style.setProperty(
+      "--bar-actions-least",
+      `${String(Math.ceil(Math.max(0, ...folds)))}px`
+    );
+  }
   if (overflows(bar)) {
     bar.dataset.tight = "";
   }
 };
 
-/** Lays the bar out in the fewest rows in which its parts fit, as the order above says. */
-const fitBar = (bar: HTMLElement) => {
+/**
+ * Past even that, at a phone's narrowest with a crowded bar: the main item folds too, last in the
+ * More menu, so the shell's own buttons keep their whole box. Returns 1 when it folded.
+ */
+const foldLast = (bar: HTMLElement) => {
+  const items = [...bar.querySelectorAll<HTMLElement>("[data-bar-item]")];
+  const last = items.at(-1);
+  const more = bar.querySelector<HTMLElement>("[data-bar-more]");
+  if (
+    last === undefined ||
+    more === null ||
+    items.length < 2 ||
+    !overflows(bar)
+  ) {
+    return 0;
+  }
+  last.dataset.folded = "";
+  more.dataset.shown = "";
+  return 1;
+};
+
+/** At the very last, at a phone's least: the last action item shows its icon alone, its words its name. */
+const bareLast = (bar: HTMLElement) => {
+  const last = [...bar.querySelectorAll<HTMLElement>("[data-bar-item]")].at(-1);
+  if (
+    last !== undefined &&
+    last.querySelector("[data-bar-bare]") !== null &&
+    overflows(bar)
+  ) {
+    last.dataset.bare = "";
+  }
+};
+
+/**
+ * Last, while the bar still runs past its room: the page's action items fold into the More menu,
+ * the first first, the last never. Returns how many folded.
+ */
+const foldItems = (bar: HTMLElement) => {
+  const items = [...bar.querySelectorAll<HTMLElement>("[data-bar-item]")];
+  const more = bar.querySelector<HTMLElement>("[data-bar-more]");
+  let folded = 0;
+  if (more === null || items.length < 2 || !overflows(bar)) {
+    return folded;
+  }
+  more.dataset.shown = "";
+  for (const item of items.slice(0, -1)) {
+    if (!overflows(bar)) {
+      break;
+    }
+    item.dataset.folded = "";
+    folded += 1;
+  }
+  return folded;
+};
+
+/** Everything that gave way at the last measure, back, so the bar is measured whole. */
+const unfold = (bar: HTMLElement) => {
   delete bar.dataset.tight;
+  for (const each of bar.querySelectorAll<HTMLElement>("[data-bar-item]")) {
+    delete each.dataset.folded;
+    delete each.dataset.bare;
+  }
+  const more = bar.querySelector<HTMLElement>("[data-bar-more]");
+  if (more !== null) {
+    delete more.dataset.shown;
+  }
+};
+
+/**
+ * Lays the bar out in the fewest rows in which its parts fit, as the order above says: the crumbs
+ * give way, then `actions` (tight), then the action items fold. Returns how many folded.
+ */
+const fitBar = (bar: HTMLElement) => {
+  unfold(bar);
   fitRows(bar);
   tighten(bar);
+  const folded = foldItems(bar);
+  bareLast(bar);
+  const last = foldLast(bar);
+  // At the very least room, the crumbs go whole (the page's name is its heading, under the bar);
+  // past even that, the actions' floor gives way: they scroll in a box as small as need be (Tab
+  // still reaches what is in them). The shell's buttons always keep their whole box.
+  const crumbs = bar.querySelector<HTMLElement>(
+    '[data-slot="app-shell-crumbs"]'
+  );
+  if (crumbs !== null && overflows(bar)) {
+    crumbs.dataset.gone = "";
+  }
+  if (overflows(bar)) {
+    bar
+      .querySelector<HTMLElement>("[data-bar-actions]")
+      ?.style.setProperty("--bar-actions-least", "0px");
+  }
+  return folded + last;
 };
 
 // What the measure changes itself, so it is not watched: the start that holds the crumbs, their
@@ -914,13 +1087,16 @@ const keep = () => {
 
 /** Measures the bar when it is drawn, and again a frame after its card or a part beside the crumbs
  * changes size, or a font loads. */
-const useFitBar = (bar: HTMLElement | null) => {
+const useFitBar = (
+  bar: HTMLElement | null,
+  onFold: (folded: number) => void
+) => {
   // After every draw: the crumbs, the brand or the actions may have changed.
   useEffect(() => {
     if (bar === null) {
       return keep;
     }
-    fitBar(bar);
+    onFold(fitBar(bar));
     const card = bar.parentElement;
     if (card === null || typeof ResizeObserver === "undefined") {
       return keep;
@@ -930,7 +1106,7 @@ const useFitBar = (bar: HTMLElement | null) => {
     const later = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        fitBar(bar);
+        onFold(fitBar(bar));
       });
     };
     const watch = new ResizeObserver(later);
@@ -952,6 +1128,135 @@ const useFitBar = (bar: HTMLElement | null) => {
     };
   });
 };
+
+/** No action items: one stable list. */
+const NO_ITEMS: readonly DropdownMenuAction[] = [];
+
+/** Where an action item leads: the host's router link, an <a href>, or nowhere (a plain button). */
+const linkOf = (item: DropdownMenuAction) => {
+  if (isValidElement(item.render)) {
+    return item.render;
+  }
+  const { href } = item;
+  // An <a href> for the button to draw itself as: its words are the button's own. SAFETY: an <a>'s
+  // props are a record of strings to values, which is all Button's `render` reads of them.
+  return href === undefined || href === ""
+    ? undefined
+    : (createElement("a", { href }) as ReactElement<Record<string, unknown>>);
+};
+
+/** An action item's look: danger as given, the main one solid, the others quiet. */
+const variantOf = (item: DropdownMenuAction, main: boolean) => {
+  if (item.danger === true) {
+    return "danger";
+  }
+  return main ? undefined : "ghost";
+};
+
+/** An action item as a button: its words, its icon, a link where it leads. The last is the page's main one. */
+const ItemButton = ({
+  item,
+  main,
+}: {
+  item: DropdownMenuAction;
+  main: boolean;
+}) => {
+  const link = linkOf(item);
+  const variant = variantOf(item, main);
+  const handleSelect = item.onSelect;
+  return (
+    <>
+      <span data-bar-words="" {...stylex.props(styles.itemWords)}>
+        <Button
+          size="sm"
+          variant={variant}
+          icon={item.icon}
+          disabled={item.disabled}
+          render={link}
+          onClick={handleSelect}
+        >
+          {item.label}
+        </Button>
+      </span>
+      {/* The main item with an icon has a bare twin, its icon alone, for a phone's least room. */}
+      {main && item.icon !== undefined && (
+        <span data-bar-bare="" {...stylex.props(styles.itemBare)}>
+          <Button
+            size="sm"
+            variant={variant}
+            icon={item.icon}
+            aria-label={item.label}
+            disabled={item.disabled}
+            render={link}
+            onClick={handleSelect}
+          />
+        </span>
+      )}
+    </>
+  );
+};
+
+/**
+ * The page's action items at the bar's end: the More menu (shown once any folded, holding those, in
+ * order), then each item as a button, the folded ones out of sight. fitBar folds them as room runs out.
+ */
+const ActionItems = ({
+  items,
+  folded,
+  moreLabel,
+}: {
+  items: readonly DropdownMenuAction[];
+  folded: number;
+  moreLabel: string;
+}) => (
+  <div data-slot="app-shell-bar-items" {...stylex.props(styles.items)}>
+    <span data-bar-more="" {...stylex.props(styles.more)}>
+      <DropdownMenuMore actions={items.slice(0, folded)} label={moreLabel} />
+    </span>
+    {items.map((item, index) => (
+      <span
+        key={item.label}
+        data-bar-item={index}
+        {...stylex.props(styles.item, stylex.defaultMarker())}
+      >
+        <ItemButton item={item} main={index === items.length - 1} />
+      </span>
+    ))}
+  </div>
+);
+
+/** The bar's end: the page's actions, its action items, then what the shell puts after them (the panels' button). */
+const BarTail = ({
+  actions,
+  items,
+  folded,
+  moreLabel,
+  barEnd,
+  centred,
+}: {
+  actions: ReactNode;
+  items: readonly DropdownMenuAction[];
+  folded: number;
+  moreLabel: string;
+  barEnd: ReactNode;
+  centred: boolean;
+}) =>
+  actions === undefined && items.length === 0 && barEnd === undefined ? null : (
+    <div
+      data-bar-tail=""
+      {...stylex.props(styles.tail, centred && styles.tailCentred)}
+    >
+      {actions !== undefined && (
+        <div data-bar-actions="" {...stylex.props(styles.actions)}>
+          {actions}
+        </div>
+      )}
+      {items.length > 0 && (
+        <ActionItems items={items} folded={folded} moreLabel={moreLabel} />
+      )}
+      {barEnd}
+    </div>
+  );
 
 /** No crumbs: the default, one stable list rather than a new one each render. */
 const NO_CRUMBS: readonly AppShellCrumb[] = [];
@@ -1005,6 +1310,8 @@ export const PageBar = ({
   middle,
   phoneMiddle = "bar",
   actions,
+  actionItems,
+  moreLabel,
   breadcrumbLabel,
   loading = false,
   barEnd,
@@ -1014,10 +1321,13 @@ export const PageBar = ({
   barEnd?: ReactNode;
 }) => {
   const [bar, setBar] = useState<HTMLElement | null>(null);
-  const { breadcrumb } = withGiven(useWords("appShell", appShellWords), {
+  const { breadcrumb, more } = withGiven(useWords("appShell", appShellWords), {
     breadcrumb: breadcrumbLabel,
+    more: moreLabel,
   });
-  useFitBar(bar);
+  // How many of the action items the last measure folded into the More menu.
+  const [folded, setFolded] = useState(0);
+  useFitBar(bar, setFolded);
   const where = whereOf({ loading, crumbs, phoneCrumbs, label: breadcrumb });
   const head =
     brand === undefined ? null : (
@@ -1042,21 +1352,16 @@ export const PageBar = ({
         {trailing}
       </div>
     );
-  // The end: the page's actions, then what the shell puts after them (the panels' button on a phone).
-  const tail =
-    actions === undefined && barEnd === undefined ? null : (
-      <div
-        {...stylex.props(
-          styles.tail,
-          middle !== undefined && styles.tailCentred
-        )}
-      >
-        {actions !== undefined && (
-          <div {...stylex.props(styles.actions)}>{actions}</div>
-        )}
-        {barEnd}
-      </div>
-    );
+  const tail = (
+    <BarTail
+      actions={actions}
+      items={actionItems ?? NO_ITEMS}
+      folded={folded}
+      moreLabel={more}
+      barEnd={barEnd}
+      centred={middle !== undefined}
+    />
+  );
   if (middle === undefined) {
     return (
       <header

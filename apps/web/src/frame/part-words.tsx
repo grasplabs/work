@@ -295,6 +295,7 @@ export const usePartWords = (): GraspWordsCatalog => {
       closeMenu: t`Close the menu`,
       closePanel: t`Close the panel`,
       togglePanel: t`Show or hide the panel`,
+      more: t`More actions`,
     },
     chatMessage: {
       person: t`You`,
