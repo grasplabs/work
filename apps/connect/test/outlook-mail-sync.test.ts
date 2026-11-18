@@ -41,6 +41,8 @@ interface Mailbox {
   search: Set<string>;
   /** The most folders Graph puts in one page of mailFolder delta. */
   folderPage: number;
+  /** A folder listing Graph answers with no folder and the same token on, for ever. */
+  stuckListing: boolean;
   /** Each folder's delta feed, by folder. */
   feeds: Record<string, Feed>;
   /** Each message as Graph reads it on its own, by ID. */
@@ -60,6 +62,7 @@ const mailbox: Mailbox = {
   hidden: new Set(),
   search: new Set(),
   folderPage: 1000,
+  stuckListing: false,
   feeds: {},
   messages: {},
   attachments: {},
@@ -90,6 +93,7 @@ const reset = (): void => {
   mailbox.hidden = new Set();
   mailbox.search = new Set();
   mailbox.folderPage = 1000;
+  mailbox.stuckListing = false;
   mailbox.feeds = {};
   mailbox.messages = {};
   mailbox.attachments = {};
@@ -220,6 +224,12 @@ const folderDelta = (url: URL, prefer: string): Response => {
   const fields = selected(url, folderProperties);
   if (fields instanceof Response) {
     return fields;
+  }
+  if (mailbox.stuckListing) {
+    return Response.json({
+      value: [],
+      "@odata.nextLink": `https://${graphHost}${foldersPath}/delta?$skiptoken=stuck`,
+    });
   }
   const asked = Number(
     /odata\.maxpagesize=(?<size>\d+)/u.exec(prefer)?.groups?.size ?? 10
@@ -459,6 +469,43 @@ describe("syncing a person's own mailbox, folder by folder", () => {
       places: ["archive", "inbox", "projects", "root"],
       cursor: null,
     });
+  });
+
+  it("asks Graph for a thousand folders a page", async () => {
+    const connectionId = await connected();
+    await exports.default.listSyncPlaces({
+      connectionId,
+      feed: "mail",
+      cursor: null,
+    });
+    const listings = sentToGraph().filter(({ path }) =>
+      path.startsWith(`${foldersPath}/delta`)
+    );
+    expect(
+      listings.length > 0 &&
+        listings.every(
+          ({ headers }) =>
+            headers.prefer?.includes("odata.maxpagesize=1000") === true
+        )
+    ).toBeTruthy();
+  });
+
+  it("waits as for a rate limit when a folder listing read moves nothing on", async () => {
+    const connectionId = await connected();
+    // Graph answers no folder and the same place on, page after page.
+    mailbox.stuckListing = true;
+    const first = await exports.default.listSyncPlaces({
+      connectionId,
+      feed: "mail",
+      cursor: null,
+    });
+    const again = await exports.default
+      .listSyncPlaces({ connectionId, feed: "mail", cursor: first.cursor })
+      .catch((error: unknown) => error);
+    expect({
+      first: first.places,
+      again: syncErrors.codeOf(again),
+    }).toStrictEqual({ first: [], again: "sync.throttled" });
   });
 
   it("lists the folders on every page of Graph's, across reads when they don't fit one", async () => {
