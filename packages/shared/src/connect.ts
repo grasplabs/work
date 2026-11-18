@@ -780,6 +780,53 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
    * when done. Asking again while it runs changes nothing.
    */
   eraseBrainReads: (connectionId: string) => Promise<void>;
+  /**
+   * The places of the shared connection `connectionId` an admin may pick
+   * to sync into the Brain (its shared drives or SharePoint libraries, as
+   * the connected account sees them), every one, with whether it is
+   * picked; null when the connection syncs no picked places. Admins only,
+   * never Grasp staff.
+   */
+  syncPlaces: (connectionId: string) => Promise<SharedSyncPlaces | null>;
+  /**
+   * Sets which places of the shared connection the sync `feed` reads: the
+   * whole set, replacing the one before, from the picks the page started
+   * from. Admins only, never Grasp staff; audited, refusals too.
+   */
+  pickSyncPlaces: (request: {
+    connectionId: string;
+    feed: string;
+    /**
+     * The picks the page started from (`SharedSyncPlaces.picks`): refused
+     * (`sync.picks_changed`), with nothing changed, once another change
+     * landed meanwhile.
+     */
+    from: string[];
+    places: string[];
+  }) => Promise<void>;
+}
+
+/**
+ * Every place of a shared connection an admin may pick to sync, as its
+ * connector lists them: the sync they are of, and each place.
+ */
+export interface SharedSyncPlaces {
+  feed: string;
+  /**
+   * Each place: its ID, its own name, what it is in (a library's site;
+   * null for a shared drive), and whether it is picked. Names are whole.
+   */
+  choices: {
+    place: string;
+    title: string;
+    within: string | null;
+    picked: boolean;
+  }[];
+  /**
+   * Every place picked now, those the listing doesn't show too: what a
+   * save starts from, so it never drops a pick the page didn't show.
+   */
+  picks: string[];
 }
 
 // The catalog: everything an admin can connect, in one list. Native
