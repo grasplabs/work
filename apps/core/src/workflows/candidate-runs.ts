@@ -39,6 +39,7 @@ import type { Acting } from "../auth/identity.ts";
 import {
   runLineageAttempts,
   runLineages,
+  runStateWriters,
   workflowCandidateRuns,
   workflowItemTests,
   workflowResources,
@@ -63,13 +64,18 @@ import {
   liveWorkflow,
   requireWorkflowRole,
 } from "../workflow-resources.ts";
-import { acceptedInput } from "../workflow-starts.ts";
+import {
+  acceptedInput,
+  writersAdmitted,
+  writersHeldSql,
+} from "../workflow-starts.ts";
 import { readableStateOf } from "../workflow-state.ts";
 import { runEngine } from "./engine.ts";
 import type { PinnedCandidateRun } from "./engine.ts";
 import { modelCallLimitOf } from "./host.ts";
 import type { RunStep } from "./host.ts";
 import type { CandidateBinding } from "./resource-authority.ts";
+import { endedRunResultWithheld } from "./resource-reads.ts";
 import { tracedSteps } from "./resource-run-trace.ts";
 import {
   engineResultOf,
@@ -367,7 +373,9 @@ export const startCandidateRun = async (
   // What the workflow keeps between its runs that its builder may read
   // (workflow-state.ts `readableStateOf`), read once and frozen with the
   // row, as a start's receipt freezes it: the test reads it, and writes
-  // nothing back (sealed-run.ts, `stepRecording`).
+  // nothing back (sealed-run.ts, `stepRecording`). The runs that set its
+  // keys are recorded as a start records them (`writersAdmitted`), so what
+  // the test returns is held to what they read (`candidateRunFor`).
   const readable = await readableStateOf(env, workflow.id, by.userId);
   const snapshot = await snapshotFrom(readable.values);
   const runId = crypto.randomUUID();
@@ -398,12 +406,15 @@ export const startCandidateRun = async (
   const manifestHash = await sha256Hex(manifest);
   const db = drizzle(env.DB);
   const createdAt = new Date();
-  // Written only while the workflow is live and its person is under both
-  // limits: otherwise NULL, which fails the batch (`allowed`).
+  // Written only while the workflow is live, its person is under both
+  // limits, and each run that set a key it froze still keeps its evidence
+  // (`writersHeldSql`, as a start's admission requires): otherwise NULL,
+  // which fails the batch (`allowed`).
   const { going, kept } = countsOf(workflow.id, by.userId);
   const allowed = sql<string>`(SELECT ${workflowResources.id} FROM ${workflowResources}
     WHERE ${workflowResources.id} = ${workflow.id} AND ${workflowResources.deletedAt} IS NULL
-      AND ${going} < ${maxLiveCandidateRuns} AND ${kept} < ${maxKeptCandidateRuns})`;
+      AND ${going} < ${maxLiveCandidateRuns} AND ${kept} < ${maxKeptCandidateRuns}
+      AND ${writersHeldSql(readable)})`;
   try {
     // Its build's bytes, referenced by its seal and stored before the row
     // that names them; given back, as is any part stored, if the row
@@ -432,6 +443,13 @@ export const startCandidateRun = async (
         status: "starting",
         createdAt,
       }),
+      ...writersAdmitted(
+        env,
+        runId,
+        readable,
+        sql`EXISTS (SELECT 1 FROM ${workflowCandidateRuns}
+          WHERE ${workflowCandidateRuns.id} = ${runId})`
+      ),
       ...(item === undefined
         ? []
         : [db.insert(workflowItemTests).values(item(runId))]),
@@ -463,6 +481,9 @@ export const startCandidateRun = async (
       }
       // Another start took the last place meanwhile: refused as it is.
       await requireUnderLimits(env, workflow.id, by.userId);
+      // A run that set a key it froze was released meanwhile: refused as
+      // a start is, and the next freezes the state anew.
+      throw workflowResourceErrors.create("workflow.start_denied");
     }
     throw error;
   }
@@ -723,6 +744,30 @@ export const candidateRunFor = async (
   if (row.status !== "completed" && row.status !== "failed") {
     return run;
   }
+  // What it returned or why it failed may hold what the kept state it
+  // started from copied: withheld as a run's is (resource-runs.ts), once
+  // what the runs that set that state read is no longer the company's, or
+  // they were never recorded (`endedRunResultWithheld`, GRA-1996), its
+  // status and times shown.
+  if (
+    await endedRunResultWithheld(
+      env,
+      {
+        runId: row.id,
+        workflowId: row.workflowResourceId,
+        principal: row.principalId,
+      },
+      row.stateHash
+    )
+  ) {
+    return {
+      ...run,
+      error: {
+        code: "brain.revoked",
+        message: workflowResourceErrors.create("brain.revoked").message,
+      },
+    };
+  }
   const result = await engineResultOf(env, row.id);
   // Core's own reason for a run the engine never had, else the engine's.
   if (
@@ -960,6 +1005,9 @@ const removed = async (
       db.delete(runLineageAttempts).where(eq(runLineageAttempts.rootRunId, id)),
       db.delete(runLineages).where(eq(runLineages.rootRunId, id)),
       db.delete(workflowCandidateRuns).where(eq(workflowCandidateRuns.id, id)),
+      // And the runs whose keys it started from: while it is kept, so is
+      // their evidence (retention.ts).
+      db.delete(runStateWriters).where(eq(runStateWriters.runId, id)),
       // The item it ran goes with it, in the same batch: while the run is
       // kept, so is what makes it its tester's alone (`readsItemRun`).
       db
