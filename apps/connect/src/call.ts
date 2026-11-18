@@ -245,6 +245,8 @@ export interface CallProgress extends Repeat {
    * unknown outcome a run waits on for its person to resolve.
    */
   native?: boolean;
+  /** Set once its connection is found: its connector, as the catalog names it. */
+  provider?: string;
   /**
    * An HTTP connection's request (GRA-1478): its method and path once it
    * is checked, its status and size once answered, for the audit log.
@@ -1021,6 +1023,7 @@ export const carryOut = async (
   const { authority, resource, idempotencyKey } = claims;
   const connection = await connectionFor(env, claims, call.connectionId, held);
   progress.native = connection.serverKind === "native";
+  progress.provider = connection.provider;
   const { input } = call;
   // MCP tools take an object of arguments.
   if (!isInput(input)) {
