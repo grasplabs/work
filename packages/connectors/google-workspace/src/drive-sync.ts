@@ -12,7 +12,7 @@ import {
   syncRoom,
   takeContent,
 } from "@grasp-os/connector-kit/sync";
-import type { SyncRoom } from "@grasp-os/connector-kit/sync";
+import type { EntryItems, SyncRoom } from "@grasp-os/connector-kit/sync";
 import type {
   SyncContent,
   SyncItem,
@@ -37,6 +37,10 @@ import { apisHost, googleFailure, googleUrl } from "./google.ts";
 // that start token, so nothing changed during the listing is missed. A
 // change gives the file as it is now, so a page read twice, or a change
 // read after the listing, yields the same version.
+//
+// Content never runs ahead of its version: after a file's bytes, its
+// `version` is read again, and a file that changed in between gives
+// nothing here; the change feed brings its newer version.
 //
 // What goes away: Drive's `removed` (deleted, or the account lost access:
 // Google doesn't say which), a file in the bin, and a file the person no
@@ -241,8 +245,47 @@ const howToRead = (
   return Number(file.size ?? 0) > maxReadBytes ? null : { media: true };
 };
 
-/** What a content read found: content, none to read, the file gone, or no room. */
-type Read = { content: SyncContent | null } | { gone: true } | { full: true };
+/**
+ * What a content read found: content, none to read, the file gone, the
+ * file changed since its metadata was read, or no room.
+ */
+type Read =
+  | { content: SyncContent | null }
+  | { gone: true }
+  | { moved: true }
+  | { full: true }
+  | { late: true };
+
+const versionSchema = z.object({ version: z.string() });
+
+/**
+ * The file's version now, read after its bytes: Drive's `version` moves
+ * with every change of a file, a Docs Editors file's too, while
+ * `headRevisionId` and `md5Checksum` exist only for files with bytes of
+ * their own (https://developers.google.com/workspace/drive/api/reference/rest/v3/files).
+ */
+const versionNow = async (
+  room: SyncRoom,
+  path: string
+): Promise<{ version: string } | "gone" | "late"> => {
+  if (!mayRequest(room)) {
+    return "late";
+  }
+  const response = await fetchInRoom(
+    room,
+    googleUrl(apisHost, path, { fields: "version" })
+  );
+  if (response === "late") {
+    return "late";
+  }
+  if (response.status === 404) {
+    return "gone";
+  }
+  if (!response.ok) {
+    throw await googleFailure(response);
+  }
+  return versionSchema.parse(await response.json());
+};
 
 /** The content an answer holds, as the file is read. */
 const contentFrom = (
@@ -271,33 +314,27 @@ const contentFrom = (
 };
 
 /** A file's content, if the page has room for it. */
-const contentOf = async (room: SyncRoom, file: DriveFile): Promise<Read> => {
-  const how = howToRead(file);
-  if (how === null) {
-    return { content: null };
-  }
-  // Base64 is a third larger than the bytes.
-  const known = (Number(file.size ?? 0) * 4) / 3;
-  // Out of requests or time before it starts: the next read takes it.
-  if (!mayRequest(room)) {
-    return { full: true };
-  }
-  if ("media" in how && known > room.bytes) {
-    return room.empty ? { content: null } : { full: true };
-  }
-  const path = `${files}/${segment(file.id)}`;
+/** No room left for this entry's bytes: an empty page goes on without its content. */
+const noRoom = (room: SyncRoom): Read =>
+  room.empty ? { content: null } : { full: true };
+
+/** A file's bytes as it is now, or what a read found instead. */
+const download = async (
+  room: SyncRoom,
+  path: string,
+  how: { export: string } | { media: true }
+): Promise<Uint8Array | Read> => {
   const response = await fetchInRoom(
     room,
     "export" in how
       ? googleUrl(apisHost, `${path}/export`, { mimeType: how.export })
       : googleUrl(apisHost, path, { alt: "media" })
   );
-  // Given up at the deadline: an empty page goes on without it.
+  // Given up at the deadline: the kit's paging decides (`fillPage`).
   if (response === "late") {
-    return room.empty ? { content: null } : { full: true };
+    return { late: true };
   }
   if (response.status === 404) {
-    await response.body?.cancel();
     return { gone: true };
   }
   // Not the owner's to download, or too large to export: nothing to read.
@@ -312,11 +349,57 @@ const contentOf = async (room: SyncRoom, file: DriveFile): Promise<Read> => {
   if (!response.ok) {
     throw await googleFailure(response);
   }
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.byteLength > maxReadBytes) {
+  return new Uint8Array(await response.arrayBuffer());
+};
+
+/**
+ * Whether bytes read now are still the version the file's metadata gave:
+ * null if so, else what the read found. Content never runs ahead of its
+ * version: if the file changed since, this entry gives nothing, and the
+ * change feed, which reports every change after the position it was read
+ * from, brings the newer version. A later read never returns to this
+ * entry, so it can't loop.
+ */
+const sameVersion = async (
+  room: SyncRoom,
+  path: string,
+  file: DriveFile
+): Promise<Read | null> => {
+  const now = await versionNow(room, path);
+  if (now === "late") {
+    return { late: true };
+  }
+  if (now === "gone") {
+    return { gone: true };
+  }
+  return now.version === file.version ? null : { moved: true };
+};
+
+/** A file's content, if the page has room for it. */
+const contentOf = async (room: SyncRoom, file: DriveFile): Promise<Read> => {
+  const how = howToRead(file);
+  if (how === null) {
     return { content: null };
   }
-  const content = contentFrom(file, how, bytes);
+  // Out of requests or time before it starts: the next read takes it.
+  if (!mayRequest(room)) {
+    return { full: true };
+  }
+  // Base64 is a third larger than the bytes.
+  if ("media" in how && (Number(file.size ?? 0) * 4) / 3 > room.bytes) {
+    return noRoom(room);
+  }
+  const path = `${files}/${segment(file.id)}`;
+  const bytes = await download(room, path, how);
+  if (!(bytes instanceof Uint8Array)) {
+    return bytes;
+  }
+  const changed = await sameVersion(room, path, file);
+  if (changed !== null) {
+    return changed;
+  }
+  const content =
+    bytes.byteLength > maxReadBytes ? null : contentFrom(file, how, bytes);
   if (content === null) {
     return { content };
   }
@@ -343,21 +426,39 @@ const itemOf = (
 
 const goneOf = (id: string): SyncItem => ({ gone: true, id, kind: "file" });
 
-/** The item a file now is, read with its content when it is synced. */
-const fileItem = async (
-  room: SyncRoom,
-  file: DriveFile,
-  changedAt: string
-): Promise<SyncItem[] | "full"> => {
+/**
+ * What a file is without reading its content: nothing for a folder, gone
+ * when this connection no longer syncs it, else the item without content.
+ */
+const withoutContent = (file: DriveFile, changedAt: string): SyncItem[] => {
   if (file.mimeType === folderMimeType) {
     return [];
   }
   if (!isOwned(file)) {
     return [goneOf(file.id)];
   }
+  return [itemOf(file, changedAt, null)];
+};
+
+/** The item a file now is, read with its content when it is synced. */
+const fileItem = async (
+  room: SyncRoom,
+  file: DriveFile,
+  changedAt: string
+): Promise<EntryItems> => {
+  const known = withoutContent(file, changedAt);
+  if (known.length === 0 || known[0]?.gone === true) {
+    return known;
+  }
   const read = await contentOf(room, file);
   if ("full" in read) {
     return "full";
+  }
+  if ("late" in read) {
+    return "late";
+  }
+  if ("moved" in read) {
+    return [];
   }
   return "gone" in read
     ? [goneOf(file.id)]
@@ -387,13 +488,14 @@ const listPage = async (
     ),
     listSchema
   );
-  const { items, last, done } = await fillPage(
+  const { items, last, done } = await fillPage({
     room,
-    listed.files ?? [],
-    position.after,
-    (file) => file.id,
-    async (file) => await fileItem(room, file, file.modifiedTime)
-  );
+    entries: listed.files ?? [],
+    after: position.after,
+    keyOf: (file) => file.id,
+    itemsFor: async (file) => await fileItem(room, file, file.modifiedTime),
+    passOver: (file) => withoutContent(file, file.modifiedTime),
+  });
   if (!done) {
     return {
       items,
@@ -421,11 +523,8 @@ const listPage = async (
 const changeKey = (change: Change): string =>
   `${change.file?.id ?? change.fileId ?? ""}@${change.time}`;
 
-/** The item a change makes: the file as it now is, gone, or none. */
-const changeItem = async (
-  room: SyncRoom,
-  change: Change
-): Promise<SyncItem[] | "full"> => {
+/** What a change makes without reading content: gone, nothing, or the file's item. */
+const changeWithoutContent = (change: Change): SyncItem[] => {
   const id = change.file?.id ?? change.fileId;
   if (id === null || id === undefined) {
     return [];
@@ -437,8 +536,17 @@ const changeItem = async (
   ) {
     return [goneOf(id)];
   }
-  return await fileItem(room, change.file, change.time);
+  return withoutContent(change.file, change.time);
 };
+
+/** The item a change makes: the file as it now is, gone, or none. */
+const changeItem = async (
+  room: SyncRoom,
+  change: Change
+): Promise<EntryItems> =>
+  change.file === null || change.file === undefined || change.removed === true
+    ? changeWithoutContent(change)
+    : await fileItem(room, change.file, change.time);
 
 /** One page of the change feed. */
 const changesPage = async (
@@ -454,13 +562,14 @@ const changesPage = async (
     }),
     changesSchema
   );
-  const { items, last, done } = await fillPage(
+  const { items, last, done } = await fillPage({
     room,
-    changed.changes ?? [],
-    position.after,
-    changeKey,
-    async (change) => await changeItem(room, change)
-  );
+    entries: changed.changes ?? [],
+    after: position.after,
+    keyOf: changeKey,
+    itemsFor: async (change) => await changeItem(room, change),
+    passOver: changeWithoutContent,
+  });
   if (!done) {
     return {
       items,

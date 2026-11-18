@@ -16,7 +16,7 @@ import {
   syncRoom,
   takeContent,
 } from "@grasp-os/connector-kit/sync";
-import type { SyncRoom } from "@grasp-os/connector-kit/sync";
+import type { EntryItems, SyncRoom } from "@grasp-os/connector-kit/sync";
 import type {
   SyncContent,
   SyncItem,
@@ -30,7 +30,6 @@ import { gmailHost, googleFailure, googleUrl } from "./google.ts";
 import {
   addressesOf,
   attachmentsOf,
-  bodyPartOf,
   headerOf,
   partSchema,
   textOf,
@@ -50,9 +49,10 @@ import type { Part } from "./mime.ts";
 //
 // What goes away: a message deleted for good (`messagesDeleted`), and one
 // moved to the bin or to spam, comes as `gone`; one taken out of either
-// comes back as a new version (its `historyId`, which moves with every
-// change of it, is its version). Other label changes (read, starred) are
-// no change to what it says, so they are left alone. A message's `gone`
+// comes back. A message's version is its ID: its content never changes,
+// and a label change (read, starred, archived) is no change to what it
+// says, so it is left alone. One that comes back from the bin has the
+// version it had: core reinstates it. A message's `gone`
 // takes its attachments with it: they are `partOf` it.
 //
 // Where a read stops, and where the next goes on: the kit's paging
@@ -193,18 +193,26 @@ const getPage = async <Schema extends z.ZodType>(
   return answer;
 };
 
-/** A part's bytes, inline or behind its attachment ID: null when there's no room. */
+/**
+ * A part's bytes, inline or behind its attachment ID; null when Gmail no
+ * longer has it; "late" when the page has no request or time left for it
+ * (the entry has started, so the kit's paging passes it over on an empty
+ * page, or stops before it).
+ */
 const partBytes = async (
   room: SyncRoom,
   message: string,
   part: Part
-): Promise<Uint8Array | null> => {
+): Promise<Uint8Array | null | "late"> => {
   const { attachmentId, data } = part.body ?? {};
   if (data !== undefined) {
     return fromBase64(data);
   }
-  if (attachmentId === undefined || !mayRequest(room)) {
+  if (attachmentId === undefined) {
     return null;
+  }
+  if (!mayRequest(room)) {
+    return "late";
   }
   const answer = await getJson(
     room,
@@ -214,7 +222,10 @@ const partBytes = async (
     ),
     attachmentSchema
   );
-  return typeof answer === "string" ? null : fromBase64(answer.data);
+  if (answer === "late") {
+    return "late";
+  }
+  return answer === "not-found" ? null : fromBase64(answer.data);
 };
 
 /** The headers a message's text starts with, as its people read them. */
@@ -226,32 +237,98 @@ const headerLines = (payload: Part | undefined): string =>
     })
     .join("\n");
 
+/** Deepest part tree read: Gmail's are a handful of levels at most. */
+const maxDepth = 16;
+
+const typeOf = (part: Part): string => (part.mimeType ?? "").toLowerCase();
+
+/** Whether a part, or any under it, is plain text. */
+const hasPlain = (part: Part, depth = 0): boolean =>
+  typeOf(part) === "text/plain" ||
+  (depth < maxDepth &&
+    (part.parts ?? []).some((child) => hasPlain(child, depth + 1)));
+
 /**
- * A message's content: its headers and text body, or its HTML body as a
- * file; "full" when fetching the body has no room left on a page that
- * holds something already.
+ * The parts a message's body is, in order, in Gmail's parsed tree (Google
+ * parses the MIME): every text part without a file name, and of each
+ * `multipart/alternative` one alternative, its plain text when it has one
+ * (RFC 2046: the alternatives say the same thing). So a second text part
+ * after an inline picture is kept.
+ */
+const bodyParts = (part: Part | undefined, depth = 0): Part[] => {
+  if (part === undefined || depth > maxDepth) {
+    return [];
+  }
+  const type = typeOf(part);
+  const children = part.parts ?? [];
+  if (type === "multipart/alternative") {
+    return bodyParts(
+      children.find((child) => hasPlain(child)) ?? children.at(-1),
+      depth + 1
+    );
+  }
+  if (type.startsWith("multipart/")) {
+    return children.flatMap((child) => bodyParts(child, depth + 1));
+  }
+  const named = (part.filename ?? "") !== "";
+  return !named && (type === "text/plain" || type === "text/html")
+    ? [part]
+    : [];
+};
+
+/** Text as HTML shows it, as written. */
+const escapeHtml = (text: string): string =>
+  text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+
+/**
+ * A message's content: its header lines, then every body part. All plain:
+ * text. Any HTML: an HTML file for core's extractor, the header lines and
+ * plain parts in it as preformatted text, so an HTML mail has its From,
+ * To, Cc and Date too. Null past what a read takes; "late" when a part's
+ * bytes couldn't be fetched in time.
  */
 const bodyOf = async (
   room: SyncRoom,
   message: Message
-): Promise<SyncContent | null | "full"> => {
+): Promise<SyncContent | null | "late"> => {
   const payload = message.payload ?? undefined;
-  const found = bodyPartOf(payload, "text");
-  const bytes =
-    found === null
-      ? new Uint8Array()
-      : await partBytes(room, message.id, found.part);
-  if (bytes === null) {
-    return room.empty ? null : "full";
+  const pieces: { html: boolean; text: string }[] = [];
+  let size = 0;
+  for (const part of bodyParts(payload)) {
+    // oxlint-disable-next-line no-await-in-loop -- one part after another, within the page's room
+    const bytes = await partBytes(room, message.id, part);
+    if (bytes === "late") {
+      return "late";
+    }
+    if (bytes !== null) {
+      size += bytes.byteLength;
+      pieces.push({
+        html: typeOf(part) === "text/html",
+        text: textOf(part, bytes),
+      });
+    }
   }
-  if (bytes.byteLength > maxReadBytes) {
+  if (size > maxReadBytes) {
     return null;
   }
-  if (found?.contentType === "html") {
-    return { type: "file", contentType: "text/html", base64: toBase64(bytes) };
+  const headers = headerLines(payload);
+  if (!pieces.some(({ html }) => html)) {
+    return {
+      type: "text",
+      text: [headers, ...pieces.map(({ text }) => text)].join("\n\n"),
+    };
   }
-  const text = found === null ? "" : textOf(found.part, bytes);
-  return { type: "text", text: `${headerLines(payload)}\n\n${text}` };
+  const html = [
+    `<pre>${escapeHtml(headers)}</pre>`,
+    ...pieces.map(({ html: isHtml, text }) =>
+      isHtml ? text : `<pre>${escapeHtml(text)}</pre>`
+    ),
+  ].join("\n");
+  return {
+    type: "file",
+    contentType: "text/html",
+    base64: toBase64(new TextEncoder().encode(html)),
+  };
 };
 
 /** What a message's items share: all but what each one is. */
@@ -260,22 +337,63 @@ type Common = Pick<
   "gone" | "kind" | "version" | "changedAt" | "readers" | "changedBy"
 >;
 
+/**
+ * What a message's items share. Its version is its ID: a message's
+ * content never changes, while Gmail's `historyId` moves with every label
+ * change, read or starred, which would add every read mail again.
+ */
+const commonOf = (owner: SyncReader[], message: Message): Common => {
+  const from = addressesOf(headerOf(message.payload?.headers, "From"))[0]
+    ?.address;
+  return {
+    gone: false,
+    kind: "mail",
+    version: message.id,
+    changedAt: new Date(Number(message.internalDate)).toISOString(),
+    readers: owner,
+    changedBy: from?.toLowerCase() ?? null,
+  };
+};
+
+/** A message and its attachments without their content: what is known of it without a request. */
+const messageWithoutContent = (
+  owner: SyncReader[],
+  message: Message
+): SyncItem[] => {
+  const common = commonOf(owner, message);
+  const payload = message.payload ?? undefined;
+  return [
+    {
+      ...common,
+      id: message.id,
+      title: headerOf(payload?.headers, "Subject") ?? "",
+      content: null,
+      partOf: null,
+    },
+    ...attachmentsOf(payload).map((attachment): SyncItem => ({
+      ...common,
+      id: `${message.id}/${attachment.id}`,
+      title: attachment.name,
+      content: null,
+      partOf: message.id,
+    })),
+  ];
+};
+
 /** A message's attachments, each an item of its own, `partOf` it. */
 const attachmentItems = async (
   room: SyncRoom,
   message: Message,
   common: Common
-): Promise<SyncItem[] | "full"> => {
+): Promise<SyncItem[] | "full" | "late"> => {
   const items: SyncItem[] = [];
   for (const attachment of attachmentsOf(message.payload ?? undefined)) {
     let content: SyncContent | null = null;
     if (attachment.size <= maxReadBytes) {
       // oxlint-disable-next-line no-await-in-loop -- one attachment after another, within the page's room
       const bytes = await partBytes(room, message.id, attachment.part);
-      // No request or time left: the next read takes the whole message,
-      // unless the page holds nothing yet.
-      if (bytes === null && !room.empty) {
-        return "full";
+      if (bytes === "late") {
+        return "late";
       }
       if (bytes !== null && bytes.byteLength <= maxReadBytes) {
         content = {
@@ -307,48 +425,45 @@ const messageItems = async (
   room: SyncRoom,
   owner: SyncReader[],
   message: Message
-): Promise<SyncItem[] | "full"> => {
+): Promise<EntryItems> => {
   if ((message.labelIds ?? []).some((label) => awayLabels.has(label))) {
     return [{ gone: true, id: message.id, kind: "mail" }];
   }
-  const payload = message.payload ?? undefined;
-  const changedAt = new Date(Number(message.internalDate)).toISOString();
-  const from = addressesOf(headerOf(payload?.headers, "From"))[0]?.address;
-  const common: Common = {
-    gone: false,
-    kind: "mail",
-    version: message.historyId,
-    changedAt,
-    readers: owner,
-    changedBy: from?.toLowerCase() ?? null,
-  };
+  const common = commonOf(owner, message);
   const body = await bodyOf(room, message);
-  if (body === "full") {
-    return "full";
+  if (body === "late") {
+    return "late";
   }
   const taken = body === null ? { content: null } : takeContent(room, body);
   if (taken === null) {
     return "full";
   }
-  const items: SyncItem[] = [
+  const attachments = await attachmentItems(room, message, common);
+  if (typeof attachments === "string") {
+    return attachments;
+  }
+  return [
     {
       ...common,
       id: message.id,
-      title: headerOf(payload?.headers, "Subject") ?? "",
+      title: headerOf(message.payload?.headers, "Subject") ?? "",
       content: taken.content,
       partOf: null,
     },
+    ...attachments,
   ];
-  const attachments = await attachmentItems(room, message, common);
-  return attachments === "full" ? "full" : [...items, ...attachments];
 };
+
+/** What one read knows of the messages it fetched, by ID, for passing one over. */
+type Fetched = Map<string, Message>;
 
 /** What one entry makes: the message as it now is, or gone. */
 const entryItems = async (
   room: SyncRoom,
   owner: SyncReader[],
+  fetched: Fetched,
   entry: Entry
-): Promise<SyncItem[] | "full"> => {
+): Promise<EntryItems> => {
   if (entry.act === "gone") {
     return [{ gone: true, id: entry.id, kind: "mail" }];
   }
@@ -363,13 +478,48 @@ const entryItems = async (
     messageSchema
   );
   if (message === "late") {
-    return "full";
+    return "late";
   }
   // Deleted since it was listed.
   if (message === "not-found") {
     return [{ gone: true, id: entry.id, kind: "mail" }];
   }
+  fetched.set(message.id, message);
   return await messageItems(room, owner, message);
+};
+
+/**
+ * An entry passed over (the kit's paging, on an empty page): gone stays
+ * gone; a message fetched comes without its content; one that couldn't
+ * even be fetched comes as its ID, with when it was passed over, so it is
+ * on record with its content left out.
+ */
+const passedOver = (
+  owner: SyncReader[],
+  fetched: Fetched,
+  entry: Entry
+): SyncItem[] => {
+  if (entry.act === "gone") {
+    return [{ gone: true, id: entry.id, kind: "mail" }];
+  }
+  const message = fetched.get(entry.id);
+  if (message !== undefined) {
+    return messageWithoutContent(owner, message);
+  }
+  return [
+    {
+      gone: false,
+      id: entry.id,
+      kind: "mail",
+      version: entry.id,
+      changedAt: new Date().toISOString(),
+      title: "",
+      content: null,
+      readers: owner,
+      changedBy: null,
+      partOf: null,
+    },
+  ];
 };
 
 /** The history's records as entries: what each does to which message. */
@@ -434,13 +584,15 @@ const listPage = async (
     id,
     act: "read",
   }));
-  const { items, last, done } = await fillPage(
+  const fetched: Fetched = new Map();
+  const { items, last, done } = await fillPage({
     room,
     entries,
-    position.after,
-    ({ key }) => key,
-    async (entry) => await entryItems(room, owner, entry)
-  );
+    after: position.after,
+    keyOf: ({ key }) => key,
+    itemsFor: async (entry) => await entryItems(room, owner, fetched, entry),
+    passOver: (entry) => passedOver(owner, fetched, entry),
+  });
   if (!done) {
     return {
       items,
@@ -477,13 +629,15 @@ const historyPage = async (
     ),
     historySchema
   );
-  const { items, last, done } = await fillPage(
+  const fetched: Fetched = new Map();
+  const { items, last, done } = await fillPage({
     room,
-    historyEntries(read.history),
-    position.after,
-    ({ key }) => key,
-    async (entry) => await entryItems(room, owner, entry)
-  );
+    entries: historyEntries(read.history),
+    after: position.after,
+    keyOf: ({ key }) => key,
+    itemsFor: async (entry) => await entryItems(room, owner, fetched, entry),
+    passOver: (entry) => passedOver(owner, fetched, entry),
+  });
   if (!done) {
     return {
       items,
