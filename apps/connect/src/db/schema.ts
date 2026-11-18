@@ -64,6 +64,32 @@ export const connections = sqliteTable(
      */
     accountEmail: text("account_email"),
     /**
+     * The account's address as its provider confirmed it, when connected
+     * and again at each renewal (providers.ts `confirmAddress`), for the
+     * providers whose reader lists name accounts by address (Google's);
+     * null when the last renewal confirmed none, and for every other
+     * provider. What core counts a person in a copied reader list by
+     * (`personalAccounts`).
+     */
+    verifiedEmail: text("verified_email"),
+    /**
+     * When the provider last confirmed `verified_email`: when connected,
+     * or at the last renewal that confirmed it. Core counts the address
+     * only while this is recent (`readerProofMaxAgeMs`), so an address an
+     * idle connection or one needing reconnecting holds stops counting.
+     */
+    verifiedEmailAt: timestamp("verified_email_at"),
+    /**
+     * The addresses `verified_email` held before a renewal or reconnect
+     * replaced or cleared it (`pastAddressesAfter`), kept until its
+     * person's erasure, which forgets the reader tokens of each (core's
+     * person-erasure.ts `identity`). Nothing reads them for access: a past
+     * address proves nothing.
+     */
+    pastVerifiedEmails: text("past_verified_emails", { mode: "json" }).$type<
+      string[]
+    >(),
+    /**
      * The other addresses the account's mailbox receives mail at (its
      * primary address and SMTP aliases), as its provider said when it was
      * connected (account-addresses.ts); null when never read.

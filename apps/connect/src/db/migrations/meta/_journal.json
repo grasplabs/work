@@ -229,8 +229,15 @@
     {
       "idx": 32,
       "version": "6",
-      "when": 1794998848013,
-      "tag": "0032_bitter_sinister_six",
+      "when": 1794995606324,
+      "tag": "0032_connection_verified_email",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1795006911862,
+      "tag": "0033_striped_wonder_man",
       "breakpoints": true
     }
   ]

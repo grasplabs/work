@@ -29,6 +29,7 @@ import type {
   ConnectApi,
   ConnectCall,
   ConnectionOwner,
+  PersonalAccount,
   ConnectionPerson,
   ConnectionSummary,
   OrganizationConnection,
@@ -108,7 +109,7 @@ import {
   changeToolkitTools,
   startToolkitConnection,
 } from "./composio-connections.ts";
-import { connectionOwners } from "./connections.ts";
+import { connectionOwners, personalAccounts } from "./connections.ts";
 import {
   actionShape,
   connectorContract,
@@ -179,7 +180,7 @@ import {
   take,
 } from "./pending.ts";
 import type { HeldAction } from "./pending.ts";
-import { erasePersonal } from "./person-erasure.ts";
+import { beginErasure, erasePersonal } from "./person-erasure.ts";
 import { probeBindings } from "./probe.ts";
 import { revocationsByHand } from "./revocations-by-hand.ts";
 import {
@@ -418,6 +419,10 @@ export default class Connect
     return await connectionOwners(this.env.DB, connectionIds);
   }
 
+  async personalAccounts(userId: unknown): Promise<PersonalAccount[]> {
+    return await personalAccounts(this.env.DB, userId);
+  }
+
   async requireClassRights(
     request: RequireClassRights
   ): Promise<{ reconnect: number }> {
@@ -445,6 +450,10 @@ export default class Connect
     request: ErasePersonal
   ): Promise<{ connections: number }> {
     return await erasePersonal(this.env, request);
+  }
+
+  async beginErasure(request: ErasePersonal): Promise<void> {
+    await beginErasure(this.env, request);
   }
 
   async abandonFlow(state: string): Promise<void> {

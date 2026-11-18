@@ -513,6 +513,25 @@ export const canSignInAgain = (
   (connection.scope === "personal" || isAdmin(person.role)) &&
   !person.staff;
 
+/**
+ * An account at a suite a person connected as their own: the provider,
+ * the company's tenant there, the account's stable subject (an Entra
+ * object ID in the tenant, a Google `sub` under its hosted domain), its
+ * address as the provider last confirmed it (Google's; null otherwise)
+ * and when (milliseconds since the epoch), and whether it is still
+ * connected (a disconnected one is listed for its person's erasure).
+ */
+export interface PersonalAccount {
+  provider: string;
+  tenant: string;
+  accountId: string;
+  verifiedEmail: string | null;
+  verifiedEmailAt: number | null;
+  /** Addresses it was confirmed under before, for its person's erasure alone. */
+  pastVerifiedEmails: string[];
+  connected: boolean;
+}
+
 /** Most connections one `connectionOwners` call takes. */
 export const connectionOwnersMax = 100;
 
@@ -2021,6 +2040,14 @@ export interface ConnectApi
     connectionIds: readonly string[]
   ) => Promise<ConnectionOwner[]>;
   /**
+   * The suite accounts the person `userId` connected as their own,
+   * disconnected ones too, as connect verified them (`PersonalAccount`):
+   * what core counts them as a reader of where it copies who may read an
+   * item, while connected and recently confirmed, and what their erasure
+   * forgets (GRA-1761).
+   */
+  personalAccounts: (userId: string) => Promise<PersonalAccount[]>;
+  /**
    * Asks the connections whose grant lacks the rights of `classes`, those
    * an admin just turned on, to be connected again (`needs_reauth`), in
    * place. How many it asked.
@@ -2051,6 +2078,14 @@ export interface ConnectApi
    * their connections it emptied.
    */
   erasePersonal: (request: ErasePersonal) => Promise<{ connections: number }>;
+  /**
+   * Marks a person's erasure begun in connect, and nothing else: from then
+   * on connect makes nothing of theirs, a flow already under way included
+   * (its insert refuses them). For core only, first of all in the erasure
+   * (person-erasure.ts `identity`), before it reads their accounts.
+   * `erasePersonal` marks it too. Safe to ask again.
+   */
+  beginErasure: (request: ErasePersonal) => Promise<void>;
   /**
    * Spends a flow that came back but can't finish (no session, say), so its
    * code can't be brought back to finish it later.
