@@ -4,21 +4,11 @@ import type {
   DocumentSummary,
   SearchHit,
 } from "@grasp-os/shared/knowledge";
-import { pageMaxLimit } from "@grasp-os/shared/knowledge";
-import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, Link } from "@tanstack/react-router";
 
 import { PageHeading } from "../frame/page.tsx";
-import { RouterLink } from "../frame/router-link.tsx";
-import {
-  Card,
-  CardDescription,
-  CardLink,
-  CardMedia,
-  CardTitle,
-} from "../grasp/card/index.ts";
 import {
   Empty,
   EmptyDescription,
@@ -26,9 +16,10 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "../grasp/empty/index.ts";
-import { File, Folder, Search } from "../grasp/icons/index.ts";
+import { File, Search } from "../grasp/icons/index.ts";
 import {
   Item,
+  ItemActions,
   ItemContent,
   ItemDescription,
   ItemDetail,
@@ -40,11 +31,9 @@ import { Section, SectionHeader } from "../grasp/section-header/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import {
-  CollectionDrawing,
-  MemoryDrawing,
-  Panel,
-} from "../knowledge/blocks.tsx";
-import { CollectionMarkers } from "../knowledge/collection-markers.tsx";
+  CollectionMarkers,
+  collectionIconOf,
+} from "../knowledge/collection-markers.tsx";
 import { KnowledgeFrame } from "../knowledge/frame.tsx";
 import type { MemoryFiles } from "../knowledge/memory.ts";
 import { loadKnowledgeNav } from "../knowledge/nav-data.ts";
@@ -171,194 +160,80 @@ const SearchResults = ({
   );
 };
 
-/** The memory files, as the first block: what every agent always has. */
-const MemoryBlock = ({ memory }: { memory: MemoryFiles }) => {
-  const { t } = useLingui();
-  return (
-    <div {...stylex.props(styles.memory)}>
-      <div {...stylex.props(styles.memoryPanel)}>
-        {memory.memory === null ? (
-          <Card>
-            <CardMedia>
-              <Panel short>
-                <MemoryDrawing />
-              </Panel>
-            </CardMedia>
-          </Card>
-        ) : (
-          <CardLink
-            aria-label={t`Memory`}
-            render={
-              <Link
-                params={{ collection: memory.memory }}
-                search={{}}
-                to="/knowledge/$collection"
-              />
-            }
-          >
-            <CardMedia>
-              <Panel short>
-                <MemoryDrawing />
-              </Panel>
-            </CardMedia>
-          </CardLink>
-        )}
-      </div>
-      <div {...stylex.props(styles.memoryWords)}>
-        <Text size="sm" tone="muted">
-          <Trans>What every agent has in its context, all the time.</Trans>
-        </Text>
-        {memory.files.length === 0 ? (
-          <Text size="sm" tone="muted">
-            <Trans>No memory files are written yet.</Trans>
-          </Text>
-        ) : (
-          <ul {...stylex.props(styles.files)}>
-            {memory.files.map((file) => (
-              <li key={file.id}>
-                <Text element="span" size="sm">
-                  <RouterLink
-                    params={{ collection: file.collectionId }}
-                    search={{ doc: file.id }}
-                    to="/knowledge/$collection"
-                    variant="standalone"
-                  >
-                    {file.path}
-                  </RouterLink>{" "}
-                  <Text element="span" size="sm" tone="muted">
-                    {file.collectionId === memory.personal
-                      ? t`(yours)`
-                      : t`(company)`}
-                  </Text>
-                </Text>
-              </li>
-            ))}
-          </ul>
-        )}
-        {memory.memory === null ? (
-          <Text size="sm" tone="muted">
-            <Trans>An admin hasn&apos;t set up company memory yet.</Trans>
-          </Text>
-        ) : null}
-      </div>
-    </div>
+// Concept B: Memory as rows of its files, collections as one list of rows.
+const MemoryRowsB = ({ memory }: { memory: MemoryFiles }) =>
+  memory.files.length === 0 ? (
+    <Text size="sm" tone="muted">
+      No memory files are written yet.
+    </Text>
+  ) : (
+    <ItemGroup separated>
+      {memory.files.map((file) => (
+        <Item
+          key={file.id}
+          render={
+            <Link
+              params={{ collection: file.collectionId }}
+              search={{ doc: file.id }}
+              to="/knowledge/$collection"
+            />
+          }
+          size="sm"
+        >
+          <ItemMedia icon={File} iconLook="inline" />
+          <ItemContent>
+            <ItemTitle>
+              {file.path}
+              <ItemDetail>
+                {file.collectionId === memory.personal ? "Yours" : "Company"}
+              </ItemDetail>
+            </ItemTitle>
+          </ItemContent>
+        </Item>
+      ))}
+    </ItemGroup>
   );
-};
 
-/** How many of a collection's latest documents its block shows. */
-const latestShown = 3;
-
-/** How many files a collection has, as far as its first page tells. */
-const useFileCount = (count: number): string => {
-  const { t } = useLingui();
-  if (count === 0) {
-    return t`No files yet.`;
-  }
-  if (count === pageMaxLimit) {
-    return t`${count} or more files`;
-  }
-  return plural(count, { one: "# file", other: "# files" });
-};
-
-/**
- * The documents last saved in a collection, newest first, with how many it
- * has. Read from its first page: past that (a collection of more than a
- * page) they are the latest of that page, and the count says "or more".
- */
-const LatestDocuments = ({ documents }: { documents: DocumentSummary[] }) => {
-  const latest = documents
-    .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-    .slice(0, latestShown);
-  const count = useFileCount(documents.length);
-  return (
-    <div {...stylex.props(styles.latest)}>
-      {latest.length === 0 ? null : (
-        <ItemGroup>
-          {latest.map((document) => (
-            <Item
-              key={document.id}
-              render={
-                <Link
-                  params={{ collection: document.collectionId }}
-                  search={{ doc: document.id }}
-                  to="/knowledge/$collection"
-                />
-              }
-              size="xs"
-            >
-              <ItemMedia icon={File} iconLook="inline" />
-              <ItemContent>
-                <ItemTitle>{document.title}</ItemTitle>
-              </ItemContent>
-            </Item>
-          ))}
-        </ItemGroup>
-      )}
-      <Text size="xs" tone="muted">
-        {count}
-      </Text>
-    </div>
-  );
-};
-
-/** A block per collection, three to a row, each opening its own page. */
-const CollectionBlocks = ({
+const CollectionRowsB = ({
   collections,
   firstPages,
 }: {
   collections: Collection[];
-  /** Each collection's first page of documents, where core listed it. */
   firstPages: ReadonlyMap<string, DocumentSummary[]>;
-}) => {
-  if (collections.length === 0) {
-    return (
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia icon={Folder} />
-          <EmptyTitle>
-            <Trans>There are no collections you can read yet.</Trans>
-          </EmptyTitle>
-        </EmptyHeader>
-      </Empty>
-    );
-  }
-  return (
-    <ul {...stylex.props(styles.blocks)}>
-      {collections.map((collection) => {
-        const documents = firstPages.get(collection.id);
-        return (
-          <li key={collection.id} {...stylex.props(styles.block)}>
-            <CardLink
-              render={
-                <Link
-                  params={{ collection: collection.id }}
-                  search={{}}
-                  to="/knowledge/$collection"
-                />
-              }
-            >
-              <CardMedia>
-                <Panel>
-                  <CollectionDrawing collection={collection} />
-                </Panel>
-              </CardMedia>
-              <CardTitle>{collection.name}</CardTitle>
-              {collection.description === "" ? null : (
-                <CardDescription>{collection.description}</CardDescription>
-              )}
-              {/* Who may read it, at the card's foot: badges say, they do
-                  nothing when pressed, so they may stand in the one link. */}
-              <CollectionMarkers collection={collection} />
-            </CardLink>
-            {documents === undefined ? null : (
-              <LatestDocuments documents={documents} />
+}) => (
+  <ItemGroup separated>
+    {collections.map((collection) => {
+      const n = firstPages.get(collection.id)?.length ?? 0;
+      return (
+        <Item
+          key={collection.id}
+          render={
+            <Link
+              params={{ collection: collection.id }}
+              search={{}}
+              to="/knowledge/$collection"
+            />
+          }
+          size="sm"
+        >
+          <ItemMedia icon={collectionIconOf(collection)} iconLook="inline" />
+          <ItemContent>
+            <ItemTitle>
+              {collection.name}
+              <ItemDetail>{n === 1 ? "1 file" : `${n} files`}</ItemDetail>
+            </ItemTitle>
+            {collection.description === "" ? null : (
+              <ItemDescription>{collection.description}</ItemDescription>
             )}
-          </li>
-        );
-      })}
-    </ul>
-  );
-};
+          </ItemContent>
+          <ItemActions>
+            <CollectionMarkers collection={collection} />
+          </ItemActions>
+        </Item>
+      );
+    })}
+  </ItemGroup>
+);
 
 const Knowledge = () => {
   const { t } = useLingui();
@@ -394,10 +269,14 @@ const Knowledge = () => {
             </Section>
           )}
           <Section aria-labelledby="memory">
-            <SectionHeader id="memory" title={<Trans>Memory</Trans>} />
+            <SectionHeader
+              description="What every agent has in its context, all the time."
+              id="memory"
+              title={<Trans>Memory</Trans>}
+            />
             <NotLoaded page={memory} />
             {memory.state === "ready" ? (
-              <MemoryBlock memory={memory.data} />
+              <MemoryRowsB memory={memory.data} />
             ) : null}
           </Section>
           <Section aria-labelledby="collections">
@@ -408,7 +287,7 @@ const Knowledge = () => {
             />
             <NotLoaded page={collections} />
             {collections.state === "ready" ? (
-              <CollectionBlocks
+              <CollectionRowsB
                 collections={collections.data}
                 firstPages={firstPages}
               />
