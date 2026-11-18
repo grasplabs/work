@@ -722,6 +722,22 @@ describe("the name people give a workflow", () => {
         setWorkflowTitle(env, ada, created.id, "x".repeat(101))
       ),
       number: await outcome(setWorkflowTitle(env, ada, created.id, 1)),
+      // Only null or an empty one clears it.
+      none: await outcome(setWorkflowTitle(env, ada, created.id, undefined)),
+      // What doesn't show, or reorders what does, is no title.
+      unseen: await Promise.all(
+        [
+          "\u200B",
+          "Inbox\u200Btriage",
+          "\u202Eegairt",
+          "Inbox\ntriage",
+          "Inbox\u2028triage",
+          "---",
+        ].map(
+          async (title) =>
+            await outcome(setWorkflowTitle(env, ada, created.id, title))
+        )
+      ),
       atCreate: await outcome(
         createWorkflowResource(env, ada, `long-${unique()}`, "x".repeat(101))
       ),
@@ -744,9 +760,11 @@ describe("the name people give a workflow", () => {
       audited: events
         .filter(
           ({ action, target }) =>
-            action === "workflow.title_set" && target?.id === created.id
+            (action === "workflow.created" ||
+              action === "workflow.title_set") &&
+            target?.id === created.id
         )
-        .map(({ actor, detail }) => ({ actor, detail })),
+        .map(({ action, actor, detail }) => ({ action, actor, detail })),
     }).toStrictEqual({
       created: "Email triage",
       plain: null,
@@ -758,6 +776,8 @@ describe("the name people give a workflow", () => {
         stranger: "workflow.resource_unavailable",
         long: "workflow.resource_invalid",
         number: "workflow.resource_invalid",
+        none: "workflow.resource_invalid",
+        unseen: Array.from({ length: 6 }, () => "workflow.resource_invalid"),
         atCreate: "workflow.resource_invalid",
       },
       read: { title: "Inbox triage", name },
@@ -765,12 +785,19 @@ describe("the name people give a workflow", () => {
       after: { title: null, name },
       audited: [
         {
+          action: "workflow.created",
           actor: { type: "person", userId: ada.userId },
-          detail: { cleared: false },
+          detail: { name, title: "Email triage" },
         },
         {
+          action: "workflow.title_set",
           actor: { type: "person", userId: ada.userId },
-          detail: { cleared: true },
+          detail: { title: "Inbox triage", previousTitle: "Email triage" },
+        },
+        {
+          action: "workflow.title_set",
+          actor: { type: "person", userId: ada.userId },
+          detail: { title: null, previousTitle: "Inbox triage" },
         },
       ],
     });

@@ -858,6 +858,8 @@ export interface RunActivity {
 export interface ConnectionWorkflow {
   id: string;
   name: string;
+  /** The name people gave it, shown in place of `name`; null for none. */
+  title: string | null;
 }
 
 /**

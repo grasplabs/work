@@ -81,6 +81,8 @@ const followsWorkflow =
 export interface AgentIndependentWorkflow {
   id: string;
   name: string;
+  /** The name people gave it, to call it by; null for none. `name` is its key. */
+  title: string | null;
   /** The live version; null before the first is published. */
   currentVersion: number | null;
   /** The person's role in it. */
@@ -135,9 +137,9 @@ export class WorkflowsApi extends WorkerEntrypoint<Env, AgentScope> {
       method: "workflows.independent",
       read: async (person, permissions) => {
         const listed = await listWorkflowResources(this.env, person);
-        return listed.flatMap(({ id, name, currentVersion, role }) =>
+        return listed.flatMap(({ id, name, title, currentVersion, role }) =>
           followsWorkflow(id)(permissions)
-            ? [{ id, name, currentVersion, role }]
+            ? [{ id, name, title, currentVersion, role }]
             : []
         );
       },

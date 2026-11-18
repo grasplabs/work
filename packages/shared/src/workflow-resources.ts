@@ -43,17 +43,30 @@ export const workflowNameSchema = z
     "Lowercase letters, digits and dashes, starting and ending with a letter or digit"
   );
 
-/**
- * The name people give a workflow, shown where its `name` would be: free
- * text, trimmed. Nothing references a workflow by it; `name` stays the key.
- */
 export const workflowTitleMaxLength = 100;
 
+// Control characters (Cc: newlines and tabs among them), format characters
+// (Cf: zero-width and bidirectional marks) and the line and paragraph
+// separators: none shows, and some reorder or hide what does.
+const unseenTitleChars = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+const letterOrDigit = /[\p{L}\p{N}]/u;
+
+/**
+ * The name people give a workflow, shown where its `name` would be: one
+ * line of free text, trimmed, with a letter or a digit in it and no
+ * character that doesn't show, so it never reads as nothing or as another
+ * text than it is. Nothing references a workflow by it; `name` stays the
+ * key.
+ */
 export const workflowTitleSchema = z
   .string()
   .trim()
   .min(1)
-  .max(workflowTitleMaxLength);
+  .max(workflowTitleMaxLength)
+  .refine(
+    (title) => !unseenTitleChars.test(title) && letterOrDigit.test(title),
+    "One line with a letter or a digit, and no invisible characters"
+  );
 
 /** What a workflow is called where people read it: its title, or its name. */
 export const workflowLabel = (workflow: {
@@ -1178,7 +1191,8 @@ export interface WorkflowResourcesApi {
   setProcess: (id: string, process: unknown) => Promise<WorkflowResource>;
   /**
    * Sets the name people see for it (`workflowTitleSchema`), or clears it
-   * with null or an empty one; for its builders, audited. Its `name` stays.
+   * with null or an empty one; for its builders, audited with the title
+   * and the one before. Its `name` stays.
    */
   setTitle: (id: string, title: unknown) => Promise<WorkflowResource>;
   /** Its draft, for its builders (`WorkflowDraft`). */

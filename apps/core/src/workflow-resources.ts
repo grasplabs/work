@@ -472,13 +472,11 @@ const entry = (
 });
 
 /**
- * A title as given (`workflowTitleSchema`): none, null or only white space
- * is no title.
+ * A title as given (`workflowTitleSchema`): null or only white space is no
+ * title; anything else that isn't one is `workflow.resource_invalid`.
  */
 const titleOf = (input: unknown): string | null =>
-  input === undefined ||
-  input === null ||
-  (typeof input === "string" && input.trim() === "")
+  input === null || (typeof input === "string" && input.trim() === "")
     ? null
     : workflowResourceErrors.parse(
         "workflow.resource_invalid",
@@ -508,7 +506,7 @@ export const createWorkflowResource = async (
     workflowNameSchema,
     name
   );
-  const given = titleOf(title);
+  const given = title === undefined ? null : titleOf(title);
   const cap = quotaLimits(env).workflowResourcesPerPerson;
   const id = crypto.randomUUID();
   const createdAt = new Date();
@@ -538,7 +536,13 @@ export const createWorkflowResource = async (
         ownerId: by.userId,
         createdAt,
       }),
-      outboxed(db, entry(by, "workflow.created", id, { name: parsed })),
+      outboxed(
+        db,
+        entry(by, "workflow.created", id, {
+          name: parsed,
+          ...(given === null ? {} : { title: given }),
+        })
+      ),
     ]);
   } catch (error) {
     if (notNullFailed(error, "workflow_resources.id")) {
@@ -569,8 +573,10 @@ export const createWorkflowResource = async (
  * builders, as its business process is set: it names nobody and grants
  * nothing, and `name`, which everything references, stays. The change and
  * its audit event are one batch; setting what is set changes and records
- * nothing. The event says whether a title was set or cleared, never its
- * text.
+ * nothing. The event has the title and the one before, as the business
+ * process's has: everyone with a role reads a title in place of the name,
+ * and two workflows may share one, so what it was called when is on
+ * record.
  */
 export const setWorkflowTitle = async (
   env: Env,
@@ -590,7 +596,8 @@ export const setWorkflowTitle = async (
       outboxed(
         db,
         entry(by, "workflow.title_set", workflow.id, {
-          cleared: title === null,
+          title,
+          previousTitle: workflow.title,
         })
       ),
     ]);
