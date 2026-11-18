@@ -1166,6 +1166,10 @@ msgstr "{only} lo usa"
 msgid "{open, plural, one {# open question} other {# open questions}}"
 msgstr "{open, plural, one {# pregunta abierta} other {# preguntas abiertas}}"
 
+#: src/brain/brain-section.tsx
+msgid "{open} still open"
+msgstr "{open} aún abiertas"
+
 #: src/onboarding/setup-steps.tsx
 msgid "{openCount, plural, =0 {Nothing needs you} =1 {Just one thing for you} other {# things for you}}"
 msgstr "{openCount, plural, =0 {Nada te espera} =1 {Solo una cosa para ti} other {# cosas para ti}}"
@@ -1479,6 +1483,7 @@ msgstr "{team} · nuestro correo no les llegó"
 msgid "{team} (team)"
 msgstr "{team} (equipo)"
 
+#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 msgid "{team} has a region of its own"
 msgstr "{team} tiene una región propia"
@@ -1490,6 +1495,10 @@ msgstr "{team} ha estado callado hasta ahora. Un mensaje breve de {lead}, su res
 #: src/brain/brain.ts
 msgid "{team} interviewed"
 msgstr "Equipo entrevistado: {team}"
+
+#: src/brain/brain-section.tsx
+msgid "{team} moved to {name}"
+msgstr "{team} se movió a {name}"
 
 #: src/brain/region-edit.tsx
 msgid "{team} moved to {to}"
@@ -2239,7 +2248,7 @@ msgid "Activity"
 msgstr "Actividad"
 
 #: src/brain/brain-log.tsx
-#: src/brain/brain-nav.tsx
+#: src/brain/brain-section.tsx
 #: src/routes/_shell.brain.tsx
 msgctxt "the brain's log"
 msgid "Activity"
@@ -3232,6 +3241,10 @@ msgstr "Áreas terminadas"
 msgid "Arrange {name}"
 msgstr "Organizar {name}"
 
+#: src/brain/brain-section.tsx
+msgid "Arrange {team}"
+msgstr "Organizar {team}"
+
 #: src/frame/part-words.tsx
 msgid "Arrow keys move it, Shift for a longer step, End docks it beside the page, Escape goes back to the page"
 msgstr "Las flechas lo mueven, Mayús para un paso más largo, Fin lo acopla junto a la página, Escape vuelve a la página"
@@ -3541,6 +3554,7 @@ msgstr "Disponible, a través de Composio"
 
 #: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
+#: src/brain/brain-section.tsx
 #: src/chat/approval-words.ts
 #: src/chat/asked-questions.tsx
 #: src/frame/part-words.tsx
@@ -3724,7 +3738,7 @@ msgid "Bound to"
 msgstr "Vinculado a"
 
 #: src/apps/resource-bindings.tsx
-#: src/brain/brain-nav.tsx
+#: src/brain/brain-section.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.brain.index.tsx
 #: src/routes/_shell.brain.tsx
@@ -4565,7 +4579,6 @@ msgctxt "put away the card of one item"
 msgid "Close"
 msgstr "Cerrar"
 
-#: src/brain/brain-nav.tsx
 #: src/frame/part-words.tsx
 msgid "Close {name}"
 msgstr "Cerrar {name}"
@@ -6515,7 +6528,6 @@ msgstr "Exactamente como está escrito aquí."
 msgid "Example"
 msgstr "Ejemplo"
 
-#: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
 msgid "Expand the navigation"
 msgstr "Desplegar la navegación"
@@ -6899,7 +6911,6 @@ msgctxt "a workflow's view"
 msgid "Flow"
 msgstr "Flujo"
 
-#: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
 msgid "Fold the navigation"
 msgstr "Plegar la navegación"
@@ -7993,6 +8004,7 @@ msgstr "En curso"
 msgid "In the archive"
 msgstr "En el archivo"
 
+#: src/brain/brain-section.tsx
 #: src/brain/brain.ts
 msgid "In the brain"
 msgstr "En el cerebro"
@@ -9430,7 +9442,7 @@ msgstr "Miembros y roles"
 msgid "members of the team in {field}"
 msgstr "los miembros del equipo en {field}"
 
-#: src/brain/brain-nav.tsx
+#: src/brain/brain-section.tsx
 #: src/brain/memory-page.tsx
 #: src/labels.ts
 #: src/routes/_shell.brain.tsx
@@ -9713,6 +9725,7 @@ msgstr "Mover después"
 msgid "Move the panel"
 msgstr "Mover el panel"
 
+#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 msgid "Move to"
 msgstr "Mover a"
@@ -9927,6 +9940,7 @@ msgstr "Opción nueva"
 msgid "New project"
 msgstr "Nuevo proyecto"
 
+#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 msgid "New region"
 msgstr "Nueva región"
@@ -11349,7 +11363,6 @@ msgctxt "open one run of a workflow"
 msgid "Open"
 msgstr "Abrir"
 
-#: src/brain/brain-nav.tsx
 #: src/frame/part-words.tsx
 #: src/knowledge/uploads.tsx
 msgid "Open {name}"
@@ -11655,6 +11668,7 @@ msgid "Over the next two weeks you’ll get a short personal link to talk with S
 msgstr "En las próximas dos semanas recibirás un enlace personal breve para hablar con Stephen, el entrevistador de IA de Grasp: los responsables unos 20 minutos, los demás de 10 a 15. Hablando o escribiendo."
 
 #: src/agents/agent-section.tsx
+#: src/brain/brain-section.tsx
 msgid "Overview"
 msgstr "Resumen"
 
@@ -12928,6 +12942,7 @@ msgstr "Cambiar nombre del chat"
 msgid "Renamed the organization"
 msgstr "Cambió el nombre de la organización"
 
+#: src/brain/brain-section.tsx
 #: src/brain/region-edit.tsx
 #: src/chat/sidebar-chats.tsx
 #: src/frame/part-words.tsx
@@ -14812,7 +14827,7 @@ msgstr "Fuente {number}"
 msgid "Sources"
 msgstr "Fuentes"
 
-#: src/brain/brain-nav.tsx
+#: src/brain/brain-section.tsx
 #: src/brain/sources-page.tsx
 #: src/routes/_shell.brain.tsx
 msgctxt "the Brain's sources page"
@@ -15760,10 +15775,13 @@ msgstr "La dirección confirmó la visión."
 msgid "The board has not confirmed the vision yet."
 msgstr "La dirección aún no ha confirmado la visión."
 
-#: src/brain/brain-nav.tsx
 #: src/workflows/requests/request-parts.tsx
 msgid "The brain"
 msgstr "El cerebro"
+
+#: src/brain/brain-section.tsx
+msgid "The Brain's pages"
+msgstr "Las páginas del Brain"
 
 #: src/workflows/business-process.tsx
 msgid "The business process {name} serves"
