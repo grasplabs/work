@@ -12,6 +12,7 @@ import {
   Icon,
   Key,
   Person,
+  ReadOnly,
   People,
   ShieldAlert,
 } from "../grasp/icons/index.ts";
@@ -57,18 +58,27 @@ export const CollectionMarkers = ({
 );
 
 /**
- * Whether a collection is sensitive, as a mark at the end of its row in the
- * navigation: an icon, named for a screen reader. Read-only has no mark
- * here: Lock means a thing the person cannot open, and these they can; the
- * collection's page says it in words.
+ * A collection's marks at the end of its row in the navigation: sensitive,
+ * and read-only (the struck pencil: may read, not change), each an icon
+ * named for a screen reader.
  */
 export const CollectionMarks = ({ collection }: { collection: Collection }) => {
   const { t } = useLingui();
-  return collection.sensitive ? (
-    <span {...stylex.props(styles.sensitive)}>
-      <Icon icon={ShieldAlert} label={t`Sensitive`} />
-    </span>
-  ) : null;
+  if (!collection.sensitive && !isReadOnly(collection)) {
+    return null;
+  }
+  return (
+    <>
+      {collection.sensitive ? (
+        <span {...stylex.props(styles.sensitive)}>
+          <Icon icon={ShieldAlert} label={t`Sensitive`} />
+        </span>
+      ) : null}
+      {isReadOnly(collection) ? (
+        <Icon icon={ReadOnly} label={t`Read-only`} />
+      ) : null}
+    </>
+  );
 };
 
 const accessIcons: Readonly<Record<CollectionAccess, IconData>> = {

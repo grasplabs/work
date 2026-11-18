@@ -1,9 +1,9 @@
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useNavigate, useRouter } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import { useState } from "react";
-import type { MouseEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 
 import { AppLogo } from "../connections/app-logo.tsx";
 import { Button } from "../grasp/button/index.ts";
@@ -215,12 +215,6 @@ const NoteMark = ({ note }: { note: Note }) => {
   return <KindDot kind={note.kind} />;
 };
 
-/** Whether a press on a link follows it here, in the app: not one opened in a new tab or window. */
-const followsHere = (event: MouseEvent): boolean =>
-  !event.defaultPrevented &&
-  event.button === 0 &&
-  !(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey);
-
 /** A note named on a page: its colour dot and name, and a preview on hover, with why it is here when the page says. */
 export const NoteChip = ({
   note,
@@ -233,30 +227,17 @@ export const NoteChip = ({
   reason?: string | undefined;
 }) => {
   const { i18n } = useLingui();
-  const router = useRouter();
-  const navigate = useNavigate();
-  const to = { to: "/brain/$noteId", params: { noteId: note.id } } as const;
-  const { href } = router.buildLocation(to);
   return (
     <HoverCard>
-      {/* The card's link is a plain one: a press on it moves within the app, as a router link does. */}
-      <span
-        onClick={(event) => {
-          if (followsHere(event)) {
-            event.preventDefault();
-            void navigate(to);
-          }
-        }}
-        role="presentation"
-        {...stylex.props(styles.chip)}
+      {/* The router's own link: a press moves within the app, a new tab opens one. */}
+      <HoverCardTrigger
+        render={<Link params={{ noteId: note.id }} to="/brain/$noteId" />}
       >
-        <HoverCardTrigger href={href}>
-          <span {...stylex.props(styles.chip)}>
-            <NoteMark note={note} />
-            <span {...stylex.props(styles.name)}>{label ?? note.title}</span>
-          </span>
-        </HoverCardTrigger>
-      </span>
+        <span {...stylex.props(styles.chip)}>
+          <NoteMark note={note} />
+          <span {...stylex.props(styles.name)}>{label ?? note.title}</span>
+        </span>
+      </HoverCardTrigger>
       <HoverCardContent align="start">
         <div {...stylex.props(styles.preview)}>
           <Text element="span" size="xs" tone="muted">
