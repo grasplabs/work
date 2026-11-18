@@ -112,8 +112,8 @@ export interface Team {
 }
 
 /**
- * One of the company's groups of teams, as its admin confirmed it or Grasp
- * proposed it: a region of the brain.
+ * One of the company's groups of teams, as Grasp arranged it or an admin
+ * changed it: a region of the brain.
  */
 export interface TeamGroup {
   id: string;
@@ -121,14 +121,14 @@ export interface TeamGroup {
   name: string;
   /** Its teams, by the brain's team ids, in the company's order. */
   teamIds: string[];
-  /** An admin confirmed it; until then it is only Grasp's proposal. */
+  /** Always true as core keeps it: every group counts, none waits to be confirmed. */
   confirmed: boolean;
 }
 
 /** Most groups of teams a company keeps. */
 export const teamGroupsMax = 50;
 
-/** A group of teams as an admin confirms it (`brain.saveTeamGroups`). */
+/** A group of teams as an admin keeps it (`brain.saveTeamGroups`). */
 export const teamGroupInputSchema = z.strictObject({
   id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u),
   name: z.string().trim().min(1).max(80),
@@ -378,8 +378,8 @@ export interface Workspace {
   teams: Team[];
   /**
    * The company's groups of teams, in its order: the brain's regions. A
-   * team in none has no group yet; Grasp proposes one when an admin asks
-   * (`brain.proposeTeamGroups`).
+   * team in none waits for Grasp to arrange it, after the staff list is
+   * saved, or for an admin to place it (`saveTeamGroups`).
    */
   teamGroups: TeamGroup[];
   /** The interviews the brain learned from, week by week, oldest first. */
@@ -480,16 +480,10 @@ export interface BrainApi {
    */
   forget: (target: BrainForgetTarget) => Promise<BrainForgetPreview>;
   /**
-   * Has Grasp propose, through the model gateway, a group for every team
-   * in none that an admin confirmed: kept as proposals until an admin
-   * confirms them (`saveTeamGroups`), replacing earlier proposals. For the
-   * company's admins. Returns the groups as they are now.
-   */
-  proposeTeamGroups: () => Promise<TeamGroup[]>;
-  /**
-   * Confirms the company's groups of teams as given, in its order, all of
-   * them: what isn't given is no longer a group. For the company's
-   * admins, audited. Returns them as kept.
+   * Keeps the company's groups of teams as given, in its order, all of
+   * them: what isn't given is no longer a group. Grasp never moves a team
+   * an admin placed. For the company's admins, audited. Returns them as
+   * kept.
    */
   saveTeamGroups: (groups: TeamGroupInput[]) => Promise<TeamGroup[]>;
   /** Closes an open gap without an answer: for the company's admins. */

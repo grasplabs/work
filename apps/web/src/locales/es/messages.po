@@ -4221,10 +4221,6 @@ msgstr "Confirmar"
 msgid "Confirm {what}"
 msgstr "Confirmar {what}"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Confirm groups"
-msgstr "Confirmar grupos"
-
 #: src/decision-confirmation.tsx
 msgid "Confirm your approval"
 msgstr "Confirma tu aprobación"
@@ -6821,10 +6817,6 @@ msgstr "El chat de Grasp"
 #: src/settings/ai-providers.tsx
 msgid "Grasp's own AI features"
 msgstr "Las funciones de IA propias de Grasp"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "Grasp’s proposal counts once you confirm it."
-msgstr "La propuesta de Grasp cuenta en cuanto la confirmes."
 
 #: src/routes/_shell.settings.brain.tsx
 msgid "Group name"
@@ -11082,14 +11074,6 @@ msgctxt "what the Brain remembers about something"
 msgid "Promise"
 msgstr "Compromiso"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Propose groups"
-msgstr "Proponer grupos"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "Proposed"
-msgstr "Propuesto"
-
 #: src/brain/brain-nav.tsx
 msgctxt "a group of teams Grasp proposed that no admin confirmed yet"
 msgid "Proposed"
@@ -12398,6 +12382,10 @@ msgstr "Guardar como PDF"
 #: src/pages/page-frame.tsx
 msgid "Save first"
 msgstr "Guardar primero"
+
+#: src/routes/_shell.settings.brain.tsx
+msgid "Save groups"
+msgstr "Guardar grupos"
 
 #: src/settings/ai-providers.tsx
 msgid "Save key"
@@ -14379,8 +14367,8 @@ msgid "The Brain, as each run's person may read it"
 msgstr "El Cerebro, tal como puede leerlo la persona de cada ejecución"
 
 #: src/routes/_shell.settings.brain.tsx
-msgid "The brain's regions: your teams, grouped the way your company is. Grasp can propose groups; they count once you confirm them."
-msgstr "Las regiones del Brain: tus equipos, agrupados como lo está tu empresa. Grasp puede proponer grupos; cuentan en cuanto los confirmes."
+msgid "The brain's regions: your teams, grouped the way your company is. Grasp groups new teams by itself; rename a group or move a team here."
+msgstr "Las regiones del Brain: tus equipos, agrupados como lo está tu empresa. Grasp agrupa los equipos nuevos por sí solo; aquí cambias el nombre de un grupo o mueves un equipo."
 
 #: src/workflows/business-process.tsx
 msgid "The business process {name} serves"

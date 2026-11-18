@@ -614,6 +614,12 @@ const proposeClaimMs = 5 * 60_000;
 const givenUpAt = "9999-12-31T00:00:00.000Z";
 /** What a run of the company's opinions is noted as among the failures (`draw_failures`). */
 const opinionsItem = "opinions";
+/**
+ * What arranging the Brain's teams into regions is noted as among the
+ * failures (`draw_failures`): owed while its row stands, from the staff
+ * list's save until arranged or given up (`arrangeNext`).
+ */
+const regionsItem = "regions";
 /** And how soon the alarm goes on drawing the next thing. */
 const drawNextMs = 500;
 /** And how long before it retries delivering audit events, first and at most. */
@@ -1321,15 +1327,25 @@ export class Onboarding extends DurableObject<Env> {
    */
   readonly #proposer: Proposer | undefined;
 
+  /**
+   * How the Brain's teams in no region are arranged into regions
+   * (core's brain-team-groups.ts, `arrangeTeams`), throwing when it
+   * can't be done: given by the Worker (onboarding/object.ts); without
+   * one, nothing is arranged.
+   */
+  readonly #arrange: (() => Promise<void>) | undefined;
+
   constructor(
     ctx: DurableObjectState,
     env: Env,
     removeFallen?: SourceRemover,
-    proposer?: Proposer
+    proposer?: Proposer,
+    arrange?: () => Promise<void>
   ) {
     super(ctx, env);
     this.#removeFallen = removeFallen;
     this.#proposer = proposer;
+    this.#arrange = arrange;
     migrateOnWake(ctx, migrations);
     // The one row everything else updates, there before anything asks. As
     // it is first made it takes the flow staff chose when they added the
@@ -1513,10 +1529,13 @@ export class Onboarding extends DurableObject<Env> {
         removed,
         confirmed,
       });
+      this.#arrangeOwed();
       return erased;
     });
     this.#deliverAudit();
     this.ctx.waitUntil(this.#armLinks());
+    // Arranging the Brain's teams waits for the alarm (`arrangeNext`).
+    await this.#armDrawing();
     if (said.length > 0) {
       await this.#afterForget();
     }
@@ -3009,6 +3028,87 @@ export class Onboarding extends DurableObject<Env> {
         .limit(1)
         .all().length > 0
     );
+  }
+
+  /**
+   * Notes, in the caller's transaction, that the Brain's teams are to be
+   * arranged into regions (`arrangeNext`): due now, its tries counted from
+   * none, as a saved staff list may name new teams.
+   */
+  #arrangeOwed(): void {
+    if (this.#arrange === undefined) {
+      return;
+    }
+    const after = new Date().toISOString();
+    this.#db
+      .insert(drawFailures)
+      .values({ item: regionsItem, tries: 0, after })
+      .onConflictDoUpdate({
+        target: drawFailures.item,
+        set: { tries: 0, after },
+      })
+      .run();
+  }
+
+  /**
+   * Arranges the Brain's teams in no region into regions, when a save of
+   * the staff list owes it (`#arrangeOwed`): claimed first, past the
+   * longest the model may take, so no second run asks meanwhile, then
+   * asked. What fails (no model, or none answered) is tried again after a
+   * minute, five and thirty, as a drawing is; then it's given up and
+   * logged until the staff list is saved again, the teams waiting in no
+   * region. A save while it runs owes it again, which this run leaves in
+   * place. Returns whether it asked.
+   */
+  async arrangeNext(now: number = Date.now()): Promise<boolean> {
+    const arrange = this.#arrange;
+    if (arrange === undefined) {
+      return false;
+    }
+    const [owed] = this.#db
+      .select()
+      .from(drawFailures)
+      .where(eq(drawFailures.item, regionsItem))
+      .all();
+    if (owed === undefined || Date.parse(owed.after) > now) {
+      return false;
+    }
+    // Read again at each step, as the call may take a minute: `now` is a
+    // test's to move.
+    const started = Date.now();
+    const clock = (): number => now + Date.now() - started;
+    const claimed = new Date(clock() + proposeClaimMs).toISOString();
+    this.#db
+      .update(drawFailures)
+      .set({ after: claimed })
+      .where(eq(drawFailures.item, regionsItem))
+      .run();
+    // Only this run's claim: a save meanwhile owes it again.
+    const ours = and(
+      eq(drawFailures.item, regionsItem),
+      eq(drawFailures.after, claimed)
+    );
+    try {
+      await arrange();
+      this.#db.delete(drawFailures).where(ours).run();
+    } catch (error) {
+      const tries = owed.tries + 1;
+      log.error("onboarding.arrange_failed", {
+        tries,
+        error: error instanceof Error ? error.name : "unknown",
+      });
+      const wait = drawRetryMs[tries - 1];
+      if (wait === undefined) {
+        this.#db.delete(drawFailures).where(ours).run();
+      } else {
+        this.#db
+          .update(drawFailures)
+          .set({ tries, after: new Date(clock() + wait).toISOString() })
+          .where(ours)
+          .run();
+      }
+    }
+    return true;
   }
 
   /**
@@ -5717,6 +5817,9 @@ export class Onboarding extends DurableObject<Env> {
       await this.remindDue();
       await this.sendUpdate();
       await this.deliverMail();
+      // The Brain's teams into regions after a save of the staff list
+      // (GRA-1993): one model call, before the intake's many.
+      await this.arrangeNext();
       // Last: a team's intake makes the most model calls of anything here,
       // and an alarm that runs out of time (15 minutes of wall time for an
       // alarm handler) is cut off where it is. Reminders, the update and
@@ -9228,9 +9331,17 @@ export class Onboarding extends DurableObject<Env> {
       )
       .all()
       .map(({ after }) => Date.parse(after));
+    // Arranging the Brain's teams, while owed (`arrangeNext`).
+    const arranging = this.#db
+      .select({ after: drawFailures.after })
+      .from(drawFailures)
+      .where(eq(drawFailures.item, regionsItem))
+      .all()
+      .map(({ after }) => Date.parse(after));
     const afters = [
       ...drawing.map(({ after }) => after),
       ...proposing,
+      ...arranging,
       ...this.#brainDueAt(now).flatMap(({ team, after }) =>
         drawn.has(team) ? [] : [after]
       ),
