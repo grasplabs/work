@@ -1579,6 +1579,10 @@
   --grasp-shell-corner: 6px;
   /* The page card's corner. */
   --grasp-shell-card-corner: 12px;
+  /* The Composer's corner in the panels' card: its squircle cuts in no deeper than the card's round corner round it. */
+  --grasp-shell-panel-composer-corner: calc(
+    var(--grasp-shell-card-corner) * 1.84
+  );
   /* The corner of a window round the shell: the card's corner plus its inset, so the two nest. */
   --grasp-shell-window-corner: calc(
     var(--grasp-shell-card-corner) + var(--grasp-shell-inset)

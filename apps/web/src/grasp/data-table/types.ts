@@ -240,6 +240,12 @@ export interface DataTableProps<Row> {
   /** With the `grouping` piece: the column whose values gather the rows, each group counted. */
   groupBy?: string;
   /**
+   * A row's state, drawn over the whole row and said in words in its first cell: `pending` (someone
+   * invited, not yet here) fades from the row's start to its end; `removed` greys it, pictures
+   * included. The row's actions stay fully seen and usable in both.
+   */
+  rowStatus?: (row: Row) => "pending" | "removed" | undefined;
+  /**
    * With the `grouping` piece: a group that asks for attention, by its value ("Needs you"). It tints
    * the group's count, and nothing else, and is said in words with the group's name.
    */

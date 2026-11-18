@@ -168,6 +168,37 @@ export const tableStyles = stylex.create({
   hideBelowTablet: {
     display: { default: null, "@container (width < 48rem)": "none" },
   },
+  // A row's state drawn over the whole row, never per cell, so it does not break at a column: a
+  // veil of the table's paper laid on top. Pending (someone not yet here) fades from the start,
+  // where the row is whole, to its end, the words still readable; mirrored right to left. Removed
+  // lays the paper evenly over the whole row, pictures included. What must stay usable (a row's actions) stands above.
+  statusRow: {
+    position: "relative",
+    "--grasp-row-fade": { default: "to right", ":dir(rtl)": "to left" },
+    "::after": {
+      content: '""',
+      position: "absolute",
+      insetInline: 0,
+      insetBlockStart: 0,
+      // Clear of the hairline under the row, which keeps its own strength.
+      insetBlockEnd: grasp.hairline,
+      pointerEvents: "none",
+    },
+  },
+  statusPending: {
+    "::after": {
+      backgroundImage: `linear-gradient(var(--grasp-row-fade), transparent 20%, color-mix(in oklab, ${grasp.paper} 70%, transparent))`,
+    },
+  },
+  // A control in such a row that must stay usable (the row's actions): above the veil.
+  aboveStatus: { position: "relative", zIndex: 1 },
+  // Greyed by the paper itself, not a filter: a filter greyed the ground too, and in dark the row
+  // stood as a grey band on the green ground.
+  statusRemoved: {
+    "::after": {
+      backgroundColor: `color-mix(in oklab, ${grasp.paper} 55%, transparent)`,
+    },
+  },
   // A row kept for its widths: it takes no room and is not drawn, but its cells still size the columns.
   collapsed: { visibility: "collapse" },
   // A row of the body: lit under a pointer, and its last one leaves the hairline to the footer.

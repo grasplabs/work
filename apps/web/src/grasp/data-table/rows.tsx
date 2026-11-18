@@ -17,7 +17,7 @@ import {
 import { visuallyHidden } from "../hidden/hidden";
 import { ChevronDown, ChevronRight, More } from "../icons";
 import { Skeleton } from "../skeleton";
-import { TableCell, TableRow } from "../table";
+import { TableCell, TableRow, tableAboveStatus } from "../table";
 import { ChooseRow } from "./choose";
 import { styles } from "./styles";
 import type { DataTableRowAction } from "./types";
@@ -144,7 +144,23 @@ interface DataRowProps<Row extends RowData> {
   detail?: (row: Row) => ReactNode;
   /** Kept only for the column widths it gives, while a search or a filter matches no row. */
   kept?: boolean;
+  /** The row's state (`rowStatus`): drawn over the row, said after its first words. */
+  status?: "pending" | "removed";
 }
+
+/** A row's state, said after its first words, for a screen reader: the look alone is not enough. */
+const StatusWords = ({
+  status,
+  words,
+}: {
+  status: "pending" | "removed" | undefined;
+  words: DataTableWords;
+}) =>
+  status === undefined ? null : (
+    <span
+      {...stylex.props(visuallyHidden)}
+    >{`, ${status === "pending" ? words.rowPending : words.rowRemoved}`}</span>
+  );
 
 /** The lead cell's words, after a toggle when the row opens, stepped in when it is deeper. */
 const Lead = <Row extends RowData>({
@@ -185,9 +201,10 @@ export const DataRow = <Row extends RowData>({
   rowActions,
   detail,
   kept = false,
+  status,
 }: DataRowProps<Row>) => (
   <>
-    <TableRow chosen={model.isChosen(row.id)} open={!kept}>
+    <TableRow chosen={model.isChosen(row.id)} open={!kept} status={status}>
       {selectable && (
         <TableCell pin={model.choosePin}>
           <ChooseRow
@@ -242,12 +259,14 @@ export const DataRow = <Row extends RowData>({
             ) : (
               shown
             )}
+            {lead && <StatusWords status={status} words={words} />}
           </TableCell>
         );
       })}
       {rowActions !== undefined && (
         <TableCell align="end">
-          <span {...stylex.props(styles.cellControl)}>
+          {/* Above a row's state: its actions stay fully seen and usable. */}
+          <span {...stylex.props(styles.cellControl, tableAboveStatus)}>
             <RowActions
               actions={rowActions(row.original)}
               label={words.actionsFor(model.name(row))}

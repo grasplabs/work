@@ -637,6 +637,7 @@ export const grasp = stylex.defineConsts({
   shellIconButton: "var(--grasp-shell-icon-button)",
   shellCorner: "var(--grasp-shell-corner)",
   shellCardCorner: "var(--grasp-shell-card-corner)",
+  shellPanelComposerCorner: "var(--grasp-shell-panel-composer-corner)",
   shellWindowCorner: "var(--grasp-shell-window-corner)",
   shellTracking: "var(--grasp-shell-tracking)",
   shellAnswer: "var(--grasp-shell-answer)",

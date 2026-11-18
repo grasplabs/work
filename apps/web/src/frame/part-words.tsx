@@ -258,6 +258,14 @@ export const usePartWords = (): GraspWordsCatalog => {
       },
       columnInfo: (header) => t`More about ${header}`,
       groupAttention: t`needs attention`,
+      rowPending: t({
+        message: "pending",
+        context: "a table row not yet in effect",
+      }),
+      rowRemoved: t({
+        message: "removed",
+        context: "a table row of something taken away",
+      }),
     },
     dataTableFilters: {
       contains: t({ message: "contains", context: "a filter's operator" }),

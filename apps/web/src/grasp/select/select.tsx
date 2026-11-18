@@ -268,8 +268,10 @@ const styles = stylex.create({
     },
     color: grasp.ink,
     fontFamily: grasp.fontSans,
-    // 16px on a phone or a touch screen (media.typing), as in an Input, so the two match in one form.
-    fontSize: { default: grasp.textSm, [media.typing]: grasp.fieldTextTouch },
+    // Its size's own text at every width. An Input takes 16px on a phone so the phone does not zoom
+    // when it is focused to type; a Select's trigger is a button and takes no typing, so in a table
+    // row it stays the size of the words beside it.
+    fontSize: grasp.textSm,
     lineHeight: grasp.textSmLine,
     fontWeight: grasp.weightRegular,
     textAlign: "start",

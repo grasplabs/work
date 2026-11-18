@@ -711,6 +711,14 @@ const PeopleTable = ({
         pageSize={pageSize}
         query={search}
         rowKey={(row) => row.key}
+        // Someone invited is not here yet: their row fades toward its end.
+        // Someone removed is greyed, their menu kept clear.
+        rowStatus={(row) => {
+          if (row.kind === "invited") {
+            return "pending";
+          }
+          return row.kind === "removed" ? "removed" : undefined;
+        }}
         rows={rows}
         unit={{ one: t`person`, other: t`people` }}
       />

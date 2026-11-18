@@ -11035,10 +11035,6 @@ msgstr "Stephen openen in {app}, in een nieuw tabblad"
 msgid "Open the App"
 msgstr "De App openen"
 
-#: src/chat/chat-bar.tsx
-msgid "Open the chat ({shortcut})"
-msgstr "De chat openen ({shortcut})"
-
 #: src/apps/app-workspace.tsx
 msgid "Open the chat in Chat"
 msgstr "De chat openen in Chat"
@@ -11507,6 +11503,11 @@ msgstr "PDF, Word, Excel, Markdown, tekst, CSV of JSON, elk tot 10 MB. Hoogstens
 #: src/onboarding/document-drop.tsx
 msgid "PDF, Word, Excel, PowerPoint or text"
 msgstr "PDF, Word, Excel, PowerPoint of tekst"
+
+#: src/frame/part-words.tsx
+msgctxt "a table row not yet in effect"
+msgid "pending"
+msgstr "in afwachting"
 
 #: src/knowledge/uploads.tsx
 msgid "Pending"
@@ -12407,6 +12408,11 @@ msgstr "Dit uit het brein verwijderen"
 #: src/frame/part-words.tsx
 msgid "Remove: {text}"
 msgstr "Verwijderen: {text}"
+
+#: src/frame/part-words.tsx
+msgctxt "a table row of something taken away"
+msgid "removed"
+msgstr "verwijderd"
 
 #: src/apps/draft-changes.tsx
 msgctxt "a file a change removes"
