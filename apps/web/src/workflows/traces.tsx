@@ -25,21 +25,12 @@ import type {
 import { Empty, EmptyDescription, EmptyHeader } from "../grasp/empty/index.ts";
 import {
   Item,
-  ItemActions,
   ItemContent,
   ItemDescription,
   ItemGroup,
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../grasp/table/index.ts";
 import {
   Tabs,
   TabsContent,
@@ -54,8 +45,8 @@ import { activityKey, activityText } from "./activity-bar.tsx";
 import type { Names } from "./activity-bar.tsx";
 import { ItemTest } from "./item-test.tsx";
 import { ListedCount } from "./listed-count.tsx";
-import { NoRuns, OpenRun } from "./resource-runs.tsx";
-import { RunBeside, RunStatusBadge, useStartedBy } from "./run-detail.tsx";
+import { WorkflowRunsTable } from "./resource-runs.tsx";
+import { RunBeside } from "./run-detail.tsx";
 import { WorkflowDiagramView } from "./workflow-diagram.tsx";
 
 // A workflow's Traces, for its builders (prototype `inside-traces.tsx`):
@@ -74,16 +65,8 @@ export type TracesPart = "runs" | "activity";
 /** How often a run still going is read again. */
 const followMs = 1500;
 
-/** The width of the runs' card under which each run is a row of its own, its facts under its time. */
-const narrowRuns = "@container runs (width < 40rem)";
-
 const styles = stylex.create({
   traces: { display: "grid", rowGap: grasp.space6, minWidth: 0 },
-  // The runs measure their own width, whatever the page beside them.
-  runs: { containerName: "runs", containerType: "inline-size" },
-  // Wide: the table; narrow: the rows. One of them shows.
-  wideRuns: { display: { default: "block", [narrowRuns]: "none" } },
-  narrowRuns: { display: { default: "none", [narrowRuns]: "block" } },
   // A run's steps, in the card of its "What it did".
   did: {
     display: "grid",
@@ -275,102 +258,6 @@ const RunTraceDetail = ({
   );
 };
 
-/** Every run, a row each; a press on one opens it, with what it did. */
-const RunsTable = ({
-  runs,
-  names,
-  opened,
-  onOpen,
-}: {
-  runs: WorkflowResourceRun[];
-  names: Names;
-  opened: string | undefined;
-  onOpen: (run: WorkflowResourceRun) => void;
-}) => {
-  const { t } = useLingui();
-  const startedBy = useStartedBy(names);
-  if (runs.length === 0) {
-    return <NoRuns />;
-  }
-  return (
-    <SectionCard aria-label={t`Runs`} density="compact" flush>
-      <div {...stylex.props(styles.runs)}>
-        <div {...stylex.props(styles.wideRuns)}>
-          <Table aria-label={t`Runs`}>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t`Started`}</TableHead>
-                <TableHead>{t`Status`}</TableHead>
-                <TableHead>{t`Version`}</TableHead>
-                <TableHead>{t`Started by`}</TableHead>
-                <TableHead
-                  aria-label={t({
-                    message: "Open",
-                    context: "column: a button that opens a run",
-                  })}
-                />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {runs.map((run) => {
-                const started = formatDateTime(run.createdAt);
-                return (
-                  <TableRow chosen={run.id === opened} key={run.id}>
-                    <TableCell lead>{started}</TableCell>
-                    <TableCell>
-                      <RunStatusBadge status={run.status} />
-                    </TableCell>
-                    <TableCell>{run.version}</TableCell>
-                    <TableCell>{startedBy(run.principal)}</TableCell>
-                    <TableCell align="end">
-                      <OpenRun
-                        onOpen={() => {
-                          onOpen(run);
-                        }}
-                        started={started}
-                      />
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-        <div {...stylex.props(styles.narrowRuns)}>
-          <ItemGroup aria-label={t`Runs`} separated>
-            {runs.map((run) => {
-              const started = formatDateTime(run.createdAt);
-              const by = startedBy(run.principal);
-              const { version } = run;
-              return (
-                <Item key={run.id} size="sm">
-                  <ItemContent>
-                    <ItemTitle>{started}</ItemTitle>
-                    <ItemDescription>
-                      {t`Version ${version} · ${by}`}
-                    </ItemDescription>
-                    <span>
-                      <RunStatusBadge status={run.status} />
-                    </span>
-                  </ItemContent>
-                  <ItemActions>
-                    <OpenRun
-                      onOpen={() => {
-                        onOpen(run);
-                      }}
-                      started={started}
-                    />
-                  </ItemActions>
-                </Item>
-              );
-            })}
-          </ItemGroup>
-        </div>
-      </div>
-    </SectionCard>
-  );
-};
-
 /** Everything that happened to the workflow, in full. */
 const ActivityList = ({
   activity,
@@ -442,13 +329,11 @@ export const Traces = ({
   onPartChange: (part: TracesPart) => void;
 }) => {
   const { t } = useLingui();
-  const [chosen, setChosen] = useState<WorkflowResourceRun | null>(null);
-  // The run the address names (Run's "Open the run"), until one is chosen here.
+  // The run the address names: one of the table's, or Run's "Open the run".
   const opened =
-    chosen ??
-    (runs.state === "ready"
+    runs.state === "ready"
       ? (runs.data.find((run) => run.id === openRun) ?? null)
-      : null);
+      : null;
   // The opened run's status, as its followed trace last said it.
   const [traced, setTraced] = useState<{ runId: string; status: string }>();
   const openedId = opened === null ? undefined : opened.id;
@@ -492,7 +377,6 @@ export const Traces = ({
               admin={admin}
               names={names}
               onClose={() => {
-                setChosen(null);
                 onCloseRun?.();
               }}
               opened={opened}
@@ -515,11 +399,10 @@ export const Traces = ({
               workflow={workflow}
             >
               {runs.state === "ready" ? (
-                <RunsTable
+                <WorkflowRunsTable
                   names={names}
-                  onOpen={setChosen}
-                  opened={openedId}
                   runs={runs.data}
+                  workflow={workflow}
                 />
               ) : (
                 <NotLoadedState page={runs} />

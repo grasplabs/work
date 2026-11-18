@@ -15,30 +15,15 @@ import { Link } from "@tanstack/react-router";
 import { formatDateTime, formatSince } from "../format.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import type { BadgeTone } from "../grasp/badge/index.ts";
-import { Empty, EmptyDescription, EmptyHeader } from "../grasp/empty/index.ts";
-import {
-  Item,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemTitle,
-} from "../grasp/item/index.ts";
+import { DataTable } from "../grasp/data-table/index.ts";
+import type { DataTableColumn } from "../grasp/data-table/index.ts";
 import { Link as TextLink } from "../grasp/link/index.ts";
-import { SectionCard } from "../grasp/section-card/index.ts";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../grasp/table/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 
 // Runs as the Workflows page and a workflow's page list them, in the
 // prototype's runs log (grasplabs/prototype `components/runs-log.tsx`):
-// when, the workflow, who started it, and what happened, as a Badge: green
+// the workflow, when, who started it, and what happened, as a Badge: green
 // once done, the attention colour where someone is needed (a decision it
 // waits for), danger where it failed. A run waiting for a decision links
 // to where it is answered. A run says what its workflow's page lists of
@@ -54,20 +39,12 @@ const statusLabels: Readonly<Record<RunStatus, MessageDescriptor>> = {
   cancelled: msg`Cancelled`,
 };
 
-/** The width of the log under which each run is a row of its own, its facts under its time. */
-const narrowLog = "@container runs-log (width < 40rem)";
-
 const styles = stylex.create({
-  // The log measures its own width, whatever the page beside it.
-  measured: { containerName: "runs-log", containerType: "inline-size" },
-  // Wide: the table; narrow: the rows, so the result is never scrolled out of sight.
-  wide: { display: { default: "block", [narrowLog]: "none" } },
-  narrow: { display: { default: "none", [narrowLog]: "block" } },
   // A result over what it waits for, and the way to the decision.
   outcome: {
     display: "flex",
     flexDirection: "column",
-    alignItems: "flex-start",
+    alignItems: "flex-end",
     gap: grasp.space1,
   },
   log: { display: "grid", rowGap: grasp.space2 },
@@ -186,104 +163,77 @@ const RunWorkflow = ({ run }: { run: ListedRun }) => (
   </TextLink>
 );
 
+/** The runs log's columns, under their headers' words, for the person `me`. */
+const logColumns = (words: {
+  me: string;
+  workflow: string;
+  when: string;
+  by: string;
+  result: string;
+}): DataTableColumn<ListedRun>[] => [
+  {
+    key: "workflow",
+    header: words.workflow,
+    value: (run) => run.name,
+    cell: (run) => <RunWorkflow run={run} />,
+  },
+  {
+    key: "when",
+    header: words.when,
+    value: (run) => run.createdAt,
+    cell: (run) => formatDateTime(run.createdAt),
+  },
+  { key: "by", header: words.by, value: (run) => startedByOf(run, words.me) },
+  {
+    key: "result",
+    header: words.result,
+    value: (run) => runStatusLabel(run.status),
+    cell: (run) => <RunOutcome run={run} />,
+    align: "end",
+  },
+];
+
+/** How many runs a page of the log holds. */
+const logPageSize = 20;
+
 /**
- * The runs log, in the order core lists them (waiting runs first); with
- * each one's workflow unless `withWorkflow` is false, as on a workflow's
- * own page. `more` says core had more than it sent; `empty` what to say
- * when there are none, such as that none match the filters.
+ * The runs log, in the order core lists them (waiting runs first), on the
+ * library's Data table as the tables pattern has it: the workflow names the
+ * row, the result stands at its end, the count and pages under it. `more`
+ * says core had more than it sent; `empty` what to say when there are none,
+ * such as that none match the filters.
  */
 export const RunsLog = ({
   runs,
   more,
   me,
   empty,
-  withWorkflow = true,
 }: {
   runs: ListedRun[];
   more: boolean;
   me: string;
   empty?: string;
-  withWorkflow?: boolean;
 }) => {
   const { t } = useLingui();
-  if (runs.length === 0) {
-    return (
-      <Empty size="section">
-        <EmptyHeader>
-          <EmptyDescription>
-            {empty ?? t`Nothing has run yet.`}
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    );
-  }
+  const columns = logColumns({
+    me,
+    workflow: t`Workflow`,
+    when: t({ message: "When", context: "column: when a run happened" }),
+    by: t`Started by`,
+    result: t({ message: "Result", context: "column: what happened in a run" }),
+  });
   return (
     <div {...stylex.props(styles.log)}>
-      <SectionCard aria-label={t`Runs`} density="compact" flush>
-        <div {...stylex.props(styles.measured)}>
-          <div {...stylex.props(styles.wide)}>
-            <Table aria-label={t`Runs`}>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>
-                    {t({
-                      message: "When",
-                      context: "column: when a run happened",
-                    })}
-                  </TableHead>
-                  {withWorkflow ? <TableHead>{t`Workflow`}</TableHead> : null}
-                  <TableHead>{t`Started by`}</TableHead>
-                  <TableHead>
-                    {t({
-                      message: "Result",
-                      context: "column: what happened in a run",
-                    })}
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {runs.map((run) => (
-                  <TableRow key={run.id}>
-                    <TableCell>{formatDateTime(run.createdAt)}</TableCell>
-                    {withWorkflow ? (
-                      <TableCell lead>
-                        <RunWorkflow run={run} />
-                      </TableCell>
-                    ) : null}
-                    <TableCell>{startedByOf(run, me)}</TableCell>
-                    <TableCell wrap>
-                      <RunOutcome run={run} />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-          <div {...stylex.props(styles.narrow)}>
-            <ItemGroup aria-label={t`Runs`} separated>
-              {runs.map((run) => (
-                <Item key={run.id} size="sm">
-                  <ItemContent>
-                    <ItemTitle>
-                      {withWorkflow ? (
-                        <RunWorkflow run={run} />
-                      ) : (
-                        formatDateTime(run.createdAt)
-                      )}
-                    </ItemTitle>
-                    <ItemDescription>
-                      {withWorkflow
-                        ? `${formatDateTime(run.createdAt)} · ${startedByOf(run, me)}`
-                        : startedByOf(run, me)}
-                    </ItemDescription>
-                    <RunOutcome run={run} />
-                  </ItemContent>
-                </Item>
-              ))}
-            </ItemGroup>
-          </div>
-        </div>
-      </SectionCard>
+      <DataTable
+        columns={columns}
+        density="compact"
+        empty={{ description: empty ?? t`Nothing has run yet.` }}
+        label={t`Runs`}
+        pageSize={logPageSize}
+        rowKey={(run) => run.id}
+        rows={runs}
+        unit={{ one: t`run`, other: t`runs` }}
+      />
       {more ? (
         <Text size="sm" tone="muted">
           {t`Showing the first ${runsPageSize} runs of more.`}

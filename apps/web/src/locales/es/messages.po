@@ -6212,10 +6212,6 @@ msgstr "Terminar ahora el acceso del personal"
 msgid "Ended"
 msgstr "Terminó"
 
-#: src/workflows/resource-runs.tsx
-msgid "Ended {ended}"
-msgstr "Terminó el {ended}"
-
 #: src/settings/staff-access.tsx
 msgid "Ending access"
 msgstr "Terminando el acceso"
@@ -11286,12 +11282,6 @@ msgctxt "a need nobody has taken up yet"
 msgid "Open"
 msgstr "Abierta"
 
-#: src/workflows/resource-runs.tsx
-#: src/workflows/traces.tsx
-msgctxt "column: a button that opens a run"
-msgid "Open"
-msgstr "Abrir"
-
 #: src/brain/brain-markdown.ts
 #: src/routes/_shell.brain.$noteId.tsx
 msgctxt "on a timeline: not happened yet"
@@ -11300,11 +11290,6 @@ msgstr "Pendiente"
 
 #: src/link-confirmation.tsx
 msgctxt "open a link to another site"
-msgid "Open"
-msgstr "Abrir"
-
-#: src/workflows/resource-runs.tsx
-msgctxt "open one run of a workflow"
 msgid "Open"
 msgstr "Abrir"
 
@@ -11417,10 +11402,6 @@ msgstr "Abrir la bandeja de entrada"
 #: src/workflows/start-run.tsx
 msgid "Open the run"
 msgstr "Abrir la ejecución"
-
-#: src/workflows/resource-runs.tsx
-msgid "Open the run started {started}"
-msgstr "Abrir la ejecución iniciada el {started}"
 
 #: src/interview/page.tsx
 msgid "Open this link again whenever you like, and carry on where you stopped."
@@ -13378,6 +13359,11 @@ msgstr "Regla"
 msgid "Rules"
 msgstr "Reglas"
 
+#: src/workflows/resource-runs.tsx
+#: src/workflows/runs.tsx
+msgid "run"
+msgstr "ejecución"
+
 #: src/activity/audit-event.tsx
 msgid "Run"
 msgstr "Ejecución"
@@ -13441,7 +13427,11 @@ msgstr "En curso o cancelada"
 
 #: src/workflows/resource-runs.tsx
 #: src/workflows/runs.tsx
-#: src/workflows/traces.tsx
+msgid "runs"
+msgstr "ejecuciones"
+
+#: src/workflows/resource-runs.tsx
+#: src/workflows/runs.tsx
 msgid "Runs"
 msgstr "Ejecuciones"
 
@@ -14847,7 +14837,6 @@ msgstr "Empiece con una letra y use después solo letras, dígitos o guiones baj
 #: src/dashboard/runs-widget.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
-#: src/workflows/traces.tsx
 msgid "Started"
 msgstr "Iniciadas"
 
@@ -14863,7 +14852,6 @@ msgstr "Empezó un chat"
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
 #: src/workflows/runs.tsx
-#: src/workflows/traces.tsx
 msgid "Started by"
 msgstr "Iniciada por"
 
@@ -14926,7 +14914,6 @@ msgstr "Afirmaciones"
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/resource-runs.tsx
-#: src/workflows/traces.tsx
 msgid "Status"
 msgstr "Estado"
 
@@ -16794,8 +16781,16 @@ msgid "Tools to allow"
 msgstr "Herramientas que permitir"
 
 #: src/workflows/requests/request-table.tsx
+msgid "topic"
+msgstr "tema"
+
+#: src/workflows/requests/request-table.tsx
 msgid "Topic"
 msgstr "Tema"
+
+#: src/workflows/requests/request-table.tsx
+msgid "topics"
+msgstr "temas"
 
 #: src/brain/brain-transcript.tsx
 msgid "Topics"
@@ -17292,7 +17287,6 @@ msgstr "Verificado hasta {entries}"
 #: src/workflows/go-lives-waiting.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
-#: src/workflows/traces.tsx
 #: src/workflows/version-source.tsx
 #: src/workflows/workflow-settings.tsx
 msgid "Version"
@@ -17331,11 +17325,6 @@ msgstr "Versión {number}, actual"
 #: src/workflows/workflows-table.tsx
 msgid "Version {version}"
 msgstr "Versión {version}"
-
-#: src/workflows/resource-runs.tsx
-#: src/workflows/traces.tsx
-msgid "Version {version} · {by}"
-msgstr "Versión {version} · {by}"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Version {version} declares no binding to approve."
@@ -18421,6 +18410,10 @@ msgstr "Calculó cómo se usa el conocimiento"
 msgid "Worked out what could be improved"
 msgstr "Calculó lo que podría mejorarse"
 
+#: src/workflows/workflows-table.tsx
+msgid "workflow"
+msgstr "flujo de trabajo"
+
 #: src/activity/audit-event.tsx
 #: src/apps/app-workflows.tsx
 #: src/dashboard/runs-widget.tsx
@@ -18477,6 +18470,10 @@ msgstr "Vistas del flujo de trabajo"
 #: src/workflows/definition-editor.tsx
 msgid "workflow.json"
 msgstr "workflow.json"
+
+#: src/workflows/workflows-table.tsx
+msgid "workflows"
+msgstr "flujos de trabajo"
 
 #: src/brain/goals-editor.tsx
 #: src/chat/mentions.tsx

@@ -6212,10 +6212,6 @@ msgstr "Toegang van medewerkers nu beëindigen"
 msgid "Ended"
 msgstr "Beëindigd"
 
-#: src/workflows/resource-runs.tsx
-msgid "Ended {ended}"
-msgstr "Klaar op {ended}"
-
 #: src/settings/staff-access.tsx
 msgid "Ending access"
 msgstr "Toegang wordt beëindigd"
@@ -11286,12 +11282,6 @@ msgctxt "a need nobody has taken up yet"
 msgid "Open"
 msgstr "Open"
 
-#: src/workflows/resource-runs.tsx
-#: src/workflows/traces.tsx
-msgctxt "column: a button that opens a run"
-msgid "Open"
-msgstr "Openen"
-
 #: src/brain/brain-markdown.ts
 #: src/routes/_shell.brain.$noteId.tsx
 msgctxt "on a timeline: not happened yet"
@@ -11300,11 +11290,6 @@ msgstr "Open"
 
 #: src/link-confirmation.tsx
 msgctxt "open a link to another site"
-msgid "Open"
-msgstr "Openen"
-
-#: src/workflows/resource-runs.tsx
-msgctxt "open one run of a workflow"
 msgid "Open"
 msgstr "Openen"
 
@@ -11417,10 +11402,6 @@ msgstr "Inbox openen"
 #: src/workflows/start-run.tsx
 msgid "Open the run"
 msgstr "Open de run"
-
-#: src/workflows/resource-runs.tsx
-msgid "Open the run started {started}"
-msgstr "Run gestart op {started} openen"
 
 #: src/interview/page.tsx
 msgid "Open this link again whenever you like, and carry on where you stopped."
@@ -13378,6 +13359,11 @@ msgstr "Regel"
 msgid "Rules"
 msgstr "Regels"
 
+#: src/workflows/resource-runs.tsx
+#: src/workflows/runs.tsx
+msgid "run"
+msgstr "run"
+
 #: src/activity/audit-event.tsx
 msgid "Run"
 msgstr "Run"
@@ -13441,7 +13427,11 @@ msgstr "Loopt of geannuleerd"
 
 #: src/workflows/resource-runs.tsx
 #: src/workflows/runs.tsx
-#: src/workflows/traces.tsx
+msgid "runs"
+msgstr "runs"
+
+#: src/workflows/resource-runs.tsx
+#: src/workflows/runs.tsx
 msgid "Runs"
 msgstr "Runs"
 
@@ -14847,7 +14837,6 @@ msgstr "Begin met een letter en gebruik daarna alleen letters, cijfers of unders
 #: src/dashboard/runs-widget.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
-#: src/workflows/traces.tsx
 msgid "Started"
 msgstr "Gestart"
 
@@ -14863,7 +14852,6 @@ msgstr "Een chat gestart"
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
 #: src/workflows/runs.tsx
-#: src/workflows/traces.tsx
 msgid "Started by"
 msgstr "Gestart door"
 
@@ -14926,7 +14914,6 @@ msgstr "Uitspraken"
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/resource-runs.tsx
-#: src/workflows/traces.tsx
 msgid "Status"
 msgstr "Status"
 
@@ -16794,8 +16781,16 @@ msgid "Tools to allow"
 msgstr "Toe te staan tools"
 
 #: src/workflows/requests/request-table.tsx
+msgid "topic"
+msgstr "onderwerp"
+
+#: src/workflows/requests/request-table.tsx
 msgid "Topic"
 msgstr "Onderwerp"
+
+#: src/workflows/requests/request-table.tsx
+msgid "topics"
+msgstr "onderwerpen"
 
 #: src/brain/brain-transcript.tsx
 msgid "Topics"
@@ -17292,7 +17287,6 @@ msgstr "Geverifieerd tot en met {entries}"
 #: src/workflows/go-lives-waiting.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
-#: src/workflows/traces.tsx
 #: src/workflows/version-source.tsx
 #: src/workflows/workflow-settings.tsx
 msgid "Version"
@@ -17331,11 +17325,6 @@ msgstr "Versie {number}, huidig"
 #: src/workflows/workflows-table.tsx
 msgid "Version {version}"
 msgstr "Versie {version}"
-
-#: src/workflows/resource-runs.tsx
-#: src/workflows/traces.tsx
-msgid "Version {version} · {by}"
-msgstr "Versie {version} · {by}"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Version {version} declares no binding to approve."
@@ -18421,6 +18410,10 @@ msgstr "Bepaald hoe kennis wordt gebruikt"
 msgid "Worked out what could be improved"
 msgstr "Bepaald wat er beter kan"
 
+#: src/workflows/workflows-table.tsx
+msgid "workflow"
+msgstr "workflow"
+
 #: src/activity/audit-event.tsx
 #: src/apps/app-workflows.tsx
 #: src/dashboard/runs-widget.tsx
@@ -18477,6 +18470,10 @@ msgstr "Weergaven van de workflow"
 #: src/workflows/definition-editor.tsx
 msgid "workflow.json"
 msgstr "workflow.json"
+
+#: src/workflows/workflows-table.tsx
+msgid "workflows"
+msgstr "workflows"
 
 #: src/brain/goals-editor.tsx
 #: src/chat/mentions.tsx

@@ -9,6 +9,8 @@ import type { ReactElement, ReactNode } from "react";
 import { formatDateTime, formatNumber } from "../format.ts";
 import { RouterLink } from "../frame/router-link.tsx";
 import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
+import { DataTable } from "../grasp/data-table/index.ts";
+import type { DataTableColumn } from "../grasp/data-table/index.ts";
 import {
   Empty,
   EmptyContent,
@@ -18,45 +20,22 @@ import {
   EmptyTitle,
 } from "../grasp/empty/index.ts";
 import { Icon, Workflow } from "../grasp/icons/index.ts";
-import {
-  Item,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../grasp/table/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { ProcessTile } from "./business-process.tsx";
 import { listsOf } from "./lists.ts";
 import { RunResult } from "./runs.tsx";
 
-// The workflows table, one row a workflow, on the library's Table in a
-// Section card: on the Workflows page, every workflow the person has a role
-// in, in two lists. A row begins with the process it serves (or a
-// workflow's mark), then its name and version; how often it ran, when it
-// last ran, whose it is and where it stands. A table wider than its card
-// scrolls sideways inside it, so no column is lost on a narrow page.
-
-/** The width of the list under which a row shows its status under its name. */
-const narrowList = "@container workflows (width < 40rem)";
+// The workflows table, one row a workflow, on the library's Data table as
+// the tables pattern has it, in a Section card: on the Workflows page,
+// every workflow the person has a role in, in two lists. The workflow
+// names the row (with the process it serves, or a workflow's mark, and its
+// version); then whose it is and when it last ran; how often it ran and
+// where it stands at the row's end. On a phone the table scrolls sideways
+// inside its card, as every table does.
 
 const styles = stylex.create({
-  // The list measures its own width, whatever the page beside it.
-  list: { containerName: "workflows", containerType: "inline-size" },
-  // Wide: the table; narrow: the rows. One of them shows.
-  wide: { display: { default: "block", [narrowList]: "none" } },
-  narrow: { display: { default: "none", [narrowList]: "block" } },
   // The mark and the name with its version under it.
   lead: {
     display: "flex",
@@ -66,8 +45,8 @@ const styles = stylex.create({
   },
   named: { display: "grid", minWidth: 0 },
   mark: { display: "inline-flex", flexShrink: 0, color: grasp.muted },
-  // The result over the runs that wait or failed.
-  status: { display: "grid", justifyItems: "start", gap: grasp.space1 },
+  // The result over the runs that wait or failed, at the row's end.
+  status: { display: "grid", justifyItems: "end", gap: grasp.space1 },
   stack: { display: "grid", gap: grasp.space6 },
 });
 
@@ -168,88 +147,34 @@ const Owner = ({ workflow }: { workflow: WorkflowSummary }) => {
   );
 };
 
-/**
- * A workflow's row: what it serves, its name and its version under it,
- * how often it ran, when it last ran, its owner and where it stands.
- */
-const WorkflowRow = ({
+/** What a workflow serves, its name and its version under it: what names its row. */
+const WorkflowName = ({
   workflow,
   process,
 }: {
   workflow: WorkflowSummary;
   process: BusinessProcess | null;
 }) => (
-  <TableRow>
-    <TableCell lead>
-      <span {...stylex.props(styles.lead)}>
-        {process === null ? (
-          <span aria-hidden="true" {...stylex.props(styles.mark)}>
-            <Icon icon={Workflow} />
-          </span>
-        ) : (
-          <ProcessTile process={process} />
-        )}
-        <span {...stylex.props(styles.named)}>
-          <RouterLink
-            params={{ workflow: workflow.workflowId }}
-            to="/workflows/$workflow"
-          >
-            {workflow.name}
-          </RouterLink>
-          <Text size="sm" tone="muted">
-            <Version version={workflow.version} />
-          </Text>
-        </span>
-      </span>
-    </TableCell>
-    <TableCell align="end">{formatNumber(workflow.handled)}</TableCell>
-    <TableCell>
-      <LastRun workflow={workflow} />
-    </TableCell>
-    <TableCell>
-      <Owner workflow={workflow} />
-    </TableCell>
-    <TableCell>
-      <Status workflow={workflow} />
-    </TableCell>
-  </TableRow>
-);
-
-/**
- * A workflow on a narrow page, as the library's Item: what it serves, its
- * name and version, and where it stands under them, so its status is never
- * pushed out of sight. How often and when it ran stay on the wide table.
- */
-const WorkflowItem = ({
-  workflow,
-  process,
-}: {
-  workflow: WorkflowSummary;
-  process: BusinessProcess | null;
-}) => (
-  <Item size="sm">
+  <span {...stylex.props(styles.lead)}>
     {process === null ? (
-      <ItemMedia icon={Workflow} iconLook="inline" />
+      <span aria-hidden="true" {...stylex.props(styles.mark)}>
+        <Icon icon={Workflow} />
+      </span>
     ) : (
-      <ItemMedia>
-        <ProcessTile process={process} />
-      </ItemMedia>
+      <ProcessTile process={process} />
     )}
-    <ItemContent>
-      <ItemTitle>
-        <RouterLink
-          params={{ workflow: workflow.workflowId }}
-          to="/workflows/$workflow"
-        >
-          {workflow.name}
-        </RouterLink>
-      </ItemTitle>
-      <ItemDescription>
+    <span {...stylex.props(styles.named)}>
+      <RouterLink
+        params={{ workflow: workflow.workflowId }}
+        to="/workflows/$workflow"
+      >
+        {workflow.name}
+      </RouterLink>
+      <Text size="sm" tone="muted">
         <Version version={workflow.version} />
-      </ItemDescription>
-      <Status workflow={workflow} />
-    </ItemContent>
-  </Item>
+      </Text>
+    </span>
+  </span>
 );
 
 /** What the Workflows page says while nobody can open any workflow. */
@@ -273,71 +198,93 @@ const NoWorkflows = () => {
   );
 };
 
+/** The workflows table's columns, under their headers' words. */
+const workflowColumns = (words: {
+  processes: WorkflowProcesses | undefined;
+  workflow: string;
+  owner: string;
+  last: string;
+  week: string;
+  status: string;
+}): DataTableColumn<WorkflowSummary>[] => [
+  {
+    key: "workflow",
+    header: words.workflow,
+    value: (row) => row.name,
+    cell: (row) => (
+      <WorkflowName process={processOf(words.processes, row)} workflow={row} />
+    ),
+  },
+  {
+    key: "owner",
+    header: words.owner,
+    value: (row) => row.owner.name ?? row.owner.userId,
+    cell: (row) => <Owner workflow={row} />,
+  },
+  {
+    key: "last",
+    header: words.last,
+    value: (row) => row.lastRun?.createdAt ?? "",
+    cell: (row) => <LastRun workflow={row} />,
+  },
+  {
+    key: "week",
+    header: words.week,
+    value: (row) => row.handled,
+    cell: (row) => formatNumber(row.handled),
+    align: "end",
+  },
+  {
+    key: "status",
+    header: words.status,
+    value: (row) => row.lastRun?.status ?? "",
+    cell: (row) => <Status workflow={row} />,
+    align: "end",
+  },
+];
+
 /**
- * Every workflow the person can open, in the library's Table: one row a
- * workflow, its columns as above.
+ * Every workflow the person can open, in the library's Data table: one row
+ * a workflow, its columns as above.
  */
 export const WorkflowsTable = ({
   rows,
   empty,
   processes,
+  label,
 }: {
   rows: WorkflowSummary[];
   /** The process each row serves; none known without it. */
   processes?: WorkflowProcesses;
   /** What an empty table says; the Workflows page's empty state without it. */
   empty?: ReactElement;
+  /** What the rows are, for a screen reader: the list's name. */
+  label?: string;
 }) => {
   const { t } = useLingui();
   if (rows.length === 0) {
     return empty ?? <NoWorkflows />;
   }
+  const columns = workflowColumns({
+    processes,
+    workflow: t`Workflow`,
+    owner: t({ message: "Owner", context: "column: who owns a workflow" }),
+    last: t`Last run`,
+    week: t`Runs a week`,
+    status: t({
+      message: "Status",
+      context: "column: where a workflow stands",
+    }),
+  });
   return (
-    <div {...stylex.props(styles.list)}>
-      <div {...stylex.props(styles.wide)}>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t`Workflow`}</TableHead>
-              <TableHead align="end">{t`Runs a week`}</TableHead>
-              <TableHead>{t`Last run`}</TableHead>
-              <TableHead>
-                {t({
-                  message: "Owner",
-                  context: "column: who owns a workflow",
-                })}
-              </TableHead>
-              <TableHead>
-                {t({
-                  message: "Status",
-                  context: "column: where a workflow stands",
-                })}
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((row) => (
-              <WorkflowRow
-                key={row.workflowId}
-                process={processOf(processes, row)}
-                workflow={row}
-              />
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-      <div {...stylex.props(styles.narrow)}>
-        <ItemGroup aria-label={t`Workflows`} separated>
-          {rows.map((row) => (
-            <WorkflowItem
-              key={row.workflowId}
-              process={processOf(processes, row)}
-              workflow={row}
-            />
-          ))}
-        </ItemGroup>
-      </div>
-    </div>
+    <DataTable
+      columns={columns}
+      density="compact"
+      label={label ?? t`Workflows`}
+      rowKey={(row) => row.workflowId}
+      rows={rows}
+      unit={{ one: t`workflow`, other: t`workflows` }}
+    />
   );
 };
 
@@ -353,7 +300,7 @@ const List = ({
 }) =>
   rows.length === 0 ? null : (
     <SectionCard density="compact" flush title={title}>
-      <WorkflowsTable processes={processes} rows={rows} />
+      <WorkflowsTable label={title} processes={processes} rows={rows} />
     </SectionCard>
   );
 
