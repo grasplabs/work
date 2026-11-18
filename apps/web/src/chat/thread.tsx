@@ -40,6 +40,7 @@ import {
   useAnswerThinking,
   useThinkingStep,
 } from "./answer-thinking.tsx";
+import { useAnswerTo } from "./answer-to.ts";
 import { AnswerWords } from "./answer-words.tsx";
 import { answeredOf } from "./answered.ts";
 import { AskedLine } from "./asked-questions.tsx";
@@ -1180,10 +1181,11 @@ export const ChatThread = ({
     children === undefined || children === null
       ? rows
       : [...rows, { kind: "after", id: "after", children }];
-  // A question just sent goes to the top, the room under it kept for its answer.
-  const answerTo = running
-    ? rows.findLast((row) => row.kind === "question")?.id
-    : undefined;
+  const answerTo = useAnswerTo(
+    chatId,
+    rows.findLast((row) => row.kind === "question")?.id,
+    running
+  );
   return (
     <div {...stylex.props(styles.room)}>
       <Thread
