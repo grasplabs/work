@@ -21,20 +21,26 @@ export interface TipProps {
   tooltip: string;
   /** Draws the layer's trigger with the tooltip trigger's props merged in. */
   render: (props: Record<string, unknown>) => ReactElement;
+  /**
+   * Kept but never opened: for a trigger whose tooltip comes and goes with its state (a compact
+   * TabsLink's), so the trigger stays the same element and its own transitions run.
+   * @default false
+   */
+  off?: boolean;
 }
 
 /** Whether the layer this trigger opens is open now. */
 const layerOpen = (element: HTMLElement | null) =>
   element?.getAttribute("aria-expanded") === "true";
 
-export const Tip = ({ tooltip, render }: TipProps) => {
+export const Tip = ({ tooltip, render, off = false }: TipProps) => {
   const node = useRef<HTMLElement | null>(null);
   const keep = (element: HTMLElement | null) => {
     node.current = element;
   };
   // While the layer is open the tooltip would stand over it or beside it: it is stopped before it opens.
   const onOpenChange = (open: boolean, details: { cancel: () => void }) => {
-    if (open && layerOpen(node.current)) {
+    if (open && (off || layerOpen(node.current))) {
       details.cancel();
     }
   };
