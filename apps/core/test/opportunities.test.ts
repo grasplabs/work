@@ -6,6 +6,7 @@ import { z } from "zod";
 import { eraseOwedOnboardingSources } from "../src/onboarding/new-brain.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { proposerOf } from "../src/opportunities.ts";
+import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import {
   aloneInTheStore,
@@ -26,7 +27,8 @@ import {
 } from "./onboarding-team.ts";
 import type { Ids, Key } from "./onboarding-team.ts";
 import type { ProviderReply } from "./provider-streams.ts";
-import { outcome, signedInApi } from "./sign-in.ts";
+import { acmeTenant } from "./sign-in-config.ts";
+import { outcome, routed, signedInApi } from "./sign-in.ts";
 
 // Opportunities (GRA-1750): each of a team's routines (GRA-1749) as an
 // admin reads it, ranked by the hours a week it takes, with its evidence
@@ -37,7 +39,13 @@ import { outcome, signedInApi } from "./sign-in.ts";
 //   routine never names (or names only as part of a word), a step it hasn't.
 // - A page's request that waits for a model: listing asks nothing, also
 //   two lists at once; a proposal is asked when the routine is noted, once,
-//   and a failing model is tried again later, never by the list.
+//   and a failing model is tried again later, never by the list; one owed
+//   and forgotten (given up, or never asked) is asked once an admin lists.
+// - A back-off counted from when a call began, not when it failed.
+// - A proposal written for a drawing that fell while the model answered,
+//   kept when its erasure fails or the store stops after the write.
+// - A system a shared connection covers listed as setup, because the
+//   routine names its product (Gmail) and not the suite.
 // - A dismissal that outlives the evidence it was made at, or one that
 //   lets go before.
 
@@ -103,13 +111,13 @@ const drawTickets = async (ids: Ids, last?: string) => {
   }
 };
 
-/** A team through the onboarding, its tickets drawn and its intake given; and the version of Sam's interview. */
-const drawnTeam = async () => {
+/** A team through the onboarding, its tickets drawn (`last` their last step) and its intake given; and the version of Sam's interview. */
+const drawnTeam = async (last?: string) => {
   const ids = await team(seven);
   await mapped(ids);
   await told(ids);
   const sam = await agree(ids.sam, [fact("s1", "step", "Answers the phone.")]);
-  await drawTickets(ids);
+  await drawTickets(ids, last);
   return { ids, sam };
 };
 
@@ -130,13 +138,75 @@ const ticketsOf = async (
   };
 };
 
-/** What Grasp proposes for each routine owed one, as the onboarding's alarm asks it, while the model answers `replies`. */
+/** What Grasp proposes for each routine owed one, as the onboarding's alarm asks it, while the model answers `replies` (from `now`, when given). */
 const proposed = async (replies: ProviderReply[], now?: number) => {
   const { requests, result } = await answering(
     replies,
     async () => await onboardingStore(env).proposeNext(now)
   );
   return { calls: requests.length, asked: result };
+};
+
+/**
+ * An admin lists, with nothing else to wake the store (no alarm set), and
+ * then the store's own alarm runs, while the model answers `replies`:
+ * whether the list set it, how many calls it made, and the tickets' form.
+ */
+const listedThenAlarmed = async (
+  api: Awaited<ReturnType<typeof signedInApi>>["api"],
+  ids: Ids,
+  replies: ProviderReply[]
+) => {
+  const store = onboardingStore(env);
+  await runInDurableObject(store, async (instance, state) => {
+    await state.storage.deleteAlarm();
+    // The fixture holds the alarm with a spy on it: taken off, so the
+    // store's own alarm runs.
+    vi.spyOn(instance, "alarm").mockRestore();
+  });
+  const { requests, result: alarmed } = await answering(replies, async () => {
+    await api.opportunities.list();
+    return await runDurableObjectAlarm(store);
+  });
+  const { tickets } = await ticketsOf(api, ids);
+  return { alarmed, asked: requests.length, form: tickets?.form };
+};
+
+/**
+ * `provider`'s account `subject`, as an admin connects it for everyone,
+ * with every right it asks for.
+ */
+const connectedForEveryone = async (
+  admin: Awaited<ReturnType<typeof signedInApi>>,
+  provider: "google" | "microsoft",
+  subject: string
+) => {
+  const { url } = await admin.api.connections.start({
+    provider,
+    scope: "shared",
+  });
+  const authorization = new URL(url);
+  const query = new URLSearchParams({
+    code: consentCode(
+      authorization,
+      provider === "google" ? "acme.test" : acmeTenant,
+      subject,
+      authorization.searchParams.get("scope") ?? undefined
+    ),
+    state: authorization.searchParams.get("state") ?? "",
+  });
+  await routed(`/api/connections/callback?${query.toString()}`, {
+    headers: { cookie: admin.session },
+  });
+  const listed = await admin.api.connections.list();
+  if (
+    !listed.some(
+      ({ accountName, status }) =>
+        status === "active" && accountName?.startsWith(`${subject}@`) === true
+    )
+  ) {
+    throw new Error(`Expected ${provider}'s shared connection`);
+  }
 };
 
 /** Kept proposals at `evidence`, as core's database holds them. */
@@ -255,46 +325,71 @@ describe("opportunities", { timeout: 120_000 }, () => {
   it("ask a proposal given up again once an admin lists, by the alarm and not the list", async () => {
     const { ids } = await drawnTeam();
     const { api } = await signedInApi(idp, "admin");
-    const start = Date.now();
     // The model fails through every retry: a minute, five and thirty.
-    let at = start;
+    let tried = Date.now();
     for (const wait of [0, 61_000, 301_000, 1_801_000]) {
-      at += wait;
+      tried += wait;
       // oxlint-disable-next-line no-await-in-loop -- one try after another
-      await proposed([], at);
+      await proposed([], tried);
     }
     const givenUp = await proposed(
       [proposing({ form: "skill", systems: [] })],
-      at + 24 * 60 * 60 * 1000
+      tried + 24 * 60 * 60 * 1000
     );
-    // Nothing else is due: the list alone sets the alarm. The store's own
-    // alarm runs again (the fixture held it), and asks it as it runs.
-    const store = onboardingStore(env);
-    await runInDurableObject(store, async (instance, state) => {
-      await state.storage.deleteAlarm();
-      // The fixture's spy on it, found again and taken off.
-      vi.spyOn(instance, "alarm").mockRestore();
-    });
-    const { requests, result: listed } = await answering(
-      [proposing({ form: "skill", systems: [] })],
-      async () => {
-        const all = await api.opportunities.list();
-        await runDurableObjectAlarm(store);
-        return all.some(({ team: of }) => of === ids.team);
-      }
-    );
-    const after = await ticketsOf(api, ids);
-    expect({
-      givenUp: givenUp.calls,
-      listed,
-      asked: requests.length,
-      form: after.tickets?.form,
-    }).toStrictEqual({
+    const listed = await listedThenAlarmed(api, ids, [
+      proposing({ form: "skill", systems: [] }),
+    ]);
+    expect({ givenUp: givenUp.calls, listed }).toStrictEqual({
       givenUp: 0,
-      listed: true,
-      asked: 1,
-      form: "skill",
+      listed: { alarmed: true, asked: 1, form: "skill" },
     });
+  });
+
+  it("ask a routine never proposed once an admin lists, when nothing else wakes the store", async () => {
+    const { ids } = await drawnTeam();
+    const { api } = await signedInApi(idp, "admin");
+    // Noted while the store's alarm was held: never asked, and no row of
+    // asking it, no alarm set.
+    const listed = await listedThenAlarmed(api, ids, [
+      proposing({ form: "workflow", systems: [] }),
+    ]);
+    expect(listed).toStrictEqual({
+      alarmed: true,
+      asked: 1,
+      form: "workflow",
+    });
+  });
+
+  it("wait a failed proposal's back-off from when its call failed, not from when it began", async () => {
+    const { ids } = await drawnTeam();
+    const { api } = await signedInApi(idp, "admin");
+    const start = Date.now();
+    // The model holds the call three minutes, then fails it.
+    const failedAt = start + 3 * 60_000;
+    try {
+      await answeringWith(
+        () => {
+          vi.useFakeTimers({ toFake: ["Date"], now: failedAt });
+        },
+        async () => await onboardingStore(env).proposeNext(start)
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+    const soon = await proposed(
+      [proposing({ form: "skill", systems: [] })],
+      failedAt + 30_000
+    );
+    const later = await proposed(
+      [proposing({ form: "skill", systems: [] })],
+      failedAt + pastFirstRetryMs
+    );
+    const { tickets } = await ticketsOf(api, ids);
+    expect({
+      soon: soon.calls,
+      later: later.calls,
+      form: tickets?.form,
+    }).toStrictEqual({ soon: 0, later: 1, form: "skill" });
   });
 
   it("neither ask a proposal twice at once nor lose it when the store stops mid-call", async () => {
@@ -461,6 +556,110 @@ describe("opportunities", { timeout: 120_000 }, () => {
       withdrew,
       kept: await keptAt(drawing?.source ?? ""),
     }).toStrictEqual({ withdrew: true, kept: 0 });
+  });
+
+  it("erase a proposal written for a drawing that fell while the model answered, though the store stopped right after the write", async () => {
+    const { ids } = await drawnTeam();
+    const store = onboardingStore(env);
+    const standing = await store.standingDrawings();
+    const evidence =
+      standing.find(({ team: of }) => of === ids.team)?.source ?? "";
+    let stop: DurableObjectState | undefined;
+    await runInDurableObject(store, (_instance, state) => {
+      stop = state;
+    });
+    // D1's statements as every Worker of this isolate prepares them, the
+    // store's included (as d1-calls.ts wraps them).
+    const database = Reflect.getPrototypeOf(env.DB);
+    const prepare: unknown =
+      database === null ? undefined : Reflect.get(database, "prepare");
+    if (database === null || typeof prepare !== "function") {
+      throw new Error("Expected D1's class in the env");
+    }
+    try {
+      await answeringWith(
+        async () => {
+          // Pim withdraws while the model answers, and the drawing's
+          // erasure runs before the answer is written; then the store
+          // stops as it goes to erase what it wrote.
+          await onLink({ action: "withdraw", ...(await openLink(ids.pim)) });
+          await eraseOwedOnboardingSources(env);
+          Reflect.set(
+            database,
+            "prepare",
+            function stopped(this: unknown, ...args: unknown[]): unknown {
+              const [query] = args;
+              if (
+                typeof query === "string" &&
+                query.startsWith('delete from "opportunity_proposals"')
+              ) {
+                stop?.abort("Stopped by the test after the write");
+                throw new Error("Stopped by the test after the write");
+              }
+              const statement: unknown = Reflect.apply(prepare, this, args);
+              return statement;
+            }
+          );
+          return proposing({ form: "workflow", systems: ["Zendesk"] });
+        },
+        async () => await store.proposeNext()
+      ).catch(() => "stopped");
+    } finally {
+      Reflect.set(database, "prepare", prepare);
+    }
+    const written = await keptAt(evidence);
+    // Started again, once the call's claim runs out: erased, no model asked.
+    const swept = await proposed([], Date.now() + proposeClaimPastMs);
+    expect({
+      written,
+      swept: swept.calls,
+      kept: await keptAt(evidence),
+    }).toStrictEqual({ written: 1, swept: 0, kept: 0 });
+  });
+
+  it("ask no setup for a system a connection for everyone covers, as the catalog describes it", async () => {
+    const { ids } = await drawnTeam(
+      "Send the answer by Gmail or Outlook, with the file from Google Drive, OneDrive or SharePoint."
+    );
+    const admin = await signedInApi(idp, "admin");
+    await proposed([
+      proposing({
+        form: "workflow",
+        systems: [
+          "Gmail",
+          "Google Drive",
+          "Outlook",
+          "OneDrive",
+          "SharePoint",
+          "Zendesk",
+        ],
+      }),
+    ]);
+    const before = await ticketsOf(admin.api, ids);
+    await connectedForEveryone(admin, "google", `team-${crypto.randomUUID()}`);
+    const google = await ticketsOf(admin.api, ids);
+    await connectedForEveryone(
+      admin,
+      "microsoft",
+      `team-${crypto.randomUUID()}`
+    );
+    const both = await ticketsOf(admin.api, ids);
+    expect({
+      before: before.tickets?.setup,
+      google: google.tickets?.setup,
+      both: both.tickets?.setup,
+    }).toStrictEqual({
+      before: [
+        "Gmail",
+        "Google Drive",
+        "Outlook",
+        "OneDrive",
+        "SharePoint",
+        "Zendesk",
+      ],
+      google: ["Outlook", "OneDrive", "SharePoint", "Zendesk"],
+      both: ["Zendesk"],
+    });
   });
 
   it("refuse anyone but an admin, listing, dismissing or restoring", async () => {

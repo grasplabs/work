@@ -1,11 +1,11 @@
 # Keeps every model file of staging's releases bucket in the Actions cache
 # (`vp run model-files --all`, scripts/model-files.ts), on main, where
-# every run can restore it: the e2e stack runs the model core ships from it
-# (e2e-build in ci.yml, scripts/local-model-files.ts), as a deployment does
-# from its bucket. About 126 MB a model, so never in git. Reading the
-# bucket takes its keys, which only main's runs get (the staging
-# environment), so the merge queue and runs by hand restore what this
-# saved.
+# every run can restore it: the e2e part that runs the Brain's test by
+# meaning runs the model core ships from it (the e2e job in ci.yml,
+# scripts/local-model-files.ts), as a deployment does from its bucket.
+# About 126 MB a model, so never in git. Reading the bucket takes its
+# keys, which only main's runs get (the staging environment), so the
+# merge queue and runs by hand restore what this saved.
 #
 # A pull request that changes the model needs its files here before its
 # merge queue run: put them in the releases bucket

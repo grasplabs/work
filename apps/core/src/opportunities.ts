@@ -261,14 +261,18 @@ export const eraseOpportunitiesOn = async (
 };
 
 /**
- * The systems the company has connected for everyone, by their catalog
- * names folded: a shared connection, active, as connect lists it for
- * `admin`.
+ * What the company has connected for everyone, as the catalog says it: a
+ * shared connection, active, as connect lists it for `admin`, by its name
+ * and, for a native one, what its description says it covers (Microsoft
+ * 365's "Outlook mail ... OneDrive and SharePoint", Google Workspace's
+ * "Gmail, Google Calendar, and files in Google Drive"). A Composio
+ * toolkit's description is its provider's words about itself, which may
+ * name other products it works with, so only its name counts.
  */
 const connectedSystemsOf = async (
   env: Env,
   admin: Identity
-): Promise<Set<string>> => {
+): Promise<string[]> => {
   const [catalog, connections] = await Promise.all([
     env.CONNECT.catalog(),
     env.CONNECT.listConnections(await personOf(env, admin)),
@@ -280,19 +284,25 @@ const connectedSystemsOf = async (
       )
       .map(({ provider }) => provider)
   );
-  return new Set(
-    catalog.entries
-      .filter(({ id }) => active.has(id))
-      .map(({ name }) => name.toLocaleLowerCase("en"))
-  );
+  return catalog.entries
+    .filter(({ id }) => active.has(id))
+    .map(({ name, description, source }) =>
+      source === "native" && description !== null
+        ? `${name}\n${description}`
+        : name
+    );
 };
+
+/** Whether `system`, as a routine names it, is one the company connected (`connectedSystemsOf`). */
+const isConnected = (connected: readonly string[], system: string): boolean =>
+  connected.some((says) => namesWhole(says, system));
 
 /** `drawing` as an opportunity, with its `proposal` when there is one. */
 const opportunityOf = (
   drawing: StandingDrawing,
   proposal: Proposal | null,
   appNames: ReadonlyMap<string, string>,
-  connected: ReadonlySet<string>
+  connected: readonly string[]
 ): Omit<Opportunity, "dismissed"> => {
   const cases = casesPerWeekOf(drawing.drawing);
   const minutes = minutesOf(drawing.drawing);
@@ -315,7 +325,7 @@ const opportunityOf = (
         ? null
         : { app: proposal.covers, name: appNames.get(proposal.covers) ?? "" },
     setup: (proposal?.systems ?? []).filter(
-      (system) => !connected.has(system.toLocaleLowerCase("en"))
+      (system) => !isConnected(connected, system)
     ),
     personApproves: proposal?.personApproves ?? [],
   };
@@ -355,9 +365,16 @@ export const proposerOf = (env: Env): Proposer => ({
         target: [opportunityProposals.routine, opportunityProposals.evidence],
         set: { proposal: kept, createdAt: new Date() },
       });
+    // Checked after the write, not with it: the drawing is the store's
+    // SQLite and this D1, which share no transaction. When this erasure
+    // fails, or the store stops first, the store's row for the call erases
+    // it later (`forget`).
     if (!stands()) {
       await eraseOpportunitiesOn(env, evidence);
     }
+  },
+  forget: async (source) => {
+    await eraseOpportunitiesOn(env, source);
   },
 });
 
