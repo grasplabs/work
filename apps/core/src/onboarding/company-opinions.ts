@@ -6,7 +6,13 @@ import { z } from "zod";
 
 import { modelSettings, modelForRole, models } from "../models.ts";
 import { ownId, withoutNames } from "./brain-intake.ts";
-import { backingOf, checksFor, claimOf, verdictsOf } from "./team-claims.ts";
+import {
+  backingOf,
+  checksFor,
+  claimOf,
+  verdictsOf,
+  writingRunsOf,
+} from "./team-claims.ts";
 import type { CheckItem, Checks, Judgment } from "./team-claims.ts";
 
 // What people across the company think of their work (GRA-1987, rule 2,
@@ -251,12 +257,12 @@ export const candidateInputOf = async (
 /** The model's answer, counted as the onboarding counts what it takes. */
 const askCareful = async <T>(
   checks: Checks,
+  model: string,
   system: string,
   input: string,
   schema: z.ZodType<T>
 ): Promise<T> => {
   const { env, count } = checks;
-  const model = modelForRole(await modelSettings(env), "careful");
   const { output, usage } = await models(env).call({
     model,
     purpose: "onboarding.claims",
@@ -293,38 +299,59 @@ export const teamCandidates = async (
   if (people.length === 0) {
     return [];
   }
-  const data = people.map(({ lines }, index) => ({
-    person: `Person ${index + 1}`,
-    lines: lines.map(({ label, text }) => ({ id: label, text })),
-  }));
-  const output = await askCareful(
-    checks,
-    candidatesSystem,
-    `<lines>\n${JSON.stringify(data, null, 1)}\n</lines>`,
-    candidatesSchema
+  const neutral = new Map(
+    people.map(({ person }, index) => [person, `Person ${index + 1}`])
   );
   const byLabel = new Map(
     people.flatMap(({ lines }) => lines.map((line) => [line.label, line]))
   );
+  const dataOf = (
+    run: readonly { label: string; person: string; text: string }[]
+  ) =>
+    [...new Set(run.map(({ person }) => person))].map((person) => ({
+      person: neutral.get(person) ?? "",
+      lines: run
+        .filter((line) => line.person === person)
+        .map(({ label, text }) => ({ id: label, text })),
+    }));
+  const model = modelForRole(await modelSettings(checks.env), "careful");
   const clean = cleanerOf(brief.names, brief.teamNames);
   const written = new Map<string, { text: string; lines: string[] }>();
-  for (const { text, lines } of output.candidates) {
-    const said = claimOf(clean(text));
-    if (said === null || written.has(said)) {
-      continue;
-    }
-    // Only labels the team's lines hold; the backing check then counts a
-    // label for a candidate only when it is one of that candidate's own.
-    const own = [
-      ...new Set(
-        lines.flatMap((label) => {
-          const line = byLabel.get(label.trim());
-          return line === undefined ? [] : [line.label];
-        })
-      ),
-    ];
-    if (own.length > 0) {
-      written.set(said, { text: said, lines: own });
+  // As few calls as fit the model's window, a team's lines split between
+  // them only when they don't fit one: a view written from two parts is
+  // two candidates, each backed apart, which the company's merge puts
+  // together (`companyOpinions`), so nothing is lost by the split.
+  for (const run of writingRunsOf(
+    model,
+    candidatesSystem,
+    [...byLabel.values()],
+    dataOf
+  )) {
+    // oxlint-disable-next-line no-await-in-loop -- one call at a time: the run waits for nobody
+    const output = await askCareful(
+      checks,
+      model,
+      candidatesSystem,
+      `<lines>\n${JSON.stringify(dataOf(run), null, 1)}\n</lines>`,
+      candidatesSchema
+    );
+    const inRun = new Set(run.map(({ label }) => label));
+    for (const { text, lines } of output.candidates) {
+      const said = claimOf(clean(text));
+      if (said === null) {
+        continue;
+      }
+      // Only labels this call was shown; the backing check then counts a
+      // label for a candidate only when it is one of that candidate's own.
+      const own = lines
+        .map((label) => label.trim())
+        .filter((label) => inRun.has(label));
+      if (own.length > 0) {
+        written.set(said, {
+          text: said,
+          lines: [...new Set([...(written.get(said)?.lines ?? []), ...own])],
+        });
+      }
     }
   }
   const items: CheckItem[] = [...written.values()].map(
@@ -384,15 +411,20 @@ const capitalised = /^\p{Lu}/u;
  * The words of `text` that can point at one person: each that holds a
  * figure ("340"), and each written with a capital (a product's, a place's
  * or a day's name: "Exact", "Monday"), in the same words as compared
- * (`sameWords`). The first word is one too: a sentence's capital can't
- * tell a name ("Exact makes ...") from any other word, so it must be
- * among the backers' words like the rest, which an opinion beginning with
- * an ordinary word they all used meets.
+ * (`sameWords`). The first word is one too, whatever its case: a
+ * sentence's capital can't tell a name ("Exact makes ...") from any other
+ * word, and one that starts in lower case ("exact makes ...") would
+ * otherwise slip past, so it must be among the backers' words like the
+ * rest, which an opinion beginning with an ordinary word they all used
+ * meets.
  */
 const tellingWords = (text: string): string[] =>
   text
     .split(/[^\p{L}\p{N}]+/u)
-    .filter((word) => figure.test(word) || capitalised.test(word))
+    .filter((word) => word !== "")
+    .filter(
+      (word, at) => at === 0 || figure.test(word) || capitalised.test(word)
+    )
     .map(sameWords);
 
 /**
@@ -497,6 +529,82 @@ export class OpinionTeamError extends Error {
   }
 }
 
+/** A view the merge is shown, and the original candidates it stands for. */
+interface MergeView {
+  label: string;
+  text: string;
+  /** The labels of the candidates it was made from (`V3`): only those back what cites it. */
+  candidates: readonly string[];
+}
+
+const mergeDataOf = (run: readonly MergeView[]) =>
+  run.map(({ label, text }) => ({ id: label, text }));
+
+/**
+ * The opinions the careful model writes from `views`, each with the
+ * original candidates it cites: one call while they fit the model's
+ * window. Past it, they are split into as few calls as fit, and the
+ * opinions those write are merged again as views of their own, each
+ * standing for the candidates its opinion cited, until one call holds
+ * them all: so an opinion two parts each wrote is put together, and still
+ * rests on the candidates of both. A round that makes no fewer opinions
+ * than it was given views stops there.
+ */
+const mergedOpinions = async (
+  checks: Checks,
+  model: string,
+  views: readonly MergeView[],
+  clean: (text: string) => string
+): Promise<{ kind: StatementKind; text: string; candidates: string[] }[]> => {
+  const runs = writingRunsOf(model, opinionsSystem, views, mergeDataOf);
+  const written = new Map<
+    string,
+    { kind: StatementKind; text: string; candidates: string[] }
+  >();
+  for (const run of runs) {
+    // oxlint-disable-next-line no-await-in-loop -- one call at a time: the run waits for nobody
+    const output = await askCareful(
+      checks,
+      model,
+      opinionsSystem,
+      `<views>\n${JSON.stringify(mergeDataOf(run), null, 1)}\n</views>`,
+      opinionsSchema
+    );
+    const byLabel = new Map(run.map((view) => [view.label, view]));
+    for (const { kind, text, candidates } of output.opinions) {
+      const said = claimOf(text);
+      // A name or a team's name in it: out.
+      if (!isKind(kind) || said === null || clean(said) !== said) {
+        continue;
+      }
+      const cited = candidates.flatMap(
+        (label) => byLabel.get(label.trim())?.candidates ?? []
+      );
+      written.set(said, {
+        kind,
+        text: said,
+        candidates: [
+          ...new Set([...(written.get(said)?.candidates ?? []), ...cited]),
+        ],
+      });
+    }
+  }
+  const opinions = [...written.values()];
+  if (runs.length <= 1 || opinions.length >= views.length) {
+    return opinions;
+  }
+  return await mergedOpinions(
+    checks,
+    model,
+    opinions.map(({ text, candidates }, at) => ({
+      label: `V${at + 1}`,
+      text,
+      candidates,
+    })),
+    clean
+  );
+};
+
 /**
  * The company's opinions, merged by the careful model from every team's
  * candidates as sentences alone, each resting on every person behind the
@@ -518,16 +626,6 @@ export const companyOpinions = async (
   const shown = brief.candidates
     .toSorted((a, b) => a.id.localeCompare(b.id))
     .map((candidate, index) => ({ ...candidate, label: `V${index + 1}` }));
-  const output = await askCareful(
-    checks,
-    opinionsSystem,
-    `<views>\n${JSON.stringify(
-      shown.map(({ label, text }) => ({ id: label, text })),
-      null,
-      1
-    )}\n</views>`,
-    opinionsSchema
-  );
   const byLabel = new Map(shown.map((each) => [each.label, each]));
   const clean = cleanerOf(brief.names, brief.teamNames);
   // What the model saw: the lines as cleaned, and the candidates.
@@ -540,35 +638,24 @@ export const companyOpinions = async (
       ...brief.candidates.map(({ text }) => text),
     ].map(sameWords)
   );
+  const model = modelForRole(await modelSettings(checks.env), "careful");
+  const opinionsOf = await mergedOpinions(
+    checks,
+    model,
+    shown.map(({ label, text }) => ({ label, text, candidates: [label] })),
+    clean
+  );
   const written = new Map<
     string,
     { kind: StatementKind; text: string; lines: string[] }
   >();
-  for (const { kind, text, candidates } of output.opinions) {
-    const said = claimOf(text);
-    // A name or a team's name in it: out.
-    if (
-      !isKind(kind) ||
-      said === null ||
-      clean(said) !== said ||
-      written.has(said)
-    ) {
-      continue;
-    }
-    const own = [
-      ...new Set(
-        candidates.flatMap((label) => {
-          const candidate = byLabel.get(label.trim());
-          return candidate === undefined ? [] : [candidate.label];
-        })
-      ),
-    ];
+  for (const { kind, text, candidates } of opinionsOf) {
     // Never asked of one whose cited candidates can't reach five.
     const reachable = new Set(
-      own.flatMap((label) => byLabel.get(label)?.people ?? [])
+      candidates.flatMap((label) => byLabel.get(label)?.people ?? [])
     );
     if (reachable.size >= opinionBackersMin) {
-      written.set(said, { kind, text: said, lines: own });
+      written.set(text, { kind, text, lines: candidates });
     }
   }
   const items: CheckItem[] = [...written.values()].map(

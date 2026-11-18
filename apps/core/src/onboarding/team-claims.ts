@@ -3,8 +3,8 @@ import type { FactTag } from "@grasp-os/shared/interview-turn";
 import { minTeamShown } from "@grasp-os/shared/onboarding";
 import { z } from "zod";
 
+import { parseModelRef } from "../model-catalog.ts";
 import {
-  contextWindowOf,
   estimatedTokens,
   modelSettings,
   modelForRole,
@@ -359,12 +359,14 @@ Answer in JSON with one field:
 const limitsOf = (
   model: string
 ): { answer: number | undefined; input: number } => {
-  const window = contextWindowOf(model);
+  // By the gateway's name for it (`provider/id`), as the catalog holds it:
+  // a window looked up by the bare name found nothing, and nothing split.
+  const window = parseModelRef(model)?.catalog.contextWindow ?? 0;
   const answer = usableAnswerTokens(model);
   return {
     answer,
     input:
-      window === undefined || answer === undefined
+      window <= 0 || answer === undefined
         ? Number.POSITIVE_INFINITY
         : window - answer,
   };
@@ -376,6 +378,20 @@ const limitsOf = (
  * `limits`. An item that doesn't fit a request on its own is left out:
  * the only thing withheld.
  */
+/** Whether a run of items fits one request (`runsOf`). */
+const fitsOf =
+  <T>(
+    system: string,
+    dataOf: (run: readonly T[]) => unknown,
+    answerOf: (item: T) => number,
+    limits: { answer: number | undefined; input: number }
+  ) =>
+  (run: readonly T[]): boolean =>
+    estimatedTokens(system.length + JSON.stringify(dataOf(run)).length) <=
+      limits.input &&
+    (limits.answer === undefined ||
+      run.reduce((sum, item) => sum + answerOf(item), 0) <= limits.answer);
+
 const runsOf = <T>(
   items: readonly T[],
   system: string,
@@ -383,11 +399,7 @@ const runsOf = <T>(
   answerOf: (item: T) => number,
   limits: { answer: number | undefined; input: number }
 ): T[][] => {
-  const fits = (run: readonly T[]): boolean =>
-    estimatedTokens(system.length + JSON.stringify(dataOf(run)).length) <=
-      limits.input &&
-    (limits.answer === undefined ||
-      run.reduce((sum, item) => sum + answerOf(item), 0) <= limits.answer);
+  const fits = fitsOf(system, dataOf, answerOf, limits);
   const runs: T[][] = [];
   let run: T[] = [];
   for (const item of items) {
@@ -400,6 +412,19 @@ const runsOf = <T>(
   }
   return [...runs, run].filter((each) => each.length > 0);
 };
+
+/**
+ * `items` in as few writing calls of `model` as fit its window, each
+ * call's request `system` and `dataOf` it (company-opinions.ts): the
+ * answer's room is the model's, so only the request decides. An item that
+ * doesn't fit a request on its own is left out.
+ */
+export const writingRunsOf = <T>(
+  model: string,
+  system: string,
+  items: readonly T[],
+  dataOf: (run: readonly T[]) => unknown
+): T[][] => runsOf(items, system, dataOf, () => 0, limitsOf(model));
 
 /** How much of an answer a backing check's item may take: it names each of its own lines at most once. */
 const backingAnswerOf = ({ label, lines: own }: CheckItem): number =>
@@ -488,8 +513,32 @@ export const backingOf = async (
       })),
     };
   };
+  // An item whose own lines don't fit one request is checked in parts,
+  // each with the lines that fit beside its words; what the parts back is
+  // put together. Only a line that doesn't fit beside the item's words on
+  // its own is never shown, and so never backs it.
+  const fits = fitsOf(backingSystem, dataOf, backingAnswerOf, limits);
+  const parts = asked.flatMap((item) => {
+    if (fits([item])) {
+      return [item];
+    }
+    const chunks: string[][] = [];
+    let chunk: string[] = [];
+    for (const line of item.lines) {
+      if (fits([{ ...item, lines: [...chunk, line] }])) {
+        chunk.push(line);
+      } else if (fits([{ ...item, lines: [line] }])) {
+        chunks.push(chunk);
+        chunk = [line];
+      }
+    }
+    return [...chunks, chunk]
+      .filter((each) => each.length > 0)
+      .map((own) => ({ ...item, lines: own }));
+  });
+  const confirmed = new Map<string, Set<string>>();
   for (const run of runsOf(
-    asked,
+    parts,
     backingSystem,
     dataOf,
     backingAnswerOf,
@@ -506,14 +555,26 @@ export const backingOf = async (
     );
     for (const item of run) {
       const own = new Set(item.lines);
-      const cited = new Set(
-        said
-          .filter(({ id }) => id.trim() === item.label)
-          .flatMap(({ lines: of }) => of.map((each) => each.trim()))
-      );
+      const held = confirmed.get(item.label) ?? new Set<string>();
+      for (const { id, lines: of } of said) {
+        if (id.trim() !== item.label) {
+          continue;
+        }
+        for (const each of of) {
+          if (own.has(each.trim())) {
+            held.add(each.trim());
+          }
+        }
+      }
+      confirmed.set(item.label, held);
+    }
+  }
+  for (const item of asked) {
+    const held = confirmed.get(item.label);
+    if (held !== undefined) {
       backing.set(
         item.label,
-        item.lines.filter((each) => own.has(each) && cited.has(each))
+        item.lines.filter((each) => held.has(each))
       );
     }
   }

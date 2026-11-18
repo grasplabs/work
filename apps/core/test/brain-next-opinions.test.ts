@@ -26,6 +26,7 @@ import {
   openLinkAs,
   participate,
 } from "./interview-link.ts";
+import { answeringProvider } from "./model-provider.ts";
 import type { ProviderReply, SentRequest } from "./model-provider.ts";
 import {
   agree,
@@ -538,6 +539,38 @@ const overTheHour = async (
   });
 };
 
+/** A long line only counted anonymously about re-typing invoices, the `at`th of the `set`th person. */
+const ledgerLine = (set: number, at: number) =>
+  anonymous(
+    fact(
+      `v${at}`,
+      "wish",
+      `Re-typing every invoice by hand is a waste of time, item ${at} of set ${set}, in the ledger of the accounts.`
+    )
+  );
+
+/** What each of nine says when one person backs two of an opinion's candidates (index: lines). */
+const twoBackings = (index: number) => {
+  const slow = anonymous(fact("v2", "wish", "Typing is slow."));
+  if (index === 0) {
+    return [said("v1", "invoice"), slow];
+  }
+  if (index === 1) {
+    return [said("v1", "invoice")];
+  }
+  return index < 4
+    ? [anonymous(fact("v1", "wish", "Typing is slow."))]
+    : [said("v1", "meeting")];
+};
+
+/** What each of nine says when the fifth's line about invoices is one the check rejects. */
+const oneRejected = (index: number) => {
+  if (index < 4) {
+    return said("v1", "invoice");
+  }
+  return index === 4 ? said("v1", "invoice", ", truly") : said("v1", "meeting");
+};
+
 /**
  * Three teams of three, everyone telling: five across the three teams
  * about invoices (two in Finance, two in Sales, one in Support), the four
@@ -949,6 +982,12 @@ describe(
               text: "Exact makes typing invoices by hand slow.",
               cites: [invoiceView],
             },
+            // The same, starting in lower case: its first word is still checked.
+            {
+              kind: "tool",
+              text: "exact makes typing invoices by hand slow.",
+              cites: [invoiceView],
+            },
           ],
         })
       );
@@ -1247,7 +1286,7 @@ describe(
       return { calls: requests.length, page: await pageOpinions() };
     };
 
-    it("cost the same model calls however many lines people say, and two more a team: two a changed team, three for the merge", async () => {
+    it("cost the same model calls however many lines people say until the input passes the window, and two more a team: two a changed team, three for the merge", async () => {
       const seven = await callsOfARun([3, 3, 3], 7);
       const seventy = await callsOfARun([3, 3, 3], 70);
       const twoTeams = await callsOfARun([5, 4], 7);
@@ -1426,6 +1465,233 @@ describe(
       }).toStrictEqual({
         before: [true, true, true],
         after: { candidates: 0, inputs: 0, people: 0 },
+      });
+    });
+
+    it("put a team and the company together past the model's window: as few calls as fit, nothing lost", async () => {
+      const ids = await company([3, 3, 3]);
+      const [first = [], ...rest] = ids;
+      for (const [set, person] of first.entries()) {
+        // oxlint-disable-next-line no-await-in-loop -- one interview at a time
+        await agree(
+          person,
+          Array.from({ length: 70 }, (_, at) => ledgerLine(set, at))
+        );
+      }
+      for (const [set, person] of rest.flat().entries()) {
+        // oxlint-disable-next-line no-await-in-loop -- one interview at a time
+        await agree(
+          person,
+          Array.from({ length: 20 }, (_, at) => ledgerLine(set + 3, at))
+        );
+      }
+      // Each line its own candidate, word for word; the merge puts every
+      // view about invoices into one opinion.
+      const perLine = (requests: readonly SentRequest[]): ProviderReply => {
+        const request = requests.at(-1);
+        const data = dataOf(request, "data");
+        const backing = backingSchema.safeParse(data);
+        if (backing.success) {
+          return reply({
+            backing: backing.data.items.map(({ id, lines: own }) => ({
+              id,
+              lines: own,
+            })),
+          });
+        }
+        const judged = judgedSchema.safeParse(data);
+        if (judged.success) {
+          return reply({
+            verdicts: judged.data.items.map(({ id }) => ({
+              id,
+              pointsAtNoOne: true,
+            })),
+          });
+        }
+        const lines = linesSchema.safeParse(dataOf(request, "lines"));
+        if (lines.success) {
+          return reply({
+            candidates: lines.data
+              .flatMap((person) => person.lines)
+              .map(({ id, text }) => ({ text, lines: [id] })),
+          });
+        }
+        const views = viewsSchema.parse(dataOf(request, "views") ?? []);
+        return reply({
+          opinions: [
+            {
+              kind: invoices.kind,
+              text: invoices.text,
+              candidates: views
+                .filter(({ text }) => text.includes("invoice"))
+                .map(({ id }) => id),
+            },
+          ],
+        });
+      };
+      // A model whose window is 8,192 tokens: a request of about 24,000
+      // characters at most, which neither a team of 210 lines nor the
+      // company's 330 candidates fits.
+      const store = onboardingStore(env);
+      let done = false;
+      const fake = await answeringProvider(
+        async (requests) => {
+          await Promise.resolve();
+          return done ? undefined : perLine(requests);
+        },
+        { models: ["openai/gpt-4"] }
+      );
+      try {
+        for (let run = 0; run < 10; run += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- one run at a time, as the alarm runs them
+          const did = await store.opinionsNext();
+          if (did === null || did === "opinions") {
+            break;
+          }
+        }
+      } finally {
+        done = true;
+      }
+      const asked = (tag: string) =>
+        fake.requests.filter((request) => dataOf(request, tag) !== undefined)
+          .length;
+      expect({
+        // Three teams, the one of 210 lines in two calls.
+        teams: asked("lines"),
+        // The company's 330 candidates in two, and their opinions in one more.
+        merge: asked("views"),
+        page: await pageOpinions(),
+        backers: await backerCount(),
+      }).toStrictEqual({
+        teams: 4,
+        merge: 3,
+        page: [invoices.text],
+        backers: 9,
+      });
+    });
+
+    it("count a person behind two of an opinion's candidates once: four people behind two candidates make no opinion", async () => {
+      const ids = await company([3, 3, 3]);
+      const everyone = ids.flat();
+      // Max says both; Mia the first; Mo and Noor the second; the rest
+      // speak of the meeting: four people, five backings.
+      for (const [index, person] of everyone.entries()) {
+        const lines = twoBackings(index);
+        // oxlint-disable-next-line no-await-in-loop -- one interview at a time
+        await agree(person, lines);
+      }
+      const slowView = "Typing takes too long.";
+      await formOpinions(
+        opinionsModel({
+          views: [
+            { when: "invoice", view: invoiceView },
+            { when: "slow", view: slowView },
+            { when: "meeting", view: meetingView },
+          ],
+          opinions: [{ ...invoices, cites: [invoiceView, slowView] }],
+        })
+      );
+      await expect(pageOpinions()).resolves.toStrictEqual([]);
+    });
+
+    it("rest a candidate only on people whose own line the check says says it: one line it rejects leaves four", async () => {
+      const ids = await company([3, 3, 3]);
+      const everyone = ids.flat();
+      for (const [index, person] of everyone.entries()) {
+        // oxlint-disable-next-line no-await-in-loop -- one interview at a time
+        await agree(person, [oneRejected(index)]);
+      }
+      await formOpinions(
+        opinionsModel({
+          views: [
+            { when: "invoice", view: invoiceView },
+            { when: "meeting", view: meetingView },
+          ],
+          opinions: [invoices],
+          // The model wrote the fifth line into the candidate; the check
+          // finds it doesn't say it.
+          says: (item, line) =>
+            !(item === invoiceView && line.includes("truly")),
+        })
+      );
+      await expect(pageOpinions()).resolves.toStrictEqual([]);
+    });
+
+    /**
+     * Ten people: Finance's four and one of Sales tell of invoices, and
+     * two of IT too: seven backers, five once IT is switched off.
+     */
+    const tenTold = async () => {
+      const ids = await company([4, 3, 3]);
+      const [finance = [], sales = [], it3 = []] = ids;
+      const backing = new Set([...finance, sales[0], it3[0], it3[1]]);
+      for (const person of ids.flat()) {
+        // oxlint-disable-next-line no-await-in-loop -- one interview at a time
+        await agree(person, [
+          said("v1", backing.has(person) ? "invoice" : "meeting"),
+        ]);
+      }
+      return { ids, it3 };
+    };
+
+    it("forget everything of a team switched off as the save commits, though the opinion stands on others", async () => {
+      const { it3 } = await tenTold();
+      await formOpinions(invoicesModel);
+      const before = await rowsNaming(it3[0] ?? "");
+      await onboardingStore(env).saveRoster(offWith(it3[0] ?? ""), by);
+      const after = await Promise.all(
+        it3.map(async (person) => await rowsNaming(person))
+      );
+      expect({
+        before: [before.backers, before.candidates, before.people].map(
+          (rows) => rows.length > 0
+        ),
+        page: await pageOpinions(),
+        backers: await backerCount(),
+        after,
+      }).toStrictEqual({
+        before: [true, true, true],
+        page: [invoices.text],
+        backers: 5,
+        after: it3.map(() => ({ backers: [], candidates: [], people: [] })),
+      });
+    });
+
+    it("note nobody of a team switched off while the merge's model is asked", async () => {
+      const { it3 } = await tenTold();
+      const store = onboardingStore(env);
+      let switched = false;
+      await answeringWith(
+        async (requests) => {
+          if (!switched && dataOf(requests.at(-1), "views") !== undefined) {
+            switched = true;
+            await store.saveRoster(offWith(it3[0] ?? ""), by);
+          }
+          return invoicesModel(requests);
+        },
+        async () => {
+          for (let run = 0; run < 10; run += 1) {
+            // oxlint-disable-next-line no-await-in-loop -- one run at a time
+            const did = await store.opinionsNext();
+            if (did === null || did === "opinions") {
+              return;
+            }
+          }
+        }
+      );
+      const after = await Promise.all(
+        it3.map(async (person) => await rowsNaming(person))
+      );
+      expect({
+        switched,
+        page: await pageOpinions(),
+        backers: await backerCount(),
+        after,
+      }).toStrictEqual({
+        switched: true,
+        page: [invoices.text],
+        backers: 5,
+        after: it3.map(() => ({ backers: [], candidates: [], people: [] })),
       });
     });
   }

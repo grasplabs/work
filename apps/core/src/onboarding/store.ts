@@ -1698,6 +1698,9 @@ export class Onboarding extends DurableObject<Env> {
     }
     this.#lateTeams(late ? before : roster, roster, now);
     this.#askNewcomers(before, roster);
+    // Someone in a team switched off no longer counts for the company's
+    // opinions: nothing of theirs is kept for them, before the recount.
+    this.#forgetOpinionsOfTeamsOut(roster);
     // Someone moved out, made a lead or taken off takes down every claim
     // and drawing resting on them, and may leave a team with nobody who
     // told its work: those are out of use in the Brain before this
@@ -7183,6 +7186,42 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * Forgets, in the caller's transaction, every candidate, backing and
+   * line mark of the company's opinions held for someone on `roster` whose
+   * team doesn't take part (switched off, or waiting for the admin): they
+   * back nothing (`#opinionTellers`), so nothing of theirs is kept.
+   */
+  #forgetOpinionsOfTeamsOut(roster: Roster): void {
+    const waiting = this.#unconfirmed().teams;
+    const out = new Set(
+      roster.teams.flatMap(({ id, off }) =>
+        off || waiting.has(id) ? [id] : []
+      )
+    );
+    const held = new Set(
+      [
+        ...this.#db
+          .select({ person: opinionPeople.person })
+          .from(opinionPeople)
+          .all(),
+        ...this.#db
+          .select({ person: opinionCandidates.person })
+          .from(opinionCandidates)
+          .all(),
+        ...this.#db
+          .select({ person: opinionBackers.person })
+          .from(opinionBackers)
+          .all(),
+      ].map(({ person }) => person)
+    );
+    for (const { id, team } of roster.people) {
+      if (held.has(id) && team !== null && out.has(team)) {
+        this.#forgetOpinionsOf(id);
+      }
+    }
+  }
+
+  /**
    * Forgets, in a transaction of its own, everything the company's
    * opinions are put together from: every candidate, every hash of what
    * a model was given, and of anyone's lines. While fewer than seven may
@@ -7461,6 +7500,14 @@ export class Onboarding extends DurableObject<Env> {
       );
       this.ctx.storage.transactionSync(() => {
         const gone = new Set(this.#goneSince(began));
+        // Nor anyone who may back none now (their team switched off while
+        // the model was asked).
+        const telling = this.#opinionTellers();
+        for (const person of brief.tellers.map(({ person: of }) => of)) {
+          if (!telling.has(person)) {
+            gone.add(person);
+          }
+        }
         this.#db
           .delete(opinionCandidates)
           .where(eq(opinionCandidates.team, team))
@@ -7612,7 +7659,9 @@ export class Onboarding extends DurableObject<Env> {
         .delete(opinionBackers)
         .where(eq(opinionBackers.record, record))
         .run();
-      for (const person of on) {
+      // Only who may back one now: someone whose team was switched off
+      // while the run asked its model is never noted again.
+      for (const person of on.filter((each) => tellers.has(each))) {
         this.#db
           .insert(opinionBackers)
           .values({ record, person })
