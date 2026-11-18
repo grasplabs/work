@@ -19,6 +19,7 @@ import { allEvents } from "./audit-events.ts";
 import { copyOfStore, restoreStore } from "./brain-next-store-copy.ts";
 import { mockIdp } from "./idp.ts";
 import { aloneInTheStore, answering, onLink } from "./interview-link.ts";
+import { teamsMade } from "./members-teams.ts";
 import { agree, fact, openLink, team } from "./onboarding-team.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
@@ -209,7 +210,7 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
     if (roster === null) {
       throw new Error("No roster.");
     }
-    await admin.api.onboarding.confirmRoster(roster);
+    await admin.api.onboarding.confirmRoster(await teamsMade(roster));
     await handOverNow();
     const readNow = async () => ({
       member: await readOf(member.userId, marker),
@@ -350,7 +351,7 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
     ]);
     const words = markers();
     // Saved, not confirmed: nothing reaches a member.
-    await admin.api.onboarding.saveRoster(rosterWith(words));
+    await admin.api.onboarding.saveRoster(await teamsMade(rosterWith(words)));
     await handOverNow();
     const unconfirmed = {
       read: await readOf(member.userId, words.team),
@@ -358,7 +359,9 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
     };
 
     // Confirmed, the other team switched off.
-    await admin.api.onboarding.confirmRoster(rosterWith(words, { off: true }));
+    await admin.api.onboarding.confirmRoster(
+      await teamsMade(rosterWith(words, { off: true }))
+    );
     await handOverNow();
     const read = await readOf(member.userId, words.team);
     const page = await member.api.brain.read();
@@ -399,13 +402,17 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
       signedInApi(idp, "user"),
     ]);
     const words = markers();
-    await admin.api.onboarding.confirmRoster(rosterWith(words));
+    await admin.api.onboarding.confirmRoster(
+      await teamsMade(rosterWith(words))
+    );
     await handOverNow();
     const first = await versionsOf(member.userId);
 
     // The same list confirmed again.
     const again = await auditedDuring(async () => {
-      await admin.api.onboarding.confirmRoster(rosterWith(words));
+      await admin.api.onboarding.confirmRoster(
+        await teamsMade(rosterWith(words))
+      );
     });
     await handOverNow();
     const unchanged = await versionsOf(member.userId);
@@ -413,13 +420,15 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
     // Renamed, and one more person in it.
     const renamed = markerOf("renamed");
     const changed = rosterWith({ ...words, team: renamed });
-    await admin.api.onboarding.confirmRoster({
-      ...changed,
-      people: [
-        ...changed.people,
-        { id: "dee", name: "Dee Dough", team: "bakery", title: "Baker" },
-      ],
-    });
+    await admin.api.onboarding.confirmRoster(
+      await teamsMade({
+        ...changed,
+        people: [
+          ...changed.people,
+          { id: "dee", name: "Dee Dough", team: "bakery", title: "Baker" },
+        ],
+      })
+    );
     await handOverNow();
     const last = await versionsOf(member.userId);
     const read = await readOf(member.userId, renamed);
@@ -448,7 +457,9 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
       signedInApi(idp, "user"),
     ]);
     const words = markers();
-    await admin.api.onboarding.confirmRoster(rosterWith(words));
+    await admin.api.onboarding.confirmRoster(
+      await teamsMade(rosterWith(words))
+    );
     await handOverNow();
     const confirmed = await versionsOf(member.userId);
 
@@ -456,12 +467,14 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
     const renamed = markerOf("renamed");
     const described = markerOf("does");
     const edited = rosterWith({ ...words, team: renamed });
-    await admin.api.onboarding.saveRoster({
-      ...edited,
-      teams: edited.teams.map((each) =>
-        each.id === "bakery" ? { ...each, does: `Bakes ${described}` } : each
-      ),
-    });
+    await admin.api.onboarding.saveRoster(
+      await teamsMade({
+        ...edited,
+        teams: edited.teams.map((each) =>
+          each.id === "bakery" ? { ...each, does: `Bakes ${described}` } : each
+        ),
+      })
+    );
     await handOverNow();
     const read = await readOf(member.userId, words.team);
     const page = JSON.stringify(await member.api.brain.read()).toLowerCase();
@@ -483,14 +496,18 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
       signedInApi(idp, "user"),
     ]);
     const words = markers();
-    await admin.api.onboarding.confirmRoster(rosterWith(words));
+    await admin.api.onboarding.confirmRoster(
+      await teamsMade(rosterWith(words))
+    );
     await handOverNow();
     const source = await rosterNow();
     const list = rosterWith(words);
-    await admin.api.onboarding.confirmRoster({
-      ...list,
-      teams: list.teams.map((each) => ({ ...each, off: true })),
-    });
+    await admin.api.onboarding.confirmRoster(
+      await teamsMade({
+        ...list,
+        teams: list.teams.map((each) => ({ ...each, off: true })),
+      })
+    );
     await handOverNow();
     const { versions } = await listVersionsAs(env, member.userId, { source });
     const newest = Math.max(...versions.map(({ version }) => version));
@@ -513,7 +530,9 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
       signedInApi(idp, "user"),
     ]);
     const words = markers();
-    await admin.api.onboarding.confirmRoster(rosterWith(words));
+    await admin.api.onboarding.confirmRoster(
+      await teamsMade(rosterWith(words))
+    );
     await handOverNow();
 
     const refused = await outcome(member.api.onboarding.eraseTeamsFromBrain());
@@ -533,11 +552,13 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
       signedInApi(idp, "user"),
     ]);
     const words = markers();
-    await admin.api.onboarding.confirmRoster(rosterWith(words));
+    await admin.api.onboarding.confirmRoster(
+      await teamsMade(rosterWith(words))
+    );
     await handOverNow();
     const renamed = markerOf("renamed");
     await admin.api.onboarding.confirmRoster(
-      rosterWith({ ...words, team: renamed })
+      await teamsMade(rosterWith({ ...words, team: renamed }))
     );
     await handOverNow();
     const erased = await rosterNow();
@@ -570,7 +591,7 @@ describe("the company's teams in the new Brain", { timeout: 180_000 }, () => {
     };
     // The next confirmed save, the same list: given afresh, under a new id.
     await admin.api.onboarding.confirmRoster(
-      rosterWith({ ...words, team: renamed })
+      await teamsMade(rosterWith({ ...words, team: renamed }))
     );
     await handOverNow();
     const fresh = await rosterNow();

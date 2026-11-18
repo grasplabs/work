@@ -5,6 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { proposeTeamGroups } from "../src/brain-team-groups.ts";
 import { mockIdp } from "./idp.ts";
+import { teamsMade } from "./members-teams.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
@@ -41,7 +42,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
     const tag = unique();
-    await admin.api.onboarding.confirmRoster(rosterOf(tag));
+    await admin.api.onboarding.confirmRoster(await teamsMade(rosterOf(tag)));
 
     let saved: unknown;
     const events = await auditedDuring(async () => {
@@ -105,7 +106,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
   it("keep each confirmed set whole, before and after, so an earlier one can be put back", async () => {
     const admin = await signedInApi(idp, "admin");
     const tag = unique();
-    await admin.api.onboarding.saveRoster(rosterOf(tag));
+    await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(tag)));
     const finance = `team-finance-${tag}`;
     const sales = `team-sales-${tag}`;
     const support = `team-support-${tag}`;
@@ -147,7 +148,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
     const tag = unique();
-    await admin.api.onboarding.saveRoster(rosterOf(tag));
+    await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(tag)));
     const finance = `team-finance-${tag}`;
     await admin.api.brain.saveTeamGroups([
       { id: "kept", name: "Kept", teamIds: [finance] },
@@ -194,7 +195,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
   it("are proposed by Grasp for the teams in none, from their names alone, checked and kept as proposals", async () => {
     const admin = await signedInApi(idp, "admin");
     const tag = unique();
-    await admin.api.onboarding.saveRoster(rosterOf(tag));
+    await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(tag)));
     const finance = `team-finance-${tag}`;
     const sales = `team-sales-${tag}`;
     const support = `team-support-${tag}`;

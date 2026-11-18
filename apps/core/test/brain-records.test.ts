@@ -8,6 +8,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
+import { teamsMade } from "./members-teams.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 
 // The brain's records (`brain.addRecords`, core's brain-records.ts), as
@@ -112,7 +113,7 @@ const interview = (tag: string) => {
 describe("the brain's records", { timeout: 120_000 }, () => {
   it("are added by an admin, read by every member in the brain, and audited", async () => {
     const admin = await signedInApi(idp, "admin");
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.saveRoster(await teamsMade(roster));
     const member = await signedInApi(idp, "user");
     const { ids, records: interviewed } = interview(unique());
     // Given by an accountant, one of five: their role may show.
@@ -257,7 +258,7 @@ describe("the brain's records", { timeout: 120_000 }, () => {
 
   it("are never written over: a retry changes nothing, and a different record under a held id keeps none of its call", async () => {
     const admin = await signedInApi(idp, "admin");
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.saveRoster(await teamsMade(roster));
     const { ids, records } = interview(unique());
     await admin.api.brain.addRecords(records);
     const extra = `cand-${unique()}`;
@@ -305,7 +306,7 @@ describe("the brain's records", { timeout: 120_000 }, () => {
 
   it("take a retry racing its first call as unchanged, and write what is still fresh when a racing call took only some ids", async () => {
     const admin = await signedInApi(idp, "admin");
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.saveRoster(await teamsMade(roster));
     const other = await signedInApi(idp, "admin");
 
     /**
@@ -358,7 +359,7 @@ describe("the brain's records", { timeout: 120_000 }, () => {
 
   it("refuse a reference to nothing, a pain on what doesn't hurt, and anything a record doesn't name", async () => {
     const admin = await signedInApi(idp, "admin");
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.saveRoster(await teamsMade(roster));
     const tag = unique();
     const statement = {
       type: "statement",
@@ -466,7 +467,7 @@ describe("the brain's records", { timeout: 120_000 }, () => {
 
   it("stop at each type's cap", async () => {
     const admin = await signedInApi(idp, "admin");
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.saveRoster(await teamsMade(roster));
     const tag = unique();
     const cap = brainRecordsMaxPerType.candidate;
     const before = await admin.api.brain.read();

@@ -4,6 +4,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
+import { teamsMade } from "./members-teams.ts";
 import {
   auditedDuring,
   openRpc,
@@ -42,19 +43,21 @@ const rosterWith = async (
   role: string,
   ...holders: Signed[]
 ): Promise<void> => {
-  await admin.api.onboarding.saveRoster({
-    teams: roster.teams,
-    people: [
-      ...roster.people,
-      ...holders.map(({ userId, person }, index) => ({
-        id: `p-${userId}`.replaceAll(/[^A-Za-z0-9_-]/gu, "").slice(0, 60),
-        name: `Holder ${index + 1}`,
-        email: String(person.email),
-        team: "finance",
-        title: role,
-      })),
-    ],
-  });
+  await admin.api.onboarding.saveRoster(
+    await teamsMade({
+      teams: roster.teams,
+      people: [
+        ...roster.people,
+        ...holders.map(({ userId, person }, index) => ({
+          id: `p-${userId}`.replaceAll(/[^A-Za-z0-9_-]/gu, "").slice(0, 60),
+          name: `Holder ${index + 1}`,
+          email: String(person.email),
+          team: "finance",
+          title: role,
+        })),
+      ],
+    })
+  );
 };
 
 /** The questions `person` was asked, as their notifications list them. */
@@ -106,7 +109,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
   it("add a team's sizes and stakeholders as dated values, joining the onboarding's team for whoever reads it: every member once the admin confirmed it", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
-    await admin.api.onboarding.confirmRoster(roster);
+    await admin.api.onboarding.confirmRoster(await teamsMade(roster));
     const tag = unique();
     const team = `sales-${tag}`;
     await admin.api.brain.addRecords([
@@ -200,7 +203,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
 
   it("refuse a team, workflow or record that doesn't exist", async () => {
     const admin = await signedInApi(idp, "admin");
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.saveRoster(await teamsMade(roster));
     const { ids, records } = gapRecords(unique());
     await admin.api.brain.addRecords(records.slice(0, 2));
 
@@ -262,7 +265,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
 
   it("refuse the onboarding's source ids as any record's own id, and a gap about what isn't a note", async () => {
     const admin = await signedInApi(idp, "admin");
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.saveRoster(await teamsMade(roster));
     const tag = unique();
     const team = `team${tag}`;
     await admin.api.brain.addRecords([
@@ -351,7 +354,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
   it("show members the onboarding source a gap or team names, and each team's values in date order", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
-    await admin.api.onboarding.confirmRoster(roster);
+    await admin.api.onboarding.confirmRoster(await teamsMade(roster));
     const tag = unique();
     const team = `team${tag}`;
     const source = `src-${tag}`;
