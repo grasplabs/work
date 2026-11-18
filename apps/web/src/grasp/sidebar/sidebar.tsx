@@ -875,10 +875,10 @@ const styles = stylex.create({
     borderBlockStartColor: "transparent",
     borderInlineEndColor: "transparent",
   },
-  // A folding group's rows stand space-3 in from its label: the stem stands under the label's
-  // first letter, and a row with no icon has its words at its own inset.
+  // A folding group's rows with icons stand space-3 in from its label: the stem stands at the
+  // label's edge, and the branch runs to the icon.
   guideInGroup: { [guideVars.stem]: `calc(-1 * ${grasp.space3})` },
-  guideNoIcon: { [guideVars.words]: grasp.shellRowInline },
+  guideNoIcon: { marginInlineStart: `calc(-1 * ${grasp.space3})` },
   // Where the person is. In forced colours the fill is dropped, so a border marks it.
   current: {
     color: grasp.shellText,
@@ -1397,8 +1397,7 @@ const groupLook = (place: GuidePlace | undefined, icon: boolean) =>
   stylex.props(
     place !== undefined && [
       styles.nested,
-      styles.guideInGroup,
-      !icon && styles.guideNoIcon,
+      icon ? styles.guideInGroup : styles.guideNoIcon,
     ]
   );
 
@@ -1420,7 +1419,12 @@ const MoreRow = ({
         row={more}
         item={item}
         onClick={handleClick}
-        look={stylex.props(styles.row, styles.more, focus.inside)}
+        look={stylex.props(
+          styles.row,
+          styles.more,
+          placed !== undefined && styles.subRow,
+          focus.inside
+        )}
       >
         <span {...stylex.props(styles.name)}>{more.label}</span>
       </Linked>
@@ -1440,8 +1444,11 @@ const Row = ({
 }) => {
   const guides = useContext(GuidesOn);
   const placed = guides ? place : undefined;
+  // In a guided group a row with no icon is a nested row: its words start past the guide's elbow.
+  const nestedWords = placed !== undefined && row.icon === undefined;
   const look = stylex.props(
     styles.row,
+    nestedWords && styles.subRow,
     hasDetail(row) && styles.rowTall,
     row.quiet === true && styles.quiet,
     hasActions(row) && rowActionsRoom,
