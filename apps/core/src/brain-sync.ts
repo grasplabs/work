@@ -1,6 +1,10 @@
 import { connectorIsolateRequests } from "@grasp-os/connector-kit/manifest";
 import { auditActorSchema, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEvent } from "@grasp-os/shared/audit";
+import type {
+  BrainSyncConnection,
+  BrainSyncPhase,
+} from "@grasp-os/shared/brain-report";
 import { brainSourceErrors } from "@grasp-os/shared/brain-sources";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorFields, errorName, log } from "@grasp-os/shared/log";
@@ -1690,7 +1694,6 @@ const commit = async (applying: Applying, page: SyncPage): Promise<void> => {
         leaseId: null,
         leaseUntil: null,
         lastSuccessAt: new Date(now),
-        lastError: null,
         added: 0,
         changed: 0,
         removed: 0,
@@ -1736,7 +1739,8 @@ const commit = async (applying: Applying, page: SyncPage): Promise<void> => {
 
 /**
  * Gives up `applying`'s source: its `stream` due again at `at`, its
- * cursors as they were or as `set` says.
+ * cursors as they were or as `set` says, with when, if it names an
+ * error.
  */
 const release = async (
   applying: Pick<Applying, "write" | "source" | "stream">,
@@ -1760,7 +1764,13 @@ const release = async (
       : { relistAt: new Date(at) };
   await applying.write.update(
     brainSyncSources,
-    { ...due, ...set, leaseId: null, leaseUntil: null },
+    {
+      ...due,
+      ...set,
+      ...(set.lastError === undefined ? {} : { lastErrorAt: new Date() }),
+      leaseId: null,
+      leaseUntil: null,
+    },
     sourceRowOf(applying.source, applying.source.place)
   );
 };
@@ -1793,20 +1803,131 @@ const overdueBy = (source: Source, now: number): number => {
 };
 
 /**
- * How many sources' relists are past their day now, for the staff's view
- * of the Brain (brain-report.ts): where it is not 0, a reader list can be
- * staler than a day.
+ * Whether a source's relist is past its day at `now`: the one under way
+ * by when it was due to start, else the next by when it is due
+ * (`overdueBy` in SQL).
+ */
+const relistLate = (now: number): SQL =>
+  sql`CASE WHEN ${brainSyncSources.relisting} = 1 THEN coalesce(${brainSyncSources.relistSince}, ${brainSyncSources.relistAt}) ELSE ${brainSyncSources.relistAt} END < ${now - relistMs}`;
+
+/**
+ * How many sources' relists are past their day now, a dropped place's
+ * left out (it is read no more): where it is not 0, a reader list can be
+ * staler than a day. The staff's view of the Brain counts the same in
+ * `syncForStaff`.
  */
 export const overdueRelists = async (env: Pick<Env, "DB">): Promise<number> => {
-  const late = Date.now() - relistMs;
   const row = await drizzle(env.DB)
     .select({ count: sql<number>`count(*)` })
     .from(brainSyncSources)
-    .where(
-      sql`CASE WHEN ${brainSyncSources.relisting} = 1 THEN coalesce(${brainSyncSources.relistSince}, ${brainSyncSources.relistAt}) ELSE ${brainSyncSources.relistAt} END < ${late}`
-    )
+    .where(and(eq(brainSyncSources.dropped, false), relistLate(Date.now())))
     .get();
   return row?.count ?? 0;
+};
+
+/** Where a connection's sync stands, from its places' rows grouped. */
+const phaseOf = ({
+  listing,
+  relisting,
+}: {
+  listing: number;
+  relisting: number;
+}): BrainSyncPhase => {
+  if (listing === 1) {
+    return "listing";
+  }
+  return relisting === 1 ? "relisting" : "changes";
+};
+
+/** A time a grouped read gave in milliseconds, as ISO 8601; null as null. */
+const isoOf = (ms: number | null): string | null =>
+  ms === null ? null : new Date(ms).toISOString();
+
+/**
+ * Native sync for the staff's view of the Brain (brain-report.ts,
+ * GRA-1817): each synced connection, sync by sync, from its sources' rows
+ * alone, never whose it is, its account, its places or anything it holds;
+ * and how many sources' relists are past their day, counted over the same
+ * rows. The connection is named by a hash of its ID; a dropped place
+ * counts no more. Two reads, whatever the number of connections: the
+ * sources, grouped, and how many items each holds in a store.
+ */
+export const syncForStaff = async (
+  env: Pick<Env, "DB">
+): Promise<{
+  overdueRelists: number;
+  connections: BrainSyncConnection[];
+}> => {
+  const db = drizzle(env.DB);
+  const now = Date.now();
+  const s = brainSyncSources;
+  const place = sql`${s.place} <> ${placesListing}`;
+  const latestError = (column: SQL) =>
+    sql`(SELECT ${column} FROM ${brainSyncSources} AS e WHERE e.connection_id = ${s.connectionId} AND e.feed = ${s.feed} AND e.dropped = 0 AND e.last_error_at IS NOT NULL ORDER BY e.last_error_at DESC LIMIT 1)`;
+  const [rows, held] = await Promise.all([
+    db
+      .select({
+        connectionId: s.connectionId,
+        feed: s.feed,
+        provider: sql<string>`max(${s.provider})`,
+        listing: sql<number>`max(${place} AND ${s.listingOpen})`,
+        relisting: sql<number>`max(${s.relisting})`,
+        syncedAt: sql<number | null>`max(${s.lastSuccessAt})`,
+        // Missed by a run: due before the run a period ago.
+        behindSince: sql<
+          number | null
+        >`min(CASE WHEN ${s.dueAt} < ${now - pollMs} THEN ${s.dueAt} END)`,
+        relistsOverdue: sql<number>`sum(${relistLate(now)})`,
+        failing: sql<number>`max(${s.lastErrorAt} IS NOT NULL AND (${s.lastSuccessAt} IS NULL OR ${s.lastErrorAt} > ${s.lastSuccessAt}))`,
+        errorCode: sql<string | null>`${latestError(sql`e.last_error`)}`,
+        errorAt: sql<number | null>`${latestError(sql`e.last_error_at`)}`,
+      })
+      .from(s)
+      .where(eq(s.dropped, false))
+      .groupBy(s.connectionId, s.feed)
+      .all(),
+    db
+      .select({
+        connectionId: brainSyncItems.connectionId,
+        feed: brainSyncItems.feed,
+        items: sql<number>`count(*)`,
+      })
+      .from(brainSyncItems)
+      .where(isNotNull(brainSyncItems.store))
+      .groupBy(brainSyncItems.connectionId, brainSyncItems.feed)
+      .all(),
+  ]);
+  const itemsOf = new Map(
+    held.map((row) => [`${row.connectionId}\n${row.feed}`, row.items])
+  );
+  const connections = await Promise.all(
+    rows.map(async (row) => {
+      const hash = await sha256Hex(row.connectionId);
+      return {
+        connection: hash.slice(0, 12),
+        provider: row.provider,
+        feed: row.feed,
+        phase: phaseOf(row),
+        items: itemsOf.get(`${row.connectionId}\n${row.feed}`) ?? 0,
+        syncedAt: isoOf(row.syncedAt),
+        behindSince: isoOf(row.behindSince),
+        relistOverdue: row.relistsOverdue > 0,
+        error:
+          row.errorCode === null || row.errorAt === null
+            ? null
+            : { code: row.errorCode, at: new Date(row.errorAt).toISOString() },
+        failing: row.failing === 1,
+      };
+    })
+  );
+  return {
+    overdueRelists: rows.reduce((sum, row) => sum + row.relistsOverdue, 0),
+    connections: connections.toSorted(
+      (one, other) =>
+        one.connection.localeCompare(other.connection) ||
+        one.feed.localeCompare(other.feed)
+    ),
+  };
 };
 
 /**
@@ -2051,7 +2172,7 @@ const sourceStatement = (
 ) =>
   insert(
     brainSyncSources,
-    sql`SELECT ${of.connectionId}, ${of.feed}, ${place}, ${of.personId}, ${of.provider}, ${of.tenant}, ${of.account}, NULL, 1, 1, ${now}, NULL, NULL, NULL, NULL, 0, 0, 0, NULL, 0, ${relistAt}, NULL, 0, ${of.kind}, 0, 0, ${seenIn}`,
+    sql`SELECT ${of.connectionId}, ${of.feed}, ${place}, ${of.personId}, ${of.provider}, ${of.tenant}, ${of.account}, NULL, 1, 1, ${now}, NULL, NULL, NULL, NULL, 0, 0, 0, NULL, 0, ${relistAt}, NULL, 0, ${of.kind}, 0, 0, ${seenIn}, NULL`,
     sql`NOT ${closed(of.connectionId)} AND NOT ${erasureBegan(of.personId)}`
   ).onConflictDoUpdate({
     target: [
@@ -2221,7 +2342,6 @@ const listPlaces = async (
         leaseId: null,
         leaseUntil: null,
         lastSuccessAt: new Date(now),
-        lastError: null,
       },
       sourceRowOf(listing, placesListing)
     )
