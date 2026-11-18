@@ -7,7 +7,7 @@ import type { CommandEntry, CommandItems } from "../grasp/command/index.ts";
 import { Plus } from "../grasp/icons/index.ts";
 import { groupLabel } from "./groups.ts";
 import type { Integration } from "./integrations.ts";
-import { stateOf } from "./integrations.ts";
+import { find, stateOf } from "./integrations.ts";
 import { AppMark } from "./overview-lists.tsx";
 
 // Finding an app, and asking for one Grasp can't reach yet, in one place
@@ -31,7 +31,6 @@ const useRow = () => {
     return {
       value: integration.key,
       label: integration.name,
-      keywords: [kind, integration.id],
       media: <AppMark integration={integration} />,
       description: integration.description ?? kind,
       ...(needs
@@ -71,8 +70,11 @@ export const FindApp = ({
   const rowOf = useRow();
   const [query, setQuery] = useState("");
   const sought = query.trim();
-  const connected = integrations.filter((each) => each.connections.length > 0);
-  const others = integrations.filter((each) => each.connections.length === 0);
+  // The palette's order is the page's: the apps here first, then those to
+  // add, the request always last, however well its words match.
+  const found = find(integrations, sought);
+  const connected = found.filter((each) => each.connections.length > 0);
+  const others = found.filter((each) => each.connections.length === 0);
   const items: CommandItems = [
     ...(connected.length === 0
       ? []
@@ -108,7 +110,6 @@ export const FindApp = ({
               {
                 value: REQUEST,
                 label: t`Request ${sought}`,
-                keywords: [sought],
                 icon: Plus,
                 description: t`Grasp checks what it takes to connect it.`,
               },
@@ -120,6 +121,7 @@ export const FindApp = ({
     <CommandDialog
       aria-label={t`Find an app`}
       empty={t`Type the app's name to request it.`}
+      filter={false}
       items={items}
       onAction={(value) => {
         if (value === REQUEST) {

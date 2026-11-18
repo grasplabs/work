@@ -131,7 +131,11 @@ describe("finding an app", () => {
   it("shows the app that matches and opens it", async () => {
     const chosen = await opened();
     await type("micro");
-    expect(rows().some((row) => row.includes("Microsoft 365"))).toBeTruthy();
+    // The app here first; asking for what was typed always last.
+    expect(rows().map((row) => row.slice(0, 13))).toStrictEqual([
+      "Microsoft 365",
+      "Request micro",
+    ]);
     await press("Microsoft 365");
     expect(chosen.app).toBe("native:microsoft");
   });
