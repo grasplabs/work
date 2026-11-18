@@ -3316,7 +3316,6 @@ msgid "Ask an admin"
 msgstr "Einen Admin fragen"
 
 #: src/chat/chat-composer.tsx
-#: src/chat/global-chat.tsx
 #: src/frame/part-words.tsx
 msgid "Ask anything, or describe a process"
 msgstr "Etwas fragen oder einen Prozess beschreiben"
@@ -13807,14 +13806,6 @@ msgstr "Sagen Sie es so, wie Sie es einer Kollegin erzählen würden. Grasp übe
 #: src/frame/part-words.tsx
 msgid "Say what should change"
 msgstr "Sagen Sie, was sich ändern soll"
-
-#: src/chat/chat-subject.ts
-msgid "Say what to change. Only you see the changes until you share them with your team."
-msgstr "Sagen Sie, was sich ändern soll. Nur Sie sehen die Änderungen, bis Sie sie mit Ihrem Team teilen."
-
-#: src/chat/chat-subject.ts
-msgid "Say what to change. Only you see the changes, in the Flow: its runs go on as they are until a new version runs for your team."
-msgstr "Sagen Sie, was sich ändern soll. Nur Sie sehen die Änderungen, im Flow: Seine Läufe gehen weiter wie bisher, bis eine neue Version für Ihr Team läuft."
 
 #: src/apps/apps-overview.tsx
 msgid "Say what you want to build, and Grasp builds it."
