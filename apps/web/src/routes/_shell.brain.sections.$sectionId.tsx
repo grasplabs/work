@@ -28,6 +28,14 @@ import {
 } from "../grasp/card/index.ts";
 import { iconVars } from "../grasp/icons/icon.stylex.ts";
 import { Brain as BrainMark, Icon } from "../grasp/icons/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
 import { Link as TextLink } from "../grasp/link/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -103,6 +111,7 @@ const NoteBlock = ({
 const SectionPage = () => {
   const { t, i18n } = useLingui();
   const { sectionId } = Route.useParams();
+  const { concept } = Route.useSearch();
   const { brain, workspace } = useBrainData();
   const { identity } = useRouteContext({ from: "/_shell" });
   const section = brainSections.find(
@@ -150,7 +159,44 @@ const SectionPage = () => {
                 )}
               </SectionTitle>
             )}
-            <div {...stylex.props(blockStyles.blocks)}>
+            {concept === "b" ? (
+              <ItemGroup separated>
+                {group.notes.map((note) => (
+                  <Item
+                    key={note.id}
+                    render={
+                      <Link params={{ noteId: note.id }} to="/brain/$noteId" />
+                    }
+                    size="sm"
+                  >
+                    <ItemMedia icon={section.icon} iconLook="inline" />
+                    <ItemContent>
+                      <ItemTitle>{note.title}</ItemTitle>
+                      <ItemDescription>{note.summary}</ItemDescription>
+                    </ItemContent>
+                  </Item>
+                ))}
+              </ItemGroup>
+            ) : null}
+            {concept === "c" ? (
+              <div {...stylex.props(blockStyles.blocks)}>
+                {group.notes.map((note) => (
+                  <CardLink
+                    key={note.id}
+                    render={
+                      <Link params={{ noteId: note.id }} to="/brain/$noteId" />
+                    }
+                  >
+                    <CardTitle headingLevel={2}>{note.title}</CardTitle>
+                    <CardDescription>{note.summary}</CardDescription>
+                  </CardLink>
+                ))}
+              </div>
+            ) : null}
+            <div
+              hidden={concept !== undefined}
+              {...stylex.props(blockStyles.blocks)}
+            >
               {group.notes.map((note) => (
                 <NoteBlock
                   headingLevel={group.name === undefined ? 2 : 3}
@@ -168,5 +214,8 @@ const SectionPage = () => {
 };
 
 export const Route = createFileRoute("/_shell/brain/sections/$sectionId")({
+  // Concepts for Ruben (concept branch only): ?concept=b or ?concept=c.
+  validateSearch: (search: Record<string, unknown>): { concept?: string } =>
+    typeof search.concept === "string" ? { concept: search.concept } : {},
   component: SectionPage,
 });
