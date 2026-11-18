@@ -814,10 +814,6 @@ msgid "{name} edited it"
 msgstr "{name} hat es bearbeitet"
 
 #: src/agents/agent-documents.tsx
-msgid "{name} has {most} documents, the most an agent keeps. Remove one to add another."
-msgstr "{name} hat {most} Dokumente, mehr behält ein Agent nicht. Entferne eines, um ein weiteres hinzuzufügen."
-
-#: src/agents/agent-documents.tsx
 msgid "{name} has no documents."
 msgstr "{name} hat keine Dokumente."
 
@@ -10804,8 +10800,8 @@ msgid "PDF"
 msgstr "PDF"
 
 #: src/agents/agent-documents.tsx
-msgid "PDF, Word, Excel, Markdown, text, CSV or JSON, up to 10 MB each. At most {most} documents."
-msgstr "PDF, Word, Excel, Markdown, Text, CSV oder JSON, jeweils bis 10 MB. Höchstens {most} Dokumente."
+msgid "PDF, Word, Excel, Markdown, text, CSV or JSON, up to 10 MB each."
+msgstr "PDF, Word, Excel, Markdown, Text, CSV oder JSON, jeweils bis 10 MB."
 
 #: src/onboarding/document-drop.tsx
 msgid "PDF, Word, Excel, PowerPoint or text"

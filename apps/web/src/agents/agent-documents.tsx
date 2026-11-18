@@ -1,5 +1,4 @@
 import { agentErrors } from "@grasp-os/shared/agent";
-import { agentDocumentsMax } from "@grasp-os/shared/agents";
 import type { Agent, AgentDocument } from "@grasp-os/shared/agents";
 import {
   chatFileMaxBytes,
@@ -50,8 +49,6 @@ export const AgentDocuments = ({
   const { t, i18n } = useLingui();
   const input = useRef<HTMLInputElement>(null);
   const { name } = agent;
-  const most = agentDocumentsMax;
-  const full = (documents?.length ?? 0) >= agentDocumentsMax;
   const added = (at: string): string =>
     new Intl.DateTimeFormat(i18n.locale, { dateStyle: "medium" }).format(
       new Date(at)
@@ -61,8 +58,7 @@ export const AgentDocuments = ({
       return;
     }
     void change(async (session) => {
-      // One after another: core counts each against the most an agent
-      // keeps, and the first it refuses says why.
+      // One after another: the first core refuses says why.
       for (const file of files) {
         // Refused here as core would, before it is sent at all: a file
         // past what one message to core holds would drop the connection,
@@ -138,9 +134,9 @@ export const AgentDocuments = ({
       {editable && documents !== undefined ? (
         <li className="flex flex-col gap-3 border-t px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
           <span className="text-muted-foreground">
-            {full
-              ? t`${name} has ${most} documents, the most an agent keeps. Remove one to add another.`
-              : t`PDF, Word, Excel, Markdown, text, CSV or JSON, up to 10 MB each. At most ${most} documents.`}
+            <Trans>
+              PDF, Word, Excel, Markdown, text, CSV or JSON, up to 10 MB each.
+            </Trans>
           </span>
           <input
             accept={accepted}
@@ -159,7 +155,7 @@ export const AgentDocuments = ({
           />
           <Button
             className="flex-none"
-            disabled={!can || full}
+            disabled={!can}
             onClick={() => {
               input.current?.click();
             }}
