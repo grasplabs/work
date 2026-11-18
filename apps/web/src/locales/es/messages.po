@@ -1126,7 +1126,6 @@ msgid "{people, plural, one {{sector}, # person.} other {{sector}, # people.}}"
 msgstr "{people, plural, one {{sector}, # persona.} other {{sector}, # personas.}}"
 
 #: src/brain/brain.ts
-#: src/routes/_shell.settings.members.tsx
 #: src/workflows/requests/request-table.tsx
 msgid "{people, plural, one {# person} other {# people}}"
 msgstr "{people, plural, one {# persona} other {# personas}}"
@@ -1134,10 +1133,6 @@ msgstr "{people, plural, one {# persona} other {# personas}}"
 #: src/workflows/requests/request-table.tsx
 msgid "{people, plural, one {# person} other {# people}} · {helpful} helpful"
 msgstr "{people, plural, one {# persona} other {# personas}} · {helpful} útil"
-
-#: src/routes/_shell.settings.members.tsx
-msgid "{people, plural, one {# person} other {# people}} · {invited, plural, one {# invited} other {# invited}}"
-msgstr "{people, plural, one {# persona} other {# personas}} · {invited, plural, one {# invitada} other {# invitadas}}"
 
 #: src/projects/file-item-dialog.tsx
 msgid "{people, plural, one {Also give the # person in {projectName} access?} other {Also give the # people in {projectName} access?}}"
@@ -14884,6 +14879,10 @@ msgstr "responsables han hablado"
 #: src/inbox/interviews-item.tsx
 msgid "Team leads talked"
 msgstr "Responsables que hablaron"
+
+#: src/routes/_shell.settings.members.tsx
+msgid "Team members"
+msgstr "Miembros del equipo"
 
 #: src/brain/brain.ts
 msgid "Team size unknown"

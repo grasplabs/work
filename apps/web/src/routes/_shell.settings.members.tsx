@@ -601,9 +601,6 @@ const PeopleTable = ({
   const [search, setSearch] = useState("");
   const gone = useRemovedPeople(removed);
   const narrow = useNarrow();
-  // What the head counts: the members, and apart from them who is invited.
-  const people = members.length;
-  const invited = invitations.length;
   const rows: PersonRow[] = [
     ...members.map((member) => ({
       key: member.userId,
@@ -671,11 +668,7 @@ const PeopleTable = ({
           </>
         ) : undefined
       }
-      title={
-        invited === 0
-          ? plural(people, { one: "# person", other: "# people" })
-          : t`${plural(people, { one: "# person", other: "# people" })} · ${plural(invited, { one: "# invited", other: "# invited" })}`
-      }
+      title={t`Team members`}
     >
       {notice.failure === undefined && notice.done === undefined ? null : (
         <div {...stylex.props(styles.notice)}>
