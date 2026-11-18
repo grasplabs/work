@@ -141,7 +141,7 @@ const play = (
   element.height = Math.round(height * dpr);
   context.setTransform(dpr, 0, 0, dpr, 0, 0);
   const styles = palette(element);
-  const background = rgb(token(element, "--background"));
+  const background = rgb(token(element, "--grasp-paper"));
   const ground = `rgb(${background.join(", ")})`;
 
   const brain = from ?? disc(width / 2, height / 2);
