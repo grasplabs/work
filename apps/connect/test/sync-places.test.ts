@@ -682,6 +682,12 @@ describe("a shared connection's picked places", () => {
     const { admin, connectionId } = await sharedConnection();
     const own = await ownConnection();
     const toolkit = await addConnection();
+    // Disconnected: nothing to pick, so the page shows nothing.
+    const { connectionId: disconnected } = await sharedConnection();
+    await drizzle(env.DB)
+      .update(connections)
+      .set({ status: "disconnected" })
+      .where(eq(connections.id, disconnected));
     const choicesOf = async (id: string) =>
       await exports.default.syncPlaceChoices({
         person: admin,
@@ -692,6 +698,7 @@ describe("a shared connection's picked places", () => {
       shared: await choicesOf(connectionId),
       own: await choicesOf(own),
       toolkit: await choicesOf(toolkit),
+      disconnected: await choicesOf(disconnected),
     }).toStrictEqual({
       shared: {
         feed: "sites",
@@ -705,6 +712,7 @@ describe("a shared connection's picked places", () => {
       },
       own: null,
       toolkit: null,
+      disconnected: null,
     });
   });
 
