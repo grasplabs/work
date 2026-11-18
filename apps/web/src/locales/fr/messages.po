@@ -5766,13 +5766,13 @@ msgstr "Tout ce que je lis et chaque conversation que je mène passe par un mod�
 msgid "Everything I read and every conversation I have runs on an AI model. Yours is Grasp’s AI, and it is ready."
 msgstr "Tout ce que je lis et chaque conversation que je mène passe par un modèle d’IA. Le vôtre est l’IA de Grasp, et elle est prête."
 
+#: src/connections/brain-audience.tsx
+msgid "Everything the Brain kept from it is erased for good, and nobody reads it from now on. This can't be undone. To keep anything from it again, choose who may read it once the erasure is done."
+msgstr "Tout ce que le Brain en avait conservé est effacé définitivement, et plus personne ne le lit désormais. C’est irréversible. Pour en conserver à nouveau quoi que ce soit, choisissez qui peut le lire une fois l’effacement terminé."
+
 #: src/connections/connection-list.tsx
 msgid "Everything the Brain kept from it is erased for good."
 msgstr "Tout ce que le Brain en avait conservé est effacé définitivement."
-
-#: src/connections/brain-audience.tsx
-msgid "Everything the Brain kept of what agents read through it is erased for good, and nobody reads it from now on. This can't be undone. To keep what agents read through it again, choose who may read it once the erasure is done."
-msgstr "Tout ce que le Brain a conservé de ce que les agents y ont lu est effacé définitivement, et plus personne ne le lit désormais. C’est irréversible. Pour conserver à nouveau ce que les agents y lisent, choisissez qui peut le lire une fois l’effacement terminé."
 
 #: src/interview/closed.tsx
 msgid "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."

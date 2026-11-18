@@ -21,6 +21,7 @@ import type { UploadMediaType } from "@grasp-os/shared/uploads";
 import { clockLeaseMs, clockPeriods } from "@grasp-os/workerflow/clock";
 import { and, asc, eq, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import type { SQL, SQLWrapper } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
@@ -927,8 +928,7 @@ const add = async (
   given: Item | undefined,
   item: Extract<SyncItem, { gone: false }>,
   plan: Plan,
-  text: string,
-  again = false
+  text: string
 ): Promise<void> => {
   const { env, db, budget, source, readAt } = applying;
   const change = await changeOf([
@@ -979,20 +979,14 @@ const add = async (
     if (brainSourceErrors.codeOf(error) !== "brain.source_erased") {
       throw error;
     }
-    // A key this source named, erased all the same: its next key, once.
-    // A disconnect that closed the connection refuses that key's claim;
-    // a person's erasure, which disconnects, too.
-    if (again) {
-      throw new SyncStoppedError("lost");
-    }
-    await add(
-      applying,
-      await nextKey(applying, claimed),
-      item,
-      plan,
-      text,
-      true
-    );
+    // A key this source named, erased all the same: its next key, until
+    // one was never erased. An item whose row an erasure forgot (a place
+    // un-picked, an admin's "Erase what the Brain kept") starts again at
+    // its first key, so it steps past each key it held before; each step
+    // is charged, so the budget bounds a run. A disconnect that closed the
+    // connection refuses the next key's claim, and so does a person's
+    // erasure, which disconnects.
+    await add(applying, await nextKey(applying, claimed), item, plan, text);
     return;
   }
   spend(budget, 1);
@@ -2220,17 +2214,18 @@ const erasedEvent = async (
 });
 
 /**
- * Takes the erasure a disconnect of `connectionId` owes a step on, out
- * of `budget`: the keys it gave the shared store erased and forgotten, a
- * page at a time, and once none is left, its rows forgotten and the
- * erasure ended, with its one event (`brain.sync.erased`, how many
- * sources), in one batch. A step that fails leaves what it erased
- * forgotten; the next erases the rest, a key again without change.
+ * Erases, out of `budget`, every key the sync of `connectionId` gave the
+ * shared store, and one it was leaving there when a run stopped, a page
+ * at a time: each page's keys erased, then its rows forgotten in one
+ * batch with the erasure's count up by as many (`countUp`). A step that
+ * fails leaves what it erased forgotten; the next erases the rest, a key
+ * again without change.
  */
-export const stepSyncErasure = async (
+const eraseSharedCopies = async (
   env: Env,
   connectionId: string,
-  budget: Budget
+  budget: Budget,
+  countUp: (db: Database) => BatchItem<"sqlite">
 ): Promise<void> => {
   const db = drizzle(env.DB);
   for (;;) {
@@ -2250,7 +2245,7 @@ export const stepSyncErasure = async (
       .orderBy(asc(brainSyncItems.feed), asc(brainSyncItems.itemId))
       .limit(erasedPerPage);
     if (page.length === 0) {
-      break;
+      return;
     }
     // Its key in the shared store, and the one it was leaving there when a
     // run stopped, if any.
@@ -2279,12 +2274,30 @@ export const stepSyncErasure = async (
           )
         )
       ),
-      db
-        .update(brainSyncDisconnects)
-        .set({ erased: sql`${brainSyncDisconnects.erased} + changes()` })
-        .where(eq(brainSyncDisconnects.connectionId, connectionId)),
+      countUp(db),
     ]);
   }
+};
+
+/**
+ * Takes the erasure a disconnect of `connectionId` owes a step on, out
+ * of `budget`: the keys it gave the shared store erased and forgotten, a
+ * page at a time (`eraseSharedCopies`), and once none is left, its rows
+ * forgotten and the erasure ended, with its one event
+ * (`brain.sync.erased`, how many sources), in one batch.
+ */
+export const stepSyncErasure = async (
+  env: Env,
+  connectionId: string,
+  budget: Budget
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  await eraseSharedCopies(env, connectionId, budget, (counting) =>
+    counting
+      .update(brainSyncDisconnects)
+      .set({ erased: sql`${brainSyncDisconnects.erased} + changes()` })
+      .where(eq(brainSyncDisconnects.connectionId, connectionId))
+  );
   spend(budget, 1);
   const row = await db
     .select()
@@ -2319,24 +2332,94 @@ export const stepSyncErasure = async (
 };
 
 /**
+ * Takes an admin's "Erase what the Brain kept" of the shared connection
+ * `connectionId` (shared-reads.ts) a step on, for what its picked places
+ * synced (GRA-2066): every key it gave the shared store erased, a page at
+ * a time (`eraseSharedCopies`), each counted in that erasure, and then
+ * every row of it forgotten, so its picked places are read again from
+ * nothing once an audience is chosen. Its sources went as the erasure
+ * started, and nothing is kept meanwhile (`mayKeep`); the erasure ends,
+ * with its one event, once no row of it is left (shared-reads.ts
+ * `ended`). Only while it is under way.
+ */
+const stepReadsErasure = async (
+  env: Env,
+  connectionId: string,
+  budget: Budget
+): Promise<void> => {
+  const underWay = sql`EXISTS (SELECT 1 FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connectionId} AND ${connectionBrainErasures.erasing} = 1)`;
+  await eraseSharedCopies(env, connectionId, budget, (counting) =>
+    counting
+      .update(connectionBrainErasures)
+      .set({ erased: sql`${connectionBrainErasures.erased} + changes()` })
+      .where(
+        and(
+          eq(connectionBrainErasures.connectionId, connectionId),
+          eq(connectionBrainErasures.erasing, true)
+        )
+      )
+  );
+  spend(budget, 1);
+  const db = drizzle(env.DB);
+  await db.batch([
+    db
+      .delete(brainSyncItems)
+      .where(
+        sql`${brainSyncItems.connectionId} = ${connectionId} AND ${underWay}`
+      ),
+    db
+      .delete(brainSyncCatchUps)
+      .where(
+        sql`${brainSyncCatchUps.connectionId} = ${connectionId} AND ${underWay}`
+      ),
+  ]);
+};
+
+/**
  * Takes every erasure a disconnect owes a step on (`stepSyncErasure`),
- * oldest first, out of `budget`. One that fails is logged with its
- * connection and its error's name, and tried again at the next run.
+ * then every admin's "Erase what the Brain kept" with synced copies left
+ * (`stepReadsErasure`), oldest first, out of `budget`. One that fails is
+ * logged with its connection and its error's name, and tried again at the
+ * next run.
  */
 const completeSyncErasures = async (
   env: Env,
   budget: Budget
 ): Promise<void> => {
+  const db = drizzle(env.DB);
   spend(budget, 1);
-  const owed = await drizzle(env.DB)
-    .select({ connectionId: brainSyncDisconnects.connectionId })
-    .from(brainSyncDisconnects)
-    .where(eq(brainSyncDisconnects.erasing, true))
-    .orderBy(asc(brainSyncDisconnects.requestedAt));
-  for (const { connectionId } of owed) {
+  const [disconnects, erasures] = await db.batch([
+    db
+      .select({ connectionId: brainSyncDisconnects.connectionId })
+      .from(brainSyncDisconnects)
+      .where(eq(brainSyncDisconnects.erasing, true))
+      .orderBy(asc(brainSyncDisconnects.requestedAt)),
+    // An admin's "Erase what the Brain kept" with copies left to erase,
+    // unless a disconnect's erasure, above, erases them.
+    db
+      .select({ connectionId: connectionBrainErasures.connectionId })
+      .from(connectionBrainErasures)
+      .where(
+        sql`${connectionBrainErasures.erasing} = 1
+          AND EXISTS (SELECT 1 FROM ${brainSyncItems} WHERE ${brainSyncItems.connectionId} = ${connectionBrainErasures.connectionId})
+          AND NOT ${closed(sql`${connectionBrainErasures.connectionId}`)}`
+      )
+      .orderBy(asc(connectionBrainErasures.requestedAt)),
+  ]);
+  const owed = [
+    ...disconnects.map(({ connectionId }) => ({
+      connectionId,
+      step: stepSyncErasure,
+    })),
+    ...erasures.map(({ connectionId }) => ({
+      connectionId,
+      step: stepReadsErasure,
+    })),
+  ];
+  for (const { connectionId, step } of owed) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
-      await stepSyncErasure(env, connectionId, budget);
+      await step(env, connectionId, budget);
     } catch (error) {
       if (stoppedFor(error, "budget")) {
         throw error;

@@ -5,6 +5,8 @@ import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { addSource, recallAs } from "../src/brain-next.ts";
 import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { runSync } from "../src/brain-sync.ts";
+import { completeOwedErasures } from "../src/shared-reads.ts";
+import { allEvents } from "./audit-events.ts";
 import { chooseAudience } from "./brain-audiences.ts";
 import { newTeam } from "./brain-next-leaks-harness.ts";
 import { consentCode } from "./connect-providers.ts";
@@ -61,15 +63,14 @@ const fileOf = (id: string, text: string) => ({
 });
 
 /**
- * A Microsoft 365 account `admin` connects for the company, read by the
- * sample sync connector, whose sites are `sites`, each holding one file
- * with its marker.
+ * Has the account `subject` hold the sites `sites`, each one file with its
+ * marker, in its `version`, as the sample sync connector reads them.
  */
-const sharedSites = async (
-  admin: Person,
-  sites: Record<string, string>
-): Promise<string> => {
-  const subject = `shared-${unique()}`;
+const sitesHeld = async (
+  subject: string,
+  sites: Record<string, string>,
+  version = "1"
+): Promise<void> => {
   const providers = testBinding("CONNECT_PROVIDERS");
   if (!isFetcher(providers)) {
     throw new TypeError("Expected the providers Worker");
@@ -84,7 +85,9 @@ const sharedSites = async (
           site,
           {
             "": {
-              changes: [fileOf(`${site}-plan`, `Plan ${marker}`)],
+              changes: [
+                { ...fileOf(`${site}-plan`, `Plan ${marker}`), version },
+              ],
               next: "1",
               more: false,
             },
@@ -94,6 +97,19 @@ const sharedSites = async (
       ),
     }),
   });
+};
+
+/**
+ * A Microsoft 365 account `admin` connects for the company, read by the
+ * sample sync connector, whose sites are `sites`, each holding one file
+ * with its marker: its connection, and the account's subject.
+ */
+const sharedSites = async (
+  admin: Person,
+  sites: Record<string, string>
+): Promise<{ connectionId: string; subject: string }> => {
+  const subject = `shared-${unique()}`;
+  await sitesHeld(subject, sites);
   const { url } = await admin.api.connections.start({
     provider: "microsoft",
     scope: "shared",
@@ -123,7 +139,7 @@ const sharedSites = async (
     .prepare("UPDATE connections SET server = 'sample-sync' WHERE id = ?")
     .bind(connection.id)
     .run();
-  return connection.id;
+  return { connectionId: connection.id, subject };
 };
 
 /** `admin` picks `places` on `connectionId`, from the picks held now. */
@@ -203,7 +219,7 @@ describe("native sync of a shared connection's picked places", () => {
       const [picked, unpicked] = [markerOf(), markerOf()];
       const site = `site-${unique()}`;
       const other = `site-${unique()}`;
-      const connectionId = await sharedSites(admin, {
+      const { connectionId } = await sharedSites(admin, {
         [site]: picked,
         [other]: unpicked,
       });
@@ -249,7 +265,7 @@ describe("native sync of a shared connection's picked places", () => {
       ]);
       const [first, second] = [markerOf(), markerOf()];
       const [one, two] = [`site-${unique()}`, `site-${unique()}`];
-      const connectionId = await sharedSites(admin, {
+      const { connectionId } = await sharedSites(admin, {
         [one]: first,
         [two]: second,
       });
@@ -296,7 +312,7 @@ describe("native sync of a shared connection's picked places", () => {
       ]);
       const [first, second] = [markerOf(), markerOf()];
       const [one, two] = [`site-${unique()}`, `site-${unique()}`];
-      const connectionId = await sharedSites(admin, {
+      const { connectionId } = await sharedSites(admin, {
         [one]: first,
         [two]: second,
       });
@@ -366,7 +382,7 @@ describe("native sync of a shared connection's picked places", () => {
       ]);
       const marker = markerOf();
       const site = `site-${unique()}`;
-      const connectionId = await sharedSites(admin, { [site]: marker });
+      const { connectionId } = await sharedSites(admin, { [site]: marker });
       await chooseAudience(admin.api, connectionId, { kind: "everyone" });
       await pick(admin, connectionId, [site]);
       await syncAll();
@@ -395,6 +411,93 @@ describe("native sync of a shared connection's picked places", () => {
         kept: {},
         closed: { erasing: 0, erased: 1 },
       });
+    }
+  );
+
+  it(
+    'erases what a picked place synced with "Erase what the Brain kept", for good, and reads it again from nothing for the next audience',
+    setUpTime,
+    async () => {
+      const [admin, member] = await Promise.all([
+        signedInApi(idp, "admin"),
+        signedInApi(idp, "user"),
+      ]);
+      const [old, fresh] = [markerOf(), markerOf()];
+      const site = `site-${unique()}`;
+      const { connectionId, subject } = await sharedSites(admin, {
+        [site]: old,
+      });
+      await chooseAudience(admin.api, connectionId, { kind: "everyone" });
+      await pick(admin, connectionId, [site]);
+      await syncAll();
+      const before = await finds(member.userId, old);
+      // The file changes at the source meanwhile.
+      await sitesHeld(subject, { [site]: fresh }, "2");
+
+      await admin.api.connections.eraseBrainReads(connectionId);
+      const atErase = await finds(member.userId, old);
+      // The clock erases the copies, then ends the erasure.
+      await sync();
+      await completeOwedErasures(env);
+      await chooseAudience(admin.api, connectionId, { kind: "everyone" });
+      // An audience again, before any run: no old copy is left to read.
+      const atAudience = await finds(member.userId, old);
+      await syncAll();
+      const events = await allEvents();
+      const erased = events.filter(
+        ({ action, target }) =>
+          action === "brain.shared_reads.erased" && target?.id === connectionId
+      );
+      const places = await admin.api.connections.syncPlaces(connectionId);
+
+      expect({
+        before,
+        atErase,
+        atAudience,
+        after: {
+          old: await finds(member.userId, old),
+          fresh: await finds(member.userId, fresh),
+        },
+        stillPicked: places?.picks,
+        erased: erased.map(({ detail }) => detail),
+      }).toStrictEqual({
+        before: true,
+        atErase: false,
+        atAudience: false,
+        after: { old: false, fresh: true },
+        stillPicked: [site],
+        // The one copy synced; no agent read anything through it.
+        erased: [{ sources: 1 }],
+      });
+    }
+  );
+
+  it(
+    "reads a place again each time it is picked again after an un-pick erased it",
+    setUpTime,
+    async () => {
+      const [admin, member] = await Promise.all([
+        signedInApi(idp, "admin"),
+        signedInApi(idp, "user"),
+      ]);
+      const marker = markerOf();
+      const site = `site-${unique()}`;
+      const { connectionId } = await sharedSites(admin, { [site]: marker });
+      await chooseAudience(admin.api, connectionId, { kind: "everyone" });
+      const seen: boolean[] = [];
+      for (let round = 0; round < 3; round += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one round after another
+        await pick(admin, connectionId, [site]);
+        // oxlint-disable-next-line no-await-in-loop -- one round after another
+        await syncAll();
+        // oxlint-disable-next-line no-await-in-loop -- one round after another
+        seen.push(await finds(member.userId, marker));
+        // oxlint-disable-next-line no-await-in-loop -- one round after another
+        await pick(admin, connectionId, []);
+        // oxlint-disable-next-line no-await-in-loop -- one round after another
+        await syncAll();
+      }
+      expect(seen).toStrictEqual([true, true, true]);
     }
   );
 

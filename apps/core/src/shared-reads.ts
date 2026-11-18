@@ -12,7 +12,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorName, log } from "@grasp-os/shared/log";
 import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -25,6 +25,8 @@ import {
 } from "./audit-outbox.ts";
 import { erasingAtOnce, eraseSources } from "./brain-next-origins.ts";
 import {
+  brainSyncItems,
+  brainSyncSources,
   connectionBrainAudiences,
   connectionBrainErasures,
   connectionBrainReads,
@@ -58,6 +60,16 @@ import { inList } from "./db/d1.ts";
 // part-way, or a store out of reach, delays it and never drops it, and
 // nothing races it in the background. Nobody reads its records from the
 // moment it starts, so waiting for the clock shows nobody anything.
+//
+// What native sync copied from the places picked on the connection
+// (brain-sync.ts, GRA-1719) is part of what the Brain kept of it, so an
+// erasure erases it too (GRA-2066): as it starts, the connection's sync
+// sources go, so its picked places (still picked) are read again from
+// nothing once an admin chooses an audience; the sync run erases every
+// key they gave the Brain and forgets their rows, each counted in the
+// erasure (brain-sync.ts `stepReadsErasure`); and the erasure ends only
+// once none is left (`ended`). Nothing is copied meanwhile, as nothing is
+// kept without an audience.
 //
 // A disconnect also closes the connection here for good (`closed`): no
 // audience is opened on it again, whatever was checked before the
@@ -209,10 +221,11 @@ interface ErasureRequest {
 
 /**
  * The statements that start the erasure `request` of what the Brain kept
- * through its connection, for one batch: its audience gone, and, unless
- * one is under way or this request started already, the next generation
- * marked under way. The statement after them sees whether it started
- * (`changes()`). A request started once never starts again, so a repeat
+ * through its connection, for one batch: its audience gone, its native
+ * sync's sources gone (read again from nothing once an audience is
+ * chosen), and, unless one is under way or this request started already,
+ * the next generation marked under way. The statement after them sees
+ * whether it started (`changes()`). A request started once never starts again, so a repeat
  * erases nothing kept after it ended.
  */
 const startStatements = (
@@ -223,6 +236,14 @@ const startStatements = (
     db
       .delete(connectionBrainAudiences)
       .where(eq(connectionBrainAudiences.connectionId, connectionId)),
+    db
+      .delete(brainSyncSources)
+      .where(
+        and(
+          eq(brainSyncSources.connectionId, connectionId),
+          isNull(brainSyncSources.personId)
+        )
+      ),
     db
       .insert(connectionBrainErasures)
       .values({
@@ -287,8 +308,9 @@ interface Budget {
 /**
  * Ends the erasure `stepping` took on, whose older records (`older`) are
  * all erased, with its one event, in one batch: its count as the row has
- * it now, and only if it is still that erasure, under way, and no older
- * record was named since (none can be, while it is under way).
+ * it now, and only if it is still that erasure, under way, no older
+ * record was named since (none can be, while it is under way), and no
+ * copy its native sync made is left (brain-sync.ts `stepReadsErasure`).
  */
 const ended = async (
   env: Env,
@@ -320,7 +342,8 @@ const ended = async (
       .where(
         and(
           thisErasure,
-          sql`NOT EXISTS (SELECT 1 FROM ${connectionBrainReads} WHERE ${older})`
+          sql`NOT EXISTS (SELECT 1 FROM ${connectionBrainReads} WHERE ${older})`,
+          sql`NOT EXISTS (SELECT 1 FROM ${brainSyncItems} WHERE ${brainSyncItems.connectionId} = ${connectionId})`
         )
       ),
     outboxedEventWhere(db, event, sql`changes() > 0`),
@@ -521,8 +544,10 @@ export const closeOnDisconnect = async (
 
 /**
  * An admin's "Erase what the Brain kept" of the shared connection
- * `connectionId`: everything, for good, its audience gone with it; what
- * agents read through it afterwards is kept only once an admin chooses an
+ * `connectionId`: everything, for good, its audience gone with it: what
+ * agents read through it, and what native sync copied from its picked
+ * places. What agents read through it afterwards, and its picked places,
+ * read again from nothing, are kept only once an admin chooses an
  * audience again. Admins only, never Grasp staff. Its request is audited
  * in the batch that starts it (`brain.shared_reads.erase_requested`), and
  * its end once every record is erased (`brain.shared_reads.erased`, with
