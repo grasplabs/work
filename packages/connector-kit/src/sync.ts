@@ -1,5 +1,10 @@
 import { syncPageSchema } from "@grasp-os/shared/sync";
-import type { SyncItemKind, SyncPage } from "@grasp-os/shared/sync";
+import type {
+  SyncContent,
+  SyncItem,
+  SyncItemKind,
+  SyncPage,
+} from "@grasp-os/shared/sync";
 import { z } from "zod";
 
 import { ToolError } from "./connector.ts";
@@ -139,6 +144,179 @@ export const defineSync = (definition: SyncDefinition): Sync => ({
   },
 });
 
+// Paging a provider's pages into sync pages, for any sync: a page stops
+// once its requests, its content or its time reach `syncPageLimits`, and
+// answers what it has. Its cursor names the key of the last entry it
+// handled in the provider's page, never a position: the next read goes on
+// after that entry, or handles the provider's page again from its start
+// if the entry is no longer there. Handling an entry again changes nothing
+// (core keys each version), and an entry that an earlier one's removal
+// moves up is never skipped.
+
+const cursorPartPattern = /^[\w-]*$/u;
+
+/**
+ * A part of a cursor: any text (a provider's token, an entry's key) as
+ * base64url, so it stays in the cursor's alphabet; empty for null. Join
+ * parts with `.`.
+ */
+export const cursorPart = (value: string | null): string =>
+  btoa(String.fromCodePoint(...new TextEncoder().encode(value ?? "")))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replaceAll("=", "");
+
+/**
+ * The text a part of a cursor holds, null for empty. A part this kit
+ * didn't write starts the source over.
+ */
+export const fromCursorPart = (value: string | undefined): string | null => {
+  if (value === undefined || !cursorPartPattern.test(value)) {
+    throw new RestartSyncError("Not a cursor this sync wrote");
+  }
+  let bytes: Uint8Array;
+  try {
+    bytes = Uint8Array.from(
+      atob(value.replaceAll("-", "+").replaceAll("_", "/")),
+      (character) => character.codePointAt(0) ?? 0
+    );
+  } catch {
+    throw new RestartSyncError("Not a cursor this sync wrote");
+  }
+  const text = new TextDecoder().decode(bytes);
+  return text === "" ? null : text;
+};
+
+/** What a page has left: requests, content bytes, and until when. */
+export interface SyncRoom {
+  requests: number;
+  bytes: number;
+  /** In ms since the epoch. */
+  deadline: number;
+  /**
+   * Whether it holds no entry yet: an empty page takes its first entry
+   * whatever it costs (without content that doesn't fit), so every read
+   * moves on.
+   */
+  empty: boolean;
+}
+
+/** A page's whole room, until `deadline`. */
+export const syncRoom = (deadline: number): SyncRoom => ({
+  requests: syncPageLimits.requests,
+  bytes: syncPageLimits.contentBytes,
+  deadline,
+  empty: true,
+});
+
+/** Bytes `content` takes in a page, as JSON. */
+export const contentSize = (content: SyncContent): number =>
+  new TextEncoder().encode(JSON.stringify(content)).byteLength;
+
+/**
+ * Takes room for `content` if the page has it; else none fits: null, or,
+ * on an empty page, the content left out (`{ content: null }`).
+ */
+export const takeContent = (
+  room: SyncRoom,
+  content: SyncContent
+): { content: SyncContent | null } | null => {
+  const size = contentSize(content);
+  if (size <= room.bytes) {
+    room.bytes -= size;
+    return { content };
+  }
+  return room.empty ? { content: null } : null;
+};
+
+/**
+ * Whether a request may start: requests and time left. A request that
+ * starts goes through `fetchInRoom`, so it is given up at the deadline.
+ */
+export const mayRequest = (room: SyncRoom): boolean =>
+  room.requests > 0 && Date.now() < room.deadline;
+
+/** What one entry of a provider's page gives a sync page. */
+export type EntryItems =
+  | readonly SyncItem[]
+  /** No room or time was left to start it: the next read takes it. */
+  | "full"
+  /** Its own request ran past the page's deadline. */
+  | "late";
+
+/** How a page is filled from one of a provider's pages (`fillPage`). */
+export interface PageFill<Entry> {
+  room: SyncRoom;
+  entries: readonly Entry[];
+  /** The key of the last entry handled, from the cursor; null from the start. */
+  after: string | null;
+  keyOf: (entry: Entry) => string;
+  itemsFor: (entry: Entry) => Promise<EntryItems>;
+  /**
+   * The items of an entry passed over, with no request: what it is,
+   * without its content (`content: null`), or nothing if nothing of it is
+   * known without one.
+   */
+  passOver: (entry: Entry) => readonly SyncItem[];
+}
+
+/**
+ * The items of a provider's page `entries` after the one keyed `after`
+ * (all of them when it isn't there), until the page is full: the items,
+ * the key of the last entry handled, and whether every one was.
+ *
+ * Every connector's page follows the same rules here, so no read can stall
+ * a source:
+ *
+ * - An entry whose own request ran past the deadline ("late") is left for
+ *   the next page, unless the page holds nothing yet: then it is passed
+ *   over (`passOver`, its content left out), so an entry that is always too
+ *   slow can't stop the source.
+ * - A page that can't even start its first entry ("full": its time ran out
+ *   reading the provider's page) moves nothing on: it fails as throttled,
+ *   without a time, so the caller backs off, never answering the same
+ *   cursor as a page with more to read at once.
+ */
+export const fillPage = async <Entry>({
+  room,
+  entries,
+  after,
+  keyOf,
+  itemsFor,
+  passOver,
+}: PageFill<Entry>): Promise<{
+  items: SyncItem[];
+  last: string | null;
+  done: boolean;
+}> => {
+  const from =
+    after === null
+      ? 0
+      : entries.findIndex((entry) => keyOf(entry) === after) + 1;
+  const items: SyncItem[] = [];
+  let last = after;
+  for (const entry of entries.slice(from)) {
+    // oxlint-disable-next-line no-await-in-loop -- one entry after another, within the page's room
+    const found = await itemsFor(entry);
+    if (found === "full" || found === "late") {
+      if (!room.empty) {
+        return { items, last, done: false };
+      }
+      if (found === "full") {
+        throw new ToolError("The page's time ran out before it took anything", {
+          code: "throttled",
+        });
+      }
+      items.push(...passOver(entry));
+    } else {
+      items.push(...found);
+    }
+    room.empty = false;
+    last = keyOf(entry);
+  }
+  return { items, last, done: true };
+};
+
 /**
  * Sends one GET and reads its whole answer before `deadline` (ms since the
  * epoch): the answer, its body already read, or "late" when the deadline
@@ -166,4 +344,17 @@ export const fetchBefore = async (
     }
     throw error;
   }
+};
+
+/**
+ * Sends one GET of a page, counted against its requests, and reads its
+ * whole answer before the page's deadline (`fetchBefore`): "late" when the
+ * deadline cut it off, before its headers or while its body still came.
+ */
+export const fetchInRoom = async (
+  room: SyncRoom,
+  url: URL
+): Promise<Response | "late"> => {
+  room.requests -= 1;
+  return await fetchBefore(url, room.deadline);
 };
