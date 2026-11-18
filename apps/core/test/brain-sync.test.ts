@@ -1569,7 +1569,10 @@ describe("native sync", () => {
       const message = (name: keyof typeof marks) =>
         mailItem(name, `Mail ${marks[name]}`);
       const quiet = { changes: [], next: "q", more: false };
-      const { world } = await connectSampleFeed(owner, { "": quiet, q: quiet });
+      const { connectionId, world } = await connectSampleFeed(owner, {
+        "": quiet,
+        q: quiet,
+      });
       const a: Record<string, unknown> = {
         "": feedPage(
           [
@@ -1642,10 +1645,13 @@ describe("native sync", () => {
       await set();
       later(pollMs);
       await syncOn(
-        interleaving(holdStatement, async () => {
-          await intoB("held");
-          await overlappingRun();
-        })
+        interleaving(
+          { pattern: holdStatement, bound: connectionId },
+          async () => {
+            await intoB("held");
+            await overlappingRun();
+          }
+        )
       );
       await runs(4);
       const afterHold = await finds(owner.userId, marks.held);
@@ -1660,10 +1666,13 @@ describe("native sync", () => {
       await runs(1);
       later(pollMs);
       await syncOn(
-        interleaving(leaveStatement, async () => {
-          await intoB("finished");
-          await overlappingRun();
-        })
+        interleaving(
+          { pattern: leaveStatement, bound: connectionId },
+          async () => {
+            await intoB("finished");
+            await overlappingRun();
+          }
+        )
       );
       await runs(3);
       const afterFinish = await finds(owner.userId, marks.finished);
@@ -1673,10 +1682,13 @@ describe("native sync", () => {
       await set(["b"]);
       later(24 * 60 * 60 * 1000);
       await syncOn(
-        interleaving(leaveStatement, async () => {
-          await intoB("swept");
-          await overlappingRun();
-        })
+        interleaving(
+          { pattern: leaveStatement, bound: connectionId },
+          async () => {
+            await intoB("swept");
+            await overlappingRun();
+          }
+        )
       );
       await runs(3);
 
@@ -1981,7 +1993,7 @@ describe("native sync", () => {
       later(pollMs);
       await syncOn(
         interleaving(
-          claimStatement,
+          { pattern: claimStatement, bound: connectionId },
           async () => {
             // The folder list read without a, as its daily listing does:
             // a dropped.
@@ -1994,10 +2006,13 @@ describe("native sync", () => {
             // a's erase, up to its last step: the page's claim lands
             // after it found nothing left, before it deletes the source.
             erasing = runSync(
-              interleaving(placeGoneStatement, async () => {
-                claimMay.resolve(null);
-                await claimDone.promise;
-              })
+              interleaving(
+                { pattern: placeGoneStatement, bound: connectionId },
+                async () => {
+                  claimMay.resolve(null);
+                  await claimDone.promise;
+                }
+              )
             ).finally(() => {
               claimMay.resolve(null);
             });
