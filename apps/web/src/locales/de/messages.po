@@ -2489,8 +2489,8 @@ msgstr "Eine App oder einen Workflow hinzuzufügen teilt sie mit niemandem. Hier
 
 #: src/apps/app-webhooks.tsx
 #: src/frame/part-words.tsx
-#: src/routes/_shell.settings.billing.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/billing-card.tsx
 msgid "Address"
 msgstr "Adresse"
 
@@ -3649,13 +3649,21 @@ msgstr "Abrechnung"
 msgid "Billing API"
 msgstr "Abrechnungs-API"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing-card.tsx
 msgid "Billing details"
 msgstr "Rechnungsdaten"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing-card.tsx
 msgid "Billing email"
 msgstr "Rechnungs-E-Mail"
+
+#: src/routes/_shell.settings.billing.tsx
+msgid "Billing emails"
+msgstr "Rechnungs-E-Mails"
+
+#: src/settings/billing-card.tsx
+msgid "Billing information"
+msgstr "Rechnungsinformationen"
 
 #: src/apps/app-workflows.tsx
 msgid "Bind"
@@ -3937,6 +3945,7 @@ msgstr "Ausführen nicht möglich: {unread}"
 #: src/routes/_shell.settings.members.tsx
 #: src/routes/_shell.settings.security.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/billing-card.tsx
 #: src/settings/erasures.tsx
 #: src/settings/event-sources.tsx
 #: src/settings/invitations.tsx
@@ -4539,6 +4548,7 @@ msgstr "Klippen"
 #: src/routes/_shell.settings.audit.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/audit-chain.tsx
+#: src/settings/billing-card.tsx
 #: src/settings/erasures.tsx
 #: src/settings/event-sources.tsx
 #: src/settings/invitations.tsx
@@ -4696,7 +4706,7 @@ msgstr "Handel"
 
 #: src/agents/agents-overview.tsx
 #: src/brain/brain.ts
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing-card.tsx
 msgid "Company"
 msgstr "Unternehmen"
 
@@ -6128,6 +6138,10 @@ msgstr "Bearbeiten"
 #: src/agents/agent-page.tsx
 msgid "Edit {name}"
 msgstr "{name} bearbeiten"
+
+#: src/settings/billing-card.tsx
+msgid "Edit billing information"
+msgstr "Rechnungsinformationen bearbeiten"
 
 #: src/workflows/workflow-flow.tsx
 msgid "Edit JSON"
@@ -10065,6 +10079,10 @@ msgstr "Kein archivierter Chat namens „{query}“"
 msgid "No archived chats"
 msgstr "Keine archivierten Chats"
 
+#: src/settings/billing-card.tsx
+msgid "No billing details yet"
+msgstr "Noch keine Rechnungsdaten"
+
 #: src/workflows/business-process.tsx
 msgid "No business process"
 msgstr "Kein Geschäftsprozess"
@@ -10675,6 +10693,7 @@ msgstr "Noch nicht gelaufen"
 #: src/brain/goals-editor.tsx
 #: src/brain/memory-page.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/billing-card.tsx
 #: src/settings/team-members-dialog.tsx
 #: src/settings/workspace-name.tsx
 msgid "Not saved"
@@ -13690,6 +13709,7 @@ msgstr "Sand"
 #: src/frame/part-words.tsx
 #: src/knowledge/document.tsx
 #: src/projects/project-dialog.tsx
+#: src/settings/billing-card.tsx
 #: src/workflows/resource-params.tsx
 msgid "Save"
 msgstr "Speichern"
@@ -13770,6 +13790,7 @@ msgstr "In Ihrem Gedächtnis gespeichert"
 #: src/brain/memory-page.tsx
 #: src/frame/part-words.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/billing-card.tsx
 #: src/settings/profile-name.tsx
 #: src/settings/team-members-dialog.tsx
 #: src/settings/workspace-name.tsx
@@ -17352,7 +17373,7 @@ msgstr "Die Werte wurden mit der Person gelöscht, die sie geschrieben hat."
 msgid "Values weren't read."
 msgstr "Werte wurden nicht gelesen."
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing-card.tsx
 msgid "VAT number"
 msgstr "USt-IdNr."
 

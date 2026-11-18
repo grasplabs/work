@@ -2489,8 +2489,8 @@ msgstr "Een app of workflow toevoegen deelt die met niemand. Alleen wie er toega
 
 #: src/apps/app-webhooks.tsx
 #: src/frame/part-words.tsx
-#: src/routes/_shell.settings.billing.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/billing-card.tsx
 msgid "Address"
 msgstr "Adres"
 
@@ -3649,13 +3649,21 @@ msgstr "Facturatie"
 msgid "Billing API"
 msgstr "Facturatie-API"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing-card.tsx
 msgid "Billing details"
 msgstr "Factuurgegevens"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing-card.tsx
 msgid "Billing email"
 msgstr "Factuur-e-mail"
+
+#: src/routes/_shell.settings.billing.tsx
+msgid "Billing emails"
+msgstr "Factuur-e-mails"
+
+#: src/settings/billing-card.tsx
+msgid "Billing information"
+msgstr "Factuurgegevens"
 
 #: src/apps/app-workflows.tsx
 msgid "Bind"
@@ -3937,6 +3945,7 @@ msgstr "Uitvoeren kan niet: {unread}"
 #: src/routes/_shell.settings.members.tsx
 #: src/routes/_shell.settings.security.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/billing-card.tsx
 #: src/settings/erasures.tsx
 #: src/settings/event-sources.tsx
 #: src/settings/invitations.tsx
@@ -4539,6 +4548,7 @@ msgstr "Kliffen"
 #: src/routes/_shell.settings.audit.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/audit-chain.tsx
+#: src/settings/billing-card.tsx
 #: src/settings/erasures.tsx
 #: src/settings/event-sources.tsx
 #: src/settings/invitations.tsx
@@ -4696,7 +4706,7 @@ msgstr "Verkoop"
 
 #: src/agents/agents-overview.tsx
 #: src/brain/brain.ts
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing-card.tsx
 msgid "Company"
 msgstr "Bedrijf"
 
@@ -6128,6 +6138,10 @@ msgstr "Bewerken"
 #: src/agents/agent-page.tsx
 msgid "Edit {name}"
 msgstr "{name} bewerken"
+
+#: src/settings/billing-card.tsx
+msgid "Edit billing information"
+msgstr "Factuurgegevens bewerken"
 
 #: src/workflows/workflow-flow.tsx
 msgid "Edit JSON"
@@ -10065,6 +10079,10 @@ msgstr "Geen gearchiveerde chat met de naam “{query}”"
 msgid "No archived chats"
 msgstr "Geen gearchiveerde chats"
 
+#: src/settings/billing-card.tsx
+msgid "No billing details yet"
+msgstr "Nog geen factuurgegevens"
+
 #: src/workflows/business-process.tsx
 msgid "No business process"
 msgstr "Geen bedrijfsproces"
@@ -10675,6 +10693,7 @@ msgstr "Nog niet gedraaid"
 #: src/brain/goals-editor.tsx
 #: src/brain/memory-page.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/billing-card.tsx
 #: src/settings/team-members-dialog.tsx
 #: src/settings/workspace-name.tsx
 msgid "Not saved"
@@ -13690,6 +13709,7 @@ msgstr "Zand"
 #: src/frame/part-words.tsx
 #: src/knowledge/document.tsx
 #: src/projects/project-dialog.tsx
+#: src/settings/billing-card.tsx
 #: src/workflows/resource-params.tsx
 msgid "Save"
 msgstr "Opslaan"
@@ -13770,6 +13790,7 @@ msgstr "Opgeslagen in je geheugen"
 #: src/brain/memory-page.tsx
 #: src/frame/part-words.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/billing-card.tsx
 #: src/settings/profile-name.tsx
 #: src/settings/team-members-dialog.tsx
 #: src/settings/workspace-name.tsx
@@ -17352,7 +17373,7 @@ msgstr "De waarden zijn gewist met de persoon die ze schreef."
 msgid "Values weren't read."
 msgstr "Waarden zijn niet gelezen."
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing-card.tsx
 msgid "VAT number"
 msgstr "Btw-nummer"
 

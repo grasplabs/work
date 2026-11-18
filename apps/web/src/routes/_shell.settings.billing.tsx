@@ -11,17 +11,19 @@ import {
 } from "../grasp/setting-row/index.ts";
 import { Switch } from "../grasp/switch/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
+import { BillingCard } from "../settings/billing-card.tsx";
 import { useQueuedSave } from "../settings/queued-save.ts";
 import { ReadOnlyRow } from "../settings/read-only-row.tsx";
-import { SavedField } from "../settings/saved-field.tsx";
 import {
   SectionNotLoaded,
   SettingsError,
   SettingsLoading,
 } from "../settings/section.tsx";
 
-// Settings → Billing, for admins: the plan, the way to what AI costs (on
-// AI and spend, not repeated here), and the billing details. Core keeps the
+// Settings → Billing, for admins: the billing details as a card at its
+// head (settings/billing-card.tsx), their form in a dialog from its one
+// button; the plan, with the way to what AI costs (on AI and spend, not
+// repeated here); and which billing emails go out. Core keeps the
 // billing details (`orgSettings.billing()`), which the organization's own
 // admins change here, each field saved as it is left; Grasp staff read
 // them. No payment
@@ -75,66 +77,13 @@ const BillingPage = () => {
   const readOnly = identity.staff;
   return (
     <>
+      <BillingCard billing={billing} canChange={!readOnly} />
       <Plan />
-      <SectionCard density="compact" flush title={t`Billing details`}>
+      <SectionCard density="compact" flush title={t`Billing emails`}>
         <SettingsRows>
           {failure === undefined ? null : (
             <RowAlert variant="danger">{failure}</RowAlert>
           )}
-          <SettingRow label={t`Billing email`}>
-            {(field) => (
-              <SavedField
-                field={field}
-                maxLength={254}
-                onSave={(email) => {
-                  save({ email });
-                }}
-                readOnly={readOnly}
-                type="email"
-                value={billing.email}
-              />
-            )}
-          </SettingRow>
-          <SettingRow label={t`Company`}>
-            {(field) => (
-              <SavedField
-                field={field}
-                maxLength={120}
-                onSave={(company) => {
-                  save({ company });
-                }}
-                readOnly={readOnly}
-                value={billing.company}
-              />
-            )}
-          </SettingRow>
-          <SettingRow label={t`Address`}>
-            {(field) => (
-              <SavedField
-                field={field}
-                maxLength={500}
-                multiline
-                onSave={(address) => {
-                  save({ address });
-                }}
-                readOnly={readOnly}
-                value={billing.address}
-              />
-            )}
-          </SettingRow>
-          <SettingRow label={t`VAT number`}>
-            {(field) => (
-              <SavedField
-                field={field}
-                maxLength={14}
-                onSave={(vatNumber) => {
-                  save({ vatNumber });
-                }}
-                readOnly={readOnly}
-                value={billing.vatNumber}
-              />
-            )}
-          </SettingRow>
           <SettingRow label={t`Email invoices`}>
             <Switch
               checked={billing.emailInvoices}

@@ -2489,8 +2489,8 @@ msgstr "Ajouter une app ou un workflow ne le partage avec personne. Seules les p
 
 #: src/apps/app-webhooks.tsx
 #: src/frame/part-words.tsx
-#: src/routes/_shell.settings.billing.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/billing-card.tsx
 msgid "Address"
 msgstr "Adresse"
 
@@ -3649,13 +3649,21 @@ msgstr "Facturation"
 msgid "Billing API"
 msgstr "API de facturation"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing-card.tsx
 msgid "Billing details"
 msgstr "Informations de facturation"
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing-card.tsx
 msgid "Billing email"
 msgstr "E-mail de facturation"
+
+#: src/routes/_shell.settings.billing.tsx
+msgid "Billing emails"
+msgstr "E-mails de facturation"
+
+#: src/settings/billing-card.tsx
+msgid "Billing information"
+msgstr "Informations de facturation"
 
 #: src/apps/app-workflows.tsx
 msgid "Bind"
@@ -3937,6 +3945,7 @@ msgstr "Impossible de proposer Exécuter : {unread}"
 #: src/routes/_shell.settings.members.tsx
 #: src/routes/_shell.settings.security.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/billing-card.tsx
 #: src/settings/erasures.tsx
 #: src/settings/event-sources.tsx
 #: src/settings/invitations.tsx
@@ -4539,6 +4548,7 @@ msgstr "Falaises"
 #: src/routes/_shell.settings.audit.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/audit-chain.tsx
+#: src/settings/billing-card.tsx
 #: src/settings/erasures.tsx
 #: src/settings/event-sources.tsx
 #: src/settings/invitations.tsx
@@ -4696,7 +4706,7 @@ msgstr "Commerce"
 
 #: src/agents/agents-overview.tsx
 #: src/brain/brain.ts
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing-card.tsx
 msgid "Company"
 msgstr "Entreprise"
 
@@ -6128,6 +6138,10 @@ msgstr "Modifier"
 #: src/agents/agent-page.tsx
 msgid "Edit {name}"
 msgstr "Modifier {name}"
+
+#: src/settings/billing-card.tsx
+msgid "Edit billing information"
+msgstr "Modifier les informations de facturation"
 
 #: src/workflows/workflow-flow.tsx
 msgid "Edit JSON"
@@ -10065,6 +10079,10 @@ msgstr "Aucune discussion archivée nommée « {query} »"
 msgid "No archived chats"
 msgstr "Aucune discussion archivée"
 
+#: src/settings/billing-card.tsx
+msgid "No billing details yet"
+msgstr "Pas encore d’informations de facturation"
+
 #: src/workflows/business-process.tsx
 msgid "No business process"
 msgstr "Aucun processus métier"
@@ -10675,6 +10693,7 @@ msgstr "Pas encore exécuté"
 #: src/brain/goals-editor.tsx
 #: src/brain/memory-page.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/billing-card.tsx
 #: src/settings/team-members-dialog.tsx
 #: src/settings/workspace-name.tsx
 msgid "Not saved"
@@ -13690,6 +13709,7 @@ msgstr "Sable"
 #: src/frame/part-words.tsx
 #: src/knowledge/document.tsx
 #: src/projects/project-dialog.tsx
+#: src/settings/billing-card.tsx
 #: src/workflows/resource-params.tsx
 msgid "Save"
 msgstr "Enregistrer"
@@ -13770,6 +13790,7 @@ msgstr "Enregistré dans votre mémoire"
 #: src/brain/memory-page.tsx
 #: src/frame/part-words.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/billing-card.tsx
 #: src/settings/profile-name.tsx
 #: src/settings/team-members-dialog.tsx
 #: src/settings/workspace-name.tsx
@@ -17352,7 +17373,7 @@ msgstr "Les valeurs ont été effacées avec la personne qui les a écrites."
 msgid "Values weren't read."
 msgstr "Les valeurs n'ont pas été lues."
 
-#: src/routes/_shell.settings.billing.tsx
+#: src/settings/billing-card.tsx
 msgid "VAT number"
 msgstr "Numéro de TVA"
 
