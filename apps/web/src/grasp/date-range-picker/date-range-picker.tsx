@@ -136,6 +136,13 @@ const styles = stylex.create({
   // The field is wider than a date picker's: two dates.
   field: {
     maxWidth: grasp.dateRangeWidth,
+    // On a phone the dates are 16px (media.typing) and two must fit a narrow field whole: the
+    // start's inset is a step less there. Its calendar opens as a sheet there, so nothing lines up
+    // with that inset.
+    paddingInlineStart: {
+      default: grasp.dateFieldInset,
+      [media.typing]: grasp.space2,
+    },
   },
   // The presets beside the months; under them on a phone, the month centred under the presets.
   inner: {

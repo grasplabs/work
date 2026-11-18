@@ -26,6 +26,7 @@ import { Avatar, AvatarImage, AvatarFallback } from "../avatar";
 import { Button, useAction } from "../button";
 import { Company, Folder, Icon, Link, People } from "../icons";
 import { Input } from "../input";
+import type { LayoutStyle } from "../layout/layout";
 import { Select, SelectTrigger, SelectValue, SelectContent } from "../select";
 import { grasp } from "../tokens/tokens.stylex";
 import { useWords, withGiven } from "../words/words";
@@ -34,24 +35,8 @@ import type { ShareCandidate, SharePicked } from "./picker";
 import { shareAccessWords } from "./words";
 import type { ShareAccessWords } from "./words";
 
-type Layout = string | number | null;
-
 /** What a caller may style: where the list sits and how wide it is. Never its look. */
-export type ShareAccessLayoutStyle = stylex.StyleXStyles<{
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  flexGrow?: Layout;
-  flexShrink?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  gridRow?: Layout;
-  width?: Layout;
-  minWidth?: Layout;
-  maxWidth?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginInline?: Layout;
-}>;
+export type ShareAccessLayoutStyle = LayoutStyle;
 
 /** One who has access: a person, a group, or everyone at the company. */
 export interface ShareMember {

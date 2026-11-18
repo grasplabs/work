@@ -153,9 +153,11 @@ export const datePickerStyles = stylex.create({
     maxWidth: "none",
   },
   // Between a range's two dates: the field's gap and as much again on each side.
+  // On a phone (16px dates in a narrow field) only the field's gap on each side, so both dates fit
+  // whole.
   between: {
     flexShrink: 0,
-    marginInline: grasp.space1,
+    marginInline: { default: grasp.space1, [media.typing]: 0 },
     color: grasp.muted,
   },
 

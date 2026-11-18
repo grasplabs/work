@@ -21,6 +21,7 @@
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 
+import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { compositionOf, groundOf, markCells } from "./field";
@@ -29,25 +30,8 @@ import type { AgentMarkComposition, AgentMarkGround } from "./field";
 /** xs 24, sm 32, md 40, lg 64, xl 72 pixels. */
 export type AgentMarkSize = "xs" | "sm" | "md" | "lg" | "xl";
 
-type Layout = string | number | null;
-
 /** What a caller may style: where the mark sits. Never its look. */
-export type AgentMarkLayoutStyle = stylex.StyleXStyles<{
-  alignSelf?: Layout;
-  justifySelf?: Layout;
-  flexShrink?: Layout;
-  gridArea?: Layout;
-  gridColumn?: Layout;
-  gridRow?: Layout;
-  order?: Layout;
-  margin?: Layout;
-  marginBlock?: Layout;
-  marginBlockStart?: Layout;
-  marginBlockEnd?: Layout;
-  marginInline?: Layout;
-  marginInlineStart?: Layout;
-  marginInlineEnd?: Layout;
-}>;
+export type AgentMarkLayoutStyle = LayoutStyle;
 
 /** Every prop an AgentMark takes. */
 export interface AgentMarkProps {

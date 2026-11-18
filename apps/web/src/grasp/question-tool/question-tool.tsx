@@ -38,6 +38,7 @@ import { focus } from "../focus/focus";
 import { Alert, Done, Icon, Plus, Tick } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
+import { simply } from "../motion/simply.stylex";
 import { scroll } from "../scroll/scroll";
 import { Textarea } from "../textarea";
 import { grasp, media } from "../tokens/tokens.stylex";
@@ -344,7 +345,7 @@ const styles = stylex.create({
     },
     cursor: "pointer",
     transitionProperty: "box-shadow, background-color, transform",
-    transitionDuration: { default: grasp.durationHover, [media.reduced]: "0s" },
+    transitionDuration: simply.hover,
     transitionTimingFunction: grasp.ease,
   },
   // The tick at a chosen card's end. Its room is kept at rest, so choosing never moves the words

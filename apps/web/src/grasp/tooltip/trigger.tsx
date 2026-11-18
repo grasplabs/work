@@ -28,7 +28,10 @@ type TriggerPrimitiveProps = ComponentProps<typeof TriggerPrimitive>;
  */
 interface TriggerWithWords {
   render?: never;
-  /** The words on the trigger: what it does ("Publish", "Share"). */
+  /**
+   * The words on the trigger: what it does ("Publish", "Share"). With `render`, what the element
+   * holds, if it is not in the element already.
+   */
   children: ButtonWords;
   /** An icon before the words, or the whole trigger with `aria-label`. Import it from the icons entry (`@/components/grasp/icons`). */
   icon?: IconData;
@@ -44,7 +47,10 @@ interface TriggerIconOnly {
   render?: never;
   children?: never;
   icon: IconData;
-  /** The name of an icon-only trigger, for a screen reader, a voice command and an agent. */
+  /**
+   * The name of an icon-only trigger, for a screen reader, a voice command and an agent. With
+   * `render`, its name when its own words do not say it (a face, a logo).
+   */
   "aria-label": string;
   /** @deprecated Use `aria-label`. */
   label?: never;
@@ -72,10 +78,8 @@ interface TriggerRendered {
    * is its description. Without it, a Grasp Button.
    */
   render: RenderProp;
-  /** What the element holds, if it is not in the element already. */
   children?: ReactNode;
   icon?: never;
-  /** Its name, when its own words do not say it (a face, a logo). */
   "aria-label"?: string;
   /** @deprecated Use `aria-label`. */
   label?: never;

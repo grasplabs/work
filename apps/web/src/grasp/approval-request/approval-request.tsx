@@ -225,6 +225,10 @@ const NARROW = media.belowPhone;
 // their row equally. A button is as wide as its widest words ("Approved"), so two of them
 // beside Details do not fit a phone.
 const NARROW_CARD = "@container approval (width < 26rem)";
+// Narrower still (a thread beside a page at 320): two buttons whose widest words are "Approved"
+// and "Declined" do not fit side by side, so they stand one above the other, each the row's width.
+const NARROWEST_CARD = "@container approval (width < 15rem)";
+const NARROW_PAIR = "@container approval (15rem <= width < 26rem)";
 
 // The settled line comes in where the answers stood: a fade, no travel.
 const fadeIn = stylex.keyframes({ from: { opacity: 0 }, to: { opacity: 1 } });
@@ -377,9 +381,11 @@ const styles = stylex.create({
   },
   answersShared: {
     display: { default: "flex", [NARROW_CARD]: "grid" },
+    // The two conditions do not overlap, so their order never decides.
     gridTemplateColumns: {
       default: null,
-      [NARROW_CARD]: "repeat(2, minmax(0, 1fr))",
+      [NARROW_PAIR]: "repeat(2, minmax(0, 1fr))",
+      [NARROWEST_CARD]: "minmax(0, 1fr)",
     },
   },
   // Why Approve is held: one quiet line under the row, on the card's own start line (where Details

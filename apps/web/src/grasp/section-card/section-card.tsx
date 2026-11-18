@@ -56,12 +56,14 @@ type SectionCardName =
   | {
       /** The part's name, in sentence case ("Usage"). Leave it out for a card the page's own title names. */
       title: ReactNode;
-      /** Its name for a screen reader, when it has a title: the title names it already. */
+      /**
+       * Its name for a screen reader. With a title, the title names it already; with no title, the
+       * card draws no header and this names it ("Profile").
+       */
       "aria-label"?: string;
     }
   | {
       title?: undefined;
-      /** With no title: the card draws no header, and this names it for a screen reader ("Profile"). */
       "aria-label": string;
     };
 
