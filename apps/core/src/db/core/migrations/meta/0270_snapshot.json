@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "aca9d471-c45b-4b28-9f13-140f7d612df7",
+  "id": "1e3f6b14-4b78-4663-b118-3d5d5234ea79",
   "prevId": "5831fe4f-bab0-4dca-8fdb-ad54966e3bd0",
   "tables": {
     "access_revocations": {
@@ -5002,6 +5002,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "seen_in": {
+          "name": "seen_in",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         }
       },

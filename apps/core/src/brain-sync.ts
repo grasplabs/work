@@ -12,7 +12,6 @@ import type {
   SyncPage,
   SyncPlaces,
   SyncReader,
-  SyncSource,
 } from "@grasp-os/shared/sync";
 import { uploadTypes } from "@grasp-os/shared/uploads";
 import type { UploadMediaType } from "@grasp-os/shared/uploads";
@@ -148,6 +147,16 @@ const nextRelistAt = async (
  * daily relist beside them.
  */
 type Stream = "changes" | "relist";
+
+/**
+ * The place of the row that lists a sync's places (`listSyncPlaces`) as
+ * work in the same queue as its pages (`listPlaces`): no place a sync
+ * lists can be it, since a place never holds ":" (`syncPlaceSchema`).
+ */
+const placesListing = ":places";
+
+/** When a row's relist is never due: the places listing has none. */
+const never = new Date(8_640_000_000_000_000);
 
 /** A page of keys erased at once after a disconnect, or at a listing's end. */
 const erasedPerPage = 100;
@@ -601,6 +610,14 @@ const finishOwedLeaves = async (applying: Applying): Promise<void> => {
 };
 
 /**
+ * Whether the removal of `row` from `source` is held for a move (`hold`):
+ * only in a sync that lists places, and only for what is in its owner's
+ * own store. Anything others may read goes at once.
+ */
+const holds = (source: Source, row: Item): boolean =>
+  source.place !== ownPlace && row.store === "own";
+
+/**
  * Holds the removal of `row`'s item, gone from one place of a sync that
  * lists places: a message moved between two folders comes as gone in
  * one and new in the other, in whichever order the two are read, so it
@@ -652,7 +669,7 @@ const finishHeldRemovals = async (applying: Applying): Promise<void> => {
     .where(
       sql`${brainSyncItems.connectionId} = ${source.connectionId} AND ${brainSyncItems.feed} = ${source.feed} AND ${brainSyncItems.place} = ${source.place} AND ${brainSyncItems.heldSince} IS NOT NULL AND (${brainSyncItems.heldSince} < ${dayAgo} OR NOT EXISTS (
         SELECT 1 FROM ${brainSyncSources} AS other
-        WHERE other.connection_id = ${source.connectionId} AND other.feed = ${source.feed} AND other.place <> ${source.place} AND other.dropped = 0
+        WHERE other.connection_id = ${source.connectionId} AND other.feed = ${source.feed} AND other.place <> ${source.place} AND other.place <> ${placesListing} AND other.dropped = 0
           AND (other.last_success_at IS NULL OR other.last_success_at <= ${brainSyncItems.heldSince})))`
     );
   for (const row of due) {
@@ -717,9 +734,7 @@ const leaveParts = async (
     );
   for (const part of parts) {
     // oxlint-disable-next-line no-await-in-loop -- in order, within the budget
-    await (source.place === ownPlace
-      ? leave(applying, part)
-      : hold(applying, part));
+    await (holds(source, part) ? hold(applying, part) : leave(applying, part));
   }
 };
 
@@ -1053,9 +1068,7 @@ const applyRemovals = async (
       rows.set(
         item.id,
         // oxlint-disable-next-line no-await-in-loop -- in order, within the budget
-        await (source.place === ownPlace
-          ? leave(applying, row)
-          : hold(applying, row))
+        await (holds(source, row) ? hold(applying, row) : leave(applying, row))
       );
       continue;
     }
@@ -1127,10 +1140,6 @@ const applyAdds = async (
  */
 const apply = async (applying: Applying, page: SyncPage): Promise<void> => {
   const { db, budget, source } = applying;
-  await finishOwedLeaves(applying);
-  if (source.leavesOwed) {
-    await finishHeldRemovals(applying);
-  }
   const rows = await rowsOf(applying, page.items);
   if ((source.listingOpen || source.relisting) && rows.size > 0) {
     // Named while a listing is under way, by it or by a change since,
@@ -1465,6 +1474,13 @@ const syncPage = async (
       removed: source.removed,
     },
   };
+  // What earlier runs left owed needs only core and the Brain: done before
+  // the read, so a source whose provider fails or whose connection waits
+  // to be connected again still erases what it owes.
+  await finishOwedLeaves(applying);
+  if (source.leavesOwed) {
+    await finishHeldRemovals(applying);
+  }
   if (stream === "relist") {
     const overdue = overdueBy(source, Date.now());
     if (overdue > 0) {
@@ -1556,99 +1572,60 @@ const syncPage = async (
 };
 
 /**
- * The places of `listed`, a sync connect lists: `own` for one that reads
- * the whole account; else what it lists now (`listSyncPlaces`), or
- * undefined when that failed, which changes none of its sources.
+ * The statement that keeps the source of `place` for the sync `of` names
+ * (its connection's person, provider, tenant, account and kind), unless a
+ * disconnect closed its connection: made from no cursor, or one dropped
+ * before read again from the start; `seenIn`, the places listing that
+ * named it last, for a sync that lists places.
  */
-const placesOf = async (
-  env: Env,
-  budget: Budget,
-  listed: SyncSource
-): Promise<readonly string[] | undefined> => {
-  if (listed.places === "own") {
-    return [ownPlace];
-  }
-  const places: string[] = [];
-  let cursor: string | null = null;
-  try {
-    // A list too long for one read goes on from where the last stopped.
-    do {
-      spend(budget, 1);
-      // oxlint-disable-next-line no-await-in-loop -- one read after another
-      const read: SyncPlaces = await env.CONNECT.listSyncPlaces({
-        connectionId: listed.connectionId,
-        feed: listed.feed,
-        cursor,
-      });
-      places.push(...read.places);
-      ({ cursor } = read);
-    } while (cursor !== null);
-    return places;
-  } catch (error) {
-    if (stoppedFor(error, "budget")) {
-      throw error;
-    }
-    log.warn("brain.sync.places_failed", {
-      connectionId: listed.connectionId,
-      errorName: errorName(error),
-    });
-    return undefined;
-  }
-};
-
-/**
- * The statements that keep `listed`'s sources as its `places` say, unless
- * a disconnect closed its connection: one source per place, a new one
- * from no cursor, one dropped before and listed again read again from the
- * start; and every place it no longer lists dropped (read no more, its
- * keys erased by the clock: `completeDroppedPlaces`).
- */
-const placeStatements = (
+const sourceStatement = (
   db: Database,
-  listed: SyncSource,
-  places: readonly string[],
+  of: Pick<
+    Source,
+    | "connectionId"
+    | "feed"
+    | "personId"
+    | "provider"
+    | "tenant"
+    | "account"
+    | "kind"
+  >,
+  place: string,
   relistAt: number,
-  now: number
-) => {
-  const kept = places.map((place) =>
-    db
-      .insert(brainSyncSources)
-      .select(
-        sql`SELECT ${listed.connectionId}, ${listed.feed}, ${place}, ${listed.ownerUserId}, ${listed.provider}, ${listed.tenant}, ${listed.account}, NULL, 1, 1, ${now}, NULL, NULL, NULL, NULL, 0, 0, 0, NULL, 0, ${relistAt}, NULL, 0, ${listed.kind}, 0, 0
-          WHERE NOT ${closed(listed.connectionId)}`
-      )
-      .onConflictDoUpdate({
-        target: [
-          brainSyncSources.connectionId,
-          brainSyncSources.feed,
-          brainSyncSources.place,
-        ],
-        set: {
-          tenant: listed.tenant,
-          account: listed.account,
-          kind: listed.kind,
-          dropped: false,
-          cursor: sql`CASE WHEN ${brainSyncSources.dropped} = 1 THEN NULL ELSE ${brainSyncSources.cursor} END`,
-          listing: sql`CASE WHEN ${brainSyncSources.dropped} = 1 THEN ${brainSyncSources.listing} + 1 ELSE ${brainSyncSources.listing} END`,
-          listingOpen: sql`CASE WHEN ${brainSyncSources.dropped} = 1 THEN 1 ELSE ${brainSyncSources.listingOpen} END`,
-        },
-      })
-  );
-  return [
-    ...kept,
-    db
-      .update(brainSyncSources)
-      .set({ dropped: true })
-      .where(
-        sql`${brainSyncSources.connectionId} = ${listed.connectionId} AND ${brainSyncSources.feed} = ${listed.feed} AND ${brainSyncSources.dropped} = 0 AND NOT ${inList(brainSyncSources.place, [...places])}`
-      ),
-  ];
-};
+  now: number,
+  seenIn: number | null = null
+) =>
+  db
+    .insert(brainSyncSources)
+    .select(
+      sql`SELECT ${of.connectionId}, ${of.feed}, ${place}, ${of.personId}, ${of.provider}, ${of.tenant}, ${of.account}, NULL, 1, 1, ${now}, NULL, NULL, NULL, NULL, 0, 0, 0, NULL, 0, ${relistAt}, NULL, 0, ${of.kind}, 0, 0, ${seenIn}
+        WHERE NOT ${closed(of.connectionId)}`
+    )
+    .onConflictDoUpdate({
+      target: [
+        brainSyncSources.connectionId,
+        brainSyncSources.feed,
+        brainSyncSources.place,
+      ],
+      set: {
+        tenant: of.tenant,
+        account: of.account,
+        kind: of.kind,
+        ...(seenIn === null ? {} : { seenIn }),
+        dropped: false,
+        cursor: sql`CASE WHEN ${brainSyncSources.dropped} = 1 THEN NULL ELSE ${brainSyncSources.cursor} END`,
+        listing: sql`CASE WHEN ${brainSyncSources.dropped} = 1 THEN ${brainSyncSources.listing} + 1 ELSE ${brainSyncSources.listing} END`,
+        listingOpen: sql`CASE WHEN ${brainSyncSources.dropped} = 1 THEN 1 ELSE ${brainSyncSources.listingOpen} END`,
+      },
+    });
 
 /**
- * The syncs connect lists now, each kept here as its sources, one per
- * place (`placeStatements`), a page of connections at a time. A sync
- * whose places couldn't be listed keeps its sources as they are.
+ * The syncs connect lists now, each kept here, a page of connections at
+ * a time: a sync of the whole account as its one source (`own`); a sync
+ * that lists places as the row that lists them (`placesListing`), due at
+ * once when it is new. Its places are listed by that row in the queue
+ * (`listPlaces`), never here: listing every mailbox's folders on every
+ * run would leave no run for the pages.
  */
 const refreshSources = async (
   env: Env,
@@ -1663,20 +1640,19 @@ const refreshSources = async (
     const now = Date.now();
     const statements = [];
     for (const listed of page.sources) {
-      // oxlint-disable-next-line no-await-in-loop -- one sync at a time, within the budget
-      const places = await placesOf(env, budget, listed);
-      if (places !== undefined) {
-        statements.push(
-          ...placeStatements(
-            db,
-            listed,
-            places,
-            // oxlint-disable-next-line no-await-in-loop -- a hash, no call
-            await nextRelistAt({ ...listed, place: ownPlace }, now),
-            now
-          )
-        );
-      }
+      const of = { ...listed, personId: listed.ownerUserId };
+      statements.push(
+        listed.places === "own"
+          ? sourceStatement(
+              db,
+              of,
+              ownPlace,
+              // oxlint-disable-next-line no-await-in-loop -- a hash, no call
+              await nextRelistAt({ ...listed, place: ownPlace }, now),
+              now
+            )
+          : sourceStatement(db, of, placesListing, never.getTime(), now)
+      );
     }
     const [first, ...rest] = statements;
     if (first !== undefined) {
@@ -1686,6 +1662,111 @@ const refreshSources = async (
     }
     after = page.next;
   } while (after !== null);
+};
+
+/**
+ * Lists a sync's places, a read at a time, as work in the queue: the row
+ * `listing` holds is the sync's places listing (`placesListing`), its
+ * cursor where the listing goes on, its `listing` the listing's number.
+ * Each read keeps a source for each place it names, marked as seen by
+ * this listing; once the cursor ends, every place the listing didn't name
+ * is dropped (read no more, its copies erased by the clock:
+ * `completeDroppedPlaces`), and the next listing is due on the sync's
+ * daily time, the relist's rhythm (`relistMs`, `nextRelistAt`): a folder
+ * made or deleted is seen within a day, and at connect. A read that fails
+ * changes nothing: tried again from the same cursor at the next run.
+ */
+const listPlaces = async (
+  env: Env,
+  db: Database,
+  listing: Source,
+  leaseId: string,
+  budget: Budget
+): Promise<void> => {
+  const applying = { db, source: listing, leaseId, stream: "changes" as const };
+  const number =
+    listing.cursor === null ? listing.listing + 1 : listing.listing;
+  spend(budget, 1);
+  let read: SyncPlaces;
+  try {
+    read = await env.CONNECT.listSyncPlaces({
+      connectionId: listing.connectionId,
+      feed: listing.feed,
+      cursor: listing.cursor,
+    });
+  } catch (error) {
+    log.warn("brain.sync.places_failed", {
+      connectionId: listing.connectionId,
+      errorName: errorName(error),
+    });
+    spend(budget, 1);
+    await release(applying, Date.now() + pollMs, {
+      lastError: syncErrors.codeOf(error) ?? "sync.failed",
+    });
+    return;
+  }
+  const now = Date.now();
+  const ended = read.cursor === null;
+  // Each place's daily time first: a query returned from an async
+  // function would run there and then, outside the batch.
+  const relists = await Promise.all(
+    read.places.map(
+      async (place) => await nextRelistAt({ ...listing, place }, now)
+    )
+  );
+  const kept = read.places.map((place, index) =>
+    sourceStatement(
+      db,
+      listing,
+      place,
+      relists[index] ?? now + relistMs,
+      now,
+      number
+    )
+  );
+  const dropped = ended
+    ? [
+        db
+          .update(brainSyncSources)
+          .set({ dropped: true })
+          .where(
+            sql`${brainSyncSources.connectionId} = ${listing.connectionId} AND ${brainSyncSources.feed} = ${listing.feed} AND ${brainSyncSources.place} <> ${placesListing} AND ${brainSyncSources.dropped} = 0 AND (${brainSyncSources.seenIn} IS NULL OR ${brainSyncSources.seenIn} < ${number})`
+          ),
+      ]
+    : [];
+  // The places first, then the cursor with what the listing drops: a run
+  // stopped between the two reads the same places again, which changes
+  // nothing.
+  const [first, ...rest] = kept;
+  if (first !== undefined) {
+    spend(budget, 1);
+    await db.batch([first, ...rest]);
+  }
+  spend(budget, 1);
+  const [moved] = await db.batch([
+    db
+      .update(brainSyncSources)
+      .set({
+        cursor: read.cursor,
+        listing: number,
+        dueAt: new Date(ended ? await nextRelistAt(listing, now) : now),
+        leaseId: null,
+        leaseUntil: null,
+        lastSuccessAt: new Date(now),
+        lastError: null,
+      })
+      .where(
+        and(
+          eq(brainSyncSources.connectionId, listing.connectionId),
+          eq(brainSyncSources.feed, listing.feed),
+          eq(brainSyncSources.place, placesListing),
+          eq(brainSyncSources.leaseId, leaseId)
+        )
+      )
+      .returning({ place: brainSyncSources.place }),
+    ...dropped,
+  ]);
+  heldAfter(moved);
 };
 
 /** The readers `source`'s person's own store adds with, or the shared store's. */
@@ -2083,9 +2164,14 @@ export const runSync = async (env: Env, given?: Budget): Promise<void> => {
       const { source, stream } = claimed;
       try {
         // oxlint-disable-next-line no-await-in-loop -- one source at a time
-        await syncPage(env, db, source, leaseId, budget, stream);
+        await (source.place === placesListing
+          ? listPlaces(env, db, source, leaseId, budget)
+          : syncPage(env, db, source, leaseId, budget, stream));
       } catch (error) {
         if (stoppedFor(error, "budget")) {
+          log.info("brain.sync.budget_spent", {
+            connectionId: source.connectionId,
+          });
           // What was done is in its rows: the page is read again next run,
           // still due since when it was, so it keeps its turn.
           // oxlint-disable-next-line no-await-in-loop -- ends the run
@@ -2113,5 +2199,7 @@ export const runSync = async (env: Env, given?: Budget): Promise<void> => {
     if (!stoppedFor(error, "budget")) {
       throw error;
     }
+    // Spent before any page was claimed: what is owed waits for the next.
+    log.info("brain.sync.budget_spent", {});
   }
 };

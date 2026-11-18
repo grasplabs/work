@@ -3520,6 +3520,9 @@ export const connectionBrainErasures = sqliteTable(
  * is no longer listed (`dropped`: read no more, its keys erased by the
  * clock, then the row deleted), and whether its relist is fetching what
  * its names-only listing found unknown or changed (`relistCatchUp`).
+ * For a sync that lists places, the places listing that named the place
+ * last (`seenIn`); its listing itself is a row of its own here, place
+ * `:places`, its cursor where the listing goes on.
  */
 export const brainSyncSources = sqliteTable(
   "brain_sync_sources",
@@ -3550,6 +3553,7 @@ export const brainSyncSources = sqliteTable(
     kind: text({ enum: ["mail", "file", "event"] }).notNull(),
     dropped: integer({ mode: "boolean" }).notNull(),
     relistCatchUp: integer("relist_catch_up", { mode: "boolean" }).notNull(),
+    seenIn: integer("seen_in"),
   },
   (table) => [
     primaryKey({ columns: [table.connectionId, table.feed, table.place] }),

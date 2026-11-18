@@ -21,7 +21,8 @@ export const sampleSyncControlUrl = "https://sample-sync-control.test/feed";
  * A test POSTs `{ subject, pages?, places?, folders?, failing? }` to the
  * control URL: what it names replaces that part of the account's world;
  * `folders` maps each folder to `{ changes, names, items }`, its pages by
- * position and its items by ID; a folder in `failing` answers 500. Every
+ * position and its items by ID; a folder in `failing` answers 500, and so
+ * does the `files` feed while `failing` names `files`. Every
  * items request is kept, by folder: GET the control URL with `subject`
  * and `folder` for them.
  *
@@ -109,6 +110,10 @@ export const sampleSyncFake = () => {
         return undefined;
       }
       if (url.pathname === "/v1/me/changes") {
+        const failing = field(world, "failing");
+        if (Array.isArray(failing) && failing.includes("files")) {
+          return new Response(null, { status: 500 });
+        }
         return pageOr410(
           field(field(world, "pages"), url.searchParams.get("from") ?? "")
         );

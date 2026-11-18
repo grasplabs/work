@@ -66,6 +66,7 @@ CREATE TABLE `brain_sync_sources` (
 	`kind` text NOT NULL,
 	`dropped` integer NOT NULL,
 	`relist_catch_up` integer NOT NULL,
+	`seen_in` integer,
 	PRIMARY KEY(`connection_id`, `feed`, `place`)
 );
 --> statement-breakpoint

@@ -1405,6 +1405,232 @@ describe("native sync", () => {
   );
 
   it(
+    "lists mailboxes' folders as work in the queue: removals keep their turn, and every mailbox gets its folders",
+    setUpTime,
+    async () => {
+      // A person whose note goes away: a removal waiting for its page.
+      const remover = await signedInApi(idp, "user");
+      const note = markerOf();
+      const removing = await connectSampleFeed(remover, {
+        "": feedPage([mailItem("note", `Note ${note}`)], "n1"),
+        n1: feedPage([], "n1"),
+      });
+      later(pollMs);
+      await sync();
+      // Many mailboxes whose folders are still to be listed.
+      const mailboxes = await Promise.all(
+        Array.from({ length: 8 }, async () => await signedInApi(idp, "user"))
+      );
+      const markers = mailboxes.map(() => markerOf());
+      for (const [index, mailbox] of mailboxes.entries()) {
+        // oxlint-disable-next-line no-await-in-loop -- one connection at a time
+        const { world } = await connectSampleFeed(mailbox, {
+          "": feedPage([], "q"),
+          q: feedPage([], "q"),
+        });
+        // oxlint-disable-next-line no-await-in-loop -- one connection at a time
+        await world({
+          places: ["inbox"],
+          folders: {
+            inbox: {
+              changes: {
+                "": feedPage(
+                  [mailItem("inbox/x", `Mail ${markers[index] ?? ""}`)],
+                  "i1"
+                ),
+                i1: feedPage([], "i1"),
+              },
+            },
+          },
+        });
+      }
+      await removing.post({
+        "": feedPage([mailItem("note", `Note ${note}`)], "n1"),
+        n1: feedPage([goneItem("note")], "n2"),
+        n2: feedPage([], "n2"),
+      });
+      // Runs too small to list every mailbox's folders in one: as many
+      // calls as there are syncs listing places, plus the run's own three.
+      const listings = await env.DB.prepare(
+        "SELECT count(DISTINCT connection_id || ' ' || feed) AS count FROM brain_sync_sources WHERE place = ':places'"
+      ).first<{ count: number }>();
+      const left = 3 + Math.max(listings?.count ?? 0, mailboxes.length);
+      let removedAt: number | undefined;
+      let listedAt: number | undefined;
+      for (let run = 0; run < 120 && listedAt === undefined; run += 1) {
+        later(pollMs);
+        vi.useFakeTimers({ toFake: ["Date"], now: clockAt });
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- one run after another, as the clock runs them
+          await runSync(env, { left });
+        } finally {
+          vi.useRealTimers();
+        }
+        // oxlint-disable-next-line no-await-in-loop -- read after each run
+        if (removedAt === undefined && !(await finds(remover.userId, note))) {
+          removedAt = run;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- read after each run
+        const found = await Promise.all(
+          mailboxes.map(
+            async (mailbox, index) =>
+              await finds(mailbox.userId, markers[index] ?? "")
+          )
+        );
+        if (found.every(Boolean)) {
+          listedAt = run;
+        }
+      }
+
+      expect({
+        removed: removedAt !== undefined && removedAt < 60,
+        listed: listedAt !== undefined,
+      }).toStrictEqual({ removed: true, listed: true });
+    }
+  );
+
+  it(
+    "finishes an erase a stopped run owed, even while the provider fails every read",
+    setUpTime,
+    async () => {
+      const owner = await signedInApi(idp, "user");
+      const marker = markerOf();
+      const { connectionId, post, world } = await connectSampleFeed(owner, {
+        "": feedPage([mailItem("memo", `Memo ${marker}`)], "m1"),
+        m1: feedPage([], "m1"),
+      });
+      later(pollMs);
+      await sync();
+      await post({
+        "": feedPage([mailItem("memo", `Memo ${marker}`)], "m1"),
+        m1: feedPage([goneItem("memo")], "m2"),
+        m2: feedPage([], "m2"),
+      });
+      // Runs stopped at each step in turn, until one stops between the
+      // removal's record and its erase.
+      let owed = false;
+      for (let left = 4; left < 40 && !owed; left += 1) {
+        later(pollMs);
+        vi.useFakeTimers({ toFake: ["Date"], now: clockAt });
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- one run after another
+          await runSync(env, { left });
+        } finally {
+          vi.useRealTimers();
+        }
+        // oxlint-disable-next-line no-await-in-loop -- read after each run
+        const leaving = await env.DB.prepare(
+          "SELECT count(*) AS count FROM brain_sync_items WHERE connection_id = ? AND leaving IS NOT NULL"
+        )
+          .bind(connectionId)
+          .first<{ count: number }>();
+        owed = (leaving?.count ?? 0) > 0;
+      }
+      const owedFound = await finds(owner.userId, marker);
+      // The provider fails every read from now on.
+      await world({ failing: ["files"] });
+      later(pollMs);
+      await sync();
+
+      expect({
+        owed,
+        owedFound,
+        after: await finds(owner.userId, marker),
+      }).toStrictEqual({ owed: true, owedFound: true, after: false });
+    }
+  );
+
+  it(
+    "lets a held removal go after a day when another folder never catches up",
+    setUpTime,
+    async () => {
+      const owner = await signedInApi(idp, "user");
+      const marker = markerOf();
+      const quiet = feedPage([], "q");
+      const { world } = await connectSampleFeed(owner, { "": quiet, q: quiet });
+      const a: Record<string, unknown> = {
+        "": feedPage([mailItem("a/m", `Mail ${marker}`)], "a1"),
+        a1: feedPage([], "a1"),
+      };
+      const b = { "": feedPage([], "b1"), b1: feedPage([], "b1") };
+      await world({
+        places: ["a", "b"],
+        folders: { a: { changes: a }, b: { changes: b } },
+        failing: [],
+      });
+      later(pollMs);
+      await sync();
+      later(pollMs);
+      await sync();
+      // Gone from a; b fails from now on and never reads again.
+      a.a1 = feedPage([goneItem("a/m")], "a2");
+      a.a2 = feedPage([], "a2");
+      await world({
+        folders: { a: { changes: a }, b: { changes: b } },
+        failing: ["b"],
+      });
+      later(pollMs);
+      await sync();
+      const held = await finds(owner.userId, marker);
+      later(24 * 60 * 60 * 1000 + pollMs);
+      await sync();
+
+      expect({ held, after: await finds(owner.userId, marker) }).toStrictEqual({
+        held: true,
+        after: false,
+      });
+    }
+  );
+
+  it(
+    "never holds the removal of what others may read: a shared file gone from a folder goes at once",
+    setUpTime,
+    async () => {
+      const [owner, colleague] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "user"),
+      ]);
+      const quiet = feedPage([], "q");
+      await connectSampleFeed(colleague, { "": quiet, q: quiet });
+      const marker = markerOf();
+      const { world } = await connectSampleFeed(owner, { "": quiet, q: quiet });
+      const shared = mailItem("a/f", `Plan ${marker}`, {
+        kind: "file",
+        readers: [{ kind: "tenant", id: acmeTenant }],
+      });
+      const a: Record<string, unknown> = {
+        "": feedPage([shared], "a1"),
+        a1: feedPage([], "a1"),
+      };
+      const b = { "": feedPage([], "b1"), b1: feedPage([], "b1") };
+      await world({
+        places: ["a", "b"],
+        folders: { a: { changes: a }, b: { changes: b } },
+        failing: [],
+      });
+      later(pollMs);
+      await sync();
+      later(pollMs);
+      await sync();
+      const before = await finds(colleague.userId, marker);
+      // Gone from a while b fails, which would hold a removal.
+      a.a1 = feedPage([goneItem("a/f")], "a2");
+      a.a2 = feedPage([], "a2");
+      await world({
+        folders: { a: { changes: a }, b: { changes: b } },
+        failing: ["b"],
+      });
+      later(pollMs);
+      await sync();
+
+      expect({
+        before,
+        after: await finds(colleague.userId, marker),
+      }).toStrictEqual({ before: true, after: false });
+    }
+  );
+
+  it(
     "after a restart, takes out what the relist no longer names",
     setUpTime,
     async () => {
