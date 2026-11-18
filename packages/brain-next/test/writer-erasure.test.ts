@@ -906,7 +906,8 @@ describe("a writer's erasure", () => {
         // drew memories (migration 0028, extractors.ts), a person's
         // skill proposals and what they name (migration 0029, skill-proposals.ts)
         // and the events of people's steps, the tags an erasure closed and
-        // the key they are made under (migration 0030, events.ts).
+        // the key they are made under (migration 0030, events.ts), and the
+        // events a person's erasure took (migration 0031, erasure.ts).
         tables: now.tables
           .filter(
             ({ name }) =>
@@ -930,6 +931,7 @@ describe("a writer's erasure", () => {
                 "events",
                 "closed_event_tags",
                 "event_key",
+                "person_erasure_events",
               ].includes(name)
           )
           .map((table) => {

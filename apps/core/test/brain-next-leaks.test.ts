@@ -405,6 +405,13 @@ describe(
         "an event of the holder's team": markerWord(),
         // Its tag of who took it, as the store keeps it: set once planted.
         "the tag of who took an event of the holder's team": markerWord(),
+        // A tag a person's erasure closed, as its ledger entry names it: a
+        // tag's shape, so the store takes it.
+        "the tag of an erased person's events": [
+          ...crypto.getRandomValues(new Uint8Array(32)),
+        ]
+          .map((byte) => byte.toString(16).padStart(2, "0"))
+          .join(""),
       };
       // What every member may read, and nobody outside the company.
       const companyMarkers = {
@@ -809,6 +816,23 @@ describe(
             .one().who
       );
       markers["the tag of who took an event of the holder's team"] = eventWho;
+      // An erased person's events, by their tag, under the key the store's
+      // events are under.
+      await sharedStore().erasePersonShared({
+        person: `erased-${crypto.randomUUID()}`,
+        identifiers: [],
+        reason: "person_erased",
+        events: {
+          keyId: await runInDurableObject(
+            sharedStore(),
+            (_store, state) =>
+              state.storage.sql
+                .exec<{ id: string }>("SELECT id FROM event_key WHERE row = 1")
+                .one().id
+          ),
+          who: [markers["the tag of an erased person's events"]],
+        },
+      });
       // Readers copied from where a file lives (GRA-1761): the holder by
       // the account they sign in with, beside a link and a group, which
       // reach nobody. Its twin, the stale list: first shared with the
