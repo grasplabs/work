@@ -9,6 +9,7 @@ import type { Access } from "@grasp-os/brain-next/contract";
 import { brainUploadReadersSchema } from "@grasp-os/shared/brain-sources";
 import type { BrainUploadReaders } from "@grasp-os/shared/brain-sources";
 import { chatIdSchema } from "@grasp-os/shared/ids";
+import { minTeamShown } from "@grasp-os/shared/onboarding";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { SourceReader } from "@grasp-os/shared/source-readers";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
@@ -29,6 +30,7 @@ import {
   publishAs,
   readSourceVersionAs,
   recallAs,
+  recordEvents,
   rememberAs,
   versionRefSchema,
   workBrain,
@@ -397,6 +399,9 @@ describe(
         "an answer in the holder's chat": markerWord(),
         "a memory the holder shared with a team the outsider isn't in":
           markerWord(),
+        "an event of the holder's team": markerWord(),
+        // Its tag of who took it, as the store keeps it: set once planted.
+        "the tag of who took an event of the holder's team": markerWord(),
       };
       // What every member may read, and nobody outside the company.
       const companyMarkers = {
@@ -448,6 +453,7 @@ describe(
         "an answer in the holder's chat": answerMarker,
         "a memory the holder shared with a team the outsider isn't in":
           sharedMemoryMarker,
+        "an event of the holder's team": eventMarker,
       } = markers;
       // Instruction files the outsider may not get: the holder's own,
       // another agent's than theirs, and an App's they don't build (one no
@@ -768,6 +774,36 @@ describe(
           id: `${sharedConnection}/${crypto.randomUUID()}`,
         }
       );
+      // A step the holder took, kept as an event of a team of theirs large
+      // enough to keep one (GRA-1763): nobody reads it back, that team
+      // included.
+      const eventPeople = await Promise.all(
+        Array.from(
+          { length: minTeamShown - 1 },
+          async () => await signedInWithRole(idp, "user")
+        )
+      );
+      await newTeam(holder, ...eventPeople.map(({ userId }) => userId));
+      await recordEvents(env, [
+        {
+          key: crypto.randomUUID(),
+          personId: holder,
+          step: eventMarker,
+          item: eventMarker,
+          at: new Date(),
+        },
+      ]);
+      const eventWho = await runInDurableObject(
+        sharedStore(),
+        (_store, state) =>
+          state.storage.sql
+            .exec<{ who: string }>(
+              "SELECT who FROM events WHERE step = ?",
+              eventMarker
+            )
+            .one().who
+      );
+      markers["the tag of who took an event of the holder's team"] = eventWho;
       // Readers copied from where a file lives (GRA-1761): the holder by
       // the account they sign in with, beside a link and a group, which
       // reach nobody. Its twin, the stale list: first shared with the
@@ -1176,6 +1212,8 @@ describe(
           askedMarker,
           answerMarker,
           sharedMemoryMarker,
+          // Not the event's: nothing asks for an event, and every pass
+          // forbids its marker in what it gets (`markers`).
         ],
         hiddenVersions: everyVersionOf(
           ...ownerIds,
@@ -1361,6 +1399,8 @@ describe(
         teamUploadMarker,
         teamSkillMarker,
         sharedMemoryMarker,
+        eventMarker,
+        eventWho,
         readersMarker,
         staleReadersMarker,
         readersId,
@@ -1914,6 +1954,7 @@ describe(
             world.narrowedMarker,
             world.agentFileMarker,
             world.appFileMarker,
+            world.eventMarker,
           ],
           hiddenVersions: [
             ...everyVersionOf(world.noneId),
@@ -1931,6 +1972,8 @@ describe(
           "another agent's instruction file": world.agentFileMarker,
           "an App's instruction file the outsider doesn't build":
             world.appFileMarker,
+          "an event of the holder's team": world.eventMarker,
+          "the tag of who took an event of the holder's team": world.eventWho,
         },
         { inRecall: world.inRecall }
       );
