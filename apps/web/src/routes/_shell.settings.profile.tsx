@@ -2,8 +2,14 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
 
+import { Badge } from "../grasp/badge/index.ts";
 import { DE, ES, FR, GB, NL } from "../grasp/flags/index.ts";
 import type { FlagData } from "../grasp/flags/index.ts";
+import {
+  InputGroup,
+  InputGroupInput,
+  InputGroupText,
+} from "../grasp/input-group/index.ts";
 import { Input } from "../grasp/input/index.ts";
 import { LanguageSwitch } from "../grasp/language-switch/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
@@ -18,8 +24,9 @@ import { SettingsError } from "../settings/section.tsx";
 // speaks to them, as the library's Settings pattern has it: one compact
 // card of rows, every control on one edge and as wide as the others. Their
 // name is theirs to change; their email is their sign-in's, so it stands in
-// a field that only reads, as is their role, an admin's to give. Their
-// teams are shown where they are managed.
+// a field that only reads, with their role, an admin's to give, as a
+// badge at its end: one row for the facts of their sign-in. Their teams
+// are shown where they are managed.
 
 const styles = stylex.create({
   // Every control fills the rows' shared control column.
@@ -40,30 +47,38 @@ const languages = Object.entries(localeNames).flatMap(([code, name]) =>
 );
 
 /** A value this person reads here but doesn't change, in a field that only reads. */
-const ReadOnlyRow = ({
-  label,
-  value,
-  info,
-  type,
-}: {
-  label: string;
-  value: string;
-  info?: string;
-  type?: "email";
-}) => (
-  <SettingRow {...(info === undefined ? {} : { info })} label={label}>
+const ReadOnlyRow = ({ label, value }: { label: string; value: string }) => (
+  <SettingRow label={label}>
     {(field) => (
       <Input
         {...field}
         layout={styles.control}
         readOnly
         size="sm"
-        {...(type === undefined ? {} : { type })}
         value={value}
       />
     )}
   </SettingRow>
 );
+
+/** Their sign-in's email, which only reads, with their role at its end. */
+const EmailRow = ({ email, role }: { email: string; role: string }) => {
+  const { t } = useLingui();
+  return (
+    <SettingRow info={t`Your sign-in; your admin changes it.`} label={t`Email`}>
+      {(field) => (
+        // BUILDER: InputGroup has no `sm` size, so this field stands taller than the row's other `sm`
+        // controls; asked of the library (Input's `sm` height for InputGroup).
+        <InputGroup layout={styles.control}>
+          <InputGroupInput {...field} readOnly type="email" value={email} />
+          <InputGroupText>
+            <Badge size="sm">{role}</Badge>
+          </InputGroupText>
+        </InputGroup>
+      )}
+    </SettingRow>
+  );
+};
 
 /** The language Grasp speaks to this person, chosen as it is picked. */
 const LanguageRow = () => {
@@ -99,13 +114,7 @@ const Profile = () => {
         ) : (
           <ProfileName name={identity.name} />
         )}
-        <ReadOnlyRow
-          info={t`Your sign-in; your admin changes it.`}
-          label={t`Email`}
-          type="email"
-          value={identity.email}
-        />
-        <ReadOnlyRow label={t`Role`} value={roleLabel(identity.role)} />
+        <EmailRow email={identity.email} role={roleLabel(identity.role)} />
         <LanguageRow />
       </SettingsRows>
     </SectionCard>
