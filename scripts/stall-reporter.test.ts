@@ -53,7 +53,11 @@ const file = (name: string): ReportedModule => {
     relativeModuleId: `test/${name}.test.ts`,
     children: { allTests: () => tests },
     state: () => states.get(id) ?? "pending",
-    diagnostic: () => ({ duration: durationsOf.get(id) ?? 0 }),
+    diagnostic: () => ({
+      setupDuration: 4100,
+      collectDuration: 900,
+      duration: durationsOf.get(id) ?? 0,
+    }),
   };
   testsOf.set(testModule, tests);
   return testModule;
@@ -254,10 +258,11 @@ describe("the progress file", () => {
         ({ fullName }) =>
           `passed core test/package-builds.test.ts > ${fullName}`
       ),
-      // The file's own time, its hooks' included, as Vitest timed it.
+      // The file's own time, its hooks', setup's and import's included,
+      // as Vitest timed them.
       "file core test/package-builds.test.ts",
     ]);
-    expect(lines.at(-1)).toMatch(/ file 91235ms core /u);
+    expect(lines.at(-1)).toMatch(/ file 96235ms core /u);
   });
 });
 

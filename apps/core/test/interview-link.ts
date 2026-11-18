@@ -320,6 +320,18 @@ export const holdAlarm = async (): Promise<void> => {
   });
 };
 
+/**
+ * Takes arranging the Brain's teams into regions (GRA-1993) out of the
+ * store's way: every staff list a test saves owes it, and the store's
+ * alarm would ask the model for it, for a test that tries something else
+ * the alarm does.
+ */
+export const noRegionsOwed = async (): Promise<void> => {
+  await runInDurableObject(onboardingStore(env), (_instance, state) => {
+    state.storage.sql.exec("DELETE FROM draw_failures WHERE item = 'regions'");
+  });
+};
+
 /** A day on: past every wait before a failed drawing or intake is tried again, and every clock a test moves on. */
 const pastEveryWaitMs = 24 * 60 * 60 * 1000;
 

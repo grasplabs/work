@@ -52,6 +52,7 @@ import {
   storeBytesMax,
   workPriorities,
   storeKindOf,
+  readerGroupsMax,
 } from "@grasp-os/brain-next/contract";
 import type {
   Extract as BrainExtract,
@@ -918,6 +919,7 @@ const memberGroupsOf = async (
   groups: string[];
   audiences: readonly ConnectionAudience[];
   accountGroups: string[];
+  sourceGroups: string[];
 }> => {
   const id = checked(idSchema, personId);
   // One snapshot: their teams, the audiences and their sign-in accounts,
@@ -936,6 +938,9 @@ const memberGroupsOf = async (
   if (member === undefined) {
     throw permissionErrors.create("permission.person_inactive");
   }
+  const held = asThemselves
+    ? await heldPrincipalsOf(env, member.userId, signIns, connected)
+    : { accounts: [], groups: [] };
   return {
     person: member.userId,
     groups: [
@@ -944,9 +949,8 @@ const memberGroupsOf = async (
       membersGroup,
     ],
     audiences,
-    accountGroups: asThemselves
-      ? await heldPrincipalsOf(env, member.userId, signIns, connected)
-      : [],
+    accountGroups: held.accounts,
+    sourceGroups: held.groups,
   };
 };
 
@@ -982,6 +986,28 @@ const withConnections = (
 };
 
 /**
+ * A person's groups as their reader holds them: their own (`own`: teams,
+ * the company, connections, the accounts they proved and their tenants),
+ * each once, then the groups of theirs at a provider that sources name
+ * (`sourceGroups`, sorted: source-readers.ts `heldPrincipalsOf`), as many
+ * as there is room for beside them (`readerGroupsMax`). Past it, only the
+ * last of those provider groups are left out: what is shared with them
+ * alone isn't read, and everything else is, so a person in more groups
+ * that sources name than a reader holds keeps the rest of their search. A
+ * person whose own groups pass the bound is refused, as before.
+ */
+const asHeld = (
+  own: readonly string[],
+  sourceGroups: readonly string[]
+): string[] => {
+  const held = [...new Set(own)];
+  return [
+    ...held,
+    ...sourceGroups.slice(0, Math.max(0, readerGroupsMax - held.length)),
+  ];
+};
+
+/**
  * The member `personId` as the Brain's reader: the person, their teams as
  * core counts them now, the company, the members reading as themselves
  * (`membersGroup`), and the shared connections whose Brain audience holds
@@ -991,14 +1017,14 @@ const personReaderOf = async (
   env: ReaderEnv,
   personId: string
 ): Promise<PersonReader> => {
-  const { person, groups, audiences, accountGroups } = await memberGroupsOf(
-    env,
-    personId,
-    true
-  );
+  const { person, groups, audiences, accountGroups, sourceGroups } =
+    await memberGroupsOf(env, personId, true);
   return {
     person,
-    groups: [...withConnections(groups, audiences), ...accountGroups],
+    groups: asHeld(
+      [...withConnections(groups, audiences), ...accountGroups],
+      sourceGroups
+    ),
   };
 };
 
@@ -1030,16 +1056,16 @@ const readerOf = async (
   reach: Reach,
   teams: readonly string[] = []
 ): Promise<Reader> => {
-  const { person, groups, audiences, accountGroups } = await memberGroupsOf(
-    env,
-    personId,
-    reach === "person"
-  );
+  const { person, groups, audiences, accountGroups, sourceGroups } =
+    await memberGroupsOf(env, personId, reach === "person");
   switch (reach) {
     case "person": {
       return {
         person,
-        groups: [...withConnections(groups, audiences), ...accountGroups],
+        groups: asHeld(
+          [...withConnections(groups, audiences), ...accountGroups],
+          sourceGroups
+        ),
       };
     }
     case "teams": {

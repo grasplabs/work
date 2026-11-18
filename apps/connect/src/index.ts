@@ -183,6 +183,7 @@ import {
 import type { HeldAction } from "./pending.ts";
 import { beginErasure, erasePersonal } from "./person-erasure.ts";
 import { probeBindings } from "./probe.ts";
+import { readReaderGroups } from "./reader-groups.ts";
 import { revocationsByHand } from "./revocations-by-hand.ts";
 import {
   listSyncPlaces,
@@ -423,6 +424,10 @@ export default class Connect
 
   async personalAccounts(userId: unknown): Promise<PersonalAccount[]> {
     return await personalAccounts(this.env.DB, userId);
+  }
+
+  async readReaderGroups(request: unknown): Promise<{ read: number }> {
+    return { read: await readReaderGroups(this.env, request) };
   }
 
   async requireClassRights(

@@ -4225,10 +4225,6 @@ msgstr "Bevestigen"
 msgid "Confirm {what}"
 msgstr "{what} bevestigen"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Confirm groups"
-msgstr "Groepen bevestigen"
-
 #: src/decision-confirmation.tsx
 msgid "Confirm your approval"
 msgstr "Bevestig je goedkeuring"
@@ -6838,10 +6834,6 @@ msgstr "De chat van Grasp"
 #: src/settings/ai-providers.tsx
 msgid "Grasp's own AI features"
 msgstr "De eigen AI-functies van Grasp"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "Grasp’s proposal counts once you confirm it."
-msgstr "Het voorstel van Grasp telt zodra je het bevestigt."
 
 #: src/routes/_shell.settings.brain.tsx
 msgid "Group name"
@@ -11099,14 +11091,6 @@ msgctxt "what the Brain remembers about something"
 msgid "Promise"
 msgstr "Toezegging"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Propose groups"
-msgstr "Groepen voorstellen"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "Proposed"
-msgstr "Voorgesteld"
-
 #: src/brain/brain-nav.tsx
 msgctxt "a group of teams Grasp proposed that no admin confirmed yet"
 msgid "Proposed"
@@ -12415,6 +12399,10 @@ msgstr "Opslaan als pdf"
 #: src/pages/page-frame.tsx
 msgid "Save first"
 msgstr "Eerst opslaan"
+
+#: src/routes/_shell.settings.brain.tsx
+msgid "Save groups"
+msgstr "Groepen opslaan"
 
 #: src/settings/ai-providers.tsx
 msgid "Save key"
@@ -14396,8 +14384,8 @@ msgid "The Brain, as each run's person may read it"
 msgstr "Het Brein, zoals de persoon van elke run het mag lezen"
 
 #: src/routes/_shell.settings.brain.tsx
-msgid "The brain's regions: your teams, grouped the way your company is. Grasp can propose groups; they count once you confirm them."
-msgstr "De regio’s van het Brain: je teams, gegroepeerd zoals je bedrijf is. Grasp kan groepen voorstellen; ze tellen zodra je ze bevestigt."
+msgid "The brain's regions: your teams, grouped the way your company is. Grasp groups new teams by itself; rename a group or move a team here."
+msgstr "De regio’s van het Brain: je teams, gegroepeerd zoals je bedrijf is. Grasp groepeert nieuwe teams zelf; hier geef je een groep een andere naam of verplaats je een team."
 
 #: src/workflows/business-process.tsx
 msgid "The business process {name} serves"

@@ -529,6 +529,15 @@ export interface PersonalAccount {
   verifiedEmailAt: number | null;
   /** Addresses it was confirmed under before, for its person's erasure alone. */
   pastVerifiedEmails: string[];
+  /**
+   * The groups the account is in at the provider, nested ones included,
+   * as the last whole read with its own token said (connect's
+   * reader-groups.ts); none until one was. Each by the ID a reader list
+   * names it by: an Entra object ID, a Google group's address.
+   */
+  groups: string[];
+  /** When that read was (milliseconds); null when there was none. */
+  groupsReadAt: number | null;
   connected: boolean;
 }
 
@@ -2058,6 +2067,18 @@ export interface ConnectApi
    * forgets (GRA-1761).
    */
   personalAccounts: (userId: string) => Promise<PersonalAccount[]>;
+  /**
+   * Reads, with each person's own token, the groups of the personal suite
+   * connections whose token was minted since their last read, or whose
+   * read is under way (connect's reader-groups.ts), sending at most
+   * `requests` requests to the providers and starting no turn once it made
+   * `queries` D1 queries: core's clock asks every minute, with its shares
+   * of the platform's limits. How many reads became whole.
+   */
+  readReaderGroups: (request: {
+    requests: number;
+    queries: number;
+  }) => Promise<{ read: number }>;
   /**
    * Asks the connections whose grant lacks the rights of `classes`, those
    * an admin just turned on, to be connected again (`needs_reauth`), in

@@ -1163,7 +1163,16 @@ const stop = async (
       ...(composio ? [disconnectCleanup(db, cleanupId, stillConnected)] : []),
       db
         .update(connections)
-        .set({ status: "disconnected", updatedAt: new Date() })
+        .set({
+          status: "disconnected",
+          // The groups its account is in: nothing counts a disconnected
+          // connection's, so none are kept (reader-groups.ts).
+          readerGroups: null,
+          readerGroupsAt: null,
+          readerGroupsTriedAt: null,
+          readerGroupsReading: null,
+          updatedAt: new Date(),
+        })
         .where(stillConnected),
       // After the status, by the call that stopped it: the revoke it owes,
       // with a copy of the tokens to revoke with, before they go.

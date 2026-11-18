@@ -4225,10 +4225,6 @@ msgstr "Bestätigen"
 msgid "Confirm {what}"
 msgstr "{what} bestätigen"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Confirm groups"
-msgstr "Gruppen bestätigen"
-
 #: src/decision-confirmation.tsx
 msgid "Confirm your approval"
 msgstr "Genehmigung bestätigen"
@@ -6838,10 +6834,6 @@ msgstr "Grasps Chat"
 #: src/settings/ai-providers.tsx
 msgid "Grasp's own AI features"
 msgstr "Grasps eigene KI-Funktionen"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "Grasp’s proposal counts once you confirm it."
-msgstr "Der Vorschlag von Grasp gilt, sobald Sie ihn bestätigen."
 
 #: src/routes/_shell.settings.brain.tsx
 msgid "Group name"
@@ -11099,14 +11091,6 @@ msgctxt "what the Brain remembers about something"
 msgid "Promise"
 msgstr "Zusage"
 
-#: src/routes/_shell.settings.brain.tsx
-msgid "Propose groups"
-msgstr "Gruppen vorschlagen"
-
-#: src/routes/_shell.settings.brain.tsx
-msgid "Proposed"
-msgstr "Vorgeschlagen"
-
 #: src/brain/brain-nav.tsx
 msgctxt "a group of teams Grasp proposed that no admin confirmed yet"
 msgid "Proposed"
@@ -12415,6 +12399,10 @@ msgstr "Als PDF speichern"
 #: src/pages/page-frame.tsx
 msgid "Save first"
 msgstr "Zuerst speichern"
+
+#: src/routes/_shell.settings.brain.tsx
+msgid "Save groups"
+msgstr "Gruppen speichern"
 
 #: src/settings/ai-providers.tsx
 msgid "Save key"
@@ -14396,8 +14384,8 @@ msgid "The Brain, as each run's person may read it"
 msgstr "Das Gehirn, so wie die Person jedes Laufs es lesen darf"
 
 #: src/routes/_shell.settings.brain.tsx
-msgid "The brain's regions: your teams, grouped the way your company is. Grasp can propose groups; they count once you confirm them."
-msgstr "Die Bereiche des Brains: Ihre Teams, so gruppiert wie Ihr Unternehmen. Grasp kann Gruppen vorschlagen; sie gelten, sobald Sie sie bestätigen."
+msgid "The brain's regions: your teams, grouped the way your company is. Grasp groups new teams by itself; rename a group or move a team here."
+msgstr "Die Bereiche des Brains: Ihre Teams, so gruppiert wie Ihr Unternehmen. Grasp gruppiert neue Teams selbst; hier benennen Sie eine Gruppe um oder verschieben ein Team."
 
 #: src/workflows/business-process.tsx
 msgid "The business process {name} serves"

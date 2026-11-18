@@ -6246,23 +6246,27 @@ export const brainTeamGroups = sqliteTable("brain_team_groups", {
   teamIds: text("team_ids").notNull(),
   /** Its place in the company's order. */
   position: integer().notNull(),
-  /** When an admin confirmed it; null while it is only Grasp's proposal. */
+  /**
+   * When it was kept: set on every row, as every group counts (GRA-1993).
+   * Kept for the release before, which reads a row without it as a
+   * proposal (expand, then contract).
+   */
   confirmedAt: timestamp("confirmed_at"),
   savedAt: timestamp("saved_at").notNull(),
 });
 
 /**
- * Each time an admin confirmed the groups of teams (brain-team-groups.ts):
- * the groups whole, as they were before and as confirmed, so an earlier
- * set can be put back. Never changed or deleted; the audit event of the
- * save names its id, and who saved it.
+ * Each time an admin saved the groups of teams, or Grasp arranged them
+ * (brain-team-groups.ts): the groups whole, as they were before and after,
+ * so an earlier set can be put back. Never changed or deleted; the audit
+ * event of the change names its id, and who made it.
  */
 export const brainTeamGroupSaves = sqliteTable("brain_team_group_saves", {
   id: text().primaryKey(),
   savedAt: timestamp("saved_at").notNull(),
   /** The groups before, as JSON: each one's id, name, teams and whether confirmed. */
   before: text().notNull(),
-  /** The groups as confirmed, as JSON, the same way. */
+  /** The groups after, as JSON, the same way. */
   after: text().notNull(),
 });
 
@@ -6977,6 +6981,19 @@ export const sourceReaderTokens = sqliteTable(
   },
   (table) => [index("source_reader_tokens_person_idx").on(table.person)]
 );
+
+/**
+ * Every group of a provider's that a copied reader list ever named
+ * (source-readers.ts `readerPrincipalsOf`, GRA-1761), by the Brain's name
+ * of it (`group:<provider>:<tenant>:<group>`), written before the list
+ * reaches the Brain. A person reads as only those of their own groups
+ * that are here (`heldPrincipalsOf`): the groups sources are shared with,
+ * however many groups they are in. A group is no person; nothing is
+ * removed, as a name no source holds any more costs a reader nothing.
+ */
+export const sourceReaderGroups = sqliteTable("source_reader_groups", {
+  name: text().primaryKey(),
+});
 
 /**
  * What Grasp proposes for a team's routine (opportunities.ts, GRA-1750),
