@@ -267,6 +267,7 @@ export const runAdmitted = (db: DrizzleD1Database, run: RunAdmission) =>
           "account"
         ),
         failedTask: sql<null>`NULL`.as("failed_task"),
+        capturedAt: sql<null>`NULL`.as("captured"),
       })
       .from(sql`(SELECT 1)`)
       .where(

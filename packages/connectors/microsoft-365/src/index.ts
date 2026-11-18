@@ -11,6 +11,7 @@ import { mailReplyTools } from "./mail-replies.ts";
 import { mailSortingTools } from "./mail-sorting.ts";
 import { mailTools } from "./mail.ts";
 import { meetingTools } from "./meetings.ts";
+import { onedriveSync } from "./onedrive-sync.ts";
 import { onenoteTools } from "./onenote.ts";
 import { plannerTools } from "./planner.ts";
 import { todoTools } from "./todo.ts";
@@ -24,6 +25,10 @@ import { workbookTools } from "./workbook.ts";
  * site per call, a Planner plan's tasks, one plan per call, and the rows
  * of a named table in an Excel workbook, one workbook per call, and the
  * person's own Teams chats and the transcripts of meetings they were in.
+ *
+ * It syncs the person's own OneDrive for the Brain (onedrive-sync.ts), on
+ * `Files.ReadWrite.All`, which covers the sync's reads (driveItem delta,
+ * permissions and content all take `Files.Read`).
  */
 export default defineConnector({
   name: "microsoft-365",
@@ -72,4 +77,5 @@ export default defineConnector({
     ...chatTools,
     ...meetingTools,
   ],
+  syncs: [onedriveSync],
 });

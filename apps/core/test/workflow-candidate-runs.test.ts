@@ -25,7 +25,7 @@ import {
   createWorkflowResource,
   deleteWorkflowResource,
 } from "../src/workflow-resources.ts";
-import { workflowStateOf, writeWorkflowState } from "../src/workflow-state.ts";
+import { writeWorkflowState } from "../src/workflow-state.ts";
 import {
   candidateRunFor,
   startCandidateRun,
@@ -36,6 +36,7 @@ import { runEngine } from "../src/workflows/engine.ts";
 import { allEvents } from "./audit-events.ts";
 import { withCpuKills } from "./cpu-kills.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
+import { workflowStateOf } from "./kept-state.ts";
 import { whileEngineRefuses } from "./runs.ts";
 import { outcome, unique } from "./sign-in.ts";
 import { publishDefinition } from "./workflow-publishing.ts";
