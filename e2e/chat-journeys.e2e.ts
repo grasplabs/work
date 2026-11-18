@@ -19,10 +19,9 @@ import { peopleIn } from "./people.ts";
 const questionOf = (opener: string): string =>
   `${opener} (${crypto.randomUUID().slice(0, 8)})`;
 
-/** Asks `question` from Chat's start, its tour turned down; the chat's messages. */
+/** Asks `question` from Chat's start; the chat's messages. */
 const askFromStart = async (page: Page, question: string) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Not now" }).click();
   await page.getByLabel("Your question").fill(question);
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page).toHaveURL(/\/chats\/[^/]+$/u);
@@ -149,7 +148,6 @@ test("a question core never confirms says it wasn't sent, and keeps it in the bo
   });
   const question = questionOf(modelScripts.answers.opener);
   await page.goto("/");
-  await page.getByRole("button", { name: "Not now" }).click();
   const box = page.getByLabel("Your question");
   await box.fill(question);
 

@@ -89,6 +89,11 @@ export interface SidebarRow extends SidebarSubRow {
    * For a list of what happened (Activity).
    */
   detail?: string;
+  /**
+   * In the regular weight, as the group's last row is: one of the person's own things in a list
+   * (a chat), not a place in the product. Its colour and its current mark are a row's.
+   */
+  quiet?: boolean;
   /** Short words at the row's end, quiet, instead of a count: when it happened ("2m"). */
   end?: string;
   /**
@@ -886,6 +891,8 @@ const styles = stylex.create({
     transitionDuration: { default: grasp.shellAnswer, [REDUCED]: "0s" },
     transitionTimingFunction: grasp.ease,
   },
+  // One of the person's own things in a list (`quiet`): the regular weight, as the row to all of them.
+  rowQuiet: { fontWeight: grasp.weightRegular },
   // A group's last row, to all of its kind: quieter than the rows, in the muted ink and regular
   // weight, its words where the rows' names start.
   more: {
@@ -1279,6 +1286,7 @@ const MoreRow = ({ more, item }: { more: SidebarMore; item: boolean }) => {
 const Row = ({ row, item }: { row: SidebarRow; item: boolean }) => {
   const look = stylex.props(
     styles.row,
+    row.quiet === true && styles.rowQuiet,
     hasDetail(row) && styles.rowTall,
     hasActions(row) && rowActionsRoom,
     row.current === true && styles.current,
