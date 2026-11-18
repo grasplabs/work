@@ -135,6 +135,14 @@ export const stephenGraphUrl = "https://graph-control.test/stephen";
  */
 export const stephenGoogleUrl = "https://google-control.test/stephen";
 
+/**
+ * Where tests change the address Google gives an account from then on:
+ * `{ subject, email }`, as an admin renaming it in Workspace does. A
+ * renewal of that account's tokens is answered with it; with \`email\`
+ * null, without an ID token, and no userinfo endpoint answers here.
+ */
+export const googleAddressUrl = "https://google-control.test/address";
+
 /** Where tests read how many drafts Graph made for `?mailbox=`: `{ drafts }`. */
 export const graphDraftsUrl = "https://graph-control.test/drafts";
 
@@ -312,6 +320,36 @@ const base64Url = (bytes) =>
     .replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
 const encoded = (value) =>
   base64Url(new TextEncoder().encode(JSON.stringify(value)));
+/** Each Google account's Workspace domain and address now, by its subject. */
+const googleAccounts = new Map();
+/**
+ * Google's token endpoint renewing an account's tokens, as Google does for
+ * a grant with \`openid\`: with an ID token for the account as it is now.
+ */
+const googleRefresh = async (request) => {
+  const form = new URLSearchParams(await request.text());
+  const subject = (form.get("refresh_token") ?? "").replace(/^refresh./u, "");
+  const account = googleAccounts.get(subject);
+  if (form.get("grant_type") !== "refresh_token" || account === undefined) {
+    return undefined;
+  }
+  const claims = {
+    iss: "https://accounts.google.com",
+    aud: ${JSON.stringify(clients.google.id)},
+    sub: subject,
+    hd: account.domain,
+    email: account.email,
+    email_verified: true,
+  };
+  return Response.json({
+    token_type: "Bearer",
+    access_token: "access." + subject + "." + crypto.randomUUID(),
+    expires_in: 3599,
+    ...(account.email === null
+      ? {}
+      : { id_token: [encoded({ alg: "RS256" }), encoded(claims), "signature"].join(".") }),
+  });
+};
 /**
  * Google's token endpoint redeeming a code \`consentCode\` made for Grasp's
  * Google client, with what was granted: the account it names, in the
@@ -342,6 +380,7 @@ const googleConsent = async (request) => {
     email: subject + "@" + domain,
     email_verified: true,
   };
+  googleAccounts.set(subject, { domain, email: claims.email });
   return Response.json({
     token_type: "Bearer",
     access_token: "access." + subject,
@@ -762,10 +801,18 @@ export default {
       return new Response(null, { status: 200 });
     }
     if (request.method === "POST" && url.href === "https://oauth2.googleapis.com/token") {
-      const answered = await googleConsent(request.clone());
+      const answered =
+        (await googleConsent(request.clone())) ??
+        (await googleRefresh(request.clone()));
       if (answered !== undefined) {
         return answered;
       }
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(googleAddressUrl)}) {
+      const { subject, email } = await request.json();
+      const account = googleAccounts.get(subject);
+      googleAccounts.set(subject, { domain: account?.domain ?? "acme.test", email });
+      return new Response(null, { status: 204 });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkKeysUrl)}) {
       // Added to the keys other test files published: files run at once,

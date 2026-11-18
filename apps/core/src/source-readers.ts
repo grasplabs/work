@@ -1,10 +1,14 @@
+import type { AuditEvent } from "@grasp-os/shared/audit";
+import { connectionOwnersMax } from "@grasp-os/shared/connect";
 import type { PersonalAccount } from "@grasp-os/shared/connect";
 import { toHex } from "@grasp-os/shared/encoding";
+import { errorName } from "@grasp-os/shared/log";
 import type { SourceReader } from "@grasp-os/shared/source-readers";
 import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
+import type { Held } from "./audit-outbox.ts";
 import { providerIds, signInConfig } from "./auth/config.ts";
 import { accounts, sourceReaderTokens } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
@@ -311,7 +315,8 @@ export const heldPrincipalsOf = async (
  * minting each that no list named yet, as the connection proves them:
  * so their erasure finds them by person (`forgetTokens`), whatever address
  * a connection carries and whether or not they ever read by it. Called
- * when a connection is made or made again (connections.ts).
+ * when a connection is made or made again (connections.ts), and when a
+ * renewal finds its address changed (`claimOnAddressChanges`).
  */
 export const claimConnectedTokens = async (
   env: Pick<Env, "DB" | "BETTER_AUTH_SECRET">,
@@ -385,3 +390,65 @@ export const forgetTokens = (
         )
       )
     );
+
+/** A connection whose renewal found its account's address changed, if `event` says so. */
+const changedConnectionOf = (event: AuditEvent): string | undefined =>
+  event.action === "connection.account_changed" &&
+  event.target?.type === "connection"
+    ? event.target.id
+    : undefined;
+
+/**
+ * For each of connect's `connection.account_changed` events among
+ * `events` (connect's tokens.ts: a renewal confirmed another address, or
+ * none), claims again for the connection's owner the tokens of every
+ * account they connected (`claimConnectedTokens`), before the event leaves
+ * connect's outbox (audit-drains.ts): so the address now confirmed is
+ * theirs to be erased by, whether or not they read by it. One whose claim
+ * failed is held, and tried again by the next drain.
+ */
+export const claimOnAddressChanges = async (
+  env: Pick<Env, "DB" | "BETTER_AUTH_SECRET" | "CONNECT">,
+  events: readonly AuditEvent[]
+): Promise<Held> => {
+  const changed = events.flatMap((event) => {
+    const connectionId = changedConnectionOf(event);
+    return connectionId === undefined ? [] : [{ event, connectionId }];
+  });
+  if (changed.length === 0) {
+    return { ids: [], errors: [] };
+  }
+  const ids = [...new Set(changed.map(({ connectionId }) => connectionId))];
+  const owners = new Map<string, string | null>();
+  for (let at = 0; at < ids.length; at += connectionOwnersMax) {
+    // oxlint-disable-next-line no-await-in-loop -- a page at a time
+    const page = await env.CONNECT.connectionOwners(
+      ids.slice(at, at + connectionOwnersMax)
+    );
+    for (const { id, ownerUserId } of page) {
+      owners.set(id, ownerUserId);
+    }
+  }
+  const settled = await Promise.allSettled(
+    changed.map(async ({ connectionId }) => {
+      const owner = owners.get(connectionId) ?? null;
+      if (owner !== null) {
+        await claimConnectedTokens(
+          env,
+          owner,
+          await env.CONNECT.personalAccounts(owner)
+        );
+      }
+    })
+  );
+  const held = changed.flatMap(({ event }, index) => {
+    const outcome = settled[index];
+    return outcome?.status === "rejected"
+      ? [{ id: event.id, error: errorName(outcome.reason) }]
+      : [];
+  });
+  return {
+    ids: held.map(({ id }) => id),
+    errors: held.map(({ error }) => error),
+  };
+};

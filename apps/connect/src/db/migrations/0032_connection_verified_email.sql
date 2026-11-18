@@ -1,0 +1,1 @@
+ALTER TABLE `connections` ADD `verified_email` text;

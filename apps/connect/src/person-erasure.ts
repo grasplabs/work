@@ -158,6 +158,7 @@ export const erasePersonal = async (
           accountId: null,
           accountName: null,
           accountEmail: null,
+          verifiedEmail: null,
           accountAddresses: null,
           accountSenders: null,
           updatedAt: new Date(),

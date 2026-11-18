@@ -324,9 +324,9 @@ const accountsOwnerSchema = z.string().min(1);
  * connect made itself (`native`), pinned to the company's tenant, whose
  * account it took from the provider's verified ID token at connecting
  * (oauth.ts). One a token renewal lost (`needs_reauth`) is still theirs.
- * The address only for Google, whose account is never kept unless its
- * token marked the address verified (providers.ts); Entra's address is
- * not verified, so none for Microsoft.
+ * Its address only as the provider confirmed it, when connected and at
+ * its last renewal (`verifiedEmail`, providers.ts `confirmAddress`):
+ * Google's; Entra's address is not verified, so none for Microsoft.
  */
 export const personalAccounts = async (
   db: D1Database,
@@ -342,7 +342,7 @@ export const personalAccounts = async (
       provider: connections.provider,
       tenant: connections.tenant,
       accountId: connections.accountId,
-      accountEmail: connections.accountEmail,
+      verifiedEmail: connections.verifiedEmail,
     })
     .from(connections)
     .where(
@@ -356,7 +356,7 @@ export const personalAccounts = async (
         isNotNull(connections.accountId)
       )
     );
-  return rows.flatMap(({ provider, tenant, accountId, accountEmail }) =>
+  return rows.flatMap(({ provider, tenant, accountId, verifiedEmail }) =>
     tenant === null || accountId === null
       ? []
       : [
@@ -364,7 +364,7 @@ export const personalAccounts = async (
             provider,
             tenant,
             accountId,
-            verifiedEmail: provider === "google" ? accountEmail : null,
+            verifiedEmail,
           },
         ]
   );

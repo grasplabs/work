@@ -151,6 +151,21 @@ export interface OAuthProviderConfig {
     tenant: string,
     clientId: string
   ) => Promise<ProviderAccount | null>;
+  /**
+   * For a provider whose reader lists name accounts by address (Google's),
+   * the address the provider confirms, at a renewal, for the account
+   * `accountId` in `tenant`, by the same rules as when it was connected;
+   * `null` when it confirms none. Core counts a connection's address as
+   * proved only while the last renewal confirmed it (connections.ts
+   * `personalAccounts`). None where reader lists name an account by a
+   * stable ID (Entra's object ID).
+   */
+  confirmAddress?: (
+    tokens: TokenSet,
+    tenant: string,
+    clientId: string,
+    accountId: string
+  ) => Promise<string | null>;
 }
 
 /** An app people connect with an API key they give. */
@@ -274,6 +289,51 @@ const microsoft: OAuthProviderConfig = {
   account: entraAccount,
 };
 
+/** Google's userinfo endpoint, as its discovery document names it. */
+const googleUserinfo = "https://openidconnect.googleapis.com/v1/userinfo";
+
+/** What a userinfo answer must hold for its address to count, as an ID token's would. */
+const googleUserinfoSchema = z.object({
+  sub: z.string().min(1),
+  email: z.string().min(1),
+  email_verified: z.literal(true),
+  hd: z.string(),
+});
+
+/** How long a userinfo read may take before its address counts as unconfirmed. */
+const userinfoTimeoutMs = 10_000;
+
+/**
+ * The address Google's userinfo endpoint confirms for `accessToken`: only
+ * for the account `accountId` under the hosted domain `tenant`, marked
+ * verified; `null` for anything else, an error included.
+ */
+const googleUserinfoAddress = async (
+  accessToken: string,
+  tenant: string,
+  accountId: string
+): Promise<string | null> => {
+  try {
+    const response = await fetch(googleUserinfo, {
+      headers: { authorization: `Bearer ${accessToken}` },
+      redirect: "manual",
+      signal: AbortSignal.timeout(userinfoTimeoutMs),
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      return null;
+    }
+    const info = googleUserinfoSchema.safeParse(await response.json());
+    return info.success &&
+      info.data.sub === accountId &&
+      info.data.hd.toLowerCase() === tenant
+      ? info.data.email.toLowerCase()
+      : null;
+  } catch {
+    return null;
+  }
+};
+
 /**
  * Google Workspace. Google can only hint at the domain (`hd`), so the ID
  * token's `hd` is what counts. `access_type=offline` with `prompt=consent`
@@ -319,6 +379,20 @@ const google: OAuthProviderConfig = {
     return inTenant
       ? { id: sub, name: email ?? null, email: email ?? null }
       : null;
+  },
+  confirmAddress: async (tokens, tenant, clientId, accountId) => {
+    // The renewal's ID token, which Google returns from a refresh
+    // (https://developers.google.com/identity/openid-connect/openid-connect,
+    // "an ID token is returned from a token refresh"), checked as at
+    // connecting; else the userinfo endpoint of Google's discovery document,
+    // for the token just renewed, with the same checks.
+    const fromToken = await google.account(tokens, tenant, clientId);
+    if (fromToken !== null) {
+      return fromToken.id === accountId
+        ? (fromToken.email?.toLowerCase() ?? null)
+        : null;
+    }
+    return await googleUserinfoAddress(tokens.accessToken, tenant, accountId);
   },
 };
 
