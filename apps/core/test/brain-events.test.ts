@@ -20,7 +20,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
-import { eraseEventsOf, recordEvents } from "../src/brain-next.ts";
+import { erasePersonShared, recordEvents } from "../src/brain-next.ts";
 import { chatOf, codeStep, says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -463,7 +463,7 @@ describe("the Brain's events", setUpTime, () => {
       stepBy(others[0] ?? "", "deals.read"),
     ]);
     const before = await stepsOf(team);
-    await eraseEventsOf(rotated(), anna);
+    await erasePersonShared(rotated(), { personId: anna, email: null });
 
     expect({ before, after: await stepsOf(team) }).toStrictEqual({
       before: ["deals.update", "deals.read"],

@@ -58,6 +58,7 @@ import type {
   Access,
   AskModel,
   NewEvent,
+  PersonEvents,
   AttributeRule,
   Brain,
   ContestedCursor,
@@ -2284,31 +2285,6 @@ const sharedPersonErasureSchema = z.strictObject({
   // As sign-in kept it: the Brain checks it by its own identifier rule.
   email: z.string().min(1).nullable(),
 });
-
-/**
- * Erases from the shared store, for an admin's erasure of the member
- * `personId`, what the Brain derived about them and what is in their own
- * word, and keeps the company's documents, even where their text names
- * them (decided 16 November, GRA-1747: how the plan's "removes their
- * personal content everywhere" reads for what others may read). Which
- * entity is theirs is decided on `email` alone, the address their
- * sign-in verified, never on a name (the Brain's people.ts). Hidden from
- * every read once it returns, and in the Brain's ledger, so a restore
- * can't bring it back; deleted by the Brain's tick. Safe to repeat: the
- * same person is the same erasure, its email the first call's. One that
- * throws must be repeated.
- */
-export const erasePersonShared = async (
-  env: BrainEnv,
-  erased: { personId: string; email: string | null }
-): Promise<void> => {
-  const { personId, email } = checked(sharedPersonErasureSchema, erased);
-  await brain(env).erasePersonShared({
-    person: personId,
-    identifiers: email === null ? [] : [{ type: "email", value: email }],
-    reason: "person_erased",
-  });
-};
 
 /**
  * Erases every memory `writer` wrote in the shared store, learned up to
@@ -6647,7 +6623,7 @@ export const forgetForAppAs = async (
 //   without core's key (one person's tags in two teams differ, though one
 //   call's events in each of their teams co-occur), and a person's
 //   erasure finds and deletes their events in every team
-//   (`eraseEventsOf`). A member removed but not erased keeps theirs, as
+//   (`erasePersonShared`). A member removed but not erased keeps theirs, as
 //   history.
 // - A drain that read a person's teams before their erasure writing after
 //   it: the erasure closes their tags in the Brain, which then refuses an
@@ -6771,30 +6747,54 @@ export const recordEvents = async (
 };
 
 /**
- * Deletes every event `personId` took, in whichever team: their tag for
- * each of the organization's teams, as core keeps them now, since they may
- * have left one. A team deleted since is no longer known: its events of
- * theirs go only with their time (`eventsKeptMs`). For their erasure
- * (person-erasure.ts); safe to repeat.
+ * `personId`'s events for their erasure: their tag in each of the
+ * organization's teams, as core keeps them now (they may have left one),
+ * under core's key now; none in an organization with no team. A team
+ * deleted since is no longer known: its events of theirs go only with
+ * their time (`eventsKeptMs`).
  */
-export const eraseEventsOf = async (
+const eventsOfPerson = async (
   env: Env,
   personId: string
-): Promise<void> => {
-  const person = checked(idSchema, personId);
+): Promise<PersonEvents | undefined> => {
   const teamRows = await teamsWithMembers(env);
+  if (teamRows.length === 0) {
+    return undefined;
+  }
   const whoKey = await derivedHmacKey(env, eventWhoPurpose, ["sign"]);
   const who = await Promise.all(
-    teamRows.map(async ({ id }) => await whoOf(whoKey, person, teamGroup(id)))
+    teamRows.map(async ({ id }) => await whoOf(whoKey, personId, teamGroup(id)))
   );
-  const keyId = await macOf(whoKey, eventKeyIdLabel);
-  for (let start = 0; start < who.length; start += eventsPerAddMax) {
-    // oxlint-disable-next-line no-await-in-loop -- one page at a time
-    await brain(env).eraseEvents({
-      keyId,
-      who: who.slice(start, start + eventsPerAddMax),
-    });
-  }
+  return { keyId: await macOf(whoKey, eventKeyIdLabel), who };
+};
+
+/**
+ * Erases from the shared store, for an admin's erasure of the member
+ * `personId`, what the Brain derived about them and what is in their own
+ * word, and keeps the company's documents, even where their text names
+ * them (decided 16 November, GRA-1747: how the plan's "removes their
+ * personal content everywhere" reads for what others may read). Which
+ * entity is theirs is decided on `email` alone, the address their
+ * sign-in verified, never on a name (the Brain's people.ts). With it, the
+ * events of the steps they took (GRA-1763), by their tag in each team
+ * (`eventsOfPerson`). Hidden from every read once it returns, and in the
+ * Brain's ledger, so a restore of its storage can't bring any of it back;
+ * deleted by the Brain's tick. Safe to repeat: the same person is the
+ * same erasure, its email and events the first call's. One that throws
+ * must be repeated.
+ */
+export const erasePersonShared = async (
+  env: Env,
+  erased: { personId: string; email: string | null }
+): Promise<void> => {
+  const { personId, email } = checked(sharedPersonErasureSchema, erased);
+  const events = await eventsOfPerson(env, personId);
+  await brain(env).erasePersonShared({
+    person: personId,
+    identifiers: email === null ? [] : [{ type: "email", value: email }],
+    reason: "person_erased",
+    ...(events === undefined ? {} : { events }),
+  });
 };
 
 /** Deletes every event the Brain keeps past its time: core's clock runs it. */

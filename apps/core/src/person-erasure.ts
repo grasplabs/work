@@ -34,7 +34,6 @@ import { directoryProviderId } from "./auth/config.ts";
 import { eraseGapAnswerer } from "./brain-gaps.ts";
 import {
   erasePerson as eraseFromBrain,
-  eraseEventsOf,
   erasePersonShared,
   isBrainRestoring,
   stillDeletingTooLong,
@@ -380,7 +379,7 @@ const brain: ErasureStep = {
  * again still has it. Complete once the Brain answered: recorded, hidden
  * from every read and in its ledger; its tick deletes the rest. With it,
  * the events of the steps they took (GRA-1763), deleted by their tag in
- * each of the company's teams.
+ * each of the company's teams, in the same ledger entry.
  */
 const brainShared: ErasureStep = {
   area: "brain_shared",
@@ -396,10 +395,6 @@ const brainShared: ErasureStep = {
       personId: userId,
       email: person?.email ?? null,
     });
-    // The steps they took, kept as their teams' events, by their tag in
-    // each team (GRA-1763): an erasure is final, so these don't wait out
-    // their 90 days.
-    await eraseEventsOf(env, userId);
     await completed(db, userId, "brain_shared");
   },
 };

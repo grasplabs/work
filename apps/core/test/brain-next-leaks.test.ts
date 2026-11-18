@@ -42,6 +42,7 @@ import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
 import {
   answerCaptureIdOf,
   captureIdOf,
+  sharedReadHashOf,
 } from "../src/connection-capture-key.ts";
 import { captureRead, captureRunRead } from "../src/connection-capture.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
@@ -388,6 +389,8 @@ describe(
           markerWord(),
         "what an agent read through a shared connection for a team the outsider isn't in":
           markerWord(),
+        "what an agent read through a shared connection with no Brain audience":
+          markerWord(),
         "the holder's own skill": markerWord(),
         "a team's skill the outsider isn't in": markerWord(),
         "a file the source shares with the holder, by their account":
@@ -406,6 +409,13 @@ describe(
         "an event of the holder's team": markerWord(),
         // Its tag of who took it, as the store keeps it: set once planted.
         "the tag of who took an event of the holder's team": markerWord(),
+        // A tag a person's erasure closed, as its ledger entry names it: a
+        // tag's shape, so the store takes it.
+        "the tag of an erased person's events": [
+          ...crypto.getRandomValues(new Uint8Array(32)),
+        ]
+          .map((byte) => byte.toString(16).padStart(2, "0"))
+          .join(""),
       };
       // What every member may read, and nobody outside the company.
       const companyMarkers = {
@@ -446,6 +456,8 @@ describe(
           triggerCaptureMarker,
         "what an agent read through a shared connection for a team the outsider isn't in":
           sharedReadMarker,
+        "what an agent read through a shared connection with no Brain audience":
+          unsharedReadMarker,
         "the holder's own skill": holderSkillMarker,
         "a team's skill the outsider isn't in": teamSkillMarker,
         "a file the source shares with the holder, by their account":
@@ -759,29 +771,84 @@ describe(
         }),
       };
       // Read through a shared connection an admin opened in the Brain to a
-      // team the outsider isn't in (GRA-1831): readable by that team, as
-      // core's records say at each read, its connection's ID holding a
-      // marker too.
-      const sharedConnection = `connection-${sharedReadMarker}`;
-      await connectDb()
-        .prepare(
-          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, 'hubspot', 'shared', NULL, 'active', 'composio', 'hubspot', ?, ?)"
-        )
-        .bind(sharedConnection, readAtNow, readAtNow)
-        .run();
+      // team the outsider isn't in (GRA-1831), by the capture of a chat's
+      // reads (connection-capture.ts): readable by that team, as core's
+      // records say at each read, its connection's ID holding a marker
+      // too. The outsider's own agent read it, on purpose: having read it
+      // gives them nothing of it. Its twin, the same read through a shared
+      // connection no audience was chosen for, is kept for nobody, the
+      // holder included.
+      const sharedToolkit = async (marker: string): Promise<string> => {
+        const id = `connection-${marker}`;
+        await connectDb()
+          .prepare(
+            "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tools, created_at, updated_at) VALUES (?, 'mail', 'shared', NULL, 'active', 'composio', 'https://mail.test/mcp', ?, ?, ?)"
+          )
+          .bind(
+            id,
+            JSON.stringify([{ name: "mail.search", read: true }]),
+            readAtNow,
+            readAtNow
+          )
+          .run();
+        return id;
+      };
+      const sharedRead = async (
+        reader: string,
+        connectionId: string,
+        call: { query: string },
+        text: string
+      ): Promise<void> => {
+        await captureRead(
+          env,
+          {
+            workspaceId: personalWorkspaceId(reader),
+            agentId: chatAgentId,
+            chatId: chatIdSchema.parse(crypto.randomUUID()),
+            personId: reader,
+            runId: crypto.randomUUID(),
+          },
+          connectionId,
+          "mail.search",
+          call,
+          {
+            result: {
+              output: JSON.stringify(text),
+              provenance: ["mail/mail.search"],
+              keep: true,
+            },
+            readAt: new Date(readAtNow),
+          }
+        );
+      };
+      const [sharedConnection, unsharedConnection] = await Promise.all([
+        sharedToolkit(sharedReadMarker),
+        sharedToolkit(unsharedReadMarker),
+      ]);
       const sharingAdmin = await signedInApi(idp, "admin");
       await chooseAudience(sharingAdmin.api, sharedConnection, {
         kind: "team",
         teamId: secretTeam,
       });
-      const sharedReadId = await add(
-        `Deal pipeline ${sharedWord} ${sharedReadMarker}`,
-        { kind: "connection", connectionId: sharedConnection },
-        {
-          producer: "connected",
-          id: `${sharedConnection}/${crypto.randomUUID()}`,
-        }
+      const sharedCall = { query: `pipeline ${sharedReadMarker}` };
+      await sharedRead(
+        outsider,
+        sharedConnection,
+        sharedCall,
+        `Deal pipeline ${sharedWord} ${sharedReadMarker}`
       );
+      await sharedRead(
+        holder,
+        unsharedConnection,
+        { query: `orders ${unsharedReadMarker}` },
+        `Supplier orders ${sharedWord} ${unsharedReadMarker}`
+      );
+      const sharedReadId: SourceRef = {
+        producer: "connected",
+        id: `${sharedConnection}/0/${await sharedReadHashOf("mail.search", {
+          input: sharedCall,
+        })}`,
+      };
       // A step the holder took, kept as an event of a team of theirs large
       // enough to keep one (GRA-1763): nobody reads it back, that team
       // included.
@@ -812,6 +879,23 @@ describe(
             .one().who
       );
       markers["the tag of who took an event of the holder's team"] = eventWho;
+      // An erased person's events, by their tag, under the key the store's
+      // events are under.
+      await sharedStore().erasePersonShared({
+        person: `erased-${crypto.randomUUID()}`,
+        identifiers: [],
+        reason: "person_erased",
+        events: {
+          keyId: await runInDurableObject(
+            sharedStore(),
+            (_store, state) =>
+              state.storage.sql
+                .exec<{ id: string }>("SELECT id FROM event_key WHERE row = 1")
+                .one().id
+          ),
+          who: [markers["the tag of an erased person's events"]],
+        },
+      });
       // Readers copied from where a file lives (GRA-1761): the holder by
       // the account they sign in with, beside a link and a group, which
       // reach nobody. Its twin, the stale list: first shared with the
@@ -1213,6 +1297,7 @@ describe(
         runCaptureId
       );
       const holderFindsTriggerCapture = await holderFinds(triggerCaptureMarker);
+      const holderFindsUnsharedRead = await holderFinds(unsharedReadMarker);
       // And by the ID the hidden copies share: their own chunk, as exact.
       const { items: cappedItems } = await recallAs(env, outsider, {
         personal: true,
@@ -1433,6 +1518,7 @@ describe(
         runCaptureMarker,
         runCaptureId,
         triggerCaptureMarker,
+        unsharedReadMarker,
         runMarker,
         askedMarker,
         answerMarker,
@@ -1482,6 +1568,7 @@ describe(
           holderFindsToolkitCapture,
           holderFindsRunCapture,
           holderFindsTriggerCapture,
+          holderFindsUnsharedRead,
           cappedFinds,
           teamSkillSelected,
           holderAppFile: holderAppFiles.some(
@@ -1598,6 +1685,7 @@ describe(
         holderFindsToolkitCapture: true,
         holderFindsRunCapture: true,
         holderFindsTriggerCapture: false,
+        holderFindsUnsharedRead: false,
         cappedFinds: [{ text: capped, found: "exact" }],
         teamSkillSelected: {
           byTheHolder: [`${secretTeam}:${teamSkillMarker}`],
@@ -1875,6 +1963,7 @@ describe(
             world.toolkitCaptureMarker,
             world.runCaptureMarker,
             world.triggerCaptureMarker,
+            world.unsharedReadMarker,
             world.toHolderMarker,
             ...world.instructionMarkers,
             world.ownUploadMarker,
