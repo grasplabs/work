@@ -2692,7 +2692,7 @@ describe("team claims in the new Brain", { timeout: 120_000 }, () => {
     const admin = await signedInApi(idp, "admin");
     const { workflows } = await admin.api.brain.read();
     return workflows
-      .filter(({ teamId }) => teamId === `team-${ids.team}`)
+      .filter(({ teamId }) => teamId === ids.team)
       .map(({ name, drawings }) => [name, drawings?.length ?? 0]);
   };
 

@@ -88,7 +88,7 @@ const askedWithBrain = async (ids: Ids, ...replies: Answer[]) => {
     binding: "BRAIN",
   });
   const brain = await member.api.brain.read();
-  const teamId = `team-${ids.team}`;
+  const teamId = ids.team;
   const said = brain.statements.find(({ teamIds }) => teamIds.includes(teamId));
   const work = brain.workflows.find((workflow) => workflow.teamId === teamId);
   return { member, chats, teamId, said: said?.id ?? "", work };
@@ -155,7 +155,7 @@ const drawn = (of: "me" | "team", per: "week" | "month") => ({
 
 describe("a step of thinking, checked", () => {
   const brain = {
-    teams: [{ id: "team-1", name: "Mortgage advice" }],
+    teams: [{ id: "1", name: "Mortgage advice" }],
     statements: [{ id: "st-1" }],
     workflows: [{ id: "wf-1", name: "Weekly report" }],
   };
@@ -168,7 +168,7 @@ describe("a step of thinking, checked", () => {
         step: "Reading the teams.",
         shape: "same-pain",
         move: "teams",
-        notes: ["Mortgage advice", "mortgage-advice", "team-1", "st-1"],
+        notes: ["Mortgage advice", "mortgage-advice", "1", "st-1"],
       }),
       workflowInSamePain: check({
         step: "Reading the work.",
@@ -181,7 +181,7 @@ describe("a step of thinking, checked", () => {
       byName: {
         step: {
           text: "Reading the teams.",
-          notes: ["team-1", "st-1"],
+          notes: ["1", "st-1"],
           shape: "same-pain",
           move: "teams",
         },
@@ -209,7 +209,7 @@ describe("a step of thinking, checked", () => {
           step: "Reading the teams.",
           shape: "same-pain",
           move: "teams",
-          notes: ["team-1"],
+          notes: ["1"],
         });
         return details;
       } catch (error) {
@@ -223,13 +223,13 @@ describe("a step of thinking, checked", () => {
         "The brain could not be read.",
         {
           text: "Reading the teams.",
-          notes: ["team-1"],
+          notes: ["1"],
           shape: "same-pain",
           move: "teams",
         },
         {
           text: "Reading the teams.",
-          notes: ["team-1"],
+          notes: ["1"],
           shape: "same-pain",
           move: "teams",
         },
@@ -240,7 +240,7 @@ describe("a step of thinking, checked", () => {
 
   it("refuses a shape or a move there isn't, and a step that names nothing or says nothing", () => {
     expect([
-      check({ step: "x", shape: "mood", move: "teams", notes: ["team-1"] }),
+      check({ step: "x", shape: "mood", move: "teams", notes: ["1"] }),
       check({ step: "x", shape: "hours", move: "teams", notes: ["wf-1"] }),
       check({ step: "x", shape: "hours", move: "work", notes: [] }),
       check({ step: " ", shape: "hours", move: "work", notes: ["wf-1"] }),

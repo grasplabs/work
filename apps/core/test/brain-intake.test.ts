@@ -62,7 +62,7 @@ const theOnboardings: { what: string; record: BrainRecordInput }[] = [
       type: "workflow",
       id: "wf-1",
       name: "Tickets",
-      teamId: "team-x",
+      teamId: "x",
       sourceId: "src-roster",
       status: "drawn",
     },
@@ -73,7 +73,7 @@ const theOnboardings: { what: string; record: BrainRecordInput }[] = [
   },
   {
     what: "a roster team's record",
-    record: { type: "team", id: "team-x", name: "Ops", sourceId: "src-roster" },
+    record: { type: "team", id: "x", name: "Ops", sourceId: "src-roster" },
   },
 ];
 
@@ -145,7 +145,7 @@ describe(
       const member = await signedInApi(idp, "user");
       const brain = await member.api.brain.read();
       const records = await kept(ids);
-      const teamId = `team-${ids.team}`;
+      const teamId = ids.team;
       expect({
         gave,
         ...shownOf(brain, teamId),
@@ -248,7 +248,7 @@ describe(
       const member = await signedInApi(idp, "user");
       const brain = await member.api.brain.read();
       const workflow = brain.workflows.find(
-        ({ teamId }) => teamId === `team-${ids.team}`
+        ({ teamId }) => teamId === ids.team
       );
       const restsOn = async (person: string) => {
         const sent = await store.sentFor(person);
@@ -330,7 +330,7 @@ describe(
       const member = await signedInApi(idp, "user");
       const brain = await member.api.brain.read();
       const workflow = brain.workflows.find(
-        ({ teamId }) => teamId === `team-${ids.team}`
+        ({ teamId }) => teamId === ids.team
       );
       const after = await kept(ids);
       const now = after.filter(({ type }) => type === "workflowVersion");
@@ -456,7 +456,7 @@ describe(
       const ids = await sevenTeam();
       await mapped(ids);
       const member = await signedInApi(idp, "user");
-      const teamId = `team-${ids.team}`;
+      const teamId = ids.team;
       const shown = async () => {
         const brain = await member.api.brain.read();
         return {
@@ -546,7 +546,7 @@ describe(
       );
       const staff = staffCore.authenticate();
       const { core: nobodyCore } = await openRpc();
-      const teamId = `team-${ids.team}`;
+      const teamId = ids.team;
       const records = await kept(ids);
       const said = [
         ...records.flatMap(({ type, body }) =>

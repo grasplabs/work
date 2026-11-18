@@ -312,7 +312,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
         ambition: "Every client gets their numbers within a week.",
         whyNow:
           "Copying invoices by hand.\nClients wait weeks for their numbers.",
-        inviteTeamIds: ["team-finance"],
+        inviteTeamIds: ["finance"],
         budget: [],
         toolApproval: [],
         sourceId: "src-kickoff",
@@ -320,7 +320,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       },
       teams: [
         {
-          id: "team-finance",
+          id: "finance",
           name: "Finance",
           sourceId: "src-kickoff",
           counts: [
@@ -340,7 +340,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
           ],
         },
         {
-          id: "team-ops",
+          id: "ops",
           name: "Operations",
           sourceId: "src-roster",
           counts: [
@@ -407,7 +407,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       vision: { ...workspace.vision, inviteTeamIds: [] },
       teams: [
         {
-          id: "team-finance",
+          id: "finance",
           name: "Finance",
           sourceId: "src-kickoff",
           counts: [
@@ -521,7 +521,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
           // The lead's role alone would point at them: never sent.
           step: 2,
           interviewee: "stakeholder",
-          teamIds: ["team-finance"],
+          teamIds: ["finance"],
         },
         {
           id: `src.document-${first.id}`,
@@ -542,26 +542,26 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
         {
           id: "tool.document-exact-online",
           name: "Exact Online",
-          teamIds: ["team-finance"],
+          teamIds: ["finance"],
           sourceId: `src.document-${first.id}`,
         },
         {
           id: "tool.document-claimspro",
           name: "ClaimsPro",
-          teamIds: ["team-finance", "team-legal"],
+          teamIds: ["finance", "legal"],
           sourceId: `src.document-${first.id}`,
         },
         // Two names whose letters read alike stay two tools.
         {
           id: "tool.document-microsoft-project",
           name: "Microsoft Project",
-          teamIds: ["team-finance"],
+          teamIds: ["finance"],
           sourceId: `src.document-${first.id}`,
         },
         {
           id: "tool.document-microsoft-project-2",
           name: "Microsoft.Project",
-          teamIds: ["team-finance"],
+          teamIds: ["finance"],
           sourceId: `src.document-${first.id}`,
         },
       ],
@@ -578,7 +578,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       type: "tool",
       id: `tool-${tag}`,
       name: `ledger ${tag}`,
-      teamIds: ["team-ops"],
+      teamIds: ["ops"],
       sourceId: `src-${tag}`,
       ai: "none",
     };
@@ -609,14 +609,14 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
         {
           id: `tool.document-claims-${tag}`,
           name: `Claims ${tag}`,
-          teamIds: ["team-finance"],
+          teamIds: ["finance"],
           sourceId: `src.document-${document.id}`,
         },
         // The record keeps its id, name and source.
         {
           id: record.id,
           name: record.name,
-          teamIds: ["team-ops", "team-finance"],
+          teamIds: ["ops", "finance"],
           sourceId: record.sourceId,
           ai: "none",
         },
@@ -626,7 +626,7 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
         {
           id: record.id,
           name: record.name,
-          teamIds: ["team-ops"],
+          teamIds: ["ops"],
           sourceId: record.sourceId,
           ai: "none",
         },
