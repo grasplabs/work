@@ -6,6 +6,7 @@
 // Kept in localStorage, not a cookie: the session cookie is httpOnly, and
 // this travels to no server.
 
+// public/theme.js reads it too, before first paint, for the frame's ground.
 const key = "grasp.signed-in";
 
 /** Notes that core said someone is signed in here. */
