@@ -2,7 +2,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { skillErrors } from "@grasp-os/shared/skills";
 import type { ListedSkill, SkillProposal } from "@grasp-os/shared/skills";
-import { and, desc, eq, gt, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -22,7 +22,7 @@ import {
   workflowResources,
   workflowStartReceipts,
 } from "./db/core/schema.ts";
-import { runRetentionDays } from "./workflows/engine.ts";
+import { detailsRemoved } from "./workflows/retention.ts";
 
 // Skills proposed to a person from their own runs that keep succeeding
 // (GRA-1756; the design is on the issue). The Brain's model drafts each in
@@ -75,8 +75,6 @@ const sha256Of = async (text: string): Promise<string> =>
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 
-const dayMs = 24 * 60 * 60 * 1000;
-
 /** A run of a streak. */
 interface StreakRun {
   id: string;
@@ -87,18 +85,19 @@ interface StreakRun {
 
 /**
  * `person`'s latest `proposalStreak` ended runs of `workflowId` that they
- * or their agent started and that still have their details (not past the
- * run retention, nor swept: what retention erased from the Brain is never
- * among them), while they hold the workflow, read in one statement, when
- * every one of them completed, at one version, none restricted: newest
- * first. Null when they don't, or there are fewer.
+ * or their agent started, while they hold the workflow, read in one
+ * statement, when every one of them completed, at one version, none
+ * restricted, and none had its details removed (`detailsRemoved`, run
+ * retention's own rule: past the retention, or swept). The newest runs
+ * being the latest ended, that is the latest ones that still have their
+ * details, so what retention erases from the Brain, or is about to, is
+ * never among them. Newest first; null otherwise, or with fewer.
  */
 const streakOf = async (
   env: Env,
   person: string,
   workflowId: string
 ): Promise<StreakRun[] | null> => {
-  const kept = new Date(Date.now() - runRetentionDays * dayMs);
   const runs = await drizzle(env.DB)
     .select({
       id: workflowResourceRuns.id,
@@ -107,6 +106,8 @@ const streakOf = async (
       version: workflowResourceRuns.version,
       status: workflowResourceRuns.status,
       restricted: workflowResourceRuns.restricted,
+      endedAt: workflowResourceRuns.endedAt,
+      detailsRemovedAt: workflowStartReceipts.detailsRemovedAt,
     })
     .from(workflowResourceRuns)
     .innerJoin(
@@ -121,8 +122,7 @@ const streakOf = async (
       and(
         eq(workflowResourceRuns.workflowResourceId, workflowId),
         eq(workflowResourceRuns.principalId, person),
-        gt(workflowResourceRuns.endedAt, kept),
-        isNull(workflowStartReceipts.detailsRemovedAt),
+        isNotNull(workflowResourceRuns.endedAt),
         inArray(workflowStartReceipts.invokerType, ["person", "agent"]),
         holdsWorkflowSql(person, workflowId)
       )
@@ -134,8 +134,11 @@ const streakOf = async (
     newest !== undefined &&
     runs.length === proposalStreak &&
     runs.every(
-      ({ status, version, restricted }) =>
-        status === "completed" && version === newest.version && !restricted
+      (run) =>
+        run.status === "completed" &&
+        run.version === newest.version &&
+        !run.restricted &&
+        !detailsRemoved(run)
     );
   return holds
     ? runs.map(({ id, workflow, name, version }) => ({

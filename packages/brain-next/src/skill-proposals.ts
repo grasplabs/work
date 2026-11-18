@@ -201,6 +201,9 @@ const draftOf = async (
   if (sources.length === 0) {
     return undefined;
   }
+  // Stopped from here on by an erasure of any of them, as work keyed by
+  // one is: what it read never reaches the model after that erasure.
+  context.watch(sources);
   const read = await readCurrent(
     {
       storage: context.storage,

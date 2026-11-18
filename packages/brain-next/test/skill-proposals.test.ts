@@ -270,12 +270,13 @@ describe("skill proposals", () => {
     });
   });
 
-  it("deletes a proposal and what names its run on that run's erasure, and saves none whose run is erased while it is drawn", async () => {
+  it("deletes a proposal and what names its run on that run's erasure, and saves none whose run is erased while it is drawn, nor sends its text once erased while the draft waits its turn", async () => {
     const runs = [
       await sourceOf("Workflow run completed."),
       await sourceOf("Workflow run completed."),
     ];
     const [first = "", second = ""] = runs;
+    const third = await sourceOf("Workflow run completed. Third.");
     // One saved, then its first run erased.
     await propose(await keyOf(), runs, draftingModel().ask);
     const [saved] = await own().skillProposals({ reader: readerOf() });
@@ -299,8 +300,43 @@ describe("skill proposals", () => {
     await own().eraseSource({ source: second, reason: "deleted" });
     held.resolve(true);
     await ticking;
+    // One drawn from the third, which is erased once it was read, while the
+    // draft waits for a turn at the model (the queue's bucket emptied).
+    await runInDurableObject(own(), (_store, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO work_model_bucket (id, tokens, at, paused_until)
+        VALUES (1, 0, ?1, 0)
+        ON CONFLICT (id) DO UPDATE SET tokens = 0, at = ?1, paused_until = 0`,
+        Date.now()
+      );
+    });
+    await own().proposeSkill({
+      person,
+      key: await keyOf(),
+      about: 'Workflow "send-report"',
+      subject,
+    });
+    const picked = Promise.withResolvers<boolean>();
+    const waiting = draftingModel();
+    const drawing = own().work({
+      ask: waiting.ask,
+      at: new Date(),
+      embedders: noModel,
+      handOvers: noHandOvers,
+      contextTokens: null,
+      proposalSources: async () => {
+        picked.resolve(true);
+        return await Promise.resolve([third]);
+      },
+    });
+    await picked.promise;
+    // Its read is done well before a token comes back (one every 2 s).
+    await scheduler.wait(500);
+    await own().eraseSource({ source: third, reason: "deleted" });
+    await drawing;
     expect({
       saved: saved?.restsOn.map(({ source }) => source),
+      askedAfterErasure: waiting.asked.length,
       listed: await own().skillProposals({ reader: readerOf() }),
       kept: await runInDurableObject(
         own(),
@@ -311,12 +347,13 @@ describe("skill proposals", () => {
             )
             .one().count
       ),
-      naming: [await naming(first), await naming(second)],
+      naming: [await naming(first), await naming(second), await naming(third)],
     }).toStrictEqual({
       saved: runs,
+      askedAfterErasure: 0,
       listed: [],
       kept: 0,
-      naming: [0, 0],
+      naming: [0, 0, 0],
     });
   });
 

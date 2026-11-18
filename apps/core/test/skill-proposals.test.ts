@@ -12,7 +12,12 @@ import { describe, expect, it } from "vite-plus/test";
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { memberOf } from "../src/auth/identity.ts";
-import { addOwnSkill, eraseSource, workBrain } from "../src/brain-next.ts";
+import {
+  addOwnSkill,
+  addSource,
+  eraseSource,
+  workBrain,
+} from "../src/brain-next.ts";
 import { skillsFor } from "../src/brain-skills.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
@@ -33,7 +38,11 @@ import { webhookConfig } from "./source-config.ts";
 import { holdsNothing } from "./stored-skills.ts";
 import { granted } from "./workflow-calls.ts";
 import { publishDefinition } from "./workflow-publishing.ts";
-import { definitionOf, ended } from "./workflow-resource-runs-harness.ts";
+import {
+  definitionOf,
+  ended,
+  oldStarts,
+} from "./workflow-resource-runs-harness.ts";
 
 // Skills proposed from a person's own runs that keep succeeding (GRA-1756;
 // the design is on the issue), through core's real boundaries: real runs,
@@ -619,6 +628,31 @@ describe("skill proposals", setUpTime, () => {
       naming: [0, 0],
       runs: [...latest, ...newer],
     });
+  });
+
+  it("drafts nothing from a run past the retention that wasn't swept yet, though the Brain still holds it", async () => {
+    const { drafted } = await draftingProvider(`weekly-report-${unique()}`);
+    const [builder, ada] = await Promise.all([
+      person("builder"),
+      person("user"),
+    ]);
+    const workflow = await workflowOf(builder.by, [ada.userId]);
+    // A run of hers that ended a year ago, past the retention, which no
+    // sweep has reached: its details kept, and its source still in her own
+    // store, as the hand-over left it.
+    const [old = ""] = await oldStarts(ada.by, workflow.id, 1, true);
+    await addSource(env, {
+      source: { producer: "run", id: old },
+      change: "end",
+      text: "Workflow run completed.\n\nOld result.",
+      readers: { kind: "owner", personId: ada.userId },
+    });
+    // Four more that succeed: the latest five ended hold the old one.
+    await runs(ada.by, workflow.id, 4);
+    expect({
+      draftsAsked: drafted().length,
+      proposed: await proposedFrom(ada.api, workflow.id),
+    }).toStrictEqual({ draftsAsked: 0, proposed: [] });
   });
 
   it("keeps a dismissed proposal away for its version, and proposes again for a new one", async () => {
