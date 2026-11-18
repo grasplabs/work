@@ -3,7 +3,7 @@ import { auditActorSchema, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEvent } from "@grasp-os/shared/audit";
 import { brainSourceErrors } from "@grasp-os/shared/brain-sources";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { errorName, log } from "@grasp-os/shared/log";
+import { errorFields, errorName, log } from "@grasp-os/shared/log";
 import {
   readerProofMaxAgeMs,
   sourceReaderSchema,
@@ -34,10 +34,12 @@ import {
   changeSourceReaders,
   eraseOwnGroup,
   eraseSource,
+  eventsPerAddMax,
   principalMaxLength,
+  recordEvents,
   sourceTextProblem,
 } from "./brain-next.ts";
-import type { SourceReaders, SourceRef } from "./brain-next.ts";
+import type { ObservedStep, SourceReaders, SourceRef } from "./brain-next.ts";
 import {
   brainSyncCatchUps,
   brainSyncDisconnects,
@@ -430,6 +432,11 @@ interface Applying {
    * no read of its own (the run holds the source alone).
    */
   counts: { added: number; changed: number; removed: number };
+  /**
+   * The person's steps this read applied, one per change counted
+   * (`stepped`), recorded once the page is committed (`recordSteps`).
+   */
+  steps: ObservedStep[];
 }
 
 /**
@@ -457,10 +464,14 @@ const heldSource = (applying: Applying) =>
     eq(brainSyncSources.leaseId, applying.leaseId)
   );
 
-/** One of the page's counters, one up, while the run holds the source. */
+/**
+ * One of the page's counters, one up, while the run holds the source (and
+ * `when` holds, if given: a write earlier in the same batch took effect).
+ */
 const counted = (
   applying: Applying,
-  counter: "added" | "changed" | "removed"
+  counter: "added" | "changed" | "removed",
+  when: SQL = sql`1 = 1`
 ) =>
   applying.db
     .update(brainSyncSources)
@@ -470,7 +481,8 @@ const counted = (
         eq(brainSyncSources.connectionId, applying.source.connectionId),
         eq(brainSyncSources.feed, applying.source.feed),
         eq(brainSyncSources.place, applying.source.place),
-        eq(brainSyncSources.leaseId, applying.leaseId)
+        eq(brainSyncSources.leaseId, applying.leaseId),
+        when
       )
     )
     .returning({ leaseId: brainSyncSources.leaseId });
@@ -479,11 +491,52 @@ const counted = (
 const itemWhere = (applying: Applying, itemId: string): SQL =>
   sql`${brainSyncItems.connectionId} = ${applying.source.connectionId} AND ${brainSyncItems.feed} = ${applying.source.feed} AND ${brainSyncItems.itemId} = ${itemId}`;
 
+/**
+ * `row` as the run read it, still in the place the run acts for, as SQL:
+ * the same generation, in this place, while the run holds its source.
+ * Every statement that holds, leaves or erases an item for a place
+ * checks it in the statement itself: a page of another place may have
+ * brought the item there since it was read (`bringBack`), with the same
+ * generation, and what this place says of an item no longer in it
+ * changes nothing.
+ */
+const stillHere = (applying: Applying, row: Item): SQL =>
+  sql`${itemWhere(applying, row.itemId)} AND ${brainSyncItems.generation} = ${row.generation} AND ${brainSyncItems.place} = ${applying.source.place} AND ${stillHeld(applying)}`;
+
 /** Throws when a batch's last statement, the counter, found the run no longer holding its source. */
 const heldAfter = (counter: readonly unknown[]): void => {
   if (counter.length === 0) {
     throw new SyncStoppedError("lost");
   }
+};
+
+/**
+ * One step of the connection's owner for a change this read counted: the
+ * sync's kind and what happened (`file.added`, `mail.removed`), keyed by
+ * the change (the same on every repeat, so a page applied twice keeps it
+ * once), on the provider's item, when the provider says it changed.
+ */
+const stepped = (
+  applying: Applying,
+  counter: "added" | "changed" | "removed",
+  key: string,
+  item: string,
+  at: Date
+): void => {
+  applying.steps.push({
+    key,
+    personId: applying.source.personId,
+    step: `${applying.source.kind}.${counter}`,
+    item,
+    at,
+    // #2428 adds the system and whether the step wrote something: here.
+  });
+};
+
+/** When the provider says `item` changed, or the read's time if it says none it can use. */
+const changedOf = (item: { changedAt: string }, readAt: Date): Date => {
+  const at = new Date(item.changedAt);
+  return Number.isNaN(at.getTime()) ? readAt : at;
 };
 
 /** `counter` one up in what this read knows of the page's counters, once stored. */
@@ -539,10 +592,15 @@ const finishLeaving = async (applying: Applying, row: Item): Promise<Item> => {
  * (`finishLeaving`). So a run stopped between the two (its budget, a
  * failed write, a lost lease, a killed isolate) leaves a row that says
  * what is still owed, never one that claims a key the Brain erased, and
- * the next read of the source erases it before anything else.
+ * the next read of the source erases it before anything else. Only while
+ * the row is still here (`stillHere`): `undefined`, with nothing erased
+ * or counted, for an item another place has taken since it was read.
  */
-const leave = async (applying: Applying, row: Item): Promise<Item> => {
-  const { db, budget } = applying;
+const leave = async (
+  applying: Applying,
+  row: Item
+): Promise<Item | undefined> => {
+  const { db, budget, source } = applying;
   if (row.store === null) {
     return await finishLeaving(applying, row);
   }
@@ -560,21 +618,31 @@ const leave = async (applying: Applying, row: Item): Promise<Item> => {
     heldSince: null,
   };
   spend(budget, 1);
-  const [, owed, counter] = await db.batch([
-    db
-      .update(brainSyncItems)
-      .set(left)
-      .where(
-        sql`${itemWhere(applying, row.itemId)} AND ${brainSyncItems.generation} = ${row.generation} AND ${stillHeld(applying)}`
-      ),
+  // Owed first, which a leave that took nothing leaves harmlessly set;
+  // counted only if the row left, by the state the leave wrote.
+  const [owed, gone, counter] = await db.batch([
     db
       .update(brainSyncSources)
       .set({ leavesOwed: true })
-      .where(heldSource(applying)),
-    counted(applying, "removed"),
+      .where(heldSource(applying))
+      .returning({ place: brainSyncSources.place }),
+    db
+      .update(brainSyncItems)
+      .set(left)
+      .where(stillHere(applying, row))
+      .returning({ key: brainSyncItems.key }),
+    counted(
+      applying,
+      "removed",
+      sql`EXISTS (SELECT 1 FROM ${brainSyncItems} WHERE ${itemWhere(applying, row.itemId)} AND ${brainSyncItems.generation} = ${generation} AND ${brainSyncItems.leaving} = ${row.key} AND ${brainSyncItems.place} = ${source.place})`
+    ),
   ]);
-  heldAfter(owed.meta.changes > 0 ? counter : []);
+  heldAfter(owed);
+  if (gone.length === 0) {
+    return undefined;
+  }
   countedIn(applying, "removed", counter);
+  stepped(applying, "removed", row.key, row.itemId, applying.readAt);
   return await finishLeaving(applying, { ...row, ...left });
 };
 
@@ -629,29 +697,32 @@ const holds = (source: Source, row: Item): boolean =>
  * is erased only once every other place of the sync has applied a page
  * since (`finishHeldRemovals`), never leaving a hole while the other
  * place is read later. Mail is its own person's alone, so nobody else
- * reads it meanwhile. Held since when it first went.
+ * reads it meanwhile. Held since when it first went. Only while the row
+ * is still here (`stillHere`): `undefined` for an item another place has
+ * taken since it was read.
  */
-const hold = async (applying: Applying, row: Item): Promise<Item> => {
+const hold = async (
+  applying: Applying,
+  row: Item
+): Promise<Item | undefined> => {
   const { db, budget } = applying;
   const heldSince = row.heldSince ?? new Date();
   spend(budget, 1);
-  const [held, owed] = await db.batch([
-    db
-      .update(brainSyncItems)
-      .set({ heldSince })
-      .where(
-        sql`${itemWhere(applying, row.itemId)} AND ${brainSyncItems.generation} = ${row.generation} AND ${stillHeld(applying)}`
-      )
-      .returning({ key: brainSyncItems.key }),
+  const [owed, held] = await db.batch([
     db
       .update(brainSyncSources)
       .set({ leavesOwed: true })
       .where(heldSource(applying))
       .returning({ place: brainSyncSources.place }),
+    db
+      .update(brainSyncItems)
+      .set({ heldSince })
+      .where(stillHere(applying, row))
+      .returning({ key: brainSyncItems.key }),
   ]);
-  heldAfter(held);
   heldAfter(owed);
-  return { ...row, heldSince };
+  // Taken by another place since it was read: not held here.
+  return held.length === 0 ? undefined : { ...row, heldSince };
 };
 
 /**
@@ -775,15 +846,16 @@ const changeReaders = async (
   plan: Plan
 ): Promise<Item> => {
   const { env, db, budget, readAt } = applying;
+  const change = await changeOf([
+    "readers",
+    plan.readersKey,
+    readAt.getTime(),
+    row.itemId,
+  ]);
   spend(budget, 1);
   const made = await changeSourceReaders(env, {
     source: sourceRefOf(row.key),
-    change: await changeOf([
-      "readers",
-      plan.readersKey,
-      readAt.getTime(),
-      row.itemId,
-    ]),
+    change,
     readers: { kind: "readers", readers: plan.readers },
     readAt,
   });
@@ -803,6 +875,8 @@ const changeReaders = async (
     counted(applying, "changed"),
   ]);
   countedIn(applying, "changed", counter);
+  // A sharing change moves no time at the provider: as of the read.
+  stepped(applying, "changed", change, row.itemId, readAt);
   return { ...row, version: made.version };
 };
 
@@ -855,6 +929,31 @@ const claim = async (
 };
 
 /**
+ * `row` ready for `plan`'s claim: erased from the store it leaves, if it
+ * crosses, and any erase a stopped run owed on it done, here before the
+ * claim keeps the row (in this place, which may not be where the erase
+ * was owed). An item another place took since the page was read stops
+ * the page, to be read again from where that place left it.
+ */
+const clearedFor = async (
+  applying: Applying,
+  row: Item | undefined,
+  plan: Plan
+): Promise<Item | undefined> => {
+  if (row === undefined) {
+    return undefined;
+  }
+  if (row.store !== null && row.store !== plan.store) {
+    const left = await leave(applying, row);
+    if (left === undefined) {
+      throw new SyncStoppedError("lost");
+    }
+    return left;
+  }
+  return await finishLeaving(applying, row);
+};
+
+/**
  * Adds `item`'s `text` to the Brain as `plan` says, after naming its key
  * (`claim`), unless its row has that change already: erased first from
  * the store it leaves, if it crosses.
@@ -877,15 +976,12 @@ const add = async (
   if (given?.store === plan.store && given.change === change) {
     return;
   }
-  let row = given;
-  if (
-    row?.store !== null &&
-    row?.store !== undefined &&
-    row.store !== plan.store
-  ) {
-    row = await leave(applying, row);
-  }
-  const claimed = await claim(applying, row, item, plan);
+  const claimed = await claim(
+    applying,
+    await clearedFor(applying, given, plan),
+    item,
+    plan
+  );
   // An item's own store's add asks the shared store about its key before
   // and after (brain-next.ts `keptIn`), and reads the time zone.
   spend(budget, plan.store === "own" ? 4 : 2);
@@ -952,6 +1048,7 @@ const add = async (
     claimed.version === null && version === 1 ? "added" : "changed";
   const [, stored] = await db.batch([recorded, counted(applying, counter)]);
   countedIn(applying, counter, stored);
+  stepped(applying, counter, change, item.id, changedOf(item, readAt));
 };
 
 /**
@@ -1139,11 +1236,13 @@ const applyRemovals = async (
       if (row.place !== source.place) {
         continue;
       }
-      rows.set(
-        item.id,
-        // oxlint-disable-next-line no-await-in-loop -- in order, within the budget
-        await (holds(source, row) ? hold(applying, row) : leave(applying, row))
-      );
+      // oxlint-disable-next-line no-await-in-loop -- in order, within the budget
+      const after = await (holds(source, row)
+        ? hold(applying, row)
+        : leave(applying, row));
+      if (after !== undefined) {
+        rows.set(item.id, after);
+      }
       continue;
     }
     // A names-only listing names no readers: mail and events are their
@@ -1156,6 +1255,10 @@ const applyRemovals = async (
     const changed = await (plan.store === "own"
       ? leave(applying, row)
       : changeReaders(applying, row, plan));
+    if (changed === undefined) {
+      // Taken by another place since the page was read: read it again.
+      throw new SyncStoppedError("lost");
+    }
     rows.set(item.id, changed);
   }
   for (const part of parts.out) {
@@ -1298,6 +1401,31 @@ const relistMoved = async (
 };
 
 /**
+ * Keeps the page's steps as the Brain's events, after its commit, for the
+ * owner's teams of at least `minTeamShown` (`recordEvents` decides).
+ * Never holds up the sync: a failure is logged, and so is a run whose
+ * budget can't cover it, and their steps are not kept. Its calls: the
+ * owner's teams, their sizes, and at least one add per `eventsPerAddMax`
+ * steps (a step is an event for each of the owner's teams).
+ */
+const recordSteps = async (applying: Applying): Promise<void> => {
+  const { env, budget, source, steps } = applying;
+  if (steps.length === 0) {
+    return;
+  }
+  try {
+    spend(budget, 2 + Math.ceil(steps.length / eventsPerAddMax));
+    await recordEvents(env, steps);
+  } catch (error) {
+    log.warn("brain.sync.steps_not_kept", {
+      connectionId: source.connectionId,
+      steps: steps.length,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
  * Moves the source's cursor past `page`, once it is applied, in one batch
  * with the page's one event (if it did anything): its counters reset,
  * the listing closed at its first page with nothing more, due again at
@@ -1361,6 +1489,7 @@ const commit = async (applying: Applying, page: SyncPage): Promise<void> => {
           ...fetched,
         ]);
   heldAfter(committed);
+  await recordSteps(applying);
 };
 
 /**
@@ -1554,6 +1683,7 @@ const syncPage = async (
       changed: source.changed,
       removed: source.removed,
     },
+    steps: [],
   };
   // What earlier runs left owed needs only core and the Brain: done before
   // the read, so a source whose provider fails or whose connection waits
@@ -1894,34 +2024,61 @@ const eraseDroppedPlace = async (
     if (rows.length === 0) {
       break;
     }
+    const ids = rows.map(({ itemId }) => itemId);
+    const erase = async (key: string, store: Store) => {
+      spend(budget, store === "own" ? 2 : 1);
+      await eraseSource(env, {
+        source: sourceRefOf(key),
+        readers: readersIn(source, store),
+        reason: "deleted",
+      });
+    };
+    // What a stopped run owed first: a key a row is leaving is no one's.
     for (const row of rows) {
-      const keys = [
-        ...(row.store === null ? [] : [{ key: row.key, store: row.store }]),
-        ...(row.leaving === null || row.leavingStore === null
-          ? []
-          : [{ key: row.leaving, store: row.leavingStore }]),
-      ];
-      for (const { key, store } of keys) {
-        spend(budget, store === "own" ? 2 : 1);
+      if (row.leaving !== null && row.leavingStore !== null) {
         // oxlint-disable-next-line no-await-in-loop -- within the budget
-        await eraseSource(env, {
-          source: sourceRefOf(key),
-          readers: readersIn(source, store),
-          reason: "deleted",
-        });
+        await erase(row.leaving, row.leavingStore);
+      }
+    }
+    // Then each key a row holds, taken from it (leaving, a generation on,
+    // so a claim from an earlier read misses it) in the statement that
+    // checks it is still in the dropped place: one another place brought
+    // over since the read keeps its key (`stillHere`).
+    spend(budget, 1);
+    // oxlint-disable-next-line no-await-in-loop -- a page at a time
+    const taken = await db
+      .update(brainSyncItems)
+      .set({
+        leaving: sql`${brainSyncItems.key}`,
+        leavingStore: sql`${brainSyncItems.store}`,
+        store: null,
+        generation: sql`${brainSyncItems.generation} + 1`,
+      })
+      .where(
+        and(
+          ofPlace,
+          inList(brainSyncItems.itemId, ids),
+          isNotNull(brainSyncItems.store)
+        )
+      )
+      .returning();
+    for (const row of taken) {
+      if (row.leaving !== null && row.leavingStore !== null) {
+        // oxlint-disable-next-line no-await-in-loop -- within the budget
+        await erase(row.leaving, row.leavingStore);
       }
     }
     spend(budget, 1);
     // oxlint-disable-next-line no-await-in-loop -- a page at a time
-    await db.delete(brainSyncItems).where(
-      and(
-        ofPlace,
-        inList(
-          brainSyncItems.itemId,
-          rows.map(({ itemId }) => itemId)
+    await db
+      .delete(brainSyncItems)
+      .where(
+        and(
+          ofPlace,
+          inList(brainSyncItems.itemId, ids),
+          isNull(brainSyncItems.store)
         )
-      )
-    );
+      );
   }
   // Only while it is still dropped: listed again meanwhile, it stays.
   spend(budget, 1);

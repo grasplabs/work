@@ -530,7 +530,10 @@ const newSourceSchema = z.strictObject({
 export { questionMaxLength as recallQuestionMaxLength } from "@grasp-os/brain-next/contract";
 export { removalsMax } from "@grasp-os/brain-next/contract";
 /** The longest group name the Brain takes: a reader whose name is longer is nobody. */
-export { principalMaxLength } from "@grasp-os/brain-next/contract";
+export {
+  eventsPerAddMax,
+  principalMaxLength,
+} from "@grasp-os/brain-next/contract";
 
 /** Whose word a memory is, as the Brain names it: what a chat pins of it (history-access.ts). */
 export { speakerSchema } from "@grasp-os/brain-next/contract";

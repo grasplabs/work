@@ -4430,6 +4430,13 @@ export const coreProbes = {
       async () => await Promise.resolve(coreBrain.recallQuestionMaxLength)
     ),
   ],
+  // A number, the most events one add takes: the same for everyone.
+  eventsPerAddMax: async () => [
+    await answer(
+      "the most events one add takes",
+      async () => await Promise.resolve(coreBrain.eventsPerAddMax)
+    ),
+  ],
   // A number, the longest group name the Brain takes: the same for everyone.
   principalMaxLength: async () => [
     await answer(

@@ -1,4 +1,5 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import { minTeamShown } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -6,14 +7,17 @@ import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { eraseSource, recallAs } from "../src/brain-next.ts";
 import { overdueRelists, runSync } from "../src/brain-sync.ts";
 import { allEvents } from "./audit-events.ts";
+import { newTeam } from "./brain-next-leaks-harness.ts";
+import { inStoreOf } from "./brain-next-out-reads.ts";
 import { consentCode } from "./connect-providers.ts";
 import { countingBinds } from "./counting-binds.ts";
+import { interleaving } from "./d1-interleaving.ts";
 import { driveSyncControlUrl } from "./drive-sync-fake.ts";
 import type { DriveFile, DriveWorld } from "./drive-sync-fake.ts";
 import { mockIdp } from "./idp.ts";
 import { sampleSyncControlUrl } from "./sample-sync-fake.ts";
 import { acmeTenant, signInConfig } from "./sign-in-config.ts";
-import { routed, signedInApi, unique } from "./sign-in.ts";
+import { routed, signedInApi, signedInWithRole, unique } from "./sign-in.ts";
 import { connectDb, testBinding } from "./test-env.ts";
 
 // Native sync's run (src/brain-sync.ts, GRA-1758), through the real
@@ -254,6 +258,29 @@ let clockAt = Date.now();
 const later = (ms: number): void => {
   clockAt = Math.max(clockAt, Date.now()) + ms;
 };
+
+/** Runs the sync as the clock does, at the fake clock's time, on `given`. */
+const syncOn = async (given: Env): Promise<void> => {
+  vi.useFakeTimers({ toFake: ["Date"], now: clockAt });
+  try {
+    await runSync(given);
+  } finally {
+    vi.useRealTimers();
+  }
+};
+
+/** Another run, inside one under way, a poll later: as overlapping runs meet. */
+const overlappingRun = async (): Promise<void> => {
+  later(pollMs);
+  vi.setSystemTime(clockAt);
+  await runSync(env);
+};
+
+/** The hold of a removal for a move (`hold`), as its statement starts. */
+const holdStatement = /^update "brain_sync_items" set "held_since" = \?/u;
+
+/** An item taken out (`leave`): the key it leaves named. */
+const leaveStatement = /^update "brain_sync_items" set .*"leaving" = \?/u;
 
 /** Runs the sync as the clock does, at the fake clock's time. */
 const sync = async (): Promise<void> => {
@@ -1517,6 +1544,202 @@ describe("native sync", () => {
       expect({ returned, after: await found() }).toStrictEqual({
         returned: { m1: true, m2: true, m3: true },
         after: { m1: true, m2: true, m3: true },
+      });
+    }
+  );
+
+  it(
+    "leaves a message another folder brought back between a folder's read of its removal and the hold, the held removal's end, or a relist's sweep",
+    setUpTime,
+    async () => {
+      const owner = await signedInApi(idp, "user");
+      const marks = {
+        held: markerOf(),
+        finished: markerOf(),
+        swept: markerOf(),
+        kept: markerOf(),
+      };
+      // One ID wherever the message is.
+      const message = (name: keyof typeof marks) =>
+        mailItem(name, `Mail ${marks[name]}`);
+      const quiet = { changes: [], next: "q", more: false };
+      const { world } = await connectSampleFeed(owner, { "": quiet, q: quiet });
+      const a: Record<string, unknown> = {
+        "": feedPage(
+          [
+            message("held"),
+            message("finished"),
+            message("swept"),
+            message("kept"),
+          ],
+          "a1"
+        ),
+        a1: feedPage([], "a1"),
+      };
+      const b: Record<string, unknown> = {
+        "": feedPage([], "b1"),
+        b1: feedPage([], "b1"),
+      };
+      // The daily names-only listings: a names only `kept`, b what it has.
+      const aNames = { "": feedPage([mailItem("kept", null)], "n") };
+      const bNames: Record<string, unknown> = { "": feedPage([], "n") };
+      const set = async (failing: string[] = []) => {
+        await world({
+          places: ["a", "b"],
+          folders: {
+            a: { changes: a, names: aNames, items: {} },
+            b: { changes: b, names: bNames, items: {} },
+          },
+          failing,
+        });
+      };
+      await set();
+      later(pollMs);
+      await sync();
+      later(pollMs);
+      await sync();
+      const found = async () => ({
+        held: await finds(owner.userId, marks.held),
+        finished: await finds(owner.userId, marks.finished),
+        swept: await finds(owner.userId, marks.swept),
+        kept: await finds(owner.userId, marks.kept),
+      });
+      const runs = async (count: number) => {
+        for (let run = 0; run < count; run += 1) {
+          later(pollMs);
+          // oxlint-disable-next-line no-await-in-loop -- one run after another
+          await sync();
+        }
+      };
+      /**
+       * b has `name` from its next read on, as a move into it does: once in
+       * its changes, at the position its cursor is at, and in its listings.
+       */
+      const inB: string[] = [];
+      let bAt = 1;
+      const intoB = async (name: keyof typeof marks) => {
+        inB.push(name);
+        b[`b${bAt}`] = feedPage([message(name)], `b${bAt + 1}`);
+        bAt += 1;
+        b[`b${bAt}`] = feedPage([], `b${bAt}`);
+        bNames[""] = feedPage(
+          inB.map((id) => mailItem(id, null)),
+          "n"
+        );
+        await set();
+      };
+
+      // a reads `held` gone; b brings it over before a's hold lands (a is
+      // read first: both are due at once).
+      a.a1 = feedPage([goneItem("held")], "a2");
+      a.a2 = feedPage([], "a2");
+      await set();
+      later(pollMs);
+      await syncOn(
+        interleaving(holdStatement, async () => {
+          await intoB("held");
+          await overlappingRun();
+        })
+      );
+      await runs(4);
+      const afterHold = await finds(owner.userId, marks.held);
+
+      // a reads `finished` gone while b fails: held. b comes back empty,
+      // which ends the hold; b brings it over before a's end of it lands.
+      a.a2 = feedPage([goneItem("finished")], "a3");
+      a.a3 = feedPage([], "a3");
+      await set(["b"]);
+      await runs(1);
+      await set();
+      await runs(1);
+      later(pollMs);
+      await syncOn(
+        interleaving(leaveStatement, async () => {
+          await intoB("finished");
+          await overlappingRun();
+        })
+      );
+      await runs(3);
+      const afterFinish = await finds(owner.userId, marks.finished);
+
+      // A day on, a's names-only relist doesn't name `swept`; b (failing
+      // until then) brings it over before a's sweep takes it out.
+      await set(["b"]);
+      later(24 * 60 * 60 * 1000);
+      await syncOn(
+        interleaving(leaveStatement, async () => {
+          await intoB("swept");
+          await overlappingRun();
+        })
+      );
+      await runs(3);
+
+      expect({ afterHold, afterFinish, end: await found() }).toStrictEqual({
+        afterHold: true,
+        afterFinish: true,
+        end: { held: true, finished: true, swept: true, kept: true },
+      });
+    }
+  );
+
+  it(
+    "keeps each synced change as one event for each of the owner's teams of five or more, once however often its page is applied",
+    setUpTime,
+    async () => {
+      const owner = await signedInApi(idp, "user");
+      const others = await Promise.all(
+        Array.from({ length: minTeamShown - 1 }, async () => {
+          const { userId } = await signedInWithRole(idp, "user");
+          return userId;
+        })
+      );
+      // Five with the owner, and four.
+      const [five, four] = await Promise.all([
+        newTeam(owner.userId, ...others),
+        newTeam(owner.userId, ...others.slice(1)),
+      ]);
+      const note = markerOf();
+      const { connectionId } = await connectSampleFeed(owner, {
+        "": feedPage(
+          [mailItem("note", `Note ${note}`, { kind: "file" })],
+          "p1"
+        ),
+        p1: feedPage([], "p1"),
+      });
+      const eventsOf = async () =>
+        await inStoreOf("brain", (sql) =>
+          sql
+            .exec<Record<string, SqlStorageValue>>(
+              "SELECT team, step, item FROM events WHERE team IN (?, ?) ORDER BY team",
+              `team:${five}`,
+              `team:${four}`
+            )
+            .toArray()
+        );
+      later(pollMs);
+      await sync();
+      const kept = await eventsOf();
+      // The same page applied again, from the start.
+      await env.DB.prepare(
+        "UPDATE brain_sync_sources SET cursor = NULL WHERE connection_id = ?"
+      )
+        .bind(connectionId)
+        .run();
+      later(pollMs);
+      await sync();
+
+      expect({
+        kept: kept.map(({ team, step }) => ({ team, step })),
+        itemNamed: kept.every(
+          ({ item }) => typeof item === "string" && item !== "note"
+        ),
+        found: await finds(owner.userId, note),
+        again: await eventsOf(),
+      }).toStrictEqual({
+        kept: [{ team: `team:${five}`, step: "file.added" }],
+        itemNamed: true,
+        found: true,
+        again: kept,
       });
     }
   );
