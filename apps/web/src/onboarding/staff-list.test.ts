@@ -263,6 +263,9 @@ describe("the teams and people in a staff list", () => {
   });
 });
 
+/** A team's id as core keeps it: its members' team's (GRA-2055), never the list's. */
+const membersId = (team: string): string => `members-${team}`;
+
 describe("a staff list shared again", () => {
   const rows = [
     ["Name", "Email", "Team", "Team lead"],
@@ -280,12 +283,14 @@ describe("a staff list shared again", () => {
   const saved: Roster = rosterSchema.parse({
     teams: first.teams.map((team) => ({
       ...team,
+      id: membersId(team.id),
       off: team.name === "Board",
       lead: team.name === "Sales" ? idOf("Sam Visser") : team.lead,
       does: team.name === "Ops" ? "Plans the routes" : "",
     })),
     people: first.people.map((person) => ({
       ...person,
+      team: membersId(person.team),
       away: person.name === "Sam Visser",
     })),
   });
@@ -297,11 +302,17 @@ describe("a staff list shared again", () => {
       saved
     );
     expect(
-      again.teams.map((team) => [team.name, team.off, team.lead, team.does])
+      again.teams.map((team) => [
+        team.name,
+        team.id,
+        team.off,
+        team.lead,
+        team.does,
+      ])
     ).toStrictEqual([
-      ["Sales", false, idOf("Sam Visser"), ""],
-      ["Ops", false, null, "Plans the routes"],
-      ["Board", true, null, ""],
+      ["Sales", membersId(teamOf("Sales")), false, idOf("Sam Visser"), ""],
+      ["Ops", membersId(teamOf("Ops")), false, null, "Plans the routes"],
+      ["Board", membersId(teamOf("Board")), true, null, ""],
     ]);
     expect(
       again.people.map((person) => [person.name, person.away])
@@ -320,9 +331,9 @@ describe("a staff list shared again", () => {
       row[0] === "Sam Visser" ? ["Sam Visser", "sam@x.com", "Ops", ""] : row
     );
     const again = withSaved(staffListOf(moved, "Other").roster, saved);
-    expect(again.teams.find((team) => team.id === teamOf("Sales"))?.lead).toBe(
-      idOf("Lea Bakker")
-    );
+    expect(
+      again.teams.find((team) => team.id === membersId(teamOf("Sales")))?.lead
+    ).toBe(idOf("Lea Bakker"));
     expect(rosterSchema.safeParse(again).success).toBeTruthy();
   });
 

@@ -449,18 +449,49 @@ export const directoryListOf = (
 };
 
 /**
+ * `read` with each team the saved list has by name (any case) under the
+ * saved one's id: core keeps a team under its members' team's id
+ * (GRA-2055), never the id a list read here makes of its name.
+ */
+const underSavedIds = (
+  read: StaffList["roster"],
+  saved: Roster
+): StaffList["roster"] => {
+  const savedIds = new Map(
+    saved.teams.map((team) => [team.name.toLowerCase(), team.id])
+  );
+  const idOf = new Map(
+    read.teams.map((team) => [
+      team.id,
+      savedIds.get(team.name.toLowerCase()) ?? team.id,
+    ])
+  );
+  return {
+    teams: read.teams.map((team) => ({
+      ...team,
+      id: idOf.get(team.id) ?? team.id,
+    })),
+    people: read.people.map((person) => ({
+      ...person,
+      team: idOf.get(person.team) ?? person.team,
+    })),
+  };
+};
+
+/**
  * A staff list read again, with what the admin set on the one before kept
  * for the teams and people in both, by id: a team they switched off stays
  * off, someone marked away stays away, a lead they picked stays the lead
  * while still in that team, and what a team does stays said.
  */
 export const withSaved = (
-  roster: StaffList["roster"],
+  read: StaffList["roster"],
   saved: Roster | null
 ): StaffList["roster"] => {
   if (saved === null) {
-    return roster;
+    return read;
   }
+  const roster = underSavedIds(read, saved);
   const savedTeams = new Map(saved.teams.map((team) => [team.id, team]));
   const savedPeople = new Map(
     saved.people.map((person) => [person.id, person])
