@@ -1,5 +1,13 @@
-export { ContextMenu } from "./context-menu";
-export type { ContextMenuProps } from "./context-menu";
+export {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuTrigger,
+} from "./context-menu";
+export type {
+  ContextMenuContentProps,
+  ContextMenuProps,
+  ContextMenuTriggerProps,
+} from "./context-menu";
 export type {
   MenuAction,
   MenuCheckbox,

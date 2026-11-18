@@ -513,6 +513,8 @@
     oklch(0.27 0.09 168),
     oklch(0.93 0.12 165)
   );
+  --grasp-brain-heat: light-dark(oklch(0.627 0.183 36.26), oklch(0.68 0.19 38));
+  --grasp-brain-glow: oklch(0.843 0.135 83.03);
   --grasp-level-slider-warm: light-dark(
     oklch(0.74 0.15 58),
     var(--grasp-attention)
@@ -835,6 +837,8 @@
     transparent
   );
   --grasp-chat-start-gap: var(--grasp-space-8);
+  --grasp-sign-in-night: var(--grasp-light-night);
+  --grasp-sign-in-veil: oklch(0.131 0.021 174.91 / 0.32);
   --grasp-inspector-pad: var(--grasp-space-6);
   --grasp-inspector-pad-end: var(--grasp-space-20);
   --grasp-inspector-gap: var(--grasp-space-6);
@@ -1357,6 +1361,8 @@
     oklch(0.27 0.09 168),
     oklch(0.93 0.12 165)
   );
+  --grasp-brain-heat: light-dark(oklch(0.627 0.183 36.26), oklch(0.68 0.19 38));
+  --grasp-brain-glow: oklch(0.843 0.135 83.03);
   --grasp-level-slider-warm: light-dark(
     oklch(0.74 0.15 58),
     var(--grasp-attention)
@@ -1676,6 +1682,8 @@
     transparent
   );
   --grasp-chat-start-gap: var(--grasp-space-8);
+  --grasp-sign-in-night: var(--grasp-light-night);
+  --grasp-sign-in-veil: oklch(0.131 0.042 178 / 0.32);
   --grasp-inspector-pad: var(--grasp-space-6);
   --grasp-inspector-pad-end: var(--grasp-space-20);
   --grasp-inspector-gap: var(--grasp-space-6);
@@ -2195,6 +2203,8 @@
     oklch(0.27 0.09 168),
     oklch(0.93 0.12 165)
   );
+  --grasp-brain-heat: light-dark(oklch(0.627 0.183 36.26), oklch(0.68 0.19 38));
+  --grasp-brain-glow: oklch(0.843 0.135 83.03);
   --grasp-level-slider-warm: light-dark(
     oklch(0.74 0.15 58),
     var(--grasp-attention)
@@ -2505,6 +2515,8 @@
     transparent
   );
   --grasp-chat-start-gap: var(--grasp-space-8);
+  --grasp-sign-in-night: var(--grasp-light-night);
+  --grasp-sign-in-veil: oklch(0.131 0.005 75 / 0.32);
   --grasp-inspector-pad: var(--grasp-space-6);
   --grasp-inspector-pad-end: var(--grasp-space-20);
   --grasp-inspector-gap: var(--grasp-space-6);

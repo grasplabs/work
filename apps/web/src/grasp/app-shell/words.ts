@@ -32,6 +32,8 @@ export const appShellPanelWords = {
   dock: "Dock beside the page",
   /** The link to the panel's own page. */
   page: "Open as a page",
+  /** The menu the head's own controls fold into when its name would fall too short. */
+  more: "More actions",
   /** The control that takes the panel full screen over the page. */
   expand: "Full screen",
   /** The same control while it is full screen: back to where it was. */
