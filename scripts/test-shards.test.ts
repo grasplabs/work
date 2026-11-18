@@ -8,6 +8,7 @@ import path from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  aloneSeconds,
   concurrentFiles,
   installsOffline,
   projectStartSeconds,
@@ -38,8 +39,8 @@ const file = (
 
 /** Many short files and a few long ones, as a test suite has. */
 const suite: ShardFile[] = [
-  file("core fair-admission", 230),
-  file("core brain-baseline", 155),
+  file("core fair-admission", 95),
+  file("core brain-baseline", 80),
   file("core agent", 90),
   file("pages client", 180, { group: 1 }),
   file("pages stream", 75, { group: 1 }),
@@ -118,7 +119,7 @@ describe("splitting the test files between shards", () => {
     // ends with its longest file, and more end no sooner.
     const atOnce = Math.floor(concurrentFiles);
     const files = Array.from({ length: 3 * atOnce }, (_, index) =>
-      file(`core ${index}`, 100)
+      file(`core ${index}`, 90)
     );
     const shards = splitIntoShards(files, 5);
 
@@ -310,7 +311,7 @@ describe("splitting the test files between shards", () => {
 
   it("spreads short files evenly beside long ones that set every shard's time", () => {
     const long = Array.from({ length: 4 }, (_, index) =>
-      file(`long ${index}`, 100)
+      file(`long ${index}`, 90)
     );
     const short = Array.from({ length: 20 }, (_, index) =>
       file(`short-${index} file`, 2)
@@ -320,5 +321,28 @@ describe("splitting the test files between shards", () => {
     );
 
     expect(counts).toStrictEqual([6, 6, 6, 6]);
+  });
+
+  it("runs each file that takes as long as a shard may share on a shard of its own, while one is left for the rest", () => {
+    const long = [
+      file("core leaks", aloneSeconds * 3),
+      file("core interviews", aloneSeconds * 2),
+      file("core erasure", aloneSeconds),
+    ];
+    const short = Array.from({ length: 40 }, (_, index) =>
+      file(`core short-${index}`, 10)
+    );
+    // With a shard to spare, each long file alone and the short ones
+    // spread over the rest; without, the last long file beside them.
+    expect(
+      keysOf(splitIntoShards([...long, ...short], 6)).filter((shard) =>
+        shard.every((key) => !key.includes("short"))
+      )
+    ).toStrictEqual([["core leaks"], ["core interviews"], ["core erasure"]]);
+    expect(
+      splitIntoShards([...long, ...short], 3)
+        .map((shard) => shard.length)
+        .toSorted((a, b) => a - b)
+    ).toStrictEqual([1, 1, 41]);
   });
 });

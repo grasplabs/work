@@ -114,6 +114,29 @@ export const shardSeconds = (files: readonly ShardFile[]): number => {
 export const wholeProjectSeconds = 2 * projectStartSeconds;
 
 /**
+ * A file that takes at least this long runs on a shard of its own. Its
+ * time is what it took beside a shard's other files, sharing the runner's
+ * CPUs with them, and alone it takes a fraction of that: the new Brain's
+ * leak test took 224 to 376 s beside 174 other files of core's, and 72 s
+ * on a laptop alone (November 2026). Counted as running at that time
+ * beside others, it set the time every shard of its group was filled up
+ * to, so they all slowed to it again, and one ran past its step's
+ * timeout.
+ */
+export const aloneSeconds = 100;
+
+/** Whether `shard` is one file that takes `aloneSeconds` or longer, alone. */
+const isAlone = (shard: readonly ShardFile[]): boolean =>
+  shard.length === 1 && (shard[0]?.seconds ?? 0) >= aloneSeconds;
+
+/**
+ * How long the longest of `shards` takes, of those not a file alone
+ * (`aloneSeconds`): what more shards can shorten.
+ */
+const sharedSecondsOf = (shards: readonly ShardFile[][]): number =>
+  Math.max(0, ...shards.filter((shard) => !isAlone(shard)).map(shardSeconds));
+
+/**
  * `files` in the units the split places: a small project's files
  * together (`wholeProjectSeconds`), every other file on its own.
  */
@@ -170,11 +193,26 @@ export const spreadOver = (
     .toSorted(
       (a, b) => workOf(b) - workOf(a) || byKey(keyOfUnit(a), keyOfUnit(b))
     );
-  for (const unit of longestFirst) {
+  // Each long file to a shard of its own while one is left for the rest
+  // (`aloneSeconds`), longest first.
+  let alone = 0;
+  const others = longestFirst.filter((unit) => {
+    const free = shards.findIndex((shard) => shard.length === 0);
+    const lone = isAlone(unit) && free !== -1 && alone + 1 < count;
+    if (lone) {
+      shards[free]?.push(...unit);
+      alone += 1;
+    }
+    return !lone;
+  });
+  for (const unit of others) {
     let best = 0;
     let bestSeconds = Number.POSITIVE_INFINITY;
     let bestWork = Number.POSITIVE_INFINITY;
     for (const [index, shard] of shards.entries()) {
+      if (isAlone(shard)) {
+        continue;
+      }
       const seconds = shardSeconds([...shard, ...unit]);
       const work = workOf(shard);
       if (
@@ -227,17 +265,21 @@ export const splitIntoShards = (
   const shardsOf = new Map(
     order.map((group) => [group, spreadOver(groups.get(group) ?? [], 1)])
   );
-  const longestOf = (shards: readonly ShardFile[][]): number =>
-    Math.max(...shards.map(shardSeconds));
-  /** The soonest a group's shards can end, however many: its longest unit's. */
+  /**
+   * The soonest a group's shards can end, however many: its longest
+   * unit's, of those that don't run alone.
+   */
   const floorOf = new Map(
-    order.map((group) => [group, longestOf(unitsOf(groups.get(group) ?? []))])
+    order.map((group) => [
+      group,
+      sharedSecondsOf(unitsOf(groups.get(group) ?? [])),
+    ])
   );
   for (let left = count - order.length; left > 0; left -= 1) {
     let slowest: number | undefined;
     let slowestSeconds = Number.NEGATIVE_INFINITY;
     for (const group of order) {
-      const seconds = longestOf(shardsOf.get(group) ?? []);
+      const seconds = sharedSecondsOf(shardsOf.get(group) ?? []);
       const shortens = seconds > (floorOf.get(group) ?? 0);
       if (shortens && seconds > slowestSeconds) {
         slowest = group;

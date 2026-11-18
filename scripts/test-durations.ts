@@ -1,10 +1,12 @@
 // Records how long each test file takes, for the split between CI's
 // shards (scripts/test-shards.ts), from the shards' test-progress
-// artifacts (scripts/stall-reporter.ts writes them):
+// artifacts (scripts/stall-reporter.ts writes them), of the merge
+// queue's last passing runs, which run every shard:
 //
-//   gh run download <run> -n test-progress-1-of-6 -D runs/<run>-1
-//   ...
-//   vp run test:durations runs/*/test-progress.log
+//   gh run list --workflow ci.yml --event merge_group --status success \
+//     --limit 5 --json databaseId -q '.[].databaseId' |
+//     xargs -I{} gh run download {} -p 'test-progress-*' -D runs/{}
+//   vp run test:durations runs/*/*/test-progress.log
 //
 // Several runs make it steadier: each file takes the median of the runs
 // it passed in. A run where a file failed a test gives it no time: a test

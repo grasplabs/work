@@ -261,11 +261,13 @@ jobs:
       # one before had ended, up to two minutes a group. Six shards took
       # 14 to 16 minutes (October 2026, GRA-1094). No shard's time can be
       # shorter than its longest file's, so split a file that sets it
-      # rather than adding shards. Refresh the durations from the shards'
-      # test-progress artifacts when the split drifts
-      # (scripts/test-durations.ts): of the brain's two shards, balanced on
-      # paper, one ran 161 s of files and the other 134 s on durations a
-      # month old (November 2026).
+      # rather than adding shards. A file of 100 s or more runs on a shard
+      # of its own (scripts/test-shards.ts, `aloneSeconds`): packed beside
+      # others, the new Brain's leak test slowed to six minutes and its
+      # shard ran out of this step (November 2026). Refresh the durations
+      # from the shards' test-progress artifacts when the split drifts
+      # (scripts/test-durations.ts): durations a day old put that test at
+      # a third of what it took.
       # A failed test is tried once more: a third of pull request runs
       # failed, most often on a few flaky files, each a whole re-run of CI
       # (October 2026). The flaky
