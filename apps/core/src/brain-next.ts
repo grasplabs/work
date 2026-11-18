@@ -324,11 +324,12 @@ const kindsWithoutColon = <const K extends string>(
 // `capture`: what a chat's agent read through its person's own connection
 // (connection-capture.ts, GRA-1730), in their own store alone.
 // `interview`: a person's interview, theirs alone, in their own store;
-// `claim`: what five or more people of a staff-list team said in theirs,
-// readable by that team (onboarding/new-brain.ts, GRA-1790, GRA-1741).
+// `claim`: how a staff-list team works, as its people shared it in theirs,
+// readable by every member as themselves (onboarding/new-brain.ts,
+// GRA-1790, GRA-1741, GRA-1987).
 // `drawing`: a drawing of a staff-list team's piece of work, only what
-// five or more of its people told, readable by every member as themselves
-// (onboarding/new-brain.ts, GRA-1748).
+// its people are checked to have told, readable by every member as
+// themselves (onboarding/new-brain.ts, GRA-1748).
 // `kickoff`: what every member reads of the onboarding's kickoff, readable
 // by everyone (onboarding/new-brain.ts, GRA-1748).
 // `roster`: the company's confirmed teams, as the admin described them,
@@ -1140,7 +1141,7 @@ const isUsableVector = (vector: readonly number[]): boolean =>
  * which counts it for staff; recall goes ahead by words and exact parts.
  */
 const meaningOf = async (
-  env: Pick<Env, "EMBEDDER" | "DURABLE_OBJECT_JURISDICTION">,
+  env: Pick<Env, "EMBEDDER" | "MODEL_FILES" | "DURABLE_OBJECT_JURISDICTION">,
   question: string
 ): Promise<Pick<RecallRequest, "meaning" | "withoutMeaning">> => {
   if (question.trim() === "") {
@@ -1149,6 +1150,13 @@ const meaningOf = async (
   const embedded = await questionVectorOf(env, question);
   if (embedded.kind === "vector" && isUsableVector(embedded.vector)) {
     return { meaning: { model: embedded.model, vector: embedded.vector } };
+  }
+  if (embedded.kind === "files_missing") {
+    // Every recall goes so until the files are there: the clock says that
+    // once per isolate (`warmQuestionEmbedder`), and a deployment without
+    // them fails its probe, so a warning per recall would say nothing new.
+    // Staff still count each one.
+    return { withoutMeaning: "failed" };
   }
   const reason = embedded.kind === "none" ? embedded.reason : "unusable";
   log.warn("brain.recall.without_meaning", { reason });
@@ -1176,7 +1184,7 @@ const reachOf = ({ personal, company = false }: Recall): Reach => {
  * `company`, as the company and, of `teams`, those they are in now.
  */
 const recallRequestAs = async (
-  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER">,
+  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER" | "MODEL_FILES">,
   personId: string,
   recall: Recall
 ): Promise<RecallRequest> => {
@@ -1350,7 +1358,9 @@ const usedOf = async (
  * store found and the pack as the stores' contract gives it.
  */
 const packedAs = async (
-  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER" | "WORKSPACES">,
+  env: BrainEnv &
+    ReaderEnv &
+    Pick<Env, "EMBEDDER" | "MODEL_FILES" | "WORKSPACES">,
   personId: string,
   recall: Recall
 ): Promise<{
@@ -1410,7 +1420,9 @@ const packedAs = async (
  * nor handed to the model, code or a page.
  */
 export const recallOwnedAs = async (
-  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER" | "WORKSPACES">,
+  env: BrainEnv &
+    ReaderEnv &
+    Pick<Env, "EMBEDDER" | "MODEL_FILES" | "WORKSPACES">,
   personId: string,
   recall: Recall
 ): Promise<{ pack: RecalledPack; fromOwn: boolean }> => {
@@ -1442,7 +1454,9 @@ export const recallOwnedAs = async (
  * (`recallPassagesAs`).
  */
 export const recallAs = async (
-  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER" | "WORKSPACES">,
+  env: BrainEnv &
+    ReaderEnv &
+    Pick<Env, "EMBEDDER" | "MODEL_FILES" | "WORKSPACES">,
   personId: string,
   recall: Recall
 ): Promise<RecalledPack> => {
@@ -1459,7 +1473,7 @@ export const recallAs = async (
  * SDK's `BrainPack`).
  */
 export const recallPassagesAs = async (
-  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER">,
+  env: BrainEnv & ReaderEnv & Pick<Env, "EMBEDDER" | "MODEL_FILES">,
   personId: string,
   recall: Recall
 ): Promise<RecalledPassages> => {

@@ -111,7 +111,8 @@ const shownOf = (brain: Workspace, teamId: string) => {
       status: workflow?.status,
       steps: workflow?.baseline.steps.map(({ text }) => text),
       minutes: workflow?.baseline.steps[0]?.minutes,
-      people: drawing?.people,
+      // No count of people, in it or in any of its numbers (GRA-1987).
+      counted: JSON.stringify(drawing ?? {}).includes('"people"'),
       volumes: drawing?.volumes,
       takes: drawing?.takes,
       open: drawing?.open,
@@ -154,13 +155,13 @@ describe(
         team: "Ops",
         source: {
           title: "Interviews with Ops",
-          how: "8 people",
+          // Never how many were interviewed (GRA-1987).
+          how: undefined,
           kind: "interview",
           who: null,
         },
         sources: 1,
-        // The five who said tickets come in through Zendesk, put together;
-        // what one of them said alone stays out.
+        // What they said of Zendesk, put together.
         statements: [
           {
             kind: "tool",
@@ -172,28 +173,22 @@ describe(
           name: "handling new tickets",
           local: "nieuwe tickets afhandelen",
           status: "drawn",
-          // What five told; the step only Max told stays out.
-          steps: ["Open the ticket.", "Send the answer."],
+          // What they told, the step only Max told too, its name out.
+          steps: [
+            "Open the ticket.",
+            "Ask someone when the customer number is missing.",
+            "Send the answer.",
+          ],
           // The median of the five's own normal minutes, never one of theirs
           // as a lowest or highest.
           minutes: { quickest: 4, normal: 4, longest: 4, basis: "estimated" },
-          people: 7,
-          volumes: [
-            {
-              of: "me",
-              per: "week",
-              // Medians of the five's quiet and busy weeks.
-              low: 32,
-              high: 52,
-              people: 5,
-              basis: "estimated",
-            },
-          ],
+          counted: false,
+          // Each gave a count of their own: never shown.
+          volumes: [],
           takes: {
             unit: "minutes",
             quickest: 3,
             longest: 45,
-            people: 5,
             basis: "estimated",
           },
           // Written for the next interviews from what few said: never the brain's.
@@ -353,7 +348,7 @@ describe(
     it("counts a week's interviews only of people still taking part, and never moves a week a withdrawal took below five into another", async () => {
       const store = onboardingStore(env);
       // Eight tell their own work, and Lea leads: one of them and Lea
-      // going still leaves seven who tell, so the team's interviews show.
+      // going still leaves others who tell, so the team's interviews show.
       const ids = await eightTeam();
       await mapped(ids);
       await sevenTold(ids);
@@ -388,7 +383,7 @@ describe(
       });
     });
 
-    it("asks no model for a team that can't show its results: under seven who tell, switched off, or switched on again but waiting for the admin", async () => {
+    it("asks no model for a team that can't show its results: nobody but its lead told it, switched off, or switched on again but waiting for the admin", async () => {
       const store = onboardingStore(env);
       const ids = await sevenTeam();
       await mapped(ids);
@@ -413,14 +408,12 @@ describe(
           async () => await store.drawNext()
         );
       };
-      // Six tell their own work (Lea leads: not counted), five of them of
-      // Zendesk alike.
+      // Only Lea told (she leads: not counted).
+      const none = await intakeNow();
+      // Six tell their work: the team's results may show, and its intake asks.
       await told(ids);
       await answering([ticketsReply(ids)], async () => await store.drawNext());
-      const six = await intakeNow();
-      // Sam too: seven, the team's results may show, and its intake asks.
-      await samTold(["Answers the phone."]);
-      const seven = await intakeNow();
+      const telling = await intakeNow();
       // Switched off, confirmed; then on again in a save not confirmed.
       const view = await store.view();
       const roster = view.roster ?? { teams: [], people: [] };
@@ -432,23 +425,23 @@ describe(
         },
         by
       );
-      await samTold(["Answers the phone.", "Logs the call."], 1);
+      await samTold(["Answers the phone.", "Logs the call."]);
       const off = await intakeNow();
       await store.saveRoster(roster, by, { confirmed: false });
       await samTold(
         ["Answers the phone.", "Logs the call.", "Closes the call."],
-        2
+        1
       );
       const waiting = await intakeNow();
       const due = `brain:${ids.team}`;
       expect({
-        six,
-        seven: { ...seven, asked: seven.asked > 0 },
+        none,
+        telling: { ...telling, asked: telling.asked > 0 },
         off,
         waiting,
       }).toStrictEqual({
-        six: { gave: due, asked: 0, noted: [] },
-        seven: {
+        none: { gave: due, asked: 0, noted: [] },
+        telling: {
           gave: due,
           asked: true,
           noted: ["statement", "workflow", "workflowVersion"],
@@ -458,36 +451,33 @@ describe(
       });
     });
 
-    it("shows a member a team's name, its interviews and their weeks only while its results may show: not at six who tell, nor once it is switched off or waiting for the admin", async () => {
+    it("shows a member a team's name, its interviews and their weeks only while its results may show: not while nobody but its lead told it, nor once it is switched off or waiting for the admin", async () => {
       const store = onboardingStore(env);
       const ids = await sevenTeam();
       await mapped(ids);
-      await told(ids);
       const member = await signedInApi(idp, "user");
       const teamId = `team-${ids.team}`;
       const shown = async () => {
         const brain = await member.api.brain.read();
         return {
           team: brain.teams.some(({ id }) => id === teamId),
-          interviews:
-            brain.sources.find(
-              ({ teamIds }) => teamIds?.includes(teamId) === true
-            )?.how ?? null,
+          interviews: brain.sources.some(
+            ({ teamIds }) => teamIds?.includes(teamId) === true
+          ),
           weeks: brain.interviewWeeks.reduce(
             (sum, { interviews }) => sum + interviews,
             0
           ),
         };
       };
-      // Six tell their own work, and the team's intake runs.
+      // Only Lea told, and the team's intake runs.
+      await intake(ids);
+      const none = await shown();
+      // Six tell their own work.
+      await told(ids);
       await answering([ticketsReply(ids)], async () => await store.drawNext());
       await intake(ids);
       const six = await shown();
-      // Sam too: seven.
-      await agree(ids.sam, [fact("s1", "step", "Answers the phone.")]);
-      await answering([ticketsReply(ids)], async () => await store.drawNext());
-      await intake(ids);
-      const seven = await shown();
       // The admin switches the team off, then on again in a save not
       // confirmed, then confirms it.
       const view = await store.view();
@@ -507,17 +497,18 @@ describe(
       const confirmed = await shown();
       await intake(ids);
       const again = await shown();
-      expect({ six, seven, off, waiting, confirmed, again }).toStrictEqual({
+      expect({ none, six, off, waiting, confirmed, again }).toStrictEqual({
         // The roster's team, as the admin confirmed it, without its
         // interviews.
-        six: { team: true, interviews: null, weeks: 0 },
-        seven: { team: true, interviews: "8 people", weeks: 8 },
-        off: { team: false, interviews: null, weeks: 0 },
-        waiting: { team: false, interviews: null, weeks: 0 },
+        none: { team: true, interviews: false, weeks: 0 },
+        // Lea and the six, in a week of seven.
+        six: { team: true, interviews: true, weeks: 7 },
+        off: { team: false, interviews: false, weeks: 0 },
+        waiting: { team: false, interviews: false, weeks: 0 },
         // A member reads the interviews as what its claims cite: back
         // once its next intake notes them again.
-        confirmed: { team: true, interviews: null, weeks: 8 },
-        again: { team: true, interviews: "8 people", weeks: 8 },
+        confirmed: { team: true, interviews: false, weeks: 7 },
+        again: { team: true, interviews: true, weeks: 7 },
       });
     });
 
@@ -580,7 +571,7 @@ describe(
         };
       };
       const safe = {
-        listed: { how: "8 people" },
+        listed: { how: undefined },
         turns: undefined,
         inListing: undefined,
         statements: [],
