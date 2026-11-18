@@ -207,7 +207,7 @@ export const AppIntegrations = ({
                 line.why.length === 1 && line.why[0] === "added";
               return (
                 <Item key={line.key} size="xs">
-                  <ItemMedia>
+                  <ItemMedia align="center">
                     <ProviderMark
                       id={line.ref.id}
                       logo={line.logo}
