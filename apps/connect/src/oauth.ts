@@ -412,6 +412,20 @@ const isDuplicate = (error: unknown): boolean =>
 /** What a connection keeps of its sign-in: tokens or a key, sealed. */
 type Kept = Parameters<typeof firstTokens>[2];
 
+/**
+ * The address a connection counts as confirmed when it is connected: the
+ * account's, as its provider's checked ID token gave it, for a provider
+ * that confirms addresses at each renewal (`confirmAddress`); none for any
+ * other.
+ */
+const confirmedAddressOf = (
+  provider: ProviderConfig,
+  account: ProviderAccount
+): string | null =>
+  provider.kind === "oauth" && provider.confirmAddress !== undefined
+    ? (account.email?.toLowerCase() ?? null)
+    : null;
+
 /** What a connection is connected for: its scope, and its tenant if pinned. */
 type Target = Pick<FlowRow, "scope" | "tenant">;
 
@@ -455,6 +469,7 @@ const storeConnection = async (
       accountId: account.id,
       accountName: account.name,
       accountEmail: account.email?.toLowerCase() ?? null,
+      verifiedEmail: confirmedAddressOf(provider, account),
       accountAddresses: addresses?.receives ?? null,
       accountSenders: addresses?.sends ?? null,
       connectedBy: person.userId,
@@ -538,6 +553,7 @@ const reconnect = async (
           tenant: tenantOf(flow),
           accountName: account.name,
           accountEmail: account.email?.toLowerCase() ?? null,
+          verifiedEmail: confirmedAddressOf(provider, account),
           // A lookup that failed keeps what was read before.
           ...(addresses === undefined
             ? {}
@@ -894,6 +910,7 @@ const replaceKey = async (
         .set({
           accountName: account.name,
           accountEmail: account.email?.toLowerCase() ?? null,
+          verifiedEmail: confirmedAddressOf(provider, account),
           updatedAt: now,
         })
         .where(stillActive),

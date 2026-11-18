@@ -9,6 +9,7 @@ import {
 import type { Outbox } from "./audit-outbox.ts";
 import { loneNotesPerDrain } from "./brain-hand-overs.ts";
 import { eraseCapturesOfDisconnects } from "./capture-erasures.ts";
+import { claimOnAddressChanges } from "./source-readers.ts";
 
 // The drains that reach connect's outbox (audit-outbox.ts), each with
 // what must be done with connect's events before they leave it: the
@@ -21,7 +22,16 @@ import { eraseCapturesOfDisconnects } from "./capture-erasures.ts";
 const connectOf = (env: Env, besides?: Outbox["appended"]): Outbox =>
   connectOutbox(
     env,
-    async (events) => await eraseCapturesOfDisconnects(env, events),
+    async (events) => {
+      const [erasing, claiming] = await Promise.all([
+        eraseCapturesOfDisconnects(env, events),
+        claimOnAddressChanges(env, events),
+      ]);
+      return {
+        ids: [...erasing.ids, ...claiming.ids],
+        errors: [...erasing.errors, ...claiming.errors],
+      };
+    },
     besides
   );
 

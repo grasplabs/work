@@ -64,6 +64,15 @@ export const connections = sqliteTable(
      */
     accountEmail: text("account_email"),
     /**
+     * The account's address as its provider confirmed it, when connected
+     * and again at each renewal (providers.ts `confirmAddress`), for the
+     * providers whose reader lists name accounts by address (Google's);
+     * null when the last renewal confirmed none, and for every other
+     * provider. What core counts a person in a copied reader list by
+     * (`personalAccounts`).
+     */
+    verifiedEmail: text("verified_email"),
+    /**
      * The other addresses the account's mailbox receives mail at (its
      * primary address and SMTP aliases), as its provider said when it was
      * connected (account-addresses.ts); null when never read.

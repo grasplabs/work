@@ -336,24 +336,71 @@ interface RefreshContext {
 }
 
 /**
+ * The address the provider confirms for the connection's account at this
+ * renewal, and the one it held before, for a provider that confirms
+ * addresses (providers.ts `confirmAddress`); `undefined` for any other.
+ */
+const addressAt = async (
+  { env, provider, client, tenant }: RefreshContext,
+  connectionId: string,
+  minted: TokenSet
+): Promise<{ before: string | null; now: string | null } | undefined> => {
+  if (provider.confirmAddress === undefined) {
+    return undefined;
+  }
+  const held = await drizzle(env.DB)
+    .select({
+      accountId: connections.accountId,
+      verifiedEmail: connections.verifiedEmail,
+    })
+    .from(connections)
+    .where(eq(connections.id, connectionId))
+    .get();
+  if (held === undefined) {
+    return undefined;
+  }
+  return {
+    before: held.verifiedEmail,
+    now:
+      held.accountId === null
+        ? null
+        : await provider.confirmAddress(
+            minted,
+            tenant,
+            client.id,
+            held.accountId
+          ),
+  };
+};
+
+/**
  * Stores what a refresh got, only if `row` is still the current
  * generation of a connection not disconnected. If a disconnect came first
  * (the row is gone, or the connection disconnected), the minted tokens
  * are revoked (threat model CN14), and the call goes no
  * further; if another refresh did (its lease had lapsed), they are dropped
  * and the stored ones stand.
+ *
+ * With the address the provider confirmed now (`address`), in the same
+ * transaction: the connection's confirmed address, and, when it changed,
+ * one `connection.account_changed` event, which core drains to claim the
+ * reader tokens of the address now confirmed (core's source-readers.ts).
+ * An address the renewal didn't confirm counts as none, so an address
+ * given to someone else since never stays the old account's.
  */
 const storeRefreshed = async (
   { env, vault, provider, client }: RefreshContext,
   row: TokenRow,
   current: StoredOAuthTokens,
-  minted: TokenSet
+  minted: TokenSet,
+  address?: { before: string | null; now: string | null }
 ): Promise<string | undefined> => {
   const next: StoredOAuthTokens = {
     accessToken: minted.accessToken,
     refreshToken: minted.refreshToken ?? current.refreshToken,
   };
-  const stored = await drizzle(env.DB)
+  const db = drizzle(env.DB);
+  const tokensUpdate = db
     .update(connectionTokens)
     .set({
       sealed: await sealTokens(vault, row.connectionId, next),
@@ -363,14 +410,47 @@ const storeRefreshed = async (
       grantedScopes: minted.scope ?? row.grantedScopes,
       updatedAt: new Date(),
     })
-    .where(
-      and(
-        unchanged(row),
-        sql`EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${row.connectionId} AND ${connections.status} <> 'disconnected')`
-      )
-    )
-    .returning({ connectionId: connectionTokens.connectionId });
-  if (stored.length > 0) {
+    .where(and(unchanged(row), notDisconnected(row)));
+  let stored = false;
+  if (address === undefined || address.now === address.before) {
+    const done = await tokensUpdate.returning({
+      connectionId: connectionTokens.connectionId,
+    });
+    stored = done.length > 0;
+  } else {
+    // The address first, while the tokens' row is still the one read.
+    stored = await recordEventIf(
+      env,
+      {
+        actor: { type: "system" },
+        action: "connection.account_changed",
+        target: { type: "connection", id: row.connectionId },
+        detail: { provider: provider.id, confirmed: address.now !== null },
+      },
+      {
+        from: connectionTokens,
+        where: sql`${unchanged(row)} AND ${notDisconnected(row)}`,
+      },
+      [
+        db
+          .update(connections)
+          .set({ verifiedEmail: address.now, updatedAt: new Date() })
+          .where(
+            and(
+              eq(connections.id, row.connectionId),
+              exists(
+                db
+                  .select()
+                  .from(connectionTokens)
+                  .where(and(unchanged(row), notDisconnected(row)))
+              )
+            )
+          ),
+        tokensUpdate,
+      ]
+    );
+  }
+  if (stored) {
     return next.accessToken;
   }
   if (
@@ -438,7 +518,13 @@ const refreshUnderLease = async (
       }
       throw connectErrors.create("connect.connection_inactive");
     }
-    return await storeRefreshed(context, row, current, minted);
+    return await storeRefreshed(
+      context,
+      row,
+      current,
+      minted,
+      await addressAt(context, row.connectionId, minted)
+    );
   } catch (error) {
     await releaseLease(env.DB, row);
     throw error;

@@ -20,11 +20,16 @@ import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import worker from "../src/index.ts";
 import { objectsHolding, tablesHolding } from "./brain-next-traces.ts";
-import { consentCode } from "./connect-providers.ts";
+import { consentCode, googleAddressUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { noProducers } from "./no-producers.ts";
-import { acmeTenant, entraClient, otherTenant } from "./sign-in-config.ts";
+import {
+  acmeTenant,
+  entraClient,
+  googleClient,
+  otherTenant,
+} from "./sign-in-config.ts";
 import {
   coreOrigin,
   entraPerson,
@@ -39,6 +44,7 @@ import {
   whoami,
   withSignIn,
 } from "./sign-in.ts";
+import { connectDb, testBinding } from "./test-env.ts";
 
 // Readers copied from where an item lives (GRA-1761; the threat model is
 // on the issue): who may read it is the list the system gives, and core
@@ -216,6 +222,45 @@ const holdingBrainErasures = async (held: boolean): Promise<void> => {
       );
     }
   );
+};
+
+/** The providers Worker's fake of Google: tells it the address it gives `subject` from now on. */
+const googleGives = async (
+  subject: string,
+  email: string | null
+): Promise<void> => {
+  const providers = testBinding("CONNECT_PROVIDERS");
+  if (
+    typeof providers !== "object" ||
+    providers === null ||
+    !("fetch" in providers) ||
+    typeof providers.fetch !== "function"
+  ) {
+    throw new TypeError("Expected the providers Worker");
+  }
+  await Reflect.apply(providers.fetch, providers, [
+    googleAddressUrl,
+    { method: "POST", body: JSON.stringify({ subject, email }) },
+  ]);
+};
+
+/** Ends `connectionId`'s access token and renews it, as its next use does; then the drain runs. */
+const renewed = async (connectionId: string): Promise<void> => {
+  await connectDb()
+    .prepare(
+      "UPDATE connection_tokens SET access_expires_at = 0 WHERE connection_id = ?"
+    )
+    .bind(connectionId)
+    .run();
+  await outcome(
+    env.CONNECT.readSyncPage({
+      connectionId,
+      feed: "gmail",
+      place: "own",
+      cursor: null,
+    })
+  );
+  await runMinuteTasks();
 };
 
 const readersOf = (...readers: SourceReader[]): SourceReaders => ({
@@ -852,6 +897,130 @@ describe("readers copied from the source", () => {
       );
 
       await expect(finds(newcomer, list, marker)).resolves.toBeFalsy();
+    }
+  );
+
+  it(
+    "stops counting a connected Google address once a renewal confirms another, and counts the new one",
+    setUpTime,
+    async () => {
+      const alice = await microsoftMember();
+      const { id: connectionId, account: oldAddress } =
+        await connectedGoogle(alice);
+      // Shared with the address her connection was made under, which an
+      // admin then gives someone new.
+      const oldMarker = uniqueWord();
+      const sharedWithOld = await sharedItem(oldMarker, readersOf(oldAddress));
+      const before = await finds(alice.userId, sharedWithOld, oldMarker);
+      const [local = ""] = alice.email.split("@");
+      const renamed = `${local}-renamed@acme.test`;
+      await googleGives(local, renamed);
+      await renewed(connectionId);
+      const newMarker = uniqueWord();
+      const sharedWithNew = await sharedItem(
+        newMarker,
+        readersOf({
+          kind: "account",
+          provider: "google",
+          tenant: "acme.test",
+          account: renamed,
+        })
+      );
+
+      expect({
+        before,
+        afterOld: await finds(alice.userId, sharedWithOld, oldMarker),
+        afterNew: await finds(alice.userId, sharedWithNew, newMarker),
+      }).toStrictEqual({ before: true, afterOld: false, afterNew: true });
+    }
+  );
+
+  it(
+    "counts no connected Google address a renewal couldn't confirm",
+    setUpTime,
+    async () => {
+      const alice = await microsoftMember();
+      const { id: connectionId, account } = await connectedGoogle(alice);
+      const marker = uniqueWord();
+      const shared = await sharedItem(marker, readersOf(account));
+      const before = await finds(alice.userId, shared, marker);
+      const [local = ""] = alice.email.split("@");
+      // Renewed with no ID token, and no userinfo answer.
+      await googleGives(local, null);
+      await renewed(connectionId);
+
+      expect({
+        before,
+        after: await finds(alice.userId, shared, marker),
+      }).toStrictEqual({ before: true, after: false });
+    }
+  );
+
+  it(
+    "counts a Google sign-in only under the hosted domain it proved, and under one the config moves to only once signed in through it",
+    setUpTime,
+    async () => {
+      const claims = googlePerson();
+      const { userId } = await whoami(await signedIn(idp, "google", claims));
+      const accountMarker = uniqueWord();
+      const byAccount = await sharedItem(
+        accountMarker,
+        readersOf({
+          kind: "account",
+          provider: "google",
+          tenant: "acme.test",
+          account: String(claims.email),
+        })
+      );
+      const tenantMarker = uniqueWord();
+      const byTenant = await sharedItem(
+        tenantMarker,
+        readersOf({
+          kind: "tenant",
+          provider: "google",
+          tenant: "elsewhere.test",
+        })
+      );
+      const movedEnv = withSignIn({
+        google: { hostedDomain: "elsewhere.test", clientId: googleClient.id },
+      });
+      const findsWith = async (
+        coreEnv: Env,
+        source: SourceRef,
+        marker: string
+      ) => {
+        const { items } = await recallAs(coreEnv, userId, {
+          personal: true,
+          question: marker,
+          budget: { tokens: recallBudgetMax },
+        });
+        return items.some(({ source: found }) => found.id === source.id);
+      };
+      const before = await findsWith(env, byAccount, accountMarker);
+      const moved = {
+        account: await findsWith(movedEnv, byAccount, accountMarker),
+        tenant: await findsWith(movedEnv, byTenant, tenantMarker),
+      };
+      // Signed in through the new hosted domain, the same account.
+      await signedIn(
+        idp,
+        "google",
+        { ...claims, hd: "elsewhere.test" },
+        { coreEnv: movedEnv }
+      );
+
+      expect({
+        before,
+        moved,
+        signedIn: {
+          account: await findsWith(movedEnv, byAccount, accountMarker),
+          tenant: await findsWith(movedEnv, byTenant, tenantMarker),
+        },
+      }).toStrictEqual({
+        before: true,
+        moved: { account: false, tenant: false },
+        signedIn: { account: true, tenant: true },
+      });
     }
   );
 
