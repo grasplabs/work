@@ -1,5 +1,3 @@
-// The kit's mark: Grasp UI has no Grasp mark yet (the sidebar's is the same).
-import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import * as stylex from "@stylexjs/stylex";
@@ -7,6 +5,8 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 
 import { Heading } from "../grasp/heading/index.ts";
+import { iconVars } from "../grasp/icons/icon.stylex.ts";
+import { BrandGrasp, Icon } from "../grasp/icons/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { bodyOf, PlainMarkdown } from "../knowledge/markdown.tsx";
 import { FigureTiles } from "./figure-tiles.tsx";
@@ -44,9 +44,9 @@ const styles = stylex.create({
     alignItems: "center",
     gap: grasp.space2,
     fontWeight: grasp.weightMedium,
+    // The mark about as tall as a line of its words: it sits in the icon's square.
+    [iconVars.size]: grasp.iconMd,
   },
-  // The mark at the head, as tall as a line of its words.
-  mark: { height: grasp.iconSm, width: "auto" },
   // The frame it prints from: on the page, never seen nor pressed.
   frame: {
     position: "fixed",
@@ -130,7 +130,7 @@ const PrintPage = ({
   // `page-export` (styles.css): the A4 page and its headings, for print.
   <main className={`page-export ${stylex.props(styles.page).className ?? ""}`}>
     <header {...stylex.props(styles.head)}>
-      <GraspMark {...stylex.props(styles.mark)} />
+      <Icon icon={BrandGrasp} />
       Grasp
     </header>
     <Heading level={1}>{title}</Heading>
