@@ -98,7 +98,8 @@ export const intoMembersTeams = async (
 ): Promise<{ roster: Roster; minted: Set<string> }> => {
   const db = drizzle(env.DB);
   // The members' teams first, then the store's: a team deleted in between
-  // is missing from the first read and so never kept by the second.
+  // is missing from the first read and so never kept by the second. No
+  // test can pin this order; the insert's own guard below is what holds.
   const [existing, madeBefore] = await db.batch([
     db
       .select({ id: teams.id, name: teams.name })

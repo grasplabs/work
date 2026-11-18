@@ -7,6 +7,7 @@ import { z } from "zod";
 import { appHost } from "../src/durable-objects.ts";
 import { newTeam } from "./admin-teams.ts";
 import { requestGranted } from "./apps.ts";
+import { landingAt } from "./d1-landing.ts";
 import { apiOf, referenceTo } from "./notes-client-app.ts";
 import {
   mockSessionIdp,
@@ -75,6 +76,66 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
       userId: member.userId,
     });
 
+    await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
+  });
+
+  it("clears the page of someone the staff list takes out of the team the App is shared with, though another confirm put them there just before", async () => {
+    const opened = await openedApp();
+    const admin = await personApi("admin");
+    const ann = await personApi("user");
+    const tag = unique();
+    const names = ["A", "B", "C"].map((letter) => `${letter} ${tag}`);
+    const email = z.string().parse(ann.person.email);
+    const { roster: first } = await admin.api.onboarding.confirmRoster({
+      teams: names.map((name, index) => ({
+        id: `t${index}`,
+        name,
+        lead: null,
+      })),
+      people: [{ id: "ann", name: "Ann", email, team: "t0" }],
+    });
+    const ids = names.map(
+      (name) => first?.teams.find((team) => team.name === name)?.id ?? ""
+    );
+    const listed = (annIn: number) => ({
+      teams: names.map((name, index) => ({
+        id: ids[index] ?? "",
+        name,
+        lead: null,
+      })),
+      people: [{ id: "ann", name: "Ann", email, team: ids[annIn] ?? "" }],
+    });
+    await admin.api.apps.members.add(opened.app, {
+      type: "team",
+      id: ids[2] ?? "",
+      role: "user",
+    });
+    // This confirm read Ann in A and moves her to B. Just before its
+    // writes, another moved her to C, the App's team, and she opened it.
+    let follower: Awaited<ReturnType<typeof followedList>> | undefined;
+    const landing = landingAt(
+      /insert into "team_primaries"/iu,
+      "before",
+      async () => {
+        await admin.api.onboarding.confirmRoster(listed(2));
+        const { lease } = await ann.api.pages.open(opened.app);
+        follower = await followedList(opened, ann.api.pages, lease);
+      }
+    );
+    const { core } = await openRpc(admin.session, {
+      coreEnv: landing.coreEnv,
+    });
+    try {
+      using session = core.authenticate();
+      await session.onboarding.confirmRoster(listed(1));
+    } finally {
+      core[Symbol.dispose]();
+    }
+
+    expect(landing.landed()).toBeTruthy();
+    if (follower === undefined) {
+      throw new Error("Ann's page never opened");
+    }
     await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
   });
 
