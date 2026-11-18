@@ -38,9 +38,7 @@ import { inList } from "./db/d1.ts";
 // A granted source that doesn't resolve (connect doesn't know the
 // connection) fails closed: nobody reads it but the App's owner and
 // admins, who aren't checked, since what the App read of it can't be
-// placed. So does a Knowledge collection an App was granted before the
-// Brain replaced Knowledge (`collection:<id>`): the App may hold what it
-// read there, and nothing can say who may read that now.
+// placed.
 //
 // An App's code is treated as free of provenance: every file is taken
 // to hold no data, which nothing checks: builders must not put data into
@@ -468,9 +466,6 @@ export const sourcesOfApps = async (
     isNotNull(permissions.grantedAt),
     or(
       eq(permissions.objectType, "connection"),
-      // A Knowledge collection, a kind the platform no longer serves:
-      // unresolved (above), whatever its actions.
-      sql`${permissions.objectType} = 'collection'`,
       // A grant to read the Brain that names teams (only an App's does).
       and(eq(permissions.objectType, "platform"), isNotNull(permissions.teams))
     )
@@ -502,17 +497,13 @@ export const sourcesOfApps = async (
               sourceGrant
             )
           );
-  /** What one node was granted: connections, teams, and what can't be placed. */
+  /** What one node was granted: connections and teams. */
   interface Granted {
     connected: Set<string>;
-    unplaced: Set<string>;
     teams: Set<string>;
   }
   const own = new Map<string, Granted>(
-    all.map((node) => [
-      node,
-      { connected: new Set(), unplaced: new Set(), teams: new Set() },
-    ])
+    all.map((node) => [node, { connected: new Set(), teams: new Set() }])
   );
   const add = (
     of: Granted | undefined,
@@ -522,10 +513,8 @@ export const sourcesOfApps = async (
       for (const team of teamsIn(teams)) {
         of?.teams.add(team);
       }
-    } else if (object === "connection") {
-      of?.connected.add(id);
     } else {
-      of?.unplaced.add(`${object}:${id}`);
+      of?.connected.add(id);
     }
   };
   for (const row of rows) {
@@ -543,7 +532,6 @@ export const sourcesOfApps = async (
           connected: new Set(
             reached.flatMap((of) => [...(of?.connected ?? [])])
           ),
-          unplaced: new Set(reached.flatMap((of) => [...(of?.unplaced ?? [])])),
           teams: [...new Set(reached.flatMap((of) => [...(of?.teams ?? [])]))],
         },
       ];
@@ -560,11 +548,11 @@ export const sourcesOfApps = async (
       : await connectionOwnersOf(env, connectionIds);
   const ownerOf = new Map(owners.map((owner) => [owner.id, owner]));
   return new Map(
-    [...granted].map(([app, { connected, unplaced, teams }]) => {
+    [...granted].map(([app, { connected, teams }]) => {
       const sources: AppSources = {
         connections: [],
         brainTeams: teams,
-        unresolved: [...(reach.get(app)?.unresolved ?? []), ...unplaced],
+        unresolved: [...(reach.get(app)?.unresolved ?? [])],
       };
       for (const id of connected) {
         const owner = ownerOf.get(id);
