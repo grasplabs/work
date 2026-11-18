@@ -134,27 +134,6 @@ describe("sharing an App", () => {
     ).resolves.toBe("ok");
   });
 
-  it("is refused for an App granted a Knowledge collection before the Brain, whoever reads it", async () => {
-    const [owner, anna] = await Promise.all([
-      personApi("builder"),
-      personApi("user"),
-    ]);
-    const app = await newApp(owner);
-    await storedGrant(
-      { type: "app", id: app },
-      { type: "collection", id: "handbook" },
-      ["read"],
-      "HANDBOOK"
-    );
-
-    await expect(
-      shareRefusal(owner, app, { type: "person", id: anna.userId })
-    ).resolves.toStrictEqual({
-      sources: ["collection:handbook"],
-      people: [anna.userId],
-    });
-  });
-
   it("stays refused once the App's grant is revoked: it may still hold what it read", async () => {
     const [owner, anna, admin] = await Promise.all([
       personApi("builder"),

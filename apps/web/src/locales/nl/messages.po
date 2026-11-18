@@ -5187,6 +5187,11 @@ msgstr "Een gebeurtenis laten vallen die geen workflow kon aannemen"
 msgid "Dublin"
 msgstr "Dublin"
 
+#: src/brain/memories-page.tsx
+msgctxt "what the Brain remembers about something"
+msgid "Duration"
+msgstr "Duur"
+
 #: src/agents/agents-overview.tsx
 msgid "Each agent has its own name and job, answers only the people you choose, and does only what you let it."
 msgstr "Elke agent heeft een eigen naam en taak, antwoordt alleen de mensen die u kiest en doet alleen wat u toestaat."
@@ -5642,6 +5647,11 @@ msgstr "Alles wat het Brain heeft bewaard van wat agents erdoor lazen, wordt voo
 #: src/interview/closed.tsx
 msgid "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."
 msgstr "Alles wat je me hebt verteld, wordt voorgoed verwijderd en is niet terug te halen. Klopt er alleen iets niet? Verbeter het dan met ‘Iets toevoegen’."
+
+#: src/brain/memories-page.tsx
+msgctxt "what the Brain remembers about something"
+msgid "Evidence"
+msgstr "Onderbouwing"
 
 #: src/brain/sources-page.tsx
 msgctxt "how search found a passage"
@@ -6754,10 +6764,6 @@ msgstr "Headernaam"
 msgid "Hear both again"
 msgstr "Allebei nog eens horen"
 
-#: src/brain/work-knowledge.tsx
-msgid "Heard from enough people"
-msgstr "Van genoeg mensen gehoord"
-
 #: src/interview/words.ts
 msgid "Hello"
 msgstr "Hallo"
@@ -6896,6 +6902,13 @@ msgstr "Hoe vaak"
 #: src/brain/work-knowledge.tsx
 msgid "How sure"
 msgstr "Hoe zeker"
+
+#. Under a statement put together from the interviews
+#. Under a statement put together from the interviews
+#: src/brain/aggregate.tsx
+#: src/brain/brain.ts
+msgid "How the team works, as its people told it"
+msgstr "Hoe het team werkt, zoals de mensen het vertelden"
 
 #: src/brain/work-knowledge.tsx
 msgid "How the work goes today"
@@ -12068,13 +12081,6 @@ msgctxt "what something known rests on: people said it"
 msgid "Said"
 msgstr "Gezegd"
 
-#. Under a statement put together from the interviews
-#. Under a statement put together from the interviews
-#: src/brain/aggregate.tsx
-#: src/brain/brain.ts
-msgid "Said by five or more people"
-msgstr "Gezegd door vijf of meer mensen"
-
 #: src/brain/work-knowledge.tsx
 msgid "Said in an interview"
 msgstr "Gezegd in een interview"
@@ -15206,6 +15212,10 @@ msgstr "Vandaag"
 msgid "Token"
 msgstr "Token"
 
+#: src/brain/work-knowledge.tsx
+msgid "Told by the team that does it"
+msgstr "Verteld door het team dat het doet"
+
 #: src/onboarding/send-plan-form.tsx
 msgid "Tomorrow"
 msgstr "Morgen"
@@ -15691,6 +15701,11 @@ msgstr "De waarden zijn gewist met de persoon die ze schreef."
 msgid "Values weren't read."
 msgstr "Waarden zijn niet gelezen."
 
+#: src/brain/memories-page.tsx
+msgctxt "what the Brain remembers about something"
+msgid "Variant"
+msgstr "Variant"
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "VAT number"
 msgstr "Btw-nummer"
@@ -15801,6 +15816,11 @@ msgstr "Bezoeker van {app}"
 #: src/voice/sound-controls.tsx
 msgid "Volume"
 msgstr "Volume"
+
+#: src/brain/memories-page.tsx
+msgctxt "what the Brain remembers about something"
+msgid "Wait"
+msgstr "Wachten"
 
 #: src/workflows/figures.tsx
 msgid "wait for a decision now"
@@ -16429,6 +16449,14 @@ msgstr "Wat deze beslissing vraagt, kan nu niet worden getoond."
 msgid "What this decision asks is withheld, so you can only reject it."
 msgstr "Wat deze beslissing vraagt, wordt achtergehouden. Je kunt haar daarom alleen afwijzen."
 
+#: src/chat/held-writes.tsx
+msgid "What this would send can't be shown right now, so you can only reject it for now. Try again in a moment."
+msgstr "Wat dit zou versturen, kan nu niet worden getoond. Je kunt het daarom voorlopig alleen afwijzen. Probeer het zo nog eens."
+
+#: src/chat/held-writes.tsx
+msgid "What this would send is withheld: the run that asked for it may no longer read what it read, so you can only reject it."
+msgstr "Wat dit zou versturen, wordt achtergehouden: de run die erom vroeg, mag niet meer lezen wat hij las. Je kunt het daarom alleen afwijzen."
+
 #: src/agents/agent-wakes.tsx
 msgid "What to ask it each time"
 msgstr "Wat hem elke keer gevraagd wordt"
@@ -16471,8 +16499,16 @@ msgid "What was said is on the work it was about"
 msgstr "Wat gezegd is, staat bij het werk waar het over ging"
 
 #: src/dashboard/outcome-card.tsx
+msgid "What was sent can't be shown right now. Try again in a moment."
+msgstr "Wat is verstuurd, kan nu niet worden getoond. Probeer het zo nog eens."
+
+#: src/dashboard/outcome-card.tsx
 msgid "What was sent is no longer kept."
 msgstr "Wat is verstuurd wordt niet meer bewaard."
+
+#: src/dashboard/outcome-card.tsx
+msgid "What was sent is withheld: the run that sent it may no longer read what it read."
+msgstr "Wat is verstuurd, wordt achtergehouden: de run die het verstuurde, mag niet meer lezen wat hij las."
 
 #: src/interview/before.tsx
 msgid "What we do"
