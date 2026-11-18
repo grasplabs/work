@@ -1316,10 +1316,6 @@ msgstr "{rows, plural, one {# fila para importar.} other {# filas para importar.
 msgid "{runs, plural, one {{date}: # run} other {{date}: # runs}}"
 msgstr "{runs, plural, one {{date}: # ejecución} other {{date}: # ejecuciones}}"
 
-#: src/workflows/overview-concepts.tsx
-msgid "{runs, plural, one {# run} other {# runs}}"
-msgstr "{runs, plural, one {# ejecución} other {# ejecuciones}}"
-
 #: src/dashboard/runs-widget.tsx
 msgid "{runs, plural, one {Without a person, of # run} other {Without a person, of # runs}}"
 msgstr "{runs, plural, one {Sin una persona, de # ejecución} other {Sin una persona, de # ejecuciones}}"
@@ -12020,10 +12016,6 @@ msgstr "Conexiones personales"
 #: src/settings/erasures.tsx
 msgid "Personal Knowledge and memories"
 msgstr "Conocimiento personal y recuerdos"
-
-#: src/workflows/overview-concepts.tsx
-msgid "Phase"
-msgstr "Fase"
 
 #: src/frame/part-words.tsx
 msgctxt "a screen width"

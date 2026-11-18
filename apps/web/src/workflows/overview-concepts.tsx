@@ -3,23 +3,18 @@ import type { WorkflowStage } from "@grasp-os/shared/workflow-lifecycle";
 import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
-import { msg, plural } from "@lingui/core/macro";
+import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { formatNumber } from "../format.ts";
 import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
-import { Badge } from "../grasp/badge/index.ts";
 import { BrandIcon } from "../grasp/brand-icon/index.ts";
 import type { Brand } from "../grasp/brand-icon/index.ts";
-import { Card } from "../grasp/card/index.ts";
 import { DataTable, grouping } from "../grasp/data-table/index.ts";
 import type { DataTableColumn } from "../grasp/data-table/index.ts";
-import { Heading } from "../grasp/heading/index.ts";
-import { IconTile } from "../grasp/icon-tile/index.ts";
 import { iconVars } from "../grasp/icons/icon.stylex.ts";
 import {
   AppRecord,
@@ -33,7 +28,6 @@ import {
 } from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
 import { Link as TextLink } from "../grasp/link/index.ts";
-import { Tabs, TabsList, TabsTrigger } from "../grasp/tabs/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 
@@ -362,10 +356,24 @@ const styles = stylex.create({
   },
   stack: { display: "grid", gap: grasp.space4 },
   cellIcon: {
-    [iconVars.size]: grasp.shellIcon,
+    [iconVars.size]: grasp.iconMd,
     display: "inline-flex",
     color: grasp.text,
     flexShrink: 0,
+  },
+  // Concept only, until IconTile's size="sm": a 24px tile from its tokens.
+  smallTile: {
+    [iconVars.size]: grasp.iconSm,
+    display: "inline-flex",
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    width: grasp.space6,
+    height: grasp.space6,
+    borderRadius: grasp.corner,
+    cornerShape: grasp.cornerShape,
+    color: grasp.inspectorKind,
+    backgroundColor: grasp.inspectorTileTint,
   },
   // T: the tools at the text's own height, so every row is one height.
   tableTools: {
@@ -401,133 +409,6 @@ const Tools = ({
   );
 };
 
-/** Its name, on one or two lines: a link for a real workflow. */
-const CardName = ({ row }: { row: ConceptRow }) => (
-  <span {...stylex.props(styles.name)}>
-    <Text element="span" size="sm" weight="medium">
-      {row.name}
-    </Text>
-  </span>
-);
-
-/** The whole card as one link to the workflow; a sample opens nothing. */
-const CardLink = ({
-  row,
-  children,
-}: {
-  row: ConceptRow;
-  children: ReactNode;
-}) =>
-  row.sample ? (
-    <div {...stylex.props(styles.cardLink)}>{children}</div>
-  ) : (
-    <Link
-      params={{ workflow: row.id }}
-      to="/workflows/$workflow"
-      {...stylex.props(styles.cardLink)}
-    >
-      {children}
-    </Link>
-  );
-
-/** Its runs, one quiet number. */
-const RunCount = ({ runs }: { runs: number }) => {
-  const { t } = useLingui();
-  return runs === 0 ? null : (
-    <Text element="span" size="xs" tone="muted">
-      {t`${plural(runs, { one: "# run", other: "# runs" })}`}
-    </Text>
-  );
-};
-
-/** The business process's icon, in the library's tile; the workflow mark where none is set. */
-const ProcessMark = ({ row }: { row: ConceptRow }) => (
-  <IconTile
-    icon={row.process === null ? Workflow : processIcons[row.process]}
-    variant="tint"
-  />
-);
-
-/** B1: the least a card can be: icon, name, the owner's face; tools and runs on one quiet line. */
-const MinimalCard = ({ row }: { row: ConceptRow }) => {
-  const { t } = useLingui();
-  return (
-    <CardLink row={row}>
-      <Card padding="none">
-        <div {...stylex.props(styles.card, styles.cardMinimal)}>
-          <span {...stylex.props(styles.top)}>
-            <ProcessMark row={row} />
-            <CardName row={row} />
-            {row.phase === "needsYou" ? (
-              <Badge
-                aria-label={t({
-                  message: "Needs you",
-                  context: "workflow phase",
-                })}
-                tone="attention"
-                variant="dot"
-              />
-            ) : null}
-          </span>
-          <span {...stylex.props(styles.foot)}>
-            <span {...stylex.props(styles.meta)}>
-              <Tools tools={row.tools} />
-              <RunCount runs={row.runs} />
-            </span>
-            <Avatar name={row.owner} size="xs">
-              <AvatarFallback />
-            </Avatar>
-          </span>
-        </div>
-      </Card>
-    </CardLink>
-  );
-};
-
-/** B2: a little richer: the owner by name, the team, tools and runs, still compact. */
-const RichCard = ({ row }: { row: ConceptRow }) => (
-  <Card padding="none">
-    <div {...stylex.props(styles.card, styles.cardRich)}>
-      <span {...stylex.props(styles.top)}>
-        <ProcessMark row={row} />
-        <span {...stylex.props(styles.rich)}>
-          <CardName row={row} />
-          <Text element="span" size="xs" tone="muted" wrap="truncate">
-            {row.team}
-          </Text>
-        </span>
-      </span>
-      <span {...stylex.props(styles.rich)}>
-        <span {...stylex.props(styles.owner)}>
-          <Avatar decorative name={row.owner} size="xs">
-            <AvatarFallback />
-          </Avatar>
-          <Text element="span" size="xs" wrap="truncate">
-            {row.owner}
-          </Text>
-        </span>
-        <span {...stylex.props(styles.foot)}>
-          <Tools tools={row.tools} />
-          <RunCount runs={row.runs} />
-        </span>
-      </span>
-    </div>
-  </Card>
-);
-
-/** B3: a workflow as one row in its lane. */
-const LaneRow = ({ row }: { row: ConceptRow }) => (
-  <div {...stylex.props(styles.laneRow)}>
-    <ProcessMark row={row} />
-    <span {...stylex.props(styles.rowName)}>
-      <CardName row={row} />
-    </span>
-    <Avatar name={row.owner} size="xs">
-      <AvatarFallback />
-    </Avatar>
-  </div>
-);
-
 /** The phases in the order a list reads them: what needs you first. */
 const readingOrder: readonly Phase[] = [
   "needsYou",
@@ -538,158 +419,68 @@ const readingOrder: readonly Phase[] = [
 ];
 
 /** A lane's head: the phase, strong, and how many; Needs you in the attention colour. */
-const LaneHead = ({ phase, count }: { phase: Phase; count: number }) => (
-  <span
-    {...stylex.props(
-      styles.laneHead,
-      phase === "needsYou" && styles.laneHeadNeeds
-    )}
-  >
-    <Heading level={2} size="ui">
-      {i18n._(phaseNames[phase])}
-    </Heading>
-    <Badge size="sm" tone={phase === "needsYou" ? "attention" : "neutral"}>
-      {formatNumber(count)}
-    </Badge>
-  </span>
-);
 
-type CardLook = "minimal" | "bare" | "rich" | "rows";
+/** How T draws a workflow's process: a 24px tile, or the bare icon. */
+type TableIcon = "tile" | "bare";
 
-/** A lane's workflows, as the concept draws them. */
-const LaneBody = ({
-  phase,
-  rows,
-  look,
+/** T: the workflow cell: the process's icon, its name (a link for a real workflow), and on a phone the owner's face at its end. */
+const WorkflowCell = ({
+  row,
+  icon,
+  face,
 }: {
-  phase: Phase;
-  rows: readonly ConceptRow[];
-  look: CardLook;
+  row: ConceptRow;
+  icon: TableIcon;
+  face: boolean;
 }) => {
-  if (look === "bare") {
-    return (
-      <div {...stylex.props(styles.laneBare)}>
-        {rows.map((row) => (
-          <MinimalCard key={row.id} row={row} />
-        ))}
-      </div>
-    );
-  }
-  if (look === "rows") {
-    return rows.length === 0 ? null : (
-      <Card padding="none">
-        {rows.map((row) => (
-          <LaneRow key={row.id} row={row} />
-        ))}
-      </Card>
-    );
-  }
+  const glyph = row.process === null ? Workflow : processIcons[row.process];
   return (
-    <div
-      {...stylex.props(
-        styles.laneBody,
-        phase === "needsYou" && styles.laneBodyNeeds
-      )}
-    >
-      {rows.map((row) =>
-        look === "minimal" ? (
-          <MinimalCard key={row.id} row={row} />
-        ) : (
-          <RichCard key={row.id} row={row} />
-        )
-      )}
-    </div>
-  );
-};
-
-/** The board: five lanes at a wide width; on a phone, one phase at a time behind a switch. */
-const Board = ({
-  rows,
-  look,
-}: {
-  rows: readonly ConceptRow[];
-  look: CardLook;
-}) => {
-  const { t } = useLingui();
-  const [shown, setShown] = useState<Phase>("needsYou");
-  const inPhase = (phase: Phase) => rows.filter((row) => row.phase === phase);
-  return (
-    <div {...stylex.props(styles.measured)}>
-      <div {...stylex.props(styles.wide)}>
-        <div {...stylex.props(styles.board)}>
-          {phases.map((phase) => (
-            <section key={phase} {...stylex.props(styles.lane)}>
-              <LaneHead count={inPhase(phase).length} phase={phase} />
-              <LaneBody look={look} phase={phase} rows={inPhase(phase)} />
-            </section>
-          ))}
-        </div>
-      </div>
-      <div {...stylex.props(styles.narrow)}>
-        <Tabs
-          onValueChange={(value) => {
-            const next = phases.find((phase) => phase === value);
-            if (next !== undefined) {
-              setShown(next);
-            }
-          }}
-          value={shown}
-          variant="segmented"
-        >
-          <TabsList aria-label={t`Phase`}>
-            {readingOrder.map((phase) => (
-              <TabsTrigger key={phase} value={phase}>
-                {i18n._(phaseNames[phase])}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
-        <LaneBody look={look} phase={shown} rows={inPhase(shown)} />
-      </div>
-    </div>
-  );
-};
-
-/** T: the workflow cell, the process's icon and its name, a link for a real workflow. */
-const WorkflowCell = ({ row }: { row: ConceptRow }) => (
-  <span {...stylex.props(styles.lead)}>
-    <span {...stylex.props(styles.cellIcon)}>
-      <Icon
-        icon={row.process === null ? Workflow : processIcons[row.process]}
-      />
-    </span>
-    {row.sample ? (
-      <Text element="span" size="sm" weight="medium">
-        {row.name}
-      </Text>
-    ) : (
-      <TextLink
-        render={
-          <Link params={{ workflow: row.id }} to="/workflows/$workflow" />
-        }
-        variant="standalone"
+    <span {...stylex.props(styles.lead)}>
+      {/* Concept only: the library's IconTile has one (inspector) size; its
+          `size="sm"` is being built. Until then, a 24px tile from its tokens. */}
+      <span
+        {...stylex.props(icon === "tile" ? styles.smallTile : styles.cellIcon)}
       >
-        {row.name}
-      </TextLink>
-    )}
-  </span>
-);
+        <Icon icon={glyph} />
+      </span>
+      <span {...stylex.props(styles.rowName)}>
+        {row.sample ? (
+          <Text element="span" size="sm" weight="medium">
+            {row.name}
+          </Text>
+        ) : (
+          <TextLink
+            render={
+              <Link params={{ workflow: row.id }} to="/workflows/$workflow" />
+            }
+            variant="standalone"
+          >
+            {row.name}
+          </TextLink>
+        )}
+      </span>
+      {face ? (
+        <Avatar name={row.owner} size="xs">
+          <AvatarFallback />
+        </Avatar>
+      ) : null}
+    </span>
+  );
+};
 
 /** T: the owner, a face and a name, as the library's avatar beside a name. */
-const OwnerCell = ({ name, face }: { name: string; face?: boolean }) => (
+const OwnerCell = ({ name }: { name: string }) => (
   <span {...stylex.props(styles.owner)}>
-    <Avatar decorative={face !== true} name={name} size="xs">
+    <Avatar decorative name={name} size="xs">
       <AvatarFallback />
     </Avatar>
-    {face === true ? null : (
-      <Text element="span" size="sm">
-        {name}
-      </Text>
-    )}
+    <Text element="span" size="sm">
+      {name}
+    </Text>
   </span>
 );
 
-/** T: the table's columns, under their headers' words; on a phone, the workflow and the owner's face. */
+/** T: the table's columns, under their headers' words; on a phone, the workflow (with the owner's face) alone. */
 const tableColumns = (words: {
   workflow: string;
   owner: string;
@@ -697,12 +488,15 @@ const tableColumns = (words: {
   tools: string;
   runs: string;
   phone: boolean;
+  icon: TableIcon;
 }): DataTableColumn<ConceptRow>[] => [
   {
     key: "workflow",
     header: words.workflow,
     value: (row) => row.name,
-    cell: (row) => <WorkflowCell row={row} />,
+    cell: (row) => (
+      <WorkflowCell face={words.phone} icon={words.icon} row={row} />
+    ),
   },
   // What the rows are gathered by: its value heads each group, so its own
   // cells stay empty (the library hides a column only with its View menu).
@@ -712,16 +506,15 @@ const tableColumns = (words: {
     value: (row) => i18n._(phaseNames[row.phase]),
     cell: () => "",
   },
-  {
-    key: "owner",
-    header: words.owner,
-    value: (row) => row.owner,
-    cell: (row) => <OwnerCell face={words.phone} name={row.owner} />,
-    ...(words.phone ? { align: "end" as const } : {}),
-  },
   ...(words.phone
     ? []
     : [
+        {
+          key: "owner",
+          header: words.owner,
+          value: (row: ConceptRow) => row.owner,
+          cell: (row: ConceptRow) => <OwnerCell name={row.owner} />,
+        },
         {
           key: "team",
           header: words.team,
@@ -748,13 +541,18 @@ const tableColumns = (words: {
 const PhaseTable = ({
   rows,
   phone,
+  icon,
+  head,
 }: {
   rows: readonly ConceptRow[];
   phone: boolean;
+  icon: TableIcon;
+  head: "plain" | "quiet";
 }) => {
   const { t } = useLingui();
   return (
     <DataTable
+      appearance={{ head }}
       columns={tableColumns({
         workflow: t`Workflow`,
         owner: t({ message: "Owner", context: "column: who owns a workflow" }),
@@ -762,8 +560,8 @@ const PhaseTable = ({
         tools: t`Tools`,
         runs: t`Runs`,
         phone,
+        icon,
       })}
-      appearance={{ head: "plain" }}
       density="compact"
       groupBy="phase"
       label={t`Workflows`}
@@ -778,13 +576,21 @@ const PhaseTable = ({
 };
 
 /** T: the wide table, or the phone's. */
-const TableConcept = ({ rows }: { rows: readonly ConceptRow[] }) => (
+const TableConcept = ({
+  rows,
+  icon,
+  head,
+}: {
+  rows: readonly ConceptRow[];
+  icon: TableIcon;
+  head: "plain" | "quiet";
+}) => (
   <div {...stylex.props(styles.measured, styles.tableFoot)}>
     <div {...stylex.props(styles.wide)}>
-      <PhaseTable phone={false} rows={rows} />
+      <PhaseTable head={head} icon={icon} phone={false} rows={rows} />
     </div>
     <div {...stylex.props(styles.narrow)}>
-      <PhaseTable phone rows={rows} />
+      <PhaseTable head={head} icon={icon} phone rows={rows} />
     </div>
   </div>
 );
@@ -794,12 +600,12 @@ export const OverviewConcept = ({
   concept,
   rows,
 }: {
-  concept: "b1" | "b1n" | "t";
+  concept: "t" | "tq" | "tb";
   rows: readonly ConceptRow[];
-}): ReactNode => {
-  if (concept === "t") {
-    return <TableConcept rows={rows} />;
-  }
-  const looks = { b1: "minimal", b1n: "bare" } as const;
-  return <Board look={looks[concept]} rows={rows} />;
-};
+}): ReactNode => (
+  <TableConcept
+    head={concept === "tq" ? "quiet" : "plain"}
+    icon={concept === "tb" ? "bare" : "tile"}
+    rows={rows}
+  />
+);

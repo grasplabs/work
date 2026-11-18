@@ -1316,10 +1316,6 @@ msgstr "{rows, plural, one {# rij om te importeren.} other {# rijen om te import
 msgid "{runs, plural, one {{date}: # run} other {{date}: # runs}}"
 msgstr "{runs, plural, one {{date}: # run} other {{date}: # runs}}"
 
-#: src/workflows/overview-concepts.tsx
-msgid "{runs, plural, one {# run} other {# runs}}"
-msgstr "{runs, plural, one {# run} other {# runs}}"
-
 #: src/dashboard/runs-widget.tsx
 msgid "{runs, plural, one {Without a person, of # run} other {Without a person, of # runs}}"
 msgstr "{runs, plural, one {Zonder persoon, van # run} other {Zonder persoon, van # runs}}"
@@ -12020,10 +12016,6 @@ msgstr "Persoonlijke koppelingen"
 #: src/settings/erasures.tsx
 msgid "Personal Knowledge and memories"
 msgstr "Persoonlijke Kennis en herinneringen"
-
-#: src/workflows/overview-concepts.tsx
-msgid "Phase"
-msgstr "Fase"
 
 #: src/frame/part-words.tsx
 msgctxt "a screen width"

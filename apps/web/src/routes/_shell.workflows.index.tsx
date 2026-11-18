@@ -80,7 +80,7 @@ import type { WorkflowProcesses } from "../workflows/workflows-table.tsx";
 
 interface WorkflowsSearch {
   /** Which concept shows, for Ruben to choose (never merged). */
-  concept?: "b1" | "b1n" | "t";
+  concept?: "t" | "tq" | "tb";
   tab?: "needs" | "runs";
   /** On the lists: the business process whose workflows show. */
   process?: BusinessProcess;
@@ -735,7 +735,7 @@ const conceptRowsOf = (
 ];
 
 /** A concept: the page's heading over the concept's content. */
-const ConceptPage = ({ concept }: { concept: "b1" | "b1n" | "t" }) => {
+const ConceptPage = ({ concept }: { concept: "t" | "tq" | "tb" }) => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
@@ -821,9 +821,9 @@ const searchOf = (search: Record<string, unknown>): WorkflowsSearch => ({
     ? { process: search.process }
     : {}),
   ...(isStatus(search.status) ? { status: search.status } : {}),
-  ...(search.concept === "b1" ||
-  search.concept === "b1n" ||
-  search.concept === "t"
+  ...(search.concept === "t" ||
+  search.concept === "tq" ||
+  search.concept === "tb"
     ? { concept: search.concept }
     : {}),
 });
