@@ -31,7 +31,7 @@ import type { Ids, Key } from "./onboarding-team.ts";
 import type { ProviderReply } from "./provider-streams.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { outcome, routed, signedInApi, signedInWithRole } from "./sign-in.ts";
-import { namedTeam } from "./teams.ts";
+import { teamAs } from "./teams.ts";
 
 // Opportunities (GRA-1750): each of a team's routines (GRA-1749) as an
 // admin reads it, ranked by the hours a week it takes, with its evidence
@@ -721,11 +721,16 @@ describe("opportunities", { timeout: 120_000 }, () => {
       proposing({ form: "workflow", systems: ["Zendesk", "Excel"] }),
     ]);
     const admin = await signedInApi(idp, "admin");
-    // Named as the staff list names the team whose tickets were described.
+    // The team whose tickets were described, under its one id (GRA-2055):
+    // renamed in Settings › Members since, which splits nothing.
     const ops = await membersOf(5);
-    await namedTeam("Ops", ...ops);
+    await teamAs(ids.team, "Operations", ...ops);
     const finance = await membersOf(5);
-    await namedTeam("Finance", ...finance);
+    const financeTeam = await teamAs(
+      crypto.randomUUID(),
+      "Finance",
+      ...finance
+    );
     await recordEvents(env, [
       // Read in Zendesk, as described; then mailed from Microsoft 365.
       ...eachTook(
@@ -744,7 +749,7 @@ describe("opportunities", { timeout: 120_000 }, () => {
       const listed = await admin.api.opportunities.list();
       return listed.flatMap(({ basis, team: of, name, seen, differs }) =>
         of === ids.team || basis === "observed"
-          ? [{ basis, name, seen, differs }]
+          ? [{ basis, team: of, name, seen, differs }]
           : []
       );
     };
@@ -758,6 +763,8 @@ describe("opportunities", { timeout: 120_000 }, () => {
       both: [
         {
           basis: "both",
+          // Described and seen: one team, by its one id (GRA-2035).
+          team: ids.team,
           name: "handling new tickets",
           seen: {
             steps: [
@@ -780,6 +787,7 @@ describe("opportunities", { timeout: 120_000 }, () => {
         },
         {
           basis: "observed",
+          team: financeTeam,
           name: "exact invoices.read → sheets rows.add",
           seen: {
             steps: [
@@ -804,6 +812,7 @@ describe("opportunities", { timeout: 120_000 }, () => {
       after: [
         {
           basis: "described",
+          team: ids.team,
           name: "handling new tickets",
           seen: null,
           differs: null,
@@ -816,7 +825,7 @@ describe("opportunities", { timeout: 120_000 }, () => {
     const { ids } = await drawnTeam("Send the answer from the Excel sheet.");
     const admin = await signedInApi(idp, "admin");
     const ops = await membersOf(5);
-    await namedTeam("Ops", ...ops);
+    await teamAs(ids.team, "Ops", ...ops);
     // Seen in Zendesk alone; the description names Zendesk and Excel.
     await recordEvents(
       env,
@@ -852,9 +861,9 @@ describe("opportunities", { timeout: 120_000 }, () => {
     const { ids } = await drawnTeam();
     const admin = await signedInApi(idp, "admin");
     const ops = await membersOf(10);
-    await namedTeam("Ops", ...ops);
+    await teamAs(ids.team, "Ops", ...ops);
     const finance = await membersOf(15);
-    await namedTeam("Finance", ...finance);
+    await teamAs(crypto.randomUUID(), "Finance", ...finance);
     const ticketsRead = {
       step: "tickets.read",
       system: "zendesk",

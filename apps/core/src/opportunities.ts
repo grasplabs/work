@@ -67,8 +67,8 @@ import { teamsWithMembers } from "./organization-teams.ts";
 // events, each move in them made by five or more people of a team, held
 // there; nothing of them is kept here either, so one that falls in the
 // Brain is gone from the next list. A seen routine is the same as a
-// described one when their team has the same name (the staff list and
-// Settings › Members list the same company's teams, apart) and the
+// described one when they are of the same team, by its id (the staff list
+// names the members' teams, GRA-2055, so a rename splits nothing) and the
 // described one names a system the seen one is in: its text names the
 // system whole, or a system its proposal found in that text is the
 // catalog's (`namesWhole`, the same test as for what is connected). Then
@@ -344,10 +344,6 @@ const systemOf = (
     : { id: provider, name: entry.name, says: saysOf(entry) };
 };
 
-/** A team's name as two lists of the company's teams are compared: case and Unicode form aside. */
-const teamNameKey = (name: string): string =>
-  name.normalize("NFC").trim().toLocaleLowerCase();
-
 /**
  * A described routine as a seen one is compared with it: its text as
  * every member reads it, and the systems its proposal found there (each
@@ -363,8 +359,6 @@ interface Described {
 /** A routine seen in a team, with its systems as the catalog names them. */
 interface Seen {
   routine: SeenInTeam;
-  /** Its team's name in Settings › Members. */
-  teamName: string;
   /** Each step's system, in step order. */
   systems: SeenSystem[];
 }
@@ -430,23 +424,20 @@ const comparisonOf = (
 
 /**
  * Pairs each seen routine with the described one it is (see the top): of
- * its team by name, describing the most of its systems, at least one;
+ * its team, describing the most of its systems, at least one;
  * each described one with one seen one at most, the first that matches it
  * best.
  */
 const pairsOf = (
   described: readonly Described[],
-  seen: readonly Seen[],
-  rosterNames: ReadonlyMap<string, string>
+  seen: readonly Seen[]
 ): Map<StandingDrawing, Seen> => {
   const pairs = new Map<StandingDrawing, Seen>();
   for (const each of seen) {
     const [best] = described
       .filter(
         ({ drawing }) =>
-          !pairs.has(drawing) &&
-          teamNameKey(rosterNames.get(drawing.team) ?? "") ===
-            teamNameKey(each.teamName)
+          !pairs.has(drawing) && drawing.team === each.routine.team
       )
       .map((one) => ({
         drawing: one.drawing,
@@ -642,24 +633,19 @@ export const listOpportunities = async (
     observedRoutinesOf(env),
     teamsWithMembers(env),
   ]);
-  const teamNames = new Map(memberTeams.map(({ id, name }) => [id, name]));
-  const seen = observed.flatMap((routine): Seen[] => {
-    const teamName = teamNames.get(routine.team);
-    return teamName === undefined
-      ? []
-      : [
+  // A team deleted since shows nothing it was seen doing.
+  const teamIds = new Set(memberTeams.map(({ id }) => id));
+  const seen = observed.flatMap((routine): Seen[] =>
+    teamIds.has(routine.team)
+      ? [
           {
             routine,
-            teamName,
             systems: routine.steps.map(({ system }) =>
               systemOf(catalog, system)
             ),
           },
-        ];
-  });
-  const roster = await store.companyTeams();
-  const rosterNames = new Map(
-    (roster?.teams ?? []).map(({ id, name }) => [id, name])
+        ]
+      : []
   );
   const described = drawings.map((drawing) => ({
     drawing,
@@ -668,7 +654,7 @@ export const listOpportunities = async (
       kept.proposals.get(keyOf(drawing.workflow, drawing.source))?.systems ??
       null,
   }));
-  const pairs = pairsOf(described, seen, rosterNames);
+  const pairs = pairsOf(described, seen);
   const paired = new Set(pairs.values());
   const opportunities: Opportunity[] = [];
   for (const each of seen.filter((one) => !paired.has(one))) {

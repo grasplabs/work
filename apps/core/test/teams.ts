@@ -29,13 +29,13 @@ export const leaveTeam = async (
     .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
 };
 
-/** A new team of the organization `of`, named `name` (`Team <id>` by default), with `members`: its ID. */
+/** A new team of the organization `of`, named `name` (`Team <id>` by default), with `members`: its ID, `id` when given. */
 const teamOf = async (
   of: string,
   members: readonly string[],
-  name?: string
+  name?: string,
+  id: string = crypto.randomUUID()
 ) => {
-  const id = crypto.randomUUID();
   await drizzle(env.DB)
     .insert(teams)
     .values({
@@ -60,6 +60,16 @@ export const namedTeam = async (
   name: string,
   ...members: string[]
 ): Promise<string> => await teamOf(organizationId, members, name);
+
+/**
+ * The organization's team `id`, named `name`, with `members`: as the
+ * staff list names it (GRA-2055), the team a staff list's team is.
+ */
+export const teamAs = async (
+  id: string,
+  name: string,
+  ...members: string[]
+): Promise<string> => await teamOf(organizationId, members, name, id);
 
 /** A team of another organization than the deployment's, with `members`: its ID. */
 export const otherOrganizationsTeam = async (
