@@ -3,7 +3,7 @@ import type { AuditActor } from "@grasp-os/shared/audit";
 import { brainSourceErrors } from "@grasp-os/shared/brain-sources";
 import type { ConnectResult, ToolClass } from "@grasp-os/shared/connect";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { redact } from "@grasp-os/shared/redact";
+import { redact, redactJson } from "@grasp-os/shared/redact";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -87,11 +87,12 @@ import { markCaptured } from "./workflows/run-evidence.ts";
 //   read and gives as the version's latest read time, on the person's
 //   Sources page and in the passage the model reads. A read again of the
 //   same text adds that read time to its version, and no version.
-// - Credentials are redacted once, over exactly the text kept (a
-//   toolkit's blocks joined first, a native item's whole answer), so what
-//   is kept never holds anything `redact` removes from that same text. Not
-//   yet inside JSON string values, where an escaped newline can hide the
-//   next line's credential (GRA-1880).
+// - Credentials are redacted over exactly the text kept (a native item's
+//   whole answer; a toolkit's blocks of JSON each, then joined), so what
+//   is kept never holds anything `redact` removes from that same text. A
+//   text that is JSON (structured content, a block of JSON) is redacted
+//   by its decoded values (`redact`, GRA-1880), so an escaped newline
+//   can't hide the next line's credential.
 // - Capturing never holds up or fails the call: it runs once the agent
 //   has its answer (`waitUntil`). Every call ends in one audit event, of
 //   IDs and counts alone (items, kept, failed, skipped, adding up to
@@ -304,9 +305,11 @@ const answerCaptured = async (
     const [event, detail] = skippedAll("no_text", 1);
     return [event, { ...detail, ...counted }];
   }
-  // Redacted once, over exactly the text kept: a credential's name in one
+  // A block of JSON alone first, by its values (each other block stays as
+  // it is, so `Bearer` at the end of one still names a token in the
+  // next); then over exactly the text kept, as a credential's name in one
   // block and its value in the next are one credential.
-  const text = redact(texts.join("\n\n"));
+  const text = redact(texts.map((each) => redactJson(each)).join("\n\n"));
   let ended: Ended;
   try {
     const id = await answerCaptureIdOf(

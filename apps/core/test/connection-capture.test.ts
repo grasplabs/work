@@ -568,13 +568,20 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     const person = await signedInApi(idp, "user");
     const marker = markerOf();
     const secret = `hunter2-${crypto.randomUUID()}`;
+    const sessionId = `s3ss${crypto.randomUUID().replaceAll("-", "")}`;
     const { connectionId, mailbox } = await ownGmail(person);
     const id = `login-${marker}`;
     await worldHolds(stephenGoogleUrl, {
       mailbox,
       events: [],
       messages: [
-        gmailMessage(id, `Login ${marker}`, `Your password: ${secret}`),
+        // The session ID on the line after the password: in the answer's
+        // JSON, a line break is the two characters `\n` (GRA-1880).
+        gmailMessage(
+          id,
+          `Login ${marker}`,
+          `Your password: ${secret}\nCookie: sid=${sessionId}`
+        ),
       ],
     });
     const chat = await chatOf(
@@ -598,7 +605,7 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     expect({
       own: own.texts.map(({ text }) => ({
         redacted: text.includes("password: [redacted]"),
-        secret: text.includes(secret),
+        secret: text.includes(secret) || text.includes(sessionId),
       })),
       asApp,
       erased,

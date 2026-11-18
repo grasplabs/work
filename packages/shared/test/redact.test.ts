@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { redact } from "../src/redact.ts";
+import { redact, redactJson } from "../src/redact.ts";
 
 // Credentials in what an outside system or code wrote, redacted before it
 // reaches a chat, a model, a log or the Brain (src/redact.ts). Pure logic:
@@ -269,7 +269,8 @@ describe("redacting credentials", () => {
         'cookie: "theme=dark; sid=9f8e7d"',
       ].map(redact)
     ).toStrictEqual([
-      '{"session": "[redacted]", "sessionId": "[redacted]"}',
+      // JSON: written back compact once something in it is redacted.
+      '{"session":"[redacted]","sessionId":"[redacted]"}',
       "JSESSIONID=[redacted]; Path=/",
       'cookie: "[redacted]"',
     ]);
@@ -287,5 +288,174 @@ describe("redacting credentials", () => {
       "access_token=[redacted]",
       "key [redacted]",
     ]);
+  });
+});
+
+describe("redacting JSON text by its values", () => {
+  /** A session ID, built at run time, so the source holds none to scan. */
+  const sessionId = ["s3ss", crypto.randomUUID().replaceAll("-", "")].join("");
+
+  it("redacts the credential on the line after another inside a JSON string, and gives back JSON of the same shape", () => {
+    const body = `Hi,\npassword: x\nCookie: sid=${sessionId}\nThanks`;
+    const text = JSON.stringify({ id: "m1", body, labels: ["INBOX"] });
+
+    expect(JSON.parse(redact(text))).toStrictEqual({
+      id: "m1",
+      body: "Hi,\npassword: [redacted]\nCookie: [redacted]\nThanks",
+      labels: ["INBOX"],
+    });
+  });
+
+  it("redacts JSON held as text in a string, however deep, the same way", () => {
+    const inner = JSON.stringify({
+      note: `password: x\nCookie: sid=${sessionId}`,
+    });
+    const text = JSON.stringify({
+      content: [{ type: "text", text: JSON.stringify({ result: inner }) }],
+    });
+    const redacted = redact(text);
+    const outer = z
+      .object({ content: z.tuple([z.object({ text: z.string() })]) })
+      .parse(JSON.parse(redacted));
+    const middle = z
+      .object({ result: z.string() })
+      .parse(JSON.parse(outer.content[0].text));
+
+    expect({
+      leaked: redacted.includes(sessionId),
+      innermost: z.unknown().parse(JSON.parse(middle.result)),
+    }).toStrictEqual({
+      leaked: false,
+      innermost: { note: "password: [redacted]\nCookie: [redacted]" },
+    });
+  });
+
+  it("reads an escaped quote as the quote it is, so a value before one is redacted and the JSON still parses", () => {
+    const text = JSON.stringify({
+      note: `Cookie: sid=${sessionId}"; theme=dark`,
+    });
+
+    expect(JSON.parse(redact(text))).toStrictEqual({
+      note: 'Cookie: [redacted]"; theme=dark',
+    });
+  });
+
+  it("redacts a credential's whole value by its member's name, whatever the value is, and a name that is itself a credential", () => {
+    const stripeKey = ["sk", "live", "a1b2c3d4e5f6g7h8"].join("_");
+    const text = JSON.stringify({
+      password: ["first", "second"],
+      token: 4_242_424_242,
+      "X-Api-Key": { value: "k" },
+      headers: { "Set-Cookie": [`sid=${sessionId}`], Accept: "text/html" },
+      access_token: null,
+      [stripeKey]: "label",
+      tokens: 3,
+    });
+
+    expect(JSON.parse(redact(text))).toStrictEqual({
+      password: "[redacted]",
+      token: "[redacted]",
+      "X-Api-Key": "[redacted]",
+      headers: { "Set-Cookie": "[redacted]", Accept: "text/html" },
+      access_token: "[redacted]",
+      "[redacted]": "label",
+      // Not a credential's name: it doesn't end in one.
+      tokens: 3,
+    });
+  });
+
+  it("writes numbers back as they were written, and a text with nothing to redact byte for byte", () => {
+    const untouched = '{\n  "id": 12345678901234567890,\n  "total": 1.50\n}';
+
+    expect([
+      redact(
+        '{"id": 12345678901234567890, "total": 1.50, "huge": 1e400, "password": "x"}'
+      ),
+      redact(untouched),
+    ]).toStrictEqual([
+      '{"id":12345678901234567890,"total":1.50,"huge":1e400,"password":"[redacted]"}',
+      untouched,
+    ]);
+  });
+
+  it("redacts a string inside JSON exactly as the same text alone", () => {
+    // Texts the rules over text redact, each also put inside JSON.
+    const texts = [
+      'password: "correct horse battery staple"',
+      "access_token=ya29.a0AfH6SMB and more",
+      "key Bearer abcdefghijklmnopqrstuvwxyz0123",
+      "https://acme.blob.core.windows.net/c/q.pdf?sv=2024&sig=AbC%2Bd3fG%3D",
+      `JSESSIONID=${sessionId}; Path=/`,
+      "Nothing to redact here.",
+    ];
+
+    expect(
+      texts.map((text): unknown => JSON.parse(redact(JSON.stringify({ text }))))
+    ).toStrictEqual(texts.map((text) => ({ text: redact(text) })));
+  });
+
+  it("redacts text that is not JSON as text, even when it looks like JSON", () => {
+    expect(
+      [
+        // Single quotes, a second document, text around it, cut off.
+        "{'password': 'x'}",
+        '{"password": "x"}\n{"token": "y"}',
+        'Result: {"password": "x"}',
+        '{"password": "x", "body": "more',
+      ].map(redact)
+    ).toStrictEqual([
+      "{'password': '[redacted]'}",
+      '{"password": "[redacted]"}\n{"token": "[redacted]"}',
+      'Result: {"password": "[redacted]"}',
+      '{"password": "[redacted]", "body": "more',
+    ]);
+  });
+
+  it("redacts a text of JSON by its values for joining, and leaves any other text for the pass over the whole", () => {
+    expect(
+      [
+        JSON.stringify({ body: `password: x\nCookie: sid=${sessionId}` }),
+        "Authorization: Bearer",
+      ].map(redactJson)
+    ).toStrictEqual([
+      '{"body":"password: [redacted]\\nCookie: [redacted]"}',
+      "Authorization: Bearer",
+    ]);
+  });
+
+  it("never throws: what JSON's grammar refuses is text, and JSON too deep to read is redacted whole", () => {
+    const deep = 1_000_000;
+    expect(
+      [
+        '{"a": "\\ud800", "b": "\\u0000"}',
+        '{"__proto__": {"token": "x"}}',
+        "{",
+        "[1, 2,]",
+        '"',
+        `${"[".repeat(deep)}"password: x"${"]".repeat(deep)}`,
+      ].map(redact)
+    ).toStrictEqual([
+      '{"a": "\\ud800", "b": "\\u0000"}',
+      '{"__proto__":{"token":"[redacted]"}}',
+      "{",
+      "[1, 2,]",
+      '"',
+      "[redacted]",
+    ]);
+  });
+
+  it("redacts a megabyte of JSON in one pass, every value in it", () => {
+    const messages = Array.from({ length: 12_000 }, (_, index) => ({
+      id: `m${index}`,
+      body: `Hi,\npassword: x\nCookie: sid=${sessionId}\nSee you`,
+    }));
+    const text = JSON.stringify({ messages });
+    const nested = JSON.stringify({ text: JSON.stringify({ text }) });
+    const redacted = [redact(text), redact(nested)];
+
+    expect({
+      megabyte: text.length > 1_000_000,
+      leaked: redacted.map((each) => each.includes(sessionId)),
+    }).toStrictEqual({ megabyte: true, leaked: [false, false] });
   });
 });
