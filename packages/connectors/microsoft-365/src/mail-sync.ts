@@ -9,142 +9,128 @@ import {
   fromCursorPart,
   mayRequest,
   RestartSyncError,
+  syncPageLimits,
   syncRoom,
   takeContent,
 } from "@grasp-os/connector-kit/sync";
-import type { SyncRoom } from "@grasp-os/connector-kit/sync";
+import type { EntryItems, SyncRoom } from "@grasp-os/connector-kit/sync";
 import type {
   SyncContent,
   SyncItem,
   SyncPage,
   SyncReader,
 } from "@grasp-os/shared/sync";
-import { ownPlace } from "@grasp-os/shared/sync";
+import { syncItemSchema } from "@grasp-os/shared/sync";
 import { z } from "zod";
 
 import { graphFailure, graphHost, graphUrl, v1 } from "./graph.ts";
 
 // Native sync of a person's own Outlook mailbox (GRA-1759, PR G): every
-// message in it, then what changed and what went away, each attachment an
-// item of its own linked to its message (`partOf`). Mail is readable only
-// by the mailbox's own person, so each message's only reader is them, and
-// it lives in their own store.
+// message of every mail folder, then what changed and what went away, each
+// attachment an item of its own linked to its message (`partOf`). Mail is
+// readable only by the mailbox's own person, so each message's only reader
+// is them, and it lives in their own store.
 //
-// How it reads (the orchestrator's decision, recorded on GRA-1759): one
-// place and one cursor for the whole mailbox. Graph's change feed for mail
-// is per folder only (message delta), and one cursor can't hold a token
-// for every folder; so the sync lists `/me/messages`, which holds "the
-// messages in the signed-in user's mailbox (including the Deleted Items
-// and Clutter folders)", ordered by `lastModifiedDateTime`
-// (https://learn.microsoft.com/en-us/graph/api/user-list-messages?view=graph-rest-1.0).
-// The first listing and every change after it are the same read: the
-// first has no lower bound. Messages are asked for by their immutable IDs
-// (`Prefer: IdType="ImmutableId"`): a message's usual ID "changes when the
-// item is moved from one container … to another"
-// (https://learn.microsoft.com/en-us/graph/api/resources/message?view=graph-rest-1.0).
+// How it reads (the orchestrator's decision, recorded on GRA-1759): by
+// message delta, per mail folder, as Microsoft documents syncing mail
+// ("Delta query is a per-folder operation. To track the changes of the
+// messages in a folder hierarchy, you need to track each folder
+// individually",
+// https://learn.microsoft.com/en-us/graph/delta-query-messages). Each mail
+// folder is a place of the person's own connection, a source of its own
+// with its own cursor, the folder's delta token:
+// - Its places are the mailbox's folders (mailFolder delta,
+//   https://learn.microsoft.com/en-us/graph/api/mailfolder-delta?view=graph-rest-1.0),
+//   less Deleted Items, Junk Email and Drafts and every folder under them.
+//   A folder that appears or goes changes the list; core then adds or
+//   drops its source.
+// - A folder's messages come from its delta
+//   (https://learn.microsoft.com/en-us/graph/api/message-delta?view=graph-rest-1.0),
+//   first all of them, then what changed. A message deleted, or moved out
+//   of the folder, comes under `@removed` and goes. A moved message comes
+//   in the folder it moved to as new.
+// - Each item is keyed by its folder too (`<folder>/<message>`): a message
+//   keeps its ID when it moves (`Prefer: IdType="ImmutableId"`), so the
+//   copy that goes and the copy that comes are two keys, and the order in
+//   which core applies the two folders' pages can never erase the one that
+//   stays.
+// - Graph's next and delta links are never followed: only their
+//   `$skiptoken` or `$deltatoken` is kept, which carry the `$select`, and
+//   the request is built here. A token Graph no longer knows (410,
+//   `syncStateNotFound`) lists the folder again.
+// - Graph is asked for no more messages a page (`odata.maxpagesize`) than a
+//   page has requests for one read each; a page that stops inside Graph's
+//   page goes on after the last message handled, by its ID and
+//   `changeKey`, or from the top of Graph's page when that message isn't
+//   there as it was (the kit's `fillPage`).
 //
-// Resuming, by key, never by position, and without assuming how Graph
-// orders messages changed at the same time. Graph documents ordering by
-// several properties, but none by `id`, and "properties that appear in
-// `$orderby` must also appear in `$filter`"
-// (https://learn.microsoft.com/en-us/graph/query-parameters), so there is
-// no second sort key to lean on. Instead the sync takes the messages of
-// one `lastModifiedDateTime` (a "time") as a group, in the order of their
-// IDs, which it sorts itself:
-// - A listing reads past the last time done (`gt`), and only the first
-//   page of it: Graph's next link carries `$skip`, a position ("This API
-//   uses the `$skip` value to keep count of all the items it has gone
-//   through"), which a message that changes meanwhile shifts.
-// - Every time but the last of a full listing page is whole in the page.
-//   The last one, and a time a page stopped inside, is read on its own
-//   (`eq`), its IDs sorted, and goes on after the greatest ID handled.
-// - Only messages last changed before the second Graph answered the
-//   listing in (its `Date` header) are taken, so no message joins a time
-//   once the sync has started on it.
-// - A time is done only when all of its messages are; the cursor then
-//   moves past it.
-//
-// What goes away, at once: a message in Deleted Items or Junk Email, or in
-// a folder under either (a deleted folder is moved under Deleted Items),
-// found by walking a message's folder up to the mailbox's root. A message
-// outside the root, or whose folder Graph no longer has, can't be
-// confirmed as mail and goes away too. The sync run removes a message's
-// attachments with it. A message whose read is late past the page's
-// deadline is left to the next page; the page's first goes away, so it
-// can't hold the sync, and comes back when it next changes or at the
-// daily relisting.
-//
-// What is left out: drafts (`isDraft`, not sent yet); inline attachments
-// (pictures in the body, such as signatures); attachments that are an
-// Outlook item (an attached message, event or contact) or a link to a
-// cloud file; a file attachment larger than a read takes (`maxReadBytes`)
-// comes without its content; Bcc and Reply-To in a message's header lines.
-//
-// THE BOUND: a HARD delete (a message deleted for good, or Deleted Items
-// emptied) never shows in `/me/messages`: the message just isn't there.
-// It goes at the sync run's daily full relisting (PR I), so a hard-deleted
-// message can stay for at most a day. That is the orchestrator's decision:
-// a mail item is readable only by the mailbox's own person, so nobody
-// else is affected.
+// What is left out: drafts (`isDraft`); inline attachments (pictures in
+// the body, such as signatures); attachments that are an Outlook item (an
+// attached message, event or contact) or a link to a cloud file; Bcc and
+// Reply-To in a message's header lines. A message or file larger than
+// connect reads of one answer, or late past the page's deadline as the
+// page's first, comes without its content, never failing the page.
 //
 // NEEDS A REAL TENANT TO CONFIRM (not documented by Microsoft):
-// - That moving a message (to Deleted Items, Junk Email or any folder)
-//   moves its `lastModifiedDateTime`. Microsoft documents a move as making
-//   "a new copy of the message in the destination folder", which suggests
-//   so; if not, a move to Deleted Items goes at the daily relisting.
-// - That `lastModifiedDateTime` is set no later than the `Date` of the
-//   first answer that lists the message.
-// - A time of more than one listing page of messages (1,000 changed in
-//   one second) can only be read through Graph's next links, a position: a
-//   message of it that changes during that read can hide another until the
-//   daily relisting.
+// - That mailFolder delta lists every folder, nested ones too; its page
+//   doesn't say.
+// - That a delta token read again answers the same messages in the same
+//   order, less those changed since. If not, Graph's page is read from its
+//   top.
 
 const me = "/me";
-const messages = `${me}/messages`;
 const folders = `${me}/mailFolders`;
+const messages = `${me}/messages`;
 
-/**
- * Messages asked of Graph per listing page: the most `$top` takes ("within
- * the range of 1 and 1000", user-list-messages). Only IDs and what decides
- * how a message is read are listed; each message is read on its own.
- */
-const listingSize = 1000;
+/** Folders whose messages aren't mail to keep: the bin, junk, drafts. */
+const leftOutFolders = ["deleteditems", "junkemail", "drafts"] as const;
 
-/** Well-known folders: their messages are not mail any more. */
-const goneFolders = ["deleteditems", "junkemail"] as const;
-
-/** The mailbox's root: every folder of mail is under it. */
-const rootFolder = "msgfolderroot";
-
-/** Immutable IDs, and bodies as text (user-list-messages, message-get). */
+/** Immutable IDs, and bodies as text (message-delta, message-get). */
 const prefer = 'IdType="ImmutableId", outlook.body-content-type="text"';
 
-/** Each Graph read's headers. */
-const init = { headers: { prefer } };
-
 /**
- * A time as Graph writes it, and as the cursor carries it into a
- * `$filter`: ISO 8601 in UTC, nothing else.
+ * Messages asked of Graph per page of a folder's delta: one per request a
+ * page has after its own two (the owner, the delta), so the page can read
+ * each one.
  */
-const timeSchema = z.iso.datetime();
+const deltaPageSize = syncPageLimits.requests - 2;
+
+const removedSchema = z.unknown().optional();
 
 const listedSchema = z.object({
   id: z.string().min(1),
-  lastModifiedDateTime: timeSchema,
+  "@removed": removedSchema,
   changeKey: z.string().min(1).nullish(),
-  parentFolderId: z.string().min(1).nullish(),
+  lastModifiedDateTime: z.string().nullish(),
+  subject: z.string().nullish(),
   isDraft: z.boolean().nullish(),
   hasAttachments: z.boolean().nullish(),
 });
 type Listed = z.infer<typeof listedSchema>;
 
+/** What a folder's delta lists of each message: enough to pass it over. */
 const listedFields =
-  "id,lastModifiedDateTime,changeKey,parentFolderId,isDraft,hasAttachments";
+  "id,changeKey,lastModifiedDateTime,subject,isDraft,hasAttachments";
 
-const listingSchema = z.object({
+const deltaSchema = z.object({
   value: z.array(listedSchema),
   "@odata.nextLink": z.string().optional(),
+  "@odata.deltaLink": z.string().optional(),
 });
+
+const folderEntrySchema = z.object({
+  id: z.string().min(1),
+  "@removed": removedSchema,
+  parentFolderId: z.string().min(1).nullish(),
+});
+
+const foldersSchema = z.object({
+  value: z.array(folderEntrySchema),
+  "@odata.nextLink": z.string().optional(),
+  "@odata.deltaLink": z.string().optional(),
+});
+
+const folderSchema = z.object({ id: z.string().min(1) });
 
 const addressSchema = z
   .object({
@@ -186,274 +172,179 @@ const attachmentsSchema = z.object({
   "@odata.nextLink": z.string().optional(),
 });
 
-const folderSchema = z.object({
-  id: z.string().min(1),
-  parentFolderId: z.string().min(1).nullish(),
-});
-
 const meSchema = z.object({ id: z.string().min(1) });
 
 /** The content type of a file Graph names none for. */
 const unknownType = "application/octet-stream";
 
-/**
- * Where a read is: from the start; inside a time, after the greatest ID
- * handled in it (none: from its first); or past a time.
- */
-type Position =
-  | { at: "start" }
-  | { at: "inside"; time: string; after: string | null }
-  | { at: "past"; time: string };
+/** Each Graph read's headers. */
+const init = { headers: { prefer } };
 
-/** The cursor of a position: `m.s`, `m.i.<time>.<after>` or `m.p.<time>`. */
-const cursorOf = (position: Position): string => {
-  switch (position.at) {
-    case "start": {
-      return "m.s";
-    }
-    case "inside": {
-      return `m.i.${cursorPart(position.time)}.${cursorPart(position.after)}`;
-    }
-    case "past": {
-      return `m.p.${cursorPart(position.time)}`;
-    }
-    default: {
-      return position satisfies never;
-    }
-  }
-};
+/** Graph's token to read a folder's delta from: a skip or a delta token. */
+interface Token {
+  kind: "skip" | "delta";
+  value: string;
+}
+
+/**
+ * Where a folder's read is: Graph's token (none: the folder's first
+ * listing), and the message of that token's page already handled.
+ */
+interface Position {
+  token: Token | null;
+  after: string | null;
+}
 
 const notOurs = (): RestartSyncError =>
   new RestartSyncError("Not a cursor this sync wrote");
 
-/** A time a cursor carries, checked before it goes into a `$filter`. */
-const timeOf = (part: string | undefined): string => {
-  const time = fromCursorPart(part);
-  if (time === null || !timeSchema.safeParse(time).success) {
-    throw notOurs();
-  }
-  return time;
+const kinds: Readonly<Record<string, Token["kind"] | null>> = {
+  s: "skip",
+  d: "delta",
+  n: null,
 };
+
+/** The cursor of a position: `f.<s|d|n>.<token>.<after>`. */
+const cursorOf = ({ token, after }: Position): string =>
+  `f.${token === null ? "n" : token.kind.charAt(0)}.${cursorPart(token?.value ?? null)}.${cursorPart(after)}`;
 
 /** The position a cursor this sync wrote names; any other starts over. */
 const positionOf = (cursor: string): Position => {
-  const [tag, at, time, after, ...rest] = cursor.split(".");
-  if (tag !== "m" || rest.length > 0) {
+  const [tag, kind = "", token, after, ...rest] = cursor.split(".");
+  const tokenKind = Object.hasOwn(kinds, kind) ? kinds[kind] : undefined;
+  if (tag !== "f" || tokenKind === undefined || rest.length > 0) {
     throw notOurs();
   }
-  if (at === "s" && time === undefined) {
-    return { at: "start" };
+  const value = fromCursorPart(token);
+  if ((tokenKind === null) !== (value === null)) {
+    throw notOurs();
   }
-  if (at === "i" && after !== undefined) {
-    return { at: "inside", time: timeOf(time), after: fromCursorPart(after) };
+  return {
+    token:
+      tokenKind === null || value === null ? null : { kind: tokenKind, value },
+    after: fromCursorPart(after),
+  };
+};
+
+/** The token a link Graph handed back carries; the link is never followed. */
+const tokenOf = (link: string, kind: Token["kind"]): Token => {
+  let url: URL;
+  try {
+    url = new URL(link);
+  } catch {
+    throw new ToolError("Graph's link isn't a URL", { code: "failed" });
   }
-  if (at === "p" && after === undefined) {
-    return { at: "past", time: timeOf(time) };
+  const value = url.searchParams.get(`$${kind}token`) ?? "";
+  if (url.hostname !== graphHost || value === "") {
+    throw new ToolError("Graph's link has no token", { code: "failed" });
   }
-  throw notOurs();
+  return { kind, value };
 };
 
 /**
- * Why a page stops before a message: no room left in it (`full`), or a
- * read the page's deadline cut off (`late`).
- */
-class StopError extends Error {
-  readonly why: "full" | "late";
-
-  constructor(why: "full" | "late") {
-    super(
-      why === "full"
-        ? "No room left in the page"
-        : "Graph didn't answer before the page's deadline"
-    );
-    this.name = "StopError";
-    this.why = why;
-  }
-}
-
-/**
- * What a read the page can't go without stands for when it is late or out
- * of room with nothing taken: Graph is slow, and the page waits as for a
- * rate limit, rather than answering with no progress.
+ * What a read the page can't go without stands for when it is late: Graph
+ * is slow, and the page waits as for a rate limit.
  */
 const tooSlow = (): ToolError =>
   new ToolError("Microsoft 365 didn't answer in time", {
     code: "unavailable",
   });
 
+/** Whether Graph refused an item (403) or no longer has it (404). */
+const isUnreadable = (response: Response): boolean =>
+  response.status === 403 || response.status === 404;
+
 /**
- * A GET to Graph, within the page's requests, its whole answer read before
- * the page's deadline (the kit's `fetchInRoom`); a stop when there is no
- * request left or the deadline cut it off.
+ * A GET to Graph within the page's room (the kit's `fetchInRoom`): "late"
+ * when the deadline cut it off, "large" when its answer is more than
+ * connect reads of one (the egress cuts it off while it comes).
  */
-const get = async (room: SyncRoom, url: URL): Promise<Response> => {
-  if (room.requests <= 0) {
-    throw new StopError("full");
+const get = async (
+  room: SyncRoom,
+  url: URL
+): Promise<Response | "late" | "large"> => {
+  try {
+    return await fetchInRoom(room, url, init);
+  } catch {
+    return "large";
   }
-  const response = await fetchInRoom(room, url, init);
-  if (response === "late") {
-    throw new StopError("late");
-  }
-  return response;
 };
 
-/** Graph's JSON answer to a GET that must succeed. */
+/** Graph's JSON answer to a GET the page can't go without. */
 const getJson = async <Schema extends z.ZodType>(
   room: SyncRoom,
   url: URL,
   schema: Schema
 ): Promise<z.output<Schema>> => {
   const response = await get(room, url);
+  if (response === "late") {
+    throw tooSlow();
+  }
+  if (response === "large") {
+    throw new ToolError("Graph's answer is larger than connect reads", {
+      code: "failed",
+    });
+  }
   if (!response.ok) {
     throw await graphFailure(response);
   }
   return schema.parse(await response.json());
 };
 
-/** Whether Graph refused an item (403) or no longer has it (404). */
-const isUnreadable = (response: Response): boolean =>
-  response.status === 403 || response.status === 404;
-
 /**
- * A next link Graph handed back, followed only on its own host and the
- * same path (see "NEEDS A REAL TENANT" for where it is followed).
+ * The mailbox's folders to sync: every folder mailFolder delta lists, less
+ * Deleted Items, Junk Email and Drafts and every folder under them.
  */
-const nextUrl = (link: string, path: string): URL => {
-  const url = new URL(link);
-  if (url.hostname !== graphHost || url.pathname !== `${v1}${path}`) {
-    throw new ToolError("Graph's next link leads elsewhere", {
-      code: "failed",
-    });
-  }
-  return url;
-};
-
-/** Graph's own second of an answer (its `Date` header), in ms. */
-const secondOf = (response: Response): number => {
-  const time = Date.parse(response.headers.get("date") ?? "");
-  if (Number.isNaN(time)) {
-    throw new ToolError("Graph's answer has no Date", { code: "failed" });
-  }
-  return time;
-};
-
-/**
- * The first page of the listing past `time` (from the start without one),
- * oldest change first, and Graph's second of it. `$filter` and `$orderby`
- * name the same property, as Graph requires (user-list-messages, "Using
- * filter and orderby in the same query").
- */
-const listingAfter = async (room: SyncRoom, time: string | null) => {
-  const response = await get(
-    room,
-    graphUrl(messages, {
-      $filter: time === null ? undefined : `lastModifiedDateTime gt ${time}`,
-      $orderby: "lastModifiedDateTime",
-      $select: listedFields,
-      $top: String(listingSize),
-    })
-  );
-  if (!response.ok) {
-    throw await graphFailure(response);
-  }
-  return {
-    settled: secondOf(response),
-    page: listingSchema.parse(await response.json()),
-  };
-};
-
-/** By ID, as the sync orders a time's messages itself. */
-const byId = (a: Listed, b: Listed): number =>
-  a.id < b.id ? -1 : Number(a.id > b.id);
-
-/**
- * Every message changed at `time`, in the order of their IDs. Past one
- * listing page, through Graph's next links (see "NEEDS A REAL TENANT").
- */
-const messagesAt = async (room: SyncRoom, time: string): Promise<Listed[]> => {
-  const listed: Listed[] = [];
-  let url: URL | null = graphUrl(messages, {
-    $filter: `lastModifiedDateTime eq ${time}`,
-    $select: listedFields,
-    $top: String(listingSize),
-  });
-  while (url !== null) {
-    // oxlint-disable-next-line no-await-in-loop -- one page after another
-    const page: z.infer<typeof listingSchema> = await getJson(
-      room,
-      url,
-      listingSchema
-    );
-    listed.push(...page.value);
-    const next: string | undefined = page["@odata.nextLink"];
-    url = next === undefined ? null : nextUrl(next, messages);
-  }
-  return listed.toSorted(byId);
-};
-
-/** Whether a folder's messages are mail, as far as the page found out. */
-type Standing = "mail" | "gone";
-
-/**
- * Whether a folder holds mail: under the mailbox's root and not under
- * Deleted Items or Junk Email, walked up one folder at a time and kept for
- * the page. A folder Graph no longer has, or outside the root, is gone.
- * https://learn.microsoft.com/en-us/graph/api/mailfolder-get?view=graph-rest-1.0
- */
-const standingOf = async (
-  room: SyncRoom,
-  known: Map<string, Standing>,
-  folder: string
-): Promise<Standing> => {
-  const walked: string[] = [];
-  let at: string | null = folder;
-  let standing: Standing | undefined;
-  while (standing === undefined) {
-    if (at === null || walked.includes(at)) {
-      standing = "gone";
-      break;
-    }
-    standing = known.get(at);
-    if (standing !== undefined) {
-      break;
-    }
-    walked.push(at);
-    // oxlint-disable-next-line no-await-in-loop -- one folder up at a time
-    const response: Response = await get(
-      room,
-      graphUrl(`${folders}/${segment(at)}`, { $select: "id,parentFolderId" })
-    );
-    if (isUnreadable(response)) {
-      standing = "gone";
-      break;
-    }
-    if (!response.ok) {
-      // oxlint-disable-next-line no-await-in-loop -- the walk ends here
-      throw await graphFailure(response);
-    }
-    // oxlint-disable-next-line no-await-in-loop -- the walk goes on from it
-    const read = folderSchema.parse(await response.json());
-    at = read.parentFolderId ?? null;
-  }
-  for (const id of walked) {
-    known.set(id, standing);
-  }
-  return standing;
-};
-
-/** The well-known folders' standing: the root is mail, the others not. */
-const knownFolders = async (room: SyncRoom): Promise<Map<string, Standing>> => {
-  const known = new Map<string, Standing>();
-  for (const name of [rootFolder, ...goneFolders]) {
+const placesOf = async (): Promise<string[]> => {
+  const room = syncRoom(Date.now() + syncPageLimits.millis);
+  const leftOut = new Set<string>();
+  for (const name of leftOutFolders) {
     // oxlint-disable-next-line no-await-in-loop -- three small reads
     const { id } = await getJson(
       room,
       graphUrl(`${folders}/${name}`, { $select: "id" }),
       folderSchema
     );
-    known.set(id, name === rootFolder ? "mail" : "gone");
+    leftOut.add(id);
   }
-  return known;
+  const parents = new Map<string, string | null>();
+  let url: URL | null = graphUrl(`${folders}/delta`, {
+    $select: "id,parentFolderId",
+  });
+  while (url !== null) {
+    // oxlint-disable-next-line no-await-in-loop -- one page after another
+    const page: z.infer<typeof foldersSchema> = await getJson(
+      room,
+      url,
+      foldersSchema
+    );
+    for (const folder of page.value) {
+      if (folder["@removed"] === undefined) {
+        parents.set(folder.id, folder.parentFolderId ?? null);
+      }
+    }
+    const next: string | undefined = page["@odata.nextLink"];
+    url =
+      next === undefined
+        ? null
+        : graphUrl(`${folders}/delta`, {
+            $skiptoken: tokenOf(next, "skip").value,
+          });
+  }
+  /** Whether a folder or one above it is left out. */
+  const isLeftOut = (id: string): boolean => {
+    const seen = new Set<string>();
+    let at: string | null = id;
+    while (at !== null && !seen.has(at)) {
+      if (leftOut.has(at)) {
+        return true;
+      }
+      seen.add(at);
+      at = parents.get(at) ?? null;
+    }
+    return false;
+  };
+  return [...parents.keys()].filter((id) => !isLeftOut(id));
 };
 
 /** A recipient, as a mail's header line writes it. */
@@ -480,80 +371,133 @@ const textOf = (message: Message): string => {
   return `${lines.join("\n")}\n\n${message.body?.content ?? ""}`;
 };
 
-/**
- * Takes `content` into the page if it fits; on an empty page, without it;
- * else the page stops before the message (the kit's `takeContent`).
- */
-const take = (room: SyncRoom, content: SyncContent): SyncContent | null => {
-  const taken = takeContent(room, content);
-  if (taken === null) {
-    throw new StopError("full");
-  }
-  return taken.content;
-};
-
 /** Whether an attachment is a file to sync: a file, not inline. */
 const isFile = (attachment: Attachment): boolean =>
   attachment["@odata.type"] === "#microsoft.graph.fileAttachment" &&
   attachment.isInline !== true;
 
-/** A message's attachments, as listed, through Graph's next links. */
+/** What a page reads a folder's messages with. */
+interface Folder {
+  place: string;
+  owner: SyncReader[];
+}
+
+/** A message's key in a folder: `<folder>/<message>`. */
+const keyIn = (folder: Folder, id: string): string => `${folder.place}/${id}`;
+
+/**
+ * Items that keep within the shared item's bounds; one that breaks them
+ * (an ID or a title longer than an item takes) is passed over.
+ */
+const fitting = (items: readonly SyncItem[]): SyncItem[] =>
+  items.filter((item) => syncItemSchema.safeParse(item).success);
+
+/** An item that is there. */
+type Present = Extract<SyncItem, { gone: false }>;
+
+/** A message as an item, with `content`, and its version and time. */
+const messageItem = (
+  folder: Folder,
+  listed: Listed,
+  title: string,
+  content: SyncContent | null
+): Present => ({
+  gone: false,
+  id: keyIn(folder, listed.id),
+  kind: "mail",
+  version: listed.changeKey ?? listed.lastModifiedDateTime ?? "",
+  changedAt: listed.lastModifiedDateTime ?? "",
+  title,
+  content,
+  readers: folder.owner,
+  changedBy: null,
+  partOf: null,
+});
+
+/**
+ * What a message passed over is, with no request: gone if removed,
+ * nothing if a draft, else itself without its content or files.
+ */
+const passOver = (folder: Folder, listed: Listed): SyncItem[] => {
+  if (listed["@removed"] !== undefined) {
+    return [{ gone: true, id: keyIn(folder, listed.id), kind: "mail" }];
+  }
+  if (listed.isDraft === true) {
+    return [];
+  }
+  return fitting([messageItem(folder, listed, listed.subject ?? "", null)]);
+};
+
+/** A message's attachments, as listed, a page of Graph's at a time. */
 const attachmentsOf = async (
   room: SyncRoom,
   id: string
-): Promise<Attachment[]> => {
+): Promise<Attachment[] | "late" | "full"> => {
   const path = `${messages}/${segment(id)}/attachments`;
   const listed: Attachment[] = [];
   let url: URL | null = graphUrl(path, {
     $select: "id,name,contentType,size,isInline",
   });
   while (url !== null) {
+    if (!mayRequest(room)) {
+      // The page's first message is taken with the files listed so far.
+      return room.empty ? listed : "full";
+    }
     // oxlint-disable-next-line no-await-in-loop -- one page after another
-    const page: z.infer<typeof attachmentsSchema> = await getJson(
-      room,
-      url,
-      attachmentsSchema
-    );
+    const response = await get(room, url);
+    if (response === "late") {
+      return "late";
+    }
+    if (response === "large" || isUnreadable(response)) {
+      return listed;
+    }
+    if (!response.ok) {
+      // oxlint-disable-next-line no-await-in-loop -- the listing ends here
+      throw await graphFailure(response);
+    }
+    // oxlint-disable-next-line no-await-in-loop -- read before the next
+    const page = attachmentsSchema.parse(await response.json());
     listed.push(...page.value);
-    const next: string | undefined = page["@odata.nextLink"];
-    url = next === undefined ? null : nextUrl(next, path);
+    const next = page["@odata.nextLink"];
+    url =
+      next === undefined
+        ? null
+        : graphUrl(path, {
+            $select: "id,name,contentType,size,isInline",
+            $skiptoken: tokenOf(next, "skip").value,
+          });
   }
   return listed;
 };
 
 /**
- * An attachment's bytes: null when it is larger than a read takes, Graph
- * no longer has it, or, for the page's first message only, it is late or
- * out of room. For any later message that stops the page before it, so
- * the file is read with its content on the next page.
+ * A file attachment's bytes: null when it is larger than a read takes,
+ * than connect reads of one answer, or Graph no longer has it; "late" or
+ * "full" when the page has no time or request left for it.
  * https://learn.microsoft.com/en-us/graph/api/attachment-get?view=graph-rest-1.0
  */
 const bytesOf = async (
   room: SyncRoom,
   message: string,
   attachment: Attachment
-): Promise<Uint8Array | null> => {
+): Promise<Uint8Array | null | "late" | "full"> => {
   if ((attachment.size ?? 0) > maxReadBytes) {
     return null;
   }
-  let response: Response;
-  try {
-    if (!mayRequest(room)) {
-      throw new StopError(room.requests <= 0 ? "full" : "late");
-    }
-    response = await get(
-      room,
-      graphUrl(
-        `${messages}/${segment(message)}/attachments/${segment(attachment.id)}/$value`
-      )
-    );
-  } catch (error) {
-    if (error instanceof StopError && room.empty) {
-      return null;
-    }
-    throw error;
+  if (!mayRequest(room)) {
+    // The page's first message is taken with its file's content left out.
+    return room.empty ? null : "full";
   }
-  if (isUnreadable(response)) {
+  const response = await get(
+    room,
+    graphUrl(
+      `${messages}/${segment(message)}/attachments/${segment(attachment.id)}/$value`
+    )
+  );
+  if (response === "late") {
+    return "late";
+  }
+  if (response === "large" || isUnreadable(response)) {
     return null;
   }
   if (!response.ok) {
@@ -563,115 +507,120 @@ const bytesOf = async (
   return bytes.byteLength > maxReadBytes ? null : bytes;
 };
 
-/** What a page reads every message against. */
-interface Mailbox {
-  owner: SyncReader[];
-  folders: Map<string, Standing>;
-}
-
 /**
- * A message, as items: the message and each file attachment, or gone, or
- * nothing (a draft). Throws a stop when the page has no room for all of
- * it: a message is taken whole or not at all.
+ * One message's items for the kit's `fillPage`: gone, nothing (a draft),
+ * or the message with its text and each file attachment; "late" or "full"
+ * when the page stops before it (the kit passes over the page's first).
+ * A message whose answer is larger than connect reads of one comes
+ * without its content, never failing the page.
  * https://learn.microsoft.com/en-us/graph/api/message-get?view=graph-rest-1.0
  */
 const itemsOf = async (
   room: SyncRoom,
-  mailbox: Mailbox,
+  folder: Folder,
   listed: Listed
-): Promise<SyncItem[]> => {
-  const gone: SyncItem[] = [{ gone: true, id: listed.id, kind: "mail" }];
-  if (listed.isDraft === true) {
-    return [];
+): Promise<EntryItems> => {
+  if (listed["@removed"] !== undefined || listed.isDraft === true) {
+    return passOver(folder, listed);
   }
-  const folder = listed.parentFolderId ?? null;
-  if (
-    folder === null ||
-    (await standingOf(room, mailbox.folders, folder)) === "gone"
-  ) {
-    return gone;
+  if (!mayRequest(room)) {
+    return "full";
   }
   const response = await get(
     room,
     graphUrl(`${messages}/${segment(listed.id)}`, { $select: messageFields })
   );
+  if (response === "late") {
+    return "late";
+  }
+  if (response === "large") {
+    return passOver(folder, listed);
+  }
   if (isUnreadable(response)) {
-    return gone;
+    return [{ gone: true, id: keyIn(folder, listed.id), kind: "mail" }];
   }
   if (!response.ok) {
     throw await graphFailure(response);
   }
   const message = messageSchema.parse(await response.json());
-  const version = listed.changeKey ?? listed.lastModifiedDateTime;
-  const common = {
-    gone: false,
-    kind: "mail",
-    version,
-    changedAt: listed.lastModifiedDateTime,
-    readers: mailbox.owner,
-    changedBy: null,
-  } as const;
-  const items: SyncItem[] = [
-    {
-      ...common,
-      id: listed.id,
-      title: message.subject ?? "",
-      content: take(room, { type: "text", text: textOf(message) }),
-      partOf: null,
-    },
-  ];
+  const text = takeContent(room, { type: "text", text: textOf(message) });
+  if (text === null) {
+    return "full";
+  }
+  const item = messageItem(folder, listed, message.subject ?? "", text.content);
   if (listed.hasAttachments !== true) {
-    return items;
+    return fitting([item]);
   }
   const attachments = await attachmentsOf(room, listed.id);
+  if (attachments === "late" || attachments === "full") {
+    return attachments;
+  }
+  const items: SyncItem[] = [item];
   for (const attachment of attachments.filter(isFile)) {
     // oxlint-disable-next-line no-await-in-loop -- one file after another, within the page's room
     const bytes = await bytesOf(room, listed.id, attachment);
-    items.push({
-      ...common,
-      id: `${listed.id}/${attachment.id}`,
-      title: attachment.name ?? "",
-      content:
-        bytes === null
-          ? null
-          : take(room, {
-              type: "file",
-              contentType: attachment.contentType ?? unknownType,
-              base64: toBase64(bytes),
-            }),
-      partOf: listed.id,
-    });
-  }
-  return items;
-};
-
-/**
- * One message's items for the kit's `fillPage`, or "full" when the page
- * stops before it: out of room or time, or a read late. The page's first
- * message is taken whatever it costs; if its reads are late it goes away,
- * so it can't hold the sync.
- */
-const itemsFor =
-  (room: SyncRoom, mailbox: Mailbox) =>
-  async (listed: Listed): Promise<readonly SyncItem[] | "full"> => {
-    if (!room.empty && !mayRequest(room)) {
-      return "full";
+    if (bytes === "late" || bytes === "full") {
+      return bytes;
     }
-    try {
-      return await itemsOf(room, mailbox, listed);
-    } catch (error) {
-      if (!(error instanceof StopError)) {
-        throw error;
-      }
-      if (!room.empty) {
+    let content: SyncContent | null = null;
+    if (bytes !== null) {
+      const taken = takeContent(room, {
+        type: "file",
+        contentType: attachment.contentType ?? unknownType,
+        base64: toBase64(bytes),
+      });
+      if (taken === null) {
         return "full";
       }
-      if (error.why === "late") {
-        return [{ gone: true, id: listed.id, kind: "mail" }];
-      }
-      throw tooSlow();
+      ({ content } = taken);
     }
-  };
+    items.push({
+      ...item,
+      id: `${item.id}/${attachment.id}`,
+      title: attachment.name ?? "",
+      content,
+      partOf: item.id,
+    });
+  }
+  return fitting(items);
+};
+
+/** One page of a folder's delta: from a token, or its first listing. */
+const deltaPage = async (
+  room: SyncRoom,
+  folder: Folder,
+  token: Token | null
+): Promise<z.infer<typeof deltaSchema> | "late"> => {
+  const path = `${folders}/${segment(folder.place)}/messages/delta`;
+  const url =
+    token === null
+      ? graphUrl(path, { $select: listedFields })
+      : graphUrl(path, { [`$${token.kind}token`]: token.value });
+  let response: Response | "late";
+  try {
+    response = await fetchInRoom(room, url, {
+      headers: { prefer: `${prefer}, odata.maxpagesize=${deltaPageSize}` },
+    });
+  } catch {
+    throw new ToolError("Graph's delta page is larger than connect reads", {
+      code: "failed",
+    });
+  }
+  if (response === "late") {
+    return "late";
+  }
+  if (response.status === 410 || (response.status === 404 && token !== null)) {
+    throw new RestartSyncError();
+  }
+  if (!response.ok) {
+    throw await graphFailure(response);
+  }
+  return deltaSchema.parse(await response.json());
+};
+
+/** A message's key in Graph's page: its ID and `changeKey`. */
+const keyOf = ({ id, changeKey }: Listed): string =>
+  `${id}\n${changeKey ?? ""}`;
 
 /** The person's own Entra object ID, their mail's only reader. */
 const ownerOf = async (room: SyncRoom): Promise<SyncReader[]> => {
@@ -679,137 +628,76 @@ const ownerOf = async (room: SyncRoom): Promise<SyncReader[]> => {
   return [{ kind: "account", id: id.toLowerCase() }];
 };
 
-/** What a step of the page took, and where it goes on. */
-interface Step {
-  items: SyncItem[];
-  at: Position;
-  /** Whether the page stops here, and whether more is due at once. */
-  stop: { more: boolean } | null;
-}
-
-/**
- * The messages of `time` after `after`, in the order of their IDs: those
- * a listing page already holds whole, or read on their own.
- */
-const insideStep = async (
-  room: SyncRoom,
-  mailbox: Mailbox,
-  time: string,
-  after: string | null,
-  whole: readonly Listed[] | null
-): Promise<Step> => {
-  const all = whole ?? (await messagesAt(room, time));
-  const left = all.filter(({ id }) => after === null || id > after);
-  const filled = await fillPage(
-    room,
-    left,
-    null,
-    ({ id }) => id,
-    itemsFor(room, mailbox)
-  );
-  if (!filled.done) {
-    return {
-      items: filled.items,
-      at: { at: "inside", time, after: filled.last ?? after },
-      stop: { more: true },
-    };
-  }
-  return { items: filled.items, at: { at: "past", time }, stop: null };
-};
-
-/**
- * The listing past the last time done: each time whole in its page taken
- * from there; the last time of a page that goes on, which may go on past
- * it, read on its own next.
- */
-const listingStep = async (
-  room: SyncRoom,
-  mailbox: Mailbox,
-  position: Exclude<Position, { at: "inside" }>
-): Promise<Step> => {
-  const { settled, page } = await listingAfter(
-    room,
-    position.at === "past" ? position.time : null
-  );
-  const listed = page.value.filter(
-    ({ lastModifiedDateTime }) => Date.parse(lastModifiedDateTime) < settled
-  );
-  const lastTime = page.value.at(-1)?.lastModifiedDateTime;
-  const goesOn = page["@odata.nextLink"] !== undefined;
-  const items: SyncItem[] = [];
-  let at: Position = position;
-  const times = [
-    ...new Set(listed.map(({ lastModifiedDateTime }) => lastModifiedDateTime)),
-  ];
-  for (const time of times) {
-    if (goesOn && time === lastTime) {
-      return { items, at: { at: "inside", time, after: null }, stop: null };
-    }
-    const whole = listed
-      .filter(({ lastModifiedDateTime }) => lastModifiedDateTime === time)
-      .toSorted(byId);
-    // oxlint-disable-next-line no-await-in-loop -- one time after another
-    const step = await insideStep(room, mailbox, time, null, whole);
-    items.push(...step.items);
-    ({ at } = step);
-    if (step.stop !== null) {
-      return { items, at, stop: step.stop };
-    }
-  }
-  // Every settled time is done: what's left changed at or after the second
-  // Graph answered in, or there is nothing more.
-  return { items, at, stop: { more: false } };
-};
-
-/** One page of the person's own mailbox from `position` on. */
+/** One page of a folder's messages from `position` on. */
 const readPage = async (
+  place: string,
   position: Position,
   deadline: number
 ): Promise<SyncPage> => {
   const room = syncRoom(deadline);
+  const folder: Folder = { place, owner: await ownerOf(room) };
   const items: SyncItem[] = [];
   let at = position;
-  try {
-    const mailbox: Mailbox = {
-      owner: await ownerOf(room),
-      folders: await knownFolders(room),
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- one page of Graph's after another
+    const page = await deltaPage(room, folder, at.token);
+    if (page === "late") {
+      if (room.empty) {
+        throw tooSlow();
+      }
+      return { items, cursor: cursorOf(at), more: true };
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one page of Graph's after another
+    const filled = await fillPage({
+      room,
+      entries: page.value,
+      after: at.after,
+      keyOf,
+      itemsFor: async (listed) => await itemsOf(room, folder, listed),
+      passOver: (listed) => passOver(folder, listed),
+    });
+    items.push(...filled.items);
+    if (!filled.done) {
+      return {
+        items,
+        cursor: cursorOf({ ...at, after: filled.last }),
+        more: true,
+      };
+    }
+    const next = page["@odata.nextLink"];
+    const end = page["@odata.deltaLink"];
+    if (next === undefined && end === undefined) {
+      throw new ToolError("Graph's page has no link on", { code: "failed" });
+    }
+    at = {
+      token:
+        next === undefined
+          ? tokenOf(end ?? "", "delta")
+          : tokenOf(next, "skip"),
+      after: null,
     };
-    for (;;) {
-      const step =
-        at.at === "inside"
-          ? // oxlint-disable-next-line no-await-in-loop -- one step after another, within the page's room
-            await insideStep(room, mailbox, at.time, at.after, null)
-          : // oxlint-disable-next-line no-await-in-loop -- one step after another, within the page's room
-            await listingStep(room, mailbox, at);
-      items.push(...step.items);
-      ({ at } = step);
-      if (step.stop !== null) {
-        return { items, cursor: cursorOf(at), more: step.stop.more };
-      }
-      if (!mayRequest(room)) {
-        return { items, cursor: cursorOf(at), more: true };
-      }
+    if (next === undefined) {
+      return { items, cursor: cursorOf(at), more: false };
     }
-  } catch (error) {
-    if (!(error instanceof StopError)) {
-      throw error;
+    if (!mayRequest(room)) {
+      return { items, cursor: cursorOf(at), more: true };
     }
-    // A listing or a folder late or out of room: what the page has, or,
-    // with nothing taken yet, a wait as for a rate limit.
-    if (room.empty) {
-      throw tooSlow();
-    }
-    return { items, cursor: cursorOf(at), more: true };
   }
 };
 
-/** The person's own mailbox: every message, its changes and attachments. */
+/** The person's own mailbox: each folder's messages, changes and files. */
 export const mailSync = defineSync({
   name: "mail",
   kind: "mail",
   routes: [
     { method: "GET", host: graphHost, path: `${v1}${me}` },
-    { method: "GET", host: graphHost, path: `${v1}${messages}` },
+    { method: "GET", host: graphHost, path: `${v1}${folders}/delta` },
+    { method: "GET", host: graphHost, path: `${v1}${folders}/{folder}` },
+    {
+      method: "GET",
+      host: graphHost,
+      path: `${v1}${folders}/{place}/messages/delta`,
+    },
     { method: "GET", host: graphHost, path: `${v1}${messages}/{message}` },
     {
       method: "GET",
@@ -821,17 +709,12 @@ export const mailSync = defineSync({
       host: graphHost,
       path: `${v1}${messages}/{message}/attachments/{attachment}/$value`,
     },
-    { method: "GET", host: graphHost, path: `${v1}${folders}/{folder}` },
   ],
-  read: async ({ place, cursor, deadline }) => {
-    if (place !== ownPlace) {
-      throw new ToolError("This sync reads the person's own mailbox only", {
-        code: "failed",
-      });
-    }
-    return await readPage(
-      cursor === null ? { at: "start" } : positionOf(cursor),
+  places: async () => await placesOf(),
+  read: async ({ place, cursor, deadline }) =>
+    await readPage(
+      place,
+      cursor === null ? { token: null, after: null } : positionOf(cursor),
       deadline
-    );
-  },
+    ),
 });
