@@ -3,6 +3,7 @@ import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
 
 import { Button } from "../grasp/button/index.ts";
+import { Input } from "../grasp/input/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   RowAlert,
@@ -10,7 +11,6 @@ import {
   SettingsRows,
 } from "../grasp/setting-row/index.ts";
 import { Switch } from "../grasp/switch/index.ts";
-import { Text } from "../grasp/text/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { useQueuedSave } from "../settings/queued-save.ts";
 import { SavedField } from "../settings/saved-field.tsx";
@@ -19,6 +19,7 @@ import {
   SettingsError,
   SettingsLoading,
 } from "../settings/section.tsx";
+import { controlStyles } from "../settings/workspace-name.tsx";
 
 // Settings → Billing, for admins: the plan, the way to what AI costs (on
 // AI and spend, not repeated here), and the billing details. Core keeps the
@@ -39,7 +40,15 @@ const Plan = () => {
           info={t`Grasp links Stripe and sets up your plan with you.`}
           label={t`Current plan`}
         >
-          <Text size="sm">{t`None yet`}</Text>
+          {(field) => (
+            <Input
+              {...field}
+              layout={controlStyles.fill}
+              readOnly
+              size="sm"
+              value={t`None yet`}
+            />
+          )}
         </SettingRow>
         {/* What AI costs this month stands on its own page: the way there. */}
         <SettingRow label={t`AI spend`}>
@@ -67,7 +76,7 @@ const BillingPage = () => {
   );
   if (page.state !== "ready") {
     return (
-      <SectionCard title={t`Plan`}>
+      <SectionCard density="compact" title={t`Plan`}>
         <SectionNotLoaded page={page} />
       </SectionCard>
     );
