@@ -23,7 +23,9 @@ declare global {
  * `passwd`, `authorization`, `session` (`sessionId`, `JSESSIONID`) or
  * `cookie`, or of a name ending in one (`access_token`, `client_secret`), written as `name=value` or
  * `name: value`: quoted, to its closing quote (or the end of the line),
- * spaces included; unquoted, to the next space or separator, with a
+ * spaces included; unquoted, to the next whitespace or quote (a `&`, `,`
+ * or `;` taken with it: what follows in a query string, a cookie or a list
+ * is lost, the value never kept in part), with a
  * `Bearer` or `Basic` scheme of any length taken with it. JSON quoted
  * once more, as a string inside JSON (`{\"password\":\"…\"}`), is
  * caught the same way, to the escaped closing quote (a text that is JSON
@@ -103,7 +105,7 @@ const credentials: readonly (readonly [
   // match starts once per word, not at every "-" of a flood.
   [
     new RegExp(
-      String.raw`\b(?<name>\w*?(?:${credentialNames}))(?<between>\\?["']?\s*[:=]\s*)(?:(?<escapedQuote>\\["'])(?:(?!\k<escapedQuote>)[^\n])*(?<escapedClose>\k<escapedQuote>)?|(?<quote>["'])(?:\\.|(?!\k<quote>)[^\\\n])*(?<close>\k<quote>)?|(?:(?:bearer|basic)\s+)?[^\s"'&,;]+)`,
+      String.raw`\b(?<name>\w*?(?:${credentialNames}))(?<between>\\?["']?\s*[:=]\s*)(?:(?<escapedQuote>\\["'])(?:(?!\k<escapedQuote>)[^\n])*(?<escapedClose>\k<escapedQuote>)?|(?<quote>["'])(?:\\.|(?!\k<quote>)[^\\\n])*(?<close>\k<quote>)?|(?:(?:bearer|basic)\s+)?[^\s"']+)`,
       "giu"
     ),
     redactedAssignment,
@@ -317,19 +319,56 @@ const redactText = (text: string): string => {
 //   rounded), compact; a text with nothing to redact comes back byte for
 //   byte.
 //
-// JSON is the whole text, by JSON's grammar (RFC 8259): text around it, a
-// second document after it, or a document cut off, is not, and gets the
-// rules above over the text as written. A text that is JSON but too deep
-// for the platform's stack to revive or write back is redacted whole, never
-// passed on. Not caught, as by the rules over text: a credential split
-// across values (`["password:", "hunter2"]`) or named by a sibling's value
-// (`{"type":"bearer","value":"…"}`, GRA-1881).
+// JSON is the whole text, by JSON's grammar (RFC 8259), after a byte order
+// mark and whitespace: text around it, a second document after it, or a
+// document cut off, is not, and gets the rules above over the text as
+// written. So does JSON that holds a member's name twice: `JSON.parse`
+// keeps only the last, so writing it back would drop the others unread.
+// And so does JSON in which nothing is redacted by its values, so what is
+// redacted is never less than the rules over text remove. A text that is
+// JSON but too deep for the platform's stack to revive or write back is
+// redacted whole, never passed on.
+//
+// Not caught: a credential split across values (`["password:",
+// "hunter2"]`) or named by a sibling's value (`{"type":"bearer",
+// "value":"…"}`, GRA-1881); and the rest of a value after whitespace an
+// escape stands for (`password: ab\thunter2` keeps `hunter2`, as the
+// same text written with a tab does; GRA-2040).
 
 /** What a redacted JSON value, or a text too deep to read, becomes. */
 const redactedValue = "[redacted]";
 
-/** Where a JSON text may hold a string: one opening with `{`, `[` or `"`. */
-const mayHoldJsonString = /^[\t\n\r ]*[[{"]/u;
+/**
+ * Where a JSON text may hold a string: one opening with `{`, `[` or `"`,
+ * after a byte order mark and JSON's whitespace.
+ */
+const mayHoldJsonString = /^\uFEFF?[\t\n\r ]*[[{"]/u;
+
+/**
+ * How many members the objects of `json` (a text `JSON.parse` accepted)
+ * hold as written: outside its strings, a `:` only ever separates a
+ * member's name from its value (RFC 8259 §4), and inside one a `"` ends it
+ * unless a `\\` escapes it (§7). One pass, never a pattern: a pattern over
+ * a string of megabytes of escapes overflows the stack.
+ */
+const membersWritten = (json: string): number => {
+  let members = 0;
+  let inString = false;
+  let escaped = false;
+  for (const char of json) {
+    if (escaped) {
+      escaped = false;
+    } else if (inString) {
+      escaped = char === "\\";
+      inString = char !== '"';
+    } else if (char === '"') {
+      inString = true;
+    } else if (char === ":") {
+      members += 1;
+    }
+  }
+  return members;
+};
 
 /**
  * `value` (an object JSON.parse revived) with each member's name passed
@@ -352,21 +391,34 @@ const withNamesRedacted = (
 
 /**
  * `text` redacted by its values when it is JSON (above), or undefined when
- * it is not.
+ * the rules over text are to redact it.
  */
 const redactedJson = (text: string): string | undefined => {
   if (!mayHoldJsonString.test(text)) {
     return undefined;
   }
+  // `JSON.parse` refuses a byte order mark: read past it, and keep it.
+  const mark = text.startsWith("\uFEFF") ? "\uFEFF" : "";
+  const json = text.slice(mark.length);
   /** A string in it, JSON held as text in it read the same way in turn. */
   const redactString = (each: string): string =>
     redactedJson(each) ?? redactText(each);
   let changed = false;
+  // The members revived: fewer than written when a name came twice.
+  let membersRead = 0;
   const revived = (
     name: string,
     value: unknown,
     { source }: { source?: string } = {}
   ): unknown => {
+    const isObject =
+      typeof value === "object" &&
+      value !== null &&
+      // A list's names are its indexes: nothing to redact, nor to read.
+      !Array.isArray(value);
+    if (isObject) {
+      membersRead += Object.keys(value).length;
+    }
     let kept = value;
     if (credentialName.test(name)) {
       kept = redactedValue;
@@ -375,20 +427,18 @@ const redactedJson = (text: string): string | undefined => {
     } else if (typeof value === "number" && source !== undefined) {
       // Written back as it came; never a change.
       return JSON.rawJSON(source);
-    } else if (
-      typeof value === "object" &&
-      value !== null &&
-      // A list's names are its indexes: nothing to redact, nor to read.
-      !Array.isArray(value)
-    ) {
+    } else if (isObject) {
       kept = withNamesRedacted(value, redactString);
     }
     changed ||= kept !== value;
     return kept;
   };
   try {
-    const value: unknown = JSON.parse(text, revived);
-    return changed ? JSON.stringify(value) : text;
+    const value: unknown = JSON.parse(json, revived);
+    if (!changed || membersRead !== membersWritten(json)) {
+      return undefined;
+    }
+    return `${mark}${JSON.stringify(value)}`;
   } catch (error) {
     // What JSON's grammar refused: text.
     if (error instanceof SyntaxError) {
@@ -408,10 +458,10 @@ export const redact = (text: string): string =>
   redactedJson(text) ?? redactText(text);
 
 /**
- * `text` redacted by its values when it is JSON, and as it was when it is
- * not: for a text joined with others before `redact` reads the whole, so
- * a credential's name at the end of one and its value at the start of the
- * next still meet, as text.
+ * `text` redacted by its values when it is JSON (above), and as it was
+ * otherwise: for a text joined with others before `redact` reads the
+ * whole, so a credential's name at the end of one and its value at the
+ * start of the next still meet, as text.
  */
 export const redactJson = (text: string): string => redactedJson(text) ?? text;
 

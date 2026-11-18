@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { redact, redactJson } from "../src/redact.ts";
+import { redact as redactBefore } from "./redact-before.ts";
 
 // Credentials in what an outside system or code wrote, redacted before it
 // reaches a chat, a model, a log or the Brain (src/redact.ts). Pure logic:
@@ -271,7 +272,8 @@ describe("redacting credentials", () => {
     ).toStrictEqual([
       // JSON: written back compact once something in it is redacted.
       '{"session":"[redacted]","sessionId":"[redacted]"}',
-      "JSESSIONID=[redacted]; Path=/",
+      // An unquoted value runs to whitespace: its `;` goes with it.
+      "JSESSIONID=[redacted] Path=/",
       'cookie: "[redacted]"',
     ]);
   });
@@ -411,6 +413,68 @@ describe("redacting JSON text by its values", () => {
     ]);
   });
 
+  it("redacts JSON that holds a member's name twice as text, so neither value is kept with a credential or dropped", () => {
+    const password = ["hunt", "er2"].join("");
+    const bearer = "abcdefghijklmnopqrstuvwxyz";
+    const twice = `{"note":"password: ${password}","note":"fine"}`;
+    const texts = [
+      twice,
+      `{"h":"Authorization: Bearer ${bearer}","h":0}`,
+      JSON.stringify({ outer: twice }),
+      '{"token":"t1","note":"keep me","note":"and me"}',
+    ];
+    const redacted = texts.map(redact);
+
+    expect({
+      redacted,
+      kept: redacted.map(
+        (text) => text.includes(password) || text.includes(bearer)
+      ),
+    }).toStrictEqual({
+      redacted: [
+        '{"note":"password: [redacted]","note":"fine"}',
+        '{"h":"Authorization: [redacted]","h":0}',
+        String.raw`{"outer":"{\"note\":\"password: [redacted]\",\"note\":\"fine\"}"}`,
+        '{"token":"[redacted]","note":"keep me","note":"and me"}',
+      ],
+      kept: [false, false, false, false],
+    });
+  });
+
+  it("takes a `&` into an unquoted value, written as itself or as JSON's `\\u0026`", () => {
+    expect(
+      [
+        String.raw`{"body":"password: ab\u0026hunter2 sent"}`,
+        "password: ab&hunter2 sent",
+        "https://app.test/login?user=ann&password=hunter2&next=%2F",
+      ].map(redact)
+    ).toStrictEqual([
+      '{"body":"password: [redacted] sent"}',
+      "password: [redacted] sent",
+      "https://app.test/login?user=ann&password=[redacted]",
+    ]);
+  });
+
+  it("reads JSON after whitespace or a byte order mark, and keeps the mark", () => {
+    const json = JSON.stringify({ b: `password: x\nCookie: sid=${sessionId}` });
+    const redacted = [`\n ${json}`, `\uFEFF${json}`].map(redact);
+
+    expect({
+      leaked: redacted.map((text) => text.includes(sessionId)),
+      marked: redacted.map((text) => text.startsWith("\uFEFF")),
+      values: redacted.map((text): unknown =>
+        JSON.parse(text.replace(/^\uFEFF/u, ""))
+      ),
+    }).toStrictEqual({
+      leaked: [false, false],
+      marked: [false, true],
+      values: [
+        { b: "password: [redacted]\nCookie: [redacted]" },
+        { b: "password: [redacted]\nCookie: [redacted]" },
+      ],
+    });
+  });
+
   it("redacts a text of JSON by its values for joining, and leaves any other text for the pass over the whole", () => {
     expect(
       [
@@ -453,9 +517,102 @@ describe("redacting JSON text by its values", () => {
     const nested = JSON.stringify({ text: JSON.stringify({ text }) });
     const redacted = [redact(text), redact(nested)];
 
+    // 15 megabytes in one string, beside a credential's name: more than
+    // a pattern over it can step through without overflowing the stack.
+    const escapes = JSON.stringify({
+      password: "x",
+      path: "word ".repeat(3_000_000),
+    });
+
     expect({
       megabyte: text.length > 1_000_000,
       leaked: redacted.map((each) => each.includes(sessionId)),
-    }).toStrictEqual({ megabyte: true, leaked: [false, false] });
+      escapes: redact(escapes).startsWith('{"password":"[redacted]","path":'),
+    }).toStrictEqual({ megabyte: true, leaked: [false, false], escapes: true });
+  });
+});
+
+describe("never keeping what redaction removed before GRA-1880", () => {
+  // Each credential below starts with `Zq`, so it can be found again. The
+  // rules before (test/redact-before.ts) are the floor: whatever they
+  // removed, the current ones must remove too. Not in the table: a value
+  // holding whitespace an escape stands for (`password: ab\thunter2`),
+  // which now ends there, as the same text written with a tab does
+  // (GRA-2040).
+  const password = "Zqhunter2";
+  const token = "Zqabcdefghijklmnopqrstuvwx";
+  const session = "Zqs3ss10n0123456789abcdef";
+  const twice = `{"note":"password: ${password}","note":"fine"}`;
+  const lines = `password: x\nCookie: sid=${session}`;
+  const texts = [
+    // The review's probes.
+    twice,
+    `{"h":"Authorization: Bearer ${token}","h":0}`,
+    JSON.stringify({ outer: twice }),
+    String.raw`{"body":"password: ab\u0026${password}"}`,
+    `password: ab&${password}`,
+    // The issue's case, as JSON, after whitespace and after a mark.
+    JSON.stringify({ body: lines }),
+    `\n${JSON.stringify({ body: lines })}`,
+    `\uFEFF${JSON.stringify({ body: lines })}`,
+    JSON.stringify({ text: JSON.stringify({ note: lines }) }),
+    // Query strings.
+    `https://app.test/login?user=ann&password=${password}&next=%2F`,
+    `access_token=${token}&expires_in=3600&token_type=bearer`,
+    JSON.stringify({ x: `access_token=${token}&expires_in=3600` }),
+    `api_key=${password};x=1`,
+    // Headers.
+    `Authorization: Basic ${token}`,
+    `Authorization: Bearer ${token}\r\nAccept: */*`,
+    `Cookie: sid=${session}; theme=dark`,
+    `Set-Cookie: sid=${session}; Path=/; HttpOnly`,
+    JSON.stringify({ headers: { Cookie: `sid=${session}; theme=dark` } }),
+    // Lists.
+    `token=${token},${password}`,
+    `password: ${password}, then more`,
+    `{"password": "${password}", "list": "a, b; c & d"}`,
+    JSON.stringify({ items: [{ token }, { note: `secret=${password}` }] }),
+    JSON.stringify({ q: `password="${password}"` }),
+  ];
+
+  it("gives JSON with nothing to redact by its values exactly what the rules before gave", () => {
+    // A name ending one string, its value read by the rules over text
+    // from what follows; and JSON those rules leave as it is.
+    const unchanged = [
+      '["Authorization:", "then the next item"]',
+      '{"label": "password:", "hint": "see the vault"}',
+      '{\n  "id": 12345678901234567890,\n  "total": 1.50\n}',
+    ];
+
+    expect(unchanged.map(redact)).toStrictEqual(unchanged.map(redactBefore));
+  });
+
+  it("removes every credential the rules before removed, from each text", () => {
+    const keptNow = texts.flatMap((text) => {
+      const before = redactBefore(text);
+      const now = redact(text);
+      return [password, token, session]
+        .filter((secret) => text.includes(secret))
+        .filter((secret) => !before.includes(secret) && now.includes(secret))
+        .map((secret) => ({ text, secret }));
+    });
+    // And what each rule set keeps of the table, for comparison.
+    const kept = (rules: (text: string) => string): number =>
+      texts.filter((text) =>
+        [password, token, session].some((secret) =>
+          rules(text).includes(secret)
+        )
+      ).length;
+
+    expect({
+      keptNow,
+      before: kept(redactBefore),
+      now: kept(redact),
+    }).toStrictEqual({
+      keptNow: [],
+      // Before: the probes, the issue's case and a comma list.
+      before: 6,
+      now: 0,
+    });
   });
 });
