@@ -23,6 +23,7 @@ import {
   workflowState,
   workflowStateWrites,
   keptRunEvidence,
+  runStateWriters,
 } from "../db/core/schema.ts";
 import { runRetentionDays } from "./engine.ts";
 import { runFilesRemoved } from "./run-files.ts";
@@ -225,32 +226,49 @@ const notKept = (runId: SQLiteColumn): SQL =>
 const releasedPerSweep = 500;
 
 /**
+ * That run `runId` (a column) is named by no key of a workflow's state,
+ * nor by a run that started from its keys (`runStateWriters`), as SQL.
+ */
+const unnamedSql = (runId: SQLiteColumn): SQL =>
+  sql`NOT EXISTS (SELECT 1 FROM ${workflowState}
+      WHERE ${workflowState.runId} = ${runId})
+    AND NOT EXISTS (SELECT 1 FROM ${runStateWriters}
+      WHERE ${runStateWriters.writerRunId} = ${runId})`;
+
+/**
  * Releases the evidence retention kept of runs no key of their workflow's
  * state names any more (overwritten, reset, or gone with the workflow),
- * at most `releasedPerSweep` of them, in one batch: their evidence, then
- * their mark. A run past its details has ended, and a key is set only by
- * a run that hasn't (workflow-state.ts), so none of them is named again
- * while this runs; each statement picks the same runs, in order.
+ * and no run started from (`runStateWriters`: those rows go with their
+ * run's details, or with its release here), at most `releasedPerSweep` of
+ * them: picked first, then in one batch their evidence, the runs they
+ * started from and their mark, each statement checking again that the
+ * run is still unnamed. Picked once, so a release that lets a writer of
+ * one of them go never takes that writer's mark and leaves its evidence:
+ * it is freed whole at the next sweep. A run past its details has ended:
+ * a key is set only by a run that hasn't (workflow-state.ts), and a start
+ * that froze its key is admitted only while it keeps its evidence
+ * (workflow-starts.ts), so none of them is named again meanwhile.
  */
 const keptEvidenceReleased = async (env: Env): Promise<void> => {
   const db = drizzle(env.DB);
-  const released = sql`(SELECT ${keptRunEvidence.runId} FROM ${keptRunEvidence}
-    WHERE NOT EXISTS (SELECT 1 FROM ${workflowState}
-      WHERE ${workflowState.runId} = ${keptRunEvidence.runId})
-    ORDER BY ${keptRunEvidence.runId} LIMIT ${releasedPerSweep})`;
+  const picked = await db
+    .select({ runId: keptRunEvidence.runId })
+    .from(keptRunEvidence)
+    .where(unnamedSql(keptRunEvidence.runId))
+    .orderBy(asc(keptRunEvidence.runId))
+    .limit(releasedPerSweep);
+  if (picked.length === 0) {
+    return;
+  }
+  const ids = JSON.stringify(picked.map(({ runId }) => runId));
+  const released = (runId: SQLiteColumn): SQL =>
+    sql`${runId} IN (SELECT value FROM json_each(${ids})) AND ${unnamedSql(runId)}`;
   await db.batch([
-    db
-      .delete(runBrainVersions)
-      .where(sql`${runBrainVersions.runId} IN ${released}`),
-    db
-      .delete(runBrainMemories)
-      .where(sql`${runBrainMemories.runId} IN ${released}`),
-    db
-      .delete(runChatSources)
-      .where(sql`${runChatSources.runId} IN ${released}`),
-    db
-      .delete(keptRunEvidence)
-      .where(sql`${keptRunEvidence.runId} IN ${released}`),
+    db.delete(runBrainVersions).where(released(runBrainVersions.runId)),
+    db.delete(runBrainMemories).where(released(runBrainMemories.runId)),
+    db.delete(runChatSources).where(released(runChatSources.runId)),
+    db.delete(runStateWriters).where(released(runStateWriters.runId)),
+    db.delete(keptRunEvidence).where(released(keptRunEvidence.runId)),
   ]);
 };
 
@@ -333,13 +351,19 @@ const startDetailsRemoved = async (
     // gate no new call of its, so they go, unless a key of its workflow's
     // state names it: that key is read only while they hold
     // (workflow-state.ts, GRA-1996), so they are kept until no key does
-    // (`keptEvidenceReleased`). Marked first, in this batch, so the keys
-    // read here are the ones that keep it.
+    // (`keptEvidenceReleased`); and so are those of a run another run
+    // started from, while that run's own keeps (`runStateWriters`: its
+    // checks cover them). Marked first, in this batch, so the keys and
+    // runs read here are the ones that keep it.
     db
       .insert(keptRunEvidence)
       .select(
-        sql`SELECT DISTINCT ${workflowState.runId}, ${now.getTime()} FROM ${workflowState}
-          WHERE ${workflowState.runId} IN ${due}`
+        sql`SELECT DISTINCT kept.run_id, ${now.getTime()} FROM (
+            SELECT ${workflowState.runId} AS run_id FROM ${workflowState}
+              WHERE ${workflowState.runId} IN ${due}
+            UNION SELECT ${runStateWriters.writerRunId} FROM ${runStateWriters}
+              WHERE ${runStateWriters.writerRunId} IN ${due}
+          ) AS kept WHERE true`
       )
       .onConflictDoNothing(),
     db
@@ -367,6 +391,17 @@ const startDetailsRemoved = async (
       .where(
         and(inArray(runChatSources.runId, due), notKept(runChatSources.runId))
       ),
+    // And the runs whose keys it started from, unless a key names it
+    // itself: only that key's check reads them (one hop). Kept only as a
+    // writer of a later run, it keeps no writer of its own, so no chain of
+    // runs is kept behind the last.
+    db.delete(runStateWriters).where(
+      and(
+        inArray(runStateWriters.runId, due),
+        sql`NOT EXISTS (SELECT 1 FROM ${workflowState}
+            WHERE ${workflowState.runId} = ${runStateWriters.runId})`
+      )
+    ),
     // And its inboxes (run-inboxes.ts): a reply from now on is to an
     // address nobody has.
     db.delete(runInboxes).where(inArray(runInboxes.runId, due)),
