@@ -76,6 +76,7 @@ import { storeOfNewApp } from "./app-stores.ts";
 import { racingDb, standInBinding, standInLive } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
+import { brainAway, keptFromTheBrain } from "./kept-state.ts";
 import { sleeping, woken } from "./runs.ts";
 import { outcome, unique } from "./sign-in.ts";
 import { applied } from "./store-schemas.ts";
@@ -1999,6 +2000,22 @@ describe("what a start rechecks, and records", () => {
       early: "workflow.run_limit",
       last: "workflow.run_limit",
       abandoned: 1,
+    });
+  });
+
+  it("hands a staged start over again while what its workflow keeps can't be checked, and delivers it once it can", async () => {
+    const fx = await fixture();
+    await keptFromTheBrain(env, fx.workflowId);
+    const id = `${unique()}:1:0`;
+    const away = await dispatched(brainAway(env), entryOf(fx, fx.bob, { id }));
+    const back = await dispatched(
+      env,
+      entryOf(fx, fx.bob, { id, attempts: 1 })
+    );
+    expect({ away, back, receipts: await receiptCount(fx.app) }).toStrictEqual({
+      away: "workflow.state_unchecked",
+      back: "delivered",
+      receipts: 1,
     });
   });
 

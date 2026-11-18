@@ -78,6 +78,10 @@ const pagePlan = {
   who: "Just me",
 } as const satisfies ChatPlan;
 
+/** A person's own skill named `name`, for building a close: its name is in every line of it. */
+const skillOf = (name: string): string =>
+  `---\nname: ${name}\ndescription: How I build a close, ${name}.\n---\n\nThe steps of ${name}.\n`;
+
 const toolsSchema = z.object({
   tools: z.array(z.object({ name: z.string(), description: z.string() })),
 });
@@ -374,6 +378,62 @@ describe("Make something", { timeout: 120_000 }, () => {
       told: true,
       again: "agent.plan_not_found",
       chats: [chat.id, chat.id],
+    });
+  });
+
+  // GRA-1868: the build Build it asks is a turn of its person's own chat,
+  // which their own skills steer, and nobody else's, whoever it is for (the
+  // plan's for the Finance team). What it makes carries nothing of the
+  // skill: no copy of its text, nor its name. That a colleague's run of
+  // what a builder made loads none of the builder's skills is
+  // brain-skills-code.test.ts's (Uma running Ada's App and workflow).
+  it("steers the build Build it asks with its person's own skills, never another builder's, and puts nothing of the skill in what it makes", async () => {
+    const [builder, other] = await Promise.all([
+      signedInApi(idp, "builder"),
+      signedInApi(idp, "builder"),
+    ]);
+    const theirs = `close-the-month-${unique()}`;
+    const others = `close-the-month-${unique()}`;
+    await builder.api.skills.save(skillOf(theirs));
+    await other.api.skills.save(skillOf(others));
+    const { chat, callId, provider } = await plannedChat(builder, closePlan);
+    const made = await builder.api.chats.build(chat.id, {
+      plan: callId,
+      text: "Build it",
+      model,
+    });
+    await idle(builder, chat.id);
+    const build = JSON.stringify(provider.requests.at(-1)?.body);
+    const appId = made.app?.id ?? "";
+    const workflowId = made.workflow?.id ?? "";
+    // Everything the build made, as its builders and users read it.
+    const [appFiles, workflowFiles, appFile, apps, workflows] =
+      await Promise.all([
+        builder.api.drafts.files({ kind: "app", id: appId }),
+        builder.api.drafts.files({ kind: "workflow", id: workflowId }),
+        builder.api.instructions.read({ scope: "app", appId }),
+        builder.api.apps.list(),
+        builder.api.workflowResources.list(),
+      ]);
+    const madeText = JSON.stringify([
+      appFiles,
+      workflowFiles,
+      appFile,
+      apps.filter(({ id }) => id === appId),
+      workflows.filter(({ id }) => id === workflowId),
+    ]);
+    expect({
+      built: build.includes("Build it"),
+      theirs: build.includes(`- ${theirs} (person`),
+      others: build.includes(others),
+      madeBoth: appId !== "" && workflowId !== "",
+      inMade: madeText.includes(theirs),
+    }).toStrictEqual({
+      built: true,
+      theirs: true,
+      others: false,
+      madeBoth: true,
+      inMade: false,
     });
   });
 

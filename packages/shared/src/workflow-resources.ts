@@ -147,6 +147,8 @@ export const workflowResourceErrors = defineErrorFamily({
     "A run in restricted mode keeps no state for later runs: what it read stays with it, so the step that set it failed.",
   "workflow.state_too_large":
     "The workflow's state would pass 64 KB, so the step that set it failed. Keep less in it, or reset it from the workflow's page.",
+  "workflow.state_unchecked":
+    "What this workflow keeps between its runs can't be checked right now, so the run didn't start. Try again in a moment.",
   "workflow.app_binding_invalid":
     "That isn't a workflow version this App can bind.",
   "workflow.app_binding_unavailable": "This App has no such workflow binding.",
@@ -543,7 +545,15 @@ export const workflowStateKeySchema = z
 /** One value a workflow keeps between its runs. */
 export interface WorkflowStateEntry {
   key: string;
-  value: Json;
+  /** Its value, unless it is withheld. */
+  value?: Json;
+  /**
+   * Why its value isn't shown, if it isn't: the run that set it read what
+   * the company may no longer read (`revoked`: a source erased or
+   * narrowed, a person erased), and later runs read it as unset; or that
+   * can't be checked now (`unchecked`).
+   */
+  withheld?: "revoked" | "unchecked";
   /** The run whose step set it last. */
   runId: string;
   updatedAt: string;
@@ -552,7 +562,10 @@ export interface WorkflowStateEntry {
 /** What a workflow keeps between its runs, by key. */
 export interface WorkflowState {
   entries: WorkflowStateEntry[];
-  /** What it takes now, of `workflowStateMaxBytes`. */
+  /**
+   * What the keys shown take now, of `workflowStateMaxBytes`: withheld
+   * keys aren't counted, so their values' length isn't told.
+   */
   bytes: number;
 }
 

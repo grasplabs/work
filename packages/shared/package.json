@@ -180,6 +180,7 @@
     "./store-reads": "./src/store-reads.ts",
     "./stores": "./src/stores.ts",
     "./submissions": "./src/submissions.ts",
+    "./sync": "./src/sync.ts",
     "./token-bucket": "./src/token-bucket.ts",
     "./transcripts": "./src/transcripts.ts",
     "./uploads": "./src/uploads.ts",
