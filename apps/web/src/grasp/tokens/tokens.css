@@ -1459,6 +1459,8 @@
   --grasp-composer-scale-dot: 5px;
   /* The room between the dots of the reasoning control's scale. */
   --grasp-composer-scale-gap: 2px;
+  /* The light's own band in a one-row composer's dictation once words are written: short, beside the words, so no word stands on the light. */
+  --grasp-composer-voice-row-band: 96px;
   /* The model menu's width, rail and list together, as Capy's. */
   --grasp-model-menu-width: 20rem;
   /* The widest a file waiting to be sent grows, in the strip above a composer's text: its width is its name's, up to this or the strip's width, and only a name longer than that is cut. */

@@ -3,7 +3,7 @@
 
 import { createContext, useContext } from "react";
 
-export type InputGroupSize = "md" | "lg";
+export type InputGroupSize = "sm" | "md" | "lg";
 
 export const SizeContext = createContext<InputGroupSize>("md");
 

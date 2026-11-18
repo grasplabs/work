@@ -32,6 +32,10 @@ const styles = stylex.create({
     whiteSpace: "nowrap",
     userSelect: "none",
   },
+  sm: {
+    paddingInlineStart: { default: 0, ":nth-child(2)": grasp.space3 },
+    paddingInlineEnd: { default: 0, ":last-child": grasp.space3 },
+  },
   md: {
     paddingInlineStart: { default: 0, ":nth-child(2)": grasp.space3 },
     paddingInlineEnd: { default: 0, ":last-child": grasp.space3 },
