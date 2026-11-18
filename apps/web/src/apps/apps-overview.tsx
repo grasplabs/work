@@ -31,6 +31,7 @@ import {
 import { Text } from "../grasp/text/index.ts";
 import { MakeSomethingLink } from "../make/make-link.tsx";
 import { statusOf } from "./app-status.tsx";
+import { AppsConcept } from "./apps-overview-concepts.tsx";
 
 // The Apps page: every App the person can open, newest first, as Grasp
 // UI's App cards: its window (quiet, naming the App, until each version
@@ -128,7 +129,7 @@ export const AppsOverview = ({
         // One Make something a page: with no Apps yet, the empty state's.
         action={
           builds && apps.length > 0 ? (
-            <MakeSomethingLink kind="app" />
+            <MakeSomethingLink kind="app" main={cards !== null} />
           ) : undefined
         }
         title={<Trans>Apps</Trans>}
@@ -147,7 +148,7 @@ export const AppsOverview = ({
           </EmptyHeader>
           {builds ? (
             <EmptyContent>
-              <MakeSomethingLink kind="app" />
+              <MakeSomethingLink kind="app" main={cards !== null} />
             </EmptyContent>
           ) : null}
         </Empty>
@@ -175,19 +176,23 @@ export const AppsOverview = ({
             </Empty>
           ) : (
             <section aria-label={t`Apps`}>
+              {cards === "grid" || cards === "compact" || cards === "table" ? (
+                <AppsConcept apps={shown} kind={cards} />
+              ) : null}
               {cards === "rows" ? (
                 <ItemGroup>
                   {shown.map((overview) => (
                     <AppRow key={overview.app.id} overview={overview} />
                   ))}
                 </ItemGroup>
-              ) : (
+              ) : null}
+              {cards === null || cards === "quiet" ? (
                 <AppCardGrid>
                   {shown.map((overview) => (
                     <OneApp key={overview.app.id} overview={overview} />
                   ))}
                 </AppCardGrid>
-              )}
+              ) : null}
             </section>
           )}
         </>
