@@ -12836,7 +12836,6 @@ msgid "Remove: {text}"
 msgstr "Quitar: {text}"
 
 #: src/routes/_shell.settings.members.tsx
-#: src/settings/erasures.tsx
 msgid "Removed"
 msgstr "Eliminado"
 

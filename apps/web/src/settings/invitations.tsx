@@ -11,7 +11,6 @@ import { useState } from "react";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { copyText } from "../copy.ts";
 import { formatDate, formatList } from "../format.ts";
-import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import {
   Dialog,
@@ -36,7 +35,6 @@ import {
   Item,
   ItemContent,
   ItemDescription,
-  ItemMedia,
   ItemTitle,
   ItemActions,
 } from "../grasp/item/index.ts";
@@ -265,11 +263,6 @@ export const InvitationRow = ({ invitation }: { invitation: Invitation }) => {
   };
   return (
     <Item size="xs">
-      <ItemMedia align="center">
-        <Avatar decorative name={email} size="xs">
-          <AvatarFallback />
-        </Avatar>
-      </ItemMedia>
       <ItemContent>
         <ItemTitle>{email}</ItemTitle>
         <ItemDescription>

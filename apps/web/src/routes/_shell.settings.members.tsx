@@ -23,7 +23,6 @@ import {
   AlertDialogTitle,
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
-import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import {
@@ -53,7 +52,6 @@ import {
   ItemDescription,
   ItemDetail,
   ItemGroup,
-  ItemMedia,
   ItemRevealButton,
   ItemTitle,
 } from "../grasp/item/index.ts";
@@ -70,8 +68,9 @@ import {
   SelectValue,
   SelectContent,
 } from "../grasp/select/index.ts";
+import { SettingsRows } from "../grasp/setting-row/index.ts";
 import { Text } from "../grasp/text/index.ts";
-import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { RemovedRow, useRemovedPeople } from "../settings/erasures.tsx";
@@ -104,8 +103,9 @@ import { useCore } from "../use-core.ts";
 
 const styles = stylex.create({
   page: { display: "flex", flexDirection: "column", gap: grasp.space5 },
-  // Narrower on a phone: Section card's actions never shrink, so Invite would run past its edge.
-  search: { width: { default: "14rem", [media.belowPhone]: "8rem" } },
+  // As wide as the header's own search, on a phone too: beside the Roles
+  // mark and Invite it still fits the card's line (its actions never shrink).
+  search: { width: grasp.frameSearch },
   notice: { padding: grasp.space4 },
   rowEnd: { display: "flex", alignItems: "center", gap: grasp.space1 },
   // Your own row has no menu: its room is kept, so every role stands on one edge.
@@ -116,23 +116,10 @@ const styles = stylex.create({
     gap: grasp.space3,
     margin: 0,
     padding: 0,
-    maxWidth: "20rem",
+    maxWidth: grasp.controlColumn,
   },
   roleName: { margin: 0, fontWeight: grasp.weightMedium, color: grasp.ink },
   roleText: { margin: 0, color: grasp.muted },
-  // Removed people: the list's foot, under a quiet name.
-  removedLabel: {
-    margin: 0,
-    paddingBlock: grasp.space2,
-    paddingInline: grasp.tableCellInline,
-    borderTopStyle: "solid",
-    borderTopWidth: grasp.hairline,
-    borderTopColor: grasp.line,
-    fontSize: grasp.textXs,
-    lineHeight: grasp.textXsLine,
-    fontWeight: grasp.weightMedium,
-    color: grasp.muted,
-  },
 });
 
 /** What a change did, or why it failed. */
@@ -345,9 +332,12 @@ const RolesButton = () => {
   const { t, i18n: lingui } = useLingui();
   return (
     <Popover>
-      <PopoverTrigger icon={Info} size="sm" variant="ghost">
-        {t`Roles`}
-      </PopoverTrigger>
+      <PopoverTrigger
+        aria-label={t`Roles`}
+        icon={Info}
+        size="sm"
+        variant="ghost"
+      />
       {/* It only explains: focus stays on the button, so no ring frames the panel. */}
       <PopoverContent initialFocus="none">
         <PopoverTitle>{t`Roles`}</PopoverTitle>
@@ -415,11 +405,6 @@ const MemberRow = ({
   const { name } = member;
   return (
     <Item size="xs">
-      <ItemMedia align="center">
-        <Avatar decorative name={member.name} size="xs">
-          <AvatarFallback />
-        </Avatar>
-      </ItemMedia>
       <ItemContent>
         <ItemTitle>
           {member.name}
@@ -560,14 +545,13 @@ const MembersList = ({
       )}
       {/* Removed people: the list's foot, under a quiet name, a step back. */}
       {left.length === 0 ? null : (
-        <>
-          <p {...stylex.props(styles.removedLabel)}>{t`Removed`}</p>
-          <ItemGroup aria-label={t`Removed`} separated>
+        <SettingsRows label={t`Removed`}>
+          <ItemGroup separated>
             {left.map((person) => (
               <RemovedRow key={person.userId} person={person} />
             ))}
           </ItemGroup>
-        </>
+        </SettingsRows>
       )}
     </SectionCard>
   );

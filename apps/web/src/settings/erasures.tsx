@@ -16,7 +16,6 @@ import { useEffect, useId, useState } from "react";
 
 import { formatDate } from "../format.ts";
 import { Alert } from "../grasp/alert/index.ts";
-import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import {
@@ -42,7 +41,6 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
-  ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { Progress } from "../grasp/progress/index.ts";
@@ -520,12 +518,12 @@ const ReleaseAddressDialog = ({
   );
 };
 
-/** Where `person` stands: removed, being erased, or erased. */
+/** Where `person` stands once an erasure started: being erased, or erased. Removed alone, the group's name says it. */
 const Standing = ({ person }: { person: RemovedPerson }) => {
   const { t } = useLingui();
   const { erasure } = person;
   if (erasure === null) {
-    return <Badge>{t`Removed`}</Badge>;
+    return null;
   }
   if (erasure.completedAt === null) {
     const done = doneOf(erasure.areas);
@@ -536,9 +534,9 @@ const Standing = ({ person }: { person: RemovedPerson }) => {
 };
 
 /**
- * One person an admin removed, at the foot of the members list in a quiet
- * state (their face, their name muted, where they stand), and what may be
- * done about them now.
+ * One person an admin removed, at the foot of the members list under its
+ * Removed name, in a quiet state (their name muted, where an erasure
+ * stands), and what may be done about them now.
  */
 export const RemovedRow = ({ person }: { person: RemovedPerson }) => {
   const { t } = useLingui();
@@ -555,11 +553,6 @@ export const RemovedRow = ({ person }: { person: RemovedPerson }) => {
   return (
     <>
       <Item size="xs">
-        <ItemMedia>
-          <Avatar decorative name={name} size="xs">
-            <AvatarFallback />
-          </Avatar>
-        </ItemMedia>
         <ItemContent>
           <ItemTitle>
             <Text element="span" size="sm" tone="muted">
