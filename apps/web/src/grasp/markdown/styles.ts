@@ -4,6 +4,7 @@
 import * as stylex from "@stylexjs/stylex";
 
 import { iconVars } from "../icons/icon.stylex";
+import { tableVars } from "../table/table.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 
 const REDUCED = media.reduced;
@@ -47,6 +48,14 @@ export const markdownStyles = stylex.create({
   h2: { fontSize: grasp.textLg, lineHeight: grasp.textLgLine },
   h3: { fontSize: grasp.textMd, lineHeight: grasp.textMdLine },
   h4: { fontSize: grasp.textMd, lineHeight: grasp.textMdLine },
+  // Inside a Chat message (size left out): the chat's words, 14px; the headings keep their sizes,
+  // a step each above them. A table in it reads at the same size.
+  chat: {
+    fontSize: grasp.chatText,
+    lineHeight: grasp.chatTextLine,
+    [tableVars.text]: grasp.chatText,
+    [tableVars.line]: grasp.chatTextLine,
+  },
   // The smaller size, for words in a card or a panel: a step down, headings too.
   small: {
     gap: grasp.space3,

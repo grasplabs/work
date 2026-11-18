@@ -1459,6 +1459,8 @@
   --grasp-composer-scale-dot: 5px;
   /* The room between the dots of the reasoning control's scale. */
   --grasp-composer-scale-gap: 2px;
+  /* The light's own band in a one-row composer's dictation once words are written: short, beside the words, so no word stands on the light. */
+  --grasp-composer-voice-row-band: 96px;
   /* The model menu's width, rail and list together, as Capy's. */
   --grasp-model-menu-width: 20rem;
   /* The widest a file waiting to be sent grows, in the strip above a composer's text: its width is its name's, up to this or the strip's width, and only a name longer than that is cut. */
@@ -1474,6 +1476,10 @@
   /* Chat message: chat message. */
   /* The widest a person's message grows across the conversation, so it reads as theirs. */
   --grasp-chat-bubble-width: 80%;
+  /* Every word the chat reads in: a message, an answer's Markdown, a source's passage, the Composer's text. 14px, as the sidebar's rows. */
+  --grasp-chat-text: var(--grasp-text-sm);
+  /* The line height of chat-text: a little more room than text-sm's, for reading at length. */
+  --grasp-chat-text-line: 1.375rem;
   /* Audio player: audio player. */
   /* The widest an audio player's bar grows. */
   --grasp-audio-width: 40rem;

@@ -49,7 +49,7 @@ import {
   Icon,
 } from "../icons/index.ts";
 import type {
-  SidebarGroup,
+  SidebarGroupEntry,
   SidebarMenuEntry,
   SidebarProfileProps,
   SidebarProps,
@@ -87,7 +87,7 @@ const useGroups = (
   identity: Identity,
   tab: SidebarView,
   waitingItems: readonly InboxItem[] | undefined
-): SidebarGroup[] => {
+): SidebarGroupEntry[] => {
   const { t } = useLingui();
   const matchRoute = useMatchRoute();
   const waiting = waitingItems?.length;
@@ -105,7 +105,7 @@ const useGroups = (
   const at = (to: string, fuzzy = true) => matchRoute({ to, fuzzy }) !== false;
   const inWorkflows = at("/workflows");
   const onRequests = at("/workflows/requests");
-  const sections: SidebarGroup = {
+  const sections: SidebarGroupEntry = {
     rows: [
       {
         label: t`Chat`,
@@ -177,7 +177,7 @@ const useGroups = (
     ],
   };
   // The Apps' own entries (spec 34.1), a group of their own; none when there are none.
-  const fromApps: SidebarGroup[] =
+  const fromApps: SidebarGroupEntry[] =
     apps.length === 0
       ? []
       : [
@@ -213,7 +213,7 @@ const useGroups = (
         ];
   // The person's recent chats: a group of their own under the product's
   // sections, named, so they never stand between the sections.
-  const chats: SidebarGroup[] =
+  const chats: SidebarGroupEntry[] =
     recent.length === 0
       ? []
       : [

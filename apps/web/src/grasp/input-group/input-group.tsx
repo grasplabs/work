@@ -95,15 +95,20 @@ const styles = stylex.create({
         },
       ":has(input:focus-visible)": grasp.fieldFocus,
       ":has(input[aria-invalid=true])": grasp.fieldInvalid,
-      // Read only: settled, its hairline and no lift.
+      // Read only: settled, its hairline and no lift; focus from the keys shows as the hairline one
+      // step stronger, no ring (Input's readOnly).
       ":has(input:read-only:not(:disabled))": `inset 0 0 0 1px ${grasp.fieldEdge}`,
-      ":has(input:read-only:not(:disabled):focus-visible)": grasp.fieldFocus,
+      ":has(input:read-only:not(:disabled):focus-visible:not([data-focus-pointer]))": `inset 0 0 0 1px ${grasp.fieldEdgeHover}`,
       ":has(input[aria-invalid=true]:focus-visible)": grasp.fieldFocusInvalid,
       ":has(input:disabled)": `inset 0 0 0 1px ${grasp.fieldEdge}`,
     },
     opacity: { default: 1, ":has(input:disabled)": grasp.dim },
-    cursor: { default: "text", ":has(input:disabled)": "not-allowed" },
-    // Focus, the ring for the keyboard and a real outline in forced colours: focus.fieldWithin.
+    cursor: {
+      default: "text",
+      ":has(input:read-only:not(:disabled))": "default",
+      ":has(input:disabled)": "not-allowed",
+    },
+    // Focus, the ring for the keyboard and a real outline in forced colours: focus.fieldWithinEditable.
     color: grasp.ink,
     fontFamily: grasp.fontSans,
     fontSize: { default: grasp.textSm, [media.typing]: grasp.fieldTextTouch },
@@ -157,7 +162,7 @@ export const InputGroup = ({
       {...stylex.props(
         styles.group,
         styles[size],
-        focus.fieldWithin,
+        focus.fieldWithinEditable,
         layout ?? styleProp
       )}
     >

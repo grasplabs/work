@@ -578,6 +578,7 @@ export const grasp = stylex.defineConsts({
   composerDot: "var(--grasp-composer-dot)",
   composerScaleDot: "var(--grasp-composer-scale-dot)",
   composerScaleGap: "var(--grasp-composer-scale-gap)",
+  composerVoiceRowBand: "var(--grasp-composer-voice-row-band)",
   modelMenuWidth: "var(--grasp-model-menu-width)",
   attachmentMaxWidth: "var(--grasp-attachment-max-width)",
   attachmentThumb: "var(--grasp-attachment-thumb)",
@@ -586,6 +587,8 @@ export const grasp = stylex.defineConsts({
   questionHeight: "var(--grasp-question-height)",
   // Chat message: chat message.
   chatBubbleWidth: "var(--grasp-chat-bubble-width)",
+  chatText: "var(--grasp-chat-text)",
+  chatTextLine: "var(--grasp-chat-text-line)",
   // Audio player: audio player.
   audioWidth: "var(--grasp-audio-width)",
   // Sidebar: sidebar.
