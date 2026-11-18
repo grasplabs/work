@@ -8,4 +8,8 @@ export const tableVars = stylex.defineVars({
    * the part around it (a soft head's grey was notched at both top corners).
    */
   corner: "var(--grasp-corner-mark)",
+  /** The words' size in its cells. An answer in a chat sets it to the chat's words (Markdown). */
+  text: "var(--grasp-table-text)",
+  /** Their line height, with `text`. */
+  line: "var(--grasp-table-text-line)",
 });

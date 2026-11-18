@@ -1,9 +1,3 @@
-// SourcePile: the folded list under an answer (list.tsx). The first marks overlap in a row, as
-// Perplexity's favicons do but ours, then the count, with the kinds in words under it ("4 files,
-// 3 messages"). Sources of one kind are said once, by the count itself ("1 file", "4 files"), with
-// no line under it: "1 source" over "1 file" said one thing twice. A pointer fans the marks apart
-// (only where a pointer hovers). A source found while the answer streams arrives in the pile: its
-// mark settles in and our light crosses it once.
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
@@ -88,18 +82,6 @@ export const SourcePile = ({
         </span>
         <span {...stylex.props(styles.pileCount)}>{count}</span>
       </button>
-      {one ? null : (
-        <p aria-hidden="true" {...stylex.props(styles.pileKinds)}>
-          {parts.map((part, index) => (
-            <span key={part}>
-              {index > 0 ? " " : null}
-              <span {...stylex.props(styles.pileKind)}>
-                {index < parts.length - 1 ? `${part},` : part}
-              </span>
-            </span>
-          ))}
-        </p>
-      )}
     </div>
   );
 };
