@@ -389,6 +389,13 @@ export const brainReportSchema = z.object({
    * release and shows the rest of its report.
    */
   modelSpend: brainModelSpendSchema.optional(),
+  /**
+   * Native sync (core's brain-sync.ts): how many sources' daily full
+   * relist is past its day, where a reader list can be staler than the
+   * day the sync promises. Core always sends it; optional only so the
+   * admin reads a core of an older release.
+   */
+  sync: z.object({ overdueRelists: count }).optional(),
 });
 export type BrainReport = z.infer<typeof brainReportSchema>;
 

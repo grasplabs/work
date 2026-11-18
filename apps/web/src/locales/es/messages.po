@@ -3397,6 +3397,10 @@ msgstr "Ruta de navegación"
 msgid "Briefcase"
 msgstr "Maletín"
 
+#: src/activity/audit-words.ts
+msgid "Brought changes from a connected system into the Brain"
+msgstr "Llevó al Brain los cambios de un sistema conectado"
+
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Brussels"
@@ -4501,6 +4505,15 @@ msgstr "Copenhague"
 msgid "Copied"
 msgstr "Copiado"
 
+#: src/brain/sources-page.tsx
+msgctxt "a source of the Brain"
+msgid "Copied from a connected system"
+msgstr "Copiado de un sistema conectado"
+
+#: src/brain/memories-page.tsx
+msgid "Copied from a connected system, version {version}"
+msgstr "Copiado de un sistema conectado, versión {version}"
+
 #: src/brain/opportunities-page.tsx
 msgid "Copied from another system"
 msgstr "Copiado de otro sistema"
@@ -5540,6 +5553,10 @@ msgstr "Borró a un miembro eliminado"
 #: src/activity/audit-words.ts
 msgid "Erased an upload from the Brain for good"
 msgstr "Borró para siempre un archivo subido del Brain"
+
+#: src/activity/audit-words.ts
+msgid "Erased what the Brain copied from a connection, as it was disconnected"
+msgstr "Borró lo que el Brain había copiado de una conexión, al desconectarla"
 
 #: src/activity/audit-words.ts
 msgid "Erased what the Brain kept from a connection, as it was disconnected"

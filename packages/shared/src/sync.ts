@@ -86,7 +86,13 @@ export const syncItemSchema = z.discriminatedUnion("gone", [
     readers: z.array(syncReaderSchema).nullable(),
     /** The account ID of who changed it last, if the provider says. */
     changedBy: sourceIdSchema.nullable(),
-    /** For an attachment: the ID of the item it belongs to. */
+    /**
+     * For an attachment: the ID of the item it belongs to. A part follows
+     * its item: an item read with its content comes with every part it has,
+     * in the same page, so a part left out is no longer one of them; an
+     * item without its content (names only, or passed over) keeps its
+     * parts as they are, and a gone item takes them with it.
+     */
     partOf: sourceIdSchema.nullable(),
   }),
   z.strictObject({
@@ -205,6 +211,20 @@ export const syncPageRequestSchema = z.strictObject({
   place: z.string().min(1).max(256),
   /** Null for the first listing. */
   cursor: syncCursorSchema.nullable(),
+  /**
+   * A names-only listing (core's daily pass over mail and calendar): from
+   * the start, with list calls only, each item named by its ID and
+   * version with no content and no readers, ending with nothing more and
+   * never going on into the change feed.
+   */
+  names: z.boolean().optional(),
+  /**
+   * Those items alone, read in full as a page reads them, or `gone`: what
+   * a names-only listing found unknown or held without content. At most
+   * one per request a page may send (connect checks it, by the connector
+   * kit's `connectorIsolateRequests`); the answer's cursor isn't used.
+   */
+  ids: z.array(sourceIdSchema).min(1).optional(),
 });
 export type SyncPageRequest = z.input<typeof syncPageRequestSchema>;
 
@@ -296,4 +316,37 @@ export const syncErrors = defineErrorFamily({
     "The source no longer knows that cursor: list it again from the start.",
   "sync.throttled": "The provider is throttling reads: try again later.",
   "sync.provider_failed": "The provider didn't answer the read.",
+});
+
+/**
+ * One sync core's sync run reads (GRA-1758): a connection whose connector
+ * has a sync (`feed`), what kind of items it brings, and whether it reads
+ * the whole account (`own`) or places it lists of it (`listed`, each its
+ * own source: `listSyncPlaces`). With what core needs to name the items'
+ * readers: the connection's person, provider and tenant, and its own
+ * account as its items' readers name it (`account`: Google's address as
+ * its verified sign-in gave it, Microsoft's object ID; null when the
+ * provider didn't say).
+ */
+export interface SyncSource {
+  connectionId: string;
+  ownerUserId: string;
+  provider: string;
+  tenant: string | null;
+  account: string | null;
+  feed: string;
+  kind: SyncItemKind;
+  places: "own" | "listed";
+}
+
+/** A page of the sources there are to sync, and where the next page starts. */
+export interface SyncSourcePage {
+  sources: SyncSource[];
+  /** The connection the next page starts after; null on the last page. */
+  next: string | null;
+}
+
+/** What core asks for: the page of sync sources after `after`'s connection. */
+export const syncSourcesRequestSchema = z.strictObject({
+  after: z.string().min(1).max(128).nullable(),
 });

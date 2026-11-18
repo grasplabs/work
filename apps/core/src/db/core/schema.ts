@@ -3566,6 +3566,181 @@ export const connectionBrainErasures = sqliteTable(
 );
 
 /**
+ * The sources native sync reads into the Brain (brain-sync.ts, GRA-1758),
+ * one row per connection, sync (`feed`) and place: whose connection it is
+ * and how to name its items' readers (`provider`, `tenant`,
+ * `account`, its own account as its items' readers name it, as connect
+ * last listed them), where its next page reads
+ * on from (`cursor`, null to list it from the start), the number of its
+ * latest listing (`listing`; an item a listing named carries it) and
+ * whether that listing is under way (`listingOpen`: from a null cursor
+ * until its first page with nothing more), when it is next due, the run
+ * that holds it (`leaseId` until `leaseUntil`), when a page last applied
+ * and the code of the latest failure, and what the page under way did so
+ * far in the Brain (`added`, `changed`, `removed`), counted once each,
+ * whichever run did it, for the page's one audit event. Beside it, the
+ * daily full relist: its own cursor (`relistCursor`), whether one is under
+ * way (`relisting`), when its next page is due, or the next one starts
+ * (`relistAt`), and when the one under way was due to start
+ * (`relistSince`), by which an overdue relist is seen; and whether an
+ * item of it may still be leaving a key a stopped run left unerased
+ * (`leavesOwed`), cleared when a page commits. The kind of items it
+ * brings (`kind`: mail and events relist names only), whether its place
+ * is no longer listed (`dropped`: read no more, its keys erased by the
+ * clock, then the row deleted), and whether its relist is fetching what
+ * its names-only listing found unknown or changed (`relistCatchUp`).
+ * For a sync that lists places, the places listing that named the place
+ * last (`seenIn`); its listing itself is a row of its own here, place
+ * `:places`, its cursor where the listing goes on.
+ */
+export const brainSyncSources = sqliteTable(
+  "brain_sync_sources",
+  {
+    connectionId: text("connection_id").notNull(),
+    feed: text().notNull(),
+    place: text().notNull(),
+    personId: text("person_id").notNull(),
+    provider: text().notNull(),
+    tenant: text(),
+    account: text(),
+    cursor: text(),
+    listing: integer().notNull(),
+    listingOpen: integer("listing_open", { mode: "boolean" }).notNull(),
+    dueAt: timestamp("due_at").notNull(),
+    leaseId: text("lease_id"),
+    leaseUntil: timestamp("lease_until"),
+    lastSuccessAt: timestamp("last_success_at"),
+    lastError: text("last_error"),
+    added: integer().notNull(),
+    changed: integer().notNull(),
+    removed: integer().notNull(),
+    relistCursor: text("relist_cursor"),
+    relisting: integer({ mode: "boolean" }).notNull(),
+    relistAt: timestamp("relist_at").notNull(),
+    relistSince: timestamp("relist_since"),
+    leavesOwed: integer("leaves_owed", { mode: "boolean" }).notNull(),
+    kind: text({ enum: ["mail", "file", "event"] }).notNull(),
+    dropped: integer({ mode: "boolean" }).notNull(),
+    relistCatchUp: integer("relist_catch_up", { mode: "boolean" }).notNull(),
+    seenIn: integer("seen_in"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.connectionId, table.feed, table.place] }),
+    index("brain_sync_sources_due_idx").on(table.dueAt),
+  ]
+);
+
+/**
+ * Each item native sync handed the Brain (brain-sync.ts), by connection,
+ * sync and the provider's ID of it (unique within the connection), the
+ * place whose source added it (`place`): its source's key under `sync:`
+ * (`key`, its `generation` the key's middle part, one up each time the
+ * item leaves the Brain, so a key erased is never added to again), the
+ * store it is in now (`own`, `shared`, or null when it is in neither),
+ * the change last added (null while an add is under way), the Brain's
+ * version of it as last answered, a hash of the provider's change marker
+ * it was added at (`marker`), the item it is part of (an attachment's
+ * message), the listing that last named it, and the key it is leaving
+ * (`leaving`, in the store `leavingStore`): named here before the Brain
+ * erases it, so an erase a stopped run left is finished on its next read,
+ * and a disconnect's erasure finds it; and since when its removal is held
+ * (`heldSince`: gone from one place of a sync that lists places, kept
+ * until the others have read, so a move between two leaves no hole), and
+ * when a page last saved a change of it (`savedAt`: one saved since its
+ * source last committed a page is the uncommitted page's own, whose step
+ * a replay of that page records again). Never its readers: each
+ * page gives them to the Brain again, so nothing here names a person.
+ * Core names a key here before the Brain is given it, so a disconnect's
+ * erasure finds every key it gave.
+ */
+export const brainSyncItems = sqliteTable(
+  "brain_sync_items",
+  {
+    connectionId: text("connection_id").notNull(),
+    feed: text().notNull(),
+    itemId: text("item_id").notNull(),
+    place: text().notNull(),
+    key: text().notNull(),
+    generation: integer().notNull(),
+    store: text({ enum: ["own", "shared"] }),
+    change: text(),
+    version: integer(),
+    marker: text(),
+    partOf: text("part_of"),
+    listing: integer().notNull(),
+    leaving: text(),
+    leavingStore: text("leaving_store", { enum: ["own", "shared"] }),
+    heldSince: timestamp("held_since"),
+    savedAt: timestamp("saved_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.connectionId, table.feed, table.itemId] }),
+    index("brain_sync_items_store_idx").on(table.connectionId, table.store),
+    index("brain_sync_items_leaving_idx").on(
+      table.connectionId,
+      table.feed,
+      table.leaving
+    ),
+    index("brain_sync_items_place_idx").on(
+      table.connectionId,
+      table.feed,
+      table.place
+    ),
+    index("brain_sync_items_part_of_idx").on(
+      table.connectionId,
+      table.feed,
+      table.partOf
+    ),
+  ]
+);
+
+/**
+ * What a source's names-only relist (brain-sync.ts) found unknown, held
+ * without content, or at another version than held, by the provider's ID:
+ * fetched once in full after that listing, then forgotten. Emptied when a
+ * relist starts, so a relist catches up at most once.
+ */
+export const brainSyncCatchUps = sqliteTable(
+  "brain_sync_catch_ups",
+  {
+    connectionId: text("connection_id").notNull(),
+    feed: text().notNull(),
+    place: text().notNull(),
+    itemId: text("item_id").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.connectionId, table.feed, table.place, table.itemId],
+    }),
+  ]
+);
+
+/**
+ * The connections a disconnect closed for native sync (brain-sync.ts),
+ * one row each, kept for good: nothing is synced or named under one again.
+ * The disconnect it serves (connect's event's id), who disconnected and
+ * when (`actor`, an audit actor as JSON, cleared once the erasure it owed
+ * ended and its event was written), whether erasing what it synced
+ * into the shared store is under way (`erasing`, which the clock
+ * completes), and how many sources it erased.
+ */
+export const brainSyncDisconnects = sqliteTable(
+  "brain_sync_disconnects",
+  {
+    connectionId: text("connection_id").primaryKey(),
+    request: text().notNull(),
+    actor: text(),
+    requestedAt: timestamp("requested_at").notNull(),
+    erasing: integer({ mode: "boolean" }).notNull(),
+    erased: integer().notNull(),
+    /** The run that holds the erase, until when: its token (brain-sync.ts `takeErasure`). */
+    leaseId: text("lease_id"),
+    leaseUntil: timestamp("lease_until"),
+  },
+  (table) => [index("brain_sync_disconnects_erasing_idx").on(table.erasing)]
+);
+
+/**
  * The company's agents an admin made or changed (agents.ts): one row per
  * agent, by the ID its permissions, audit events and instruction file name.
  * `face` is the figure it is drawn with; `job` one line on what it is

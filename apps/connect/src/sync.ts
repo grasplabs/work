@@ -1,4 +1,8 @@
-import { syncMethod, syncPlacesMethod } from "@grasp-os/connector-kit/manifest";
+import {
+  connectorIsolateRequests,
+  syncMethod,
+  syncPlacesMethod,
+} from "@grasp-os/connector-kit/manifest";
 import type { SyncManifest } from "@grasp-os/connector-kit/manifest";
 import {
   syncPlacesResultSchema,
@@ -6,8 +10,13 @@ import {
 } from "@grasp-os/connector-kit/sync";
 import type { SyncFailure } from "@grasp-os/connector-kit/sync";
 import { createAuditEvent } from "@grasp-os/shared/audit";
-import { connectErrors, connectionErrors } from "@grasp-os/shared/connect";
+import {
+  connectErrors,
+  connectionErrors,
+  connectionOwnersMax,
+} from "@grasp-os/shared/connect";
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
+import type { Json } from "@grasp-os/shared/json";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import {
   ownPlace,
@@ -17,14 +26,17 @@ import {
   syncPlaceChoicesRequestSchema,
   syncPlaceSchema,
   syncPlacesRequestSchema,
+  syncSourcesRequestSchema,
 } from "@grasp-os/shared/sync";
 import type {
   SyncChoices,
   SyncPage,
   SyncPlaceChoices,
   SyncPlaces,
+  SyncSource,
+  SyncSourcePage,
 } from "@grasp-os/shared/sync";
-import { and, eq, not, sql } from "drizzle-orm";
+import { and, asc, eq, gt, not, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { nativeConnector } from "./bundled-connectors.ts";
@@ -32,7 +44,7 @@ import { auditRefusal, connectionEvent } from "./connection-audit.ts";
 import type { Connection } from "./connections.ts";
 import { syncServer } from "./connectors.ts";
 import { auditOutbox, connections, syncPicks } from "./db/schema.ts";
-import { ownerErased } from "./erased-people.ts";
+import { erasureBegan, ownerErased } from "./erased-people.ts";
 import { McpError } from "./mcp.ts";
 
 // Native sync's read (GRA-1758): one page of one source's changes, for
@@ -237,7 +249,7 @@ const sendToSync = async (
   { connection, connector, sync }: Awaited<ReturnType<typeof syncOf>>,
   place: string,
   method: string,
-  params: Record<string, string | null>
+  params: Record<string, Json>
 ): Promise<unknown> => {
   if (connection.status !== "active") {
     throw syncErrors.create("sync.inactive");
@@ -273,11 +285,15 @@ export const readSyncPage = async (
   env: Env,
   request: unknown
 ): Promise<SyncPage> => {
-  const { connectionId, feed, place, cursor } = syncErrors.parse(
+  const { connectionId, feed, place, cursor, names, ids } = syncErrors.parse(
     "sync.invalid",
     syncPageRequestSchema,
     request
   );
+  // One request each at most, within what a page may send.
+  if (ids !== undefined && ids.length > connectorIsolateRequests) {
+    throw syncErrors.create("sync.invalid");
+  }
   const found = await syncOf(env, connectionId, feed, place);
   if (!mayRead(found.connection, found.sync, place, found.picked)) {
     throw syncErrors.create("sync.place_refused");
@@ -287,6 +303,8 @@ export const readSyncPage = async (
       name: feed,
       place,
       cursor,
+      ...(names === undefined ? {} : { names }),
+      ...(ids === undefined ? {} : { ids: [...ids] }),
     })
   );
 };
@@ -626,4 +644,90 @@ export const pickSyncPlaces = async (
     await changed();
   }
   return { places };
+};
+
+/**
+ * A page of the syncs core's sync run reads (GRA-1758), by connection ID
+ * after `after`: each sync of each person's own native connection that is
+ * active, of someone whose erasure hasn't begun, whose connector is for
+ * the connection's provider, with its kind and whether it reads the whole
+ * account or places it lists (`listSyncPlaces`). A shared
+ * connection's syncs, whose places an admin picks (`pickSyncPlaces`), and
+ * a sync of picked places, which only a shared connection has, are not
+ * among them yet. A page holds at most `connectionOwnersMax` connections,
+ * as connect's other pages of connections for core.
+ */
+export const listSyncSources = async (
+  env: Env,
+  request: unknown
+): Promise<SyncSourcePage> => {
+  const { after } = syncErrors.parse(
+    "sync.invalid",
+    syncSourcesRequestSchema,
+    request
+  );
+  const rows = await drizzle(env.DB)
+    .select({
+      id: connections.id,
+      ownerUserId: connections.ownerUserId,
+      provider: connections.provider,
+      server: connections.server,
+      tenant: connections.tenant,
+      accountId: connections.accountId,
+      accountEmail: connections.accountEmail,
+    })
+    .from(connections)
+    .where(
+      and(
+        eq(connections.scope, "personal"),
+        eq(connections.serverKind, "native"),
+        eq(connections.status, "active"),
+        not(erasureBegan(sql`${connections.ownerUserId}`)),
+        after === null ? undefined : gt(connections.id, after)
+      )
+    )
+    .orderBy(asc(connections.id))
+    .limit(connectionOwnersMax);
+  const sources = rows.flatMap(
+    ({
+      id,
+      ownerUserId,
+      provider,
+      server,
+      tenant,
+      accountId,
+      accountEmail,
+    }) => {
+      const manifest = nativeConnector(server)?.manifest;
+      if (ownerUserId === null || manifest?.provider !== provider) {
+        return [];
+      }
+      return Object.entries(manifest.syncs ?? {}).flatMap(
+        ([feed, sync]): SyncSource[] => {
+          const { places } = sync;
+          return places === "picked"
+            ? []
+            : [
+                {
+                  connectionId: id,
+                  ownerUserId,
+                  provider,
+                  tenant,
+                  // As its items' readers name it, and core's reading side
+                  // (connections.ts `personalAccounts`): Google by the verified
+                  // address, Microsoft by the object ID.
+                  account: provider === "google" ? accountEmail : accountId,
+                  feed,
+                  kind: sync.kind,
+                  places,
+                },
+              ];
+        }
+      );
+    }
+  );
+  return {
+    sources,
+    next: rows.length < connectionOwnersMax ? null : (rows.at(-1)?.id ?? null),
+  };
 };
