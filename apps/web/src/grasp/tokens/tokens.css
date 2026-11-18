@@ -1414,6 +1414,10 @@
   --grasp-composer-width: 36rem;
   /* The tallest a composer's text grows before it scrolls inside. */
   --grasp-composer-height: 12rem;
+  /* The least width of the one-row composer (compact), whoever holds it: in a holder that sizes to what it holds, the row is this wide, or the holder's width when that is less. */
+  --grasp-composer-row-least: 20rem;
+  /* The least width of the one row's text: narrower, the model's level folds to its mark, then the controls drop under the text. The text never gives. */
+  --grasp-composer-field-least: 8rem;
   /* The working light: lime, sea and mint in beams with dark gaps between, ending as it starts so it loops without a seam. */
   --grasp-composer-light: linear-gradient(
     90deg,
@@ -1592,6 +1596,8 @@
   --grasp-shell-page-inline: var(--grasp-space-6);
   /* The layer a page's own bar and the dock stand on, above what scrolls in the page's card. */
   --grasp-shell-page-layer: 30;
+  /* The width the dock gives what it holds (the chat's idle bar), or the dock's whole width when that is less. */
+  --grasp-shell-dock-width: 26rem;
   /* The room under the last thing on a page. */
   --grasp-shell-page-room-below: 32px;
   /* The room under a page with a chat box floating over its foot, so its last row scrolls clear. */

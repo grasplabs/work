@@ -9,6 +9,13 @@
 //     <FieldContent><FieldLabel>Weekly summary</FieldLabel></FieldContent>
 //   </Field>
 //
+// or, words first and the control at the end (a switch, as in a list of settings):
+//
+//   <Field orientation="horizontal">
+//     <FieldContent><FieldLabel>Weekly summary</FieldLabel></FieldContent>
+//     <Switch />
+//   </Field>
+//
 // The row hands its control and its words one id (`ChoiceBox`): the control takes it, the label
 // names it by `<id>-label`, the description and the error say it by `<id>-description` and
 // `<id>-error`. In a CheckboxGroup or RadioGroup (`ChoiceGrouped`), the group's field holds the
@@ -17,6 +24,8 @@ import * as stylex from "@stylexjs/stylex";
 import { createContext } from "react";
 
 import { grasp } from "../tokens/tokens.stylex";
+
+const SWITCH = ":has(> [role=switch])";
 
 export const rowStyles = stylex.create({
   row: {
@@ -37,6 +46,15 @@ export const rowStyles = stylex.create({
   end: {
     gridTemplateColumns: "minmax(0, 1fr) auto",
     columnGap: grasp.space4,
+  },
+  // A horizontal Field: the control first, or, holding a switch, the words first and the switch at
+  // the end. Read from the page itself (:has), so it is there before any script runs.
+  either: {
+    gridTemplateColumns: {
+      default: "auto minmax(0, 1fr)",
+      [SWITCH]: "minmax(0, 1fr) auto",
+    },
+    columnGap: { default: grasp.space3, [SWITCH]: grasp.space4 },
   },
   words: {
     display: "grid",

@@ -580,7 +580,17 @@ const styles = stylex.create({
   },
   // At the foot's end (dockAlign="end"): a chat box floating there, its end where the words end (F37).
   dockEnd: { justifyContent: "flex-end" },
-  dockHeld: { maxWidth: "100%", pointerEvents: "auto" },
+  // What the dock holds has a width of its own: a row that sizes to its holder (the one-row
+  // Composer) measured 24px in a holder that sizes to it. It stands centred in that width, or at its
+  // end (dockHeldEnd), so a narrower box keeps its place.
+  dockHeld: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    justifyItems: "center",
+    width: `min(100%, ${grasp.shellDockWidth})`,
+    pointerEvents: "auto",
+  },
+  dockHeldEnd: { justifyItems: "end" },
   // The dock comes up and sinks away as a movement; away, nothing in it can be seen or reached.
   dockMoves: {
     transitionProperty: "opacity, translate, visibility",
@@ -1423,6 +1433,7 @@ const ShellDock = ({
       <div
         {...stylex.props(
           styles.dockHeld,
+          align === "end" && styles.dockHeldEnd,
           styles.dockMoves,
           !shown && styles.dockAway
         )}

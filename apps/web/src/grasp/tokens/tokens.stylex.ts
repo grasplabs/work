@@ -568,6 +568,8 @@ export const grasp = stylex.defineConsts({
   // Composer: composer.
   composerWidth: "var(--grasp-composer-width)",
   composerHeight: "var(--grasp-composer-height)",
+  composerRowLeast: "var(--grasp-composer-row-least)",
+  composerFieldLeast: "var(--grasp-composer-field-least)",
   composerLight: "var(--grasp-composer-light)",
   composerTint: "var(--grasp-composer-tint)",
   composerHalo: "var(--grasp-composer-halo)",
@@ -642,6 +644,7 @@ export const grasp = stylex.defineConsts({
   shellBar: "var(--grasp-shell-bar)",
   shellPageInline: "var(--grasp-shell-page-inline)",
   shellPageLayer: "var(--grasp-shell-page-layer)",
+  shellDockWidth: "var(--grasp-shell-dock-width)",
   shellPageRoomBelow: "var(--grasp-shell-page-room-below)",
   shellPageRoomChat: "var(--grasp-shell-page-room-chat)",
   pageMeasure: "var(--grasp-page-measure)",

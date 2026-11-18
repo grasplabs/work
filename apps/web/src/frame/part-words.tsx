@@ -588,9 +588,11 @@ export const usePartWords = (): GraspWordsCatalog => {
       voice: {
         asking: t`Asking for the microphone`,
         listening: t`Listening`,
+        speaking: t`Speaking`,
         thinking: t`Writing it down`,
         silent: t`Paused`,
         muted: t`Muted`,
+        close: t`Close voice`,
         done: t`Done`,
         cancel: t`Cancel`,
         mute: t`Mute`,

@@ -40,9 +40,11 @@ const englishAttachmentWords: ComposerAttachmentWords = {
 const englishVoiceWords: ComposerVoiceWords = {
   asking: "Asking for the microphone",
   listening: "Listening",
+  speaking: "Speaking",
   thinking: "Writing it down",
   silent: "Paused",
   muted: "Muted",
+  close: "Close voice",
   done: "Done",
   cancel: "Cancel",
   mute: "Mute",
