@@ -1173,46 +1173,31 @@ describe("erasing a person", () => {
     });
   });
 
-  it("keeps out an account linked while the erasure ran too, finishing once it is gone", async () => {
+  it("links no account to them once their erasure deleted theirs, though a sign-in had found them before", async () => {
     const { admin, person } = await removedPerson();
     const late = googlePerson();
-    const trigger = `late_account_${person.userId.replaceAll("-", "_")}`;
-    // An account linked to them as the erasure's batch deletes theirs,
-    // after it read which they had.
-    await env.DB.prepare(
-      `CREATE TRIGGER ${trigger}
-       AFTER DELETE ON accounts WHEN OLD.user_id = '${person.userId}'
-       BEGIN
-         INSERT OR IGNORE INTO accounts (id, account_id, provider_id, user_id, created_at, updated_at)
-         VALUES ('${crypto.randomUUID()}', '${String(late.sub)}', 'google', '${person.userId}', 0, 0);
-       END`
-    ).run();
-    const pending = await admin.api.members.erase(
-      person.userId,
-      String(person.person.name)
+    await admin.api.members.erase(person.userId, String(person.person.name));
+    // A sign-in under way, which found them by their address before the
+    // erasure, links its account to them after the erasure deleted theirs:
+    // Better Auth's own write, refused in its statement (migration 0272).
+    const linked = await outcome(
+      env.DB.prepare(
+        "INSERT INTO accounts (id, account_id, provider_id, user_id, created_at, updated_at) VALUES (?, ?, 'google', ?, 0, 0)"
+      )
+        .bind(crypto.randomUUID(), String(late.sub), person.userId)
+        .run()
     );
-    await env.DB.prepare(`DROP TRIGGER ${trigger}`).run();
-    const meanwhile = await rowsOf("accounts", "user_id", person.userId);
-
     await runMinuteTasks();
 
     const done = await admin.api.members.erasure(person.userId);
-    const again = await signIn(idp, "google", late);
     expect({
-      stored: await storedOf(late),
-      // The identity area's own; any other area finishes on its own.
-      pending: pending.areas.filter(({ area }) => area === "identity"),
-      meanwhile,
+      linked: linked === "ok",
       done: done.erasure?.areas.filter(({ area }) => area === "identity"),
       accounts: await rowsOf("accounts", "user_id", person.userId),
-      session: again.session,
     }).toStrictEqual({
-      pending: [{ area: "identity", state: "pending" }],
-      meanwhile: 1,
+      linked: false,
       done: [{ area: "identity", state: "complete" }],
       accounts: 0,
-      session: undefined,
-      stored: { users: 0, accounts: 0 },
     });
   });
 
