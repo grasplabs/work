@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "97169803-2c7d-4d57-9df0-feb1a775b102",
+  "id": "477af347-89b4-40c6-903b-eb9161b1fe60",
   "prevId": "abced1a5-01df-4ee5-9746-de88104b0b1b",
   "tables": {
     "chunk_blocks": {
@@ -711,88 +711,6 @@
           "value": "\"erasures\".\"kind\" IN ('source', 'person', 'writer')"
         }
       }
-    },
-    "events": {
-      "name": "events",
-      "columns": {
-        "row": {
-          "name": "row",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": true
-        },
-        "key": {
-          "name": "key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "team": {
-          "name": "team",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "step": {
-          "name": "step",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "item": {
-          "name": "item",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "who": {
-          "name": "who",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "at": {
-          "name": "at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "events_key_team_idx": {
-          "name": "events_key_team_idx",
-          "columns": [
-            "key",
-            "team"
-          ],
-          "isUnique": true
-        },
-        "events_at_idx": {
-          "name": "events_at_idx",
-          "columns": [
-            "at"
-          ],
-          "isUnique": false
-        },
-        "events_who_idx": {
-          "name": "events_who_idx",
-          "columns": [
-            "who"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
     },
     "export_parts": {
       "name": "export_parts",
@@ -2179,6 +2097,46 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "proposal_sources": {
+      "name": "proposal_sources",
+      "columns": {
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "proposal": {
+          "name": "proposal",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "proposal_sources_proposal_idx": {
+          "name": "proposal_sources_proposal_idx",
+          "columns": [
+            "proposal"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "proposal_sources_source_proposal_pk": {
+          "columns": [
+            "source",
+            "proposal"
+          ],
+          "name": "proposal_sources_source_proposal_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "reader_set_members": {
       "name": "reader_set_members",
       "columns": {
@@ -2452,6 +2410,51 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "skill_proposals": {
+      "name": "skill_proposals",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "rests_on": {
+          "name": "rests_on",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "drafted_at": {
+          "name": "drafted_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
           "autoincrement": false
         }
       },

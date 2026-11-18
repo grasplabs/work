@@ -3614,18 +3614,40 @@ export const writeSharedSkill = async (
 };
 
 /**
+ * `text` as a person's own skill takes it (`addOwnSkill`): a skill in the
+ * Agent Skills format whose card names it, what it needs readable, at
+ * most an instruction file's length; `skills.invalid` otherwise. What
+ * shows a skill a person may add (skill-proposals.ts) asks the same.
+ */
+export const ownSkillTextOf = (text: unknown): string => {
+  const name = skillCardOf(
+    skillErrors.parse("skills.invalid", instructionsTextSchema, text)
+  )?.name;
+  if (name === undefined) {
+    throw skillErrors.create("skills.invalid");
+  }
+  return skillTextOf(name, text);
+};
+
+/**
  * Adds `text` as the next version of the member `personId`'s own skill of
  * the name its frontmatter gives, in their own store (`keptIn`, with
  * `owner` access), readable by them alone; the one before stays as
  * history. `change` as `writeSharedSkill`'s. Refused (`skills.invalid`)
  * for text that isn't a skill (what it needs, if it says, included),
  * (`skills.name_erased`) for a name of theirs they erased, and
- * `permission.person_inactive` once they are no longer a member.
+ * `permission.person_inactive` once they are no longer a member. With
+ * `onlyNew`, written only while they have no skill of that name, checked
+ * in the store's transaction that writes (`after: null`), and refused
+ * (`skills.name_taken`) otherwise, nothing written: so it never makes
+ * text of theirs history, however a save of theirs lands meanwhile. A
+ * change the store already has still answers with the version it made, so
+ * a retry of the same add adds nothing twice.
  */
 export const addOwnSkill = async (
   env: BrainEnv & ReaderEnv,
   personId: string,
-  added: { change: string; text: string }
+  added: { change: string; text: string; onlyNew?: true }
 ): Promise<SkillAt> => {
   const reader = await skillReaderOf(env, personId, "person");
   const change = skillErrors.parse(
@@ -3633,13 +3655,11 @@ export const addOwnSkill = async (
     changeSchema,
     added.change
   );
-  const name = skillCardOf(
-    skillErrors.parse("skills.invalid", instructionsTextSchema, added.text)
-  )?.name;
+  const text = ownSkillTextOf(added.text);
+  const name = skillCardOf(text)?.name;
   if (name === undefined) {
     throw skillErrors.create("skills.invalid");
   }
-  const text = skillTextOf(name, added.text);
   const skill = { scope: "person", name } as const;
   const key = skillKeyOf(skill);
   const access: Access = { kind: "owner", person: reader.person };
@@ -3648,14 +3668,27 @@ export const addOwnSkill = async (
   if ((await ownBrain(env, reader.person).keyState(key)) === "erased") {
     throw skillErrors.create("skills.name_erased");
   }
-  const { version } = await keptIn(
-    env,
-    key,
-    access,
-    async (store) =>
-      await store.addInstructions({ source: key, change, text, access })
-  );
-  return { ...skill, version };
+  try {
+    const { version } = await keptIn(
+      env,
+      key,
+      access,
+      async (store) =>
+        await store.addInstructions({
+          source: key,
+          change,
+          text,
+          access,
+          ...(added.onlyNew === true ? { after: null } : {}),
+        })
+    );
+    return { ...skill, version };
+  } catch (error) {
+    if (error instanceof Error && error.message === staleVersion) {
+      throw skillErrors.create("skills.name_taken");
+    }
+    throw error;
+  }
 };
 
 /**
@@ -3688,6 +3721,80 @@ export const eraseOwnSkill = async (
     source: skillKeyOf(skill),
     reason: "deleted",
   });
+};
+
+// Skill proposals (GRA-1756): a draft of a person's own skill, which the
+// Brain's model writes in their own store from sources of theirs that keep
+// ending the same way (@grasp-os/brain-next skill-proposals.ts). Core
+// decides when and from which (skill-proposals.ts); here they are named
+// for the store, each call for the member core verified alone, in their
+// own store alone.
+
+/** A person's open proposal, as core reads it: its card, its text, and the sources it rests on. */
+export interface OwnSkillProposal {
+  key: string;
+  name: string;
+  description: string;
+  text: string;
+  restsOn: SourceRef[];
+  draftedAt: Date;
+}
+
+/**
+ * Asks the member `personId`'s own store to draft a skill under `key`,
+ * for `subject` (core's words: the draft asks core which sources as it
+ * runs, `alarmHostOf`) and `about`, unless it drafted one under it
+ * already. Refused once they are no longer a member.
+ */
+export const proposeOwnSkill = async (
+  env: BrainEnv & ReaderEnv,
+  personId: string,
+  { key, about, subject }: { key: string; about: string; subject: string }
+): Promise<void> => {
+  const { person } = await skillReaderOf(env, personId, "person");
+  await ownBrain(env, person).proposeSkill({ person, key, about, subject });
+};
+
+/**
+ * The member `personId`'s open proposals, each only while every source
+ * version it rests on is still current and theirs to read, as their own
+ * store lists them. Refused once they are no longer a member.
+ */
+export const ownSkillProposalsAs = async (
+  env: BrainEnv & ReaderEnv,
+  personId: string
+): Promise<OwnSkillProposal[]> => {
+  const reader = await skillReaderOf(env, personId, "person");
+  const listed = await ownBrain(env, reader.person).skillProposals({ reader });
+  return listed.flatMap(({ key, text, restsOn, draftedAt }) => {
+    const card = skillCardOf(text);
+    return card === null
+      ? []
+      : [
+          {
+            key,
+            name: card.name,
+            description: card.description,
+            text,
+            restsOn: restsOn.map(({ source }) => sourceRefOf(source)),
+            draftedAt,
+          },
+        ];
+  });
+};
+
+/**
+ * Settles the member `personId`'s proposal `key`, accepted or dismissed
+ * alike: nothing is
+ * drafted under it again. Refused once they are no longer a member.
+ */
+export const settleOwnSkillProposal = async (
+  env: BrainEnv & ReaderEnv,
+  personId: string,
+  key: string
+): Promise<void> => {
+  const { person } = await skillReaderOf(env, personId, "person");
+  await ownBrain(env, person).settleSkillProposal({ person, key });
 };
 
 /**
@@ -4251,11 +4358,13 @@ const healthOf = (overview: WorkOverview, at: Date): OwnStoreHealth => {
  */
 export const alarmHostOf = async (
   env: Env,
-  name: string | undefined
+  name: string | undefined,
+  proposalRuns: (person: string, subject: string) => Promise<SourceRef[]>
 ): Promise<{
   ask: AskModel;
   embedders: Embedders;
   contextTokens: number | null;
+  proposalSources: (subject: string) => Promise<SourceId[]>;
   report: (overview: WorkOverview) => Promise<void>;
 }> => {
   const kind = storeKindOf(name);
@@ -4264,6 +4373,14 @@ export const alarmHostOf = async (
   }
   return {
     ask: askModel(env),
+    // Which runs a skill's draft is drawn from, as core picks them for its
+    // person as it runs (skill-proposals.ts): the queue names none.
+    proposalSources: async (subject) => {
+      const runs = await proposalRuns(kind.person, subject);
+      return runs.map((source) =>
+        sourceKeyOf(checked(sourceRefSchema, source))
+      );
+    },
     embedders: await embeddersOf(env),
     // What extraction cuts the person's own sources to, as the shared
     // store's tick does (`workBrain`).
@@ -6351,8 +6468,10 @@ export const forgetForAppAs = async (
 // - Figures from five events of one person, and events outliving their
 //   person: each event carries who took it as a MAC of the person and the
 //   team under a third key (`eventWhoPurpose`), so figures can count
-//   distinct people, one person's tags in two teams join nothing, and a
-//   person's erasure finds and deletes their events in every team
+//   distinct people, no tag can be computed or matched to a person
+//   without core's key (one person's tags in two teams differ, though one
+//   call's events in each of their teams co-occur), and a person's
+//   erasure finds and deletes their events in every team
 //   (`eraseEventsOf`). A member removed but not erased keeps theirs, as
 //   history.
 //

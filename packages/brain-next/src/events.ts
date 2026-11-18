@@ -13,8 +13,10 @@ import type { NewEvent } from "./contract.ts";
 // - A person in a row: the host names a team's group, never a person
 //   (contract.ts `newEventSchema`), an item only by a MAC of its ID, and
 //   who took it only by a MAC of them and the team, which only the host
-//   can compute: so the host can erase their events (`eraseEvents`), and
-//   the tags of one person in two teams join nothing.
+//   can compute: so the host can erase their events (`eraseEvents`).
+//   One person's tags in two teams differ, but one call makes an event in
+//   each of their teams at the same step and hour, so with raw access to
+//   this table they can be lined up by co-occurring.
 // - One call pinned by its time: each is kept to the hour, rounded down.
 // - Kept for good: every event older than `eventsKeptMs` is deleted
 //   (`expireEvents`, on the host's clock), and one dated later than when

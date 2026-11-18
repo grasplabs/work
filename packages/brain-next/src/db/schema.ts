@@ -1424,3 +1424,44 @@ export const events = sqliteTable(
     index("events_who_idx").on(table.who),
   ]
 );
+
+/**
+ * A skill drafted for the person whose own store this is, from sources of
+ * theirs that keep ending the same way (skill-proposals.ts), under the
+ * host's key for what they have in common. Open, it holds the draft and
+ * the versions it rests on, and is listed only while every one of them is
+ * still current and readable by its person; an erasure of one of them
+ * deletes it. Once settled (accepted or dismissed: nothing tells them
+ * apart) it keeps its key alone, so the
+ * same key is never drafted again, and nothing in it says what it was
+ * drawn from or what became of it. Only in a person's own store.
+ */
+export const skillProposals = sqliteTable("skill_proposals", {
+  key: text().primaryKey(),
+  state: text({ enum: ["open", "settled"] }).notNull(),
+  /** The `SKILL.md` drafted; null once settled. */
+  text: text(),
+  /** The versions it rests on, as JSON `[{ source, version }]`; null once settled. */
+  restsOn: text("rests_on"),
+  draftedAt: integer("drafted_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+/**
+ * Each source an open skill proposal rests on (skill-proposals.ts), by the
+ * proposal's key: written as the proposal is saved, from what it rests
+ * on, in the same transaction, and nowhere else. An erasure of a source
+ * finds by it the proposals that rest on it and deletes them with these
+ * rows (erasure.ts `apply`); settling a proposal deletes its rows. Only in
+ * a person's own store.
+ */
+export const proposalSources = sqliteTable(
+  "proposal_sources",
+  {
+    source: text().notNull(),
+    proposal: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.source, table.proposal] }),
+    index("proposal_sources_proposal_idx").on(table.proposal),
+  ]
+);

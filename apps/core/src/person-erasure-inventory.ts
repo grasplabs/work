@@ -676,6 +676,12 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // deletes theirs (brain-next.ts `eraseEventsOf`); the rest go after 90
   // days (`eventsKeptMs`).
   "brainStore.events": { erased: "brain_shared" },
+  "brainStore.proposal_sources": {
+    none: "the sources a person's skill proposals name (skill-proposals.ts): only in their own store, erased whole; the shared store holds none",
+  },
+  "brainStore.skill_proposals": {
+    none: "drafts of a person's own skills (skill-proposals.ts): only in their own store, erased whole; the shared store holds none",
+  },
   "brainStore.own_entity": {
     none: "a person's own store's entity for its person (own-entity.ts): the shared store holds none, and their own store is erased whole",
   },
