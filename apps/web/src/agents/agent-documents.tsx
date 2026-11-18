@@ -20,7 +20,6 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
-import { Alert } from "../grasp/alert/index.ts";
 import { Empty } from "../grasp/empty/index.ts";
 import { FileUpload } from "../grasp/file-upload/index.ts";
 import { File as FileIcon, Trash } from "../grasp/icons/index.ts";
@@ -116,8 +115,7 @@ export const AgentDocuments = ({
   return (
     <SectionCard
       density="compact"
-      // Its rows reach the edges; an Alert in their place keeps its room.
-      flush={documents !== undefined}
+      flush
       // Behind the info mark: who may learn what a document says.
       info={t`Files ${name} reads when a question needs them. Anyone who may ask it can learn what they say.`}
       actions={
@@ -161,11 +159,10 @@ export const AgentDocuments = ({
       }
       title={t`Documents`}
     >
-      {/* One part of a loaded page that failed: an Alert, not an Empty. */}
       {documents === undefined ? (
-        <Alert tone="danger">
+        <Empty size="inline" tone="danger">
           {t`The documents couldn't be loaded. Reload the page.`}
-        </Alert>
+        </Empty>
       ) : null}
       {/* Where documents can be added, the button to add them says enough. */}
       {documents?.length === 0 && !editing ? (

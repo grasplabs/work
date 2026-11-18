@@ -248,8 +248,7 @@ const Facts = ({
   const next = nextWakeAt(wakes);
   const nextMoment = next === undefined ? "" : moment(next);
   return (
-    // No title: the page's own title names what these facts are of.
-    <SectionCard aria-label={t`Details`} density="compact" flush>
+    <SectionCard density="compact" flush title={t`Details`}>
       <SettingsRows>
         <FactRow label={t`What it is for`}>
           {agent.job === "" ? t`No job written yet` : agent.job}
@@ -367,12 +366,13 @@ const Access = ({
   }
   return (
     <>
-      {/* No title: its one row says it, and the side nav says "Access". */}
-      <SectionCard aria-label={t`Who may use it`} density="compact" flush>
+      {/* A card per topic, each titled (Damsko's settings pattern); the
+          row doesn't name the agent again under the page's title. */}
+      <SectionCard density="compact" flush title={t`Who may use it`}>
         <SettingsRows>
           <SettingRow
             info={t`Nobody outside it can ask it anything, in Grasp or a chat app.`}
-            label={t`Who may use it`}
+            label={t`Answers`}
           >
             {() => (
               <AudienceControl
