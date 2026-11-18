@@ -40,17 +40,18 @@ import { graphFailure, graphHost, graphUrl, v1 } from "./graph.ts";
 // ("Microsoft Graph automatically encodes any specified parameters into
 // the token portion"), and the request is built here.
 //
-// Times: the feed is read in UTC, and each event is read again in the zone
-// it was made in (`originalStartTimeZone`, `originalEndTimeZone`), asked
-// with `Prefer: outlook.timezone`, so a weekly 09:00 in Amsterdam stays
-// 09:00 on both sides of a daylight saving change; Graph converts, from
-// its own zone names, with no table of ours
-// (https://learn.microsoft.com/en-us/graph/api/resources/event?view=graph-rest-1.0,
-// https://learn.microsoft.com/en-us/graph/api/event-get?view=graph-rest-1.0).
-// An event made in a custom zone (`tzone://Microsoft/Custom`) or with none
-// stays in UTC, and says so. An occurrence of a recurring event says that
-// and how it repeats: its series master's `recurrence` (pattern and range),
-// read once a series a page.
+// Times: as the feed gives them, in UTC, and said as UTC. Each occurrence
+// of a recurring event comes with its own real start and end, so a weekly
+// 09:00 in Amsterdam is 07:00 UTC in summer time and 08:00 UTC after the
+// clocks go back, each right for its own day. The zone the event was made
+// in (`originalStartTimeZone`, and `originalEndTimeZone` when it differs)
+// is named in the text as the feed carries it
+// (https://learn.microsoft.com/en-us/graph/api/resources/event?view=graph-rest-1.0):
+// no request, and no header built from it. An occurrence of a recurring
+// event says that and how it repeats: its series master's `recurrence`
+// (pattern and range), read once a series a page, within the page's room;
+// a master Graph no longer has gives no such line, and a read that fails
+// otherwise leaves the line out for that occurrence alone.
 //
 // What goes away: an event under `@removed` (deleted, or "outside the date
 // range" and changed), and a cancelled event (`isCancelled`). A token
@@ -131,8 +132,6 @@ const recurrenceSchema = z
 type Recurrence = z.infer<typeof recurrenceSchema>;
 
 const masterSchema = z.object({ recurrence: recurrenceSchema });
-
-const zonedSchema = z.object({ start: dateTimeSchema, end: dateTimeSchema });
 
 const addressSchema = z
   .object({
@@ -371,6 +370,13 @@ const textOf = (event: Event, repeats: string): string => {
     ["Subject", event.subject ?? ""],
     ["Start", whenOf(event.start)],
     ["End", whenOf(event.end)],
+    ["Time zone", event.originalStartTimeZone ?? ""],
+    [
+      "End time zone",
+      event.originalEndTimeZone === event.originalStartTimeZone
+        ? ""
+        : (event.originalEndTimeZone ?? ""),
+    ],
     ["Repeats", repeats],
     ["All day", event.isAllDay === true ? "yes" : ""],
     ["Location", event.location?.displayName ?? ""],
@@ -439,28 +445,17 @@ const passOverEvent = (owner: SyncReader[], event: Event): SyncItem[] => {
   return item === "full" ? [] : [item];
 };
 
-/** A custom zone Graph can't name for us, or none: the event stays in UTC. */
-const customZone = "tzone://Microsoft/Custom";
-
-/** A GET of one event (the kit's `fetchInRoom`), with `prefer`. */
+/** A GET of one event (the kit's `fetchInRoom`). */
 const getEvent = async (
   room: SyncRoom,
   id: string,
-  select: string,
-  zone?: string
+  select: string
 ): Promise<Response | "late" | "large"> => {
   try {
     return await fetchInRoom(
       room,
       graphUrl(`${events}/${segment(id)}`, { $select: select }),
-      {
-        headers: {
-          prefer:
-            zone === undefined
-              ? eventPrefer
-              : `${eventPrefer}, outlook.timezone="${zone}"`,
-        },
-      }
+      { headers: { prefer: eventPrefer } }
     );
   } catch {
     // Larger than connect reads of one answer: the egress cut it off.
@@ -469,68 +464,19 @@ const getEvent = async (
 };
 
 /**
- * An event's start or end read again in `zone`
- * (https://learn.microsoft.com/en-us/graph/api/event-get?view=graph-rest-1.0).
- */
-const inZone = async (
-  room: SyncRoom,
-  id: string,
-  zone: string
-): Promise<z.infer<typeof zonedSchema> | "late" | "large"> => {
-  const response = await getEvent(room, id, "start,end", zone);
-  if (response === "late" || response === "large") {
-    return response;
-  }
-  if (!response.ok) {
-    throw await graphFailure(response);
-  }
-  return zonedSchema.parse(await response.json());
-};
-
-/** Whether a zone is one Graph can read an event in. */
-const isNamedZone = (zone: string | null | undefined): zone is string =>
-  zone !== null && zone !== undefined && zone !== "" && zone !== customZone;
-
-/**
- * An event with its start and end in the zones it was made in, when Graph
- * can name them; "late" when the page's time ran out.
- */
-const zonedEvent = async (
-  room: SyncRoom,
-  event: Event
-): Promise<Event | "late" | "large"> => {
-  const startZone = event.originalStartTimeZone;
-  const endZone = event.originalEndTimeZone;
-  let { start, end } = event;
-  if (isNamedZone(startZone)) {
-    const zoned = await inZone(room, event.id, startZone);
-    if (zoned === "late" || zoned === "large") {
-      return zoned;
-    }
-    ({ start } = zoned);
-    if (endZone === startZone) {
-      ({ end } = zoned);
-    }
-  }
-  if (isNamedZone(endZone) && endZone !== startZone) {
-    const zoned = await inZone(room, event.id, endZone);
-    if (zoned === "late" || zoned === "large") {
-      return zoned;
-    }
-    ({ end } = zoned);
-  }
-  return { ...event, start, end };
-};
-
-/**
  * How a recurring event's series repeats, from its master's `recurrence`,
- * read once a series a page.
+ * read once a series a page, within the page's room: "full" or "late"
+ * when it has none left (the kit leaves the occurrence to the next page).
+ * A master Graph no longer has (404) repeats nothing; a read that fails
+ * otherwise leaves the line out for this occurrence, without failing the
+ * page or keeping that for the series.
+ * https://learn.microsoft.com/en-us/graph/api/event-get?view=graph-rest-1.0
  */
 const repeatsOfSeries = async (
   room: SyncRoom,
   masters: Map<string, string>,
   event: Event
-): Promise<{ repeats: string } | "late"> => {
+): Promise<{ repeats: string } | "full" | "late"> => {
   const master = event.seriesMasterId;
   if (master === null || master === undefined || master === "") {
     return { repeats: "" };
@@ -539,16 +485,30 @@ const repeatsOfSeries = async (
   if (known !== undefined) {
     return { repeats: known };
   }
+  if (room.requests <= 0) {
+    return "full";
+  }
+  if (!mayRequest(room)) {
+    return "late";
+  }
   const response = await getEvent(room, master, "recurrence");
   if (response === "late") {
     return "late";
   }
-  let repeats = "";
-  if (response !== "large" && response.ok) {
-    repeats = repeatsOf(masterSchema.parse(await response.json()).recurrence);
-  } else if (response !== "large" && response.status !== 404) {
-    throw await graphFailure(response);
+  if (response === "large") {
+    return { repeats: "" };
   }
+  if (response.status === 404) {
+    masters.set(master, "");
+    return { repeats: "" };
+  }
+  const read = response.ok
+    ? masterSchema.safeParse(await response.json())
+    : undefined;
+  if (read?.success !== true) {
+    return { repeats: "" };
+  }
+  const repeats = repeatsOf(read.data.recurrence);
   masters.set(master, repeats);
   return { repeats };
 };
@@ -635,21 +595,11 @@ const takePage = async (
       if (event["@removed"] !== undefined || event.isCancelled === true) {
         return [goneOf(event.id)];
       }
-      if (!room.empty && !mayRequest(room)) {
-        return "full";
-      }
-      const zoned = await zonedEvent(room, event);
-      if (zoned === "late") {
-        return "late";
-      }
-      if (zoned === "large") {
-        return passOverEvent(owner, event);
-      }
       const series = await repeatsOfSeries(room, masters, event);
-      if (series === "late") {
-        return "late";
+      if (series === "full" || series === "late") {
+        return series;
       }
-      const item = itemOf(room, owner, zoned, series.repeats);
+      const item = itemOf(room, owner, event, series.repeats);
       return item === "full" ? "full" : [item];
     },
     passOver: (event) => passOverEvent(owner, event),

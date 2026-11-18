@@ -2,7 +2,6 @@ import { syncErrors } from "@grasp-os/shared/sync";
 import type { SyncItem, SyncPage } from "@grasp-os/shared/sync";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
-import { z } from "zod";
 
 import { connectAccount, ownAccount, someone } from "./connect.ts";
 import { fakeInternet } from "./internet.ts";
@@ -34,6 +33,8 @@ interface Calendar {
   honoursPageSize: boolean;
   /** Every event Graph reads on its own (in UTC), by ID: masters too. */
   events: Record<string, Event>;
+  /** Events whose next read Graph fails once (a 500). */
+  failOnce: Set<string>;
   /** A skip token Graph answers only after `ms`. */
   slow?: { skip: string; ms: number };
   /** Answers every request instead, when it answers. */
@@ -43,6 +44,7 @@ interface Calendar {
 const calendar: Calendar = {
   feed: {},
   events: {},
+  failOnce: new Set(),
   graphPage: 1000,
   honoursPageSize: true,
 };
@@ -50,6 +52,7 @@ const calendar: Calendar = {
 const reset = (): void => {
   calendar.feed = {};
   calendar.events = {};
+  calendar.failOnce = new Set();
   calendar.graphPage = 1000;
   calendar.honoursPageSize = true;
   calendar.slow = undefined;
@@ -104,52 +107,19 @@ const feedPage = (url: URL, prefer: string): Response => {
   });
 };
 
-/** The zones the fake reads an event in: Graph's (Windows) names. */
-const zones: Readonly<Record<string, string>> = {
-  "W. Europe Standard Time": "Europe/Amsterdam",
-};
-
-/** A UTC time of Graph's (`2026-10-19T07:00:00.0000000`) in `zone`. */
-const inZone = (utc: string, zone: string): string => {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-CA", {
-      timeZone: zones[zone] ?? "UTC",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hourCycle: "h23",
-    })
-      .formatToParts(new Date(`${utc.slice(0, 19)}Z`))
-      .map(({ type, value }) => [type, value])
-  );
-  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}.0000000`;
-};
-
-/** One event, as Graph reads it on its own: in the zone `Prefer` asks. */
-const eventAnswer = (url: URL, prefer: string): Response => {
+/** One event, as Graph reads it on its own. */
+const eventAnswer = (url: URL): Response => {
   const id = decodeURIComponent(url.pathname.slice(eventsPath.length + 1));
-  const found = calendar.events[id];
-  if (found === undefined) {
+  if (calendar.failOnce.delete(id)) {
     return Response.json(
-      { error: { code: "ErrorItemNotFound" } },
-      { status: 404 }
+      { error: { code: "ErrorInternalServerError" } },
+      { status: 500 }
     );
   }
-  const zone = /outlook\.timezone="(?<zone>[^"]+)"/u.exec(prefer)?.groups?.zone;
-  const at = (time: unknown) => {
-    const { dateTime } = z.object({ dateTime: z.string() }).parse(time);
-    return zone === undefined
-      ? time
-      : { dateTime: inZone(dateTime, zone), timeZone: zone };
-  };
-  return Response.json({
-    ...found,
-    start: at(found.start),
-    end: at(found.end),
-  });
+  const found = calendar.events[id];
+  return found === undefined
+    ? Response.json({ error: { code: "ErrorItemNotFound" } }, { status: 404 })
+    : Response.json(found);
 };
 
 const internet = fakeInternet(async (request, url) => {
@@ -167,7 +137,7 @@ const internet = fakeInternet(async (request, url) => {
     return feedPage(url, request.headers.get("prefer") ?? "");
   }
   if (url.hostname === graphHost && url.pathname.startsWith(`${eventsPath}/`)) {
-    return eventAnswer(url, request.headers.get("prefer") ?? "");
+    return eventAnswer(url);
   }
   return Response.json({ error: { code: "NotFound" } }, { status: 404 });
 });
@@ -217,6 +187,20 @@ const event = (id: string, fields: Record<string, unknown> = {}): Event => ({
   attendees: [{ emailAddress: { address: "me@acme.test" } }],
   ...fields,
 });
+
+/** An item's text, if it has any. */
+const textOf = (item: SyncItem | undefined): string =>
+  item?.gone === false && item.content?.type === "text"
+    ? item.content.text
+    : "";
+
+/** An item's time and repeat lines. */
+const linesOf = (items: readonly SyncItem[], id: string): string[] =>
+  textOf(items.find((each) => each.id === id))
+    .split("\n")
+    .filter((line) =>
+      /^(?:Start|End|Time zone|End time zone|Repeats): /u.test(line)
+    );
 
 /** Reads every page until there is no more, and what they held. */
 const readAll = async (
@@ -410,19 +394,16 @@ describe("syncing a person's own calendar", () => {
     });
   });
 
-  it("keeps a weekly event's time in its own zone across a daylight saving change, and says how it repeats", async () => {
+  it("keeps each occurrence's own time across a daylight saving change, names its zone, and says how it repeats", async () => {
     const connectionId = await connected();
     // 09:00 in Amsterdam, every Monday: 07:00 UTC in summer time, 08:00 UTC
     // after the clocks go back on 25 October 2026.
-    const amsterdam = {
-      originalStartTimeZone: "W. Europe Standard Time",
-      originalEndTimeZone: "W. Europe Standard Time",
-      seriesMasterId: "standup",
-    };
     const occurrence = (id: string, from: string, to: string) =>
       event(id, {
-        ...amsterdam,
         subject: "Stand-up",
+        originalStartTimeZone: "W. Europe Standard Time",
+        originalEndTimeZone: "W. Europe Standard Time",
+        seriesMasterId: "standup",
         start: { dateTime: from, timeZone: "UTC" },
         end: { dateTime: to, timeZone: "UTC" },
       });
@@ -436,9 +417,12 @@ describe("syncing a person's own calendar", () => {
       "2026-10-26T08:00:00.0000000",
       "2026-10-26T08:15:00.0000000"
     );
+    // A flight that lands in another zone than it leaves from.
+    const flight = event("flight", {
+      originalStartTimeZone: "W. Europe Standard Time",
+      originalEndTimeZone: "GMT Standard Time",
+    });
     calendar.events = {
-      [before.id]: before,
-      [after.id]: after,
       standup: event("standup", {
         recurrence: {
           pattern: { type: "weekly", interval: 1, daysOfWeek: ["monday"] },
@@ -450,34 +434,117 @@ describe("syncing a person's own calendar", () => {
         },
       }),
     };
-    calendar.feed[start] = { events: [before, after], end: "t1" };
+    calendar.feed[start] = { events: [before, after, flight], end: "t1" };
     const { items } = await readAll(connectionId, null);
-    const lines = (id: string) => {
-      const item = items.find((each) => each.id === id);
-      const text =
-        item?.gone === false && item.content?.type === "text"
-          ? item.content.text
-          : "";
-      return text
-        .split("\n")
-        .filter((line) => /^(?:Start|End|Repeats): /u.test(line));
-    };
     const repeats =
       "Repeats: weekly, every 1 week on monday; from 2026-10-05, no end (W. Europe Standard Time)";
     expect({
-      before: lines("standup-1019"),
-      after: lines("standup-1026"),
+      before: linesOf(items, "standup-1019"),
+      after: linesOf(items, "standup-1026"),
+      flight: linesOf(items, "flight"),
     }).toStrictEqual({
       before: [
-        "Start: 2026-10-19T09:00:00.0000000 W. Europe Standard Time",
-        "End: 2026-10-19T09:15:00.0000000 W. Europe Standard Time",
+        "Start: 2026-10-19T07:00:00.0000000 UTC",
+        "End: 2026-10-19T07:15:00.0000000 UTC",
+        "Time zone: W. Europe Standard Time",
         repeats,
       ],
       after: [
-        "Start: 2026-10-26T09:00:00.0000000 W. Europe Standard Time",
-        "End: 2026-10-26T09:15:00.0000000 W. Europe Standard Time",
+        "Start: 2026-10-26T08:00:00.0000000 UTC",
+        "End: 2026-10-26T08:15:00.0000000 UTC",
+        "Time zone: W. Europe Standard Time",
         repeats,
       ],
+      flight: [
+        "Start: 2026-11-20T10:00:00.0000000 UTC",
+        "End: 2026-11-20T11:00:00.0000000 UTC",
+        "Time zone: W. Europe Standard Time",
+        "End time zone: GMT Standard Time",
+      ],
+    });
+  });
+
+  it("reads each series' repeats within a page's requests, leaving the rest to the next page", async () => {
+    const connectionId = await connected();
+    // Sixty occurrences, each of its own series: a read for each.
+    const many = Array.from({ length: 60 }, (_, index) =>
+      event(`e${index}`, { seriesMasterId: `series-${index}` })
+    );
+    calendar.events = Object.fromEntries(
+      many.map((_, index) => [
+        `series-${index}`,
+        event(`series-${index}`, {
+          recurrence: {
+            pattern: { type: "daily", interval: 1 },
+            range: { type: "noEnd", startDate: "2026-11-01" },
+          },
+        }),
+      ])
+    );
+    calendar.feed[start] = { events: many, end: "t1" };
+    const sent: number[] = [];
+    const items: SyncItem[] = [];
+    let cursor: string | null = null;
+    let page: SyncPage;
+    let reads = 0;
+    do {
+      const before = internet.sent.length;
+      // oxlint-disable-next-line no-await-in-loop -- pages come one after another
+      page = await read(connectionId, cursor);
+      sent.push(internet.sent.length - before);
+      items.push(...page.items);
+      ({ cursor } = page);
+      reads += 1;
+    } while (page.more && reads < 10);
+    expect({
+      // The person's own `/me` read, answered by the sign-in fake, is the
+      // fiftieth a connector's isolate may send.
+      withinRequests: sent.every((count) => count <= 49),
+      reads: reads > 1,
+      all: items.map(({ id }) => id),
+      repeats: items.every((item) =>
+        textOf(item).includes(
+          "Repeats: daily, every 1 day; from 2026-11-01, no end"
+        )
+      ),
+    }).toStrictEqual({
+      withinRequests: true,
+      reads: true,
+      all: many.map(({ id }) => id),
+      repeats: true,
+    });
+  });
+
+  it("says no repeats for a series whose master is gone, or whose read fails, and keeps the page", async () => {
+    const connectionId = await connected();
+    const daily = event("daily", {
+      recurrence: {
+        pattern: { type: "daily", interval: 1 },
+        range: { type: "noEnd", startDate: "2026-11-01" },
+      },
+    });
+    calendar.events = { daily };
+    // Its master deleted between the listing and its read.
+    const orphan = event("orphan", { seriesMasterId: "deleted-master" });
+    // Graph fails the first read of `daily`: that occurrence goes without
+    // its repeats, and the next one of the series reads them again.
+    calendar.failOnce = new Set(["daily"]);
+    const first = event("daily-1", { seriesMasterId: "daily" });
+    const second = event("daily-2", { seriesMasterId: "daily" });
+    calendar.feed[start] = { events: [orphan, first, second], end: "t1" };
+    const { items } = await readAll(connectionId, null);
+    const repeats = (id: string) =>
+      linesOf(items, id).filter((line) => line.startsWith("Repeats: "));
+    expect({
+      orphan: repeats("orphan"),
+      first: repeats("daily-1"),
+      second: repeats("daily-2"),
+      kept: items.map(({ id }) => id),
+    }).toStrictEqual({
+      orphan: [],
+      first: [],
+      second: ["Repeats: daily, every 1 day; from 2026-11-01, no end"],
+      kept: ["orphan", "daily-1", "daily-2"],
     });
   });
 
