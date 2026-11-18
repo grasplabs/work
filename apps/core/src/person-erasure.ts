@@ -194,8 +194,9 @@ const erasedEmail = (userId: string): string =>
  * pending, until the clock's next try hashes and deletes it too.
  * In the same batch, the tokens the Brain knows their accounts by on
  * copied reader lists (source-readers.ts `forgetTokens`, GRA-1761): those
- * they claimed reading as themselves, and those nobody claimed of what
- * these accounts and their address name them by. Every list naming them
+ * they claimed, and those nobody claimed of what these accounts, their
+ * connections' accounts (as connect keeps them until this is done) and
+ * their address name them by. Every list naming them
  * names a token nobody holds from then on.
  */
 const identity: ErasureStep = {
@@ -219,10 +220,21 @@ const identity: ErasureStep = {
         .where(eq(accounts.userId, userId)),
       db.select({ email: users.email }).from(users).where(eq(users.id, userId)),
     ]);
+    // Their connections' accounts too, disconnected or not, as connect
+    // still has them: its own erasure waits for this one (`connect`).
+    const connected = await env.CONNECT.personalAccounts(userId);
     const keptKeys = await keptAccountKeysOf(env, {
-      objectIds: held.flatMap(({ oid }) => (oid === null ? [] : [oid])),
+      objectIds: [
+        ...held.flatMap(({ oid }) => (oid === null ? [] : [oid])),
+        ...connected.flatMap(({ provider, accountId }) =>
+          provider === "microsoft" ? [accountId] : []
+        ),
+      ],
       addresses: [
         ...held.flatMap(({ verifiedEmail }) =>
+          verifiedEmail === null ? [] : [verifiedEmail]
+        ),
+        ...connected.flatMap(({ verifiedEmail }) =>
           verifiedEmail === null ? [] : [verifiedEmail]
         ),
         ...(user === undefined ? [] : [user.email]),
@@ -586,6 +598,9 @@ const channels: ErasureStep = {
  */
 const connect: ErasureStep = {
   area: "connect",
+  // Their connections' accounts are what `identity` forgets the reader
+  // tokens of (source-readers.ts, GRA-1761): kept until it has.
+  after: "identity",
   erase: async (env, userId) => {
     await env.CONNECT.erasePersonal({ ownerUserId: userId });
     await completed(drizzle(env.DB), userId, "connect");

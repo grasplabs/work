@@ -470,6 +470,8 @@ const storeConnection = async (
       accountName: account.name,
       accountEmail: account.email?.toLowerCase() ?? null,
       verifiedEmail: confirmedAddressOf(provider, account),
+      verifiedEmailAt:
+        confirmedAddressOf(provider, account) === null ? null : new Date(),
       accountAddresses: addresses?.receives ?? null,
       accountSenders: addresses?.sends ?? null,
       connectedBy: person.userId,
@@ -554,6 +556,8 @@ const reconnect = async (
           accountName: account.name,
           accountEmail: account.email?.toLowerCase() ?? null,
           verifiedEmail: confirmedAddressOf(provider, account),
+          verifiedEmailAt:
+            confirmedAddressOf(provider, account) === null ? null : new Date(),
           // A lookup that failed keeps what was read before.
           ...(addresses === undefined
             ? {}
@@ -911,6 +915,8 @@ const replaceKey = async (
           accountName: account.name,
           accountEmail: account.email?.toLowerCase() ?? null,
           verifiedEmail: confirmedAddressOf(provider, account),
+          verifiedEmailAt:
+            confirmedAddressOf(provider, account) === null ? null : new Date(),
           updatedAt: now,
         })
         .where(stillActive),

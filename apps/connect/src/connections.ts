@@ -12,7 +12,7 @@ import type {
   ToolReach,
 } from "@grasp-os/shared/connect";
 import { sourceReaderProviders } from "@grasp-os/shared/source-readers";
-import { and, eq, inArray, isNotNull, ne } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -320,13 +320,14 @@ const accountsOwnerSchema = z.string().min(1);
 
 /**
  * The suite accounts the person `request` names connected as their own
- * and hasn't disconnected (`ConnectApi.personalAccounts`): connections
- * connect made itself (`native`), pinned to the company's tenant, whose
- * account it took from the provider's verified ID token at connecting
- * (oauth.ts). One a token renewal lost (`needs_reauth`) is still theirs.
- * Its address only as the provider confirmed it, when connected and at
- * its last renewal (`verifiedEmail`, providers.ts `confirmAddress`):
- * Google's; Entra's address is not verified, so none for Microsoft.
+ * (`ConnectApi.personalAccounts`), disconnected ones too, each saying
+ * whether it still is: connections connect made itself (`native`), pinned
+ * to the company's tenant, whose account it took from the provider's
+ * verified ID token at connecting (oauth.ts). One a token renewal lost
+ * (`needs_reauth`) is still connected. Its address only as the provider
+ * last confirmed it, and when (`verifiedEmail`, providers.ts
+ * `confirmAddress`): Google's; Entra's address is not verified, so none
+ * for Microsoft.
  */
 export const personalAccounts = async (
   db: D1Database,
@@ -343,6 +344,8 @@ export const personalAccounts = async (
       tenant: connections.tenant,
       accountId: connections.accountId,
       verifiedEmail: connections.verifiedEmail,
+      verifiedEmailAt: connections.verifiedEmailAt,
+      status: connections.status,
     })
     .from(connections)
     .where(
@@ -350,22 +353,31 @@ export const personalAccounts = async (
         eq(connections.ownerUserId, userId),
         eq(connections.scope, "personal"),
         eq(connections.serverKind, "native"),
-        ne(connections.status, "disconnected"),
         inArray(connections.provider, [...sourceReaderProviders]),
         isNotNull(connections.tenant),
         isNotNull(connections.accountId)
       )
     );
-  return rows.flatMap(({ provider, tenant, accountId, verifiedEmail }) =>
-    tenant === null || accountId === null
-      ? []
-      : [
-          {
-            provider,
-            tenant,
-            accountId,
-            verifiedEmail,
-          },
-        ]
+  return rows.flatMap(
+    ({
+      provider,
+      tenant,
+      accountId,
+      verifiedEmail,
+      verifiedEmailAt,
+      status,
+    }) =>
+      tenant === null || accountId === null
+        ? []
+        : [
+            {
+              provider,
+              tenant,
+              accountId,
+              verifiedEmail,
+              verifiedEmailAt: verifiedEmailAt?.getTime() ?? null,
+              connected: status !== "disconnected",
+            },
+          ]
   );
 };

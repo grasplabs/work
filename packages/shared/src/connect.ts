@@ -516,15 +516,18 @@ export const canSignInAgain = (
 /**
  * An account at a suite a person connected as their own: the provider,
  * the company's tenant there, the account's stable subject (an Entra
- * object ID in the tenant, a Google `sub` under its hosted domain) and
- * its address where the provider's ID token marked it verified (Google's;
- * null otherwise), as connect took them when it was connected.
+ * object ID in the tenant, a Google `sub` under its hosted domain), its
+ * address as the provider last confirmed it (Google's; null otherwise)
+ * and when (milliseconds since the epoch), and whether it is still
+ * connected (a disconnected one is listed for its person's erasure).
  */
 export interface PersonalAccount {
   provider: string;
   tenant: string;
   accountId: string;
   verifiedEmail: string | null;
+  verifiedEmailAt: number | null;
+  connected: boolean;
 }
 
 /** Most connections one `connectionOwners` call takes. */
@@ -1999,10 +2002,11 @@ export interface ConnectApi
     connectionIds: readonly string[]
   ) => Promise<ConnectionOwner[]>;
   /**
-   * The suite accounts the person `userId` connected as their own and
-   * hasn't disconnected, as connect verified them (`PersonalAccount`):
+   * The suite accounts the person `userId` connected as their own,
+   * disconnected ones too, as connect verified them (`PersonalAccount`):
    * what core counts them as a reader of where it copies who may read an
-   * item (GRA-1761).
+   * item, while connected and recently confirmed, and what their erasure
+   * forgets (GRA-1761).
    */
   personalAccounts: (userId: string) => Promise<PersonalAccount[]>;
   /**

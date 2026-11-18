@@ -7,6 +7,14 @@ import { z } from "zod";
 // ID tokens vouch for, which core matches only against accounts a person
 // proved are theirs, by signing in with them or connecting them.
 
+/**
+ * How old a copied reader list, or the proof that an account is
+ * someone's, may be: a day. The sync reads every list again within it
+ * (GRA-1719), and a connection's address counts only while its provider
+ * confirmed it within it (core's source-readers.ts).
+ */
+export const readerProofMaxAgeMs = 24 * 60 * 60 * 1000;
+
 /** The systems whose sharing is copied: connect's provider IDs for them. */
 export const sourceReaderProviders = ["google", "microsoft"] as const;
 

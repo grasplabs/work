@@ -382,9 +382,8 @@ const addressAt = async (
  * and the stored ones stand.
  *
  * With the address the provider confirmed now (`address`), in the same
- * transaction: the connection's confirmed address, and, when it changed,
- * one `connection.account_changed` event, which core drains to claim the
- * reader tokens of the address now confirmed (core's source-readers.ts).
+ * transaction: the connection's confirmed address and when it was
+ * confirmed, and, when it changed, one `connection.account_changed` event.
  * An address the renewal didn't confirm counts as none, so an address
  * given to someone else since never stays the old account's.
  */
@@ -412,43 +411,54 @@ const storeRefreshed = async (
     })
     .where(and(unchanged(row), notDisconnected(row)));
   let stored = false;
-  if (address === undefined || address.now === address.before) {
+  if (address === undefined) {
     const done = await tokensUpdate.returning({
       connectionId: connectionTokens.connectionId,
     });
     stored = done.length > 0;
   } else {
-    // The address first, while the tokens' row is still the one read.
-    stored = await recordEventIf(
-      env,
-      {
-        actor: { type: "system" },
-        action: "connection.account_changed",
-        target: { type: "connection", id: row.connectionId },
-        detail: { provider: provider.id, confirmed: address.now !== null },
-      },
-      {
-        from: connectionTokens,
-        where: sql`${unchanged(row)} AND ${notDisconnected(row)}`,
-      },
-      [
-        db
-          .update(connections)
-          .set({ verifiedEmail: address.now, updatedAt: new Date() })
-          .where(
-            and(
-              eq(connections.id, row.connectionId),
-              exists(
-                db
-                  .select()
-                  .from(connectionTokens)
-                  .where(and(unchanged(row), notDisconnected(row)))
-              )
-            )
-          ),
-        tokensUpdate,
-      ]
-    );
+    // The address first, while the tokens' row is still the one read: as
+    // confirmed now, and when, so it counts only while recent.
+    const addressUpdate = db
+      .update(connections)
+      .set({
+        verifiedEmail: address.now,
+        verifiedEmailAt: address.now === null ? null : new Date(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(connections.id, row.connectionId),
+          exists(
+            db
+              .select()
+              .from(connectionTokens)
+              .where(and(unchanged(row), notDisconnected(row)))
+          )
+        )
+      );
+    if (address.now === address.before) {
+      const [, done] = await db.batch([
+        addressUpdate,
+        tokensUpdate.returning({ connectionId: connectionTokens.connectionId }),
+      ]);
+      stored = done.length > 0;
+    } else {
+      stored = await recordEventIf(
+        env,
+        {
+          actor: { type: "system" },
+          action: "connection.account_changed",
+          target: { type: "connection", id: row.connectionId },
+          detail: { provider: provider.id, confirmed: address.now !== null },
+        },
+        {
+          from: connectionTokens,
+          where: sql`${unchanged(row)} AND ${notDisconnected(row)}`,
+        },
+        [addressUpdate, tokensUpdate]
+      );
+    }
   }
   if (stored) {
     return next.accessToken;

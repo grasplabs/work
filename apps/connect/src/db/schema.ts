@@ -73,6 +73,13 @@ export const connections = sqliteTable(
      */
     verifiedEmail: text("verified_email"),
     /**
+     * When the provider last confirmed `verified_email`: when connected,
+     * or at the last renewal that confirmed it. Core counts the address
+     * only while this is recent (`readerProofMaxAgeMs`), so an address an
+     * idle connection or one needing reconnecting holds stops counting.
+     */
+    verifiedEmailAt: timestamp("verified_email_at"),
+    /**
      * The other addresses the account's mailbox receives mail at (its
      * primary address and SMTP aliases), as its provider said when it was
      * connected (account-addresses.ts); null when never read.
