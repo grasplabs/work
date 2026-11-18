@@ -529,6 +529,7 @@ export const usePartWords = (): GraspWordsCatalog => {
     },
     button: {
       working: t`Working`,
+      actionFailed: t`Could not finish`,
       // The button's own words as they stand: a language may not start
       // them lower case (German nouns).
       holdTo: (words) => t`Hold to confirm: ${words}`,
@@ -913,7 +914,7 @@ export const usePartWords = (): GraspWordsCatalog => {
       empty: t`Press Enter to add it.`,
       invalid: t({ message: "not valid", context: "a tag typed" }),
     },
-    dialog: { close: t`Close`, actionFailed: t`Could not finish` },
+    dialog: { close: t`Close` },
     dropdownMenu: {
       working: t({ message: "Working", context: "a menu item's action" }),
       more: t`More actions`,

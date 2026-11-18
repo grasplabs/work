@@ -13,7 +13,10 @@ import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
-import { ApprovalRequest } from "../grasp/approval-request/index.ts";
+import {
+  ApprovalRequest,
+  ApprovalRequestApprove,
+} from "../grasp/approval-request/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { CodeBlock } from "../grasp/code-block/index.ts";
@@ -455,7 +458,6 @@ export const HeldWrite = ({
             ? t`Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm.`
             : undefined
         }
-        approveLabel={t`Confirm`}
         onApprove={async () => {
           await decide(confirmHeld(action));
         }}
@@ -465,6 +467,7 @@ export const HeldWrite = ({
         title={what}
         words={{ decline: t`Reject` }}
       >
+        <ApprovalRequestApprove>{t`Confirm`}</ApprovalRequestApprove>
         <HeldWriteDetails action={action} saysUnseen={false} shown={shown} />
       </ApprovalRequest>
       {/* Core's own words for a refusal, under the card's "Could not approve". */}

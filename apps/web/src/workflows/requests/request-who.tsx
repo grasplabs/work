@@ -275,7 +275,7 @@ export const RequestPeople = ({
         ) : null}
       </div>
       {rows.length === 0 ? (
-        <Empty size="inline">
+        <Empty size="sm">
           <EmptyHeader>
             <EmptyDescription>{t`Nobody by that name`}</EmptyDescription>
           </EmptyHeader>

@@ -244,8 +244,7 @@ const PlacePanel = ({
             <Switch
               checked={on}
               disabled={!can}
-              label={t`On in ${name}`}
-              labelHidden
+              aria-label={t`On in ${name}`}
               onCheckedChange={(next) => {
                 void change(async (session) => {
                   await session.connections.setStephenPlace(
@@ -284,8 +283,7 @@ const PlacePanel = ({
             <Switch
               checked={place.acts}
               disabled={!can}
-              label={t`Does things for people in ${name}`}
-              labelHidden
+              aria-label={t`Does things for people in ${name}`}
               onCheckedChange={(acts) => {
                 void change(async (session) => {
                   await session.connections.setStephenPlace(
@@ -556,7 +554,7 @@ export const StephenSettings = ({
           title={t`Workflows`}
         >
           {workflows.length === 0 ? (
-            <Empty size="section">
+            <Empty size="md">
               <EmptyHeader>
                 <EmptyDescription>
                   <Trans>No workflow is open to asking yet.</Trans>

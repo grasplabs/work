@@ -23,7 +23,7 @@ import {
   AlertDialogTitle,
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
-import { Avatar } from "../grasp/avatar/index.ts";
+import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Folder, Icon, People } from "../grasp/icons/index.ts";
 import {
   Item,
@@ -105,7 +105,11 @@ const roles: readonly AppRole[] = ["user", "builder"];
 /** Whom a member is: a person's face, or a team's or project's mark. */
 const Mark = ({ type, name }: { type: AppMemberRef["type"]; name: string }) => {
   if (type === "person") {
-    return <Avatar decorative name={name} size="xs" />;
+    return (
+      <Avatar decorative name={name} size="xs">
+        <AvatarFallback />
+      </Avatar>
+    );
   }
   return <Icon icon={type === "team" ? People : Folder} />;
 };
@@ -282,12 +286,10 @@ const ShareWith = ({
       {offered !== undefined && offered.state !== "ready" ? (
         <Alert
           title={t`Who to share with couldn't be read. Try again in a moment.`}
-          variant="danger"
+          tone="danger"
         />
       ) : null}
-      {failure === undefined ? null : (
-        <Alert title={failure} variant="danger" />
-      )}
+      {failure === undefined ? null : <Alert title={failure} tone="danger" />}
       <AlertDialog
         onOpenChange={(open) => {
           if (!open) {

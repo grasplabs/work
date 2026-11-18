@@ -15,6 +15,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useId, useState } from "react";
 
 import { visuallyHidden } from "../hidden/hidden";
+import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 import type { ChartLayoutStyle } from "./chart";
 import { ChartPatterns, DitherBands, textureOf } from "./chart-patterns";
@@ -107,16 +108,13 @@ const styles = stylex.create({
     animationTimingFunction: grasp.ease,
     animationFillMode: "both",
   },
-  flows: {
-    transitionProperty: "opacity",
-    transitionDuration: { default: grasp.durationHover, [media.reduced]: "0s" },
-  },
+  flows: { transitionProperty: "opacity", transitionDuration: simply.hover },
   flow: {
     outline: "none",
     stroke: { default: "transparent", ":focus-visible": grasp.ring },
     strokeWidth: 2,
     transitionProperty: "opacity",
-    transitionDuration: { default: grasp.durationHover, [media.reduced]: "0s" },
+    transitionDuration: simply.hover,
   },
   back: { opacity: 0.32 },
   rest: { stopColor: grasp.chartRibbon },

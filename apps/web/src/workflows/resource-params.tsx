@@ -8,7 +8,7 @@ import { useState } from "react";
 
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import { Empty, EmptyHeader, EmptyDescription } from "../grasp/empty/index.ts";
 import { Input } from "../grasp/input/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
@@ -191,8 +191,7 @@ const ParamInput = ({
       <Switch
         checked={checked}
         disabled={!editable}
-        label={param.label}
-        labelHidden
+        aria-label={param.label}
         onCheckedChange={(next) => {
           onChecked(next);
         }}
@@ -416,7 +415,11 @@ export const ResourceParams = ({
           })}
     >
       {params.params.length === 0 ? (
-        <Empty size="inline">{t`Its current version has no parameters.`}</Empty>
+        <Empty size="sm">
+          <EmptyHeader>
+            <EmptyDescription>{t`Its current version has no parameters.`}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
         <SettingsRows>
           {params.params.map((param) => (

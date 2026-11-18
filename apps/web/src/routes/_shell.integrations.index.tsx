@@ -33,7 +33,7 @@ import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import { Empty, EmptyHeader, EmptyDescription } from "../grasp/empty/index.ts";
 import { visuallyHidden } from "../grasp/hidden/hidden.ts";
 import { Plus, Search as SearchIcon } from "../grasp/icons/index.ts";
 import {
@@ -313,10 +313,7 @@ const Notices = ({
   return (
     <>
       {connectionError === undefined ? null : (
-        <Alert
-          title={connectionErrorMessage(connectionError)}
-          variant="danger"
-        />
+        <Alert title={connectionErrorMessage(connectionError)} tone="danger" />
       )}
       {identity.staff ? (
         <Alert
@@ -326,7 +323,7 @@ const Notices = ({
       {unlisted ? (
         <Alert
           title={t`Composio's toolkits can't be listed right now. Try again shortly.`}
-          variant="attention"
+          tone="attention"
         />
       ) : null}
       <RevocationsByHand
@@ -449,7 +446,11 @@ const Integrations = () => {
               />
             )}
             {loaded && shown === 0 ? (
-              <Empty size="section">{t`No integrations match your search.`}</Empty>
+              <Empty size="md">
+                <EmptyHeader>
+                  <EmptyDescription>{t`No integrations match your search.`}</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             ) : null}
             <HttpConnections
               connections={listed}

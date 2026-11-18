@@ -12,7 +12,7 @@ import type { ReactNode } from "react";
 
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import { Empty, EmptyHeader, EmptyDescription } from "../grasp/empty/index.ts";
 import { Edit } from "../grasp/icons/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 
@@ -374,7 +374,11 @@ export const WorkflowDiagramView = ({
   return (
     <section aria-label={label} {...stylex.props(styles.view)}>
       {diagram.tasks.length === 0 ? (
-        <Empty size="inline">{t`It declares no tasks.`}</Empty>
+        <Empty size="sm">
+          <EmptyHeader>
+            <EmptyDescription>{t`It declares no tasks.`}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : null}
       {diagram.tasks.length > 0 && canvas !== undefined ? (
         <CanvasDrawing canvas={canvas} diagram={diagram} marks={marks} />

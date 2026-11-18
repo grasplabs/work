@@ -66,9 +66,6 @@ export interface SectionHeaderProps {
   layout?: SectionHeaderLayoutStyle;
 }
 
-/** A Section card narrower than this puts the actions on their own line (its head is the container). */
-const NARROW_CARD = "@container section-card-head (width < 30rem)";
-
 const styles = stylex.create({
   header: {
     display: "flex",
@@ -141,12 +138,10 @@ const styles = stylex.create({
     minWidth: 0,
     maxWidth: "100%",
     // On the title's line they may give back room above themselves (a grouped Section card's, so an
-    // xs button's foot meets the line's and its card stands 8px under both); on a line of their own,
-    // none. Never below: what is there stays whole.
-    marginBlockStart: {
-      default: sectionHeaderVars.actionsTrim,
-      [NARROW_CARD]: 0,
-    },
+    // xs button's foot meets the line's and its card stands 8px under both), at every width now that
+    // they stay on that line while they fit. Wrapped under the title, the row's gap less the trim
+    // still parts them. Never below: what is there stays whole.
+    marginBlockStart: sectionHeaderVars.actionsTrim,
     // Above a Section card's drag handle, which lies over the header: they stay pressable.
     position: "relative",
     zIndex: 1,

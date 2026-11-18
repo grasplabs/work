@@ -955,7 +955,7 @@ export const EventSourcesSettings = ({
       <AddSource onChanged={changed} onOpenChange={setAdding} open={adding} />
       {page.state === "ready" ? null : <SectionNotLoaded page={page} />}
       {page.state === "ready" && sources.length === 0 ? (
-        <Empty size="section">
+        <Empty size="md">
           <EmptyHeader>
             <EmptyDescription>
               {t`Add a source for each system that sends Grasp events.`}

@@ -2,10 +2,18 @@
 
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import {
+  isValidElement,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import type {
   ComponentProps,
   KeyboardEvent,
+  ReactElement,
   ReactNode,
   RefObject,
 } from "react";
@@ -149,11 +157,15 @@ export interface ApprovalRequestProps {
   summary?: string;
   /** What the action touches: the files, people, money or systems, listed under Details. */
   affects?: readonly ApprovalEffect[];
-  /** More to look at before answering, under Details: the command, a diff, a draft. */
+  /**
+   * An ApprovalRequestApprove, when Approve's words can say what it does; and more to look at
+   * before answering, under Details: the command, a diff, a draft.
+   */
   children?: ReactNode;
   /**
    * The words on Approve, when they can say what it does ("Pay £1,240", "Run the migration").
    * @default "Approve"
+   * @deprecated Use `ApprovalRequestApprove`.
    */
   approveLabel?: string;
   /**
@@ -1451,6 +1463,49 @@ const useDecision = ({
 };
 
 /** The card an agent shows when it needs a person's yes; once answered, one line stands where the answers were. */
+/** Every prop an ApprovalRequestApprove takes. */
+export interface ApprovalRequestApproveProps {
+  /** The words on Approve, when they can say what it does ("Pay £1,240", "Run the migration"). Without the part, "Approve". */
+  children: string;
+}
+
+/**
+ * Approve's words, inside an ApprovalRequest. It describes; the card draws Approve with them (its
+ * work, its check when grave, its failure), so it draws nothing of its own.
+ */
+export const ApprovalRequestApprove = (_props: ApprovalRequestApproveProps) =>
+  null;
+
+const isApprove = (
+  child: ReactNode
+): child is ReactElement<ApprovalRequestApproveProps> =>
+  isValidElement(child) && child.type === ApprovalRequestApprove;
+
+// Whether a child draws anything: React draws nothing for these.
+const drawn = (child: ReactNode) =>
+  child !== null && child !== undefined && typeof child !== "boolean";
+
+// The card's children, with its ApprovalRequestApprove taken out: its words, and the rest, which
+// stand under Details as before. Without the part, the children are passed on as they came.
+const partsOf = (
+  children: ReactNode
+): { approve: string | undefined; details: ReactNode } => {
+  const all: ReactNode[] = [children].flat();
+  const part = all.find(isApprove);
+  if (part === undefined) {
+    return { approve: undefined, details: children };
+  }
+  // The part leaves a hole where it stood, so the other children keep their places.
+  const rest: ReactNode[] = [];
+  for (const child of all) {
+    rest.push(isApprove(child) ? null : child);
+  }
+  return {
+    approve: part.props.children,
+    details: rest.some(drawn) ? rest : undefined,
+  };
+};
+
 export const ApprovalRequest = (props: ApprovalRequestProps) => {
   const {
     title,
@@ -1462,10 +1517,12 @@ export const ApprovalRequest = (props: ApprovalRequestProps) => {
     style: styleProp,
     layout,
   } = props;
-  // Its words: the product's, by its catalogue, else English; the caller's words and text props win.
+  const { approve, details } = partsOf(props.children);
+  // Its words: the product's, by its catalogue, else English; the caller's words and text props win,
+  // the part over the older prop.
   const words = withGiven(useWords("approvalRequest", approvalRequestWords), {
     ...givenWords,
-    approve: props.approveLabel,
+    approve: approve ?? props.approveLabel,
     changesPlaceholder: props.changesPlaceholder,
     viewer: props.viewer,
   });
@@ -1521,6 +1578,8 @@ export const ApprovalRequest = (props: ApprovalRequestProps) => {
           {...props}
           words={words}
           approveLabel={words.approve}
+          // oxlint-disable-next-line react/no-children-prop -- the card's children with its part taken out, for Details
+          children={details}
           changesPlaceholder={words.changesPlaceholder}
           titleId={titleId}
           bare={variant === "bare"}

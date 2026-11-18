@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { Button } from "../grasp/button/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import { Empty, EmptyHeader, EmptyDescription } from "../grasp/empty/index.ts";
 import { Field, FieldLabel } from "../grasp/field/index.ts";
 import {
   Code,
@@ -583,8 +583,10 @@ export const WorkflowFlow = ({
           {checkpoint === null ? (
             // Nothing passed yet, as a new workflow starts: its builders
             // tell Grasp how the work runs, in its chat beside the Flow.
-            <Empty layout={styles.empty} size="inline">
-              {t`Nothing is drawn yet. Tell Grasp in the chat how this work runs and its steps come here.`}
+            <Empty layout={styles.empty} size="sm">
+              <EmptyHeader>
+                <EmptyDescription>{t`Nothing is drawn yet. Tell Grasp in the chat how this work runs and its steps come here.`}</EmptyDescription>
+              </EmptyHeader>
             </Empty>
           ) : (
             // In the middle of the ground while it fits; from its start

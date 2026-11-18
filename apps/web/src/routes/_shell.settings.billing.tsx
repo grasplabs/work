@@ -92,8 +92,7 @@ const BillingPage = () => {
           <SettingRow label={t`Email invoices`}>
             <Switch
               checked={billing.emailInvoices}
-              label={t`Email invoices`}
-              labelHidden
+              aria-label={t`Email invoices`}
               onCheckedChange={(emailInvoices) => {
                 save({ emailInvoices });
               }}
@@ -103,8 +102,7 @@ const BillingPage = () => {
           <SettingRow label={t`Email payment receipts`}>
             <Switch
               checked={billing.emailReceipts}
-              label={t`Email payment receipts`}
-              labelHidden
+              aria-label={t`Email payment receipts`}
               onCheckedChange={(emailReceipts) => {
                 save({ emailReceipts });
               }}

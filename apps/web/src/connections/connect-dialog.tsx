@@ -475,9 +475,7 @@ const NativeFlow = ({
       >
         {t`Sign in to ${app}`}
       </Actions>
-      {failure === undefined ? null : (
-        <Alert title={failure} variant="danger" />
-      )}
+      {failure === undefined ? null : <Alert title={failure} tone="danger" />}
     </>
   );
   if (again !== undefined || !isAdmin(identity.role)) {
@@ -583,7 +581,7 @@ const ComposioFlow = ({
         </Text>
         {listed === undefined ? <LoadingLines /> : null}
         {listed === undefined || listed.state === "ready" ? null : (
-          <Alert title={notLoadedText(listed, i18n) ?? ""} variant="danger" />
+          <Alert title={notLoadedText(listed, i18n) ?? ""} tone="danger" />
         )}
         {tools === undefined ? null : (
           <div {...stylex.props(styles.tools, arrive.in)}>
@@ -625,9 +623,7 @@ const ComposioFlow = ({
         >
           {t`Consent and connect`}
         </Actions>
-        {failure === undefined ? null : (
-          <Alert title={failure} variant="danger" />
-        )}
+        {failure === undefined ? null : <Alert title={failure} tone="danger" />}
       </Step>
     </div>
   );

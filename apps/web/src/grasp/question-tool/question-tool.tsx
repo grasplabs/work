@@ -25,7 +25,7 @@ import {
   Radio as RadioPrimitive,
   RadioGroup as RadioGroupPrimitive,
 } from "@ui-sdk/react/radio";
-import { useEffect, useId, useRef, useState } from "react";
+import { isValidElement, useEffect, useId, useRef, useState } from "react";
 import type {
   KeyboardEvent,
   ReactElement,
@@ -124,8 +124,11 @@ export interface QuestionToolProps {
   /**
    * The submit button's words.
    * @default "Send answer"
+   * @deprecated Use `QuestionToolSubmit`.
    */
   submitLabel?: string;
+  /** A QuestionToolSubmit, when Send's words should say more than "Send answer" ("Next", "Send answers"). */
+  children?: ReactNode;
   /**
    * Send is held: it stays where it is and can still be reached, but does not send, and
    * `submitDisabledReason` says why beside it (the host has no assistant connected, say).
@@ -145,8 +148,8 @@ export interface QuestionToolProps {
    */
   embedded?: boolean;
   /**
-   * One of several questions asked in turn: its place ("2 of 3") shows at the head's end. Set
-   * `submitLabel` to "Next" on all but the last, and drive the steps from `onSubmit`.
+   * One of several questions asked in turn: its place ("2 of 3") shows at the head's end. Give
+   * a QuestionToolSubmit "Next" on all but the last, and drive the steps from `onSubmit`.
    */
   step?: { index: number; count: number };
   /**
@@ -855,7 +858,31 @@ const QuestionFooter = ({
   </div>
 );
 
-// The props with their defaults filled in: the caller's words, else the catalogue's, else English.
+/** Every prop a QuestionToolSubmit takes. */
+export interface QuestionToolSubmitProps {
+  /** Send's words, when they should say more than "Send answer" ("Next" on all but the last step). */
+  children: string;
+}
+
+/**
+ * Send's words, inside a QuestionTool. It describes; the card draws Send with them (held, working,
+ * failed), so it draws nothing of its own.
+ */
+export const QuestionToolSubmit = (_props: QuestionToolSubmitProps) => null;
+
+const isSubmit = (
+  child: ReactNode
+): child is ReactElement<QuestionToolSubmitProps> =>
+  isValidElement(child) && child.type === QuestionToolSubmit;
+
+// The words of the card's QuestionToolSubmit, when it holds one.
+const submitOf = (children: ReactNode): string | undefined => {
+  const all: ReactNode[] = [children].flat();
+  return all.find(isSubmit)?.props.children;
+};
+
+// The props with their defaults filled in: the caller's words, else the catalogue's, else English;
+// Send's part over the older prop.
 const withDefaults = (props: QuestionToolProps, words: QuestionToolWords) => ({
   options: props.options ?? noOptions,
   other: props.other ?? true,
@@ -863,7 +890,7 @@ const withDefaults = (props: QuestionToolProps, words: QuestionToolWords) => ({
   stepLabel: props.stepLabel ?? words.step,
   columns: props.columns ?? 1,
   label: props.label ?? words.name,
-  submitLabel: props.submitLabel ?? words.submit,
+  submitLabel: submitOf(props.children) ?? props.submitLabel ?? words.submit,
   skipLabel: props.skipLabel ?? words.skip,
   backLabel: props.backLabel ?? words.back,
   recommendedLabel: props.recommendedLabel ?? words.recommended,
@@ -1036,10 +1063,13 @@ const QuestionCard = (props: Resolved) => {
       return;
     }
     const controls = controlsIn(root.current);
+    // A text question has no choices: its box takes the focus.
     (
       controls.find(
         (control) => control.getAttribute("aria-checked") === "true"
-      ) ?? controls[0]
+      ) ??
+      controls[0] ??
+      root.current?.querySelector<HTMLElement>("textarea")
     )?.focus({ preventScroll: true });
   }, [embedded, sent]);
 

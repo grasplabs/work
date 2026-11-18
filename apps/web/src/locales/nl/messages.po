@@ -892,10 +892,6 @@ msgstr "{name} (optioneel)"
 msgid "{name} (team)"
 msgstr "{name} (team)"
 
-#: src/agents/agent-page.tsx
-msgid "{name} answers"
-msgstr "{name} antwoordt"
-
 #: src/settings/teams.tsx
 msgid "{name} couldn't be deleted. Try again."
 msgstr "{name} kon niet worden verwijderd. Probeer het opnieuw."
@@ -1125,6 +1121,7 @@ msgstr "{page} van {total}"
 msgid "{people, plural, one {{sector}, # person.} other {{sector}, # people.}}"
 msgstr "{people, plural, one {{sector}, # persoon.} other {{sector}, # mensen.}}"
 
+#: src/agents/agents-overview.tsx
 #: src/brain/brain.ts
 #: src/workflows/requests/request-table.tsx
 msgid "{people, plural, one {# person} other {# people}}"
@@ -1206,6 +1203,10 @@ msgstr "{rating} van 5"
 #: src/agents/agent-page.tsx
 msgid "{requests, plural, one {# request to a model} other {# requests to a model}}"
 msgstr "{requests, plural, one {# verzoek aan een model} other {# verzoeken aan een model}}"
+
+#: src/agents/agents-overview.tsx
+msgid "{requests, plural, one {# request} other {# requests}}"
+msgstr "{requests, plural, one {# verzoek} other {# verzoeken}}"
 
 #: src/frame/part-words.tsx
 msgid "{rest, plural, one {# other} other {# others}}"
@@ -1316,8 +1317,8 @@ msgid "{sources, plural, one {Time-consuming work that could be automated, raise
 msgstr "{sources, plural, one {Tijdrovend werk dat geautomatiseerd kan worden, genoemd in # bron, nog door geen team.} other {Tijdrovend werk dat geautomatiseerd kan worden, genoemd in # bronnen, nog door geen team.}}"
 
 #: src/agents/agents-overview.tsx
-msgid "{spent} this month"
-msgstr "{spent} deze maand"
+msgid "{spent} · {count} · {reach}"
+msgstr "{spent} · {count} · {reach}"
 
 #: src/onboarding/about-story.tsx
 msgid "{sponsor} gave me the big picture. Now I need the details."
@@ -2483,7 +2484,6 @@ msgctxt "inbox item kind"
 msgid "AI tool"
 msgstr "AI-tool"
 
-#: src/agents/agents-overview.tsx
 #: src/brain/atlas-overlays.tsx
 #: src/brain/brain-log.tsx
 #: src/routes/_shell.workflows.index.tsx
@@ -2572,6 +2572,10 @@ msgstr "Altijd donker"
 #: src/frame/part-words.tsx
 msgid "Always light"
 msgstr "Altijd licht"
+
+#: src/agents/new-agent.tsx
+msgid "Amber"
+msgstr "Amber"
 
 #: src/workflows/resource-params.tsx
 msgid "Amount"
@@ -2719,6 +2723,10 @@ msgstr "En meer."
 msgid "And the rest."
 msgstr "En de rest."
 
+#: src/agents/new-agent.tsx
+msgid "Another agent has this name"
+msgstr "Een andere agent heeft deze naam"
+
 #: src/apps/draft-changes.tsx
 msgid "Another App"
 msgstr "Een andere App"
@@ -2730,6 +2738,10 @@ msgstr "Een andere dag"
 #: src/pages/page-frame.tsx
 msgid "Another link is waiting for an answer, or one was just turned down. Try again in a moment."
 msgstr "Er wacht al een link op antwoord, of er is er net een geweigerd. Probeer het zo opnieuw."
+
+#: src/agents/new-agent.tsx
+msgid "Another name"
+msgstr "Een andere naam"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Another platform"
@@ -2801,6 +2813,7 @@ msgid "Answering"
 msgstr "Bezig met antwoorden"
 
 #: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
 msgid "Answers"
 msgstr "Antwoordt"
 
@@ -2823,6 +2836,10 @@ msgstr "Wil je nog iets koppelen?"
 #: src/onboarding/connect-steps.tsx
 msgid "Anything else?"
 msgstr "Nog iets?"
+
+#: src/agents/new-agent.tsx
+msgid "Anything it should always know?"
+msgstr "Moet hij iets altijd weten?"
 
 #: src/activity/audit-event.tsx
 #: src/connections/request-app-dialog.tsx
@@ -3579,6 +3596,10 @@ msgstr "Kruimelpad"
 msgid "Briefcase"
 msgstr "Koffer"
 
+#: src/agents/agent-templates.ts
+msgid "Briefing desk"
+msgstr "Briefingdesk"
+
 #: src/knowledge/frame.tsx
 msgid "Browse"
 msgstr "Bladeren"
@@ -3710,7 +3731,6 @@ msgstr "Uitvoeren kan niet: {unread}"
 #: src/agents/agent-documents.tsx
 #: src/agents/agent-page.tsx
 #: src/agents/agent-wakes.tsx
-#: src/agents/new-agent.tsx
 #: src/apps/app-access-requests.tsx
 #: src/apps/app-data-model.tsx
 #: src/apps/app-history.tsx
@@ -3806,6 +3826,10 @@ msgstr "Nu verdergaan"
 #: src/routes/interview.tsx
 msgid "Carry on there. Lost that device? Ask whoever sent you the link for a new start."
 msgstr "Ga daar verder. Heb je dat apparaat niet meer? Vraag degene die je de link stuurde om een nieuwe start."
+
+#: src/agents/new-agent.tsx
+msgid "Change"
+msgstr "Wijzigen"
 
 #: src/onboarding/review-parts.tsx
 msgctxt "change how it was settled"
@@ -4037,12 +4061,19 @@ msgstr "Hoofdstukken"
 msgid "Chart"
 msgstr "Grafiek"
 
+#: src/agents/agent-templates.ts
+msgid "Chase unpaid invoices"
+msgstr "Openstaande facturen najagen"
+
 #: src/agents/agent-form.tsx
 msgid "Chases unpaid invoices"
 msgstr "Volgt onbetaalde facturen op"
 
+#: src/agents/agent-templates.ts
+msgid "Chases unpaid invoices and drafts the reminders."
+msgstr "Jaagt openstaande facturen na en schrijft de herinneringen voor."
+
 #: src/agents/agent-page.tsx
-#: src/agents/agents-overview.tsx
 #: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/settings/ai-spend.tsx
@@ -4078,6 +4109,10 @@ msgstr "Chatvak"
 #: src/chat/chat-window.tsx
 msgid "Chat name"
 msgstr "Naam van de chat"
+
+#: src/agents/agents-overview.tsx
+msgid "Chat with {name}"
+msgstr "Chatten met {name}"
 
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "Chats"
@@ -4223,6 +4258,10 @@ msgstr "Kiezen uit SharePoint of OneDrive"
 msgid "Choose one"
 msgstr "Kies er een"
 
+#: src/agents/new-agent.tsx
+msgid "Choose or write an answer first"
+msgstr "Kies of schrijf eerst een antwoord"
+
 #: src/interview/before.tsx
 msgid "Choose who you want to be interviewed by."
 msgstr "Kies door wie je geïnterviewd wilt worden."
@@ -4278,7 +4317,6 @@ msgstr "{0} wissen"
 msgid "Clear filters"
 msgstr "Filters wissen"
 
-#: src/agents/agents-overview.tsx
 #: src/frame/part-words.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "Clear search"
@@ -4305,7 +4343,6 @@ msgstr "Kliffen"
 #: src/activity/audit-event.tsx
 #: src/agents/agent-page.tsx
 #: src/agents/agent-wakes.tsx
-#: src/agents/new-agent.tsx
 #: src/apps/app-access-requests.tsx
 #: src/apps/app-data-model.tsx
 #: src/apps/app-data.tsx
@@ -4478,6 +4515,7 @@ msgstr "Collecties"
 msgid "Colour"
 msgstr "Kleur"
 
+#: src/agents/new-agent.tsx
 #: src/routes/_shell.settings.appearance.tsx
 msgid "Colours"
 msgstr "Kleuren"
@@ -4513,7 +4551,6 @@ msgctxt "kind of app"
 msgid "Commerce"
 msgstr "Verkoop"
 
-#: src/agents/agents-overview.tsx
 #: src/brain/brain.ts
 #: src/settings/billing-card.tsx
 msgid "Company"
@@ -5040,6 +5077,10 @@ msgstr "Loskoppelen mislukt"
 msgid "Couldn't load who may answer for it."
 msgstr "Kon niet laden wie ervoor verantwoordelijk mag zijn."
 
+#: src/agents/new-agent.tsx
+msgid "Couldn't make it"
+msgstr "Kon niet worden gemaakt"
+
 #: src/apps/app-settings.tsx
 msgid "Couldn't refresh. This may be out of date."
 msgstr "Kon niet vernieuwen. Dit is misschien niet meer actueel."
@@ -5063,6 +5104,10 @@ msgstr "Kon niet delen"
 #: src/apps/app-sharing.tsx
 msgid "Couldn't stop sharing"
 msgstr "Kon delen niet stoppen"
+
+#: src/agents/new-agent.tsx
+msgid "Couldn't take that answer"
+msgstr "Dat antwoord kon niet worden overgenomen"
 
 #: src/frame/part-words.tsx
 msgid "Counted in the page's words. Code view marks them in its source."
@@ -5130,6 +5175,10 @@ msgstr "CRM"
 #: src/workflows/resource-params.tsx
 msgid "Cron fields"
 msgstr "Cron-velden"
+
+#: src/agents/new-agent.tsx
+msgid "Crystal"
+msgstr "Kristal"
 
 #: src/activity/audit-log.tsx
 msgid "CSV"
@@ -5969,6 +6018,10 @@ msgstr "Betaalbewijzen per e-mail"
 msgid "Email trigger"
 msgstr "E-mailtrigger"
 
+#: src/agents/new-agent.tsx
+msgid "Ember"
+msgstr "Gloed"
+
 #: src/brain/brain-article/kern.tsx
 msgid "Employee"
 msgstr "Medewerker"
@@ -6103,6 +6156,10 @@ msgstr "Gebeurtenissen in het archief"
 msgid "Events in the log"
 msgstr "Gebeurtenissen in het logboek"
 
+#: src/agents/new-agent.tsx
+msgid "Evergreen"
+msgstr "Groenblijvend"
+
 #: src/workflows/business-process.tsx
 msgid "Every client question or complaint, from the first message until it is solved."
 msgstr "Elke vraag of klacht van een klant, van het eerste bericht tot ze is opgelost."
@@ -6114,6 +6171,10 @@ msgstr "Elke dag"
 #: src/agents/agent-wakes.tsx
 msgid "Every day at {time}"
 msgstr "Elke dag om {time}"
+
+#: src/agents/new-agent.tsx
+msgid "Every day at 9:00"
+msgstr "Elke dag om 9:00"
 
 #: src/apps/app-webhooks.tsx
 msgid "Every delivery is signed with it, so the receiver can tell it came from Grasp."
@@ -6134,6 +6195,10 @@ msgstr "Elke maandag"
 #: src/agents/agent-wakes.tsx
 msgid "Every Monday at {time}"
 msgstr "Elke maandag om {time}"
+
+#: src/agents/new-agent.tsx
+msgid "Every Monday at 9:00"
+msgstr "Elke maandag om 9:00"
 
 #: src/workflows/requests/request-summary.tsx
 msgid "Every Monday morning, to you"
@@ -6167,6 +6232,10 @@ msgstr "Elke werkdag"
 msgid "Every weekday at {time}"
 msgstr "Elke werkdag om {time}"
 
+#: src/agents/new-agent.tsx
+msgid "Every weekday at 9:00"
+msgstr "Elke werkdag om 9:00"
+
 #: src/agents/agent-facts.tsx
 #: src/knowledge/collection-markers.tsx
 #: src/knowledge/new-collection.tsx
@@ -6195,6 +6264,10 @@ msgstr "Iedereen in een project waar je niet in zit"
 #: src/projects/project-view.tsx
 msgid "Everyone in it · {shownRole}"
 msgstr "Iedereen erin · {shownRole}"
+
+#: src/agents/new-agent.tsx
+msgid "Everyone in the company"
+msgstr "Iedereen in het bedrijf"
 
 #: src/inbox/items.ts
 msgid "Everyone in the company reads your answer, with your name."
@@ -6579,6 +6652,10 @@ msgstr "Vergelijkbare"
 msgid "Find Stephen under Apps in your Slack workspace."
 msgstr "Je vindt Stephen onder Apps in je Slack-workspace."
 
+#: src/agents/agent-templates.ts
+msgid "Finds overdue invoices and drafts friendly reminders"
+msgstr "Vindt achterstallige facturen en schrijft vriendelijke herinneringen voor"
+
 #: src/routes/guest.tsx
 msgid "Finish"
 msgstr "Afronden"
@@ -6723,6 +6800,10 @@ msgstr "Voor een adres dat je bedrijf aan iemand anders heeft gegeven. Wie zich 
 msgid "For each item"
 msgstr "Voor elk item"
 
+#: src/agents/agent-templates.ts
+msgid "For each meeting today, say who is coming, what was last agreed with them and what is still open. Keep each meeting to a few lines."
+msgstr "Zeg voor elke vergadering vandaag wie er komt, wat er het laatst met hen is afgesproken en wat nog openstaat. Houd elke vergadering bij een paar regels."
+
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
 msgid "For everyone"
@@ -6846,6 +6927,14 @@ msgstr "Leemte opgemerkt: {question}"
 #: src/brain/brain.ts
 msgid "Gaps"
 msgstr "Leemtes"
+
+#: src/agents/agent-templates.ts
+msgid "Gathers what to know before each meeting"
+msgstr "Verzamelt wat je voor elke vergadering moet weten"
+
+#: src/agents/agent-templates.ts
+msgid "Gathers what to know before each meeting."
+msgstr "Verzamelt wat je voor elke vergadering moet weten."
 
 #: src/activity/audit-words.ts
 msgid "Gave consent for a connection"
@@ -7769,6 +7858,10 @@ msgstr "In je documenten zag ik {tools}."
 msgid "Inbox"
 msgstr "Inbox"
 
+#: src/agents/agent-templates.ts
+msgid "Inbox sorter"
+msgstr "Inboxsorteerder"
+
 #: src/settings/sections.ts
 msgid "Incoming events"
 msgstr "Inkomende events"
@@ -7915,6 +8008,11 @@ msgstr "Uitgenodigd voor stap 2"
 msgid "Invited someone"
 msgstr "Heeft iemand uitgenodigd"
 
+#: src/agents/agent-templates.ts
+#: src/agents/new-agent.tsx
+msgid "Invoice chaser"
+msgstr "Factuurjager"
+
 #: src/frame/part-words.tsx
 msgctxt "a filter's operator"
 msgid "is"
@@ -7983,6 +8081,10 @@ msgstr "Het is niet gebeurd"
 #: src/inbox/item-detail.tsx
 msgid "It didn't happen: {who}"
 msgstr "Het is niet gebeurd: {who}"
+
+#: src/agents/new-agent.tsx
+msgid "It does nothing yet until you allow it"
+msgstr "Hij doet nog niets tot je het toestaat"
 
 #: src/apps/publish-errors.ts
 msgid "It doesn't pass its checks. Fix the problems, then share."
@@ -8094,6 +8196,10 @@ msgstr "Het opent voor het lid dat het maakte, de beheerders en iedereen met wie
 msgid "It reads no Knowledge."
 msgstr "Hij leest geen Kennis."
 
+#: src/agents/new-agent.tsx
+msgid "It reads, and what it wants to change waits for you"
+msgstr "Hij leest, en wat hij wil wijzigen wacht op jou"
+
 #: src/settings/ai-providers.tsx
 msgid "It refused the call."
 msgstr "Hij weigerde de aanroep."
@@ -8129,10 +8235,6 @@ msgstr "Hij start geen runs meer. Runs die hij al startte, gaan door. Dit kan ni
 #: src/workflows/workflow-triggers.tsx
 msgid "It starts nothing until an admin allows it to start this workflow."
 msgstr "Hij start niets tot een beheerder hem deze workflow laat starten."
-
-#: src/agents/new-agent.tsx
-msgid "It starts reaching nobody. You choose who may ask it next."
-msgstr "Hij bereikt eerst niemand. Daarna kies je wie hem iets mag vragen."
 
 #: src/interview/page.tsx
 msgid "It stays here for you to read. You can still delete it."
@@ -8403,6 +8505,10 @@ msgstr "Laat ‘Afzenderverificatie vereisen’ aan staan en sla op."
 msgid "Keep both"
 msgstr "Beide houden"
 
+#: src/agents/new-agent.tsx
+msgid "Keep editing"
+msgstr "Verder bewerken"
+
 #: src/make/examples.ts
 msgid "Keep every client question in one place, and remind us when one waits too long for an answer."
 msgstr "Houd elke klantvraag op één plek bij, en herinner ons eraan als er een te lang op antwoord wacht."
@@ -8533,6 +8639,10 @@ msgstr "Laatste 30 dagen"
 msgid "Last 7 days"
 msgstr "Laatste 7 dagen"
 
+#: src/agents/agents-overview.tsx
+msgid "Last asked"
+msgstr "Laatst gevraagd"
+
 #: src/agents/agent-page.tsx
 msgid "Last asked in a chat"
 msgstr "Laatst gevraagd in een chat"
@@ -8553,9 +8663,14 @@ msgstr "Vorige maand"
 msgid "Last ran {when}"
 msgstr "Laatst uitgevoerd op {when}"
 
+#: src/agents/agents-overview.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Last run"
 msgstr "Laatste run"
+
+#: src/agents/agents-overview.tsx
+msgid "Last run failed"
+msgstr "Laatste run mislukt"
 
 #: src/frame/part-words.tsx
 msgid "Last used"
@@ -8900,6 +9015,10 @@ msgstr "Logo verwijderd"
 msgid "London"
 msgstr "Londen"
 
+#: src/agents/agent-templates.ts
+msgid "Look for invoices more than 14 days overdue. Draft a short, friendly reminder to each client, in their own language, and say who owes what. Never send anything yourself: leave the drafts for a person to check."
+msgstr "Zoek facturen die meer dan 14 dagen achterstallig zijn. Schrijf voor elke klant een korte, vriendelijke herinnering voor in de eigen taal, en zeg wie wat schuldig is. Verstuur nooit zelf iets: laat de concepten door een mens controleren."
+
 #: src/agents/agent-wakes.tsx
 msgid "Look for overdue invoices and say which."
 msgstr "Zoek achterstallige facturen en zeg welke."
@@ -8966,6 +9085,10 @@ msgstr "E-mail"
 #: src/settings/stephen-settings.tsx
 msgid "Mail and messages to other people, after they press a card with every recipient."
 msgstr "Mail en berichten aan anderen, nadat ze op een kaart met elke ontvanger drukken."
+
+#: src/agents/agent-templates.ts
+msgid "Mail desk"
+msgstr "Maildesk"
 
 #: src/onboarding/review-parts.tsx
 msgid "Mail isn’t available on this hosting yet"
@@ -9050,6 +9173,10 @@ msgstr "Makers"
 msgid "Makes {table} sensitive: its history keeps no values, and every read is recorded."
 msgstr "Maakt {table} gevoelig: de geschiedenis bewaart geen waarden, en elke keer lezen wordt vastgelegd."
 
+#: src/agents/new-agent.tsx
+msgid "Making"
+msgstr "Wordt gemaakt"
+
 #: src/connections/integration-item.tsx
 #: src/settings/ai-providers.tsx
 msgid "Manage"
@@ -9090,17 +9217,22 @@ msgid "Max"
 msgstr "Maximaal"
 
 #: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
 msgid "May do"
 msgstr "Mag doen"
 
-#: src/agents/agents-overview.tsx
-msgid "May do nothing yet"
-msgstr "Mag nog niets doen"
+#: src/agents/new-agent.tsx
+msgid "Meadow"
+msgstr "Weide"
 
 #: src/chat/model-controls.tsx
 msgctxt "thinking effort"
 msgid "Medium"
 msgstr "Gemiddeld"
+
+#: src/agents/agent-templates.ts
+msgid "Meeting prep"
+msgstr "Vergadervoorbereiding"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Members"
@@ -9221,6 +9353,10 @@ msgstr "Geld"
 #: src/brain/brain.ts
 msgid "Monthly budget for AI"
 msgstr "Maandbudget voor AI"
+
+#: src/agents/new-agent.tsx
+msgid "Moon"
+msgstr "Maan"
 
 #: src/apps/app-workspace.tsx
 #: src/apps/apps-overview.tsx
@@ -9432,6 +9568,7 @@ msgid "My version of the App didn't start. Find out why and fix it:"
 msgstr "Mijn versie van de App startte niet. Zoek uit waarom en los het op:"
 
 #: src/agents/agent-form.tsx
+#: src/agents/new-agent.tsx
 #: src/apps/app-data-model.tsx
 #: src/apps/app-settings.tsx
 #: src/apps/field-editor.tsx
@@ -9557,6 +9694,7 @@ msgctxt "asked for the first time this span"
 msgid "New"
 msgstr "Nieuw"
 
+#: src/agents/agents-overview.tsx
 #: src/agents/new-agent.tsx
 #: src/routes/_shell.agents.new.tsx
 msgid "New agent"
@@ -9633,11 +9771,16 @@ msgstr "Nieuw: “{label}”"
 msgid "Newer"
 msgstr "Nieuwer"
 
+#: src/agents/new-agent.tsx
 #: src/chat/asked-questions.tsx
 #: src/frame/part-words.tsx
 #: src/settings/event-sources.tsx
 msgid "Next"
 msgstr "Volgende"
+
+#: src/agents/agents-overview.tsx
+msgid "Next {nextMoment}"
+msgstr "Volgende {nextMoment}"
 
 #: src/brain/brain-transcript.tsx
 #: src/frame/part-words.tsx
@@ -9703,14 +9846,6 @@ msgstr "Er is nog geen beheerder gevraagd om hem deze gebeurtenissen op zijn kop
 #: src/workflows/workflow-triggers.tsx
 msgid "No admin has been asked to let it start this workflow: it starts nothing until one allows it."
 msgstr "Er is nog geen beheerder gevraagd hem deze workflow te laten starten: hij start niets tot een beheerder dat toestaat."
-
-#: src/agents/agents-overview.tsx
-msgid "No agent matches “{asked}”"
-msgstr "Geen agent komt overeen met “{asked}”"
-
-#: src/agents/agents-overview.tsx
-msgid "No agent to show here"
-msgstr "Hier is geen agent om te tonen"
 
 #: src/frame/part-words.tsx
 msgid "No agents found"
@@ -10076,6 +10211,7 @@ msgid "Nobody with that name."
 msgstr "Niemand met die naam."
 
 #: src/agents/agent-facts.tsx
+#: src/agents/new-agent.tsx
 #: src/settings/stephen-audience.tsx
 msgid "Nobody yet"
 msgstr "Nog niemand"
@@ -10523,6 +10659,10 @@ msgstr "Niets is met het project gedeeld, dus ze verliezen geen toegang."
 msgid "Nothing matched."
 msgstr "Niets gevonden."
 
+#: src/agents/new-agent.tsx
+msgid "Nothing more"
+msgstr "Niets meer"
+
 #: src/routes/_shell.workflows.index.tsx
 msgid "Nothing needs you."
 msgstr "Niets wacht op jou."
@@ -10592,6 +10732,7 @@ msgid "Nothing was added. Fix these rows and try again."
 msgstr "Er is niets toegevoegd. Corrigeer deze rijen en probeer het opnieuw."
 
 #: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
 #: src/brain/brain.ts
 msgid "Nothing yet"
 msgstr "Nog niets"
@@ -10639,6 +10780,10 @@ msgstr "Cijfer"
 msgctxt "a kind of field"
 msgid "Number"
 msgstr "Getal"
+
+#: src/agents/new-agent.tsx
+msgid "Ocean"
+msgstr "Oceaan"
 
 #: src/workflows/figures.tsx
 msgid "of them wait for a decision"
@@ -10694,10 +10839,8 @@ msgstr "Oudere wijzigingen"
 msgid "Older versions"
 msgstr "Oudere versies"
 
-#: src/agents/agent-facts.tsx
 #: src/agents/agent-page.tsx
 #: src/agents/agent-wakes.tsx
-#: src/agents/agents-overview.tsx
 #: src/settings/stephen-settings.tsx
 msgid "On"
 msgstr "Aan"
@@ -10749,6 +10892,8 @@ msgid "On in {name}"
 msgstr "Aan in {name}"
 
 #: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
+#: src/agents/new-agent.tsx
 msgid "On its own"
 msgstr "Uit zichzelf"
 
@@ -10903,6 +11048,8 @@ msgid "Only the workflow's builders can change these."
 msgstr "Alleen de bouwers van de workflow kunnen deze wijzigen."
 
 #: src/agents/agent-page.tsx
+#: src/agents/agents-overview.tsx
+#: src/agents/new-agent.tsx
 msgid "Only when asked"
 msgstr "Alleen als het gevraagd wordt"
 
@@ -11166,6 +11313,10 @@ msgstr "of kies ze op je computer"
 msgid "Or withdraw: nothing you said is used from now on, and you can still read it here."
 msgstr "Of trek je terug: niets van wat je zei wordt nog gebruikt, en je kunt het hier nog steeds lezen."
 
+#: src/agents/new-agent.tsx
+msgid "Orb"
+msgstr "Bol"
+
 #: src/frame/part-words.tsx
 msgid "Order"
 msgstr "Volgorde"
@@ -11376,6 +11527,10 @@ msgstr "Pagina's met gebeurtenissen"
 msgid "Pagination"
 msgstr "Paginering"
 
+#: src/agents/new-agent.tsx
+msgid "Pair in orbit"
+msgstr "Paar in een baan"
+
 #: src/workflows/resource-params.tsx
 msgid "Parameters"
 msgstr "Parameters"
@@ -11474,7 +11629,6 @@ msgstr "Pauzeren"
 msgid "Pause Stephen outside Grasp?"
 msgstr "Stephen buiten Grasp pauzeren?"
 
-#: src/agents/agent-facts.tsx
 #: src/agents/agents-overview.tsx
 #: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
@@ -11507,6 +11661,10 @@ msgstr "Gepauzeerd: geen link gaat open en er gaat er geen uit. De links die aan
 #: src/workflows/workflow-status.tsx
 msgid "Pauses in {left} s"
 msgstr "Pauzeert over {left} s"
+
+#: src/agents/agent-templates.ts
+msgid "Payment pal"
+msgstr "Betaalmaatje"
 
 #: src/export/export-menu.tsx
 msgid "PDF"
@@ -11705,6 +11863,10 @@ msgstr "Abonnement"
 msgid "Plan the interviews and send the links"
 msgstr "Plan de interviews en stuur de links"
 
+#: src/agents/new-agent.tsx
+msgid "Planet"
+msgstr "Planeet"
+
 #: src/brain/brain-atlas.ts
 msgid "Plans and goals"
 msgstr "Plannen en doelen"
@@ -11745,6 +11907,10 @@ msgstr "Praag"
 #: src/chat/saved-memory.tsx
 msgid "Preference"
 msgstr "Voorkeur"
+
+#: src/agents/agent-templates.ts
+msgid "Prepare meetings"
+msgstr "Vergaderingen voorbereiden"
 
 #: src/frame/part-words.tsx
 msgid "Presets"
@@ -12075,6 +12241,10 @@ msgstr "Wat van het bedrijf is lezen"
 #: src/onboarding/hr-leads.tsx
 msgid "Read the leads from {name} again"
 msgstr "Teamleiders opnieuw uit {name} lezen"
+
+#: src/agents/agent-templates.ts
+msgid "Read the new mail and sort each message into urgent, to do or to read, with one sentence on what it is about. Draft a reply to each urgent one, short and polite. Put the urgent ones first."
+msgstr "Lees de nieuwe mail en sorteer elk bericht in dringend, te doen of te lezen, met één zin over waar het over gaat. Schrijf een kort, beleefd antwoord voor op elk dringend bericht. Zet de dringende bovenaan."
 
 #: src/settings/stephen-settings.tsx
 msgid "Read their own"
@@ -12772,6 +12942,7 @@ msgstr "Buiten gebruik stellen"
 msgid "Retried"
 msgstr "Opnieuw geprobeerd"
 
+#: src/agents/new-agent.tsx
 #: src/inbox/item-detail.tsx
 msgid "Review"
 msgstr "Beoordelen"
@@ -13364,7 +13535,6 @@ msgstr "Schematrigger"
 msgid "Screenshots"
 msgstr "Schermafbeeldingen"
 
-#: src/agents/agents-overview.tsx
 #: src/apps/apps-overview.tsx
 #: src/brain/sources-page.tsx
 #: src/frame/part-words.tsx
@@ -13450,10 +13620,6 @@ msgstr "Mensen, teams en rollen zoeken"
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Search reads every collection you may read. Try other words, or fewer."
 msgstr "Zoeken leest elke collectie die je mag lezen. Probeer andere woorden, of minder."
-
-#: src/agents/agents-overview.tsx
-msgid "Search the agents"
-msgstr "Agents doorzoeken"
 
 #: src/apps/apps-overview.tsx
 msgid "Search the Apps"
@@ -13767,6 +13933,10 @@ msgstr "Geregeld: {choice}"
 msgid "Setup"
 msgstr "Instellen"
 
+#: src/agents/new-agent.tsx
+msgid "Shape"
+msgstr "Vorm"
+
 #: src/apps/publish.tsx
 #: src/workflows/share-workflow.tsx
 msgid "Share"
@@ -13855,6 +14025,10 @@ msgstr "Delen"
 #: src/apps/publish.tsx
 msgid "Sharing undone"
 msgstr "Delen ongedaan gemaakt"
+
+#: src/agents/new-agent.tsx
+msgid "Should it work on its own?"
+msgstr "Moet hij zelfstandig werken?"
 
 #: src/apps/app-data-model.tsx
 #: src/brain/atlas-overlays.tsx
@@ -14319,6 +14493,7 @@ msgstr "Iemand die er niet meer is"
 msgid "Someone no longer in the company"
 msgstr "Iemand die niet meer in het bedrijf zit"
 
+#: src/agents/new-agent.tsx
 #: src/onboarding/connect-steps.tsx
 msgid "Something else"
 msgstr "Iets anders"
@@ -14346,6 +14521,18 @@ msgstr "Van hoog naar laag sorteren"
 #: src/frame/part-words.tsx
 msgid "Sort low to high"
 msgstr "Van laag naar hoog sorteren"
+
+#: src/agents/agent-templates.ts
+msgid "Sort the inbox"
+msgstr "De inbox sorteren"
+
+#: src/agents/agent-templates.ts
+msgid "Sorts new mail and drafts replies to what is urgent"
+msgstr "Sorteert nieuwe mail en schrijft antwoorden voor op wat dringend is"
+
+#: src/agents/agent-templates.ts
+msgid "Sorts new mail and drafts replies to what is urgent."
+msgstr "Sorteert nieuwe mail en schrijft antwoorden voor op wat dringend is."
 
 #: src/brain/brain.ts
 #: src/workflows/workflow-triggers.tsx
@@ -14725,10 +14912,22 @@ msgstr "Gestopt."
 msgid "Suggested"
 msgstr "Voorgesteld"
 
+#: src/agents/agent-templates.ts
+msgid "Sum up what changed this week: what was finished, what is late and what needs a decision. Name the people involved, keep it to one page and end with the three things that matter most."
+msgstr "Vat samen wat er deze week veranderde: wat af is, wat te laat is en wat een beslissing nodig heeft. Noem de betrokkenen, houd het bij één pagina en sluit af met de drie dingen die het meest tellen."
+
 #: src/routes/_shell.brain.$noteId.tsx
 msgctxt "tab: an interview written up short"
 msgid "Summary"
 msgstr "Samenvatting"
+
+#: src/agents/agent-templates.ts
+msgid "Sums up the week's work for the team"
+msgstr "Vat het werk van de week samen voor het team"
+
+#: src/agents/agent-templates.ts
+msgid "Sums up the week's work for the team."
+msgstr "Vat het werk van de week samen voor het team."
 
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "Support"
@@ -14743,6 +14942,10 @@ msgstr "Klantenservice"
 msgctxt "lesson evidence"
 msgid "Supported"
 msgstr "Onderbouwd"
+
+#: src/agents/new-agent.tsx
+msgid "Swarm"
+msgstr "Zwerm"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Switch a team off and nobody in it gets a link."
@@ -15526,6 +15729,10 @@ msgstr "Het antwoord van het model kwam in de verkeerde vorm terug. Probeer het 
 msgid "The monthly budget for AI is not set yet."
 msgstr "Het maandbudget voor AI is nog niet vastgesteld."
 
+#: src/agents/new-agent.tsx
+msgid "The new agent"
+msgstr "De nieuwe agent"
+
 #: src/settings/event-sources.tsx
 msgid "The new secret"
 msgstr "Het nieuwe geheim"
@@ -16121,6 +16328,7 @@ msgstr "Dit model kan geen antwoord geven dat zo lang is. Kies een ander model, 
 msgid "This model has one level of effort."
 msgstr "Dit model heeft één niveau van inspanning."
 
+#: src/agents/agents-overview.tsx
 #: src/frame/part-words.tsx
 #: src/settings/ai-spend.tsx
 #: src/workflows/requests/request-plan.tsx
@@ -16230,6 +16438,10 @@ msgstr "Deze versie, alleen-lezen"
 #: src/brain/sources-page.tsx
 msgid "Those marked Only you are yours alone: nobody else sees them, admins included."
 msgstr "Wat met Alleen jij is gemarkeerd, is van jou alleen: niemand anders ziet het, ook geen beheerders."
+
+#: src/agents/new-agent.tsx
+msgid "Three circling"
+msgstr "Drie cirkelend"
 
 #: src/activity/audit-event.tsx
 msgid "Through"
@@ -16406,6 +16618,10 @@ msgstr "Transcript"
 msgctxt "tab: the whole conversation word for word"
 msgid "Transcript"
 msgstr "Transcript"
+
+#: src/agents/new-agent.tsx
+msgid "Triangle"
+msgstr "Driehoek"
 
 #: src/activity/pending.tsx
 msgid "Trigger {trigger}"
@@ -17251,6 +17467,14 @@ msgstr "week {week}"
 msgid "Week {week}"
 msgstr "Week {week}"
 
+#: src/agents/agent-templates.ts
+msgid "Week in review"
+msgstr "Week in review"
+
+#: src/agents/agent-templates.ts
+msgid "Weekly reporter"
+msgstr "Weekverslaggever"
+
 #: src/workflows/requests/request-summary.tsx
 msgid "Weekly summary"
 msgstr "Wekelijkse samenvatting"
@@ -17346,9 +17570,17 @@ msgstr "Wat gemarkeerd is, heb ik opgeschreven. Je controleert het aan het eind.
 msgid "What is shared with this team stops being shared with its members through it, and the workflows it owns no longer have a team. Its members stay in the organization."
 msgstr "Wat met dit team gedeeld is, wordt niet meer via het team met de leden gedeeld, en de workflows van dit team hebben geen team meer. De leden blijven in de organisatie."
 
+#: src/agents/new-agent.tsx
+msgid "What it always knows"
+msgstr "Wat hij altijd weet"
+
 #: src/workflows/run-detail.tsx
 msgid "What it did"
 msgstr "Wat hij deed"
+
+#: src/agents/new-agent.tsx
+msgid "What it does"
+msgstr "Wat hij doet"
 
 #: src/brain/remember-dialog.tsx
 #: src/workflows/requests/request-table.tsx
@@ -17399,6 +17631,7 @@ msgid "What it says"
 msgstr "Wat het zegt"
 
 #: src/agents/agent-form.tsx
+#: src/agents/new-agent.tsx
 msgid "What it should know and how it should work."
 msgstr "Wat hij moet weten en hoe hij moet werken."
 
@@ -17443,6 +17676,10 @@ msgstr "Wat je nodig heeft, kan nu niet worden gelezen."
 msgid "What people ask"
 msgstr "Wat mensen vragen"
 
+#: src/agents/new-agent.tsx
+msgid "What shape should it take?"
+msgstr "Welke vorm moet hij krijgen?"
+
 #: src/chat/approval-words.ts
 #: src/inbox/item-detail.tsx
 msgid "What should change"
@@ -17452,9 +17689,17 @@ msgstr "Wat moet er veranderen"
 msgid "What should Grasp do there?"
 msgstr "Wat moet Grasp daar doen?"
 
+#: src/agents/new-agent.tsx
+msgid "What should the agent do? Pick a starting point or say it in your own words."
+msgstr "Wat moet de agent doen? Kies een startpunt of zeg het in je eigen woorden."
+
 #: src/apps/app-start.tsx
 msgid "What should this App do?"
 msgstr "Wat moet deze app doen?"
+
+#: src/agents/new-agent.tsx
+msgid "What should we call it?"
+msgstr "Hoe zullen we hem noemen?"
 
 #: src/chat/chat-start.tsx
 #: src/frame/part-words.tsx
@@ -17697,10 +17942,6 @@ msgstr "Waar, bijvoorbeeld Dropbox"
 msgid "Wherever your endpoint runs"
 msgstr "Waar je endpoint ook draait"
 
-#: src/agents/agents-overview.tsx
-msgid "Which agents to show"
-msgstr "Welke agents worden getoond"
-
 #: src/onboarding/ai-step.tsx
 msgid "Which AI"
 msgstr "Welke AI"
@@ -17712,6 +17953,10 @@ msgstr "Met welke AI zal ik denken?"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which Apps and agents hold permissions: {why}"
 msgstr "Welke apps en agents toestemmingen hebben: {why}"
+
+#: src/agents/new-agent.tsx
+msgid "Which colours should it have?"
+msgstr "Welke kleuren moet hij hebben?"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Which HR platform do you use?"
@@ -17777,6 +18022,14 @@ msgstr "Wie het krijgt"
 #: src/onboarding/setup-steps.tsx
 msgid "Who leads it?"
 msgstr "Wie leidt het?"
+
+#: src/agents/new-agent.tsx
+msgid "Who may ask it"
+msgstr "Wie hem iets mag vragen"
+
+#: src/agents/new-agent.tsx
+msgid "Who may ask it?"
+msgstr "Wie mag hem iets vragen?"
 
 #: src/knowledge/new-collection.tsx
 msgid "Who may read it"
@@ -18115,6 +18368,10 @@ msgctxt "what a tool may do"
 msgid "Write"
 msgstr "Schrijven"
 
+#: src/agents/agent-templates.ts
+msgid "Write the weekly report"
+msgstr "Het weekrapport schrijven"
+
 #: src/routes/guest.tsx
 msgid "Write your answer"
 msgstr "Schrijf je antwoord"
@@ -18278,6 +18535,10 @@ msgstr "je kunt het niet openen"
 #: src/frame/part-words.tsx
 msgid "You cannot open this"
 msgstr "Je kunt dit niet openen"
+
+#: src/agents/new-agent.tsx
+msgid "You choose people and teams on its page"
+msgstr "Je kiest mensen en teams op zijn pagina"
 
 #: src/connections/connect-dialog.tsx
 msgid "You come back to {app}’s page here."

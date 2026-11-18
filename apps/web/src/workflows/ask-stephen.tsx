@@ -44,8 +44,7 @@ export const AskStephen = ({
             checked={on}
             disabled={busy}
             id={field.id}
-            label={label}
-            labelHidden
+            aria-label={label}
             onCheckedChange={(next) => {
               void change(next);
             }}

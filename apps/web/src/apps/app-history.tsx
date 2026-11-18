@@ -583,7 +583,7 @@ const VersionChanges = ({
         }
       }}
       open
-      size="wide"
+      size="lg"
     >
       <SheetContent closeLabel={t`Close`}>
         <SheetTitle>

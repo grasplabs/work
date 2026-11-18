@@ -20,7 +20,13 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+  EmptyDescription,
+} from "../grasp/empty/index.ts";
 import { FileUpload } from "../grasp/file-upload/index.ts";
 import { File as FileIcon, Trash } from "../grasp/icons/index.ts";
 import {
@@ -160,17 +166,27 @@ export const AgentDocuments = ({
       title={t`Documents`}
     >
       {documents === undefined ? (
-        <Empty size="inline" tone="danger">
-          {t`The documents couldn't be loaded. Reload the page.`}
+        <Empty size="sm" tone="danger">
+          <EmptyHeader>
+            <EmptyMedia />
+            <EmptyTitle />
+            <EmptyDescription>{t`The documents couldn't be loaded. Reload the page.`}</EmptyDescription>
+          </EmptyHeader>
         </Empty>
       ) : null}
       {/* Where documents can be added, the button to add them says enough. */}
       {documents?.length === 0 && !editing ? (
-        <Empty size="inline">{t`${name} has no documents.`}</Empty>
+        <Empty size="sm">
+          <EmptyHeader>
+            <EmptyDescription>{t`${name} has no documents.`}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : null}
       {editing && kept >= most ? (
-        <Empty size="inline">
-          {t`${name} has ${most} documents, the most an agent keeps. Remove one to add another.`}
+        <Empty size="sm">
+          <EmptyHeader>
+            <EmptyDescription>{t`${name} has ${most} documents, the most an agent keeps. Remove one to add another.`}</EmptyDescription>
+          </EmptyHeader>
         </Empty>
       ) : null}
       {documents === undefined || documents.length === 0 ? null : (

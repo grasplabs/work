@@ -100,7 +100,7 @@ const ItemTestTable = ({ test }: { test: WorkflowItemTest }) => {
   const revision = draftRevision;
   if (test.items.length === 0) {
     return (
-      <Empty size="section">
+      <Empty size="md">
         <EmptyHeader>
           <EmptyDescription>
             {t`You have no recent runs whose input is still kept, so there was nothing to test on.`}

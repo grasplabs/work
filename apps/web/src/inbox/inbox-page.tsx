@@ -15,7 +15,7 @@ import type { ReactNode } from "react";
 import { formatDayMonth } from "../format.ts";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { Alert } from "../grasp/alert/index.ts";
-import { Avatar } from "../grasp/avatar/index.ts";
+import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { BrandIcon } from "../grasp/brand-icon/index.ts";
 import { Button, useAction } from "../grasp/button/index.ts";
@@ -246,7 +246,9 @@ const ItemList = ({
               <ItemMedia icon={kindMark[item.kind]} iconLook="inline" />
             ) : (
               <ItemMedia>
-                <Avatar name={item.face} size="xs" />
+                <Avatar name={item.face} size="xs">
+                  <AvatarFallback />
+                </Avatar>
               </ItemMedia>
             )}
             <ItemContent>
@@ -629,7 +631,7 @@ const ToDo = ({
     list: (
       <div {...stylex.props(styles.pane)}>
         {failed.map((text) => (
-          <Alert key={text} variant="attention">
+          <Alert key={text} tone="attention">
             {text}
           </Alert>
         ))}

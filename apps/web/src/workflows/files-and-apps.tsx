@@ -30,7 +30,7 @@ import {
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import { Empty, EmptyHeader, EmptyDescription } from "../grasp/empty/index.ts";
 import { Brain, Cable } from "../grasp/icons/index.ts";
 import {
   Item,
@@ -150,7 +150,13 @@ const ConnectedState = ({ integration }: { integration: Integration }) => {
 const Apps = ({ apps }: { apps: WorkflowApps }) => {
   const { t } = useLingui();
   if (apps.connected.length === 0 && apps.unconnected.length === 0) {
-    return <Empty size="inline">{t`It works in no app.`}</Empty>;
+    return (
+      <Empty size="sm">
+        <EmptyHeader>
+          <EmptyDescription>{t`It works in no app.`}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
   }
   return (
     <ItemGroup separated>
@@ -201,7 +207,13 @@ const Apps = ({ apps }: { apps: WorkflowApps }) => {
 const Knowledge = ({ knowledge }: { knowledge: WorkflowKnowledge[] }) => {
   const { t } = useLingui();
   if (knowledge.length === 0) {
-    return <Empty size="inline">{t`It reads no Knowledge.`}</Empty>;
+    return (
+      <Empty size="sm">
+        <EmptyHeader>
+          <EmptyDescription>{t`It reads no Knowledge.`}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
   }
   return (
     <ItemGroup separated>
@@ -238,7 +250,11 @@ const Files = ({ files }: { files: WorkflowFile[] }) => {
   const { t } = useLingui();
   if (files.length === 0) {
     return (
-      <Empty size="inline">{t`Its runs have written no file you may see.`}</Empty>
+      <Empty size="sm">
+        <EmptyHeader>
+          <EmptyDescription>{t`Its runs have written no file you may see.`}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
   return (
@@ -353,7 +369,11 @@ const Approved = ({
   const { busy, failure, run } = useCoreAction();
   if (declared.length === 0) {
     return (
-      <Empty size="inline">{t`Version ${version} declares no binding to approve.`}</Empty>
+      <Empty size="sm">
+        <EmptyHeader>
+          <EmptyDescription>{t`Version ${version} declares no binding to approve.`}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
   const revoke = async (alias: string, approval: string): Promise<void> => {

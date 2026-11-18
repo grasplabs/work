@@ -16,7 +16,7 @@ import {
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import { Empty, EmptyHeader, EmptyDescription } from "../grasp/empty/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   Table,
@@ -112,7 +112,11 @@ const KeptEntries = ({
       title={t`Kept between runs`}
     >
       {state.entries.length === 0 ? (
-        <Empty size="inline">{t`Nothing is kept yet.`}</Empty>
+        <Empty size="sm">
+          <EmptyHeader>
+            <EmptyDescription>{t`Nothing is kept yet.`}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
         <Table aria-label={t`Kept between runs`}>
           <TableHeader>

@@ -10,7 +10,13 @@ import { formatDate } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Empty } from "../grasp/empty/index.ts";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyDescription,
+  EmptyMedia,
+  EmptyTitle,
+} from "../grasp/empty/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
 import type { KeyValueItem } from "../grasp/key-value/index.ts";
 import { PanelSection } from "../grasp/panel-section/index.ts";
@@ -78,8 +84,10 @@ const Tools = ({
   if (tools === undefined) {
     return (
       <PanelSection label={t`What Grasp may do`}>
-        <Empty size="inline">
-          {t`The catalog doesn't list ${app}, so its tools can't be shown.`}
+        <Empty size="sm">
+          <EmptyHeader>
+            <EmptyDescription>{t`The catalog doesn't list ${app}, so its tools can't be shown.`}</EmptyDescription>
+          </EmptyHeader>
         </Empty>
       </PanelSection>
     );
@@ -98,8 +106,14 @@ const Tools = ({
         if (loaded.state !== "ready") {
           return (
             <PanelSection label={t`What Grasp may do`}>
-              <Empty size="inline" tone="danger">
-                {notLoadedText(loaded, i18n)}
+              <Empty size="sm" tone="danger">
+                <EmptyHeader>
+                  <EmptyMedia />
+                  <EmptyTitle />
+                  <EmptyDescription>
+                    {notLoadedText(loaded, i18n)}
+                  </EmptyDescription>
+                </EmptyHeader>
               </Empty>
             </PanelSection>
           );
@@ -107,7 +121,11 @@ const Tools = ({
         if (loaded.data.length === 0) {
           return (
             <PanelSection label={t`What Grasp may do`}>
-              <Empty size="inline">{t`${app} has no tools.`}</Empty>
+              <Empty size="sm">
+                <EmptyHeader>
+                  <EmptyDescription>{t`${app} has no tools.`}</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             </PanelSection>
           );
         }

@@ -32,6 +32,7 @@ import { labelStyles } from "../label/label";
 import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { wrap } from "../wrap/wrap";
 import { sliderMarker } from "./slider.stylex";
 
 /** What a caller may style: where the slider sits, and how wide it is. Never its look. */
@@ -240,7 +241,7 @@ export const Slider = ({
         {...stylex.props(styles.slider)}
       >
         <div {...stylex.props(styles.head)}>
-          <FieldLabelPrimitive {...stylex.props(labelStyles.label)}>
+          <FieldLabelPrimitive {...stylex.props(labelStyles.label, wrap.words)}>
             {label}
           </FieldLabelPrimitive>
           {showValue && (
