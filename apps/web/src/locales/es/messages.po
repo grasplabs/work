@@ -2334,6 +2334,7 @@ msgstr "Añadir un disparador"
 msgid "Add a widget"
 msgstr "Añadir un widget"
 
+#: src/connections/find-app.tsx
 #: src/connections/overview-lists.tsx
 msgctxt "apps that can still be connected"
 msgid "Add an app"
@@ -4831,6 +4832,7 @@ msgstr "Conectar otra cuenta"
 msgid "Connected"
 msgstr "Conectado"
 
+#: src/connections/find-app.tsx
 #: src/connections/overview-lists.tsx
 msgctxt "apps that are connected"
 msgid "Connected"
@@ -6795,9 +6797,18 @@ msgstr "Buscar un chat"
 msgid "Find a record by its ID"
 msgstr "Buscar un registro por su ID"
 
+#: src/connections/find-app.tsx
+#: src/routes/_shell.integrations.index.tsx
+msgid "Find an app"
+msgstr "Buscar una app"
+
 #: src/projects/file-item-dialog.tsx
 msgid "Find an app or workflow"
 msgstr "Buscar una app o un flujo de trabajo"
+
+#: src/connections/find-app.tsx
+msgid "Find an app, or name one to request"
+msgstr "Busca una app o escribe una para solicitarla"
 
 #: src/settings/team-members-dialog.tsx
 msgid "Find people"
@@ -7282,6 +7293,14 @@ msgstr "Grasp no puede decir ahora cuánto ha avanzado. Sigue igualmente."
 #: src/chat/thread.tsx
 msgid "Grasp changed a widget on your dashboard."
 msgstr "Grasp ha cambiado un widget de tu panel."
+
+#: src/connections/find-app.tsx
+msgid "Grasp checks what it takes to connect it."
+msgstr "Grasp comprueba qué hace falta para conectarla."
+
+#: src/connections/request-app-dialog.tsx
+msgid "Grasp checks what it takes to connect it. A link and what it should do there help."
+msgstr "Grasp comprueba qué hace falta para conectarla. Un enlace y lo que debe hacer allí ayudan."
 
 #: src/connections/request-app-dialog.tsx
 msgctxt "“Requested” is the name of a section on the Integrations page."
@@ -9824,6 +9843,10 @@ msgstr "Requiere atención"
 msgid "Needs its own sign-in app"
 msgstr "Necesita su propia app de inicio de sesión"
 
+#: src/connections/find-app.tsx
+msgid "Needs sign-in"
+msgstr "Requiere inicio de sesión"
+
 #: src/connections/overview-lists.tsx
 msgid "Needs sign-in. What uses it waits until then."
 msgstr "Requiere inicio de sesión. Lo que la usa espera hasta entonces."
@@ -10576,6 +10599,10 @@ msgctxt "inbox item kind: a mailbox or drive connect stopped hearing"
 msgid "Not hearing"
 msgstr "Sin recepción"
 
+#: src/connections/find-app.tsx
+msgid "Not here?"
+msgstr "¿No está?"
+
 #: src/brain/brain.ts
 msgid "Not interviewed yet."
 msgstr "Aún sin entrevista."
@@ -10604,6 +10631,7 @@ msgstr "Sin nombre del proveedor"
 msgid "Not now"
 msgstr "Ahora no"
 
+#: src/connections/find-app.tsx
 #: src/connections/integration-item.tsx
 #: src/connections/overview-lists.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -12973,6 +13001,14 @@ msgctxt "ask an admin to let a trigger start"
 msgid "Request"
 msgstr "Solicitar"
 
+#: src/connections/request-app-dialog.tsx
+msgid "Request {given}"
+msgstr "Solicitar {given}"
+
+#: src/connections/find-app.tsx
+msgid "Request {sought}"
+msgstr "Solicitar {sought}"
+
 #: src/workflows/workflow-triggers.tsx
 msgid "Request again"
 msgstr "Volver a solicitar"
@@ -12980,10 +13016,6 @@ msgstr "Volver a solicitar"
 #: src/connections/request-app-dialog.tsx
 msgid "Request an app"
 msgstr "Solicitar una app"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Request app"
-msgstr "Solicitar app"
 
 #: src/connections/requested-apps.tsx
 msgctxt "apps someone asked for"
@@ -17018,6 +17050,10 @@ msgstr "Prefiero escribir"
 #: src/interview/sound-check.tsx
 msgid "Type instead, without sound"
 msgstr "Prefiero escribir, sin sonido"
+
+#: src/connections/find-app.tsx
+msgid "Type the app's name to request it."
+msgstr "Escribe el nombre de la app para solicitarla."
 
 #: src/interview/page.tsx
 msgid "Type what is missing, or yes"

@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import { connectionErrorMessage } from "../connection-errors.ts";
 import { canConnect } from "../connections/connect-dialog.tsx";
 import { ConnectedDialog } from "../connections/connected-dialog.tsx";
+import { FindApp } from "../connections/find-app.tsx";
 import {
   HttpConnections,
   httpConnectionsMatching,
@@ -35,7 +36,7 @@ import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Empty } from "../grasp/empty/index.ts";
 import { visuallyHidden } from "../grasp/hidden/hidden.ts";
-import { Plus, Search as SearchIcon } from "../grasp/icons/index.ts";
+import { Search as SearchIcon } from "../grasp/icons/index.ts";
 import {
   InputGroup,
   InputGroupClear,
@@ -366,16 +367,36 @@ const Integrations = () => {
   const loaded = catalog.state === "ready" && connections.state === "ready";
   const opened = integrations.find((integration) => integration.key === app);
   const beside = opened !== undefined && wide;
-  const [requesting, setRequesting] = useState(false);
+  const [finding, setFinding] = useState(false);
+  // What to request, once the search handed a name over: the request is open.
+  const [requesting, setRequesting] = useState<string>();
+  const navigate = useNavigate({ from: "/integrations/" });
   // Every app that can still be added, before the search narrows them:
   // their card, and the search at its head, stand while any is left.
   const addable = sectionsOf(integrations, { show: "all" }).others;
   return (
     <>
+      <FindApp
+        integrations={integrations}
+        onApp={(key) => {
+          void navigate({
+            resetScroll: false,
+            search: (last) => ({ ...last, app: key }),
+          });
+        }}
+        onOpenChange={setFinding}
+        onRequest={setRequesting}
+        open={finding}
+      />
       <RequestAppDialog
         integrations={integrations}
-        onOpenChange={setRequesting}
-        open={requesting}
+        name={requesting ?? ""}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRequesting(undefined);
+          }
+        }}
+        open={requesting !== undefined}
       />
       <SiteHeader crumbs={[{ label: t`Integrations` }]} />
       <div ref={box} {...stylex.props(styles.whole, beside && styles.open)}>
@@ -384,13 +405,13 @@ const Integrations = () => {
             <PageHeading
               action={
                 <Button
-                  icon={Plus}
+                  icon={SearchIcon}
                   onClick={() => {
-                    setRequesting(true);
+                    setFinding(true);
                   }}
                   variant="quiet"
                 >
-                  {t`Request app`}
+                  {t`Find an app`}
                 </Button>
               }
               title={t`Integrations`}

@@ -211,19 +211,22 @@ const askedBefore = (
 
 const RequestFlow = ({
   integrations,
+  name: given,
 }: {
   integrations: readonly Integration[];
+  name: string;
 }) => {
   const { t } = useLingui();
   const formId = useId();
   const core = useCore();
   const { busy, failure, run } = useCoreAction();
   const router = useRouter();
-  const [name, setName] = useState("");
+  const [name, setName] = useState(given);
   const [url, setUrl] = useState("");
   const [why, setWhy] = useState("");
-  // Pressed once the apps shown are none of what is meant.
-  const [none, setNone] = useState(false);
+  // Pressed once the apps shown are none of what is meant; already so for
+  // a name the search handed over, where the apps were shown.
+  const [none, setNone] = useState(given !== "");
   const [asked, setAsked] = useState<Loaded<AppRequest[]>>();
   const [sent, setSent] = useState(false);
   // What was asked for already, read on its own: a failed read only
@@ -281,7 +284,14 @@ const RequestFlow = ({
   }
   return (
     <>
-      <DialogTitle>{t`Request an app`}</DialogTitle>
+      <DialogTitle>
+        {given === "" ? t`Request an app` : t`Request ${given}`}
+      </DialogTitle>
+      {given === "" ? null : (
+        <DialogDescription>
+          {t`Grasp checks what it takes to connect it. A link and what it should do there help.`}
+        </DialogDescription>
+      )}
       <DialogBody>
         <Form
           id={formId}
@@ -350,13 +360,18 @@ const RequestFlow = ({
   );
 };
 
-/** The Request app dialog; `integrations` is the page's whole list. */
+/**
+ * The Request app dialog; `integrations` is the page's whole list, and
+ * `name` what was sought where the search (find-app.tsx) handed it over.
+ */
 export const RequestAppDialog = ({
   integrations,
+  name = "",
   onOpenChange,
   open,
 }: {
   integrations: readonly Integration[];
+  name?: string;
   onOpenChange: (open: boolean) => void;
   open: boolean;
 }) => {
@@ -365,7 +380,7 @@ export const RequestAppDialog = ({
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent closeLabel={t`Close`}>
         {/* Mounted only while open, so it starts empty each time. */}
-        {open ? <RequestFlow integrations={integrations} /> : null}
+        {open ? <RequestFlow integrations={integrations} name={name} /> : null}
       </DialogContent>
     </Dialog>
   );
