@@ -204,11 +204,13 @@ describe("a pending request in a list's row", () => {
       named: requestRow(reads, named),
       both: requestRow(both, named),
       unnamed: requestRow(reads, directory),
+      unnamedWords: requestWords(reads, directory).includes(id),
       other: requestRow(onApp(["read"]), directory),
     }).toStrictEqual({
       named: `${asker} may read Finance`,
       both: `${asker} may read and change Finance`,
       unnamed: `${asker} may read a collection`,
+      unnamedWords: false,
       other: subjectOf(onApp(["read"]), directory),
     });
   });

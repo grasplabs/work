@@ -1771,6 +1771,10 @@ msgstr "Un cambio"
 msgid "A change applies to runs that start after it."
 msgstr "Un cambio se aplica a las ejecuciones que empiezan después."
 
+#: src/activity/pending.tsx
+msgid "a collection"
+msgstr "una colección"
+
 #: src/apps/app-access-requests.tsx
 #: src/apps/draft-changes.tsx
 msgid "A collection"

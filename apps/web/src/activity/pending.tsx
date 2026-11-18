@@ -125,9 +125,13 @@ export const objectOf = (
       : i18n._(msg`Connection ${connectionId}, ${resource}`);
   }
   if (object.type === "collection") {
-    const collection =
-      directory.collections?.get(object.collectionId) ?? object.collectionId;
-    return i18n._(msg`Collection ${collection}`);
+    // The request carries the collection's ID only, and an admin lists only
+    // the collections they can read: one they can't is "a collection", as
+    // `requestRow` says it, never its ID.
+    const collection = directory.collections?.get(object.collectionId);
+    return collection === undefined
+      ? i18n._(msg`a collection`)
+      : i18n._(msg`Collection ${ph({ collection })}`);
   }
   if (object.type === "app" && object.function !== undefined) {
     // A workflow's permission on one function, by its ID, named by its

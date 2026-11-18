@@ -5,7 +5,11 @@ import { useRouter } from "@tanstack/react-router";
 import { useId } from "react";
 import type { ReactNode } from "react";
 
-import { grantReviewed, reviewedVersion } from "../activity/pending.tsx";
+import {
+  grantReviewed,
+  requestAsker,
+  reviewedVersion,
+} from "../activity/pending.tsx";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import {
   confirmHeld,
@@ -524,7 +528,7 @@ const RequestItem = ({
       onDecline={async (session) =>
         await session.permissions.revoke(request.id)
       }
-      who={frame.item.context}
+      who={requestAsker(request, pending.directory)}
     />
   );
 };
