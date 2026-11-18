@@ -77,7 +77,9 @@ const ChatBox = ({
 }) => {
   const { t } = useLingui();
   const room = useRef<HTMLDivElement>(null);
-  // The cursor is in the box, so typing is all it takes.
+  // The cursor is in the box, so typing is all it takes. Found by its
+  // textarea, since Composer takes no ref: this goes once the library gives
+  // Composer a way to take focus.
   useEffect(() => {
     room.current?.querySelector("textarea")?.focus({ preventScroll: true });
   }, []);
