@@ -1,4 +1,4 @@
-import { syncPageSchema } from "@grasp-os/shared/sync";
+import { syncPageSchema, syncPlacesSchema } from "@grasp-os/shared/sync";
 import type { SyncItemKind, SyncPage } from "@grasp-os/shared/sync";
 import { z } from "zod";
 
@@ -7,6 +7,7 @@ import {
   syncManifestSchema,
   syncNameSchema,
   syncParamsSchema,
+  syncPlacesParamsSchema,
 } from "./manifest.ts";
 import type { Route, SyncManifest } from "./manifest.ts";
 
@@ -31,6 +32,13 @@ export const syncResultSchema = z.union([
   z.strictObject({ failure: syncFailureSchema }),
 ]);
 export type SyncResult = z.infer<typeof syncResultSchema>;
+
+/** A connector's answer to `syncPlacesMethod`: places, or why there are none. */
+export const syncPlacesResultSchema = z.union([
+  syncPlacesSchema,
+  z.strictObject({ failure: syncFailureSchema }),
+]);
+export type SyncPlacesResult = z.infer<typeof syncPlacesResultSchema>;
 
 /**
  * Thrown by a sync's `read` when the provider no longer has the cursor (a
@@ -57,6 +65,13 @@ export interface SyncDefinition {
    * owns. A page stays within what connect reads of a connector's answer.
    */
   read: (params: { place: string; cursor: string | null }) => Promise<SyncPage>;
+  /**
+   * The places of the connection's own account it reads, each a source of
+   * its own with its own cursor (a mailbox's folders): none for a sync that
+   * reads the whole account (`own`). A place it doesn't read any more is
+   * left out; core then drops its source.
+   */
+  places?: () => Promise<readonly string[]>;
 }
 
 /** A sync, as a connector carries it. */
@@ -65,6 +80,8 @@ export interface Sync {
   manifest: SyncManifest;
   /** Answers `syncMethod`'s params with a page or a failure. */
   call: (params: unknown) => Promise<SyncResult>;
+  /** Answers `syncPlacesMethod`'s params with places or a failure. */
+  places: (params: unknown) => Promise<SyncPlacesResult>;
 }
 
 /** The failure an error a sync threw stands for. */
@@ -89,8 +106,24 @@ export const defineSync = (definition: SyncDefinition): Sync => ({
   name: syncNameSchema.parse(definition.name),
   manifest: syncManifestSchema.parse({
     kind: definition.kind,
+    places: definition.places === undefined ? "own" : "listed",
     routes: definition.routes,
   }),
+  places: async (params) => {
+    syncPlacesParamsSchema.parse(params);
+    if (definition.places === undefined) {
+      return { failure: { code: "failed" } };
+    }
+    let places: unknown;
+    try {
+      places = { places: await definition.places() };
+    } catch (error) {
+      return { failure: failureOf(error) };
+    }
+    // A list with one place that isn't one is refused whole.
+    const parsed = syncPlacesSchema.safeParse(places);
+    return parsed.success ? parsed.data : { failure: { code: "failed" } };
+  },
   call: async (params) => {
     const asked = syncParamsSchema.parse(params);
     let page: unknown;
