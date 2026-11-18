@@ -38,6 +38,7 @@ import type {
   ChatOutput,
   ChatPlan,
   ChatProvenance,
+  ChatRating,
   ChatSearchHit,
   ChatSearchSnippet,
   ChatSummary,
@@ -4734,6 +4735,40 @@ export class Workspace extends DurableObject<Env> {
     return removed;
   }
 
+  /**
+   * Keeps what `personId` thought of an answer of their own chat, or
+   * takes it back (`null`): refused for anything but an answer of that
+   * chat. Not audited: it is the person's own note on their own chat,
+   * which nobody else reads and nothing acts on.
+   */
+  rateAnswer(
+    chatId: unknown,
+    personId: string,
+    messageId: number,
+    rating: ChatRating | null
+  ): void {
+    const { id } = this.#graspChat(chatId, personId);
+    const row = this.#db
+      .select({ message: chatMessages.message })
+      .from(chatMessages)
+      .where(and(eq(chatMessages.chatId, id), eq(chatMessages.id, messageId)))
+      .get();
+    if (
+      row === undefined ||
+      storedMessageSchema.parse(JSON.parse(row.message)).role !== "assistant"
+    ) {
+      throw agentErrors.create("agent.invalid_request");
+    }
+    this.#db
+      .update(chatMessages)
+      .set({
+        rating: rating?.value ?? null,
+        ratingReason: rating?.reason ?? null,
+      })
+      .where(eq(chatMessages.id, messageId))
+      .run();
+  }
+
   /** Renames `personId`'s own chat, audited as `by`'s. */
   renameChat(
     chatId: unknown,
@@ -5334,7 +5369,8 @@ export class Workspace extends DurableObject<Env> {
       .where(and(eq(chatMessages.chatId, chatId), gt(chatMessages.id, after)))
       .orderBy(asc(chatMessages.id))
       .all()
-      .flatMap(({ id, message, createdAt, thinkingMs, built, agentId }) => {
+      .flatMap((row) => {
+        const { id, message, createdAt, thinkingMs, built, agentId } = row;
         const stored = storedMessageSchema.parse(JSON.parse(message));
         const run = resultRunId(stored);
         const shown = withFiles(
@@ -5351,7 +5387,22 @@ export class Workspace extends DurableObject<Env> {
           ),
           carried
         );
-        return shown === undefined ? [] : [shown];
+        if (shown === undefined) {
+          return [];
+        }
+        return shown.role === "assistant" && row.rating !== null
+          ? [
+              {
+                ...shown,
+                rating: {
+                  value: row.rating,
+                  ...(row.ratingReason === null
+                    ? {}
+                    : { reason: row.ratingReason }),
+                },
+              },
+            ]
+          : [shown];
       });
   }
 
