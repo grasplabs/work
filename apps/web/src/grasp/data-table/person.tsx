@@ -17,6 +17,12 @@ export interface DataTablePersonProps {
   detail?: string;
   /** Their picture; without it, the initials. */
   src?: string;
+  /**
+   * The avatar's size: `sm` beside two lines (a name and its email), `xs` for a dense row or a name
+   * alone. The words keep the table's text size.
+   * @default "sm"
+   */
+  size?: "xs" | "sm";
 }
 
 const styles = stylex.create({
@@ -26,6 +32,9 @@ const styles = stylex.create({
     gap: grasp.space2,
     minWidth: 0,
   },
+  // A name alone stands in a box one line of the table's text tall, as a control in a cell does:
+  // the picture, taller than the line, reaches into the cell's padding and the row keeps its height.
+  oneLine: { height: grasp.tableTextLine },
   words: { display: "grid", minWidth: 0 },
   name: {
     overflow: "hidden",
@@ -46,10 +55,17 @@ export const DataTablePerson = ({
   name,
   detail,
   src,
+  size = "sm",
 }: DataTablePersonProps) => (
-  <span data-slot="data-table-person" {...stylex.props(styles.person)}>
+  <span
+    data-slot="data-table-person"
+    {...stylex.props(
+      styles.person,
+      (detail === undefined || detail === "") && styles.oneLine
+    )}
+  >
     {/* The name stands beside it in words, so the picture is decorative. */}
-    <Avatar name={name} size="sm" decorative>
+    <Avatar name={name} size={size} decorative>
       {src !== undefined && src !== "" && <AvatarImage src={src} />}
       <AvatarFallback />
     </Avatar>

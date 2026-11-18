@@ -77,15 +77,22 @@ export const styles = stylex.create({
     whiteSpace: "nowrap",
     color: "transparent",
   },
-  // A group's heading row: its toggle, its value, and how many rows it holds.
+  // A group's heading row: its toggle, its value as a heading, and how many rows it holds as a Badge.
+  // A step above a row in size and weight (the grouped Section card's title: 15 on 24 at semibold),
+  // with more room above it than below, so it belongs to the rows under it.
   group: {
     display: "inline-flex",
     alignItems: "center",
     gap: grasp.space2,
-    height: grasp.tableTextLine,
+    height: grasp.textMdLine,
+    marginBlockStart: grasp.space3,
     verticalAlign: "top",
+    fontSize: grasp.textMd,
+    lineHeight: grasp.textMdLine,
+    fontWeight: grasp.weightSemibold,
+    color: grasp.ink,
   },
-  groupCount: { color: grasp.muted, fontVariantNumeric: "tabular-nums" },
+  groupCount: { fontVariantNumeric: "tabular-nums" },
   // The first cell of a row that opens: its toggle, then its words.
   // Held to the line's height and top: an inline box of controls on the text's baseline would
   // take its baseline from a button's bottom edge and stretch the row.

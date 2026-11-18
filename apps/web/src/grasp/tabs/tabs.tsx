@@ -19,6 +19,7 @@
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
 import type { ChangeDetails } from "@ui-sdk/core";
+import { renderElement } from "@ui-sdk/react/primitive";
 import {
   Tabs as TabsPrimitive,
   TabsList as TabsListPrimitive,
@@ -27,14 +28,18 @@ import {
 } from "@ui-sdk/react/tabs";
 import type { TabsListState, TabsTabState } from "@ui-sdk/react/tabs";
 import { createContext, useContext } from "react";
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps, KeyboardEvent, ReactNode } from "react";
 
 import { focus, focusMarker } from "../focus/focus";
+import { Cross, Icon } from "../icons";
+import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { glide, spanOf } from "../motion/glide";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { useWords } from "../words/words";
 import { fadeVars } from "./fade.stylex";
 import { rowMarker } from "./tabs.stylex";
+import { tabsWords } from "./words";
 
 /** What a caller may style: where the tabs sit. Never their look. */
 export type TabsLayoutStyle = LayoutStyle;
@@ -93,6 +98,13 @@ export interface TabsTriggerProps extends Omit<
    * @default false
    */
   disabled?: boolean;
+  /**
+   * The tab can be closed (an open file): a small × at its end, its own button named "Close" and the
+   * tab's words, and Delete on the focused tab. Runs when either closes it; take the tab out, and
+   * choose another if it was the chosen one. Focus moves to the tab beside it. The × keeps its room
+   * whether it shows or not, so the tab never changes size.
+   */
+  onClose?: () => void;
 }
 
 /** Every prop a TabsPanel takes. */
@@ -292,6 +304,59 @@ const styles = stylex.create({
     // wide target; up and down the tab is tall enough already.
     insetInline: `calc(-1 * ${grasp.tabGap} / 2)`,
     insetBlock: 0,
+  },
+  // A tab that can be closed and its ×: side by side in one box, the × over room the tab keeps at
+  // its end, so the tab (and its line) runs under it and never changes size.
+  closable: {
+    position: "relative",
+    display: "inline-flex",
+    flexShrink: 0,
+  },
+  // The words' focus ring stands space-1 off them: the × stands a step further, clear of it.
+  closeRoom: {
+    paddingInlineEnd: `calc(${grasp.iconSm} + ${grasp.space1} + ${grasp.space2})`,
+  },
+  closeRoomSegment: {
+    paddingInlineEnd: `calc(${grasp.space3} + ${grasp.iconSm} + ${grasp.space1})`,
+  },
+  close: {
+    [iconVars.size]: `calc(${grasp.iconSm} * 0.75)`,
+    [iconVars.stroke]: grasp.iconStroke,
+    position: "absolute",
+    insetBlockStart: "50%",
+    insetInlineEnd: 0,
+    translate: "0 -50%",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: `calc(${grasp.iconSm} + ${grasp.space1})`,
+    height: `calc(${grasp.iconSm} + ${grasp.space1})`,
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    borderRadius: grasp.cornerCircle,
+    backgroundColor: {
+      default: "transparent",
+      ":hover": { default: null, [HOVER]: grasp.ghostFillHover },
+    },
+    color: {
+      default: grasp.muted,
+      ":hover": { default: null, [HOVER]: grasp.ink },
+    },
+    cursor: "pointer",
+    WebkitTapHighlightColor: "transparent",
+    transitionProperty: "color, background-color",
+    transitionDuration: grasp.durationHover,
+    transitionTimingFunction: grasp.ease,
+    // A finger's target round it, 24px at least (WCAG 2.5.8), unseen.
+    "::after": {
+      content: '""',
+      position: "absolute",
+      inset: `calc(-1 * ${grasp.space1} / 2)`,
+    },
+  },
+  closeSegment: {
+    insetInlineEnd: grasp.space2,
   },
   // Its focus ring (a panel takes focus when it has nothing focusable) follows the system's corner
   // and stands clear of the words: room on each side, given back by the margin, so the words keep
@@ -493,27 +558,62 @@ export const TabsList = ({ children, ...rest }: TabsListProps) => {
   );
 };
 
-/** One tab: a short noun for its view ("Activity"). */
-export const TabsTrigger = ({ children, ...rest }: TabsTriggerProps) => {
-  const segmented = useContext(Variant) === "segmented";
-  return (
-    <TabsTabPrimitive
-      {...rest}
-      className={(state: TabsTabState) =>
-        stylex.props(
-          styles.tab,
-          segmented && styles.segment,
-          !state.disabled && !state.selected && styles.live,
-          segmented && !state.disabled && !state.selected && styles.segmentLive,
-          state.selected && (segmented ? styles.segmentChosen : styles.chosen),
-          state.disabled && styles.disabled,
-          // A segment has its corner, so the ring follows it, inside: the row scrolls, so a ring
-          // outside would be cut. A line tab runs edge to edge with no corner, so its ring goes
-          // round its words instead, never as a square box round the whole tab.
-          segmented ? focus.inside : [focusMarker, focus.carrier]
-        ).className
+/** The tab beside `tab` in its list, after it or else before it: where focus goes when it closes. */
+const besideOf = (tab: HTMLElement) => {
+  const tabs = [
+    ...(tab
+      .closest("[role=tablist]")
+      ?.querySelectorAll<HTMLElement>("[role=tab]") ?? []),
+  ];
+  const at = tabs.indexOf(tab);
+  return tabs[at + 1] ?? tabs[at - 1] ?? null;
+};
+
+/**
+ * Closes the tab: runs `onClose`, and when focus was on the tab or its ×, gives it to the tab beside
+ * it once the closed one is gone.
+ */
+const closeTab = (tab: HTMLElement | null, onClose: () => void) => {
+  const box = tab?.parentElement;
+  const held =
+    box !== null && box !== undefined && box.contains(document.activeElement);
+  const beside = tab ? besideOf(tab) : null;
+  onClose();
+  if (held && beside) {
+    requestAnimationFrame(() => {
+      if (beside.isConnected) {
+        beside.focus();
       }
-    >
+    });
+  }
+};
+
+const tabClass =
+  (segmented: boolean, closable: boolean) => (state: TabsTabState) =>
+    stylex.props(
+      styles.tab,
+      segmented && styles.segment,
+      !state.disabled && !state.selected && styles.live,
+      segmented && !state.disabled && !state.selected && styles.segmentLive,
+      state.selected && (segmented ? styles.segmentChosen : styles.chosen),
+      state.disabled && styles.disabled,
+      closable && (segmented ? styles.closeRoomSegment : styles.closeRoom),
+      // A segment has its corner, so the ring follows it, inside: the row scrolls, so a ring
+      // outside would be cut. A line tab runs edge to edge with no corner, so its ring goes
+      // round its words instead, never as a square box round the whole tab.
+      segmented ? focus.inside : [focusMarker, focus.carrier]
+    ).className;
+
+/** One tab: a short noun for its view ("Activity"). */
+export const TabsTrigger = ({
+  children,
+  onClose,
+  ...rest
+}: TabsTriggerProps) => {
+  const segmented = useContext(Variant) === "segmented";
+  const words = useWords("tabs", tabsWords);
+  const inside = (
+    <>
       <span
         aria-hidden="true"
         {...stylex.props(styles.target, segmented && styles.targetSegment)}
@@ -523,6 +623,57 @@ export const TabsTrigger = ({ children, ...rest }: TabsTriggerProps) => {
       ) : (
         <span {...stylex.props(focus.label, styles.label)}>{children}</span>
       )}
+    </>
+  );
+  if (onClose === undefined) {
+    return (
+      <TabsTabPrimitive {...rest} className={tabClass(segmented, false)}>
+        {inside}
+      </TabsTabPrimitive>
+    );
+  }
+  // Its name for the ×: the tab's words, or its value when the words are not plain text.
+  const name = typeof children === "string" ? children : rest.value;
+  return (
+    <TabsTabPrimitive
+      {...rest}
+      className={tabClass(segmented, true)}
+      onKeyDown={(event: KeyboardEvent<HTMLButtonElement>) => {
+        rest.onKeyDown?.(event);
+        if (event.key === "Delete" && !event.defaultPrevented) {
+          event.preventDefault();
+          closeTab(event.currentTarget, onClose);
+        }
+      }}
+      render={(props: Record<string, unknown>, state: TabsTabState) => (
+        <span data-tab-closable="" {...stylex.props(styles.closable)}>
+          {renderElement("button", props)}
+          <button
+            type="button"
+            aria-label={words.close(name)}
+            // The chosen tab's × is the one Tab stop after it; the others are reached by the arrows
+            // and closed with Delete, as the tabs pattern asks.
+            tabIndex={state.selected ? 0 : -1}
+            onClick={(event) => {
+              closeTab(
+                event.currentTarget.parentElement?.querySelector<HTMLElement>(
+                  "[role=tab]"
+                ) ?? null,
+                onClose
+              );
+            }}
+            {...stylex.props(
+              styles.close,
+              segmented && styles.closeSegment,
+              focus.ring
+            )}
+          >
+            <Icon icon={Cross} />
+          </button>
+        </span>
+      )}
+    >
+      {inside}
     </TabsTabPrimitive>
   );
 };

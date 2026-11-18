@@ -4284,6 +4284,10 @@ msgstr "Effacer les filtres"
 msgid "Clear search"
 msgstr "Effacer la recherche"
 
+#: src/frame/part-words.tsx
+msgid "Clear the filter"
+msgstr "Effacer le filtre"
+
 #: src/activity/audit-log.tsx
 msgid "Clear the search"
 msgstr "Effacer la recherche"
@@ -6478,6 +6482,10 @@ msgstr "Fichiers à envoyer"
 #: src/workflows/start-run.tsx
 msgid "Fill this in."
 msgstr "Remplissez ce champ."
+
+#: src/frame/part-words.tsx
+msgid "Filter"
+msgstr "Filtrer"
 
 #: src/brain/brain-transcript.tsx
 msgctxt "open the filters"
@@ -9161,6 +9169,10 @@ msgstr "Budget mensuel pour l’IA"
 msgid "More"
 msgstr "Plus"
 
+#: src/frame/part-words.tsx
+msgid "More about {header}"
+msgstr "En savoir plus sur {header}"
+
 #: src/apps/app-settings.tsx
 msgid "More about copies"
 msgstr "En savoir plus sur les copies"
@@ -9427,6 +9439,10 @@ msgstr "Cite {title} sous {under}"
 #: src/chat/plan-card.tsx
 msgid "Needs {name} connected"
 msgstr "Nécessite {name} connecté"
+
+#: src/frame/part-words.tsx
+msgid "needs attention"
+msgstr "demande votre attention"
 
 #: src/connections/integration-item.tsx
 msgid "Needs its own sign-in app"

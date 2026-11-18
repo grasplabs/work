@@ -69,6 +69,12 @@ export interface TableHeadProps {
     | "onDrop"
     | "onDragEnd"
   > & { "data-drop"?: "before" | "after" };
+  /**
+   * The column goes when the table's own box is narrower than the library's phone (40rem) or tablet
+   * (48rem) breakpoint: measured on the table's box, not the window. What it holds must also be
+   * somewhere else in the row or a step away, never only here.
+   */
+  hideBelow?: "phone" | "tablet";
 }
 
 const icons = {
@@ -85,6 +91,17 @@ export const placeOf = (pin: TablePin | undefined, width?: number) => [
 ];
 
 /** How a held cell looks: on the table's ground, its lift on its open side. */
+/** A column that goes below a breakpoint of the table's box (TableHead, TableCell). */
+export const hideLook = (below: "phone" | "tablet" | undefined) => {
+  if (below === "phone") {
+    return styles.hideBelowPhone;
+  }
+  if (below === "tablet") {
+    return styles.hideBelowTablet;
+  }
+  return null;
+};
+
 export const pinLook = (pin: TablePin | undefined) => [
   pin !== undefined && styles.pinned,
   pin?.edge === true && pin.side === "start" && styles.edgeStart,
@@ -176,6 +193,7 @@ export const TableHead = ({
   end: after = afterDeprecated,
   drag,
   column,
+  hideBelow,
 }: TableHeadProps) => {
   const density = useDensity();
   const stickyHead = useStickyHead();
@@ -205,7 +223,8 @@ export const TableHead = ({
         lookOf(headLook, state !== "none"),
         drop === "before" && styles.dropBefore,
         drop === "after" && styles.dropAfter,
-        placeOf(pin, width)
+        placeOf(pin, width),
+        hideLook(hideBelow)
       )}
     >
       {onSort === undefined ? (

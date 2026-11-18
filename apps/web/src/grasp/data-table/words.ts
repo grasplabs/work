@@ -139,6 +139,11 @@ export interface DataTableWords {
    */
   width: (header: string) => string;
   /**
+   * A column's info mark: "More about Role".
+   * @default More about {header}
+   */
+  columnInfo: (header: string) => string;
+  /**
    * A sorted head's place in a sort by several: ", sorted second".
    * @default , sorted {first, second, third, fourth, fifth, then 6th}
    */
@@ -166,6 +171,11 @@ export interface DataTableWords {
    * @default Close {name}
    */
   close: (name: string) => string;
+  /**
+   * Said after a group's name when it asks for attention (`groupTone`): ", needs attention".
+   * @default needs attention
+   */
+  groupAttention: string;
   /**
    * No rows yet: "No reports yet."
    * @default No {many} yet.
@@ -241,12 +251,14 @@ export const englishWords: DataTableWords = {
   moveLater: "Move later",
   hide: "Hide column",
   width: (header) => `Width of ${header}`,
+  columnInfo: (header) => `More about ${header}`,
   sortedPlace: (place) => `, sorted ${places[place - 1] ?? `${place}th`}`,
   exportCsv: "Export CSV",
   actions: "Actions",
   actionsFor: (name) => `Actions for ${name}`,
   open: (name) => `Open ${name}`,
   close: (name) => `Close ${name}`,
+  groupAttention: "needs attention",
   noneYet: (many) => `No ${many} yet.`,
   noMatch: (many, query) => `No ${many} match “${query}”.`,
   noneMeet: (many) => `No ${many} meet the filter.`,

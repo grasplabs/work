@@ -140,9 +140,13 @@ const styles = stylex.create({
     flexBasis: { default: "auto", [NARROW_CARD]: "100%" },
     minWidth: 0,
     maxWidth: "100%",
-    // On the title's line they may give back some of their height (a grouped Section card's, so its
-    // card stands as far under an action as under a sentence); on a line of their own, none.
-    marginBlock: { default: sectionHeaderVars.actionsTrim, [NARROW_CARD]: 0 },
+    // On the title's line they may give back room above themselves (a grouped Section card's, so an
+    // xs button's foot meets the line's and its card stands 8px under both); on a line of their own,
+    // none. Never below: what is there stays whole.
+    marginBlockStart: {
+      default: sectionHeaderVars.actionsTrim,
+      [NARROW_CARD]: 0,
+    },
     // Above a Section card's drag handle, which lies over the header: they stay pressable.
     position: "relative",
     zIndex: 1,

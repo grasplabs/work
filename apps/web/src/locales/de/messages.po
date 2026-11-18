@@ -4284,6 +4284,10 @@ msgstr "Filter zurücksetzen"
 msgid "Clear search"
 msgstr "Suche löschen"
 
+#: src/frame/part-words.tsx
+msgid "Clear the filter"
+msgstr "Filter leeren"
+
 #: src/activity/audit-log.tsx
 msgid "Clear the search"
 msgstr "Suche löschen"
@@ -6478,6 +6482,10 @@ msgstr "Zu sendende Dateien"
 #: src/workflows/start-run.tsx
 msgid "Fill this in."
 msgstr "Bitte ausfüllen."
+
+#: src/frame/part-words.tsx
+msgid "Filter"
+msgstr "Filtern"
 
 #: src/brain/brain-transcript.tsx
 msgctxt "open the filters"
@@ -9161,6 +9169,10 @@ msgstr "Monatliches Budget für KI"
 msgid "More"
 msgstr "Mehr"
 
+#: src/frame/part-words.tsx
+msgid "More about {header}"
+msgstr "Mehr zu {header}"
+
 #: src/apps/app-settings.tsx
 msgid "More about copies"
 msgstr "Mehr zu Kopien"
@@ -9427,6 +9439,10 @@ msgstr "Nennt {title} unter {under}"
 #: src/chat/plan-card.tsx
 msgid "Needs {name} connected"
 msgstr "Braucht eine Verbindung zu {name}"
+
+#: src/frame/part-words.tsx
+msgid "needs attention"
+msgstr "braucht Aufmerksamkeit"
 
 #: src/connections/integration-item.tsx
 msgid "Needs its own sign-in app"

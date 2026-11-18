@@ -4,7 +4,7 @@
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
-import { pinLook, placeOf } from "./head";
+import { hideLook, pinLook, placeOf } from "./head";
 import { useRangeLook } from "./look";
 import { useDensity } from "./section-context";
 import type { TablePin } from "./section-context";
@@ -47,7 +47,30 @@ export interface TableCellProps {
    * @default false
    */
   wrap?: boolean;
+  /**
+   * The column goes when the table's own box is narrower than the library's phone (40rem) or tablet
+   * (48rem) breakpoint: measured on the table's box, not the window. What it holds must also be
+   * somewhere else in the row or a step away, never only here.
+   */
+  hideBelow?: "phone" | "tablet";
+  /**
+   * It stays in view under the table's head while the rows under it scroll, in a table whose rows
+   * scroll inside its box: a group's heading.
+   * @default false
+   */
+  sticky?: boolean;
 }
+
+/** Where it stands beyond its own look: gone below a width of the table's box, held under the head. */
+const placeLook = (
+  hideBelow: TableCellProps["hideBelow"],
+  sticky: boolean | undefined,
+  compact: boolean
+) => [
+  hideLook(hideBelow),
+  sticky === true && styles.stickyCell,
+  sticky === true && compact && styles.stickyCompact,
+];
 
 /** One fact in a row. The row's lead cell names the row. */
 export const TableCell = ({
@@ -59,6 +82,8 @@ export const TableCell = ({
   clip = false,
   title,
   wrap = false,
+  hideBelow,
+  sticky,
 }: TableCellProps) => {
   const density = useDensity();
   const range = useRangeLook();
@@ -74,7 +99,8 @@ export const TableCell = ({
     pinLook(pin),
     pin !== undefined && range === "mint" && styles.pinnedMint,
     pin?.above === true && styles.aboveBody,
-    placeOf(pin)
+    placeOf(pin),
+    placeLook(hideBelow, sticky, density === "compact")
   );
   if (lead) {
     return (

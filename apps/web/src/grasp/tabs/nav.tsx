@@ -111,17 +111,20 @@ const styles = stylex.create({
     display: "inline-flex",
     flexShrink: 0,
   },
-  // The words in a column that eases between their width and none, so a compact link's words come
-  // and go without a jump; at once under reduced motion.
+  // The words in a column that eases between their width and none, fading as they go, so a compact
+  // link's words come and go without a jump or a cut letter left standing; at once under reduced
+  // motion.
   words: {
     display: "inline-grid",
     gridTemplateColumns: "minmax(0, 1fr)",
-    transitionProperty: "grid-template-columns",
+    opacity: 1,
+    transitionProperty: "grid-template-columns, opacity",
     transitionDuration: simply.mark,
     transitionTimingFunction: grasp.ease,
   },
   wordsAway: {
     gridTemplateColumns: "minmax(0, 0fr)",
+    opacity: 0,
   },
   wordsInner: {
     minWidth: 0,

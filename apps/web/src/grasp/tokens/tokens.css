@@ -1597,7 +1597,7 @@
   /* The layer a page's own bar and the dock stand on, above what scrolls in the page's card. */
   --grasp-shell-page-layer: 30;
   /* The width the dock gives what it holds (the chat's idle bar), or the dock's whole width when that is less. */
-  --grasp-shell-dock-width: 26rem;
+  --grasp-shell-dock-width: 32rem;
   /* The room under the last thing on a page. */
   --grasp-shell-page-room-below: 32px;
   /* The room under a page with a chat box floating over its foot, so its last row scrolls clear. */
@@ -2070,6 +2070,12 @@
   --grasp-inspector-tile-icon: 24px;
   /* The tile's corner, in the system's squircle: the corner a 40px square takes. */
   --grasp-inspector-tile-corner: 14px;
+  /* The small tile, for an object in a dense table row: as tall as a person's picture there. */
+  --grasp-inspector-tile-sm: var(--grasp-avatar-xs);
+  /* The icon inside the small tile. */
+  --grasp-inspector-tile-sm-icon: 14px;
+  /* The small tile's corner, in the system's squircle: the corner a 24px square takes. */
+  --grasp-inspector-tile-sm-corner: 8px;
   /* The quiet tile: a wash of the light's mint behind the icon. */
   --grasp-inspector-tile-tint: light-dark(
     oklch(0.8005 0.1625 165.25 / 0.14),

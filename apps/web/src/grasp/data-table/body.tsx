@@ -227,6 +227,7 @@ export const Body = <Row extends RowData>({
             row={row}
             groupBy={groupBy}
             words={words}
+            tone={props.groupTone?.(String(row.getGroupingValue(groupBy)))}
           />
         ) : (
           <DataRow

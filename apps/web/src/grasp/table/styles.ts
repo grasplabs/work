@@ -151,6 +151,23 @@ export const tableStyles = stylex.create({
     borderBlockEndStyle: "solid",
     borderBlockEndColor: grasp.line,
   },
+  // A column that goes when the table's own box (the scroller, a container) is narrower than the
+  // library's phone or tablet breakpoint (tokens' media: 40rem and 48rem).
+  // A cell that stays in view under the table's head while the rows under it scroll (a group's
+  // heading), in a table whose rows scroll inside its box: on the table's paper, under the head.
+  stickyCell: {
+    position: "sticky",
+    top: grasp.tableHeadHeight,
+    zIndex: 1,
+    backgroundColor: grasp.paper,
+  },
+  stickyCompact: { top: grasp.tableHeadHeightCompact },
+  hideBelowPhone: {
+    display: { default: null, "@container (width < 40rem)": "none" },
+  },
+  hideBelowTablet: {
+    display: { default: null, "@container (width < 48rem)": "none" },
+  },
   // A row kept for its widths: it takes no room and is not drawn, but its cells still size the columns.
   collapsed: { visibility: "collapse" },
   // A row of the body: lit under a pointer, and its last one leaves the hairline to the footer.

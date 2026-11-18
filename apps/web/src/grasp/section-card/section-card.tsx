@@ -180,14 +180,15 @@ const styles = stylex.create({
     rowGap: grasp.space2,
     minWidth: 0,
   },
-  // A small button on the title's line is no taller than the line: the card stands 8px under the
-  // head's last line whether that is the title with an action or a sentence. The title is a
-  // group's (Section header's `group`): text-md, its sentence text-sm.
+  // An xs button on the title's line rises above it so its foot meets the line's: the head ends
+  // there, 8px over its card, as a head with a sentence does under the sentence. Put xs actions in
+  // a grouped head; a taller control keeps its whole box, and the card stands 8px under it. The
+  // title is a group's (Section header's `group`): text-md, its sentence text-sm.
   groupedHead: {
     paddingInline: grasp.space5,
     containerType: "inline-size",
     containerName: "section-card-head",
-    [sectionHeaderVars.actionsTrim]: `min(0px, calc((${grasp.textMdLine} - ${grasp.controlSm}) / 2))`,
+    [sectionHeaderVars.actionsTrim]: `min(0px, calc(${grasp.textMdLine} - ${grasp.controlXs}))`,
   },
   groupedHeadCompact: { paddingInline: grasp.space4 },
   // Over the header, under its actions (SectionHeader lifts them): the whole row but the buttons
