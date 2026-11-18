@@ -1,0 +1,1 @@
+ALTER TABLE `teams` ADD `minted` integer DEFAULT false NOT NULL;

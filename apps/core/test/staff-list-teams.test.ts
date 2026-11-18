@@ -1,16 +1,20 @@
+import { rosterSchema } from "@grasp-os/shared/onboarding";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { intoMembersTeams } from "../src/staff-list-teams.ts";
 import { adminCommands } from "./admin-command.ts";
+import { add, markerWord, textsFor } from "./brain-next-leaks-harness.ts";
 import { mockIdp } from "./idp.ts";
 import { agree, fact, team as teamOnTheList } from "./onboarding-team.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import {
   auditedDuring,
   callAuth,
+  openRpc,
   routed,
   signedInApi,
   unique,
@@ -77,7 +81,8 @@ const shapeOf = async (id: string) => {
 
 /**
  * `env` with its D1 binding running `land` once, around the first
- * statement whose SQL `matches`: just before it runs, or just after. Every
+ * statement, or batch holding one, whose SQL `matches`: just before it
+ * runs, or just after. Every
  * statement still runs on the real database, in the order the code under
  * test sends it; only `land` comes in between, through its own requests.
  * `landed` says whether it came at all.
@@ -95,6 +100,7 @@ const landingAt = (
     }
   };
   const real = new WeakMap<object, D1PreparedStatement>();
+  const queries = new WeakMap<object, string>();
   const runs = new Set<PropertyKey>(["run", "all", "raw", "first"]);
   const watched = (
     statement: D1PreparedStatement,
@@ -127,6 +133,7 @@ const landingAt = (
       },
     });
     real.set(wrapped, statement);
+    queries.set(wrapped, query);
     return wrapped;
   };
   const db = new Proxy(env.DB, {
@@ -135,10 +142,21 @@ const landingAt = (
         return (query: string) => watched(target.prepare(query), query);
       }
       if (key === "batch") {
-        return async (statements: D1PreparedStatement[]) =>
-          await target.batch(
+        return async (statements: D1PreparedStatement[]) => {
+          const named = statements.some((statement) =>
+            matches.test(queries.get(statement) ?? "")
+          );
+          if (named && when === "before") {
+            await once();
+          }
+          const results = await target.batch(
             statements.map((statement) => real.get(statement) ?? statement)
           );
+          if (named && when === "after") {
+            await once();
+          }
+          return results;
+        };
       }
       const value: unknown = Reflect.get(target, key, target);
       return typeof value === "function"
@@ -169,6 +187,31 @@ const addByHand = async (
     },
     coreEnv
   );
+
+/** `admin`'s confirm of `roster`, through core on `coreEnv`. */
+const confirmOn = async (
+  admin: Admin,
+  coreEnv: Env,
+  roster: RosterInput
+): Promise<void> => {
+  const { core } = await openRpc(admin.session, { coreEnv });
+  try {
+    using session = core.authenticate();
+    await session.onboarding.confirmRoster(roster);
+  } finally {
+    core[Symbol.dispose]();
+  }
+};
+
+/** `userId`'s primary rows (`team_primaries`), as the database has them. */
+const primariesOf = async (userId: string) => {
+  const { results } = await env.DB.prepare(
+    "SELECT team_id AS team, made FROM team_primaries WHERE user_id = ?"
+  )
+    .bind(userId)
+    .all<{ team: string; made: number }>();
+  return results;
+};
 
 describe("the staff list's teams", { timeout: 120_000 }, () => {
   it("are the members' teams: one id each, a new one core's own, made only once the admin confirms", async () => {
@@ -796,5 +839,169 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
       sales: true,
       finance: true,
     });
+  });
+
+  it("leave one primary, rightly marked, when a second confirm lands before the first one's writes: the same team or another", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ann = await signedInApi(idp, "user");
+    const bea = await signedInApi(idp, "user");
+    const tag = unique();
+    const { roster: first } = await admin.api.onboarding.confirmRoster({
+      teams: [
+        { id: "sales", name: `Sales ${tag}`, lead: null },
+        { id: "finance", name: `Finance ${tag}`, lead: null },
+      ],
+      people: [{ id: "bo", name: "Bo", team: "sales" }],
+    });
+    const idOf = (name: string): string =>
+      first?.teams.find((each) => each.name === `${name} ${tag}`)?.id ?? "";
+    const listed = (annIn: string, beaIn: string): RosterInput => ({
+      teams: [
+        { id: idOf("Sales"), name: `Sales ${tag}`, lead: null },
+        { id: idOf("Finance"), name: `Finance ${tag}`, lead: null },
+      ],
+      people: [
+        { id: "bo", name: "Bo", team: idOf("Sales") },
+        { id: "ann", name: "Ann", email: emailOf(ann), team: annIn },
+        { id: "bea", name: "Bea", email: emailOf(bea), team: beaIn },
+      ],
+    });
+    const sales = idOf("Sales");
+    const finance = idOf("Finance");
+    // Ann: both confirms give Sales. Bea: the second gives Finance, the
+    // first Sales; the first one's writes land last.
+    const landing = landingAt(
+      /insert into "team_primaries"/iu,
+      "before",
+      async () => {
+        await admin.api.onboarding.confirmRoster(listed(sales, finance));
+      }
+    );
+    let events: { action: string; target?: string; user: unknown }[] = [];
+    const audited = await auditedDuring(async () => {
+      await confirmOn(admin, landing.coreEnv, listed(sales, sales));
+    });
+    events = audited
+      .filter(({ action }) => action.startsWith("team.member."))
+      .map(({ action, target, detail }) => ({
+        action,
+        target: target?.id,
+        user: detail?.userId,
+      }));
+    const overlapped = {
+      ann: await primariesOf(ann.userId),
+      bea: await primariesOf(bea.userId),
+    };
+    // A later move takes away what the list made, and leaves nothing stray.
+    await admin.api.onboarding.confirmRoster(listed(finance, finance));
+    const teams = await membersTeams(admin);
+    const inTeams = (userId: string) =>
+      [...teams]
+        .filter(([, { memberIds }]) => memberIds.includes(userId))
+        .map(([name]) => name);
+
+    expect({
+      landed: landing.landed(),
+      overlapped,
+      // Bea left the Finance the second confirm made, named as such.
+      beaLeft: events.filter(
+        ({ action, user }) =>
+          action === "team.member.removed" && user === bea.userId
+      ),
+      ann: inTeams(ann.userId),
+      bea: inTeams(bea.userId),
+    }).toStrictEqual({
+      landed: true,
+      overlapped: {
+        ann: [{ team: sales, made: 1 }],
+        bea: [{ team: sales, made: 1 }],
+      },
+      beaLeft: [
+        { action: "team.member.removed", target: finance, user: bea.userId },
+      ],
+      ann: [`Finance ${tag}`],
+      bea: [`Finance ${tag}`],
+    });
+  });
+
+  it("make a team deleted while a save ran under a new id at the confirm, so nothing shared with the old one reaches its people", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ann = await signedInApi(idp, "user");
+    const tag = unique();
+    const marker = markerWord();
+    const board = await settingsTeam(admin, `Board ${tag}`);
+    await add(`Board minutes ${marker}`, { kind: "team", teamId: board });
+    const roster = rosterSchema.parse({
+      teams: [{ id: board, name: `Board ${tag}`, lead: null }],
+      people: [{ id: "ann", name: "Ann", email: emailOf(ann), team: board }],
+    });
+    const by = { type: "person", userId: admin.userId } as const;
+    const store = onboardingStore(env);
+    // A draft save reads the members' teams, Board among them...
+    const { roster: named, minted } = await intoMembersTeams(env, roster, by, {
+      make: false,
+      held: await store.heldTeams(),
+    });
+    // ...an admin deletes Board in Settings before the store keeps it...
+    const deleted = await callAuth("/organization/remove-team", admin.session, {
+      teamId: board,
+    });
+    await store.saveRoster(named, by, { confirmed: false, minted });
+    // ...and the next confirm sends the list as it read it back.
+    const { roster: draft } = await admin.api.onboarding.view();
+    if (draft === null) {
+      throw new Error("The draft wasn't kept");
+    }
+    const { roster: kept } = await admin.api.onboarding.confirmRoster(draft);
+    const again = kept?.teams.find(({ name }) => name === `Board ${tag}`)?.id;
+    const teams = await membersTeams(admin);
+    const texts = await textsFor(ann.userId, marker);
+
+    expect({
+      deleted: deleted.status,
+      draftKeptOld: named.teams[0]?.id === board,
+      newId: again !== undefined && again !== board,
+      annIn: teams.get(`Board ${tag}`)?.memberIds.includes(ann.userId),
+      reads: texts.some((text) => text.includes(marker)),
+    }).toStrictEqual({
+      deleted: 200,
+      draftKeptOld: true,
+      newId: true,
+      annIn: true,
+      reads: false,
+    });
+  });
+
+  it("place nobody an admin removed while the confirm ran", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ann = await signedInApi(idp, "user");
+    const tag = unique();
+    const { roster: first } = await admin.api.onboarding.confirmRoster({
+      teams: [{ id: "sales", name: `Sales ${tag}`, lead: null }],
+      people: [{ id: "bo", name: "Bo", team: "sales" }],
+    });
+    const sales = first?.teams[0]?.id ?? "";
+    // Removed just before the placing batch runs: its read still saw her.
+    const landing = landingAt(
+      /insert into "team_members"/iu,
+      "before",
+      async () => {
+        await admin.api.members.remove(ann.userId);
+      }
+    );
+    await confirmOn(admin, landing.coreEnv, {
+      teams: [{ id: sales, name: `Sales ${tag}`, lead: null }],
+      people: [
+        { id: "bo", name: "Bo", team: sales },
+        { id: "ann", name: "Ann", email: emailOf(ann), team: sales },
+      ],
+    });
+    const teams = await membersTeams(admin);
+
+    expect({
+      landed: landing.landed(),
+      inSales: teams.get(`Sales ${tag}`)?.memberIds.includes(ann.userId),
+      primaries: await primariesOf(ann.userId),
+    }).toStrictEqual({ landed: true, inSales: false, primaries: [] });
   });
 });

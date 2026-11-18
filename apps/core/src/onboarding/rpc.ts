@@ -192,12 +192,13 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
       // one the store holds, or a new one core makes); on a confirm its
       // members' team is made under it, before people join it.
       const store = onboardingStore(this.#env);
-      const { roster: held } = await store.view();
-      const named = await intoMembersTeams(this.#env, parsed, by, {
-        make: confirmed,
-        held: held?.teams ?? [],
-      });
-      const view = await store.saveRoster(named, by, { confirmed });
+      const { roster: named, minted } = await intoMembersTeams(
+        this.#env,
+        parsed,
+        by,
+        { make: confirmed, held: await store.heldTeams() }
+      );
+      const view = await store.saveRoster(named, by, { confirmed, minted });
       if (confirmed) {
         await placePrimaries(this.#env, named, by);
       }
