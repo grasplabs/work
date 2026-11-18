@@ -23,9 +23,6 @@ import type { Person } from "./people.ts";
 // refuses, and every race of answers, are core's own tests
 // (apps/core/test/page-workflow-decisions.test.ts).
 
-// A trace of every failing page, kept as the run's artifact.
-test.use({ trace: "retain-on-failure" });
-
 /** How long a run's change may take to reach a page. */
 const live = { timeout: 30_000 };
 

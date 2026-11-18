@@ -16,9 +16,6 @@ import type { Person } from "./people.ts";
 // the run a second time. What the host refuses, and every race of its
 // receipts, are core's own tests (apps/core/test/page-typed-workflows.test.ts).
 
-// A trace of every failing page, kept as the run's artifact.
-test.use({ trace: "retain-on-failure" });
-
 /** How long a run's change may take to reach the page. */
 const live = { timeout: 30_000 };
 

@@ -21,7 +21,8 @@ export default defineConfig({
   // held 2 s each, and the page's 5 s refreshes, on a loaded machine.
   timeout: 180_000,
   forbidOnly: ci,
-  retries: ci ? 2 : 0,
+  // Never tried again, as playwright.config.ts.
+  retries: 0,
   // One at a time: a rollout reaches every active client in ring 0, and
   // each journey seeds its own as the only one.
   workers: 1,

@@ -146,7 +146,7 @@ const fault = async (
   expect(response.status()).toBe(204);
 };
 
-// The dev server is shared by every test and retry: a fault a test set
+// The dev server is shared by every test: a fault a test set
 // never outlives it, however the test ends, nor is one left from before.
 test.beforeEach(async ({ request }) => {
   await fault(request, null);
