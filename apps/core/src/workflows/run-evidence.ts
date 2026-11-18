@@ -9,6 +9,7 @@ import {
   runBrainMemories,
   runBrainVersions,
   runStateWriters,
+  workflowResourceRuns,
 } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 
@@ -176,12 +177,13 @@ export const memoryEvidenceOfRuns = async (
 
 /**
  * Whether run `runId` keeps any evidence of what it read: a version its
- * recalls were handed, a memory its entity reads rested on (GRA-1985), or
- * what the chat that started it had read (`runChatSources`); or so does
- * a run whose kept state it started from (`runStateWriters`, one hop).
- * What it returned may then copy what can later be erased or narrowed, so
- * the Brain keeps only how it ended (brain-sources.ts, GRA-1996). One
- * statement.
+ * recalls were handed, a memory its entity reads rested on (GRA-1985),
+ * what the chat that started it had read (`runChatSources`), or so does a
+ * run whose kept state it started from (`runStateWriters`, one hop); or
+ * that it kept a read through a connection in its person's own store
+ * (`markCaptured`, GRA-1828). What it returned may then copy what can
+ * later be erased or narrowed, so the Brain keeps only how it ended
+ * (brain-sources.ts, GRA-1996). One statement.
  */
 export const readAnything = async (
   env: Env,
@@ -192,7 +194,8 @@ export const readAnything = async (
         UNION SELECT writer_run_id FROM run_state_writers WHERE run_id = ${runId})
       SELECT (EXISTS (SELECT 1 FROM run_brain_versions WHERE run_id IN (SELECT id FROM read_by))
       OR EXISTS (SELECT 1 FROM run_brain_memories WHERE run_id IN (SELECT id FROM read_by))
-      OR EXISTS (SELECT 1 FROM run_chat_sources WHERE run_id IN (SELECT id FROM read_by))) AS read`
+      OR EXISTS (SELECT 1 FROM run_chat_sources WHERE run_id IN (SELECT id FROM read_by))
+      OR EXISTS (SELECT 1 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${runId} AND ${workflowResourceRuns.capturedAt} IS NOT NULL)) AS read`
   );
   return row?.read === 1;
 };
@@ -210,3 +213,20 @@ export const stateWritersOfRuns = async (env: Env, runIds: readonly string[]) =>
     })
     .from(runStateWriters)
     .where(inList(runStateWriters.runId, runIds));
+
+/**
+ * Marks run `runId` as one that kept a read through a connection in its
+ * person's own Brain store (GRA-1828), before that read is written, so
+ * `readAnything` holds for it from then on. Not a pin: what it kept is
+ * that person's alone, and the checks of what a run read (resource-reads.ts)
+ * read as the company. Throws when the mark isn't kept (an ended run's row
+ * takes no change): the read is then kept nowhere.
+ */
+export const markCaptured = async (env: Env, runId: string): Promise<void> => {
+  await drizzle(env.DB)
+    .update(workflowResourceRuns)
+    .set({
+      capturedAt: sql`coalesce(${workflowResourceRuns.capturedAt}, ${Date.now()})`,
+    })
+    .where(eq(workflowResourceRuns.id, runId));
+};

@@ -10,7 +10,8 @@
     "./content": "./src/content.ts",
     "./manifest": "./src/manifest.ts",
     "./provider": "./src/provider.ts",
-    "./sign-in": "./src/sign-in.ts"
+    "./sign-in": "./src/sign-in.ts",
+    "./sync": "./src/sync.ts"
   },
   "dependencies": {
     "@grasp-os/shared": "workspace:*",
