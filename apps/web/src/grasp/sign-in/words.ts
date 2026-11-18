@@ -69,7 +69,7 @@ export const signInWords: SignInWords = {
     soon: "Grasp opens for everyone soon. If you have an interview link, it is in your email.",
     offline: "You're offline. Log in when you're back online.",
     notMember: "That account isn't part of your organisation.",
-    guest: "Guest accounts can't sign in.",
+    guest: "Guest accounts can't log in.",
     timedOut: "Sign-in timed out. Try again.",
     noAccess: "You don't have access to this organisation. Ask an admin.",
     unreachable: "Grasp can't be reached right now. Try again in a minute.",
