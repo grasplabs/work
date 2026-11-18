@@ -251,29 +251,32 @@ export const readSyncPage = async (
 /**
  * The places of a connection's sync, each a source of its own: `own` for
  * a sync of the whole account; the places a sync lists of its own account
- * (`places: "listed"`), read from the provider; none on a shared
+ * (`places: "listed"`), read from the provider, a read at a time from
+ * `cursor` when the list is longer than one read takes; none on a shared
  * connection until places are picked (GRA-1758, PR J).
  */
 export const listSyncPlaces = async (
   env: Env,
   request: unknown
-): Promise<{ places: string[] }> => {
-  const { connectionId, feed } = syncErrors.parse(
+): Promise<SyncPlaces> => {
+  const { connectionId, feed, cursor } = syncErrors.parse(
     "sync.invalid",
     syncPlacesRequestSchema,
     request
   );
   const found = await syncOf(env, connectionId, feed);
   if (found.connection.scope !== "personal") {
-    return { places: [] };
+    return { places: [], cursor: null };
   }
   if (found.sync.places === "own") {
-    return { places: [ownPlace] };
+    return { places: [ownPlace], cursor: null };
   }
-  const { places } = placesOf(
-    await sendToSync(env, found, ownPlace, syncPlacesMethod, { name: feed })
+  return placesOf(
+    await sendToSync(env, found, ownPlace, syncPlacesMethod, {
+      name: feed,
+      cursor,
+    })
   );
-  return { places };
 };
 
 /**

@@ -442,7 +442,11 @@ export const syncMethod = "grasp-os/sync";
 export const syncPlacesMethod = "grasp-os/sync-places";
 
 /** What connect asks a connector for its sync's places. */
-export const syncPlacesParamsSchema = z.strictObject({ name: syncNameSchema });
+export const syncPlacesParamsSchema = z.strictObject({
+  name: syncNameSchema,
+  /** Where a listing too long for one read goes on; null from the start. */
+  cursor: syncCursorSchema.nullable(),
+});
 
 /** What connect asks a connector's sync for. */
 export const syncParamsSchema = z.strictObject({

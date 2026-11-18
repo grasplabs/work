@@ -4,6 +4,7 @@ import type {
   SyncItem,
   SyncItemKind,
   SyncPage,
+  SyncPlaces,
 } from "@grasp-os/shared/sync";
 import { z } from "zod";
 
@@ -115,10 +116,15 @@ export interface SyncDefinition {
   /**
    * The places of the connection's own account it reads, each a source of
    * its own with its own cursor (a mailbox's folders): none for a sync that
-   * reads the whole account (`own`). A place it doesn't read any more is
-   * left out; core then drops its source.
+   * reads the whole account (`own`). A list too long for one read goes on
+   * from `cursor` (none: from the start) in the next; core puts the reads
+   * together, and drops the source of a place it doesn't list any more.
    */
-  places?: () => Promise<readonly string[]>;
+  places?: (params: {
+    cursor: string | null;
+    /** When the read stops taking more, in ms since the epoch. */
+    deadline: number;
+  }) => Promise<SyncPlaces>;
 }
 
 /** A sync, as a connector carries it. */
@@ -157,13 +163,16 @@ export const defineSync = (definition: SyncDefinition): Sync => ({
     routes: definition.routes,
   }),
   places: async (params) => {
-    syncPlacesParamsSchema.parse(params);
+    const asked = syncPlacesParamsSchema.parse(params);
     if (definition.places === undefined) {
       return { failure: { code: "failed" } };
     }
     let places: unknown;
     try {
-      places = { places: await definition.places() };
+      places = await definition.places({
+        cursor: asked.cursor,
+        deadline: Date.now() + syncPageLimits.millis,
+      });
     } catch (error) {
       return { failure: failureOf(error) };
     }

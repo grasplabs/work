@@ -10,6 +10,7 @@ import { ownPlace, syncErrors } from "@grasp-os/shared/sync";
 import type {
   SyncItem,
   SyncPage,
+  SyncPlaces,
   SyncReader,
   SyncSource,
 } from "@grasp-os/shared/sync";
@@ -1567,14 +1568,26 @@ const placesOf = async (
   if (listed.places === "own") {
     return [ownPlace];
   }
-  spend(budget, 1);
+  const places: string[] = [];
+  let cursor: string | null = null;
   try {
-    const { places } = await env.CONNECT.listSyncPlaces({
-      connectionId: listed.connectionId,
-      feed: listed.feed,
-    });
+    // A list too long for one read goes on from where the last stopped.
+    do {
+      spend(budget, 1);
+      // oxlint-disable-next-line no-await-in-loop -- one read after another
+      const read: SyncPlaces = await env.CONNECT.listSyncPlaces({
+        connectionId: listed.connectionId,
+        feed: listed.feed,
+        cursor,
+      });
+      places.push(...read.places);
+      ({ cursor } = read);
+    } while (cursor !== null);
     return places;
   } catch (error) {
+    if (stoppedFor(error, "budget")) {
+      throw error;
+    }
     log.warn("brain.sync.places_failed", {
       connectionId: listed.connectionId,
       errorName: errorName(error),

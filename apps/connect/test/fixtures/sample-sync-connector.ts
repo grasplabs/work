@@ -93,14 +93,19 @@ export default defineConnector({
           path: "/v1/me/folders/{place}/items",
         },
       ],
-      places: async () => {
-        const response = await fetch(`${api}/v1/me/folders`);
+      places: async ({ cursor }) => {
+        const url = new URL(`${api}/v1/me/folders`);
+        if (cursor !== null) {
+          url.searchParams.set("from", cursor);
+        }
+        const response = await fetch(url);
         if (!response.ok) {
           throw new Error(`The provider answered ${response.status}`);
         }
-        return z
-          .object({ folders: z.array(z.string()) })
-          .parse(await response.json()).folders;
+        const { folders, next } = z
+          .object({ folders: z.array(z.string()), next: z.string().nullish() })
+          .parse(await response.json());
+        return { places: folders, cursor: next ?? null };
       },
       read: async ({ place, cursor, names, ids }) => {
         const folder = `${api}/v1/me/folders/${encodeURIComponent(place)}`;
