@@ -17,6 +17,11 @@ export const buttonWords = {
   agentAsks: "Does something that needs your yes",
   /** What an agent is told before it presses a danger or approve button, from its words. */
   agentPresses: (words: string) => `Presses "${words}"`,
+  /**
+   * An action whose work failed when the host gives no `failedLabel` of its own: neutral, as the
+   * work may be a save, a check or a send. Dialog's, Alert dialog's, Drawer's and Popover's actions.
+   */
+  actionFailed: "Could not finish",
   /** What an agent's press is told while the button still shows its result. */
   agentStillSays: (shown: string) =>
     `It still says "${shown}". Press it again in a moment.`,

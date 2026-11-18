@@ -12,8 +12,10 @@ import type { ComponentProps, MouseEvent } from "react";
 
 import { Button } from "../button";
 import type { ActionState, ButtonVariant, ButtonWords } from "../button";
+import { buttonWords } from "../button/words";
 import type { IconData } from "../icons";
 import { ms } from "../tokens/tokens.values";
+import { useWords } from "../words/words";
 import { useStill } from "./still-context";
 import { drawerStyles as styles } from "./styles";
 
@@ -63,8 +65,12 @@ interface WithWork {
   action: (event: Event | undefined, details: { source: string }) => unknown;
   /** The words while the work runs ("Renaming"). Leave it out to keep the button's own words. */
   workingLabel?: string;
-  /** The words when the work failed, said plainly on the button and to a screen reader ("Could not rename"). */
-  failedLabel: string;
+  /**
+   * The words when the work failed, said plainly on the button and to a screen reader ("Could not rename"). Leave it out for
+   * the neutral one, from Button's catalogue.
+   * @default "Could not finish"
+   */
+  failedLabel?: string;
 }
 
 /** Every prop a DrawerAction takes: these, and the rest of UI SDK's DrawerClose. */
@@ -100,7 +106,7 @@ interface ActionButtonProps {
   error: unknown;
   look: Pick<ActionBase, "children" | "variant" | "icon" | "agentConfirm"> & {
     workingLabel?: string;
-    failedLabel?: string;
+    failedLabel: string;
   };
   /** It has work to do, so it shows the work's life: Cancel has none, and keeps its own width. */
   life: boolean;
@@ -140,7 +146,7 @@ const ActionButton = ({
         state: currentOf(state, failed),
         workingLabel,
         doneLabel: words ?? "",
-        failedLabel: failedLabel ?? "",
+        failedLabel,
       }
     : {};
   return (
@@ -250,13 +256,14 @@ const LiveAction = ({ rest, action, look }: LiveActionProps) => {
  * closes: a step that keeps the panel open belongs in the body.
  */
 export const DrawerAction = (props: DrawerActionProps) => {
+  const { actionFailed } = useWords("button", buttonWords);
   const {
     children,
     variant,
     icon,
     action,
     workingLabel,
-    failedLabel,
+    failedLabel = actionFailed,
     agentConfirm,
     ...rest
   } = props;
