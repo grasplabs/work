@@ -103,9 +103,11 @@ const styles = stylex.create({
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    justifyContent: "center",
+    // Centred while it fits; on a window too low for it, it scrolls in its own room and never runs under the foot.
+    justifyContent: "safe center",
     flexGrow: 1,
     minHeight: 0,
+    overflowY: "auto",
     paddingInline: grasp.space4,
   },
   // Room under the stage for their words, which float up from the box.

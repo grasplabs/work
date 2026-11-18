@@ -7,9 +7,11 @@ import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { Button } from "../grasp/button/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
 import { visuallyHidden } from "../grasp/hidden/hidden.ts";
+import { KeyValueList } from "../grasp/key-value/index.ts";
 import { arrive } from "../grasp/motion/arrive.ts";
-import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { LanguageChoice } from "../onboarding/language-choice.tsx";
 import { isRefused, participate } from "./api.ts";
 import { Head, headSizes, pair, useHead } from "./head.tsx";
@@ -60,27 +62,8 @@ const styles = stylex.create({
     borderWidth: 0,
   },
   name: { justifySelf: "center", width: "100%", maxWidth: "12rem" },
-  // What this is: each row's name beside its words, or over them on a phone.
-  rows: { width: "100%", margin: 0, textAlign: "start" },
-  row: {
-    display: "grid",
-    gridTemplateColumns: { default: "1fr", [media.fromPhone]: "7rem 1fr" },
-    columnGap: grasp.space6,
-    rowGap: grasp.space1,
-    paddingBlock: grasp.space3,
-    borderBlockStartWidth: grasp.hairline,
-    borderBlockStartStyle: "solid",
-    borderBlockStartColor: grasp.line,
-    fontSize: grasp.textMd,
-    lineHeight: grasp.textMdLine,
-  },
-  last: {
-    borderBlockEndWidth: grasp.hairline,
-    borderBlockEndStyle: "solid",
-    borderBlockEndColor: grasp.line,
-  },
-  about: { color: grasp.muted },
-  text: { margin: 0, color: grasp.text },
+  // What this is: its rows read from the start, as a text does.
+  rows: { width: "100%", textAlign: "start" },
 });
 
 /** The device's own language is marked already: a press on another switches to it, and nothing more. */
@@ -347,14 +330,14 @@ const About = ({
   const { body, size } = useHead(room, headSizes.talking);
   const promise = usePromise();
   const rows = [
-    { about: t`What we do`, text: useWhatWeDo(kind) },
+    { key: t`What we do`, value: useWhatWeDo(kind) },
     {
-      about: t`Your words`,
-      text: `${t`I write down what you tell me. At the end I read it back, and you say what is wrong. Your voice is not kept.`} ${promise}`,
+      key: t`Your words`,
+      value: `${t`I write down what you tell me. At the end I read it back, and you say what is wrong. Your voice is not kept.`} ${promise}`,
     },
     {
-      about: t`Your choice`,
-      text: t`You decide. You can stop when you want, skip any question, and delete everything for 7 days afterwards.`,
+      key: t`Your choice`,
+      value: t`You decide. You can stop when you want, skip any question, and delete everything for 7 days afterwards.`,
     },
   ];
   return (
@@ -369,23 +352,12 @@ const About = ({
         />
       </div>
       <div ref={body} {...stylex.props(looks.body)}>
-        <h1 {...stylex.props(looks.said)}>
+        <Heading level={1} size="md">
           {t`Hi ${name}, I’m ${who}. I’m an AI, and I work for Grasp.`}
-        </h1>
-        <dl {...stylex.props(styles.rows)}>
-          {rows.map((row, at) => (
-            <div
-              key={row.about}
-              {...stylex.props(
-                styles.row,
-                at === rows.length - 1 && styles.last
-              )}
-            >
-              <dt {...stylex.props(styles.about)}>{row.about}</dt>
-              <dd {...stylex.props(styles.text)}>{row.text}</dd>
-            </div>
-          ))}
-        </dl>
+        </Heading>
+        <div {...stylex.props(styles.rows)}>
+          <KeyValueList divided items={rows} />
+        </div>
         <div {...stylex.props(looks.actions)}>
           <Button
             layout={fullWidth.button}
