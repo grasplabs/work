@@ -6,6 +6,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { recordEventIf } from "./audit.ts";
+import { pastAddressesAfter } from "./connections.ts";
 import {
   connections,
   connectionTokens,
@@ -422,6 +423,7 @@ const storeRefreshed = async (
     const addressUpdate = db
       .update(connections)
       .set({
+        pastVerifiedEmails: pastAddressesAfter(address.now),
         verifiedEmail: address.now,
         verifiedEmailAt: address.now === null ? null : new Date(),
         updatedAt: new Date(),

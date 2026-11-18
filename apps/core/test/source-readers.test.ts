@@ -334,6 +334,20 @@ const signInConfirmedAgo = async (
     .run();
 };
 
+/** Connect as it is, but for `method`, which fails as an unreachable connect does. */
+const connectFailing = (method: string): Env["CONNECT"] =>
+  new Proxy(env.CONNECT, {
+    get: (target, key) => {
+      if (key === method) {
+        return () => {
+          throw new Error("connect unreachable");
+        };
+      }
+      const value: unknown = Reflect.get(target, key);
+      return value;
+    },
+  });
+
 const readersOf = (...readers: SourceReader[]): SourceReaders => ({
   kind: "readers",
   readers,
@@ -1274,6 +1288,199 @@ describe("readers copied from the source", () => {
       await expect(
         findsInDirectMessage(admin, userId, topic, secret)
       ).resolves.toBeTruthy();
+    }
+  );
+
+  it(
+    "forgets the token of an address a connection confirmed and then lost, though the person never read by it",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      const alice = await microsoftMember();
+      const { id: connectionId } = await connectedGoogle(alice);
+      const [local = ""] = alice.email.split("@");
+      const [renamed, renamedAgain] = [
+        `${local}-b@acme.test`,
+        `${local}-c@acme.test`,
+      ];
+      // Renamed to B, then a list names B; renamed again to C, and
+      // another to whom the cleared case leaves no address at all.
+      await googleGives(local, renamed);
+      await renewed(connectionId);
+      const marker = uniqueWord();
+      const list = await sharedItem(
+        marker,
+        readersOf({
+          kind: "account",
+          provider: "google",
+          tenant: "acme.test",
+          account: renamed,
+        })
+      );
+      await googleGives(local, renamedAgain);
+      await renewed(connectionId);
+      await admin.api.members.remove(alice.userId);
+      await admin.api.members.erase(alice.userId, alice.name);
+      await runMinuteTasks();
+      const { userId: newcomer } = await whoami(
+        await signedIn(idp, "google", googlePerson({ email: renamed }))
+      );
+
+      await expect(finds(newcomer, list, marker)).resolves.toBeFalsy();
+    }
+  );
+
+  it(
+    "forgets the token of an address a connection confirmed before a renewal couldn't confirm any",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      const alice = await microsoftMember();
+      const { id: connectionId } = await connectedGoogle(alice);
+      const [local = ""] = alice.email.split("@");
+      const renamed = `${local}-b@acme.test`;
+      await googleGives(local, renamed);
+      await renewed(connectionId);
+      const marker = uniqueWord();
+      const list = await sharedItem(
+        marker,
+        readersOf({
+          kind: "account",
+          provider: "google",
+          tenant: "acme.test",
+          account: renamed,
+        })
+      );
+      await googleGives(local, null);
+      await renewed(connectionId);
+      await admin.api.members.remove(alice.userId);
+      await admin.api.members.erase(alice.userId, alice.name);
+      await runMinuteTasks();
+      const { userId: newcomer } = await whoami(
+        await signedIn(idp, "google", googlePerson({ email: renamed }))
+      );
+
+      await expect(finds(newcomer, list, marker)).resolves.toBeFalsy();
+    }
+  );
+
+  it(
+    "forgets the tokens of every address a person signed in with, though they never read by them",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      const local = `signs-${unique()}`;
+      const [first, second, third] = [
+        `${local}-a@acme.test`,
+        `${local}-b@acme.test`,
+        `${local}-c@acme.test`,
+      ];
+      const claims = googlePerson({ email: first });
+      const { userId } = await whoami(await signedIn(idp, "google", claims));
+      const markers = [uniqueWord(), uniqueWord()];
+      const lists = await Promise.all(
+        [first, second].map(
+          async (address, index) =>
+            await sharedItem(
+              markers[index] ?? "",
+              readersOf({
+                kind: "account",
+                provider: "google",
+                tenant: "acme.test",
+                account: address,
+              })
+            )
+        )
+      );
+      // Their Google account renamed twice, each time signed in again.
+      await signedIn(idp, "google", { ...claims, email: second });
+      await signedIn(idp, "google", { ...claims, email: third });
+      await admin.api.members.remove(userId);
+      await admin.api.members.erase(userId, String(claims.name));
+      await runMinuteTasks();
+      await admin.api.members.releaseAddress(first);
+      const signedInAt = async (address: string): Promise<string> => {
+        const { userId: newcomer } = await whoami(
+          await signedIn(idp, "google", googlePerson({ email: address }))
+        );
+        return newcomer;
+      };
+      const [firstList, secondList] = lists;
+      const [firstMarker = "", secondMarker = ""] = markers;
+      if (firstList === undefined || secondList === undefined) {
+        throw new Error("Expected two lists");
+      }
+      const atFirst = await signedInAt(first);
+      const atSecond = await signedInAt(second);
+
+      expect({
+        first: await finds(atFirst, firstList, firstMarker),
+        second: await finds(atSecond, secondList, secondMarker),
+      }).toStrictEqual({ first: false, second: false });
+    }
+  );
+
+  it(
+    "stops a person's connections before the erasure reads their addresses, though a failed removal left them connected",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      const alice = await microsoftMember();
+      const { id: connectionId } = await connectedGoogle(alice);
+      const [local = ""] = alice.email.split("@");
+      // The removal's disconnect fails: her connection stays connected.
+      const { core: down } = await openRpc(admin.session, {
+        coreEnv: { ...env, CONNECT: connectFailing("disconnectPersonal") },
+      });
+      const removed = await outcome(
+        down.authenticate().members.remove(alice.userId)
+      );
+      // The erasure starts; connect's own part fails for now, so what
+      // `identity` read is all that stands between them.
+      const { core: erasing } = await openRpc(admin.session, {
+        coreEnv: { ...env, CONNECT: connectFailing("erasePersonal") },
+      });
+      await outcome(
+        erasing.authenticate().members.erase(alice.userId, alice.name)
+      );
+      const afterIdentity = await env.CONNECT.personalAccounts(alice.userId);
+      // Google renames her account; a renewal tries to confirm it.
+      await googleGives(local, `${local}-b@acme.test`);
+      await renewedOnly(connectionId);
+      const afterRenewal = await env.CONNECT.personalAccounts(alice.userId);
+
+      expect({
+        removed,
+        afterIdentity: afterIdentity.map(({ connected }) => connected),
+        afterRenewal: afterRenewal.map(({ verifiedEmail }) => verifiedEmail),
+      }).toStrictEqual({
+        removed: "member.connections_pending",
+        afterIdentity: [false],
+        afterRenewal: [alice.email],
+      });
+    }
+  );
+
+  it(
+    "keeps each address a connection lost once, however often it comes back",
+    setUpTime,
+    async () => {
+      const alice = await microsoftMember();
+      const { id: connectionId } = await connectedGoogle(alice);
+      const [local = ""] = alice.email.split("@");
+      const renamed = `${local}-b@acme.test`;
+      for (const address of [renamed, alice.email, renamed]) {
+        // oxlint-disable-next-line no-await-in-loop -- one renewal at a time
+        await googleGives(local, address);
+        // oxlint-disable-next-line no-await-in-loop -- one renewal at a time
+        await renewed(connectionId);
+      }
+      const [account] = await env.CONNECT.personalAccounts(alice.userId);
+
+      expect({
+        now: account?.verifiedEmail,
+        past: account?.pastVerifiedEmails,
+      }).toStrictEqual({ now: renamed, past: [alice.email, renamed] });
     }
   );
 

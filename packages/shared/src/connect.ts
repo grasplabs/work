@@ -527,6 +527,8 @@ export interface PersonalAccount {
   accountId: string;
   verifiedEmail: string | null;
   verifiedEmailAt: number | null;
+  /** Addresses it was confirmed under before, for its person's erasure alone. */
+  pastVerifiedEmails: string[];
   connected: boolean;
 }
 

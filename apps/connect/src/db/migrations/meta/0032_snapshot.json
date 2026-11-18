@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "887888ef-aa7d-4ed9-bce3-0a04b7441387",
+  "id": "c7051666-2272-40b8-8dbf-1e7833674546",
   "prevId": "6fc99c6a-a859-4fd1-9ecb-906242ffa2c0",
   "tables": {
     "ai_provider_keys": {
@@ -593,6 +593,13 @@
         "verified_email_at": {
           "name": "verified_email_at",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "past_verified_emails": {
+          "name": "past_verified_emails",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

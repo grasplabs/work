@@ -35,6 +35,7 @@ import {
   members,
   organizations,
   sessions,
+  signInAddresses,
   ssoProviders,
   teamMembers,
   teams,
@@ -695,6 +696,27 @@ const keptClaimsOf = (
 };
 
 /**
+ * Keeps the address a sign-in proved (`account.verifiedEmail`) among every
+ * address its person proved (`sign_in_addresses`), for their erasure
+ * alone (source-readers.ts `forgetTokens`): an address replaced at a later
+ * sign-in still names reader tokens to forget. Nothing reads it for
+ * access.
+ */
+const keepSignInAddress = async (
+  env: Env,
+  account: Record<string, unknown>
+): Promise<void> => {
+  const { userId, verifiedEmail } = account;
+  if (typeof userId !== "string" || typeof verifiedEmail !== "string") {
+    return;
+  }
+  await drizzle(env.DB)
+    .insert(signInAddresses)
+    .values({ userId, address: verifiedEmail.toLowerCase() })
+    .onConflictDoNothing();
+};
+
+/**
  * What is kept of an account from a sign-in: no IdP tokens (core never
  * holds provider tokens, R1), only the Entra object id and a verified
  * address taken from the ID token before it is dropped (`keptClaimsOf`).
@@ -887,10 +909,16 @@ const createAuth = (
         create: {
           // oxlint-disable-next-line require-await
           before: async (account) => withoutTokens(account),
+          after: async (account) => {
+            await keepSignInAddress(env, account);
+          },
         },
         update: {
           // oxlint-disable-next-line require-await
           before: async (account) => withoutTokens(account),
+          after: async (account) => {
+            await keepSignInAddress(env, account);
+          },
         },
       },
       session: {
