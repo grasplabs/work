@@ -90,3 +90,24 @@ export const answerCaptureIdOf = async (
   input: unknown
 ): Promise<string> =>
   `${captureGroupOf(connectionId).id}/${await sha256Hex(JSON.stringify([personId, action, "answer", canonicalText(input)]))}`;
+
+/**
+ * The hash that names, for its whole audience, what was read through a
+ * shared connection (GRA-1831; shared-reads.ts `claimSharedRead` makes
+ * the key, under the connection and its generation): the item `itemId`
+ * the tool `action` read, or the whole answer of `action` with `input`,
+ * hashed as `captureIdOf` and `answerCaptureIdOf` hash them, but with no
+ * person in it: whoever reads the same thing again through the shared
+ * connection reads the same record, its next version.
+ */
+export const sharedReadHashOf = async (
+  action: string,
+  read: { readonly itemId: string } | { readonly input: unknown }
+): Promise<string> =>
+  await sha256Hex(
+    JSON.stringify(
+      "itemId" in read
+        ? [action, read.itemId]
+        : [action, "answer", canonicalText(read.input)]
+    )
+  );

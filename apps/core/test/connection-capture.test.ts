@@ -474,7 +474,7 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     });
   });
 
-  it("keeps nothing from a shared connection, counted as skipped, nor from a toolkit that forbids copies", async () => {
+  it("keeps nothing from a shared connection with no Brain audience, counted as skipped, nor from a toolkit that forbids copies", async () => {
     const person = await signedInApi(idp, "user");
     const [sharedMarker, privateMarker, witness] = [
       markerOf(),
@@ -544,7 +544,8 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
           action: "brain.capture.skipped",
           onBehalfOf: person.userId,
           detail: {
-            reason: "shared",
+            // No Brain audience chosen for it (GRA-1831): kept for nobody.
+            reason: "no_audience",
             items: 1,
             kept: 0,
             failed: 0,

@@ -13,7 +13,11 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { drainAuditOutboxes } from "../src/audit-drains.ts";
 import { readSourceVersionAs, recallAs, workBrain } from "../src/brain-next.ts";
 import { producersOf, relayHandOvers } from "../src/brain-sources.ts";
-import { answerCaptureIdOf } from "../src/connection-capture-key.ts";
+import { setConnectionAudience } from "../src/connection-audiences.ts";
+import {
+  answerCaptureIdOf,
+  sharedReadHashOf,
+} from "../src/connection-capture-key.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { createTriggerResource } from "../src/trigger-resources.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
@@ -507,6 +511,83 @@ describe("what a workflow run reads through a connection", setUpTime, () => {
     });
   });
 
+  it("keeps what a run reads through a shared connection with a Brain audience for that audience, a trigger's run's too, and never in anyone's own store", async () => {
+    const [admin, ada, ben] = await Promise.all([
+      person("admin"),
+      person("builder"),
+      person("builder"),
+    ]);
+    const marker = markerOf();
+    const [byPerson, byTrigger] = [markerOf(), markerOf()];
+    const shared = await ownMail(undefined, [`The team's quote ${marker}`]);
+    // Everyone in the company may read what agents read through it.
+    await setConnectionAudience(
+      env,
+      admin,
+      shared.id,
+      { kind: "everyone" },
+      { kind: "nobody" }
+    );
+    const { workflow, serving } = await searching(ada, admin, shared.id);
+    const trigger = await createTriggerResource(env, ada, {
+      kind: "webhook",
+      workflowId: workflow.id,
+      config: await webhookConfig(),
+    });
+    await granted(ada, admin, {
+      subject: {
+        type: "trigger",
+        triggerId: triggerIdSchema.parse(trigger.id),
+      },
+      object: {
+        type: "workflow",
+        workflowId: workflowResourceIdSchema.parse(workflow.id),
+      },
+      actions: ["start"],
+      binding: `START_${unique().toUpperCase().replaceAll("-", "_")}`,
+    });
+    const personRun = await startedAs(
+      serving,
+      { type: "person", person: ada },
+      workflow.id,
+      byPerson
+    );
+    const personEnd = endOf(await ended(ada, workflow.id, personRun));
+    // A trigger's run acts for nobody: who may read what it read through
+    // the shared connection is the audience's all the same.
+    const triggerRun = await startedAs(
+      serving,
+      { type: "trigger", triggerId: trigger.id },
+      workflow.id,
+      byTrigger
+    );
+    await ended(ada, workflow.id, triggerRun);
+    const events = await captures(shared.id, 2);
+    await handedOver();
+    const keyOf = async (query: string) =>
+      `connected:${shared.id}/0/${await sharedReadHashOf("mail.search", {
+        input: { query },
+      })}`;
+    expect({
+      personEnd: personEnd.status,
+      events: events.map(({ action, detail }) => [action, detail.run]),
+      ada: await recalled(ada.userId, marker).then((ids) => ids.toSorted()),
+      ben: await recalled(ben.userId, marker).then((ids) => ids.toSorted()),
+      // What it returned copies what it kept: the Brain keeps only how it
+      // ended, so no copy outlives the shared read's erasure.
+      handedOver: await keptOf(ada.userId, personRun),
+    }).toStrictEqual({
+      personEnd: "completed",
+      events: [
+        ["brain.capture.kept", personRun],
+        ["brain.capture.kept", triggerRun],
+      ],
+      ada: [await keyOf(byPerson), await keyOf(byTrigger)].toSorted(),
+      ben: [await keyOf(byPerson), await keyOf(byTrigger)].toSorted(),
+      handedOver: "Workflow run completed.",
+    });
+  });
+
   it("keeps nothing of a read through a shared connection in anyone's own store", async () => {
     const [admin, ada] = await Promise.all([
       person("admin"),
@@ -547,7 +628,8 @@ describe("what a workflow run reads through a connection", setUpTime, () => {
       },
     }).toStrictEqual({
       end: "completed",
-      events: [{ action: "brain.capture.skipped", reason: "shared" }],
+      // No Brain audience chosen for it (GRA-1831): kept for nobody.
+      events: [{ action: "brain.capture.skipped", reason: "no_audience" }],
       ada: [],
       handedOver: { result: true, secret: false },
     });

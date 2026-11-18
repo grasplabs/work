@@ -12,14 +12,17 @@ import type { AgentScope } from "./agent-scope.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
 import { captureGroupOf } from "./brain-next-origins.ts";
 import { addSource } from "./brain-next.ts";
+import type { SourceReaders, SourceRef } from "./brain-next.ts";
 import { answerText } from "./connection-answer.ts";
 import {
   answerCaptureIdOf,
   captureIdOf,
   keepsWholeAnswers,
+  sharedReadHashOf,
 } from "./connection-capture-key.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { nativeItemReads } from "./native-tool-classes.gen.ts";
+import { claimSharedRead } from "./shared-reads.ts";
 import { classOf } from "./tool-classes.ts";
 import type { CallingRun } from "./workflows/resource-authority.ts";
 import { markCaptured } from "./workflows/run-evidence.ts";
@@ -41,8 +44,8 @@ import { markCaptured } from "./workflows/run-evidence.ts";
 //   (`owner`), as the plan's Owner is "the one whose own connection
 //   brought it in". A native tool only when it reaches the person's own
 //   things (its manifest's reach `own`, classed `read-own`); a toolkit's
-//   as below. A shared connection's reads, and a native tool that reaches
-//   the company's or others' things (a SharePoint list, a shared drive,
+//   as below. A shared connection's reads are the shared Brain's (below).
+//   A native tool that reaches the company's or others' things (a SharePoint list, a shared drive,
 //   another mailbox), are kept by nothing yet: a native connection may
 //   wait to be signed in again with its captures standing, so a copy
 //   could outlive the person's access at the source. They come back with
@@ -77,10 +80,10 @@ import { markCaptured } from "./workflows/run-evidence.ts";
 //   login at the time, for them alone, with no check against the source
 //   afterwards ("a person keeps what they read before losing access at
 //   the source"). Disconnecting the connection, the person's removal and
-//   their erasure erase it all (below). A shared connection's reads stay
-//   uncaptured: they are the shared Brain's, with the audience an admin
-//   chooses (GRA-1831), under their own connection's keys, so the two
-//   never meet. Not a native connector's, which is kept item by item as
+//   their erasure erase it all (below). A shared connection's reads are
+//   the shared Brain's, with the audience an admin chooses (below), under
+//   their own connection's keys, so the two never meet. Not a native
+//   connector's, which is kept item by item as
 //   above, its own things only.
 // - When it was read is the version's, not its text's: each capture
 //   carries when its tool answered (`readAt`), which the Brain keeps per
@@ -137,7 +140,9 @@ import { markCaptured } from "./workflows/run-evidence.ts";
 // or an agent for the person it works for, its principal. A run a trigger
 // started (a schedule, a webhook, a connector's event, a reply to a run's
 // mail) acts as the workflow itself, nobody opening anything there and
-// then: it keeps nothing. Nor does a call that passes a sensitive
+// then: it keeps nothing for anyone's own store, only what it reads
+// through a shared connection, for its audience (above). Nothing is kept
+// of a call that passes a sensitive
 // argument (`sensitive`): the key hashes the call's input, and the answer
 // may carry what the value gave. What a run keeps is not a read of the
 // Brain, so nothing of it is pinned with the run (run-evidence.ts), whose
@@ -146,6 +151,20 @@ import { markCaptured } from "./workflows/run-evidence.ts";
 // kept something before the Brain is written (`markCaptured`), so it
 // hands over only how it ended, never what it returned: a copy of what it
 // read that disconnecting the connection wouldn't erase.
+
+// A shared connection's reads (GRA-1831; the threat model and the
+// decisions are on the issue) are kept by the same rules, in the shared
+// store, for whoever the connection's Brain audience holds at each recall
+// (`connection` readers): one record for the whole audience, whoever read
+// it, so its key names no person (connection-capture-key.ts
+// `sharedReadHashOf`). Each is named first (shared-reads.ts
+// `claimSharedRead`), only while the connection has an audience, isn't
+// being erased and wasn't disconnected, in the statement that names it:
+// so an erasure lists every key it must erase, and one with no audience
+// keeps nothing (`no_audience`). A run a trigger started keeps these too:
+// who may read them is the audience's, not the reader's. The admin chose
+// who may read what agents read through the connection: one account reads
+// for everyone, and its own rules per person are not mirrored.
 
 type CaptureEvent =
   | "brain.capture.kept"
@@ -159,7 +178,12 @@ type CaptureEvent =
  * core can't name an agent of fails the event alone).
  */
 interface Capturer {
-  readonly personId: string;
+  /**
+   * Undefined for a run a trigger started: it acts for nobody, so it
+   * keeps reads through a shared connection alone, and records nothing
+   * else.
+   */
+  readonly personId: string | undefined;
   readonly where: { readonly chat: string } | { readonly run: string };
   readonly actor: () => AuditActor;
   /**
@@ -239,36 +263,92 @@ const skippedAll = (reason: string, items: number): Ended => [
   { reason, items, kept: 0, failed: 0, skipped: items },
 ];
 
+/** What was read: a native tool's one item, or a whole answer's call. */
+type ReadNamed = { readonly itemId: string } | { readonly input: unknown };
+
 /**
- * Keeps `text` (redacted) under `id` for its capturer's person alone,
- * read at `readAt`: what it ended in, kept, or skipped as `stale` or
- * `erased`. Throws when the Brain refused it otherwise (a text past its
- * limit) or couldn't be reached.
+ * Whose a read is: the capturer's own, through their own connection, or
+ * the connection's audience's, through a shared one.
+ */
+type Lane = { kind: "own"; personId: string } | { kind: "shared" };
+
+/** Where a read is kept: its source, who reads it, and the group it is erased with. */
+interface Place {
+  source: SourceRef;
+  readers: SourceReaders;
+  group?: SourceRef;
+}
+
+/**
+ * Where `read` of `action` through `connectionId` is kept: for the
+ * capturer alone, in their own store, erased with the connection's
+ * group; or, through a shared connection, in the shared store for its
+ * audience, named first (`claimSharedRead`): nowhere while it has none.
+ */
+const placeOf = async (
+  env: Env,
+  lane: Lane,
+  connectionId: string,
+  action: string,
+  read: ReadNamed,
+  readAt: Date
+): Promise<Place | undefined> => {
+  if (lane.kind === "shared") {
+    const source = await claimSharedRead(
+      env,
+      connectionId,
+      await sharedReadHashOf(action, read),
+      readAt
+    );
+    return source === undefined
+      ? undefined
+      : { source, readers: { kind: "connection", connectionId } };
+  }
+  const { personId } = lane;
+  const id =
+    "itemId" in read
+      ? await captureIdOf(connectionId, personId, action, read.itemId)
+      : await answerCaptureIdOf(connectionId, personId, action, read.input);
+  return {
+    source: { producer: "capture", id },
+    readers: { kind: "owner", personId },
+    // Erased with it when the connection is disconnected, and refused
+    // from then on.
+    group: captureGroupOf(connectionId),
+  };
+};
+
+/**
+ * Keeps `text` (redacted), what `read` of `action` through `connectionId`
+ * gave at `readAt`, where its lane keeps it (`placeOf`): what it ended
+ * in, kept, or skipped as `no_audience`, `stale` or `erased`. Throws when
+ * the Brain refused it otherwise (a text past its limit) or couldn't be
+ * reached.
  */
 const keptAs = async (
   env: Env,
   capturer: Capturer,
-  connectionId: string,
-  id: string,
-  text: string,
-  readAt: Date
+  { connectionId, lane }: { connectionId: string; lane: Lane },
+  action: string,
+  read: ReadNamed,
+  { text, readAt }: { text: string; readAt: Date }
 ): Promise<Ended> => {
+  const place = await placeOf(env, lane, connectionId, action, read, readAt);
+  if (place === undefined) {
+    return skippedAll("no_audience", 1);
+  }
   await capturer.beforeKeep?.();
   try {
-    // Owner content: core's Brain module keeps it in the person's own
-    // store, never the shared one.
+    // Core's Brain module keeps one person's alone in their own store,
+    // and an audience's in the shared one.
     const added = await addSource(env, {
-      source: { producer: "capture", id },
-      // Erased with it when the connection is disconnected, and refused
-      // from then on.
-      group: captureGroupOf(connectionId),
+      ...place,
       // A change of its own each time: the same text again is the current
       // version (the Brain's rule), so reading an unchanged item adds no
       // version, only its read time, and an item that changed back is a
       // version again.
       change: crypto.randomUUID(),
       text,
-      readers: { kind: "owner", personId: capturer.personId },
       readAt,
     });
     // A later read of it was kept first: this older one is not.
@@ -293,7 +373,7 @@ const keptAs = async (
 const answerCaptured = async (
   env: Env,
   capturer: Capturer,
-  connectionId: string,
+  kept: { connectionId: string; lane: Lane },
   action: string,
   input: unknown,
   { result, readAt }: Read
@@ -309,18 +389,22 @@ const answerCaptured = async (
   const text = redact(texts.join("\n\n"));
   let ended: Ended;
   try {
-    const id = await answerCaptureIdOf(
-      connectionId,
-      capturer.personId,
+    ended = await keptAs(
+      env,
+      capturer,
+      kept,
       action,
-      input
+      { input },
+      {
+        text,
+        readAt,
+      }
     );
-    ended = await keptAs(env, capturer, connectionId, id, text, readAt);
   } catch (error) {
     // The Brain refused it (a text past its limit) or couldn't be
     // reached: the one item failed.
     log.warn("connection_capture.failed", {
-      connectionId,
+      connectionId: kept.connectionId,
       ...capturer.where,
       ...errorFields(error),
     });
@@ -342,7 +426,10 @@ const answerClasses: ReadonlySet<ToolClass | undefined> = new Set([
   "read-company",
 ]);
 
-/** What capturing `result` of `action` ended in. */
+/**
+ * What capturing `result` of `action` ended in: nothing to record for a
+ * run a trigger started, through a connection that isn't shared.
+ */
 const captured = async (
   env: Env,
   capturer: Capturer,
@@ -350,19 +437,29 @@ const captured = async (
   action: string,
   input: unknown,
   { result, readAt }: Read
-): Promise<Ended> => {
+): Promise<Ended | undefined> => {
   const [owner] = await connectionOwnersOf(env, [connectionId]);
   // A whole answer is one item, whatever its server named.
   const answers = owner !== undefined && keepsWholeAnswers(owner.source);
   const named = answers ? 1 : new Set(result.provenance).size;
-  if (owner?.ownerUserId !== capturer.personId) {
+  let lane: Lane;
+  if (owner?.ownerUserId === null) {
+    lane = { kind: "shared" };
+  } else if (capturer.personId === undefined) {
+    return undefined;
+  } else if (owner?.ownerUserId === capturer.personId) {
+    lane = { kind: "own", personId: capturer.personId };
+  } else {
+    // Connect doesn't know it, or it is someone else's (a call connect
+    // refuses: `connect.not_owner`).
     return skippedAll("shared", named);
   }
   if (!(answers ? answerClasses : itemClasses).has(classOf(owner, action))) {
     return skippedAll("reach", named);
   }
+  const kept = { connectionId, lane };
   if (answers) {
-    return await answerCaptured(env, capturer, connectionId, action, input, {
+    return await answerCaptured(env, capturer, kept, action, input, {
       result,
       readAt,
     });
@@ -376,14 +473,13 @@ const captured = async (
   if (itemRead === "file" && !asksText(input)) {
     return skippedAll("file", 1);
   }
-  const id = await captureIdOf(connectionId, capturer.personId, action, itemId);
   return await keptAs(
     env,
     capturer,
-    connectionId,
-    id,
-    redact(result.output),
-    readAt
+    kept,
+    action,
+    { itemId },
+    { text: redact(result.output), readAt }
   );
 };
 
@@ -421,7 +517,7 @@ const capturedFor = async (
   if (result.keep !== true) {
     return;
   }
-  let ended: Ended;
+  let ended: Ended | undefined;
   try {
     ended = await captured(env, capturer, connectionId, action, input, read);
   } catch (error) {
@@ -441,7 +537,9 @@ const capturedFor = async (
       { items, kept: 0, failed: items, skipped: 0 },
     ];
   }
-  await endedAudited(env, capturer, connectionId, ended);
+  if (ended !== undefined) {
+    await endedAudited(env, capturer, connectionId, ended);
+  }
 };
 
 /**
@@ -500,10 +598,11 @@ const endedWithin = async (
 /**
  * Keeps what workflow run `run` read with the tool `action` through
  * `connectionId` (`read`) for the one person it acts for, by
- * `captureRead`'s rules, when it acts for one (the header). A run a
- * trigger started acts for nobody: none of its calls is a capture's, as a
- * call connect said nothing of isn't. A call that passed a sensitive
- * argument is skipped (`sensitive`). Never throws.
+ * `captureRead`'s rules, when it acts for one (the header), and what it
+ * read through a shared connection for its audience. A run a trigger
+ * started acts for nobody: only its reads through a shared connection are
+ * kept, and nothing else of its calls is recorded. A call that passed a
+ * sensitive argument is skipped (`sensitive`). Never throws.
  */
 export const captureRunRead = async (
   env: Env,
@@ -513,11 +612,11 @@ export const captureRunRead = async (
   input: unknown,
   read: Read
 ): Promise<void> => {
-  if (read.result.keep !== true || run.invoker.type === "trigger") {
+  if (read.result.keep !== true) {
     return;
   }
   const capturer: Capturer = {
-    personId: run.principal,
+    personId: run.invoker.type === "trigger" ? undefined : run.principal,
     where: { run: run.runId },
     // As the run's call receipts name it (resource-calls.ts): the
     // workflow, as a run, is the system's.
