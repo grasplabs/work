@@ -159,7 +159,7 @@ test("a person searches, edits a document, meets a newer version instead of over
       page.getByRole("heading", { level: 1, name: "Pay" }).first()
     ).toBeVisible();
     await usedBy(page)
-      .getByRole("button", { name: "Leave", exact: true })
+      .getByRole("link", { name: "Leave", exact: true })
       .click();
     await expect(
       page
@@ -167,7 +167,7 @@ test("a person searches, edits a document, meets a newer version instead of over
         .first()
     ).toBeVisible();
     await expect(
-      usedBy(page).getByRole("button", { name: "Pay", exact: true })
+      usedBy(page).getByRole("link", { name: "Pay", exact: true })
     ).toBeVisible();
 
     // An edit is a new version, with what changed.

@@ -6,7 +6,7 @@ import type {
 } from "@grasp-os/shared/knowledge";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useNavigate, useRouter } from "@tanstack/react-router";
+import { Link, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
@@ -19,7 +19,13 @@ import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Doc, Edit } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
-import { RowList, RowListItem } from "../grasp/row-list/index.ts";
+import {
+  Item,
+  ItemContent,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../grasp/item/index.ts";
 import { Section, SectionHeader } from "../grasp/section-header/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { Textarea } from "../grasp/textarea/index.ts";
@@ -259,7 +265,7 @@ const Facts = ({
 };
 
 /**
- * Documents as a small section of rows that open them: what this one
+ * Documents as a small section of links to them: what this one
  * links to, or what links to it. Nothing where there are none.
  */
 const Related = ({
@@ -275,29 +281,33 @@ const Related = ({
     title: string;
   }[];
 }) => {
-  const navigate = useNavigate();
   if (documents.length === 0) {
     return null;
   }
   return (
     <Section aria-labelledby={id}>
       <SectionHeader id={id} size="sm" title={title} />
-      <RowList aria-labelledby={id}>
+      {/* Each one has an address: a link, never a button. */}
+      <ItemGroup aria-label={title}>
         {documents.map((document) => (
-          <RowListItem
-            icon={Doc}
+          <Item
             key={document.documentId}
-            name={document.title}
-            onPress={() => {
-              void navigate({
-                to: "/knowledge/$collection",
-                params: { collection: document.collectionId },
-                search: { doc: document.documentId },
-              });
-            }}
-          />
+            render={
+              <Link
+                params={{ collection: document.collectionId }}
+                search={{ doc: document.documentId }}
+                to="/knowledge/$collection"
+              />
+            }
+            size="sm"
+          >
+            <ItemMedia icon={Doc} iconLook="inline" />
+            <ItemContent>
+              <ItemTitle>{document.title}</ItemTitle>
+            </ItemContent>
+          </Item>
         ))}
-      </RowList>
+      </ItemGroup>
     </Section>
   );
 };
