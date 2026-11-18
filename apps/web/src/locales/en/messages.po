@@ -43,10 +43,8 @@ msgstr "(yours)"
 msgid "{0, plural, one {# line taken out.} other {# lines taken out.}}"
 msgstr "{0, plural, one {# line taken out.} other {# lines taken out.}}"
 
-#. placeholder {0}: members.length + invitations.length
 #. placeholder {0}: team.people
 #: src/onboarding/send-plan-form.tsx
-#: src/routes/_shell.settings.members.tsx
 msgid "{0, plural, one {# person} other {# people}}"
 msgstr "{0, plural, one {# person} other {# people}}"
 
@@ -1193,6 +1191,7 @@ msgid "{people, plural, one {{sector}, # person.} other {{sector}, # people.}}"
 msgstr "{people, plural, one {{sector}, # person.} other {{sector}, # people.}}"
 
 #: src/brain/brain.ts
+#: src/routes/_shell.settings.members.tsx
 #: src/workflows/requests/request-table.tsx
 msgid "{people, plural, one {# person} other {# people}}"
 msgstr "{people, plural, one {# person} other {# people}}"
@@ -1200,6 +1199,10 @@ msgstr "{people, plural, one {# person} other {# people}}"
 #: src/workflows/requests/request-table.tsx
 msgid "{people, plural, one {# person} other {# people}} · {helpful} helpful"
 msgstr "{people, plural, one {# person} other {# people}} · {helpful} helpful"
+
+#: src/routes/_shell.settings.members.tsx
+msgid "{people, plural, one {# person} other {# people}} · {invited, plural, one {# invited} other {# invited}}"
+msgstr "{people, plural, one {# person} other {# people}} · {invited, plural, one {# invited} other {# invited}}"
 
 #: src/projects/file-item-dialog.tsx
 msgid "{people, plural, one {Also give the # person in {projectName} access?} other {Also give the # people in {projectName} access?}}"
@@ -8169,6 +8172,10 @@ msgstr "Invite them from the people list first."
 msgid "Invited"
 msgstr "Invited"
 
+#: src/routes/_shell.settings.members.tsx
+msgid "Invited {date}"
+msgstr "Invited {date}"
+
 #: src/activity/audit-words.ts
 msgid "Invited a guest"
 msgstr "Invited a guest"
@@ -8643,10 +8650,6 @@ msgstr "Its versions call it {aliases}"
 #: src/brain/brain-article/team-work.tsx
 msgid "Its work"
 msgstr "Its work"
-
-#: src/routes/_shell.settings.members.tsx
-msgid "Joined {date}"
-msgstr "Joined {date}"
 
 #: src/activity/audit-words.ts
 msgid "Joined from the directory, writing to Stephen"
@@ -13381,6 +13384,10 @@ msgstr "Role"
 #: src/projects/project-people.tsx
 msgid "Role in the project"
 msgstr "Role in the project"
+
+#: src/routes/_shell.settings.members.tsx
+msgid "Role of {name}"
+msgstr "Role of {name}"
 
 #: src/workflows/share-workflow.tsx
 msgid "Role of {shown}"

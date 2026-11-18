@@ -42,10 +42,8 @@ import {
   SelectContent,
 } from "../grasp/select/index.ts";
 import { TagInput } from "../grasp/tag-input/index.ts";
-import { Text } from "../grasp/text/index.ts";
 import { toast } from "../grasp/toast/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
-import { roleLabel } from "../labels.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { roleItems } from "./roles.ts";
@@ -298,9 +296,6 @@ export const InvitationActions = ({
   };
   return (
     <span {...stylex.props(styles.ends)}>
-      <Text element="span" size="sm" tone="muted">
-        {roleLabel(invitation.role)}
-      </Text>
       <DropdownMenu>
         <DropdownMenuTrigger
           aria-label={t`Actions for ${email}`}

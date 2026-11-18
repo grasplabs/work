@@ -123,6 +123,9 @@ const styles = stylex.create({
   roleText: { margin: 0, color: grasp.muted },
 });
 
+/** The table's head: the column names muted on the card's own ground, a hairline under them. */
+const HEAD = "plain" as const;
+
 /** How many people a page of the table holds: the rest are a page further. */
 const pageSize = 20;
 
@@ -135,10 +138,13 @@ interface Notice {
 /** A member's role and the menu of what else may be done to them. */
 const MemberActions = ({
   member,
+  part,
   onNotice,
   onRemoved,
 }: {
   member: Member;
+  /** Which of the row's cells: the role chosen, or the menu of what else may be done. */
+  part: "role" | "menu";
   onNotice: (notice: Notice) => void;
   /** Once they are removed: their row, and what had the focus in it, is gone. */
   onRemoved: () => void;
@@ -215,118 +221,129 @@ const MemberActions = ({
   };
   return (
     <div {...stylex.props(styles.rowEnd)}>
-      <Select
-        disabled={busy}
-        items={roleItems()}
-        onValueChange={(role) => {
-          if (role === "admin") {
-            setAsking("promote");
-          } else if (roleSchema.safeParse(role).success && role !== null) {
-            void setRole(roleSchema.parse(role));
-          }
-        }}
-        value={member.role}
-      >
-        <SelectTrigger aria-label={t`Role of ${who}`} size="sm" variant="text">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent />
-      </Select>
-      <DropdownMenu>
-        {/* Off while a role change is sent and the list read again, as the
-            role is: nothing acts on a row that is about to change. */}
-        <DropdownMenuTrigger
-          disabled={busy}
-          icon={More}
-          aria-label={t`Actions for ${who}`}
-          size="xs"
-          variant="ghost"
-        />
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem
-            icon={Copy}
-            onSelect={() => {
-              void copyEmail(member.email, {
-                copied: t`Copied`,
-                failed: t`Copying didn't work`,
-              });
+      {part === "role" ? (
+        <>
+          <Select
+            disabled={busy}
+            items={roleItems()}
+            onValueChange={(role) => {
+              if (role === "admin") {
+                setAsking("promote");
+              } else if (roleSchema.safeParse(role).success && role !== null) {
+                void setRole(roleSchema.parse(role));
+              }
             }}
+            value={member.role}
           >
-            {t`Copy email`}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            action={signOutEverywhere}
-            failedLabel={t`Not signed out`}
-            icon={SignOut}
-            mirrorIcon
-          >
-            {t`Sign out everywhere`}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            variant="danger"
-            icon={Trash}
-            onSelect={() => {
-              setAsking("remove");
+            <SelectTrigger
+              aria-label={t`Role of ${who}`}
+              size="sm"
+              variant="text"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent />
+          </Select>
+          <AlertDialog
+            onOpenChange={(open) => {
+              if (!open) {
+                setAsking(undefined);
+              }
             }}
+            open={asking === "promote"}
           >
-            {t`Remove`}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <AlertDialog
-        onOpenChange={(open) => {
-          if (!open) {
-            setAsking(undefined);
-          }
-        }}
-        open={asking === "promote"}
-      >
-        <AlertDialogContent>
-          <AlertDialogTitle>{t`Make ${name} an admin?`}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {t`Admins can change anyone's role, end their sessions and remove them, other admins included.`}
-          </AlertDialogDescription>
-          <AlertDialogFooter>
-            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
-            <AlertDialogAction
-              action={async () => {
-                await setRole("admin");
-              }}
-              failedLabel={t`Not changed`}
-              variant="ink"
-            >
-              {t`Make admin`}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <AlertDialog
-        onOpenChange={(open) => {
-          if (!open) {
-            setAsking(undefined);
-          }
-        }}
-        open={asking === "remove"}
-      >
-        <AlertDialogContent>
-          <AlertDialogTitle>{t`Remove ${name}?`}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {t`They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again.`}
-          </AlertDialogDescription>
-          <AlertDialogFooter>
-            <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
-            <AlertDialogAction
-              action={remove}
-              failedLabel={t`Not removed`}
-              variant="danger"
-              workingLabel={t`Removing`}
-            >
-              {t`Remove`}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            <AlertDialogContent>
+              <AlertDialogTitle>{t`Make ${name} an admin?`}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t`Admins can change anyone's role, end their sessions and remove them, other admins included.`}
+              </AlertDialogDescription>
+              <AlertDialogFooter>
+                <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+                <AlertDialogAction
+                  action={async () => {
+                    await setRole("admin");
+                  }}
+                  failedLabel={t`Not changed`}
+                  variant="ink"
+                >
+                  {t`Make admin`}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </>
+      ) : (
+        <>
+          <DropdownMenu>
+            {/* Off while a role change is sent and the list read again, as the
+              role is: nothing acts on a row that is about to change. */}
+            <DropdownMenuTrigger
+              disabled={busy}
+              icon={More}
+              aria-label={t`Actions for ${who}`}
+              size="xs"
+              variant="ghost"
+            />
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                icon={Copy}
+                onSelect={() => {
+                  void copyEmail(member.email, {
+                    copied: t`Copied`,
+                    failed: t`Copying didn't work`,
+                  });
+                }}
+              >
+                {t`Copy email`}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                action={signOutEverywhere}
+                failedLabel={t`Not signed out`}
+                icon={SignOut}
+                mirrorIcon
+              >
+                {t`Sign out everywhere`}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="danger"
+                icon={Trash}
+                onSelect={() => {
+                  setAsking("remove");
+                }}
+              >
+                {t`Remove`}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <AlertDialog
+            onOpenChange={(open) => {
+              if (!open) {
+                setAsking(undefined);
+              }
+            }}
+            open={asking === "remove"}
+          >
+            <AlertDialogContent>
+              <AlertDialogTitle>{t`Remove ${name}?`}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t`They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again.`}
+              </AlertDialogDescription>
+              <AlertDialogFooter>
+                <AlertDialogAction>{t`Cancel`}</AlertDialogAction>
+                <AlertDialogAction
+                  action={remove}
+                  failedLabel={t`Not removed`}
+                  variant="danger"
+                  workingLabel={t`Removing`}
+                >
+                  {t`Remove`}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </>
+      )}
     </div>
   );
 };
@@ -365,20 +382,14 @@ const RolesButton = () => {
  * another admin exists, but nobody should lose this page by accident): on
  * the same edge as the others', with the room their menu takes.
  */
-const OwnRole = ({ role }: { role: Role }) => {
-  const { t } = useLingui();
-  return (
-    <div {...stylex.props(styles.rowEnd)}>
-      <Select disabled items={roleItems()} value={role}>
-        <SelectTrigger aria-label={t`Your role`} size="sm" variant="text">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent />
-      </Select>
-      <span {...stylex.props(styles.menuRoom)} />
-    </div>
-  );
-};
+const OwnRole = ({ role, label }: { role: Role; label: string }) => (
+  <Select disabled items={roleItems()} value={role}>
+    <SelectTrigger aria-label={label} size="sm" variant="text">
+      <SelectValue />
+    </SelectTrigger>
+    <SelectContent />
+  </Select>
+);
 
 /** One row of the people's table: a member, an invitation or someone removed, with its date. */
 interface PersonRow {
@@ -400,10 +411,19 @@ interface PeopleWords {
   since: string;
   role: string;
   invited: string;
-  joined: (date: string) => string;
+  yourRole: string;
+  roleOf: (name: string) => string;
+  /** On a phone, in place of an invited person's second line. */
+  invitedShort: (date: string) => string;
   invitedOn: (date: string, by: string) => string;
   removedOn: (date: string) => string;
 }
+
+/** The role a row's person has or would join as, in words: for search and sorting. */
+const roleOf = (row: PersonRow): string => {
+  const role = row.member?.role ?? row.invitation?.role;
+  return role === undefined ? "" : roleLabel(role);
+};
 
 /** The people's columns: who, since when, and their role with what can be done. */
 const peopleColumns = ({
@@ -423,14 +443,31 @@ const peopleColumns = ({
       key: "name",
       header: words.name,
       value: (row) => `${row.name} ${row.email}`,
-      cell: (row) => (
-        <DataTablePerson
-          name={row.name}
-          {...(row.kind === "invited" || row.email === ""
-            ? {}
-            : { detail: row.email })}
-        />
-      ),
+      cell: (row) => {
+        const date = formatDate(row.at);
+        // On a phone Since steps aside: an invited or removed person's state stands under the name.
+        if (narrow && row.kind === "invited") {
+          return (
+            <DataTablePerson
+              detail={words.invitedShort(date)}
+              name={row.name}
+            />
+          );
+        }
+        if (narrow && row.kind === "removed") {
+          return (
+            <DataTablePerson detail={words.removedOn(date)} name={row.name} />
+          );
+        }
+        return (
+          <DataTablePerson
+            name={row.name}
+            {...(row.kind === "invited" || row.email === ""
+              ? {}
+              : { detail: row.email })}
+          />
+        );
+      },
     },
     {
       key: "since",
@@ -455,7 +492,8 @@ const peopleColumns = ({
             </Text>
           );
         }
-        return words.joined(date);
+        // Joined is what Since means: a member's cell is the date alone.
+        return date;
       },
     },
     {
@@ -463,20 +501,22 @@ const peopleColumns = ({
       header: words.role,
       align: "end",
       control: true,
-      value: (row) =>
-        row.member === undefined ? "" : roleLabel(row.member.role),
+      value: (row) => roleOf(row),
       cell: (row) => {
         if (row.invitation !== undefined) {
-          return <InvitationActions invitation={row.invitation} />;
-        }
-        if (row.removed !== undefined) {
-          return <RemovedActions person={row.removed} />;
+          // What they join as, which nobody changes here: as one's own role reads.
+          return (
+            <OwnRole
+              label={words.roleOf(row.name)}
+              role={row.invitation.role}
+            />
+          );
         }
         if (row.member === undefined) {
           return null;
         }
         return row.member.userId === me ? (
-          <OwnRole role={row.member.role} />
+          <OwnRole label={words.yourRole} role={row.member.role} />
         ) : (
           <MemberActions
             member={row.member}
@@ -484,6 +524,35 @@ const peopleColumns = ({
             onRemoved={() => {
               // The table reads again, without their row.
             }}
+            part="role"
+          />
+        );
+      },
+    },
+    {
+      key: "actions",
+      header: "",
+      align: "end",
+      control: true,
+      value: () => "",
+      cell: (row) => {
+        if (row.invitation !== undefined) {
+          return <InvitationActions invitation={row.invitation} />;
+        }
+        if (row.removed !== undefined) {
+          return <RemovedActions person={row.removed} />;
+        }
+        if (row.member === undefined || row.member.userId === me) {
+          return null;
+        }
+        return (
+          <MemberActions
+            member={row.member}
+            onNotice={onNotice}
+            onRemoved={() => {
+              // The table reads again, without their row.
+            }}
+            part="menu"
           />
         );
       },
@@ -532,6 +601,9 @@ const PeopleTable = ({
   const [search, setSearch] = useState("");
   const gone = useRemovedPeople(removed);
   const narrow = useNarrow();
+  // What the head counts: the members, and apart from them who is invited.
+  const people = members.length;
+  const invited = invitations.length;
   const rows: PersonRow[] = [
     ...members.map((member) => ({
       key: member.userId,
@@ -597,10 +669,11 @@ const PeopleTable = ({
           </>
         ) : undefined
       }
-      title={plural(members.length + invitations.length, {
-        one: "# person",
-        other: "# people",
-      })}
+      title={
+        invited === 0
+          ? plural(people, { one: "# person", other: "# people" })
+          : t`${plural(people, { one: "# person", other: "# people" })} · ${plural(invited, { one: "# invited", other: "# invited" })}`
+      }
     >
       {notice.failure === undefined && notice.done === undefined ? null : (
         <div {...stylex.props(styles.notice)}>
@@ -613,6 +686,7 @@ const PeopleTable = ({
       )}
       {/* A column's being hidden is read as the table starts: it starts again when the width crosses the phone's. */}
       <DataTable
+        appearance={{ head: HEAD }}
         key={narrow ? "narrow" : "wide"}
         columns={peopleColumns({
           words: {
@@ -620,7 +694,9 @@ const PeopleTable = ({
             since: t`Since`,
             role: t`Role`,
             invited: t`Invited`,
-            joined: (date) => t`Joined ${date}`,
+            yourRole: t`Your role`,
+            roleOf: (name) => t`Role of ${name}`,
+            invitedShort: (date) => t`Invited ${date}`,
             invitedOn: (date, by) => t`${date} by ${by}`,
             removedOn: (date) => t`Removed ${date}`,
           },
