@@ -8,6 +8,11 @@ import { AppLogo } from "../../connections/app-logo.tsx";
 import { formatList } from "../../format.ts";
 import { focus } from "../../grasp/focus/focus.ts";
 import { grasp } from "../../grasp/tokens/tokens.stylex.ts";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "../../grasp/tooltip/index.ts";
 import { teamOfWork } from "../brain-atlas.ts";
 import { brainLinks } from "../brain-links.ts";
 import type { BrainLink } from "../brain-links.ts";
@@ -211,17 +216,22 @@ export const TeamWork = ({
           <PartHeading title={t`Works in`} />
           <div {...stylex.props(styles.systems)}>
             {systems.map((note) => (
-              // Its name on the link, and as the pointer's hint over the logo.
-              <Link
-                aria-label={note.title}
-                key={note.id}
-                params={{ noteId: note.id }}
-                title={note.title}
-                to="/brain/$noteId"
-                {...stylex.props(styles.system, focus.ring)}
-              >
-                <AppLogo logo={note.logoSrc} name={note.title} />
-              </Link>
+              // Its name on the link, and as the tooltip over the logo.
+              <Tooltip key={note.id}>
+                <TooltipTrigger
+                  render={
+                    <Link
+                      aria-label={note.title}
+                      params={{ noteId: note.id }}
+                      to="/brain/$noteId"
+                      {...stylex.props(styles.system, focus.ring)}
+                    >
+                      <AppLogo logo={note.logoSrc} name={note.title} />
+                    </Link>
+                  }
+                />
+                <TooltipContent>{note.title}</TooltipContent>
+              </Tooltip>
             ))}
           </div>
         </section>

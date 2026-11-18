@@ -28,9 +28,9 @@ import type { TreeNode } from "../grasp/tree/index.ts";
 import { loadFromCore, NotLoaded, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
-import { collectionIconOf } from "./collection-markers.tsx";
+import { CollectionMarks, collectionIconOf } from "./collection-markers.tsx";
 import type { KnowledgeNavData } from "./nav-data.ts";
-import { folderTree, foldersTo } from "./tree.ts";
+import { countDocuments, folderTree, foldersTo } from "./tree.ts";
 import type { Folder } from "./tree.ts";
 
 // Knowledge's navigation beside the page, in the prototype's look
@@ -38,7 +38,10 @@ import type { Folder } from "./tree.ts";
 // search at the top, the home, the memory files pinned under it, then one
 // branch per collection the person may read, which opens in place to its
 // folders and documents, a page at a time. The open document is marked
-// and its folders open. It folds to a rail of icons.
+// and its folders open. The home, the memory files, the collections and
+// the documents are the router's links, so they open in a new tab too;
+// folders and "Show more" are the tree's own actions. It folds to a rail of
+// icons.
 
 /** Where the person is: the collection open, and the document in it. */
 export interface KnowledgeAt {
@@ -276,12 +279,19 @@ const useListed = (
   };
 };
 
-/** Where an item of the tree leads, or what it does. */
+/** What an item of the tree that isn't a link does. */
 type Target =
-  | { to: "home" }
-  | { to: "collection"; collection: string; doc?: string }
   | { to: "folder"; value: string }
   | { to: "more"; collection: string };
+
+/** A collection's page, or a document on it, as the router's link for a row. */
+const linkTo = (collection: string, doc?: string) => (
+  <Link
+    params={{ collection }}
+    search={doc === undefined ? {} : { doc }}
+    to="/knowledge/$collection"
+  />
+);
 
 /** The words the tree's items say that aren't names. */
 interface TreeWords {
@@ -302,19 +312,12 @@ const entriesOf = (
   folder: Folder,
   targets: Map<string, Target>
 ): TreeNode[] => [
-  ...folder.documents.map((document): TreeNode => {
-    const value = `d:${document.id}`;
-    targets.set(value, {
-      to: "collection",
-      collection: document.collectionId,
-      doc: document.id,
-    });
-    return {
-      value,
-      label: document.path.split("/").at(-1) ?? document.path,
-      icon: File,
-    };
-  }),
+  ...folder.documents.map((document): TreeNode => ({
+    value: `d:${document.id}`,
+    label: document.path.split("/").at(-1) ?? document.path,
+    icon: File,
+    render: linkTo(document.collectionId, document.id),
+  })),
   ...folder.folders.map((inner): TreeNode => {
     const value = folderValue(collection, inner.path);
     targets.set(value, { to: "folder", value });
@@ -322,6 +325,7 @@ const entriesOf = (
       value,
       label: inner.name,
       icon: FolderIcon,
+      end: countDocuments(inner),
       children: entriesOf(collection, inner, targets),
     };
   }),
@@ -369,30 +373,34 @@ const itemsOf = (
   opened: ReadonlySet<string>,
   words: TreeWords
 ): { items: TreeNode[]; targets: Map<string, Target> } => {
-  const targets = new Map<string, Target>([["home", { to: "home" }]]);
+  const targets = new Map<string, Target>();
   const items: TreeNode[] = [
-    { value: "home", label: words.knowledge, icon: Home },
+    {
+      value: "home",
+      label: words.knowledge,
+      icon: Home,
+      render: <Link search={{}} to="/knowledge" />,
+    },
   ];
   const memoryFiles =
     data.memory.state === "ready" ? data.memory.data.files : [];
   for (const file of memoryFiles) {
-    const value = `m:${file.id}`;
-    targets.set(value, {
-      to: "collection",
-      collection: file.collectionId,
-      doc: file.id,
+    items.push({
+      value: `m:${file.id}`,
+      label: file.path,
+      icon: Note,
+      render: linkTo(file.collectionId, file.id),
     });
-    items.push({ value, label: file.path, icon: Note });
   }
   const collections =
     data.collections.state === "ready" ? data.collections.data : [];
   for (const collection of collections) {
-    const value = `c:${collection.id}`;
-    targets.set(value, { to: "collection", collection: collection.id });
     items.push({
-      value,
+      value: `c:${collection.id}`,
       label: collection.name,
       icon: collectionIconOf(collection),
+      end: <CollectionMarks collection={collection} />,
+      render: linkTo(collection.id),
       // Only an open collection is read: a closed one waits, empty.
       children: opened.has(collection.id)
         ? listingOf(collection.id, listed.get(collection.id), words, targets)
@@ -434,7 +442,6 @@ export const KnowledgeTree = ({
   fold?: { label: string; onFold: () => void };
 }) => {
   const { t, i18n } = useLingui();
-  const navigate = useNavigate();
   // The collections and folders open: the way to where the person is opens
   // once, and after that closes like anything else.
   const [opened, setOpened] = useState<ReadonlySet<string>>(
@@ -460,20 +467,13 @@ export const KnowledgeTree = ({
     more: t`Show more`,
     failed: (failure) => notLoadedText(failure, i18n) ?? "",
   });
+  // A row that is a link goes by its link; the rest act here.
   const run = (value: string): void => {
     const target = targets.get(value);
     if (target === undefined) {
       return;
     }
-    if (target.to === "home") {
-      void navigate({ to: "/knowledge", search: {} });
-    } else if (target.to === "collection") {
-      void navigate({
-        to: "/knowledge/$collection",
-        params: { collection: target.collection },
-        search: target.doc === undefined ? {} : { doc: target.doc },
-      });
-    } else if (target.to === "folder") {
+    if (target.to === "folder") {
       setFolders((before) => flip(before, target.value));
     } else {
       more(target.collection);

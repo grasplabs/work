@@ -13,6 +13,13 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { PageHeading, SectionTitle } from "../frame/page.tsx";
 import { RouterLink } from "../frame/router-link.tsx";
 import {
+  Card,
+  CardDescription,
+  CardLink,
+  CardMedia,
+  CardTitle,
+} from "../grasp/card/index.ts";
+import {
   Empty,
   EmptyDescription,
   EmptyHeader,
@@ -120,8 +127,6 @@ const styles = stylex.create({
     listStyleType: "none",
   },
   block: { display: "flex", flexDirection: "column", gap: grasp.space3 },
-  blockLink: { display: "block" },
-  blockName: { display: "block", marginBlockStart: grasp.space3 },
 });
 
 const SearchResults = ({
@@ -184,9 +189,32 @@ const MemoryBlock = ({ memory }: { memory: MemoryFiles }) => {
   return (
     <div {...stylex.props(styles.memory)}>
       <div {...stylex.props(styles.memoryPanel)}>
-        <Panel short>
-          <MemoryDrawing />
-        </Panel>
+        {memory.memory === null ? (
+          <Card>
+            <CardMedia>
+              <Panel short>
+                <MemoryDrawing />
+              </Panel>
+            </CardMedia>
+          </Card>
+        ) : (
+          <CardLink
+            aria-label={t`Memory`}
+            render={
+              <Link
+                params={{ collection: memory.memory }}
+                search={{}}
+                to="/knowledge/$collection"
+              />
+            }
+          >
+            <CardMedia>
+              <Panel short>
+                <MemoryDrawing />
+              </Panel>
+            </CardMedia>
+          </CardLink>
+        )}
       </div>
       <div {...stylex.props(styles.memoryWords)}>
         <Text size="sm" tone="muted">
@@ -318,23 +346,25 @@ const CollectionBlocks = ({
         const documents = firstPages.get(collection.id);
         return (
           <li key={collection.id} {...stylex.props(styles.block)}>
-            <RouterLink
-              layout={styles.blockLink}
-              params={{ collection: collection.id }}
-              search={{}}
-              to="/knowledge/$collection"
-              variant="standalone"
+            <CardLink
+              render={
+                <Link
+                  params={{ collection: collection.id }}
+                  search={{}}
+                  to="/knowledge/$collection"
+                />
+              }
             >
-              <Panel>
-                <CollectionDrawing collection={collection} />
-              </Panel>
-              <span {...stylex.props(styles.blockName)}>{collection.name}</span>
-            </RouterLink>
-            {collection.description === "" ? null : (
-              <Text size="sm" tone="muted">
-                {collection.description}
-              </Text>
-            )}
+              <CardMedia>
+                <Panel>
+                  <CollectionDrawing collection={collection} />
+                </Panel>
+              </CardMedia>
+              <CardTitle>{collection.name}</CardTitle>
+              {collection.description === "" ? null : (
+                <CardDescription>{collection.description}</CardDescription>
+              )}
+            </CardLink>
             <CollectionMarkers collection={collection} />
             {documents === undefined ? null : (
               <LatestDocuments documents={documents} />

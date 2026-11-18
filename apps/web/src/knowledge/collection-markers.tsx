@@ -3,11 +3,18 @@ import type { Collection, CollectionAccess } from "@grasp-os/shared/knowledge";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
-import { Trans } from "@lingui/react/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 
 import { Badge } from "../grasp/badge/index.ts";
-import { Company, Key, Lock, People } from "../grasp/icons/index.ts";
+import {
+  Company,
+  Icon,
+  Key,
+  Lock,
+  People,
+  ShieldAlert,
+} from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 
@@ -25,6 +32,7 @@ const isReadOnly = ({ source }: Collection): boolean =>
 
 const styles = stylex.create({
   markers: { display: "flex", flexWrap: "wrap", gap: grasp.space1 },
+  sensitive: { display: "inline-flex", color: grasp.attention },
 });
 
 /** Who may read a collection, and whether it is sensitive or read-only. */
@@ -47,6 +55,26 @@ export const CollectionMarkers = ({
     ) : null}
   </span>
 );
+
+/**
+ * Whether a collection is sensitive or read-only, as marks at the end of
+ * its row in the navigation: icons, named for a screen reader.
+ */
+export const CollectionMarks = ({ collection }: { collection: Collection }) => {
+  const { t } = useLingui();
+  return (
+    <>
+      {collection.sensitive ? (
+        <span {...stylex.props(styles.sensitive)}>
+          <Icon icon={ShieldAlert} label={t`Sensitive`} />
+        </span>
+      ) : null}
+      {isReadOnly(collection) ? (
+        <Icon icon={Lock} label={t`Read-only`} />
+      ) : null}
+    </>
+  );
+};
 
 const accessIcons: Readonly<Record<CollectionAccess, IconData>> = {
   everyone: Company,

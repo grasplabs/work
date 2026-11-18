@@ -1,8 +1,8 @@
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Link, useMatchRoute, useNavigate } from "@tanstack/react-router";
+import { Link, useMatchRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
+import type { ReactElement, ReactNode } from "react";
 
 import { usePageSidebarFold } from "../frame/page-sidebar.tsx";
 import { Button } from "../grasp/button/index.ts";
@@ -494,25 +494,53 @@ const PageLink = ({
   </Link>
 );
 
-/** A place in the folded rail: an icon, named by its tooltip, that goes there. */
+/** The way to open the navigation again, at the top of the folded rail. */
 const RailButton = ({
   icon,
   label,
-  current = false,
   onPress,
 }: {
   icon: IconData;
   label: string;
-  current?: boolean;
   onPress: () => void;
 }) => (
   <Tooltip>
     <TooltipTrigger
-      aria-current={current ? "page" : undefined}
       aria-label={label}
       icon={icon}
       onClick={onPress}
-      variant={current ? "quiet" : "ghost"}
+      variant="ghost"
+    />
+    <TooltipContent side="right">{label}</TooltipContent>
+  </Tooltip>
+);
+
+/**
+ * A place in the folded rail: an icon, named by its tooltip, that is the router's link there, so
+ * it opens in a new tab as any link does.
+ */
+const RailLink = ({
+  icon,
+  label,
+  current = false,
+  link,
+}: {
+  icon: IconData;
+  label: string;
+  current?: boolean;
+  link: ReactElement<Record<string, unknown>>;
+}) => (
+  <Tooltip>
+    <TooltipTrigger
+      render={
+        <Button
+          aria-current={current ? "page" : undefined}
+          aria-label={label}
+          icon={icon}
+          render={link}
+          variant={current ? "quiet" : "ghost"}
+        />
+      }
     />
     <TooltipContent side="right">{label}</TooltipContent>
   </Tooltip>
@@ -614,7 +642,6 @@ export const BrainNav = ({
   region?: RegionId | undefined;
 }) => {
   const { t } = useLingui();
-  const navigate = useNavigate();
   const [collapsed, setCollapsed] = usePageSidebarFold("brain");
   const [open, setOpen] = useState(readOpened);
   // What is open is kept for the next visit, as the folding is.
@@ -691,59 +718,46 @@ export const BrainNav = ({
           />
           <Separator decorative layout={styles.railLine} />
           {company ? (
-            <RailButton
+            <RailLink
               current={onCompany}
               icon={Company}
               label={company.title}
-              onPress={() => {
-                void navigate({
-                  to: "/brain/$noteId",
-                  params: { noteId: company.id },
-                });
-              }}
+              link={
+                <Link params={{ noteId: company.id }} to="/brain/$noteId" />
+              }
             />
           ) : null}
-          <RailButton
+          <RailLink
             current={onBrain && shownRegion === undefined}
             icon={BrainMark}
             label={t`Brain`}
-            onPress={() => {
-              void navigate({ to: "/brain" });
-            }}
+            link={<Link to="/brain" />}
           />
-          <RailButton
+          <RailLink
             current={onActivity}
             icon={Chart}
             label={activityLabel}
-            onPress={() => {
-              void navigate({ to: "/brain/activity" });
-            }}
+            link={<Link to="/brain/activity" />}
           />
-          <RailButton
+          <RailLink
             current={onMemory}
             icon={NoteMark}
             label={t`Memory`}
-            onPress={() => {
-              void navigate({ to: "/brain/memory" });
-            }}
+            link={<Link to="/brain/memory" />}
           />
-          <RailButton
+          <RailLink
             current={onSources}
             icon={FolderMark}
             label={sourcesLabel}
-            onPress={() => {
-              void navigate({ to: "/brain/sources" });
-            }}
+            link={<Link to="/brain/sources" />}
           />
           {regions.map(({ region, icon }) => (
-            <RailButton
+            <RailLink
               current={here.has(regionKey(region.id))}
               icon={icon}
               key={region.id}
               label={region.name}
-              onPress={() => {
-                void navigate({ to: "/brain", search: { region: region.id } });
-              }}
+              link={<Link search={{ region: region.id }} to="/brain" />}
             />
           ))}
         </div>

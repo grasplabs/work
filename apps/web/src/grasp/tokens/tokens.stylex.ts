@@ -440,6 +440,7 @@ export const grasp = stylex.defineConsts({
   appCardGrainStrength: "var(--grasp-app-card-grain-strength)",
   // App card: app card.
   appCardRatio: "var(--grasp-app-card-ratio)",
+  appCardFrameMax: "var(--grasp-app-card-frame-max)",
   appCardCorner: "var(--grasp-app-card-corner)",
   appCardWindowCorner: "var(--grasp-app-card-window-corner)",
   appCardInset: "var(--grasp-app-card-inset)",

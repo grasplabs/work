@@ -1,20 +1,28 @@
-import type { ChatCitedDocument } from "@grasp-os/shared/chat";
-import {
-  InlineCitation,
-  InlineCitationCard,
-  InlineCitationCardBody,
-  InlineCitationCardTrigger,
-  InlineCitationQuote,
-  InlineCitationSource,
-  InlineCitationText,
-} from "@grasp-os/ui/components/inline-citation";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
+import { focus } from "../grasp/focus/focus.ts";
 import { toast } from "../grasp/toast/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
+
+const styles = stylex.create({
+  // The cited words, as a link in the text reads: underlined, in its ink.
+  note: {
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    color: "inherit",
+    font: "inherit",
+    textDecorationLine: "underline",
+    textDecorationColor: grasp.linkUnderline,
+    textUnderlineOffset: grasp.linkUnderlineOffset,
+    cursor: "pointer",
+  },
+});
 
 // A note an answer cites (`ChatCitation`): its link opens the document on
 // its collection's page (`?doc=`, as `documentHref` addresses one). The
@@ -59,61 +67,13 @@ export const CitedNote = ({
   };
   return (
     <button
-      className="underline"
       onClick={() => {
         void open();
       }}
       type="button"
+      {...stylex.props(styles.note, focus.ring)}
     >
       {children}
     </button>
-  );
-};
-
-/**
- * A span of an answer that cites a note (`ChatCitedSpan`), in the
- * prototype's inline citation (`components/ai-elements/inline-citation.tsx`):
- * its words open the note, as `CitedNote`, and a badge numbered as the
- * answer's sources are (`number`) opens a card with the document and the
- * words of it the span rests on, its `quote`, or, without one, the start
- * of what the document says.
- */
-export const CitedSpan = ({
-  source,
-  number,
-  quote,
-  children,
-}: {
-  source: ChatCitedDocument;
-  number: number;
-  quote: string | null;
-  children?: ReactNode;
-}) => {
-  const { t } = useLingui();
-  const { documentId, title, path, snippet } = source;
-  return (
-    <InlineCitation>
-      <InlineCitationText>
-        <CitedNote documentId={documentId}>{children}</CitedNote>
-      </InlineCitationText>
-      <InlineCitationCard>
-        <InlineCitationCardTrigger
-          aria-label={t`Source ${number}: ${title}`}
-          sources={[String(number)]}
-        />
-        <InlineCitationCardBody label={title}>
-          <InlineCitationSource
-            className="m-4"
-            description={quote === null && snippet !== "" ? snippet : undefined}
-            title={title}
-            url={path}
-          >
-            {quote === null ? null : (
-              <InlineCitationQuote>{quote}</InlineCitationQuote>
-            )}
-          </InlineCitationSource>
-        </InlineCitationCardBody>
-      </InlineCitationCard>
-    </InlineCitation>
   );
 };

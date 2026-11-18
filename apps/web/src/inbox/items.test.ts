@@ -569,15 +569,24 @@ describe(inboxItems, () => {
       .filter(({ kind }) => kind === "permissionRequest")
       .map(({ title }) => title);
 
-    expect(titles.toSorted()).toStrictEqual(
-      [
-        "Grant Schedule trigger (On the schedule 0 9 * * 1-5, in Europe/Berlin): start on Workflow workflow-1?",
+    // A schedule says what it is and when it next runs, never its cron.
+    const scheduled = titles.filter((title) =>
+      title.startsWith("Grant Schedule for workflow-1, next run ")
+    );
+    expect({
+      scheduled: scheduled.length,
+      cron: scheduled.some((title) => title.includes("* *")),
+      others: titles.filter((title) => !scheduled.includes(title)).toSorted(),
+    }).toStrictEqual({
+      scheduled: 1,
+      cron: false,
+      others: [
         "Grant Connection trigger (New mail in Microsoft 365, at connection-1): mail.list on Connection connection-1?",
         "Grant Email trigger (When an email arrives at its own address): start on Workflow workflow-1?",
         "Grant Webhook trigger (On order.paid events from Shop system): start on Workflow workflow-1?",
         "Grant Trigger unknown-1: start on Workflow workflow-1?",
-      ].toSorted()
-    );
+      ].toSorted(),
+    });
   });
 
   it("puts what blocks something first, then the newest", () => {

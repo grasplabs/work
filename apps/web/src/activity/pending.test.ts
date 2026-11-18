@@ -9,7 +9,7 @@ import {
 import type { Permission } from "@grasp-os/shared/permissions";
 import { describe, expect, it } from "vite-plus/test";
 
-import { objectOf, subjectOf } from "./pending.tsx";
+import { objectOf, requestWords, subjectOf } from "./pending.tsx";
 
 const app = "11111111-1111-4111-8111-111111111111";
 
@@ -130,6 +130,46 @@ describe("a pending request that names a workflow", () => {
     }).toStrictEqual({
       named: "Workflow nightly-report",
       unnamed: `Workflow ${id}`,
+    });
+  });
+});
+
+describe("a schedule trigger asking to start its workflow", () => {
+  /** `startRequest` from a trigger of `kind`, on weekdays at 09:00 in Amsterdam where it is a schedule. */
+  const triggered = (kind: "schedule" | "email"): Permission => ({
+    ...startRequest({ [workflow]: "invoice-approval" }),
+    trigger: {
+      kind,
+      schedule:
+        kind === "schedule"
+          ? { cron: "0 9 * * 1-5", timeZone: "Europe/Amsterdam" }
+          : null,
+      event: null,
+      connection: null,
+      source: null,
+    },
+  });
+  // A Tuesday at noon in Amsterdam: the next run is Wednesday at 09:00 there.
+  const now = new Date("2026-11-17T11:00:00.000Z");
+
+  it("says what it is and when it next runs, in the schedule's own zone, and any other trigger as before", () => {
+    const scheduled = requestWords(triggered("schedule"), directory, now);
+    const other = requestWords(triggered("email"), directory, now);
+
+    expect({
+      scheduled: scheduled.startsWith(
+        "Schedule for invoice-approval, next run "
+      ),
+      day: scheduled.includes("18"),
+      hour: scheduled.includes("09:00"),
+      cron: scheduled.includes("* *"),
+      other: other.endsWith(": start on Workflow invoice-approval"),
+    }).toStrictEqual({
+      scheduled: true,
+      day: true,
+      hour: true,
+      cron: false,
+      other: true,
     });
   });
 });

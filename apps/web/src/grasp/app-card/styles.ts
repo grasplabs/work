@@ -34,6 +34,11 @@ export const styles = stylex.create({
     isolation: "isolate",
     overflow: "clip",
     aspectRatio: grasp.appCardRatio,
+    // Never taller than this: at two columns (a 40rem to 96rem room) a card grows to 46rem wide and
+    // its frame, at the ratio, to 29rem. The window runs on past the foot, which crops it lower.
+    maxHeight: grasp.appCardFrameMax,
+    // The card's width whatever the height: without it the ratio takes the width from the capped height.
+    width: "100%",
     borderRadius: grasp.appCardCorner,
     cornerShape: grasp.cornerShape,
     backgroundColor: grasp.soft,

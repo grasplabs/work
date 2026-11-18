@@ -1388,8 +1388,7 @@ msgstr "{still, plural, one {A search still finds a term in # place.} other {A s
 msgid "{subject} gets this permission from now on."
 msgstr "{subject} gets this permission from now on."
 
-#: src/dashboard/pile-cards.tsx
-#: src/inbox/items.ts
+#: src/activity/pending.tsx
 msgid "{subject}: {actions} on {object}"
 msgstr "{subject}: {actions} on {object}"
 
@@ -2229,6 +2228,11 @@ msgctxt "add someone to share with"
 msgid "Add"
 msgstr "Add"
 
+#: src/frame/part-words.tsx
+msgctxt "add to an inspector's list"
+msgid "Add"
+msgstr "Add"
+
 #: src/projects/file-item-dialog.tsx
 #: src/projects/project-chats.tsx
 msgctxt "put in a project"
@@ -2238,6 +2242,10 @@ msgstr "Add"
 #: src/activity/audit-event.tsx
 msgid "Add {section}"
 msgstr "Add {section}"
+
+#: src/frame/part-words.tsx
+msgid "Add {what}"
+msgstr "Add {what}"
 
 #: src/projects/project-chats.tsx
 msgid "Add a chat"
@@ -3885,6 +3893,7 @@ msgstr "Can't offer Run: {unread}"
 #: src/chat/answer-words.tsx
 #: src/chat/brain-questions.tsx
 #: src/chat/chat-window.tsx
+#: src/chat/delete-chat-dialog.tsx
 #: src/chat/use-dictation.ts
 #: src/connections/connect-dialog.tsx
 #: src/connections/http-connections.tsx
@@ -4232,7 +4241,6 @@ msgstr "Chat box"
 msgid "Chat name"
 msgstr "Chat name"
 
-#: src/chat/chat-switcher.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "Chats"
 msgstr "Chats"
@@ -5979,10 +5987,6 @@ msgstr "Draft"
 #: src/settings/stephen-settings.tsx
 msgid "Drafts, events and files of their own, after they press a card."
 msgstr "Drafts, events and files of their own, after they press a card."
-
-#: src/chat/suggestions.tsx
-msgid "Draw how supplier invoices are handled"
-msgstr "Draw how supplier invoices are handled"
 
 #: src/brain/brain.ts
 msgctxt "workflow status"
@@ -10430,6 +10434,7 @@ msgstr "Not connected"
 msgid "Not copied"
 msgstr "Not copied"
 
+#: src/chat/delete-chat-dialog.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/teams.tsx
 #: src/workflows/delete-workflow.tsx
@@ -12205,10 +12210,6 @@ msgstr "Queries, mutations and actions of {app}"
 msgid "Question"
 msgstr "Question"
 
-#: src/chat/suggestions.tsx
-msgid "Questions to start with"
-msgstr "Questions to start with"
-
 #: src/workflows/runs.tsx
 msgid "Queued"
 msgstr "Queued"
@@ -13703,6 +13704,10 @@ msgstr "Scenes"
 msgid "Schedule"
 msgstr "Schedule"
 
+#: src/activity/pending.tsx
+msgid "Schedule for {workflow}, next run {when} ({zone})"
+msgstr "Schedule for {workflow}, next run {when} ({zone})"
+
 #: src/workflows/trigger-description.ts
 msgid "Schedule trigger"
 msgstr "Schedule trigger"
@@ -14225,6 +14230,10 @@ msgstr "Show all {devices}"
 msgid "Show all the {section}"
 msgstr "Show all the {section}"
 
+#: src/frame/part-words.tsx
+msgid "Show all the {what}"
+msgstr "Show all the {what}"
+
 #: src/activity/audit-log.tsx
 msgid "Show events"
 msgstr "Show events"
@@ -14676,10 +14685,6 @@ msgstr "Source"
 #: src/frame/part-words.tsx
 msgid "Source {number}"
 msgstr "Source {number}"
-
-#: src/chat/cited-note.tsx
-msgid "Source {number}: {title}"
-msgstr "Source {number}: {title}"
 
 #: src/brain/brain.ts
 #: src/chat/chat-markdown.ts
@@ -17409,6 +17414,11 @@ msgstr "View changes"
 msgid "Views"
 msgstr "Views"
 
+#: src/frame/part-words.tsx
+msgctxt "an inspector's views"
+msgid "Views"
+msgstr "Views"
+
 #: src/brain/brain.ts
 msgid "Vision"
 msgstr "Vision"
@@ -18010,10 +18020,6 @@ msgstr "What to remove"
 msgid "What to show of the traces"
 msgstr "What to show of the traces"
 
-#: src/chat/suggestions.tsx
-msgid "What waits on me today?"
-msgstr "What waits on me today?"
-
 #: src/inbox/inbox-page.tsx
 msgid "What waits on you"
 msgstr "What waits on you"
@@ -18129,10 +18135,6 @@ msgctxt "the places people asked Stephen in"
 msgid "Where"
 msgstr "Where"
 
-#: src/chat/suggestions.tsx
-msgid "Where does the most time still go?"
-msgstr "Where does the most time still go?"
-
 #: src/onboarding/setup-steps.tsx
 msgid "Where does the work get written down?"
 msgstr "Where does the work get written down?"
@@ -18205,10 +18207,6 @@ msgstr "Which AI"
 #: src/onboarding/setup-steps.tsx
 msgid "Which AI should I think with?"
 msgstr "Which AI should I think with?"
-
-#: src/chat/suggestions.tsx
-msgid "Which AI tools do people use?"
-msgstr "Which AI tools do people use?"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which Apps and agents hold permissions: {why}"

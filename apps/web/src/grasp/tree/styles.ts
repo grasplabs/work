@@ -120,4 +120,29 @@ export const treeStyles = stylex.create({
     overflowWrap: "anywhere",
     paddingBlock: grasp.space1,
   },
+  // A row that is a link (a node's `href` or `render`): the link fills the row from the icon to its
+  // end, so a press anywhere there is the link's, and looks as the row's words do.
+  link: {
+    display: "flex",
+    flexGrow: 1,
+    alignItems: "center",
+    alignSelf: "stretch",
+    gap: grasp.space2,
+    minWidth: 0,
+    color: "inherit",
+    textDecoration: "none",
+    outline: "none",
+  },
+  // At the row's end: a count, a mark. Quiet, never squeezed, after the words.
+  end: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: grasp.space1,
+    flexShrink: 0,
+    marginInlineStart: "auto",
+    color: grasp.muted,
+    fontSize: grasp.textXs,
+    lineHeight: grasp.textXsLine,
+    fontVariantNumeric: "tabular-nums",
+  },
 });

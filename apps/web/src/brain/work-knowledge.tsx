@@ -19,6 +19,11 @@ import { focus } from "../grasp/focus/focus.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "../grasp/tooltip/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -213,14 +218,20 @@ const useBeadText = (sentence: KnownSentence): string => {
 const Bead = ({ sentence }: { sentence: KnownSentence }) => {
   const said = useBeadText(sentence);
   return (
-    <button
-      aria-label={said}
-      title={said}
-      type="button"
-      {...stylex.props(styles.bead, focus.ring)}
-    >
-      <span aria-hidden="true" {...stylex.props(styles.beadDot)} />
-    </button>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            aria-label={said}
+            type="button"
+            {...stylex.props(styles.bead, focus.ring)}
+          >
+            <span aria-hidden="true" {...stylex.props(styles.beadDot)} />
+          </button>
+        }
+      />
+      <TooltipContent>{said}</TooltipContent>
+    </Tooltip>
   );
 };
 

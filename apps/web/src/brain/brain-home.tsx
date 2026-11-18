@@ -4,7 +4,12 @@ import { Link } from "@tanstack/react-router";
 import { useId } from "react";
 import type { ReactNode } from "react";
 
-import { focus } from "../grasp/focus/focus.ts";
+import {
+  CardDescription,
+  CardLink,
+  CardMedia,
+  CardTitle,
+} from "../grasp/card/index.ts";
 import { Link as TextLink } from "../grasp/link/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
 import { Separator } from "../grasp/separator/index.ts";
@@ -183,24 +188,14 @@ export const tone: Record<Group, Tone> = {
   },
 };
 
-const HOVER = media.hover;
-
 const styles = stylex.create({
-  // A pale field, faded a step while the pointer is on the block it heads (a link marked with
-  // stylex.defaultMarker()).
+  // A pale field; on a block the card's media around it fades it while the block is pointed at.
   panel: {
     position: "relative",
     overflow: "hidden",
     borderRadius: grasp.corner,
     cornerShape: grasp.cornerShape,
     height: `calc(2 * ${grasp.space20})`,
-    opacity: {
-      default: 1,
-      [stylex.when.ancestor(":hover")]: { default: 1, [HOVER]: 0.85 },
-    },
-    transitionProperty: "opacity",
-    transitionDuration: grasp.durationHover,
-    transitionTimingFunction: grasp.ease,
   },
   panelShort: { height: `calc(${grasp.space24} + ${grasp.space4})` },
   grid: { position: "absolute", inset: 0, width: "100%", height: "100%" },
@@ -224,32 +219,14 @@ const styles = stylex.create({
     columnGap: grasp.space6,
     rowGap: grasp.space8,
   },
-  block: {
-    display: "flex",
-    flexDirection: "column",
-    gap: grasp.space3,
-    minWidth: 0,
-    color: "inherit",
-    textDecorationLine: "none",
-    borderRadius: grasp.corner,
-  },
-  words: { display: "flex", flexDirection: "column", gap: grasp.space1 },
+  // A block's name, with how many it holds at the far end.
   nameRow: {
     display: "flex",
     alignItems: "baseline",
     justifyContent: "space-between",
     gap: grasp.space3,
-  },
-  // The block's name, underlined while the pointer is on the block.
-  name: {
     minWidth: 0,
-    textDecorationLine: {
-      default: "none",
-      [stylex.when.ancestor(":hover")]: {
-        default: "none",
-        [HOVER]: "underline",
-      },
-    },
+    marginTop: grasp.space2,
   },
   count: { flexShrink: 0, fontVariantNumeric: "tabular-nums" },
   // The home as a page.
@@ -269,10 +246,9 @@ const styles = stylex.create({
   footer: { display: "flex", flexDirection: "column", gap: grasp.space4 },
 });
 
-/** A block's name and how many it holds: the name underlined while the pointer is on its block. */
+/** The grid of blocks, a block's name row, and the page's column, for a part's own page. */
 export const blockStyles = {
-  block: [styles.block, stylex.defaultMarker(), focus.ring],
-  name: styles.name,
+  nameRow: styles.nameRow,
   count: styles.count,
   blocks: styles.blocks,
   column: styles.column,
@@ -635,33 +611,32 @@ export const BrainHome = ({ brain }: { brain: Brain }) => {
           return null;
         }
         return (
-          <Link
+          <CardLink
             key={section.key}
-            params={{ sectionId: section.slug }}
-            to="/brain/sections/$sectionId"
-            {...stylex.props(blockStyles.block)}
+            render={
+              <Link
+                params={{ sectionId: section.slug }}
+                to="/brain/sections/$sectionId"
+              />
+            }
           >
-            <Panel group={section.group}>
-              <Drawing group={section.group} />
-            </Panel>
-            <span {...stylex.props(styles.words)}>
-              <span {...stylex.props(styles.nameRow)}>
-                <span {...stylex.props(styles.name)}>
-                  <Text element="span" size="sm" weight="medium">
-                    {i18n._(groupLabel[section.group])}
-                  </Text>
-                </span>
-                <span {...stylex.props(styles.count)}>
-                  <Text element="span" size="sm" tone="muted">
-                    {shownCount(folder)}
-                  </Text>
-                </span>
+            <CardMedia>
+              <Panel group={section.group}>
+                <Drawing group={section.group} />
+              </Panel>
+            </CardMedia>
+            <div {...stylex.props(styles.nameRow)}>
+              <CardTitle headingLevel={2}>
+                {i18n._(groupLabel[section.group])}
+              </CardTitle>
+              <span {...stylex.props(styles.count)}>
+                <Text element="span" size="sm" tone="muted">
+                  {shownCount(folder)}
+                </Text>
               </span>
-              <Text element="span" size="sm" tone="muted">
-                {i18n._(section.description)}
-              </Text>
-            </span>
-          </Link>
+            </div>
+            <CardDescription>{i18n._(section.description)}</CardDescription>
+          </CardLink>
         );
       })}
     </section>

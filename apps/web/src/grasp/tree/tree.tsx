@@ -14,6 +14,8 @@
 
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
+import { renderElement } from "@ui-sdk/react/primitive";
+import type { RenderProp } from "@ui-sdk/react/primitive";
 import {
   Tree as TreePrimitive,
   TreeGroup as GroupPrimitive,
@@ -23,6 +25,7 @@ import {
 } from "@ui-sdk/react/tree";
 import type { TreeItemData } from "@ui-sdk/react/tree";
 import { useState } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 
 import { focus } from "../focus/focus";
 import { ChevronRight, Failed, Icon } from "../icons";
@@ -42,6 +45,19 @@ export interface TreeNode {
   children?: TreeNode[];
   /** It cannot be chosen, opened or run; it still takes focus, so a screen reader finds it. */
   disabled?: boolean;
+  /** What stands at the row's end, after its words: a count, a mark such as sensitive or read-only. */
+  end?: ReactNode;
+  /**
+   * Where the row leads: the row is then a link, opened by a press, Enter, a middle click or in a
+   * new tab. The keys and type-ahead stay the tree's.
+   */
+  href?: string;
+  /**
+   * The element the row's link is drawn as, for a router's link (`render={<Link to="/notes" />}`): it
+   * takes the row's look, its words and `aria-current` for the open one (`current`), and keeps its own
+   * props. Without it, an `<a href>`. Leave `href` out when the router's link carries the address.
+   */
+  render?: RenderProp;
 }
 
 /** Every prop a Tree takes. */
@@ -121,7 +137,64 @@ const withLoaded = (
     return { ...node, children: withLoaded(node.children, loaded) };
   });
 
-const Items = ({ nodes }: { nodes: TreeNode[] }) =>
+/** Whether a node's row is a link. */
+const isLinked = (node: TreeNode) =>
+  (node.href !== undefined && node.href !== "") || node.render !== undefined;
+
+/**
+ * The row's icon, words and end; in a link when the node leads somewhere. The link takes no Tab
+ * stop of its own: the tree's item holds focus, and Enter on it follows the link (Tree, below).
+ */
+const RowInside = ({ node, current }: { node: TreeNode; current: boolean }) => {
+  const inside = (
+    <>
+      {node.icon && (
+        <span aria-hidden="true" {...stylex.props(styles.icon)}>
+          <Icon icon={node.icon} />
+        </span>
+      )}
+      <span {...stylex.props(styles.words)}>{node.label}</span>
+      {node.end !== undefined && node.end !== null && node.end !== false && (
+        <span {...stylex.props(styles.end)}>{node.end}</span>
+      )}
+    </>
+  );
+  if (!isLinked(node)) {
+    return inside;
+  }
+  return renderElement(
+    "a",
+    {
+      href: node.href,
+      tabIndex: -1,
+      "data-tree-link": "",
+      "aria-current": current ? "page" : undefined,
+      className: stylex.props(styles.link).className,
+      children: inside,
+    },
+    node.render
+  );
+};
+
+/** Enter on an item whose row is a link follows it, as a press does. */
+const handleTreeKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+  if (event.key !== "Enter" || !(event.target instanceof HTMLElement)) {
+    return;
+  }
+  const item = event.target.closest("[role=treeitem]");
+  const link = item?.querySelector(":scope > * > [data-tree-link]");
+  if (link instanceof HTMLElement) {
+    link.click();
+  }
+};
+
+const Items = ({
+  nodes,
+  current,
+}: {
+  nodes: TreeNode[];
+  current: string | null | undefined;
+}) =>
   nodes.map((node) => {
     const branch = node.children !== undefined;
     return (
@@ -160,16 +233,11 @@ const Items = ({ nodes }: { nodes: TreeNode[] }) =>
           ) : (
             <span aria-hidden="true" {...stylex.props(styles.spacer)} />
           )}
-          {node.icon && (
-            <span aria-hidden="true" {...stylex.props(styles.icon)}>
-              <Icon icon={node.icon} />
-            </span>
-          )}
-          <span {...stylex.props(styles.words)}>{node.label}</span>
+          <RowInside node={node} current={current === node.value} />
         </LabelPrimitive>
         {branch && (
           <GroupPrimitive {...stylex.props(styles.group)}>
-            <Items nodes={node.children ?? []} />
+            <Items nodes={node.children ?? []} current={current} />
           </GroupPrimitive>
         )}
       </ItemPrimitive>
@@ -245,9 +313,10 @@ export const Tree = ({
       current={current}
       expandOnPress={expandOnPress}
       disabled={disabled}
+      onKeyDown={handleTreeKeyDown}
       {...stylex.props(styles.tree)}
     >
-      <Items nodes={nodes} />
+      <Items nodes={nodes} current={current} />
     </TreePrimitive>
   );
 };

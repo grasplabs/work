@@ -1,9 +1,15 @@
 import type { ChatAgent, ChatSubject } from "@grasp-os/shared/chat";
 import type { ModelEfforts } from "@grasp-os/shared/models";
-import { useIsMobile } from "@grasp-os/ui/hooks/use-mobile";
 import { useLingui } from "@lingui/react/macro";
 import { useRouteContext } from "@tanstack/react-router";
-import { createContext, use, useEffect, useEffectEvent, useRef } from "react";
+import {
+  createContext,
+  use,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useSyncExternalStore,
+} from "react";
 import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
@@ -37,6 +43,23 @@ import { useFollowedChat } from "./chat-watch.ts";
 import { tellChatsChanged } from "./chats-changed.ts";
 import type { SourceName } from "./sources.tsx";
 import { useAsk } from "./use-ask.ts";
+
+/** Narrower than this, a phone or a narrow window: the chat stands docked, never floating. */
+const narrowQuery = "(max-width: 767px)";
+
+const onWidthChange = (onChange: () => void): (() => void) => {
+  const query = matchMedia(narrowQuery);
+  query.addEventListener("change", onChange);
+  return () => {
+    query.removeEventListener("change", onChange);
+  };
+};
+
+const roomBesideNow = (): boolean => !matchMedia(narrowQuery).matches;
+
+/** Whether the window has room beside the page for the chat to float over. */
+const useRoomBeside = (): boolean =>
+  useSyncExternalStore(onWidthChange, roomBesideNow, () => true);
 
 // Grasp's one chat, on every page: the person's open chat
 // (active-chat.ts), so what is asked anywhere goes on there and shows in
@@ -266,7 +289,7 @@ const useGlobalChatValue = () => {
     wasRunning.current = running;
   }, [running]);
   const layout = useChatLayout();
-  const roomBeside = !useIsMobile();
+  const roomBeside = useRoomBeside();
   // About the page's subject, it stays open (chat-subject.ts), where the
   // page has it: that page is where its subject is made. Elsewhere, open
   // where it was put, where this page allows it there; elsewhere it stays

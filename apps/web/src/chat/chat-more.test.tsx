@@ -261,8 +261,11 @@ const typeInto = async (field: HTMLInputElement, text: string) => {
 /** The dialog's button `name`. */
 const dialogButton = (name: string): HTMLButtonElement => {
   const found = [
-    ...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
-  ].find((button) => button.textContent?.trim() === name);
+    ...document.querySelectorAll<HTMLButtonElement>(
+      '[role="dialog"] button, [role="alertdialog"] button'
+    ),
+    // A button's words, then what it says while it works, hidden till then.
+  ].find((button) => button.textContent?.trim().startsWith(name));
   if (found === undefined) {
     throw new Error(`No button ${name} in the dialog`);
   }
@@ -337,9 +340,10 @@ describe("the open chat's name and menu", () => {
     const { writes, router } = await opened(leave);
     await choose("Delete");
     expect(writes).toStrictEqual([]);
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
-      "Delete “Leave”?"
-    );
+    // Asked in an alert dialog first.
+    expect(
+      document.querySelector('[role="alertdialog"]')?.textContent
+    ).toContain("Delete “Leave”?");
     await press(dialogButton("Delete"));
     expect(writes).toStrictEqual(["remove chat-1"]);
     expect(activeChat()).toBeUndefined();

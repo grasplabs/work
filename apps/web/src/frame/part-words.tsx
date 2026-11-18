@@ -44,6 +44,7 @@ import { emptyWords } from "../grasp/empty/words.ts";
 import { fileUploadWords, imageWellWords } from "../grasp/file-upload/words.ts";
 import { filterBuilderWords } from "../grasp/filter-builder/words.ts";
 import { inputWords } from "../grasp/input/words.ts";
+import { englishWords as inspectorPanelWords } from "../grasp/inspector-panel/words.ts";
 import { languageSwitchWords } from "../grasp/language-switch/words.ts";
 import { linkWords } from "../grasp/link/words.ts";
 import { markdownWords } from "../grasp/markdown/words.ts";
@@ -113,6 +114,7 @@ export const englishPartWords: GraspWordsCatalog = {
   filterBuilder: filterBuilderWords,
   imageWell: imageWellWords,
   input: inputWords,
+  inspectorPanel: inspectorPanelWords,
   link: linkWords,
   markdown: markdownWords,
   ownerPicker: ownerPickerWords,
@@ -673,6 +675,20 @@ export const usePartWords = (): GraspWordsCatalog => {
         operator: t`Filter operator`,
         value: t`Filter value`,
       },
+    },
+    inspectorPanel: {
+      add: t({ message: "Add", context: "add to an inspector's list" }),
+      addTo: (label) => {
+        const what = label.toLowerCase();
+        return t`Add ${what}`;
+      },
+      remove: (name) => t`Remove ${name}`,
+      showAll: (label) => {
+        const what = label.toLowerCase();
+        return t`Show all the ${what}`;
+      },
+      close: t`Close`,
+      views: t({ message: "Views", context: "an inspector's views" }),
     },
     datePicker: { choose: t`Choose date` },
     dateRangePicker: {

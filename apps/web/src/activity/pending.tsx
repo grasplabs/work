@@ -3,6 +3,7 @@ import type {
   Permission,
   PermissionSubject,
 } from "@grasp-os/shared/permissions";
+import { nextScheduledRun } from "@grasp-os/shared/workflows";
 import { i18n } from "@lingui/core";
 import { msg, ph } from "@lingui/core/macro";
 
@@ -16,6 +17,7 @@ import {
   readPeople,
 } from "../directory.ts";
 import type { Directory } from "../directory.ts";
+import { formatList, formatZone } from "../format.ts";
 import {
   kindLabels,
   triggerDescription,
@@ -269,4 +271,64 @@ export const grantReviewed = async (
     }
     throw error;
   }
+};
+
+/**
+ * A schedule trigger asking to start its workflow, in words: what it is
+ * and when it next runs, in the schedule's own time zone and the page's
+ * language, from the request's own fields (the cron is read by croner,
+ * through `nextScheduledRun`, skipping a time the clocks skip, as such a
+ * trigger does). Undefined for any other request, or a schedule with no
+ * time to come: then the request reads as every other one.
+ */
+const scheduleWords = (
+  { trigger, object, actions, workflowNames }: Permission,
+  now: Date
+): string | undefined => {
+  const schedule = trigger?.kind === "schedule" ? trigger.schedule : null;
+  const startsWorkflow =
+    object.type === "workflow" &&
+    actions.length === 1 &&
+    actions[0] === "start";
+  if (schedule === null || !startsWorkflow) {
+    return undefined;
+  }
+  const next = nextScheduledRun(schedule, now, "skip");
+  if (next === undefined) {
+    return undefined;
+  }
+  const workflow = workflowNames?.[object.workflowId] ?? object.workflowId;
+  const when = new Intl.DateTimeFormat(i18n.locale, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: schedule.timeZone,
+  }).format(next);
+  const zone = formatZone(schedule.timeZone);
+  return i18n._(
+    msg`Schedule for ${ph({ workflow })}, next run ${ph({ when })} (${ph({ zone })})`
+  );
+};
+
+/**
+ * What a request asks, in one line: who asks, for what, on what; a
+ * schedule asking to start its workflow says so in words, with its next run.
+ */
+export const requestWords = (
+  request: Permission,
+  directory: Directory,
+  now: Date = new Date()
+): string => {
+  const scheduled = scheduleWords(request, now);
+  if (scheduled !== undefined) {
+    return scheduled;
+  }
+  const subject = subjectOf(request, directory);
+  const object = objectOf(request, directory);
+  const actions = formatList(request.actions);
+  return i18n._(
+    msg`${ph({ subject })}: ${ph({ actions })} on ${ph({ object })}`
+  );
 };

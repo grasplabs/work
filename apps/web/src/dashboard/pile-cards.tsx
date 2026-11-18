@@ -7,7 +7,7 @@ import { Link as RouterLink, useRouter } from "@tanstack/react-router";
 import {
   askedAgain,
   grantReviewed,
-  objectOf,
+  requestWords,
   reviewedVersion,
   reviewedVersionText,
   subjectOf,
@@ -24,7 +24,6 @@ import {
 } from "../chat/held-writes.tsx";
 import type { Session } from "../core.ts";
 import { formatTime, personName } from "../directory.ts";
-import { formatList } from "../format.ts";
 import { Link } from "../grasp/link/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -188,9 +187,7 @@ export const RequestCard = ({
   const { busy, failure, run } = useCoreAction();
   const { t } = useLingui();
   const subject = subjectOf(request, directory);
-  const object = objectOf(request, directory);
-  const actions = formatList(request.actions);
-  const who = t`${subject}: ${actions} on ${object}`;
+  const who = requestWords(request, directory);
   const decide = async (
     change: (permissions: Session["permissions"]) => Promise<unknown>,
     said: string

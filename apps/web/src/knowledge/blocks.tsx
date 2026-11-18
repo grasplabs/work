@@ -8,15 +8,14 @@ import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 // The pictures on Knowledge's blocks, in the prototype's style
 // (grasplabs/prototype `components/brain-home.tsx`): a pale field with a
 // dashed grid, a line drawing in the middle. In the palette's own greys:
-// Knowledge has no part colours of its own.
+// Knowledge has no part colours of its own. A panel stands in a card's
+// CardMedia, which gives it its corners.
 
 const styles = stylex.create({
   panel: {
     position: "relative",
     overflow: "hidden",
     height: `calc(${grasp.space24} + ${grasp.space16})`,
-    borderRadius: grasp.corner,
-    cornerShape: grasp.cornerShape,
     backgroundColor: grasp.soft,
   },
   short: { height: `calc(${grasp.space24} + ${grasp.space4})` },

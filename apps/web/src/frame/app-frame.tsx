@@ -2,6 +2,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 // The kit's toasts and tooltips stay mounted beside Grasp UI's while pages
 // in other areas still call the kit's; each goes when its last caller
 // moves to Grasp UI.
+import { Toaster } from "@grasp-os/ui/components/toast";
 import { TooltipProvider } from "@grasp-os/ui/components/tooltip";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -16,7 +17,7 @@ import { AppShell } from "../grasp/app-shell/index.ts";
 import type { AppShellProps } from "../grasp/app-shell/index.ts";
 import { useGraspSidebar } from "../grasp/frame/grasp-sidebar.tsx";
 import { Sidebar } from "../grasp/sidebar/index.ts";
-import { Toaster } from "../grasp/toast/index.ts";
+import { Toaster as GraspToaster } from "../grasp/toast/index.ts";
 import { TourLayer } from "../tour/tour-layer.tsx";
 import { useTour } from "../tour/tour-state.ts";
 import {
@@ -185,45 +186,51 @@ export const AppFrame = ({
   const touring = phase === "opening" || phase === "running";
   return (
     <PersonTheme userId={identity.userId}>
-      <TooltipProvider>
-        {/* The chat inside it too, docked or floating, so the tour holds it as well. */}
-        <div inert={touring} {...stylex.props(styles.shell)}>
-          <AppShell
-            banner={
-              failingNow.length === 0 ? undefined : (
-                <FailingBanner failing={failingNow} />
-              )
-            }
-            bar={bar}
-            dock={chatPage ? undefined : dock}
-            dockShown={dockShown}
-            {...(dockShown ? {} : { roomBelow: "page" as const })}
-            {...shellPanelsOf(panels)}
-            menuCloseLabel={t`Close the menu`}
-            menuLabel={t`Menu`}
-            menuOpen={menuOpen}
-            onMenuOpenChange={setMenuOpen}
-            page={chatPage ? "whole" : "padded"}
-            panelResizeLabel={t`Resize the chat`}
-            panelsCloseLabel={t`Close the chat`}
-            panelsToggleLabel={t`Show or hide the chat`}
-            sidebar={<Sidebar {...sidebar} />}
-          >
-            <div {...stylex.props(styles.page, fills && styles.fill)}>
-              <InFrame value>{children}</InFrame>
-            </div>
-          </AppShell>
-        </div>
-        {/* The toasts: what the page, the chat and the frame itself (a
-              sign-out core didn't carry out) say of an action. */}
-        <Toaster
-          closeLabel={t`Close`}
-          failedLabel={t`Not done`}
-          aria-label={t`Notifications`}
-          pendingLabel={t`Still working`}
-        />
-        <TourLayer identity={identity} />
-      </TooltipProvider>
+      {/* Every toast is the library's (GraspToaster below); this old
+          provider stays only because without it a press on a toast's
+          action while a library Dialog is open counts as a press outside:
+          the dialog closes and the action (Undo) is lost. It goes once the
+          library's Dialog leaves its toasts alone. */}
+      <Toaster>
+        <TooltipProvider>
+          {/* The chat inside it too, docked or floating, so the tour holds it as well. */}
+          <div inert={touring} {...stylex.props(styles.shell)}>
+            <AppShell
+              banner={
+                failingNow.length === 0 ? undefined : (
+                  <FailingBanner failing={failingNow} />
+                )
+              }
+              bar={bar}
+              dock={chatPage ? undefined : dock}
+              dockShown={dockShown}
+              {...(dockShown ? {} : { roomBelow: "page" as const })}
+              {...shellPanelsOf(panels)}
+              menuCloseLabel={t`Close the menu`}
+              menuLabel={t`Menu`}
+              menuOpen={menuOpen}
+              onMenuOpenChange={setMenuOpen}
+              page={chatPage ? "whole" : "padded"}
+              panelResizeLabel={t`Resize the chat`}
+              panelsCloseLabel={t`Close the chat`}
+              panelsToggleLabel={t`Show or hide the chat`}
+              sidebar={<Sidebar {...sidebar} />}
+            >
+              <div {...stylex.props(styles.page, fills && styles.fill)}>
+                <InFrame value>{children}</InFrame>
+              </div>
+            </AppShell>
+          </div>
+          {/* Grasp UI's toasts, for what the page and the chat say of an action. */}
+          <GraspToaster
+            closeLabel={t`Close`}
+            failedLabel={t`Not done`}
+            aria-label={t`Notifications`}
+            pendingLabel={t`Still working`}
+          />
+          <TourLayer identity={identity} />
+        </TooltipProvider>
+      </Toaster>
     </PersonTheme>
   );
 };

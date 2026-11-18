@@ -20,11 +20,16 @@ import { AppLogo } from "../connections/app-logo.tsx";
 import { NotFoundState } from "../frame/page-states.tsx";
 import { SectionTitle } from "../frame/page.tsx";
 import { Badge } from "../grasp/badge/index.ts";
+import {
+  CardDescription,
+  CardLink,
+  CardMedia,
+  CardTitle,
+} from "../grasp/card/index.ts";
 import { iconVars } from "../grasp/icons/icon.stylex.ts";
 import { Brain as BrainMark, Icon } from "../grasp/icons/index.ts";
 import { Link as TextLink } from "../grasp/link/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
-import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 
 // One part of the brain on its own page, as the prototype has it
@@ -47,12 +52,6 @@ const styles = stylex.create({
     backgroundColor: grasp.raised,
     boxShadow: grasp.liftLow,
   },
-  words: {
-    display: "flex",
-    flexDirection: "column",
-    gap: grasp.space1,
-    minWidth: 0,
-  },
   // A note's sentence, two lines at most.
   summary: {
     display: "-webkit-box",
@@ -69,37 +68,32 @@ const styles = stylex.create({
 const NoteBlock = ({
   note,
   section,
+  headingLevel,
 }: {
   note: Note;
   section: BrainSection;
+  /** Its title's level: under the page's title, or under a group's heading. */
+  headingLevel: 2 | 3;
 }) => (
-  <Link
-    params={{ noteId: note.id }}
-    to="/brain/$noteId"
-    {...stylex.props(blockStyles.block)}
-  >
-    <Panel group={section.group} short>
-      {note.kind === "tool" || note.kind === "app" ? (
-        <AppLogo name={note.title} size="lg" />
-      ) : (
-        <span {...stylex.props(styles.tile, tone[section.group].ink)}>
-          <Icon icon={section.icon} />
-        </span>
-      )}
-    </Panel>
-    <span {...stylex.props(styles.words)}>
-      <span {...stylex.props(blockStyles.name)}>
-        <Text element="span" size="sm" weight="medium" wrap="truncate">
-          {note.title}
-        </Text>
-      </span>
-      <span {...stylex.props(styles.summary)}>
-        <Text element="span" size="sm" tone="muted">
-          {note.summary}
-        </Text>
-      </span>
-    </span>
-  </Link>
+  <CardLink render={<Link params={{ noteId: note.id }} to="/brain/$noteId" />}>
+    <CardMedia>
+      <Panel group={section.group} short>
+        {note.kind === "tool" || note.kind === "app" ? (
+          <AppLogo name={note.title} size="lg" />
+        ) : (
+          <span {...stylex.props(styles.tile, tone[section.group].ink)}>
+            <Icon icon={section.icon} />
+          </span>
+        )}
+      </Panel>
+    </CardMedia>
+    <div {...stylex.props(blockStyles.nameRow)}>
+      <CardTitle headingLevel={headingLevel}>{note.title}</CardTitle>
+    </div>
+    <CardDescription>
+      <span {...stylex.props(styles.summary)}>{note.summary}</span>
+    </CardDescription>
+  </CardLink>
 );
 
 /**
@@ -159,7 +153,12 @@ const SectionPage = () => {
             )}
             <div {...stylex.props(blockStyles.blocks)}>
               {group.notes.map((note) => (
-                <NoteBlock key={note.id} note={note} section={section} />
+                <NoteBlock
+                  headingLevel={group.name === undefined ? 2 : 3}
+                  key={note.id}
+                  note={note}
+                  section={section}
+                />
               ))}
             </div>
           </section>

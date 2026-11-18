@@ -18,13 +18,13 @@ import type {
 } from "@grasp-os/shared/waiting";
 import { plural, t } from "@lingui/core/macro";
 
-import { objectOf, subjectOf } from "../activity/pending.tsx";
+import { requestWords, subjectOf } from "../activity/pending.tsx";
 import type { PendingRequests } from "../activity/pending.tsx";
 import { integrationKey } from "../connections/integrations.ts";
 import type { NotificationsPage } from "../dashboard/notifications-page.ts";
 import { decidesRequests } from "../dashboard/waiting.ts";
 import type { Interviews, Viewer, Waiting } from "../dashboard/waiting.ts";
-import { formatDate, formatDateTime, formatList } from "../format.ts";
+import { formatDate, formatDateTime } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { quietTeamOf } from "../onboarding/interviews-progress.tsx";
 import { linksOf } from "../onboarding/links-to-send.ts";
@@ -316,9 +316,7 @@ const requestItems = (pending: PendingRequests): InboxItem[] =>
   pending.requests.map((request) => {
     const { directory } = pending;
     const subject = subjectOf(request, directory);
-    const object = objectOf(request, directory);
-    const actions = formatList(request.actions);
-    const who = t`${subject}: ${actions} on ${object}`;
+    const who = requestWords(request, directory);
     const { binding } = request;
     return {
       id: `request:${request.id}`,

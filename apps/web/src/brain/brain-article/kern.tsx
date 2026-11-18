@@ -6,13 +6,17 @@ import type { ReactNode } from "react";
 
 import { formatDay, isoWeek } from "../../format.ts";
 import { Avatar, AvatarFallback } from "../../grasp/avatar/index.ts";
-import { Button } from "../../grasp/button/index.ts";
 import { Collapsible } from "../../grasp/collapsible/index.ts";
 import { focus } from "../../grasp/focus/focus.ts";
 import { Heading } from "../../grasp/heading/index.ts";
 import { Trash } from "../../grasp/icons/index.ts";
 import { Text } from "../../grasp/text/index.ts";
 import { grasp } from "../../grasp/tokens/tokens.stylex.ts";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "../../grasp/tooltip/index.ts";
 import { ClaimBasis } from "../aggregate.tsx";
 import type { Interviewee, Kern, StatementRow } from "../article-kern.ts";
 import { Drawing, Panel } from "../brain-home.tsx";
@@ -119,6 +123,8 @@ const styles = stylex.create({
     textDecorationLine: { default: "none", ":hover": "underline" },
   },
   remove: { alignSelf: "center" },
+  // Each line of who a face is, on its own line in the tooltip.
+  tipLine: { display: "block" },
   partHeading: {
     display: "flex",
     flexWrap: "wrap",
@@ -152,7 +158,7 @@ export const LastHeard = ({ date }: { date: string }) => {
 };
 
 /** Who an interviewee is, as their face says when pointed at: name, role, and how and when they were interviewed. */
-const useWhoText = (person: Interviewee): string => {
+const useWhoLines = (person: Interviewee): string[] => {
   const { t } = useLingui();
   const day = formatDay(person.date);
   return [
@@ -161,9 +167,7 @@ const useWhoText = (person: Interviewee): string => {
     [person.stakeholder ? t`Stakeholder` : t`Employee`, person.how, day]
       .filter(given)
       .join(" · "),
-  ]
-    .filter(given)
-    .join("\n");
+  ].filter(given);
 };
 
 /** One interviewee's face, a link to their interview. */
@@ -171,19 +175,31 @@ const Face = ({ person }: { person: Interviewee }) => {
   const { t } = useLingui();
   const day = formatDay(person.date);
   const who = person.label;
-  const title = useWhoText(person);
+  const lines = useWhoLines(person);
   return (
-    <Link
-      aria-label={t`${who}, interviewed ${day}`}
-      params={{ noteId: person.sourceId }}
-      title={title}
-      to="/brain/$noteId"
-      {...stylex.props(styles.person, focus.ring)}
-    >
-      <Avatar decorative name={person.label} size="md">
-        <AvatarFallback>{person.initials}</AvatarFallback>
-      </Avatar>
-    </Link>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Link
+            aria-label={t`${who}, interviewed ${day}`}
+            params={{ noteId: person.sourceId }}
+            to="/brain/$noteId"
+            {...stylex.props(styles.person, focus.ring)}
+          >
+            <Avatar decorative name={person.label} size="md">
+              <AvatarFallback>{person.initials}</AvatarFallback>
+            </Avatar>
+          </Link>
+        }
+      />
+      <TooltipContent>
+        {lines.map((line) => (
+          <span key={line} {...stylex.props(styles.tipLine)}>
+            {line}
+          </span>
+        ))}
+      </TooltipContent>
+    </Tooltip>
   );
 };
 
@@ -289,28 +305,36 @@ export const StatementLine = ({
         ) : null}
         {isTeamClaim(statement.id) ? <ClaimBasis /> : null}
       </span>
-      <Link
-        hash={statement.id}
-        params={{ noteId: place.source.id }}
-        title={place.source.title}
-        to="/brain/$noteId"
-        {...stylex.props(styles.where, focus.words)}
-      >
-        {/* Who said it as the company may read it, and the week: never a name, a day or the minute in the conversation. */}
-        {[who, t`week ${week}`].filter(given).join(" · ")}
-      </Link>
-      {onRemove === undefined ? null : (
-        <Button
-          aria-label={t`Remove this from the brain`}
-          icon={Trash}
-          layout={styles.remove}
-          onClick={() => {
-            onRemove(statement);
-          }}
-          size="xs"
-          title={t`Remove from the brain`}
-          variant="ghost"
+      {/* Who said it as the company may read it, and the week: never a name, a day or the minute in the conversation. The source's title is its tooltip. */}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Link
+              hash={statement.id}
+              params={{ noteId: place.source.id }}
+              to="/brain/$noteId"
+              {...stylex.props(styles.where, focus.words)}
+            >
+              {[who, t`week ${week}`].filter(given).join(" · ")}
+            </Link>
+          }
         />
+        <TooltipContent>{place.source.title}</TooltipContent>
+      </Tooltip>
+      {onRemove === undefined ? null : (
+        <Tooltip>
+          <TooltipTrigger
+            aria-label={t`Remove this from the brain`}
+            icon={Trash}
+            layout={styles.remove}
+            onClick={() => {
+              onRemove(statement);
+            }}
+            size="xs"
+            variant="ghost"
+          />
+          <TooltipContent>{t`Remove from the brain`}</TooltipContent>
+        </Tooltip>
       )}
     </li>
   );

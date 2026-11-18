@@ -1388,8 +1388,7 @@ msgstr "{still, plural, one {Una búsqueda aún encuentra un término en # lugar
 msgid "{subject} gets this permission from now on."
 msgstr "{subject} obtiene este permiso a partir de ahora."
 
-#: src/dashboard/pile-cards.tsx
-#: src/inbox/items.ts
+#: src/activity/pending.tsx
 msgid "{subject}: {actions} on {object}"
 msgstr "{subject}: {actions} sobre {object}"
 
@@ -2229,6 +2228,11 @@ msgctxt "add someone to share with"
 msgid "Add"
 msgstr "Añadir"
 
+#: src/frame/part-words.tsx
+msgctxt "add to an inspector's list"
+msgid "Add"
+msgstr "Añadir"
+
 #: src/projects/file-item-dialog.tsx
 #: src/projects/project-chats.tsx
 msgctxt "put in a project"
@@ -2238,6 +2242,10 @@ msgstr "Añadir"
 #: src/activity/audit-event.tsx
 msgid "Add {section}"
 msgstr "Añadir {section}"
+
+#: src/frame/part-words.tsx
+msgid "Add {what}"
+msgstr "Añadir {what}"
 
 #: src/projects/project-chats.tsx
 msgid "Add a chat"
@@ -3885,6 +3893,7 @@ msgstr "No se puede ofrecer Ejecutar: {unread}"
 #: src/chat/answer-words.tsx
 #: src/chat/brain-questions.tsx
 #: src/chat/chat-window.tsx
+#: src/chat/delete-chat-dialog.tsx
 #: src/chat/use-dictation.ts
 #: src/connections/connect-dialog.tsx
 #: src/connections/http-connections.tsx
@@ -4232,7 +4241,6 @@ msgstr "Cuadro del chat"
 msgid "Chat name"
 msgstr "Nombre del chat"
 
-#: src/chat/chat-switcher.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "Chats"
 msgstr "Chats"
@@ -5980,10 +5988,6 @@ msgstr "Borrador"
 msgid "Drafts, events and files of their own, after they press a card."
 msgstr "Sus propios borradores, eventos y archivos, después de pulsar una tarjeta."
 
-#: src/chat/suggestions.tsx
-msgid "Draw how supplier invoices are handled"
-msgstr "Dibuja cómo se tramitan las facturas de proveedores"
-
 #: src/brain/brain.ts
 msgctxt "workflow status"
 msgid "Drawn"
@@ -6644,7 +6648,7 @@ msgstr "Campo"
 #: src/frame/part-words.tsx
 msgctxt "a filter condition's part"
 msgid "Field"
-msgstr ""
+msgstr "Campo"
 
 #: src/apps/app-data.tsx
 msgid "Field for {column}"
@@ -6729,19 +6733,19 @@ msgstr "Filtrar {name}"
 
 #: src/frame/part-words.tsx
 msgid "Filter condition"
-msgstr ""
+msgstr "Condición del filtro"
 
 #: src/frame/part-words.tsx
 msgid "Filter field"
-msgstr ""
+msgstr "Campo del filtro"
 
 #: src/frame/part-words.tsx
 msgid "Filter operator"
-msgstr ""
+msgstr "Operador del filtro"
 
 #: src/frame/part-words.tsx
 msgid "Filter value"
-msgstr ""
+msgstr "Valor del filtro"
 
 #: src/activity/audit-log.tsx
 msgid "Filters"
@@ -10430,6 +10434,7 @@ msgstr "No conectada"
 msgid "Not copied"
 msgstr "No copiado"
 
+#: src/chat/delete-chat-dialog.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/teams.tsx
 #: src/workflows/delete-workflow.tsx
@@ -11429,7 +11434,7 @@ msgstr "Operaciones"
 #: src/frame/part-words.tsx
 msgctxt "a filter condition's part"
 msgid "Operator"
-msgstr ""
+msgstr "Operador"
 
 #: src/workflows/business-process.tsx
 msgctxt "business process"
@@ -12204,10 +12209,6 @@ msgstr "Consultas, mutaciones y acciones de {app}"
 #: src/inbox/item-detail.tsx
 msgid "Question"
 msgstr "Pregunta"
-
-#: src/chat/suggestions.tsx
-msgid "Questions to start with"
-msgstr "Preguntas para empezar"
 
 #: src/workflows/runs.tsx
 msgid "Queued"
@@ -13703,6 +13704,10 @@ msgstr "Escenas"
 msgid "Schedule"
 msgstr "Horario"
 
+#: src/activity/pending.tsx
+msgid "Schedule for {workflow}, next run {when} ({zone})"
+msgstr "Programación de {workflow}, próxima ejecución {when} ({zone})"
+
 #: src/workflows/trigger-description.ts
 msgid "Schedule trigger"
 msgstr "Disparador programado"
@@ -14225,6 +14230,10 @@ msgstr "Mostrar los {devices}"
 msgid "Show all the {section}"
 msgstr "Mostrar todos los {section}"
 
+#: src/frame/part-words.tsx
+msgid "Show all the {what}"
+msgstr "Mostrar todos los {what}"
+
 #: src/activity/audit-log.tsx
 msgid "Show events"
 msgstr "Mostrar eventos"
@@ -14677,10 +14686,6 @@ msgstr "Fuente"
 msgid "Source {number}"
 msgstr "Fuente {number}"
 
-#: src/chat/cited-note.tsx
-msgid "Source {number}: {title}"
-msgstr "Fuente {number}: {title}"
-
 #: src/brain/brain.ts
 #: src/chat/chat-markdown.ts
 #: src/frame/part-words.tsx
@@ -14998,7 +15003,7 @@ msgstr "Dejar de compartir"
 
 #: src/apps/app-sharing.tsx
 msgid "Stop sharing with {gone}?"
-msgstr ""
+msgstr "¿Dejar de compartir con {gone}?"
 
 #: src/workflows/share-workflow.tsx
 msgid "Stop sharing with {shown}"
@@ -17243,7 +17248,7 @@ msgstr "Valor"
 #: src/frame/part-words.tsx
 msgctxt "a filter condition's part"
 msgid "Value"
-msgstr ""
+msgstr "Valor"
 
 #: src/apps/data-model-changes.tsx
 msgid "Value for {name}"
@@ -17406,6 +17411,11 @@ msgstr "Ver cambios"
 #: src/activity/audit-event.tsx
 #: src/frame/part-words.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
+msgid "Views"
+msgstr "Vistas"
+
+#: src/frame/part-words.tsx
+msgctxt "an inspector's views"
 msgid "Views"
 msgstr "Vistas"
 
@@ -18010,10 +18020,6 @@ msgstr "Qué eliminar"
 msgid "What to show of the traces"
 msgstr "Qué mostrar de las trazas"
 
-#: src/chat/suggestions.tsx
-msgid "What waits on me today?"
-msgstr "¿Qué me espera hoy?"
-
 #: src/inbox/inbox-page.tsx
 msgid "What waits on you"
 msgstr "Lo que te espera"
@@ -18129,10 +18135,6 @@ msgctxt "the places people asked Stephen in"
 msgid "Where"
 msgstr "Dónde"
 
-#: src/chat/suggestions.tsx
-msgid "Where does the most time still go?"
-msgstr "¿Dónde se va todavía más tiempo?"
-
 #: src/onboarding/setup-steps.tsx
 msgid "Where does the work get written down?"
 msgstr "¿Dónde queda escrito el trabajo?"
@@ -18205,10 +18207,6 @@ msgstr "Qué IA"
 #: src/onboarding/setup-steps.tsx
 msgid "Which AI should I think with?"
 msgstr "¿Con qué IA debo pensar?"
-
-#: src/chat/suggestions.tsx
-msgid "Which AI tools do people use?"
-msgstr "¿Qué herramientas de IA usa la gente?"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which Apps and agents hold permissions: {why}"
@@ -18309,7 +18307,7 @@ msgstr "Quién habló"
 
 #: src/apps/app-sharing.tsx
 msgid "Who to share with couldn't be read. Try again in a moment."
-msgstr ""
+msgstr "No se pudo leer con quién compartir. Vuelve a intentarlo en un momento."
 
 #: src/connections/connect-dialog.tsx
 msgid "Who uses it"
