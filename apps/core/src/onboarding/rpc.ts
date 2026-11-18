@@ -196,7 +196,7 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         this.#env,
         parsed,
         by,
-        { make: confirmed, held: await store.heldTeams() }
+        { make: confirmed, held: async () => await store.heldTeams() }
       );
       const view = await store.saveRoster(named, by, { confirmed, minted });
       if (confirmed) {

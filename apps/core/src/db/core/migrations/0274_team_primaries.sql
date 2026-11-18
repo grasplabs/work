@@ -1,3 +1,8 @@
+CREATE TABLE `staff_list_team_ids` (
+	`id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE `team_primaries` (
 	`user_id` text PRIMARY KEY NOT NULL,
 	`team_id` text NOT NULL,
