@@ -2,6 +2,7 @@ import type { WorkflowVersionRecord } from "@grasp-os/shared/brain-records";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { drainObjectOutbox } from "../src/audit-outbox.ts";
 import {
@@ -33,7 +34,8 @@ import {
   told,
   zendeskClaim,
 } from "./onboarding-team.ts";
-import type { Key, PartJudge } from "./onboarding-team.ts";
+import type { Ids, Key, PartJudge } from "./onboarding-team.ts";
+import type { ProviderReply } from "./provider-streams.ts";
 
 // A team's routines in the new Brain (GRA-1749): the drawing of a piece
 // of its work, handed to the Brain, filed as a `routine` entity with its
@@ -169,6 +171,21 @@ const seven: readonly Key[] = [
   "sam",
 ];
 
+/** A drawing's answer as the fake model gives it: its numbers, and the rest as is. */
+const drawnSchema = z.looseObject({ numbers: z.array(z.unknown()) });
+
+/** The tickets as five told them (`fiveToldReply`), with `numbers` as each person's own numbers. */
+const withNumbers = (
+  ids: Ids,
+  numbers: readonly Record<string, unknown>[]
+): ProviderReply => {
+  const reply = fiveToldReply(ids);
+  const drawn = drawnSchema.parse(
+    JSON.parse("text" in reply ? reply.text : "{}")
+  );
+  return { ...reply, text: JSON.stringify({ ...drawn, numbers }) };
+};
+
 /**
  * A team through the onboarding: its tickets drawn as five told them
  * (`fiveToldReply`: Max, Mia, Mo, Noor and Pim; Max alone a step that
@@ -176,13 +193,21 @@ const seven: readonly Key[] = [
  * `part`, its intake given and handed over to the Brain. Max's account,
  * and the id of the tickets' drawing standing now, if one does.
  */
-const drawnTeam = async (part?: PartJudge, into: Env = env) => {
+const drawnTeam = async (
+  part?: PartJudge,
+  into: Env = env,
+  numbers?: (ids: Ids) => readonly Record<string, unknown>[]
+) => {
   const ids = await team(seven, addressOf);
   await mapped(ids);
   await told(ids);
   await agree(ids.sam, [fact("s1", "step", "Answers the phone.")]);
   await answering(
-    [fiveToldReply(ids)],
+    [
+      numbers === undefined
+        ? fiveToldReply(ids)
+        : withNumbers(ids, numbers(ids)),
+    ],
     async () => await onboardingStore(env).drawNext()
   );
   const { gave } = await intake(ids, [zendeskClaim], part);
@@ -251,6 +276,43 @@ const valuesOf = (routine: ReadRoutine | null, attribute: string): string[] =>
 
 /** Texts in their order. */
 const byText = (one: string, other: string): number => one.localeCompare(other);
+
+/** What the next interview about the tickets is told to ask, as Mo's turn is given it. */
+const asksOf = async (ids: Ids): Promise<string> => {
+  const context = await onboardingStore(env).contextOf(ids.mo);
+  return (
+    context?.known
+      .split("\n")
+      .find((line) => line.startsWith("Nobody has said yet")) ?? ""
+  );
+};
+
+/** Max's own count of a week, and the team's count Mia gave, `per` week or month. */
+const ownAndTeam =
+  (per: "week" | "month") =>
+  (ids: Ids): Record<string, unknown>[] => [
+    {
+      person: ids.max,
+      quiet: 30,
+      busy: -1,
+      of: "me",
+      per: "week",
+      minutes: [],
+      wrong: -1,
+    },
+    {
+      person: ids.mia,
+      quiet: 400,
+      busy: -1,
+      of: "team",
+      per,
+      minutes: [],
+      wrong: -1,
+    },
+  ];
+
+/** How often, as the next interview is asked it. */
+const howOften = "how many the whole team does, in a week or a month";
 
 describe("routines in the new Brain", { timeout: 120_000 }, () => {
   beforeEach(aloneInTheStore);
@@ -343,6 +405,39 @@ describe("routines in the new Brain", { timeout: 120_000 }, () => {
         "2. Ask someone when the customer number is missing.",
         "3. Send the answer.",
       ],
+    });
+  });
+
+  it("ask the next interview how often while the routine shows no count of the whole team's, though someone gave one in another period", async () => {
+    // Max counts his own week, Mia the team's month: the drawing counts by
+    // the week, so Mia's count is left out, and the routine has none.
+    const { ids, max, drawing } = await drawnTeam(
+      undefined,
+      env,
+      ownAndTeam("month")
+    );
+    const routine = await routineOn(max, drawing ?? "");
+    const asked = await asksOf(ids);
+    expect({
+      frequency: valuesOf(routine, "frequency"),
+      asked: asked.includes(howOften),
+    }).toStrictEqual({ frequency: [], asked: true });
+  });
+
+  it("stop asking how often once the routine shows the whole team's count", async () => {
+    const { ids, max, drawing } = await drawnTeam(
+      undefined,
+      env,
+      ownAndTeam("week")
+    );
+    const routine = await routineOn(max, drawing ?? "");
+    const asked = await asksOf(ids);
+    expect({
+      frequency: valuesOf(routine, "frequency"),
+      asked: asked.includes(howOften),
+    }).toStrictEqual({
+      frequency: ["about 400 a week, for the whole team"],
+      asked: false,
     });
   });
 
