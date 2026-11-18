@@ -439,9 +439,8 @@ const StaleTestData = ({ app }: { app: string }) => {
       tone="attention"
     >
       <Trans>
-        Your change reshapes the App&apos;s data in a way the example records
-        can&apos;t follow. Reset the example data in Data to try it. What your
-        team entered isn&apos;t touched.
+        Reset the example data in Data to try the change. Your team&apos;s
+        records aren&apos;t touched.
       </Trans>
     </Alert>
   );
@@ -571,7 +570,7 @@ const ReadOnlyBar = ({
         }
         layout={styles.strip}
         title={title}
-        tone={failure === undefined ? "attention" : "danger"}
+        tone={failure === undefined ? "neutral" : "danger"}
       >
         {failure}
       </Alert>
@@ -622,7 +621,6 @@ const TeamViewBar = ({ app }: { app: string }) => {
       icon={People}
       layout={styles.strip}
       title={t`What your team sees`}
-      tone="success"
     />
   );
 };
@@ -650,8 +648,7 @@ const MadeTip = ({ app }: { app: string }) => {
       title={t`This is your new App, with example data.`}
     >
       <Trans>
-        Try it out: only you see it, and the example data is just for trying. To
-        change anything, tell Grasp in the chat. When it&apos;s right, share it
+        Only you see it. Tell Grasp in the chat what to change, then share it
         with your team.
       </Trans>
     </Alert>
@@ -1233,7 +1230,7 @@ const Archived = ({
                 onClick={() => {
                   move("restore");
                 }}
-                variant="quiet"
+                variant="ink"
               >
                 {t`Restore`}
               </Button>
@@ -1242,12 +1239,7 @@ const Archived = ({
             tone={failure === undefined ? "neutral" : "danger"}
             title={t`This App is archived`}
           >
-            {failure ?? (
-              <Trans>
-                It is kept as it was, and nobody works on it. Restore it to
-                change it again.
-              </Trans>
-            )}
+            {failure ?? <Trans>Restore it to change it again.</Trans>}
           </PreviewState>
         }
         section={section}

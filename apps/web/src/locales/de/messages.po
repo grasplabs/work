@@ -8290,10 +8290,6 @@ msgstr "Sie ist endgültig weg: ihre Seiten, Versionen und Mitglieder und was ih
 msgid "It is kept as it was, and nobody works on it, until a builder restores it."
 msgstr "Sie bleibt, wie sie war, und niemand arbeitet daran, bis ein Builder sie wiederherstellt."
 
-#: src/apps/app-workspace.tsx
-msgid "It is kept as it was, and nobody works on it. Restore it to change it again."
-msgstr "Sie bleibt, wie sie war, und niemand arbeitet daran. Stellen Sie sie wieder her, um sie erneut zu ändern."
-
 #: src/connections/request-app-dialog.tsx
 msgid "It is not one of these"
 msgstr "Es ist keine davon"
@@ -11271,6 +11267,10 @@ msgstr "Nur Sie können es nutzen."
 msgid "Only you see it while you try it. You share it when it's right."
 msgstr "Nur Sie sehen es, während Sie es ausprobieren. Sie teilen es, wenn es passt."
 
+#: src/apps/app-workspace.tsx
+msgid "Only you see it. Tell Grasp in the chat what to change, then share it with your team."
+msgstr "Nur Sie sehen sie. Sagen Sie Grasp im Chat, was sich ändern soll, und teilen Sie sie dann mit Ihrem Team."
+
 #: src/apps/app-status.tsx
 #: src/apps/apps-overview.tsx
 #: src/workflows/workflow-status.tsx
@@ -12990,6 +12990,10 @@ msgstr "Testdaten zurücksetzen"
 msgid "Reset test data?"
 msgstr "Testdaten zurücksetzen?"
 
+#: src/apps/app-workspace.tsx
+msgid "Reset the example data in Data to try the change. Your team's records aren't touched."
+msgstr "Setzen Sie die Beispieldaten unter Daten zurück, um die Änderung auszuprobieren. Die Datensätze Ihres Teams bleiben unberührt."
+
 #: src/workflows/kept-state.tsx
 msgid "Reset what it keeps"
 msgstr "Behaltenes zurücksetzen"
@@ -13037,6 +13041,10 @@ msgstr "Ressourcen"
 #: src/knowledge/timeline.tsx
 msgid "Restore"
 msgstr "Wiederherstellen"
+
+#: src/apps/app-workspace.tsx
+msgid "Restore it to change it again."
+msgstr "Stellen Sie sie wieder her, um sie erneut zu ändern."
 
 #: src/apps/app-history.tsx
 msgid "Restore this earlier state?"
@@ -16867,10 +16875,6 @@ msgstr "Erneut versuchen"
 msgid "Try again to set up {name}."
 msgstr "Versuchen Sie noch einmal, {name} einzurichten."
 
-#: src/apps/app-workspace.tsx
-msgid "Try it out: only you see it, and the example data is just for trying. To change anything, tell Grasp in the chat. When it's right, share it with your team."
-msgstr "Probieren Sie sie aus: Nur Sie sehen sie, und die Beispieldaten sind nur zum Ausprobieren. Um etwas zu ändern, sagen Sie es Grasp im Chat. Wenn alles passt, teilen Sie sie mit Ihrem Team."
-
 #: src/chat/chat-window.tsx
 msgid "Try the search again"
 msgstr "Suche erneut versuchen"
@@ -18889,10 +18893,6 @@ msgstr "Ihr Browser lässt mich das Mikrofon nicht nutzen. Erlauben Sie es neben
 #: src/chat/use-dictation.ts
 msgid "Your browser's maker writes down what you say."
 msgstr "Der Hersteller Ihres Browsers schreibt auf, was Sie sagen."
-
-#: src/apps/app-workspace.tsx
-msgid "Your change reshapes the App's data in a way the example records can't follow. Reset the example data in Data to try it. What your team entered isn't touched."
-msgstr "Ihre Änderung formt die Daten der App so um, dass die Beispieldatensätze nicht folgen können. Setzen Sie die Beispieldaten unter Daten zurück, um es auszuprobieren. Was Ihr Team eingegeben hat, bleibt unberührt."
 
 #: src/apps/publish.tsx
 msgid "Your changes are shared"
