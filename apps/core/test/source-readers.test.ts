@@ -8,6 +8,7 @@ import {
 } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import {
   addSource,
@@ -20,10 +21,19 @@ import type { SourceReaders, SourceRef } from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import worker from "../src/index.ts";
+import {
+  claimConnectedTokens,
+  heldPrincipalsOf,
+  keepSignInAddress,
+} from "../src/source-readers.ts";
 import { says } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { objectsHolding, tablesHolding } from "./brain-next-traces.ts";
-import { consentCode, googleAddressUrl } from "./connect-providers.ts";
+import {
+  consentCode,
+  googleAddressUrl,
+  googleHoldUrl,
+} from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -84,7 +94,8 @@ const microsoftMember = async () => {
 /** The provider's redirect back to core, with `session`, run to its end. */
 const backFromProvider = async (
   session: string,
-  query: Record<string, string>
+  query: Record<string, string>,
+  coreEnv: Env = env
 ): Promise<void> => {
   const headers = new Headers({ cookie: session });
   headers.set(routerSecretHeader, env.ROUTER_SECRET);
@@ -94,7 +105,7 @@ const backFromProvider = async (
       `${coreOrigin}/api/connections/callback?${new URLSearchParams(query).toString()}`,
       { redirect: "manual", headers }
     ),
-    env,
+    coreEnv,
     ctx
   );
   await waitOnExecutionContext(ctx);
@@ -153,6 +164,48 @@ const disconnect = async (
 ): Promise<void> => {
   const { core } = await openRpc(who.session);
   await core.authenticate().connections.disconnect(connectionId);
+};
+
+/** `who` connects their own Microsoft account, as the Integrations page and Entra's consent do. */
+const connectedMicrosoft = async (
+  who: { session: string; oid: string },
+  coreEnv: Env = env
+): Promise<void> => {
+  const { core } = await openRpc(who.session);
+  const { url } = await core.authenticate().connections.start({
+    provider: "microsoft",
+    scope: "personal",
+    returnTo: "/integrations",
+  });
+  const authorization = new URL(url);
+  await backFromProvider(
+    who.session,
+    {
+      code: consentCode(authorization, acmeTenant, who.oid),
+      state: authorization.searchParams.get("state") ?? "",
+    },
+    coreEnv
+  );
+};
+
+/** How many of core's reader tokens name `userId` as the person holding them. */
+const tokensClaimedBy = async (userId: string): Promise<number> => {
+  const claimed = await env.DB.prepare(
+    "SELECT count(*) AS n FROM source_reader_tokens WHERE person = ?"
+  )
+    .bind(userId)
+    .first<{ n: number }>();
+  return claimed?.n ?? 0;
+};
+
+/** An admin removes and erases `who`, and the clock runs the erasure to its end. */
+const erasedBy = async (
+  admin: Awaited<ReturnType<typeof signedInApi>>,
+  who: { userId: string; name: string }
+): Promise<void> => {
+  await admin.api.members.remove(who.userId);
+  await admin.api.members.erase(who.userId, who.name);
+  await runMinuteTasks();
 };
 
 /** An item kept with `marker` for `readers`. */
@@ -347,6 +400,47 @@ const connectFailing = (method: string): Env["CONNECT"] =>
       return value;
     },
   });
+
+/** The providers Worker's fake of Google, asked at a control URL. */
+const fakeGoogle = async (
+  url: string,
+  init?: RequestInit
+): Promise<Response> => {
+  const providers = testBinding("CONNECT_PROVIDERS");
+  if (
+    typeof providers !== "object" ||
+    providers === null ||
+    !("fetch" in providers) ||
+    typeof providers.fetch !== "function"
+  ) {
+    throw new TypeError("Expected the providers Worker");
+  }
+  const response: unknown = await Reflect.apply(providers.fetch, providers, [
+    url,
+    init,
+  ]);
+  if (!(response instanceof Response)) {
+    throw new TypeError("Expected a response");
+  }
+  return response;
+};
+
+/** Waits, a bounded while, until a held call to Google is reached. */
+const exchangeHeld = async (): Promise<void> => {
+  for (let tries = 0; tries < 200; tries += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- until it is reached
+    const response = await fakeGoogle(googleHoldUrl);
+    // oxlint-disable-next-line no-await-in-loop -- until it is reached
+    const body: unknown = await response.json();
+    const { reached } = z.object({ reached: z.boolean() }).parse(body);
+    if (reached) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- until it is reached
+    await scheduler.wait(25);
+  }
+  throw new Error("The held look-up was never reached");
+};
 
 const readersOf = (...readers: SourceReader[]): SourceReaders => ({
   kind: "readers",
@@ -1139,6 +1233,53 @@ describe("readers copied from the source", () => {
   );
 
   it(
+    "claims by a new connection only the addresses it proves now: a colleague given an idle connection's address still reads after its owner's erasure",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      // Alice's connected Google account was renamed to an address that
+      // has since moved to Bob; her connection last confirmed it over a
+      // day ago. A file shared with Bob names it, and he reads it.
+      const alice = await microsoftMember();
+      const { id: idle } = await connectedGoogle(alice);
+      const [local = ""] = alice.email.split("@");
+      const moved = `moved-${unique()}@acme.test`;
+      await googleGives(local, moved);
+      await renewedOnly(idle);
+      await connectDb()
+        .prepare("UPDATE connections SET verified_email_at = ? WHERE id = ?")
+        .bind(Date.now() - 25 * hourMs, idle)
+        .run();
+      const { userId: bob } = await whoami(
+        await signedIn(idp, "google", googlePerson({ email: moved }))
+      );
+      const marker = uniqueWord();
+      const bobsFile = await sharedItem(
+        marker,
+        readersOf({
+          kind: "account",
+          provider: "google",
+          tenant: "acme.test",
+          account: moved,
+        })
+      );
+      const before = await finds(bob, bobsFile, marker);
+      // Then Alice connects her own Microsoft account, proved now.
+      await connectedMicrosoft(alice);
+      const claimed = await tokensClaimedBy(alice.userId);
+      await erasedBy(admin, alice);
+
+      // Alice claimed her first Google address, when she connected it, and
+      // her Microsoft account; not the address Bob holds.
+      expect({
+        before,
+        claimedByAlice: claimed,
+        after: await finds(bob, bobsFile, marker),
+      }).toStrictEqual({ before: true, claimedByAlice: 2, after: true });
+    }
+  );
+
+  it(
     "stops counting the address of a connection needing reconnecting a day after it was last confirmed",
     setUpTime,
     async () => {
@@ -1481,6 +1622,312 @@ describe("readers copied from the source", () => {
         now: account?.verifiedEmail,
         past: account?.pastVerifiedEmails,
       }).toStrictEqual({ now: renamed, past: [alice.email, renamed] });
+    }
+  );
+
+  it(
+    "reads a person's addresses only once their connections can write none: a renewal right after the read confirms nothing",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      const alice = await microsoftMember();
+      const { id: connectionId } = await connectedGoogle(alice);
+      const [local = ""] = alice.email.split("@");
+      // Her removal's disconnect fails: her connection stays connected.
+      const { core: down } = await openRpc(admin.session, {
+        coreEnv: { ...env, CONNECT: connectFailing("disconnectPersonal") },
+      });
+      await outcome(down.authenticate().members.remove(alice.userId));
+      // Connect answers the erasure's read of her accounts, and then, at
+      // once, a renewal tries to confirm B; its own erasure fails for now,
+      // so what the read left is what stays.
+      const racing = new Proxy(env.CONNECT, {
+        get: (target, key) => {
+          if (key === "personalAccounts") {
+            return async (userId: string) => {
+              const read = await target.personalAccounts(userId);
+              await googleGives(local, `${local}-b@acme.test`);
+              await renewedOnly(connectionId);
+              return read;
+            };
+          }
+          if (key === "erasePersonal") {
+            return () => {
+              throw new Error("connect unreachable");
+            };
+          }
+          const value: unknown = Reflect.get(target, key);
+          return value;
+        },
+      });
+      const { core } = await openRpc(admin.session, {
+        coreEnv: { ...env, CONNECT: racing },
+      });
+      await outcome(
+        core.authenticate().members.erase(alice.userId, alice.name)
+      );
+      const after = await env.CONNECT.personalAccounts(alice.userId);
+
+      expect(
+        after.map(({ connected, verifiedEmail }) => ({
+          connected,
+          verifiedEmail,
+        }))
+      ).toStrictEqual([{ connected: false, verifiedEmail: alice.email }]);
+    }
+  );
+
+  it(
+    "writes no connection a callback finishes after the erasure began, for an account renamed A to B, and claims no token",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      // Signed in with Google as A; the same account is renamed B, which a
+      // connection flow under way will be told.
+      const subject = `renamed-${unique()}`;
+      const claims = googlePerson({
+        sub: subject,
+        email: `first-${unique()}@acme.test`,
+      });
+      const session = await signedIn(idp, "google", claims);
+      const { userId: alice } = await whoami(session);
+      const { core } = await openRpc(session);
+      const { url } = await core.authenticate().connections.start({
+        provider: "google",
+        scope: "personal",
+        returnTo: "/integrations",
+      });
+      const flow = new URL(url);
+      // Her callback gets past Google's code exchange, and waits before
+      // connect stores the connection.
+      await fakeGoogle(googleHoldUrl, {
+        method: "POST",
+        body: JSON.stringify({ hold: true }),
+      });
+      const finishing = backFromProvider(session, {
+        code: consentCode(
+          flow,
+          "acme.test",
+          subject,
+          flow.searchParams.get("scope") ?? ""
+        ),
+        state: flow.searchParams.get("state") ?? "",
+      }).then(
+        () => "connected",
+        () => "refused"
+      );
+      try {
+        await exchangeHeld();
+        // Meanwhile she is removed and erased; connect's own part of the
+        // erasure fails for now.
+        await admin.api.members.remove(alice);
+        const { core: erasing } = await openRpc(admin.session, {
+          coreEnv: { ...env, CONNECT: connectFailing("erasePersonal") },
+        });
+        await outcome(
+          erasing.authenticate().members.erase(alice, String(claims.name))
+        );
+      } finally {
+        await fakeGoogle(googleHoldUrl, {
+          method: "POST",
+          body: JSON.stringify({ hold: false }),
+        });
+      }
+      const finished = await finishing;
+
+      expect({
+        finished,
+        connections: await env.CONNECT.personalAccounts(alice),
+        claimed: await tokensClaimedBy(alice),
+      }).toStrictEqual({ finished: "refused", connections: [], claimed: 0 });
+    }
+  );
+
+  // Every write naming a person, or an address or account of theirs,
+  // computed before their erasure began and run after it: none lands.
+  // One each, the same shape: the write's inputs, then the erasure, then
+  // the write (source-readers.ts `erasureBegan`).
+
+  it(
+    "claims no token for an erased person by the accounts a connection callback read before",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      const alice = await microsoftMember();
+      await connectedGoogle(alice);
+      const read = await env.CONNECT.personalAccounts(alice.userId);
+      await erasedBy(admin, alice);
+      await claimConnectedTokens(env, alice.userId, read);
+
+      await expect(tokensClaimedBy(alice.userId)).resolves.toBe(0);
+    }
+  );
+
+  it(
+    "claims no token for an erased person at a read by the accounts it read before",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      const alice = await microsoftMember();
+      await connectedMicrosoft(alice);
+      const read = await env.CONNECT.personalAccounts(alice.userId);
+      await erasedBy(admin, alice);
+      // A list copied since names her account: its token, nobody's.
+      await sharedItem(uniqueWord(), readersOf(alice.account));
+      await heldPrincipalsOf(env, alice.userId, [], read);
+
+      await expect(tokensClaimedBy(alice.userId)).resolves.toBe(0);
+    }
+  );
+
+  it("keeps no sign-in address for an erased person", setUpTime, async () => {
+    const admin = await signedInApi(idp, "admin");
+    const claims = googlePerson();
+    const { userId } = await whoami(await signedIn(idp, "google", claims));
+    await erasedBy(admin, { userId, name: String(claims.name) });
+    await keepSignInAddress(env, userId, String(claims.email));
+    const kept = await env.DB.prepare(
+      "SELECT count(*) AS n FROM sign_in_addresses WHERE user_id = ?"
+    )
+      .bind(userId)
+      .first<{ n: number }>();
+
+    expect(kept?.n).toBe(0);
+  });
+
+  it(
+    "makes or changes no sign-in account of a person whose erasure began",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      const claims = googlePerson();
+      const { userId } = await whoami(await signedIn(idp, "google", claims));
+      const later = `later-${unique()}@acme.test`;
+      // Their erasure waits on the Brain, so their accounts are still there.
+      await holdingBrainErasures(true);
+      try {
+        await admin.api.members.remove(userId);
+        await admin.api.members.erase(userId, String(claims.name));
+        const changed = await outcome(
+          env.DB.prepare(
+            "UPDATE accounts SET verified_email = ?, verified_email_at = ? WHERE user_id = ?"
+          )
+            .bind(later, Date.now(), userId)
+            .run()
+        );
+        const made = await outcome(
+          env.DB.prepare(
+            "INSERT INTO accounts (id, account_id, provider_id, user_id, verified_email, created_at, updated_at) VALUES (?, ?, 'google', ?, ?, ?, ?)"
+          )
+            .bind(
+              crypto.randomUUID(),
+              `other-${unique()}`,
+              userId,
+              later,
+              Date.now(),
+              Date.now()
+            )
+            .run()
+        );
+        const { results } = await env.DB.prepare(
+          "SELECT verified_email FROM accounts WHERE user_id = ?"
+        )
+          .bind(userId)
+          .all<{ verified_email: string | null }>();
+
+        expect({
+          changed: changed === "ok",
+          made: made === "ok",
+          addresses: results.map(({ verified_email }) => verified_email),
+        }).toStrictEqual({
+          changed: false,
+          made: false,
+          addresses: [String(claims.email)],
+        });
+      } finally {
+        await holdingBrainErasures(false);
+      }
+    }
+  );
+
+  it(
+    "keeps no address a renewal confirms for a person whose erasure began",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      const alice = await microsoftMember();
+      const { id: connectionId } = await connectedGoogle(alice);
+      const [local = ""] = alice.email.split("@");
+      await googleGives(local, `${local}-b@acme.test`);
+      // A renewal confirming B starts, and waits at Google's token answer.
+      await fakeGoogle(googleHoldUrl, {
+        method: "POST",
+        body: JSON.stringify({
+          hold: true,
+          prefix: "https://oauth2.googleapis.com/token",
+        }),
+      });
+      const renewing = renewedOnly(connectionId);
+      try {
+        await exchangeHeld();
+        // Her removal's and her erasure's disconnects fail: her connection
+        // stays connected, and her erasure has begun.
+        const { core: down } = await openRpc(admin.session, {
+          coreEnv: { ...env, CONNECT: connectFailing("disconnectPersonal") },
+        });
+        await outcome(down.authenticate().members.remove(alice.userId));
+        await outcome(
+          down.authenticate().members.erase(alice.userId, alice.name)
+        );
+      } finally {
+        await fakeGoogle(googleHoldUrl, {
+          method: "POST",
+          body: JSON.stringify({ hold: false }),
+        });
+      }
+      await renewing;
+      const [account] = await env.CONNECT.personalAccounts(alice.userId);
+
+      expect({
+        now: account?.verifiedEmail,
+        past: account?.pastVerifiedEmails,
+      }).toStrictEqual({ now: alice.email, past: [] });
+    }
+  );
+
+  it(
+    "leaves no token naming a person a connection callback claims for after their erasure, from accounts it read before",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      const alice = await microsoftMember();
+      // Her callback finishes in connect and reads her accounts; before
+      // core claims by them, she is removed and erased to the end.
+      let identity: unknown;
+      const late = new Proxy(env.CONNECT, {
+        get: (target, key) => {
+          if (key === "personalAccounts") {
+            return async (userId: string) => {
+              const read = await target.personalAccounts(userId);
+              await erasedBy(admin, alice);
+              identity = await env.DB.prepare(
+                "SELECT state FROM person_erasure_areas WHERE user_id = ? AND area = 'identity'"
+              )
+                .bind(alice.userId)
+                .first("state");
+              return read;
+            };
+          }
+          const value: unknown = Reflect.get(target, key);
+          return value;
+        },
+      });
+      await connectedMicrosoft(alice, { ...env, CONNECT: late });
+
+      expect({
+        identity,
+        claimed: await tokensClaimedBy(alice.userId),
+      }).toStrictEqual({ identity: "complete", claimed: 0 });
     }
   );
 

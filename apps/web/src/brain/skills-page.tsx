@@ -1,4 +1,5 @@
 import { failureText } from "@grasp-os/shared/errors";
+import type { Opportunity } from "@grasp-os/shared/opportunities";
 import type {
   CompanySkill,
   DecidedTeamSkill,
@@ -59,14 +60,18 @@ import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
+import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
+import { skillOf, useStartFrom } from "./opportunity-drafts.ts";
 
 // Skills (GRA-1754, GRA-1844): the person's own, which they write, edit
 // and delete, for their own chats alone; asking to share one with the
 // company or one of their teams, which waits for an admin; the company's
 // skills and their teams'; and, for the organization's admins, the shares
 // waiting for them, each with the exact text an approval adds and whom
-// for, and retiring a shared skill. Core holds every rule
+// for, and retiring a shared skill. From an opportunity an admin drafts as
+// a skill (`opportunity`, GRA-1751), the editor starts with a skill for
+// it, to change and save as their own. Core holds every rule
 // (skill-shares.ts): the page only asks. Texts are shown as text, never
 // markup.
 
@@ -937,8 +942,14 @@ const ProposedSkills = ({ onAdded }: { onAdded: () => void }) => {
   );
 };
 
-export const SkillsPage = () => {
+export const SkillsPage = ({
+  opportunity,
+}: {
+  /** The opportunity whose skill the editor starts with, once read. */
+  opportunity?: Promise<Loaded<Opportunity | undefined>> | undefined;
+}) => {
   const core = useCore();
+  const { i18n } = useLingui();
   const editorId = useId();
   const ownHeading = useId();
   const companyHeading = useId();
@@ -968,6 +979,11 @@ export const SkillsPage = () => {
       focusNext.current = null;
     }
   }, [busy]);
+
+  // The opportunity's skill, once read, fills the editor.
+  useStartFrom(opportunity, (read) => {
+    setText(skillOf(read, i18n));
+  });
 
   useEffect(() => {
     let left = false;

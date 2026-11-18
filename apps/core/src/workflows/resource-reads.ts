@@ -9,21 +9,28 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import type { CodeSubject, WorkContext } from "@grasp-os/shared/permissions";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { runOfStepKey } from "@grasp-os/shared/workflows";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { readableMemoriesAs, readableVersionsAs } from "../brain-next.ts";
 import type { PinnedVersionRef } from "../brain-next.ts";
-import { runChatSources, workflowResourceRuns } from "../db/core/schema.ts";
+import {
+  runChatSources,
+  runStateWriters,
+  workflowResourceRuns,
+} from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 import { readableSources } from "../history-access.ts";
 import { authorize } from "../permissions.ts";
 import { runAuthority, runContext } from "./resource-authority.ts";
 import type { CallingRun } from "./resource-authority.ts";
 import {
+  erasedChatPin,
   evidenceOfRuns,
   memoryEvidenceOfRuns,
   stateWritersOfRuns,
 } from "./run-evidence.ts";
+import { snapshotOf } from "./state-snapshots.ts";
 
 // What a run read, checked before anything of the run leaves it: the
 // Brain's versions its recalls pinned (run-evidence.ts) and what the chat
@@ -137,13 +144,23 @@ const readOf = (
  * read, for its person, something it had read then (GRA-1093,
  * workflow-starts.ts): as the chat's own history check decides it
  * (`readableSources`), under the chat's agent and person as they are
- * now: one check per chat, however many runs it started.
+ * now: one check per chat, however many runs it started. A run whose chat's
+ * person was erased (`erasedChatPin`) may read none of it, ever, unasked.
  */
 const chatPinsChecked = async (
   env: Env,
-  rows: EvidenceRead["pins"],
+  allRows: EvidenceRead["pins"],
   checked: Checked
 ): Promise<void> => {
+  const erased = new Set(
+    allRows
+      .filter(({ sourceId }) => sourceId === erasedChatPin.sourceId)
+      .map(({ runId }) => runId)
+  );
+  for (const runId of erased) {
+    checked.refused.add(runId);
+  }
+  const rows = allRows.filter(({ runId }) => !erased.has(runId));
   // Each run's pins are its one chat's: its first row names it.
   const chatOf = new Map<string, string>();
   for (const row of rows) {
@@ -437,7 +454,9 @@ const requireOwnEvidenceReadable = async (
  * entity reads rested on still one the company may read
  * (`readableMemoriesAs`): not taken by a person's erasure, retired, or
  * resting on a source erased or narrowed (GRA-1985). A test run recalls
- * nothing, so has nothing to check. Asked before a model, connection,
+ * nothing; what it holds of the Brain is the kept state it started from,
+ * held to what its writers read before what it returned is shown
+ * (candidate-runs.ts `candidateRunFor`). Asked before a model, connection,
  * App or files-write call, a decision, its output, and before a step's
  * state is written (sealed-run.ts `stepRecording`); its files are listed
  * and downloaded only while it holds (run-file-downloads.ts), and what its
@@ -461,7 +480,8 @@ export const requireResourceRunEvidenceReadable = async (
 
 /**
  * The same check for a run that ended, before what it returned or why it
- * failed is shown to anyone (resource-runs.ts `resultOf`): its record
+ * failed is shown to anyone (resource-runs.ts `resultOf`, and a test
+ * run's: candidate-runs.ts `candidateRunFor`): its record
  * holds what it recalled, so once the company may no longer read that,
  * the record is withheld as `brain.revoked`, its status and times shown.
  */
@@ -470,6 +490,43 @@ export const requireEndedRunEvidenceReadable = async (
   run: Pick<CallingRun, "runId" | "workflowId" | "principal">
 ): Promise<void> => {
   await requireOwnEvidenceReadable(env, run);
+};
+
+/**
+ * Whether run `runId`, which froze as it started the state `stateHash`
+ * names (null: none), has the runs that set its keys recorded
+ * (`runStateWriters`), for a reader of what it returned or why it failed.
+ * An invariant, not a path for older rows: every key names the run that
+ * set it (workflow-state.ts), the batch that admits a start or a test run
+ * records each of them (workflow-starts.ts `writersAdmitted`), and they
+ * stay while its details do. A run that froze a key with none recorded
+ * can't be held to what its writers read, ever, so what it returned is
+ * withheld as refused, and logged (GRA-1996). So is one whose snapshot
+ * isn't stored.
+ */
+const frozenWritersRecorded = async (
+  env: Env,
+  runId: string,
+  stateHash: string | null
+): Promise<boolean> => {
+  if (stateHash === null) {
+    return true;
+  }
+  const [snapshot, writer] = await Promise.all([
+    snapshotOf(env, stateHash),
+    drizzle(env.DB)
+      .select({ runId: runStateWriters.runId })
+      .from(runStateWriters)
+      .where(eq(runStateWriters.runId, runId))
+      .limit(1)
+      .get(),
+  ]);
+  const froze = snapshot === undefined || Object.keys(snapshot).length > 0;
+  if (!froze || writer !== undefined) {
+    return true;
+  }
+  log.error("workflow.run_writers_unrecorded", { runId });
+  return false;
 };
 
 /**
@@ -492,6 +549,23 @@ export const runEvidenceHolds = async (
     return false;
   }
 };
+
+/**
+ * Whether what ended run `run`, which froze as it started the state
+ * `stateHash` names, returned or why it failed is withheld as
+ * `brain.revoked`: the runs that set that state weren't recorded
+ * (`frozenWritersRecorded`), or it may no longer read what it read
+ * (`runEvidenceHolds`), its writers' evidence included. For the readers of
+ * a run's and a test run's result (resource-runs.ts `resultOf`,
+ * candidate-runs.ts `candidateRunFor`). Any other failure throws.
+ */
+export const endedRunResultWithheld = async (
+  env: Env,
+  run: Pick<CallingRun, "runId" | "workflowId" | "principal">,
+  stateHash: string | null
+): Promise<boolean> =>
+  !(await frozenWritersRecorded(env, run.runId, stateHash)) ||
+  !(await runEvidenceHolds(env, run));
 
 /**
  * What checking a run's evidence came to for a reader: it holds; it was

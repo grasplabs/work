@@ -174,6 +174,13 @@ export type RecoveryMode = (typeof recoveryModes)[number];
  */
 export const egressHeader = "grasp-egress";
 
+/**
+ * The error a provider's answer fails with once it passes what connect's
+ * egress reads of one answer: its body stops with this message, which a
+ * connector tells apart from any other failure (`isTooLarge` in sync.ts).
+ */
+export const egressTooLargeMessage = "The provider's response is too large";
+
 /** The kinds of answer connect's egress gives itself, as `egressHeader` says. */
 export const egressKind = {
   refused: "refused",

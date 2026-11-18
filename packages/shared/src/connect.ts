@@ -2043,6 +2043,14 @@ export interface ConnectApi
    */
   erasePersonal: (request: ErasePersonal) => Promise<{ connections: number }>;
   /**
+   * Marks a person's erasure begun in connect, and nothing else: from then
+   * on connect makes nothing of theirs, a flow already under way included
+   * (its insert refuses them). For core only, first of all in the erasure
+   * (person-erasure.ts `identity`), before it reads their accounts.
+   * `erasePersonal` marks it too. Safe to ask again.
+   */
+  beginErasure: (request: ErasePersonal) => Promise<void>;
+  /**
    * Spends a flow that came back but can't finish (no session, say), so its
    * code can't be brought back to finish it later.
    */
