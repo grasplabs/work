@@ -1519,10 +1519,6 @@ msgstr "{teams, plural, one {# équipe} other {# équipes}}, {statements, plural
 msgid "{teams, plural, one {Named by # team. Not seen in use yet, so its use is reported, not observed.} other {Named by # teams. Not seen in use yet, so its use is reported, not observed.}}"
 msgstr "{teams, plural, one {Cité par # équipe. Pas encore vu en usage : son utilisation est déclarée, non mesurée.} other {Cité par # équipes. Pas encore vu en usage : son utilisation est déclarée, non mesurée.}}"
 
-#: src/settings/audit-chain.tsx
-msgid "{time}. Entries through {purged} were removed when their retention ended; they still link up."
-msgstr "{time}. Les entrées jusqu'à {purged} ont été supprimées à la fin de leur conservation ; la chaîne reste liée."
-
 #: src/workflows/requests/request-detail.tsx
 msgid "{times, plural, one {Asked once} other {Asked # times}} · {people, plural, one {# person} other {# people}}"
 msgstr "{times, plural, one {Demandé une fois} other {Demandé # fois}} · {people, plural, one {# personne} other {# personnes}}"
@@ -2534,10 +2530,6 @@ msgstr "Les admins peuvent changer le rôle de chacun, mettre fin à ses session
 #: src/inbox/items.ts
 msgid "Advisory"
 msgstr "Avis de sécurité"
-
-#: src/settings/audit-archive.tsx
-msgid "After a run ends; then its inputs, outputs and messages go."
-msgstr "Après la fin d'une exécution ; ensuite ses entrées, sorties et messages sont supprimés."
 
 #: src/activity/audit-event.tsx
 #: src/routes/_shell.agents.$agent.tsx
@@ -6259,6 +6251,10 @@ msgstr "Saisissez l’e-mail d’au moins une personne à inviter."
 msgid "Enter your endpoint's address."
 msgstr "Saisissez l'adresse de votre endpoint."
 
+#: src/settings/audit-chain.tsx
+msgid "Entries through {purged} were removed when their retention ended; they still link up."
+msgstr "Les entrées jusqu'à {purged} ont été supprimées à la fin de leur conservation ; la chaîne reste liée."
+
 #: src/settings/erasures.tsx
 msgid "Erase"
 msgstr "Effacer"
@@ -6323,6 +6319,14 @@ msgstr "Type d’événement"
 #: src/routes/_shell.settings.audit.tsx
 msgid "Events"
 msgstr "Événements"
+
+#: src/settings/audit-archive.tsx
+msgid "Events in the archive"
+msgstr "Événements dans les archives"
+
+#: src/settings/audit-archive.tsx
+msgid "Events in the log"
+msgstr "Événements dans le journal"
 
 #: src/workflows/business-process.tsx
 msgid "Every client question or complaint, from the first message until it is solved."
@@ -7053,10 +7057,6 @@ msgstr "Depuis Google Drive. Je ne lis que les fichiers que vous ajoutez."
 #: src/onboarding/place-picker.tsx
 msgid "From SharePoint or OneDrive. I read only the files you add."
 msgstr "Depuis SharePoint ou OneDrive. Je ne lis que les fichiers que vous ajoutez."
-
-#: src/settings/audit-archive.tsx
-msgid "From when each event was recorded; then deleted."
-msgstr "À partir de l’enregistrement de chaque événement, puis supprimé."
 
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "From your Apps"
@@ -7988,10 +7988,6 @@ msgstr "Dans une seule conversation, pour {requester}"
 msgid "In progress"
 msgstr "En cours"
 
-#: src/settings/audit-archive.tsx
-msgid "In the archive"
-msgstr "Dans les archives"
-
 #: src/brain/brain.ts
 msgid "In the brain"
 msgstr "Dans le Cerveau"
@@ -8007,10 +8003,6 @@ msgstr "Dans le Centre d’administration Exchange, allez dans Flux de messageri
 #: src/onboarding/review-parts.tsx
 msgid "In the Google Admin console, go to Apps, then Google Workspace, then Gmail, then Spam, phishing and malware."
 msgstr "Dans la console d’administration Google, allez dans Applications, puis Google Workspace, puis Gmail, puis Spam, hameçonnage et logiciels malveillants."
-
-#: src/settings/audit-archive.tsx
-msgid "In the log"
-msgstr "Dans le journal"
 
 #: src/workflows/requests/request-who.tsx
 msgid "In the Netherlands the works council may need to agree before you turn this on."
@@ -16259,10 +16251,6 @@ msgstr "Thème"
 #: src/workflows/workflow-diagram.tsx
 msgid "Then {task}"
 msgstr "Puis {task}"
-
-#: src/settings/audit-archive.tsx
-msgid "Then events move to the archive."
-msgstr "Ensuite, les événements passent à l'archive."
 
 #: src/onboarding/about-story.tsx
 msgid "Then I talk to your team myself: short conversations, over two weeks. That’s where I learn the most."

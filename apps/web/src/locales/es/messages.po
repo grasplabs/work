@@ -1519,10 +1519,6 @@ msgstr "{teams, plural, one {# equipo} other {# equipos}}, {statements, plural, 
 msgid "{teams, plural, one {Named by # team. Not seen in use yet, so its use is reported, not observed.} other {Named by # teams. Not seen in use yet, so its use is reported, not observed.}}"
 msgstr "{teams, plural, one {La menciona # equipo. Aún no se ha visto en uso, así que su uso es declarado, no observado.} other {La mencionan # equipos. Aún no se ha visto en uso, así que su uso es declarado, no observado.}}"
 
-#: src/settings/audit-chain.tsx
-msgid "{time}. Entries through {purged} were removed when their retention ended; they still link up."
-msgstr "{time}. Las entradas hasta {purged} se eliminaron al terminar su conservación; la cadena sigue enlazada."
-
 #: src/workflows/requests/request-detail.tsx
 msgid "{times, plural, one {Asked once} other {Asked # times}} · {people, plural, one {# person} other {# people}}"
 msgstr "{times, plural, one {Preguntado una vez} other {Preguntado # veces}} · {people, plural, one {# persona} other {# personas}}"
@@ -2534,10 +2530,6 @@ msgstr "Los administradores pueden cambiar el rol de cualquiera, cerrar sus sesi
 #: src/inbox/items.ts
 msgid "Advisory"
 msgstr "Aviso de seguridad"
-
-#: src/settings/audit-archive.tsx
-msgid "After a run ends; then its inputs, outputs and messages go."
-msgstr "Tras terminar una ejecución; después se eliminan entradas, salidas y mensajes."
 
 #: src/activity/audit-event.tsx
 #: src/routes/_shell.agents.$agent.tsx
@@ -6259,6 +6251,10 @@ msgstr "Escribe el correo de al menos una persona para invitarla."
 msgid "Enter your endpoint's address."
 msgstr "Escribe la dirección de tu endpoint."
 
+#: src/settings/audit-chain.tsx
+msgid "Entries through {purged} were removed when their retention ended; they still link up."
+msgstr "Las entradas hasta {purged} se eliminaron al terminar su conservación; la cadena sigue enlazada."
+
 #: src/settings/erasures.tsx
 msgid "Erase"
 msgstr "Borrar"
@@ -6323,6 +6319,14 @@ msgstr "Tipo de evento"
 #: src/routes/_shell.settings.audit.tsx
 msgid "Events"
 msgstr "Eventos"
+
+#: src/settings/audit-archive.tsx
+msgid "Events in the archive"
+msgstr "Eventos en el archivo"
+
+#: src/settings/audit-archive.tsx
+msgid "Events in the log"
+msgstr "Eventos en el registro"
 
 #: src/workflows/business-process.tsx
 msgid "Every client question or complaint, from the first message until it is solved."
@@ -7053,10 +7057,6 @@ msgstr "De Google Drive. Solo leo los archivos que añadas."
 #: src/onboarding/place-picker.tsx
 msgid "From SharePoint or OneDrive. I read only the files you add."
 msgstr "De SharePoint o OneDrive. Solo leo los archivos que añadas."
-
-#: src/settings/audit-archive.tsx
-msgid "From when each event was recorded; then deleted."
-msgstr "Desde que se registró cada evento; luego se elimina."
 
 #: src/grasp/frame/grasp-sidebar.tsx
 msgid "From your Apps"
@@ -7988,10 +7988,6 @@ msgstr "Solo en un chat, para {requester}"
 msgid "In progress"
 msgstr "En curso"
 
-#: src/settings/audit-archive.tsx
-msgid "In the archive"
-msgstr "En el archivo"
-
 #: src/brain/brain.ts
 msgid "In the brain"
 msgstr "En el cerebro"
@@ -8007,10 +8003,6 @@ msgstr "En el Centro de administración de Exchange, ve a Flujo de correo y lueg
 #: src/onboarding/review-parts.tsx
 msgid "In the Google Admin console, go to Apps, then Google Workspace, then Gmail, then Spam, phishing and malware."
 msgstr "En la Consola del administrador de Google, ve a Aplicaciones, luego a Google Workspace, luego a Gmail y luego a Spam, phishing y software malicioso."
-
-#: src/settings/audit-archive.tsx
-msgid "In the log"
-msgstr "En el registro"
 
 #: src/workflows/requests/request-who.tsx
 msgid "In the Netherlands the works council may need to agree before you turn this on."
@@ -16259,10 +16251,6 @@ msgstr "Tema"
 #: src/workflows/workflow-diagram.tsx
 msgid "Then {task}"
 msgstr "Después {task}"
-
-#: src/settings/audit-archive.tsx
-msgid "Then events move to the archive."
-msgstr "Después, los eventos pasan al archivo."
 
 #: src/onboarding/about-story.tsx
 msgid "Then I talk to your team myself: short conversations, over two weeks. That’s where I learn the most."
