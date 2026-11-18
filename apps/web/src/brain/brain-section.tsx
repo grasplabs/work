@@ -122,7 +122,10 @@ export const useBrainSection = (): SidebarSection | undefined => {
   const read = loaded?.state === "ready" ? loaded.data : undefined;
   const arranging = useArrangingIn(read?.workspace);
   const [outside, setOutside] = useState<Outside>();
-  const inBrain = match !== undefined;
+  // By the address, not the route's match: the match comes after the address
+  // as the Brain loads, and the Brain itself was then kept as the page to go
+  // back to, so Back led nowhere.
+  const inBrain = pathname === "/brain" || pathname.startsWith("/brain/");
   if (!inBrain && outside?.pathname !== pathname) {
     setOutside({ pathname, search });
   }
