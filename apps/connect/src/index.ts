@@ -179,7 +179,7 @@ import type { HeldAction } from "./pending.ts";
 import { erasePersonal } from "./person-erasure.ts";
 import { probeBindings } from "./probe.ts";
 import { revocationsByHand } from "./revocations-by-hand.ts";
-import { listSyncSources, readSyncPage } from "./sync.ts";
+import { listSyncPlaces, listSyncSources, readSyncPage } from "./sync.ts";
 import { webhookPost } from "./webhooks.ts";
 
 // The egress handler of native connectors' isolates (src/connectors.ts).
@@ -624,6 +624,11 @@ export default class Connect
 
   async syncSources(request: unknown): Promise<SyncSourcePage> {
     return await listSyncSources(this.env, request);
+  }
+
+  /** The places of a connection's sync, each a source of its own. */
+  async listSyncPlaces(request: unknown): Promise<{ places: string[] }> {
+    return await listSyncPlaces(this.env, request);
   }
 
   // Generated connector contracts (src/contracts.ts): what an App's
