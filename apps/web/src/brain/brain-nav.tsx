@@ -90,7 +90,7 @@ const ROW_GAP = `calc(${grasp.space1} / 2)`;
 
 /**
  * Each kind of note's dot, in the brain's own hue for its group, the same as the atlas and a
- * note's page draw it (brain-colors.ts): those hues are the brain's, not the theme's.
+ * note's page draw it (brain-chips.tsx): those hues are the brain's, not the theme's.
  */
 const dots = stylex.create({
   company: { backgroundColor: grasp.ink },

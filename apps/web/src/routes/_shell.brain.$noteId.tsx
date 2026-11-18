@@ -60,6 +60,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "../grasp/tabs/index.ts";
+import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 
@@ -159,10 +160,6 @@ const styles = stylex.create({
     color: grasp.muted,
   },
   earlier: { paddingBottom: grasp.space2 },
-  count: {
-    marginInlineStart: grasp.space2,
-    color: grasp.muted,
-  },
   details: {
     display: "flex",
     flexDirection: "column",
@@ -439,8 +436,10 @@ const Fold = ({
     fit
     title={
       <>
-        {title}
-        <span {...stylex.props(styles.count)}>{count}</span>
+        {title}{" "}
+        <Text element="span" size="sm" tone="quiet">
+          {count}
+        </Text>
       </>
     }
   >
@@ -969,7 +968,8 @@ const NoteContent = ({
           {
             value: "timeline",
             label: t`Timeline`,
-            count: events,
+            // A timeline of only what is still open counts nothing that happened.
+            ...(events > 0 ? { count: events } : {}),
             content: <Timeline note={note} />,
           },
         ]
