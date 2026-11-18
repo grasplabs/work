@@ -810,8 +810,8 @@ msgid "{left, plural, one {# team here is not interviewed yet.} other {# teams h
 msgstr "{left, plural, one {# Team hier ist noch nicht interviewt.} other {# Teams hier sind noch nicht interviewt.}}"
 
 #: src/apps/app-code.tsx
-msgid "{lines, plural, one {# line} other {# lines}}"
-msgstr "{lines, plural, one {# Zeile} other {# Zeilen}}"
+msgid "{lines, plural, one {# line, read only} other {# lines, read only}}"
+msgstr "{lines, plural, one {# Zeile, nur lesbar} other {# Zeilen, nur lesbar}}"
 
 #: src/settings/teams.tsx
 msgid "{listed} and {rest, plural, one {# other} other {# others}}"
@@ -1040,6 +1040,10 @@ msgstr "{name}: Agenten durchsuchen es live, wenn Sie fragen. Das Gehirn behält
 #: src/agents/agent-section.tsx
 msgid "{name}'s pages"
 msgstr "Seiten von {name}"
+
+#: src/apps/app-section.tsx
+msgid "{name}'s workspace"
+msgstr "Arbeitsbereich von {name}"
 
 #: src/routes/_shell.settings.appearance.tsx
 msgid "{named}, {current}. Switch to {next}"
@@ -2829,7 +2833,7 @@ msgstr "Noch etwas?"
 msgid "App"
 msgstr "App"
 
-#: src/apps/app-workspace.tsx
+#: src/apps/app-section.tsx
 msgctxt "an app's workspace view"
 msgid "App"
 msgstr "App"
@@ -2848,10 +2852,6 @@ msgstr "App nicht gefunden"
 #: src/projects/file-item-dialog.tsx
 msgid "App or workflow"
 msgstr "App oder Workflow"
-
-#: src/pages/page-frame.tsx
-msgid "App page"
-msgstr "App-Seite"
 
 #: src/frame/part-words.tsx
 msgid "App preview"
@@ -3002,6 +3002,7 @@ msgstr "Freigabe für neue Tools benannt"
 msgid "Approving"
 msgstr "Wird genehmigt"
 
+#: src/apps/app-section.tsx
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
@@ -4418,7 +4419,7 @@ msgstr "Den Abschluss machen und die Zahlen erstellen, auf die die Geschäftslei
 msgid "Code"
 msgstr "Code"
 
-#: src/apps/app-workspace.tsx
+#: src/apps/app-section.tsx
 msgctxt "an app's workspace view"
 msgid "Code"
 msgstr "Code"
@@ -5168,7 +5169,7 @@ msgstr "Dunkler Rand"
 msgid "Data"
 msgstr "Daten"
 
-#: src/apps/app-workspace.tsx
+#: src/apps/app-section.tsx
 msgctxt "an app's workspace view"
 msgid "Data"
 msgstr "Daten"
@@ -5448,6 +5449,7 @@ msgctxt "workflow status"
 msgid "Designed"
 msgstr "Neu gestaltet"
 
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Desktop"
 msgstr "Desktop"
@@ -5770,6 +5772,10 @@ msgstr "Als PDF herunterladen"
 #: src/inbox/report-row.tsx
 msgid "Download page"
 msgstr "Seite herunterladen"
+
+#: src/apps/app-code.tsx
+msgid "Download the file"
+msgstr "Datei herunterladen"
 
 #: src/workflows/workflow-settings.tsx
 #: src/workflows/workflow-status.tsx
@@ -6538,6 +6544,10 @@ msgstr "Finanzen und Buchhaltung"
 msgid "Find a chat"
 msgstr "Einen Chat finden"
 
+#: src/apps/app-code.tsx
+msgid "Find a file"
+msgstr "Datei suchen"
+
 #: src/apps/app-data.tsx
 msgid "Find a record by its ID"
 msgstr "Datensatz nach ID suchen"
@@ -7216,6 +7226,10 @@ msgstr "Grasp merkt sich: {statement}"
 #: src/chat/saved-memory.tsx
 msgid "Grasp will remember: {statement} (value: {value})"
 msgstr "Grasp merkt sich: {statement} (Wert: {value})"
+
+#: src/apps/app-code.tsx
+msgid "Grasp writes the first version in the chat."
+msgstr "Grasp schreibt die erste Version im Chat."
 
 #: src/apps/app-history.tsx
 msgid "Grasp, in {name}'s chat"
@@ -8003,10 +8017,6 @@ msgstr "Sie ist endgültig weg: ihre Seiten, Versionen und Mitglieder und was ih
 #: src/apps/app-page.tsx
 msgid "It is kept as it was, and nobody works on it, until a builder restores it."
 msgstr "Sie bleibt, wie sie war, und niemand arbeitet daran, bis ein Builder sie wiederherstellt."
-
-#: src/apps/app-workspace.tsx
-msgid "It is kept as it was, and nobody works on it. Restore it to change it again."
-msgstr "Sie bleibt, wie sie war, und niemand arbeitet daran. Stellen Sie sie wieder her, um sie erneut zu ändern."
 
 #: src/connections/request-app-dialog.tsx
 msgid "It is not one of these"
@@ -9751,8 +9761,8 @@ msgid "No chats yet"
 msgstr "Noch keine Chats"
 
 #: src/apps/app-code.tsx
-msgid "No code yet: Grasp writes the first version in the chat."
-msgstr "Noch kein Code: Grasp schreibt die erste Version im Chat."
+msgid "No code yet"
+msgstr "Noch kein Code"
 
 #: src/brain/brain.ts
 msgid "No connector yet"
@@ -9769,6 +9779,14 @@ msgstr "Im jüngsten Abschnitt des Protokolls passt kein Ereignis."
 #: src/activity/audit-log.tsx
 msgid "No events match."
 msgstr "Keine passenden Ereignisse."
+
+#: src/apps/app-data.tsx
+msgid "No example records"
+msgstr "Keine Beispieldatensätze"
+
+#: src/apps/app-code.tsx
+msgid "No files"
+msgstr "Keine Dateien"
 
 #: src/knowledge/nav.tsx
 #: src/routes/_shell.knowledge.index.tsx
@@ -9893,9 +9911,6 @@ msgid "No record of this table has that ID."
 msgstr "Kein Datensatz dieser Tabelle hat diese ID."
 
 #: src/apps/app-data.tsx
-msgid "No records"
-msgstr "Keine Datensätze"
-
 #: src/brain/memory-page.tsx
 msgid "No records yet"
 msgstr "Noch keine Einträge"
@@ -10898,6 +10913,10 @@ msgstr "Nur Sie können es nutzen."
 msgid "Only you see it while you try it. You share it when it's right."
 msgstr "Nur Sie sehen es, während Sie es ausprobieren. Sie teilen es, wenn es passt."
 
+#: src/apps/app-workspace.tsx
+msgid "Only you see it. Tell Grasp in the chat what to change, then share it with your team."
+msgstr "Nur Sie sehen sie. Sagen Sie Grasp im Chat, was sich ändern soll, und teilen Sie sie dann mit Ihrem Team."
+
 #: src/apps/app-status.tsx
 #: src/apps/apps-overview.tsx
 #: src/workflows/workflow-status.tsx
@@ -10986,6 +11005,7 @@ msgstr "Dateien und Apps öffnen"
 msgid "Open full page"
 msgstr "Als ganze Seite öffnen"
 
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Open in a new tab"
 msgstr "In neuem Tab öffnen"
@@ -11302,6 +11322,10 @@ msgstr "Pakete"
 msgid "Packages of {name} were revoked as malware"
 msgstr "Pakete von {name} wurden als Malware widerrufen"
 
+#: src/apps/preview-controls.tsx
+msgid "Page"
+msgstr "Seite"
+
 #: src/frame/part-words.tsx
 msgctxt "one page of a form"
 msgid "Page"
@@ -11593,6 +11617,10 @@ msgstr "Persönliche Verbindungen"
 msgid "Personal Knowledge and memories"
 msgstr "Persönliches Wissen und Erinnerungen"
 
+#: src/apps/preview-controls.tsx
+msgid "Phone"
+msgstr "Smartphone"
+
 #: src/frame/part-words.tsx
 msgctxt "a screen width"
 msgid "Phone"
@@ -11733,6 +11761,10 @@ msgstr "Vorschau Ihres Chat-Hintergrunds"
 #: src/knowledge/purge.tsx
 msgid "Preview the purge"
 msgstr "Bereinigung vorab ansehen"
+
+#: src/apps/preview-controls.tsx
+msgid "Preview width"
+msgstr "Breite der Vorschau"
 
 #: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
@@ -12236,6 +12268,7 @@ msgid "Release address…"
 msgstr "Adresse freigeben…"
 
 #: src/apps/app-data.tsx
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Reload"
 msgstr "Neu laden"
@@ -12558,6 +12591,14 @@ msgstr "Testdaten zurücksetzen"
 msgid "Reset test data?"
 msgstr "Testdaten zurücksetzen?"
 
+#: src/apps/app-workspace.tsx
+msgid "Reset the example data in Data to try the change. Your team's records aren't touched."
+msgstr "Setzen Sie die Beispieldaten unter Daten zurück, um die Änderung auszuprobieren. Die Datensätze Ihres Teams bleiben unberührt."
+
+#: src/apps/app-data.tsx
+msgid "Reset the example data to fill it."
+msgstr "Setzen Sie die Beispieldaten zurück, um sie zu füllen."
+
 #: src/workflows/kept-state.tsx
 msgid "Reset what it keeps"
 msgstr "Behaltenes zurücksetzen"
@@ -12605,6 +12646,10 @@ msgstr "Ressourcen"
 #: src/knowledge/timeline.tsx
 msgid "Restore"
 msgstr "Wiederherstellen"
+
+#: src/apps/app-workspace.tsx
+msgid "Restore it to change it again."
+msgstr "Stellen Sie sie wieder her, um sie erneut zu ändern."
 
 #: src/apps/app-history.tsx
 msgid "Restore this earlier state?"
@@ -13668,7 +13713,7 @@ msgctxt "a workflow's view"
 msgid "Settings"
 msgstr "Einstellungen"
 
-#: src/apps/app-workspace.tsx
+#: src/apps/app-section.tsx
 msgctxt "an app's workspace view"
 msgid "Settings"
 msgstr "Einstellungen"
@@ -14708,6 +14753,7 @@ msgstr "Tabellenname"
 msgid "Tables"
 msgstr "Tabellen"
 
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Tablet"
 msgstr "Tablet"
@@ -15803,6 +15849,10 @@ msgstr "Sie erreichen nur das Onboarding und verlieren den Zugang 7 Tage nach de
 msgid "They see it once you share it with them."
 msgstr "Sie sehen es, sobald Sie es mit ihnen teilen."
 
+#: src/apps/app-data.tsx
+msgid "They show here as people use the App."
+msgstr "Sie erscheinen hier, sobald die App genutzt wird."
+
 #: src/brain/brain.ts
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "They told us"
@@ -16119,10 +16169,6 @@ msgstr "Der gespeicherte Code dieser Seite stimmt nicht mehr mit dem veröffentl
 msgid "This version can't open"
 msgstr "Diese Version kann nicht geöffnet werden"
 
-#: src/apps/app-code.tsx
-msgid "This version has no files."
-msgstr "Diese Version hat keine Dateien."
-
 #: src/pages/frame-failure.tsx
 msgid "This version of the App hasn't been sealed, so it can't be opened. A builder can publish it again."
 msgstr "Diese Version der App wurde nicht versiegelt und kann deshalb nicht geöffnet werden. Ein Builder kann sie erneut veröffentlichen."
@@ -16341,7 +16387,6 @@ msgid "Try"
 msgstr "Versuchen"
 
 #: src/agents/agent-documents.tsx
-#: src/apps/app-data.tsx
 #: src/apps/app-owner.tsx
 #: src/apps/app-settings.tsx
 #: src/chat/builds.tsx
@@ -16366,10 +16411,6 @@ msgstr "Erneut versuchen"
 #: src/frame/setting-up.tsx
 msgid "Try again to set up {name}."
 msgstr "Versuchen Sie noch einmal, {name} einzurichten."
-
-#: src/apps/app-workspace.tsx
-msgid "Try it out: only you see it, and the example data is just for trying. To change anything, tell Grasp in the chat. When it's right, share it with your team."
-msgstr "Probieren Sie sie aus: Nur Sie sehen sie, und die Beispieldaten sind nur zum Ausprobieren. Um etwas zu ändern, sagen Sie es Grasp im Chat. Wenn alles passt, teilen Sie sie mit Ihrem Team."
 
 #: src/chat/chat-window.tsx
 msgid "Try the search again"
@@ -18025,10 +18066,6 @@ msgctxt "settings group"
 msgid "Workspace"
 msgstr "Arbeitsbereich"
 
-#: src/apps/app-workspace.tsx
-msgid "Workspace views"
-msgstr "Ansichten des Arbeitsbereichs"
-
 #: src/projects/project-dialog.tsx
 msgid "Wrench"
 msgstr "Schraubenschlüssel"
@@ -18312,10 +18349,6 @@ msgstr "Ihr Browser lässt mich das Mikrofon nicht nutzen. Erlauben Sie es neben
 #: src/chat/use-dictation.ts
 msgid "Your browser's maker writes down what you say."
 msgstr "Der Hersteller Ihres Browsers schreibt auf, was Sie sagen."
-
-#: src/apps/app-workspace.tsx
-msgid "Your change reshapes the App's data in a way the example records can't follow. Reset the example data in Data to try it. What your team entered isn't touched."
-msgstr "Ihre Änderung formt die Daten der App so um, dass die Beispieldatensätze nicht folgen können. Setzen Sie die Beispieldaten unter Daten zurück, um es auszuprobieren. Was Ihr Team eingegeben hat, bleibt unberührt."
 
 #: src/apps/publish.tsx
 msgid "Your changes are shared"

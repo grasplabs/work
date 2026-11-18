@@ -46,7 +46,6 @@ import {
 } from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
-import { TabsLink, TabsNav } from "../grasp/tabs/nav.tsx";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { PageFrame } from "../pages/page-frame.tsx";
 import type { FrameFix } from "../pages/page-frame.tsx";
@@ -64,6 +63,15 @@ import { StatusBadge, useStatusMove, userNames } from "./app-status.tsx";
 import { DraftPreview } from "./draft-preview.tsx";
 import { fixQuestion } from "./fix-with-grasp.ts";
 import { dismissMadeTip, showsMadeTip } from "./made-tip.ts";
+import {
+  PreviewControls,
+  previewWidths,
+  usePreviewControls,
+} from "./preview-controls.tsx";
+import type {
+  PreviewControlsProps,
+  PreviewWidth,
+} from "./preview-controls.tsx";
 import { ChangesLine, ShareWithTeam, showsChangesLine } from "./publish.tsx";
 import { hasChanges, useAppDraft } from "./use-app-draft.ts";
 import { readTables, useAppRead } from "./use-app-read.ts";
@@ -78,9 +86,11 @@ const AppCode = lazy(async () => {
 // An App's workspace, where its builders change it, at the App's own
 // address (/apps/$app): its people get the App itself there. One bar, the
 // App's (frame/item-shell.tsx): back to the Apps, its name and where it
-// stands in plain words ("Only you see this", or who uses it), then what
-// the main area shows (Preview, Code, Data, Settings), "…" and Share with
-// your team, the page's one lime action (publish.tsx). The main area
+// stands in plain words ("Only you see this", or who uses it), the
+// preview's own controls, "…" and Share with your team, the page's one
+// main action (publish.tsx). What the main area shows (the App, Code,
+// Data, Settings' sections) are rows of the sidebar's section, the App's
+// while its workspace is open (app-section.tsx). The main area
 // always shows the App: an App with no page yet asks what it should do
 // (app-start.tsx), and one just made says what to do next, once
 // (made-tip.ts).
@@ -192,49 +202,10 @@ const styles = stylex.create({
   },
   unseen: { opacity: 0 },
   strip: { flexShrink: 0 },
+  // A preview drawn narrower than its room, in the middle of it.
+  drawn: { width: "100%", marginInline: "auto" },
   padded: { padding: grasp.space4 },
 });
-
-/** The switch's entries, in order. */
-const views = ["preview", "code", "data", "settings"] as const;
-
-/** Preview | Code | Data | Settings: links, so each is an address of its own. */
-const ViewSwitch = ({ app, view }: { app: string; view: WorkspaceView }) => {
-  const { t } = useLingui();
-  const labels: Record<WorkspaceView, string> = {
-    preview: t({ message: "App", context: "an app's workspace view" }),
-    code: t({ message: "Code", context: "an app's workspace view" }),
-    data: t({ message: "Data", context: "an app's workspace view" }),
-    settings: t({ message: "Settings", context: "an app's workspace view" }),
-  };
-  return (
-    <TabsNav aria-label={t`Workspace views`} variant="segmented">
-      {views.map((each) => (
-        <TabsLink
-          current={each === view}
-          key={each}
-          render={
-            <Link
-              // The App's own view has no `view` in its address: said
-              // so, so the router's own match marks it only there.
-              activeOptions={{ explicitUndefined: true }}
-              params={{ app }}
-              replace
-              search={(held) => ({
-                env: held.env,
-                project: held.project,
-                view: each === "preview" ? undefined : each,
-              })}
-              to="/apps/$app"
-            />
-          }
-        >
-          {labels[each]}
-        </TabsLink>
-      ))}
-    </TabsNav>
-  );
-};
 
 /**
  * The rest, under "…": the App's own link, what its team sees (here, and
@@ -326,10 +297,13 @@ const WorkspaceBar = ({
   settingUp = false,
   chatId,
   onShared,
+  preview,
 }: {
   app: ViewedApp;
   back: Crumb;
   view: WorkspaceView;
+  /** The preview's own controls, beside the views while it shows. */
+  preview?: PreviewControlsProps | undefined;
   identity: Pick<Identity, "staff">;
   /** The App's changes, as read last; none while they are read, or archived. */
   draft: AppDraft | undefined;
@@ -377,7 +351,11 @@ const WorkspaceBar = ({
       // In the bar's middle, which goes to a row of its own where the bar
       // is too narrow for it beside the rest; there the views fold to one
       // button where even that row is too narrow (Grasp UI's TabsNav).
-      views={<ViewSwitch app={app.id} view={view} />}
+      // The App's views are rows of the sidebar's section (app-section
+      // .tsx); the bar's middle holds the preview's own controls.
+      {...(view === "preview" && preview !== undefined
+        ? { views: <PreviewControls {...preview} /> }
+        : {})}
     />
   );
 };
@@ -439,9 +417,8 @@ const StaleTestData = ({ app }: { app: string }) => {
       tone="attention"
     >
       <Trans>
-        Your change reshapes the App&apos;s data in a way the example records
-        can&apos;t follow. Reset the example data in Data to try it. What your
-        team entered isn&apos;t touched.
+        Reset the example data in Data to try the change. Your team&apos;s
+        records aren&apos;t touched.
       </Trans>
     </Alert>
   );
@@ -571,7 +548,7 @@ const ReadOnlyBar = ({
         }
         layout={styles.strip}
         title={title}
-        tone={failure === undefined ? "attention" : "danger"}
+        tone={failure === undefined ? "neutral" : "danger"}
       >
         {failure}
       </Alert>
@@ -622,7 +599,6 @@ const TeamViewBar = ({ app }: { app: string }) => {
       icon={People}
       layout={styles.strip}
       title={t`What your team sees`}
-      tone="success"
     />
   );
 };
@@ -650,8 +626,7 @@ const MadeTip = ({ app }: { app: string }) => {
       title={t`This is your new App, with example data.`}
     >
       <Trans>
-        Try it out: only you see it, and the example data is just for trying. To
-        change anything, tell Grasp in the chat. When it&apos;s right, share it
+        Only you see it. Tell Grasp in the chat what to change, then share it
         with your team.
       </Trans>
     </Alert>
@@ -677,6 +652,8 @@ const SetUpOver = ({ failed, name }: { failed: boolean; name: string }) => (
  */
 const PreviewArea = ({
   app,
+  at,
+  width,
   draft,
   shown,
   running,
@@ -685,6 +662,9 @@ const PreviewArea = ({
   onChanged,
 }: {
   app: App;
+  /** The page it shows; its first while none was picked. */
+  at: string | undefined;
+  width: PreviewWidth;
   /** The App's draft; none until it is read. */
   draft: AppDraft | undefined;
   shown: ReadOnlyShown | undefined;
@@ -755,8 +735,10 @@ const PreviewArea = ({
       >
         <DraftPreview
           app={app.id}
+          at={at}
           draft={draft}
           key={tries}
+          width={width}
           name={name}
           onEnded={(end) => {
             if (end.status === "failed") {
@@ -794,9 +776,14 @@ const PreviewArea = ({
  */
 const LivePreview = ({
   app,
+  at,
+  width,
   building,
 }: {
   app: App;
+  /** The page it shows; its first while none was picked. */
+  at: string | undefined;
+  width: PreviewWidth;
   building?: { running: boolean };
 }) => {
   const { t } = useLingui();
@@ -817,10 +804,11 @@ const LivePreview = ({
   return (
     <section
       aria-label={t`${name}, as your team sees it`}
-      {...stylex.props(styles.column)}
+      {...stylex.props(styles.column, styles.drawn, previewWidths[width])}
     >
       <PageFrame
         app={app.id}
+        at={at}
         bare
         embedded
         onEnded={(end) => {
@@ -1128,6 +1116,11 @@ const Building = ({
     !theirs &&
     sharesApp(app, identity) &&
     showsChangesLine(app, draft, members ?? []);
+  const { controls, width, page, reloads } = usePreviewControls(
+    app,
+    theirs,
+    draft
+  );
   return (
     <ItemShell
       bar={
@@ -1140,6 +1133,7 @@ const Building = ({
           members={members}
           onShared={reread}
           pending={changesLine}
+          preview={controls}
           running={busy}
           settingUp={settingUp}
           view={view}
@@ -1170,12 +1164,20 @@ const Building = ({
         identity={identity}
         preview={
           theirs ? (
-            <LivePreview app={app} building={{ running }} key="live" />
+            <LivePreview
+              app={app}
+              at={page}
+              building={{ running }}
+              key={`live/${reloads}`}
+              width={width}
+            />
           ) : (
             <PreviewArea
               app={app}
+              at={page}
               draft={draft}
-              key={`${shownKey(shown)}/${resets}`}
+              key={`${shownKey(shown)}/${resets}/${reloads}`}
+              width={width}
               onChanged={reread}
               onFrame={onFrame}
               running={running}
@@ -1233,7 +1235,7 @@ const Archived = ({
                 onClick={() => {
                   move("restore");
                 }}
-                variant="quiet"
+                variant="ink"
               >
                 {t`Restore`}
               </Button>
@@ -1242,12 +1244,7 @@ const Archived = ({
             tone={failure === undefined ? "neutral" : "danger"}
             title={t`This App is archived`}
           >
-            {failure ?? (
-              <Trans>
-                It is kept as it was, and nobody works on it. Restore it to
-                change it again.
-              </Trans>
-            )}
+            {failure ?? <Trans>Restore it to change it again.</Trans>}
           </PreviewState>
         }
         section={section}

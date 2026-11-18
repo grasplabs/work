@@ -810,8 +810,8 @@ msgid "{left, plural, one {# team here is not interviewed yet.} other {# teams h
 msgstr "{left, plural, one {# team hier is nog niet geïnterviewd.} other {# teams hier zijn nog niet geïnterviewd.}}"
 
 #: src/apps/app-code.tsx
-msgid "{lines, plural, one {# line} other {# lines}}"
-msgstr "{lines, plural, one {# regel} other {# regels}}"
+msgid "{lines, plural, one {# line, read only} other {# lines, read only}}"
+msgstr "{lines, plural, one {# regel, alleen lezen} other {# regels, alleen lezen}}"
 
 #: src/settings/teams.tsx
 msgid "{listed} and {rest, plural, one {# other} other {# others}}"
@@ -1040,6 +1040,10 @@ msgstr "{name}: agents doorzoeken het live als je iets vraagt. Het brein bewaart
 #: src/agents/agent-section.tsx
 msgid "{name}'s pages"
 msgstr "Pagina's van {name}"
+
+#: src/apps/app-section.tsx
+msgid "{name}'s workspace"
+msgstr "Werkruimte van {name}"
 
 #: src/routes/_shell.settings.appearance.tsx
 msgid "{named}, {current}. Switch to {next}"
@@ -2829,7 +2833,7 @@ msgstr "Nog iets?"
 msgid "App"
 msgstr "App"
 
-#: src/apps/app-workspace.tsx
+#: src/apps/app-section.tsx
 msgctxt "an app's workspace view"
 msgid "App"
 msgstr "App"
@@ -2848,10 +2852,6 @@ msgstr "App niet gevonden"
 #: src/projects/file-item-dialog.tsx
 msgid "App or workflow"
 msgstr "App of workflow"
-
-#: src/pages/page-frame.tsx
-msgid "App page"
-msgstr "App-pagina"
 
 #: src/frame/part-words.tsx
 msgid "App preview"
@@ -3002,6 +3002,7 @@ msgstr "Goedkeurder voor nieuwe tools benoemd"
 msgid "Approving"
 msgstr "Goedkeuren…"
 
+#: src/apps/app-section.tsx
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
@@ -4418,7 +4419,7 @@ msgstr "De boeken afsluiten en de cijfers maken waar de directie naar kijkt."
 msgid "Code"
 msgstr "Code"
 
-#: src/apps/app-workspace.tsx
+#: src/apps/app-section.tsx
 msgctxt "an app's workspace view"
 msgid "Code"
 msgstr "Code"
@@ -5168,7 +5169,7 @@ msgstr "Donkere rand"
 msgid "Data"
 msgstr "Gegevens"
 
-#: src/apps/app-workspace.tsx
+#: src/apps/app-section.tsx
 msgctxt "an app's workspace view"
 msgid "Data"
 msgstr "Gegevens"
@@ -5448,6 +5449,7 @@ msgctxt "workflow status"
 msgid "Designed"
 msgstr "Ontworpen"
 
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Desktop"
 msgstr "Desktop"
@@ -5770,6 +5772,10 @@ msgstr "Downloaden als pdf"
 #: src/inbox/report-row.tsx
 msgid "Download page"
 msgstr "Pagina downloaden"
+
+#: src/apps/app-code.tsx
+msgid "Download the file"
+msgstr "Bestand downloaden"
 
 #: src/workflows/workflow-settings.tsx
 #: src/workflows/workflow-status.tsx
@@ -6538,6 +6544,10 @@ msgstr "Financiën en boekhouding"
 msgid "Find a chat"
 msgstr "Een chat zoeken"
 
+#: src/apps/app-code.tsx
+msgid "Find a file"
+msgstr "Bestand zoeken"
+
 #: src/apps/app-data.tsx
 msgid "Find a record by its ID"
 msgstr "Zoek een record op zijn ID"
@@ -7216,6 +7226,10 @@ msgstr "Grasp onthoudt: {statement}"
 #: src/chat/saved-memory.tsx
 msgid "Grasp will remember: {statement} (value: {value})"
 msgstr "Grasp onthoudt: {statement} (waarde: {value})"
+
+#: src/apps/app-code.tsx
+msgid "Grasp writes the first version in the chat."
+msgstr "Grasp schrijft de eerste versie in de chat."
 
 #: src/apps/app-history.tsx
 msgid "Grasp, in {name}'s chat"
@@ -8003,10 +8017,6 @@ msgstr "Hij is definitief weg: zijn pagina’s, versies en leden, en wat hij moc
 #: src/apps/app-page.tsx
 msgid "It is kept as it was, and nobody works on it, until a builder restores it."
 msgstr "Ze blijft zoals ze was, en niemand werkt eraan, tot een bouwer haar herstelt."
-
-#: src/apps/app-workspace.tsx
-msgid "It is kept as it was, and nobody works on it. Restore it to change it again."
-msgstr "Ze blijft zoals ze was, en niemand werkt eraan. Herstel haar om haar weer te wijzigen."
 
 #: src/connections/request-app-dialog.tsx
 msgid "It is not one of these"
@@ -9751,8 +9761,8 @@ msgid "No chats yet"
 msgstr "Nog geen chats"
 
 #: src/apps/app-code.tsx
-msgid "No code yet: Grasp writes the first version in the chat."
-msgstr "Nog geen code: Grasp schrijft de eerste versie in de chat."
+msgid "No code yet"
+msgstr "Nog geen code"
 
 #: src/brain/brain.ts
 msgid "No connector yet"
@@ -9769,6 +9779,14 @@ msgstr "Er passen geen gebeurtenissen in het laatste stuk van het log."
 #: src/activity/audit-log.tsx
 msgid "No events match."
 msgstr "Geen gebeurtenissen gevonden."
+
+#: src/apps/app-data.tsx
+msgid "No example records"
+msgstr "Geen voorbeeldrecords"
+
+#: src/apps/app-code.tsx
+msgid "No files"
+msgstr "Geen bestanden"
 
 #: src/knowledge/nav.tsx
 #: src/routes/_shell.knowledge.index.tsx
@@ -9893,9 +9911,6 @@ msgid "No record of this table has that ID."
 msgstr "Geen record van deze tabel heeft die ID."
 
 #: src/apps/app-data.tsx
-msgid "No records"
-msgstr "Geen records"
-
 #: src/brain/memory-page.tsx
 msgid "No records yet"
 msgstr "Nog geen herinneringen"
@@ -10898,6 +10913,10 @@ msgstr "Alleen jij kunt het gebruiken."
 msgid "Only you see it while you try it. You share it when it's right."
 msgstr "Alleen jij ziet het terwijl je het uitprobeert. Je deelt het als het goed is."
 
+#: src/apps/app-workspace.tsx
+msgid "Only you see it. Tell Grasp in the chat what to change, then share it with your team."
+msgstr "Alleen jij ziet hem. Vertel Grasp in de chat wat er moet veranderen en deel hem dan met je team."
+
 #: src/apps/app-status.tsx
 #: src/apps/apps-overview.tsx
 #: src/workflows/workflow-status.tsx
@@ -10986,6 +11005,7 @@ msgstr "Bestanden en apps openen"
 msgid "Open full page"
 msgstr "Volledige pagina openen"
 
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Open in a new tab"
 msgstr "Openen in een nieuw tabblad"
@@ -11302,6 +11322,10 @@ msgstr "Pakketten"
 msgid "Packages of {name} were revoked as malware"
 msgstr "Pakketten van {name} zijn ingetrokken als malware"
 
+#: src/apps/preview-controls.tsx
+msgid "Page"
+msgstr "Pagina"
+
 #: src/frame/part-words.tsx
 msgctxt "one page of a form"
 msgid "Page"
@@ -11593,6 +11617,10 @@ msgstr "Persoonlijke koppelingen"
 msgid "Personal Knowledge and memories"
 msgstr "Persoonlijke Kennis en herinneringen"
 
+#: src/apps/preview-controls.tsx
+msgid "Phone"
+msgstr "Telefoon"
+
 #: src/frame/part-words.tsx
 msgctxt "a screen width"
 msgid "Phone"
@@ -11733,6 +11761,10 @@ msgstr "Voorbeeld van je chatachtergrond"
 #: src/knowledge/purge.tsx
 msgid "Preview the purge"
 msgstr "Opschoning eerst bekijken"
+
+#: src/apps/preview-controls.tsx
+msgid "Preview width"
+msgstr "Breedte van het voorbeeld"
 
 #: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
@@ -12236,6 +12268,7 @@ msgid "Release address…"
 msgstr "Adres vrijgeven…"
 
 #: src/apps/app-data.tsx
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Reload"
 msgstr "Opnieuw laden"
@@ -12558,6 +12591,14 @@ msgstr "Testgegevens resetten"
 msgid "Reset test data?"
 msgstr "Testgegevens resetten?"
 
+#: src/apps/app-workspace.tsx
+msgid "Reset the example data in Data to try the change. Your team's records aren't touched."
+msgstr "Zet de voorbeeldgegevens in Gegevens terug om de wijziging te proberen. De records van je team blijven onaangeroerd."
+
+#: src/apps/app-data.tsx
+msgid "Reset the example data to fill it."
+msgstr "Zet de voorbeeldgegevens terug om hem te vullen."
+
 #: src/workflows/kept-state.tsx
 msgid "Reset what it keeps"
 msgstr "Wat het bewaart resetten"
@@ -12605,6 +12646,10 @@ msgstr "Resources"
 #: src/knowledge/timeline.tsx
 msgid "Restore"
 msgstr "Herstellen"
+
+#: src/apps/app-workspace.tsx
+msgid "Restore it to change it again."
+msgstr "Zet hem terug om hem weer te wijzigen."
 
 #: src/apps/app-history.tsx
 msgid "Restore this earlier state?"
@@ -13668,7 +13713,7 @@ msgctxt "a workflow's view"
 msgid "Settings"
 msgstr "Instellingen"
 
-#: src/apps/app-workspace.tsx
+#: src/apps/app-section.tsx
 msgctxt "an app's workspace view"
 msgid "Settings"
 msgstr "Instellingen"
@@ -14708,6 +14753,7 @@ msgstr "Tabelnaam"
 msgid "Tables"
 msgstr "Tabellen"
 
+#: src/apps/preview-controls.tsx
 #: src/frame/part-words.tsx
 msgid "Tablet"
 msgstr "Tablet"
@@ -15803,6 +15849,10 @@ msgstr "Ze komen alleen bij de onboarding, en verliezen de toegang 7 dagen na de
 msgid "They see it once you share it with them."
 msgstr "Ze zien het zodra je het met hen deelt."
 
+#: src/apps/app-data.tsx
+msgid "They show here as people use the App."
+msgstr "Ze verschijnen hier zodra mensen de app gebruiken."
+
 #: src/brain/brain.ts
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "They told us"
@@ -16119,10 +16169,6 @@ msgstr "De opgeslagen code van deze pagina komt niet meer overeen met de gepubli
 msgid "This version can't open"
 msgstr "Deze versie kan niet openen"
 
-#: src/apps/app-code.tsx
-msgid "This version has no files."
-msgstr "Deze versie heeft geen bestanden."
-
 #: src/pages/frame-failure.tsx
 msgid "This version of the App hasn't been sealed, so it can't be opened. A builder can publish it again."
 msgstr "Deze versie van de app is niet verzegeld, dus hij kan niet worden geopend. Een bouwer kan hem opnieuw publiceren."
@@ -16341,7 +16387,6 @@ msgid "Try"
 msgstr "Proberen"
 
 #: src/agents/agent-documents.tsx
-#: src/apps/app-data.tsx
 #: src/apps/app-owner.tsx
 #: src/apps/app-settings.tsx
 #: src/chat/builds.tsx
@@ -16366,10 +16411,6 @@ msgstr "Opnieuw proberen"
 #: src/frame/setting-up.tsx
 msgid "Try again to set up {name}."
 msgstr "Probeer {name} opnieuw op te zetten."
-
-#: src/apps/app-workspace.tsx
-msgid "Try it out: only you see it, and the example data is just for trying. To change anything, tell Grasp in the chat. When it's right, share it with your team."
-msgstr "Probeer het uit: alleen jij ziet het, en de voorbeeldgegevens zijn alleen om te proberen. Wil je iets veranderen, zeg het tegen Grasp in de chat. Klopt het, deel het dan met je team."
 
 #: src/chat/chat-window.tsx
 msgid "Try the search again"
@@ -18025,10 +18066,6 @@ msgctxt "settings group"
 msgid "Workspace"
 msgstr "Werkruimte"
 
-#: src/apps/app-workspace.tsx
-msgid "Workspace views"
-msgstr "Weergaven van de werkruimte"
-
 #: src/projects/project-dialog.tsx
 msgid "Wrench"
 msgstr "Moersleutel"
@@ -18312,10 +18349,6 @@ msgstr "Je browser laat me de microfoon niet gebruiken. Sta het toe naast het ad
 #: src/chat/use-dictation.ts
 msgid "Your browser's maker writes down what you say."
 msgstr "De maker van je browser schrijft uit wat je zegt."
-
-#: src/apps/app-workspace.tsx
-msgid "Your change reshapes the App's data in a way the example records can't follow. Reset the example data in Data to try it. What your team entered isn't touched."
-msgstr "Je wijziging vormt de gegevens van de App zo om dat de voorbeeldrecords niet mee kunnen. Zet de voorbeeldgegevens terug in Gegevens om het uit te proberen. Wat je team heeft ingevoerd, blijft onaangeroerd."
 
 #: src/apps/publish.tsx
 msgid "Your changes are shared"

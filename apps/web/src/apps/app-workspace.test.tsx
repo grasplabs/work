@@ -23,7 +23,6 @@ import {
 } from "@grasp-os/shared/ids";
 import type { Permission } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -366,14 +365,14 @@ const opened = async (
     id: "_shell",
     beforeLoad: () => ({ identity }),
     component: () => (
-      <SidebarProvider>
+      <>
         <GlobalChatProvider>
           <Outlet />
           <ChatPanel />
           <ChatBar />
         </GlobalChatProvider>
         <Toaster aria-label="Notifications" />
-      </SidebarProvider>
+      </>
     ),
   });
   const page = createRoute({
@@ -814,8 +813,8 @@ describe(AppWorkspace, () => {
       await settled();
       seen[who] = {
         name: document.querySelector("h1")?.textContent,
-        views:
-          document.querySelector('nav[aria-label="Workspace views"]') !== null,
+        controls:
+          document.querySelector('[aria-label="Preview width"]') !== null,
         share: [...document.querySelectorAll("button")].some(
           (each) => nameOf(each) === "Share with your team"
         ),
@@ -828,21 +827,21 @@ describe(AppWorkspace, () => {
     expect(seen).toStrictEqual({
       builder: {
         name: "Invoices",
-        views: true,
+        controls: true,
         share: true,
         chat: true,
         app: false,
       },
       user: {
         name: "Invoices",
-        views: false,
+        controls: false,
         share: false,
         chat: false,
         app: true,
       },
       staff: {
         name: "Invoices",
-        views: false,
+        controls: false,
         share: false,
         chat: false,
         app: true,
@@ -929,28 +928,6 @@ describe(AppWorkspace, () => {
         chatId: "chat-first",
         text: "A board of open invoices",
         subject: { kind: "app", id: "invoice-desk" },
-      },
-    ]);
-  });
-
-  it("switches the main area between Preview, Code, Data and Settings, the one shown marked", async () => {
-    await opened(fakeApps().apps);
-
-    const views = document.querySelector('nav[aria-label="Workspace views"]');
-    expect(
-      [...(views?.querySelectorAll("a") ?? [])].map((link) => ({
-        name: link.textContent,
-        to: link.getAttribute("href"),
-        shown: link.getAttribute("aria-current") === "page",
-      }))
-    ).toStrictEqual([
-      { name: "App", to: "/apps/invoice-desk", shown: true },
-      { name: "Code", to: "/apps/invoice-desk?view=code", shown: false },
-      { name: "Data", to: "/apps/invoice-desk?view=data", shown: false },
-      {
-        name: "Settings",
-        to: "/apps/invoice-desk?view=settings",
-        shown: false,
       },
     ]);
   });
@@ -2296,7 +2273,7 @@ describe(AppWorkspace, () => {
       calm: says("It shows here as soon as there is something to see."),
       state: says("Setting up"),
       shareOff: off(share),
-      views: document.querySelector('nav[aria-label="Workspace views"]'),
+      controls: document.querySelector('[aria-label="Preview width"]'),
       // The preview that failed under it never shows, nor the tip.
       failure: [...document.querySelectorAll("body *")].some(
         (each) =>
@@ -2311,7 +2288,7 @@ describe(AppWorkspace, () => {
       calm: true,
       state: true,
       shareOff: true,
-      views: null,
+      controls: null,
       failure: false,
       fix: false,
       tip: false,
@@ -2386,19 +2363,19 @@ describe(AppWorkspace, () => {
       seen[state] = {
         settingUp: says("Setting up Invoices…"),
         notReady,
-        views:
-          document.querySelector('nav[aria-label="Workspace views"]') !== null,
+        controls:
+          document.querySelector('[aria-label="Preview width"]') !== null,
         asked: sent.map(({ question }) => question.text),
       };
       takenDown();
     }
 
     expect(seen).toStrictEqual({
-      runs: { settingUp: false, notReady: false, views: true, asked: [] },
+      runs: { settingUp: false, notReady: false, controls: true, asked: [] },
       fails: {
         settingUp: false,
         notReady: true,
-        views: false,
+        controls: false,
         asked: ["Try again to set up Invoices."],
       },
     });
