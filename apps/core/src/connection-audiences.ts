@@ -73,7 +73,11 @@ export const audiencesRead = (db: DrizzleD1Database) =>
     // that would.
     .where(
       sql`NOT EXISTS (SELECT 1 FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connectionBrainAudiences.connectionId} AND (${connectionBrainErasures.erasing} = 1 OR ${connectionBrainErasures.closed} = 1))`
-    );
+    )
+    // In one order, with the places of each (`sharedPlacesRead`): a reader
+    // past the bound of groups leaves out the same places each read
+    // (brain-next.ts `readerGroupsOf`).
+    .orderBy(connectionBrainAudiences.connectionId);
 
 /**
  * The read of every place a shared connection syncs into the Brain now

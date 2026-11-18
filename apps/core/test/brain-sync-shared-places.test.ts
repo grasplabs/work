@@ -18,6 +18,7 @@ import { chooseAudience } from "./brain-audiences.ts";
 import { newTeam } from "./brain-next-leaks-harness.ts";
 import { inStoreOf } from "./brain-next-out-reads.ts";
 import {
+  claimStatement,
   clockAt,
   connectSharedSites,
   finds,
@@ -32,6 +33,7 @@ import {
   syncOn,
 } from "./brain-sync-world.ts";
 import type { Person } from "./brain-sync-world.ts";
+import { interleaving } from "./d1-interleaving.ts";
 import { mockIdpWith } from "./idp.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
@@ -348,7 +350,13 @@ describe("native sync of a shared connection's picked places", () => {
 
       await admin.api.connections.eraseBrainReads(connectionId);
       const atErase = await finds(member.userId, old);
-      // The clock erases the copies, then ends the erasure.
+      // A step of the erasure before the sync run has erased the copies:
+      // still under way, so no audience can be chosen yet.
+      await completeOwedErasures(env);
+      const beforeCopiesErased = await outcome(
+        chooseAudience(admin.api, connectionId, { kind: "everyone" })
+      );
+      // The run erases the copies; the erasure's next step ends it.
       await sync();
       await completeOwedErasures(env);
       await chooseAudience(admin.api, connectionId, { kind: "everyone" });
@@ -365,6 +373,7 @@ describe("native sync of a shared connection's picked places", () => {
       expect({
         before,
         atErase,
+        beforeCopiesErased,
         atAudience,
         after: {
           old: await finds(member.userId, old),
@@ -375,6 +384,7 @@ describe("native sync of a shared connection's picked places", () => {
       }).toStrictEqual({
         before: true,
         atErase: false,
+        beforeCopiesErased: "connection.brain_erasing",
         atAudience: false,
         after: { old: false, fresh: true },
         stillPicked: [site],
@@ -414,6 +424,166 @@ describe("native sync of a shared connection's picked places", () => {
       expect(seen).toStrictEqual([true, true, true]);
     }
   );
+
+  it(
+    "keeps nothing more of a page under way once its connection's audience goes to nobody, or an erase of its records starts, before its next item",
+    setUpTime,
+    async () => {
+      const [admin, seller] = await Promise.all([
+        signedInApi(idp, "admin"),
+        signedInApi(idp, "user"),
+      ]);
+      const sales = await newTeam(seller.userId);
+      /**
+       * A place picked on a new connection for `sales`, its page read by a
+       * run while `change` lands just before the page claims its item: what
+       * the sync holds of it after that run.
+       */
+      const keptAfter = async (
+        change: (connectionId: string) => Promise<void>
+      ): Promise<Record<string, number>> => {
+        const site = `site-${unique()}`;
+        const { connectionId } = await connectSharedSites(admin, {
+          [site]: markerOf(),
+        });
+        await chooseAudience(admin.api, connectionId, {
+          kind: "team",
+          teamId: sales,
+        });
+        await pick(admin, connectionId, [site]);
+        // The run lists the place, then reads its page: the change lands
+        // as that page claims its item.
+        later(pollMs);
+        await syncOn(
+          interleaving(
+            { pattern: claimStatement, bound: connectionId },
+            async () => {
+              // The admin acts now, not at the run's clock, which other
+              // files in the worker may have moved past their session's end.
+              vi.useRealTimers();
+              await change(connectionId);
+              vi.useFakeTimers({ toFake: ["Date"], now: clockAt() });
+            }
+          )
+        );
+        return await heldBy(connectionId);
+      };
+      expect({
+        toNobody: await keptAfter(async (connectionId) => {
+          await chooseAudience(admin.api, connectionId, { kind: "nobody" });
+        }),
+        erased: await keptAfter(async (connectionId) => {
+          await admin.api.connections.eraseBrainReads(connectionId);
+        }),
+      }).toStrictEqual({ toNobody: {}, erased: {} });
+    }
+  );
+
+  it("still reads a reader's own and the company's, and all but the last places, when their audiences hold more picked places than a reader can", async () => {
+    const reader = await signedInApi(idp, "user");
+    const word = markerOf();
+    // Two connections everyone may read, kept in the reverse of their
+    // order by ID, so only an ordered read holds the first one's places
+    // first (connection-audiences.ts `audiencesRead`).
+    const [first, last] = [`0-${unique()}`, `~-${unique()}`];
+    const perConnection = 600;
+    const placesOf = (connectionId: string) =>
+      Array.from(
+        { length: perConnection },
+        (_, index) =>
+          `${connectionId.slice(0, 1)}${String(index).padStart(4, "0")}`
+      );
+    const now = Date.now();
+    const neverDue = Date.parse("2100-01-01T00:00:00.000Z");
+    /** `source`, holding `marker`, for `readers`. */
+    const add = async (
+      source: SourceRef,
+      readers: SourceReaders,
+      marker: string
+    ): Promise<void> => {
+      await addSource(env, {
+        source,
+        change: crypto.randomUUID(),
+        text: `Price list ${word} ${marker}`,
+        readers,
+      });
+    };
+    try {
+      for (const connectionId of [last, first]) {
+        // oxlint-disable-next-line no-await-in-loop -- one connection at a time
+        await env.DB.batch([
+          env.DB.prepare(
+            "INSERT INTO connection_brain_audiences (connection_id, team_id, changed_by, changed_at) VALUES (?, NULL, ?, ?)"
+          ).bind(connectionId, reader.userId, now),
+          env.DB.prepare(
+            "INSERT INTO brain_sync_sources (connection_id, feed, place, person_id, provider, tenant, account, cursor, listing, listing_open, due_at, lease_id, lease_until, last_success_at, last_error, added, changed, removed, relist_cursor, relisting, relist_at, relist_since, leaves_owed, kind, dropped, relist_catch_up, seen_in) SELECT ?, 'sites', value, NULL, 'microsoft', NULL, NULL, NULL, 1, 0, ?, NULL, NULL, NULL, NULL, 0, 0, 0, NULL, 0, ?, NULL, 0, 'file', 0, 0, NULL FROM json_each(?)"
+          ).bind(
+            connectionId,
+            neverDue,
+            neverDue,
+            JSON.stringify(placesOf(connectionId))
+          ),
+        ]);
+      }
+      const marks = {
+        own: markerOf(),
+        company: markerOf(),
+        firstsLast: markerOf(),
+        lastsFirst: markerOf(),
+        lastsLast: markerOf(),
+      };
+      await add(
+        { producer: "upload", id: unique() },
+        { kind: "owner", personId: reader.userId },
+        marks.own
+      );
+      await add(
+        { producer: "upload", id: unique() },
+        { kind: "everyone" },
+        marks.company
+      );
+      const placeCopy = async (
+        connectionId: string,
+        place: string,
+        marker: string
+      ) => {
+        await add(
+          { producer: "sync", id: `${connectionId}/1/${unique()}` },
+          { kind: "place", connectionId, feed, place },
+          marker
+        );
+      };
+      await placeCopy(first, placesOf(first).at(-1) ?? "", marks.firstsLast);
+      await placeCopy(last, placesOf(last)[0] ?? "", marks.lastsFirst);
+      await placeCopy(last, placesOf(last).at(-1) ?? "", marks.lastsLast);
+
+      expect({
+        own: await finds(reader.userId, marks.own),
+        company: await finds(reader.userId, marks.company),
+        // The first connection's places, all of them, then the last's, as
+        // many as there is room for: its last place goes unread.
+        firstsLast: await finds(reader.userId, marks.firstsLast),
+        lastsFirst: await finds(reader.userId, marks.lastsFirst),
+        lastsLast: await finds(reader.userId, marks.lastsLast),
+      }).toStrictEqual({
+        own: true,
+        company: true,
+        firstsLast: true,
+        lastsFirst: true,
+        lastsLast: false,
+      });
+    } finally {
+      // Nobody else in the worker reads these places.
+      await env.DB.batch([
+        env.DB.prepare(
+          "DELETE FROM connection_brain_audiences WHERE connection_id IN (?, ?)"
+        ).bind(first, last),
+        env.DB.prepare(
+          "DELETE FROM brain_sync_sources WHERE connection_id IN (?, ?)"
+        ).bind(first, last),
+      ]);
+    }
+  });
 
   it("keeps a place's group for what native sync copies from that place of that connection alone", async () => {
     const [connectionId, other] = [
