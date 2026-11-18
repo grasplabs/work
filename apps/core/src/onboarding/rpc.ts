@@ -19,6 +19,7 @@ import type {
   HrPlatform,
   OnboardingHr,
 } from "@grasp-os/shared/hr";
+import { log } from "@grasp-os/shared/log";
 import {
   linksTakenSchema,
   onboardingErrors,
@@ -64,7 +65,11 @@ import { z } from "zod";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
-import { intoMembersTeams, placePrimaries } from "../staff-list-teams.ts";
+import {
+  intoMembersTeams,
+  placedVersion,
+  placePrimaries,
+} from "../staff-list-teams.ts";
 import {
   inProgramme,
   nextReport,
@@ -199,12 +204,25 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         { make: confirmed, held: async () => await store.heldTeams() }
       );
       const view = await store.saveRoster(named, by, { confirmed, minted });
-      if (confirmed) {
-        await placePrimaries(this.#env, by);
-      }
       // A team the save took under seven loses its claims in the Brain now,
       // not only by core's clock (onboarding/new-brain.ts).
       await eraseOwedClaimsQuietly(this.#env);
+      if (confirmed) {
+        // Done only once this list, or a newer one, is placed; else it is
+        // saved, and the clock places it (`placeUnplaced`).
+        const version = await store.confirmedVersion();
+        try {
+          await placePrimaries(this.#env, by);
+        } catch (error) {
+          // Its name alone: a failed query's message holds its addresses.
+          log.error("onboarding.placing_failed", {
+            error: error instanceof Error ? error.name : "unknown",
+          });
+        }
+        if ((await placedVersion(this.#env)) < version) {
+          throw onboardingErrors.create("onboarding.teams_follow");
+        }
+      }
       return view;
     });
   }

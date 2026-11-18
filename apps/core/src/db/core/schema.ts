@@ -570,28 +570,36 @@ export const teamPrimaries = sqliteTable(
 );
 
 /**
- * The last confirmed staff list whose places were put into the members'
+ * The placing of the staff list the admin confirmed into the members'
  * teams (GRA-2055), by the onboarding store's version of it: one row for
- * the company. A placement claims its version here before it reads, only
- * when it is newer, and every statement it writes holds only while the
- * row still names it (staff-list-teams.ts `placePrimaries`): an older
- * confirm never applies after a newer one.
+ * the company (staff-list-teams.ts `placePrimaries`). A placing claims its
+ * version here before it reads, under a lease of its own, and every
+ * statement it writes holds only while the row still has its lease: an
+ * older confirm never applies after a newer one, nor a placing taken for
+ * dead after the one that took over. Its last batch marks the version
+ * placed; the clock places again what is claimed and not placed once no
+ * lease is live.
  */
 export const staffListPlaced = sqliteTable("staff_list_placed", {
   organizationId: text("organization_id").primaryKey(),
+  /** The version claimed last: placed, or being placed. */
   version: integer().notNull(),
+  /** The version whose placing finished, 0 before any. */
+  placed: integer().notNull(),
+  /** The lease of the placing under way, none once it ended. */
+  leaseId: text("lease_id"),
+  leaseUntil: timestamp("lease_until"),
 });
 
 /**
- * Team ids that must never be made (again) by the staff list (GRA-2055):
- * every id the list made a members' team of, written by the batch that
- * makes it (staff-list-teams.ts `intoMembersTeams`), and every team id
- * deleted in Settings › Members, written by Better Auth's before-delete
- * hook (auth/auth.ts). Kept for good. A team row is made only under an id
- * not here, in the same statement, so a deleted team's id never comes back
- * with what was shared with it, whatever the onboarding's store holds. An
- * id recorded for a delete that then failed only keeps the list from
- * making it: that team still exists, and is read as a members' team.
+ * The ids of every team deleted (GRA-2055), kept for good: written by the
+ * trigger `teams_delete_retires` (migration 0276) in the statement that
+ * deletes the row, so no code of any release, before this one or after a
+ * rollback, deletes a team without it. The staff list makes a members'
+ * team only under an id not here, checked in the statement that makes it
+ * (staff-list-teams.ts `intoMembersTeams`), so a deleted team's id never
+ * comes back with what was shared with it, whatever the onboarding's
+ * store holds.
  */
 export const retiredTeamIds = sqliteTable("retired_team_ids", {
   id: text().primaryKey(),

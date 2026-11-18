@@ -488,6 +488,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "onboarding.approvals": { erased: "interview" },
   "onboarding.interview_states": { erased: "interview" },
   "onboarding.counted": { kept: "who was counted in the admin's numbers" },
+  "onboarding.confirmed_places": { erased: "interview" },
   "onboarding.asked_about": { erased: "interview" },
   "onboarding.brain_sent": { erased: "interview" },
   "onboarding.opinion_candidates": { erased: "interview" },

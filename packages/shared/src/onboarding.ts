@@ -531,4 +531,6 @@ export const onboardingErrors = defineErrorFamily({
     "The team is told: what was agreed stays as it was agreed.",
   "onboarding.interviews_kept":
     "The team is told: the interviews stay part of the onboarding.",
+  "onboarding.teams_follow":
+    "The staff list is saved. Its people are put in their teams shortly.",
 });

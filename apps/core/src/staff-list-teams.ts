@@ -1,6 +1,7 @@
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { teamNameKey } from "@grasp-os/shared/onboarding";
+import { clockLeaseMs } from "@grasp-os/workerflow/clock";
 import type { SQL } from "drizzle-orm";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -42,7 +43,8 @@ import type { ConfirmedPlaces } from "./onboarding/store.ts";
 //   id is a members' team's, or one core made for the list
 //   (`crypto.randomUUID`, marked `minted` in the store), never one a
 //   request sent; a confirm makes a members' team only under a minted id,
-//   so an id whose team was deleted while a save ran is never made again.
+//   and only under one D1 never retired: a trigger retires every deleted
+//   team's id (`retired_team_ids`), whichever release's code deleted it.
 // - A rename or a confirm splitting what one team holds: a team keeps one
 //   id from the first save that names it, and everything keys by it.
 // - A team the admin only drafted: made at the confirm, never before, so a
@@ -60,16 +62,17 @@ const keptRowsSchema = z.array(
   })
 );
 
-/** The memberships a leave's delete returns (`placementOf`). */
-const leftRowsSchema = z.array(
-  z.object({ teamId: z.string(), userId: z.string() })
-);
-
 /** The directory's placeholder addresses (auth/directory-members.ts): no sign-in verified them. */
 const placeholderSuffix = "%@directory.invalid";
 
 /** How many people's changes go in one batch: six statements each at most. */
 const peoplePerBatch = 50;
+
+/**
+ * How long a placing holds its claim without renewing it: the clock's
+ * own lease on a task, past which it is taken for dead.
+ */
+const leaseMs = clockLeaseMs;
 
 /** What a staff-list change records as how it was made. */
 const via = "staffList";
@@ -115,7 +118,7 @@ export const intoMembersTeams = async (
   // The members' teams first, then the store's: a team deleted in between
   // is missing from the first read and so never kept by the second. No
   // test can pin this order; the insert's own guard below is what holds.
-  const [existing, madeBefore] = await db.batch([
+  const [existing, retired] = await db.batch([
     db
       .select({ id: teams.id, name: teams.name })
       .from(teams)
@@ -124,13 +127,12 @@ export const intoMembersTeams = async (
   ]);
   const held = await heldNow();
   const known = new Map(existing.map(({ id, name }) => [id, name]));
-  // A minted id that is retired (the list made a team of it, or a team of
-  // it was deleted) and is no members' team now was deleted: it is never
-  // kept, and its team gets a new id. What the store holds under the old id is left on purpose: the
-  // admin deleted that team, and nothing of it may reach the new one.
-  const madeEver = new Set(madeBefore.map(({ id }) => id));
+  // A minted id whose team was deleted (retired) is never kept, and its
+  // team gets a new id. What the store holds under the old id is left on
+  // purpose: that team was deleted, and nothing of it may reach the new one.
+  const deleted = new Set(retired.map(({ id }) => id));
   const mintedHeld = held.filter(
-    ({ id, minted }) => minted && !known.has(id) && !madeEver.has(id)
+    ({ id, minted }) => minted && !known.has(id) && !deleted.has(id)
   );
   const kept = new Set([...known.keys(), ...mintedHeld.map(({ id }) => id)]);
   const byName = new Map<string, Set<string>>();
@@ -191,7 +193,6 @@ export const intoMembersTeams = async (
           )
           .onConflictDoNothing(),
         outboxedIfChanged(db, entry("team.created", id)),
-        db.insert(retiredTeamIds).values({ id }).onConflictDoNothing(),
       ]),
       ...renamed.flatMap(({ id, name }) => [
         db
@@ -269,11 +270,11 @@ interface Placement {
  * itself (`made`), never one an admin added by hand, and adds the new one,
  * recording whether it made it (an admin may have added it already). It
  * never adds a membership in the team their primary row already names: an
- * admin who took that one away by hand keeps it away. Confirms never
- * interleave (`placePrimaries`), so what they read stands; what an admin
- * does by hand meanwhile is checked in the statements themselves. Every
- * statement holds only while `holds` (this confirm's version is the one
- * placed). The statements of one person go in one batch, a move's leave
+ * admin who took that one away by hand keeps it away. Placings never
+ * interleave (`placePrimaries`): each reads under its claim, so what it
+ * read stands; what an admin does by hand meanwhile is checked in the
+ * statements themselves. Every statement holds only while `holds` (the
+ * placing's lease stands). The statements of one person go in one batch, a move's leave
  * and join together; a leave's open-page notice is kept in the batch with
  * it (`revocationsOf`). None when the read saw no change.
  */
@@ -296,8 +297,6 @@ export const placementOf = (
     target: { type: "team", id: teamId },
     detail: { userId, via },
   });
-  const isPrimary = (teamId: string) =>
-    sql`EXISTS (SELECT 1 FROM ${teamPrimaries} WHERE ${teamPrimaries.userId} = ${userId} AND ${teamPrimaries.teamId} = ${teamId})`;
   const leave =
     before === undefined
       ? []
@@ -323,11 +322,7 @@ export const placementOf = (
                   listMade,
                   holds
                 )
-              )
-              .returning({
-                teamId: teamMembers.teamId,
-                userId: teamMembers.userId,
-              }),
+              ),
             outboxedIfChanged(db, entry("team.member.removed", before.teamId)),
             ...(after === undefined
               ? [
@@ -349,8 +344,7 @@ export const placementOf = (
       ...leave,
       // In one statement with the checks: someone removed, or a team
       // deleted, since the read gets nothing; nor does a membership an
-      // admin added meanwhile, by its pair or Better Auth's key; nor one in
-      // the team their primary row already names.
+      // admin added meanwhile, by its pair or Better Auth's key.
       db
         .insert(teamMembers)
         .select(
@@ -358,8 +352,7 @@ export const placementOf = (
             WHERE ${holds}
               AND ${activeMember(userId)}
               AND EXISTS (SELECT 1 FROM ${teams} WHERE ${teams.id} = ${after} AND ${teams.organizationId} = ${organizationId})
-              AND NOT ${isIn}
-              AND NOT ${isPrimary(after)}`
+              AND NOT ${isIn}`
         )
         .onConflictDoNothing(),
       outboxedIfChanged(db, entry("team.member.added", after)),
@@ -369,7 +362,7 @@ export const placementOf = (
         .select(
           sql`SELECT ${userId}, ${after}, ${now.getTime()},
               EXISTS (SELECT 1 FROM ${teamMembers} WHERE ${teamMembers.id} = ${memberId})
-            WHERE ${holds} AND ${isIn} AND NOT ${isPrimary(after)}`
+            WHERE ${holds} AND ${isIn}`
         )
         .onConflictDoUpdate({
           target: teamPrimaries.userId,
@@ -384,18 +377,25 @@ export const placementOf = (
 };
 
 /**
- * `placePrimaries` for one claimed version: each current member whose
- * verified address its list names goes in that team, as their primary
- * one; whoever it moved, took off, or no longer finds leaves the team it
- * gave them before, by the one rule (`placementOf`). Each change audited.
+ * `placePrimaries` for one claimed version, under its lease `leaseId`:
+ * each current member whose verified address its list names goes in that
+ * team, as their primary one; whoever it moved, took off, or no longer
+ * finds leaves the team it gave them before, by the one rule
+ * (`placementOf`). Each change audited. Its last batch marks the version
+ * placed.
  */
 const placeVersion = async (
   env: Env,
   actor: AuditActor,
-  { version, places }: ConfirmedPlaces
+  { version, places }: ConfirmedPlaces,
+  leaseId: string
 ): Promise<void> => {
   const db = drizzle(env.DB);
-  const holds = sql`EXISTS (SELECT 1 FROM ${staffListPlaced} WHERE ${staffListPlaced.organizationId} = ${organizationId} AND ${staffListPlaced.version} = ${version})`;
+  const ours = and(
+    eq(staffListPlaced.organizationId, organizationId),
+    eq(staffListPlaced.leaseId, leaseId)
+  );
+  const holds = sql`EXISTS (SELECT 1 FROM ${staffListPlaced} WHERE ${ours})`;
   const teamOf = new Map(places.map(({ email, team }) => [email, team]));
   const [found, placed] = await db.batch([
     db
@@ -443,69 +443,84 @@ const placeVersion = async (
       })
   );
   const now = new Date();
-  // What the batches actually left, by the leaves' own returned rows.
-  const left: { teamId: string; userId: string }[] = [];
-  // Each person's change whole in one batch: a move never ends half done.
-  for (const part of chunks(changes, peoplePerBatch)) {
+  const touched = [
+    ...new Set(
+      changes.flatMap(({ before, after }) =>
+        [before?.teamId, after].filter((id) => id !== undefined)
+      )
+    ),
+  ];
+  const batches = changes.length > 0 ? chunks(changes, peoplePerBatch) : [[]];
+  // Each person's change whole in one batch, so a move never ends half
+  // done; the batches one after another, each within D1's limits, the
+  // first statement of each renewing the lease. A placing that stops part
+  // way leaves its version unplaced, for the clock to place again.
+  for (const [index, part] of batches.entries()) {
     const groups = part.map((change) =>
       placementOf(db, actor, change, now, holds)
     );
-    // Where each leaving person's statements start: its notice, then its
-    // removal.
+    // Where each leaving person's statements start: its notice first.
     const leaves: number[] = [];
-    let at = 0;
+    let at = 1;
     for (const { statements, leaves: leaving } of groups) {
       if (leaving) {
         leaves.push(at);
       }
       at += statements.length;
     }
-    const [first, ...rest] = groups.flatMap(({ statements }) => statements);
-    if (first !== undefined) {
-      // Batches one after another, each within D1's limits.
-      // oxlint-disable-next-line no-await-in-loop
-      const results = await auditedBatch(env, db, [first, ...rest]);
-      const kept = leaves.flatMap((start) =>
-        keptRowsSchema.parse(results[start])
-      );
-      for (const start of leaves) {
-        left.push(...leftRowsSchema.parse(results[start + 1]));
-      }
-      // As Better Auth's own removal does (auth.ts): leaving a team can
-      // take a role in an App away, so its open pages look again; told
-      // once the batch committed, and by the clock if not now.
-      // oxlint-disable-next-line no-await-in-loop
-      await tellKept(env, kept);
-    }
-  }
-  const touched = [
-    ...new Set([
-      ...left.map(({ teamId }) => teamId),
-      ...changes.flatMap(({ after }) => (after === undefined ? [] : [after])),
-    ]),
-  ];
-  if (touched.length > 0) {
-    // Better Auth's count of each team's members, as its own writes keep it.
-    await db
-      .update(teams)
-      .set({
-        memberCount: sql`(SELECT count(*) FROM ${teamMembers} WHERE ${teamMembers.teamId} = ${teams.id})`,
-      })
-      .where(inList(teams.id, touched));
+    const last = index === batches.length - 1;
+    // oxlint-disable-next-line no-await-in-loop -- one batch at a time
+    const results = await auditedBatch(env, db, [
+      db
+        .update(staffListPlaced)
+        .set({ leaseUntil: new Date(Date.now() + leaseMs) })
+        .where(ours),
+      ...groups.flatMap(({ statements }) => statements),
+      ...(last
+        ? [
+            // Better Auth's count of each team's members, as its own
+            // writes keep it.
+            ...(touched.length > 0
+              ? [
+                  db
+                    .update(teams)
+                    .set({
+                      memberCount: sql`(SELECT count(*) FROM ${teamMembers} WHERE ${teamMembers.teamId} = ${teams.id})`,
+                    })
+                    .where(inList(teams.id, touched)),
+                ]
+              : []),
+            db
+              .update(staffListPlaced)
+              .set({ placed: version, leaseId: null, leaseUntil: null })
+              .where(ours),
+          ]
+        : []),
+    ]);
+    // As Better Auth's own removal does (auth.ts): leaving a team can
+    // take a role in an App away, so its open pages look again; told
+    // once the batch committed, and by the clock if not now.
+    // oxlint-disable-next-line no-await-in-loop -- one batch at a time
+    await tellKept(
+      env,
+      leaves.flatMap((start) => keptRowsSchema.parse(results[start]))
+    );
   }
 };
 
 /**
  * Puts the members of the list the admin last confirmed in their teams
  * (GRA-2055), from the onboarding store's confirmed places, never from a
- * request: a confirm at a time, and never an older one after a newer one.
- * It claims its version in D1 first (`staff_list_placed`), only when it is
- * newer than the one placed, reads after that claim, and writes only
- * while the claim stands: a newer confirm's claim makes the rest of an
- * older one's writes nothing, and the newer one reads what the older one
- * wrote. Placed, it looks at the store again and places a newer list, if
- * one came meanwhile, so the members' teams end as the last confirmed
- * list says.
+ * request: a placing at a time, and never an older list after a newer
+ * one. It claims its version in D1 first (`staff_list_placed`), under a
+ * lease of its own, only when it is newer than the one claimed, or is the
+ * one claimed, not placed, and under no live lease (a placing that failed
+ * or died); it reads after that claim, and writes only while its lease
+ * stands: a newer claim makes the rest of an older placing's writes
+ * nothing, and reads what it wrote. Placed, it looks at the store again
+ * and places a newer list, if one came meanwhile, so the members' teams
+ * end as the last confirmed list says. The clock calls it too, so a list
+ * a confirm saved but didn't place is placed shortly.
  */
 export const placePrimaries = async (
   env: Env,
@@ -516,24 +531,66 @@ export const placePrimaries = async (
   let confirmed = await store.confirmedPlaces();
   while (confirmed !== null) {
     const { version } = confirmed;
+    const leaseId = crypto.randomUUID();
+    const now = Date.now();
+    const leaseUntil = new Date(now + leaseMs);
     // oxlint-disable-next-line no-await-in-loop -- one confirmed list at a time
     const [claimed] = await db
       .insert(staffListPlaced)
-      .values({ organizationId, version })
+      .values({ organizationId, version, placed: 0, leaseId, leaseUntil })
       .onConflictDoUpdate({
         target: staffListPlaced.organizationId,
-        set: { version },
-        setWhere: sql`${staffListPlaced.version} < ${version}`,
+        set: { version, leaseId, leaseUntil },
+        setWhere: sql`${staffListPlaced.version} < ${version}
+          OR (${staffListPlaced.version} = ${version}
+            AND ${staffListPlaced.placed} < ${version}
+            AND (${staffListPlaced.leaseUntil} IS NULL OR ${staffListPlaced.leaseUntil} <= ${now}))`,
       })
       .returning({ version: staffListPlaced.version });
     if (claimed === undefined) {
       // This list or a newer one is placed, or being placed.
       return;
     }
-    // oxlint-disable-next-line no-await-in-loop -- one confirmed list at a time
-    await placeVersion(env, actor, confirmed);
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one confirmed list at a time
+      await placeVersion(env, actor, confirmed, leaseId);
+    } catch (error) {
+      // Its lease given up at once, so the clock's next run places it
+      // again; if even that fails, once the lease runs out.
+      // oxlint-disable-next-line no-await-in-loop -- one confirmed list at a time
+      await db
+        .update(staffListPlaced)
+        .set({ leaseUntil: null })
+        .where(eq(staffListPlaced.leaseId, leaseId))
+        .catch(() => null);
+      throw error;
+    }
     // oxlint-disable-next-line no-await-in-loop -- one confirmed list at a time
     const latest = await store.confirmedPlaces();
     confirmed = latest?.version === version ? null : latest;
+  }
+};
+
+/**
+ * The version of the confirmed list whose placing last finished
+ * (`placePrimaries`), 0 before any.
+ */
+export const placedVersion = async (env: Env): Promise<number> => {
+  const [row] = await drizzle(env.DB)
+    .select({ placed: staffListPlaced.placed })
+    .from(staffListPlaced)
+    .where(eq(staffListPlaced.organizationId, organizationId));
+  return row?.placed ?? 0;
+};
+
+/**
+ * For the clock: places the list the admin last confirmed where no
+ * placing finished it (a confirm whose placing failed or died), as the
+ * system. Nothing when it is placed.
+ */
+export const placeUnplaced = async (env: Env): Promise<void> => {
+  const version = await onboardingStore(env).confirmedVersion();
+  if (version > (await placedVersion(env))) {
+    await placePrimaries(env, { type: "system" });
   }
 };

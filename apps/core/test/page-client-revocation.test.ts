@@ -80,7 +80,7 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
   });
 
-  it("clears the page of someone the staff list takes out of the team the App is shared with, by the clock when the confirm failed just after", async () => {
+  it("clears the page of someone the staff list takes out of the team the App is shared with, by the clock when telling the pages failed after the confirm's batch", async () => {
     const opened = await openedApp();
     const admin = await personApi("admin");
     const ann = await personApi("user");
@@ -109,28 +109,29 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     const { lease } = await ann.api.pages.open(opened.app);
     const follower = await followedList(opened, ann.api.pages, lease);
     // The confirm takes Ann out of C, the App's team; the database goes
-    // away just after that batch commits, before any page is told.
+    // away just after that batch commits, before any page is told. The
+    // batch placed the whole list, so the confirm answers it is done.
     const landing = landingAt(/delete from "team_members"/iu, "after", () => {
       throw new Error("The database went away");
     });
     const { core } = await openRpc(admin.session, {
       coreEnv: landing.coreEnv,
     });
-    let failed = false;
+    let answered = "ok";
     try {
       using session = core.authenticate();
       await session.onboarding.confirmRoster(listed(ids, 0));
     } catch {
-      failed = true;
+      answered = "failed";
     } finally {
       core[Symbol.dispose]();
     }
     // The clock tells what the batch kept.
     await retryAccessRevocations(env);
 
-    expect({ landed: landing.landed(), failed }).toStrictEqual({
+    expect({ landed: landing.landed(), answered }).toStrictEqual({
       landed: true,
-      failed: true,
+      answered: "ok",
     });
     await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
   });

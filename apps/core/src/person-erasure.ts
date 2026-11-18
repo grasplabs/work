@@ -484,7 +484,7 @@ const runs: ErasureStep = {
  * ran first; once an admin released the address, or under an older key, it
  * is found by address no more.
  * Their entry on the list is the company's (Nick's D5): it stays, removed
- * only by an admin.
+ * only by an admin; where the confirmed list places their address goes.
  */
 const interview: ErasureStep = {
   area: "interview",
@@ -545,6 +545,16 @@ const interview: ErasureStep = {
       // Not on the list by the address they signed in with: an interview
       // under another address is left. IDs only.
       log.warn("member.erasure_interview_unmatched", { userId });
+    }
+    // Where the confirmed list places their address (GRA-2055), also
+    // once a draft took them off the list: nobody signing in with it is
+    // placed by it.
+    for (const email of await store.confirmedAddresses()) {
+      // oxlint-disable-next-line no-await-in-loop -- one address at a time
+      if ((await emailHashOf(env, email)) === erasure.emailHash) {
+        // oxlint-disable-next-line no-await-in-loop -- one address at a time
+        await store.forgetPlaceOf(email);
+      }
     }
     await completed(db, userId, "interview");
   },

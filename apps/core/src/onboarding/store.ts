@@ -146,6 +146,7 @@ import {
   brainOpinions,
   brainSent,
   brainTeams,
+  confirmedPlaces,
   countedPeople,
   countedWorks,
   drawFailures,
@@ -325,11 +326,10 @@ const queuedKey = "forget_lines_queued";
 const kickoffChangesKey = "kickoff_changes";
 
 /**
- * Where the list the admin last confirmed puts each address, by the
- * version of that confirm (`confirmedPlaces`): the first of two people
- * sharing an address keeps it.
+ * The version of the list the admin last confirmed (GRA-2055), one more
+ * with each confirmed save, its places held in `confirmed_places`.
  */
-const confirmedPlacesKey = "confirmed_places";
+const confirmedVersionKey = "confirmed_version";
 
 const confirmedPlacesSchema = z.object({
   version: z.int().positive(),
@@ -4939,23 +4939,72 @@ export class Onboarding extends DurableObject<Env> {
    * (staff-list-teams.ts `placePrimaries`). Null before any confirm.
    */
   confirmedPlaces(): ConfirmedPlaces | null {
-    const held = this.ctx.storage.kv.get(confirmedPlacesKey);
-    return held === undefined ? null : confirmedPlacesSchema.parse(held);
+    const version = this.confirmedVersion();
+    return version === 0
+      ? null
+      : confirmedPlacesSchema.parse({
+          version,
+          places: this.#db
+            .select({
+              email: confirmedPlaces.email,
+              team: confirmedPlaces.team,
+            })
+            .from(confirmedPlaces)
+            .all(),
+        });
+  }
+
+  /** The version of the list the admin last confirmed, 0 before any (`confirmedPlaces`). */
+  confirmedVersion(): number {
+    return z
+      .int()
+      .nonnegative()
+      .parse(this.ctx.storage.kv.get(confirmedVersionKey) ?? 0);
   }
 
   /** In a confirmed save's transaction: its places, under the next version. */
   #keepConfirmedPlaces(roster: Roster): void {
-    const teamOf = new Map<string, string>();
+    const version = this.confirmedVersion() + 1;
+    this.#db.delete(confirmedPlaces).run();
     for (const { email, team } of roster.people) {
       const address = email.toLowerCase();
-      if (address !== "" && !teamOf.has(address)) {
-        teamOf.set(address, team);
+      if (address !== "") {
+        // The first of two people sharing an address keeps it.
+        this.#db
+          .insert(confirmedPlaces)
+          .values({ email: address, team })
+          .onConflictDoNothing()
+          .run();
       }
     }
-    this.ctx.storage.kv.put(confirmedPlacesKey, {
-      version: (this.confirmedPlaces()?.version ?? 0) + 1,
-      places: [...teamOf].map(([email, team]) => ({ email, team })),
-    });
+    this.ctx.storage.kv.put(confirmedVersionKey, version);
+  }
+
+  /**
+   * The addresses the confirmed list places (GRA-2055), for core to find
+   * an erased person's by its keyed hash (person-erasure.ts): only core
+   * asks, and nothing of it leaves core.
+   */
+  confirmedAddresses(): string[] {
+    return this.#db
+      .select({ email: confirmedPlaces.email })
+      .from(confirmedPlaces)
+      .all()
+      .map(({ email }) => email);
+  }
+
+  /**
+   * Takes `email` out of where the confirmed list places people
+   * (GRA-2055): its person was erased or removed as a member, so nobody
+   * signing in with it is placed by it. The roster's entry stays, the
+   * company's (Nick's D5); the admin's next confirm places it again if
+   * the list still has it.
+   */
+  forgetPlaceOf(email: string): void {
+    this.#db
+      .delete(confirmedPlaces)
+      .where(eq(confirmedPlaces.email, email.toLowerCase()))
+      .run();
   }
 
   /** Whether the staff list has the members' team `id` (GRA-2055). */

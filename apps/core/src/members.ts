@@ -65,6 +65,7 @@ import {
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { emailHashOf, erasedAddress } from "./erased-people.ts";
+import { onboardingStore } from "./onboarding/store.ts";
 import { teamsWithMembers } from "./organization-teams.ts";
 import {
   erasePerson,
@@ -403,6 +404,16 @@ const removeMember = async (
     await tellKept(env, kept);
   } else if (!(await isRemoved(env, target))) {
     throw refusal(by, memberErrors.create("member.not_found"));
+  }
+  // Where the confirmed staff list places their address goes (GRA-2055):
+  // they aren't put in a team by it, should they sign in again. Asked
+  // again, the removal finishes it.
+  const [person] = await drizzle(env.DB)
+    .select({ email: users.email })
+    .from(users)
+    .where(eq(users.id, target));
+  if (person !== undefined) {
+    await onboardingStore(env).forgetPlaceOf(person.email);
   }
   // What they typed into Apps' previews stays with each App's test data,
   // which its other builders share (app-preview.ts): no preview is theirs

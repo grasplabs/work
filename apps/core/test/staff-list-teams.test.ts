@@ -12,20 +12,25 @@ import { add, markerWord, textsFor } from "./brain-next-leaks-harness.ts";
 import { landingAt } from "./d1-landing.ts";
 import { mockIdp } from "./idp.ts";
 import { aloneInTheStore } from "./interview-link.ts";
+import { runMinuteTasks } from "./maintenance.ts";
 import {
   agree,
   fact,
   mapped,
   team as teamOnTheList,
 } from "./onboarding-team.ts";
-import { clientOrigin } from "./sign-in-config.ts";
+import { acmeTenant, clientOrigin } from "./sign-in-config.ts";
 import {
   auditedDuring,
   callAuth,
+  entraPerson,
   openRpc,
+  outcome,
   routed,
+  signedIn,
   signedInApi,
   unique,
+  whoami,
 } from "./sign-in.ts";
 
 // One list of teams with one id (GRA-2055, core's staff-list-teams.ts):
@@ -62,8 +67,8 @@ const listTeams = async (admin: Admin) => {
 };
 
 /** The address someone signed in with. */
-const emailOf = (signedIn: Admin): string =>
-  z.string().parse(signedIn.person.email);
+const emailOf = (person: Admin): string =>
+  z.string().parse(person.person.email);
 
 /** A team made in Settings › Members, as an admin makes one. */
 const settingsTeam = async (admin: Admin, name: string): Promise<string> => {
@@ -182,6 +187,29 @@ const asAnEarlierReleaseWrote = async (): Promise<void> => {
       );
     }
   });
+};
+
+/**
+ * `count` members of the organization, written as sign-in writes them:
+ * their ids and addresses.
+ */
+const manyMembers = async (count: number) => {
+  const now = Date.now();
+  const people = Array.from({ length: count }, () => {
+    const id = `member-${unique()}`;
+    return { id, email: `${id}@acme.test` };
+  });
+  await env.DB.batch(
+    people.flatMap(({ id, email }) => [
+      env.DB.prepare(
+        "INSERT INTO users (id, name, email, email_verified, created_at, updated_at) VALUES (?, 'Member', ?, 1, ?, ?)"
+      ).bind(id, email, now, now),
+      env.DB.prepare(
+        "INSERT INTO members (id, organization_id, user_id, role, created_at) VALUES (?, 'organization', ?, 'user', ?)"
+      ).bind(`membership-${id}`, id, now),
+    ])
+  );
+  return people;
 };
 
 describe("the staff list's teams", { timeout: 120_000 }, () => {
@@ -1316,12 +1344,11 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
     expect(before.works).toBeGreaterThan(0);
   });
 
-  it("never make a Settings team again under its id once it is deleted, though a store row an earlier release wrote still names it", async () => {
+  it("never make a Settings team again under its id once any release's code deleted it, though a store row an earlier release wrote still names it", async () => {
     const admin = await signedInApi(idp, "admin");
     const ann = await signedInApi(idp, "user");
     const tag = unique();
     const marker = markerWord();
-    const by = { type: "person", userId: admin.userId } as const;
     const store = onboardingStore(env);
     const board = await settingsTeam(admin, `Board ${tag}`);
     await add(`Board minutes ${marker}`, { kind: "team", teamId: board });
@@ -1333,39 +1360,246 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
     // could have written it: minted, by the column's default.
     await store.saveRoster(listed, { type: "system" });
     await asAnEarlierReleaseWrote();
-    // A stale tab's confirm read the store then...
-    const staleHeld = await store.heldTeams();
-    // ...the admin takes Board off the list and deletes it in Settings...
-    await admin.api.onboarding.saveRoster({
-      teams: [{ id: "desk", name: `Desk ${tag}`, lead: null }],
-      people: [{ id: "bo", name: "Bo", team: "desk" }],
-    });
-    const deleted = await callAuth("/organization/remove-team", admin.session, {
-      teamId: board,
-    });
-    // ...and the stale confirm goes on, Board held and minted.
-    const { roster: named, minted } = await intoMembersTeams(env, listed, by, {
-      make: true,
-      held: async () => await Promise.resolve(staleHeld),
-    });
-    await store.saveRoster(named, by, { confirmed: true, minted });
-    await placePrimaries(env, by);
-    const again = named.teams[0]?.id;
+    const held = await store.heldTeams();
+    const wasMinted = held.find(({ id }) => id === board)?.minted;
+    // Deleted as a release without this one's hooks deletes it (a
+    // rollback), though the list still names it.
+    await env.DB.prepare("DELETE FROM teams WHERE id = ?").bind(board).run();
+    const { roster: confirmed } =
+      await admin.api.onboarding.confirmRoster(listed);
+    const again = confirmed?.teams[0]?.id;
     const teams = await membersTeams(admin);
     const texts = await textsFor(ann.userId, marker);
 
     expect({
-      wasMinted: staleHeld.find(({ id }) => id === board)?.minted,
-      deleted: deleted.status,
+      wasMinted,
       newId: again !== undefined && again !== board,
       annIn: teams.get(`Board ${tag}`)?.memberIds.includes(ann.userId),
       reads: texts.some((text) => text.includes(marker)),
     }).toStrictEqual({
       wasMinted: true,
-      deleted: 200,
       newId: true,
       annIn: true,
       reads: false,
+    });
+  });
+
+  it("place a confirmed list whose placing stopped part way: the confirm hears the teams follow, and the clock finishes it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ann = await signedInApi(idp, "user");
+    const tag = unique();
+    // More people than one batch places.
+    const others = await manyMembers(60);
+    const listed = (sales: string, finance: string, inSales: boolean) => {
+      const team = inSales ? sales : finance;
+      return {
+        teams: [
+          { id: sales, name: `Sales ${tag}`, lead: null },
+          { id: finance, name: `Finance ${tag}`, lead: null },
+        ],
+        people: [
+          { id: "ann", name: "Ann", email: emailOf(ann), team },
+          ...others.map(({ id, email }) => ({
+            id,
+            name: "Member",
+            email,
+            team,
+          })),
+        ],
+      } satisfies RosterInput;
+    };
+    const { roster: first } = await admin.api.onboarding.confirmRoster(
+      listed("sales", "finance", false)
+    );
+    const idOf = (name: string): string =>
+      first?.teams.find((each) => each.name === `${name} ${tag}`)?.id ?? "";
+    // Everyone moves to Sales; the database fails right after the first
+    // batch of the placing committed.
+    const failing = landingAt(
+      /insert into "team_members"/iu,
+      "after",
+      async () => await Promise.reject(new Error("The database went away"))
+    );
+    const answered = await outcome(
+      confirmOn(
+        admin,
+        failing.coreEnv,
+        listed(idOf("Sales"), idOf("Finance"), true)
+      )
+    );
+    const counted = async () => {
+      const teams = await membersTeams(admin);
+      return {
+        sales: teams.get(`Sales ${tag}`)?.memberIds.length,
+        finance: teams.get(`Finance ${tag}`)?.memberIds.length,
+        annInFinance: teams
+          .get(`Finance ${tag}`)
+          ?.memberIds.includes(ann.userId),
+      };
+    };
+    const stopped = await counted();
+
+    await runMinuteTasks();
+
+    expect({
+      landed: failing.landed(),
+      answered,
+      // Part of the list left in Finance until the clock's run.
+      leftBehind: (stopped.finance ?? 0) > 0,
+      finished: await counted(),
+    }).toStrictEqual({
+      landed: true,
+      answered: "onboarding.teams_follow",
+      leftBehind: true,
+      finished: { sales: 61, finance: 0, annInFinance: false },
+    });
+  });
+
+  it("tell a confirm its list is placed only once it is, though another confirm's placing holds a newer list when it looks", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ann = await signedInApi(idp, "user");
+    const tag = unique();
+    const { roster: first } = await admin.api.onboarding.confirmRoster({
+      teams: [
+        { id: "sales", name: `Sales ${tag}`, lead: null },
+        { id: "finance", name: `Finance ${tag}`, lead: null },
+      ],
+      people: [{ id: "bo", name: "Bo", team: "sales" }],
+    });
+    const idOf = (name: string): string =>
+      first?.teams.find((each) => each.name === `${name} ${tag}`)?.id ?? "";
+    const listed = (annIn: string): RosterInput => ({
+      teams: [
+        { id: idOf("Sales"), name: `Sales ${tag}`, lead: null },
+        { id: idOf("Finance"), name: `Finance ${tag}`, lead: null },
+      ],
+      people: [
+        { id: "bo", name: "Bo", team: idOf("Sales") },
+        { id: "ann", name: "Ann", email: emailOf(ann), team: annIn },
+      ],
+    });
+    // Confirm B saves Sales and waits just before it claims it...
+    const { promise: atClaim, resolve: reached } = Promise.withResolvers();
+    const { promise: gate, resolve: open } = Promise.withResolvers();
+    const waiting = landingAt(
+      /insert into "staff_list_placed"/iu,
+      "before",
+      async () => {
+        reached(null);
+        await gate;
+      }
+    );
+    const second = outcome(
+      confirmOn(admin, waiting.coreEnv, listed(idOf("Sales")))
+    );
+    await atClaim;
+    // ...confirm A saves Finance, claims it, and fails before its writes:
+    // B looks while A's placing still holds Finance.
+    const failing = landingAt(
+      /insert into "team_members"/iu,
+      "before",
+      async () => {
+        open(null);
+        await second;
+        throw new Error("The database went away");
+      }
+    );
+    const firstAnswer = await outcome(
+      confirmOn(admin, failing.coreEnv, listed(idOf("Finance")))
+    );
+    const annInFinance = async () => {
+      const teams = await membersTeams(admin);
+      return teams.get(`Finance ${tag}`)?.memberIds.includes(ann.userId);
+    };
+    const before = await annInFinance();
+
+    await runMinuteTasks();
+
+    expect({
+      landed: waiting.landed() && failing.landed(),
+      first: firstAnswer,
+      second: await second,
+      before,
+      after: await annInFinance(),
+    }).toStrictEqual({
+      landed: true,
+      first: "onboarding.teams_follow",
+      second: "onboarding.teams_follow",
+      before: false,
+      after: true,
+    });
+  });
+
+  it("place nobody by the address of someone erased or removed, though the list the admin confirmed names it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ann = await signedInApi(idp, "user");
+    const bea = await signedInApi(idp, "user");
+    const cy = await signedInApi(idp, "user");
+    const tag = unique();
+    const store = onboardingStore(env);
+    const listed = (finance: string, withCy: boolean): RosterInput => ({
+      teams: [{ id: finance, name: `Finance ${tag}`, lead: null }],
+      people: [
+        { id: "ann", name: "Ann", email: emailOf(ann), team: finance },
+        { id: "bea", name: "Bea", email: emailOf(bea), team: finance },
+        ...(withCy
+          ? [{ id: "cy", name: "Cy", email: emailOf(cy), team: finance }]
+          : []),
+      ],
+    });
+    const { roster: first } = await admin.api.onboarding.confirmRoster(
+      listed("finance", false)
+    );
+    const finance = first?.teams[0]?.id ?? "";
+    const theirs = async () => {
+      const held = new Set(await store.confirmedAddresses());
+      return [ann, bea].flatMap((person) =>
+        held.has(emailOf(person).toLowerCase()) ? [person.person.name] : []
+      );
+    };
+    await admin.api.members.remove(ann.userId);
+    await admin.api.members.remove(bea.userId);
+    const removed = await theirs();
+    // The admin confirms the list again, its entries for them kept (the
+    // company's), Cy new on it; its placing fails before it writes.
+    const failing = landingAt(
+      /insert into "team_members"/iu,
+      "before",
+      async () => await Promise.reject(new Error("The database went away"))
+    );
+    const answered = await outcome(
+      confirmOn(admin, failing.coreEnv, listed(finance, true))
+    );
+    await admin.api.members.erase(ann.userId, String(ann.person.name));
+    const erased = await theirs();
+    // Ann's address released, someone signs in with it before the clock
+    // places the list.
+    await admin.api.members.releaseAddress(emailOf(ann));
+    const { userId: again } = await whoami(
+      await signedIn(
+        idp,
+        "microsoft",
+        entraPerson(acmeTenant, "acme.test", { email: emailOf(ann) })
+      )
+    );
+
+    await runMinuteTasks();
+    const teams = await membersTeams(admin);
+    const inFinance = teams.get(`Finance ${tag}`)?.memberIds;
+
+    expect({
+      removed,
+      answered,
+      erased,
+      again: inFinance?.includes(again ?? ""),
+      cy: inFinance?.includes(cy.userId),
+    }).toStrictEqual({
+      removed: [],
+      answered: "onboarding.teams_follow",
+      // Bea's address is on the list again: removed, she is placed nowhere.
+      erased: [bea.person.name],
+      again: false,
+      cy: true,
     });
   });
 });

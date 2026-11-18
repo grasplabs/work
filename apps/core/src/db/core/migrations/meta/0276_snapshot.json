@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "c7f4847e-869c-4833-81ed-e65b5da1423f",
+  "id": "8b4237de-6b9a-4c4c-a976-82ae31331767",
   "prevId": "be859107-9b5b-4dd8-b861-350f19167227",
   "tables": {
     "access_revocations": {
@@ -12378,6 +12378,27 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "placed": {
+          "name": "placed",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lease_id": {
+          "name": "lease_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lease_until": {
+          "name": "lease_until",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         }
       },

@@ -920,3 +920,16 @@ export const opinionBackers = sqliteTable(
     index("opinion_backers_person").on(table.person),
   ]
 );
+
+/**
+ * Where the list the admin last confirmed puts each address (GRA-2055),
+ * lower case, the first of two people sharing an address keeping it: what
+ * core places the members by (staff-list-teams.ts `placePrimaries`).
+ * Replaced whole by each confirmed save, under the next version
+ * (`confirmedVersion`); an address leaves it when its person is erased or
+ * removed as a member, so nobody signing in with it later is placed.
+ */
+export const confirmedPlaces = sqliteTable("confirmed_places", {
+  email: text().primaryKey(),
+  team: text().notNull(),
+});
