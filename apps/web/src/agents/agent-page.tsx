@@ -366,11 +366,13 @@ const Access = ({
   }
   return (
     <>
+      {/* A card per topic, each titled (Damsko's settings pattern); the
+          row doesn't name the agent again under the page's title. */}
       <SectionCard density="compact" flush title={t`Who may use it`}>
         <SettingsRows>
           <SettingRow
             info={t`Nobody outside it can ask it anything, in Grasp or a chat app.`}
-            label={t`${name} answers`}
+            label={t`Answers`}
           >
             {() => (
               <AudienceControl

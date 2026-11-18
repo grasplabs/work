@@ -209,7 +209,7 @@ const press = async (element: Element | null | undefined) => {
 /** The agents' names, as the rows start with them. */
 const names = ["Stephen", "Claire", "Milan"];
 
-/** Each row as its name, where its name leads, and whether it offers a chat. */
+/** Each card as its name, where it leads, and whether it opens a chat. */
 const cards = () =>
   [...document.querySelectorAll("ul[aria-label='Agents'] > li")].map((row) => {
     const text = row.textContent ?? "";
@@ -272,7 +272,6 @@ describe("the company's agents, on pages of their own", () => {
     it("shows someone who isn't an admin only their agents, each opening a chat with it and nothing to change", async () => {
       await mounted(
         <AgentsOverview
-          models={[]}
           makes={false}
           managed={undefined}
           usable={[chatAgent(stephen), chatAgent(claire)]}
@@ -285,15 +284,14 @@ describe("the company's agents, on pages of their own", () => {
         { name: "Claire", to: undefined, chat: ["/?agent=agent-claire"] },
       ]);
       expect({
-        newAgent: buttonNamed("New agent") !== undefined,
+        newAgent: document.querySelector("a[href='/agents/new']") !== null,
         says: document.body.textContent?.includes("Paused"),
       }).toStrictEqual({ newAgent: false, says: false });
     });
 
-    it("shows an admin every agent, and offers a chat only with one that is on and answers them", async () => {
+    it("shows an admin every agent, each card opening its page", async () => {
       await mounted(
         <AgentsOverview
-          models={[]}
           makes
           managed={managed}
           // The admin isn't in Claire's teams; Milan is paused.
@@ -303,11 +301,7 @@ describe("the company's agents, on pages of their own", () => {
       expect(
         cards().map(({ name, to, chat }) => ({ name, to, chat }))
       ).toStrictEqual([
-        {
-          name: "Stephen",
-          to: "/agents/organization",
-          chat: ["/?agent=organization"],
-        },
+        { name: "Stephen", to: "/agents/organization", chat: [] },
         { name: "Claire", to: "/agents/agent-claire", chat: [] },
         { name: "Milan", to: "/agents/agent-milan", chat: [] },
       ]);
@@ -325,7 +319,7 @@ describe("the company's agents, on pages of their own", () => {
           milansCard?.text.includes(words)
         ),
         milanPaused: milansCard?.text.includes("Paused"),
-        newAgent: buttonNamed("New agent") !== undefined,
+        newAgent: document.querySelector("a[href='/agents/new']") !== null,
       }).toStrictEqual({
         claire: [true, true, true, true],
         milanCost: false,
@@ -333,19 +327,6 @@ describe("the company's agents, on pages of their own", () => {
         milanPaused: true,
         newAgent: true,
       });
-    });
-
-    it("narrows an admin's list to the paused ones", async () => {
-      await mounted(
-        <AgentsOverview
-          models={[]}
-          makes
-          managed={managed}
-          usable={[chatAgent(stephen)]}
-        />
-      );
-      await press(buttonNamed("Paused"));
-      expect(cards().map(({ name }) => name)).toStrictEqual(["Milan"]);
     });
   });
 
@@ -455,7 +436,6 @@ describe("the company's agents, on pages of their own", () => {
       const unread: ManagedAgents = { ...managed, settings: {} };
       await mounted(
         <AgentsOverview
-          models={[]}
           makes={false}
           managed={unread}
           usable={[chatAgent(stephen)]}
