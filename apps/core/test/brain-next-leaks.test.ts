@@ -135,6 +135,12 @@ const accountOf = (claims: Claims): SourceReader => ({
   account: String(claims.oid),
 });
 
+/** The account `claims` signed in with, as the directory read puts it on a staff-list entry. */
+const directoryAccountOf = (claims: Claims) => ({
+  tenant: acmeTenant,
+  oid: String(claims.oid),
+});
+
 /** Grants the chat agent the Brain permission, once for the file. */
 const chatAgentReadsBrain = chatAgentReadsBrainOnce(idp);
 
@@ -3449,9 +3455,11 @@ describe(
     // draft, nor someone moved out since.
     it("gives a team's source to whom the confirmed staff list puts in the team, and to nobody a draft names or the list moved out", async () => {
       const admin = await signedInApi(idp, "admin");
-      // Placed by the address their Google sign-in proved.
-      const ann = await signedInApi(idp, "user", "google");
-      const ben = await signedInApi(idp, "user", "google");
+      // Placed by their account in the company's directory, which their
+      // entries from its read carry.
+      const ann = await signedInApi(idp, "user");
+      const ben = await signedInApi(idp, "user");
+
       const tag = unique();
       const marker = markerWord();
       const annEmail = String(ann.person.email);
@@ -3466,13 +3474,20 @@ describe(
           { id: ids.support, name: `Support ${tag}`, lead: null },
         ],
         people: [
-          { id: `ann-${tag}`, name: "Ann", email: annEmail, team: ids[annIn] },
+          {
+            id: `ann-${tag}`,
+            name: "Ann",
+            email: annEmail,
+            entra: directoryAccountOf(ann.person),
+            team: ids[annIn],
+          },
           ...(withBen
             ? [
                 {
                   id: `ben-${tag}`,
                   name: "Ben",
                   email: String(ben.person.email),
+                  entra: directoryAccountOf(ben.person),
                   team: ids.sales,
                 },
               ]

@@ -305,6 +305,8 @@ interface Entry {
   lead: boolean;
   /** Who they report to, by name or email address, in lower case; empty for nobody. */
   manager: string;
+  /** Their account in the company's Microsoft directory, when the list is its read. */
+  entra?: { tenant: string; oid: string };
 }
 
 /**
@@ -348,6 +350,7 @@ const rosterOf = (
       team,
       title: entry.title.slice(0, textMost),
       away: false,
+      ...(entry.entra === undefined ? {} : { entra: entry.entra }),
     };
     if (people.some((each) => each.id === person.id)) {
       continue;
@@ -421,7 +424,9 @@ export const staffListOf = (rows: string[][], noTeam: string): StaffList => {
  */
 export const directoryListOf = (
   people: readonly DirectoryPerson[],
-  noTeam: string
+  noTeam: string,
+  /** The Microsoft directory's tenant, when the directory is one: each person keeps their object id in it, which the list places their sign-in by. */
+  entraTenant?: string
 ): StaffList => {
   const byKey = new Map<string, DirectoryPerson>();
   for (const person of people) {
@@ -444,6 +449,9 @@ export const directoryListOf = (
         manager === undefined
           ? ""
           : manager.email || manager.name.toLowerCase(),
+      ...(entraTenant === undefined
+        ? {}
+        : { entra: { tenant: entraTenant, oid: person.id } }),
     };
   });
   return { ...rosterOf(entries, noTeam), skipped: 0 };

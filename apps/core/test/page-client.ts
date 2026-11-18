@@ -47,14 +47,11 @@ export const mockSessionIdp = (): Idp => {
   return idp;
 };
 
-export const personApi = async (
-  role: Role,
-  provider: "microsoft" | "google" = "microsoft"
-) => {
+export const personApi = async (role: Role) => {
   if (currentIdp === undefined) {
     throw new Error("The test file calls mockSessionIdp()");
   }
-  return await signedInApi(currentIdp, role, provider);
+  return await signedInApi(currentIdp, role);
 };
 
 /**

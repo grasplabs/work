@@ -629,13 +629,15 @@ const readDirectoryRoster = async (
   { roster: RosterInput; suite: DirectorySuite } | DirectoryProblem
 > => {
   try {
-    const { people, suite } = await core.withSession(
+    const { people, suite, tenant } = await core.withSession(
       async (session) => await session.onboarding.readDirectory()
     );
-    return {
-      roster: withSaved(directoryListOf(people, noTeam).roster, saved),
-      suite,
-    };
+    const list = directoryListOf(
+      people,
+      noTeam,
+      suite === "microsoft" ? tenant : undefined
+    );
+    return { roster: withSaved(list.roster, saved), suite };
   } catch (error) {
     if (error instanceof StaffListError) {
       return error.reason === "empty" ? "empty" : "large";

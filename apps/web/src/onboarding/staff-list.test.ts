@@ -410,6 +410,25 @@ const inDirectory = (
 });
 
 describe("the teams and people in a directory", () => {
+  it("keeps each person's account in a Microsoft directory, with its tenant, and none from Google's", () => {
+    const people = [inDirectory("oid-1", { department: "Sales" })];
+    const accounts = (tenant?: string) =>
+      directoryListOf(people, "Other", tenant).roster.people.map(
+        ({ entra }) => entra
+      );
+    expect({
+      microsoft: accounts("tenant-1"),
+      google: accounts(),
+      valid: rosterSchema.safeParse(
+        directoryListOf(people, "Other", "tenant-1").roster
+      ).success,
+    }).toStrictEqual({
+      microsoft: [{ tenant: "tenant-1", oid: "oid-1" }],
+      google: [undefined],
+      valid: true,
+    });
+  });
+
   it("makes teams of departments, leads of who most of a team reports to, and puts people in no department under Other, as a roster core takes", () => {
     const list = directoryListOf(
       [

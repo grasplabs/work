@@ -514,7 +514,8 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "onboarding.teams": { company: "the company's roster: a team's lead (D5)" },
   "onboarding.works": { company: "the company's roster: who does what (D5)" },
   "onboarding.mail_outbox": {
-    company: "mail to the roster (D5), which keeps the address anyway",
+    company:
+      "mail to the roster (D5); an erased person's address leaves it with their mail",
   },
   "onboarding.events": { kept: "the onboarding's log, IDs only" },
   "onboarding.counted_works": { company: "who counted a work (D5)" },

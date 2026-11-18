@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "81c12af0-0ec0-4b03-b2bf-0dc746db3463",
+  "id": "6c94420a-33f4-4047-bcda-8d3c631c9857",
   "prevId": "58a72173-efdc-41cf-94fc-bace806ccaf5",
   "tables": {
     "approvals": {
@@ -533,11 +533,32 @@
     "confirmed_places": {
       "name": "confirmed_places",
       "columns": {
-        "email": {
-          "name": "email",
+        "person": {
+          "name": "person",
           "type": "text",
           "primaryKey": true,
           "notNull": true,
+          "autoincrement": false
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entra_tenant": {
+          "name": "entra_tenant",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "entra_oid": {
+          "name": "entra_oid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "team": {
@@ -1729,6 +1750,20 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "entra_tenant": {
+          "name": "entra_tenant",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "entra_oid": {
+          "name": "entra_oid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         }
       },

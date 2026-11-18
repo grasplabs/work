@@ -24,7 +24,17 @@ import {
 } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  isNotNull,
+  isNull,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -51,6 +61,7 @@ import { signInConfig } from "./auth/config.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
 import { personOf } from "./connections.ts";
 import {
+  accounts,
   channelAccounts,
   invitations,
   memberRemovals,
@@ -405,16 +416,22 @@ const removeMember = async (
   } else if (!(await isRemoved(env, target))) {
     throw refusal(by, memberErrors.create("member.not_found"));
   }
-  // Where the confirmed staff list places their address goes (GRA-2055):
-  // they aren't put in a team by it, should they sign in again. Asked
-  // again, the removal finishes it.
-  const [person] = await drizzle(env.DB)
-    .select({ email: users.email })
-    .from(users)
-    .where(eq(users.id, target));
-  if (person !== undefined) {
-    await onboardingStore(env).forgetPlaceOf(person.email);
-  }
+  // Where the confirmed staff list places them goes (GRA-2055), by their
+  // address and by the Microsoft object ids their accounts carry: they
+  // aren't put in a team by it, should they sign in again. Asked again,
+  // the removal finishes it.
+  const db = drizzle(env.DB);
+  const [person, held] = await db.batch([
+    db.select({ email: users.email }).from(users).where(eq(users.id, target)),
+    db
+      .select({ oid: accounts.oid })
+      .from(accounts)
+      .where(and(eq(accounts.userId, target), isNotNull(accounts.oid))),
+  ]);
+  await onboardingStore(env).forgetPlaceOf({
+    emails: person.map(({ email }) => email),
+    oids: held.flatMap(({ oid }) => (oid === null ? [] : [oid])),
+  });
   // What they typed into Apps' previews stays with each App's test data,
   // which its other builders share (app-preview.ts): no preview is theirs
   // alone, and they no longer reach any.

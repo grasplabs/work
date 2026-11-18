@@ -3,7 +3,7 @@ import type { Roster } from "@grasp-os/shared/onboarding";
 import { teamNameKey } from "@grasp-os/shared/onboarding";
 import { clockLeaseMs } from "@grasp-os/workerflow/clock";
 import type { SQL } from "drizzle-orm";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -36,10 +36,11 @@ import { comparable, provedSignInAccounts } from "./source-readers.ts";
 // - Someone placed in a team reads what the team's members read. Only an
 //   admin's confirm places anyone (`placePrimaries`), never a draft save;
 //   only a current member (not removed, checked in the statement itself),
-//   found by an address their sign-in proved (`provedMembersOf`, the
-//   reader lists' proof), never by `users.email`, Entra's `email` claim,
-//   a name or a directory placeholder; every placement and removal
-//   audited.
+//   found by what their sign-in proved (`provedMembersOf`, the reader
+//   lists' proof): a Google address, or a Microsoft account by tenant and
+//   object id against the one the directory read put on the entry; never
+//   by `users.email`, Entra's `email` claim, a name or a directory
+//   placeholder; every placement and removal audited.
 // - Nothing automatic overrides what an admin did by hand (`placementOf`):
 //   the list adds a membership only when the team it gives someone
 //   changes, and takes away only one it made itself.
@@ -378,23 +379,60 @@ export const placementOf = (
 };
 
 /**
- * The current members who proved one of `addresses` (compared form,
- * `comparable`) is theirs, each with the address: the one rule of who the
- * staff list places by an address (GRA-2055), for a confirm's placing and
- * for a first sign-in after it. The proof is the one an item's reader
- * list takes (source-readers.ts `provedSignInAccounts`): a Google sign-in's
- * address its ID token marked verified, in the company's hosted domain and
- * sign-in domains, confirmed within a day. Never `users.email`, nor Entra's
- * `email` claim, which proves nothing: a Microsoft sign-in keeps no proved
- * address, so the list places nobody who signs in with Microsoft; an admin
- * places them by hand.
+ * What the staff list places a sign-in by (GRA-2055, `provedMembersOf`):
+ * an entry's address, which a Google sign-in proves, or the Microsoft
+ * directory account an entry from the directory read carries, by tenant
+ * and object id, which a Microsoft sign-in proves.
+ */
+export type PlaceKey = `google:${string}` | `microsoft:${string}`;
+
+/** The key of the address `email`, in compared form (`comparable`). */
+export const addressKey = (email: string): PlaceKey =>
+  `google:${comparable(email)}`;
+
+/** The key of the Microsoft account `oid` in the tenant `tenant`. */
+export const entraKey = (tenant: string, oid: string): PlaceKey =>
+  `microsoft:${comparable(tenant)}:${comparable(oid)}`;
+
+/** The keys a confirmed entry places a sign-in by. */
+export const keysOfPlace = ({
+  email,
+  entra,
+}: {
+  email: string;
+  entra: { tenant: string; oid: string } | null;
+}): PlaceKey[] => [
+  ...(email === "" ? [] : [addressKey(email)]),
+  ...(entra === null ? [] : [entraKey(entra.tenant, entra.oid)]),
+];
+
+/**
+ * The current members whose sign-in proved one of `keys` is theirs, each
+ * with the key: the one rule of who the staff list places (GRA-2055), for
+ * a confirm's placing and for a first sign-in after it. The proof is the
+ * one an item's reader list takes (source-readers.ts
+ * `provedSignInAccounts`): Google by the address its ID token marked
+ * verified, in the company's hosted domain and sign-in domains, confirmed
+ * within a day; Microsoft by the object id of a sign-in through the
+ * company's own tenant, against the account the directory read put on the
+ * entry, no address compared at all. Never `users.email`, nor Entra's
+ * `email` claim, which proves nothing: a Microsoft member whose entry
+ * carries no directory account (a list from a file, or typed by hand) is
+ * placed by an admin, by hand.
  */
 export const provedMembersOf = async (
   env: Pick<Env, "SIGN_IN">,
   db: DrizzleD1Database,
-  addresses: readonly string[]
-): Promise<{ userId: string; email: string }[]> => {
-  if (addresses.length === 0) {
+  keys: readonly PlaceKey[]
+): Promise<{ userId: string; key: PlaceKey }[]> => {
+  const wanted = new Set(keys);
+  const addresses = keys.flatMap((key) =>
+    key.startsWith("google:") ? [key.slice("google:".length)] : []
+  );
+  const oids = keys.flatMap((key) =>
+    key.startsWith("microsoft:") ? [key.slice(key.lastIndexOf(":") + 1)] : []
+  );
+  if (addresses.length === 0 && oids.length === 0) {
     return [];
   }
   const signIns = await db
@@ -409,26 +447,37 @@ export const provedMembersOf = async (
     .from(accounts)
     .where(
       and(
-        eq(accounts.providerId, providerIds.google),
-        inList(sql`lower(${accounts.verifiedEmail})`, addresses),
+        or(
+          and(
+            eq(accounts.providerId, providerIds.google),
+            inList(sql`lower(${accounts.verifiedEmail})`, addresses)
+          ),
+          and(
+            eq(accounts.providerId, providerIds.entra),
+            inList(sql`lower(${accounts.oid})`, oids)
+          )
+        ),
         activeMember(accounts.userId)
       )
     )
     .orderBy(accounts.userId);
-  const wanted = new Set(addresses);
   return signIns.flatMap(({ userId, ...signIn }) =>
-    provedSignInAccounts(env, [signIn]).flatMap(({ provider, account }) =>
-      provider === "google" && wanted.has(comparable(account))
-        ? [{ userId, email: comparable(account) }]
-        : []
+    provedSignInAccounts(env, [signIn]).flatMap(
+      ({ provider, tenant, account }) => {
+        const key =
+          provider === "google"
+            ? addressKey(account)
+            : entraKey(tenant, account);
+        return wanted.has(key) ? [{ userId, key }] : [];
+      }
     )
   );
 };
 
 /**
  * `placePrimaries` for one claimed version, under its lease `leaseId`:
- * each current member whose verified address its list names goes in that
- * team, as their primary one; whoever it moved, took off, or no longer
+ * each current member whose sign-in proved an address or account its list
+ * names (`provedMembersOf`) goes in that team, as their primary one; whoever it moved, took off, or no longer
  * finds leaves the team it gave them before, by the one rule
  * (`placementOf`). Each change audited. Its last batch marks the version
  * placed.
@@ -446,7 +495,9 @@ const placeVersion = async (
   );
   const holds = sql`EXISTS (SELECT 1 FROM ${staffListPlaced} WHERE ${ours})`;
   const teamOf = new Map(
-    places.map(({ email, team }) => [comparable(email), team])
+    places.flatMap((place) =>
+      keysOfPlace(place).map((key) => [key, place.team] as const)
+    )
   );
   const [found, placed] = await Promise.all([
     provedMembersOf(env, db, [...teamOf.keys()]),
@@ -460,8 +511,8 @@ const placeVersion = async (
       .orderBy(teamPrimaries.userId),
   ]);
   const wanted = new Map<string, string>();
-  for (const { userId, email } of found) {
-    const team = teamOf.get(email);
+  for (const { userId, key } of found) {
+    const team = teamOf.get(key);
     if (team !== undefined && !wanted.has(userId)) {
       wanted.set(userId, team);
     }

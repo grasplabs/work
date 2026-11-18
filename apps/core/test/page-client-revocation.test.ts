@@ -34,6 +34,7 @@ import {
   slowToFollow,
   whenLetGo,
 } from "./page-revocation.ts";
+import { acmeTenant } from "./sign-in-config.ts";
 import { callAuth, openRpc, unique } from "./sign-in.ts";
 
 // Revocation (spec 11.4): when a write takes a person's role in an App
@@ -83,18 +84,21 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
   it("clears the page of someone the staff list takes out of the team the App is shared with, by the clock when telling the pages failed after the confirm's batch", async () => {
     const opened = await openedApp();
     const admin = await personApi("admin");
-    // Placed by the address their Google sign-in proved.
-    const ann = await personApi("user", "google");
+    const ann = await personApi("user");
     const tag = unique();
     const names = ["B", "C"].map((letter) => `${letter} ${tag}`);
     const email = z.string().parse(ann.person.email);
+    // Her entry from the directory read: placed by her account in it.
+    const entra = { tenant: acmeTenant, oid: z.string().parse(ann.person.oid) };
     const listed = (ids: readonly string[], annIn: number) => ({
       teams: names.map((name, index) => ({
         id: ids[index] ?? `t${index}`,
         name,
         lead: null,
       })),
-      people: [{ id: "ann", name: "Ann", email, team: ids[annIn] ?? "t1" }],
+      people: [
+        { id: "ann", name: "Ann", email, entra, team: ids[annIn] ?? "t1" },
+      ],
     });
     const { roster: first } = await admin.api.onboarding.confirmRoster(
       listed(["t0", "t1"], 1)
