@@ -12,6 +12,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
+import { useChatLayout } from "../chat/chat-layout.ts";
 import { formatDay } from "../format.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Clock, Info } from "../grasp/icons/index.ts";
@@ -205,15 +206,20 @@ export const NotePageTwo = ({
   const [docked, setDocked] = useState(option === "1");
   const [sheet, setSheet] = useState(false);
   const panel = option !== "3";
+  // The chat docked at the card's end takes that side: the panel steps
+  // aside while it is there, and comes back when the chat closes or floats.
+  const chat = useChatLayout();
+  const chatDocked = chat.open && chat.placement === "docked";
+  const besidePage = panel && docked && !chatDocked;
   const showDetails = () => {
-    if (window.matchMedia(WIDE_QUERY).matches) {
+    if (window.matchMedia(WIDE_QUERY).matches && !chatDocked) {
       setDocked(!docked);
     } else {
       setSheet(true);
     }
   };
   return (
-    <div {...stylex.props(styles.frame, panel && docked && styles.framePanel)}>
+    <div {...stylex.props(styles.frame, besidePage && styles.framePanel)}>
       <div {...stylex.props(styles.main)}>
         <div {...stylex.props(styles.band)}>
           <PanelTexture />
@@ -264,7 +270,7 @@ export const NotePageTwo = ({
           {children}
         </div>
       </div>
-      {panel && docked ? (
+      {besidePage ? (
         <div {...stylex.props(styles.side)}>
           <NoteInspector framed={false} rows={rows} timeline={note.timeline} />
         </div>
