@@ -54,7 +54,7 @@ const unit = (color: string): Vec3 => {
 // dot ink's (dot-ink.ts); the rest are the theme's tokens, never a copy.
 const inksOf = (element: HTMLElement): Inks => ({
   ink: unit(getComputedStyle(element).color),
-  warm: unit(token(element, "--brain-heat")),
+  warm: unit(token(element, "--grasp-brain-heat")),
   open: unit(token(element, "--grasp-attention")),
 });
 

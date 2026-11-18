@@ -200,8 +200,8 @@ export const token = (element: Element, name: string): string => {
 export const palette = (element: HTMLElement): string[] => {
   // A dot at rest is the text's own colour where it stands: the ink on a page, the canvas on the sidebar.
   const ink = rgb(getComputedStyle(element).color);
-  const heat = rgb(token(element, "--brain-heat"));
-  const glow = rgb(token(element, "--brain-glow"));
+  const heat = rgb(token(element, "--grasp-brain-heat"));
+  const glow = rgb(token(element, "--grasp-brain-glow"));
   const styles: string[] = [];
   for (let h = 0; h < HEATS; h += 1) {
     const w = h / (HEATS - 1);
