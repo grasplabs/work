@@ -173,7 +173,9 @@ const FileList = ({ documents }: { documents: DocumentSummary[] }) => {
                 <ItemTitle>
                   {document.title}
                   <ItemDetail>
-                    {folder.path === ""
+                    {/* A folder that only repeats the title (a skill's
+                        `<name>/SKILL.md`) says nothing more. */}
+                    {folder.path === "" || folder.path === document.title
                       ? formatDate(document.updatedAt)
                       : `${folder.path} · ${formatDate(document.updatedAt)}`}
                   </ItemDetail>
