@@ -2,7 +2,9 @@
  * `vp run dev`: the frontend (localhost:5173) with core and connect behind
  * it (localhost:8787), and the fake IdP people sign in through, as the
  * client's Entra tenant (apps/core/test/idp-worker.ts). Any email at
- * acme.test signs in; admin@acme.test joins as an admin. The page
+ * acme.test signs in; admin@acme.test joins as an admin. Connect runs with
+ * a fake outside API beside it, for an admin to approve as an HTTP
+ * connection (apps/connect/test/dev-entry.ts). The page
  * compiler is built again when the kit or the compiler changes
  * (packages/compiler/watch.ts), into the assets core serves, so App pages
  * follow `@grasp-os/ui` as the frontend does. When one of them stops, or
@@ -11,6 +13,7 @@
  */
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
+import path from "node:path";
 
 import { localIdpPort, localSignIn } from "../apps/core/test/sign-in-config.ts";
 import { withNoBackgroundCompile } from "../apps/core/workerd-v8-flags.ts";
@@ -42,6 +45,12 @@ const children = [
     ...process.env,
     MINIFLARE_WORKERD_V8_FLAGS: withNoBackgroundCompile(
       process.env.MINIFLARE_WORKERD_V8_FLAGS
+    ),
+    // Connect with the fake outside API beside it, here alone
+    // (scripts/wrangler-local-config.ts).
+    CONNECT_DEV_MAIN: path.join(
+      import.meta.dirname,
+      "../apps/connect/test/dev-entry.ts"
     ),
   }),
   start("vp", ["run", "--filter", "@grasp-os/web", "dev"]),
