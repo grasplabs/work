@@ -127,6 +127,8 @@ const styles = stylex.create({
     paddingBlockStart: grasp.space6,
   },
   bar: { marginBlockStart: "auto" },
+  // C: the Flow at a fixed height over its runs.
+  flowTop: { flexGrow: 0, height: "26rem" },
   waiting: {
     flexShrink: 0,
     padding: grasp.space3,
@@ -442,6 +444,26 @@ const shownView = (
   return asked;
 };
 
+/**
+ * The view shown and how its panes stand, by concept: B opens on Runs; C
+ * shows the Flow at a fixed height over its runs, on one page.
+ */
+const conceptPanes = (
+  asked: WorkflowView | undefined,
+  concept: "b" | "c" | undefined,
+  flow: boolean
+) => {
+  const view = shownView(asked ?? (concept === "b" ? "runs" : undefined), flow);
+  const together = concept === "c" && view !== "settings";
+  return {
+    view,
+    flowPane: together
+      ? [styles.flow, styles.flowTop]
+      : [view === "flow" ? styles.flow : styles.away],
+    runsPane: [view === "runs" || together ? styles.runs : styles.away],
+  };
+};
+
 /** What the workflow's page read. */
 interface WorkflowPageRead {
   resource: WorkflowResource;
@@ -462,6 +484,7 @@ interface WorkflowPageRead {
 }
 
 const WorkflowResourceView = ({
+  concept,
   back,
   view: asked,
   section,
@@ -469,6 +492,8 @@ const WorkflowResourceView = ({
   ...read
 }: WorkflowPageRead & {
   back: Crumb;
+  /** B: opens on Runs, no chat docked; C: its Flow over its runs on one page. */
+  concept: "b" | "c" | undefined;
   /** The view the address asks for, if any. */
   view: WorkflowView | undefined;
   section: WorkflowSettingsSection | undefined;
@@ -478,7 +503,11 @@ const WorkflowResourceView = ({
   const { resource, draft, runs, activity, names, admin } = read;
   const navigate = useNavigate();
   const builder = resource.role === "builder";
-  const view = shownView(asked, draft !== undefined);
+  const { view, flowPane, runsPane } = conceptPanes(
+    asked,
+    concept,
+    draft !== undefined
+  );
   // When its draft was saved: as loaded, or as a save here answered,
   // whichever is later.
   const [savedHere, setSavedHere] = useState<string | null>(null);
@@ -577,7 +606,9 @@ const WorkflowResourceView = ({
         />
       }
     >
-      {builder ? <DrawnInChat onDraft={took} resource={resource} /> : null}
+      {builder && concept !== "b" ? (
+        <DrawnInChat onDraft={took} resource={resource} />
+      ) : null}
       {status === undefined ? null : (
         <GoLiveWaiting
           me={names.me}
@@ -588,7 +619,7 @@ const WorkflowResourceView = ({
       )}
       {/* Kept while another view shows: its zoom and layout stay. */}
       {draft === undefined ? null : (
-        <div {...stylex.props(view === "flow" ? styles.flow : styles.away)}>
+        <div {...stylex.props(flowPane)}>
           {draft.state === "ready" ? (
             <WorkflowFlow
               draft={latest ?? draft.data}
@@ -607,7 +638,7 @@ const WorkflowResourceView = ({
         </div>
       )}
       {/* Kept while another view shows: a test going on stays followed. */}
-      <div {...stylex.props(view === "runs" ? styles.runs : styles.away)}>
+      <div {...stylex.props(runsPane)}>
         <RunsView
           activity={activity}
           admin={admin}
@@ -678,7 +709,7 @@ const WorkflowResourcePage = () => {
   } = Route.useLoaderData();
   const people = usePeople(peopleRead);
   const { identity } = Route.useRouteContext();
-  const { view, section, run } = Route.useSearch();
+  const { view, section, run, concept } = Route.useSearch();
   const { t } = useLingui();
   const back = backCrumb({ label: t`Workflows`, to: "/workflows" }, project);
   if (resource.state !== "ready") {
@@ -700,6 +731,7 @@ const WorkflowResourcePage = () => {
       admin={isAdmin(identity.role)}
       approves={isMemberAdmin(identity)}
       back={back}
+      concept={concept}
       names={{ people, me: identity.userId }}
       resource={resource.data}
       run={run}
@@ -711,6 +743,8 @@ const WorkflowResourcePage = () => {
 
 /** What a link to a workflow's page may ask of it. */
 interface WorkflowSearch {
+  /** Which concept shows, for Ruben to choose (never merged). */
+  concept?: "b" | "c";
   /** The view it opens on: Flow for its builders, Runs for anyone else, by default. */
   view?: WorkflowView;
   /** In Settings, the section open: General by default. */
@@ -730,6 +764,9 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
     const section = workflowSettingsSectionOf(search.section);
     const project = projectSearchOf(search);
     return {
+      ...(search.concept === "b" || search.concept === "c"
+        ? { concept: search.concept }
+        : {}),
       ...(view === undefined ? {} : { view }),
       ...(section === undefined ? {} : { section }),
       ...(project === undefined ? {} : { project }),
