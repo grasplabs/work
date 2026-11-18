@@ -131,6 +131,7 @@
     "./onboarding": "./src/onboarding.ts",
     "./function-limits": "./src/function-limits.ts",
     "./functions": "./src/functions.ts",
+    "./opportunities": "./src/opportunities.ts",
     "./org-settings": "./src/org-settings.ts",
     "./organization": "./src/organization.ts",
     "./onboarding-choices": "./src/onboarding-choices.ts",

@@ -152,6 +152,11 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // What agents read through a shared connection, kept for its audience,
   // names no one; who asked to erase it, an admin's act on the company's.
   "core.connection_brain_reads": noPerson,
+  // What Grasp proposes for a team's routine, and which an admin
+  // dismissed, by routine and evidence (opportunities.ts): ids, a form,
+  // step numbers and systems, never who. Who dismissed is in the audit log.
+  "core.opportunity_proposals": noPerson,
+  "core.opportunity_dismissals": noPerson,
   "core.connection_brain_erasures": { company: "erasures an admin asked for" },
   // Native sync (brain-sync.ts): a source names its connection's person
   // and their own account (`account`), deleted by the connect area (and by each
