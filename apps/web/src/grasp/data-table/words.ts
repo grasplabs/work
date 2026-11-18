@@ -310,6 +310,12 @@ declare module "../words/words" {
   }
 }
 
+/** What it tells a developer: English, for them, and not in the catalogue. */
+export const dataTableNotices = {
+  noToaster:
+    "DataTable: an action was done and no Toaster is on the page, so its toast (and its Undo) shows nowhere. Put one <Toaster /> at the page's root, outside every layer, or pass the table a `toaster` with its own.",
+};
+
 /**
  * What the table's agent tools answer when they cannot do what was asked. For the agent, which reads
  * English: kept here with the words, and not in the catalogue, as no person reads them.

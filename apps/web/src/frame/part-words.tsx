@@ -51,6 +51,8 @@ import { linkWords } from "../grasp/link/words.ts";
 import { markdownWords } from "../grasp/markdown/words.ts";
 import { ownerPickerWords } from "../grasp/owner-picker/words.ts";
 import { paginationWords } from "../grasp/pagination/words.ts";
+import { panelWords } from "../grasp/panel/words.ts";
+import { questionToolWords } from "../grasp/question-tool/words.ts";
 import { sectionCardWords } from "../grasp/section-card/words.ts";
 import { settingRowWords } from "../grasp/setting-row/words.ts";
 import { shareAccessWords } from "../grasp/share-access/words.ts";
@@ -121,6 +123,8 @@ export const englishPartWords: GraspWordsCatalog = {
   markdown: markdownWords,
   ownerPicker: ownerPickerWords,
   pagination: paginationWords,
+  panel: panelWords,
+  questionTool: questionToolWords,
   rename: renameWords,
   sectionCard: sectionCardWords,
   settingRow: settingRowWords,
@@ -699,7 +703,21 @@ export const usePartWords = (): GraspWordsCatalog => {
       },
       copied: t`Copied`,
       failed: t`Could not copy`,
-      pending: t`Loading`,
+      pending: t`Loading the value`,
+    },
+    panel: {
+      close: t`Close`,
+      views: t({ message: "Views", context: "a panel's views" }),
+      showAll: t`Show all`,
+    },
+    questionTool: {
+      other: t({ message: "Other", context: "an answer of one's own" }),
+      name: t`Question`,
+      submit: t`Send answer`,
+      skip: t`Skip`,
+      back: t`Back`,
+      recommended: t`Recommended`,
+      step: (step, count) => t`${step} of ${count}`,
     },
     datePicker: { choose: t`Choose date` },
     dateRangePicker: {

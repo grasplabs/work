@@ -10,6 +10,8 @@ import type { ReactNode } from "react";
 import { Expand, Minus } from "../icons";
 import { RowListAction } from "../row-list";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { useWords, withGiven } from "../words/words";
+import { panelWords } from "./words";
 
 /** Every prop a PanelText takes. */
 export interface PanelTextProps {
@@ -63,9 +65,12 @@ const styles = stylex.create({
 /** A long text in a card: faded at the foot, opened in place. */
 export const PanelText = ({
   children,
-  openLabel = "Show all",
+  openLabel: openLabelGiven,
   defaultOpen = false,
 }: PanelTextProps) => {
+  const { showAll: openLabel } = withGiven(useWords("panel", panelWords), {
+    showAll: openLabelGiven,
+  });
   const [open, setOpen] = useState(defaultOpen);
   const id = useId();
   const body = useRef<HTMLDivElement>(null);

@@ -1404,6 +1404,10 @@ msgstr "{status, select, drawn {{workflow} (uitgetekend)} designed {{workflow} (
 msgid "{status, select, drawn {Drawn as a workflow} designed {Designed as a workflow} testing {Testing as a workflow} other {Running as a workflow}}"
 msgstr "{status, select, drawn {Uitgetekend als workflow} designed {Ontworpen als workflow} testing {In test als workflow} other {Live als workflow}}"
 
+#: src/frame/part-words.tsx
+msgid "{step} of {count}"
+msgstr "{step} van {count}"
+
 #: src/knowledge/purge.tsx
 msgid "{still, plural, one {A search still finds a term in # place.} other {A search still finds a term in # places.}}"
 msgstr "{still, plural, one {Zoeken vindt een term nog op # plek.} other {Zoeken vindt een term nog op # plekken.}}"
@@ -9055,7 +9059,6 @@ msgid "Loaded"
 msgstr "Geladen"
 
 #: src/brain/forget.tsx
-#: src/frame/part-words.tsx
 #: src/onboarding/place-picker.tsx
 msgid "Loading"
 msgstr "Laden"
@@ -9087,6 +9090,10 @@ msgstr "Het gesprek laden"
 #: src/frame/part-words.tsx
 msgid "Loading the page"
 msgstr "Pagina laden"
+
+#: src/frame/part-words.tsx
+msgid "Loading the value"
+msgstr "De waarde wordt geladen"
 
 #: src/activity/audit-log.tsx
 #: src/apps/app-workspace.tsx
@@ -11469,6 +11476,11 @@ msgstr "Oslo"
 msgid "Other"
 msgstr "Overig"
 
+#: src/frame/part-words.tsx
+msgctxt "an answer of one's own"
+msgid "Other"
+msgstr "Anders"
+
 #: src/connections/groups.ts
 msgctxt "kind of app"
 msgid "Other"
@@ -12192,6 +12204,7 @@ msgstr "Queries van {app}"
 msgid "Queries, mutations and actions of {app}"
 msgstr "Queries, mutaties en acties van {app}"
 
+#: src/frame/part-words.tsx
 #: src/inbox/item-detail.tsx
 msgid "Question"
 msgstr "Vraag"
@@ -12457,6 +12470,7 @@ msgstr "Recente activiteit"
 msgid "Recent runs"
 msgstr "Recente runs"
 
+#: src/frame/part-words.tsx
 #: src/settings/ai-providers.tsx
 msgid "Recommended"
 msgstr "Aanbevolen"
@@ -13935,6 +13949,7 @@ msgid "Send"
 msgstr "Versturen"
 
 #: src/chat/brain-questions.tsx
+#: src/frame/part-words.tsx
 msgid "Send answer"
 msgstr "Antwoord versturen"
 
@@ -14201,6 +14216,10 @@ msgstr "Toon er nog {count}"
 #: src/inbox/inbox-page.tsx
 msgid "Show activity by"
 msgstr "Activiteit tonen van"
+
+#: src/frame/part-words.tsx
+msgid "Show all"
+msgstr "Alles tonen"
 
 #: src/chat/held-writes.tsx
 msgid "Show all {count} lines ({characters} characters)"
@@ -14533,6 +14552,10 @@ msgstr "Omvang gewijzigd naar onbekend"
 #: src/labels.ts
 msgid "Skill"
 msgstr "Skill"
+
+#: src/frame/part-words.tsx
+msgid "Skip"
+msgstr "Overslaan"
 
 #: src/dashboard/todo-pile.tsx
 msgctxt "put a to-do card at the back of the pile"
@@ -17370,6 +17393,11 @@ msgstr "Wijzigingen bekijken"
 #: src/activity/audit-event.tsx
 #: src/frame/part-words.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
+msgid "Views"
+msgstr "Weergaven"
+
+#: src/frame/part-words.tsx
+msgctxt "a panel's views"
 msgid "Views"
 msgstr "Weergaven"
 

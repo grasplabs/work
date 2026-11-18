@@ -41,7 +41,10 @@ import type { LayoutStyle } from "../layout/layout";
 import { scroll } from "../scroll/scroll";
 import { Textarea } from "../textarea";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { useWords } from "../words/words";
 import { rowMarker } from "./markers.stylex";
+import { questionToolWords } from "./words";
+import type { QuestionToolWords } from "./words";
 
 /** What a caller may style: where the card sits and how wide it is. Never its look. */
 export type QuestionToolLayoutStyle = LayoutStyle;
@@ -845,21 +848,18 @@ const QuestionFooter = ({
   </div>
 );
 
-// A step's place in English; `stepLabel` replaces it.
-const stepOf = (step: number, count: number) => `${step} of ${count}`;
-
-// The props with their defaults filled in.
-const withDefaults = (props: QuestionToolProps) => ({
+// The props with their defaults filled in: the caller's words, else the catalogue's, else English.
+const withDefaults = (props: QuestionToolProps, words: QuestionToolWords) => ({
   options: props.options ?? noOptions,
   other: props.other ?? true,
-  otherLabel: props.otherLabel ?? "Other",
-  stepLabel: props.stepLabel ?? stepOf,
+  otherLabel: props.otherLabel ?? words.other,
+  stepLabel: props.stepLabel ?? words.step,
   columns: props.columns ?? 1,
-  label: props.label ?? "Question",
-  submitLabel: props.submitLabel ?? "Send answer",
-  skipLabel: props.skipLabel ?? "Skip",
-  backLabel: props.backLabel ?? "Back",
-  recommendedLabel: props.recommendedLabel ?? "Recommended",
+  label: props.label ?? words.name,
+  submitLabel: props.submitLabel ?? words.submit,
+  skipLabel: props.skipLabel ?? words.skip,
+  backLabel: props.backLabel ?? words.back,
+  recommendedLabel: props.recommendedLabel ?? words.recommended,
   embedded: props.embedded ?? false,
 });
 
@@ -1185,9 +1185,10 @@ const QuestionCard = (props: Resolved) => {
 };
 
 /** An assistant's question, answered by a choice, several choices or the person's own words. */
-export const QuestionTool = (props: QuestionToolProps) => (
-  <QuestionCard {...props} {...withDefaults(props)} />
-);
+export const QuestionTool = (props: QuestionToolProps) => {
+  const words = useWords("questionTool", questionToolWords);
+  return <QuestionCard {...props} {...withDefaults(props, words)} />;
+};
 
 /** The look of a question's parts, for its docs-only still drawing (still.tsx). */
 export const questionStyles = styles;

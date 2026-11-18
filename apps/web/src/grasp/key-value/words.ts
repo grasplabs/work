@@ -7,7 +7,7 @@ export const keyValueWords: KeyValueLabels = {
   copy: (name) => `Copy ${name.toLowerCase()}`,
   copied: "Copied",
   failed: "Could not copy",
-  pending: "Loading",
+  pending: "Loading the value",
 };
 
 declare module "../words/words" {

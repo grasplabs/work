@@ -1,7 +1,9 @@
 // SourcePile: the folded list under an answer (list.tsx). The first marks overlap in a row, as
-// Perplexity's favicons do but ours, then the count, with the kinds in words after it on the same line
-// ("4 files, 3 messages"). A pointer fans the marks apart (only where a pointer hovers). A source found while
-// the answer streams arrives in the pile: its mark settles in and our light crosses it once.
+// Perplexity's favicons do but ours, then the count, with the kinds in words under it ("4 files,
+// 3 messages"). Sources of one kind are said once, by the count itself ("1 file", "4 files"), with
+// no line under it: "1 source" over "1 file" said one thing twice. A pointer fans the marks apart
+// (only where a pointer hovers). A source found while the answer streams arrives in the pile: its
+// mark settles in and our light crosses it once.
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
@@ -38,15 +40,21 @@ export const SourcePile = ({
   const shown = sources.slice(0, SHOWN);
   const parts = kindsInParts(sources.map(kindOf), labels);
   const kinds = parts.join(", ");
-  const count = labels.count(sources.length);
+  // One kind: its own words are the count, and nothing stands under it.
+  const one = parts.length === 1;
+  const count = one ? kinds : labels.count(sources.length);
   // The steps the last mark fans.
   const spread = Math.max(0, shown.length - 1);
   return (
-    <div {...stylex.props(styles.pileLine)}>
+    <div {...stylex.props(styles.section)}>
       <button
         type="button"
         id={id}
-        aria-label={`${count}: ${kinds}. ${labels.open}`}
+        aria-label={
+          one
+            ? `${count}. ${labels.open}`
+            : `${count}: ${kinds}. ${labels.open}`
+        }
         data-slot="source-pile"
         onClick={(event) => {
           onOpen(event.currentTarget);
@@ -80,16 +88,18 @@ export const SourcePile = ({
         </span>
         <span {...stylex.props(styles.pileCount)}>{count}</span>
       </button>
-      <p aria-hidden="true" {...stylex.props(styles.pileKinds)}>
-        {parts.map((part, index) => (
-          <span key={part}>
-            {index > 0 ? " " : null}
-            <span {...stylex.props(styles.pileKind)}>
-              {index < parts.length - 1 ? `${part},` : part}
+      {one ? null : (
+        <p aria-hidden="true" {...stylex.props(styles.pileKinds)}>
+          {parts.map((part, index) => (
+            <span key={part}>
+              {index > 0 ? " " : null}
+              <span {...stylex.props(styles.pileKind)}>
+                {index < parts.length - 1 ? `${part},` : part}
+              </span>
             </span>
-          </span>
-        ))}
-      </p>
+          ))}
+        </p>
+      )}
     </div>
   );
 };

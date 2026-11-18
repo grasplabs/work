@@ -3,6 +3,7 @@
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
+import type { RenderProp } from "@ui-sdk/react/primitive";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -89,6 +90,16 @@ export interface AppCardAction {
   danger?: boolean;
   /** Shown, but not chosen now. */
   disabled?: boolean;
+  /**
+   * Where it leads ("Settings"): the item is then a link, opened by a press, Enter, a middle click
+   * or in a new tab, as Dropdown menu's item is. The menu closes as it goes.
+   */
+  href?: string;
+  /**
+   * The link a router draws (`<Link to="…" />`), in place of an `<a href>`: it takes the item's look,
+   * words and place in the arrows' order. Leave `href` out when the router's link carries the address.
+   */
+  render?: RenderProp;
 }
 
 /** The cleanup of an effect that started nothing. */
@@ -486,6 +497,8 @@ export const MoreMenu = ({ actions, label }: MoreMenuProps) => (
             icon={action.icon}
             variant={action.danger === true ? "danger" : undefined}
             disabled={action.disabled}
+            href={action.href}
+            render={action.render}
             onSelect={() => {
               action.onSelect?.();
             }}

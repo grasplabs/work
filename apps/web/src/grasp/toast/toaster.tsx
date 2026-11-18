@@ -30,6 +30,7 @@ import type {
   ToastState,
   ToastType,
 } from "@ui-sdk/react/toast";
+import { useEffect } from "react";
 import type { ReactNode } from "react";
 
 import { Button } from "../button";
@@ -47,7 +48,7 @@ import type { IconData } from "../icons";
 import { useWords, withGiven } from "../words/words";
 import { queueOf, toast } from "./queue";
 import { toastStyles as styles } from "./styles";
-import { toasterWords } from "./words";
+import { toasterNotices, toasterWords } from "./words";
 
 /** Every prop a Toaster takes. */
 export interface ToasterProps {
@@ -148,7 +149,36 @@ const actionState = (state: ToastButtonState) => {
   return state.error !== undefined && state.error !== null ? "failed" : "idle";
 };
 
-/** Where toasts appear. Place it once, near the root of the page. */
+/** Every Toaster on the page, by the queue it draws: two on one queue show every toast twice. */
+const regions = new Map<object, { where: string }[]>();
+
+/**
+ * Says so, in the console, when a second Toaster draws a queue another already draws: every toast
+ * would show in both, both are live regions that say it, and F6 stops at both. One per page, at
+ * its root, outside every layer. (Toasters on queues of their own, such as the docs' examples', are
+ * each their own and fine.)
+ */
+const useOneRegion = (queue: object, side: string, align: string) => {
+  useEffect(() => {
+    const own = { where: `${side} ${align}` };
+    const known = regions.get(queue) ?? [];
+    if (known.length > 0) {
+      console.warn(
+        toasterNotices.twice([...known, own].map((each) => each.where))
+      );
+    }
+    regions.set(queue, [...known, own]);
+    return () => {
+      const left = (regions.get(queue) ?? []).filter((each) => each !== own);
+      if (left.length === 0) {
+        regions.delete(queue);
+      } else {
+        regions.set(queue, left);
+      }
+    };
+  }, [queue, side, align]);
+};
+
 export const Toaster = ({
   side = "bottom",
   align = "end",
@@ -163,6 +193,7 @@ export const Toaster = ({
   pendingLabel: pendingGiven,
   closeLabel: closeGiven,
 }: ToasterProps) => {
+  useOneRegion(toaster ?? toast, side, align);
   const {
     name: label,
     failed: failedLabel,

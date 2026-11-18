@@ -1404,6 +1404,10 @@ msgstr "{status, select, drawn {{workflow} (drawn)} designed {{workflow} (design
 msgid "{status, select, drawn {Drawn as a workflow} designed {Designed as a workflow} testing {Testing as a workflow} other {Running as a workflow}}"
 msgstr "{status, select, drawn {Drawn as a workflow} designed {Designed as a workflow} testing {Testing as a workflow} other {Running as a workflow}}"
 
+#: src/frame/part-words.tsx
+msgid "{step} of {count}"
+msgstr "{step} of {count}"
+
 #: src/knowledge/purge.tsx
 msgid "{still, plural, one {A search still finds a term in # place.} other {A search still finds a term in # places.}}"
 msgstr "{still, plural, one {A search still finds a term in # place.} other {A search still finds a term in # places.}}"
@@ -9055,7 +9059,6 @@ msgid "Loaded"
 msgstr "Loaded"
 
 #: src/brain/forget.tsx
-#: src/frame/part-words.tsx
 #: src/onboarding/place-picker.tsx
 msgid "Loading"
 msgstr "Loading"
@@ -9087,6 +9090,10 @@ msgstr "Loading the conversation"
 #: src/frame/part-words.tsx
 msgid "Loading the page"
 msgstr "Loading the page"
+
+#: src/frame/part-words.tsx
+msgid "Loading the value"
+msgstr "Loading the value"
 
 #: src/activity/audit-log.tsx
 #: src/apps/app-workspace.tsx
@@ -11469,6 +11476,11 @@ msgstr "Oslo"
 msgid "Other"
 msgstr "Other"
 
+#: src/frame/part-words.tsx
+msgctxt "an answer of one's own"
+msgid "Other"
+msgstr "Other"
+
 #: src/connections/groups.ts
 msgctxt "kind of app"
 msgid "Other"
@@ -12192,6 +12204,7 @@ msgstr "Queries of {app}"
 msgid "Queries, mutations and actions of {app}"
 msgstr "Queries, mutations and actions of {app}"
 
+#: src/frame/part-words.tsx
 #: src/inbox/item-detail.tsx
 msgid "Question"
 msgstr "Question"
@@ -12457,6 +12470,7 @@ msgstr "Recent activity"
 msgid "Recent runs"
 msgstr "Recent runs"
 
+#: src/frame/part-words.tsx
 #: src/settings/ai-providers.tsx
 msgid "Recommended"
 msgstr "Recommended"
@@ -13935,6 +13949,7 @@ msgid "Send"
 msgstr "Send"
 
 #: src/chat/brain-questions.tsx
+#: src/frame/part-words.tsx
 msgid "Send answer"
 msgstr "Send answer"
 
@@ -14201,6 +14216,10 @@ msgstr "Show {count} more"
 #: src/inbox/inbox-page.tsx
 msgid "Show activity by"
 msgstr "Show activity by"
+
+#: src/frame/part-words.tsx
+msgid "Show all"
+msgstr "Show all"
 
 #: src/chat/held-writes.tsx
 msgid "Show all {count} lines ({characters} characters)"
@@ -14533,6 +14552,10 @@ msgstr "Size changed to unknown"
 #: src/labels.ts
 msgid "Skill"
 msgstr "Skill"
+
+#: src/frame/part-words.tsx
+msgid "Skip"
+msgstr "Skip"
 
 #: src/dashboard/todo-pile.tsx
 msgctxt "put a to-do card at the back of the pile"
@@ -17370,6 +17393,11 @@ msgstr "View changes"
 #: src/activity/audit-event.tsx
 #: src/frame/part-words.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
+msgid "Views"
+msgstr "Views"
+
+#: src/frame/part-words.tsx
+msgctxt "a panel's views"
 msgid "Views"
 msgstr "Views"
 

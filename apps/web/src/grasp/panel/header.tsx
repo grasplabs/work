@@ -27,7 +27,9 @@ import { simply } from "../motion/simply.stylex";
 import { RowListAction } from "../row-list";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { ms } from "../tokens/tokens.values";
+import { useWords, withGiven } from "../words/words";
 import { usePanel } from "./context";
+import { panelWords } from "./words";
 
 /** One view of the object: a tab with an icon and a word. */
 export interface PanelHeaderView {
@@ -573,13 +575,17 @@ export const PanelHeader = ({
   meta,
   actions,
   onClose,
-  closeLabel = "Close",
+  closeLabel: closeLabelGiven,
   views,
-  viewsLabel = "Views",
+  viewsLabel: viewsLabelGiven,
   level: levelDeprecated,
   headingLevel: level = levelDeprecated ?? 2,
   texture = false,
 }: PanelHeaderProps) => {
+  const { close: closeLabel, views: viewsLabel } = withGiven(
+    useWords("panel", panelWords),
+    { close: closeLabelGiven, views: viewsLabelGiven }
+  );
   const bar = useRef<HTMLDivElement>(null);
   const top = useRef<HTMLDivElement>(null);
   const fold = useRef<HTMLDivElement>(null);

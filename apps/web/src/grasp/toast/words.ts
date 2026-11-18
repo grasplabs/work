@@ -18,3 +18,9 @@ declare module "../words/words" {
     toaster: ToasterWords;
   }
 }
+
+/** What it tells a developer: English, for them, and not in the catalogue. */
+export const toasterNotices = {
+  twice: (where: string[]) =>
+    `Toaster: ${String(where.length)} Toasters draw the same toasts (${where.join("; ")}), so each toast shows ${String(where.length)} times and is said ${String(where.length)} times. Keep one <Toaster /> per page, at its root, outside every layer.`,
+};

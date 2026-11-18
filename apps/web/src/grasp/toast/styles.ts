@@ -188,14 +188,17 @@ export const toastStyles = stylex.create({
     marginInlineEnd: `calc(-1 * ${grasp.space2})`,
   },
   // Along the bottom: the newest at the foot, the older ones peeking above it, or stacked above
-  // it while the stack is open. It rises from below the window.
+  // it while the stack is open. It rises a little as it fades in.
   atBottom: {
     bottom: 0,
     transformOrigin: "bottom center",
     translate: {
       default: `${swipeX} calc(var(--toast-index) * -1 * ${grasp.toastPeek} + ${swipeY})`,
       [expanded]: `${swipeX} calc(-1 * (var(--toast-offset) + var(--toast-index) * ${grasp.toastGap}) + ${swipeY})`,
-      [enteringFront]: `${swipeX} 100%`,
+      // It rises a short way, not a whole toast: from its first frame its action stands within
+      // space-3 of where it comes to rest, so a press aimed there lands on it (the product's note:
+      // a press while it slid in from below missed).
+      [enteringFront]: `${swipeX} ${grasp.space3}`,
     },
     scale: {
       default: `calc(1 - var(--toast-index) * ${grasp.toastPeekScale})`,
@@ -209,7 +212,7 @@ export const toastStyles = stylex.create({
     translate: {
       default: `${swipeX} calc(var(--toast-index) * ${grasp.toastPeek} + ${swipeY})`,
       [expanded]: `${swipeX} calc(var(--toast-offset) + var(--toast-index) * ${grasp.toastGap} + ${swipeY})`,
-      [enteringFront]: `${swipeX} -100%`,
+      [enteringFront]: `${swipeX} calc(-1 * ${grasp.space3})`,
     },
     scale: {
       default: `calc(1 - var(--toast-index) * ${grasp.toastPeekScale})`,

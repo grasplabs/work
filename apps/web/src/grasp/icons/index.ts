@@ -56,6 +56,7 @@ import {
   Doc01Icon,
   Dollar01Icon,
   Download01Icon,
+  EditOff03Icon,
   File01Icon,
   FileEditIcon,
   FitToScreenIcon,
@@ -513,6 +514,11 @@ export const AppRecord: IconData = Invoice01Icon;
 export const Mail: IconData = Mail01Icon;
 /** Locked: there, but the person cannot open it. SquareLock02Icon. */
 export const Lock: IconData = SquareLock02Icon;
+/**
+ * Read only: the person may open and read it, not change it (a document shared to view). Not
+ * Lock, which says it cannot be opened at all. Edit's pencil, struck through. EditOff03Icon.
+ */
+export const ReadOnly: IconData = EditOff03Icon;
 /**
  * Someone's pointer, as another person's cursor is drawn on a shared canvas. Cursor02Icon. It
  * points along the line: right to left it turns round, as the pointer does in a right-to-left
