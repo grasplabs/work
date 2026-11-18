@@ -57,7 +57,6 @@ import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { roleLabel } from "../labels.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import { PhoneHidden } from "./phone-hidden.tsx";
 import { roleItems } from "./roles.ts";
 import { RowNote } from "./section.tsx";
 
@@ -276,7 +275,6 @@ export const InvitationRow = ({ invitation }: { invitation: Invitation }) => {
   const { email } = invitation;
   const date = formatDate(invitation.invitedAt);
   const role = roleLabel(invitation.role);
-  const inviter = invitation.invitedBy;
   const withdraw = (): void => {
     void run(async (session) => {
       await changeThenRefresh(
@@ -291,18 +289,17 @@ export const InvitationRow = ({ invitation }: { invitation: Invitation }) => {
   };
   return (
     <Item size="xs">
-      <PhoneHidden>
-        <ItemMedia align="center">
-          <Avatar decorative name={email} size="xs">
-            <AvatarFallback />
-          </Avatar>
-        </ItemMedia>
-      </PhoneHidden>
+      <ItemMedia align="center">
+        <Avatar decorative name={email} size="xs">
+          <AvatarFallback />
+        </Avatar>
+      </ItemMedia>
       <ItemContent>
         <ItemTitle>{email}</ItemTitle>
         <ItemDescription>
           <RowNote failure={failure}>
-            {t`Invited as ${role} by ${inviter} on ${date}`}
+            {/* Who sent it is in the audit trail: the row keeps to what they join as, and since when. */}
+            {t`Invited as ${role} on ${date}`}
           </RowNote>
         </ItemDescription>
       </ItemContent>

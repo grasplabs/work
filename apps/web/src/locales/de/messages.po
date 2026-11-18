@@ -651,6 +651,10 @@ msgstr "{email} · entfernt am {date}"
 msgid "{event}, at {account}"
 msgstr "{event}, bei {account}"
 
+#: src/routes/_shell.settings.members.tsx
+msgid "{everyone, plural, one {# person} other {# people}}"
+msgstr "{everyone, plural, one {# Person} other {# Personen}}"
+
 #: src/workflows/workflows-table.tsx
 msgid "{failed, plural, one {# failed in the last {days} days} other {# failed in the last {days} days}}"
 msgstr "{failed, plural, one {# fehlgeschlagen in den letzten {days} Tagen} other {# fehlgeschlagen in den letzten {days} Tagen}}"
@@ -8169,8 +8173,8 @@ msgid "Invited a guest"
 msgstr "Einen Gast eingeladen"
 
 #: src/settings/invitations.tsx
-msgid "Invited as {role} by {inviter} on {date}"
-msgstr "Als {role} eingeladen von {inviter} am {date}"
+msgid "Invited as {role} on {date}"
+msgstr "Als {role} eingeladen am {date}"
 
 #: src/activity/audit-event.tsx
 msgid "Invited by"
@@ -10188,6 +10192,10 @@ msgstr "Niemand mit diesem Namen"
 msgid "No one has that name"
 msgstr "Niemand hat diesen Namen"
 
+#: src/routes/_shell.settings.members.tsx
+msgid "No one matches"
+msgstr "Niemand passt"
+
 #: src/settings/teams.tsx
 msgid "No one yet: open it to add people"
 msgstr "Noch niemand: Öffnen Sie es, um Personen hinzuzufügen"
@@ -10388,10 +10396,6 @@ msgstr "Niemand Bestimmtes"
 #: src/brain/brain-atlas.ts
 msgid "Nobody is named yet to approve a new tool."
 msgstr "Noch niemand ist benannt, der ein neues Tool freigibt."
-
-#: src/routes/_shell.settings.members.tsx
-msgid "Nobody matches."
-msgstr "Niemand passt."
 
 #: src/agents/agent-page.tsx
 msgid "Nobody outside it can ask it anything, in Grasp or a chat app."
@@ -11749,6 +11753,10 @@ msgstr "Seiten von {name}"
 msgid "Pages of events"
 msgstr "Seiten der Ereignisse"
 
+#: src/routes/_shell.settings.members.tsx
+msgid "Pages of members"
+msgstr "Seiten der Mitglieder"
+
 #: src/frame/part-words.tsx
 msgid "Pagination"
 msgstr "Seitennavigation"
@@ -11906,6 +11914,10 @@ msgstr "PDF, Word, Excel, PowerPoint oder Text"
 msgid "Pending"
 msgstr "Ausstehend"
 
+#: src/routes/_shell.settings.members.tsx
+msgid "people"
+msgstr "Personen"
+
 #: src/apps/publish.tsx
 #: src/chat/mentions.tsx
 #: src/people/people-teams-picker.tsx
@@ -11997,6 +12009,10 @@ msgstr "Berechtigung für die Plattformstatistiken"
 #: src/apps/resource-bindings.tsx
 msgid "Permission to invite guests"
 msgstr "Berechtigung, Gäste einzuladen"
+
+#: src/routes/_shell.settings.members.tsx
+msgid "person"
+msgstr "Person"
 
 #: src/activity/audit-event.tsx
 #: src/workflows/requests/request-who.tsx
@@ -13857,6 +13873,10 @@ msgstr "Chats durchsuchen"
 #: src/activity/audit-log.tsx
 msgid "Search events by person or ID"
 msgstr "Ereignisse nach Person oder ID suchen"
+
+#: src/routes/_shell.settings.members.tsx
+msgid "Search finds people by their name or email."
+msgstr "Die Suche findet Personen nach Name oder E-Mail."
 
 #: src/apps/indexes-view.tsx
 msgid "Search in {searched}"

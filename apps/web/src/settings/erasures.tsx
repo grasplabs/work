@@ -51,7 +51,6 @@ import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import { PhoneHidden } from "./phone-hidden.tsx";
 
 // Erasing someone an admin removed (GRA-903, GRA-1195): their email,
 // sign-ins and personal content go; their name and ID stay on the
@@ -556,13 +555,11 @@ export const RemovedRow = ({ person }: { person: RemovedPerson }) => {
   return (
     <>
       <Item size="xs">
-        <PhoneHidden>
-          <ItemMedia>
-            <Avatar decorative name={name} size="xs">
-              <AvatarFallback />
-            </Avatar>
-          </ItemMedia>
-        </PhoneHidden>
+        <ItemMedia>
+          <Avatar decorative name={name} size="xs">
+            <AvatarFallback />
+          </Avatar>
+        </ItemMedia>
         <ItemContent>
           <ItemTitle>
             <Text element="span" size="sm" tone="muted">

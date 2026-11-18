@@ -651,6 +651,10 @@ msgstr "{email} · verwijderd op {date}"
 msgid "{event}, at {account}"
 msgstr "{event}, bij {account}"
 
+#: src/routes/_shell.settings.members.tsx
+msgid "{everyone, plural, one {# person} other {# people}}"
+msgstr "{everyone, plural, one {# persoon} other {# personen}}"
+
 #: src/workflows/workflows-table.tsx
 msgid "{failed, plural, one {# failed in the last {days} days} other {# failed in the last {days} days}}"
 msgstr "{failed, plural, one {# mislukt in de afgelopen {days} dagen} other {# mislukt in de afgelopen {days} dagen}}"
@@ -8169,8 +8173,8 @@ msgid "Invited a guest"
 msgstr "Een gast uitgenodigd"
 
 #: src/settings/invitations.tsx
-msgid "Invited as {role} by {inviter} on {date}"
-msgstr "Uitgenodigd als {role} door {inviter} op {date}"
+msgid "Invited as {role} on {date}"
+msgstr "Uitgenodigd als {role} op {date}"
 
 #: src/activity/audit-event.tsx
 msgid "Invited by"
@@ -10188,6 +10192,10 @@ msgstr "Niemand met die naam"
 msgid "No one has that name"
 msgstr "Niemand heet zo"
 
+#: src/routes/_shell.settings.members.tsx
+msgid "No one matches"
+msgstr "Niemand gevonden"
+
 #: src/settings/teams.tsx
 msgid "No one yet: open it to add people"
 msgstr "Nog niemand: open het om mensen toe te voegen"
@@ -10388,10 +10396,6 @@ msgstr "Niemand in het bijzonder"
 #: src/brain/brain-atlas.ts
 msgid "Nobody is named yet to approve a new tool."
 msgstr "Er is nog niemand genoemd die een nieuwe tool goedkeurt."
-
-#: src/routes/_shell.settings.members.tsx
-msgid "Nobody matches."
-msgstr "Niemand komt overeen."
 
 #: src/agents/agent-page.tsx
 msgid "Nobody outside it can ask it anything, in Grasp or a chat app."
@@ -11749,6 +11753,10 @@ msgstr "Pagina’s van {name}"
 msgid "Pages of events"
 msgstr "Pagina's met gebeurtenissen"
 
+#: src/routes/_shell.settings.members.tsx
+msgid "Pages of members"
+msgstr "Pagina's met leden"
+
 #: src/frame/part-words.tsx
 msgid "Pagination"
 msgstr "Paginering"
@@ -11906,6 +11914,10 @@ msgstr "PDF, Word, Excel, PowerPoint of tekst"
 msgid "Pending"
 msgstr "In afwachting"
 
+#: src/routes/_shell.settings.members.tsx
+msgid "people"
+msgstr "personen"
+
 #: src/apps/publish.tsx
 #: src/chat/mentions.tsx
 #: src/people/people-teams-picker.tsx
@@ -11997,6 +12009,10 @@ msgstr "Recht voor de platformstatistieken"
 #: src/apps/resource-bindings.tsx
 msgid "Permission to invite guests"
 msgstr "Recht om gasten uit te nodigen"
+
+#: src/routes/_shell.settings.members.tsx
+msgid "person"
+msgstr "persoon"
 
 #: src/activity/audit-event.tsx
 #: src/workflows/requests/request-who.tsx
@@ -13857,6 +13873,10 @@ msgstr "Chats doorzoeken"
 #: src/activity/audit-log.tsx
 msgid "Search events by person or ID"
 msgstr "Gebeurtenissen zoeken op persoon of ID"
+
+#: src/routes/_shell.settings.members.tsx
+msgid "Search finds people by their name or email."
+msgstr "Zoeken vindt mensen op naam of e-mail."
 
 #: src/apps/indexes-view.tsx
 msgid "Search in {searched}"

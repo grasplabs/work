@@ -79,7 +79,6 @@ import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import { PhoneHidden } from "./phone-hidden.tsx";
 import { SectionNotLoaded, SettingsStack } from "./section.tsx";
 
 // Settings › Incoming events, for the organization's own admins: the event
@@ -432,19 +431,16 @@ const SourceRow = ({
       </ItemContent>
       <ItemActions>
         <div {...stylex.props(styles.rowEnd)}>
-          {/* On a phone the URL is copied from the source's details: the row keeps its room for the name. */}
           {url === undefined ? null : (
-            <PhoneHidden>
-              <Button
-                aria-label={copied ? t`Copied` : t`Copy the URL of ${name}`}
-                icon={copied ? Tick : Copy}
-                onClick={() => {
-                  void copy(url);
-                }}
-                size="sm"
-                variant="ghost"
-              />
-            </PhoneHidden>
+            <Button
+              aria-label={copied ? t`Copied` : t`Copy the URL of ${name}`}
+              icon={copied ? Tick : Copy}
+              onClick={() => {
+                void copy(url);
+              }}
+              size="sm"
+              variant="ghost"
+            />
           )}
           <Button
             aria-label={t`Details of ${name}`}

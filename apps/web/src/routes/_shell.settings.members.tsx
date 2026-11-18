@@ -24,7 +24,6 @@ import {
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
 import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
-import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import {
   DropdownMenu,
@@ -33,6 +32,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../grasp/dropdown-menu/index.ts";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "../grasp/empty/index.ts";
 import {
   Copy,
   Info,
@@ -57,6 +62,7 @@ import {
   ItemRevealButton,
   ItemTitle,
 } from "../grasp/item/index.ts";
+import { Pagination } from "../grasp/pagination/index.ts";
 import {
   Popover,
   PopoverContent,
@@ -71,7 +77,6 @@ import {
   SelectContent,
 } from "../grasp/select/index.ts";
 import { SettingsRows } from "../grasp/setting-row/index.ts";
-import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -81,7 +86,6 @@ import {
   InvitationRow,
   InviteButton,
 } from "../settings/invitations.tsx";
-import { PhoneHidden } from "../settings/phone-hidden.tsx";
 import { roleItems, roleLines } from "../settings/roles.ts";
 import {
   SectionNotLoaded,
@@ -110,6 +114,14 @@ const styles = stylex.create({
   // mark and Invite it still fits the card's line (its actions never shrink).
   search: { width: grasp.frameSearch },
   notice: { padding: grasp.space4 },
+  // Older removed people, asked for under the ones shown.
+  older: {
+    display: "grid",
+    justifyItems: "start",
+    gap: grasp.space2,
+    paddingBlock: grasp.space2,
+    paddingInline: grasp.tableCellInline,
+  },
   rowEnd: { display: "flex", alignItems: "center", gap: grasp.space1 },
   // Your own row has no menu: its room is kept, so every role stands on one edge.
   menuRoom: { width: grasp.controlXs, flexShrink: 0 },
@@ -124,6 +136,14 @@ const styles = stylex.create({
   roleName: { margin: 0, fontWeight: grasp.weightMedium, color: grasp.ink },
   roleText: { margin: 0, color: grasp.muted },
 });
+
+/** How many people a page of the list holds: the rest are a page further. */
+const pageSize = 20;
+
+/** One row of the people's list: a member, or an invitation not yet taken up. */
+type Listed =
+  | { kind: "member"; member: Member }
+  | { kind: "invited"; invitation: Invitation };
 
 /** What a change did, or why it failed. */
 interface Notice {
@@ -408,13 +428,11 @@ const MemberRow = ({
   const { name } = member;
   return (
     <Item size="xs">
-      <PhoneHidden>
-        <ItemMedia align="center">
-          <Avatar decorative name={member.name} size="xs">
-            <AvatarFallback />
-          </Avatar>
-        </ItemMedia>
-      </PhoneHidden>
+      <ItemMedia align="center">
+        <Avatar decorative name={member.name} size="xs">
+          <AvatarFallback />
+        </Avatar>
+      </ItemMedia>
       <ItemContent>
         <ItemTitle>
           {member.name}
@@ -469,16 +487,25 @@ const MembersList = ({
   const [search, setSearch] = useState("");
   const searchField = useRef<HTMLInputElement>(null);
   const gone = useRemovedPeople(removed);
-  const people = members.length;
-  const shown = members.filter((member) => matches(member, search));
-  const invited = invitations.filter((invitation) =>
-    matches(invitation, search)
-  );
+  const [page, setPage] = useState(1);
+  // The people and the invitations not yet taken up, as one list.
+  const everyone = members.length + invitations.length;
+  const found: Listed[] = [
+    ...members
+      .filter((member) => matches(member, search))
+      .map((member) => ({ kind: "member" as const, member })),
+    ...invitations
+      .filter((invitation) => matches(invitation, search))
+      .map((invitation) => ({ kind: "invited" as const, invitation })),
+  ];
+  // Paged twenty at a time; the search runs over all of them.
+  const pages = Math.max(1, Math.ceil(found.length / pageSize));
+  const at = Math.min(page, pages);
+  const onPage = found.slice((at - 1) * pageSize, at * pageSize);
   const left = gone.people.filter((person) =>
     matches({ name: person.name, email: person.email ?? "" }, search)
   );
-  const nobody =
-    shown.length === 0 && invited.length === 0 && left.length === 0;
+  const nobody = found.length === 0 && left.length === 0;
   return (
     <SectionCard
       actions={
@@ -488,7 +515,10 @@ const MembersList = ({
             <InputGroupText icon={Search} />
             <InputGroupInput
               aria-label={t`Search members`}
-              onValueChange={setSearch}
+              onValueChange={(value) => {
+                setSearch(value);
+                setPage(1);
+              }}
               placeholder={t`Search members`}
               ref={searchField}
               type="search"
@@ -498,29 +528,21 @@ const MembersList = ({
           <InviteButton />
         </>
       }
-      aside={<Badge size="sm">{people}</Badge>}
       density="compact"
       flush
       footer={
-        gone.more ? (
-          <>
-            <Button
-              disabled={gone.busy}
-              onClick={() => {
-                void gone.showMore();
-              }}
-              size="sm"
-              variant="ghost"
-            >
-              {t`Show older`}
-            </Button>
-            {gone.failure === undefined ? null : (
-              <Alert tone="danger">{gone.failure}</Alert>
-            )}
-          </>
+        found.length > pageSize ? (
+          <Pagination
+            aria-label={t`Pages of members`}
+            onPageChange={setPage}
+            page={at}
+            pageSize={pageSize}
+            total={found.length}
+            unit={{ one: t`person`, other: t`people` }}
+          />
         ) : undefined
       }
-      title={t`Members`}
+      title={plural(everyone, { one: "# person", other: "# people" })}
     >
       {notice.failure === undefined && notice.done === undefined ? null : (
         <div {...stylex.props(styles.notice)}>
@@ -532,35 +554,62 @@ const MembersList = ({
         </div>
       )}
       {nobody ? (
-        <div {...stylex.props(styles.notice)}>
-          <Text tone="muted">{t`Nobody matches.`}</Text>
-        </div>
+        <Empty size="sm">
+          <EmptyHeader>
+            <EmptyTitle>{t`No one matches`}</EmptyTitle>
+            <EmptyDescription>
+              {t`Search finds people by their name or email.`}
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
         <ItemGroup aria-label={t`Members`} separated>
-          {shown.map((member) => (
-            <MemberRow
-              key={member.userId}
-              me={member.userId === me}
-              member={member}
-              onNotice={setNotice}
-              onRemoved={() => {
-                searchField.current?.focus();
-              }}
-            />
-          ))}
-          {invited.map((invitation) => (
-            <InvitationRow invitation={invitation} key={invitation.id} />
-          ))}
+          {onPage.map((each) =>
+            each.kind === "member" ? (
+              <MemberRow
+                key={each.member.userId}
+                me={each.member.userId === me}
+                member={each.member}
+                onNotice={setNotice}
+                onRemoved={() => {
+                  searchField.current?.focus();
+                }}
+              />
+            ) : (
+              <InvitationRow
+                invitation={each.invitation}
+                key={each.invitation.id}
+              />
+            )
+          )}
         </ItemGroup>
       )}
       {/* Removed people: the list's foot, under a quiet name, a step back. */}
-      {left.length === 0 ? null : (
+      {/* At the list's foot: on its last page only. */}
+      {left.length === 0 || at < pages ? null : (
         <SettingsRows label={t`Removed`}>
           <ItemGroup separated>
             {left.map((person) => (
               <RemovedRow key={person.userId} person={person} />
             ))}
           </ItemGroup>
+          {gone.more ? (
+            <div {...stylex.props(styles.older)}>
+              <Button
+                disabled={gone.busy}
+                onClick={() => {
+                  void gone.showMore();
+                }}
+                size="sm"
+                variant="ghost"
+              >
+                {t`Show older`}
+              </Button>
+              {gone.failure === undefined ? null : (
+                <Alert tone="danger">{gone.failure}</Alert>
+              )}
+            </div>
+          ) : null}
         </SettingsRows>
       )}
     </SectionCard>
