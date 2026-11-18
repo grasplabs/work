@@ -8,7 +8,7 @@ import { formatAge } from "../format.ts";
 import { useFrameRead } from "../frame/frame-read.ts";
 import type { IconData } from "../grasp/icons/index.ts";
 import { Bell, Brain, People, Question, Tick } from "../grasp/icons/index.ts";
-import type { SidebarGroup, SidebarRow } from "../grasp/sidebar/index.ts";
+import type { SidebarGroupEntry, SidebarRow } from "../grasp/sidebar/index.ts";
 import { kindMark } from "./inbox-kind.tsx";
 import { groupLabel, groupOrder } from "./inbox-page.tsx";
 import { groupOf, inboxItems, unread } from "./items.ts";
@@ -104,7 +104,7 @@ const byAge = (a: InboxItem, b: InboxItem): number => {
  */
 export const useInboxGroups = (
   items: readonly InboxItem[] | undefined
-): SidebarGroup[] => {
+): SidebarGroupEntry[] => {
   const { t, i18n } = useLingui();
   const { pathname, search } = useLocation();
   const waitedLabel = (duration: string): string => t`Waiting for ${duration}`;

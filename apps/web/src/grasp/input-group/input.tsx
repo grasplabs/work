@@ -36,7 +36,11 @@ export interface InputGroupInputProps extends Omit<
   placeholder?: string;
   /** Needs a value before the form is sent. @default false */
   required?: boolean;
-  /** Can be read and copied, not changed. The group takes a quieter fill. @default false */
+  /**
+   * Can be read and copied, not changed. The group takes a quieter fill, with no caret or focus
+   * ring; focus from the keys shows as its hairline a step stronger.
+   * @default false
+   */
   readOnly?: boolean;
   /** Out of use: the whole group is at half strength. @default false */
   disabled?: boolean;
@@ -73,7 +77,8 @@ const styles = stylex.create({
       default: grasp.ink,
       ":read-only:not(:disabled)": grasp.fieldInkRead,
     },
-    caretColor: grasp.ink,
+    // Read only: no caret, nothing says type here (Input's readOnly).
+    caretColor: { default: grasp.ink, ":read-only": "transparent" },
     font: "inherit",
     letterSpacing: "normal",
     textAlign: "start",
@@ -101,7 +106,11 @@ const styles = stylex.create({
     backgroundClip: { default: null, [CLIP_TEXT]: "text" },
     // One tile: words past the content box take no paint, so stay unseen.
     backgroundRepeat: { default: null, [CLIP_TEXT]: "no-repeat" },
-    cursor: { default: "text", ":disabled": "not-allowed" },
+    cursor: {
+      default: "text",
+      ":read-only:not(:disabled)": "default",
+      ":disabled": "not-allowed",
+    },
     // The group's own clear square empties a search; the browser's cross would make two.
     // display: none, not appearance: none: WebKit draws its own cross with appearance none too.
     "::-webkit-search-cancel-button": { display: "none" },
