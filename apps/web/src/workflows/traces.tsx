@@ -23,6 +23,14 @@ import type {
   ActivityStep,
 } from "../grasp/agent-activity/index.ts";
 import { Empty, EmptyDescription, EmptyHeader } from "../grasp/empty/index.ts";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   Table,
@@ -61,8 +69,16 @@ export type TracesPart = "runs" | "activity";
 /** How often a run still going is read again. */
 const followMs = 1500;
 
+/** The width of the runs' card under which each run is a row of its own, its facts under its time. */
+const narrowRuns = "@container runs (width < 40rem)";
+
 const styles = stylex.create({
   traces: { display: "grid", rowGap: grasp.space6, minWidth: 0 },
+  // The runs measure their own width, whatever the page beside them.
+  runs: { containerName: "runs", containerType: "inline-size" },
+  // Wide: the table; narrow: the rows. One of them shows.
+  wideRuns: { display: { default: "block", [narrowRuns]: "none" } },
+  narrowRuns: { display: { default: "none", [narrowRuns]: "block" } },
   // Kept, but not shown, while Activity shows.
   away: { display: "none" },
   // A run's steps, in the card of its "What it did".
@@ -281,45 +297,79 @@ const RunsTable = ({
   }
   return (
     <SectionCard aria-label={t`Runs`} density="compact" flush>
-      <Table aria-label={t`Runs`}>
-        <TableHeader>
-          <TableRow>
-            <TableHead>{t`Started`}</TableHead>
-            <TableHead>{t`Status`}</TableHead>
-            <TableHead>{t`Version`}</TableHead>
-            <TableHead>{t`Started by`}</TableHead>
-            <TableHead
-              aria-label={t({
-                message: "Open",
-                context: "column: a button that opens a run",
-              })}
-            />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {runs.map((run) => {
-            const started = formatDateTime(run.createdAt);
-            return (
-              <TableRow chosen={run.id === opened} key={run.id}>
-                <TableCell lead>{started}</TableCell>
-                <TableCell>
-                  <RunStatusBadge status={run.status} />
-                </TableCell>
-                <TableCell>{run.version}</TableCell>
-                <TableCell>{startedBy(run.principal)}</TableCell>
-                <TableCell align="end">
-                  <OpenRun
-                    onOpen={() => {
-                      onOpen(run);
-                    }}
-                    started={started}
-                  />
-                </TableCell>
+      <div {...stylex.props(styles.runs)}>
+        <div {...stylex.props(styles.wideRuns)}>
+          <Table aria-label={t`Runs`}>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t`Started`}</TableHead>
+                <TableHead>{t`Status`}</TableHead>
+                <TableHead>{t`Version`}</TableHead>
+                <TableHead>{t`Started by`}</TableHead>
+                <TableHead
+                  aria-label={t({
+                    message: "Open",
+                    context: "column: a button that opens a run",
+                  })}
+                />
               </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
+            </TableHeader>
+            <TableBody>
+              {runs.map((run) => {
+                const started = formatDateTime(run.createdAt);
+                return (
+                  <TableRow chosen={run.id === opened} key={run.id}>
+                    <TableCell lead>{started}</TableCell>
+                    <TableCell>
+                      <RunStatusBadge status={run.status} />
+                    </TableCell>
+                    <TableCell>{run.version}</TableCell>
+                    <TableCell>{startedBy(run.principal)}</TableCell>
+                    <TableCell align="end">
+                      <OpenRun
+                        onOpen={() => {
+                          onOpen(run);
+                        }}
+                        started={started}
+                      />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+        <div {...stylex.props(styles.narrowRuns)}>
+          <ItemGroup aria-label={t`Runs`} separated>
+            {runs.map((run) => {
+              const started = formatDateTime(run.createdAt);
+              const by = startedBy(run.principal);
+              const { version } = run;
+              return (
+                <Item key={run.id} size="sm">
+                  <ItemContent>
+                    <ItemTitle>{started}</ItemTitle>
+                    <ItemDescription>
+                      {t`Version ${version} · ${by}`}
+                    </ItemDescription>
+                    <span>
+                      <RunStatusBadge status={run.status} />
+                    </span>
+                  </ItemContent>
+                  <ItemActions>
+                    <OpenRun
+                      onOpen={() => {
+                        onOpen(run);
+                      }}
+                      started={started}
+                    />
+                  </ItemActions>
+                </Item>
+              );
+            })}
+          </ItemGroup>
+        </div>
+      </div>
     </SectionCard>
   );
 };
