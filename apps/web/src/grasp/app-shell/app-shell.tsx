@@ -14,6 +14,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { MouseEvent, ReactNode, RefObject, UIEvent } from "react";
+import { flushSync } from "react-dom";
 
 import { Button } from "../button";
 import type { DropdownMenuAction } from "../dropdown-menu";
@@ -583,6 +584,12 @@ const styles = stylex.create({
   // No bar: the page has the whole card, edge to edge, such as a backdrop.
   mainWhole: { paddingBlockStart: 0, paddingBlockEnd: 0, paddingInline: 0 },
   roomForChat: { paddingBlockEnd: grasp.shellPageRoomChat },
+  // Once the dock is measured: its height, its inset from the card's foot and the gap above it, so the
+  // last row scrolls clear of a dock of any height (a band over the bar, the bar's tall form), and
+  // never less than a page's usual room (a dock that sank away is 0px).
+  roomForDock: (height: string) => ({
+    paddingBlockEnd: `max(${grasp.shellPageRoomBelow}, calc(${height} + ${grasp.space4} + ${grasp.space6}))`,
+  }),
   // Beside the page's own panel: the page's words keep to the column before it.
   mainBesidePanel: {
     paddingInlineEnd: `calc(${grasp.inspectorWidth} + ${grasp.shellPageInline})`,
@@ -1680,6 +1687,70 @@ const PagePanel = ({
   );
 };
 
+/**
+ * The dock's height, measured, for the page's room below: it follows the bar going tall, a band
+ * stacked over it, and the dock sinking away (0px while it is not shown). Null until measured, when
+ * the page keeps shell-page-room-chat. A page scrolled to its end stays at its end as the room changes,
+ * so its last row never slips under the dock.
+ */
+const useDockRoom = (
+  card: RefObject<HTMLDivElement | null>,
+  on: boolean,
+  shown: boolean
+) => {
+  const [height, setHeight] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const held = card.current?.querySelector<HTMLElement>(
+      ":scope > [data-slot=app-shell-dock] > *"
+    );
+    const page = card.current?.querySelector<HTMLElement>(
+      ":scope > [data-slot=app-shell-page]"
+    );
+    if (
+      !on ||
+      held === null ||
+      held === undefined ||
+      page === null ||
+      page === undefined
+    ) {
+      return holdNothing;
+    }
+    const read = () => {
+      const atEnd = page.scrollHeight - page.scrollTop - page.clientHeight < 2;
+      const next = shown ? Math.ceil(held.getBoundingClientRect().height) : 0;
+      flushSync(() => {
+        setHeight(next);
+      });
+      if (atEnd) {
+        page.scrollTop = page.scrollHeight;
+      }
+    };
+    const observer = new ResizeObserver(read);
+    observer.observe(held);
+    return () => {
+      observer.disconnect();
+    };
+  }, [card, on, shown]);
+  return on ? height : null;
+};
+
+/** The page's room below: the usual, a chat box's, or, once measured, as tall as the dock is. */
+const usePageRoom = (
+  card: RefObject<HTMLDivElement | null>,
+  roomBelow: AppShellProps["roomBelow"],
+  docked: boolean,
+  shown: boolean
+) => {
+  const room = roomBelow ?? (docked ? "chat" : "page");
+  const height = useDockRoom(card, docked && room === "chat", shown);
+  if (room !== "chat") {
+    return false;
+  }
+  return height === null
+    ? styles.roomForChat
+    : styles.roomForDock(`${height}px`);
+};
+
 /** The white card: the frame's bar or the floating Menu button, the page, and the dock. */
 const ShellCard = ({
   sidebar,
@@ -1730,7 +1801,13 @@ const ShellCard = ({
   const menuWords = withGiven(useWords("appShell", appShellWords), {
     menu: menuLabel,
   });
-  const room = roomBelow ?? (dock === undefined ? "page" : "chat");
+  const own = useRef<HTMLDivElement>(null);
+  const roomLook = usePageRoom(
+    own,
+    roomBelow,
+    dock !== undefined,
+    dockShown ?? true
+  );
   const whole = isWhole(bar, page);
   const framed =
     bar === "frame" &&
@@ -1786,7 +1863,6 @@ const ShellCard = ({
         onOpenChange={onPanelsOpenChange}
       />
     ) : undefined;
-  const own = useRef<HTMLDivElement>(null);
   const { beside, sheetOpen, besideLook } = usePagePanelPlace(
     own,
     pagePanelShown,
@@ -1849,7 +1925,7 @@ const ShellCard = ({
         onScroll={handlePageScroll}
         {...stylex.props(
           styles.main,
-          room === "chat" && styles.roomForChat,
+          roomLook,
           bar === "page" && styles.mainUnderOwnBar,
           whole && styles.mainWhole,
           besideLook,
