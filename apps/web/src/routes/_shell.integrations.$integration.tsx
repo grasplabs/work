@@ -57,10 +57,10 @@ import { Cable } from "../grasp/icons/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { SectionHeader } from "../grasp/section-header/index.ts";
+import { FactRow, SettingsRows } from "../grasp/setting-row/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { FactRow, SettingsRows } from "../settings/section.tsx";
 
 // One integration: its mark, name and what it is for, then a page of
 // compact cards, as Settings has them, where the prototype had tabs:

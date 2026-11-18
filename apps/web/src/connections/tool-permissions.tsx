@@ -15,8 +15,8 @@ import {
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { SectionHeader } from "../grasp/section-header/index.ts";
+import { RowAlert, SettingsRows } from "../grasp/setting-row/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
-import { RowAlert, SettingsRows } from "../settings/section.tsx";
 import type { Integration } from "./integrations.ts";
 import { ToolChoice } from "./tool-choice.tsx";
 import { toolRules, withAllowed, withRead } from "./tool-choices.ts";

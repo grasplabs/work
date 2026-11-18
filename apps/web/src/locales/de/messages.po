@@ -6568,10 +6568,6 @@ msgstr "Personen finden"
 msgid "Find similar"
 msgstr "Ähnliche finden"
 
-#: src/settings/where-stephen.tsx
-msgid "Find Stephen under Apps in your Slack workspace."
-msgstr "Sie finden Stephen unter „Apps“ in Ihrem Slack-Workspace."
-
 #: src/routes/guest.tsx
 msgid "Finish"
 msgstr "Beenden"
@@ -10927,7 +10923,6 @@ msgstr "Nur Sie sehen das"
 #: src/connections/overview-lists.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/inbox/item-detail.tsx
-#: src/settings/where-stephen.tsx
 msgid "Open"
 msgstr "Öffnen"
 
@@ -10963,10 +10958,6 @@ msgstr "Öffnen"
 #: src/knowledge/uploads.tsx
 msgid "Open {name}"
 msgstr "{name} öffnen"
-
-#: src/settings/where-stephen.tsx
-msgid "Open a chat with Stephen, or search for him in Teams’ apps."
-msgstr "Öffnen Sie einen Chat mit Stephen oder suchen Sie ihn unter den Apps in Teams."
 
 #: src/link-confirmation.tsx
 msgid "Open a link outside Grasp?"
@@ -11022,10 +11013,6 @@ msgstr "Offene Fragen"
 #: src/brain/brain.ts
 msgid "Open since {date}. Until it is answered, this stays unknown, never zero."
 msgstr "Offen seit {date}. Bis zur Antwort bleibt das unbekannt, nie null."
-
-#: src/settings/where-stephen.tsx
-msgid "Open Stephen in {app}, in a new tab"
-msgstr "Stephen in {app} öffnen, in einem neuen Tab"
 
 #: src/inbox/item-detail.tsx
 msgid "Open the App"
@@ -17641,10 +17628,6 @@ msgstr "Wo die Arbeit weitergeht"
 #: src/inbox/report-view.tsx
 msgid "Where this week's {total} runs went."
 msgstr "Wohin die {total} Läufe dieser Woche gingen."
-
-#: src/settings/where-stephen.tsx
-msgid "Where to reach Stephen"
-msgstr "Wo Sie Stephen erreichen"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Where you are in the brain"
