@@ -445,12 +445,16 @@ describe("syncing a person's own Drive", () => {
     drive.contents = { slow: "s", next: "n" };
     // Slow on every read, and first in its page.
     drive.slow = { path: "/drive/v3/files/slow/export", ms: 20_000 };
-    const first = await read(connectionId, null);
-    expect(first.items).toStrictEqual([
+    // Late once: nothing yet, so one slow answer costs it nothing.
+    const once = await read(connectionId, null);
+    expect(once.items).toStrictEqual([]);
+    // Late twice in a row: passed over without its content.
+    const twice = await read(connectionId, once.cursor);
+    expect(twice.items).toStrictEqual([
       expect.objectContaining({ id: "slow", gone: false, content: null }),
     ]);
-    const second = await read(connectionId, first.cursor);
-    expect(second.items.map(({ id }) => id)).toStrictEqual(["next"]);
+    const next = await read(connectionId, twice.cursor);
+    expect(next.items.map(({ id }) => id)).toStrictEqual(["next"]);
   });
 
   it("never puts a file's new bytes under the version it was listed at", async () => {
