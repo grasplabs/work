@@ -21,13 +21,13 @@ import {
   InputGroupInput,
   InputGroupText,
 } from "../grasp/input-group/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   RowAlert,
   SettingRow,
   SettingsRows,
 } from "../grasp/setting-row/index.ts";
 import { useCore } from "../use-core.ts";
-import { TitledCard } from "./titled-card.tsx";
 import { controlStyles } from "./workspace-name.tsx";
 
 // Settings › Workspace › Grasp staff access, for the company's admins,
@@ -70,7 +70,7 @@ const EndStaffAccess = ({
   };
   return (
     <AlertDialog>
-      <AlertDialogTrigger size="sm">
+      <AlertDialogTrigger size="xs">
         {t`End staff access now`}
       </AlertDialogTrigger>
       <AlertDialogContent>
@@ -116,7 +116,8 @@ export const StaffAccessSection = ({
   }
   const until = formatDateTime(staff.until);
   return (
-    <TitledCard
+    <SectionCard
+      variant="grouped"
       {...(editable
         ? { actions: <EndStaffAccess onFailure={setFailure} /> }
         : {})}
@@ -158,6 +159,6 @@ export const StaffAccessSection = ({
           )}
         </SettingRow>
       </SettingsRows>
-    </TitledCard>
+    </SectionCard>
   );
 };

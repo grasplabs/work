@@ -219,7 +219,7 @@ export const IntegrityDialog = ({
       <DialogTrigger
         aria-label={t`Integrity and archive`}
         icon={Info}
-        size="sm"
+        size="xs"
         tooltip={t`Integrity and archive`}
         variant="ghost"
       />

@@ -55,6 +55,7 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "../grasp/popover/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   Select,
   SelectTrigger,
@@ -78,7 +79,6 @@ import {
   SettingsLoading,
 } from "../settings/section.tsx";
 import { TeamsPanel } from "../settings/teams.tsx";
-import { TitledCard } from "../settings/titled-card.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 
@@ -356,7 +356,7 @@ const RolesButton = () => {
       <PopoverTrigger
         aria-label={t`Roles`}
         icon={Info}
-        size="sm"
+        size="xs"
         variant="ghost"
       />
       {/* It only explains: focus stays on the button, so no ring frames the panel. */}
@@ -632,7 +632,9 @@ const PeopleTable = ({
     })),
   ];
   return (
-    <TitledCard
+    <SectionCard
+      variant="grouped"
+      density="compact"
       actions={
         <>
           <RolesButton />
@@ -712,7 +714,7 @@ const PeopleTable = ({
         rows={rows}
         unit={{ one: t`person`, other: t`people` }}
       />
-    </TitledCard>
+    </SectionCard>
   );
 };
 
@@ -735,9 +737,9 @@ const MembersPage = () => {
           removed={page.data.removed}
         />
       ) : (
-        <TitledCard density="compact" title={t`Members`}>
+        <SectionCard variant="grouped" density="compact" title={t`Members`}>
           <SectionNotLoaded page={page} />
-        </TitledCard>
+        </SectionCard>
       )}
       {/* Core refuses the teams to anyone else. */}
       {/* Read again whenever the people change, so a removed person leaves the teams' faces too. */}

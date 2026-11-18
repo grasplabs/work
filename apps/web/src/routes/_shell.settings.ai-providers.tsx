@@ -2,6 +2,7 @@ import { isMemberAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
+import { SectionCard } from "../grasp/section-card/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { AiProvidersSettings } from "../settings/ai-providers.tsx";
 import { SpendCard } from "../settings/ai-spend.tsx";
@@ -10,7 +11,6 @@ import {
   SettingsError,
   SettingsLoading,
 } from "../settings/section.tsx";
-import { TitledCard } from "../settings/titled-card.tsx";
 
 // Settings › AI and spend, for admins: the organization's own AI provider
 // keys, the models its calls use (settings/ai-providers.tsx), and what they
@@ -25,9 +25,9 @@ const AiProvidersPage = () => {
   const { identity } = Route.useRouteContext();
   if (page.state !== "ready") {
     return (
-      <TitledCard title={t`AI and spend`}>
+      <SectionCard variant="grouped" density="compact" title={t`AI and spend`}>
         <SectionNotLoaded page={page} />
-      </TitledCard>
+      </SectionCard>
     );
   }
   return (

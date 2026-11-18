@@ -183,7 +183,7 @@ export const InviteButton = () => {
         }
       }}
     >
-      <DialogTrigger icon={Plus} size="sm" variant="ink">
+      <DialogTrigger icon={Plus} size="xs" variant="ink">
         {t`Invite`}
       </DialogTrigger>
       <DialogContent closeLabel={t`Close`}>

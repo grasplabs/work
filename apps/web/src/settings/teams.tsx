@@ -44,6 +44,7 @@ import {
   ItemTitle,
   ItemActions,
 } from "../grasp/item/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -52,7 +53,6 @@ import { useCore } from "../use-core.ts";
 import { LoadingLines, RowNote, SectionNotLoaded } from "./section.tsx";
 import { createTeam, deleteTeam } from "./team-changes.ts";
 import { isTaken, TeamDialog } from "./team-members-dialog.tsx";
-import { TitledCard } from "./titled-card.tsx";
 import { useTeamChange } from "./use-team-change.ts";
 
 // Teams, for admins (GRA-1296): the organization's teams, each with how
@@ -213,7 +213,7 @@ const NewTeamButton = ({
         onClick={() => {
           setOpen(true);
         }}
-        size="sm"
+        size="xs"
         // Quiet: Invite is the page's one main action.
         variant="quiet"
       >
@@ -381,7 +381,8 @@ const TeamsList = ({
   const [opened, setOpened] = useState<string>();
   const open = teams.find(({ id }) => id === opened);
   return (
-    <TitledCard
+    <SectionCard
+      variant="grouped"
       actions={<NewTeamButton onChanged={onChanged} teams={teams} />}
       density="compact"
       flush={teams.length > 0}
@@ -415,7 +416,7 @@ const TeamsList = ({
         team={open}
         teams={teams}
       />
-    </TitledCard>
+    </SectionCard>
   );
 };
 
@@ -442,21 +443,21 @@ export const TeamsPanel = () => {
   };
   if (loaded === undefined) {
     return (
-      <TitledCard title={t`Teams`}>
+      <SectionCard variant="grouped" density="compact" title={t`Teams`}>
         <LoadingLines lines={3} />
-      </TitledCard>
+      </SectionCard>
     );
   }
   return loaded.state === "ready" ? (
     <TeamsList data={loaded.data} onChanged={reload} />
   ) : (
-    <TitledCard title={t`Teams`}>
+    <SectionCard variant="grouped" density="compact" title={t`Teams`}>
       <SectionNotLoaded
         onRetry={() => {
           void reload();
         }}
         page={loaded}
       />
-    </TitledCard>
+    </SectionCard>
   );
 };

@@ -9,10 +9,10 @@ import {
 } from "../grasp/backdrop/index.ts";
 import type { BackdropLook as Look } from "../grasp/backdrop/index.ts";
 import { Button } from "../grasp/button/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import { LookTiles } from "./look-tiles.tsx";
 import type { LookTilesWords } from "./look-tiles.tsx";
 import { SettingsStack } from "./section.tsx";
-import { TitledCard } from "./titled-card.tsx";
 
 // Settings → Appearance: what stands behind Chat's start (the person's
 // look, chat/backdrop-look.ts), chosen by sight. The look live and large,
@@ -80,13 +80,14 @@ export const BackdropSettings = ({ userId }: { userId: string }) => {
   const look = useLook(userId);
   const words = useTileWords();
   return (
-    <TitledCard
+    <SectionCard
+      variant="grouped"
       actions={
         <Button
           onClick={() => {
             chooseLook(userId, randomLook(look));
           }}
-          size="sm"
+          size="xs"
           variant="quiet"
         >
           {t`Randomize`}
@@ -106,6 +107,6 @@ export const BackdropSettings = ({ userId }: { userId: string }) => {
           words={words}
         />
       </SettingsStack>
-    </TitledCard>
+    </SectionCard>
   );
 };

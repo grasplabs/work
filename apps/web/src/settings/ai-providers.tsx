@@ -70,6 +70,7 @@ import {
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { RadioGroup, RadioGroupItem } from "../grasp/radio-group/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   FactRow,
   RowAlert,
@@ -82,7 +83,6 @@ import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { ReadOnlyRow } from "./read-only-row.tsx";
-import { TitledCard } from "./titled-card.tsx";
 
 // Settings › AI providers, as the library's Settings pattern has it: one
 // compact card per topic, rows inside, every control on one edge and as
@@ -594,7 +594,7 @@ const AddProviderDialog = ({
         onClick={() => {
           setOpen(true);
         }}
-        size="sm"
+        size="xs"
         variant="ink"
       >
         {t`Add a provider`}
@@ -935,7 +935,7 @@ const Models = ({
     defaultName = nameOf(defaultModel, providers);
   }
   return (
-    <TitledCard density="compact" flush title={t`Models`}>
+    <SectionCard variant="grouped" density="compact" flush title={t`Models`}>
       <SettingsRows>
         {editable && custom ? (
           <NameModel
@@ -1019,7 +1019,7 @@ const Models = ({
           </SettingRow>
         ) : null}
       </SettingsRows>
-    </TitledCard>
+    </SectionCard>
   );
 };
 
@@ -1063,7 +1063,8 @@ const Source = ({
   const limit = formatDollars(graspAi.month.limitUsd);
   const onGrasp = source === "grasp";
   return (
-    <TitledCard
+    <SectionCard
+      variant="grouped"
       {...(editable
         ? {
             actions: (
@@ -1112,7 +1113,7 @@ const Source = ({
           </RowAlert>
         ) : null}
       </SettingsRows>
-    </TitledCard>
+    </SectionCard>
   );
 };
 
@@ -1187,7 +1188,8 @@ export const AiProvidersSettings = ({
           });
         }}
       />
-      <TitledCard
+      <SectionCard
+        variant="grouped"
         {...(editable && addable.length > 0
           ? {
               actions: <AddProviderDialog offered={addable} onAdd={addKey} />,
@@ -1230,7 +1232,7 @@ export const AiProvidersSettings = ({
             ))}
           </ItemGroup>
         ) : null}
-      </TitledCard>
+      </SectionCard>
       {providers.length === 0 ? null : (
         <Models
           choice={choice}

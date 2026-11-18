@@ -21,13 +21,13 @@ import {
   ItemActions,
   ItemMedia,
 } from "../grasp/item/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
 import { SettingsRows } from "../grasp/setting-row/index.ts";
 import { toast } from "../grasp/toast/index.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { forgetChatLink } from "./chat-link.ts";
 import { RowNote, SectionNotLoaded } from "./section.tsx";
-import { TitledCard } from "./titled-card.tsx";
 
 // Settings › Security: the person's accounts on chat platforms that are
 // linked to them, so Grasp knows it is them writing there, as quiet rows in
@@ -266,9 +266,9 @@ export const PendingChatLink = ({ chat }: { chat: Loaded<ChatAccounts> }) => {
   const { t } = useLingui();
   if (chat.state !== "ready") {
     return (
-      <TitledCard density="compact" title={t`Chat apps`}>
+      <SectionCard variant="grouped" density="compact" title={t`Chat apps`}>
         <SectionNotLoaded page={chat} />
-      </TitledCard>
+      </SectionCard>
     );
   }
   const { pending } = chat.data;
@@ -277,7 +277,7 @@ export const PendingChatLink = ({ chat }: { chat: Loaded<ChatAccounts> }) => {
   }
   const { preview, secret } = pending;
   return (
-    <TitledCard density="compact" title={t`Chat apps`}>
+    <SectionCard variant="grouped" density="compact" title={t`Chat apps`}>
       {preview.state === "refused" ? (
         <RefusedLink reason={preview.reason} />
       ) : (
@@ -288,6 +288,6 @@ export const PendingChatLink = ({ chat }: { chat: Loaded<ChatAccounts> }) => {
           secret={secret}
         />
       )}
-    </TitledCard>
+    </SectionCard>
   );
 };

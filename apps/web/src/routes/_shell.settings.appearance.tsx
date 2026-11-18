@@ -1,11 +1,11 @@
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
+import { SectionCard } from "../grasp/section-card/index.ts";
 import { ThemeSwitch } from "../grasp/theme-switch/index.ts";
 import { BackdropSettings } from "../settings/backdrop-settings.tsx";
 import { ComposerSettings } from "../settings/composer-settings.tsx";
 import { SettingsError } from "../settings/section.tsx";
-import { TitledCard } from "../settings/titled-card.tsx";
 
 // Settings → Appearance: how Grasp looks for this person. Light, dark or
 // the device's, and the colours (Grasp UI's themes), with Grasp UI's Theme
@@ -18,7 +18,7 @@ import { TitledCard } from "../settings/titled-card.tsx";
 const Theme = () => {
   const { t } = useLingui();
   return (
-    <TitledCard density="compact" title={t`Theme`}>
+    <SectionCard variant="grouped" density="compact" title={t`Theme`}>
       <ThemeSwitch
         variant="picker"
         label={t`Mode`}
@@ -40,7 +40,7 @@ const Theme = () => {
         }}
         themesLabel={t`Colours`}
       />
-    </TitledCard>
+    </SectionCard>
   );
 };
 
