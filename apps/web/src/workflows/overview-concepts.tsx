@@ -35,7 +35,7 @@ import {
   Workflow,
 } from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
-import { SectionCard } from "../grasp/section-card/index.ts";
+import { Section, SectionHeader } from "../grasp/section-header/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -359,7 +359,8 @@ const styles = stylex.create({
   map: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fill, minmax(20rem, 1fr))",
-    gap: grasp.space4,
+    alignItems: "start",
+    gap: grasp.space6,
   },
   mapRow: {
     display: "grid",
@@ -501,16 +502,21 @@ export const SectionsConcept = ({ rows }: { rows: readonly ConceptRow[] }) => (
     {readingOrder.map((phase) => {
       const shown = rows.filter((row) => row.phase === phase);
       return shown.length === 0 ? null : (
-        <SectionCard
-          density="compact"
-          flush
-          key={phase}
-          title={`${i18n._(phaseNames[phase])} · ${formatNumber(shown.length)}`}
-        >
-          {shown.map((row) => (
-            <SectionRow key={row.id} row={row} />
-          ))}
-        </SectionCard>
+        <Section key={phase}>
+          <SectionHeader
+            aside={
+              <Text element="span" size="sm" tone="muted">
+                {formatNumber(shown.length)}
+              </Text>
+            }
+            title={i18n._(phaseNames[phase])}
+          />
+          <Card padding="none">
+            {shown.map((row) => (
+              <SectionRow key={row.id} row={row} />
+            ))}
+          </Card>
+        </Section>
       );
     })}
   </div>
@@ -625,23 +631,26 @@ const TeamCard = ({
   team: string;
   rows: readonly ConceptRow[];
 }) => (
-  <SectionCard density="compact" flush title={team}>
-    {rows.map((row) => (
-      <div key={row.id} {...stylex.props(styles.mapRow)}>
-        <span {...stylex.props(styles.lead)}>
-          <WorkflowIcon row={row} treatment="process" />
-          <span {...stylex.props(styles.named)}>
-            <RowName row={row} />
-            <Owner name={row.owner} />
+  <Section>
+    <SectionHeader title={team} />
+    <Card padding="none">
+      {rows.map((row) => (
+        <div key={row.id} {...stylex.props(styles.mapRow)}>
+          <span {...stylex.props(styles.lead)}>
+            <WorkflowIcon row={row} treatment="process" />
+            <span {...stylex.props(styles.named)}>
+              <RowName row={row} />
+              <Owner name={row.owner} />
+            </span>
           </span>
-        </span>
-        <Tools tools={row.tools} />
-        <span {...stylex.props(styles.quiet)}>
-          <PhaseBadge phase={row.phase} />
-        </span>
-      </div>
-    ))}
-  </SectionCard>
+          <Tools tools={row.tools} />
+          <span {...stylex.props(styles.quiet)}>
+            <PhaseBadge phase={row.phase} />
+          </span>
+        </div>
+      ))}
+    </Card>
+  </Section>
 );
 
 /** D: the company as it runs, team by team. */
