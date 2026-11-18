@@ -328,7 +328,8 @@ const accountsOwnerSchema = z.string().min(1);
  * (`needs_reauth`) is still connected. Its address only as the provider
  * last confirmed it, and when (`verifiedEmail`, providers.ts
  * `confirmAddress`): Google's; Entra's address is not verified, so none
- * for Microsoft.
+ * for Microsoft. Its groups as the last whole read of them said, and when
+ * (reader-groups.ts).
  */
 export const personalAccounts = async (
   db: D1Database,
@@ -347,6 +348,8 @@ export const personalAccounts = async (
       verifiedEmail: connections.verifiedEmail,
       verifiedEmailAt: connections.verifiedEmailAt,
       pastVerifiedEmails: connections.pastVerifiedEmails,
+      readerGroups: connections.readerGroups,
+      readerGroupsAt: connections.readerGroupsAt,
       status: connections.status,
     })
     .from(connections)
@@ -368,6 +371,8 @@ export const personalAccounts = async (
       verifiedEmail,
       verifiedEmailAt,
       pastVerifiedEmails,
+      readerGroups,
+      readerGroupsAt,
       status,
     }) =>
       tenant === null || accountId === null
@@ -380,6 +385,8 @@ export const personalAccounts = async (
               verifiedEmail,
               verifiedEmailAt: verifiedEmailAt?.getTime() ?? null,
               pastVerifiedEmails: pastVerifiedEmails ?? [],
+              groups: readerGroups ?? [],
+              groupsReadAt: readerGroupsAt?.getTime() ?? null,
               connected: status !== "disconnected",
             },
           ]

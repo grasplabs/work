@@ -6839,6 +6839,19 @@ export const sourceReaderTokens = sqliteTable(
 );
 
 /**
+ * Every group of a provider's that a copied reader list ever named
+ * (source-readers.ts `readerPrincipalsOf`, GRA-1761), by the Brain's name
+ * of it (`group:<provider>:<tenant>:<group>`), written before the list
+ * reaches the Brain. A person reads as only those of their own groups
+ * that are here (`heldPrincipalsOf`): the groups sources are shared with,
+ * however many groups they are in. A group is no person; nothing is
+ * removed, as a name no source holds any more costs a reader nothing.
+ */
+export const sourceReaderGroups = sqliteTable("source_reader_groups", {
+  name: text().primaryKey(),
+});
+
+/**
  * What Grasp proposes for a team's routine (opportunities.ts, GRA-1750),
  * at the evidence it rests on: the model's answer, held to what it was
  * given, kept so it is asked once per evidence. Only while that evidence

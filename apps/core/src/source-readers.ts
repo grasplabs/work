@@ -12,6 +12,7 @@ import {
   accounts,
   personErasures,
   signInAddresses,
+  sourceReaderGroups,
   sourceReaderTokens,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
@@ -23,8 +24,9 @@ import { derivedHmacKey } from "./derived-keys.ts";
 // Brain's, and puts a person in that group at every read only from
 // accounts they proved are theirs: the ones they sign in with, and the
 // suite accounts they connected as their own. A link reaches nobody, an
-// outside account is held by nobody, and a group is held by nobody until
-// core knows its members.
+// outside account is held by nobody, and a group only by the people whose
+// own connection's last read of their groups, within a day, says they are
+// in it.
 //
 // Each system names a user reader by what its own ID tokens vouch for:
 // Microsoft by the Entra object ID (Graph's `grantedToV2.user.id`, the
@@ -56,10 +58,50 @@ import { derivedHmacKey } from "./derived-keys.ts";
 // again, at most a day (decided for the sync run, GRA-1719); the leaver
 // themselves is refused at once, as every read checks membership.
 //
+// A group reader is held by a person through the suite account they
+// connected as their own: connect reads, with that account's own token,
+// the groups it is in, nested ones included, each time its access token is
+// minted (connect's reader-groups.ts), and the groups count while that read
+// is recent (`readerProofMaxAgeMs`, as every proof here). So a person who
+// leaves a group stops reading by it at their connection's next token
+// renewal, and a day after its last read whatever happens; nobody holds a
+// group by a directory's word, or by a read that failed, and nothing of
+// anyone else's groups is kept (GRA-1719, "Group members").
+//
 // A group's name is its kind, then its parts joined by ":", which no part
 // holds (`sourceReaderSchema`), so two readers never share a name. No other
 // group core names starts with these kinds (`team:`, `connection:`,
 // `company`, `members`).
+
+/**
+ * How many requests one run of the clock lets connect send reading
+ * people's groups (connect's reader-groups.ts), counted all told: the
+ * providers' pages, each connection's token and each write. The platform's
+ * limit is Workers' subrequests per invocation: 10,000 by default on
+ * Workers Paid, as Cloudflare's Workers limits page states it (checked 18
+ * November 2026; D1 queries count too; on-prem workerd has none). The page
+ * doesn't say whether what a service binding's callee sends counts against
+ * its caller, so it is taken to: this is a share of the clock's own
+ * invocation, a tenth, as the shared reads' erasures take
+ * (shared-reads.ts `brainCallsPerTick`), which leaves 8,000 for the
+ * clock's other tasks. A read longer than one run goes on in the next.
+ */
+export const readerGroupRequestsPerTick = 1000;
+
+/**
+ * How many D1 queries one run of connect's reads of people's groups may
+ * make before it starts no other turn, counted all told (the due list,
+ * each connection's token, each write). The platform's limit is D1's
+ * queries per Worker invocation: 1,000 on Workers Paid, a batch counting
+ * as one, as Cloudflare's D1 limits page states it (checked 18 November
+ * 2026; past it a query fails). The run is connect's own invocation:
+ * Cloudflare's service bindings page counts each call to a service binding
+ * as a Worker invocation. Half of it: the other half is room for the one
+ * turn under way when the share is reached, whose worst case is a token
+ * renewal waiting out another's lease (connect's tokens.ts `refreshed`:
+ * three queries every 100 ms for 15 s, about 460 with the turn's own).
+ */
+export const readerGroupQueriesPerTick = 500;
 
 /** `part` as two names of it are compared: Unicode NFC, lowercase. */
 const comparable = (part: string): string =>
@@ -105,6 +147,21 @@ const keysOf = async (
 const tenantPrincipal = (provider: string, tenant: string): string =>
   `tenant:${provider}:${comparable(tenant)}`;
 
+/** What the Brain's name of a provider's group starts with. */
+const groupPrefix = "group:";
+
+/**
+ * The Brain's group of the group `group` in `tenant` at `provider`: a
+ * group's ID compared as an account's is (Entra's object IDs and Google's
+ * addresses are both case-blind).
+ */
+const groupPrincipal = (
+  provider: string,
+  tenant: string,
+  group: string
+): string =>
+  `${groupPrefix}${provider}:${comparable(tenant)}:${comparable(group)}`;
+
 /** The Brain's group of an account by its token. */
 const tokenPrincipal = (token: string): string => `account:${token}`;
 
@@ -116,7 +173,7 @@ const tokenPrincipal = (token: string): string => `account:${token}`;
 export const plainPrincipalOf = (reader: SourceReader): string | undefined => {
   switch (reader.kind) {
     case "group": {
-      return `group:${reader.provider}:${comparable(reader.tenant)}:${reader.group}`;
+      return groupPrincipal(reader.provider, reader.tenant, reader.group);
     }
     case "tenant": {
       return tenantPrincipal(reader.provider, reader.tenant);
@@ -179,12 +236,26 @@ export const readerPrincipalsOf = async (
     env,
     readers.flatMap((reader) => (reader.kind === "account" ? [reader] : []))
   );
-  const plain = readers.flatMap((reader) => plainPrincipalOf(reader) ?? []);
+  const plain = [
+    ...new Set(readers.flatMap((reader) => plainPrincipalOf(reader) ?? [])),
+  ];
+  const db = drizzle(env.DB);
+  // The groups the list names, kept before the list reaches the Brain: so
+  // a person in them reads it from the next read on (`heldPrincipalsOf`).
+  const named = plain.filter((principal) => principal.startsWith(groupPrefix));
+  const nameGroups = db
+    .insert(sourceReaderGroups)
+    .select(
+      sql`SELECT value FROM json_each(${JSON.stringify(named)}) WHERE true`
+    )
+    .onConflictDoNothing();
   if (keys.length === 0) {
-    return [...new Set(plain)];
+    if (named.length > 0) {
+      await nameGroups;
+    }
+    return plain;
   }
   const minted = JSON.stringify(keys.map((key) => [key, crypto.randomUUID()]));
-  const db = drizzle(env.DB);
   const [, tokens] = await db.batch([
     db
       .insert(sourceReaderTokens)
@@ -197,6 +268,7 @@ export const readerPrincipalsOf = async (
       .select({ token: sourceReaderTokens.token })
       .from(sourceReaderTokens)
       .where(inList(sourceReaderTokens.key, keys)),
+    nameGroups,
   ]);
   return [
     ...new Set([...tokens.map(({ token }) => tokenPrincipal(token)), ...plain]),
@@ -328,26 +400,59 @@ const readingAccountsOf = (
 };
 
 /**
+ * The Brain's groups of the groups the suite accounts the member connected
+ * as their own (`connected`) are in: of each connection still connected,
+ * the groups its last whole read found (connect's reader-groups.ts), while
+ * that read is recent (`readerProofMaxAgeMs`), in its own tenant.
+ */
+const groupsHeldBy = (connected: readonly PersonalAccount[]): string[] =>
+  connected.flatMap(
+    ({ provider, tenant, groups, groupsReadAt, connected: live }) =>
+      live && recent(groupsReadAt)
+        ? groups.map((group) => groupPrincipal(provider, tenant, group))
+        : []
+  );
+
+/**
+ * The read of which of `groups` a copied reader list ever named
+ * (`source_reader_groups`), sorted, for the batch of a read: the only ones
+ * a person needs to read as, however many groups they are in.
+ */
+const namedGroupsRead = (db: DrizzleD1Database, groups: readonly string[]) =>
+  db
+    .select({ name: sourceReaderGroups.name })
+    .from(sourceReaderGroups)
+    .where(inList(sourceReaderGroups.name, groups))
+    .orderBy(sourceReaderGroups.name);
+
+/**
  * The Brain's groups the member `userId` holds, reading as themselves, by
  * the accounts they proved are theirs (`signIns`, `connected`): each
- * account's token and its tenant's name. One batch: they claim the
- * tokens of those accounts (`person`, written only where it changes), and
- * their tokens are read. Nothing is minted: an account no list named has
- * no token, and holds nothing.
+ * account's token and its tenant's name (`accounts`), and those of the
+ * groups their connected accounts are in (`groupsHeldBy`) that a list
+ * named, read in the same batch, sorted (`groups`). One batch: they claim the tokens of those
+ * accounts (`person`, written only where it changes), and their tokens
+ * and named groups are read. Nothing is minted: an account no list named
+ * has no token, and holds nothing.
  */
 export const heldPrincipalsOf = async (
   env: Pick<Env, "DB" | "SIGN_IN" | "BETTER_AUTH_SECRET">,
   userId: string,
   signIns: readonly SignIn[],
   connected: readonly PersonalAccount[]
-): Promise<string[]> => {
+): Promise<{ accounts: string[]; groups: string[] }> => {
   const reading = readingAccountsOf(env, signIns, connected);
+  const groups = [...new Set(groupsHeldBy(connected))];
+  const db = drizzle(env.DB);
   if (reading.length === 0) {
-    return [];
+    if (groups.length === 0) {
+      return { accounts: [], groups: [] };
+    }
+    const named = await namedGroupsRead(db, groups);
+    return { accounts: [], groups: named.map(({ name }) => name) };
   }
   const keys = await keysOf(env, reading);
-  const db = drizzle(env.DB);
-  const [, tokens] = await db.batch([
+  const [, tokens, named] = await db.batch([
     db
       .update(sourceReaderTokens)
       .set({ person: userId })
@@ -365,15 +470,19 @@ export const heldPrincipalsOf = async (
       .select({ token: sourceReaderTokens.token })
       .from(sourceReaderTokens)
       .where(inList(sourceReaderTokens.key, keys)),
+    namedGroupsRead(db, groups),
   ]);
-  return [
-    ...new Set([
-      ...tokens.map(({ token }) => tokenPrincipal(token)),
-      ...reading.map(({ provider, tenant }) =>
-        tenantPrincipal(provider, tenant)
-      ),
-    ]),
-  ];
+  return {
+    accounts: [
+      ...new Set([
+        ...tokens.map(({ token }) => tokenPrincipal(token)),
+        ...reading.map(({ provider, tenant }) =>
+          tenantPrincipal(provider, tenant)
+        ),
+      ]),
+    ],
+    groups: named.map(({ name }) => name),
+  };
 };
 
 /**
