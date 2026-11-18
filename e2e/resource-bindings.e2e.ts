@@ -68,7 +68,7 @@ const resourceOn = async (page: Page, app: string, alias: string) => {
   await page.goto(`/apps/${app}/settings?section=connections`);
   return page
     .getByRole("region", { name: "Resources" })
-    .getByRole("article", { name: alias });
+    .getByRole("region", { name: alias, exact: true });
 };
 
 const unbound = "The App's actions can't use it until an admin binds it.";

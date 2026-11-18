@@ -41,7 +41,11 @@ test("a person opens the source an uploaded meeting became in the brain, and rea
   const page = await pageOf(member);
   await page.goto(`/knowledge/${collectionId}`);
   const uploads = page.getByRole("region", { name: "Upload" });
-  await uploads.getByLabel("Upload a PDF, Word or Excel file").setInputFiles({
+  // Chosen with the drop zone's Choose files, as a person picks it.
+  const choosing = page.waitForEvent("filechooser");
+  await uploads.getByRole("button", { name: "Choose files" }).click();
+  const chooser = await choosing;
+  await chooser.setFiles({
     name: "budget-meeting.vtt",
     mimeType: "text/vtt",
     buffer: Buffer.from(captions),

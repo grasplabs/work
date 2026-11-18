@@ -68,7 +68,7 @@ test("a builder creates a table and its fields in the Data view, and sees them i
   // A table, named as a person says it, saved as code names it.
   await page.getByRole("button", { name: "New table" }).click();
   const dialog = page.getByRole("dialog", { name: "New table" });
-  await dialog.getByLabel("Table name").fill("Tasks");
+  await dialog.getByLabel("Name").fill("Tasks");
   await dialog.getByRole("button", { name: "Create table" }).click();
   await expect(page.getByRole("table", { name: "tasks" })).toBeVisible(read);
 

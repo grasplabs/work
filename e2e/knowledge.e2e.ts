@@ -111,7 +111,7 @@ test("a person searches, edits a document, meets a newer version instead of over
     await expect(collections.getByText(hiddenName)).toHaveCount(0);
     // A first visit creates the person's Personal collection, listed at once.
     await expect(
-      collections.getByRole("link", { name: "Personal", exact: true })
+      collections.getByRole("heading", { name: "Personal", exact: true })
     ).toBeVisible();
     await expect(
       page.getByRole("region", { name: "Memory" }).getByRole("alert")

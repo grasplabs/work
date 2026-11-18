@@ -180,7 +180,7 @@ test("a builder finds an App in the list, opens it and uses its page with live d
   await page.goto("/");
   const nav = page.getByRole("navigation", { name: "Main" });
   await nav.getByRole("link", { name: "Apps" }).click();
-  const cards = page.getByRole("list", { name: "Apps" }).getByRole("listitem");
+  const cards = page.getByRole("region", { name: "Apps" }).getByRole("article");
   const search = page.getByRole("textbox", { name: "Search the Apps" });
 
   // A search by name finds this run's Apps, one card each whatever their

@@ -33,7 +33,7 @@ test("a person asks Grasp to remember something and shares it with their team, w
   await expect(remember).toBeHidden();
 
   // Theirs, proposed, and open beside the list.
-  const panel = page.getByRole("region", { name: statement });
+  const panel = page.getByRole("complementary", { name: statement });
   await expect(panel).toBeVisible(pageRead);
   await expect(panel.getByText("Proposed", { exact: true })).toBeVisible();
 
@@ -45,7 +45,7 @@ test("a person asks Grasp to remember something and shares it with their team, w
   await expect(share.getByRole("radio", { name: team })).toBeChecked();
   await share.getByRole("button", { name: "Share it" }).click();
   await expect(share).toBeHidden();
-  const published = page.getByRole("region", { name: statement });
+  const published = page.getByRole("complementary", { name: statement });
   await expect(published.getByText("Team", { exact: true })).toBeVisible(
     pageRead
   );

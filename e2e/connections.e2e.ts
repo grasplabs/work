@@ -27,12 +27,8 @@ const cardOf = (
   name: string,
   { account }: SeededConnection
 ): Locator =>
-  page.getByRole("listitem").filter({
-    has: page.getByRole("heading", {
-      level: 3,
-      name: `${name} (${account})`,
-    }),
-  });
+  // Each account is a card of its own, named for it.
+  page.getByRole("region", { name: `${name} (${account})`, exact: true });
 
 test("a person comes back from connecting Microsoft 365, sees it on its page, and is offered to sign in again or disconnect one whose access ran out", async ({
   pageOf,
@@ -81,7 +77,11 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
     name: "Microsoft 365 is connected",
   });
   await expect(done.getByText("Just for you")).toBeVisible();
-  await done.getByRole("button", { name: "Close" }).click();
+  // Its own Close, under what was chosen (the corner's is the dialog's).
+  await done
+    .getByRole("button", { name: "Close" })
+    .filter({ hasText: "Close" })
+    .click();
   await expect(done).toHaveCount(0);
   expect(new URL(page.url()).searchParams.get("connection")).toBeNull();
   // Its Overview's account card: where it stands, what it reaches, and
@@ -299,10 +299,9 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   await page.goto(`/apps/${appId}/settings?section=connections`);
   const inUse = page.getByRole("region", { name: "Connections in use" });
   const used = inUse.getByRole("listitem").filter({ hasText: "Microsoft 365" });
+  await expect(used).toContainText("Connected for everyone");
   await expect(
-    used.getByRole("button", {
-      name: "Manage Microsoft 365, connected for everyone",
-    })
+    used.getByRole("link", { name: "Manage Microsoft 365" })
   ).toBeVisible();
   await expect(inUse.getByRole("listitem")).toHaveCount(1);
 

@@ -24,7 +24,7 @@ const quoted = (text: string): string => `'${text.replaceAll("'", "''")}'`;
 /** The window of the person's chats, ⌘K away on every page. */
 const chatsWindow = async (page: Page) => {
   await page.keyboard.press("ControlOrMeta+k");
-  const window = page.getByRole("dialog", { name: "Chats" });
+  const window = page.getByRole("dialog", { name: "Search chats" });
   await expect(window).toBeVisible();
   return window;
 };
@@ -215,6 +215,8 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   // Renamed from the chat's menu in the window, in place: the name is in
   // a field, Escape keeps the one it had and Enter keeps the new one.
   chats = await chatsWindow(page);
+  // A row's menu shows on the row the pointer is on.
+  await rowOf(chats, question).hover();
   await chats.getByRole("button", { name: `More for ${question}` }).click();
   await page.getByRole("menuitem", { name: "Rename" }).click();
   const name = chats.getByLabel("Chat name");
@@ -222,6 +224,7 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   await name.fill("Never kept");
   await name.press("Escape");
   await expect(rowOf(chats, question)).toBeVisible();
+  await rowOf(chats, question).hover();
   await chats.getByRole("button", { name: `More for ${question}` }).click();
   await page.getByRole("menuitem", { name: "Rename" }).click();
   await chats.getByLabel("Chat name").fill(title);
@@ -598,7 +601,7 @@ test("the chat on every other page carries on the open chat, which opens as its 
 
   // Opened as a page, it is the chat's own page, with nothing of the dock
   // beside it; Back, the dock is beside the page again, on the same chat.
-  await chat.getByRole("button", { name: "Open as a page" }).click();
+  await chat.getByRole("link", { name: "Open as a page" }).click();
   await expect(page).toHaveURL(/\/chats\/[^/]+$/u);
   await expect(
     page.getByRole("main").getByRole("article").first()

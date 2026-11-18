@@ -62,7 +62,9 @@ test("a builder makes an App from what they want done, shares it with their team
   // beside it builds it.
   await plan.getByRole("button", { name: "Build it" }).click();
   await expect(page).toHaveURL(/\/apps\/[^/?]+$/u);
-  await expect(page.getByText(`Setting up ${appPlanned}…`)).toBeVisible(built);
+  await expect(
+    page.getByRole("heading", { level: 1, name: appPlanned })
+  ).toBeVisible(built);
   const app = new URL(page.url()).pathname.split("/").at(-1) ?? "";
 
   // The chat read how an App is written, wrote it, and said so.

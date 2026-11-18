@@ -30,9 +30,10 @@ test("an admin opens Settings on the workspace, and each section from the sideba
   // changes them, so this test doesn't pin their values).
   const workspace = sectionOf(page, "Organization");
   await expect(workspace.getByLabel("Name")).toBeEnabled();
-  await expect(sectionOf(page, "Region")).toContainText("European Union");
+  // Where its data is kept, and its time zone, beside its name.
+  await expect(workspace).toContainText("European Union");
   await expect(
-    sectionOf(page, "Region").getByRole("combobox", { name: "Time zone" })
+    workspace.getByRole("combobox", { name: "Time zone" })
   ).toBeEnabled();
 
   await nav.getByRole("link", { name: "Billing" }).click();
