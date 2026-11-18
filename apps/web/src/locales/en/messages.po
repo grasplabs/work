@@ -3440,6 +3440,10 @@ msgstr "Can hand files people can read to its workflows."
 msgid "Can’t be read"
 msgstr "Can’t be read"
 
+#: src/workflows/kept-state.tsx
+msgid "Can't be shown right now."
+msgstr "Can't be shown right now."
+
 #: src/workflows/start-run.tsx
 msgid "Can't offer Run: {unread}"
 msgstr "Can't offer Run: {unread}"
@@ -16931,6 +16935,10 @@ msgstr "Withdraw the invitation of {email}"
 #: src/activity/audit-words.ts
 msgid "Withdrew an invitation"
 msgstr "Withdrew an invitation"
+
+#: src/workflows/kept-state.tsx
+msgid "Withheld: the run that kept it read something that is no longer there to read, so later runs start without it."
+msgstr "Withheld: the run that kept it read something that is no longer there to read, so later runs start without it."
 
 #: src/brain/memories-page.tsx
 msgid "Without a name"
