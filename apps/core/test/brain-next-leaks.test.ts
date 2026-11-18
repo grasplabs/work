@@ -9,6 +9,7 @@ import type { Access } from "@grasp-os/brain-next/contract";
 import { brainUploadReadersSchema } from "@grasp-os/shared/brain-sources";
 import type { BrainUploadReaders } from "@grasp-os/shared/brain-sources";
 import { chatIdSchema } from "@grasp-os/shared/ids";
+import { minTeamShown } from "@grasp-os/shared/onboarding";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -751,13 +752,21 @@ describe(
           id: `${sharedConnection}/${crypto.randomUUID()}`,
         }
       );
-      // A step the holder took, kept as an event of their team (GRA-1763):
-      // nobody reads it back, their team included.
+      // A step the holder took, kept as an event of a team of theirs large
+      // enough to keep one (GRA-1763): nobody reads it back, that team
+      // included.
+      const eventPeople = await Promise.all(
+        Array.from(
+          { length: minTeamShown - 1 },
+          async () => await signedInWithRole(idp, "user")
+        )
+      );
+      await newTeam(holder, ...eventPeople.map(({ userId }) => userId));
       await recordEvents(env, [
         {
           key: crypto.randomUUID(),
           personId: holder,
-          step: `Sent ${sharedWord} ${eventMarker}`,
+          step: eventMarker,
           item: eventMarker,
           at: new Date(),
         },

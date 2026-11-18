@@ -11,15 +11,20 @@ import type { NewEvent } from "./contract.ts";
 //   figure holds one; whatever is drawn from them later is drawn here and
 //   held to the five-person floor where it is drawn.
 // - A person in a row: the host names a team's group, never a person
-//   (contract.ts `newEventSchema`), and an item only by its SHA-256.
+//   (contract.ts `newEventSchema`), and an item only by a MAC of its ID.
+// - One call pinned by its time: each is kept to the hour, rounded down.
 // - Kept for good: every event older than `eventsKeptMs` is deleted
 //   (`expireEvents`, on the host's clock), and one dated later than when
 //   it is kept is kept as of then, so none outlives the window.
 
+/** An hour, in milliseconds: what an event's time is kept to. */
+const hourMs = 60 * 60 * 1000;
+
 /**
  * Keeps `events`, each once by its key and team, as of `now`: one dated
- * later is kept as of `now`, and one already past `eventsKeptMs` is not
- * kept at all. One statement each, in one transaction.
+ * later is kept as of `now`, its time rounded down to the hour, and one
+ * already past `eventsKeptMs` is not kept at all. One statement each, in
+ * one transaction.
  */
 export const addEvents = (
   storage: DurableObjectStorage,
@@ -29,7 +34,8 @@ export const addEvents = (
   const oldest = now - eventsKeptMs;
   storage.transactionSync(() => {
     for (const { key, team, step, item, at } of events) {
-      const happened = Math.min(Date.parse(at), now);
+      const happened =
+        Math.floor(Math.min(Date.parse(at), now) / hourMs) * hourMs;
       if (happened >= oldest) {
         storage.sql.exec(
           "INSERT INTO events (key, team, step, item, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (key, team) DO NOTHING",

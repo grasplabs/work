@@ -1,4 +1,5 @@
 import { brainQuestionMaxLength } from "@grasp-os/shared/brain-sources";
+import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import {
   instructionsMaxLength,
   isOverInstructionsLimit,
@@ -1406,21 +1407,21 @@ export const eventsKeptMs = 90 * 24 * 60 * 60 * 1000;
 /** Most events one add takes (`Brain.addEvents`); a host with more sends a page after the other. */
 export const eventsPerAddMax = 500;
 
-/** Most characters of an event's kind of step. */
-export const eventStepMaxLength = 256;
-
 /**
  * One thing that happened (`Brain.addEvents`): which team's (a group, as
  * the host names it, never a person), what kind of step, on which item,
- * and when. The item is the SHA-256 of the host's ID for it, in hex, so
- * the Brain keeps nothing readable of it; null when the step was on none.
- * `key` is the producer's for the event, the same on every retry: with its
- * team, one event.
+ * and when. The item is a MAC of the host's ID for it, in hex, so the
+ * Brain keeps nothing readable of it; null when the step was on none.
+ * `key` is the host's for the event and its team, the same on every
+ * retry: one event a key and team. `at` is kept to the hour, rounded down
+ * (events.ts), so no stored time pins one call. The step's own bound is
+ * the host's (core takes it as connect's action, `permissionActionSchema`);
+ * here it is any identifier's (`identifierMaxLength`).
  */
 export const newEventSchema = z.strictObject({
   key: changeKeySchema,
   team: principalSchema,
-  step: wellFormedString().min(1).max(eventStepMaxLength),
+  step: wellFormedString().min(1).max(identifierMaxLength),
   item: z
     .string()
     .regex(/^[0-9a-f]{64}$/u)

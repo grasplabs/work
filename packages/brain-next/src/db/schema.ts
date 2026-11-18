@@ -1396,14 +1396,17 @@ export const events = sqliteTable(
   "events",
   {
     row: integer().primaryKey({ autoIncrement: true }),
-    /** The producer's key for the event, with its team: one row a pair. */
+    /** The host's key for the event and its team: one row a pair. */
     key: text().notNull(),
     /** The team's group, as the host names it. */
     team: text().notNull(),
     step: text().notNull(),
-    /** The SHA-256 of the item's ID, in hex; null when it was on none. */
+    /** A MAC of the item's ID, in hex; null when it was on none. */
     item: text(),
-    /** When it happened, in milliseconds: never later than when it was kept. */
+    /**
+     * When it happened, in milliseconds, rounded down to the hour: never
+     * later than when it was kept.
+     */
     at: integer().notNull(),
   },
   (table) => [

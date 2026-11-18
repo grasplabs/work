@@ -17,7 +17,6 @@ import {
   changeReused,
   listPageMax,
   erasureReasons,
-  eventStepMaxLength,
   eventsPerAddMax,
   exportFileNameSchema,
   exportIdSchema,
@@ -128,7 +127,7 @@ import type {
 import { brainSourceErrors, firstLineOf } from "@grasp-os/shared/brain-sources";
 import { brainConnectionIdSchema } from "@grasp-os/shared/connect";
 import { withinTime } from "@grasp-os/shared/deadline";
-import { sha256Hex } from "@grasp-os/shared/encoding";
+import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -141,7 +140,11 @@ import type { InstructionFileRef } from "@grasp-os/shared/instruction-files";
 import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import type { ModelErrorCode } from "@grasp-os/shared/models";
-import { permissionErrors } from "@grasp-os/shared/permissions";
+import { minTeamShown } from "@grasp-os/shared/onboarding";
+import {
+  permissionActionSchema,
+  permissionErrors,
+} from "@grasp-os/shared/permissions";
 import { holdsKnownCredential, redact } from "@grasp-os/shared/redact";
 import { skillErrors } from "@grasp-os/shared/skills";
 import { drizzle } from "drizzle-orm/d1";
@@ -155,9 +158,13 @@ import {
   ownStoresTotals,
 } from "./brain-own-stores.ts";
 import type { OwnStoreHealth } from "./brain-own-stores.ts";
-import { largeEnoughAudiences } from "./brain-share-audiences.ts";
+import {
+  largeEnoughAudiences,
+  teamsOfAtLeast,
+} from "./brain-share-audiences.ts";
 import { audiencesRead } from "./connection-audiences.ts";
 import type { ConnectionAudience } from "./connection-audiences.ts";
+import { derivedHmacKey } from "./derived-keys.ts";
 import { inJurisdiction, workspace } from "./durable-objects.ts";
 import {
   embedInBulk,
@@ -6326,16 +6333,36 @@ export const forgetForAppAs = async (
 // find routines in, never read back by anyone (@grasp-os/brain-next's
 // events.ts). A producer names the person who did a step; core turns them
 // into their teams here, from its own records read now, and hands the
-// Brain only those teams' groups: never the person, and the item only by
-// its SHA-256. A person in no team, or no longer a member, gives none.
+// Brain only those teams' groups, never the person. The ways an event
+// could still point at one person, and how each is closed:
+//
+// - A small team's events are its few people's trail: an event is kept
+//   only for a team of at least `minTeamShown` current members now, the
+//   floor every figure about people holds to. A smaller team, no team, or
+//   someone no longer a member, gives none, so a person's erasure has
+//   nothing of theirs to find.
+// - A row joined back to the audit log, or an item to its system: the
+//   event's key is a MAC of the producer's key (for a call, its audit
+//   event's id) and the team, and the item a MAC of its ID, each under a
+//   key of core's own (`derivedHmacKey`), so whoever holds the Brain's
+//   rows alone can't compute either.
+// - A call pinned by its time: the Brain keeps each to the hour.
+//
 // The Brain deletes every event past its time on core's clock
 // (`expireEvents`).
+
+/** What the key of each event's MAC is derived for (`derivedHmacKey`). */
+const eventKeyPurpose = "grasp-os/brain-event-key/v1";
+
+/** What the key of each event item's MAC is derived for (`derivedHmacKey`). */
+const eventItemPurpose = "grasp-os/brain-event-item/v1";
 
 const observedStepSchema = z.strictObject({
   /** The producer's key for the step, the same on every retry. */
   key: changeSchema,
   personId: idSchema,
-  step: wellFormedString().min(1).max(eventStepMaxLength),
+  /** What kind of step: a connection's action, as connect bounds it. */
+  step: permissionActionSchema,
   item: wellFormedString().min(1).nullable(),
   at: z.date(),
 });
@@ -6343,18 +6370,28 @@ const observedStepSchema = z.strictObject({
 /**
  * One step a person took, as a producer hands it to `recordEvents`: its
  * key, the same on every retry; who took it, turned into their teams and
- * never kept; what kind of step (a tool's action); the ID of the item it
- * was on as its system names it, or null; and when.
+ * never kept; what kind of step (a connection's action); the ID of the
+ * item it was on as its system names it, or null; and when, which the
+ * Brain keeps to the hour.
  */
 export type ObservedStep = z.infer<typeof observedStepSchema>;
 
+/** `text`'s HMAC-SHA256 under `key`, in hex. */
+const macOf = async (key: CryptoKey, text: string): Promise<string> =>
+  toHex(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(text))
+    )
+  );
+
 /**
  * Keeps `steps` as the Brain's events, one per team each person is in
- * now: safe to repeat, as each is kept once by its key and team.
- * Server-side, for producers alone: nothing answers them back.
+ * now that has at least `minTeamShown` current members: safe to repeat,
+ * as each is kept once by its key and team. Server-side, for producers
+ * alone: nothing answers them back.
  */
 export const recordEvents = async (
-  env: BrainEnv & ReaderEnv,
+  env: BrainEnv & ReaderEnv & Pick<Env, "BETTER_AUTH_SECRET">,
   steps: readonly ObservedStep[]
 ): Promise<void> => {
   const observed = checked(z.array(observedStepSchema), steps);
@@ -6364,17 +6401,33 @@ export const recordEvents = async (
     // oxlint-disable-next-line no-await-in-loop -- one person at a time
     const [membership, memberTeams] = await db.batch(memberReads(db, personId));
     const member = memberFrom(personId, membership, memberTeams);
-    teamsOf.set(
-      personId,
-      member === undefined ? [] : member.teams.map(({ id }) => teamGroup(id))
-    );
+    teamsOf.set(personId, member?.teams.map(({ id }) => id) ?? []);
   }
+  const large = await teamsOfAtLeast(
+    env.DB,
+    [...new Set([...teamsOf.values()].flat())],
+    minTeamShown
+  );
+  const [keyKey, itemKey] = await Promise.all([
+    derivedHmacKey(env, eventKeyPurpose, ["sign"]),
+    derivedHmacKey(env, eventItemPurpose, ["sign"]),
+  ]);
   const events: NewEvent[] = [];
   for (const { key, personId, step, item, at } of observed) {
-    // oxlint-disable-next-line no-await-in-loop -- one hash at a time
-    const hashed = item === null ? null : await sha256Hex(item);
-    for (const team of teamsOf.get(personId) ?? []) {
-      events.push({ key, team, step, item: hashed, at: at.toISOString() });
+    // oxlint-disable-next-line no-await-in-loop -- one MAC at a time
+    const marked = item === null ? null : await macOf(itemKey, item);
+    for (const teamId of teamsOf.get(personId) ?? []) {
+      if (large.has(teamId)) {
+        const team = teamGroup(teamId);
+        events.push({
+          // oxlint-disable-next-line no-await-in-loop -- one MAC at a time
+          key: await macOf(keyKey, JSON.stringify([key, team])),
+          team,
+          step,
+          item: marked,
+          at: at.toISOString(),
+        });
+      }
     }
   }
   for (let start = 0; start < events.length; start += eventsPerAddMax) {

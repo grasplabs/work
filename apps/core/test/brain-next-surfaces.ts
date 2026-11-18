@@ -4322,20 +4322,18 @@ export const coreProbes = {
         },
         about
       );
-    const marked = markers.map((marker) =>
-      stepOf(personId, `Sent ${marker}`, marker)
-    );
+    const marked = markers.map((marker) => stepOf(personId, marker, marker));
     return [
       await record("the reader's marked steps", marked, "hidden"),
       await record("the same steps again", marked, "hidden"),
       await record(
         "a step of someone who is no member",
-        [stepOf(stranger(), "Sent", null)],
+        [stepOf(stranger(), "mail.send", null)],
         "nothing"
       ),
       await record("a marked step dated after now", [
         {
-          ...stepOf(personId, `Sent ${markers.join(" ")}`, null),
+          ...stepOf(personId, markers[0] ?? "mail.send", null),
           at: new Date(Date.now() + 86_400_000),
         },
       ]),
@@ -4344,7 +4342,7 @@ export const coreProbes = {
       ]),
       await record("a step of no one", [stepOf("", markers.join(" "), null)]),
       await record("a step at no time", [
-        { ...stepOf(personId, "Sent", null), at: markers.join(" ") },
+        { ...stepOf(personId, "mail.send", null), at: markers.join(" ") },
       ]),
     ];
   },
@@ -4353,7 +4351,7 @@ export const coreProbes = {
       {
         key: crypto.randomUUID(),
         personId,
-        step: `Sent ${markers.join(" ")}`.slice(0, 256),
+        step: markers[0] ?? "mail.send",
         item: markers.join(" "),
         at: new Date(),
       },
