@@ -1,9 +1,11 @@
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { eraseOwedOnboardingSources } from "../src/onboarding/new-brain.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { proposerOf } from "../src/opportunities.ts";
 import { mockIdp } from "./idp.ts";
 import {
   aloneInTheStore,
@@ -147,6 +149,9 @@ const keptAt = async (evidence: string): Promise<number> => {
   return row?.kept ?? 0;
 };
 
+/** Past the claim on a proposal being asked (five minutes). */
+const proposeClaimPastMs = 5 * 60_000 + 1000;
+
 /** Past the first back-off of a proposal that failed (a minute). */
 const pastFirstRetryMs = 61_000;
 
@@ -244,6 +249,103 @@ describe("opportunities", { timeout: 120_000 }, () => {
       tooSoon: 0,
       later: 1,
       form: "skill",
+    });
+  });
+
+  it("ask a proposal given up again once an admin lists, by the alarm and not the list", async () => {
+    const { ids } = await drawnTeam();
+    const { api } = await signedInApi(idp, "admin");
+    const start = Date.now();
+    // The model fails through every retry: a minute, five and thirty.
+    let at = start;
+    for (const wait of [0, 61_000, 301_000, 1_801_000]) {
+      at += wait;
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      await proposed([], at);
+    }
+    const givenUp = await proposed(
+      [proposing({ form: "skill", systems: [] })],
+      at + 24 * 60 * 60 * 1000
+    );
+    const listed = await ticketsOf(api, ids);
+    const asked = await proposed([proposing({ form: "skill", systems: [] })]);
+    const after = await ticketsOf(api, ids);
+    expect({
+      givenUp: givenUp.calls,
+      listCalls: listed.asked,
+      asked: asked.calls,
+      form: after.tickets?.form,
+    }).toStrictEqual({ givenUp: 0, listCalls: 0, asked: 1, form: "skill" });
+  });
+
+  it("neither ask a proposal twice at once nor lose it when the store stops mid-call", async () => {
+    const { ids } = await drawnTeam();
+    const { api } = await signedInApi(idp, "admin");
+    const store = onboardingStore(env);
+    const gate = Promise.withResolvers<boolean>();
+    const reached = Promise.withResolvers<boolean>();
+    // The model is asked and holds its answer; the store stops meanwhile.
+    const held = answeringWith(
+      async () => {
+        reached.resolve(true);
+        await gate.promise;
+        return proposing({ form: "workflow", systems: [] });
+      },
+      async () => await store.proposeNext()
+    ).catch(() => "stopped");
+    await reached.promise;
+    await runInDurableObject(store, (_instance, state) => {
+      state.abort("Stopped by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the stop.
+    });
+    gate.resolve(true);
+    await held;
+    // Started again: still claimed, so nothing is asked now.
+    const again = await proposed([proposing({ form: "app", systems: [] })]);
+    // Past the claim, it is asked, and kept.
+    const later = await proposed(
+      [proposing({ form: "app", systems: [] })],
+      Date.now() + proposeClaimPastMs
+    );
+    const { tickets } = await ticketsOf(api, ids);
+    expect({
+      again: again.calls,
+      later: later.calls,
+      form: tickets?.form,
+    }).toStrictEqual({ again: 0, later: 1, form: "app" });
+  });
+
+  it("ask which routines are owed a proposal in one bound value, however many there are", async () => {
+    const sources = Array.from({ length: 150 }, () => crypto.randomUUID());
+    const bound: number[] = [];
+    const db = new Proxy(env.DB, {
+      get: (target, name): unknown => {
+        const member: unknown = Reflect.get(target, name);
+        if (name !== "prepare" || typeof member !== "function") {
+          return typeof member === "function" ? member.bind(target) : member;
+        }
+        return (query: string) => {
+          const statement = target.prepare(query);
+          return new Proxy(statement, {
+            get: (inner, key): unknown => {
+              const value: unknown = Reflect.get(inner, key);
+              if (key === "bind" && typeof value === "function") {
+                return (...values: unknown[]) => {
+                  bound.push(values.length);
+                  return inner.bind(...values);
+                };
+              }
+              return typeof value === "function" ? value.bind(inner) : value;
+            },
+          });
+        };
+      },
+    });
+    const owed = await proposerOf({ ...env, DB: db }).owed(sources);
+    expect({ owed: owed.length, mostBound: Math.max(...bound) }).toStrictEqual({
+      owed: 150,
+      mostBound: 1,
     });
   });
 

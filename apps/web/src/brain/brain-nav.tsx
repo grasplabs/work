@@ -1,4 +1,4 @@
-import { isAdmin } from "@grasp-os/shared/roles";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import {
   PageSidebar,
   PageSidebarBody,
@@ -359,7 +359,7 @@ export const BrainNav = ({
   });
   // Opportunities are an admin's (GRA-1750): nobody else gets the link.
   const { identity } = useRouteContext({ from: "/_shell" });
-  const admin = isAdmin(identity.role);
+  const admin = isMemberAdmin(identity);
   const onOpportunities = Boolean(matchRoute({ to: "/brain/opportunities" }));
   const opportunitiesLabel = t({
     message: "Opportunities",

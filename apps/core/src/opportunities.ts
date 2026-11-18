@@ -7,7 +7,7 @@ import type {
 } from "@grasp-os/shared/opportunities";
 import { requireAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -336,7 +336,11 @@ export const proposerOf = (env: Env): Proposer => ({
     const kept = await drizzle(env.DB)
       .select({ evidence: opportunityProposals.evidence })
       .from(opportunityProposals)
-      .where(inArray(opportunityProposals.evidence, [...sources]));
+      // Every id as one bound parameter: D1 binds at most 100 to a
+      // statement, and a company can have more routines than that.
+      .where(
+        sql`${opportunityProposals.evidence} IN (SELECT value FROM json_each(${JSON.stringify(sources)}))`
+      );
     const has = new Set(kept.map(({ evidence }) => evidence));
     return sources.filter((source) => !has.has(source));
   },
@@ -372,7 +376,11 @@ export const listOpportunities = async (
   // drawing's readers, onboarding/new-brain.ts): read here by the store's
   // own rule for what stands, which the Brain is handed, for an admin, who
   // is one.
-  const drawings = await onboardingStore(env).standingDrawings();
+  const store = onboardingStore(env);
+  // An admin looking makes every proposal given up owed again: the
+  // onboarding's alarm asks it once more, as before, never this request.
+  await store.proposalsWanted();
+  const drawings = await store.standingDrawings();
   const kept = await keptOf(env);
   const listed = await listApps(env, admin);
   const appNames = new Map(listed.map(({ id, name }) => [String(id), name]));

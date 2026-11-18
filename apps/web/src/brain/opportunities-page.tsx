@@ -116,9 +116,10 @@ const FormBadge = ({ form }: { form: OpportunityForm | null }) => {
 
 /** One figure of an opportunity, with what it counts under it. */
 const Figure = ({ value, label }: { value: number | null; label: string }) => (
-  <div className="flex flex-col gap-1">
+  // The term first, as a description list reads; shown under its figure.
+  <div className="flex flex-col-reverse gap-1">
+    <dt className="text-muted-foreground text-xs">{label}</dt>
     <Stat render={<dd />}>{value === null ? "–" : formatDecimal(value)}</Stat>
-    <dt className="text-muted-foreground order-last text-xs">{label}</dt>
   </div>
 );
 

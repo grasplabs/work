@@ -2731,7 +2731,9 @@ export class Onboarding extends DurableObject<Env> {
       if (!due || drawing === null) {
         continue;
       }
-      // Claimed before it is asked: past the longest a model call takes.
+      // Claimed before it is asked, past the longest a model call takes:
+      // stored before the call goes out, so a store stopped meanwhile finds
+      // it claimed and asks it again only once the claim runs out.
       this.#db
         .insert(drawFailures)
         .values({
@@ -2774,6 +2776,28 @@ export class Onboarding extends DurableObject<Env> {
       }
     }
     return asked;
+  }
+
+  /**
+   * Makes every proposal given up (`proposeNext`) owed again, and sets the
+   * alarm to ask it: for an admin opening the opportunities, as a provider
+   * that was down when routines were noted may answer now. Asked with the
+   * same back-off as before, by the alarm, never by the caller.
+   */
+  async proposalsWanted(now: number = Date.now()): Promise<void> {
+    const given = this.#db
+      .delete(drawFailures)
+      .where(
+        and(
+          like(drawFailures.item, "propose:%"),
+          gt(drawFailures.tries, drawRetryMs.length)
+        )
+      )
+      .returning({ item: drawFailures.item })
+      .all();
+    if (given.length > 0) {
+      await this.#alarmBy(now + drawNextMs);
+    }
   }
 
   async #intakeDue(now: number): Promise<string | null> {
