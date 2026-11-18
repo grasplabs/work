@@ -54,6 +54,8 @@ import { Collapsible } from "../grasp/collapsible/index.ts";
 import { focus } from "../grasp/focus/focus.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import { Brain as BrainMark } from "../grasp/icons/index.ts";
+import { InspectorPanel } from "../grasp/inspector-panel/index.ts";
+import { KeyValueList } from "../grasp/key-value/index.ts";
 import {
   Tabs,
   TabsContent,
@@ -197,6 +199,7 @@ const styles = stylex.create({
     paddingTop: grasp.space4,
   },
   knowledge: { paddingInline: grasp.space6 },
+  conceptPanel: { flexGrow: 1, minHeight: 0 },
 });
 
 /** A name in a property: a chip for a note, or plain words. */
@@ -501,15 +504,11 @@ const mergeRows = (rows: DetailRow[]): DetailRow[] => {
  * its kind. What names it says on hover where: the sentence of a conversation, or the property of
  * a page. Long rows are capped behind "+N".
  */
-const DetailRows = ({
-  note,
-  byId,
-  workspace,
-}: {
-  note: Note;
-  byId: Map<string, Note>;
-  workspace: Workspace;
-}) => {
+const useDetailRows = (
+  note: Note,
+  byId: Map<string, Note>,
+  workspace: Workspace
+): DetailRow[] => {
   const { t } = useLingui();
   // What the article already shows: how many of each kind were said (the tabs over the statements).
   // A team's roles stay: its banner shows its interviewees or its drawing, not the roster's roles.
@@ -639,9 +638,19 @@ const DetailRows = ({
   );
   // What the note is first, then its work, then where it comes from and what is open.
   const order: DetailGroup[] = ["about", "work", "context"];
-  const sorted = order.flatMap((group) =>
-    rows.filter((row) => row.group === group)
-  );
+  return order.flatMap((group) => rows.filter((row) => row.group === group));
+};
+
+const DetailRows = ({
+  note,
+  byId,
+  workspace,
+}: {
+  note: Note;
+  byId: Map<string, Note>;
+  workspace: Workspace;
+}) => {
+  const sorted = useDetailRows(note, byId, workspace);
   return (
     <div {...stylex.props(styles.details)}>
       {sorted.map((row) => (
@@ -877,6 +886,87 @@ const NoteBody = ({
   );
 };
 
+/** Concept B: the note's side as the library's inspector. */
+const ConceptInspector = ({
+  note,
+  byId,
+  workspace,
+}: {
+  note: Note;
+  byId: Map<string, Note>;
+  workspace: Workspace;
+}) => {
+  const { t } = useLingui();
+  const navigateTo = useNavigate();
+  const detailRows = useDetailRows(note, byId, workspace);
+  const timelineRows = note.timeline.map((entry, index) => ({
+    id: `${entry.date}-${index}`,
+    name: entry.title,
+    detail: formatDay(entry.date),
+  }));
+  return (
+    <InspectorPanel
+      aria-label={t`Details`}
+      layout={styles.conceptPanel}
+      sections={[
+        ...detailRows.map((row) => ({
+          id: row.label,
+          label: row.label,
+          rows: row.refs.map((ref, at) => ({
+            id: `${ref.to ?? ref.label}-${at}`,
+            name: ref.label,
+            ...(ref.to === undefined
+              ? {}
+              : {
+                  onPress: () => {
+                    void navigateTo({
+                      to: "/brain/$noteId",
+                      params: { noteId: ref.to ?? "" },
+                    });
+                  },
+                }),
+          })),
+        })),
+        ...(timelineRows.length > 0
+          ? [{ id: "timeline", label: t`Timeline`, rows: timelineRows }]
+          : []),
+      ]}
+      title={note.title}
+    />
+  );
+};
+
+/** Concept C: the details as facts under the title, the timeline folded below. */
+const ConceptColumn = ({
+  note,
+  byId,
+  workspace,
+}: {
+  note: Note;
+  byId: Map<string, Note>;
+  workspace: Workspace;
+}) => {
+  const { t } = useLingui();
+  const detailRows = useDetailRows(note, byId, workspace);
+  const events = note.timeline.length;
+  return (
+    <>
+      <KeyValueList
+        divided
+        items={detailRows.map((row) => ({
+          key: row.label,
+          value: row.refs.map((ref) => ref.label).join(", "),
+        }))}
+      />
+      {events > 0 || note.open.length > 0 ? (
+        <Fold count={events} title={t`Timeline`}>
+          <Timeline note={note} />
+        </Fold>
+      ) : null}
+    </>
+  );
+};
+
 /** One note's page, but the company's: its article, and its details and timeline at the side. */
 const NoteContent = ({
   note,
@@ -932,6 +1022,9 @@ const NoteContent = ({
     : undefined;
   const kern = kernOf(note.id, statements);
   const events = note.timeline.length;
+  // Concepts for Ruben: ?concept=b (the library's inspector) or ?concept=c (one column).
+  const { concept } = Route.useSearch();
+
   // A page such as a source folder's has no properties or links of its own: its timeline lists what it holds.
   const details = note.points.length > 0 || note.linked.length > 0;
   const timeline = events > 0 || note.open.length > 0;
@@ -976,8 +1069,17 @@ const NoteContent = ({
       : []),
   ];
 
+  const inspector =
+    concept === "b" ? (
+      <ConceptInspector byId={byId} note={note} workspace={workspace} />
+    ) : undefined;
+  const oneColumn =
+    concept === "c" ? (
+      <ConceptColumn byId={byId} note={note} workspace={workspace} />
+    ) : null;
   return (
     <NoteArticle
+      side={inspector}
       footer={note.mentions.length > 0 ? <Mentions note={note} /> : undefined}
       header={
         <BannerHeader
@@ -986,9 +1088,10 @@ const NoteContent = ({
           sticker={stickerOf(note, source)}
         />
       }
-      tabs={tabs}
+      tabs={concept === "b" || concept === "c" ? [] : tabs}
       toolbar={<NoteToolbar note={note} onForget={onForget} source={source} />}
     >
+      {oneColumn}
       <NoteBody
         activeId={activeId}
         byId={byId}
@@ -1105,10 +1208,14 @@ const NotePage = () => {
 
 export const Route = createFileRoute("/_shell/brain/$noteId")({
   // `?knowledge` opens a piece of work on what Grasp knows about it.
-  validateSearch: (search: Record<string, unknown>): { knowledge?: true } =>
-    search.knowledge === true || search.knowledge === "true"
-      ? { knowledge: true }
-      : {},
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { knowledge?: true; concept?: string } => ({
+    ...(search.knowledge === true || search.knowledge === "true"
+      ? { knowledge: true as const }
+      : {}),
+    ...(typeof search.concept === "string" ? { concept: search.concept } : {}),
+  }),
   // The note's transcript, when its source has one: `brain.read`, which the
   // layout read, says only how many turns it has.
   loader: async ({

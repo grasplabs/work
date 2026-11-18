@@ -68,6 +68,14 @@ const styles = stylex.create({
     borderTopStyle: "solid",
     borderTopColor: grasp.line,
   },
+  sideOverride: {
+    display: { default: "none", [WIDE]: "flex" },
+    flexDirection: "column",
+    minHeight: 0,
+    flexShrink: 0,
+    width: grasp.inspectorWidth,
+    padding: grasp.space3,
+  },
   side: {
     display: { default: "none", [WIDE]: "flex" },
     flexDirection: "column",
@@ -97,12 +105,15 @@ export const NoteArticle = ({
   children,
   tabs,
   footer,
+  side: sideOverride,
 }: {
   toolbar: ReactNode;
   header: ReactNode;
   children: ReactNode;
   tabs: SideTab[];
   footer?: ReactNode;
+  /** A concept's own side, in place of the tabs. */
+  side?: ReactNode;
 }) => {
   // The tab beside the note: the first, or the one picked.
   const [side, setSide] = useState<string>();
@@ -127,6 +138,9 @@ export const NoteArticle = ({
           )}
         </div>
       </article>
+      {sideOverride === undefined ? null : (
+        <div {...stylex.props(styles.sideOverride)}>{sideOverride}</div>
+      )}
       {tabs.length === 0 ? null : (
         <aside {...stylex.props(styles.side)}>
           <Tabs
