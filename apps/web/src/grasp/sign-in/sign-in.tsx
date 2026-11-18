@@ -11,6 +11,15 @@
 //   <SignIn providers={providers} staff notice="ended" />       sent back: one line over the buttons
 //   <SignIn providers={[]} page="staff" />                      the staff page
 //
+// Dark only: it draws on its own night in both themes, its controls in the light and dark schemes
+// the tokens give through `light-dark()`. The host's CSS pipeline must let `light-dark()` reach the
+// browser as written: a build step that settles it once at the root (lightningcss does, for older
+// browsers) draws the light theme's ink on the night.
+//
+// The order of a press: `onPress` at once, then the door opens (duration-arrive, at once under
+// reduced motion), then the chosen way fades too, and the page goes: the way's `onSelect`, else
+// `onChoose`, else its `href`.
+//
 // Parts: Button (quiet, in the light scheme: the website's plain white), Alert, Text, Link, Icon and
 // the brands' own marks. Every word is the catalogue's `signIn` (words.ts), and the `words` prop
 // replaces any of them. Every value is a token (src/tokens).
@@ -34,6 +43,7 @@ import { ArrowRight, BrandGrasp, Icon } from "../icons";
 import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import { Link } from "../link/link";
+import { simply } from "../motion/simply.stylex";
 import { Text } from "../text/text";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { useWords } from "../words/words";
@@ -117,6 +127,12 @@ export interface SignInProps {
    * @default "grasp-sign-in-last"
    */
   rememberKey?: string;
+  /**
+   * A way in was pressed (`"staff"` for staff's way), at the press, before the door opens: time to
+   * ask the server for the provider's address while the way out plays. The order is `onPress`, then
+   * the door, then the way's own `onSelect`, else `onChoose`, else its `href`.
+   */
+  onPress?: (id: string) => void;
   /**
    * A way in was chosen and the door has opened (`"staff"` for staff's way), for a way with no
    * `onSelect` of its own. Without either, the page goes to the way's `href`.
@@ -224,24 +240,54 @@ const styles = stylex.create({
     gap: grasp.space2,
     [iconVars.size]: grasp.iconSm,
   },
+  // The middle, centred on the page: an unseen room over the title as tall as why someone is back,
+  // the title, why someone is back, then the ways. The two rooms open together, so the title keeps
+  // its place whether a line stands under it or not, and only the ways move down to make room.
+  // A line that arrives or goes while the page stands opens or closes its rooms over the UI's time
+  // (simply.ui; at once under reduced motion): nothing jumps.
   middle: {
     display: "grid",
     alignContent: "center",
     justifyItems: "center",
-    gap: grasp.space10,
     width: "100%",
     maxWidth: grasp.signInColumn,
     marginInline: "auto",
     paddingBlock: grasp.space24,
   },
-  head: { display: "grid", justifyItems: "center", gap: grasp.space3 },
-  // Why someone is back stands with the ways it is about, closer than the title.
-  act: {
+  head: {
     display: "grid",
     justifyItems: "center",
-    gap: grasp.space5,
-    width: "100%",
+    gap: grasp.space3,
+    marginBlockEnd: grasp.space10,
   },
+  // A room that opens: one row, from none of its content's height to all of it (0fr to 1fr of a box
+  // whose own height is its content's), its content cut while it is shorter.
+  room: {
+    display: "grid",
+    gridTemplateRows: "0fr",
+    width: "100%",
+    transitionProperty: "grid-template-rows",
+    transitionDuration: simply.ui,
+    transitionTimingFunction: grasp.ease,
+  },
+  roomOpen: { gridTemplateRows: "1fr" },
+  // Why someone is back stands with the ways it is about, closer than the title.
+  roomInner: {
+    display: "grid",
+    justifyItems: "center",
+    width: "100%",
+    minHeight: 0,
+    overflow: "hidden",
+  },
+  roomWords: {
+    display: "grid",
+    justifyItems: "center",
+    width: "100%",
+    paddingBlockEnd: grasp.space5,
+  },
+  // The room over the title: the same line, unseen, so it is exactly as tall.
+  mirror: { visibility: "hidden" },
+  act: { display: "grid", justifyItems: "center", width: "100%" },
   // The ways in: the website's plain white, which is the quiet button in the light scheme.
   ways: {
     display: "grid",
@@ -337,6 +383,8 @@ interface Way {
   words: string;
   icon: IconData;
   staff: boolean;
+  /** Where it goes: given, the way is a link, so it still goes with scripts off. */
+  href: string | undefined;
 }
 
 /** The page's title: the sign-in page's, the staff page's or the guest page's. */
@@ -369,7 +417,7 @@ const go = (
 /** The ways this page offers, the one used last time first. */
 const waysOf = (
   providers: readonly SignInProvider[],
-  staff: boolean,
+  staff: { shown: boolean; href: string | undefined },
   words: SignInWords,
   last: string
 ): Way[] => {
@@ -380,8 +428,9 @@ const waysOf = (
       words: words.way(provider.name),
       icon: provider.icon,
       staff: false,
+      href: provider.href,
     })),
-    ...(staff
+    ...(staff.shown
       ? [
           {
             id: "staff",
@@ -389,6 +438,7 @@ const waysOf = (
             words: words.staff,
             icon: BrandGrasp,
             staff: true,
+            href: staff.href,
           },
         ]
       : []),
@@ -400,6 +450,8 @@ interface WaysProps {
   ways: readonly Way[];
   /** A press is playing the way out: every way but the chosen one fades. */
   gone: boolean;
+  /** The door has opened: the chosen way fades too, and the open door stands alone. */
+  opened: boolean;
   last: string;
   leaving: string | undefined;
   offline: boolean;
@@ -412,6 +464,7 @@ interface WaysProps {
 const SignInWays = ({
   ways,
   gone,
+  opened,
   last,
   leaving,
   offline,
@@ -420,59 +473,71 @@ const SignInWays = ({
   aim,
 }: WaysProps) => (
   <div {...stylex.props(styles.ways)}>
-    {ways.map((way) => (
-      <div
-        key={way.id}
-        data-way={way.id}
-        data-last-used={way.id === last ? "" : undefined}
-        onPointerEnter={() => {
-          aim(true);
-        }}
-        onPointerLeave={() => {
-          aim(false);
-        }}
-        onFocus={() => {
-          aim(true);
-        }}
-        onBlur={() => {
-          aim(false);
-        }}
-        data-theme="light"
-        {...stylex.props(
-          styles.way,
-          styles.white,
-          styles.fades,
-          gone && leaving !== way.id && styles.gone
-        )}
-      >
-        <Button
-          variant="quiet"
-          size="lg"
-          icon={way.icon}
-          status={leaving === way.id ? "working" : "idle"}
-          workingLabel={words.leaving(way.name)}
-          doneLabel={words.opened}
-          failedLabel={words.notOpened}
-          disabled={offline || (leaving !== undefined && leaving !== way.id)}
-          layout={styles.wide}
-          onClick={(event: MouseEvent<HTMLElement>) => {
-            choose(way.id, event);
+    {ways.map((way) => {
+      const off = offline || (leaving !== undefined && leaving !== way.id);
+      return (
+        <div
+          key={way.id}
+          data-way={way.id}
+          data-last-used={way.id === last ? "" : undefined}
+          onPointerEnter={() => {
+            aim(true);
           }}
+          onPointerLeave={() => {
+            aim(false);
+          }}
+          onFocus={() => {
+            aim(true);
+          }}
+          onBlur={() => {
+            aim(false);
+          }}
+          data-theme="light"
+          {...stylex.props(
+            styles.way,
+            styles.white,
+            styles.fades,
+            gone && (opened || leaving !== way.id) && styles.gone
+          )}
         >
-          {way.words}
-        </Button>
-        {way.id === last && (
-          <>
-            <span aria-hidden="true" {...stylex.props(styles.ring)} />
-            <span {...stylex.props(styles.tag)}>
-              <Badge tone="success" size="sm">
-                {words.lastUsed}
-              </Badge>
-            </span>
-          </>
-        )}
-      </div>
-    ))}
+          <Button
+            variant="quiet"
+            size="lg"
+            icon={way.icon}
+            status={leaving === way.id ? "working" : "idle"}
+            workingLabel={words.leaving(way.name)}
+            doneLabel={words.opened}
+            failedLabel={words.notOpened}
+            disabled={off}
+            // Never a second line: in a box narrower than a phone the words end in an ellipsis.
+            truncate
+            // A way with an address is a link, so it goes even with scripts off; with them, the press
+            // is held back (choose) while the door plays. Out of use, it is no link at all.
+            render={
+              way.href === undefined || off ? undefined : (
+                <a href={way.href} aria-label={way.words} />
+              )
+            }
+            layout={styles.wide}
+            onClick={(event: MouseEvent<HTMLElement>) => {
+              choose(way.id, event);
+            }}
+          >
+            {way.words}
+          </Button>
+          {way.id === last && (
+            <>
+              <span aria-hidden="true" {...stylex.props(styles.ring)} />
+              <span {...stylex.props(styles.tag)}>
+                <Badge tone="success" size="sm">
+                  {words.lastUsed}
+                </Badge>
+              </span>
+            </>
+          )}
+        </div>
+      );
+    })}
   </div>
 );
 
@@ -525,19 +590,79 @@ interface NoticeProps {
   notice: SignInNotice;
   words: SignInWords;
   gone: boolean;
+  /** A copy that only keeps room (over the title, or a line folding away): no live role. */
+  silent?: boolean;
 }
 
 /** Why someone is back, in one line over the buttons: plain, said politely; a refusal, at once. */
-const SignInNoticeLine = ({ notice, words, gone }: NoticeProps) => {
+const SignInNoticeLine = ({
+  notice,
+  words,
+  gone,
+  silent = false,
+}: NoticeProps) => {
   const said = noticeOf(notice, words.notices);
+  const live = said.plain ? "polite" : "assertive";
   return (
     <div {...stylex.props(styles.notice, styles.fades, gone && styles.gone)}>
       <Alert
         tone={said.plain ? "neutral" : "attention"}
-        live={said.plain ? "polite" : "assertive"}
+        live={silent ? "off" : live}
       >
         {said.words}
       </Alert>
+    </div>
+  );
+};
+
+interface NoticeRoomProps {
+  /** Why someone is back now; none once it has gone. */
+  notice: SignInNotice | undefined;
+  /** The last line said, kept while its room closes. */
+  said: SignInNotice | undefined;
+  words: SignInWords;
+  gone: boolean;
+  /** The unseen copy over the title, only keeping room. */
+  mirror?: boolean;
+}
+
+/**
+ * A room for why someone is back, that opens to its line's height and closes again (simply.ui). The
+ * one under the title holds the line; the one over it holds an unseen copy, so the title stays put.
+ */
+const NoticeRoom = ({
+  notice,
+  said,
+  words,
+  gone,
+  mirror = false,
+}: NoticeRoomProps) => {
+  // The line itself, heard; a copy (over the title, or a line folding away) only keeps room.
+  const live = !mirror && notice !== undefined;
+  const line =
+    said === undefined ? null : (
+      <SignInNoticeLine
+        notice={live ? notice : said}
+        words={words}
+        gone={mirror ? false : gone}
+        silent={!live}
+      />
+    );
+  return (
+    <div
+      inert={mirror || !live}
+      aria-hidden={mirror || !live ? true : undefined}
+      {...stylex.props(
+        styles.room,
+        notice !== undefined && styles.roomOpen,
+        mirror && styles.mirror
+      )}
+    >
+      <div {...stylex.props(styles.roomInner)}>
+        {line === null ? null : (
+          <div {...stylex.props(styles.roomWords)}>{line}</div>
+        )}
+      </div>
     </div>
   );
 };
@@ -551,6 +676,7 @@ export const SignIn = ({
   leaving: leavingGiven,
   lastUsed,
   rememberKey = lastUsedKey,
+  onPress,
   onChoose,
   staffHref,
   organisation,
@@ -569,6 +695,8 @@ export const SignIn = ({
   const { canvas, door } = useDoor(plain, still);
   // A press leaves for the provider: that button works while the door opens, the rest fades.
   const [pressed, setPressed] = useState<string>();
+  // The door has opened at the chosen way: that way fades too, and the page leaves.
+  const [opened, setOpened] = useState(false);
   const [aimed, setAimed] = useState(false);
   const leaving = pressed ?? leavingGiven;
   // A kept provider that is no longer offered is no "Last used".
@@ -579,22 +707,31 @@ export const SignIn = ({
   const staffOnly = page === "staff";
   const ways = waysOf(
     staffOnly ? [] : providers,
-    staff || staffOnly,
+    { shown: staff || staffOnly, href: staffHref },
     words,
     last
   );
   // Only a press plays the way out; `leaving` from the host shows the state, everything still there.
   const gone = pressed !== undefined;
+  // Why someone is back, kept after it goes, so its room closes with its words in it.
+  const [said, setSaid] = useState<SignInNotice | undefined>(notice);
+  if (notice !== undefined && notice !== said) {
+    setSaid(notice);
+  }
   const choose = (id: string, event: MouseEvent<HTMLElement>) => {
+    // A way that is a link waits for the door; the page goes when it has opened (go).
+    event.preventDefault();
     if (leaving !== undefined) {
       return;
     }
     setPressed(id);
     setAimed(false);
+    onPress?.(id);
     if (id !== "staff") {
       writeLastUsed(rememberKey, id);
     }
     const done = () => {
+      setOpened(true);
       go(
         providers.find((provider) => provider.id === id),
         id === "staff" ? staffHref : undefined,
@@ -647,22 +784,28 @@ export const SignIn = ({
       />
       <SignInTop words={words} backHref={backHref} gone={gone} />
       <div {...stylex.props(styles.middle)}>
+        <NoticeRoom
+          notice={notice}
+          said={said}
+          words={words}
+          gone={gone}
+          mirror
+        />
         <div {...stylex.props(styles.head, styles.fades, gone && styles.gone)}>
           {organisation}
           <Heading level={1} size="xl" id={titleId}>
             {titleOf(page, words)}
           </Heading>
         </div>
+        <NoticeRoom notice={notice} said={said} words={words} gone={gone} />
         <div {...stylex.props(styles.act)}>
-          {notice !== undefined && (
-            <SignInNoticeLine notice={notice} words={words} gone={gone} />
-          )}
           {page === "guest" ? (
             children
           ) : (
             <SignInWays
               ways={ways}
               gone={gone}
+              opened={opened}
               last={last}
               leaving={leaving}
               offline={notice === "offline"}
