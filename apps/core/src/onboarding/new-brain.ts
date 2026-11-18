@@ -5,6 +5,7 @@ import { erasureBegun } from "../brain-hand-overs.ts";
 import { addSource, eraseSource } from "../brain-next.ts";
 import type { Filed, Handed, SourceReaders, SourceRef } from "../brain-next.ts";
 import { eraseOpportunitiesOn } from "../opportunities.ts";
+import { opinionSource } from "./company-opinions.ts";
 import { drawingText, routineFacts } from "./routine.ts";
 import { onboardingStore } from "./store.ts";
 import type { OwedErasure, StandingDrawing } from "./store.ts";
@@ -200,6 +201,25 @@ export const drawingOf = async (env: Env, id: string): Promise<Handed> => {
       };
 };
 
+/**
+ * Opinion `id` of the company's as the onboarding holds it now: its
+ * sentence alone, never a team nor who or how many back it, for every
+ * member reading as themselves (`members`, as a claim: never code);
+ * nothing once it no longer stands (GRA-1987).
+ */
+export const opinionOf = async (env: Env, id: string): Promise<Handed> => {
+  const held = await onboardingStore(env).opinionToHand(id);
+  return held === null
+    ? gone
+    : {
+        kind: "source",
+        change: id,
+        text: `What people across the company say: ${held.text}`,
+        whenTooLarge: "An opinion of the company's too large to keep.",
+        readers: { kind: "members" },
+      };
+};
+
 /** The kickoff's source, by the store's id for it (`kickoffBrainId`). */
 export const kickoffSource = (id: string): SourceRef => ({
   producer: "kickoff",
@@ -310,11 +330,13 @@ const erase = async (env: Env, owed: OwedErasure): Promise<void> => {
     });
     return;
   }
+  const sourceOf = {
+    claim: claimSource,
+    drawing: drawingSource,
+    opinion: opinionSource,
+  }[owed.kind];
   await eraseSource(env, {
-    source:
-      owed.kind === "claim"
-        ? claimSource(owed.source)
-        : drawingSource(owed.source),
+    source: sourceOf(owed.source),
     readers: { kind: "members" },
     reason: "deleted",
   });
