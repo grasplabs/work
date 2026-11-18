@@ -1,5 +1,6 @@
 import type { Workspace } from "@grasp-os/shared/brain";
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
+import { rosterSchema } from "@grasp-os/shared/onboarding";
 import type { SessionApi } from "@grasp-os/shared/rpc";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -70,10 +71,6 @@ const theOnboardings: { what: string; record: BrainRecordInput }[] = [
   {
     what: "an onb- id",
     record: { type: "candidate", id: "onb-st-1", name: "Tickets" },
-  },
-  {
-    what: "a roster team's record",
-    record: { type: "team", id: "x", name: "Ops", sourceId: "src-roster" },
   },
 ];
 
@@ -600,5 +597,23 @@ describe(
         expect(result).toBe("brain.record_invalid");
       }
     );
+
+    it("is the onboarding's alone: an admin can't add a team record under a staff-list team's id", async () => {
+      const admin = await signedInApi(idp, "admin");
+      // The staff list names its team by its members' team's id (GRA-2055).
+      await onboardingStore(env).saveRoster(
+        rosterSchema.parse({
+          teams: [{ id: "x", name: "Ops", lead: null }],
+          people: [{ id: "p", name: "Pat", team: "x" }],
+        }),
+        { type: "system" }
+      );
+      const result = await outcome(
+        admin.api.brain.addRecords([
+          { type: "team", id: "x", name: "Ops", sourceId: "src-roster" },
+        ])
+      );
+      expect(result).toBe("brain.record_invalid");
+    });
   }
 );
