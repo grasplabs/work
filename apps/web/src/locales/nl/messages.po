@@ -16449,6 +16449,14 @@ msgstr "Wat deze beslissing vraagt, kan nu niet worden getoond."
 msgid "What this decision asks is withheld, so you can only reject it."
 msgstr "Wat deze beslissing vraagt, wordt achtergehouden. Je kunt haar daarom alleen afwijzen."
 
+#: src/chat/held-writes.tsx
+msgid "What this would send can't be shown right now, so you can only reject it for now. Try again in a moment."
+msgstr "Wat dit zou versturen, kan nu niet worden getoond. Je kunt het daarom voorlopig alleen afwijzen. Probeer het zo nog eens."
+
+#: src/chat/held-writes.tsx
+msgid "What this would send is withheld: the run that asked for it may no longer read what it read, so you can only reject it."
+msgstr "Wat dit zou versturen, wordt achtergehouden: de run die erom vroeg, mag niet meer lezen wat hij las. Je kunt het daarom alleen afwijzen."
+
 #: src/agents/agent-wakes.tsx
 msgid "What to ask it each time"
 msgstr "Wat hem elke keer gevraagd wordt"
@@ -16491,8 +16499,16 @@ msgid "What was said is on the work it was about"
 msgstr "Wat gezegd is, staat bij het werk waar het over ging"
 
 #: src/dashboard/outcome-card.tsx
+msgid "What was sent can't be shown right now. Try again in a moment."
+msgstr "Wat is verstuurd, kan nu niet worden getoond. Probeer het zo nog eens."
+
+#: src/dashboard/outcome-card.tsx
 msgid "What was sent is no longer kept."
 msgstr "Wat is verstuurd wordt niet meer bewaard."
+
+#: src/dashboard/outcome-card.tsx
+msgid "What was sent is withheld: the run that sent it may no longer read what it read."
+msgstr "Wat is verstuurd, wordt achtergehouden: de run die het verstuurde, mag niet meer lezen wat hij las."
 
 #: src/interview/before.tsx
 msgid "What we do"

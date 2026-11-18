@@ -6,6 +6,7 @@ import {
 } from "@grasp-os/shared/connect";
 import { attachmentsProperty } from "@grasp-os/shared/connector-attachments";
 import { permissionActionSchema } from "@grasp-os/shared/permissions";
+import { syncCursorSchema, syncItemKindSchema } from "@grasp-os/shared/sync";
 import { z } from "zod";
 
 import { endpointHost, signInSchema } from "./sign-in.ts";
@@ -401,6 +402,39 @@ const maxHosts = 16;
 /** A connector's name: its package's, and its app's slug. */
 export const connectorNameSchema = z.string().regex(/^[a-z][a-z0-9-]{0,62}$/u);
 
+/** A sync's name, as core asks for it: `drive`, `gmail`, `calendar`. */
+export const syncNameSchema = z.string().regex(/^[a-z][a-z\d-]{0,63}$/u);
+
+/**
+ * A sync (sync.ts), as the manifest declares it: the kind of item it
+ * reads, and the only requests it may send, all reads.
+ */
+export const syncManifestSchema = z.strictObject({
+  kind: syncItemKindSchema,
+  routes: z
+    .array(routeSchema)
+    .min(1)
+    .max(maxRoutes)
+    .refine(
+      (routes) => routes.every(({ method }) => method === "GET"),
+      "A sync only reads: its routes are GETs"
+    ),
+});
+export type SyncManifest = z.infer<typeof syncManifestSchema>;
+
+/** The JSON-RPC method connect asks a connector for a sync page by. */
+export const syncMethod = "grasp-os/sync";
+
+/** What connect asks a connector's sync for. */
+export const syncParamsSchema = z.strictObject({
+  name: syncNameSchema,
+  /** `own`, the connection's own account, or a picked place. */
+  place: z.string().min(1).max(256),
+  /** Null for the first listing. */
+  cursor: syncCursorSchema.nullable(),
+});
+export type SyncParams = z.infer<typeof syncParamsSchema>;
+
 export const connectorManifestSchema = z
   .strictObject({
     name: connectorNameSchema,
@@ -422,6 +456,11 @@ export const connectorManifestSchema = z
     hosts: z.array(hostSchema).min(1).max(maxHosts),
     /** Each action (tool) by name, and the only requests it may send. */
     actions: z.record(permissionActionSchema, actionManifestSchema),
+    /**
+     * Each sync (sync.ts) by name, and the only requests it may send:
+     * none for a connector that syncs nothing.
+     */
+    syncs: z.record(syncNameSchema, syncManifestSchema).optional(),
   })
   .refine(
     ({ provider, signIn }) =>
@@ -445,8 +484,8 @@ export const connectorManifestSchema = z
     "The account lookup goes to one of the connector's hosts"
   )
   .refine(
-    ({ hosts, actions }) =>
-      Object.values(actions).every(({ routes }) =>
+    ({ hosts, actions, syncs = {} }) =>
+      [...Object.values(actions), ...Object.values(syncs)].every(({ routes }) =>
         routes.every(({ host }) => hosts.includes(host))
       ),
     "Every route's host must be one of the connector's hosts"

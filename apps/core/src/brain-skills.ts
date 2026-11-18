@@ -48,6 +48,15 @@ export type { SkillAt, SkillCardAt, SkillVersion } from "./brain-next.ts";
 //   shape reaches that person alone, their own chat; their teams' in the
 //   rest of their own conversation; a conversation others share gets
 //   Grasp's and the company's alone, as it recalls nothing of a team.
+//   Where a person's own skills reach (GRA-1868, the threat model on the
+//   issue): a turn they ask in their own chat in Grasp or their direct
+//   message on a chat app, and so every build, which is such a turn
+//   (Build it sends the build to the chat's agent; an App's or a
+//   workflow's page builds in its own chat). Never a run of an App or a
+//   workflow: a run's result is shown to its admins too (workflows/
+//   resource-runs.ts `resourceRunFor`), so code reads Grasp's and the
+//   company's alone (brain-recall.ts `codeSkills`); never a turn nobody
+//   asked for, a chat others share, or anyone else's chat.
 // - Needs (skill-needs.ts): a skill that declares a connection or a tool
 //   the caller doesn't hold now is never listed, selected or read: it is
 //   as if it weren't there, so nothing of it reaches the model.
