@@ -859,7 +859,9 @@ const AnswerBody = ({
     firstId === undefined ? undefined : context.worked.get(firstId);
   // The activity's line says what Grasp does once steps show, or between two
   // replies; while words arrive, they say it themselves.
-  const thought = thoughtOf(replies, partial).thoughts !== undefined;
+  // Thought, with its words or only its time (a provider that shows none).
+  const { thoughts, seconds: thoughtFor } = thoughtOf(replies, partial);
+  const thought = thoughts !== undefined || thoughtFor !== undefined;
   const activity =
     steps.length > 0 || (live && (context.checking || partial === null));
   return (

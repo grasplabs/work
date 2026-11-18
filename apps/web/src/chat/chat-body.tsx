@@ -75,8 +75,9 @@ const styles = stylex.create({
     paddingBlockStart: grasp.space2,
     paddingBlockEnd: grasp.shellPageInline,
   },
-  // On a chat's page the column is already in from the card's sides: the box is as wide as the thread.
-  footerInColumn: { paddingInline: 0 },
+  // On a chat's page the column is already in from the card's sides: the box in as far as the
+  // thread's rows are (Grasp UI's Thread, space-4), so it is as wide as the thread.
+  footerInColumn: { paddingInline: grasp.space4 },
   notice: {
     display: "flex",
     alignItems: "center",

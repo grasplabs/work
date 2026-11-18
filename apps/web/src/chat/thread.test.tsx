@@ -541,7 +541,8 @@ describe(ChatThread, () => {
               input: { query: "expense policy" },
             },
           ],
-          reasoning: { text: "Look it up.", ms: 3400 },
+          // Its time only: a provider that shows none of its words.
+          reasoning: { text: "", ms: 3400 },
           end: "done",
           at: "2026-10-27T09:00:05.000Z",
         },
@@ -561,10 +562,11 @@ describe(ChatThread, () => {
     );
 
     expect({
-      thought: thoughtLine().line,
+      // With no words to unfold, its line is words only, not a button.
+      thought: document.body.textContent.includes("Thought for 3 seconds"),
       working: workingLine(),
     }).toStrictEqual({
-      thought: "Thought for 3 seconds",
+      thought: true,
       working: "Working on it",
     });
   });

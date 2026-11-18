@@ -398,6 +398,36 @@ describe("Chat's page from Make something", () => {
     }).toStrictEqual({ waiting: true, after: false });
   });
 
+  it("says a question waits while the browser is offline, before the connection notices", async () => {
+    const confirmed = Promise.withResolvers<boolean>();
+    await shown(undefined, undefined, { confirmed: confirmed.promise });
+    await act(async () => {
+      typeIn(box(), "What waits on me today?");
+      await Promise.resolve();
+    });
+    Object.defineProperty(navigator, "onLine", {
+      configurable: true,
+      get: () => false,
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new Event("offline"));
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+    const waiting = document.body.textContent?.includes("Waiting to send.");
+    Reflect.deleteProperty(navigator, "onLine");
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+      confirmed.resolve(true);
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect(waiting).toBeTruthy();
+  });
+
   it("says in its own words that a question the connection dropped wasn't sent, never the connection's, and keeps it", async () => {
     const raw = "WebSocket closed with code 1006";
     const dropped = Promise.reject(new Error(raw));

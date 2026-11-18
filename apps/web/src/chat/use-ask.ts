@@ -9,7 +9,7 @@ import { failureText } from "@grasp-os/shared/errors";
 import type { ModelEffort, ModelEfforts } from "@grasp-os/shared/models";
 import { useLingui } from "@lingui/react/macro";
 import { useRouteContext } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 
 import { useCoreReach } from "../frame/page-failed.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -106,6 +106,24 @@ export const unsentChatFor = (
     ? unsent.id
     : undefined;
 
+/** Follows the browser's own word on whether it is online. */
+const onOnlineChange = (changed: () => void): (() => void) => {
+  window.addEventListener("online", changed);
+  window.addEventListener("offline", changed);
+  return () => {
+    window.removeEventListener("online", changed);
+    window.removeEventListener("offline", changed);
+  };
+};
+
+/** Whether the browser says it is online; on the server, yes. */
+const useOnline = (): boolean =>
+  useSyncExternalStore(
+    onOnlineChange,
+    () => navigator.onLine,
+    () => true
+  );
+
 /** What the box says under it about the question: waiting, late, or why it didn't go. */
 const questionNote = ({
   waiting,
@@ -160,7 +178,11 @@ export const useAsk = (
   // fails: while core is out of reach, the box says it waits.
   const [pending, setPending] = useState(false);
   const reach = useCoreReach();
-  const waiting = pending && reach !== undefined && reach !== "reachable";
+  // Offline, a socket that looked open can't say so for a while: the
+  // browser knows at once.
+  const online = useOnline();
+  const waiting =
+    pending && (!online || (reach !== undefined && reach !== "reachable"));
   // Why the last question didn't go: core's own words for a refusal it
   // names; ours for anything else (a dropped connection's raw text).
   const [unsentWhy, setUnsentWhy] = useState<string>();
