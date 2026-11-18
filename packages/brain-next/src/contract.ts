@@ -1,4 +1,5 @@
 import { brainQuestionMaxLength } from "@grasp-os/shared/brain-sources";
+import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import {
   instructionsMaxLength,
   isOverInstructionsLimit,
@@ -1430,6 +1431,71 @@ export const sourceRemovalSchema = z.strictObject({
   sources: z.array(sourceIdSchema).min(1).max(removalsMax),
 });
 export type SourceRemoval = z.infer<typeof sourceRemovalSchema>;
+
+/**
+ * How long the Brain keeps an event, from when it happened: 90 days, long
+ * enough to see a monthly routine three times. What is drawn from events
+ * (a routine's figures) stays; the events themselves go (`expireEvents`).
+ */
+export const eventsKeptMs = 90 * 24 * 60 * 60 * 1000;
+
+/** Most events one add takes (`Brain.addEvents`); a host with more sends a page after the other. */
+export const eventsPerAddMax = 500;
+
+/** A MAC the host makes under a key of its own (HMAC-SHA256), in hex. */
+const macSchema = z.string().regex(/^[0-9a-f]{64}$/u);
+
+/**
+ * One thing that happened (`Brain.addEvents`): which team's (a group, as
+ * the host names it, never a person), what kind of step, on which item,
+ * who took it, and when. The item is a MAC of the host's ID for it, so
+ * the Brain keeps nothing readable of it; null when the step was on none.
+ * `who` is a MAC of the person and the team, by the host's key: one
+ * person's steps in one team share it, and their steps in two teams
+ * don't. Without the host's key no tag can be computed or matched to a
+ * person; but one call makes one event in each of its person's teams,
+ * with the same step and hour, so with raw access to the store their
+ * tags in two teams can be lined up by co-occurring. Nothing answers it back; it
+ * is there so the host can erase a person's events (`eraseEvents`), and
+ * so whatever draws figures from events can count people. **A figure
+ * drawn from events may be shown only when at least five distinct `who`
+ * values stand behind it** (the host's `minTeamShown`, the floor every
+ * figure about people holds to). `key` is the host's for the event and
+ * its team, the same on every retry: one event a key and team. `at` is
+ * kept to the hour, rounded down (events.ts), so no stored time pins one
+ * call. The step's own bound is the host's (core takes it as connect's
+ * action, `permissionActionSchema`); here it is any identifier's
+ * (`identifierMaxLength`).
+ */
+export const newEventSchema = z.strictObject({
+  key: changeKeySchema,
+  team: principalSchema,
+  step: wellFormedString().min(1).max(identifierMaxLength),
+  item: macSchema.nullable(),
+  who: macSchema,
+  at: z.iso.datetime(),
+});
+export type NewEvent = z.infer<typeof newEventSchema>;
+
+/** Events to keep (`Brain.addEvents`). */
+export const newEventsSchema = z.strictObject({
+  /**
+   * Which of the host's keys made the events' keys and tags: an id of it,
+   * never the key. A call under another id than the store last saw first
+   * deletes every event and closed tag (events.ts `underKey`).
+   */
+  keyId: macSchema,
+  events: z.array(newEventSchema).min(1).max(eventsPerAddMax),
+});
+export type NewEvents = z.infer<typeof newEventsSchema>;
+
+/** A person's tags whose events to erase (`Brain.eraseEvents`): one a team. */
+export const eventErasureSchema = z.strictObject({
+  /** As `NewEvents.keyId`. */
+  keyId: macSchema,
+  who: z.array(macSchema).min(1).max(eventsPerAddMax),
+});
+export type EventErasure = z.infer<typeof eventErasureSchema>;
 
 /**
  * Whether `source` may be in `group`: its key is the group's, "/" and
@@ -3302,6 +3368,30 @@ export interface Brain {
    * answers alike whatever there was.
    */
   removeSources: (request: SourceRemoval) => Promise<void>;
+  /**
+   * Keeps events (events.ts), each once by its key and team: a repeat adds
+   * nothing. One dated later than now is kept as of now, and one already
+   * older than `eventsKeptMs`, or under a tag an erasure closed, is not
+   * kept. Under another `keyId` than last time, every event and closed tag
+   * is deleted first. Nothing reads them back: no
+   * member answers an event, so they are never in a recall, an export or
+   * a figure about one person. The shared store's alone: a person's own
+   * store refuses them.
+   */
+  addEvents: (request: NewEvents) => Promise<void>;
+  /**
+   * Deletes every event older than `eventsKeptMs`, by the store's clock.
+   * The shared store's alone. Safe to repeat.
+   */
+  expireEvents: () => Promise<void>;
+  /**
+   * Deletes every event whose `who` is one of `request.who`, and closes
+   * those tags so no later add keeps an event under one (until
+   * `eventsKeptMs` passes): a person's erasure, by their tag in each team.
+   * The shared store's alone. Safe to repeat, and answers alike whatever
+   * there was.
+   */
+  eraseEvents: (request: EventErasure) => Promise<void>;
   /**
    * Erases `person`'s own store whole, the one place what only they may
    * read is kept: everything it holds, and from then on every call is

@@ -1646,9 +1646,12 @@ const leavingNone = [
   // One read of which keys and memories an erasure took.
   "erasedOf",
   // The shared store's alone: a person's own store refuses them.
+  "addEvents",
+  "eraseEvents",
   "erasePersonShared",
   "eraseWriter",
   "erasureStatus",
+  "expireEvents",
   "exportFile",
   "exportStatus",
   "findEntities",
