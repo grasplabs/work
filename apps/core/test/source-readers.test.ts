@@ -2389,6 +2389,42 @@ describe("groups copied from the source", () => {
   );
 
   it(
+    "starts over, never goes on with, a read that stopped before asking about an address a renewal gave to someone else meanwhile",
+    setUpTime,
+    async () => {
+      const bob = await microsoftMember();
+      const [local = ""] = bob.email.split("@");
+      const { id: connectionId } = await connectedGoogle(bob);
+      // Runs too small to ask anything: his read stops with his address
+      // still to be asked about.
+      const stopped = await eventually(async () => {
+        await env.CONNECT.readReaderGroups({ requests: 4 });
+        const row = await connectDb()
+          .prepare(
+            "SELECT reader_groups_reading IS NOT NULL AS stopped FROM connections WHERE id = ?"
+          )
+          .bind(connectionId)
+          .first<{ stopped: number }>();
+        return row?.stopped === 1;
+      });
+      // Google renames his account, his old address goes to a new hire,
+      // whose groups a read by it now finds, and his token is renewed.
+      const hiresGroup = `hire-${unique()}@acme.test`;
+      await inGroups(bob.email, [hiresGroup]);
+      await googleGives(local, `${local}-renamed@acme.test`);
+      await renewedOnly(connectionId);
+      await groupsRead(connectionId);
+      const marker = uniqueWord();
+      const item = await sharedItem(marker, readersOf(googleGroup(hiresGroup)));
+
+      expect({
+        stopped,
+        bob: await finds(bob.userId, item, marker),
+      }).toStrictEqual({ stopped: true, bob: false });
+    }
+  );
+
+  it(
     "reads a person's groups across runs however many they are in, grants none until the read is whole, and reads others in between",
     setUpTime,
     async () => {
