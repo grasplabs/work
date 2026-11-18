@@ -171,8 +171,10 @@ export interface AppShellProps {
   /**
    * Opens and closes the panels from the shell's own button, when you keep `panelsOpen` with it:
    * the button then stands at the bar's row at every width, open or closed, so a closed panel
-   * always has a visible way back. Without it, the button shows only on a phone, while the panels
-   * show, to set them aside; opening closed panels is then yours (an Ask bar, a chat button).
+   * always has a visible way back. On a phone too, the button and Escape close them through this,
+   * so your count stays true for the next page. Without it, the button shows only on a phone, while
+   * the panels show, to set them aside; opening closed panels is then yours (an Ask bar, a chat
+   * button).
    */
   onPanelsOpenChange?: (open: boolean) => void;
   /** Runs once the panels have arrived and stand still. */
@@ -1225,9 +1227,10 @@ const PanelsToggle = ({
   phone: boolean;
   onOpenChange: ((open: boolean) => void) | undefined;
 }) => {
-  // On a phone with the panels shown, it sets them aside and back; otherwise, with the host's
-  // `onPanelsOpenChange`, it opens and closes them, at every width.
-  const setsAside = phone && open;
+  // With the host's `onPanelsOpenChange` it opens and closes them through the host, at every width,
+  // a phone's too, so the host's count stays true for the next page. Without it, on a phone with
+  // the panels shown, it sets them aside and back.
+  const setsAside = phone && open && onOpenChange === undefined;
   return (
     <span
       data-slot="app-shell-panels-toggle"
@@ -1806,15 +1809,20 @@ export const AppShell = ({
   const paneled = hasPanels(panels, panelsOpen);
   const place = usePanelsPlace({ paneled, covered, crowded, narrow });
   const { aside, setAside, over, guessing, phone, inertCard, under } = place;
-  // On a phone the panels are a sheet over the page: Escape sets them aside, focus on their button.
+  // On a phone the panels are a sheet over the page: Escape closes them through the host when it
+  // gave `onPanelsOpenChange`, else sets them aside; focus goes to their button.
   useEffect(() => {
     const element = shell.current;
     return phone && !aside && element !== null
       ? escapeSetsAside(element, () => {
-          setAside(true);
+          if (onPanelsOpenChange === undefined) {
+            setAside(true);
+          } else {
+            onPanelsOpenChange(false);
+          }
         })
       : undefined;
-  }, [phone, aside, setAside]);
+  }, [phone, aside, setAside, onPanelsOpenChange]);
 
   const card = (
     <ShellCard
