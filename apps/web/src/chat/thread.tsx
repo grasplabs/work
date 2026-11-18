@@ -859,9 +859,6 @@ const AnswerBody = ({
     firstId === undefined ? undefined : context.worked.get(firstId);
   // The activity's line says what Grasp does once steps show, or between two
   // replies; while words arrive, they say it themselves.
-  // Thought, with its words or only its time (a provider that shows none).
-  const { thoughts, seconds: thoughtFor } = thoughtOf(replies, partial);
-  const thought = thoughts !== undefined || thoughtFor !== undefined;
   const activity =
     steps.length > 0 || (live && (context.checking || partial === null));
   return (
@@ -874,11 +871,10 @@ const AnswerBody = ({
           words={activityWords}
           loading={live}
           workingLabel={
-            // Its thinking done (the line over it says how long), what Grasp
+            // The activity shows once the message's thinking line has become
+            // "Thought for …" (Grasp UI's ChatMessage times it): what Grasp
             // does next is work, never a second "Thinking".
-            thought &&
-            !context.checking &&
-            (context.doing ?? "thinking") === "thinking"
+            !context.checking && (context.doing ?? "thinking") === "thinking"
               ? t`Working on it`
               : context.workingLabel
           }
@@ -1184,14 +1180,10 @@ export const ChatThread = ({
     children === undefined || children === null
       ? rows
       : [...rows, { kind: "after", id: "after", children }];
-  // A question just sent goes to the top, the room under it kept for its
-  // answer: not the chat's first, which stands at the top with its day
-  // already. Taken there, its day line went above the view and the top's
-  // fade lay over it, and both came back with a jump as the answer ended.
-  const sent = running
-    ? rows.findLastIndex((row) => row.kind === "question")
-    : -1;
-  const answerTo = sent > 0 ? rows[sent]?.id : undefined;
+  // A question just sent goes to the top, the room under it kept for its answer.
+  const answerTo = running
+    ? rows.findLast((row) => row.kind === "question")?.id
+    : undefined;
   return (
     <div {...stylex.props(styles.room)}>
       <Thread

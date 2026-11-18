@@ -494,7 +494,8 @@ describe(ChatThread, () => {
 
     expect({ checking, otherwise: workingLine() }).toStrictEqual({
       checking: "Checking the App…",
-      otherwise: "Thinking",
+      // Under the message's own thinking line: work, never a second "Thinking".
+      otherwise: "Working on it",
     });
   });
 
@@ -523,7 +524,8 @@ describe(ChatThread, () => {
   });
 
   it("says one thinking line at a time: how long it thought, then that it works on, never Thinking again", async () => {
-    // It thought, then searched; the search answered and the turn runs on, no words yet.
+    // It searched; the search answered and the turn runs on, no words yet: the message's
+    // line says how long it thought (Grasp UI times it), so the activity says it works on.
     await thread(
       [
         asked,
@@ -541,8 +543,6 @@ describe(ChatThread, () => {
               input: { query: "expense policy" },
             },
           ],
-          // Its time only: a provider that shows none of its words.
-          reasoning: { text: "", ms: 3400 },
           end: "done",
           at: "2026-10-27T09:00:05.000Z",
         },
@@ -561,14 +561,7 @@ describe(ChatThread, () => {
       false
     );
 
-    expect({
-      // With no words to unfold, its line is words only, not a button.
-      thought: document.body.textContent.includes("Thought for 3 seconds"),
-      working: workingLine(),
-    }).toStrictEqual({
-      thought: true,
-      working: "Working on it",
-    });
+    expect(workingLine()).toBe("Working on it");
   });
 
   it("says under a code step each widget it made or changed on the dashboard, with the way there", async () => {
