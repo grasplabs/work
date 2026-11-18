@@ -14,7 +14,6 @@ import { GlobalChatProvider, useGlobalChat } from "../chat/global-chat.tsx";
 import { readWithin, shellStatus } from "../core-connection.ts";
 import { failingUpFront, providersOf } from "../frame/ai-key-banner.tsx";
 import { AppFrame } from "../frame/app-frame.tsx";
-import { PagePanelProvider, usePagePanelHost } from "../frame/page-panel.tsx";
 import { PageError } from "../frame/page-states.tsx";
 import {
   landingAfterSignIn,
@@ -35,22 +34,7 @@ import { signInErrorSearch } from "../sign-in-errors.ts";
  */
 const ShellFrame = () => {
   const { core, identity } = Route.useRouteContext();
-  const chat = useChatPanels();
-  // A page's inspector takes the shell's panels while it is open, docked
-  // beside the page, closed by its own head (frame/page-panel.tsx).
-  const page = usePagePanelHost();
-  const panels = page.open
-    ? {
-        ...chat,
-        panels: page.slot,
-        open: true,
-        onOpenChange: undefined,
-        placement: "docked" as const,
-        onPlacementChange: undefined,
-        covered: false,
-        onClose: page.onClose,
-      }
-    : chat;
+  const panels = useChatPanels();
   // The chat's idle bar stands at the card's foot only while the chat is
   // closed: open beside the page or floating, the foot has no bar, so the
   // page keeps no room or fade for one.
@@ -59,19 +43,17 @@ const ShellFrame = () => {
   // Chat's start has no bar: its backdrop takes the whole card.
   const chatStart = useMatchRoute()({ to: "/" }) !== false;
   return (
-    <PagePanelProvider host={page.host}>
-      <AppFrame
-        bar={chatStart ? "none" : "page"}
-        core={core}
-        dock={<ChatBar />}
-        dockShown={stage.bar}
-        failing={failing}
-        identity={identity}
-        panels={panels}
-      >
-        <Outlet />
-      </AppFrame>
-    </PagePanelProvider>
+    <AppFrame
+      bar={chatStart ? "none" : "page"}
+      core={core}
+      dock={<ChatBar />}
+      dockShown={stage.bar}
+      failing={failing}
+      identity={identity}
+      panels={panels}
+    >
+      <Outlet />
+    </AppFrame>
   );
 };
 

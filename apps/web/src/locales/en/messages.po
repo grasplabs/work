@@ -2190,6 +2190,7 @@ msgstr "Account"
 #: src/activity/audit-event.tsx
 #: src/activity/audit-log.tsx
 #: src/activity/type-labels.ts
+#: src/connections/overview-concepts.tsx
 msgid "Action"
 msgstr "Action"
 
@@ -3209,21 +3210,9 @@ msgstr "Apps"
 msgid "Apps and agents with a permission"
 msgstr "Apps and agents with a permission"
 
-#: src/connections/overview-concepts.tsx
-msgid "Apps connected to Grasp, those that need someone first."
-msgstr "Apps connected to Grasp, those that need someone first."
-
-#: src/connections/overview-concepts.tsx
-msgid "Apps Grasp can connect to."
-msgstr "Apps Grasp can connect to."
-
 #: src/workflows/files-and-apps.tsx
 msgid "Apps it works in"
 msgstr "Apps it works in"
-
-#: src/connections/overview-concepts.tsx
-msgid "Apps to add"
-msgstr "Apps to add"
 
 #: src/apps/app-settings.tsx
 #: src/apps/app-status.tsx
@@ -7452,10 +7441,6 @@ msgstr "Grasp lets it be sent once more, exactly as before, and a run waiting on
 msgid "Grasp links Stripe and sets up your plan with you."
 msgstr "Grasp links Stripe and sets up your plan with you."
 
-#: src/connections/overview-concepts.tsx
-msgid "Grasp lost access to {name}: what uses it waits until someone signs in again."
-msgstr "Grasp lost access to {name}: what uses it waits until someone signs in again."
-
 #: src/dashboard/widget-board.tsx
 msgid "Grasp made this widget for you. Taken off, it is gone for good."
 msgstr "Grasp made this widget for you. Taken off, it is gone for good."
@@ -8082,6 +8067,10 @@ msgstr "In this chat only, until you delete it. Anything it sends or changes sti
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "In this conversation"
 msgstr "In this conversation"
+
+#: src/connections/overview-concepts.tsx
+msgid "In workflows"
+msgstr "In workflows"
 
 #: src/brain/brain.ts
 msgctxt "note property: the drawn version of this workflow on the Workflows page"
@@ -9881,8 +9870,8 @@ msgid "Narrow the list"
 msgstr "Narrow the list"
 
 #: src/connections/overview-concepts.tsx
-msgid "Need someone to sign in again"
-msgstr "Need someone to sign in again"
+msgid "Need sign-in"
+msgstr "Need sign-in"
 
 #: src/chat/plan-card.tsx
 msgid "Needs {name} connected"
@@ -9900,6 +9889,14 @@ msgstr "Needs attention"
 #: src/connections/integration-item.tsx
 msgid "Needs its own sign-in app"
 msgstr "Needs its own sign-in app"
+
+#: src/connections/overview-concepts.tsx
+msgid "Needs sign-in"
+msgstr "Needs sign-in"
+
+#: src/connections/overview-concepts.tsx
+msgid "Needs sign-in. What uses it waits until then."
+msgstr "Needs sign-in. What uses it waits until then."
 
 #: src/connections/integration-item.tsx
 msgid "Needs signing in again"
@@ -10409,7 +10406,6 @@ msgid "No workflow with counted hours here yet."
 msgstr "No workflow with counted hours here yet."
 
 #: src/brain/brain.ts
-#: src/connections/overview-concepts.tsx
 msgid "No workflow yet"
 msgstr "No workflow yet"
 
@@ -11397,7 +11393,6 @@ msgid "Only you see this"
 msgstr "Only you see this"
 
 #: src/chat/sidebar-chats.tsx
-#: src/connections/overview-concepts.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/in-inbox.tsx
 #: src/inbox/item-detail.tsx
@@ -11433,7 +11428,6 @@ msgid "Open"
 msgstr "Open"
 
 #: src/brain/brain-nav.tsx
-#: src/connections/overview-concepts.tsx
 #: src/frame/part-words.tsx
 #: src/knowledge/uploads.tsx
 msgid "Open {name}"
@@ -12473,7 +12467,6 @@ msgstr "Reach others"
 msgid "Reached"
 msgstr "Reached"
 
-#: src/connections/integration-inspector.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Reaches"
 msgstr "Reaches"
@@ -14619,6 +14612,10 @@ msgstr "Sign in to {app} again"
 msgid "Sign in to {label} again"
 msgstr "Sign in to {label} again"
 
+#: src/connections/overview-concepts.tsx
+msgid "Sign in to {name} again"
+msgstr "Sign in to {name} again"
+
 #: src/routes/decisions.$decision.tsx
 msgid "Sign in to answer"
 msgstr "Sign in to answer"
@@ -14686,6 +14683,10 @@ msgstr "Signals by kind"
 #: src/routes/_shell.settings.security.tsx
 msgid "Signed in {time}"
 msgstr "Signed in {time}"
+
+#: src/connections/integration-inspector.tsx
+msgid "Signed in as"
+msgstr "Signed in as"
 
 #: src/activity/audit-words.ts
 msgid "Signed in for the first time, after joining from the directory"
@@ -16857,6 +16858,10 @@ msgstr "To"
 msgid "To act in this workspace, ask its admin to add you as a user, and sign in as one."
 msgstr "To act in this workspace, ask its admin to add you as a user, and sign in as one."
 
+#: src/connections/overview-concepts.tsx
+msgid "To add"
+msgstr "To add"
+
 #: src/dashboard/todo-pile.tsx
 msgctxt "dashboard: what waits on you"
 msgid "To do"
@@ -18711,10 +18716,6 @@ msgstr "Workflows that serve {title}"
 #: src/dashboard/spend-widget.tsx
 msgid "Workflows that spent most"
 msgstr "Workflows that spent most"
-
-#: src/connections/overview-concepts.tsx
-msgid "Workflows that use them"
-msgstr "Workflows that use them"
 
 #: src/apps/app-workflows.tsx
 msgid "Workflows the App starts"

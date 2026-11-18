@@ -5,17 +5,14 @@ import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useRef } from "react";
-import type { ReactNode } from "react";
 
 import { formatDayMonth, formatNumber } from "../format.ts";
-import { Backdrop, BackdropGlass } from "../grasp/backdrop/index.ts";
+import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import type { BadgeTone } from "../grasp/badge/index.ts";
 import { BrandIcon } from "../grasp/brand-icon/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Card, CardDescription, CardTitle } from "../grasp/card/index.ts";
-import { ConnectionRow } from "../grasp/connection-row/index.ts";
+import { Card } from "../grasp/card/index.ts";
 import { DataTable } from "../grasp/data-table/index.ts";
 import { Empty } from "../grasp/empty/index.ts";
 import { Plus, Search as SearchIcon } from "../grasp/icons/index.ts";
@@ -35,8 +32,8 @@ import {
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { PageHeader } from "../grasp/page-header/index.ts";
+import { PanelTexture } from "../grasp/panel/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import { Section, SectionHeader } from "../grasp/section-header/index.ts";
 import {
   Select,
   SelectContent,
@@ -52,7 +49,7 @@ import { groupLabel } from "./groups.ts";
 import { httpConnectionsMatching } from "./http-connections.tsx";
 import { find, stateOf, workflowsOf } from "./integrations.ts";
 import type { Integration } from "./integrations.ts";
-import { brandOf, ProviderMark } from "./provider-mark.tsx";
+import { brandOf } from "./provider-mark.tsx";
 
 // CONCEPT BRANCH ONLY, never merged: three shapes for the Integrations
 // overview, for Ruben to choose between (`?concept=a|b|c`). Each opens an
@@ -81,39 +78,30 @@ const styles = stylex.create({
   name: { display: "flex", alignItems: "center", gap: grasp.space3 },
   grid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 16rem), 1fr))",
-    gap: grasp.space4,
-  },
-  cardHead: {
-    display: "flex",
-    alignItems: "start",
-    justifyContent: "space-between",
-    gap: grasp.space2,
-  },
-  cardFoot: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: grasp.space2,
-    marginBlockStart: "auto",
-  },
-  cardBody: {
-    display: "flex",
-    flexDirection: "column",
+    gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 20rem), 1fr))",
     gap: grasp.space3,
-    height: "100%",
+    margin: 0,
+    padding: 0,
   },
   search: { flexGrow: 1, maxWidth: "24rem" },
+  // The strip's own box, so the texture fills it: positioned, clipped.
   strip: {
-    paddingInline: grasp.space6,
-    paddingBlock: grasp.space6,
+    position: "relative",
+    overflow: "hidden",
+    paddingInline: grasp.space3,
+    paddingBlock: grasp.space3,
   },
   chips: {
+    position: "relative",
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 13rem), 1fr))",
-    gap: grasp.space3,
+    gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 20rem), 1fr))",
+    gap: grasp.space1,
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
   },
-  chip: { minWidth: 0 },
+  cell: { minWidth: 0, listStyle: "none" },
+  kind: { width: "auto", minWidth: "12rem" },
 });
 
 /** Opens an app in the shell's panel. */
@@ -151,7 +139,7 @@ const useUsedBy = () => {
     }
     const count = workflowsOf(integration, uses).length;
     return count === 0
-      ? t`No workflow yet`
+      ? ""
       : t`${plural(count, { one: "# workflow", other: "# workflows" })}`;
   };
 };
@@ -162,7 +150,7 @@ const useStatus = () => {
   return (integration: Integration): { words: string; tone: BadgeTone } => {
     const state = stateOf(integration);
     if (state === "needs_reauth") {
-      return { words: t`Sign in again`, tone: "attention" };
+      return { words: t`Needs sign-in`, tone: "attention" };
     }
     if (state === "not_connected") {
       return integration.offered
@@ -174,8 +162,9 @@ const useStatus = () => {
 };
 
 /**
- * An app's mark: the library's Brand icon where it has the brand (bare at
- * 20px in a row, on its own tile in a card), else the logo core serves.
+ * An app's mark, one size per list: the library's Brand icon on its tile
+ * where it has the brand, else the library's fallback, an Avatar with the
+ * app's initials, at the same size.
  */
 const Mark = ({
   integration,
@@ -185,20 +174,13 @@ const Mark = ({
   look?: "row" | "card";
 }) => {
   const brand = brandOf(integration.id, integration.name);
-  if (brand !== undefined) {
-    return look === "row" ? (
-      <BrandIcon brand={brand} decorative size="md" tile={false} />
-    ) : (
-      <BrandIcon brand={brand} decorative size="lg" />
-    );
-  }
-  return (
-    <ProviderMark
-      id={integration.id}
-      logo={integration.logo}
-      name={integration.name}
-      size={look === "row" ? "sm" : "md"}
-    />
+  const size = look === "row" ? "sm" : "lg";
+  return brand === undefined ? (
+    <Avatar decorative name={integration.name} size={size}>
+      <AvatarFallback />
+    </Avatar>
+  ) : (
+    <BrandIcon brand={brand} decorative size={size} />
   );
 };
 
@@ -224,17 +206,17 @@ const Figures = ({
       items={[
         { title: t`Connected`, value: formatNumber(connected.length) },
         {
-          title: t`Need someone to sign in again`,
+          title: t`Need sign-in`,
           value: formatNumber(needs.length),
           ...(needs.length > 0 ? { tone: "danger" as const } : {}),
         },
         {
-          title: t`Workflows that use them`,
+          title: t`In workflows`,
           value: uses === undefined ? "" : formatNumber(workflows.size),
           loading: uses === undefined,
         },
         {
-          title: t`Apps to add`,
+          title: t`To add`,
           value: formatNumber(integrations.length - connected.length),
         },
       ]}
@@ -298,6 +280,29 @@ const NameCell = ({ integration }: { integration: Integration }) => (
 );
 
 const nameCell = (row: AppRow) => <NameCell integration={row.integration} />;
+
+/** Sign in again, where the app needs it: it opens the app beside the list, with its sign-in. */
+const ActionCell = ({ integration }: { integration: Integration }) => {
+  const { t } = useLingui();
+  const open = useOpen();
+  const { name } = integration;
+  return stateOf(integration) === "needs_reauth" ? (
+    <Button
+      aria-label={t`Sign in to ${name} again`}
+      onClick={() => {
+        open(integration.key);
+      }}
+      size="xs"
+      variant="quiet"
+    >
+      {t`Sign in again`}
+    </Button>
+  ) : null;
+};
+
+const actionCell = (row: AppRow) => (
+  <ActionCell integration={row.integration} />
+);
 
 const statusCell = (row: AppRow) => (
   <Badge tone={row.status.tone}>{row.status.words}</Badge>
@@ -387,7 +392,7 @@ export const ConceptTable = ({
       <ToolbarBand aria-label={t`Narrow the list`} start={<Search q={q} />} />
       {all ? (
         <DataTable
-          caption={t`Apps Grasp can connect to.`}
+          appearance={{ head: "plain" }}
           columns={[
             {
               key: "name",
@@ -418,7 +423,7 @@ export const ConceptTable = ({
         />
       ) : (
         <DataTable
-          caption={t`Apps connected to Grasp, those that need someone first.`}
+          appearance={{ head: "plain" }}
           columns={[
             {
               key: "name",
@@ -432,16 +437,27 @@ export const ConceptTable = ({
               header: t`Connected by`,
               value: (row: AppRow) => row.by,
             },
-            {
-              key: "usedBy",
-              header: t`Used by`,
-              value: (row: AppRow) => row.usedBy,
-            },
+            ...(rows.some((row) => row.usedBy !== "")
+              ? [
+                  {
+                    key: "usedBy",
+                    header: t`Used by`,
+                    value: (row: AppRow) => row.usedBy,
+                  },
+                ]
+              : []),
             {
               key: "status",
               header: t`Status`,
               value: (row: AppRow) => row.status.words,
               cell: statusCell,
+              align: "end",
+            },
+            {
+              key: "action",
+              header: t`Action`,
+              value: () => "",
+              cell: actionCell,
               align: "end",
             },
           ]}
@@ -456,81 +472,48 @@ export const ConceptTable = ({
   );
 };
 
-/** One app as a card: mark and kind at the head, its sentence, and its one action at the foot. */
+/** One app to add, as an outlined Item: its mark, name, sentence and Connect. */
 const AppCard = ({ integration }: { integration: Integration }) => {
   const { t, i18n } = useLingui();
   const open = useOpen();
-  const status = useStatus()(integration);
-  const whose = useWhose()(integration);
-  const connected = integration.connections.length > 0;
   const { name } = integration;
-  let action: ReactNode;
-  if (stateOf(integration) === "needs_reauth") {
-    action = (
-      <Button
-        onClick={() => {
-          open(integration.key);
-        }}
-        size="sm"
-        variant="ink"
-      >
-        {t`Sign in again`}
-      </Button>
-    );
-  } else if (connected) {
-    action = (
-      <Button
-        aria-label={t`Open ${name}`}
-        onClick={() => {
-          open(integration.key);
-        }}
-        size="sm"
-        variant="ghost"
-      >
-        {t`Open`}
-      </Button>
-    );
-  } else {
-    action = (
-      <Button
-        aria-label={t`Connect ${name}`}
-        onClick={() => {
-          open(integration.key);
-        }}
-        size="sm"
-        variant="quiet"
-      >
-        {t`Connect`}
-      </Button>
-    );
-  }
   return (
-    <Card element="li" padding="md">
-      <div {...stylex.props(styles.cardBody)}>
-        <div {...stylex.props(styles.cardHead)}>
-          <Mark integration={integration} look="card" />
-          <Badge size="sm" tone={connected ? status.tone : "neutral"}>
-            {connected ? status.words : i18n._(groupLabel[integration.group])}
-          </Badge>
-        </div>
-        <CardTitle>{name}</CardTitle>
-        {integration.description === null ? null : (
-          <CardDescription>{integration.description}</CardDescription>
-        )}
-        <div {...stylex.props(styles.cardFoot)}>
-          <Text element="span" size="sm" tone="muted">
-            {connected ? whose : ""}
-          </Text>
-          {action}
-        </div>
-      </div>
-    </Card>
+    <li {...stylex.props(styles.cell)}>
+      <Item size="sm" variant="outline">
+        <ItemMedia>
+          <Mark integration={integration} />
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle>{name}</ItemTitle>
+          <ItemDescription>
+            {integration.description ?? i18n._(groupLabel[integration.group])}
+          </ItemDescription>
+        </ItemContent>
+        <ItemActions>
+          {integration.offered ? (
+            <Button
+              aria-label={t`Connect ${name}`}
+              onClick={() => {
+                open(integration.key);
+              }}
+              size="sm"
+              variant="quiet"
+            >
+              {t`Connect`}
+            </Button>
+          ) : (
+            <Badge size="sm">{t`Not offered`}</Badge>
+          )}
+        </ItemActions>
+      </Item>
+    </li>
   );
 };
 
 /**
- * What is connected, as glass chips on a dithered field at the head of
- * the catalogue: the marks at a glance, the one needing someone first.
+ * What is connected, at the head of the catalogue, on the library's faint
+ * dither of the light (PanelTexture, as the organisation card's cover):
+ * one row of the same height each, those needing sign-in first.
  */
 const ConnectedStrip = ({
   connected,
@@ -539,7 +522,6 @@ const ConnectedStrip = ({
 }) => {
   const { t } = useLingui();
   const open = useOpen();
-  const clear = useRef<HTMLDivElement>(null);
   if (connected.length === 0) {
     return null;
   }
@@ -549,43 +531,46 @@ const ConnectedStrip = ({
       Number(stateOf(one) === "needs_reauth")
   );
   return (
-    <Backdrop
-      clear={clear}
-      layout={styles.strip}
-      variant={{ backdrop: "dots", pattern: "bayer", tone: "mint" }}
-    >
-      <div ref={clear} {...stylex.props(styles.chips)}>
-        {ordered.map((integration) => {
-          const needs = stateOf(integration) === "needs_reauth";
-          return (
-            <BackdropGlass key={integration.key} layout={styles.chip}>
-              <Item
-                render={
-                  <button
-                    aria-label={integration.name}
-                    onClick={() => {
-                      open(integration.key);
-                    }}
-                    type="button"
-                  />
-                }
-                size="xs"
-              >
-                <ItemMedia>
-                  <Mark integration={integration} />
-                </ItemMedia>
-                <ItemContent>
-                  <ItemTitle>{integration.name}</ItemTitle>
-                  <ItemDescription>
-                    {needs ? t`Sign in again` : t`Connected`}
-                  </ItemDescription>
-                </ItemContent>
-              </Item>
-            </BackdropGlass>
-          );
-        })}
+    <Card aria-label={t`Connected`} element="section" padding="none">
+      <div {...stylex.props(styles.strip)}>
+        <PanelTexture />
+        <ul {...stylex.props(styles.chips)}>
+          {ordered.map((integration) => {
+            const needs = stateOf(integration) === "needs_reauth";
+            return (
+              <li key={integration.key} {...stylex.props(styles.cell)}>
+                <Item
+                  render={
+                    <button
+                      aria-label={integration.name}
+                      onClick={() => {
+                        open(integration.key);
+                      }}
+                      type="button"
+                    />
+                  }
+                  size="xs"
+                >
+                  <ItemMedia>
+                    <Mark integration={integration} />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>{integration.name}</ItemTitle>
+                  </ItemContent>
+                  {needs ? (
+                    <ItemActions>
+                      <Badge size="sm" tone="attention">
+                        {t`Needs sign-in`}
+                      </Badge>
+                    </ItemActions>
+                  ) : null}
+                </Item>
+              </li>
+            );
+          })}
+        </ul>
       </div>
-    </Backdrop>
+    </Card>
   );
 };
 
@@ -647,7 +632,7 @@ export const ConceptCatalogue = ({
             }}
             value={filter ?? "all"}
           >
-            <SelectTrigger aria-label={t`Kind`} size="sm">
+            <SelectTrigger aria-label={t`Kind`} layout={styles.kind} size="sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent />
@@ -699,76 +684,14 @@ export const ConceptTopics = ({
         title={t`Integrations`}
       />
       {needs.length === 0 ? null : (
-        <Section>
-          <SectionHeader title={t`Needs you`} />
-          <SectionCard aria-label={t`Needs you`} density="compact" flush>
+        <SectionCard
+          density="compact"
+          flush
+          title={t`Needs you`}
+          variant="grouped"
+        >
+          <ItemGroup aria-label={t`Needs you`} separated>
             {needs.map((integration) => {
-              const { name } = integration;
-              return (
-                <ConnectionRow
-                  actionLabel={t`Sign in again`}
-                  key={integration.key}
-                  label={name}
-                  onAction={() => {
-                    open(integration.key);
-                  }}
-                  problem={t`Grasp lost access to ${name}: what uses it waits until someone signs in again.`}
-                  status="broken"
-                />
-              );
-            })}
-          </SectionCard>
-        </Section>
-      )}
-      <Section>
-        <SectionHeader
-          aside={
-            <Text element="span" size="sm" tone="muted">
-              {formatNumber(working.length)}
-            </Text>
-          }
-          title={t`Connected`}
-        />
-        <SectionCard aria-label={t`Connected`} density="compact" flush>
-          {working.length === 0 ? (
-            <Empty size="inline">{t`Nothing connected yet.`}</Empty>
-          ) : (
-            <ItemGroup aria-label={t`Connected`} separated>
-              {working.map((integration) => (
-                <Item
-                  key={integration.key}
-                  render={
-                    <Link
-                      from="/integrations/"
-                      resetScroll={false}
-                      search={(last) => ({ ...last, app: integration.key })}
-                      to="/integrations"
-                    />
-                  }
-                  size="xs"
-                >
-                  <ItemMedia>
-                    <Mark integration={integration} />
-                  </ItemMedia>
-                  <ItemContent>
-                    <ItemTitle>{integration.name}</ItemTitle>
-                    <ItemDescription>
-                      {[whose(integration), usedBy(integration, uses)]
-                        .filter((part) => part !== "")
-                        .join(" · ")}
-                    </ItemDescription>
-                  </ItemContent>
-                </Item>
-              ))}
-            </ItemGroup>
-          )}
-        </SectionCard>
-      </Section>
-      <Section>
-        <SectionHeader actions={<Search q={q} />} title={t`Add an app`} />
-        <SectionCard aria-label={t`Add an app`} density="compact" flush>
-          <ItemGroup aria-label={t`Add an app`} separated>
-            {addable.map((integration) => {
               const { name } = integration;
               return (
                 <Item key={integration.key} size="xs">
@@ -778,48 +701,132 @@ export const ConceptTopics = ({
                   <ItemContent>
                     <ItemTitle>{name}</ItemTitle>
                     <ItemDescription>
-                      {integration.description ??
-                        i18n._(groupLabel[integration.group])}
+                      {t`Needs sign-in. What uses it waits until then.`}
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>
-                    {integration.offered ? (
-                      <Button
-                        aria-label={t`Connect ${name}`}
-                        onClick={() => {
-                          open(integration.key);
-                        }}
-                        size="sm"
-                        variant="quiet"
-                      >
-                        {t`Connect`}
-                      </Button>
-                    ) : (
-                      <Badge size="sm">{t`Not offered`}</Badge>
-                    )}
+                    <Button
+                      aria-label={t`Sign in to ${name} again`}
+                      onClick={() => {
+                        open(integration.key);
+                      }}
+                      size="sm"
+                      variant="quiet"
+                    >
+                      {t`Sign in again`}
+                    </Button>
                   </ItemActions>
                 </Item>
               );
             })}
           </ItemGroup>
         </SectionCard>
-      </Section>
+      )}
+      <SectionCard
+        aside={
+          <Text element="span" size="sm" tone="muted">
+            {formatNumber(working.length)}
+          </Text>
+        }
+        density="compact"
+        flush
+        title={t`Connected`}
+        variant="grouped"
+      >
+        {working.length === 0 ? (
+          <Empty size="inline">{t`Nothing connected yet.`}</Empty>
+        ) : (
+          <ItemGroup aria-label={t`Connected`} separated>
+            {working.map((integration) => (
+              <Item
+                key={integration.key}
+                render={
+                  <Link
+                    from="/integrations/"
+                    resetScroll={false}
+                    search={(last) => ({ ...last, app: integration.key })}
+                    to="/integrations"
+                  />
+                }
+                size="xs"
+              >
+                <ItemMedia>
+                  <Mark integration={integration} />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>{integration.name}</ItemTitle>
+                  <ItemDescription>
+                    {[whose(integration), usedBy(integration, uses)]
+                      .filter((part) => part !== "")
+                      .join(" · ")}
+                  </ItemDescription>
+                </ItemContent>
+              </Item>
+            ))}
+          </ItemGroup>
+        )}
+      </SectionCard>
+      <SectionCard
+        actions={<Search q={q} />}
+        density="compact"
+        flush
+        title={t`Add an app`}
+        variant="grouped"
+      >
+        <ItemGroup aria-label={t`Add an app`} separated>
+          {addable.map((integration) => {
+            const { name } = integration;
+            return (
+              <Item key={integration.key} size="xs">
+                <ItemMedia>
+                  <Mark integration={integration} />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>{name}</ItemTitle>
+                  <ItemDescription>
+                    {integration.description ??
+                      i18n._(groupLabel[integration.group])}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  {integration.offered ? (
+                    <Button
+                      aria-label={t`Connect ${name}`}
+                      onClick={() => {
+                        open(integration.key);
+                      }}
+                      size="sm"
+                      variant="quiet"
+                    >
+                      {t`Connect`}
+                    </Button>
+                  ) : (
+                    <Badge size="sm">{t`Not offered`}</Badge>
+                  )}
+                </ItemActions>
+              </Item>
+            );
+          })}
+        </ItemGroup>
+      </SectionCard>
       {http.length === 0 ? null : (
-        <Section>
-          <SectionHeader title={t`HTTP connections`} />
-          <SectionCard aria-label={t`HTTP connections`} density="compact" flush>
-            <ItemGroup aria-label={t`HTTP connections`} separated>
-              {http.map(({ connection, http: summary }) => (
-                <Item key={connection.id} size="xs">
-                  <ItemContent>
-                    <ItemTitle>{summary.name}</ItemTitle>
-                    <ItemDescription>{summary.origin}</ItemDescription>
-                  </ItemContent>
-                </Item>
-              ))}
-            </ItemGroup>
-          </SectionCard>
-        </Section>
+        <SectionCard
+          density="compact"
+          flush
+          title={t`HTTP connections`}
+          variant="grouped"
+        >
+          <ItemGroup aria-label={t`HTTP connections`} separated>
+            {http.map(({ connection, http: summary }) => (
+              <Item key={connection.id} size="xs">
+                <ItemContent>
+                  <ItemTitle>{summary.name}</ItemTitle>
+                  <ItemDescription>{summary.origin}</ItemDescription>
+                </ItemContent>
+              </Item>
+            ))}
+          </ItemGroup>
+        </SectionCard>
       )}
     </div>
   );

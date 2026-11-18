@@ -2190,6 +2190,7 @@ msgstr "Konto"
 #: src/activity/audit-event.tsx
 #: src/activity/audit-log.tsx
 #: src/activity/type-labels.ts
+#: src/connections/overview-concepts.tsx
 msgid "Action"
 msgstr "Aktion"
 
@@ -3209,21 +3210,9 @@ msgstr "Apps"
 msgid "Apps and agents with a permission"
 msgstr "Apps und Agenten mit einer Berechtigung"
 
-#: src/connections/overview-concepts.tsx
-msgid "Apps connected to Grasp, those that need someone first."
-msgstr "Mit Grasp verbundene Apps, zuerst die, die jemanden brauchen."
-
-#: src/connections/overview-concepts.tsx
-msgid "Apps Grasp can connect to."
-msgstr "Apps, mit denen sich Grasp verbinden kann."
-
 #: src/workflows/files-and-apps.tsx
 msgid "Apps it works in"
 msgstr "Apps, in denen er arbeitet"
-
-#: src/connections/overview-concepts.tsx
-msgid "Apps to add"
-msgstr "Apps zum Hinzufügen"
 
 #: src/apps/app-settings.tsx
 #: src/apps/app-status.tsx
@@ -7452,10 +7441,6 @@ msgstr "Grasp lässt es noch einmal senden, genau wie zuvor, und ein Lauf, der d
 msgid "Grasp links Stripe and sets up your plan with you."
 msgstr "Grasp verbindet Stripe und richtet Ihren Tarif mit Ihnen ein."
 
-#: src/connections/overview-concepts.tsx
-msgid "Grasp lost access to {name}: what uses it waits until someone signs in again."
-msgstr "Grasp hat den Zugriff auf {name} verloren: Was es nutzt, wartet, bis sich jemand erneut anmeldet."
-
 #: src/dashboard/widget-board.tsx
 msgid "Grasp made this widget for you. Taken off, it is gone for good."
 msgstr "Grasp hat dieses Widget für Sie erstellt. Entfernt ist es endgültig weg."
@@ -8082,6 +8067,10 @@ msgstr "Nur in diesem Chat, bis Sie ihn löschen. Was er sendet oder ändert, wa
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "In this conversation"
 msgstr "In diesem Gespräch"
+
+#: src/connections/overview-concepts.tsx
+msgid "In workflows"
+msgstr "In Workflows"
 
 #: src/brain/brain.ts
 msgctxt "note property: the drawn version of this workflow on the Workflows page"
@@ -9881,8 +9870,8 @@ msgid "Narrow the list"
 msgstr "Liste eingrenzen"
 
 #: src/connections/overview-concepts.tsx
-msgid "Need someone to sign in again"
-msgstr "Jemand muss sich erneut anmelden"
+msgid "Need sign-in"
+msgstr "Anmeldung nötig"
 
 #: src/chat/plan-card.tsx
 msgid "Needs {name} connected"
@@ -9900,6 +9889,14 @@ msgstr "Braucht Aufmerksamkeit"
 #: src/connections/integration-item.tsx
 msgid "Needs its own sign-in app"
 msgstr "Braucht eine eigene Anmelde-App"
+
+#: src/connections/overview-concepts.tsx
+msgid "Needs sign-in"
+msgstr "Anmeldung nötig"
+
+#: src/connections/overview-concepts.tsx
+msgid "Needs sign-in. What uses it waits until then."
+msgstr "Anmeldung nötig. Was es nutzt, wartet bis dahin."
 
 #: src/connections/integration-item.tsx
 msgid "Needs signing in again"
@@ -10409,7 +10406,6 @@ msgid "No workflow with counted hours here yet."
 msgstr "Hier noch kein Workflow mit gezählten Stunden."
 
 #: src/brain/brain.ts
-#: src/connections/overview-concepts.tsx
 msgid "No workflow yet"
 msgstr "Noch kein Workflow"
 
@@ -11397,7 +11393,6 @@ msgid "Only you see this"
 msgstr "Nur Sie sehen das"
 
 #: src/chat/sidebar-chats.tsx
-#: src/connections/overview-concepts.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/in-inbox.tsx
 #: src/inbox/item-detail.tsx
@@ -11433,7 +11428,6 @@ msgid "Open"
 msgstr "Öffnen"
 
 #: src/brain/brain-nav.tsx
-#: src/connections/overview-concepts.tsx
 #: src/frame/part-words.tsx
 #: src/knowledge/uploads.tsx
 msgid "Open {name}"
@@ -12473,7 +12467,6 @@ msgstr "Andere erreichen"
 msgid "Reached"
 msgstr "Erreicht"
 
-#: src/connections/integration-inspector.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Reaches"
 msgstr "Reicht bis"
@@ -14619,6 +14612,10 @@ msgstr "Erneut bei {app} anmelden"
 msgid "Sign in to {label} again"
 msgstr "Erneut bei {label} anmelden"
 
+#: src/connections/overview-concepts.tsx
+msgid "Sign in to {name} again"
+msgstr "Erneut bei {name} anmelden"
+
 #: src/routes/decisions.$decision.tsx
 msgid "Sign in to answer"
 msgstr "Zum Antworten anmelden"
@@ -14686,6 +14683,10 @@ msgstr "Signale nach Art"
 #: src/routes/_shell.settings.security.tsx
 msgid "Signed in {time}"
 msgstr "Angemeldet am {time}"
+
+#: src/connections/integration-inspector.tsx
+msgid "Signed in as"
+msgstr "Angemeldet als"
 
 #: src/activity/audit-words.ts
 msgid "Signed in for the first time, after joining from the directory"
@@ -16857,6 +16858,10 @@ msgstr "Bis"
 msgid "To act in this workspace, ask its admin to add you as a user, and sign in as one."
 msgstr "Um in diesem Workspace zu handeln, bitten Sie seinen Admin, Sie als Benutzer hinzuzufügen, und melden Sie sich als solcher an."
 
+#: src/connections/overview-concepts.tsx
+msgid "To add"
+msgstr "Zum Hinzufügen"
+
 #: src/dashboard/todo-pile.tsx
 msgctxt "dashboard: what waits on you"
 msgid "To do"
@@ -18711,10 +18716,6 @@ msgstr "Workflows, die {title} dienen"
 #: src/dashboard/spend-widget.tsx
 msgid "Workflows that spent most"
 msgstr "Workflows mit den höchsten Ausgaben"
-
-#: src/connections/overview-concepts.tsx
-msgid "Workflows that use them"
-msgstr "Workflows, die sie nutzen"
 
 #: src/apps/app-workflows.tsx
 msgid "Workflows the App starts"

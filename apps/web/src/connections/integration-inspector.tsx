@@ -30,7 +30,6 @@ import {
   allowedToolsOf,
   newestOf,
   toolGroups,
-  useReaches,
   useWhyNoConnect,
 } from "./integration-facts.ts";
 import type { Integration } from "./integrations.ts";
@@ -52,6 +51,11 @@ import type { ConnectionUses } from "./workflows-using.tsx";
 // connection this person may remove.
 
 const styles = stylex.create({
+  // The facts on the section card's inset, as the inspector's rows stand.
+  facts: {
+    marginInline: grasp.inspectorInset,
+    marginBlock: grasp.space2,
+  },
   foot: {
     display: "flex",
     flexWrap: "wrap",
@@ -142,7 +146,6 @@ const Account = ({
   identity: Identity;
 }) => {
   const { t } = useLingui();
-  const reachesOf = useReaches();
   const newest = newestOf(integration);
   if (newest === undefined) {
     return null;
@@ -158,16 +161,17 @@ const Account = ({
       value:
         state === "personal" ? t`Only you` : t`Everyone in the organization`,
     },
-    { key: t`Reaches`, value: reachesOf(integration) },
     { key: t`Connected by`, value: by },
     { key: t`Connected on`, value: formatDate(newest.createdAt) },
   ];
   if (newest.accountName !== null) {
-    items.unshift({ key: t`Account`, value: newest.accountName });
+    items.unshift({ key: t`Signed in as`, value: newest.accountName });
   }
   return (
     <PanelSection label={t`Account`}>
-      <KeyValueList items={items} variant="inline" />
+      <div {...stylex.props(styles.facts)}>
+        <KeyValueList items={items} variant="inline" />
+      </div>
     </PanelSection>
   );
 };

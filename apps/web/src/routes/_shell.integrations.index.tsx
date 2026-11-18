@@ -46,7 +46,6 @@ import { RevocationsByHand } from "../connections/revocations-by-hand.tsx";
 import type { ConnectionUses } from "../connections/workflows-using.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import { formatNumber } from "../format.ts";
-import { PagePanel } from "../frame/page-panel.tsx";
 import { PageLoading } from "../frame/page-states.tsx";
 import { Page, PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
@@ -112,6 +111,34 @@ const step = 80;
 const WIDE = 60 * 16;
 
 const styles = stylex.create({
+  // The page has the whole card (`page: "whole"`): the lists keep the
+  // shell's own room and scroll on their own; the open app stands beside
+  // them flush with the bar, the card's end and its foot.
+  whole: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    width: "100%",
+    height: "100%",
+    minHeight: 0,
+  },
+  wholeOpen: {
+    gridTemplateColumns: `minmax(0, 1fr) ${grasp.inspectorWidth}`,
+  },
+  pane: {
+    minWidth: 0,
+    minHeight: 0,
+    overflowY: "auto",
+    paddingBlockStart: grasp.space7,
+    paddingBlockEnd: grasp.shellPageRoomBelow,
+    paddingInline: grasp.shellPageInline,
+  },
+  side: {
+    height: "100%",
+    minHeight: 0,
+    borderInlineStartWidth: grasp.hairline,
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: grasp.line,
+  },
   // The lists, and the app beside them while one is open.
   split: {
     display: "grid",
@@ -614,6 +641,12 @@ const Concept = ({ concept }: { concept: OverviewConcept }) => {
     listed
   );
   const opened = integrations.find((integration) => integration.key === app);
+  const { box, wide } = useWide();
+  const beside = opened !== undefined && wide;
+  const tools =
+    opened?.listed === true && opened.source === "native"
+      ? toolsOf(core, opened).tools
+      : undefined;
   const Shape = overviewConcepts[concept];
   const { t } = useLingui();
   const close = () => {
@@ -630,53 +663,67 @@ const Concept = ({ concept }: { concept: OverviewConcept }) => {
         open={requesting}
       />
       <SiteHeader crumbs={[{ label: t`Integrations` }]} />
-      <Page>
-        <Await
-          fallback={
-            <Shape
-              connections={listed}
-              integrations={integrations}
-              onRequest={() => {
-                setRequesting(true);
-              }}
-              q={q}
-              uses={undefined}
-              view={view}
+      <div
+        ref={box}
+        {...stylex.props(styles.whole, beside && styles.wholeOpen)}
+      >
+        <div {...stylex.props(styles.pane)}>
+          <Page>
+            <Await
+              fallback={
+                <Shape
+                  connections={listed}
+                  integrations={integrations}
+                  onRequest={() => {
+                    setRequesting(true);
+                  }}
+                  q={q}
+                  uses={undefined}
+                  view={view}
+                />
+              }
+              promise={uses}
+            >
+              {(read) => (
+                <Shape
+                  connections={listed}
+                  integrations={integrations}
+                  onRequest={() => {
+                    setRequesting(true);
+                  }}
+                  q={q}
+                  uses={read.state === "ready" ? read.data : undefined}
+                  view={view}
+                />
+              )}
+            </Await>
+          </Page>
+        </div>
+        {opened === undefined || !wide ? null : (
+          <div {...stylex.props(styles.side)}>
+            <IntegrationInspector
+              framed={false}
+              identity={identity}
+              integration={opened}
+              key={opened.key}
+              layout={styles.fill}
+              onClose={close}
+              tools={tools}
+              uses={uses}
             />
-          }
-          promise={uses}
-        >
-          {(read) => (
-            <Shape
-              connections={listed}
-              integrations={integrations}
-              onRequest={() => {
-                setRequesting(true);
-              }}
-              q={q}
-              uses={read.state === "ready" ? read.data : undefined}
-              view={view}
-            />
-          )}
-        </Await>
-      </Page>
-      <PagePanel onClose={close} open={opened !== undefined}>
-        {opened === undefined ? null : (
-          <IntegrationInspector
-            framed={false}
-            identity={identity}
-            integration={opened}
-            key={opened.key}
-            onClose={close}
-            tools={
-              opened.listed && opened.source === "native"
-                ? toolsOf(core, opened).tools
-                : undefined
-            }
-            uses={uses}
-          />
+          </div>
         )}
-      </PagePanel>
+      </div>
+      {opened === undefined || wide ? null : (
+        <Details
+          core={core}
+          identity={identity}
+          integration={opened}
+          key={opened.key}
+          uses={uses}
+          wide={false}
+        />
+      )}
     </>
   );
 };
@@ -720,105 +767,108 @@ const Today = () => {
         open={requesting}
       />
       <SiteHeader crumbs={[{ label: t`Integrations` }]} />
-      <Page>
-        <PageHeading
-          action={
-            <Button
-              icon={Plus}
-              onClick={() => {
-                setRequesting(true);
-              }}
-              variant="quiet"
-            >
-              {t`Request app`}
-            </Button>
-          }
-          title={t`Integrations`}
-        />
-        <Returned connection={connection} integrations={integrations} />
-        {connectionError === undefined ? null : (
-          <Alert
-            title={connectionErrorMessage(connectionError)}
-            variant="danger"
-          />
-        )}
-        {identity.staff ? (
-          <Alert
-            title={t`Grasp staff can't connect accounts or change what is offered here: that is for the organization's own people.`}
-          />
-        ) : null}
-        {catalog.state === "ready" &&
-        catalog.data.composio === "unavailable" ? (
-          <Alert
-            title={t`Composio's toolkits can't be listed right now. Try again shortly.`}
-            variant="attention"
-          />
-        ) : null}
-        <RevocationsByHand
-          nameOf={(provider) =>
-            integrations.find(
-              (each) => each.source === "native" && each.id === provider
-            )?.name ?? provider
-          }
-          toDos={toRevoke}
-        />
-        <NotLoaded page={catalog} />
-        <NotLoaded page={connections} />
-        <div ref={box} {...stylex.props(styles.split, beside && styles.open)}>
-          <div {...stylex.props(styles.lists)}>
-            <Search q={q} />
-            <output {...stylex.props(visuallyHidden)}>
-              {q === undefined
-                ? ""
-                : t`${plural(shown, { one: "# integration shown", other: "# integrations shown" })}`}
-            </output>
-            {loaded && shown === 0 ? (
-              <Empty size="section">{t`No integrations match your search.`}</Empty>
-            ) : null}
-            {q !== undefined && shown === 0 ? null : (
-              <Await
-                fallback={
-                  <Connected open={app} sections={first} uses={undefined} />
-                }
-                promise={uses}
-              >
-                {(read) => {
-                  const known = read.state === "ready" ? read.data : undefined;
-                  return (
-                    <Connected
-                      open={app}
-                      sections={sectionsOf(
-                        integrations,
-                        { show: "all" },
-                        q,
-                        known
-                      )}
-                      uses={known}
-                    />
-                  );
+      <div {...stylex.props(styles.pane)}>
+        <Page>
+          <PageHeading
+            action={
+              <Button
+                icon={Plus}
+                onClick={() => {
+                  setRequesting(true);
                 }}
-              </Await>
-            )}
-            <AddMore group={group} open={app} others={first.others} q={q} />
-            <HttpConnections
-              connections={listed}
-              identity={identity}
-              search={q}
-            />
-            <RequestedApps requests={requests} search={q} />
-          </div>
-          {opened === undefined ? null : (
-            <Details
-              core={core}
-              identity={identity}
-              integration={opened}
-              key={opened.key}
-              uses={uses}
-              wide={wide}
+                variant="quiet"
+              >
+                {t`Request app`}
+              </Button>
+            }
+            title={t`Integrations`}
+          />
+          <Returned connection={connection} integrations={integrations} />
+          {connectionError === undefined ? null : (
+            <Alert
+              title={connectionErrorMessage(connectionError)}
+              variant="danger"
             />
           )}
-        </div>
-      </Page>
+          {identity.staff ? (
+            <Alert
+              title={t`Grasp staff can't connect accounts or change what is offered here: that is for the organization's own people.`}
+            />
+          ) : null}
+          {catalog.state === "ready" &&
+          catalog.data.composio === "unavailable" ? (
+            <Alert
+              title={t`Composio's toolkits can't be listed right now. Try again shortly.`}
+              variant="attention"
+            />
+          ) : null}
+          <RevocationsByHand
+            nameOf={(provider) =>
+              integrations.find(
+                (each) => each.source === "native" && each.id === provider
+              )?.name ?? provider
+            }
+            toDos={toRevoke}
+          />
+          <NotLoaded page={catalog} />
+          <NotLoaded page={connections} />
+          <div ref={box} {...stylex.props(styles.split, beside && styles.open)}>
+            <div {...stylex.props(styles.lists)}>
+              <Search q={q} />
+              <output {...stylex.props(visuallyHidden)}>
+                {q === undefined
+                  ? ""
+                  : t`${plural(shown, { one: "# integration shown", other: "# integrations shown" })}`}
+              </output>
+              {loaded && shown === 0 ? (
+                <Empty size="section">{t`No integrations match your search.`}</Empty>
+              ) : null}
+              {q !== undefined && shown === 0 ? null : (
+                <Await
+                  fallback={
+                    <Connected open={app} sections={first} uses={undefined} />
+                  }
+                  promise={uses}
+                >
+                  {(read) => {
+                    const known =
+                      read.state === "ready" ? read.data : undefined;
+                    return (
+                      <Connected
+                        open={app}
+                        sections={sectionsOf(
+                          integrations,
+                          { show: "all" },
+                          q,
+                          known
+                        )}
+                        uses={known}
+                      />
+                    );
+                  }}
+                </Await>
+              )}
+              <AddMore group={group} open={app} others={first.others} q={q} />
+              <HttpConnections
+                connections={listed}
+                identity={identity}
+                search={q}
+              />
+              <RequestedApps requests={requests} search={q} />
+            </div>
+            {opened === undefined ? null : (
+              <Details
+                core={core}
+                identity={identity}
+                integration={opened}
+                key={opened.key}
+                uses={uses}
+                wide={wide}
+              />
+            )}
+          </div>
+        </Page>
+      </div>
     </>
   );
 };
@@ -830,6 +880,8 @@ const textOf = (value: unknown): string | undefined => {
 };
 
 export const Route = createFileRoute("/_shell/integrations/")({
+  // The whole card, so an open app stands flush beside the lists.
+  staticData: { page: "whole" },
   validateSearch: (search: Record<string, unknown>): IntegrationsSearch => ({
     q: textOf(search.q),
     group: catalogGroups.find((group) => group === search.group),
