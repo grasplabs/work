@@ -6,6 +6,9 @@ import {
   defineSync,
   fetchInRoom,
   fillPage,
+  fromInPagePart,
+  inPagePart,
+  startOfPage,
   fromCursorPart,
   mayRequest,
   RestartSyncError,
@@ -13,14 +16,17 @@ import {
   syncRoom,
   takeContent,
 } from "@grasp-os/connector-kit/sync";
-import type { EntryItems, SyncRoom } from "@grasp-os/connector-kit/sync";
+import type {
+  EntryItems,
+  InPage,
+  SyncRoom,
+} from "@grasp-os/connector-kit/sync";
 import type {
   SyncContent,
   SyncItem,
   SyncPage,
   SyncReader,
 } from "@grasp-os/shared/sync";
-import { syncItemSchema } from "@grasp-os/shared/sync";
 import { z } from "zod";
 
 import { graphFailure, graphHost, graphUrl, v1 } from "./graph.ts";
@@ -72,7 +78,8 @@ import { graphFailure, graphHost, graphUrl, v1 } from "./graph.ts";
 // What is left out: drafts (`isDraft`); inline attachments (pictures in
 // the body, such as signatures); attachments that are an Outlook item (an
 // attached message, event or contact) or a link to a cloud file; Bcc and
-// Reply-To in a message's header lines. A message or file larger than
+// Reply-To in a message's header lines. An item past one of the shared
+// item's bounds is fitted by the kit (`fitItem`). A message or file larger than
 // connect reads of one answer, or late past the page's deadline as the
 // page's first, comes without its content, never failing the page.
 //
@@ -228,11 +235,11 @@ interface Token {
 
 /**
  * Where a folder's read is: Graph's token (none: the folder's first
- * listing), and the message of that token's page already handled.
+ * listing), and where it is inside that token's page (the kit's `InPage`).
  */
 interface Position {
   token: Token | null;
-  after: string | null;
+  at: InPage;
 }
 
 const notOurs = (): RestartSyncError =>
@@ -244,13 +251,13 @@ const kinds: Readonly<Record<string, Token["kind"] | null>> = {
   n: null,
 };
 
-/** The cursor of a position: `f.<s|d|n>.<token>.<after>`. */
-const cursorOf = ({ token, after }: Position): string =>
-  `f.${token === null ? "n" : token.kind.charAt(0)}.${cursorPart(token?.value ?? null)}.${cursorPart(after)}`;
+/** The cursor of a position: `f.<s|d|n>.<token>.<at>`. */
+const cursorOf = ({ token, at }: Position): string =>
+  `f.${token === null ? "n" : token.kind.charAt(0)}.${cursorPart(token?.value ?? null)}.${inPagePart(at)}`;
 
 /** The position a cursor this sync wrote names; any other starts over. */
 const positionOf = (cursor: string): Position => {
-  const [tag, kind = "", token, after, ...rest] = cursor.split(".");
+  const [tag, kind = "", token, at, ...rest] = cursor.split(".");
   const tokenKind = Object.hasOwn(kinds, kind) ? kinds[kind] : undefined;
   if (tag !== "f" || tokenKind === undefined || rest.length > 0) {
     throw notOurs();
@@ -262,7 +269,7 @@ const positionOf = (cursor: string): Position => {
   return {
     token:
       tokenKind === null || value === null ? null : { kind: tokenKind, value },
-    after: fromCursorPart(after),
+    at: fromInPagePart(at),
   };
 };
 
@@ -567,13 +574,6 @@ interface Folder {
 /** A message's key in a folder: `<folder>/<message>`. */
 const keyIn = (folder: Folder, id: string): string => `${folder.place}/${id}`;
 
-/**
- * Items that keep within the shared item's bounds; one that breaks them
- * (an ID or a title longer than an item takes) is passed over.
- */
-const fitting = (items: readonly SyncItem[]): SyncItem[] =>
-  items.filter((item) => syncItemSchema.safeParse(item).success);
-
 /** An item that is there. */
 type Present = Extract<SyncItem, { gone: false }>;
 
@@ -607,7 +607,7 @@ const passOver = (folder: Folder, listed: Listed): SyncItem[] => {
   if (listed.isDraft === true) {
     return [];
   }
-  return fitting([messageItem(folder, listed, listed.subject ?? "", null)]);
+  return [messageItem(folder, listed, listed.subject ?? "", null)];
 };
 
 /** A message's attachments, as listed, a page of Graph's at a time. */
@@ -731,7 +731,7 @@ const itemsOf = async (
   }
   const item = messageItem(folder, listed, message.subject ?? "", text.content);
   if (listed.hasAttachments !== true) {
-    return fitting([item]);
+    return [item];
   }
   const attachments = await attachmentsOf(room, listed.id);
   if (attachments === "late" || attachments === "full") {
@@ -764,7 +764,7 @@ const itemsOf = async (
       partOf: item.id,
     });
   }
-  return fitting(items);
+  return items;
 };
 
 /** One page of a folder's delta: from a token, or its first listing. */
@@ -833,7 +833,7 @@ const readPage = async (
     const filled = await fillPage({
       room,
       entries: page.value,
-      after: at.after,
+      at: at.at,
       keyOf,
       itemsFor: async (listed) => await itemsOf(room, folder, listed),
       passOver: (listed) => passOver(folder, listed),
@@ -842,7 +842,7 @@ const readPage = async (
     if (!filled.done) {
       return {
         items,
-        cursor: cursorOf({ ...at, after: filled.last }),
+        cursor: cursorOf({ ...at, at: filled.at }),
         more: true,
       };
     }
@@ -856,7 +856,7 @@ const readPage = async (
         next === undefined
           ? tokenOf(end ?? "", "delta")
           : tokenOf(next, "skip"),
-      after: null,
+      at: startOfPage,
     };
     if (next === undefined) {
       return { items, cursor: cursorOf(at), more: false };
@@ -896,7 +896,7 @@ export const mailSync = defineSync({
   read: async ({ place, cursor, deadline }) =>
     await readPage(
       place,
-      cursor === null ? { token: null, after: null } : positionOf(cursor),
+      cursor === null ? { token: null, at: startOfPage } : positionOf(cursor),
       deadline
     ),
 });

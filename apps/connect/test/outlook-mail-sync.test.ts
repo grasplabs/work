@@ -426,6 +426,10 @@ const removed = (id: string): Message => ({
 
 const owner = () => [{ kind: "account", id: ownerId }];
 
+/** A page's items, each with whether it came with its content. */
+const withContent = (page: SyncPage) =>
+  page.items.map((item) => [item.id, !item.gone && item.content !== null]);
+
 const pdf = {
   "@odata.type": "#microsoft.graph.fileAttachment",
   id: "pdf",
@@ -631,8 +635,8 @@ describe("syncing a person's own mailbox, folder by folder", () => {
   });
 
   it(
-    "leaves a message whose file is late to the next page once the page holds one, and passes the first over",
-    { timeout: 120_000 },
+    "leaves a message whose file is late to the next page once the page holds one, and passes the first over when late twice",
+    { timeout: 180_000 },
     async () => {
       const connectionId = await connected();
       mailbox.feeds.inbox = {
@@ -649,18 +653,19 @@ describe("syncing a person's own mailbox, folder by folder", () => {
         ms: 35_000,
       };
       const first = await read(connectionId, "inbox", null);
+      // As the page's first, late once: it is left for the next read.
       const second = await read(connectionId, "inbox", first.cursor);
+      // Late again: it can't hold the sync, so it comes without its content.
+      const third = await read(connectionId, "inbox", second.cursor);
       mailbox.slow = undefined;
       expect({
         first: first.items.map(({ id }) => id),
-        // As the page's first, it can't hold the sync: without its content.
-        second: second.items.map((item) => [
-          item.id,
-          !item.gone && item.content !== null,
-        ]),
+        second: withContent(second),
+        third: withContent(third),
       }).toStrictEqual({
         first: ["inbox/a"],
-        second: [["inbox/b", false]],
+        second: [],
+        third: [["inbox/b", false]],
       });
     }
   );
