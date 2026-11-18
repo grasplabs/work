@@ -327,10 +327,13 @@ export const fillPage = async <Entry>({
  */
 export const fetchBefore = async (
   url: URL,
-  deadline: number
+  deadline: number,
+  /** The request's own headers, such as a provider's `Prefer`. */
+  init: Pick<RequestInit, "headers"> = {}
 ): Promise<Response | "late"> => {
   try {
     const response = await fetch(url, {
+      ...init,
       signal: AbortSignal.timeout(Math.max(deadline - Date.now(), 0)),
     });
     const body = await response.arrayBuffer();
@@ -353,8 +356,9 @@ export const fetchBefore = async (
  */
 export const fetchInRoom = async (
   room: SyncRoom,
-  url: URL
+  url: URL,
+  init: Pick<RequestInit, "headers"> = {}
 ): Promise<Response | "late"> => {
   room.requests -= 1;
-  return await fetchBefore(url, room.deadline);
+  return await fetchBefore(url, room.deadline, init);
 };
