@@ -1,15 +1,25 @@
-import { Button } from "@grasp-os/ui/components/button";
-import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
-import { ArrowLeftIcon, ArrowRightIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
+import type { StyleXStyles } from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
+import { Button } from "../grasp/button/index.ts";
+import { iconVars } from "../grasp/icons/icon.stylex.ts";
+import {
+  ArrowLeft,
+  ArrowRight,
+  BrandGrasp,
+  Icon,
+} from "../grasp/icons/index.ts";
+import { Stepper } from "../grasp/stepper/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { LanguageButton } from "../language-picker.tsx";
 import { SoundControls } from "../voice/sound-controls.tsx";
 import { KnowledgeCorner } from "./knowledge-bar.tsx";
 import type { Knowledge } from "./knowledge-bar.tsx";
+import { comeIn, motion } from "./motion.ts";
 import { stepIndex, waysFrom, wizardOf } from "./setup.ts";
 import type { SetupPath, SetupStep } from "./setup.ts";
 import { wasHeard } from "./visit.ts";
@@ -21,63 +31,107 @@ import { wasHeard } from "./visit.ts";
 // left, in the same row, with a way on beside it as far as you have been;
 // one centred column; where you are, bottom centre;
 // bottom right, pause and the sound, with the language before them on
-// every step after the first, where it is chosen. The dots go back, and
-// forward again as far as you have been; so do the arrow keys and the
-// arrows at the top (setup.ts `waysFrom`); Escape
+// every step after the first, where it is chosen. The steps go back
+// (the library's Stepper); so do the arrow keys and the arrows at the top,
+// and those go on as far as you have been (setup.ts `waysFrom`); Escape
 // leaves. After the wizard, a word says where things stand. The frame is
 // as high as the window and the page never scrolls, so the way on is
 // always in sight.
 
-const dotClass = {
-  current:
-    "bg-foreground block h-1.5 w-5 rounded-full transition-all duration-300",
-  done: "bg-foreground block h-1.5 w-1.5 rounded-full transition-all duration-300",
-  later: "bg-border block h-1.5 w-1.5 rounded-full transition-all duration-300",
-} as const;
+/** The head's and the foot's height. */
+const BAR = "4.5rem";
 
-const dotOf = (at: number, index: number): string => {
-  if (at === index) {
-    return dotClass.current;
-  }
-  return at < index ? dotClass.done : dotClass.later;
-};
+const styles = stylex.create({
+  window: {
+    display: "flex",
+    flexDirection: "column",
+    height: "100svh",
+    overflow: "hidden",
+    backgroundColor: grasp.paper,
+    color: grasp.text,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+  },
+  // The way back and on at the start, what Grasp knows in the middle, and the end kept as wide as the start.
+  bar: {
+    display: "grid",
+    gridTemplateColumns: "1fr auto 1fr",
+    alignItems: "center",
+    columnGap: grasp.space2,
+    flexShrink: 0,
+    height: BAR,
+    paddingInline: { default: grasp.space10, [media.belowPhone]: grasp.space4 },
+    backgroundColor: grasp.paper,
+  },
+  ways: { display: "flex", alignItems: "center", gap: grasp.space1 },
+  main: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    alignItems: "center",
+    minHeight: 0,
+    overflowY: "auto",
+    paddingInline: grasp.space4,
+    paddingBlock: grasp.space2,
+  },
+  column: {
+    display: "flex",
+    justifyContent: "center",
+    width: "100%",
+    marginBlock: "auto",
+  },
+  mark: { display: "flex", [iconVars.size]: grasp.iconMd },
+  where: { display: "flex", alignItems: "center", justifyContent: "center" },
+  end: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: grasp.space1,
+  },
+});
 
-/** The dots for the wizard's steps, each a way back, and on as far as you have been. */
+const arrivingStyles = stylex.create({ base: { minWidth: 0 } });
+
+/** The steps of the wizard, each named, a way back to those done. */
 const StepDots = ({
   index,
   path,
-  open,
   onGo,
 }: {
   index: number;
   /** The screens this company's admin goes through. */
   path: SetupPath;
-  /** Whether the step at a place can be gone to. */
-  open: (at: number) => boolean;
   onGo: (step: SetupStep) => void;
 }) => {
   const { t } = useLingui();
+  const names: Record<SetupStep, string> = {
+    welcome: t`Welcome`,
+    ai: t`AI`,
+    about: t`How it works`,
+    company: t`Company`,
+    sources: t`Sources`,
+    documents: t`Documents`,
+    pulse: t`Tools`,
+    leads: t`Leads`,
+    team: t`Team`,
+    listening: t`Interviews`,
+    review: t`Review`,
+    open: t`Open`,
+  };
+  const wizard = wizardOf(path);
   return (
-    <span className="animate-in fade-in flex items-center">
-      {wizardOf(path).map((each, at) => {
-        const n = at + 1;
-        return (
-          <button
-            aria-current={at === index ? "step" : undefined}
-            aria-label={t`Step ${n}`}
-            className="focus-visible:ring-ring/50 flex h-6 items-center rounded-full px-0.75 outline-none focus-visible:ring-3 disabled:cursor-default"
-            disabled={!open(at)}
-            key={each}
-            onClick={() => {
-              onGo(each);
-            }}
-            type="button"
-          >
-            <span className={dotOf(at, index)} />
-          </button>
-        );
-      })}
-    </span>
+    <Stepper
+      aria-label={t`Onboarding steps`}
+      onValueChange={(at) => {
+        const step = wizard[at];
+        if (step !== undefined) {
+          onGo(step);
+        }
+      }}
+      steps={wizard.map((step) => ({ label: names[step] }))}
+      value={index}
+      variant="light"
+    />
   );
 };
 
@@ -89,19 +143,24 @@ const StepDots = ({
  */
 export const Arriving = ({
   settled,
-  className = "min-w-0",
-  motion = "animate-in fade-in duration-500",
+  layout,
+  motion: comesIn = motion.fade,
   children,
 }: {
   settled: boolean;
-  className?: string;
+  /** Where it stands. */
+  layout?: StyleXStyles;
   /** How it comes in. */
-  motion?: string;
+  motion?: StyleXStyles;
   children: ReactNode;
 }) => {
   // oxlint-disable-next-line react/hook-use-state -- as it was on arrival, never set
   const [still] = useState(settled);
-  return <span className={cn(className, !still && motion)}>{children}</span>;
+  return (
+    <span {...comeIn(!still, comesIn, arrivingStyles.base, layout)}>
+      {children}
+    </span>
+  );
 };
 
 /** The screens before Grasp knows anything of the company, where how much it knows isn't shown. */
@@ -137,7 +196,7 @@ export const SetupFrame = ({
     open: t`Ready`,
   };
   const word = words[step];
-  const { back, on, open } = waysFrom(index, reached, path);
+  const { back, on } = waysFrom(index, reached, path);
   // Back on a step finished before, what turns up around it is there at once, too.
   const settled = wasHeard(step);
 
@@ -160,23 +219,20 @@ export const SetupFrame = ({
   }, [onExit]);
 
   return (
-    <div className="bg-background flex h-svh flex-col overflow-hidden text-sm">
+    <div {...stylex.props(styles.window)}>
       {/* The ways back and on a step on the left, and how much Grasp knows of the organization in the middle, in one row. */}
-      <header className="setup-header grid h-18 flex-none items-center px-4 sm:px-10">
-        <nav
-          aria-label={t`Back and forward`}
-          className="flex items-center gap-1"
-        >
+      <header {...stylex.props(styles.bar)}>
+        <nav aria-label={t`Back and forward`} {...stylex.props(styles.ways)}>
           {back === undefined ? null : (
             <Arriving settled={settled}>
               <Button
+                icon={ArrowLeft}
                 onClick={() => {
                   onGo(back);
                 }}
                 size="sm"
                 variant="ghost"
               >
-                <ArrowLeftIcon data-icon="inline-start" />
                 {t`Back`}
               </Button>
             </Arriving>
@@ -185,6 +241,7 @@ export const SetupFrame = ({
           {on === undefined ? null : (
             <Arriving settled={settled}>
               <Button
+                iconEnd={ArrowRight}
                 onClick={() => {
                   onGo(on);
                 }}
@@ -192,7 +249,6 @@ export const SetupFrame = ({
                 variant="ghost"
               >
                 {t`Forward`}
-                <ArrowRightIcon data-icon="inline-end" />
               </Button>
             </Arriving>
           )}
@@ -206,28 +262,29 @@ export const SetupFrame = ({
         )}
       </header>
       {/* A step fits between the two rows, a long list scrolling in its own panel; only where a window is too small even for that, on a phone, does the step scroll between them. */}
-      <main className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 py-2">
-        <div className="my-auto flex w-full justify-center">{children}</div>
+      <main {...stylex.props(styles.main)}>
+        <div {...stylex.props(styles.column)}>{children}</div>
       </main>
-      <footer className="bg-background setup-footer grid h-18 flex-none items-center px-4 sm:px-10">
+      <footer {...stylex.props(styles.bar)}>
         {/* The mark bottom left, across from the language. */}
-        <GraspMark className="size-5" />
-        <nav aria-label={t`Onboarding steps`} className="flex items-center">
+        <span {...stylex.props(styles.mark)}>
+          <Icon icon={BrandGrasp} label="Grasp" />
+        </span>
+        <div {...stylex.props(styles.where)}>
           {word === undefined ? (
-            <StepDots index={index} onGo={onGo} open={open} path={path} />
+            <StepDots index={index} onGo={onGo} path={path} />
           ) : (
-            <span
-              className="text-muted-foreground animate-in fade-in slide-in-from-bottom-1 duration-200"
-              key={word}
-            >
-              {word}
+            <span key={word} {...stylex.props(motion.rise)}>
+              <Text element="span" size="sm" tone="muted">
+                {word}
+              </Text>
             </span>
           )}
-        </nav>
+        </div>
         {/* The language, once chosen, then pause and the sound. */}
-        <div className="flex items-center justify-end gap-1">
+        <div {...stylex.props(styles.end)}>
           {step === "welcome" ? null : (
-            <span className="animate-in fade-in duration-500">
+            <span {...stylex.props(motion.fade)}>
               <LanguageButton />
             </span>
           )}

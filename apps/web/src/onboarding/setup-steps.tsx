@@ -51,6 +51,7 @@ import { Textarea } from "@grasp-os/ui/components/textarea";
 import { cn } from "@grasp-os/ui/lib/utils";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useNavigate, useRouter, useSearch } from "@tanstack/react-router";
 import {
   CheckIcon,
@@ -85,6 +86,7 @@ import type { DocumentRow } from "./document-drop.tsx";
 import { HrLeads } from "./hr-leads.tsx";
 import { InterviewsProgress } from "./interviews-progress.tsx";
 import { LanguageChoice } from "./language-choice.tsx";
+import { motion } from "./motion.ts";
 import { NoSenderItem } from "./no-sender.tsx";
 import { PlacePicker } from "./place-picker.tsx";
 import type { PickedFile } from "./place-picker.tsx";
@@ -491,11 +493,8 @@ const Welcome = (props: StepProps) => {
         voice={lines.voice}
       />
       <div
-        className={cn(
-          "transition-all duration-700 ease-out",
-          !asked && "-translate-y-2 opacity-0"
-        )}
         inert={!asked}
+        {...stylex.props(motion.change, !asked && motion.waitingAbove)}
       >
         <LanguageChoice
           onPick={(locale) => {

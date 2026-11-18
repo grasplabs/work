@@ -1,9 +1,6 @@
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
 import { useLingui } from "@lingui/react/macro";
 
+import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
 import { chooseLocale, isLocale, localeNames } from "../i18n.ts";
 import type { Locale } from "../i18n.ts";
 
@@ -19,6 +16,7 @@ const languages = Object.entries(localeNames).map(([value, label]) => ({
  * Every language, named in its own words, and none chosen yet: the page
  * reads in the browser's language until you pick one, and the way on waits
  * for it. The options themselves stay put, so the keys keep their place.
+ * Stephen asks for it at the end of his greeting, so there is no label above it.
  */
 export const LanguageChoice = ({
   picked,
@@ -30,33 +28,28 @@ export const LanguageChoice = ({
 }) => {
   const { t, i18n } = useLingui();
   return (
-    <div className="flex flex-col items-center gap-3">
-      {/* Stephen asks for it at the end of his greeting, so there is no label above it. */}
-      <ToggleGroup
-        aria-label={t`Choose your language`}
-        className="flex-wrap justify-center"
-        onValueChange={(value: unknown[]) => {
-          const [chosen] = value;
-          // Pressing the chosen one again keeps it.
-          if (isLocale(chosen)) {
-            onPick(chosen);
-            void chooseLocale(chosen);
-          }
-        }}
-        size="sm"
-        spacing={1}
-        value={picked ? [i18n.locale] : []}
-      >
-        {languages.map((language) => (
-          <ToggleGroupItem
-            key={language.value}
-            lang={language.value}
-            value={language.value}
-          >
-            {language.label}
-          </ToggleGroupItem>
-        ))}
-      </ToggleGroup>
-    </div>
+    <ToggleGroup
+      aria-label={t`Choose your language`}
+      onValueChange={(value: unknown[]) => {
+        const [chosen] = value;
+        // Pressing the chosen one again keeps it.
+        if (isLocale(chosen)) {
+          onPick(chosen);
+          void chooseLocale(chosen);
+        }
+      }}
+      size="sm"
+      value={picked ? [i18n.locale] : []}
+    >
+      {languages.map((language) => (
+        <Toggle
+          key={language.value}
+          lang={language.value}
+          value={language.value}
+        >
+          {language.label}
+        </Toggle>
+      ))}
+    </ToggleGroup>
   );
 };
