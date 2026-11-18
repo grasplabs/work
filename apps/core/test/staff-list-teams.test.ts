@@ -5,7 +5,11 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { intoMembersTeams } from "../src/staff-list-teams.ts";
+import {
+  intoMembersTeams,
+  keepStaffListPlaces,
+  placePrimaries,
+} from "../src/staff-list-teams.ts";
 import { adminCommands } from "./admin-command.ts";
 import { add, markerWord, textsFor } from "./brain-next-leaks-harness.ts";
 import { mockIdp } from "./idp.ts";
@@ -214,6 +218,14 @@ const primariesOf = async (userId: string) => {
     .bind(userId)
     .all<{ team: string; made: number }>();
   return results;
+};
+
+/** How many audit events the outbox refused (`audit_outbox_rejected`). */
+const rejectedCount = async (): Promise<number> => {
+  const row = await env.DB.prepare(
+    "SELECT count(*) AS n FROM audit_outbox_rejected"
+  ).first<{ n: number }>();
+  return row?.n ?? 0;
 };
 
 describe("the staff list's teams", { timeout: 120_000 }, () => {
@@ -960,17 +972,28 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
         await admin.api.onboarding.confirmRoster(listed(sales, finance));
       }
     );
-    let events: { action: string; target?: string; user: unknown }[] = [];
+    const rejectedBefore = await rejectedCount();
     const audited = await auditedDuring(async () => {
       await confirmOn(admin, landing.coreEnv, listed(sales, sales));
     });
-    events = audited
-      .filter(({ action }) => action.startsWith("team.member."))
-      .map(({ action, target, detail }) => ({
-        action,
-        target: target?.id,
-        user: detail?.userId,
-      }));
+    const nameOf = new Map([
+      [sales, "sales"],
+      [finance, "finance"],
+      [ann.userId, "ann"],
+      [bea.userId, "bea"],
+    ]);
+    // Every event of both confirms, each naming what it did, and no gap.
+    const events = audited
+      .filter(
+        ({ action }) =>
+          action.startsWith("team.member.") || action === "audit.gap"
+      )
+      .map(
+        ({ action, target, detail }) =>
+          `${action} ${nameOf.get(target?.id ?? "") ?? target?.id} ${nameOf.get(String(detail?.userId)) ?? "?"}`
+      )
+      .toSorted();
+    const rejected = (await rejectedCount()) - rejectedBefore;
     const overlapped = {
       ann: await primariesOf(ann.userId),
       bea: await primariesOf(bea.userId),
@@ -986,11 +1009,8 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
     expect({
       landed: landing.landed(),
       overlapped,
-      // Bea left the Finance the second confirm made, named as such.
-      beaLeft: events.filter(
-        ({ action, user }) =>
-          action === "team.member.removed" && user === bea.userId
-      ),
+      events,
+      rejected,
       ann: inTeams(ann.userId),
       bea: inTeams(bea.userId),
     }).toStrictEqual({
@@ -999,9 +1019,17 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
         ann: [{ team: sales, made: 1 }],
         bea: [{ team: sales, made: 1 }],
       },
-      beaLeft: [
-        { action: "team.member.removed", target: finance, user: bea.userId },
+      // The second confirm placed both; the first then took Bea out of
+      // the Finance the second made, named as such, and put her in Sales.
+      // Ann's join changed nothing and her leave found nothing: neither
+      // says anything.
+      events: [
+        "team.member.added finance bea",
+        "team.member.added sales ann",
+        "team.member.added sales bea",
+        "team.member.removed finance bea",
       ],
+      rejected: 0,
       ann: [`Finance ${tag}`],
       bea: [`Finance ${tag}`],
     });
@@ -1023,7 +1051,7 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
     // A draft save reads the members' teams, Board among them...
     const { roster: named, minted } = await intoMembersTeams(env, roster, by, {
       make: false,
-      held: await store.heldTeams(),
+      held: async () => await store.heldTeams(),
     });
     // ...an admin deletes Board in Settings before the store keeps it...
     const deleted = await callAuth("/organization/remove-team", admin.session, {
@@ -1086,5 +1114,181 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
       inSales: teams.get(`Sales ${tag}`)?.memberIds.includes(ann.userId),
       primaries: await primariesOf(ann.userId),
     }).toStrictEqual({ landed: true, inSales: false, primaries: [] });
+  });
+
+  it("never make a team the list made once again under its id after an admin deleted it, though a stale confirm still holds it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ann = await signedInApi(idp, "user");
+    const tag = unique();
+    const marker = markerWord();
+    const by = { type: "person", userId: admin.userId } as const;
+    const store = onboardingStore(env);
+    const listed = (board: string, sales: string): RosterInput => ({
+      teams: [
+        { id: board, name: `Board ${tag}`, lead: null },
+        { id: sales, name: `Sales ${tag}`, lead: null },
+      ],
+      people: [
+        { id: "ann", name: "Ann", email: emailOf(ann), team: board },
+        { id: "bo", name: "Bo", team: sales },
+      ],
+    });
+    // A confirm makes Board under the id core minted; its minutes are shared.
+    const { roster: first } = await admin.api.onboarding.confirmRoster(
+      listed("board", "sales")
+    );
+    const idOf = (name: string): string =>
+      first?.teams.find((team) => team.name === `${name} ${tag}`)?.id ?? "";
+    const board = idOf("Board");
+    const sales = idOf("Sales");
+    await add(`Board minutes ${marker}`, { kind: "team", teamId: board });
+    // A stale tab's confirm read the store while Board was on it...
+    const staleHeld = await store.heldTeams();
+    // ...then another save takes Board off and an admin deletes it...
+    await admin.api.onboarding.saveRoster({
+      teams: [{ id: sales, name: `Sales ${tag}`, lead: null }],
+      people: [{ id: "bo", name: "Bo", team: sales }],
+    });
+    const deleted = await callAuth("/organization/remove-team", admin.session, {
+      teamId: board,
+    });
+    // ...and the stale confirm goes on: Board held and minted, to it.
+    const stale = rosterSchema.parse(listed(board, sales));
+    const { roster: named, minted } = await intoMembersTeams(env, stale, by, {
+      make: true,
+      held: async () => await Promise.resolve(staleHeld),
+    });
+    await store.saveRoster(named, by, { confirmed: true, minted });
+    await keepStaffListPlaces(env, named);
+    await placePrimaries(env, by);
+    const again = named.teams.find(({ name }) => name === `Board ${tag}`)?.id;
+    const teams = await membersTeams(admin);
+    const texts = await textsFor(ann.userId, marker);
+
+    expect({
+      deleted: deleted.status,
+      newId: again !== undefined && again !== board,
+      annIn: teams.get(`Board ${tag}`)?.memberIds.includes(ann.userId),
+      reads: texts.some((text) => text.includes(marker)),
+    }).toStrictEqual({ deleted: 200, newId: true, annIn: true, reads: false });
+  });
+
+  it("never make a team again under an id the list made while its confirm ran, when the admin deleted it in between", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ann = await signedInApi(idp, "user");
+    const tag = unique();
+    const marker = markerWord();
+    const listed: RosterInput = {
+      teams: [
+        { id: "board", name: `Board ${tag}`, lead: null },
+        { id: "sales", name: `Sales ${tag}`, lead: null },
+      ],
+      people: [
+        { id: "ann", name: "Ann", email: emailOf(ann), team: "board" },
+        { id: "bo", name: "Bo", team: "sales" },
+      ],
+    };
+    // Board is only on a draft: no members' team yet, its id core's own.
+    const { roster: drafted } = await admin.api.onboarding.saveRoster(listed);
+    if (drafted === null) {
+      throw new Error("The draft wasn't kept");
+    }
+    const board =
+      drafted.teams.find(({ name }) => name === `Board ${tag}`)?.id ?? "";
+    const sales =
+      drafted.teams.find(({ name }) => name === `Sales ${tag}`)?.id ?? "";
+    // A confirm from a stale tab read Board as still to make. Just before
+    // it makes it, another confirm made it, its minutes were shared, it
+    // was taken off the list and an admin deleted it.
+    const landing = landingAt(/insert into "teams"/iu, "before", async () => {
+      await admin.api.onboarding.confirmRoster(drafted);
+      await add(`Board minutes ${marker}`, { kind: "team", teamId: board });
+      await admin.api.onboarding.saveRoster({
+        teams: [{ id: sales, name: `Sales ${tag}`, lead: null }],
+        people: [{ id: "bo", name: "Bo", team: sales }],
+      });
+      await callAuth("/organization/remove-team", admin.session, {
+        teamId: board,
+      });
+    });
+    await confirmOn(admin, landing.coreEnv, drafted);
+    const afterStale = await membersTeams(admin);
+    // The next confirm gives Board a new id.
+    const { roster: held } = await admin.api.onboarding.view();
+    if (held === null) {
+      throw new Error("No staff list");
+    }
+    const { roster: kept } = await admin.api.onboarding.confirmRoster(held);
+    const again = kept?.teams.find(({ name }) => name === `Board ${tag}`)?.id;
+    const teams = await membersTeams(admin);
+    const texts = await textsFor(ann.userId, marker);
+
+    expect({
+      landed: landing.landed(),
+      madeAgain: afterStale.get(`Board ${tag}`)?.id === board,
+      newId: again !== undefined && again !== board,
+      annIn: teams.get(`Board ${tag}`)?.memberIds.includes(ann.userId),
+      reads: texts.some((text) => text.includes(marker)),
+    }).toStrictEqual({
+      landed: true,
+      madeAgain: false,
+      newId: true,
+      annIn: true,
+      reads: false,
+    });
+  });
+
+  it("count each team's members by what a confirm's batch did, though another confirm moved them in between", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ann = await signedInApi(idp, "user");
+    const tag = unique();
+    const names = ["A", "B", "C"].map((letter) => `${letter} ${tag}`);
+    const { roster: first } = await admin.api.onboarding.confirmRoster({
+      teams: names.map((name, index) => ({
+        id: `t${index}`,
+        name,
+        lead: null,
+      })),
+      people: [{ id: "ann", name: "Ann", email: emailOf(ann), team: "t0" }],
+    });
+    const ids = names.map(
+      (name) => first?.teams.find((team) => team.name === name)?.id ?? ""
+    );
+    const listed = (annIn: number): RosterInput => ({
+      teams: names.map((name, index) => ({
+        id: ids[index] ?? "",
+        name,
+        lead: null,
+      })),
+      people: [
+        { id: "ann", name: "Ann", email: emailOf(ann), team: ids[annIn] ?? "" },
+      ],
+    });
+    // This confirm read Ann in A and moves her to B; just before its
+    // writes, another moved her to C.
+    const landing = landingAt(
+      /insert into "team_primaries"/iu,
+      "before",
+      async () => {
+        await admin.api.onboarding.confirmRoster(listed(2));
+      }
+    );
+    await confirmOn(admin, landing.coreEnv, listed(1));
+    const { results } = await env.DB.prepare(
+      `SELECT name, member_count AS counted,
+         (SELECT count(*) FROM team_members WHERE team_id = teams.id) AS members
+       FROM teams WHERE id IN (?, ?, ?) ORDER BY name`
+    )
+      .bind(...ids)
+      .all<{ name: string; counted: number; members: number }>();
+
+    expect({ landed: landing.landed(), results }).toStrictEqual({
+      landed: true,
+      results: [
+        { name: names[0], counted: 0, members: 0 },
+        { name: names[1], counted: 1, members: 1 },
+        { name: names[2], counted: 0, members: 0 },
+      ],
+    });
   });
 });

@@ -591,6 +591,18 @@ export const staffListPlaces = sqliteTable(
 );
 
 /**
+ * The ids of every members' team the staff list ever made (GRA-2055):
+ * written by the very batch that makes one (staff-list-teams.ts
+ * `intoMembersTeams`), kept when the team is deleted. A team row is made
+ * only under an id not here, in the same statement, so a deleted team's id
+ * is never made again, whatever the onboarding's store still holds.
+ */
+export const staffListTeamIds = sqliteTable("staff_list_team_ids", {
+  id: text().primaryKey(),
+  organizationId: text("organization_id").notNull(),
+});
+
+/**
  * Part of the SSO plugin's model, and stays empty: sign-in providers come
  * only from deployment config, and registering one in-product is refused.
  */

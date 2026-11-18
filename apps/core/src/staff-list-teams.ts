@@ -4,13 +4,15 @@ import type { Roster } from "@grasp-os/shared/onboarding";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import { teamAccessMayHaveDropped } from "./access-revocations.ts";
-import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
+import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember, organizationId } from "./auth/membership-sql.ts";
 import {
   auditOutbox,
   staffListPlaces,
+  staffListTeamIds,
   teamMembers,
   teamPrimaries,
   teams,
@@ -45,6 +47,11 @@ import { teamNameKey } from "./onboarding/kickoff-company.ts";
 //   id from the first save that names it, and everything keys by it.
 // - A team the admin only drafted: made at the confirm, never before, so a
 //   draft fixed before it leaves no team behind.
+
+/** The memberships a leave's delete returns (`placementOf`). */
+const leftRowsSchema = z.array(
+  z.object({ teamId: z.string(), userId: z.string() })
+);
 
 /** The directory's placeholder addresses (auth/directory-members.ts): no sign-in verified them. */
 const placeholderSuffix = "%@directory.invalid";
@@ -83,15 +90,35 @@ export const intoMembersTeams = async (
   env: Env,
   roster: Roster,
   actor: AuditActor,
-  { make, held }: { make: boolean; held: readonly HeldTeam[] }
+  {
+    make,
+    held: heldNow,
+  }: {
+    make: boolean;
+    /** The store's teams, read only after the members' teams are. */
+    held: () => Promise<readonly HeldTeam[]>;
+  }
 ): Promise<{ roster: Roster; minted: Set<string> }> => {
   const db = drizzle(env.DB);
-  const existing = await db
-    .select({ id: teams.id, name: teams.name })
-    .from(teams)
-    .where(eq(teams.organizationId, organizationId));
+  // The members' teams first, then the store's: a team deleted in between
+  // is missing from the first read and so never kept by the second.
+  const [existing, madeBefore] = await db.batch([
+    db
+      .select({ id: teams.id, name: teams.name })
+      .from(teams)
+      .where(eq(teams.organizationId, organizationId)),
+    db.select({ id: staffListTeamIds.id }).from(staffListTeamIds),
+  ]);
+  const held = await heldNow();
   const known = new Map(existing.map(({ id, name }) => [id, name]));
-  const mintedHeld = held.filter(({ id, minted }) => minted && !known.has(id));
+  // A minted id the list made a members' team of once, and which is no
+  // members' team now, was deleted: it is never kept, and its team gets a
+  // new id. What the store holds under the old id is left on purpose: the
+  // admin deleted that team, and nothing of it may reach the new one.
+  const madeEver = new Set(madeBefore.map(({ id }) => id));
+  const mintedHeld = held.filter(
+    ({ id, minted }) => minted && !known.has(id) && !madeEver.has(id)
+  );
   const kept = new Set([...known.keys(), ...mintedHeld.map(({ id }) => id)]);
   const byName = new Map<string, Set<string>>();
   for (const { id, name } of [...existing, ...mintedHeld]) {
@@ -139,22 +166,24 @@ export const intoMembersTeams = async (
       detail: { via },
     });
     const [first, ...rest] = [
-      // As Better Auth's own create-team makes a team, under the id kept.
-      ...(made.length === 0
-        ? []
-        : statementsWithin(made, (part) =>
-            db.insert(teams).values(
-              part.map(({ id, name }) => ({
-                id,
-                name,
-                organizationId,
-                memberCount: 0,
-                createdAt: now,
-                updatedAt: now,
-              }))
-            )
-          )),
-      ...made.map(({ id }) => outboxed(db, entry("team.created", id))),
+      ...made.flatMap(({ id, name }) => [
+        // As Better Auth's own create-team makes a team, under the id kept,
+        // and only under one the list never made before: the proof is in
+        // this statement, so no read, however old, makes a deleted team's
+        // id again.
+        db
+          .insert(teams)
+          .select(
+            sql`SELECT ${id}, ${name}, 0, ${organizationId}, ${now.getTime()}, ${now.getTime()}
+              WHERE NOT EXISTS (SELECT 1 FROM ${staffListTeamIds} WHERE ${staffListTeamIds.id} = ${id})`
+          )
+          .onConflictDoNothing(),
+        outboxedIfChanged(db, entry("team.created", id)),
+        db
+          .insert(staffListTeamIds)
+          .values({ id, organizationId })
+          .onConflictDoNothing(),
+      ]),
       ...renamed.flatMap(({ id, name }) => [
         db
           .update(teams)
@@ -267,6 +296,7 @@ export const placementOf = (
     "core"
   );
   const leave = [
+    // First in the person's statements: `placePrimaries` reads what it left.
     db
       .delete(teamMembers)
       .where(
@@ -274,7 +304,8 @@ export const placementOf = (
           eq(teamMembers.userId, userId),
           sql`${teamMembers.teamId} = ${listMade}`
         )
-      ),
+      )
+      .returning({ teamId: teamMembers.teamId, userId: teamMembers.userId }),
     // Its event names the team the statement above left, as it was then.
     db.insert(auditOutbox).select(
       sql`SELECT ${removed.id}, json_set(${JSON.stringify(removed)}, '$.target.id', ${listMade}), ${now.getTime()}
@@ -416,24 +447,36 @@ export const placePrimaries = async (
       })
   );
   const now = new Date();
+  // What the batches actually left, by the leaves' own returned rows: a
+  // confirm in between may have moved someone, so never the read's guess.
+  const left: { teamId: string; userId: string }[] = [];
   // Each person's change whole in one batch: a move never ends half done.
   for (const part of chunks(changes, peoplePerBatch)) {
-    const [first, ...rest] = part.flatMap((change) =>
-      placementOf(db, actor, change, now)
-    );
+    const groups = part
+      .map((change) => placementOf(db, actor, change, now))
+      .filter((group) => group.length > 0);
+    // Where each person's statements start in the batch: their leave.
+    const starts: number[] = [];
+    let at = 0;
+    for (const group of groups) {
+      starts.push(at);
+      at += group.length;
+    }
+    const [first, ...rest] = groups.flat();
     if (first !== undefined) {
       // Batches one after another, each within D1's limits.
       // oxlint-disable-next-line no-await-in-loop
-      await auditedBatch(env, db, [first, ...rest]);
+      const results = await auditedBatch(env, db, [first, ...rest]);
+      for (const start of starts) {
+        left.push(...leftRowsSchema.parse(results[start]));
+      }
     }
   }
   const touched = [
-    ...new Set(
-      changes.flatMap(({ before, after }) => [
-        ...(before === undefined ? [] : [before.teamId]),
-        ...(after === undefined ? [] : [after]),
-      ])
-    ),
+    ...new Set([
+      ...left.map(({ teamId }) => teamId),
+      ...changes.flatMap(({ after }) => (after === undefined ? [] : [after])),
+    ]),
   ];
   if (touched.length > 0) {
     // Better Auth's count of each team's members, as its own writes keep it.
@@ -446,14 +489,12 @@ export const placePrimaries = async (
   }
   // As Better Auth's own removal does (auth.ts): leaving a team can take a
   // role in an App shared with it away, so its open pages look again.
-  const left = new Map<string, string[]>();
-  for (const { userId, before } of changes) {
-    if (before !== undefined) {
-      left.set(before.teamId, [...(left.get(before.teamId) ?? []), userId]);
-    }
+  const leavers = new Map<string, string[]>();
+  for (const { teamId, userId } of left) {
+    leavers.set(teamId, [...(leavers.get(teamId) ?? []), userId]);
   }
   await Promise.all(
-    [...left].map(async ([teamId, userIds]) => {
+    [...leavers].map(async ([teamId, userIds]) => {
       await teamAccessMayHaveDropped(env, teamId, userIds);
     })
   );
