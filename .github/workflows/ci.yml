@@ -536,14 +536,6 @@ jobs:
       - uses: ./.github/actions/playwright-browser
         with:
           save: true
-      # The model files main keeps (.github/workflows/model-files.yml): the
-      # build puts the files of the model core ships in the stack's state
-      # (scripts/local-model-files.ts), so every part recalls by meaning.
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/grasp-os/model-files
-          key: model-files-${{ github.run_id }}
-          restore-keys: model-files-
       # The parts wait for it: every build at once (e2e/build.ts).
       # Then the parallel parts' tests, listed once for all fourteen
       # (scripts/e2e-parts.ts). The same count as e2e's matrix, below:
@@ -660,6 +652,26 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: e2e-stack
+      # The part that runs the Brain's test by meaning
+      # (e2e/brain-meaning.e2e.ts) gets the model files main keeps
+      # (.github/workflows/model-files.yml), which its stack puts in its
+      # state as it starts (playwright.config.ts). Only that part: on every
+      # part's stack, loading the model took 20 to 45 s of the part and
+      # failed both onboarding stacks (November 2026).
+      - id: meaning
+        run: |
+          if [ "$GRASP_E2E_PART" = parallel ] && grep -q ' › brain-meaning\.e2e\.ts › ' "e2e/dist/parts/$PART.txt"; then
+            echo "runs=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GRASP_E2E_PART: ${{ matrix.project }}
+          PART: ${{ matrix.artifact }}
+      - if: steps.meaning.outputs.runs == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/grasp-os/model-files
+          key: model-files-${{ github.run_id }}
+          restore-keys: model-files-
       # Beside the journeys, the runner's memory once a minute, as in the
       # test shards (scripts/memory-log.ts).
       - run: |
