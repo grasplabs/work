@@ -15,6 +15,8 @@ interface Scene {
   height: number;
   time: number;
   pointer: { x: number; y: number } | undefined;
+  /** How much the pointer presses on the sand, 0 to 1: it eases in as it comes and out as it goes. */
+  press: number;
   clear: Box | undefined;
 }
 
@@ -116,6 +118,13 @@ const pixelMark = 2;
 /** How many frames the sand takes to settle, for its first and its still picture. */
 const settleFrames = 150;
 
+/** How far from the pointer the sand parts, and how hard, in CSS pixels a step. */
+const partReach = 130;
+const partPush = 2.6;
+
+/** The steps of see-through a grain is drawn in, so the canvas's alpha is set a few times a frame. */
+const alphaSteps = 12;
+
 /** The most grains, and how many CSS pixels of field each grain has. */
 const mostGrains = 9000;
 const pixelsPerGrain = 140;
@@ -132,7 +141,12 @@ const sandOn = (scene: Scene, field: Plate, pixel: boolean) => {
     size: index % 3 === 0 ? 1.6 : 1.1,
     spark: index % 26 === 0,
   }));
-  const step = (now: Scene): void => {
+  // `rate` is how much of a step this frame is: 1 at thirty frames a second, which the sand was
+  // tuned at, a half at sixty. The slide down the slope goes with it; the shake is a random walk,
+  // so it goes with its root and the sand is as restless at any frame rate.
+  const step = (now: Scene, rate = 1): void => {
+    const walk = Math.sqrt(rate);
+    const lamp = now.press > 0.01 ? now.pointer : undefined;
     for (const grain of grains) {
       // Down the slope of how much the plate moves, faster where it moves more, with the shake of
       // the plate on top.
@@ -142,17 +156,23 @@ const sandOn = (scene: Scene, field: Plate, pixel: boolean) => {
       const slope = Math.hypot(dx, dy);
       const moving = Math.min(1, Math.abs(value) * 1.5);
       const pull = slope > 0 ? (Math.sign(value) * moving * 3.6) / slope : 0;
-      let shake = 0.5 + moving * 1.5;
-      if (now.pointer !== undefined) {
-        const away = Math.hypot(
-          grain.x - now.pointer.x,
-          grain.y - now.pointer.y
-        );
-        shake += Math.max(0, 1 - away / 110) * 7;
-      }
+      const shake = (0.5 + moving * 1.5) * walk;
       const angle = Math.random() * Math.PI * 2;
-      grain.x += -dx * pull + Math.cos(angle) * shake;
-      grain.y += -dy * pull + Math.sin(angle) * shake;
+      grain.x += -dx * pull * rate + Math.cos(angle) * shake;
+      grain.y += -dy * pull * rate + Math.sin(angle) * shake;
+      // The pointer parts the sand: grains near it slide straight away from it, most at its
+      // middle and none at its reach, and drift back down the plate's slope once it has gone.
+      if (lamp !== undefined) {
+        const px = grain.x - lamp.x;
+        const py = grain.y - lamp.y;
+        const away = Math.hypot(px, py);
+        if (away < partReach && away > 0) {
+          const near = 1 - away / partReach;
+          const push = (near * near * partPush * now.press * rate) / away;
+          grain.x += px * push;
+          grain.y += py * push;
+        }
+      }
       const out =
         grain.x < 0 ||
         grain.y < 0 ||
@@ -170,10 +190,16 @@ const sandOn = (scene: Scene, field: Plate, pixel: boolean) => {
     now: Scene,
     sparks: boolean
   ): void => {
+    const most = sparks ? 0.9 : 0.5;
+    let level = -1;
     for (const grain of grains) {
       const shown = grain.spark === sparks ? shownAt(now, grain.x, grain.y) : 0;
       if (shown > 0.01) {
-        ctx.globalAlpha = (sparks ? 0.9 : 0.5) * shown;
+        const next = Math.ceil(shown * alphaSteps);
+        if (next !== level) {
+          level = next;
+          ctx.globalAlpha = (most * next) / alphaSteps;
+        }
         if (pixel) {
           ctx.fillRect(
             Math.floor(grain.x / pixelGrid) * pixelGrid,
@@ -208,8 +234,14 @@ const sandOn = (scene: Scene, field: Plate, pixel: boolean) => {
   return { step, draw, stretch };
 };
 
-/** How long a frame is, at most thirty a second. */
-const frameMs = 1000 / 30;
+/** The step the sand was tuned at, a thirtieth of a second; a frame is its share of that. */
+const stepMs = 1000 / 30;
+/** The longest a frame counts for (a tab coming back): the sand never jumps. */
+const longestMs = 50;
+/** How fast the pointer's press eases in and out, as a share of what is left each step. */
+const pressEase = 0.18;
+/** How many frames the colours are kept before they are read again (the theme may have changed). */
+const colourFrames = 30;
 
 /** The most canvas pixels to a CSS pixel: a grain is a dot of 1 to 1.6px, crisp at 2. */
 const mostRatio = 2;
@@ -230,6 +262,7 @@ export const startSand = (
     height: 1,
     time: 0,
     pointer: undefined,
+    press: 0,
     clear: undefined,
   };
   const pixel = kind === "pixels";
@@ -240,10 +273,21 @@ export const startSand = (
   let running = false;
   // The canvas takes its colours from its own style, so they follow the theme: its text colour for
   // the grains, its outline's for the sparks (backdrop-grain and backdrop-spark).
+  // Read every `colourFrames` frames, not each one: reading a style sixty times a second is work
+  // the sand does not need.
+  let read: Colours | undefined;
+  let readFor = 0;
   const colours = (): Colours => {
-    const style = getComputedStyle(element);
-    return { grain: style.color, accent: style.outlineColor };
+    if (read === undefined || readFor <= 0) {
+      const style = getComputedStyle(element);
+      read = { grain: style.color, accent: style.outlineColor };
+      readFor = colourFrames;
+    }
+    readFor -= 1;
+    return read;
   };
+  // Whether the pointer is on the page: its place is kept as it leaves, so its press eases out there.
+  let pointing = false;
   /** Where what is kept clear stands, in the canvas's own space. */
   const place = (): void => {
     const box = element.getBoundingClientRect();
@@ -289,20 +333,23 @@ export const startSand = (
   };
   const loop = (now: number): void => {
     frame = requestAnimationFrame(loop);
-    if (now - last >= frameMs) {
-      last = now;
-      place();
-      scene.time = (now - begun) / 1000;
-      sand?.step(scene);
-      paint();
-    }
+    // Every frame the screen gives (sixty a second, or more), each a share of a step by its time.
+    const rate = Math.min(now - last, longestMs) / stepMs;
+    last = now;
+    place();
+    scene.time = (now - begun) / 1000;
+    const ease = 1 - (1 - pressEase) ** rate;
+    scene.press += ((pointing ? 1 : 0) - scene.press) * ease;
+    sand?.step(scene, rate);
+    paint();
   };
   const point = (event: PointerEvent): void => {
     const box = element.getBoundingClientRect();
     scene.pointer = { x: event.clientX - box.left, y: event.clientY - box.top };
+    pointing = true;
   };
   const leave = (): void => {
-    scene.pointer = undefined;
+    pointing = false;
   };
   const resized = new ResizeObserver(fit);
   resized.observe(element);
