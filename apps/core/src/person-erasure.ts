@@ -71,6 +71,9 @@ import {
   users,
   workflowDecisionConfirmations,
   apps as appRegistry,
+  keptRunEvidence,
+  runChatSources,
+  workflowState,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { appPreview, workspace, inJurisdiction } from "./durable-objects.ts";
@@ -354,7 +357,10 @@ const brainShared: ErasureStep = {
  * `requirePerson`), so it fails at its first step.
  * Moving ownership of what they owned is an admin's. Then the one-use
  * confirmations they were given to answer decisions go. The decisions
- * they answered keep who did, as company history.
+ * they answered keep who did, as company history. And what their chats
+ * had read, kept with the runs those chats started past those runs'
+ * details for a key of what a workflow keeps (workflow-state.ts): the
+ * keys go, and the pins with their ID.
  */
 const runs: ErasureStep = {
   area: "runs",
@@ -372,10 +378,28 @@ const runs: ErasureStep = {
     if (stopped.unasked > 0) {
       throw new Error("Runs of theirs are still to be asked to end");
     }
+    // What their chats had read, kept with the runs those chats started
+    // (`runChatSources`): every key of what a workflow keeps that such a
+    // run set is deleted, as without their pins its check would pass, and
+    // then their pins kept past those runs' details go, their ID with
+    // them (GRA-1996). Keys first, so no key is left that a pin backed.
+    const theirRuns = sql`(SELECT ${runChatSources.runId} FROM ${runChatSources}
+      WHERE ${runChatSources.personId} = ${userId})`;
     await db.batch([
       db
         .delete(workflowDecisionConfirmations)
         .where(eq(workflowDecisionConfirmations.userId, userId)),
+      db
+        .delete(workflowState)
+        .where(sql`${workflowState.runId} IN ${theirRuns}`),
+      db
+        .delete(runChatSources)
+        .where(
+          and(
+            eq(runChatSources.personId, userId),
+            sql`${runChatSources.runId} IN (SELECT ${keptRunEvidence.runId} FROM ${keptRunEvidence})`
+          )
+        ),
       completed(db, userId, "runs"),
     ]);
   },

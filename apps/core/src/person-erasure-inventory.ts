@@ -193,7 +193,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // an erased person's ID (D3).
   "core.run_chat_sources": {
     company:
-      "what a run's chat had read, with the run; its pins keep other people's IDs after their erasure (D3)",
+      "what a run's chat had read, with the run; its pins keep other people's IDs after their erasure (D3). Their own pins kept past a run's details for a kept key go with their erasure, and every key such a run set (GRA-1996)",
   },
   "core.org_settings": {
     none: "the organization's billing and Pulse settings",
