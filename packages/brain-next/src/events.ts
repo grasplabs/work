@@ -13,14 +13,19 @@ import type { NewEvent } from "./contract.ts";
 // - A person in a row: the host names a team's group, never a person
 //   (contract.ts `newEventSchema`), an item only by a MAC of its ID, and
 //   who took it only by a MAC of them and the team, which only the host
-//   can compute: so the host can erase their events (`eraseEvents`).
+//   can compute: so the host can erase their events (`eraseEventsIn`).
 //   One person's tags in two teams differ, but one call makes an event in
 //   each of their teams at the same step and hour, so with raw access to
 //   this table they can be lined up by co-occurring.
 // - One call pinned by its time: each is kept to the hour, rounded down.
 // - A late write after an erasure: the erasure closes the person's tags in
 //   the transaction that deletes their events, and an add under a closed
-//   tag keeps nothing (`eraseEvents`, `addEvents`).
+//   tag keeps nothing (`eraseEventsIn`, `addEvents`).
+// - An erasure undone by a restore of the store's storage: it is part of
+//   the person's erasure in the shared store, whose ledger entry names
+//   the tags and the key they were made under (erasure.ts
+//   `erasePersonShared`); a replay applies it again, as the erasure
+//   itself did.
 // - Tags no erasure can compute: the host names the key it made them
 //   with, and a call under another key deletes every event and closed tag
 //   first (`underKey`).
@@ -36,34 +41,29 @@ import type { NewEvent } from "./contract.ts";
 const hourMs = 60 * 60 * 1000;
 
 /**
- * `change` run under the host's key `keyId`, in one transaction with it:
- * when the store last saw another, every event and closed tag is deleted
- * first, as no erasure could compute their tags again, and `keyId` kept.
- * So a rotation of the host's key drops what was kept under the old one
- * (at most `eventsKeptMs` of it) and leaves nothing an erasure can't find.
+ * The store under the host's key `keyId`, in the caller's transaction:
+ * when it last saw another, every event and closed tag is deleted first,
+ * as no erasure could compute their tags again, and `keyId` kept. So a
+ * rotation of the host's key drops what was kept under the old one (at
+ * most `eventsKeptMs` of it) and leaves nothing an erasure can't find; and
+ * a replay of an erasure made under another key than a restored copy's
+ * drops that copy's events, which no later erasure could find either.
  */
-const underKey = (
-  storage: DurableObjectStorage,
-  keyId: string,
-  change: () => void
-): void => {
-  storage.transactionSync(() => {
-    const { sql } = storage;
-    const [kept] = sql
-      .exec<{ id: string }>("SELECT id FROM event_key WHERE row = 1")
-      .toArray();
-    if (kept?.id !== keyId) {
-      if (kept !== undefined) {
-        sql.exec("DELETE FROM events");
-        sql.exec("DELETE FROM closed_event_tags");
-      }
-      sql.exec(
-        "INSERT INTO event_key (row, id) VALUES (1, ?) ON CONFLICT (row) DO UPDATE SET id = excluded.id",
-        keyId
-      );
-    }
-    change();
-  });
+const underKey = (sql: SqlStorage, keyId: string): void => {
+  const [kept] = sql
+    .exec<{ id: string }>("SELECT id FROM event_key WHERE row = 1")
+    .toArray();
+  if (kept?.id === keyId) {
+    return;
+  }
+  if (kept !== undefined) {
+    sql.exec("DELETE FROM events");
+    sql.exec("DELETE FROM closed_event_tags");
+  }
+  sql.exec(
+    "INSERT INTO event_key (row, id) VALUES (1, ?) ON CONFLICT (row) DO UPDATE SET id = excluded.id",
+    keyId
+  );
 };
 
 /**
@@ -80,7 +80,8 @@ export const addEvents = (
   now: number
 ): void => {
   const oldest = now - eventsKeptMs;
-  underKey(storage, keyId, () => {
+  storage.transactionSync(() => {
+    underKey(storage.sql, keyId);
     for (const { key, team, step, item, who, at } of events) {
       const happened =
         Math.floor(Math.min(Date.parse(at), now) / hourMs) * hourMs;
@@ -114,28 +115,28 @@ export const expireEvents = (sql: SqlStorage, now: number): void => {
 
 /**
  * Deletes every event whose tag is one of `who`, and closes those tags as
- * of `now`, in one transaction under the host's key `keyId`: a person's
- * erasure, which no later add can undo.
+ * of `at`, under the host's key `keyId` (`underKey`), in the caller's
+ * transaction: a person's erasure (erasure.ts `erasePersonShared`, and
+ * its replay), which no later add can undo while an event could still
+ * arrive.
  */
-export const eraseEvents = (
-  storage: DurableObjectStorage,
-  keyId: string,
-  who: readonly string[],
-  now: number
+export const eraseEventsIn = (
+  sql: SqlStorage,
+  { keyId, who }: { keyId: string; who: readonly string[] },
+  at: number
 ): void => {
-  underKey(storage, keyId, () => {
-    const listed = JSON.stringify(who);
-    storage.sql.exec(
-      "DELETE FROM events WHERE who IN (SELECT value FROM json_each(?))",
-      listed
-    );
-    storage.sql.exec(
-      `INSERT INTO closed_event_tags (who, at)
-      SELECT value, ? FROM json_each(?)
-      WHERE true
-      ON CONFLICT (who) DO UPDATE SET at = excluded.at`,
-      now,
-      listed
-    );
-  });
+  underKey(sql, keyId);
+  const listed = JSON.stringify(who);
+  sql.exec(
+    "DELETE FROM events WHERE who IN (SELECT value FROM json_each(?))",
+    listed
+  );
+  sql.exec(
+    `INSERT INTO closed_event_tags (who, at)
+    SELECT value, ? FROM json_each(?)
+    WHERE true
+    ON CONFLICT (who) DO UPDATE SET at = max(at, excluded.at)`,
+    at,
+    listed
+  );
 };

@@ -58,6 +58,19 @@ const keyId = "a".repeat(64);
 /** A tag of who took a step, as the host makes one: 64 hex digits. */
 const aTag = (): string => crypto.randomUUID().replaceAll("-", "").repeat(2);
 
+/**
+ * A person's erasure in the shared store, of someone with no card, with
+ * the events under `who` (their tag in one team), made under `under`.
+ */
+const erasedTags = async (who: string, under = keyId): Promise<void> => {
+  await shared().erasePersonShared({
+    person: `person-${crypto.randomUUID()}`,
+    identifiers: [],
+    reason: "person_erased",
+    events: { keyId: under, who: [who] },
+  });
+};
+
 /** The steps of the events the shared store keeps for `team`, in order. */
 const stepsFor = async (team: string): Promise<unknown[]> => {
   const rows = await keptFor(team);
@@ -185,7 +198,7 @@ describe("events", () => {
         eventOf(team, "deals.read", undefined, other),
       ],
     });
-    await shared().eraseEvents({ keyId, who: [erased] });
+    await erasedTags(erased);
     // The late write: the same person's step, made from teams read
     // before the erasure.
     await shared().addEvents({
@@ -205,7 +218,7 @@ describe("events", () => {
   it("keep a closed tag only as long as an event under it could arrive", async () => {
     const team = `team:${crypto.randomUUID()}`;
     const erased = aTag();
-    await shared().eraseEvents({ keyId, who: [erased] });
+    await erasedTags(erased);
     const later = Date.now() + eventsKeptMs + 60_000;
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(later);
@@ -225,7 +238,7 @@ describe("events", () => {
       keyId,
       events: [eventOf(team, "deals.old", undefined, kept)],
     });
-    await shared().eraseEvents({ keyId, who: [closed] });
+    await erasedTags(closed);
     const before = await keptFor(team);
     await shared().addEvents({
       keyId: "b".repeat(64),
@@ -260,7 +273,7 @@ describe("events", () => {
       keyId,
       events: [eventOf(team, step, undefined, kept)],
     });
-    await shared().eraseEvents({ keyId, who: [closed] });
+    await erasedTags(closed);
     await shared().startRestore(before, "test");
     const restored = await restoredState(before);
     await shared().addEvents({
@@ -282,6 +295,71 @@ describe("events", () => {
       source: "held",
       steps: [step],
       exported: [],
+    });
+  });
+
+  it("stay erased through a restore of the store's storage to before the erasure: the replay takes the person's events again and closes their tag", async () => {
+    const team = `team:${crypto.randomUUID()}`;
+    const [erased, other] = [aTag(), aTag()];
+    await shared().addEvents({
+      keyId,
+      events: [
+        eventOf(team, "deals.update", undefined, erased),
+        eventOf(team, "deals.read", undefined, other),
+      ],
+    });
+    const before = await copyOf(shared());
+    await erasedTags(erased);
+    // An older copy of the storage comes back: the store replays the
+    // ledger as it starts.
+    await restore(shared(), before);
+    await shared().addEvents({
+      keyId,
+      events: [
+        eventOf(team, "deals.late", undefined, erased),
+        eventOf(team, "deals.late", undefined, other),
+      ],
+    });
+
+    await expect(stepsFor(team)).resolves.toStrictEqual([
+      "deals.read",
+      "deals.late",
+    ]);
+  });
+
+  it("leave nothing of an erased person after a restore to before a rotation of the host's key: the replay drops what the old key made", async () => {
+    const team = `team:${crypto.randomUUID()}`;
+    const [oldTag, newTag, other] = [aTag(), aTag(), aTag()];
+    const rotated = "c".repeat(64);
+    // The person's and a colleague's events under the key before.
+    await shared().addEvents({
+      keyId,
+      events: [
+        eventOf(team, "deals.update", undefined, oldTag),
+        eventOf(team, "deals.read", undefined, other),
+      ],
+    });
+    const before = await copyOf(shared());
+    // The key rotated, then the person erased under the new one: their old
+    // tag is one no erasure can compute any more.
+    await shared().addEvents({
+      keyId: rotated,
+      events: [eventOf(team, "deals.new", undefined, other)],
+    });
+    await erasedTags(newTag, rotated);
+    await restore(shared(), before);
+    const replayed = await stepsFor(team);
+    await shared().addEvents({
+      keyId: rotated,
+      events: [
+        eventOf(team, "deals.late", undefined, newTag),
+        eventOf(team, "deals.kept", undefined, other),
+      ],
+    });
+
+    expect({ replayed, after: await stepsFor(team) }).toStrictEqual({
+      replayed: [],
+      after: ["deals.kept"],
     });
   });
 });

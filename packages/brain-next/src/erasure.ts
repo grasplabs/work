@@ -1,14 +1,21 @@
 import { z } from "zod";
 
 import type { BrainBucket } from "./bucket.ts";
-import { erasureReasons, refusalPrefix, restoringNow } from "./contract.ts";
+import {
+  erasureReasons,
+  personEventsSchema,
+  refusalPrefix,
+  restoringNow,
+} from "./contract.ts";
 import type {
   ErasureReason,
   ErasureStatus,
   ErasuresOverview,
   Identifier,
+  PersonEvents,
 } from "./contract.ts";
 import { foldIdentifier } from "./entities.ts";
+import { eraseEventsIn } from "./events.ts";
 import { hashOf, releaseVectors } from "./files.ts";
 import {
   deleteMemories,
@@ -621,6 +628,8 @@ const personBodySchema = z.union([
     subjects: z.array(
       z.string().regex(/^(?:[0-9a-f]{64}|entity:[0-9a-f-]{36})$/u)
     ),
+    /** Their events' tags and the host's key they were made under (events.ts). */
+    events: personEventsSchema.optional(),
   }),
   z.strictObject({ parts: z.int().nonnegative() }),
 ]);
@@ -628,15 +637,19 @@ type PersonBody = z.infer<typeof personBodySchema>;
 
 /**
  * Records the person's erasure `key` (`entry`) and applies it to what
- * `found` names (people.ts `applyPerson`), in the caller's transaction;
- * none found (a legacy entry's body): its record alone.
+ * `found` names (people.ts `applyPerson`), and to their events (`events`:
+ * those deleted and their tags closed as of the erasure, events.ts
+ * `eraseEventsIn`, the tags kept with it for its entry's body), in the
+ * caller's transaction; none found (a legacy entry's body): its record
+ * alone.
  */
 const applyPersonEntry = (
   sql: SqlStorage,
   key: string,
   entry: LedgerEntry,
   confirmed: boolean,
-  found: PersonFound | undefined
+  found: PersonFound | undefined,
+  events: PersonEvents | undefined
 ): void => {
   sql.exec(
     `INSERT OR IGNORE INTO erasures
@@ -650,6 +663,16 @@ const applyPersonEntry = (
   );
   if (found !== undefined) {
     applyPerson(sql, { key, subject: entry.subject }, found);
+  }
+  if (events !== undefined) {
+    sql.exec(
+      `INSERT OR IGNORE INTO person_erasure_events (erasure, who, key_id)
+      SELECT ?, value, ? FROM json_each(?)`,
+      key,
+      events.keyId,
+      JSON.stringify(events.who)
+    );
+    eraseEventsIn(sql, events, entry.at);
   }
 };
 
@@ -1269,7 +1292,27 @@ const confirm = async (
       )
       .toArray()
       .map(({ subject }) => subject);
-    body = JSON.stringify(personBodySchema.parse({ subjects }));
+    const tags = storage.sql
+      .exec<{ who: string; keyId: string }>(
+        `SELECT who, key_id AS keyId FROM person_erasure_events
+        WHERE erasure = ? ORDER BY who`,
+        key
+      )
+      .toArray();
+    const [first] = tags;
+    body = JSON.stringify(
+      personBodySchema.parse({
+        subjects,
+        ...(first === undefined
+          ? {}
+          : {
+              events: {
+                keyId: first.keyId,
+                who: tags.map(({ who }) => who),
+              },
+            }),
+      })
+    );
   }
   await inTime(bucket.put(key, body));
   storage.sql.exec("UPDATE erasures SET confirmed = 1 WHERE key = ?", key);
@@ -1532,10 +1575,12 @@ export const erasePersonShared = async (
     person,
     identifiers,
     reason,
+    events,
   }: {
     person: string;
     identifiers: readonly Identifier[];
     reason: ErasureReason;
+    events?: PersonEvents;
   }
 ): Promise<void> => {
   const { storage } = store;
@@ -1567,11 +1612,18 @@ export const erasePersonShared = async (
       at: nextAt(sql),
     };
     const key = ledgerKeyOf(entry);
-    applyPersonEntry(sql, key, entry, false, {
-      people: [person],
-      identifiers: held,
-      subjects: closing,
-    });
+    applyPersonEntry(
+      sql,
+      key,
+      entry,
+      false,
+      {
+        people: [person],
+        identifiers: held,
+        subjects: closing,
+      },
+      events
+    );
     return { key, confirmed: 0 };
   });
   if (recorded.confirmed === 0) {
@@ -1692,7 +1744,7 @@ interface EntryRead {
   group?: boolean;
   writer?: WriterBody;
   /** A person's entry: what it names in this copy; undefined for a legacy body (`personBodySchema`). */
-  person?: { found: PersonFound | undefined };
+  person?: { found: PersonFound | undefined; events?: PersonEvents };
 }
 
 /**
@@ -1720,6 +1772,9 @@ const readEntry = async (
     replayMemos.set(storage, memo);
     return {
       person: {
+        ...("events" in body && body.events !== undefined
+          ? { events: body.events }
+          : {}),
         found:
           "subjects" in body
             ? await foundForReplay(
@@ -1828,7 +1883,14 @@ export const replayStep = async ({
             keepGroup(sql, entry.subject);
           }
           if (person !== undefined) {
-            applyPersonEntry(sql, key, entry, true, person.found);
+            applyPersonEntry(
+              sql,
+              key,
+              entry,
+              true,
+              person.found,
+              person.events
+            );
             return [];
           }
           return apply(sql, key, entry, true, writer).stopped;

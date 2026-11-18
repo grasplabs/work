@@ -1444,6 +1444,24 @@ export const closedEventTags = sqliteTable(
 );
 
 /**
+ * The events a person's erasure in the shared store erased (erasure.ts
+ * `erasePersonShared`): each of their tags, and the host's key they were
+ * made under, by the erasure (`erasures.key`). Its ledger entry's body is
+ * written from these, so a replay after a restore of the store's storage
+ * erases their events again (events.ts `eraseEventsIn`). Kept with the
+ * erasure, as `person_erasure_subjects` is. Opaque without the host's key.
+ */
+export const personErasureEvents = sqliteTable(
+  "person_erasure_events",
+  {
+    erasure: text().notNull(),
+    who: text().notNull(),
+    keyId: text("key_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.erasure, table.who] })]
+);
+
+/**
  * Which of the host's keys the events' tags and keys are made with, by an
  * id of it the host gives (a MAC of a fixed label under it), never the
  * key: one row. A call under another id finds tags no erasure could

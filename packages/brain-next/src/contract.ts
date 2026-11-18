@@ -1427,7 +1427,8 @@ const macSchema = z.string().regex(/^[0-9a-f]{64}$/u);
  * person; but one call makes one event in each of its person's teams,
  * with the same step and hour, so with raw access to the store their
  * tags in two teams can be lined up by co-occurring. Nothing answers it back; it
- * is there so the host can erase a person's events (`eraseEvents`), and
+ * is there so the host can erase a person's events (`erasePersonShared`'s
+ * `events`), and
  * so whatever draws figures from events can count people. **A figure
  * drawn from events may be shown only when at least five distinct `who`
  * values stand behind it** (the host's `minTeamShown`, the floor every
@@ -1460,13 +1461,23 @@ export const newEventsSchema = z.strictObject({
 });
 export type NewEvents = z.infer<typeof newEventsSchema>;
 
-/** A person's tags whose events to erase (`Brain.eraseEvents`): one a team. */
-export const eventErasureSchema = z.strictObject({
-  /** As `NewEvents.keyId`. */
+/**
+ * Most of a person's event tags one erasure names: one per team of the
+ * company, as the host keeps them. A bound on one request, not on what
+ * anyone keeps.
+ */
+export const eventTagsPerErasureMax = 10_000;
+
+/**
+ * A person's events to erase with them (`SharedPersonErasure.events`):
+ * their tag in each team, under the host's key `keyId` (as
+ * `NewEvents.keyId`).
+ */
+export const personEventsSchema = z.strictObject({
   keyId: macSchema,
-  who: z.array(macSchema).min(1).max(eventsPerAddMax),
+  who: z.array(macSchema).min(1).max(eventTagsPerErasureMax),
 });
-export type EventErasure = z.infer<typeof eventErasureSchema>;
+export type PersonEvents = z.infer<typeof personEventsSchema>;
 
 /**
  * Whether `source` may be in `group`: its key is the group's, "/" and
@@ -2092,12 +2103,17 @@ export type Identifier = z.infer<typeof identifierSchema>;
  * the host's id for them, as it names them whose word a memory is or who
  * confirmed one, and the exact identifiers the host verified as theirs
  * (their sign-in email). A name is never one: only exact evidence says
- * which entity is theirs.
+ * which entity is theirs. With it, their events (`events`): those under
+ * their tags are deleted and the tags closed, so no later add keeps one
+ * under them while an event could still arrive (events.ts), recorded in
+ * the erasure's ledger entry, so a replay after a restore of the store's
+ * storage erases them again.
  */
 export const sharedPersonErasureSchema = z.strictObject({
   person: principalSchema,
   identifiers: z.array(identifierSchema).max(namesPerEntityMax),
   reason: z.literal("person_erased"),
+  events: personEventsSchema.optional(),
 });
 export type SharedPersonErasure = z.infer<typeof sharedPersonErasureSchema>;
 
@@ -3332,14 +3348,6 @@ export interface Brain {
    * The shared store's alone. Safe to repeat.
    */
   expireEvents: () => Promise<void>;
-  /**
-   * Deletes every event whose `who` is one of `request.who`, and closes
-   * those tags so no later add keeps an event under one (until
-   * `eventsKeptMs` passes): a person's erasure, by their tag in each team.
-   * The shared store's alone. Safe to repeat, and answers alike whatever
-   * there was.
-   */
-  eraseEvents: (request: EventErasure) => Promise<void>;
   /**
    * Erases `person`'s own store whole, the one place what only they may
    * read is kept: everything it holds, and from then on every call is

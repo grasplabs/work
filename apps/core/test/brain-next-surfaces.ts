@@ -4573,23 +4573,6 @@ export const coreProbes = {
       }),
     ];
   },
-  // A person's erasure of their events: no reader, and refused for no
-  // one without naming them. Never the reader's own: the planted event a
-  // later pass hunts for is the holder's.
-  eraseEventsOf: async ({ markers }) => [
-    await answer("someone's who never took a step", async () => {
-      await coreBrain.eraseEventsOf(env, stranger());
-    }),
-    await answer("no one", async () => {
-      await coreBrain.eraseEventsOf(env, "");
-    }),
-    await answer(
-      "someone named by the markers, past an ID's length",
-      async () => {
-        await coreBrain.eraseEventsOf(env, markers.join(" ").repeat(64));
-      }
-    ),
-  ],
 } satisfies Record<
   Exclude<CoreMember, CorePersonMember | CoreCodeMember | CoreAppMember>,
   Probe
@@ -10931,25 +10914,6 @@ export const storeProbes = {
         undefined,
         personalStore(personId)
       ),
-    ];
-  },
-  eraseEvents: async ({ personId, markers }) => {
-    const keyId = await eventKeyId();
-    return [
-      await answer("tags no event has", async () => {
-        await store().eraseEvents({ keyId, who: [aTag(), aTag()] });
-      }),
-      await answer("no tags", async () => {
-        await store().eraseEvents({ keyId, who: [] });
-      }),
-      await answer("a tag that is the markers", async () => {
-        await store().eraseEvents(
-          unchecked({ keyId, who: [markers.join(" ")] })
-        );
-      }),
-      await answer("tags, from the reader's own store", async () => {
-        await personalStore(personId).eraseEvents({ keyId, who: [aTag()] });
-      }),
     ];
   },
   expireEvents: async ({ personId }) => [

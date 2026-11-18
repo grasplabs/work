@@ -1644,7 +1644,6 @@ const leavingNone = [
   "erasedOf",
   // The shared store's alone: a person's own store refuses them.
   "addEvents",
-  "eraseEvents",
   "erasePersonShared",
   "eraseWriter",
   "erasureStatus",

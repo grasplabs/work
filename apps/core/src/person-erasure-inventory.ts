@@ -674,7 +674,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "brainStore.memory_judging_places": noPerson,
   // The steps people took, as their teams' events (GRA-1763): each with a
   // keyed tag of who took it in that team, by which a person's erasure
-  // deletes theirs (brain-next.ts `eraseEventsOf`); the rest go after 90
+  // deletes theirs (brain-next.ts `erasePersonShared`); the rest go after 90
   // days (`eventsKeptMs`).
   "brainStore.events": { erased: "brain_shared" },
   // The tags an erasure of events closed, so a late write under one is
@@ -682,6 +682,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // it, each deleted once no event under it could still arrive (90 days).
   "brainStore.closed_event_tags": {
     kept: "an erasure's own record: tags opaque without core's key, kept 90 days so a late write can't bring erased events back",
+  },
+  "brainStore.person_erasure_events": {
+    kept: "an erasure's own record: the tags of the events a person's erasure took, opaque without core's key, so a replay after a restore takes them again",
   },
   "brainStore.event_key": {
     none: "an id of core's key the events are made under, never a person",
