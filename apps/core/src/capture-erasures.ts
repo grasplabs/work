@@ -114,19 +114,16 @@ const eraseEach = async (
       });
     })
   );
-  // What native sync copied through a person's own connection
-  // (brain-sync.ts, GRA-1758): their own store's copies erased, the
+  // What native sync copied through a native connection (brain-sync.ts,
+  // GRA-1758, GRA-1719): a person's own store's copies erased, the
   // connection closed for the sync, and the shared store's copies owed,
-  // before the disconnect leaves the outbox.
+  // before the disconnect leaves the outbox. A shared one (no person) put
+  // copies in the shared store alone.
   const synced = stopped.flatMap(({ disconnect, connectionId }) => {
     const owner = owners.get(connectionId);
-    const personId = owner?.ownerUserId;
-    return owner?.source !== "native" ||
-      personId === null ||
-      personId === undefined ||
-      unkeyable(connectionId)
+    return owner?.source !== "native" || unkeyable(connectionId)
       ? []
-      : [{ disconnect, connectionId, personId }];
+      : [{ disconnect, connectionId, personId: owner.ownerUserId }];
   });
   const syncSettled = await Promise.allSettled(
     synced.map(async ({ disconnect, connectionId, personId }) => {

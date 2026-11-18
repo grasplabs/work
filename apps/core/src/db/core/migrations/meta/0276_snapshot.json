@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "8b4237de-6b9a-4c4c-a976-82ae31331767",
+  "id": "da669a77-dff6-4bd0-9289-95526405397a",
   "prevId": "be859107-9b5b-4dd8-b861-350f19167227",
   "tables": {
     "access_revocations": {
@@ -4875,7 +4875,7 @@
           "name": "person_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "provider": {
@@ -5045,6 +5045,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "picks_version": {
+          "name": "picks_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -5052,6 +5059,14 @@
           "name": "brain_sync_sources_due_idx",
           "columns": [
             "due_at"
+          ],
+          "isUnique": false
+        },
+        "brain_sync_sources_person_idx": {
+          "name": "brain_sync_sources_person_idx",
+          "columns": [
+            "person_id",
+            "dropped"
           ],
           "isUnique": false
         }
@@ -10248,23 +10263,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "retired_team_ids": {
-      "name": "retired_team_ids",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "run_brain_evidence": {
       "name": "run_brain_evidence",
       "columns": {
@@ -12363,51 +12361,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "staff_list_placed": {
-      "name": "staff_list_placed",
-      "columns": {
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "placed": {
-          "name": "placed",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "lease_id": {
-          "name": "lease_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "lease_until": {
-          "name": "lease_until",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "stephen_places": {
       "name": "stephen_places",
       "columns": {
@@ -13039,79 +12992,6 @@
           "tableTo": "users",
           "columnsFrom": [
             "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "team_primaries": {
-      "name": "team_primaries",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "team_id": {
-          "name": "team_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "placed_at": {
-          "name": "placed_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "made": {
-          "name": "made",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "team_primaries_team_id_idx": {
-          "name": "team_primaries_team_id_idx",
-          "columns": [
-            "team_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "team_primaries_user_id_users_id_fk": {
-          "name": "team_primaries_user_id_users_id_fk",
-          "tableFrom": "team_primaries",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "team_primaries_team_id_teams_id_fk": {
-          "name": "team_primaries_team_id_teams_id_fk",
-          "tableFrom": "team_primaries",
-          "tableTo": "teams",
-          "columnsFrom": [
-            "team_id"
           ],
           "columnsTo": [
             "id"

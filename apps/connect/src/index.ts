@@ -661,7 +661,9 @@ export default class Connect
   }
 
   /** An admin's picks of a shared connection's places to sync. Audited. */
-  async pickSyncPlaces(request: unknown): Promise<{ places: string[] }> {
+  async pickSyncPlaces(
+    request: unknown
+  ): Promise<{ places: string[]; version: number }> {
     return await pickSyncPlaces(this.env, request);
   }
 

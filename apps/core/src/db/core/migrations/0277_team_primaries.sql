@@ -19,7 +19,8 @@ CREATE TABLE `team_primaries` (
 	FOREIGN KEY (`team_id`) REFERENCES `teams`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE INDEX `team_primaries_team_id_idx` ON `team_primaries` (`team_id`);--> statement-breakpoint
+CREATE INDEX `team_primaries_team_id_idx` ON `team_primaries` (`team_id`);
+--> statement-breakpoint
 -- Every deleted team's id is retired in the statement that deletes it
 -- (GRA-2055): the staff list never makes a team again under a retired id,
 -- so a deleted team's id never comes back with what was shared with it,

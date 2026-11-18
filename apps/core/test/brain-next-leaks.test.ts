@@ -394,6 +394,12 @@ describe(
           markerWord(),
         "what an agent read through a shared connection with no Brain audience":
           markerWord(),
+        "a file native sync copied from a place picked on a shared connection for a team the outsider isn't in":
+          markerWord(),
+        "a file native sync copied from a place un-picked on a shared connection everyone may read":
+          markerWord(),
+        "a file native sync copied from a place picked on a shared connection with no Brain audience":
+          markerWord(),
         "the holder's own skill": markerWord(),
         "a team's skill the outsider isn't in": markerWord(),
         "a file the source shares with the holder, by their account":
@@ -463,6 +469,12 @@ describe(
           sharedReadMarker,
         "what an agent read through a shared connection with no Brain audience":
           unsharedReadMarker,
+        "a file native sync copied from a place picked on a shared connection for a team the outsider isn't in":
+          teamPlaceMarker,
+        "a file native sync copied from a place un-picked on a shared connection everyone may read":
+          unpickedPlaceMarker,
+        "a file native sync copied from a place picked on a shared connection with no Brain audience":
+          nobodyPlaceMarker,
         "the holder's own skill": holderSkillMarker,
         "a team's skill the outsider isn't in": teamSkillMarker,
         "a file the source shares with the holder, by their account":
@@ -854,6 +866,65 @@ describe(
           input: sharedCall,
         })}`,
       };
+      // Copied by native sync from places an admin picked on shared
+      // connections (GRA-1719), each for its place's own group, which a
+      // reader holds beside the connection's audience only while the place
+      // is picked (brain-next.ts `withConnections`): one for a team the
+      // outsider isn't in; one whose place was un-picked, though everyone
+      // may read the connection; one whose connection has no audience.
+      // Their places, as the sync run keeps them, are never due in a run.
+      const neverDue = Date.parse("2100-01-01T00:00:00.000Z");
+      const placeCopy = async (
+        marker: string,
+        audience: Parameters<typeof chooseAudience>[2] | undefined,
+        dropped: boolean
+      ): Promise<SourceRef> => {
+        // Its ID holds no marker: everyone holds the group of a connection
+        // everyone may read.
+        const connectionId = await sharedToolkit(unique().replaceAll("-", ""));
+        if (audience !== undefined) {
+          await chooseAudience(sharingAdmin.api, connectionId, audience);
+        }
+        const place = `site-${unique()}`;
+        await env.DB.prepare(
+          "INSERT INTO brain_sync_sources (connection_id, feed, place, person_id, provider, tenant, account, cursor, listing, listing_open, due_at, lease_id, lease_until, last_success_at, last_error, added, changed, removed, relist_cursor, relisting, relist_at, relist_since, leaves_owed, kind, dropped, relist_catch_up, seen_in) VALUES (?, 'sites', ?, NULL, 'microsoft', NULL, NULL, NULL, 1, 0, ?, NULL, ?, NULL, NULL, 0, 0, 0, NULL, 0, ?, NULL, 0, 'file', ?, 0, NULL)"
+        )
+          .bind(
+            connectionId,
+            place,
+            neverDue,
+            neverDue,
+            neverDue,
+            dropped ? 1 : 0
+          )
+          .run();
+        const source: SourceRef = {
+          producer: "sync",
+          id: `${connectionId}/1/${unique()}`,
+        };
+        await addSource(env, {
+          source,
+          change: crypto.randomUUID(),
+          text: `Site plan ${sharedWord} ${marker}`,
+          readers: { kind: "place", connectionId, feed: "sites", place },
+        });
+        return source;
+      };
+      const teamPlaceId = await placeCopy(
+        teamPlaceMarker,
+        { kind: "team", teamId: secretTeam },
+        false
+      );
+      const unpickedPlaceId = await placeCopy(
+        unpickedPlaceMarker,
+        { kind: "everyone" },
+        true
+      );
+      const nobodyPlaceId = await placeCopy(
+        nobodyPlaceMarker,
+        undefined,
+        false
+      );
       // A step the holder took, kept as an event of a team of theirs large
       // enough to keep one (GRA-1763): nobody reads it back, that team
       // included.
@@ -1394,6 +1465,9 @@ describe(
           toolkitCaptureMarker,
           runCaptureMarker,
           sharedReadMarker,
+          teamPlaceMarker,
+          unpickedPlaceMarker,
+          nobodyPlaceMarker,
           readersMarker,
           staleReadersMarker,
           syncMarker,
@@ -1423,6 +1497,9 @@ describe(
           toolkitCaptureId,
           runCaptureId,
           sharedReadId,
+          teamPlaceId,
+          unpickedPlaceId,
+          nobodyPlaceId,
           readersId,
           staleReadersId,
           goneSyncId,
@@ -1591,6 +1668,11 @@ describe(
         runCaptureId,
         triggerCaptureMarker,
         unsharedReadMarker,
+        unpickedPlaceMarker,
+        nobodyPlaceMarker,
+        placeMarkers: [teamPlaceMarker, unpickedPlaceMarker, nobodyPlaceMarker],
+        unpickedPlaceId,
+        nobodyPlaceId,
         runMarker,
         askedMarker,
         answerMarker,
@@ -1862,9 +1944,12 @@ describe(
               // Every company marker stays forbidden (`forbidden`), the
               // opinion's too; the fixture's own text holds the Brain's
               // most a value may (500 characters), which the opinion's
-              // marker would pass once every producer has one.
+              // marker would pass once every producer has one. So would the
+              // shared places' copies, forbidden here all the same.
               markers: [
-                ...asOutsider.markers,
+                ...asOutsider.markers.filter(
+                  (marker) => !world.placeMarkers.includes(marker)
+                ),
                 world.everyoneUploadMarker,
                 world.claimMarker,
                 world.drawingMarker,
@@ -2021,6 +2106,8 @@ describe(
           _joinedShared,
         "what an agent read through a shared connection for a team the outsider isn't in":
           _joinedSharedRead,
+        "a file native sync copied from a place picked on a shared connection for a team the outsider isn't in":
+          _joinedPlace,
         ...notJoined
       } = markers;
       const { findings, addressed } = await watched(
@@ -2038,6 +2125,8 @@ describe(
             world.runCaptureMarker,
             world.triggerCaptureMarker,
             world.unsharedReadMarker,
+            world.unpickedPlaceMarker,
+            world.nobodyPlaceMarker,
             world.toHolderMarker,
             ...world.instructionMarkers,
             world.ownUploadMarker,
@@ -2054,6 +2143,8 @@ describe(
             world.captureId,
             world.toolkitCaptureId,
             world.runCaptureId,
+            world.unpickedPlaceId,
+            world.nobodyPlaceId,
             world.runSource,
             world.turnSource
           ),
@@ -2538,6 +2629,8 @@ describe(
           _teamShared,
         "what an agent read through a shared connection for a team the outsider isn't in":
           _teamSharedRead,
+        "a file native sync copied from a place picked on a shared connection for a team the outsider isn't in":
+          _teamPlace,
         ...notTeams
       } = markers;
       const { findings, addressed } = await watched(

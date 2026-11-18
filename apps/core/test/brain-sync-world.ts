@@ -171,6 +171,116 @@ export const connectSampleFeed = async (
   return { connectionId: connection.id, post, world, fetchedOf };
 };
 
+/** A file of a shared site, its readers unread (as a shared drive's are), as a sync item. */
+const siteFileOf = (id: string, text: string, version: string) => ({
+  gone: false,
+  id,
+  kind: "file",
+  version,
+  changedAt: "2026-11-18T09:00:00.000Z",
+  title: id,
+  content: { type: "text", text },
+  readers: null,
+  changedBy: null,
+  partOf: null,
+});
+
+/**
+ * Has the account `subject` hold the sites `sites` to pick, each one file
+ * with its marker, in its `version`, as the sample sync connector's sync
+ * of picked places (`sites`) reads them (test/sample-sync-fake.ts).
+ */
+export const sitesHeld = async (
+  subject: string,
+  sites: Record<string, string>,
+  version = "1"
+): Promise<void> => {
+  const providers = testBinding("CONNECT_PROVIDERS");
+  if (!isFetcher(providers)) {
+    throw new TypeError("Expected the providers Worker");
+  }
+  await providers.fetch(sampleSyncControlUrl, {
+    method: "POST",
+    body: JSON.stringify({
+      subject,
+      sites: Object.keys(sites).map((id) => ({ id, name: id })),
+      siteFeeds: Object.fromEntries(
+        Object.entries(sites).map(([site, marker]) => [
+          site,
+          {
+            "": {
+              changes: [siteFileOf(`${site}-plan`, `Plan ${marker}`, version)],
+              next: "1",
+              more: false,
+            },
+            "1": { changes: [], next: "1", more: false },
+          },
+        ])
+      ),
+    }),
+  });
+};
+
+/** Has the account `subject`'s sites `sites` fail every read (500), and the others answer. */
+export const sitesFailing = async (
+  subject: string,
+  sites: readonly string[]
+): Promise<void> => {
+  const providers = testBinding("CONNECT_PROVIDERS");
+  if (!isFetcher(providers)) {
+    throw new TypeError("Expected the providers Worker");
+  }
+  await providers.fetch(sampleSyncControlUrl, {
+    method: "POST",
+    body: JSON.stringify({ subject, failing: sites }),
+  });
+};
+
+/**
+ * A Microsoft 365 account `admin` connects for the company (GRA-1719),
+ * read by the sample sync connector, whose sites to pick are `sites`
+ * (`sitesHeld`): its connection, one of the test's own, and the account's
+ * subject.
+ */
+export const connectSharedSites = async (
+  admin: Person,
+  sites: Record<string, string>
+): Promise<{ connectionId: string; subject: string }> => {
+  const subject = `shared-${unique()}`;
+  await sitesHeld(subject, sites);
+  const { url } = await admin.api.connections.start({
+    provider: "microsoft",
+    scope: "shared",
+  });
+  const authorization = new URL(url);
+  const query = new URLSearchParams({
+    code: consentCode(
+      authorization,
+      acmeTenant,
+      subject,
+      "openid profile email offline_access User.Read Files.Read.All Sites.Read.All"
+    ),
+    state: authorization.searchParams.get("state") ?? "",
+  });
+  await routed(`/api/connections/callback?${query.toString()}`, {
+    headers: { cookie: admin.session },
+  });
+  const listed = await admin.api.connections.list();
+  const connection = listed.find(
+    ({ accountName }) => accountName === `${subject}@acme.test`
+  );
+  if (connection === undefined) {
+    throw new Error("Expected the shared Microsoft connection");
+  }
+  // Read by the sample sync connector instead of the suite's own.
+  await connectDb()
+    .prepare("UPDATE connections SET server = 'sample-sync' WHERE id = ?")
+    .bind(connection.id)
+    .run();
+  ours.add(connection.id);
+  return { connectionId: connection.id, subject };
+};
+
 /** A message in a mailbox, or a part of one (`partOf`), as a sync item. */
 export const mailItem = (
   id: string,

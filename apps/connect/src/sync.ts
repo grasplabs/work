@@ -36,7 +36,7 @@ import type {
   SyncSource,
   SyncSourcePage,
 } from "@grasp-os/shared/sync";
-import { and, asc, eq, gt, not, sql } from "drizzle-orm";
+import { and, asc, eq, gt, not, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { nativeConnector } from "./bundled-connectors.ts";
@@ -531,12 +531,16 @@ export const syncPlaceChoices = async (
  * (`sync.picks_changed`), with nothing changed. The same set again
  * changes and records nothing. A place no longer picked is refused from
  * the next read on, and is no longer among the sync's places, so core's
- * sync run drops it and erases what it brought.
+ * sync run drops it and erases what it brought. Answers the picks, and
+ * the connection's version of them (`syncPicksVersion`), one up with each
+ * save that changed them: core hides what a save un-picked only for a
+ * version newer than the last it hid for, so an older save that lands
+ * late never drops a newer choice.
  */
 export const pickSyncPlaces = async (
   env: Env,
   request: unknown
-): Promise<{ places: string[] }> => {
+): Promise<{ places: string[]; version: number }> => {
   const { person, connectionId, feed, from, places } = syncErrors.parse(
     "sync.invalid",
     pickSyncPlacesSchema,
@@ -566,17 +570,19 @@ export const pickSyncPlaces = async (
   const after = new Set(places);
   const same =
     from.length === places.length && from.every((place) => after.has(place));
+  /** The connection's version of its picks, as it is now. */
+  const versionNow = sql<number>`coalesce((SELECT ${connections.syncPicksVersion} FROM ${connections} WHERE ${connections.id} = ${connectionId}), 0)`;
   if (same) {
     // Nothing to change: still, never answer a page left open as if
     // what it shows were what is held.
     const now = await db
-      .select({ unchanged: sql<number>`${unchanged}` })
+      .select({ unchanged: sql<number>`${unchanged}`, version: versionNow })
       .from(sql`(SELECT 1)`)
       .get();
     if (now?.unchanged !== 1) {
-      await changed();
+      return await changed();
     }
-    return { places };
+    return { places, version: now.version };
   }
   // What came and went, counted in the same transaction as the write, from
   // the picks it replaces.
@@ -595,7 +601,7 @@ export const pickSyncPlaces = async (
   // The change is made only once its event is written, and its event only
   // while the picks are the ones the page started from: one transaction.
   const recorded = sql`EXISTS (SELECT 1 FROM ${auditOutbox} WHERE ${auditOutbox.id} = ${event.id})`;
-  const [written] = await db.batch([
+  const [written, [bumped]] = await db.batch([
     db
       .insert(auditOutbox)
       .select(
@@ -612,6 +618,15 @@ export const pickSyncPlaces = async (
           .where(unchanged)
       )
       .returning({ id: auditOutbox.id }),
+    // A version that only grows, one up with the change, in its
+    // transaction: what core's hide of the places it un-picks goes by.
+    db
+      .update(connections)
+      .set({
+        syncPicksVersion: sql`coalesce(${connections.syncPicksVersion}, 0) + 1`,
+      })
+      .where(and(eq(connections.id, connectionId), recorded))
+      .returning({ version: connections.syncPicksVersion }),
     db
       .delete(syncPicks)
       .where(
@@ -640,22 +655,24 @@ export const pickSyncPlaces = async (
       )
       .onConflictDoNothing(),
   ]);
-  if (written.length === 0) {
-    await changed();
+  const version = bumped?.version ?? null;
+  if (written.length === 0 || version === null) {
+    return await changed();
   }
-  return { places };
+  return { places, version };
 };
 
 /**
  * A page of the syncs core's sync run reads (GRA-1758), by connection ID
- * after `after`: each sync of each person's own native connection that is
- * active, of someone whose erasure hasn't begun, whose connector is for
- * the connection's provider, with its kind and whether it reads the whole
- * account or places it lists (`listSyncPlaces`). A shared
- * connection's syncs, whose places an admin picks (`pickSyncPlaces`), and
- * a sync of picked places, which only a shared connection has, are not
- * among them yet. A page holds at most `connectionOwnersMax` connections,
- * as connect's other pages of connections for core.
+ * after `after`: each sync of each active native connection whose
+ * connector is for the connection's provider, with its kind and how it
+ * reads (`listSyncPlaces`). A person's own connection, of someone whose
+ * erasure hasn't begun: its syncs of the whole account (`own`) and of
+ * places it lists (`listed`). A shared connection: its syncs of places
+ * an admin picks (`picked`), with no person, as it has none (GRA-1719).
+ * Neither kind ever the other's syncs (`mayRead`). A page holds at most
+ * `connectionOwnersMax` connections, as connect's other pages of
+ * connections for core.
  */
 export const listSyncSources = async (
   env: Env,
@@ -679,10 +696,15 @@ export const listSyncSources = async (
     .from(connections)
     .where(
       and(
-        eq(connections.scope, "personal"),
         eq(connections.serverKind, "native"),
         eq(connections.status, "active"),
-        not(erasureBegan(sql`${connections.ownerUserId}`)),
+        or(
+          eq(connections.scope, "shared"),
+          and(
+            eq(connections.scope, "personal"),
+            not(erasureBegan(sql`${connections.ownerUserId}`))
+          )
+        ),
         after === null ? undefined : gt(connections.id, after)
       )
     )
@@ -699,30 +721,31 @@ export const listSyncSources = async (
       accountEmail,
     }) => {
       const manifest = nativeConnector(server)?.manifest;
-      if (ownerUserId === null || manifest?.provider !== provider) {
+      if (manifest?.provider !== provider) {
         return [];
       }
+      // A shared connection has no person, and syncs only picked places;
+      // a person's own never syncs them.
+      const shared = ownerUserId === null;
       return Object.entries(manifest.syncs ?? {}).flatMap(
-        ([feed, sync]): SyncSource[] => {
-          const { places } = sync;
-          return places === "picked"
-            ? []
-            : [
+        ([feed, sync]): SyncSource[] =>
+          (sync.places === "picked") === shared
+            ? [
                 {
                   connectionId: id,
                   ownerUserId,
                   provider,
                   tenant,
                   // As its items' readers name it, and core's reading side
-                  // (connections.ts `personalAccounts`): Google by the verified
-                  // address, Microsoft by the object ID.
+                  // (connections.ts `personalAccounts`): Google by the
+                  // verified address, Microsoft by the object ID.
                   account: provider === "google" ? accountEmail : accountId,
                   feed,
                   kind: sync.kind,
-                  places,
+                  places: sync.places,
                 },
-              ];
-        }
+              ]
+            : []
       );
     }
   );
