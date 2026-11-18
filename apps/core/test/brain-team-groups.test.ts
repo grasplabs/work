@@ -316,7 +316,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     // Three regions of a staff list before, whose teams are all gone: they
     // take none of the map's four lobes.
     const old = unique();
-    await admin.api.onboarding.saveRoster(rosterOf(old));
+    await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(old)));
     const gone = ["finance", "sales", "support"].map((team, index) => ({
       id: `gone-${index}-${tag}`,
       name: `Gone ${index}`,
@@ -328,7 +328,8 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     const events = await auditedDuring(async () => {
       ({ ran, requests } = await alarmed(
         [arranging(answer)],
-        async () => await admin.api.onboarding.saveRoster(roster)
+        async () =>
+          await admin.api.onboarding.saveRoster(await teamsMade(roster))
       ));
     });
     const { teamGroups } = await admin.api.brain.read();
@@ -398,7 +399,8 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
           ],
         }),
       ],
-      async () => await admin.api.onboarding.saveRoster(rosterOf(tag))
+      async () =>
+        await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(tag)))
     );
     const { teamGroups } = await admin.api.brain.read();
 
@@ -430,7 +432,8 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
           groups: [{ name: "Everyone", teamIds: [finance, sales, support] }],
         }),
       ],
-      async () => await admin.api.onboarding.saveRoster(rosterOf(tag))
+      async () =>
+        await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(tag)))
     );
     const arranged = await admin.api.brain.read();
     const everyone = arranged.teamGroups.find(({ teamIds }) =>
@@ -443,7 +446,8 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
 
     const { ran, requests } = await alarmed(
       [arranging({ groups: [{ name: "Money", teamIds: [finance] }] })],
-      async () => await admin.api.onboarding.saveRoster(rosterOf(tag))
+      async () =>
+        await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(tag)))
     );
     const { teamGroups } = await admin.api.brain.read();
 
@@ -464,7 +468,8 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     const store = onboardingStore(env);
     const failed = await alarmed(
       [refused],
-      async () => await admin.api.onboarding.saveRoster(rosterOf(tag))
+      async () =>
+        await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(tag)))
     );
     const afterFailure = await admin.api.brain.read();
     const owed = await regionsRow();
@@ -501,7 +506,8 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
           ],
         }),
       ],
-      async () => await admin.api.onboarding.saveRoster(rosterOf(tag))
+      async () =>
+        await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(tag)))
     );
     const { teamGroups } = await admin.api.brain.read();
 
@@ -543,7 +549,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     const finance = `team-finance-${tag}`;
     const sales = `team-sales-${tag}`;
     const support = `team-support-${tag}`;
-    await admin.api.onboarding.saveRoster(rosterOf(tag));
+    await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(tag)));
     const store = onboardingStore(env);
 
     const { requests } = await arrangingWith(
@@ -557,7 +563,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
           await admin.api.brain.saveTeamGroups([
             { id: "front", name: "Front office", teamIds: [sales] },
           ]);
-          await admin.api.onboarding.saveRoster(rosterOf(tag));
+          await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(tag)));
           return arranging({
             groups: [{ name: "Everyone", teamIds: [finance, sales, support] }],
           });
@@ -588,7 +594,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     const finance = `team-finance-${tag}`;
     const sales = `team-sales-${tag}`;
     const support = `team-support-${tag}`;
-    await admin.api.onboarding.saveRoster(rosterOf(tag));
+    await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(tag)));
     // A fault at the database binding: once the arrangement prepares its
     // write (the statement that keeps the set of groups, seen through
     // D1's public `prepare`), an admin's save is made through the real
@@ -676,7 +682,7 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
     const tag = unique();
 
     const { requests, result } = await arrangingWith([], async () => {
-      await admin.api.onboarding.saveRoster(rosterOf(tag));
+      await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(tag)));
       return [await admin.api.brain.read(), await member.api.brain.read()];
     });
     const owed = await regionsRow();
