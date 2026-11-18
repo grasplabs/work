@@ -20,6 +20,7 @@ import { DataTable, grouping } from "../grasp/data-table/index.ts";
 import type { DataTableColumn } from "../grasp/data-table/index.ts";
 import { Heading } from "../grasp/heading/index.ts";
 import { IconTile } from "../grasp/icon-tile/index.ts";
+import { iconVars } from "../grasp/icons/icon.stylex.ts";
 import {
   AppRecord,
   Chart,
@@ -360,19 +361,36 @@ const styles = stylex.create({
     minWidth: 0,
   },
   stack: { display: "grid", gap: grasp.space4 },
-  cellIcon: { display: "inline-flex", color: grasp.muted, flexShrink: 0 },
+  cellIcon: {
+    [iconVars.size]: grasp.shellIcon,
+    display: "inline-flex",
+    color: grasp.text,
+    flexShrink: 0,
+  },
+  // T: the tools at the text's own height, so every row is one height.
+  tableTools: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: grasp.space1,
+  },
   // Room under the table, so the chat bar never covers its last row.
   tableFoot: { paddingBlockEnd: grasp.space20 },
 });
 
 /** The tools it uses, as small marks. */
-const Tools = ({ tools }: { tools: readonly Brand[] }) => {
+const Tools = ({
+  tools,
+  size = "md",
+}: {
+  tools: readonly Brand[];
+  size?: "sm" | "md";
+}) => {
   const shown = tools.slice(0, 3);
   const more = tools.length - shown.length;
   return (
     <span {...stylex.props(styles.tools)}>
       {shown.map((tool) => (
-        <BrandIcon brand={tool} key={tool} size="md" tile={false} />
+        <BrandIcon brand={tool} key={tool} size={size} tile={false} />
       ))}
       {more > 0 ? (
         <Text element="span" size="xs" tone="muted">
@@ -440,27 +458,25 @@ const MinimalCard = ({ row }: { row: ConceptRow }) => {
           <span {...stylex.props(styles.top)}>
             <ProcessMark row={row} />
             <CardName row={row} />
+            {row.phase === "needsYou" ? (
+              <Badge
+                aria-label={t({
+                  message: "Needs you",
+                  context: "workflow phase",
+                })}
+                tone="attention"
+                variant="dot"
+              />
+            ) : null}
           </span>
           <span {...stylex.props(styles.foot)}>
             <span {...stylex.props(styles.meta)}>
               <Tools tools={row.tools} />
               <RunCount runs={row.runs} />
             </span>
-            <span {...stylex.props(styles.meta)}>
-              {row.phase === "needsYou" ? (
-                <Badge
-                  aria-label={t({
-                    message: "Needs you",
-                    context: "workflow phase",
-                  })}
-                  tone="attention"
-                  variant="dot"
-                />
-              ) : null}
-              <Avatar name={row.owner} size="xs">
-                <AvatarFallback />
-              </Avatar>
-            </span>
+            <Avatar name={row.owner} size="xs">
+              <AvatarFallback />
+            </Avatar>
           </span>
         </div>
       </Card>
@@ -623,7 +639,7 @@ const Board = ({
           <TabsList aria-label={t`Phase`}>
             {readingOrder.map((phase) => (
               <TabsTrigger key={phase} value={phase}>
-                {`${i18n._(phaseNames[phase])} ${formatNumber(inPhase(phase).length)}`}
+                {i18n._(phaseNames[phase])}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -715,7 +731,7 @@ const tableColumns = (words: {
           key: "tools",
           header: words.tools,
           value: (row: ConceptRow) => row.tools.join(" "),
-          cell: (row: ConceptRow) => <Tools tools={row.tools} />,
+          cell: (row: ConceptRow) => <Tools size="sm" tools={row.tools} />,
         },
         {
           key: "runs",
@@ -747,6 +763,7 @@ const PhaseTable = ({
         runs: t`Runs`,
         phone,
       })}
+      appearance={{ head: "plain" }}
       density="compact"
       groupBy="phase"
       label={t`Workflows`}
