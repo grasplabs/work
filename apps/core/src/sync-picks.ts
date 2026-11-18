@@ -92,7 +92,18 @@ export const readSyncPlaces = async (
     choices.push(...next.choices);
     ({ cursor } = next);
   }
-  return { feed: first.feed, choices, picks: first.picks };
+  // Every box from the one set of picks the page saves from (`from`): a
+  // later read may see picks another admin changed meanwhile, and a box
+  // from it would disagree with what the save checks against.
+  const picked = new Set(first.picks);
+  return {
+    feed: first.feed,
+    choices: choices.map((choice) => ({
+      ...choice,
+      picked: picked.has(choice.place),
+    })),
+    picks: first.picks,
+  };
 };
 
 /**
