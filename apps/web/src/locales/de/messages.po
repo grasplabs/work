@@ -3363,6 +3363,7 @@ msgstr "Darum bitten, Version {askable} für das Team laufen zu lassen"
 msgid "Ask what you're looking for"
 msgstr "Fragen Sie, wonach Sie suchen"
 
+#: src/chat/chat-composer.tsx
 #: src/frame/connect-ai-provider.tsx
 msgid "Ask your admin to connect an AI provider."
 msgstr "Bitten Sie Ihren Admin, einen KI-Anbieter zu verbinden."
@@ -4821,7 +4822,7 @@ msgstr "KI-Anbieter verbinden"
 msgid "Connect an AI provider before sending."
 msgstr "Verbinden Sie vor dem Senden einen KI-Anbieter."
 
-#: src/frame/connect-ai-provider.tsx
+#: src/chat/chat-composer.tsx
 msgid "Connect an AI provider to start asking"
 msgstr "Verbinde einen KI-Anbieter, um Fragen zu stellen"
 
@@ -7193,6 +7194,7 @@ msgstr "Ohne Ton weiter"
 msgid "Go to {time}, {who}"
 msgstr "Zu {time} gehen, {who}"
 
+#: src/chat/chat-composer.tsx
 #: src/frame/connect-ai-provider.tsx
 msgid "Go to AI providers"
 msgstr "Zu den KI-Anbietern"

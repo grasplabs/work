@@ -3363,6 +3363,7 @@ msgstr "Vragen om versie {askable} voor het team te laten draaien"
 msgid "Ask what you're looking for"
 msgstr "Vraag wat je zoekt"
 
+#: src/chat/chat-composer.tsx
 #: src/frame/connect-ai-provider.tsx
 msgid "Ask your admin to connect an AI provider."
 msgstr "Vraag je beheerder een AI-aanbieder te koppelen."
@@ -4821,7 +4822,7 @@ msgstr "Koppel een AI-aanbieder"
 msgid "Connect an AI provider before sending."
 msgstr "Verbind een AI-provider voordat je verstuurt."
 
-#: src/frame/connect-ai-provider.tsx
+#: src/chat/chat-composer.tsx
 msgid "Connect an AI provider to start asking"
 msgstr "Koppel een AI-provider om vragen te stellen"
 
@@ -7193,6 +7194,7 @@ msgstr "Verder zonder geluid"
 msgid "Go to {time}, {who}"
 msgstr "Ga naar {time}, {who}"
 
+#: src/chat/chat-composer.tsx
 #: src/frame/connect-ai-provider.tsx
 msgid "Go to AI providers"
 msgstr "Naar AI-aanbieders"
