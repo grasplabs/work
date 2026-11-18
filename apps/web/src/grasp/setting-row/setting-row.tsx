@@ -129,6 +129,16 @@ const styles = stylex.create({
     gap: grasp.space1,
     minWidth: 0,
   },
+  // A named group that is not the first thing in its card (after rows, a table, a paragraph): a
+  // hairline over its label, across the card as a row's is, and room under it, so the label belongs
+  // to the rows below it and does not float under what came before. The first thing in a card has
+  // none: the card's own edge is above it.
+  groupAfter: {
+    borderTopStyle: "solid",
+    borderTopColor: grasp.line,
+    borderTopWidth: { default: 0, ":not(:first-child)": grasp.hairline },
+    paddingBlockStart: { default: 0, ":not(:first-child)": grasp.space4 },
+  },
   groupLabel: {
     margin: 0,
     paddingInline: grasp.tableCellInline,
@@ -489,7 +499,7 @@ export const SettingsRows = ({
     <section
       data-slot="settings-rows"
       aria-labelledby={labelId}
-      {...stylex.props(styles.group, layout ?? style)}
+      {...stylex.props(styles.group, styles.groupAfter, layout ?? style)}
     >
       <Heading
         id={labelId}

@@ -80,9 +80,12 @@ export const noteStyles = stylex.create({
     color: grasp.muted,
     opacity: { default: 1, ":is([data-disabled])": grasp.dim },
   },
-  // What is wrong, in words, in danger. The control's hairline turns danger with it.
+  // What is wrong, in words, in danger. The control's hairline turns danger with it. Whole words,
+  // never hyphenated ("al-ready" read as a second fault): only a single word longer than the line
+  // breaks, where it must (the note's overflow-wrap).
   error: {
     color: grasp.danger,
+    hyphens: "manual",
   },
 });
 
