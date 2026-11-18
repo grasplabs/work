@@ -1185,6 +1185,69 @@ describe("readers copied from the source", () => {
   );
 
   it(
+    "claims by a new connection only the addresses it proves now: a colleague given an idle connection's address still reads after its owner's erasure",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      // Alice's connected Google account was renamed to an address that
+      // has since moved to Bob; her connection last confirmed it over a
+      // day ago. A file shared with Bob names it, and he reads it.
+      const alice = await microsoftMember();
+      const { id: idle } = await connectedGoogle(alice);
+      const [local = ""] = alice.email.split("@");
+      const moved = `moved-${unique()}@acme.test`;
+      await googleGives(local, moved);
+      await renewedOnly(idle);
+      await connectDb()
+        .prepare("UPDATE connections SET verified_email_at = ? WHERE id = ?")
+        .bind(Date.now() - 25 * hourMs, idle)
+        .run();
+      const { userId: bob } = await whoami(
+        await signedIn(idp, "google", googlePerson({ email: moved }))
+      );
+      const marker = uniqueWord();
+      const bobsFile = await sharedItem(
+        marker,
+        readersOf({
+          kind: "account",
+          provider: "google",
+          tenant: "acme.test",
+          account: moved,
+        })
+      );
+      const before = await finds(bob, bobsFile, marker);
+      // Then Alice connects her own Microsoft account, proved now.
+      const { core } = await openRpc(alice.session);
+      const { url } = await core.authenticate().connections.start({
+        provider: "microsoft",
+        scope: "personal",
+        returnTo: "/integrations",
+      });
+      const authorization = new URL(url);
+      await backFromProvider(alice.session, {
+        code: consentCode(authorization, acmeTenant, alice.oid),
+        state: authorization.searchParams.get("state") ?? "",
+      });
+      const claimed = await env.DB.prepare(
+        "SELECT count(*) AS n FROM source_reader_tokens WHERE person = ?"
+      )
+        .bind(alice.userId)
+        .first<{ n: number }>();
+      await admin.api.members.remove(alice.userId);
+      await admin.api.members.erase(alice.userId, alice.name);
+      await runMinuteTasks();
+
+      // Alice claimed her first Google address, when she connected it, and
+      // her Microsoft account; not the address Bob holds.
+      expect({
+        before,
+        claimedByAlice: claimed?.n,
+        after: await finds(bob, bobsFile, marker),
+      }).toStrictEqual({ before: true, claimedByAlice: 2, after: true });
+    }
+  );
+
+  it(
     "stops counting the address of a connection needing reconnecting a day after it was last confirmed",
     setUpTime,
     async () => {

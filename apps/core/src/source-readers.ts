@@ -339,33 +339,20 @@ export const heldPrincipalsOf = async (
 
 /**
  * Claims for the member `userId` the tokens of the suite accounts they
- * connected as their own (`connected`, connect's `personalAccounts`),
- * minting each that no list named yet, as the connection proves them:
- * so their erasure finds them by person (`forgetTokens`), whatever address
- * a connection carries and whether or not they ever read by it. Called
- * when a connection is made or made again (connections.ts).
+ * connected as their own (`connected`, connect's `personalAccounts`) that
+ * count for reading now (`readingAccountsOf`, as a read claims), minting
+ * each that no list named yet: so their erasure finds them by person
+ * (`forgetTokens`), whether or not they ever read by it. A stale proof, an
+ * idle connection's address that may be someone else's by now, claims
+ * nothing, and takes no one's token. Called when a connection is made or
+ * made again (connections.ts).
  */
 export const claimConnectedTokens = async (
-  env: Pick<Env, "DB" | "BETTER_AUTH_SECRET">,
+  env: Pick<Env, "DB" | "SIGN_IN" | "BETTER_AUTH_SECRET">,
   userId: string,
   connected: readonly PersonalAccount[]
 ): Promise<void> => {
-  const keys = await keysOf(
-    env,
-    connected.flatMap(
-      ({ provider, accountId, verifiedEmail, connected: live }) => {
-        if (!live) {
-          return [];
-        }
-        if (provider === "microsoft") {
-          return [{ provider, account: accountId }];
-        }
-        return provider === "google" && verifiedEmail !== null
-          ? [{ provider, account: verifiedEmail }]
-          : [];
-      }
-    )
-  );
+  const keys = await keysOf(env, readingAccountsOf(env, [], connected));
   if (keys.length === 0) {
     return;
   }
