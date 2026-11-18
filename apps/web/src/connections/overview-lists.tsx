@@ -27,7 +27,8 @@ import { brandOf } from "./provider-mark.tsx";
 // again, each with its one fix; what is connected, each opening the app
 // beside the list; and every app that can still be added, with Connect.
 // Every row opens the app beside the list (`?app=`), where its sign-in,
-// its facts and what Grasp may do in it are.
+// its facts and what Grasp may do in it are. A mark stands in the middle
+// of its row's words (Ruben, 18 Nov 2026: a platform-wide rule).
 
 /**
  * An app's mark, one size everywhere on the page: the library's Brand
@@ -78,7 +79,7 @@ export const NeedsYou = ({
           const { name } = integration;
           return (
             <Item key={integration.key} size="xs">
-              <ItemMedia>
+              <ItemMedia align="center">
                 <AppMark integration={integration} />
               </ItemMedia>
               <ItemContent>
@@ -131,7 +132,7 @@ export const ConnectedList = ({
       <ItemGroup aria-label={title} separated>
         {connected.map((integration) => (
           <Item key={integration.key} render={openLink(integration)} size="xs">
-            <ItemMedia>
+            <ItemMedia align="center">
               <AppMark integration={integration} />
             </ItemMedia>
             <ItemContent>
@@ -179,7 +180,7 @@ export const AddApps = ({
           const connects = canConnect(integration);
           return (
             <Item key={integration.key} size="xs">
-              <ItemMedia>
+              <ItemMedia align="center">
                 <AppMark integration={integration} />
               </ItemMedia>
               <ItemContent>
