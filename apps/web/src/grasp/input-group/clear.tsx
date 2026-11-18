@@ -56,6 +56,7 @@ const styles = stylex.create({
     transitionDuration: grasp.durationHover,
     transitionTimingFunction: grasp.ease,
   },
+  sm: { width: `calc(${grasp.controlSm} - 2 * ${grasp.space1})` },
   md: { width: `calc(${grasp.controlMd} - 2 * ${grasp.space1})` },
   lg: { width: `calc(${grasp.controlLg} - 2 * ${grasp.space1})` },
   // A finger needs 44px round it too; at rest the press covers the whole end square.

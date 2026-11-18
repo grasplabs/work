@@ -124,6 +124,13 @@ const styles = stylex.create({
   },
   // Room at each end: the field's own padding at the group's edge, a small gap beside a neighbour.
   // The group's touch area is always its first child, so the first part is the second.
+  sm: {
+    paddingInlineStart: {
+      default: grasp.space2,
+      ":nth-child(2)": grasp.space3,
+    },
+    paddingInlineEnd: { default: grasp.space2, ":last-child": grasp.space3 },
+  },
   md: {
     paddingInlineStart: {
       default: grasp.space2,

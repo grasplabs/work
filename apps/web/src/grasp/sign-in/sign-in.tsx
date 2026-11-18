@@ -122,6 +122,11 @@ export interface SignInProps {
    * `onSelect` of its own. Without either, the page goes to the way's `href`.
    */
   onChoose?: (id: string) => void;
+  /**
+   * A way in was pressed, before the door opens: for a host that starts its work at the press, so
+   * it runs while the door opens and the page leaves sooner.
+   */
+  onPress?: (id: string) => void;
   /** Where staff's way goes once the door has opened. */
   staffHref?: string;
   /** The organisation's own name or logo, over the title. */
@@ -400,6 +405,8 @@ interface WaysProps {
   ways: readonly Way[];
   /** A press is playing the way out: every way but the chosen one fades. */
   gone: boolean;
+  /** The door has opened: the chosen way fades too, and the open door stands alone. */
+  opened: boolean;
   last: string;
   leaving: string | undefined;
   offline: boolean;
@@ -412,6 +419,7 @@ interface WaysProps {
 const SignInWays = ({
   ways,
   gone,
+  opened,
   last,
   leaving,
   offline,
@@ -442,7 +450,7 @@ const SignInWays = ({
           styles.way,
           styles.white,
           styles.fades,
-          gone && leaving !== way.id && styles.gone
+          gone && (opened || leaving !== way.id) && styles.gone
         )}
       >
         <Button
@@ -552,6 +560,7 @@ export const SignIn = ({
   lastUsed,
   rememberKey = lastUsedKey,
   onChoose,
+  onPress,
   staffHref,
   organisation,
   language,
@@ -570,6 +579,8 @@ export const SignIn = ({
   // A press leaves for the provider: that button works while the door opens, the rest fades.
   const [pressed, setPressed] = useState<string>();
   const [aimed, setAimed] = useState(false);
+  // The door has opened at the chosen way: that way fades as well.
+  const [opened, setOpened] = useState(false);
   const leaving = pressed ?? leavingGiven;
   // A kept provider that is no longer offered is no "Last used".
   const wanted = lastUsed ?? kept;
@@ -591,10 +602,12 @@ export const SignIn = ({
     }
     setPressed(id);
     setAimed(false);
+    onPress?.(id);
     if (id !== "staff") {
       writeLastUsed(rememberKey, id);
     }
     const done = () => {
+      setOpened(true);
       go(
         providers.find((provider) => provider.id === id),
         id === "staff" ? staffHref : undefined,
@@ -663,6 +676,7 @@ export const SignIn = ({
             <SignInWays
               ways={ways}
               gone={gone}
+              opened={opened}
               last={last}
               leaving={leaving}
               offline={notice === "offline"}

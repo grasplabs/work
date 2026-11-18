@@ -1,5 +1,6 @@
 // InputGroupButton: a Grasp Button (src/components/button) inside an InputGroup, at Button's small
-// height and set in from the group's edge by the same room on every side: Copy, Send, Search.
+// height and set in from the group's edge by the same room on every side: Copy, Send, Search. In a
+// small group, Button's extra-small, set in the same way.
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
@@ -35,24 +36,26 @@ interface InputGroupButtonOwn {
 }
 
 /**
- * Every prop an InputGroupButton takes: these, and a Button's others. Its height is always
- * Button's `sm`, set in from the group's edge.
+ * Every prop an InputGroupButton takes: these, and a Button's others. Its height is Button's `sm`
+ * (`xs` in a small group), set in from the group's edge.
  */
 export type InputGroupButtonProps = InputGroupButtonOwn &
   Without<ButtonProps, "size" | "style">;
 
 const styles = stylex.create({
+  sm: { marginInline: `calc((${grasp.controlSm} - ${grasp.controlXs}) / 2)` },
   md: { marginInline: `calc((${grasp.controlMd} - ${grasp.controlSm}) / 2)` },
   lg: { marginInline: `calc((${grasp.controlLg} - ${grasp.controlSm}) / 2)` },
 });
 
-/** The Button's props: small, in its variant, set in by the group's size. */
+/** The Button's props: small (extra-small in a small group), in its variant, set in by the group's size. */
 const placed = (
   rest: object,
   variant: ButtonVariant,
-  inset: ButtonLayoutStyle
+  inset: ButtonLayoutStyle,
+  small: boolean
 ) => {
-  const props = { ...rest, variant, size: "sm", style: inset };
+  const props = { ...rest, variant, size: small ? "xs" : "sm", style: inset };
   // SAFETY: the caller's own Button props, with the size and the inset the group gives it.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   return props as ButtonProps;
@@ -64,5 +67,5 @@ export const InputGroupButton = ({
   ...rest
 }: InputGroupButtonProps) => {
   const size = useGroupSize();
-  return <Button {...placed(rest, variant, styles[size])} />;
+  return <Button {...placed(rest, variant, styles[size], size === "sm")} />;
 };
