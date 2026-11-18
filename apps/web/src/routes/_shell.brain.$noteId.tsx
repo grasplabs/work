@@ -41,6 +41,7 @@ import {
 import type { Note, NoteEvent, NotePoint, NoteRef } from "../brain/brain.ts";
 import { ForgetButton, useCanForget, useForget } from "../brain/forget.tsx";
 import { GapActions } from "../brain/gap-actions.tsx";
+import { NotePageTwo } from "../brain/note-page-2.tsx";
 import { loadTranscript, withTranscript } from "../brain/note-transcript.ts";
 import { placeOf } from "../brain/transcript.ts";
 import { labelOf } from "../brain/witness.ts";
@@ -501,15 +502,11 @@ const mergeRows = (rows: DetailRow[]): DetailRow[] => {
  * its kind. What names it says on hover where: the sentence of a conversation, or the property of
  * a page. Long rows are capped behind "+N".
  */
-const DetailRows = ({
-  note,
-  byId,
-  workspace,
-}: {
-  note: Note;
-  byId: Map<string, Note>;
-  workspace: Workspace;
-}) => {
+const useDetailRows = (
+  note: Note,
+  byId: Map<string, Note>,
+  workspace: Workspace
+): DetailRow[] => {
   const { t } = useLingui();
   // What the article already shows: how many of each kind were said (the tabs over the statements).
   // A team's roles stay: its banner shows its interviewees or its drawing, not the roster's roles.
@@ -639,9 +636,19 @@ const DetailRows = ({
   );
   // What the note is first, then its work, then where it comes from and what is open.
   const order: DetailGroup[] = ["about", "work", "context"];
-  const sorted = order.flatMap((group) =>
-    rows.filter((row) => row.group === group)
-  );
+  return order.flatMap((group) => rows.filter((row) => row.group === group));
+};
+
+const DetailRows = ({
+  note,
+  byId,
+  workspace,
+}: {
+  note: Note;
+  byId: Map<string, Note>;
+  workspace: Workspace;
+}) => {
+  const sorted = useDetailRows(note, byId, workspace);
   return (
     <div {...stylex.props(styles.details)}>
       {sorted.map((row) => (
@@ -1048,6 +1055,53 @@ const WorkTabs = ({ note, children }: { note: Note; children: ReactNode }) => {
   );
 };
 
+/** Round 2's concepts: the note's page with its details as the library's inspector, or in the page. */
+const ConceptNote = ({
+  note,
+  workspace,
+  byId,
+  option,
+}: {
+  note: Note;
+  workspace: Workspace;
+  byId: Map<string, Note>;
+  option: "1" | "2" | "3";
+}) => {
+  const { t } = useLingui();
+  const { brain } = useBrainData();
+  const rows = useDetailRows(note, byId, workspace);
+  const source = workspace.sources.find((each) => each.id === note.id);
+  return (
+    <NotePageTwo
+      actions={
+        <>
+          <Button
+            aria-label={t`Show in the brain`}
+            icon={BrainMark}
+            render={
+              <Link
+                search={note.kind === "company" ? {} : { note: note.id }}
+                to="/brain"
+              />
+            }
+            size="sm"
+            variant="ghost"
+          />
+          <ExportButton note={note} source={source} />
+        </>
+      }
+      note={note}
+      option={option}
+      rows={rows}
+      timeline={<Timeline note={note} />}
+    >
+      {note.kind === "team" ? (
+        <TeamWork brain={brain} team={note} ws={workspace} />
+      ) : null}
+    </NotePageTwo>
+  );
+};
+
 /**
  * One note, read like a page, the same for every kind (`brain/brain-article/`): the banner of
  * its part with who or what it is, the title and summary, its own text or its conversation, and
@@ -1061,6 +1115,7 @@ const NotePage = () => {
   const { noteId } = Route.useParams();
   const { brain, workspace: read } = useBrainData();
   const { transcript } = Route.useLoaderData();
+  const { concept } = Route.useSearch();
   const workspace = withTranscript(read, noteId, transcript);
   // The statement a link opened: its id is the address's hash.
   const hash = useLocation({ select: (location) => location.hash });
@@ -1078,6 +1133,17 @@ const NotePage = () => {
       <HomePage
         brain={brain}
         toolbar={<NoteToolbar note={note} source={source} />}
+      />
+    );
+  }
+  if (concept !== undefined) {
+    return (
+      <ConceptNote
+        byId={new Map(brain.notes.map((each) => [each.id, each]))}
+        key={note.id}
+        note={note}
+        option={concept}
+        workspace={workspace}
       />
     );
   }
@@ -1103,12 +1169,27 @@ const NotePage = () => {
   );
 };
 
+/** A round-2 option from the address, which reads `?concept=1` as a number. */
+const conceptOf = (value: unknown): { concept?: "1" | "2" | "3" } => {
+  const text = String(value);
+  if (text === "1" || text === "2" || text === "3") {
+    return { concept: text };
+  }
+  return {};
+};
+
 export const Route = createFileRoute("/_shell/brain/$noteId")({
   // `?knowledge` opens a piece of work on what Grasp knows about it.
-  validateSearch: (search: Record<string, unknown>): { knowledge?: true } =>
-    search.knowledge === true || search.knowledge === "true"
-      ? { knowledge: true }
-      : {},
+  // Concepts for Ruben (concept branch only): the card's whole room, and ?concept=1|2|3.
+  staticData: { room: "whole" },
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { knowledge?: true; concept?: "1" | "2" | "3" } => ({
+    ...(search.knowledge === true || search.knowledge === "true"
+      ? { knowledge: true as const }
+      : {}),
+    ...conceptOf(search.concept),
+  }),
   // The note's transcript, when its source has one: `brain.read`, which the
   // layout read, says only how many turns it has.
   loader: async ({

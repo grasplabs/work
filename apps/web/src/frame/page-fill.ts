@@ -15,8 +15,18 @@ declare module "@tanstack/react-router" {
   interface StaticDataRouteOption {
     /** The page fills the card and scrolls inside its own panes (frame/page-fill.ts). */
     page?: "fill";
+    /**
+     * The page has the card's whole room, edge to edge under the bar (App
+     * shell's `page="whole"`), as a chat does: for a page whose side panel
+     * stands flush with the bar, the card's end and its foot.
+     */
+    room?: "whole";
   }
 }
+
+/** Whether the page shown has the card's whole room: any of its routes says so. */
+export const usePageWhole = (): boolean =>
+  useMatches().some(({ staticData }) => staticData.room === "whole");
 
 /** Whether the page shown fills the card: any of its routes says so. */
 export const usePageFills = (): boolean =>

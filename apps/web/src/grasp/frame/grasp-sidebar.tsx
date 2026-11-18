@@ -442,6 +442,17 @@ export const useGraspSidebar = ({
       : {}),
     searchShortcut: shortcutLabel(chatsKey),
     ...(section === undefined ? {} : { section }),
+    // Concept for Ruben (concept branch only): find anything in the Brain.
+    ...(section !== undefined && section === brainSection
+      ? {
+          filter: {
+            label: t`Find in the brain`,
+            placeholder: t`Find in the brain`,
+            empty: t`Nothing in the brain by that name`,
+            clear: t`Clear`,
+          },
+        }
+      : {}),
     ...(searching
       ? {
           // The phone's menu goes first: App shell closes it on its own
