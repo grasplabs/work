@@ -414,6 +414,10 @@ msgstr "{count, plural, one {Uit je laatste run van {workflow}, versie {version}
 msgid "{count, plural, one {It can't be shared yet: # problem} other {It can't be shared yet: # problems}}"
 msgstr "{count, plural, one {Het kan nog niet gedeeld worden: # probleem} other {Het kan nog niet gedeeld worden: # problemen}}"
 
+#: src/workflows/run-detail.tsx
+msgid "{count, plural, one {It started without # kept value: the run that kept it read something that is no longer there to read.} other {It started without # kept values: the runs that kept them read something that is no longer there to read.}}"
+msgstr "{count, plural, one {Hij begon zonder # bewaarde waarde: de run die hem bewaarde, las iets wat niet meer te lezen is.} other {Hij begon zonder # bewaarde waarden: de runs die ze bewaarden, lazen iets wat niet meer te lezen is.}}"
+
 #: src/brain/thinking/use-thinking.ts
 msgid "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
 msgstr "{count, plural, one {# workflow lezen} other {# workflows lezen}}"
