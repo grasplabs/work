@@ -941,6 +941,10 @@ msgstr "{needs, plural, one {# wacht op jou} other {# wachten op jou}}"
 msgid "{number} of {total}"
 msgstr "{number} van {total}"
 
+#: src/brain/opportunity-drafts.ts
+msgid "{number}. {step} (a person approves this step)"
+msgstr "{number}. {step} (een persoon keurt deze stap goed)"
+
 #: src/brain/brain-atlas.ts
 msgid "{one} and {other} both name the same handover, each from their own side."
 msgstr "{one} en {other} noemen allebei dezelfde overdracht, elk vanaf hun eigen kant."
@@ -3585,6 +3589,10 @@ msgstr "Nu verdergaan"
 msgid "Cases a week"
 msgstr "Gevallen per week"
 
+#: src/brain/opportunity-drafts.ts
+msgid "Cases a week: {cases}."
+msgstr "Gevallen per week: {cases}."
+
 #: src/settings/audit-chain.tsx
 msgid "Chain check"
 msgstr "Ketencontrole"
@@ -4269,6 +4277,7 @@ msgid "Connect another account"
 msgstr "Nog een account koppelen"
 
 #: src/brain/opportunities-page.tsx
+#: src/brain/opportunity-drafts.ts
 msgid "Connect first: {systems}."
 msgstr "Koppel eerst: {systems}."
 
@@ -5198,6 +5207,24 @@ msgstr "Tabel downloaden als Markdown"
 #: src/workflows/workflows-table.tsx
 msgid "Draft"
 msgstr "Concept"
+
+#: src/brain/opportunity-drafts.ts
+msgid "Draft a workflow for the opportunity “{title}”."
+msgstr "Maak een concept-workflow voor de kans ‘{title}’."
+
+#: src/brain/opportunity-drafts.ts
+msgid "Draft an App for the opportunity “{title}”."
+msgstr "Maak een concept-App voor de kans ‘{title}’."
+
+#: src/brain/opportunities-page.tsx
+msgctxt "drafts what an opportunity proposes"
+msgid "Draft it"
+msgstr "Uitwerken"
+
+#: src/brain/opportunities-page.tsx
+msgctxt "drafts what an opportunity proposes, named for it"
+msgid "Draft it for “{title}”"
+msgstr "Uitwerken: ‘{title}’"
 
 #: src/brain/skills-page.tsx
 msgid "Drafted from your own runs of a workflow that keep succeeding. Only you see them, and none is used until you add it to your skills."
@@ -6954,6 +6981,10 @@ msgstr "Houd 4 seconden vast"
 msgid "Hours a week"
 msgstr "Uren per week"
 
+#: src/brain/opportunity-drafts.ts
+msgid "Hours a week by hand: {hours}."
+msgstr "Uren per week met de hand: {hours}."
+
 #: src/brain/thinking/work-hours.tsx
 msgid "Hours not known yet"
 msgstr "Uren nog niet bekend"
@@ -6999,6 +7030,10 @@ msgstr "Hoe vaak"
 msgid "How sure"
 msgstr "Hoe zeker"
 
+#: src/brain/opportunity-drafts.ts
+msgid "How the team does it today:"
+msgstr "Zo doet het team het nu:"
+
 #. Under a statement put together from the interviews
 #. Under a statement put together from the interviews
 #: src/brain/aggregate.tsx
@@ -7029,6 +7064,10 @@ msgstr "Hoe deze App gebouwd is en waar je op let als je hem verandert."
 #: src/interview/closed.tsx
 msgid "How was talking to {who}?"
 msgstr "Hoe was het om met {who} te praten?"
+
+#: src/brain/opportunity-drafts.ts
+msgid "How we handle “{title}”, step by step."
+msgstr "Hoe we ‘{title}’ aanpakken, stap voor stap."
 
 #: src/brain/goals-editor.tsx
 msgid "How we notice it"
