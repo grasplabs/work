@@ -5,9 +5,9 @@ import { z } from "zod";
 import { readActivity, readWaiting } from "../dashboard/read-dashboard.ts";
 import { readDirectory } from "../directory.ts";
 import { PageLoading } from "../frame/page-states.tsx";
-import { InboxPage, groupOrder } from "../inbox/inbox-page.tsx";
+import { InboxPage, concepts, groupOrder } from "../inbox/inbox-page.tsx";
 import { inboxItems, unread } from "../inbox/items.ts";
-import { ReportRow } from "../inbox/report-row.tsx";
+import { ReportItem } from "../inbox/report-row.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 
 // The inbox, as the prototype's (`routes/inbox.tsx`), at its address: what
@@ -24,16 +24,21 @@ const Inbox = () => {
   const { waiting, readAt, activity, programme, report } =
     Route.useLoaderData();
   const { identity } = Route.useRouteContext();
-  const { item, group } = Route.useSearch();
+  const { item, group, concept, report: reportReady } = Route.useSearch();
   return (
     <InboxPage
       activity={activity}
       chosen={item}
+      concept={concept}
       group={group}
       items={inboxItems(waiting, identity, readAt)}
       foot={
-        programme.state === "ready" && programme.data !== null ? (
-          <ReportRow programme={programme.data} report={report} />
+        // The report is an item once it is ready (`?report=ready` shows it
+        // before then, for the concepts).
+        programme.state === "ready" &&
+        programme.data !== null &&
+        (programme.data.nextReport.inDays === 0 || reportReady === "ready") ? (
+          <ReportItem programme={programme.data} report={report} />
         ) : undefined
       }
       notLoaded={unread(waiting)}
@@ -46,6 +51,9 @@ export const Route = createFileRoute("/_shell/inbox")({
   validateSearch: z.object({
     item: z.string().optional(),
     group: z.enum(groupOrder).optional(),
+    // Which of the concepts Ruben chooses between to show (concept branch only).
+    concept: z.enum(concepts).optional(),
+    report: z.literal("ready").optional(),
   }),
   pendingComponent: PageLoading,
   loader: async ({ context: { core, identity } }) => {

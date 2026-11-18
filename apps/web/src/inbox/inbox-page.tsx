@@ -28,6 +28,12 @@ import { Badge } from "../grasp/badge/index.ts";
 import { BrandIcon } from "../grasp/brand-icon/index.ts";
 import { Button, useAction } from "../grasp/button/index.ts";
 import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogTitle,
+} from "../grasp/dialog/index.ts";
+import {
   Empty,
   EmptyContent,
   EmptyDescription,
@@ -45,6 +51,14 @@ import {
   ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
+import { KeyValueList } from "../grasp/key-value/index.ts";
+import { PanelSection } from "../grasp/panel-section/index.ts";
+import {
+  Panel,
+  PanelHeader,
+  PanelTexture,
+  PanelView,
+} from "../grasp/panel/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import {
   Sheet,
@@ -130,6 +144,62 @@ const styles = stylex.create({
   skip: {
     marginInlineStart: "auto",
   },
+  // The list as the page's own column, top to bottom.
+  pane: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space3,
+    minWidth: 0,
+    minHeight: "calc(100dvh - 9rem)",
+  },
+  paneBeside: {
+    borderInlineEndWidth: grasp.hairline,
+    borderInlineEndStyle: "solid",
+    borderInlineEndColor: grasp.line,
+    paddingInlineEnd: grasp.space4,
+  },
+  single: {
+    width: "100%",
+    maxWidth: "48rem",
+    marginInline: "auto",
+  },
+  splitInspector: {
+    gridTemplateColumns: `minmax(0, 1fr) ${grasp.inspectorWidth}`,
+  },
+  panel: {
+    position: "sticky",
+    top: 0,
+    maxHeight: "calc(100dvh - 7rem)",
+  },
+  // The one thing to decide, alone beside the list, a little below its top.
+  stage: {
+    position: "sticky",
+    top: 0,
+    display: "flex",
+    justifyContent: "center",
+    minHeight: "calc(100dvh - 9rem)",
+    paddingBlockStart: grasp.space10,
+    paddingInline: grasp.space6,
+    borderRadius: grasp.corner,
+    overflow: "hidden",
+  },
+  // The card and its head stand over the stage's dither.
+  overTexture: {
+    position: "relative",
+  },
+  dialogStage: {
+    position: "relative",
+    padding: grasp.space4,
+    borderRadius: grasp.corner,
+    overflow: "hidden",
+  },
+  walkBox: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+    width: "100%",
+    maxWidth: grasp.approvalWidth,
+  },
   // Nothing waits: the report's row stands under the Empty, at the list's width.
   emptyFoot: {
     width: "100%",
@@ -145,6 +215,10 @@ const styles = stylex.create({
     whiteSpace: "nowrap",
   },
 });
+
+/** The Inbox's shapes Ruben chooses between (concept branch only). */
+export const concepts = ["a", "b", "c"] as const;
+export type Concept = (typeof concepts)[number];
 
 /**
  * The groups, short enough that the filter fits beside the list. The
@@ -164,9 +238,6 @@ export const groupLabel: Record<Group, MessageDescriptor> = {
 /** The groups in the filter's order; the address (`?group=`) takes these. */
 // Workflows' and Apps' asks are one group, Approvals (Ruben, 17 November).
 export const groupOrder = ["asked", "brain", "approvals", "outcomes"] as const;
-
-const isGroup = (value: string | null): value is Group =>
-  value === "all" || groupOrder.some((each) => each === value);
 
 /** What a row says under its name: its own words, or its kind and date when it has one. */
 const rowLine = (item: InboxItem, kind: string): string => {
@@ -329,60 +400,6 @@ const NoItems = ({
   );
 };
 
-/** The groups as tabs, each with how many it holds; only where there are two or more. */
-const GroupTabs = ({
-  counts,
-  current,
-  shown,
-  total,
-}: {
-  counts: ReadonlyMap<Group, number>;
-  current: Group;
-  shown: readonly Exclude<Group, "all">[];
-  total: number;
-}) => {
-  const { t, i18n } = useLingui();
-  const navigate = useNavigate();
-  if (shown.length < 2) {
-    return null;
-  }
-  return (
-    <Tabs
-      onValueChange={(value) => {
-        if (isGroup(value)) {
-          // In the address, so the sidebar's views and Back follow it.
-          void navigate({
-            from: "/inbox",
-            to: "/inbox",
-            search: (before) => ({
-              ...before,
-              group: value === "all" ? undefined : value,
-            }),
-            replace: true,
-          });
-        }
-      }}
-      value={current}
-      variant="segmented"
-    >
-      <TabsList aria-label={t`Show`}>
-        {(["all", ...shown] as const).map((each) => {
-          const groupName = i18n._(groupLabel[each]);
-          const count = each === "all" ? total : (counts.get(each) ?? 0);
-          return (
-            <TabsTrigger key={each} value={each}>
-              {t({
-                message: `${groupName} ${count}`,
-                context: "inbox filter with how many it holds",
-              })}
-            </TabsTrigger>
-          );
-        })}
-      </TabsList>
-    </Tabs>
-  );
-};
-
 /**
  * The walk's head over the item: where in what waits it is, the one before
  * and the next (round and round), and Skip, which puts it at the back.
@@ -438,6 +455,152 @@ const WalkHead = ({
   );
 };
 
+/** What each concept's shape is given: the list, and the walk's head and item. */
+interface ShapeProps {
+  wide: boolean;
+  /** A row was chosen: on a narrow page, or in B, the walk opens over the page. */
+  open: boolean;
+  selected: InboxItem | undefined;
+  onClose: () => void;
+  onSaid: (said: string) => void;
+  list: ReactNode;
+  head: ReactNode;
+}
+
+/** The kind of the item shown, as a sheet's or a dialog's title. */
+const useKind = (selected: InboxItem | undefined): string => {
+  const { i18n } = useLingui();
+  return selected === undefined ? "" : i18n._(kindLabel[selected.kind]);
+};
+
+/** The item shown, answered in place. */
+const Detail = ({ selected, onSaid }: ShapeProps) =>
+  selected === undefined ? null : (
+    <ItemDetail item={selected} key={selected.id} onSaid={onSaid} />
+  );
+
+/** On a narrow page, the walk in a Sheet once a row is chosen. */
+const PhoneSheet = (shape: ShapeProps) => {
+  const { wide, open, onClose, head } = shape;
+  const kind = useKind(shape.selected);
+  return !wide && open ? (
+    <Sheet
+      onOpenChange={(next) => {
+        if (!next) {
+          onClose();
+        }
+      }}
+      open
+      size="lg"
+    >
+      <SheetContent>
+        <SheetTitle>{kind}</SheetTitle>
+        <SheetBody>
+          {head}
+          <Detail {...shape} />
+        </SheetBody>
+      </SheetContent>
+    </Sheet>
+  ) : null;
+};
+
+/**
+ * A: the list, and beside it the one thing to decide, alone on the page on
+ * the dither, the walk's head above it.
+ */
+const StageShape = (shape: ShapeProps) => (
+  <div {...stylex.props(styles.split, shape.wide && styles.splitWide)}>
+    {shape.list}
+    {shape.wide ? (
+      <div {...stylex.props(styles.stage)}>
+        <PanelTexture />
+        <div {...stylex.props(styles.walkBox, styles.overTexture)}>
+          {shape.head}
+          <Detail {...shape} />
+        </div>
+      </div>
+    ) : null}
+    <PhoneSheet {...shape} />
+  </div>
+);
+
+/**
+ * B: the list is the page; a row opens the walk in a dialog, to decide one
+ * after another without leaving it.
+ */
+const DialogShape = (shape: ShapeProps) => {
+  const { list, open, onClose, head } = shape;
+  const kind = useKind(shape.selected);
+  return (
+    <div {...stylex.props(styles.single)}>
+      {list}
+      {open ? (
+        <Dialog
+          onOpenChange={(next) => {
+            if (!next) {
+              onClose();
+            }
+          }}
+          open
+        >
+          <DialogContent>
+            <DialogTitle>{kind}</DialogTitle>
+            <DialogBody>
+              <div {...stylex.props(styles.dialogStage)}>
+                <PanelTexture />
+                <div {...stylex.props(styles.walkBox, styles.overTexture)}>
+                  {head}
+                  <Detail {...shape} />
+                </div>
+              </div>
+            </DialogBody>
+          </DialogContent>
+        </Dialog>
+      ) : null}
+    </div>
+  );
+};
+
+/**
+ * C: the list, and beside it an inspector that is always open: the card at
+ * its head, what is known about the item in sections under it.
+ */
+const InspectorShape = (shape: ShapeProps) => {
+  const { t } = useLingui();
+  const { wide, head, selected } = shape;
+  const kind = useKind(selected);
+  const facts = selected?.facts ?? [];
+  return (
+    <div {...stylex.props(styles.split, wide && styles.splitInspector)}>
+      {shape.list}
+      {wide && selected !== undefined ? (
+        <div {...stylex.props(styles.panel)}>
+          <Panel aria-label={kind}>
+            <PanelHeader actions={head} texture title={kind} />
+            <PanelView>
+              <PanelSection card={false} label={t`To decide`}>
+                <Detail {...shape} />
+              </PanelSection>
+              {facts.length === 0 ? null : (
+                <PanelSection label={t`Facts`}>
+                  <KeyValueList
+                    items={facts.map(({ label, value }) => ({
+                      key: label,
+                      value,
+                    }))}
+                    variant="inline"
+                  />
+                </PanelSection>
+              )}
+            </PanelView>
+          </Panel>
+        </div>
+      ) : null}
+      <PhoneSheet {...shape} />
+    </div>
+  );
+};
+
 /**
  * The list and, beside it, the walk through it: the item shown with its
  * head. On a narrow page the list stands alone, and a row opens the walk
@@ -451,6 +614,7 @@ const ToDo = ({
   onSaid,
   wide,
   foot,
+  concept,
 }: {
   items: readonly InboxItem[];
   chosen: string | undefined;
@@ -462,8 +626,10 @@ const ToDo = ({
   wide: boolean;
   /** What stands at the foot of the list's column: the report's row. */
   foot: ReactNode;
+  /** Which concept to show (concept branch only). */
+  concept: Concept;
 }) => {
-  const { t, i18n } = useLingui();
+  const { i18n } = useLingui();
   const navigate = useNavigate();
   // Where the open item stood, so the one after it opens once it is settled.
   const [at, setAt] = useState(0);
@@ -474,7 +640,6 @@ const ToDo = ({
     const each = groupOf[item.kind];
     counts.set(each, (counts.get(each) ?? 0) + 1);
   }
-  const shownGroups = groupOrder.filter((each) => counts.has(each));
   // A group that has emptied falls back to everything.
   const current = group === "all" || counts.has(group) ? group : "all";
   const inGroup = listed(items, current, "urgent");
@@ -570,60 +735,46 @@ const ToDo = ({
   if (items.length === 0) {
     return <NoItems failed={failed} foot={foot} />;
   }
-  const walk =
-    selected === undefined ? null : (
-      <>
-        <WalkHead
-          count={list.length}
-          onSkip={skipShown}
-          onStep={step}
-          place={place + 1}
-        />
-        <ItemDetail item={selected} key={selected.id} onSaid={onSaid} />
-      </>
-    );
-  return (
-    <div {...stylex.props(styles.split, wide && styles.splitWide)}>
-      <div {...stylex.props(styles.list)}>
+  const beside = wide && concept !== "b";
+  const shape: ShapeProps = {
+    wide,
+    open: reading,
+    selected,
+    onClose: back,
+    onSaid,
+    head: (
+      <WalkHead
+        count={list.length}
+        onSkip={skipShown}
+        onStep={step}
+        place={place + 1}
+      />
+    ),
+    // The list as the page's own full-height column: no card, no tabs (the
+    // sidebar's Inbox view is the filter), the report's item at its head.
+    list: (
+      <div {...stylex.props(styles.pane, beside && styles.paneBeside)}>
         {failed.map((text) => (
           <Alert key={text} variant="attention">
             {text}
           </Alert>
         ))}
-        <GroupTabs
-          counts={counts}
-          current={current}
-          shown={shownGroups}
-          total={items.length}
-        />
-        <SectionCard aria-label={t`What waits on you`} density="compact" flush>
-          {/* The one the walk shows is marked; on a narrow page only once it is open. */}
-          <ItemList
-            list={list}
-            onOpen={open}
-            selected={wide || reading ? selected : undefined}
-          />
-        </SectionCard>
         {foot}
+        <ItemList
+          list={list}
+          onOpen={open}
+          selected={beside || reading ? selected : undefined}
+        />
       </div>
-      {wide ? <div {...stylex.props(styles.item)}>{walk}</div> : null}
-      {!wide && reading && selected !== undefined ? (
-        <Sheet
-          onOpenChange={(next) => {
-            if (!next) {
-              back();
-            }
-          }}
-          open
-          size="lg"
-        >
-          <SheetContent>
-            <SheetTitle>{i18n._(kindLabel[selected.kind])}</SheetTitle>
-            <SheetBody>{walk}</SheetBody>
-          </SheetContent>
-        </Sheet>
-      ) : null}
-    </div>
+    ),
+  };
+  if (concept === "b") {
+    return <DialogShape {...shape} />;
+  }
+  return concept === "c" ? (
+    <InspectorShape {...shape} />
+  ) : (
+    <StageShape {...shape} />
   );
 };
 
@@ -759,6 +910,7 @@ export const InboxPage = ({
   notLoaded,
   activity,
   foot,
+  concept,
 }: {
   items: readonly InboxItem[];
   /** The item open, by its ID: the list's first when none is, or it waits no more. */
@@ -769,6 +921,8 @@ export const InboxPage = ({
   activity: Promise<Loaded<InboxActivity>> | undefined;
   /** What stands at the foot of the list's column: the weekly report's row, with a programme. */
   foot?: ReactNode;
+  /** A concept to show in place of the current page (concept branch only). */
+  concept?: Concept;
 }) => {
   const { t, i18n } = useLingui();
   const [said, setSaid] = useState("");
@@ -798,13 +952,15 @@ export const InboxPage = ({
       notLoaded={notLoaded}
       onSaid={setSaid}
       wide={wide}
+      concept={concept ?? "a"}
     />
   );
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Inbox` }]} />
       <div ref={page} {...stylex.props(styles.page)}>
-        {activity === undefined ? (
+        {/* The concepts have no tabs: the sidebar's Inbox view is the Inbox's navigation. */}
+        {activity === undefined || concept !== undefined ? (
           toDo
         ) : (
           <Tabs defaultValue="todo">
