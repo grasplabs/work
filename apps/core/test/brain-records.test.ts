@@ -2,7 +2,6 @@ import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
 import {
   brainRecordsMaxPerCall,
   brainRecordsMaxPerType,
-  purgedMarker,
 } from "@grasp-os/shared/brain-records";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
@@ -493,73 +492,6 @@ describe("the brain's records", { timeout: 120_000 }, () => {
     expect({ past, held: workspace.candidates.length }).toStrictEqual({
       past: "brain.records_full",
       held: cap,
-    });
-  });
-});
-
-/** A source naming `name`, a tool and a statement in its words. */
-const naming = (tag: string, name: string) => {
-  const ids = {
-    source: `src-${tag}`,
-    tool: `tool-${tag}`,
-    statement: `st-${tag}`,
-  };
-  const records: BrainRecordInput[] = [
-    {
-      type: "source",
-      id: ids.source,
-      kind: "interview",
-      title: `Interview with ${name}`,
-      date: "2026-10-20",
-    },
-    {
-      type: "tool",
-      id: ids.tool,
-      name: `${name}'s sheet`,
-      sourceId: ids.source,
-      ai: "none",
-    },
-    {
-      type: "statement",
-      id: ids.statement,
-      kind: "blocker",
-      text: `${name} types invoices over by hand.`,
-      sourceId: ids.source,
-      toolIds: [ids.tool],
-      pain: "high",
-    },
-  ];
-  return { ids, records };
-};
-
-describe("a record an earlier release's term purge rewrote", () => {
-  it("stays as the purge left it when the same record is sent again", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const tag = unique();
-    const name = `Visser${tag}`;
-    const { ids, records } = naming(tag, name);
-    await admin.api.brain.addRecords(records);
-    // As the purge left it on a deployment: its words rewritten, marked.
-    const statement = records.find(({ type }) => type === "statement");
-    const purgedText = `${purgedMarker} types invoices over by hand.`;
-    await env.DB.prepare(
-      "UPDATE brain_records SET body = json_set(body, '$.text', ?), purged_at = ? WHERE id = ? AND type = 'statement'"
-    )
-      .bind(purgedText, Date.now(), ids.statement)
-      .run();
-
-    // The onboarding gives a team's intake again: the same records.
-    const again = await admin.api.brain.addRecords(records);
-    const read = await admin.api.brain.read();
-
-    expect({
-      sent: statement?.type,
-      again,
-      statement: read.statements.find(({ id }) => id === ids.statement)?.text,
-    }).toStrictEqual({
-      sent: "statement",
-      again: { added: 0, unchanged: 3 },
-      statement: purgedText,
     });
   });
 });

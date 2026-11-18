@@ -10,7 +10,8 @@ import { outcome, signedInApi, unique } from "./sign-in.ts";
 // (packages/shared/src/work-knowledge.ts): a sentence never carries a
 // quote, a name or a day, only the brain's own words and the week; a role
 // is named only where five or more of its team hold it, and only once
-// five or more people told about the work; how sure Grasp is says enough
+// the work is heard (a drawing of it stands, or five or more conversations
+// told of it); how sure Grasp is says enough
 // or not yet, never how many; and what the brain lets go of is gone from
 // the tab with it. Asking for more voices is the company's admins'.
 
@@ -262,7 +263,8 @@ describe("a piece of work's knowledge", () => {
       ],
       confidence: "heard",
     });
-    // Drawn again once someone was erased: four people, nobody decides.
+    // Drawn again once someone was erased: nobody decides. It stands, so
+    // it is heard, however few told it (GRA-1987).
     await drawingHeld({ ...held, drawing: drawing(4, "", "2026-10-21") });
     const again = await member.api.brain.work(workflow);
     expect({
@@ -272,7 +274,7 @@ describe("a piece of work's knowledge", () => {
     }).toStrictEqual({
       decides: false,
       weeks: ["2026-W43"],
-      confidence: "waiting",
+      confidence: "heard",
     });
   });
 

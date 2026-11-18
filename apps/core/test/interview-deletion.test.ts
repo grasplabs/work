@@ -28,6 +28,7 @@ import { onboardingLog } from "./onboarding-log.ts";
 import {
   agree,
   alikeReply,
+  anonymous,
   claimsReply,
   fact,
   intakeAlike,
@@ -61,7 +62,6 @@ import { sayOnLink, stillKept } from "./spoken.ts";
 // - D3: a copy left open saving it back (also interview-links.test.ts).
 // - D4: Stephen's lines from it, kept for their sound.
 // - L7: someone taken off the list leaving what they said behind.
-// - W5: a team falling under five people in the brain by a delete.
 // - W7: the deletion in the audit log with who, or with their words, or
 //   a delete from the link there at all: its moment would tell the admin
 //   which lead it was.
@@ -108,17 +108,18 @@ const linesWith = (words: string): InterviewLine[] => [
 
 /**
  * Max, Mia and Mo agree to what they told about tickets: one fact each of
- * their own, and with Noor and Pim that tickets arrive in Zendesk and wait
- * (Max in words of his own); Noor, Pim and Rik agree to a step each. The
- * team's claims are the two the five share; what one of them said alone
- * never reaches the brain.
+ * their own, kept only counted anonymously (GRA-1987), and with Noor and
+ * Pim that tickets arrive in Zendesk and wait (Max in words of his own);
+ * Noor, Pim and Rik agree to a step each. The team's claim is that tickets
+ * arrive in Zendesk (a wait is no team claim); what one of them kept to
+ * themselves never reaches the brain.
  */
 const toldWith = async (ids: Ids, said: Said) => {
   await agree(
     ids.max,
     [
       fact("m2", "system", "Tickets arrive in Zendesk."),
-      fact("m9", "wait", `Tickets wait in ${said.max}.`),
+      anonymous(fact("m9", "wait", `Tickets wait in ${said.max}.`)),
     ],
     0,
     linesWith(said.max)
@@ -128,7 +129,9 @@ const toldWith = async (ids: Ids, said: Said) => {
     [
       fact("i1", "system", "Tickets arrive in Zendesk."),
       fact("i8", "wait", "Tickets wait for the customer."),
-      fact("i9", "wish", `Would like ${said.mia} filled in for them.`),
+      anonymous(
+        fact("i9", "wish", `Would like ${said.mia} filled in for them.`)
+      ),
     ],
     0,
     linesWith(said.mia)
@@ -138,7 +141,7 @@ const toldWith = async (ids: Ids, said: Said) => {
     [
       fact("o2", "system", "Tickets arrive in Zendesk."),
       fact("o8", "wait", "Tickets wait for the customer."),
-      fact("o9", "rule", `Every ticket gets ${said.mo}.`),
+      anonymous(fact("o9", "rule", `Every ticket gets ${said.mo}.`)),
     ],
     0,
     linesWith(said.mo)
@@ -189,9 +192,7 @@ const inTheBrain = async (ids: Ids, said: Said) => {
     lines: linesWith(said.lea),
   });
   await toldWith(ids, said);
-  // Sam too: with him seven tell their own work, as a team needs to have
-  // claims and drawings at all (`teamMayClaim`); and Ada, on an eight
-  // (`eightTeam`), so one leaving leaves seven.
+  // Sam too, and Ada, on an eight (`eightTeam`).
   await agree(ids.sam, [fact("s1", "step", "Answers the phone.")]);
   const { roster } = await onboardingStore(env).view();
   if (roster?.people.some(({ id }) => id === ids.ada) === true) {
@@ -278,8 +279,8 @@ const brainOf = async (ids: Ids) => {
       .toSorted(),
     sources: brain.sources
       .filter(({ teamIds }) => teamIds?.includes(teamId) === true)
-      .map(({ how }) => how),
-    drawings: tickets?.drawings?.map(({ people }) => people) ?? null,
+      .map(({ title, how }) => [title, how ?? null]),
+    drawings: tickets?.drawings?.length ?? null,
   };
 };
 
@@ -352,6 +353,38 @@ const leaSaves = (facts: InterviewFact[]): InterviewProgress => ({
   addedAt: 0,
 });
 
+/**
+ * Max, back on his link, puts his queue right, as a rule he shares with
+ * his team: kept by the page as agreed to still, not approved.
+ */
+const putRight = async (ids: Ids, said: Said, words: string, version = 1) => {
+  const facts: InterviewFact[] = [
+    fact("m2", "system", "Tickets arrive in Zendesk."),
+    fact("m9", "rule", `Every ticket waits in ${words}.`),
+  ];
+  const progress: InterviewProgress = {
+    person: "completed",
+    told: true,
+    mode: "type",
+    lines: linesWith(said.max),
+    facts,
+    phase: "readback",
+    wants: "end",
+    startedAt: Date.now(),
+    confirmed: facts.length,
+    adding: false,
+    addedAt: 0,
+  };
+  const link = await openLink(ids.max);
+  const response = await onLink({
+    action: "save",
+    ...link,
+    version,
+    progress,
+  });
+  return { status: response.status, link, facts };
+};
+
 describe("deleting an interview", { timeout: 180_000 }, () => {
   beforeEach(aloneInTheStore);
 
@@ -367,7 +400,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
         await remove(ids);
       });
       const redrawn = await drawAll(ids);
-      await intakeAlike();
+      await givenToBrain(ids);
       const works = await store.teamWorks(ids.team);
       const tickets = works.find(({ name }) => name === "handling new tickets");
       const audit = JSON.stringify(events);
@@ -391,20 +424,19 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
         auditNames: [audit.includes(ids.max), audit.includes(said.max)],
       }).toStrictEqual({
         before: {
-          // The two claims five of them made; what one said alone stays out.
-          statements: [
-            "Tickets arrive in Zendesk.",
-            "Tickets wait for the customer.",
-          ],
-          sources: ["9 people"],
-          drawings: [8],
+          // What they shared of Zendesk, put together; what each kept to
+          // themselves stays out.
+          statements: ["Tickets arrive in Zendesk."],
+          sources: [["Interviews with Ops", null]],
+          drawings: 1,
         },
         after: {
-          // Both rested on five, Max among them: under five now, they go.
-          statements: [],
-          sources: ["8 people"],
+          // It rested on Max too: it went with him, and the team's next
+          // intake made it again from the rest.
+          statements: ["Tickets arrive in Zendesk."],
+          sources: [["Interviews with Ops", null]],
           // The drawing from eight is gone; the one from who is left is there.
-          drawings: [7],
+          drawings: 1,
         },
         left: { words: [], person: [] },
         others: true,
@@ -487,11 +519,8 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       ],
       after: {
         // The lead's facts are in no claim: the team's stay.
-        statements: [
-          "Tickets arrive in Zendesk.",
-          "Tickets wait for the customer.",
-        ],
-        sources: ["7 people"],
+        statements: ["Tickets arrive in Zendesk."],
+        sources: [["Interviews with Ops", null]],
         // The map was hers: its work leaves the brain with her facts (GRA-329).
         drawings: null,
       },
@@ -538,47 +567,6 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     await givenToBrain(ids);
     const after = await brainOf(ids);
     expect(after.drawings).toBeNull();
-  });
-
-  it("that leaves a team under seven people takes all of the team's interviews out of the brain until seven agree again (W5)", async () => {
-    const store = onboardingStore(env);
-    // Seven who tell their own work, as a team needs before any of its
-    // results are shown (`teamMayClaim`), and the lead, who isn't counted.
-    const ids = await sevenTeam();
-    const said = sentinels();
-    await mapped(ids);
-    await agree(ids.max, [fact("m9", "wait", `Tickets wait in ${said.max}.`)]);
-    await agree(ids.mia, [
-      fact("i9", "wish", `Would like ${said.mia} filled in for them.`),
-    ]);
-    await agree(ids.mo, [fact("o9", "rule", `Every ticket gets ${said.mo}.`)]);
-    await agree(ids.noor, [fact("n1", "step", "Reads the ticket first.")]);
-    await agree(ids.pim, [fact("p1", "step", "Tags the ticket.")]);
-    await agree(ids.rik, [fact("r1", "step", "Checks the queue at noon.")]);
-    await agree(ids.sam, [fact("s1", "step", "Answers the phone.")]);
-    await drawAll(ids);
-    await intakeAlike();
-    const before = await kept(ids);
-    await deleteOnLink(ids.mia);
-    await drawAll(ids);
-    await intakeAlike();
-    const after = await kept(ids);
-    const resting = await store.sentFor(ids.max);
-    expect({
-      before: [...new Set(before.map(({ type }) => type))].toSorted(),
-      after: after.map(({ type }) => type),
-      brain: await brainOf(ids),
-      // Under seven the team's intake asks nothing and notes nothing, and
-      // whom its drawing rested on is forgotten: noted anew once seven
-      // tell again.
-      restsOn: resting.map(({ type }) => type),
-    }).toStrictEqual({
-      // Nothing five of them said alike: no statement, before or after.
-      before: ["workflow", "workflowVersion"],
-      after: [],
-      brain: { statements: [], sources: [], drawings: null },
-      restsOn: [],
-    });
   });
 
   it("while the same work is being drawn throws the drawing away, and draws it again without them", async () => {
@@ -670,6 +658,9 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     const said = sentinels();
     await mapped(ids);
     await toldWith(ids, said);
+    // Max shares his queue with his team, as a rule.
+    const { link, facts } = await putRight(ids, said, said.max);
+    await approve(link, facts);
     await agree(ids.sam, [fact("s1", "step", "Answers the phone.")]);
     await agree(ids.ada, [fact("a1", "step", "Closes the day's tickets.")]);
     await drawAll(ids);
@@ -699,7 +690,7 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     const deleted = await deleting;
     const landed = await brainOf(ids);
     await drawAll(ids);
-    await intakeAlike();
+    await givenToBrain(ids);
     expect({
       gave,
       deleted,
@@ -713,10 +704,10 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       landed: false,
       left: { words: [], person: [] },
       after: {
-        // The claims rested on five, Max among them: under five, none.
-        statements: [],
-        sources: ["8 people"],
-        drawings: [7],
+        // Made again from the rest, never from him.
+        statements: ["Tickets arrive in Zendesk."],
+        sources: [["Interviews with Ops", null]],
+        drawings: 1,
       },
       restsOn: [],
     });
@@ -794,35 +785,6 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
   });
 });
 
-/** Max, back on his link, puts his queue right: kept by the page as agreed to still, not approved. */
-const putRight = async (ids: Ids, said: Said, words: string) => {
-  const facts: InterviewFact[] = [
-    fact("m2", "system", "Tickets arrive in Zendesk."),
-    fact("m9", "wait", `Tickets wait in ${words}.`),
-  ];
-  const progress: InterviewProgress = {
-    person: "completed",
-    told: true,
-    mode: "type",
-    lines: linesWith(said.max),
-    facts,
-    phase: "readback",
-    wants: "end",
-    startedAt: Date.now(),
-    confirmed: facts.length,
-    adding: false,
-    addedAt: 0,
-  };
-  const link = await openLink(ids.max);
-  const response = await onLink({
-    action: "save",
-    ...link,
-    version: 1,
-    progress,
-  });
-  return { status: response.status, link, facts };
-};
-
 describe(
   "withdrawing, and putting right what was approved",
   { timeout: 180_000 },
@@ -841,9 +803,9 @@ describe(
       });
       const after = await brainOf(ids);
       expect({
-        // The claim Max was one of the five behind, and his drawing.
+        // The claim Max is one of those behind, and his drawing.
         before: [
-          before.statements.includes("Tickets wait for the customer."),
+          before.statements.includes("Tickets arrive in Zendesk."),
           before.drawings,
         ],
         withdrawn: response.status,
@@ -851,13 +813,13 @@ describe(
         // nothing of his left resting on anything, nor waiting for the
         // alarm as someone gone.
         after: [
-          after.statements.includes("Tickets wait for the customer."),
+          after.statements.includes("Tickets arrive in Zendesk."),
           after.drawings,
         ],
         restsOn: await store.sentFor(ids.max),
         gone: await store.sentFor(`gone:${ids.max}`),
       }).toStrictEqual({
-        before: [true, [7]],
+        before: [true, 1],
         withdrawn: 200,
         after: [false, null],
         restsOn: [],
@@ -906,7 +868,7 @@ describe(
         redrawn: false,
         drawInput: null,
         restsOn: [],
-        statements: 2,
+        statements: 1,
       });
     });
 
@@ -961,9 +923,9 @@ describe(
         statements: after.statements.length,
         workflows: types.has("workflow") || types.has("workflowVersion"),
       }).toStrictEqual({
-        before: [7],
+        before: 1,
         after: null,
-        statements: 2,
+        statements: 1,
         workflows: false,
       });
     });
@@ -1002,7 +964,7 @@ describe(
         edited: edited.drawings,
         statements: edited.statements.length,
         redrawn: redrawn.drawings !== null,
-      }).toStrictEqual({ edited: null, statements: 2, redrawn: true });
+      }).toStrictEqual({ edited: null, statements: 1, redrawn: true });
     });
 
     it("a lead's second take-back in the millisecond their map was drawn from makes it due again, and keeps the team's work out of the brain until then (T2, maps)", async () => {
@@ -1097,7 +1059,7 @@ describe(
         await onLink({ action: "withdraw", ...link });
       });
       const redrawn = await drawAll(ids);
-      await intakeAlike();
+      await givenToBrain(ids);
       const works = await store.teamWorks(ids.team);
       const tickets = works.find(({ name }) => name === "handling new tickets");
       const left = await leftOf(ids.max, said.max);
@@ -1119,10 +1081,10 @@ describe(
         auditNames: JSON.stringify(events).includes(ids.max),
       }).toStrictEqual({
         after: {
-          // The claims rested on five, Max among them: under five, none.
-          statements: [],
-          sources: ["8 people"],
-          drawings: [7],
+          // Made again from the rest, never from him.
+          statements: ["Tickets arrive in Zendesk."],
+          sources: [["Interviews with Ops", null]],
+          drawings: 1,
         },
         words: ["interviews"],
         drawnFrom: [
@@ -1167,14 +1129,14 @@ describe(
         approved: approved.statements,
       }).toStrictEqual({
         status: 200,
-        // Four still say tickets wait: the claim goes until his line,
-        // put right, is approved, and comes back in the words most used.
+        // His line, put right, counts nowhere until it is approved; then
+        // it is the team's rule, in its new words.
         unapproved: ["Tickets arrive in Zendesk."],
         drawnBefore: ["Tickets arrive in Zendesk."],
         approved: [
+          `Every ticket waits in ${fixed}.`,
           "Tickets arrive in Zendesk.",
-          "Tickets wait for the customer.",
-        ],
+        ].toSorted(),
       });
     });
 
@@ -1183,18 +1145,17 @@ describe(
       const said = sentinels();
       await mapped(ids);
       await toldWith(ids, said);
+      // Max shares his queue with his team, as a rule.
+      const { link, facts } = await putRight(ids, said, said.max);
+      await approve(link, facts);
       await agree(ids.sam, [fact("s1", "step", "Answers the phone.")]);
       await drawAll(ids);
-      // The model puts a claim together in Max's own words, with the four
-      // who say tickets wait behind it too: five, as a claim needs.
+      // The model puts a claim together in Max's own words.
       const maxsWords = claimsReply([
         {
-          kind: "blocker",
-          text: `Tickets wait in ${said.max}.`,
-          cites: [
-            `Tickets wait in ${said.max}.`,
-            "Tickets wait for the customer.",
-          ],
+          kind: "rule",
+          text: `Every ticket waits in ${said.max}.`,
+          cites: [`Every ticket waits in ${said.max}.`],
         },
       ]);
       // Max puts his queue right as the model puts the team's claims
@@ -1207,7 +1168,7 @@ describe(
           fixing === undefined &&
           JSON.stringify(requests.at(-1)).includes(said.max)
         ) {
-          fixing = putRight(ids, said, sentinelOf("inbox"));
+          fixing = putRight(ids, said, sentinelOf("inbox"), 2);
           await fixing;
         }
         return maxsWords(requests);
@@ -1274,13 +1235,13 @@ describe("the alarm, while something else fails", { timeout: 180_000 }, () => {
         return { failed: threw, alarm: await state.storage.getAlarm() };
       }
     );
-    // The claim he was one of the five behind is gone from the page.
+    // The claim he is one of those behind is gone from the page.
     const { statements } = await brainOf(ids);
     expect({
       stuck,
       failed,
       after: await owed(),
-      claim: statements.includes("Tickets wait for the customer."),
+      claim: statements.includes("Tickets arrive in Zendesk."),
       armed: alarm !== null,
     }).toStrictEqual({
       stuck: false,

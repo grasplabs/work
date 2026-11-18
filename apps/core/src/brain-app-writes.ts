@@ -52,9 +52,9 @@ import type { InvocationOrigin } from "./resource-adapter.ts";
 //   mid-call read the table before), admins building every App; and only
 //   them: no one else's call could read it.
 // - Everything the App can reach is everyone's in the company: no
-//   personal connection, no collection not everyone reads, no team's part
-//   of the Brain, no other App (app-provenance.ts `holdingsOf`, one walk
-//   of the graph for all of it and the person's role). A grant counts
+//   personal connection, no team's part of the Brain, no other App
+//   (app-provenance.ts `holdingsOf`, one walk of the graph for all of it
+//   and the person's role). A grant counts
 //   once given, revoked or not: the App may still hold what it read.
 //   What the walk can't place refuses too, in words of its own: it need
 //   not last.
@@ -185,22 +185,17 @@ const readersOf = ({ access, rules }: TableAccess): TableReaders => {
 
 /**
  * What of `sources` not everyone may read, as a refusal names it: the
- * first, of a kind that lasts (a connection, a Knowledge collection an App
- * was granted before the Brain replaced Knowledge, which nothing can place
- * any more, a team's part of the Brain), or what can't be placed now.
+ * first, of a kind that lasts (a connection, a team's part of the Brain),
+ * or what can't be placed now.
  */
 const unreadableReachOf = (
   sources: AppSources
-): "connection" | "collection" | "team_brain" | "unplaced" | undefined => {
+): "connection" | "team_brain" | "unplaced" | undefined => {
   // As someone in no team, who isn't an admin, reads: what everyone may.
   const unreadable = unreadableBy(sources, readerOf("", [], "user"));
   const [first] = unreadable;
   if (first === undefined) {
     return undefined;
-  }
-  // A collection's grant lasts, whatever else can't be placed now.
-  if (unreadable.some((source) => source.startsWith("collection:"))) {
-    return "collection";
   }
   if (sources.unresolved.includes(first)) {
     return "unplaced";

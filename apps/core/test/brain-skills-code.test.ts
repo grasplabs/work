@@ -634,6 +634,8 @@ describe("skills, as an App and a workflow reach them", setUpTime, () => {
     });
   });
 
+  // Also GRA-1868's: Ada built the App and the workflow, and her own skill
+  // reaches neither her runs nor her colleague Uma's.
   it("never hands an App or a workflow the acting person's own skill, nor tells it exists: the same answer as for someone without one", async () => {
     const admin = await person("admin");
     const ada = await person("builder");

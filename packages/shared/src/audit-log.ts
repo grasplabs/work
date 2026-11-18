@@ -184,8 +184,7 @@ const typeRules: readonly {
   { action: "admin.brain.erasure.looked_up", type: "read" },
   // A gap's owner asked (Grasp's), and a person answering or closing it.
   { action: "brain.gap.asked", type: "action" },
-  // A purge rewriting answers, or forgetting who gave them.
-  { action: "brain.gap.answers_purged", type: "action" },
+  // An erased person forgotten as who answered gaps.
   { action: "brain.gap.answerer_erased", type: "action" },
   { action: "brain.gap", type: "decision" },
   // Two entities of different collections decided to be one, or not
