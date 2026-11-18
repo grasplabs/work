@@ -36,6 +36,11 @@ type Feed = Record<string, { entries: Message[]; end: string }>;
 interface Mailbox {
   /** Each folder's parent. */
   parents: Record<string, string | null>;
+  /** Hidden folders, and search folders, by ID. */
+  hidden: Set<string>;
+  search: Set<string>;
+  /** The most folders Graph puts in one page of mailFolder delta. */
+  folderPage: number;
   /** Each folder's delta feed, by folder. */
   feeds: Record<string, Feed>;
   /** Each message as Graph reads it on its own, by ID. */
@@ -52,6 +57,9 @@ interface Mailbox {
 
 const mailbox: Mailbox = {
   parents: {},
+  hidden: new Set(),
+  search: new Set(),
+  folderPage: 1000,
   feeds: {},
   messages: {},
   attachments: {},
@@ -61,6 +69,7 @@ const mailbox: Mailbox = {
 /** The well-known names Graph takes for folders. */
 const wellKnown: Record<string, string> = {
   msgfolderroot: "root",
+  searchfolders: "searches",
   deleteditems: "deleted",
   junkemail: "junk",
   drafts: "drafts",
@@ -68,6 +77,8 @@ const wellKnown: Record<string, string> = {
 
 const reset = (): void => {
   mailbox.parents = {
+    root: "top",
+    searches: "root",
     inbox: "root",
     projects: "inbox",
     archive: "root",
@@ -76,6 +87,9 @@ const reset = (): void => {
     junk: "root",
     drafts: "root",
   };
+  mailbox.hidden = new Set();
+  mailbox.search = new Set();
+  mailbox.folderPage = 1000;
   mailbox.feeds = {};
   mailbox.messages = {};
   mailbox.attachments = {};
@@ -174,17 +188,55 @@ const only = (
 const notFound = (): Response =>
   Response.json({ error: { code: "ErrorItemNotFound" } }, { status: 404 });
 
-/** The mailbox's folders, as mailFolder delta lists them. */
-const folderDelta = (url: URL): Response => {
+/**
+ * A 400 when a request names a query option the endpoint doesn't take, as
+ * Graph refuses it.
+ */
+const unknownOption = (url: URL, known: readonly string[]): Response | null =>
+  [...url.searchParams.keys()].every((name) => known.includes(name))
+    ? null
+    : Response.json({ error: { code: "BadRequest" } }, { status: 400 });
+
+/** A folder, as Graph gives it. */
+const folderOf = (id: string): Record<string, unknown> => ({
+  ...(mailbox.search.has(id)
+    ? { "@odata.type": "#microsoft.graph.mailSearchFolder" }
+    : {}),
+  id,
+  parentFolderId: mailbox.parents[id] ?? null,
+  isHidden: mailbox.hidden.has(id),
+  displayName: id,
+});
+
+/**
+ * The mailbox's folders, as mailFolder delta lists them: as many a page
+ * as `odata.maxpagesize` asks and Graph gives, with a skip token on.
+ */
+const folderDelta = (url: URL, prefer: string): Response => {
+  const refused = unknownOption(url, ["$select", "$skiptoken", "$deltatoken"]);
+  if (refused !== null) {
+    return refused;
+  }
   const fields = selected(url, folderProperties);
   if (fields instanceof Response) {
     return fields;
   }
+  const asked = Number(
+    /odata\.maxpagesize=(?<size>\d+)/u.exec(prefer)?.groups?.size ?? 10
+  );
+  const size = Math.min(asked, mailbox.folderPage);
+  const from = Number(url.searchParams.get("$skiptoken") ?? 0);
+  const all = Object.keys(mailbox.parents).filter((id) => id !== "top");
+  const more = from + size < all.length;
   return Response.json({
-    value: Object.entries(mailbox.parents).map(([id, parentFolderId]) =>
-      only({ id, parentFolderId, displayName: id }, fields)
-    ),
-    "@odata.deltaLink": `https://${graphHost}${foldersPath}/delta?$deltatoken=f1`,
+    value: all.slice(from, from + size).map((id) => only(folderOf(id), fields)),
+    ...(more
+      ? {
+          "@odata.nextLink": `https://${graphHost}${foldersPath}/delta?$skiptoken=${from + size}`,
+        }
+      : {
+          "@odata.deltaLink": `https://${graphHost}${foldersPath}/delta?$deltatoken=f1`,
+        }),
   });
 };
 
@@ -193,6 +245,10 @@ const folderDelta = (url: URL): Response => {
  * skip or delta token, as many messages as `odata.maxpagesize` asks.
  */
 const messageDelta = (url: URL, folder: string, prefer: string): Response => {
+  const refused = unknownOption(url, ["$select", "$skiptoken", "$deltatoken"]);
+  if (refused !== null) {
+    return refused;
+  }
   const feed = mailbox.feeds[folder];
   if (feed === undefined) {
     return notFound();
@@ -232,12 +288,28 @@ const messageDelta = (url: URL, folder: string, prefer: string): Response => {
   });
 };
 
+/** The query options a message's read, its attachments or a file take. */
+const optionsOf = (
+  part: string | undefined,
+  attachment: string | undefined,
+  value: string | undefined
+): string[] => {
+  if (part !== undefined && attachment === undefined) {
+    return ["$select", "$skiptoken"];
+  }
+  return value === undefined ? ["$select"] : [];
+};
+
 /** A message, its attachments, or an attachment's bytes. */
 const messageAnswer = (url: URL, rest: string[]): Response => {
   const [id = "", part, attachment, value] = rest;
   const message = mailbox.messages[id];
   if (message === undefined) {
     return notFound();
+  }
+  const refused = unknownOption(url, optionsOf(part, attachment, value));
+  if (refused !== null) {
+    return refused;
   }
   if (part === undefined) {
     const fields = selected(url, messageProperties);
@@ -274,7 +346,7 @@ const internet = fakeInternet(async (request, url) => {
   }
   const path = url.pathname;
   if (path === `${foldersPath}/delta`) {
-    return folderDelta(url);
+    return folderDelta(url, request.headers.get("prefer") ?? "");
   }
   const delta =
     /^\/v1\.0\/me\/mailFolders\/(?<folder>[^/]+)\/messages\/delta$/u.exec(path)
@@ -284,13 +356,17 @@ const internet = fakeInternet(async (request, url) => {
   }
   if (path.startsWith(`${foldersPath}/`)) {
     const name = path.slice(foldersPath.length + 1);
+    const refused = unknownOption(url, ["$select"]);
+    if (refused !== null) {
+      return refused;
+    }
     const fields = selected(url, folderProperties);
     if (fields instanceof Response) {
       return fields;
     }
     const id = wellKnown[name] ?? name;
     return Object.hasOwn(mailbox.parents, id)
-      ? Response.json({ id })
+      ? Response.json(only(folderOf(id), fields))
       : notFound();
   }
   if (path.startsWith(`${messagesPath}/`)) {
@@ -360,15 +436,55 @@ const pdf = {
 };
 
 describe("syncing a person's own mailbox, folder by folder", () => {
-  it("lists every mail folder as a place, and not the bin, junk or drafts or what is under them", async () => {
+  it("lists every mail folder as a place, and not the bin, junk, drafts, hidden or search folders or what is under them", async () => {
     const connectionId = await connected();
-    const { places } = await exports.default.listSyncPlaces({
+    mailbox.parents = {
+      ...mailbox.parents,
+      secret: "root",
+      "saved-search": "searches",
+      "loose-search": "root",
+    };
+    mailbox.hidden = new Set(["secret"]);
+    mailbox.search = new Set(["saved-search", "loose-search"]);
+    const { places, cursor } = await exports.default.listSyncPlaces({
       connectionId,
       feed: "mail",
+      cursor: null,
     });
-    expect(places.toSorted()).toStrictEqual(
-      ["archive", "inbox", "projects"].toSorted()
-    );
+    expect({ places: places.toSorted(), cursor }).toStrictEqual({
+      places: ["archive", "inbox", "projects", "root"],
+      cursor: null,
+    });
+  });
+
+  it("lists the folders on every page of Graph's, across reads when they don't fit one", async () => {
+    const connectionId = await connected();
+    // Graph gives two folders a page: more pages than one read has requests.
+    mailbox.folderPage = 2;
+    const many = Array.from({ length: 120 }, (_, index) => `f${index}`);
+    mailbox.parents = {
+      ...mailbox.parents,
+      ...Object.fromEntries(many.map((id) => [id, "inbox"])),
+    };
+    const listed: string[] = [];
+    let cursor: string | null = null;
+    let reads = 0;
+    do {
+      const answer: { places: string[]; cursor: string | null } =
+        // oxlint-disable-next-line no-await-in-loop -- reads come one after another
+        await exports.default.listSyncPlaces({
+          connectionId,
+          feed: "mail",
+          cursor,
+        });
+      listed.push(...answer.places);
+      ({ cursor } = answer);
+      reads += 1;
+    } while (cursor !== null && reads < 10);
+    expect({ reads: reads > 1, places: new Set(listed) }).toStrictEqual({
+      reads: true,
+      places: new Set(["root", "inbox", "projects", "archive", ...many]),
+    });
   });
 
   it("brings in a folder's messages and their files, and no draft", async () => {

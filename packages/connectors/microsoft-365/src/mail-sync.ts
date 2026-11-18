@@ -64,6 +64,11 @@ import { graphFailure, graphHost, graphUrl, v1 } from "./graph.ts";
 //   `changeKey`, or from the top of Graph's page when that message isn't
 //   there as it was (the kit's `fillPage`).
 //
+// The folder listing goes on across reads (`listSyncPlaces` with a
+// cursor): Exchange allows 10,000 subfolders a folder and 300 levels
+// (Exchange Online limits, "Mailbox folder limits"), so no read is sure to
+// hold a mailbox's folders.
+//
 // What is left out: drafts (`isDraft`); inline attachments (pictures in
 // the body, such as signatures); attachments that are an Outlook item (an
 // attached message, event or contact) or a link to a cloud file; Bcc and
@@ -72,8 +77,13 @@ import { graphFailure, graphHost, graphUrl, v1 } from "./graph.ts";
 // page's first, comes without its content, never failing the page.
 //
 // NEEDS A REAL TENANT TO CONFIRM (not documented by Microsoft):
-// - That mailFolder delta lists every folder, nested ones too; its page
-//   doesn't say.
+// - That mailFolder delta lists every folder, nested ones too, hidden ones
+//   and search folders included or not; its page doesn't say. Hidden
+//   folders (`isHidden`), search folders (`mailSearchFolder`, and every
+//   folder under the search folders' parent) are left out either way.
+// - The largest page mailFolder delta gives (`odata.maxpagesize`): its
+//   page names the header without a maximum. A list longer than a read
+//   goes on in the next.
 // - That a delta token read again answers the same messages in the same
 //   order, less those changed since. If not, Graph's page is read from its
 //   top.
@@ -82,8 +92,28 @@ const me = "/me";
 const folders = `${me}/mailFolders`;
 const messages = `${me}/messages`;
 
-/** Folders whose messages aren't mail to keep: the bin, junk, drafts. */
-const leftOutFolders = ["deleteditems", "junkemail", "drafts"] as const;
+/**
+ * Folders whose messages aren't mail to keep, nor any folder under them:
+ * the bin, junk, drafts, and the search folders' parent (a search folder
+ * shows messages of other folders again).
+ */
+const leftOutFolders = [
+  "deleteditems",
+  "junkemail",
+  "drafts",
+  "searchfolders",
+] as const;
+
+/** The mailbox's root: the folders a mail client shows are under it. */
+const rootFolder = "msgfolderroot";
+
+/**
+ * Folders asked of Graph per page of mailFolder delta
+ * (`odata.maxpagesize`, which its page documents without a maximum): the
+ * most Outlook's lists take a page ("within the range of 1 and 1000",
+ * user-list-messages).
+ */
+const folderPageSize = 1000;
 
 /** Immutable IDs, and bodies as text (message-delta, message-get). */
 const prefer = 'IdType="ImmutableId", outlook.body-content-type="text"';
@@ -118,11 +148,21 @@ const deltaSchema = z.object({
   "@odata.deltaLink": z.string().optional(),
 });
 
+/**
+ * A folder, as mailFolder delta and a folder's read give it
+ * (https://learn.microsoft.com/en-us/graph/api/resources/mailfolder?view=graph-rest-1.0):
+ * a search folder comes as `#microsoft.graph.mailSearchFolder`.
+ */
 const folderEntrySchema = z.object({
+  "@odata.type": z.string().nullish(),
   id: z.string().min(1),
   "@removed": removedSchema,
   parentFolderId: z.string().min(1).nullish(),
+  isHidden: z.boolean().nullish(),
 });
+type FolderEntry = z.infer<typeof folderEntrySchema>;
+
+const folderFields = "id,parentFolderId,isHidden";
 
 const foldersSchema = z.object({
   value: z.array(folderEntrySchema),
@@ -261,10 +301,17 @@ const isUnreadable = (response: Response): boolean =>
  */
 const get = async (
   room: SyncRoom,
-  url: URL
+  url: URL,
+  pageSize?: number
 ): Promise<Response | "late" | "large"> => {
   try {
-    return await fetchInRoom(room, url, init);
+    return await fetchInRoom(
+      room,
+      url,
+      pageSize === undefined
+        ? init
+        : { headers: { prefer: `${prefer}, odata.maxpagesize=${pageSize}` } }
+    );
   } catch {
     return "large";
   }
@@ -291,60 +338,195 @@ const getJson = async <Schema extends z.ZodType>(
   return schema.parse(await response.json());
 };
 
+/** Whether a folder's messages are mail to keep, as far as a read found out. */
+type Standing = "keep" | "leave";
+
+/** Whether a folder, on its own, is left out: hidden, or a search folder. */
+const isLeftOutItself = (folder: FolderEntry): boolean =>
+  folder.isHidden === true ||
+  folder["@odata.type"] === "#microsoft.graph.mailSearchFolder";
+
 /**
- * The mailbox's folders to sync: every folder mailFolder delta lists, less
- * Deleted Items, Junk Email and Drafts and every folder under them.
+ * A folder's standing: left out itself, or as the folder above it; walked
+ * up through the folders this read listed, then one read of Graph's each
+ * (cached for the read), to a folder known. Null when the read has no
+ * request left to finish the walk.
+ * https://learn.microsoft.com/en-us/graph/api/mailfolder-get?view=graph-rest-1.0
  */
-const placesOf = async (): Promise<string[]> => {
-  const room = syncRoom(Date.now() + syncPageLimits.millis);
-  const leftOut = new Set<string>();
-  for (const name of leftOutFolders) {
-    // oxlint-disable-next-line no-await-in-loop -- three small reads
+const standingOf = async (
+  room: SyncRoom,
+  known: Map<string, Standing>,
+  listed: ReadonlyMap<string, FolderEntry>,
+  folder: FolderEntry
+): Promise<Standing | null> => {
+  const walked: string[] = [];
+  let at: FolderEntry | null = folder;
+  let standing: Standing | undefined;
+  while (standing === undefined) {
+    if (at === null || walked.includes(at.id)) {
+      // Outside the mailbox's root, or a loop: not mail a client shows.
+      standing = "leave";
+      break;
+    }
+    standing = known.get(at.id);
+    if (standing !== undefined) {
+      break;
+    }
+    walked.push(at.id);
+    if (isLeftOutItself(at)) {
+      standing = "leave";
+      break;
+    }
+    const parent: string | null = at.parentFolderId ?? null;
+    if (parent === null) {
+      at = null;
+      continue;
+    }
+    const cached = listed.get(parent);
+    if (cached !== undefined || known.has(parent)) {
+      at = cached ?? { id: parent };
+      continue;
+    }
+    if (!mayRequest(room)) {
+      return null;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one folder up at a time
+    const response = await get(
+      room,
+      graphUrl(`${folders}/${segment(parent)}`, { $select: folderFields })
+    );
+    if (response === "late") {
+      return null;
+    }
+    if (response === "large" || isUnreadable(response)) {
+      at = null;
+      continue;
+    }
+    if (!response.ok) {
+      // oxlint-disable-next-line no-await-in-loop -- the walk ends here
+      throw await graphFailure(response);
+    }
+    // oxlint-disable-next-line no-await-in-loop -- the walk goes on from it
+    at = folderEntrySchema.parse(await response.json());
+  }
+  for (const id of walked) {
+    known.set(id, standing);
+  }
+  return standing;
+};
+
+/**
+ * Where the folder listing goes on: Graph's skip token (none: from its
+ * start), and the folder of that page already handled.
+ */
+interface ListingAt {
+  token: string | null;
+  after: string | null;
+}
+
+/** The cursor of where the folder listing goes on: `l.<token>.<after>`. */
+const listingCursorOf = ({ token, after }: ListingAt): string =>
+  `l.${cursorPart(token)}.${cursorPart(after)}`;
+
+/** Where a folder listing's cursor says it goes on; any other starts over. */
+const listingAtOf = (cursor: string | null): ListingAt => {
+  if (cursor === null) {
+    return { token: null, after: null };
+  }
+  const [tag, token, after, ...rest] = cursor.split(".");
+  if (tag !== "l" || rest.length > 0) {
+    throw notOurs();
+  }
+  return { token: fromCursorPart(token), after: fromCursorPart(after) };
+};
+
+/**
+ * The mailbox's folders to sync, a read at a time: every folder mailFolder
+ * delta lists (https://learn.microsoft.com/en-us/graph/api/mailfolder-delta?view=graph-rest-1.0),
+ * less hidden ones, search folders, and Deleted Items, Junk Email, Drafts
+ * and the search folders' parent with every folder under them. A list
+ * longer than one read goes on from its cursor: Graph's skip token and
+ * the last folder handled in its page.
+ */
+const placesOf = async ({
+  cursor,
+  deadline,
+}: {
+  cursor: string | null;
+  deadline: number;
+}): Promise<{ places: string[]; cursor: string | null }> => {
+  const room = syncRoom(deadline);
+  let at = listingAtOf(cursor);
+  const from0 = listingCursorOf(at);
+  const places: string[] = [];
+  /** What the read answers when it must stop: a wait if it moved nothing on. */
+  const stop = (): { places: string[]; cursor: string | null } => {
+    if (places.length === 0 && listingCursorOf(at) === from0) {
+      throw tooSlow();
+    }
+    return { places, cursor: listingCursorOf(at) };
+  };
+  const known = new Map<string, Standing>();
+  for (const name of [rootFolder, ...leftOutFolders]) {
+    // oxlint-disable-next-line no-await-in-loop -- five small reads
     const { id } = await getJson(
       room,
       graphUrl(`${folders}/${name}`, { $select: "id" }),
       folderSchema
     );
-    leftOut.add(id);
+    known.set(id, name === rootFolder ? "keep" : "leave");
   }
-  const parents = new Map<string, string | null>();
-  let url: URL | null = graphUrl(`${folders}/delta`, {
-    $select: "id,parentFolderId",
-  });
-  while (url !== null) {
+  for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- one page after another
-    const page: z.infer<typeof foldersSchema> = await getJson(
+    const response = await get(
       room,
-      url,
-      foldersSchema
+      graphUrl(
+        `${folders}/delta`,
+        at.token === null ? { $select: folderFields } : { $skiptoken: at.token }
+      ),
+      folderPageSize
     );
-    for (const folder of page.value) {
+    if (response === "late") {
+      return stop();
+    }
+    if (response === "large") {
+      throw new ToolError("Graph's folder page is larger than connect reads", {
+        code: "failed",
+      });
+    }
+    if (!response.ok) {
+      // oxlint-disable-next-line no-await-in-loop -- the listing ends here
+      throw await graphFailure(response);
+    }
+    // oxlint-disable-next-line no-await-in-loop -- read before it's handled
+    const page = foldersSchema.parse(await response.json());
+    const listed = new Map(page.value.map((folder) => [folder.id, folder]));
+    const { after } = at;
+    const from =
+      after === null ? 0 : page.value.findIndex(({ id }) => id === after) + 1;
+    for (const folder of page.value.slice(from)) {
       if (folder["@removed"] === undefined) {
-        parents.set(folder.id, folder.parentFolderId ?? null);
+        // oxlint-disable-next-line no-await-in-loop -- one folder after another
+        const standing = await standingOf(room, known, listed, folder);
+        if (standing === null) {
+          // No room left to place it: the next read goes on from it.
+          return stop();
+        }
+        if (standing === "keep") {
+          places.push(folder.id);
+        }
       }
+      at = { token: at.token, after: folder.id };
     }
-    const next: string | undefined = page["@odata.nextLink"];
-    url =
-      next === undefined
-        ? null
-        : graphUrl(`${folders}/delta`, {
-            $skiptoken: tokenOf(next, "skip").value,
-          });
+    const next = page["@odata.nextLink"];
+    if (next === undefined) {
+      return { places, cursor: null };
+    }
+    at = { token: tokenOf(next, "skip").value, after: null };
+    if (!mayRequest(room)) {
+      return stop();
+    }
   }
-  /** Whether a folder or one above it is left out. */
-  const isLeftOut = (id: string): boolean => {
-    const seen = new Set<string>();
-    let at: string | null = id;
-    while (at !== null && !seen.has(at)) {
-      if (leftOut.has(at)) {
-        return true;
-      }
-      seen.add(at);
-      at = parents.get(at) ?? null;
-    }
-    return false;
-  };
-  return [...parents.keys()].filter((id) => !isLeftOut(id));
 };
 
 /** A recipient, as a mail's header line writes it. */
@@ -710,7 +892,7 @@ export const mailSync = defineSync({
       path: `${v1}${messages}/{message}/attachments/{attachment}/$value`,
     },
   ],
-  places: async () => await placesOf(),
+  places: async (params) => await placesOf(params),
   read: async ({ place, cursor, deadline }) =>
     await readPage(
       place,
