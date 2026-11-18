@@ -28,14 +28,6 @@ export const listsOf = (
 };
 
 /**
- * What `rows` handled this week, together: the sum of each one's runs
- * completed in the last week (`handled`), so a person's total counts only
- * the workflows they can open.
- */
-export const handledOf = (rows: readonly WorkflowSummary[]): number =>
-  rows.reduce((sum, row) => sum + row.handled, 0);
-
-/**
  * The processes `served` holds, in the order the UI lists them: what the
  * page offers to filter by. A workflow that serves none is in no process.
  */

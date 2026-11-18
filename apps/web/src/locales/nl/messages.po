@@ -13483,10 +13483,6 @@ msgstr "Runs"
 msgid "Runs a week"
 msgstr "Runs per week"
 
-#: src/workflows/workflows-table.tsx
-msgid "runs a week by these workflows"
-msgstr "runs per week door deze workflows"
-
 #: src/onboarding/ai-step.tsx
 msgid "Runs at: {whereItRuns}"
 msgstr "Draait bij: {whereItRuns}"
@@ -16280,10 +16276,6 @@ msgstr "Deze notities rusten nergens anders op en gaan ook mee: {named} en nog {
 #: src/brain/forget.tsx
 msgid "These notes rest on nothing else and go too: {named}."
 msgstr "Deze notities rusten nergens anders op en gaan ook mee: {named}."
-
-#: src/workflows/workflows-table.tsx
-msgid "These workflows, in figures"
-msgstr "Deze workflows, in cijfers"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."

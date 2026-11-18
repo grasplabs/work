@@ -13483,10 +13483,6 @@ msgstr "Läufe"
 msgid "Runs a week"
 msgstr "Läufe pro Woche"
 
-#: src/workflows/workflows-table.tsx
-msgid "runs a week by these workflows"
-msgstr "Läufe pro Woche dieser Workflows"
-
 #: src/onboarding/ai-step.tsx
 msgid "Runs at: {whereItRuns}"
 msgstr "Läuft bei: {whereItRuns}"
@@ -16280,10 +16276,6 @@ msgstr "Diese Notizen stützen sich auf nichts anderes und gehen mit: {named} un
 #: src/brain/forget.tsx
 msgid "These notes rest on nothing else and go too: {named}."
 msgstr "Diese Notizen stützen sich auf nichts anderes und gehen mit: {named}."
-
-#: src/workflows/workflows-table.tsx
-msgid "These workflows, in figures"
-msgstr "Diese Workflows in Zahlen"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."

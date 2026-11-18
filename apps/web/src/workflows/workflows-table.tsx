@@ -27,7 +27,6 @@ import {
   ItemTitle,
 } from "../grasp/item/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import { StatsGrid } from "../grasp/stats/index.ts";
 import {
   Table,
   TableBody,
@@ -39,7 +38,7 @@ import {
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { ProcessTile } from "./business-process.tsx";
-import { handledOf, listsOf } from "./lists.ts";
+import { listsOf } from "./lists.ts";
 import { RunResult } from "./runs.tsx";
 
 // The workflows table, one row a workflow, on the library's Table in a
@@ -380,36 +379,18 @@ export const WorkflowLists = ({
   );
 };
 
-/**
- * The Workflows page's list: the runs these workflows completed this week
- * (core's `handled`) as a figure, then two lists. The prototype's return a
- * month and what designs expect on top are left out: core measures no
- * return yet and keeps no designs, so they were always a dash.
- */
+/** The Workflows page's list: two lists, or the empty state while there is none. */
 export const WorkflowsOverview = ({
   rows,
   processes,
 }: {
   rows: WorkflowSummary[];
   processes?: WorkflowProcesses;
-}) => {
-  const { t } = useLingui();
-  if (rows.length === 0) {
-    return <NoWorkflows />;
-  }
-  return (
+}) =>
+  rows.length === 0 ? (
+    <NoWorkflows />
+  ) : (
     <div {...stylex.props(styles.stack)}>
-      <StatsGrid
-        aria-label={t`These workflows, in figures`}
-        columns={3}
-        items={[
-          {
-            title: t`runs a week by these workflows`,
-            value: formatNumber(handledOf(rows)),
-          },
-        ]}
-      />
       <WorkflowLists processes={processes} rows={rows} />
     </div>
   );
-};

@@ -40,12 +40,17 @@ import {
   TableHeader,
   TableRow,
 } from "../grasp/table/index.ts";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../grasp/tabs/index.ts";
 import { Text } from "../grasp/text/index.ts";
-import { Toggle, ToggleGroup } from "../grasp/toggle/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
-import { ActivityLine, activityKey } from "./activity-bar.tsx";
+import { activityKey, activityText } from "./activity-bar.tsx";
 import type { Names } from "./activity-bar.tsx";
 import { ItemTest } from "./item-test.tsx";
 import { ListedCount } from "./listed-count.tsx";
@@ -79,8 +84,6 @@ const styles = stylex.create({
   // Wide: the table; narrow: the rows. One of them shows.
   wideRuns: { display: { default: "block", [narrowRuns]: "none" } },
   narrowRuns: { display: { default: "none", [narrowRuns]: "block" } },
-  // Kept, but not shown, while Activity shows.
-  away: { display: "none" },
   // A run's steps, in the card of its "What it did".
   did: {
     display: "grid",
@@ -88,12 +91,6 @@ const styles = stylex.create({
     paddingBlock: grasp.space3,
     paddingInline: grasp.inspectorInset,
     minWidth: 0,
-  },
-  lines: {
-    margin: 0,
-    paddingBlock: grasp.space2,
-    paddingInline: grasp.space4,
-    listStyle: "none",
   },
 });
 
@@ -401,11 +398,18 @@ const ActivityList = ({
   });
   return (
     <SectionCard aria-label={label} density="compact" flush>
-      <ol {...stylex.props(styles.lines)}>
+      <ItemGroup aria-label={label} separated>
         {activity.data.map((row) => (
-          <ActivityLine key={activityKey(row)} names={names} row={row} />
+          <Item key={activityKey(row)} size="sm">
+            <ItemContent>
+              <ItemTitle>{activityText(row, names)}</ItemTitle>
+              <ItemDescription>
+                <time dateTime={row.at}>{formatDateTime(row.at)}</time>
+              </ItemDescription>
+            </ItemContent>
+          </Item>
         ))}
-      </ol>
+      </ItemGroup>
     </SectionCard>
   );
 };
@@ -450,81 +454,83 @@ export const Traces = ({
   const openedId = opened === null ? undefined : opened.id;
   return (
     <div {...stylex.props(styles.traces)}>
-      <ToggleGroup
-        aria-label={t`What to show of the traces`}
-        onValueChange={(value: unknown[]) => {
-          const [next] = value;
+      <Tabs
+        onValueChange={(next) => {
           if (next === "runs" || next === "activity") {
             onPartChange(next);
           }
         }}
-        value={[part]}
+        value={part}
+        variant="segmented"
       >
-        {/* Quiet, each with how many, as the prototype has them. */}
-        <Toggle value="runs">
-          {t({ message: "Runs", context: "activity of a workflow: what ran" })}
-          <ListedCount
-            count={runs.state === "ready" ? runs.data.length : undefined}
-            of="runs"
-          />
-        </Toggle>
-        <Toggle value="activity">
-          {t({ message: "Activity", context: "what a workflow did lately" })}
-          <ListedCount
-            count={
-              activity.state === "ready" ? activity.data.length : undefined
-            }
-            of="activity"
-          />
-        </Toggle>
-      </ToggleGroup>
-      {/* Kept while Activity shows: a test going on stays followed, and
-          the answers typed for it stay. */}
-      <div {...stylex.props(styles.traces, part !== "runs" && styles.away)}>
-        {checkpoint === null ? null : (
-          <ItemTest revision={checkpoint} workflow={workflow} />
-        )}
-        <RunBeside
-          admin={admin}
-          names={names}
-          onClose={() => {
-            setChosen(null);
-            onCloseRun?.();
-          }}
-          opened={opened}
-          status={
-            traced !== undefined && traced.runId === openedId
-              ? traced.status
-              : null
-          }
-          steps={
-            opened === null ? null : (
-              <RunTraceDetail
-                onStatus={(status) => {
-                  setTraced({ runId: opened.id, status });
-                }}
-                runId={opened.id}
-                workflow={workflow}
-              />
-            )
-          }
-          workflow={workflow}
-        >
-          {runs.state === "ready" ? (
-            <RunsTable
-              names={names}
-              onOpen={setChosen}
-              opened={openedId}
-              runs={runs.data}
+        <TabsList aria-label={t`What to show of the traces`}>
+          {/* The bar's Runs view already counts the runs. */}
+          <TabsTrigger value="runs">
+            {t({
+              message: "Runs",
+              context: "activity of a workflow: what ran",
+            })}
+          </TabsTrigger>
+          <TabsTrigger value="activity">
+            {t({ message: "Activity", context: "what a workflow did lately" })}
+            <ListedCount
+              count={
+                activity.state === "ready" ? activity.data.length : undefined
+              }
+              of="activity"
             />
-          ) : (
-            <NotLoadedState page={runs} />
-          )}
-        </RunBeside>
-      </div>
-      {part === "activity" ? (
-        <ActivityList activity={activity} names={names} />
-      ) : null}
+          </TabsTrigger>
+        </TabsList>
+        {/* Kept while Activity shows: a test going on stays followed, and
+            the answers typed for it stay. */}
+        <TabsContent keepMounted value="runs">
+          <div {...stylex.props(styles.traces)}>
+            {checkpoint === null ? null : (
+              <ItemTest revision={checkpoint} workflow={workflow} />
+            )}
+            <RunBeside
+              admin={admin}
+              names={names}
+              onClose={() => {
+                setChosen(null);
+                onCloseRun?.();
+              }}
+              opened={opened}
+              status={
+                traced !== undefined && traced.runId === openedId
+                  ? traced.status
+                  : null
+              }
+              steps={
+                opened === null ? null : (
+                  <RunTraceDetail
+                    onStatus={(status) => {
+                      setTraced({ runId: opened.id, status });
+                    }}
+                    runId={opened.id}
+                    workflow={workflow}
+                  />
+                )
+              }
+              workflow={workflow}
+            >
+              {runs.state === "ready" ? (
+                <RunsTable
+                  names={names}
+                  onOpen={setChosen}
+                  opened={openedId}
+                  runs={runs.data}
+                />
+              ) : (
+                <NotLoadedState page={runs} />
+              )}
+            </RunBeside>
+          </div>
+        </TabsContent>
+        <TabsContent value="activity">
+          <ActivityList activity={activity} names={names} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };

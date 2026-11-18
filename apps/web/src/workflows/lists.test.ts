@@ -2,13 +2,7 @@ import { runIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  handledOf,
-  listsOf,
-  needsAttention,
-  processesIn,
-  showsUnder,
-} from "./lists.ts";
+import { listsOf, needsAttention, processesIn, showsUnder } from "./lists.ts";
 
 /** A workflow that ran and needs nobody, changed by `change`. */
 const workflow = (
@@ -66,17 +60,6 @@ describe("the Workflows page's lists", () => {
 
   it("puts nothing in a list it doesn't belong to", () => {
     expect(listsOf([never])).toStrictEqual({ atWork: [], onTheWay: [never] });
-  });
-
-  it("handles a week together what each workflow handled, none when none ran", () => {
-    expect({
-      some: handledOf([
-        workflow("a", { handled: 12 }),
-        never,
-        workflow("b", { handled: 30 }),
-      ]),
-      none: handledOf([]),
-    }).toStrictEqual({ some: 42, none: 0 });
   });
 
   it("offers each process a workflow serves once, in the order the UI lists them", () => {
