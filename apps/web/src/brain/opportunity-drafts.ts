@@ -145,13 +145,30 @@ const skillNameOf = (name: string): string =>
     .slice(0, skillNameMaxLength)
     .replaceAll(/^-+|-+$/gu, "") || "routine";
 
+/** Control characters, line breaks among them. */
+const controlCharacters = /\p{Cc}/gu;
+
+/** Runs of white space. */
+const whiteSpace = /\s+/gu;
+
+/**
+ * `text` on one line: its runs of white space one space, its control
+ * characters gone. A SKILL.md's description is one line (core refuses a
+ * line break in it, which YAML reads from a quoted `\n`), and so is its
+ * heading.
+ */
+const oneLineOf = (text: string): string =>
+  text.replaceAll(whiteSpace, " ").replaceAll(controlCharacters, "").trim();
+
 /**
  * A SKILL.md for `opportunity`, as Skills' editor starts with it: a name
- * from the routine's, when to use it, and its steps, for the admin to
- * change and save as their own.
+ * from the routine's, when to use it, its steps, and its figures and what
+ * to connect first, as the brief has them, for the admin to change and
+ * save as their own.
  */
 export const skillOf = (opportunity: Opportunity, i18n: I18n): string => {
-  const title = titleOf(opportunity, i18n.locale);
+  const title = oneLineOf(titleOf(opportunity, i18n.locale));
+  const figures = figureLinesOf(opportunity, i18n);
   const description = i18n._(msg`How we handle “${title}”, step by step.`);
   return [
     "---",
@@ -163,5 +180,6 @@ export const skillOf = (opportunity: Opportunity, i18n: I18n): string => {
     `# ${title}`,
     "",
     ...stepLinesOf(opportunity, i18n),
+    ...(figures.length === 0 ? [] : ["", ...figures]),
   ].join("\n");
 };

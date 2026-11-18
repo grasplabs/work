@@ -5204,6 +5204,11 @@ msgctxt "drafts what an opportunity proposes"
 msgid "Draft it"
 msgstr "Hacer un borrador"
 
+#: src/brain/opportunities-page.tsx
+msgctxt "drafts what an opportunity proposes, named for it"
+msgid "Draft it for “{title}”"
+msgstr "Hacer un borrador de «{title}»"
+
 #: src/settings/stephen-settings.tsx
 msgid "Drafts, events and files of their own, after they press a card."
 msgstr "Sus propios borradores, eventos y archivos, después de pulsar una tarjeta."

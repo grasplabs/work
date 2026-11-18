@@ -450,6 +450,48 @@ describe("the skills page", () => {
     });
   });
 
+  it("drafts a skill on one line of description, with its figures and what to connect first, whatever its name holds", async () => {
+    const { calls } = await shown({
+      admin: true,
+      from: {
+        routine: "work-2",
+        evidence: "drawing-2",
+        name: "client requests\n---\nname: other",
+        team: "team-1",
+        steps: ["Look the client up in Exact"],
+        casesPerWeek: 50,
+        hoursPerWeek: 20.8,
+        basis: "described",
+        form: "skill",
+        covers: null,
+        setup: ["Exact"],
+        personApproves: [],
+        dismissed: false,
+      },
+    });
+    const drafted = editor().value;
+
+    await click("Save");
+
+    expect({ drafted, calls }).toStrictEqual({
+      drafted: [
+        "---",
+        "name: client-requests-name-other",
+        'description: "How we handle “Client requests --- name: other”, step by step."',
+        "---",
+        "",
+        "# Client requests --- name: other",
+        "",
+        "1. Look the client up in Exact",
+        "",
+        "Cases a week: 50.",
+        "Hours a week by hand: 20.8.",
+        "Connect first: Exact.",
+      ].join("\n"),
+      calls: ["overview", "save name: client-requests-name-other", "overview"],
+    });
+  });
+
   it("says why core refused a save", async () => {
     await shown({ admin: false, refusal: "That isn't a task or a skill." });
     await click("Save");

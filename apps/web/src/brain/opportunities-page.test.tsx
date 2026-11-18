@@ -148,6 +148,22 @@ describe("Opportunities", () => {
     });
   });
 
+  it("names each Draft it for its opportunity, so a list of links tells them apart", async () => {
+    await shown([
+      proposed(1, "closing the month", "workflow", 9),
+      proposed(2, "answering how-to questions", "skill", 7),
+    ]);
+
+    expect(
+      [...document.querySelectorAll("a")]
+        .filter((each) => each.textContent === "Draft it")
+        .map((each) => each.getAttribute("aria-label"))
+    ).toStrictEqual([
+      "Draft it for “Closing the month”",
+      "Draft it for “Answering how-to questions”",
+    ]);
+  });
+
   it("opens Make something's chat for the opportunity when Draft it is picked", async () => {
     const { calls, router } = await shown([
       proposed(1, "closing the month", "workflow", 9),

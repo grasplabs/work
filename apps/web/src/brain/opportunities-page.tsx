@@ -128,16 +128,25 @@ const Figure = ({ value, label }: { value: number | null; label: string }) => (
  * or asked of a model until the admin sends or saves it.
  */
 const DraftLink = ({ opportunity }: { opportunity: Opportunity }) => {
+  const { t, i18n } = useLingui();
   const draft = draftOf(opportunity.form);
   if (draft === null) {
     return null;
   }
+  // Named for its opportunity, so a list of the page's links tells them
+  // apart; it starts with the words it shows.
+  const title = titleOf(opportunity, i18n.locale);
+  const named = t({
+    message: `Draft it for “${title}”`,
+    context: "drafts what an opportunity proposes, named for it",
+  });
   const label = (
     <Trans context="drafts what an opportunity proposes">Draft it</Trans>
   );
   const { routine } = opportunity;
   return draft.kind === "skill" ? (
     <Link
+      aria-label={named}
       className={buttonVariants({ size: "sm" })}
       search={{ opportunity: routine }}
       to="/brain/skills"
@@ -146,6 +155,7 @@ const DraftLink = ({ opportunity }: { opportunity: Opportunity }) => {
     </Link>
   ) : (
     <Link
+      aria-label={named}
       className={buttonVariants({ size: "sm" })}
       search={{ make: draft.kind, opportunity: routine }}
       to="/"
