@@ -19,6 +19,7 @@ import { Field, FieldLabel } from "../grasp/field/index.ts";
 import { Edit, Home, Icon, Mail, Tag } from "../grasp/icons/index.ts";
 import type { IconData } from "../grasp/icons/index.ts";
 import { Input } from "../grasp/input/index.ts";
+import { Text } from "../grasp/text/index.ts";
 import { Textarea } from "../grasp/textarea/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { useCoreAction } from "../use-core-action.ts";
@@ -26,7 +27,8 @@ import { useCoreAction } from "../use-core-action.ts";
 // The billing details' card, at the head of Settings › Billing, in the
 // manner of the organization's card (org-card.tsx): who is billed as the
 // card's title line in the serif, and the address, the VAT number and the
-// billing email as small tags, each only when there is one. Its one
+// billing email as small tags, each only when there is one; with nothing
+// on file, one quiet line. Its one
 // button opens the details as a form in a Dialog, saved whole through core
 // (`orgSettings.updateBilling`) with Save, as the library's Forms pattern
 // has it. Grasp staff read the card and change nothing, so they have no
@@ -65,7 +67,6 @@ const styles = stylex.create({
     lineHeight: { default: grasp.titleMdLine, [NARROW]: grasp.titleSmLine },
     fontWeight: grasp.weightRegular,
   },
-  nameless: { color: grasp.muted },
   tags: {
     display: "flex",
     flexWrap: "wrap",
@@ -235,9 +236,10 @@ export const BillingCard = ({
     <section aria-label={t`Billing information`} {...stylex.props(styles.card)}>
       <div {...stylex.props(styles.head)}>
         {billing.company === null ? (
-          <h2 {...stylex.props(styles.name, styles.nameless)}>
+          // Nothing on file is no title: a quiet line, beside the way to add them.
+          <Text size="sm" tone="muted">
             {t`No billing details yet`}
-          </h2>
+          </Text>
         ) : (
           <h2 dir="auto" {...stylex.props(styles.name)}>
             {billing.company}
