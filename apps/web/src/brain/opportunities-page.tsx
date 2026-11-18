@@ -71,8 +71,8 @@ const dismissing = async (
   }
 };
 
-/** What Grasp proposes, as the page names it. */
-const FormBadge = ({ form }: { form: OpportunityForm }) => {
+/** What Grasp proposes, as the page names it; none proposed yet, when it couldn't ask a model. */
+const FormBadge = ({ form }: { form: OpportunityForm | null }) => {
   const { t } = useLingui();
   const labels: Record<OpportunityForm, string> = {
     workflow: t({
@@ -96,7 +96,13 @@ const FormBadge = ({ form }: { form: OpportunityForm }) => {
       context: "what an opportunity could become",
     }),
   };
-  return <Badge variant="secondary">{labels[form]}</Badge>;
+  return form === null ? (
+    <Badge variant="outline">
+      <Trans>Nothing proposed yet</Trans>
+    </Badge>
+  ) : (
+    <Badge variant="secondary">{labels[form]}</Badge>
+  );
 };
 
 /** One figure of an opportunity, with what it counts under it. */
@@ -269,7 +275,7 @@ export const OpportunitiesPage = () => {
             </EmptyHeader>
           </Empty>
         ) : null}
-        {read.state === "ready" ? (
+        {read.state === "ready" && read.data.length > 0 ? (
           <ul className="flex flex-col gap-4">
             {read.data.map((opportunity) => (
               <li key={opportunity.routine}>

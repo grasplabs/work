@@ -9710,6 +9710,10 @@ msgstr "Rien de ce type pour l’instant."
 msgid "Nothing of this kind you may read yet"
 msgstr "Rien de ce type que vous puissiez lire pour l’instant"
 
+#: src/brain/opportunities-page.tsx
+msgid "Nothing proposed yet"
+msgstr "Rien de proposé pour l'instant"
+
 #: src/interview/transcript.tsx
 msgid "Nothing said yet."
 msgstr "Rien n’a encore été dit."

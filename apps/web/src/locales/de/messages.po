@@ -9710,6 +9710,10 @@ msgstr "Davon noch nichts."
 msgid "Nothing of this kind you may read yet"
 msgstr "Noch nichts dieser Art, das Sie lesen dürfen"
 
+#: src/brain/opportunities-page.tsx
+msgid "Nothing proposed yet"
+msgstr "Noch nichts vorgeschlagen"
+
 #: src/interview/transcript.tsx
 msgid "Nothing said yet."
 msgstr "Noch nichts gesagt."
