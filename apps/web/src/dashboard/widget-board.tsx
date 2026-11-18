@@ -150,6 +150,15 @@ const stateTones: Record<WorkflowState, BadgeTone> = {
   notRun: "neutral",
 };
 
+/**
+ * What each amber state means, on its badge: the two share a colour, so
+ * the badge says which is which when pointed at or reached by keyboard.
+ */
+const stateExplained: Partial<Record<WorkflowState, MessageDescriptor>> = {
+  attention: msg`A run of it failed lately.`,
+  waiting: msg`A run of it waits for a person to decide.`,
+};
+
 /** Each state's name. */
 const stateNames: Record<WorkflowState, MessageDescriptor> = {
   attention: msg`Needs attention`,
@@ -405,12 +414,19 @@ const WorkflowTabsView = ({ rows }: { rows: readonly WorkflowSummary[] }) => {
       {shown.map((state, index) => {
         const here = states[state];
         const name = i18n._(stateNames[state]);
+        const explained = stateExplained[state];
         return (
           <li key={state} {...stylex.props(styles.count)}>
             {index === 0 ? null : <Separator decorative />}
             <span {...stylex.props(styles.stage)}>
               <span {...stylex.props(styles.stageName)}>
-                <Badge tone={stateTones[state]} variant="dot">
+                <Badge
+                  {...(explained === undefined
+                    ? {}
+                    : { explain: i18n._(explained) })}
+                  tone={stateTones[state]}
+                  variant="dot"
+                >
                   {name}
                 </Badge>
                 <Text element="span" size="sm" tone="muted">

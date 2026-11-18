@@ -168,11 +168,10 @@ const rowOf = (id: string): string =>
     row.textContent?.includes(`hooks.example.com/${id}`)
   )?.textContent ?? "";
 
-/** The secret the page shows, if it shows one. */
+/** The secret the page shows, if it shows one: its Copy field's value. */
 const secretShown = (): string | undefined =>
-  [...document.querySelectorAll("input")].find(
-    (input) => input.getAttribute("aria-label") === "Secret"
-  )?.value;
+  document.querySelector('[data-slot="copy-field-value"]')?.textContent ??
+  undefined;
 
 describe(AppWebhooks, () => {
   afterEach(takenDown);

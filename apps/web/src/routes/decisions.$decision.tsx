@@ -2,17 +2,13 @@ import { decisionErrors } from "@grasp-os/shared/decisions";
 import type { DecisionView } from "@grasp-os/shared/decisions";
 import { failureText } from "@grasp-os/shared/errors";
 import type { Identity, SignInOption } from "@grasp-os/shared/rpc";
-import { Button } from "@grasp-os/ui/components/button";
-import { Card, CardContent } from "@grasp-os/ui/components/card";
+// The kit's mark: Grasp UI has no Grasp mark yet (the sidebar's is the same).
 import { GraspMark } from "@grasp-os/ui/components/grasp-mark";
-import { Label } from "@grasp-os/ui/components/label";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
-import { Textarea } from "@grasp-os/ui/components/textarea";
 import { i18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { CircleDotIcon } from "lucide-react";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { createFileRoute, Link as RouterLink } from "@tanstack/react-router";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
@@ -31,6 +27,17 @@ import { AppFrame } from "../frame/app-frame.tsx";
 import { NotFound } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { CodeBlock } from "../grasp/code-block/index.ts";
+import { Field, FieldLabel } from "../grasp/field/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
+import { KeyValueList } from "../grasp/key-value/index.ts";
+import type { KeyValueItem } from "../grasp/key-value/index.ts";
+import { Link } from "../grasp/link/index.ts";
+import { SectionCard } from "../grasp/section-card/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { Textarea } from "../grasp/textarea/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { signInErrorSearch } from "../sign-in-errors.ts";
 import { SignInOptions } from "../sign-in-options.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -42,6 +49,31 @@ import { useCoreAction } from "../use-core-action.ts";
 // core says. Someone signed in sees it in the app's frame; anyone else
 // on a page of its own, asked to sign in. The card is the prototype's
 // decision card (grasplabs/prototype `components/decision-card.tsx`).
+
+const styles = stylex.create({
+  card: { width: "100%", maxWidth: "36rem" },
+  stack: { display: "flex", flexDirection: "column", gap: grasp.space4 },
+  answers: { display: "flex", gap: grasp.space2 },
+  // A page of its own: the mark and what it says, in the middle.
+  alone: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: grasp.space4,
+    minHeight: "100svh",
+    padding: grasp.space6,
+    textAlign: "center",
+    backgroundColor: grasp.paper,
+    color: grasp.text,
+  },
+  inFrame: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: grasp.space4,
+  },
+});
 
 type DecisionPage =
   | { state: "offline" }
@@ -106,6 +138,54 @@ const outcomeOf = (decision: DecisionView): string => {
     : i18n._(msg`Rejected by ${name} on ${date}.`);
 };
 
+/** What a decision says about itself: where from, which run, about what, until when. */
+const useFacts = (current: DecisionView, open: boolean): KeyValueItem[] => {
+  const { t } = useLingui();
+  return [
+    {
+      key: t({ message: "From", context: "where a decision comes from" }),
+      value: current.workflow,
+    },
+    {
+      key: t({
+        message: "Run",
+        context: "the run of a workflow a decision is for",
+      }),
+      value: current.run,
+      mono: true,
+    },
+    ...(current.input === undefined
+      ? []
+      : [
+          {
+            key: t({
+              message: "About",
+              context:
+                "what a decision is about, as its workflow run passed it",
+            }),
+            value: (
+              <CodeBlock
+                code={JSON.stringify(current.input, undefined, 2)}
+                language="json"
+                wrap
+              />
+            ),
+          },
+        ]),
+    ...(open
+      ? [
+          {
+            key: t({
+              message: "Open until",
+              context: "until when a decision can be answered",
+            }),
+            value: formatDateTime(current.expiresAt),
+          },
+        ]
+      : []),
+  ];
+};
+
 /**
  * The decision, as the prototype's card: what is asked, where it comes
  * from, until when, and the answers core offers, or how it ended.
@@ -115,7 +195,9 @@ const DecisionCard = ({ decision }: { decision: DecisionView }) => {
   const [comment, setComment] = useState("");
   const [pending, setPending] = useState<PendingConfirmation>();
   const { busy, failure, run } = useCoreAction();
+  const { t } = useLingui();
   const open = current.status === "open";
+  const facts = useFacts(current, open);
   // Core shows the answer as it would record it, and Grasp's own dialog
   // asks the person to confirm exactly that (decision-confirmation.tsx).
   // An answer already recorded, as after a lost reply, asks nothing more.
@@ -176,119 +258,71 @@ const DecisionCard = ({ decision }: { decision: DecisionView }) => {
         }}
         pending={pending}
       />
-      <Card className="w-full max-w-xl" size="sm">
-        <CardContent>
-          <div className="flex items-start gap-4">
-            <div className="bg-muted grid size-8 flex-none place-items-center rounded-md">
-              <CircleDotIcon aria-hidden="true" className="size-4" />
-            </div>
-            <div className="flex min-w-0 flex-1 flex-col gap-3">
-              <div className="flex flex-col gap-1">
-                <h1 className="font-medium">{current.description}</h1>
-                <p className="text-muted-foreground">
-                  {open ? (
-                    <Trans>A run of a workflow waits for this answer.</Trans>
-                  ) : (
-                    <Trans>A run of a workflow asked for this answer.</Trans>
-                  )}
-                </p>
-                <dl className="mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-0.5">
-                  <dt className="text-muted-foreground">
-                    <Trans context="where a decision comes from">From</Trans>
-                  </dt>
-                  <dd className="truncate">{current.workflow}</dd>
-                  <dt className="text-muted-foreground">
-                    <Trans context="the run of a workflow a decision is for">
-                      Run
-                    </Trans>
-                  </dt>
-                  <dd className="truncate font-mono text-xs leading-5">
-                    {current.run}
-                  </dd>
-                  {current.input === undefined ? null : (
-                    <>
-                      <dt className="text-muted-foreground">
-                        <Trans context="what a decision is about, as its workflow run passed it">
-                          About
-                        </Trans>
-                      </dt>
-                      <dd className="min-w-0">
-                        <pre className="max-h-48 overflow-auto font-mono text-xs break-all whitespace-pre-wrap">
-                          {JSON.stringify(current.input, undefined, 2)}
-                        </pre>
-                      </dd>
-                    </>
-                  )}
-                  {open ? (
-                    <>
-                      <dt className="text-muted-foreground">
-                        <Trans context="until when a decision can be answered">
-                          Open until
-                        </Trans>
-                      </dt>
-                      <dd>{formatDateTime(current.expiresAt)}</dd>
-                    </>
-                  ) : null}
-                </dl>
+      <SectionCard
+        description={
+          open
+            ? t`A run of a workflow waits for this answer.`
+            : t`A run of a workflow asked for this answer.`
+        }
+        layout={styles.card}
+        title={current.description}
+      >
+        <div {...stylex.props(styles.stack)}>
+          <KeyValueList items={facts} variant="inline" />
+          {open ? (
+            <>
+              <Field name="decision-comment">
+                <FieldLabel>{t`Comment (optional)`}</FieldLabel>
+                <Textarea
+                  disabled={busy}
+                  maxLength={2000}
+                  onValueChange={setComment}
+                  value={comment}
+                />
+              </Field>
+              <ErrorText>{failure}</ErrorText>
+              <div {...stylex.props(styles.answers)}>
+                <Button
+                  disabled={busy}
+                  onClick={() => {
+                    void answer(true);
+                  }}
+                  size="sm"
+                  variant="ink"
+                >
+                  {t({ message: "Approve", context: "a workflow's decision" })}
+                </Button>
+                <Button
+                  disabled={busy}
+                  onClick={() => {
+                    void answer(false);
+                  }}
+                  size="sm"
+                  variant="quiet"
+                >
+                  {t({ message: "Reject", context: "a workflow's decision" })}
+                </Button>
               </div>
-              {open ? (
-                <div className="flex flex-col gap-3">
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="decision-comment">
-                      <Trans>Comment (optional)</Trans>
-                    </Label>
-                    <Textarea
-                      disabled={busy}
-                      id="decision-comment"
-                      maxLength={2000}
-                      onChange={(event) => {
-                        setComment(event.target.value);
-                      }}
-                      value={comment}
-                    />
-                  </div>
-                  <ErrorText>{failure}</ErrorText>
-                  <div className="flex gap-2">
-                    <Button
-                      disabled={busy}
-                      onClick={() => {
-                        void answer(true);
-                      }}
-                      size="sm"
-                    >
-                      <Trans>Approve</Trans>
-                    </Button>
-                    <Button
-                      disabled={busy}
-                      onClick={() => {
-                        void answer(false);
-                      }}
-                      size="sm"
-                      variant="outline"
-                    >
-                      <Trans>Reject</Trans>
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  {/* Why a confirmed answer wasn't taken, when the decision
-                      closed meanwhile. */}
-                  <ErrorText>{failure}</ErrorText>
-                  <output>{outcomeOf(current)}</output>
-                </div>
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+            </>
+          ) : (
+            <>
+              {/* Why a confirmed answer wasn't taken, when the decision
+                  closed meanwhile. */}
+              <ErrorText>{failure}</ErrorText>
+              <output>
+                <Text element="span">{outcomeOf(current)}</Text>
+              </output>
+            </>
+          )}
+        </div>
+      </SectionCard>
     </>
   );
 };
 
 /** A page of its own, for someone not signed in or when core is away. */
 const OnItsOwn = ({ children }: { children: ReactNode }) => (
-  <main className="bg-background flex min-h-svh flex-col items-center justify-center gap-4 p-6 text-center text-sm">
+  <main {...stylex.props(styles.alone)}>
     <GraspMark className="size-6" />
     {children}
   </main>
@@ -308,7 +342,7 @@ const DecisionInFrame = ({
   return (
     <AppFrame core={core} identity={identity}>
       <SiteHeader crumbs={crumbs} />
-      <div className="flex flex-col items-center gap-4 text-sm">{children}</div>
+      <div {...stylex.props(styles.inFrame)}>{children}</div>
     </AppFrame>
   );
 };
@@ -321,9 +355,7 @@ const Decision = () => {
   if (page.state === "offline") {
     return (
       <OnItsOwn>
-        <PageHeaderTitle>
-          <Trans>Decision</Trans>
-        </PageHeaderTitle>
+        <Heading level={1}>{t`Decision`}</Heading>
         <ErrorText>
           {t`Grasp can't be reached right now. Try again in a moment.`}
         </ErrorText>
@@ -333,12 +365,10 @@ const Decision = () => {
   if (page.state === "signed-out") {
     return (
       <OnItsOwn>
-        <PageHeaderTitle>
-          <Trans>Sign in to answer</Trans>
-        </PageHeaderTitle>
-        <p className="text-muted-foreground">
-          <Trans>Only the people this decision is from can answer it.</Trans>
-        </p>
+        <Heading level={1}>{t`Sign in to answer`}</Heading>
+        <Text tone="muted">
+          {t`Only the people this decision is from can answer it.`}
+        </Text>
         <SignInOptions
           error={error}
           options={page.signInOptions}
@@ -365,15 +395,9 @@ const Decision = () => {
         crumbs={[workflows, { label: t`Decision` }]}
         identity={page.identity}
       >
-        <PageHeaderTitle>
-          <Trans>Decision</Trans>
-        </PageHeaderTitle>
-        <p className="text-muted-foreground">
-          <Trans>This decision is for someone else to answer.</Trans>
-        </p>
-        <Link className="underline-offset-4 hover:underline" to="/">
-          <Trans>Go to Grasp</Trans>
-        </Link>
+        <Heading level={1}>{t`Decision`}</Heading>
+        <Text tone="muted">{t`This decision is for someone else to answer.`}</Text>
+        <Link render={<RouterLink to="/" />}>{t`Go to Grasp`}</Link>
       </DecisionInFrame>
     );
   }
@@ -383,13 +407,9 @@ const Decision = () => {
         crumbs={[workflows, { label: t`Decision` }]}
         identity={page.identity}
       >
-        <PageHeaderTitle>
-          <Trans>Decision</Trans>
-        </PageHeaderTitle>
+        <Heading level={1}>{t`Decision`}</Heading>
         <ErrorText>{page.message}</ErrorText>
-        <Link className="underline-offset-4 hover:underline" to="/">
-          <Trans>Go to Grasp</Trans>
-        </Link>
+        <Link render={<RouterLink to="/" />}>{t`Go to Grasp`}</Link>
       </DecisionInFrame>
     );
   }

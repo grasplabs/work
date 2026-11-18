@@ -1,23 +1,21 @@
-import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
-import { Button } from "@grasp-os/ui/components/button";
 import {
-  Command,
-  CommandEmpty,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@grasp-os/ui/components/command";
+  Avatar as KitAvatar,
+  AvatarFallback as KitAvatarFallback,
+} from "@grasp-os/ui/components/avatar";
+import { CommandItem } from "@grasp-os/ui/components/command";
+import { useLingui } from "@lingui/react/macro";
+import { useState } from "react";
+
+import { initials } from "../frame/person-menu.tsx";
+import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
+import { Command } from "../grasp/command/index.ts";
+import type { CommandEntry } from "../grasp/command/index.ts";
+import { ChevronDown, Icon, Person } from "../grasp/icons/index.ts";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { ChevronDownIcon } from "lucide-react";
-import { useState } from "react";
-
-import { initials } from "../frame/person-menu.tsx";
+} from "../grasp/popover/index.ts";
 import { usePeopleApart } from "./people-apart.ts";
 import type { PeopleApart } from "./people-apart.ts";
 
@@ -54,8 +52,8 @@ export const matchTyped = (
 
 /** Someone's portrait: their initials. */
 export const PersonAvatar = ({ name }: { name: string }) => (
-  <Avatar size="sm">
-    <AvatarFallback>{initials(name)}</AvatarFallback>
+  <Avatar decorative name={name} size="xs">
+    <AvatarFallback />
   </Avatar>
 );
 
@@ -63,6 +61,10 @@ export const PersonAvatar = ({ name }: { name: string }) => (
  * One person in a list of people to pick from: their portrait and name,
  * found by either their name or their email as typed, and under it what
  * tells them apart from someone of the same name (`usePeopleApart`).
+ *
+ * Still the old kit's row: the sharing picker (`share-picker.tsx`) lists it
+ * in its own old list until sharing moves onto the library, and this
+ * pickers' lists are the library's Command (`personEntry`).
  */
 export const PersonOption = ({
   person,
@@ -83,7 +85,9 @@ export const PersonOption = ({
     // Their ID keeps two people of the same name apart.
     value={`person:${person.id}`}
   >
-    <PersonAvatar name={person.name} />
+    <KitAvatar size="sm">
+      <KitAvatarFallback>{initials(person.name)}</KitAvatarFallback>
+    </KitAvatar>
     <span className="flex min-w-0 flex-1 flex-col">
       <span className="truncate">{person.name}</span>
       {hint === undefined ? null : (
@@ -92,6 +96,35 @@ export const PersonOption = ({
     </span>
   </CommandItem>
 );
+
+/**
+ * One person in the library's list of people to pick from: their name,
+ * found by their name, their email or what tells them apart from a
+ * namesake (`usePeopleApart`), which stands under it. Their ID keeps two
+ * people of the same name apart.
+ */
+export const personEntry = (
+  person: Pickable,
+  hint: string | undefined,
+  value = `person:${person.id}`
+): CommandEntry => ({
+  value,
+  label: person.name,
+  icon: Person,
+  keywords: [person.email ?? "", hint ?? ""],
+  ...(hint === undefined ? {} : { description: hint }),
+});
+
+/** The entries whose words hold what was typed, as `matchTyped` finds them. */
+export const entriesTyped = (
+  entries: readonly CommandEntry[],
+  query: string
+): CommandEntry[] =>
+  entries.filter(
+    (entry) =>
+      matchTyped(entry.label, query, [entry.label, ...(entry.keywords ?? [])]) >
+      0
+  );
 
 /**
  * The owner as their button names them: told apart from a namesake once
@@ -107,6 +140,32 @@ const ownerNamed = (
   return name === null || listed === undefined
     ? name
     : apart.named({ ...listed, name });
+};
+
+/** The owner's portrait on the button, or a quiet mark for nobody yet. */
+const OwnerFace = ({ name }: { name: string | null }) =>
+  name === null ? (
+    <Avatar decorative name="?" size="xs">
+      <AvatarFallback>?</AvatarFallback>
+    </Avatar>
+  ) : (
+    <PersonAvatar name={name} />
+  );
+
+/** What the owner's button shows: their portrait, and their name and the chevron when there is room. */
+const ownerButtonWords = (
+  ownerName: string | null,
+  owner: string,
+  compact: boolean,
+  disabled: boolean
+) => {
+  const face = <OwnerFace key="face" name={ownerName} />;
+  if (compact) {
+    return face;
+  }
+  return disabled
+    ? [face, owner]
+    : [face, owner, <Icon icon={ChevronDown} key="chevron" />];
 };
 
 /**
@@ -140,77 +199,60 @@ export const PersonPicker = ({
 }) => {
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const apart = usePeopleApart(people ?? []);
   const owner = ownerNamed(ownerName, ownerId, people, apart);
+  const shown = owner ?? t`No owner yet`;
   const label =
     owner === null
       ? t`Owner: nobody yet. Change owner`
       : t`Owner: ${owner}. Change owner`;
+  const entries = (people ?? []).map((person) => ({
+    ...personEntry(person, apart.hint(person)),
+    current: person.id === ownerId,
+  }));
   return (
     <Popover
       onOpenChange={(next: boolean) => {
         setOpen(next);
         if (next) {
+          setQuery("");
           onOpen?.();
         }
       }}
       open={open}
     >
       <PopoverTrigger
+        aria-label={disabled ? shown : label}
         disabled={disabled}
-        render={
-          <Button
-            aria-label={disabled ? (owner ?? t`No owner yet`) : label}
-            size={compact ? "icon-sm" : "default"}
-            title={compact ? (owner ?? t`No owner yet`) : undefined}
-            variant="ghost"
-          />
-        }
+        size="sm"
+        tooltip={compact ? shown : undefined}
+        variant="ghost"
       >
-        {ownerName === null ? (
-          <Avatar size="sm">
-            <AvatarFallback>?</AvatarFallback>
-          </Avatar>
-        ) : (
-          <PersonAvatar name={ownerName} />
-        )}
-        {compact ? null : (owner ?? t`No owner yet`)}
-        {compact || disabled ? null : (
-          <ChevronDownIcon className="text-muted-foreground" />
-        )}
+        {ownerButtonWords(ownerName, shown, compact, disabled)}
       </PopoverTrigger>
-      <PopoverContent align={align} className="w-72" variant="flush">
-        <Command filter={matchTyped}>
-          <CommandInput placeholder={t`Search people`} />
-          <CommandList>
-            {people === null ? (
-              <div className="text-muted-foreground flex items-center justify-center gap-2 py-6 text-sm">
-                <Spinner />
-                <Trans>Reading who can own it…</Trans>
-              </div>
-            ) : (
-              <>
-                <CommandEmpty>
-                  <Trans>Nobody with that name.</Trans>
-                </CommandEmpty>
-                {people.map((person) => (
-                  <PersonOption
-                    checked={person.id === ownerId}
-                    key={person.id}
-                    hint={apart.hint(person)}
-                    onSelect={() => {
-                      setOpen(false);
-                      if (person.id !== ownerId) {
-                        onPick(person);
-                      }
-                    }}
-                    person={person}
-                  />
-                ))}
-              </>
-            )}
-          </CommandList>
-        </Command>
+      <PopoverContent align={align}>
+        <Command
+          aria-label={t`Search people`}
+          bare
+          empty={t`Nobody with that name.`}
+          filter={false}
+          items={entriesTyped(entries, query)}
+          loading={people === null}
+          loadingLabel={t`Reading who can own it…`}
+          onAction={(value) => {
+            setOpen(false);
+            const person = people?.find(
+              (each) => `person:${each.id}` === value
+            );
+            if (person !== undefined && person.id !== ownerId) {
+              onPick(person);
+            }
+          }}
+          onQueryChange={setQuery}
+          placeholder={t`Search people`}
+          query={query}
+        />
       </PopoverContent>
     </Popover>
   );

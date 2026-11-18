@@ -532,10 +532,45 @@ const set = async (
   await settled();
 };
 
-/** The choice labelled `label`, or none. */
-const choice = (label: string): HTMLSelectElement | null => {
-  const found = document.querySelector(`select[aria-label="${label}"]`);
-  return found instanceof HTMLSelectElement ? found : null;
+/** The choice labelled `label` (a library Select's trigger), or none. */
+const choice = (label: string): HTMLElement | null =>
+  document.querySelector<HTMLElement>(
+    `[role="combobox"][aria-label="${label}"]`
+  );
+
+/** What a choice shows as chosen, without what is hidden from a screen reader. */
+const chosenIn = (label: string): string | undefined => {
+  const found = choice(label);
+  if (found === null) {
+    return undefined;
+  }
+  const copy = found.cloneNode(true);
+  if (!(copy instanceof Element)) {
+    return undefined;
+  }
+  for (const hidden of copy.querySelectorAll("[aria-hidden='true']")) {
+    hidden.remove();
+  }
+  return copy.textContent.trim();
+};
+
+/** Opens the choice labelled `label` and picks the option that says `name`. */
+const choose = async (label: string, name: string) => {
+  const control = choice(label);
+  if (control === null) {
+    throw new TypeError(`No choice ${label}`);
+  }
+  await press(control);
+  const list = document.querySelector(
+    `[id="${control.getAttribute("aria-controls") ?? ""}"]`
+  );
+  const option = [
+    ...(list ?? document).querySelectorAll<HTMLElement>('[role="option"]'),
+  ].find((each) => each.textContent.trim() === name);
+  if (option === undefined) {
+    throw new TypeError(`No option ${name}`);
+  }
+  await press(option);
 };
 
 /** The switch on the row that says `words`. */
@@ -626,22 +661,22 @@ describe("an agent's page", () => {
   it("opens a new agent reaching nobody, and saves whom it answers and what it may do as an admin chooses them", async () => {
     const { connections, asked } = await withClaire();
     await shown(connections, { agent: "Claire", tab: "access" });
-    const who = choice("Who may use Claire");
-    const readOwn = choice("Read their own, for Claire");
-    if (who === null || readOwn === null) {
-      throw new TypeError("Expected Claire's choices");
-    }
-    const before = [who.value, readOwn.value];
-    await set(who, "everyone", "change");
-    await set(readOwn, "same", "change");
-    expect(before).toStrictEqual(["nobody", "nobody"]);
+    const before = [
+      chosenIn("Who may use Claire"),
+      chosenIn("Read their own, for Claire"),
+    ];
+    await choose("Who may use Claire", "Everyone");
+    await choose("Read their own, for Claire", "As the company has it");
+    expect(before).toStrictEqual(["Nobody yet", "Nobody yet"]);
     expect(asked).toStrictEqual([
       ["reach", "agent-1", true, { who: "everyone" }],
       ["class", "agent-1", "read-own", { who: "asClass" }],
     ]);
     // Read again from core: the page shows what it keeps.
-    expect(choice("Who may use Claire")?.value).toBe("everyone");
-    expect(choice("Read their own, for Claire")?.value).toBe("same");
+    expect(chosenIn("Who may use Claire")).toBe("Everyone");
+    expect(chosenIn("Read their own, for Claire")).toBe(
+      "As the company has it"
+    );
   });
 
   it("saves a new name with the rest of the agent as it was", async () => {

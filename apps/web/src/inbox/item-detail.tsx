@@ -375,8 +375,14 @@ const useApprovalWords = (): Partial<ApprovalWords> => {
     approving: t`Approving`,
     declining: t`Declining`,
     sending: t`Sending`,
-    couldNotApprove: t`Not approved`,
-    couldNotDecline: t`Not declined`,
+    couldNotApprove: t({
+      message: "Failed",
+      context: "an approval that did not go through",
+    }),
+    couldNotDecline: t({
+      message: "Failed",
+      context: "a decline that did not go through",
+    }),
     couldNotSend: t`Not sent`,
     approved: t`Approved`,
     declined: t`Declined`,

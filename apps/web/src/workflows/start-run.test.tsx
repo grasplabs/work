@@ -293,7 +293,7 @@ describe("starting a workflow by hand", () => {
       typed: null,
       unpicked: { asked: 0, said: true },
       offered: [
-        "ALAda Lovelace",
+        "Ada Lovelace",
         "Finance",
         "Everyone with the Admin role",
         "Everyone with the Builder role",

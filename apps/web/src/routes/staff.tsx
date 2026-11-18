@@ -1,17 +1,19 @@
-import { Button } from "@grasp-os/ui/components/button";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
-import { Trans } from "@lingui/react/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { shellStatus, signOut } from "../core-connection.ts";
 import { OnboardingFrame } from "../frame/onboarding-frame.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
+import { Text } from "../grasp/text/index.ts";
 
 // Where a Grasp staff sign-in lands: staff steer a company's Grasp from
 // Grasp's admin dashboard, never from inside it, so there is nothing for
 // them here. To act in this workspace, they are added to it as a user.
 
 const StaffPage = () => {
+  const { t } = useLingui();
   const { core } = Route.useRouteContext();
   const [busy, setBusy] = useState(false);
   const leave = async (): Promise<void> => {
@@ -26,23 +28,23 @@ const StaffPage = () => {
   };
   return (
     <OnboardingFrame>
-      <PageHeaderTitle>
-        <Trans>Grasp staff work from the admin dashboard</Trans>
-      </PageHeaderTitle>
-      <p className="text-muted-foreground">
+      <Heading
+        level={1}
+      >{t`Grasp staff work from the admin dashboard`}</Heading>
+      <Text tone="muted">
         <Trans>
           To act in this workspace, ask its admin to add you as a user, and sign
           in as one.
         </Trans>
-      </p>
+      </Text>
       <Button
         disabled={busy}
         onClick={() => {
           void leave();
         }}
-        variant="outline"
+        variant="quiet"
       >
-        <Trans>Sign out</Trans>
+        {t`Sign out`}
       </Button>
     </OnboardingFrame>
   );

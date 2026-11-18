@@ -1,19 +1,22 @@
 import { guestMessageMaxLength } from "@grasp-os/shared/guests";
 import type { GuestView } from "@grasp-os/shared/guests";
-import { Button } from "@grasp-os/ui/components/button";
-import { PageHeaderTitle } from "@grasp-os/ui/components/page-header";
 import { i18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
 import { ChatComposer } from "../chat/chat-composer.tsx";
-import { GraspEyes } from "../chat/grasp-eyes.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { OnboardingFrame } from "../frame/onboarding-frame.tsx";
+import { Button } from "../grasp/button/index.ts";
+import { ChatMessage } from "../grasp/chat-message/index.ts";
+import { Heading } from "../grasp/heading/index.ts";
+import { Text } from "../grasp/text/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { guestCall, linkSecret } from "../guest/api.ts";
 
 // Where a guest link leads (`/guest#<secret>`): someone who isn't a member,
@@ -21,6 +24,35 @@ import { guestCall, linkSecret } from "../guest/api.ts";
 // secret after the `#`, which the browser never sends anywhere but in the
 // requests below, is all the page has, and all it can do is this chat.
 // What the model answers is shown as plain text.
+
+const styles = stylex.create({
+  messages: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space8,
+    width: "100%",
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  // Plain text, its line breaks kept: never Markdown.
+  plain: { whiteSpace: "pre-wrap" },
+  intro: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: grasp.space2,
+    textAlign: "center",
+  },
+  ended: { alignSelf: "flex-start" },
+  box: {
+    display: "flex",
+    flexDirection: "column",
+    gap: grasp.space2,
+    width: "100%",
+  },
+  finish: { alignSelf: "flex-end" },
+});
 
 /** What the page shows, and the link's secret it was opened with. */
 type Page =
@@ -56,8 +88,9 @@ const endedText = (view: GuestView): string | undefined => {
 };
 
 /**
- * The messages so far in the chat's look (chat/thread.tsx): theirs on the
- * right, the answers beside Grasp's eyes, as plain text, never Markdown.
+ * The messages so far as Grasp UI's Chat message draws them: theirs on the
+ * right, Grasp's answers as plain text, never Markdown; while one is read,
+ * Grasp thinking.
  */
 const Messages = ({
   view,
@@ -68,35 +101,27 @@ const Messages = ({
   reading: boolean;
 }) => {
   const { t } = useLingui();
-  const last = view.messages.at(-1);
   return (
-    <ol aria-label={t`Messages`} className="flex w-full flex-col gap-8">
-      {view.messages.map((message) =>
-        message.role === "guest" ? (
-          <li
-            className="bg-secondary text-foreground ml-auto w-fit max-w-11/12 rounded-lg px-4 py-3 whitespace-pre-wrap"
-            key={`${message.at}-${message.role}`}
+    <ol aria-label={t`Messages`} {...stylex.props(styles.messages)}>
+      {view.messages.map((message) => (
+        <li key={`${message.at}-${message.role}`}>
+          <ChatMessage
+            dateTime={message.at}
+            from={message.role === "guest" ? "person" : "agent"}
+            name="Grasp"
           >
-            <span className="sr-only">{t`You:`} </span>
-            {message.text}
-          </li>
-        ) : (
-          <li
-            className="flex items-start gap-3"
-            key={`${message.at}-${message.role}`}
-          >
-            <GraspEyes live={message === last} state="idle" />
-            <p className="min-w-0 flex-1 whitespace-pre-wrap">
-              <span className="sr-only">Grasp: </span>
-              {message.text}
-            </p>
-          </li>
-        )
-      )}
+            <span {...stylex.props(styles.plain)}>{message.text}</span>
+          </ChatMessage>
+        </li>
+      ))}
       {reading ? (
-        <li aria-busy="true" className="flex items-start gap-3">
-          <GraspEyes live state="thinking" />
-          <output className="shimmer-text">{t`Reading what you wrote`}</output>
+        <li>
+          <ChatMessage
+            from="agent"
+            name="Grasp"
+            status="thinking"
+            thinkingLabel={t`Reading what you wrote`}
+          />
         </li>
       ) : null}
     </ol>
@@ -138,11 +163,9 @@ const Chat = ({ secret, first }: { secret: string; first: GuestView }) => {
   return (
     <>
       <GraspBuddy />
-      <div className="flex flex-col gap-2 text-center">
-        <PageHeaderTitle>
-          <Trans>Hi {name}</Trans>
-        </PageHeaderTitle>
-        <p className="text-muted-foreground text-balance">
+      <div {...stylex.props(styles.intro)}>
+        <Heading level={1}>{t`Hi ${name}`}</Heading>
+        <Text tone="muted">
           <Trans>
             This chat asks how your work is done. Everything you write is kept
             and read by the people who invited you, who may copy it into their
@@ -150,14 +173,18 @@ const Chat = ({ secret, first }: { secret: string; first: GuestView }) => {
             bank details or anything you wouldn&apos;t put in an email.
           </Trans>
           {open ? ` ${t`The link works until ${until}.`}` : ""}
-        </p>
+        </Text>
       </div>
       <Messages reading={pending === "send"} view={view} />
       {ended === undefined ? null : (
-        <output className="text-muted-foreground self-start">{ended}</output>
+        <output {...stylex.props(styles.ended)}>
+          <Text element="span" tone="muted">
+            {ended}
+          </Text>
+        </output>
       )}
       {open ? (
-        <div className="flex w-full flex-col gap-2">
+        <div {...stylex.props(styles.box)}>
           {view.turnsLeft > 0 ? (
             <ChatComposer
               busy={pending === "send"}
@@ -185,14 +212,14 @@ const Chat = ({ secret, first }: { secret: string; first: GuestView }) => {
             <ErrorText>{failure}</ErrorText>
           )}
           <Button
-            className="self-end"
             disabled={pending !== undefined}
+            layout={styles.finish}
             onClick={() => {
               void call({ action: "finish" });
             }}
-            variant="outline"
+            variant="quiet"
           >
-            <Trans>Finish</Trans>
+            {t`Finish`}
           </Button>
         </div>
       ) : null}
@@ -201,6 +228,7 @@ const Chat = ({ secret, first }: { secret: string; first: GuestView }) => {
 };
 
 const Guest = () => {
+  const { t } = useLingui();
   // The link's secret, read from the URL once, and again only when the
   // URL's fragment changes (another link pasted over this one): the chat
   // shown, and the one every message goes to, are the one this opened.
@@ -248,18 +276,18 @@ const Guest = () => {
       {shown.state === "loading" ? (
         <>
           <GraspBuddy />
-          <output className="text-muted-foreground">
-            <Trans>Opening the chat…</Trans>
+          <output>
+            <Text element="span" tone="muted">
+              {t`Opening the chat…`}
+            </Text>
           </output>
         </>
       ) : null}
       {shown.state === "refused" ? (
         <>
           <GraspBuddy />
-          <div className="flex flex-col items-center gap-2 text-center">
-            <PageHeaderTitle>
-              <Trans>This chat can&apos;t be opened</Trans>
-            </PageHeaderTitle>
+          <div {...stylex.props(styles.intro)}>
+            <Heading level={1}>{t`This chat can't be opened`}</Heading>
             <ErrorText>{shown.message}</ErrorText>
           </div>
         </>

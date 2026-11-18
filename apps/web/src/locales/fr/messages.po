@@ -1925,6 +1925,14 @@ msgstr "Une exécution d’un workflow a demandé cette réponse."
 msgid "A run of a workflow waits for this answer."
 msgstr "Une exécution d’un workflow attend cette réponse."
 
+#: src/dashboard/widget-board.tsx
+msgid "A run of it failed lately."
+msgstr "Une de ses exécutions a échoué récemment."
+
+#: src/dashboard/widget-board.tsx
+msgid "A run of it waits for a person to decide."
+msgstr "Une de ses exécutions attend la décision d’une personne."
+
 #: src/workflows/activity-bar.tsx
 msgid "A run of version {version} for someone else ended: {status}"
 msgstr "Une exécution de la version {version} pour quelqu’un d’autre est terminée : {status}"
@@ -2982,10 +2990,14 @@ msgstr "Approbation"
 
 #: src/apps/app-webhooks.tsx
 #: src/dashboard/pile-cards.tsx
-#: src/decision-confirmation.tsx
 #: src/inbox/item-detail.tsx
-#: src/routes/decisions.$decision.tsx
 #: src/workflows/binding-approvals.tsx
+msgid "Approve"
+msgstr "Approuver"
+
+#: src/decision-confirmation.tsx
+#: src/routes/decisions.$decision.tsx
+msgctxt "a workflow's decision"
 msgid "Approve"
 msgstr "Approuver"
 
@@ -3870,7 +3882,6 @@ msgstr "Impossible de proposer Exécuter : {unread}"
 #: src/chat/brain-questions.tsx
 #: src/chat/chat-window.tsx
 #: src/chat/use-dictation.ts
-#: src/confirmed.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/http-connections.tsx
 #: src/connections/request-app-dialog.tsx
@@ -4494,7 +4505,6 @@ msgstr "Falaises"
 #: src/settings/stephen-settings.tsx
 #: src/settings/team-members-dialog.tsx
 #: src/settings/teams.tsx
-#: src/shown-once.tsx
 #: src/workflows/requests/request-detail.tsx
 #: src/workflows/requests/request-summary.tsx
 #: src/workflows/requests/request-table.tsx
@@ -4974,7 +4984,6 @@ msgstr "Copenhague"
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/event-sources.tsx
 #: src/settings/invitations.tsx
-#: src/shown-once.tsx
 msgid "Copied"
 msgstr "Copié"
 
@@ -4984,7 +4993,6 @@ msgstr "Copies"
 
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
-#: src/shown-once.tsx
 msgid "Copy"
 msgstr "Copier"
 
@@ -6553,6 +6561,11 @@ msgstr "échouée"
 msgid "Failed"
 msgstr "En échec"
 
+#: src/inbox/item-detail.tsx
+msgctxt "a decline that did not go through"
+msgid "Failed"
+msgstr "Échec"
+
 #: src/dashboard/report.ts
 msgctxt "a figure of the report"
 msgid "Failed"
@@ -6573,6 +6586,11 @@ msgstr "Échoué"
 msgctxt "a workflow's state"
 msgid "Failed"
 msgstr "Échoué"
+
+#: src/inbox/item-detail.tsx
+msgctxt "an approval that did not go through"
+msgid "Failed"
+msgstr "Échec"
 
 #: src/workflows/run-status.ts
 msgctxt "status of a workflow run"
@@ -7452,12 +7470,8 @@ msgid "Grasp's own rules always hold over these."
 msgstr "Les règles de Grasp priment toujours."
 
 #: src/settings/staff-access.tsx
-msgid "Grasp's own team can sign in here to help only while Grasp has opened a window, for at most 7 days, and you can end it at any time. Full access: they can do everything their role allows in the whole workspace, not only the onboarding."
-msgstr "L’équipe de Grasp ne peut se connecter ici pour aider que pendant une période ouverte par Grasp, de 7 jours au plus, et vous pouvez y mettre fin à tout moment. Accès complet : elle peut faire tout ce que son rôle permet dans tout l’espace de travail, pas seulement l’onboarding."
-
-#: src/settings/staff-access.tsx
-msgid "Grasp's own team can sign in here to help only while Grasp has opened a window, for at most 7 days, and you can end it at any time. Onboarding only: they reach the onboarding alone, and lose access 7 days after Grasp's go."
-msgstr "L’équipe de Grasp ne peut se connecter ici pour aider que pendant une période ouverte par Grasp, de 7 jours au plus, et vous pouvez y mettre fin à tout moment. Onboarding uniquement : elle n’accède qu’à l’onboarding et perd l’accès 7 jours après le feu vert de Grasp."
+msgid "Grasp's own team can sign in here to help only while Grasp has opened a window, for at most 7 days, and you can end it at any time."
+msgstr "L’équipe de Grasp ne peut se connecter ici pour aider que tant que Grasp a ouvert une fenêtre, 7 jours au plus, et vous pouvez y mettre fin à tout moment."
 
 #: src/frame/part-words.tsx
 #: src/settings/backdrop-settings.tsx
@@ -8674,6 +8688,10 @@ msgstr "A caché au modèle quelque chose que le chat ne peut plus lire"
 #: src/workflows/kept-state.tsx
 msgid "Key"
 msgstr "Clé"
+
+#: src/export/figure-tiles.tsx
+msgid "Key figures"
+msgstr ""
 
 #: src/apps/resource-bindings.tsx
 msgid "Kind"
@@ -10386,10 +10404,6 @@ msgctxt "a question to the board without an answer"
 msgid "Not answered yet"
 msgstr "Pas encore de réponse"
 
-#: src/inbox/item-detail.tsx
-msgid "Not approved"
-msgstr "Non approuvé"
-
 #: src/apps/resource-bindings.tsx
 msgid "Not bound"
 msgstr "Non lié"
@@ -10424,10 +10438,6 @@ msgstr "Non connectée"
 #: src/settings/invitations.tsx
 msgid "Not copied"
 msgstr "Non copié"
-
-#: src/inbox/item-detail.tsx
-msgid "Not declined"
-msgstr "Non refusé"
 
 #: src/settings/ai-providers.tsx
 #: src/settings/teams.tsx
@@ -10969,7 +10979,6 @@ msgstr "Versions plus anciennes"
 #: src/agents/agent-page.tsx
 #: src/agents/agent-wakes.tsx
 #: src/agents/agents-overview.tsx
-#: src/settings/stephen-card.tsx
 #: src/settings/stephen-settings.tsx
 msgid "On"
 msgstr "Activé"
@@ -11023,6 +11032,10 @@ msgstr "Activé dans {name}"
 #: src/agents/agent-page.tsx
 msgid "On its own"
 msgstr "De lui-même"
+
+#: src/settings/stephen-card.tsx
+msgid "On outside Grasp"
+msgstr "Actif hors de Grasp"
 
 #: src/workflows/trigger-description.ts
 msgid "On the schedule {cron}, in {zone}"
@@ -12536,11 +12549,15 @@ msgstr "Référence pour le support"
 
 #: src/chat/held-writes.tsx
 #: src/dashboard/pile-cards.tsx
-#: src/decision-confirmation.tsx
 #: src/inbox/item-detail.tsx
-#: src/routes/decisions.$decision.tsx
 msgid "Reject"
 msgstr "Rejeter"
+
+#: src/decision-confirmation.tsx
+#: src/routes/decisions.$decision.tsx
+msgctxt "a workflow's decision"
+msgid "Reject"
+msgstr "Refuser"
 
 #: src/workflows/today-lanes.tsx
 msgctxt "send a waiting item back to people"
@@ -13850,7 +13867,6 @@ msgid "Searching the docs for {query}"
 msgstr "Recherche de {query} dans la documentation"
 
 #: src/connections/http-connections.tsx
-#: src/shown-once.tsx
 msgid "Secret"
 msgstr "Secret"
 
@@ -16236,6 +16252,10 @@ msgstr "Ces workflows, en chiffres"
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
 msgstr "La personne est déconnectée partout, ses connexions personnelles sont coupées et elle ne peut plus se connecter."
 
+#: src/settings/staff-access.tsx
+msgid "They can do everything their role allows in the whole workspace, not only the onboarding."
+msgstr "Ils peuvent faire tout ce que leur rôle permet dans tout l’espace de travail, pas seulement l’onboarding."
+
 #: src/apps/app-history.tsx
 msgid "They go, for everyone who builds this App. Its history in Settings keeps them, so you can bring them back."
 msgstr "Elles disparaissent, pour tous ceux qui construisent cette App. Son historique dans Réglages les garde, vous pouvez donc les récupérer."
@@ -16243,6 +16263,10 @@ msgstr "Elles disparaissent, pour tous ceux qui construisent cette App. Son hist
 #: src/projects/project-people.tsx
 msgid "They lose access to what is shared with everyone in the project, unless it is also shared with them another way. Their open pages of it stop within seconds."
 msgstr "Ils perdent l'accès à ce qui est partagé avec tout le projet, sauf si c'est aussi partagé avec eux autrement. Leurs pages ouvertes s'arrêtent en quelques secondes."
+
+#: src/settings/staff-access.tsx
+msgid "They reach the onboarding alone, and lose access 7 days after Grasp's go."
+msgstr "Ils n’accèdent qu’à l’onboarding, et perdent l’accès 7 jours après le feu vert de Grasp."
 
 #: src/apps/app-workspace.tsx
 msgid "They see it once you share it with them."
@@ -18830,7 +18854,6 @@ msgid "You withdrew. Nothing you said is used from now on."
 msgstr "Vous vous êtes retiré. Rien de ce que vous avez dit n’est utilisé à partir de maintenant."
 
 #: src/interview/transcript.tsx
-#: src/routes/guest.tsx
 msgid "You:"
 msgstr "Vous :"
 
