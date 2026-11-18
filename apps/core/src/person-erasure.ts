@@ -71,6 +71,9 @@ import {
   users,
   workflowDecisionConfirmations,
   apps as appRegistry,
+  runChatSources,
+  runStateWriters,
+  workflowState,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { appPreview, workspace, inJurisdiction } from "./durable-objects.ts";
@@ -88,6 +91,7 @@ import { eraseOnboardingAccount } from "./onboarding/new-brain.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 import type { ErasureAreaName } from "./person-erasure-inventory.ts";
 import { stopRunsFor } from "./workflows/resource-runs.ts";
+import { erasedChatPin } from "./workflows/run-evidence.ts";
 
 // Erasing a person (GRA-903), from its threat model (person-erasure.test.ts):
 //
@@ -354,7 +358,13 @@ const brainShared: ErasureStep = {
  * `requirePerson`), so it fails at its first step.
  * Moving ownership of what they owned is an admin's. Then the one-use
  * confirmations they were given to answer decisions go. The decisions
- * they answered keep who did, as company history.
+ * they answered keep who did, as company history. And what their chats
+ * had read, pinned on the runs those chats started (workflow-starts.ts):
+ * the keys of what a workflow keeps those runs set go, and so do those of
+ * the runs that started from them (one hop, `runStateWriters`). Their pins
+ * go too, their ID with them, whatever the run's age. Each run is left an
+ * erased pin (`erasedChatPin`), which keeps it, and the runs that started
+ * from its state, refused for good.
  */
 const runs: ErasureStep = {
   area: "runs",
@@ -372,10 +382,35 @@ const runs: ErasureStep = {
     if (stopped.unasked > 0) {
       throw new Error("Runs of theirs are still to be asked to end");
     }
+    // What their chats had read, pinned on the runs those chats started
+    // (`runChatSources`), as one batch (GRA-1996). First every key such a
+    // run set, and every key of a run that started from one (one hop, as a
+    // run's check reads them): erasure is final, so none is left to show
+    // again. Then each such run's erased pin, before their own pins go:
+    // without any, its check, and that of a run still going that started
+    // from its state, would pass as having read nothing.
+    const theirRuns = sql`(SELECT ${runChatSources.runId} FROM ${runChatSources}
+      WHERE ${runChatSources.personId} = ${userId})`;
     await db.batch([
       db
         .delete(workflowDecisionConfirmations)
         .where(eq(workflowDecisionConfirmations.userId, userId)),
+      db.delete(workflowState).where(
+        sql`${workflowState.runId} IN ${theirRuns}
+          OR ${workflowState.runId} IN (SELECT ${runStateWriters.runId}
+            FROM ${runStateWriters}
+            WHERE ${runStateWriters.writerRunId} IN ${theirRuns})`
+      ),
+      db
+        .insert(runChatSources)
+        .select(
+          sql`SELECT DISTINCT ${runChatSources.runId}, ${erasedChatPin.sourceId},
+              ${erasedChatPin.workspaceId}, ${erasedChatPin.chatId},
+              ${erasedChatPin.agentId}, ${erasedChatPin.personId}
+            FROM ${runChatSources} WHERE ${runChatSources.personId} = ${userId}`
+        )
+        .onConflictDoNothing(),
+      db.delete(runChatSources).where(eq(runChatSources.personId, userId)),
       completed(db, userId, "runs"),
     ]);
   },
