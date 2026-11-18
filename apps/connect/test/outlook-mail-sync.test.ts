@@ -43,6 +43,8 @@ interface Mailbox {
   folderPage: number;
   /** A folder listing Graph answers with no folder and the same token on, for ever. */
   stuckListing: boolean;
+  /** Folder listing skip tokens Graph no longer knows. */
+  expiredListing: Set<string>;
   /** Messages whose next read drops its connection part-way, once. */
   dropOnce: Set<string>;
   /** Each folder's delta feed, by folder. */
@@ -65,6 +67,7 @@ const mailbox: Mailbox = {
   search: new Set(),
   folderPage: 1000,
   stuckListing: false,
+  expiredListing: new Set(),
   dropOnce: new Set(),
   feeds: {},
   messages: {},
@@ -97,6 +100,7 @@ const reset = (): void => {
   mailbox.search = new Set();
   mailbox.folderPage = 1000;
   mailbox.stuckListing = false;
+  mailbox.expiredListing = new Set();
   mailbox.dropOnce = new Set();
   mailbox.feeds = {};
   mailbox.messages = {};
@@ -228,6 +232,12 @@ const folderDelta = (url: URL, prefer: string): Response => {
   const fields = selected(url, folderProperties);
   if (fields instanceof Response) {
     return fields;
+  }
+  if (mailbox.expiredListing.has(url.searchParams.get("$skiptoken") ?? "")) {
+    return Response.json(
+      { error: { code: "SyncStateNotFound" } },
+      { status: 410 }
+    );
   }
   if (mailbox.stuckListing) {
     return Response.json({
@@ -577,6 +587,56 @@ describe("syncing a person's own mailbox, folder by folder", () => {
       first: first.places,
       again: syncErrors.codeOf(again),
     }).toStrictEqual({ first: [], again: "sync.throttled" });
+  });
+
+  it("lists the folders again from the start when Graph no longer knows the listing's token", async () => {
+    const connectionId = await connected();
+    // Graph gives two folders a page: the first read stops partway, on a
+    // skip token Graph then forgets.
+    mailbox.folderPage = 2;
+    const many = Array.from({ length: 120 }, (_, index) => `f${index}`);
+    mailbox.parents = {
+      ...mailbox.parents,
+      ...Object.fromEntries(many.map((id) => [id, "inbox"])),
+    };
+    const first = await exports.default.listSyncPlaces({
+      connectionId,
+      feed: "mail",
+      cursor: null,
+    });
+    mailbox.expiredListing = new Set(
+      Array.from({ length: 200 }, (_, index) => `${index}`)
+    );
+    const expired = await exports.default
+      .listSyncPlaces({ connectionId, feed: "mail", cursor: first.cursor })
+      .catch((error: unknown) => error);
+    mailbox.expiredListing = new Set();
+    const listed: string[] = [];
+    let cursor: string | null = null;
+    let reads = 0;
+    do {
+      const answer: { places: string[]; cursor: string | null } =
+        // oxlint-disable-next-line no-await-in-loop -- reads come one after another
+        await exports.default.listSyncPlaces({
+          connectionId,
+          feed: "mail",
+          cursor,
+        });
+      listed.push(...answer.places);
+      ({ cursor } = answer);
+      reads += 1;
+    } while (cursor !== null && reads < 10);
+    expect({
+      stopped: first.cursor !== null,
+      expired: syncErrors.codeOf(expired),
+      done: cursor,
+      places: new Set(listed),
+    }).toStrictEqual({
+      stopped: true,
+      expired: "sync.restart",
+      done: null,
+      places: new Set(["root", "inbox", "projects", "archive", ...many]),
+    });
   });
 
   it("lists the folders on every page of Graph's, across reads when they don't fit one", async () => {

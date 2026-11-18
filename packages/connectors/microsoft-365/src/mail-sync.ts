@@ -477,6 +477,44 @@ const listingAtOf = (cursor: string | null): ListingAt => {
 };
 
 /**
+ * One page of mailFolder delta, from its start (no token) or a skip token:
+ * "late" when the read's deadline cut it off.
+ */
+const folderPageOf = async (
+  room: SyncRoom,
+  token: string | null
+): Promise<z.infer<typeof foldersSchema> | "late"> => {
+  const response = await get(
+    room,
+    graphUrl(
+      `${folders}/delta`,
+      token === null ? { $select: folderFields } : { $skiptoken: token }
+    ),
+    folderPageSize
+  );
+  if (response === "late") {
+    return "late";
+  }
+  if (response === "large") {
+    throw new ToolError("Graph's folder page is larger than connect reads", {
+      code: "failed",
+    });
+  }
+  // A token Graph no longer knows lists the folders again from the start:
+  // Outlook's tokens, mailFolder's too, expire when Graph's token cache
+  // fills, answered 410 or a 40X with `syncStateNotFound`
+  // (https://learn.microsoft.com/en-us/graph/delta-query-overview,
+  // "Synchronization reset" and "Token duration").
+  if (response.status === 410 || (response.status === 404 && token !== null)) {
+    throw new RestartSyncError();
+  }
+  if (!response.ok) {
+    throw await graphFailure(response);
+  }
+  return foldersSchema.parse(await response.json());
+};
+
+/**
  * The mailbox's folders to sync, a read at a time: every folder mailFolder
  * delta lists (https://learn.microsoft.com/en-us/graph/api/mailfolder-delta?view=graph-rest-1.0),
  * less hidden ones, search folders, and Deleted Items, Junk Email, Drafts
@@ -527,28 +565,10 @@ const placesOf = async ({
   }
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- one page after another
-    const response = await get(
-      room,
-      graphUrl(
-        `${folders}/delta`,
-        at.token === null ? { $select: folderFields } : { $skiptoken: at.token }
-      ),
-      folderPageSize
-    );
-    if (response === "late") {
+    const page = await folderPageOf(room, at.token);
+    if (page === "late") {
       return stop();
     }
-    if (response === "large") {
-      throw new ToolError("Graph's folder page is larger than connect reads", {
-        code: "failed",
-      });
-    }
-    if (!response.ok) {
-      // oxlint-disable-next-line no-await-in-loop -- the listing ends here
-      throw await graphFailure(response);
-    }
-    // oxlint-disable-next-line no-await-in-loop -- read before it's handled
-    const page = foldersSchema.parse(await response.json());
     const listed = new Map(page.value.map((folder) => [folder.id, folder]));
     const { after } = at;
     const from =
