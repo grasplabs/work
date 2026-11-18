@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
+import type { Opportunity } from "@grasp-os/shared/opportunities";
 import type {
   DecidedTeamSkill,
   ListedSkill,
   ListedTeamSkill,
   OwnSkillShare,
   SkillAudienceAsked,
+  SkillProposal,
   SkillShare,
   SkillShareRequest,
   SkillsOverview,
@@ -30,7 +32,8 @@ import { SkillsPage } from "./skills-page.tsx";
 // The skills page, against core's `skills` as the page reaches it over
 // RPC, faked: the person's own skills, saved from the editor and shared;
 // the company's; and, for an admin, a share waiting with the exact text
-// approving it adds, approved from the page; a refusal is said.
+// approving it adds, approved from the page; a refusal is said. From an
+// opportunity an admin drafts as a skill, the editor starts with it.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -94,6 +97,22 @@ const shareOf = (
   inUse: false,
 });
 
+/** A skill proposed to the person from 2 runs of `send-report`. */
+const proposalOf = (key: string, name: string): SkillProposal => ({
+  key,
+  name,
+  description: `When you ask for ${name}`,
+  text: `---\nname: ${name}\ndescription: When you ask for ${name}\n---\nAsk which week.\n`,
+  basis: {
+    workflow: { id: "wf-1", name: "send-report" },
+    version: 3,
+    runs: [
+      { id: "run-5", endedAt: new Date("2026-11-16T09:00:00.000Z") },
+      { id: "run-4", endedAt: new Date("2026-11-15T09:00:00.000Z") },
+    ],
+  },
+});
+
 /** Shows the page on a faked core, as an admin or not, refusing saves with `refusal`. */
 const shown = async ({
   admin,
@@ -109,8 +128,12 @@ const shown = async ({
   teams = [],
   team = [],
   teamSkills = [],
+  from,
+  proposed = [],
 }: {
   admin: boolean;
+  /** The opportunity the editor starts with, as an admin drafts it. */
+  from?: Opportunity;
   refusal?: string;
   /** The person's shares already there. */
   existing?: OwnSkillShare[];
@@ -134,6 +157,8 @@ const shown = async ({
   team?: ListedTeamSkill[];
   /** Every team's skill in use, as an admin is shown them. */
   teamSkills?: DecidedTeamSkill[];
+  /** The skills proposed to the person. */
+  proposed?: SkillProposal[];
 }) => {
   const calls: string[] = [];
   const owned = [own, other];
@@ -145,7 +170,30 @@ const shown = async ({
   };
   const shares: OwnSkillShare[] = [...existing];
   let requests = [waiting];
+  let proposals = [...proposed];
   const skills = {
+    proposals: async (): Promise<SkillProposal[]> => {
+      await Promise.resolve();
+      return [...proposals];
+    },
+    acceptProposal: async (key: string) => {
+      await Promise.resolve();
+      calls.push(`accept ${key}`);
+      const accepted = proposals.find((each) => each.key === key);
+      proposals = proposals.filter((each) => each.key !== key);
+      const skill = {
+        name: accepted?.name ?? "",
+        version: 1,
+        description: accepted?.description ?? "",
+      };
+      owned.push(skill);
+      return skill;
+    },
+    dismissProposal: async (key: string) => {
+      await Promise.resolve();
+      calls.push(`dismiss ${key}`);
+      proposals = proposals.filter((each) => each.key !== key);
+    },
     overview: async (): Promise<SkillsOverview> => {
       await Promise.resolve();
       calls.push("overview");
@@ -256,7 +304,15 @@ const shown = async ({
   const page = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: SkillsPage,
+    component: () => (
+      <SkillsPage
+        opportunity={
+          from === undefined
+            ? undefined
+            : Promise.resolve({ state: "ready", data: from })
+        }
+      />
+    ),
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
@@ -389,6 +445,134 @@ describe("the skills page", () => {
       replaces: true,
       calls: ["overview", "approve share-1", "overview"],
       after: true,
+    });
+  });
+
+  it("starts the editor with a skill for an opportunity an admin drafts, saved as their own", async () => {
+    const { calls } = await shown({
+      admin: true,
+      from: {
+        routine: "work-1",
+        evidence: "drawing-1",
+        name: "beantwoorden van klantvragen: één per dag",
+        team: "team-1",
+        steps: ["Read the question", "Answer from the handbook"],
+        casesPerWeek: null,
+        hoursPerWeek: null,
+        basis: "described",
+        seen: null,
+        differs: null,
+        form: "skill",
+        covers: null,
+        setup: [],
+        personApproves: [2],
+        dismissed: false,
+      },
+    });
+    const drafted = editor().value;
+
+    await click("Save");
+
+    expect({ drafted, calls }).toStrictEqual({
+      drafted: [
+        "---",
+        "name: beantwoorden-van-klantvragen-een-per-dag",
+        'description: "How we handle “Beantwoorden van klantvragen: één per dag”, step by step."',
+        "---",
+        "",
+        "# Beantwoorden van klantvragen: één per dag",
+        "",
+        "1. Read the question",
+        "2. Answer from the handbook (a person approves this step)",
+      ].join("\n"),
+      // Nothing else was asked: saved as the admin's own skill, which
+      // sharing would then ask an admin to approve.
+      calls: [
+        "overview",
+        "save name: beantwoorden-van-klantvragen-een-per-dag",
+        "overview",
+      ],
+    });
+  });
+
+  it("drafts a skill on one line of description, with its figures and what to connect first, whatever its name holds", async () => {
+    const { calls } = await shown({
+      admin: true,
+      from: {
+        routine: "work-2",
+        evidence: "drawing-2",
+        name: "client requests\n---\nname: other",
+        team: "team-1",
+        steps: ["Look the client up in Exact"],
+        casesPerWeek: 50,
+        hoursPerWeek: 20.8,
+        basis: "described",
+        seen: null,
+        differs: null,
+        form: "skill",
+        covers: null,
+        setup: ["Exact"],
+        personApproves: [],
+        dismissed: false,
+      },
+    });
+    const drafted = editor().value;
+
+    await click("Save");
+
+    expect({ drafted, calls }).toStrictEqual({
+      drafted: [
+        "---",
+        "name: client-requests-name-other",
+        'description: "How we handle “Client requests --- name: other”, step by step."',
+        "---",
+        "",
+        "# Client requests --- name: other",
+        "",
+        "1. Look the client up in Exact",
+        "",
+        "Cases a week: 50.",
+        "Hours a week by hand: 20.8.",
+        "Connect first: Exact.",
+      ].join("\n"),
+      calls: ["overview", "save name: client-requests-name-other", "overview"],
+    });
+  });
+
+  it("shows a skill proposed from the person's runs with what it rests on, adds one and dismisses another", async () => {
+    const { calls } = await shown({
+      admin: false,
+      proposed: [
+        proposalOf("key-1", "weekly-report"),
+        proposalOf("key-2", "monthly-report"),
+      ],
+    });
+    const page = document.body.textContent ?? "";
+    await click("Add to your skills");
+    const added = document.body.textContent ?? "";
+    await click("Dismiss");
+    expect({
+      section: page.includes("Proposed for you"),
+      basis: page.includes(
+        "From your last 2 runs of send-report, version 3, which all succeeded"
+      ),
+      text: page.includes("Ask which week."),
+      listedAfterAdd: [...document.querySelectorAll("li")].some((item) =>
+        item.textContent?.startsWith("weekly-report")
+      ),
+      stillProposed: added.includes("monthly-report"),
+      after: document.body.textContent?.includes("Proposed for you"),
+      calls: calls.filter(
+        (call) => call.startsWith("accept") || call.startsWith("dismiss")
+      ),
+    }).toStrictEqual({
+      section: true,
+      basis: true,
+      text: true,
+      listedAfterAdd: true,
+      stillProposed: true,
+      after: false,
+      calls: ["accept key-1", "dismiss key-2"],
     });
   });
 

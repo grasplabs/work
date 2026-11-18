@@ -131,6 +131,14 @@ export const chatMessages = sqliteTable(
      * for what was kept before a chat could have several agents.
      */
     agentId: text("agent_id"),
+    /**
+     * What the chat's person thought of an answer (`ChatsApi.rate`), and
+     * why, in their words, if they said: theirs alone to read, like the
+     * chat. Null for a message they didn't rate, and for any other
+     * message.
+     */
+    rating: text({ enum: ["up", "down"] }),
+    ratingReason: text("rating_reason"),
   },
   (table) => [index("chat_messages_chat").on(table.chatId, table.id)]
 );

@@ -21,10 +21,12 @@ import { z } from "zod";
 import {
   auditedBatch,
   outboxedEventWhere,
+  outboxedEventWithDetailWhere,
   uuidFromHash,
 } from "./audit-outbox.ts";
 import { erasingAtOnce, eraseSources } from "./brain-next-origins.ts";
 import {
+  brainSyncItems,
   connectionBrainAudiences,
   connectionBrainErasures,
   connectionBrainReads,
@@ -59,6 +61,16 @@ import { inList } from "./db/d1.ts";
 // nothing races it in the background. Nobody reads its records from the
 // moment it starts, so waiting for the clock shows nobody anything.
 //
+// What native sync copied from the places picked on the connection
+// (brain-sync.ts, GRA-1719) is part of what the Brain kept of it, so an
+// erasure erases it too (GRA-2066): while it is under way, the sync run
+// drops every place picked on the connection (brain-sync.ts
+// `dropErasedPlaces`) and erases what each copied, each copy counted in
+// the erasure; the erasure ends only once none is left (`ended`). The
+// places stay picked, and are read again from nothing once an admin
+// chooses an audience. Nothing is copied meanwhile, as nothing is kept
+// without an audience.
+//
 // A disconnect also closes the connection here for good (`closed`): no
 // audience is opened on it again, whatever was checked before the
 // disconnect landed (connection-audiences.ts), so nothing claimed after
@@ -73,10 +85,11 @@ const hashSchema = z.string().regex(/^[0-9a-f]{64}$/u);
  * subrequests per invocation: 10,000 by default on Workers Paid, as
  * Cloudflare's Workers limits page states it (checked 17 November 2026;
  * D1 queries count too; on-prem workerd has none). Erasures take a tenth
- * of it; the other 9,000 are left for the clock's other tasks in the same
- * invocation (the audit drain, the Brain's work queue and hand-overs, the
- * onboarding's and the uploads' owed work), which is an estimate, not a
- * measurement: each takes a few dozen calls a tick today. Every erasure
+ * of it, and native sync another tenth (brain-sync.ts); the other 8,000
+ * are left for the clock's other tasks in the same invocation (the audit
+ * drain, the Brain's work queue and hand-overs, the onboarding's and the
+ * uploads' owed work), which is an estimate, not a measurement: each
+ * takes a few dozen calls a tick today. Every erasure
  * under way shares it (`completeOwedErasures`); what is left is erased by
  * the next run, so any number is erased in the end.
  */
@@ -96,7 +109,10 @@ const erasedPerPage = 100;
  * connection-audiences.ts); the statement checks it all the same, as
  * every read that trusts an audience does. Decided in the statement that names it, so
  * an erasure that starts after it lists it, and one that started before
- * refuses it. The same record again is the same source, named once.
+ * refuses it. The same record again is the same source, named once,
+ * its read time the latest of its reads (the Sources page's last read),
+ * moved on by the same statement, so only while the connection has an
+ * audience and isn't being erased or closed.
  */
 export const claimSharedRead = async (
   env: Pick<Env, "DB">,
@@ -114,10 +130,14 @@ export const claimSharedRead = async (
         WHERE EXISTS (SELECT 1 FROM ${connectionBrainAudiences} WHERE ${connectionBrainAudiences.connectionId} = ${connection})
           AND NOT EXISTS (SELECT 1 FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connection} AND (${connectionBrainErasures.erasing} = 1 OR ${connectionBrainErasures.closed} = 1))`
     )
-    // Named already: the same source, as it was first named.
+    // Named already: the same source, as it was first named, read last
+    // at the later of its reads (claims of one record may land in any
+    // order).
     .onConflictDoUpdate({
       target: connectionBrainReads.sourceId,
-      set: { sourceId: sql`${connectionBrainReads.sourceId}` },
+      set: {
+        readAt: sql`MAX(${connectionBrainReads.readAt}, excluded.read_at)`,
+      },
     })
     .returning({ sourceId: connectionBrainReads.sourceId });
   return named === undefined
@@ -286,8 +306,9 @@ interface Budget {
 /**
  * Ends the erasure `stepping` took on, whose older records (`older`) are
  * all erased, with its one event, in one batch: its count as the row has
- * it now, and only if it is still that erasure, under way, and no older
- * record was named since (none can be, while it is under way).
+ * it now, and only if it is still that erasure, under way, no older
+ * record was named since (none can be, while it is under way), and no
+ * copy its native sync made is left (brain-sync.ts `dropErasedPlaces`).
  */
 const ended = async (
   env: Env,
@@ -319,10 +340,21 @@ const ended = async (
       .where(
         and(
           thisErasure,
-          sql`NOT EXISTS (SELECT 1 FROM ${connectionBrainReads} WHERE ${older})`
+          sql`NOT EXISTS (SELECT 1 FROM ${connectionBrainReads} WHERE ${older})`,
+          sql`NOT EXISTS (SELECT 1 FROM ${brainSyncItems} WHERE ${brainSyncItems.connectionId} = ${connectionId})`
         )
       ),
-    outboxedEventWhere(db, event, sql`changes() > 0`),
+    // How many it erased as the row says it now, in the statement that
+    // records it: the sync run may have erased a last copy, and counted
+    // it, after the row above was read (brain-sync.ts `eraseDroppedPlace`).
+    outboxedEventWithDetailWhere(
+      db,
+      event,
+      {
+        sources: sql`(SELECT ${connectionBrainErasures.erased} FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connectionId} AND ${connectionBrainErasures.request} = ${request} AND ${connectionBrainErasures.generation} = ${generation})`,
+      },
+      sql`changes() > 0`
+    ),
   ]);
 };
 
@@ -520,8 +552,10 @@ export const closeOnDisconnect = async (
 
 /**
  * An admin's "Erase what the Brain kept" of the shared connection
- * `connectionId`: everything, for good, its audience gone with it; what
- * agents read through it afterwards is kept only once an admin chooses an
+ * `connectionId`: everything, for good, its audience gone with it: what
+ * agents read through it, and what native sync copied from its picked
+ * places. What agents read through it afterwards, and its picked places,
+ * read again from nothing, are kept only once an admin chooses an
  * audience again. Admins only, never Grasp staff. Its request is audited
  * in the batch that starts it (`brain.shared_reads.erase_requested`), and
  * its end once every record is erased (`brain.shared_reads.erased`, with

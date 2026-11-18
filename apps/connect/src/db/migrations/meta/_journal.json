@@ -225,6 +225,34 @@
       "when": 1794777930640,
       "tag": "0031_slim_the_santerians",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1794995606324,
+      "tag": "0032_connection_verified_email",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1795006911862,
+      "tag": "0033_striped_wonder_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1795012177571,
+      "tag": "0034_connection_reader_groups",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1795033402621,
+      "tag": "0035_sync_picks_version",
+      "breakpoints": true
     }
   ]
 }

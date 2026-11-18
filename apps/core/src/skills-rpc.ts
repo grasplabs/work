@@ -1,6 +1,7 @@
 import type {
   ListedSkill,
   SkillAudienceAsked,
+  SkillProposal,
   SkillShare,
   SkillsApi,
   SkillsOverview,
@@ -10,6 +11,11 @@ import type {
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import {
+  acceptProposal,
+  dismissProposal,
+  skillProposalsFor,
+} from "./skill-proposals.ts";
 import {
   approveShare,
   declineShare,
@@ -95,6 +101,26 @@ export class SkillsRpc extends CoreRpcTarget implements SkillsApi {
   async retire(name: string, audience: SkillAudienceAsked): Promise<void> {
     await withPerson(this.#check, async (person) => {
       await retireSkill(this.#env, person, name, audience);
+    });
+  }
+
+  async proposals(): Promise<SkillProposal[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await skillProposalsFor(this.#env, person)
+    );
+  }
+
+  async acceptProposal(key: string): Promise<ListedSkill> {
+    return await withPerson(
+      this.#check,
+      async (person) => await acceptProposal(this.#env, person, key)
+    );
+  }
+
+  async dismissProposal(key: string): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      await dismissProposal(this.#env, person, key);
     });
   }
 

@@ -19,7 +19,12 @@ const reportAs = async (
   person: string,
   overview: WorkOverview
 ): Promise<void> => {
-  const host = await alarmHostOf(env, `person:${person}`);
+  // It picks no run for a skill's draft: none is made here.
+  const host = await alarmHostOf(
+    env,
+    `person:${person}`,
+    async () => await Promise.resolve([])
+  );
   await host.report(overview);
 };
 

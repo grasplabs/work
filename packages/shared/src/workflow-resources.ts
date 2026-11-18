@@ -6,6 +6,7 @@ import { defineErrorFamily } from "./errors.ts";
 import type { EventSourcesApi } from "./event-sources.ts";
 import { chatIdSchema, identifierSchema, workspaceIdSchema } from "./ids.ts";
 import type { Json } from "./json.ts";
+import { platformLimits } from "./platform-limits.ts";
 import type { RunFileListing } from "./run-files.ts";
 import { isEventType, sealedBuildLimits } from "./sealed-builds.ts";
 import type { MemberRole, SubjectMembersApi } from "./subject-members.ts";
@@ -166,8 +167,7 @@ export const workflowResourceErrors = defineErrorFamily({
     "The App function this run called failed, so the run failed. These details name the App's error code.",
   "workflow.decision_timed_out":
     "Nobody answered the run's decision before its deadline, so the run failed.",
-  "workflow.model_call_limit":
-    "The run made as many model calls as its workflow allows, so it failed.",
+  "workflow.model_call_limit": `The run made ${platformLimits.lineageModelRequests} model requests, the most one run may make, so it stopped.`,
   "workflow.paused":
     "This workflow is paused, so it starts no runs. Someone who builds it can resume it.",
   "workflow.step_not_found":
@@ -702,6 +702,12 @@ export interface WorkflowResourceRun {
    * when. It goes on by itself once calls work.
    */
   aiProvider?: RunAiProviderWait;
+  /**
+   * How many keys of what its workflow kept it started without, if any:
+   * withheld, as the run that set each read what the company may no
+   * longer read, so it read them as unset. A count, never a key or value.
+   */
+  stateWithheld?: number;
   createdAt: string;
   endedAt: string | null;
   /** What it returned, once completed, for those who see its details. */
@@ -1003,6 +1009,8 @@ export interface WorkflowCandidateRun {
   buildHash: string;
   principal: string;
   status: WorkflowRunStatus;
+  /** How many kept keys it started without, if any, as a run says it. */
+  stateWithheld?: number;
   createdAt: string;
   endedAt: string | null;
   /** What it returned, once completed. */

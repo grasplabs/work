@@ -28,6 +28,7 @@ import {
   brainErasureForStaff,
   brainStaffReport,
 } from "./brain-next.ts";
+import { syncForStaff } from "./brain-sync.ts";
 import { consoleSigned } from "./console-signed.ts";
 import type { ConsoleRefusal } from "./console-signed.ts";
 import { errorResponse } from "./errors.ts";
@@ -54,7 +55,9 @@ import { brainErasureStateOf } from "./person-erasure.ts";
 // - Content reaching the admin: the report is built field by field from
 //   the store's overview (brain-next.ts `brainStaffReport`), leaving out
 //   what names anything, and parsed here by the schema, which names
-//   nothing else.
+//   nothing else. Native sync's connections come from its sources' rows
+//   (brain-sync.ts `syncForStaff`): codes, times and counts, each
+//   connection by a hash of its ID, never whose it is or its account.
 //
 // - A lookup of an erasure (`brainErasureResponse`) the company can't see,
 //   or that says more than whether: `admin.brain.erasure.looked_up`, with
@@ -125,7 +128,11 @@ export const brainReportResponse = async (
     detail: {},
   });
   // Only what the schema names leaves core, whatever was built.
-  return answer(brainReportSchema.parse(await brainStaffReport(env)));
+  const [report, sync] = await Promise.all([
+    brainStaffReport(env),
+    syncForStaff(env),
+  ]);
+  return answer(brainReportSchema.parse({ ...report, sync }));
 };
 
 /**

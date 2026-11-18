@@ -253,6 +253,50 @@ export const brainModelSpendSchema = z.object({
 });
 export type BrainModelSpend = z.infer<typeof brainModelSpendSchema>;
 
+/**
+ * Where a synced connection's sync stands: listing its places' items
+ * from the start (its first listing, or after the provider lost its
+ * cursor), relisting them in full (the daily relist, beside its
+ * changes), or only following changes.
+ */
+export const brainSyncPhases = ["listing", "relisting", "changes"] as const;
+export type BrainSyncPhase = (typeof brainSyncPhases)[number];
+
+/**
+ * One sync (`feed`, such as `gmail`) of one connection, as native sync
+ * last read it: never whose connection it is, its account or anything it
+ * holds. The connection is named by a hash of its ID alone (`connection`,
+ * the first 12 hex digits of its SHA-256), so the rows of one connection
+ * show together and stay the same from one read to the next.
+ */
+export const brainSyncConnectionSchema = z.object({
+  connection: z.string().regex(/^[\da-f]{12}$/u),
+  /** The provider and the sync, names in code (`google`, `gmail`). */
+  provider: codeName,
+  feed: codeName,
+  phase: z.enum(brainSyncPhases),
+  /** Items it holds in the Brain. */
+  items: count,
+  /** When a page of any of its places last applied; null until one has. */
+  syncedAt: isoTime.nullable(),
+  /**
+   * When the place waiting longest was due, once a run of the clock (a
+   * minute) passed without reading it: the runs' budget was spent first,
+   * or its reads keep failing. Null while every place is read on time.
+   */
+  behindSince: isoTime.nullable(),
+  /** Whether a place's daily relist is past its day. */
+  relistOverdue: z.boolean(),
+  /**
+   * Its latest failed read: the error's code (`sync.throttled`) and when,
+   * never what the provider said; null while none has failed.
+   */
+  error: z.object({ code: codeName, at: isoTime }).nullable(),
+  /** Whether a place's latest read failed, not since got through. */
+  failing: z.boolean(),
+});
+export type BrainSyncConnection = z.infer<typeof brainSyncConnectionSchema>;
+
 /** A client's Brain, as staff see it. */
 export const brainReportSchema = z.object({
   /** When core read it. */
@@ -389,6 +433,20 @@ export const brainReportSchema = z.object({
    * release and shows the rest of its report.
    */
   modelSpend: brainModelSpendSchema.optional(),
+  /**
+   * Native sync (core's brain-sync.ts): how many sources' daily full
+   * relist is past its day, where a reader list can be staler than the
+   * day the sync promises; and each synced connection, sync by sync
+   * (`brainSyncConnectionSchema`). Core always sends both; each is
+   * optional only so the admin reads a core of an older release, one
+   * without native sync or one whose report counts overdue relists alone.
+   */
+  sync: z
+    .object({
+      overdueRelists: count,
+      connections: z.array(brainSyncConnectionSchema).optional(),
+    })
+    .optional(),
 });
 export type BrainReport = z.infer<typeof brainReportSchema>;
 

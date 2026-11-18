@@ -55,6 +55,12 @@ export const formatNumber = (value: number): string =>
     value
   );
 
+/** A figure with at most one decimal, with the page's language's separators: "16.8", "16,8". */
+export const formatDecimal = (value: number): string =>
+  new Intl.NumberFormat(i18n.locale, { maximumFractionDigits: 1 }).format(
+    value
+  );
+
 /** A count at a glance, as the page's language shortens it: "1.2K", "1,2 Mio.". */
 export const formatCompact = (value: number): string =>
   new Intl.NumberFormat(i18n.locale, { notation: "compact" }).format(value);

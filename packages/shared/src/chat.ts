@@ -802,6 +802,15 @@ export interface ChatReasoning {
   ms: number | null;
 }
 
+/** The longest reason a rating takes. */
+export const chatRatingReasonMax = 2000;
+
+/** What a person thought of an answer in their own chat, and why if they said. */
+export interface ChatRating {
+  value: "up" | "down";
+  reason?: string;
+}
+
 /**
  * One stored message of a chat, oldest first by `id`. The agent's
  * instructions and the APIs it was shown aren't among them.
@@ -837,6 +846,8 @@ export type ChatMessage =
       tools: ChatToolCall[];
       /** What the model thought before it, when it thought. */
       reasoning?: ChatReasoning;
+      /** What the person thought of it, if they rated it (`ChatsApi.rate`). */
+      rating?: ChatRating;
       /**
        * The questions it asked the person, with choices, if it ended its
        * response asking them (`askQuestions`): shown in place of the
@@ -1215,6 +1226,13 @@ export interface ChatsApi {
    * none is offered for it.
    */
   efforts: () => Promise<Record<string, ModelEfforts>>;
+  /**
+   * What people call each of `models()`: its provider's own name for it
+   * ("Claude Sonnet 4.5"), for any member, since only admins read the
+   * providers' catalog. A model the organization named itself, on its
+   * OpenAI-compatible endpoint, is called what the organization named it.
+   */
+  names: () => Promise<Record<string, string>>;
   /** The person's chats, the most recently active first. */
   list: () => Promise<ChatSummary[]>;
   /**
@@ -1289,6 +1307,17 @@ export interface ChatsApi {
    * watching.
    */
   send: (chatId: string, question: ChatQuestion) => Promise<void>;
+  /**
+   * Rates an answer of the person's own chat, by its message's `id`, or
+   * takes the rating back (`null`). Kept with the chat, where only its
+   * person reads it: nobody else sees a rating, and nothing learns from
+   * one. Audited without the rating or its reason. Anything but an answer of that chat is `agent.invalid_request`.
+   */
+  rate: (
+    chatId: string,
+    messageId: number,
+    rating: ChatRating | null
+  ) => Promise<void>;
   /**
    * Build it: makes what the chat's plan `build.plan` lists (an App, a
    * workflow, or both), owned by the person, in the project the chat was

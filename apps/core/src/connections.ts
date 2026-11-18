@@ -39,6 +39,7 @@ import type {
   OfferedCatalog,
   AppPointerSetting,
   SharedMailboxSetting,
+  SharedSyncPlaces,
   ConnectionBrainAudienceSetting,
   ToolClassSetting,
 } from "@grasp-os/shared/connect";
@@ -122,6 +123,7 @@ import {
   eraseBrainReads,
   mayHoldReadsOf,
 } from "./shared-reads.ts";
+import { claimConnectedTokens } from "./source-readers.ts";
 import { routeMember } from "./staff-audit.ts";
 import {
   readStephenReach,
@@ -129,6 +131,7 @@ import {
   setStephenPlace,
   setStephenReach,
 } from "./stephen-reach.ts";
+import { pickSyncPlaces, readSyncPlaces } from "./sync-picks.ts";
 import {
   anyMailboxPointed,
   classesOn,
@@ -840,6 +843,30 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
     });
   }
 
+  async syncPlaces(connectionId: unknown): Promise<SharedSyncPlaces | null> {
+    return await withPerson(
+      this.#check,
+      async (identity) =>
+        await readSyncPlaces(
+          this.#env,
+          identity,
+          async () => await personOf(this.#env, identity),
+          connectionId
+        )
+    );
+  }
+
+  async pickSyncPlaces(request: unknown): Promise<void> {
+    await withPerson(this.#check, async (identity) => {
+      await pickSyncPlaces(
+        this.#env,
+        identity,
+        async () => await personOf(this.#env, identity),
+        request
+      );
+    });
+  }
+
   async stephenReach(): Promise<StephenReach> {
     return await withPerson(this.#check, async (identity) => {
       requireAdmin(identity);
@@ -1183,6 +1210,14 @@ export const handleConnectionCallback = async (
       // Only whether there is one matters; the provider's text isn't kept.
       error: params.get("error")?.slice(0, 64) ?? undefined,
     });
+    // The accounts it proves are theirs, for the reader lists the Brain
+    // copies (GRA-1761): failed, the flow fails, and connecting again in
+    // place claims them.
+    await claimConnectedTokens(
+      env,
+      identity.userId,
+      await env.CONNECT.personalAccounts(identity.userId)
+    );
   } catch (error) {
     return failed(errorCodeOf(error));
   }

@@ -176,6 +176,24 @@ export const memoryEvidenceOfRuns = async (
   await memoryEvidenceQuery(drizzle(env.DB), (runId) => inList(runId, runIds));
 
 /**
+ * The pin a person's erasure leaves on each run their chat started, in
+ * place of theirs (person-erasure.ts): a pin of no source, chat, agent or
+ * person. Their pins went, their ID with them; this one keeps the run
+ * refused for good (resource-reads.ts), and with it every run that started
+ * from its kept state, where without any pin it would read as having read
+ * nothing. No real pin names an empty source. It is kept and released as
+ * the pins it replaced were (retention.ts), and counts as evidence like
+ * them (`readAnything`).
+ */
+export const erasedChatPin = {
+  sourceId: "",
+  workspaceId: "",
+  chatId: "",
+  agentId: "",
+  personId: "",
+} as const;
+
+/**
  * Whether run `runId` keeps any evidence of what it read: a version its
  * recalls were handed, a memory its entity reads rested on (GRA-1985),
  * what the chat that started it had read (`runChatSources`), or so does a

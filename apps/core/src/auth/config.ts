@@ -11,7 +11,9 @@ import { loopbackHosts } from "@grasp-os/shared/router";
  * `undefined` when none is set. A config that doesn't parse counts as none:
  * sign-in fails closed.
  */
-export const signInConfig = (env: Env): SignInConfig | undefined =>
+export const signInConfig = (
+  env: Pick<Env, "SIGN_IN">
+): SignInConfig | undefined =>
   deploymentConfig(signInConfigSchema, "SIGN_IN", env.SIGN_IN);
 
 /** Whether `value` is an origin on this machine, e.g. `http://localhost:8787`. */

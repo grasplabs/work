@@ -271,8 +271,15 @@
     {
       "idx": 38,
       "version": "6",
-      "when": 1795042158704,
-      "tag": "0038_chat_request_keys",
+      "when": 1795042738283,
+      "tag": "0038_chat_answer_rating",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1795044530090,
+      "tag": "0039_chat_request_keys",
       "breakpoints": true
     }
   ]

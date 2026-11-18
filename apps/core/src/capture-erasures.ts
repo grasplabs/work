@@ -10,6 +10,7 @@ import { auditLog } from "./audit-log.ts";
 import { uuidFromHash } from "./audit-outbox.ts";
 import type { Held } from "./audit-outbox.ts";
 import { eraseCaptures } from "./brain-next-origins.ts";
+import { closeSyncOfDisconnect } from "./brain-sync.ts";
 import { mayHoldCapturesOf } from "./connection-capture-key.ts";
 import { eraseSharedReadsOfDisconnect } from "./shared-reads.ts";
 
@@ -113,6 +114,36 @@ const eraseEach = async (
       });
     })
   );
+  // What native sync copied through a native connection (brain-sync.ts,
+  // GRA-1758, GRA-1719): a person's own store's copies erased, the
+  // connection closed for the sync, and the shared store's copies owed,
+  // before the disconnect leaves the outbox. A shared one (no person) put
+  // copies in the shared store alone.
+  const synced = stopped.flatMap(({ disconnect, connectionId }) => {
+    const owner = owners.get(connectionId);
+    return owner?.source !== "native" || unkeyable(connectionId)
+      ? []
+      : [{ disconnect, connectionId, personId: owner.ownerUserId }];
+  });
+  const syncSettled = await Promise.allSettled(
+    synced.map(async ({ disconnect, connectionId, personId }) => {
+      try {
+        await closeSyncOfDisconnect(env, {
+          connectionId,
+          personId,
+          request: disconnect.id,
+          actor: disconnect.actor,
+          at: new Date(disconnect.at),
+        });
+      } catch (error) {
+        // An owner the Brain refuses could never have had anything synced.
+        if (brainSourceErrors.codeOf(error) !== "brain.request_invalid") {
+          throw error;
+        }
+        log.error("brain.sync.erase_refused", { connectionId });
+      }
+    })
+  );
   const due = stopped.flatMap(({ disconnect, connectionId }) => {
     const owner = owners.get(connectionId);
     const personId = owner?.ownerUserId;
@@ -164,10 +195,13 @@ const eraseEach = async (
         ...shared.flatMap(({ disconnect }, index) =>
           sharedSettled[index]?.status === "rejected" ? [disconnect.id] : []
         ),
+        ...synced.flatMap(({ disconnect }, index) =>
+          syncSettled[index]?.status === "rejected" ? [disconnect.id] : []
+        ),
       ],
       errors: [
         ...new Set(
-          [...settled, ...sharedSettled].flatMap((each) =>
+          [...settled, ...sharedSettled, ...syncSettled].flatMap((each) =>
             each.status === "rejected" ? [errorName(each.reason)] : []
           )
         ),

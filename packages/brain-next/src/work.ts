@@ -27,6 +27,7 @@ import type {
   HandOvers,
   ModelTrouble,
   OverdueWork,
+  ProposalSources,
   WorkErrorCode,
   WorkOverview,
   WorkPriority,
@@ -263,6 +264,12 @@ export interface WorkContext {
    */
   owner?: string;
   /**
+   * The host's pick of the sources a skill's draft is drawn from, as it
+   * runs (contract.ts `ProposalSources`): a person's own store's alarm
+   * only.
+   */
+  proposalSources?: ProposalSources;
+  /**
    * Says more is left once this run returns (rule 7), having written
    * `progress` pieces of the work (more than 0, or the attempt fails): the
    * item is put back, due at once with its attempts reset, unless a newer
@@ -279,6 +286,13 @@ export interface WorkContext {
   keep: (payload: unknown) => void;
   /** Aborted once the item's time is up: end then, by throwing. */
   signal: AbortSignal;
+  /**
+   * Stops this attempt on an erasure of any of `keys` too, as an erasure
+   * of its own item's key does (`stopWorkOn`): for work that reads sources
+   * other than its key's. Its signal aborts, and no model call of it is
+   * sent after (`askWithin`). For this attempt alone.
+   */
+  watch: (keys: readonly string[]) => void;
 }
 
 /**
@@ -294,6 +308,8 @@ export interface WorkHost {
   handOvers?: HandOvers;
   /** A person's own store's tick only (`WorkContext.owner`). */
   owner?: string;
+  /** A person's own store's alarm only (`WorkContext.proposalSources`). */
+  proposalSources?: ProposalSources;
 }
 
 /** A kind of work, and how one item of it is done. */
@@ -1186,9 +1202,16 @@ const runItem = async (
   }
   const controller = new AbortController();
   const { signal } = controller;
-  const ofKey = state.underWay.get(item.key) ?? new Set<AbortController>();
-  ofKey.add(controller);
-  state.underWay.set(item.key, ofKey);
+  /** Stops `controller` on an erasure of `key` (`stopWorkOn`). */
+  const underWayOn = (key: string): Set<AbortController> => {
+    const set = state.underWay.get(key) ?? new Set<AbortController>();
+    set.add(controller);
+    state.underWay.set(key, set);
+    return set;
+  };
+  const ofKey = underWayOn(item.key);
+  /** The other keys this attempt is stopped on (`WorkContext.watch`). */
+  const watched = new Map<string, Set<AbortController>>();
   const limit = setTimeout(() => {
     controller.abort(new WorkError("timed_out"));
   }, runner.timeLimitMs);
@@ -1208,6 +1231,14 @@ const runItem = async (
         contextTokens: host.contextTokens,
         handOvers: host.handOvers,
         owner: host.owner,
+        proposalSources: host.proposalSources,
+        watch: (keys) => {
+          for (const key of keys) {
+            if (key !== item.key && !watched.has(key)) {
+              watched.set(key, underWayOn(key));
+            }
+          }
+        },
         again: (progress) => {
           again = { progress };
         },
@@ -1244,9 +1275,11 @@ const runItem = async (
       return { done: false, error, timedOut: signal.aborted };
     } finally {
       clearTimeout(limit);
-      ofKey.delete(controller);
-      if (ofKey.size === 0 && state.underWay.get(item.key) === ofKey) {
-        state.underWay.delete(item.key);
+      for (const [key, set] of [[item.key, ofKey] as const, ...watched]) {
+        set.delete(controller);
+        if (set.size === 0 && state.underWay.get(key) === set) {
+          state.underWay.delete(key);
+        }
       }
       // Nothing of it asks the model once it ended: not an `ask` it left behind.
       controller.abort(new WorkError("timed_out"));

@@ -18,7 +18,9 @@ import { acmeTenant, clients } from "../../connect/test/provider-config.ts";
 import { aiProvidersFake } from "./ai-providers-fake.ts";
 import { botConnectorFake } from "./bot-connector-fake.ts";
 import { composioApiScript, composioLogoScript } from "./composio-api.ts";
+import { driveSyncControlUrl, driveSyncFake } from "./drive-sync-fake.ts";
 import { mailServerScript } from "./mail-server.ts";
+import { sampleSyncControlUrl, sampleSyncFake } from "./sample-sync-fake.ts";
 import { stephenGoogleFake } from "./stephen-google-fake.ts";
 import { stephenGraphFake } from "./stephen-graph-fake.ts";
 
@@ -132,6 +134,38 @@ export const stephenGraphUrl = "https://graph-control.test/stephen";
  * them (test/stephen-google-fake.ts).
  */
 export const stephenGoogleUrl = "https://google-control.test/stephen";
+
+/**
+ * Where tests change the address Google gives an account from then on:
+ * `{ subject, email }`, as an admin renaming it in Workspace does. A
+ * renewal of that account's tokens is answered with it, and so is Google's
+ * userinfo endpoint; with \`email\` null, a renewal comes without an ID
+ * token, and the userinfo endpoint names no address.
+ */
+export const googleAddressUrl = "https://google-control.test/address";
+
+/**
+ * Where tests hold a call to Google mid-way: POST \`{ hold: true, prefix? }\`
+ * holds the next request whose URL starts with \`prefix\` until POST
+ * \`{ hold: false }\`, and then answers it as ever; GET answers
+ * \`{ reached }\`, whether a held one is waiting. By default the look-up of an account's addresses (connect's
+ * account-addresses.ts, which goes on without them): a connection's
+ * finishing, after Google's code exchange and before connect stores it.
+ */
+export const googleHoldUrl = "https://google-control.test/hold";
+
+/**
+ * Where tests set the groups a member is directly in, at Microsoft or
+ * Google alike: POST `{ member, groups }`, the member a Microsoft object
+ * ID, a Google address or a group's ID, each lower case; or `{ member,
+ * failing }`, which makes every read of that member's groups fail (503)
+ * while true: on Microsoft the account's, on Google each query naming the
+ * member. A Google group whose ID starts with `mapped-` comes back mapped
+ * from another identity source, with a namespace. Graph's `/me/transitiveMemberOf` answers the token's own
+ * account's groups through every nesting, Cloud Identity's
+ * `searchDirectGroups` a member's direct ones, as each documents.
+ */
+export const groupsControlUrl = "https://groups-control.test/groups";
 
 /** Where tests read how many drafts Graph made for `?mailbox=`: `{ drafts }`. */
 export const graphDraftsUrl = "https://graph-control.test/drafts";
@@ -310,6 +344,141 @@ const base64Url = (bytes) =>
     .replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
 const encoded = (value) =>
   base64Url(new TextEncoder().encode(JSON.stringify(value)));
+/** Each Google account's Workspace domain and address now, by its subject. */
+const googleAccounts = new Map();
+/** Each member's direct groups (\`groupsControlUrl\`), by its key, lower case. */
+const directGroups = new Map();
+/** The members whose group reads fail. */
+const failingGroups = new Set();
+/** Every group \`member\` is in, through any nesting, each once. */
+const transitiveGroups = (member) => {
+  const found = new Set();
+  let members = [member];
+  while (members.length > 0) {
+    const next = [];
+    for (const each of members) {
+      for (const group of directGroups.get(each) ?? []) {
+        if (!found.has(group)) {
+          found.add(group);
+          next.push(group);
+        }
+      }
+    }
+    members = next;
+  }
+  return [...found];
+};
+/** The subject an access token of the fakes names: \`access.<subject>\`, maybe with a renewal's suffix. */
+const subjectOf = (request) => {
+  const authorization = request.headers.get("authorization") ?? "";
+  const [subject = ""] = authorization.startsWith("Bearer access.")
+    ? authorization.slice("Bearer access.".length).split(".")
+    : [];
+  return subject;
+};
+/**
+ * Graph's \`GET /me/transitiveMemberOf\`
+ * (https://learn.microsoft.com/en-us/graph/api/user-list-transitivememberof?view=graph-rest-1.0):
+ * the token's account's groups, nested ones too, 100 a page (Graph's
+ * default) with a directory role among them, as Graph lists roles too.
+ * Query options other than its own \`$skiptoken\` are advanced queries,
+ * refused here as Graph refuses them without \`ConsistencyLevel\`.
+ */
+const graphMemberOf = (request, url) => {
+  if ([...url.searchParams.keys()].some((key) => key !== "$skiptoken")) {
+    return Response.json({ error: { code: "Request_UnsupportedQuery" } }, { status: 400 });
+  }
+  const subject = subjectOf(request).toLowerCase();
+  if (subject === "") {
+    return Response.json({ error: { code: "InvalidAuthenticationToken" } }, { status: 401 });
+  }
+  if (failingGroups.has(subject)) {
+    return Response.json({ error: { code: "serviceNotAvailable" } }, { status: 503 });
+  }
+  const all = [
+    { "@odata.type": "#microsoft.graph.directoryRole", id: "62e90394-69f5-4237-9190-012177145e10" },
+    ...transitiveGroups(subject).map((id) => ({ "@odata.type": "#microsoft.graph.group", id })),
+  ];
+  const start = Number(url.searchParams.get("$skiptoken") ?? "0");
+  const value = all.slice(start, start + 100);
+  return Response.json({
+    value,
+    ...(start + 100 < all.length
+      ? { "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/transitiveMemberOf?$skiptoken=" + (start + 100) }
+      : {}),
+  });
+};
+const groupQueryStart = "member_key_id == '";
+const groupQueryEnd = "' && 'cloudidentity.googleapis.com/groups.discussion_forum' in labels";
+/** The member a \`searchDirectGroups\` query names, in the one shape connect asks it; null for any other. */
+const groupQueryMember = (query) =>
+  query.startsWith(groupQueryStart) && query.endsWith(groupQueryEnd) &&
+  query.length > groupQueryStart.length + groupQueryEnd.length
+    ? query.slice(groupQueryStart.length, query.length - groupQueryEnd.length)
+    : null;
+/**
+ * Cloud Identity's \`groups.memberships.searchDirectGroups\`
+ * (https://docs.cloud.google.com/identity/docs/reference/rest/v1/groups.memberships/searchDirectGroups):
+ * a member's direct groups, at most \`pageSize\` (1000 at most) a page,
+ * for a token whose grant holds \`cloud-identity.groups.readonly\`; any
+ * other option, or a query of another shape, is refused.
+ */
+const searchDirectGroups = (request, url) => {
+  const allowed = new Set(["query", "pageSize", "pageToken", "orderBy"]);
+  const member = groupQueryMember(url.searchParams.get("query") ?? "");
+  const pageSize = Number(url.searchParams.get("pageSize") ?? "200");
+  if ([...url.searchParams.keys()].some((key) => !allowed.has(key)) || member === null || member.includes("'") || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 1000) {
+    return Response.json({ error: { code: 400, status: "INVALID_ARGUMENT" } }, { status: 400 });
+  }
+  const account = googleAccounts.get(subjectOf(request));
+  if (account === undefined || !(account.scope ?? "").split(" ").includes("https://www.googleapis.com/auth/cloud-identity.groups.readonly")) {
+    return Response.json({ error: { code: 403, status: "PERMISSION_DENIED" } }, { status: 403 });
+  }
+  if (failingGroups.has(member)) {
+    return Response.json({ error: { code: 503, status: "UNAVAILABLE" } }, { status: 503 });
+  }
+  const groups = directGroups.get(member) ?? [];
+  const start = Number(url.searchParams.get("pageToken") ?? "0");
+  return Response.json({
+    memberships: groups.slice(start, start + pageSize).map((id) => ({
+      group: "groups/" + id.replace(/[^a-z0-9]/gu, ""),
+      // A group mapped from another identity source carries its namespace.
+      groupKey: id.startsWith("mapped-") ? { id, namespace: "identitysources/acme" } : { id },
+      roles: [{ name: "MEMBER" }],
+    })),
+    ...(start + pageSize < groups.length ? { nextPageToken: String(start + pageSize) } : {}),
+  });
+};
+/** A hold on the next look-up of a Google account's addresses, while a test asks for one. */
+let googleHold = null;
+/**
+ * Google's token endpoint renewing an account's tokens, as Google does for
+ * a grant with \`openid\`: with an ID token for the account as it is now.
+ */
+const googleRefresh = async (request) => {
+  const form = new URLSearchParams(await request.text());
+  const subject = (form.get("refresh_token") ?? "").replace(/^refresh./u, "");
+  const account = googleAccounts.get(subject);
+  if (form.get("grant_type") !== "refresh_token" || account === undefined) {
+    return undefined;
+  }
+  const claims = {
+    iss: "https://accounts.google.com",
+    aud: ${JSON.stringify(clients.google.id)},
+    sub: subject,
+    hd: account.domain,
+    email: account.email,
+    email_verified: true,
+  };
+  return Response.json({
+    token_type: "Bearer",
+    access_token: "access." + subject + "." + crypto.randomUUID(),
+    expires_in: 3599,
+    ...(account.email === null
+      ? {}
+      : { id_token: [encoded({ alg: "RS256" }), encoded(claims), "signature"].join(".") }),
+  });
+};
 /**
  * Google's token endpoint redeeming a code \`consentCode\` made for Grasp's
  * Google client, with what was granted: the account it names, in the
@@ -340,6 +509,7 @@ const googleConsent = async (request) => {
     email: subject + "@" + domain,
     email_verified: true,
   };
+  googleAccounts.set(subject, { domain, email: claims.email, scope: atob(granted) });
   return Response.json({
     token_type: "Bearer",
     access_token: "access." + subject,
@@ -352,6 +522,8 @@ const googleConsent = async (request) => {
 const graphEvents = (${graphEventsFake.toString()})();
 const stephenGraph = (${stephenGraphFake.toString()})();
 const stephenGoogle = (${stephenGoogleFake.toString()})();
+const driveSync = (${driveSyncFake.toString()})();
+const sampleSync = (${sampleSyncFake.toString()})();
 const graphSent = [];
 const graphLosing = new Map();
 const graphDrafts = new Map();
@@ -517,6 +689,39 @@ export default {
     const url = new URL(request.url);
     if (aiProviders.handles(url)) {
       return await aiProviders.answer(request, url);
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(groupsControlUrl)}) {
+      const { member, groups, failing } = await request.json();
+      if (groups !== undefined) {
+        directGroups.set(member, groups);
+      }
+      if (failing === true) {
+        failingGroups.add(member);
+      } else if (failing === false) {
+        failingGroups.delete(member);
+      }
+      return new Response(null, { status: 204 });
+    }
+    if (url.hostname === "graph.microsoft.com" && request.method === "GET" && url.pathname === "/v1.0/me/transitiveMemberOf") {
+      return graphMemberOf(request, url);
+    }
+    if (request.method === "GET" && url.href === "https://openidconnect.googleapis.com/v1/userinfo") {
+      // Google's userinfo endpoint: the token's account as it is now.
+      const subject = subjectOf(request);
+      const account = googleAccounts.get(subject);
+      if (account === undefined || account.email === null) {
+        return Response.json({ error: "invalid_token" }, { status: 401 });
+      }
+      return Response.json({ sub: subject, email: account.email, email_verified: true, hd: account.domain });
+    }
+    if (url.hostname === "cloudidentity.googleapis.com" && request.method === "GET" && url.pathname === "/v1/groups/-/memberships:searchDirectGroups") {
+      if (googleHold !== null && url.href.startsWith(googleHold.prefix)) {
+        googleHold.reached = true;
+        while (googleHold?.held === true) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      }
+      return searchDirectGroups(request, url);
     }
     if (url.hostname === "backend.composio.dev" && url.pathname.startsWith("/api/v3.1/")) {
       return await composioApi(request, url);
@@ -732,18 +937,68 @@ export default {
     if (url.hostname === "login.botframework.com") {
       return botFramework.answer(request);
     }
+    if (url.origin + url.pathname === ${JSON.stringify(driveSyncControlUrl)}) {
+      return await driveSync.control(request);
+    }
+    const fromDriveSync = driveSync.answer(request, url);
+    if (fromDriveSync !== undefined) {
+      return fromDriveSync;
+    }
+    if (url.origin + url.pathname === ${JSON.stringify(sampleSyncControlUrl)}) {
+      return await sampleSync.control(request);
+    }
+    const fromSampleSync = sampleSync.answer(request, url);
+    if (fromSampleSync !== undefined) {
+      return fromSampleSync;
+    }
     if (url.href === ${JSON.stringify(stephenGoogleUrl)}) {
       return await stephenGoogle.control(request);
+    }
+    if (googleHold !== null && url.href.startsWith(googleHold.prefix)) {
+      // Polls the flag: workerd refuses to wait on a promise another request made.
+      googleHold.reached = true;
+      while (googleHold?.held === true) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
     }
     const fromStephenGoogle = await stephenGoogle.answer(request, url);
     if (fromStephenGoogle !== undefined) {
       return fromStephenGoogle;
     }
+    if (request.method === "POST" && url.href === "https://oauth2.googleapis.com/revoke") {
+      // Google takes back the grant a disconnect revokes, as it does.
+      return new Response(null, { status: 200 });
+    }
     if (request.method === "POST" && url.href === "https://oauth2.googleapis.com/token") {
-      const answered = await googleConsent(request.clone());
+      const answered =
+        (await googleConsent(request.clone())) ??
+        (await googleRefresh(request.clone()));
       if (answered !== undefined) {
         return answered;
       }
+    }
+    if (url.href === ${JSON.stringify(googleHoldUrl)}) {
+      if (request.method === "GET") {
+        return Response.json({ reached: googleHold?.reached === true });
+      }
+      const { hold, prefix } = await request.json();
+      if (hold) {
+        googleHold = {
+          reached: false,
+          held: true,
+          prefix: prefix ?? "https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs",
+        };
+      } else if (googleHold !== null) {
+        googleHold.held = false;
+        googleHold = null;
+      }
+      return new Response(null, { status: 204 });
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(googleAddressUrl)}) {
+      const { subject, email } = await request.json();
+      const account = googleAccounts.get(subject);
+      googleAccounts.set(subject, { ...account, domain: account?.domain ?? "acme.test", email });
+      return new Response(null, { status: 204 });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(botFrameworkKeysUrl)}) {
       // Added to the keys other test files published: files run at once,

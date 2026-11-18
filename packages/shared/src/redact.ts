@@ -1,5 +1,13 @@
 import { decodeHTMLAttribute } from "entities/decode";
 
+declare global {
+  // JSON.parse source text access (TC39, shipped in V8 and so in workerd):
+  // not in TypeScript's lib yet, nor the reviver's third argument.
+  interface JSON {
+    rawJSON: (text: string) => unknown;
+  }
+}
+
 // Credentials in text an outside system or code wrote, redacted before it
 // reaches a chat, a model or a log.
 
@@ -15,10 +23,13 @@ import { decodeHTMLAttribute } from "entities/decode";
  * `passwd`, `authorization`, `session` (`sessionId`, `JSESSIONID`) or
  * `cookie`, or of a name ending in one (`access_token`, `client_secret`), written as `name=value` or
  * `name: value`: quoted, to its closing quote (or the end of the line),
- * spaces included; unquoted, to the next space or separator, with a
+ * spaces included; unquoted, to the next whitespace or quote (a `&`, `,`
+ * or `;` taken with it: what follows in a query string, a cookie or a list
+ * is lost, the value never kept in part), with a
  * `Bearer` or `Basic` scheme of any length taken with it. JSON quoted
  * once more, as a string inside JSON (`{\"password\":\"…\"}`), is
- * caught the same way, to the escaped closing quote. And in every link,
+ * caught the same way, to the escaped closing quote (a text that is JSON
+ * is read by its values instead, below). And in every link,
  * its parameters that sign or grant it (`redactLinks`, below). Anything else
  * shaped like a secret is not caught: this is a net for what an outside
  * system's data may carry, not a guarantee (a run holds no secret of its
@@ -65,6 +76,23 @@ const credentialFormats: readonly RegExp[] = [
   /\bAKIA[0-9A-Z]{16}\b/gu,
 ];
 
+/**
+ * The names whose value {@link credentials} redacts whole, alone or ending
+ * a longer name (`access_token`, `set-cookie`): one source for the
+ * named-value rule over text and for a JSON member's name
+ * ({@link credentialName}).
+ */
+const credentialNames = String.raw`api[_-]?key|apikey|token|secret|passwd|password|authorization|session(?:[_-]?id)?|sessid|cookie`;
+
+/**
+ * A JSON member's name that names a credential: one the named-value rule
+ * would take, ending at the name's end, as it would before the `:`.
+ */
+const credentialName = new RegExp(
+  String.raw`\b\w*?(?:${credentialNames})$`,
+  "iu"
+);
+
 const credentials: readonly (readonly [
   RegExp,
   string | ((...args: unknown[]) => string),
@@ -76,7 +104,10 @@ const credentials: readonly (readonly [
   // linear. A name's prefix (`access_`) is word characters only, so a
   // match starts once per word, not at every "-" of a flood.
   [
-    /\b(?<name>\w*?(?:api[_-]?key|apikey|token|secret|passwd|password|authorization|session(?:[_-]?id)?|sessid|cookie))(?<between>\\?["']?\s*[:=]\s*)(?:(?<escapedQuote>\\["'])(?:(?!\k<escapedQuote>)[^\n])*(?<escapedClose>\k<escapedQuote>)?|(?<quote>["'])(?:\\.|(?!\k<quote>)[^\\\n])*(?<close>\k<quote>)?|(?:(?:bearer|basic)\s+)?[^\s"'&,;]+)/giu,
+    new RegExp(
+      String.raw`\b(?<name>\w*?(?:${credentialNames}))(?<between>\\?["']?\s*[:=]\s*)(?:(?<escapedQuote>\\["'])(?:(?!\k<escapedQuote>)[^\n])*(?<escapedClose>\k<escapedQuote>)?|(?<quote>["'])(?:\\.|(?!\k<quote>)[^\\\n])*(?<close>\k<quote>)?|(?:(?:bearer|basic)\s+)?[^\s"']+)`,
+      "giu"
+    ),
     redactedAssignment,
   ],
 ];
@@ -258,8 +289,8 @@ const redactLinks = (text: string): string =>
     return redactParams(url, true) ? serialized(url) + found.slice(end) : found;
   });
 
-/** `text` with every credential in it ({@link credentials}) redacted. */
-export const redact = (text: string): string => {
+/** `text` with every credential in it redacted by the rules above. */
+const redactText = (text: string): string => {
   let redacted = redactLinks(text);
   for (const [pattern, replacement] of credentials) {
     redacted =
@@ -269,6 +300,170 @@ export const redact = (text: string): string => {
   }
   return redacted;
 };
+
+// JSON text (GRA-1880). The rules above read text as written, and in JSON
+// a line break is the two characters `\n`: `password: x\nCookie: sid=…`
+// took `x\nCookie:` for the password and left the session ID. So a text
+// that is JSON is redacted by its values, read by the platform's own
+// parser (`JSON.parse`), never by rules of ours:
+//
+// - every string, a member's name as well as a value, decoded and redacted
+//   by `redact` itself, so JSON held in a string as text is read the same
+//   way in turn, however deep (each level doubles its escapes, so the
+//   text bounds how many there are);
+// - a member whose name names a credential (`credentialName`, the
+//   named-value rule's own names) has its whole value redacted, whatever
+//   it is (a string, a number, a list, an object, `null`);
+// - written back by `JSON.stringify`, its numbers as they were written
+//   (JSON.parse source text access and `JSON.rawJSON`, so no long ID is
+//   rounded), compact; a text with nothing to redact comes back byte for
+//   byte.
+//
+// JSON is the whole text, by JSON's grammar (RFC 8259), after a byte order
+// mark and whitespace: text around it, a second document after it, or a
+// document cut off, is not, and gets the rules above over the text as
+// written. So does JSON that holds a member's name twice: `JSON.parse`
+// keeps only the last, so writing it back would drop the others unread.
+// And so does JSON in which nothing is redacted by its values, so what is
+// redacted is never less than the rules over text remove. A text that is
+// JSON but too deep for the platform's stack to revive or write back is
+// redacted whole, never passed on.
+//
+// Not caught: a credential split across values (`["password:",
+// "hunter2"]`) or named by a sibling's value (`{"type":"bearer",
+// "value":"…"}`, GRA-1881); and the rest of a value after whitespace an
+// escape stands for (`password: ab\thunter2` keeps `hunter2`, as the
+// same text written with a tab does; GRA-2040).
+
+/** What a redacted JSON value, or a text too deep to read, becomes. */
+const redactedValue = "[redacted]";
+
+/**
+ * Where a JSON text may hold a string: one opening with `{`, `[` or `"`,
+ * after a byte order mark and JSON's whitespace.
+ */
+const mayHoldJsonString = /^\uFEFF?[\t\n\r ]*[[{"]/u;
+
+/**
+ * How many members the objects of `json` (a text `JSON.parse` accepted)
+ * hold as written: outside its strings, a `:` only ever separates a
+ * member's name from its value (RFC 8259 §4), and inside one a `"` ends it
+ * unless a `\\` escapes it (§7). One pass, never a pattern: a pattern over
+ * a string of megabytes of escapes overflows the stack.
+ */
+const membersWritten = (json: string): number => {
+  let members = 0;
+  let inString = false;
+  let escaped = false;
+  for (const char of json) {
+    if (escaped) {
+      escaped = false;
+    } else if (inString) {
+      escaped = char === "\\";
+      inString = char !== '"';
+    } else if (char === '"') {
+      inString = true;
+    } else if (char === ":") {
+      members += 1;
+    }
+  }
+  return members;
+};
+
+/**
+ * `value` (an object JSON.parse revived) with each member's name passed
+ * through `redactName`; `value` itself when none changes.
+ */
+const withNamesRedacted = (
+  value: object,
+  redactName: (name: string) => string
+): object => {
+  const members: [string, unknown][] = Object.entries(value);
+  const renamed = members.map(([name, member]): [string, unknown] => [
+    redactName(name),
+    member,
+  ]);
+  if (renamed.every(([name], index) => name === members[index]?.[0])) {
+    return value;
+  }
+  return Object.fromEntries(renamed);
+};
+
+/**
+ * `text` redacted by its values when it is JSON (above), or undefined when
+ * the rules over text are to redact it.
+ */
+const redactedJson = (text: string): string | undefined => {
+  if (!mayHoldJsonString.test(text)) {
+    return undefined;
+  }
+  // `JSON.parse` refuses a byte order mark: read past it, and keep it.
+  const mark = text.startsWith("\uFEFF") ? "\uFEFF" : "";
+  const json = text.slice(mark.length);
+  /** A string in it, JSON held as text in it read the same way in turn. */
+  const redactString = (each: string): string =>
+    redactedJson(each) ?? redactText(each);
+  let changed = false;
+  // The members revived: fewer than written when a name came twice.
+  let membersRead = 0;
+  const revived = (
+    name: string,
+    value: unknown,
+    { source }: { source?: string } = {}
+  ): unknown => {
+    const isObject =
+      typeof value === "object" &&
+      value !== null &&
+      // A list's names are its indexes: nothing to redact, nor to read.
+      !Array.isArray(value);
+    if (isObject) {
+      membersRead += Object.keys(value).length;
+    }
+    let kept = value;
+    if (credentialName.test(name)) {
+      kept = redactedValue;
+    } else if (typeof value === "string") {
+      kept = redactString(value);
+    } else if (typeof value === "number" && source !== undefined) {
+      // Written back as it came; never a change.
+      return JSON.rawJSON(source);
+    } else if (isObject) {
+      kept = withNamesRedacted(value, redactString);
+    }
+    changed ||= kept !== value;
+    return kept;
+  };
+  try {
+    const value: unknown = JSON.parse(json, revived);
+    if (!changed || membersRead !== membersWritten(json)) {
+      return undefined;
+    }
+    return `${mark}${JSON.stringify(value)}`;
+  } catch (error) {
+    // What JSON's grammar refused: text.
+    if (error instanceof SyntaxError) {
+      return undefined;
+    }
+    // Anything else, such as JSON too deep for the platform's stack to
+    // revive or write back: redacted whole, never passed on.
+    return redactedValue;
+  }
+};
+
+/**
+ * `text` with every credential in it redacted: by its values when it is
+ * JSON, else by the rules over text ({@link credentials}, `redactLinks`).
+ */
+export const redact = (text: string): string =>
+  redactedJson(text) ?? redactText(text);
+
+/**
+ * `text` redacted by its values when it is JSON (above), and as it was
+ * otherwise: for a text joined with others before `redact` reads the
+ * whole, so a credential's name at the end of one and its value at the
+ * start of the next still meet, as text.
+ */
+export const redactJson = (text: string): string => redactedJson(text) ?? text;
 
 /**
  * Whether `text` holds a credential in one of the known formats

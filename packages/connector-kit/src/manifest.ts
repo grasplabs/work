@@ -174,6 +174,13 @@ export type RecoveryMode = (typeof recoveryModes)[number];
  */
 export const egressHeader = "grasp-egress";
 
+/**
+ * The error a provider's answer fails with once it passes what connect's
+ * egress reads of one answer: its body stops with this message, which a
+ * connector tells apart from any other failure (`isTooLarge` in sync.ts).
+ */
+export const egressTooLargeMessage = "The provider's response is too large";
+
 /** The kinds of answer connect's egress gives itself, as `egressHeader` says. */
 export const egressKind = {
   refused: "refused",
@@ -412,11 +419,14 @@ export const syncNameSchema = z.string().regex(/^[a-z][a-z\d-]{0,63}$/u);
 export const syncManifestSchema = z.strictObject({
   kind: syncItemKindSchema,
   /**
-   * What it reads of a personal connection: `own`, the whole account; or
-   * `listed`, places of the account the sync lists itself (`syncPlacesMethod`),
-   * each read as a source of its own with its own cursor.
+   * What it reads: of a personal connection, `own`, the whole account, or
+   * `listed`, places of the account the sync lists itself
+   * (`syncPlacesMethod`); of a shared connection, `picked`, the places of
+   * the connected account an admin picked from those it lists (shared
+   * drives, document libraries). Each place is read as a source of its
+   * own with its own cursor.
    */
-  places: z.enum(["own", "listed"]).default("own"),
+  places: z.enum(["own", "listed", "picked"]).default("own"),
   routes: z
     .array(routeSchema)
     .min(1)
@@ -455,6 +465,14 @@ export const syncParamsSchema = z.strictObject({
   place: z.string().min(1).max(256),
   /** Null for the first listing. */
   cursor: syncCursorSchema.nullable(),
+  /** A names-only listing (`SyncPageRequest.names`). */
+  names: z.boolean().optional(),
+  /** Those items alone, in full (`SyncPageRequest.ids`): one request each at most. */
+  ids: z
+    .array(z.string().min(1).max(1024))
+    .min(1)
+    .max(connectorIsolateRequests)
+    .optional(),
 });
 export type SyncParams = z.infer<typeof syncParamsSchema>;
 

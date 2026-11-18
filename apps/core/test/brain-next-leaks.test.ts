@@ -9,7 +9,10 @@ import type { Access } from "@grasp-os/brain-next/contract";
 import { brainUploadReadersSchema } from "@grasp-os/shared/brain-sources";
 import type { BrainUploadReaders } from "@grasp-os/shared/brain-sources";
 import { chatIdSchema } from "@grasp-os/shared/ids";
+import { minTeamShown } from "@grasp-os/shared/onboarding";
 import { authoritySchema } from "@grasp-os/shared/permissions";
+import { readerProofMaxAgeMs } from "@grasp-os/shared/source-readers";
+import type { SourceReader } from "@grasp-os/shared/source-readers";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -22,11 +25,13 @@ import {
   addInstructionFile,
   addSource,
   brainStaffReport,
+  changeSourceReaders,
   eraseSource,
   erasePerson,
   publishAs,
   readSourceVersionAs,
   recallAs,
+  recordEvents,
   rememberAs,
   versionRefSchema,
   workBrain,
@@ -38,6 +43,7 @@ import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
 import {
   answerCaptureIdOf,
   captureIdOf,
+  sharedReadHashOf,
 } from "../src/connection-capture-key.ts";
 import { captureRead, captureRunRead } from "../src/connection-capture.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
@@ -71,6 +77,7 @@ import { brainSurfaces, membersOf, textOf } from "./brain-next-surfaces.ts";
 import type { Probing } from "./brain-next-surfaces.ts";
 import { chatIdsOf, codeStepTrace } from "./code-step-trace.ts";
 import { mockIdp } from "./idp.ts";
+import type { Claims } from "./idp.ts";
 import { saveInstructions } from "./instruction-saves.ts";
 import { answeringProvider, testModel } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
@@ -119,6 +126,14 @@ import {
 // nobody may read.
 
 const idp = mockIdp();
+
+/** The account `claims` signed in with, as a reader list names it. */
+const accountOf = (claims: Claims): SourceReader => ({
+  kind: "account",
+  provider: "microsoft",
+  tenant: acmeTenant,
+  account: String(claims.oid),
+});
 
 /** Grants the chat agent the Brain permission, once for the file. */
 const chatAgentReadsBrain = chatAgentReadsBrainOnce(idp);
@@ -345,10 +360,11 @@ describe(
       await answeringProvider(() => {});
       // The holder builds Apps, so they can make the outsider a user of
       // two.
-      const [holderApi, { userId: outsider }] = await Promise.all([
-        signedInApi(idp, "builder"),
-        signedInWithRole(idp, "user"),
-      ]);
+      const [holderApi, { userId: outsider, person: outsiderPerson }] =
+        await Promise.all([
+          signedInApi(idp, "builder"),
+          signedInWithRole(idp, "user"),
+        ]);
       const holder = holderApi.userId;
       const secretTeam = await newTeam(holder);
       const ownTeam = await newTeam(outsider);
@@ -357,6 +373,8 @@ describe(
         "the holder's own source": markerWord(),
         "a team's source the outsider isn't in": markerWord(),
         "a source nobody is known to read": markerWord(),
+        "a file shared with a group the outsider proved they were in over a day ago":
+          markerWord(),
         "the holder's interview": markerWord(),
         "a source narrowed away from the outsider": markerWord(),
         "a source narrowed to the holder alone": markerWord(),
@@ -374,13 +392,39 @@ describe(
           markerWord(),
         "what an agent read through a shared connection for a team the outsider isn't in":
           markerWord(),
+        "what an agent read through a shared connection with no Brain audience":
+          markerWord(),
+        "a file native sync copied from a place picked on a shared connection for a team the outsider isn't in":
+          markerWord(),
+        "a file native sync copied from a place un-picked on a shared connection everyone may read":
+          markerWord(),
+        "a file native sync copied from a place picked on a shared connection with no Brain audience":
+          markerWord(),
         "the holder's own skill": markerWord(),
         "a team's skill the outsider isn't in": markerWord(),
+        "a file the source shares with the holder, by their account":
+          markerWord(),
+        "a file the source shared with the outsider, then with the holder alone":
+          markerWord(),
+        "a file native sync copied from the holder's drive for them alone":
+          markerWord(),
+        "a file native sync copied for the outsider too, then erased as gone at the source":
+          markerWord(),
         "the holder's run": markerWord(),
         "a question in the holder's chat": markerWord(),
         "an answer in the holder's chat": markerWord(),
         "a memory the holder shared with a team the outsider isn't in":
           markerWord(),
+        "an event of the holder's team": markerWord(),
+        // Its tag of who took it, as the store keeps it: set once planted.
+        "the tag of who took an event of the holder's team": markerWord(),
+        // A tag a person's erasure closed, as its ledger entry names it: a
+        // tag's shape, so the store takes it.
+        "the tag of an erased person's events": [
+          ...crypto.getRandomValues(new Uint8Array(32)),
+        ]
+          .map((byte) => byte.toString(16).padStart(2, "0"))
+          .join(""),
       };
       // What every member may read, and nobody outside the company.
       const companyMarkers = {
@@ -403,6 +447,8 @@ describe(
         "the holder's own source": ownerMarker,
         "a team's source the outsider isn't in": teamMarker,
         "a source nobody is known to read": noneMarker,
+        "a file shared with a group the outsider proved they were in over a day ago":
+          staleGroupMarker,
         "the holder's interview": interviewMarker,
         "a source narrowed away from the outsider": narrowedMarker,
         "a source narrowed to the holder alone": toHolderMarker,
@@ -421,13 +467,30 @@ describe(
           triggerCaptureMarker,
         "what an agent read through a shared connection for a team the outsider isn't in":
           sharedReadMarker,
+        "what an agent read through a shared connection with no Brain audience":
+          unsharedReadMarker,
+        "a file native sync copied from a place picked on a shared connection for a team the outsider isn't in":
+          teamPlaceMarker,
+        "a file native sync copied from a place un-picked on a shared connection everyone may read":
+          unpickedPlaceMarker,
+        "a file native sync copied from a place picked on a shared connection with no Brain audience":
+          nobodyPlaceMarker,
         "the holder's own skill": holderSkillMarker,
         "a team's skill the outsider isn't in": teamSkillMarker,
+        "a file the source shares with the holder, by their account":
+          readersMarker,
+        "a file the source shared with the outsider, then with the holder alone":
+          staleReadersMarker,
+        "a file native sync copied from the holder's drive for them alone":
+          syncMarker,
+        "a file native sync copied for the outsider too, then erased as gone at the source":
+          goneSyncMarker,
         "the holder's run": runMarker,
         "a question in the holder's chat": askedMarker,
         "an answer in the holder's chat": answerMarker,
         "a memory the holder shared with a team the outsider isn't in":
           sharedMemoryMarker,
+        "an event of the holder's team": eventMarker,
       } = markers;
       // Instruction files the outsider may not get: the holder's own,
       // another agent's than theirs, and an App's they don't build (one no
@@ -725,29 +788,285 @@ describe(
         }),
       };
       // Read through a shared connection an admin opened in the Brain to a
-      // team the outsider isn't in (GRA-1831): readable by that team, as
-      // core's records say at each read, its connection's ID holding a
-      // marker too.
-      const sharedConnection = `connection-${sharedReadMarker}`;
-      await connectDb()
-        .prepare(
-          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, 'hubspot', 'shared', NULL, 'active', 'composio', 'hubspot', ?, ?)"
-        )
-        .bind(sharedConnection, readAtNow, readAtNow)
-        .run();
+      // team the outsider isn't in (GRA-1831), by the capture of a chat's
+      // reads (connection-capture.ts): readable by that team, as core's
+      // records say at each read, its connection's ID holding a marker
+      // too. The outsider's own agent read it, on purpose: having read it
+      // gives them nothing of it. Its twin, the same read through a shared
+      // connection no audience was chosen for, is kept for nobody, the
+      // holder included.
+      const sharedToolkit = async (marker: string): Promise<string> => {
+        const id = `connection-${marker}`;
+        await connectDb()
+          .prepare(
+            "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tools, created_at, updated_at) VALUES (?, 'mail', 'shared', NULL, 'active', 'composio', 'https://mail.test/mcp', ?, ?, ?)"
+          )
+          .bind(
+            id,
+            JSON.stringify([{ name: "mail.search", read: true }]),
+            readAtNow,
+            readAtNow
+          )
+          .run();
+        return id;
+      };
+      const sharedRead = async (
+        reader: string,
+        connectionId: string,
+        call: { query: string },
+        text: string
+      ): Promise<void> => {
+        await captureRead(
+          env,
+          {
+            workspaceId: personalWorkspaceId(reader),
+            agentId: chatAgentId,
+            chatId: chatIdSchema.parse(crypto.randomUUID()),
+            personId: reader,
+            runId: crypto.randomUUID(),
+          },
+          connectionId,
+          "mail.search",
+          call,
+          {
+            result: {
+              output: JSON.stringify(text),
+              provenance: ["mail/mail.search"],
+              keep: true,
+            },
+            readAt: new Date(readAtNow),
+          }
+        );
+      };
+      const [sharedConnection, unsharedConnection] = await Promise.all([
+        sharedToolkit(sharedReadMarker),
+        sharedToolkit(unsharedReadMarker),
+      ]);
       const sharingAdmin = await signedInApi(idp, "admin");
       await chooseAudience(sharingAdmin.api, sharedConnection, {
         kind: "team",
         teamId: secretTeam,
       });
-      const sharedReadId = await add(
-        `Deal pipeline ${sharedWord} ${sharedReadMarker}`,
-        { kind: "connection", connectionId: sharedConnection },
+      const sharedCall = { query: `pipeline ${sharedReadMarker}` };
+      await sharedRead(
+        outsider,
+        sharedConnection,
+        sharedCall,
+        `Deal pipeline ${sharedWord} ${sharedReadMarker}`
+      );
+      await sharedRead(
+        holder,
+        unsharedConnection,
+        { query: `orders ${unsharedReadMarker}` },
+        `Supplier orders ${sharedWord} ${unsharedReadMarker}`
+      );
+      const sharedReadId: SourceRef = {
+        producer: "connected",
+        id: `${sharedConnection}/0/${await sharedReadHashOf("mail.search", {
+          input: sharedCall,
+        })}`,
+      };
+      // Copied by native sync from places an admin picked on shared
+      // connections (GRA-1719), each for its place's own group, which a
+      // reader holds beside the connection's audience only while the place
+      // is picked (brain-next.ts `withConnections`): one for a team the
+      // outsider isn't in; one whose place was un-picked, though everyone
+      // may read the connection; one whose connection has no audience.
+      // Their places, as the sync run keeps them, are never due in a run.
+      const neverDue = Date.parse("2100-01-01T00:00:00.000Z");
+      const placeCopy = async (
+        marker: string,
+        audience: Parameters<typeof chooseAudience>[2] | undefined,
+        dropped: boolean
+      ): Promise<SourceRef> => {
+        // Its ID holds no marker: everyone holds the group of a connection
+        // everyone may read.
+        const connectionId = await sharedToolkit(unique().replaceAll("-", ""));
+        if (audience !== undefined) {
+          await chooseAudience(sharingAdmin.api, connectionId, audience);
+        }
+        const place = `site-${unique()}`;
+        await env.DB.prepare(
+          "INSERT INTO brain_sync_sources (connection_id, feed, place, person_id, provider, tenant, account, cursor, listing, listing_open, due_at, lease_id, lease_until, last_success_at, last_error, added, changed, removed, relist_cursor, relisting, relist_at, relist_since, leaves_owed, kind, dropped, relist_catch_up, seen_in) VALUES (?, 'sites', ?, NULL, 'microsoft', NULL, NULL, NULL, 1, 0, ?, NULL, ?, NULL, NULL, 0, 0, 0, NULL, 0, ?, NULL, 0, 'file', ?, 0, NULL)"
+        )
+          .bind(
+            connectionId,
+            place,
+            neverDue,
+            neverDue,
+            neverDue,
+            dropped ? 1 : 0
+          )
+          .run();
+        const source: SourceRef = {
+          producer: "sync",
+          id: `${connectionId}/1/${unique()}`,
+        };
+        await addSource(env, {
+          source,
+          change: crypto.randomUUID(),
+          text: `Site plan ${sharedWord} ${marker}`,
+          readers: { kind: "place", connectionId, feed: "sites", place },
+        });
+        return source;
+      };
+      const teamPlaceId = await placeCopy(
+        teamPlaceMarker,
+        { kind: "team", teamId: secretTeam },
+        false
+      );
+      const unpickedPlaceId = await placeCopy(
+        unpickedPlaceMarker,
+        { kind: "everyone" },
+        true
+      );
+      const nobodyPlaceId = await placeCopy(
+        nobodyPlaceMarker,
+        undefined,
+        false
+      );
+      // A step the holder took, kept as an event of a team of theirs large
+      // enough to keep one (GRA-1763): nobody reads it back, that team
+      // included.
+      const eventPeople = await Promise.all(
+        Array.from(
+          { length: minTeamShown - 1 },
+          async () => await signedInWithRole(idp, "user")
+        )
+      );
+      await newTeam(holder, ...eventPeople.map(({ userId }) => userId));
+      await recordEvents(env, [
         {
-          producer: "connected",
-          id: `${sharedConnection}/${crypto.randomUUID()}`,
+          key: crypto.randomUUID(),
+          personId: holder,
+          step: eventMarker,
+          system: "crm",
+          writes: false,
+          item: eventMarker,
+          at: new Date(),
+        },
+      ]);
+      // Four of that team, the holder among them, reading in a system the
+      // marker names and then mailing (GRA-1764): one person short of a
+      // routine seen in activity, so no read shows it.
+      const anHourAgo = new Date(Date.now() - 3_600_000);
+      await recordEvents(
+        env,
+        [holder, ...eventPeople.slice(1).map(({ userId }) => userId)].flatMap(
+          (personId) => [
+            {
+              key: crypto.randomUUID(),
+              personId,
+              step: "deals.read",
+              system: eventMarker,
+              writes: false,
+              item: null,
+              at: anHourAgo,
+            },
+            {
+              key: crypto.randomUUID(),
+              personId,
+              step: "mail.send",
+              system: "mail",
+              writes: true,
+              item: null,
+              at: new Date(),
+            },
+          ]
+        )
+      );
+      const eventWho = await runInDurableObject(
+        sharedStore(),
+        (_store, state) =>
+          state.storage.sql
+            .exec<{ who: string }>(
+              "SELECT who FROM events WHERE step = ?",
+              eventMarker
+            )
+            .one().who
+      );
+      markers["the tag of who took an event of the holder's team"] = eventWho;
+      // An erased person's events, by their tag, under the key the store's
+      // events are under.
+      await sharedStore().erasePersonShared({
+        person: `erased-${crypto.randomUUID()}`,
+        identifiers: [],
+        reason: "person_erased",
+        events: {
+          keyId: await runInDurableObject(
+            sharedStore(),
+            (_store, state) =>
+              state.storage.sql
+                .exec<{ id: string }>("SELECT id FROM event_key WHERE row = 1")
+                .one().id
+          ),
+          who: [markers["the tag of an erased person's events"]],
+        },
+      });
+      // Readers copied from where a file lives (GRA-1761): the holder by
+      // the account they sign in with, beside a link and a group, which
+      // reach nobody. Its twin, the stale list: first shared with the
+      // outsider too, then with the holder alone; its only version is the
+      // first, which the outsider was among the readers of.
+      const readersId = await add(
+        `Lease terms ${sharedWord} ${readersMarker}`,
+        {
+          kind: "readers",
+          readers: [
+            accountOf(holderApi.person),
+            { kind: "link" },
+            {
+              kind: "group",
+              provider: "microsoft",
+              tenant: acmeTenant,
+              group: `group-${readersMarker}`,
+            },
+          ],
         }
       );
+      const staleReadersId = await add(
+        `Lease draft ${sharedWord} ${staleReadersMarker}`,
+        {
+          kind: "readers",
+          readers: [accountOf(outsiderPerson), accountOf(holderApi.person)],
+        }
+      );
+      await changeSourceReaders(env, {
+        source: staleReadersId,
+        change: crypto.randomUUID(),
+        readers: { kind: "readers", readers: [accountOf(holderApi.person)] },
+      });
+      // A file native sync copied from the holder's own drive (GRA-1758),
+      // only theirs to read at the source: in their own store, in their
+      // connection's group (brain-sync.ts). Its twin: copied while the
+      // source shared it with the outsider too, then erased when it went
+      // away there, as the sync takes out everything that did.
+      const syncConnection = `connection-${syncMarker}`;
+      const syncId: SourceRef = {
+        producer: "sync",
+        id: `${syncConnection}/1/${unique()}`,
+      };
+      await addSource(env, {
+        source: syncId,
+        change: crypto.randomUUID(),
+        text: `Supplier contract ${sharedWord} ${syncMarker}`,
+        readers: { kind: "owner", personId: holder },
+        group: { producer: "sync", id: syncConnection },
+      });
+      ownerIds.push(syncId);
+      const goneSyncId = await add(
+        `Supplier offer ${sharedWord} ${goneSyncMarker}`,
+        {
+          kind: "readers",
+          readers: [accountOf(outsiderPerson), accountOf(holderApi.person)],
+        },
+        { producer: "sync", id: `${syncConnection}/1/${unique()}` }
+      );
+      await eraseSource(env, {
+        source: goneSyncId,
+        readers: { kind: "none" },
+        reason: "deleted",
+      });
       const teamSource = `Board minutes ${sharedWord} ${teamMarker}`;
       const teamId = await add(teamSource, {
         kind: "team",
@@ -756,6 +1075,39 @@ describe(
       const noneId = await add(`Unfiled note ${sharedWord} ${noneMarker}`, {
         kind: "none",
       });
+      // Shared with a group the outsider is in by the last read of their
+      // own connection's groups (GRA-1761), but that read is over a day
+      // old: it proves nothing any more, so the file is nobody's.
+      const staleGroup = crypto.randomUUID();
+      await connectDb()
+        .prepare(
+          "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tenant, account_id, reader_groups, reader_groups_at, created_at, updated_at) VALUES (?, 'microsoft', 'personal', ?, 'active', 'native', 'microsoft-365', ?, ?, ?, ?, ?, ?)"
+        )
+        .bind(
+          crypto.randomUUID(),
+          outsider,
+          acmeTenant,
+          String(outsiderPerson.oid),
+          JSON.stringify([staleGroup]),
+          Date.now() - readerProofMaxAgeMs - 60_000,
+          readAtNow,
+          readAtNow
+        )
+        .run();
+      const staleGroupId = await add(
+        `Lease annex ${sharedWord} ${staleGroupMarker}`,
+        {
+          kind: "readers",
+          readers: [
+            {
+              kind: "group",
+              provider: "microsoft",
+              tenant: acmeTenant,
+              group: staleGroup,
+            },
+          ],
+        }
+      );
       // A claim of how a staff-list team works, from its interviews, from
       // the first person who told it (GRA-1741, GRA-1987): every member
       // reads it as themselves (GRA-1748), nobody outside the company, and
@@ -1085,6 +1437,7 @@ describe(
         runCaptureId
       );
       const holderFindsTriggerCapture = await holderFinds(triggerCaptureMarker);
+      const holderFindsUnsharedRead = await holderFinds(unsharedReadMarker);
       // And by the ID the hidden copies share: their own chunk, as exact.
       const { items: cappedItems } = await recallAs(env, outsider, {
         personal: true,
@@ -1106,11 +1459,19 @@ describe(
           interviewMarker,
           teamMarker,
           noneMarker,
+          staleGroupMarker,
           narrowedMarker,
           captureMarker,
           toolkitCaptureMarker,
           runCaptureMarker,
           sharedReadMarker,
+          teamPlaceMarker,
+          unpickedPlaceMarker,
+          nobodyPlaceMarker,
+          readersMarker,
+          staleReadersMarker,
+          syncMarker,
+          goneSyncMarker,
           toHolderMarker,
           ...instructionMarkers,
           ownUploadMarker,
@@ -1121,11 +1482,14 @@ describe(
           askedMarker,
           answerMarker,
           sharedMemoryMarker,
+          // Not the event's: nothing asks for an event, and every pass
+          // forbids its marker in what it gets (`markers`).
         ],
         hiddenVersions: everyVersionOf(
           ...ownerIds,
           teamId,
           noneId,
+          staleGroupId,
           narrowedId,
           ownUpload,
           teamUpload,
@@ -1133,6 +1497,12 @@ describe(
           toolkitCaptureId,
           runCaptureId,
           sharedReadId,
+          teamPlaceId,
+          unpickedPlaceId,
+          nobodyPlaceId,
+          readersId,
+          staleReadersId,
+          goneSyncId,
           runSource,
           turnSource
         ),
@@ -1188,6 +1558,12 @@ describe(
           marker:
             "what an agent read through a shared connection for a team the outsider isn't in",
           source: sharedReadId,
+          reader: holder,
+        },
+        sync: {
+          marker:
+            "a file native sync copied from the holder's drive for them alone",
+          source: syncId,
           reader: holder,
         },
         run: { marker: "the holder's run", source: runSource, reader: holder },
@@ -1276,6 +1652,7 @@ describe(
         interviewMarker,
         teamMarker,
         noneMarker,
+        staleGroupMarker,
         claimMarker,
         claimText,
         drawingMarker,
@@ -1290,6 +1667,12 @@ describe(
         runCaptureMarker,
         runCaptureId,
         triggerCaptureMarker,
+        unsharedReadMarker,
+        unpickedPlaceMarker,
+        nobodyPlaceMarker,
+        placeMarkers: [teamPlaceMarker, unpickedPlaceMarker, nobodyPlaceMarker],
+        unpickedPlaceId,
+        nobodyPlaceId,
         runMarker,
         askedMarker,
         answerMarker,
@@ -1304,12 +1687,19 @@ describe(
         teamUploadMarker,
         teamSkillMarker,
         sharedMemoryMarker,
+        eventMarker,
+        eventWho,
+        readersMarker,
+        staleReadersMarker,
+        readersId,
+        staleReadersId,
         instructionMarkers,
         inRecall,
         instructionGroups,
         ownerIds,
         teamId,
         noneId,
+        staleGroupId,
         claimId,
         drawingId,
         opinionId,
@@ -1333,6 +1723,7 @@ describe(
           holderFindsToolkitCapture,
           holderFindsRunCapture,
           holderFindsTriggerCapture,
+          holderFindsUnsharedRead,
           cappedFinds,
           teamSkillSelected,
           holderAppFile: holderAppFiles.some(
@@ -1449,6 +1840,7 @@ describe(
         holderFindsToolkitCapture: true,
         holderFindsRunCapture: true,
         holderFindsTriggerCapture: false,
+        holderFindsUnsharedRead: false,
         cappedFinds: [{ text: capped, found: "exact" }],
         teamSkillSelected: {
           byTheHolder: [`${secretTeam}:${teamSkillMarker}`],
@@ -1552,9 +1944,12 @@ describe(
               // Every company marker stays forbidden (`forbidden`), the
               // opinion's too; the fixture's own text holds the Brain's
               // most a value may (500 characters), which the opinion's
-              // marker would pass once every producer has one.
+              // marker would pass once every producer has one. So would the
+              // shared places' copies, forbidden here all the same.
               markers: [
-                ...asOutsider.markers,
+                ...asOutsider.markers.filter(
+                  (marker) => !world.placeMarkers.includes(marker)
+                ),
                 world.everyoneUploadMarker,
                 world.claimMarker,
                 world.drawingMarker,
@@ -1711,6 +2106,8 @@ describe(
           _joinedShared,
         "what an agent read through a shared connection for a team the outsider isn't in":
           _joinedSharedRead,
+        "a file native sync copied from a place picked on a shared connection for a team the outsider isn't in":
+          _joinedPlace,
         ...notJoined
       } = markers;
       const { findings, addressed } = await watched(
@@ -1721,11 +2118,15 @@ describe(
             world.ownerMarker,
             world.interviewMarker,
             world.noneMarker,
+            world.staleGroupMarker,
             world.narrowedMarker,
             world.captureMarker,
             world.toolkitCaptureMarker,
             world.runCaptureMarker,
             world.triggerCaptureMarker,
+            world.unsharedReadMarker,
+            world.unpickedPlaceMarker,
+            world.nobodyPlaceMarker,
             world.toHolderMarker,
             ...world.instructionMarkers,
             world.ownUploadMarker,
@@ -1736,11 +2137,14 @@ describe(
           hiddenVersions: everyVersionOf(
             ...world.ownerIds,
             world.noneId,
+            world.staleGroupId,
             world.narrowedId,
             world.ownUpload,
             world.captureId,
             world.toolkitCaptureId,
             world.runCaptureId,
+            world.unpickedPlaceId,
+            world.nobodyPlaceId,
             world.runSource,
             world.turnSource
           ),
@@ -1850,12 +2254,15 @@ describe(
           // The team claim is theirs to read: they told their work in it.
           markers: [
             world.noneMarker,
+            world.staleGroupMarker,
             world.narrowedMarker,
             world.agentFileMarker,
             world.appFileMarker,
+            world.eventMarker,
           ],
           hiddenVersions: [
             ...everyVersionOf(world.noneId),
+            ...everyVersionOf(world.staleGroupId),
             { source: world.narrowedId, version: 1 },
           ],
           // Their own instruction file is theirs, and so are the Apps'
@@ -1866,10 +2273,14 @@ describe(
         },
         {
           "a source nobody is known to read": world.noneMarker,
+          "a file shared with a group the outsider proved they were in over a day ago":
+            world.staleGroupMarker,
           "a source narrowed away from the outsider": world.narrowedMarker,
           "another agent's instruction file": world.agentFileMarker,
           "an App's instruction file the outsider doesn't build":
             world.appFileMarker,
+          "an event of the holder's team": world.eventMarker,
+          "the tag of who took an event of the holder's team": world.eventWho,
         },
         { inRecall: world.inRecall }
       );
@@ -1900,17 +2311,20 @@ describe(
             world.interviewMarker,
             world.teamMarker,
             world.noneMarker,
+            world.staleGroupMarker,
             world.claimMarker,
             world.drawingMarker,
             world.opinionMarker,
             world.narrowedMarker,
             world.sharedMemoryMarker,
+            world.readersMarker,
             ...holdersOwnProduced(world).markers,
           ],
           hiddenVersions: everyVersionOf(
             ...world.ownerIds,
             world.teamId,
             world.noneId,
+            world.staleGroupId,
             world.claimId,
             world.drawingId,
             world.opinionId,
@@ -1927,6 +2341,8 @@ describe(
           "a memory shared with a team, though the holder is in the team":
             world.sharedMemoryMarker,
           "a source nobody is known to read": world.noneMarker,
+          "a file shared with a group the outsider proved they were in over a day ago":
+            world.staleGroupMarker,
           "a team's claim from the interviews, which code never gets":
             world.claimMarker,
           "a team's drawing from the interviews, which code never gets":
@@ -1934,6 +2350,8 @@ describe(
           "the company's opinion from the interviews, which code never gets":
             world.opinionMarker,
           "a source narrowed away from the outsider": world.narrowedMarker,
+          "a file the source shares with the holder, which code never reads by their account":
+            world.readersMarker,
           ...holdersOwnProduced(world).forbidden,
         },
         {
@@ -1979,17 +2397,20 @@ describe(
             world.interviewMarker,
             world.teamMarker,
             world.noneMarker,
+            world.staleGroupMarker,
             world.claimMarker,
             world.drawingMarker,
             world.opinionMarker,
             world.narrowedMarker,
             world.sharedMemoryMarker,
+            world.readersMarker,
             ...holdersOwnProduced(world).markers,
           ],
           hiddenVersions: everyVersionOf(
             ...world.ownerIds,
             world.teamId,
             world.noneId,
+            world.staleGroupId,
             world.claimId,
             world.drawingId,
             world.opinionId,
@@ -2008,6 +2429,8 @@ describe(
           "a memory shared with a team the grant doesn't name, though the holder is in it":
             world.sharedMemoryMarker,
           "a source nobody is known to read": world.noneMarker,
+          "a file shared with a group the outsider proved they were in over a day ago":
+            world.staleGroupMarker,
           "a team's claim from the interviews, which code never gets":
             world.claimMarker,
           "a team's drawing from the interviews, which code never gets":
@@ -2015,6 +2438,8 @@ describe(
           "the company's opinion from the interviews, which code never gets":
             world.opinionMarker,
           "a source narrowed away from the outsider": world.narrowedMarker,
+          "a file the source shares with the holder, which code never reads by their account":
+            world.readersMarker,
           ...holdersOwnProduced(world).forbidden,
         },
         {
@@ -2052,6 +2477,7 @@ describe(
           markers: [
             world.ownerMarker,
             world.interviewMarker,
+            world.readersMarker,
             ...holdersOwnProduced(world).markers,
           ],
           hiddenVersions: [],
@@ -2062,6 +2488,8 @@ describe(
         {
           "the holder's own source": world.ownerMarker,
           "the holder's interview": world.interviewMarker,
+          "a file the source shares with the holder, which an App never reads by their account":
+            world.readersMarker,
           ...holdersOwnProduced(world).forbidden,
         },
         { among: surfaces.filter(([name]) => name === "core recallAs") }
@@ -2201,6 +2629,8 @@ describe(
           _teamShared,
         "what an agent read through a shared connection for a team the outsider isn't in":
           _teamSharedRead,
+        "a file native sync copied from a place picked on a shared connection for a team the outsider isn't in":
+          _teamPlace,
         ...notTeams
       } = markers;
       const { findings, addressed } = await watched(
@@ -2214,6 +2644,7 @@ describe(
             world.ownerMarker,
             world.interviewMarker,
             world.noneMarker,
+            world.staleGroupMarker,
             world.narrowedMarker,
             world.toHolderMarker,
             ...world.instructionMarkers,
@@ -2222,6 +2653,7 @@ describe(
           hiddenVersions: everyVersionOf(
             ...world.ownerIds,
             world.noneId,
+            world.staleGroupId,
             world.narrowedId,
             ...holdersOwnProduced(world).sources
           ),
@@ -2272,20 +2704,26 @@ describe(
             world.interviewMarker,
             world.teamMarker,
             world.noneMarker,
+            world.staleGroupMarker,
             world.narrowedMarker,
             world.toHolderMarker,
             ...world.instructionMarkers,
             ...holdersOwnProduced(world).markers,
             world.teamUploadMarker,
             world.sharedMemoryMarker,
+            world.readersMarker,
+            world.staleReadersMarker,
           ],
           hiddenVersions: everyVersionOf(
             ...world.ownerIds,
             world.teamId,
             world.noneId,
+            world.staleGroupId,
             world.narrowedId,
             ...holdersOwnProduced(world).sources,
-            world.teamUpload
+            world.teamUpload,
+            world.readersId,
+            world.staleReadersId
           ),
           hiddenUploads: [world.ownUpload.id, world.teamUpload.id],
           hiddenInstructionFiles: [

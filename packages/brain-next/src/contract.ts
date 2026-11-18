@@ -1,4 +1,5 @@
 import { brainQuestionMaxLength } from "@grasp-os/shared/brain-sources";
+import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import {
   instructionsMaxLength,
   isOverInstructionsLimit,
@@ -174,12 +175,24 @@ export const versionSchema = z.int().positive();
 
 /**
  * Who may read a source: one person (`owner`: theirs alone, admins
- * included), a named group (`audience`), or nobody, when who may read it
- * isn't known (`none`).
+ * included), a named group (`audience`), anyone in any of several groups
+ * (`readers`: a list the host copied from where the source lives, each
+ * once), or nobody, when who may read it isn't known (`none`). Readers of
+ * one group are that group's audience: the same set, read back as
+ * `audience`.
  */
 export const accessSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("owner"), person: principalSchema }),
   z.strictObject({ kind: z.literal("audience"), group: principalSchema }),
+  z.strictObject({
+    kind: z.literal("readers"),
+    groups: z
+      .array(principalSchema)
+      .min(1)
+      .refine((groups) => new Set(groups).size === groups.length, {
+        message: "Names a group twice",
+      }),
+  }),
   z.strictObject({ kind: z.literal("none") }),
 ]);
 export type Access = z.infer<typeof accessSchema>;
@@ -316,6 +329,23 @@ export const newSourceSchema = z.strictObject({
   readAt: z.int().nonnegative().optional(),
 });
 export type NewSource = z.infer<typeof newSourceSchema>;
+
+/**
+ * A change of who may read a source: the change `change` of `source` as a
+ * new version with the text of its current one and these readers
+ * (`access`). `readAt` as an add's: when the producer read who may read
+ * it, so a late change of an older read never replaces a newer one.
+ * `extract` as an add's: how memories are drawn from the source, for the
+ * new version when it needs drawing (`Brain.changeReaders`).
+ */
+export const readersChangeSchema = z.strictObject({
+  source: sourceIdSchema,
+  change: changeKeySchema,
+  access: accessSchema,
+  readAt: z.int().nonnegative().optional(),
+  extract: extractSchema.optional(),
+});
+export type ReadersChange = z.infer<typeof readersChangeSchema>;
 
 /**
  * An instruction file's text: at most `instructionsMaxLength` UTF-16
@@ -1331,6 +1361,12 @@ export interface WorkRequest {
    * (`contextTokensSchema`). Null when the host doesn't know it.
    */
   contextTokens: number | null;
+  /**
+   * The host's pick of the sources a skill's draft is drawn from, as it
+   * runs (`ProposalSources`): for a person's own store's tick; a store
+   * given none drafts nothing.
+   */
+  proposalSources?: ProposalSources;
 }
 
 /**
@@ -1395,6 +1431,127 @@ export const sourceRemovalSchema = z.strictObject({
   sources: z.array(sourceIdSchema).min(1).max(removalsMax),
 });
 export type SourceRemoval = z.infer<typeof sourceRemovalSchema>;
+
+/**
+ * How long the Brain keeps an event, from when it happened: 90 days, long
+ * enough to see a monthly routine three times. What is drawn from events
+ * (a routine's figures) stays; the events themselves go (`expireEvents`).
+ */
+export const eventsKeptMs = 90 * 24 * 60 * 60 * 1000;
+
+/** Most events one add takes (`Brain.addEvents`); a host with more sends a page after the other. */
+export const eventsPerAddMax = 500;
+
+/** A MAC the host makes under a key of its own (HMAC-SHA256), in hex. */
+const macSchema = z.string().regex(/^[0-9a-f]{64}$/u);
+
+/**
+ * One thing that happened (`Brain.addEvents`): which team's (a group, as
+ * the host names it, never a person), what kind of step, on which item,
+ * who took it, and when. The item is a MAC of the host's ID for it, so
+ * the Brain keeps nothing readable of it; null when the step was on none.
+ * `who` is a MAC of the person and the team, by the host's key: one
+ * person's steps in one team share it, and their steps in two teams
+ * don't. Without the host's key no tag can be computed or matched to a
+ * person; but one call makes one event in each of its person's teams,
+ * with the same step and hour, so with raw access to the store their
+ * tags in two teams can be lined up by co-occurring. Nothing answers it back; it
+ * is there so the host can erase a person's events (`erasePersonShared`'s
+ * `events`), and
+ * so whatever draws figures from events can count people. **A figure
+ * drawn from events may be shown only when at least five distinct `who`
+ * values stand behind it** (the host's `minTeamShown`, the floor every
+ * figure about people holds to). `key` is the host's for the event and
+ * its team, the same on every retry: one event a key and team. `at` is
+ * kept to the hour, rounded down (events.ts), so no stored time pins one
+ * call. The step's own bound is the host's (core takes it as connect's
+ * action, `permissionActionSchema`); here it is any identifier's
+ * (`identifierMaxLength`).
+ */
+export const newEventSchema = z.strictObject({
+  key: changeKeySchema,
+  team: principalSchema,
+  step: wellFormedString().min(1).max(identifierMaxLength),
+  /**
+   * The system the step was in: its connector, as the host's catalog names
+   * it. A step that writes into another system than the one before it is
+   * data copied between them (`observedRoutines`).
+   */
+  system: wellFormedString().min(1).max(identifierMaxLength),
+  /** Whether the step changed something in its system. */
+  writes: z.boolean(),
+  item: macSchema.nullable(),
+  who: macSchema,
+  at: z.iso.datetime(),
+});
+export type NewEvent = z.infer<typeof newEventSchema>;
+
+/** Events to keep (`Brain.addEvents`). */
+export const newEventsSchema = z.strictObject({
+  /**
+   * Which of the host's keys made the events' keys and tags: an id of it,
+   * never the key. A call under another id than the store last saw first
+   * deletes every event and closed tag (events.ts `underKey`).
+   */
+  keyId: macSchema,
+  events: z.array(newEventSchema).min(1).max(eventsPerAddMax),
+});
+export type NewEvents = z.infer<typeof newEventsSchema>;
+
+/** One step of a routine seen in activity (`Brain.observedRoutines`). */
+export interface ObservedRoutineStep {
+  /** The system it is in, as the event names it. */
+  system: string;
+  /** What kind of step, as the event names it. */
+  step: string;
+  /** Whether it changes something in its system. */
+  writes: boolean;
+  /**
+   * How many hours after the step before it comes: the middle of each
+   * person's own middle, so no one person sets it. Null on the first.
+   * Events are kept to the hour, so this is whole hours and halves.
+   */
+  hoursAfter: number | null;
+  /**
+   * It writes into another system than the step before it was in: the
+   * same data copied from one system into the other, a friction.
+   */
+  copied: boolean;
+}
+
+/** A step some take instead of the routine's next one: a variant. */
+export interface ObservedVariant {
+  /** The routine's step it follows instead of the next one (from 0). */
+  after: number;
+  system: string;
+  step: string;
+}
+
+/**
+ * A routine seen in a team's activity (`Brain.observedRoutines`): its
+ * steps in order and its variants, each made by at least `minTeamShown`
+ * distinct people of the team. Never who, how many, an item or a time.
+ */
+export interface ObservedRoutine {
+  /** The team's group, as the host named it on its events. */
+  team: string;
+  steps: ObservedRoutineStep[];
+  variants: ObservedVariant[];
+}
+
+/**
+ * A person's events to erase with them (`SharedPersonErasure.events`):
+ * their tag in each team, under the host's key `keyId` (as
+ * `NewEvents.keyId`). As many as the company has teams: an erasure is
+ * never refused for its size. The store writes them a slice at a time
+ * (events.ts `tagsPerStatement`); the only bound is the transport's, a
+ * Workers RPC message (32 MiB, some 400,000 tags).
+ */
+export const personEventsSchema = z.strictObject({
+  keyId: macSchema,
+  who: z.array(macSchema).min(1),
+});
+export type PersonEvents = z.infer<typeof personEventsSchema>;
 
 /**
  * Whether `source` may be in `group`: its key is the group's, "/" and
@@ -1569,6 +1726,63 @@ export const ownExportStartSchema = ownExportRequestSchema.extend({
   deployment: deploymentSchema,
 });
 export type OwnExportStart = z.infer<typeof ownExportStartSchema>;
+
+/**
+ * Skill proposals (skill-proposals.ts), in a person's own store alone: a
+ * draft of a skill of theirs, written by the host's model from sources of
+ * theirs that keep ending the same way. Its key is the host's, for what
+ * those sources have in common: the SHA-256 of it, as hex, so the store
+ * never names it.
+ */
+export const proposalKeySchema = z.string().regex(/^[0-9a-f]{64}$/u);
+
+/**
+ * A proposal to draft for `person` under `key`, unless one was drafted
+ * under it already: of what the host queued it for (`subject`, the host's
+ * own words, which name no source), and what the host says the sources
+ * have in common (`about`), as long as an instruction file at most. It
+ * names no source: the draft asks the host which, as it runs
+ * (`ProposalSources`).
+ */
+export const proposalRequestSchema = z.strictObject({
+  person: principalSchema,
+  key: proposalKeySchema,
+  about: wellFormedString().min(1).max(instructionsMaxLength),
+  subject: wellFormedString().min(1).max(sourceIdMaxLength),
+});
+export type ProposalRequest = z.infer<typeof proposalRequestSchema>;
+
+/**
+ * The sources a draft is to be drawn from, as the host picks them at the
+ * moment it runs, for what it queued it for (`subject`): at most a read
+ * of current versions (`currentReadMax`); none when its rule doesn't hold
+ * now. Only a person's own store's alarm is given it (`AlarmHost`).
+ */
+export type ProposalSources = (subject: string) => Promise<SourceId[]>;
+
+/** The open proposals of a person's own store, asked by that person. */
+export const proposalsRequestSchema = z.strictObject({
+  reader: personReaderSchema,
+});
+export type ProposalsRequest = z.infer<typeof proposalsRequestSchema>;
+
+/** An open proposal: its key, the `SKILL.md` drafted, and the versions it rests on. */
+export interface SkillProposal {
+  key: string;
+  text: string;
+  restsOn: SourceVersionRef[];
+  draftedAt: Date;
+}
+
+/**
+ * A person settling one of their own proposals, accepted or dismissed
+ * alike: nothing is drafted under its key again.
+ */
+export const proposalSettleSchema = z.strictObject({
+  person: principalSchema,
+  key: proposalKeySchema,
+});
+export type ProposalSettle = z.infer<typeof proposalSettleSchema>;
 
 /** A file of a person's own export, asked by that person. */
 export const ownExportFileRequestSchema = exportFileRequestSchema.extend({
@@ -1963,12 +2177,17 @@ export type Identifier = z.infer<typeof identifierSchema>;
  * the host's id for them, as it names them whose word a memory is or who
  * confirmed one, and the exact identifiers the host verified as theirs
  * (their sign-in email). A name is never one: only exact evidence says
- * which entity is theirs.
+ * which entity is theirs. With it, their events (`events`): those under
+ * their tags are deleted and the tags closed, so no later add keeps one
+ * under them while an event could still arrive (events.ts), recorded in
+ * the erasure's ledger entry, so a replay after a restore of the store's
+ * storage erases them again.
  */
 export const sharedPersonErasureSchema = z.strictObject({
   person: principalSchema,
   identifiers: z.array(identifierSchema).max(namesPerEntityMax),
   reason: z.literal("person_erased"),
+  events: personEventsSchema.optional(),
 });
 export type SharedPersonErasure = z.infer<typeof sharedPersonErasureSchema>;
 
@@ -2963,6 +3182,29 @@ export interface Brain {
    */
   addSource: (source: NewSource) => Promise<AddedVersion>;
   /**
+   * Gives `source` other readers (`change.access`): a new version with the
+   * text of its current one, added as `addSource` adds one, in one
+   * transaction. So narrowing takes effect at once for everything the
+   * Brain answers, history and what was drawn from it included: a reader
+   * reads a version only while among its readers and the current one's.
+   * The producer never reads back the text it takes away. A change added
+   * before answers with the version it made, whatever came since; readers
+   * the current version already has answer with it, writing nothing; a
+   * version added meanwhile is read again, so text is never taken back.
+   * Null for a source with no current version. Access a store may not
+   * keep is refused as an add's is.
+   *
+   * Memories are drawn from the new version, as `extract` says or else as
+   * an item on the queue was drawing the source, only when it needs it:
+   * the old version's drawing hadn't finished, or the change adds a
+   * reader. A memory is read only by a reader of both its version and the
+   * current one, so what was drawn under the old readers is never shown
+   * to a reader the change adds: it is drawn again, for them. A narrowing
+   * whose drawing had finished draws nothing: those who remain read what
+   * was drawn.
+   */
+  changeReaders: (change: ReadersChange) => Promise<AddedVersion | null>;
+  /**
    * Adds a version of an instruction file as `addSource` adds a source,
    * with the same versions, change keys and safe repeats, but kept whole:
    * never cut into chunks or indexed, so recall never returns it. The
@@ -3188,6 +3430,31 @@ export interface Brain {
    */
   removeSources: (request: SourceRemoval) => Promise<void>;
   /**
+   * Keeps events (events.ts), each once by its key and team: a repeat adds
+   * nothing. One dated later than now is kept as of now, and one already
+   * older than `eventsKeptMs`, or under a tag an erasure closed, is not
+   * kept. Under another `keyId` than last time, every event and closed tag
+   * is deleted first. Nothing reads them back: no
+   * member answers an event, so they are never in a recall, an export or
+   * a figure about one person. The shared store's alone: a person's own
+   * store refuses them.
+   */
+  addEvents: (request: NewEvents) => Promise<void>;
+  /**
+   * Deletes every event older than `eventsKeptMs`, by the store's clock.
+   * The shared store's alone. Safe to repeat.
+   */
+  expireEvents: () => Promise<void>;
+  /**
+   * The routines seen in each team's events now (routines-observed.ts):
+   * which step follows which, by plain counting, each move kept only when
+   * at least `minTeamShown` distinct people of the team made it. Worked
+   * out at each call from the events there are, never kept: one resting
+   * on fewer people since (an erasure, an expiry) is gone at the next.
+   * The shared store's alone.
+   */
+  observedRoutines: () => Promise<ObservedRoutine[]>;
+  /**
    * Erases `person`'s own store whole, the one place what only they may
    * read is kept: everything it holds, and from then on every call is
    * refused, also after a restore of its storage. Safe to repeat. A
@@ -3287,6 +3554,26 @@ export interface Brain {
    * other, alike. Only their own store answers, and only them.
    */
   ownExportFile: (request: OwnExportFileRequest) => Promise<string | null>;
+  /**
+   * Puts a draft of a skill for `person` on their own store's queue
+   * (skill-proposals.ts): the host's model writes it from the current
+   * versions of the sources the host picks as it runs, as that person
+   * reads them, once per key, open or settled. Only their own store takes
+   * it, and only for them.
+   */
+  proposeSkill: (request: ProposalRequest) => Promise<void>;
+  /**
+   * The reader's open skill proposals, each only while every version it
+   * rests on is still current and theirs to read. Only their own store
+   * answers them; the shared store answers none.
+   */
+  skillProposals: (request: ProposalsRequest) => Promise<SkillProposal[]>;
+  /**
+   * Settles one of `person`'s open proposals, accepted or dismissed alike,
+   * keeping its key alone. Only their own store takes it, and only for
+   * them.
+   */
+  settleSkillProposal: (request: ProposalSettle) => Promise<void>;
   /**
    * Starts restoring the company export `id` of `deployment` from the
    * bucket into this shared store, which must hold no version: a part a

@@ -1,4 +1,5 @@
 import type { ModelSettings } from "@grasp-os/shared/models";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import {
   Table,
@@ -66,14 +67,17 @@ const AllowedModels = ({ models }: { models: string[] }) => (
 );
 
 /** The limit on requests every run has. */
-const RunRequests = () => (
-  <p className="text-muted-foreground text-sm">
-    <Trans>
-      Each workflow run, with the runs it starts, may make at most 100 model
-      requests, retries included.
-    </Trans>
-  </p>
-);
+const RunRequests = () => {
+  const limit = platformLimits.lineageModelRequests;
+  return (
+    <p className="text-muted-foreground text-sm">
+      <Trans>
+        Each workflow run, with the runs it starts, may make at most {limit}{" "}
+        model requests, retries included.
+      </Trans>
+    </p>
+  );
+};
 
 /** Each App's model binding, and what it spent this month. */
 const BindingSpend = ({

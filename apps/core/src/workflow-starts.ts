@@ -246,7 +246,9 @@ const frozenState = async (
  * unchecked in the run, so the start is refused, and the next freezes the
  * state anew (GRA-1996).
  */
-const writersHeldSql = (state: { writers: readonly string[] } | null): SQL =>
+export const writersHeldSql = (
+  state: { writers: readonly string[] } | null
+): SQL =>
   sql`NOT EXISTS (SELECT 1 FROM json_each(${JSON.stringify(state?.writers ?? [])}) AS writer
     WHERE writer.value NOT IN (SELECT ${keptRunEvidence.runId} FROM ${keptRunEvidence})
       AND EXISTS (SELECT 1 FROM ${workflowStartReceipts} AS done
@@ -257,7 +259,7 @@ const writersHeldSql = (state: { writers: readonly string[] } | null): SQL =>
  * `runId` started from (`runStateWriters`), for the batch that admits it,
  * under `admitted`. None for no writers, or no state.
  */
-const writersAdmitted = (
+export const writersAdmitted = (
   env: Env,
   runId: string,
   state: { writers: readonly string[] } | null,
@@ -809,9 +811,15 @@ const ruleOf = async (
 /**
  * `input` as the version's contract takes it, normalized, as canonical
  * JSON: `workflow.start_invalid` with its issues (paths, never values)
- * otherwise, or when it is over the function input limit.
+ * otherwise, or when it is over the function input limit. `at` is where
+ * the input stands in what was sent, before each issue's path: a
+ * trigger's `config.input`, nothing for a start's own.
  */
-export const acceptedInput = (descriptor: string, input: unknown): string => {
+export const acceptedInput = (
+  descriptor: string,
+  input: unknown,
+  at = ""
+): string => {
   const schema = schemaFromDescriptor(descriptor);
   const checked = schema["~standard"].validate(input);
   if ("then" in checked) {
@@ -819,12 +827,15 @@ export const acceptedInput = (descriptor: string, input: unknown): string => {
   }
   if (checked.issues !== undefined) {
     throw workflowResourceErrors.create("workflow.start_invalid", {
-      issues: issuesOf({
-        issues: checked.issues.map(({ path, message }) => ({
-          path: (path ?? []).map(String),
-          message,
-        })),
-      }),
+      issues: issuesOf(
+        {
+          issues: checked.issues.map(({ path, message }) => ({
+            path: (path ?? []).map(String),
+            message,
+          })),
+        },
+        at
+      ),
     });
   }
   const parsed = z.json().safeParse(checked.value);
@@ -836,7 +847,7 @@ export const acceptedInput = (descriptor: string, input: unknown): string => {
     new TextEncoder().encode(text).byteLength > platformLimits.functionArgsBytes
   ) {
     throw workflowResourceErrors.create("workflow.start_invalid", {
-      issues: ["args: Too large for a start."],
+      issues: [`${at === "" ? "args" : at}: Too large for a start.`],
     });
   }
   return text;
@@ -1533,6 +1544,9 @@ export const admitWorkflowStart = async (
     null,
     authorization.restricted ? 1 : 0,
     stateHashOf(authorization),
+    authorization.state !== null && authorization.state.withheld > 0
+      ? authorization.state.withheld
+      : null,
   ].map((value) => (value === null ? sql`NULL` : sql`${value}`));
   const detail = {
     ...noted,

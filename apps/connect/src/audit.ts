@@ -158,6 +158,11 @@ export interface CallRecord {
   recovery?: RecoveryMode;
   /** The IDs of the resources it read. */
   provenance?: readonly string[];
+  /**
+   * Its connection's connector, as the catalog names it: the system it
+   * was in, never which connection (a person's own names that person).
+   */
+  provider?: string;
   /** The held action it made, or the one its person confirmed. */
   pendingActionId?: string;
   /**
@@ -283,6 +288,7 @@ export const auditCall = async (
     }
   };
   add("action", call?.action);
+  add("provider", record.provider);
   add("resource", call?.resource);
   // App code chooses keys, so the log gets a hash, never the key itself.
   add(

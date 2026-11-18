@@ -31,6 +31,7 @@
 import {
   brainOf,
   currentReadMax,
+  eventsPerAddMax,
   handOversMax,
   listPageMax,
   listPrefixesMax,
@@ -73,6 +74,7 @@ import {
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
 import { instructionsMaxLength } from "@grasp-os/shared/instruction-files";
+import { minTeamShown } from "@grasp-os/shared/onboarding";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -110,6 +112,7 @@ import { appOf as writingAppOf } from "./brain-writing-app.ts";
 import { noProducers } from "./no-producers.ts";
 import { person as orgMember } from "./sealed-apps.ts";
 import { holding, holdsNothing } from "./stored-skills.ts";
+import { newTeam } from "./teams.ts";
 
 /** The reader a probe calls as, and what they may not see. */
 export interface Probing {
@@ -601,6 +604,59 @@ const momentsOf = (probing: Probing): Date[] => [
 
 /** The Brain's store, as the harness reaches it: by its contract. */
 const store = (): Brain => brainOf(inJurisdiction(env, env.BRAIN_STORE));
+
+/** A step `who` took now, as a producer hands it to core's `recordEvents`. */
+const stepOf = (who: string, step: string, item: string | null) => ({
+  key: crypto.randomUUID(),
+  personId: who,
+  step,
+  system: "mail",
+  writes: true,
+  item,
+  at: new Date(),
+});
+
+/**
+ * `marker` as a step or a system this call alone takes: the passes' readers
+ * share teams, and the same marked step taken by five of them would be
+ * five people's, which a routine seen in activity shows (GRA-1764).
+ */
+const takenOnce = (marker: string): string =>
+  `${marker}.${crypto.randomUUID().slice(0, 8)}`;
+
+/** A tag no one's: 64 random hex digits, as the host's MACs are written. */
+const aTag = (): string =>
+  [...crypto.getRandomValues(new Uint8Array(32))]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+
+/**
+ * The id of core's key the shared store's events are under, or a new one
+ * while it has none: so a probe's add or erasure never drops the events
+ * a later pass hunts for, as a call under another key would.
+ */
+const eventKeyId = async (): Promise<string> =>
+  await runInDurableObject(
+    inJurisdiction(env, env.BRAIN_STORE).getByName("brain"),
+    (_store, state) => {
+      const [kept] = state.storage.sql
+        .exec<{ id: string }>("SELECT id FROM event_key WHERE row = 1")
+        .toArray();
+      return kept?.id ?? aTag();
+    }
+  );
+
+/** An event of `team` now, as the store's `addEvents` takes it. */
+const eventOf = (team: string, step: string) => ({
+  key: crypto.randomUUID(),
+  team,
+  step,
+  system: "mail",
+  writes: true,
+  item: null,
+  who: aTag(),
+  at: new Date().toISOString(),
+});
 
 /** A source no one added. */
 const missingSource = (): SourceRef => ({
@@ -1981,6 +2037,84 @@ const ownExportSettled = async (person: string, id: string): Promise<void> => {
   throw new Error("An own export was still being written after 5 ticks");
 };
 
+/** A proposal's key: a SHA-256, as hex, of something nobody else proposes. */
+const proposalKey = async (): Promise<string> =>
+  [
+    ...new Uint8Array(
+      await crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(crypto.randomUUID())
+      )
+    ),
+  ]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+
+/**
+ * Someone else's open skill proposal, holding every marker, in their own
+ * store (skill-proposals.ts): its person and key. Written as the store
+ * keeps a draft, so no model is asked; it rests on no version, so it is
+ * listed to its person whatever they read.
+ */
+const strangersProposal = async ({
+  markers,
+}: Probing): Promise<{ person: string; key: string }> => {
+  const person = stranger();
+  const key = await proposalKey();
+  await personalStore(person).proposeSkill({
+    person,
+    key,
+    about: markedText(markers),
+    subject: "probe@1",
+  });
+  await runInDurableObject(
+    inJurisdiction(env, env.BRAIN_STORE).getByName(`person:${person}`),
+    (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO skill_proposals (key, state, text, rests_on, drafted_at)
+        VALUES (?, 'open', ?, '[]', ?)`,
+        key,
+        `---\nname: marked\ndescription: ${markedText(markers)}\n---\n${markedText(markers)}\n`,
+        Date.now()
+      );
+    }
+  );
+  return { person, key };
+};
+
+/**
+ * Ticks `person`'s own store with a model that records what it is asked,
+ * and a host that picks `picked` as the sources of any skill's draft: what
+ * reached the model, for the harness to look for markers in.
+ */
+const askedOnTick = async (
+  person: string,
+  picked: readonly string[] = []
+): Promise<string[]> => {
+  const asked: string[] = [];
+  await personalStore(person).work({
+    ask: async ({ system, input }) => {
+      asked.push(system, input);
+      return await quietModel();
+    },
+    at: new Date(),
+    embedders: noEmbedders,
+    handOvers: noHandOvers,
+    contextTokens: null,
+    proposalSources: async () => await Promise.resolve([...picked]),
+  });
+  return asked;
+};
+
+/** The keys of `versions`' sources, at most what one draft is drawn from. */
+const draftedFrom = (versions: readonly { source: SourceRef }[]): string[] =>
+  versions
+    .slice(0, currentReadMax)
+    .map(({ source }) => `${source.producer}:${source.id}`);
+
+/** Picks no run for any draft: a host whose drafts end without a proposal. */
+const noRuns = async (): Promise<SourceRef[]> => await Promise.resolve([]);
+
 /** Someone else's own export, written, holding every marker: its id. */
 const strangersExport = async ({ markers }: Probing): Promise<string> => {
   const person = stranger();
@@ -2245,6 +2379,117 @@ export const coreProbes = {
       ...(await otherKindOf(hiddenVersions)),
       // Groups (GRA-1805): a person's own store's alone, over their source.
       ...(await groupedAdds(markers, text)),
+    ];
+  },
+  // Readers copied from where an item lives (GRA-1761): a source of its
+  // own, marked, given other readers; never a hidden one, whose readers
+  // the passes after this one count on.
+  changeSourceReaders: async ({ markers }) => {
+    const text = markedText(markers);
+    const strangersAccount = (): SourceReaders => ({
+      kind: "readers",
+      readers: [
+        {
+          kind: "account",
+          provider: "microsoft",
+          tenant: stranger(),
+          account: stranger(),
+        },
+      ],
+    });
+    const change = async (
+      name: string,
+      readers: SourceReaders,
+      source: SourceRef = missingSource(),
+      key = crypto.randomUUID()
+    ) =>
+      await answer(
+        name,
+        async () =>
+          await coreBrain.changeSourceReaders(env, {
+            source,
+            change: key,
+            readers,
+          })
+      );
+    const source = missingSource();
+    const narrowing = crypto.randomUUID();
+    return [
+      await change("a source no one added", strangersAccount()),
+      await change("for someone else alone", {
+        kind: "owner",
+        personId: stranger(),
+      }),
+      await change("an unknown kind", unchecked({ kind: "anyone" })),
+      await change(
+        "a reader's ID of the markers and a colon",
+        unchecked({
+          kind: "readers",
+          readers: [
+            {
+              kind: "account",
+              provider: "google",
+              tenant: "acme.test",
+              account: markers.join(":"),
+            },
+          ],
+        })
+      ),
+      await change(
+        "a reader of another system named by the markers",
+        unchecked({
+          kind: "readers",
+          readers: [
+            { kind: "tenant", provider: markers.join(""), tenant: "x" },
+          ],
+        })
+      ),
+      await change(
+        "too long a reader's ID",
+        unchecked({
+          kind: "readers",
+          readers: [
+            {
+              kind: "group",
+              provider: "google",
+              tenant: "acme.test",
+              group: text.repeat(30),
+            },
+          ],
+        })
+      ),
+      await change(
+        "a shared connection's readers for another producer",
+        { kind: "connection", connectionId: stranger() },
+        source
+      ),
+      await answer("a marked source, first", async () => {
+        await coreBrain.addSource(env, {
+          source,
+          change: crypto.randomUUID(),
+          text,
+          readers: strangersAccount(),
+        });
+      }),
+      await change(
+        "narrowed to a link",
+        { kind: "readers", readers: [{ kind: "link" }] },
+        source,
+        narrowing
+      ),
+      await change(
+        "the same narrowing again",
+        { kind: "readers", readers: [{ kind: "link" }] },
+        source,
+        narrowing
+      ),
+      await change(
+        "the same change with other readers",
+        strangersAccount(),
+        source,
+        narrowing
+      ),
+      await change("readers it already has", { kind: "none" }, source),
     ];
   },
   listSourcesAs: async ({ personId, hiddenVersions, markers }) => {
@@ -4087,11 +4332,130 @@ export const coreProbes = {
       });
     })),
   ],
+  // Asks the reader's own store to draft a skill (GRA-1756): from sources
+  // they may not read, nothing reaches a model; for someone who isn't a
+  // member, refused.
+  proposeOwnSkill: async ({ personId, markers, hiddenVersions }) => [
+    await answer("from sources the reader may not read, ticked", async () => {
+      await coreBrain.proposeOwnSkill(env, personId, {
+        key: await proposalKey(),
+        about: markedText(markers),
+        subject: "probe@1",
+      });
+      return await askedOnTick(personId, draftedFrom(hiddenVersions));
+    }),
+    await answer("a key that isn't one", async () => {
+      await coreBrain.proposeOwnSkill(env, personId, {
+        key: markers.join(""),
+        about: "A routine.",
+        subject: "probe@1",
+      });
+    }),
+    await answer("as someone who isn't a member", async () => {
+      await coreBrain.proposeOwnSkill(env, stranger(), {
+        key: await proposalKey(),
+        about: "A routine.",
+        subject: "probe@1",
+      });
+    }),
+  ],
+  // The reader's own proposals: never someone else's, which holds every
+  // marker.
+  ownSkillProposalsAs: async (probing) => {
+    await strangersProposal(probing);
+    return [
+      await answer(
+        "the reader's own, beside someone else's marked one",
+        async () => await coreBrain.ownSkillProposalsAs(env, probing.personId)
+      ),
+      await answer(
+        "as someone who isn't a member",
+        async () => await coreBrain.ownSkillProposalsAs(env, stranger())
+      ),
+    ];
+  },
+  // Settles in the reader's own store alone: someone else's key answers as
+  // one nobody proposed, and their proposal stays open.
+  settleOwnSkillProposal: async (probing) => {
+    const others = await strangersProposal(probing);
+    return [
+      await answer(
+        "someone else's marked proposal",
+        async () => {
+          await coreBrain.settleOwnSkillProposal(
+            env,
+            probing.personId,
+            others.key
+          );
+          const left = await personalStore(others.person).skillProposals({
+            reader: { person: others.person, groups: [] },
+          });
+          return left.length;
+        },
+        "hidden"
+      ),
+      await answer(
+        "a proposal nobody made",
+        async () => {
+          await coreBrain.settleOwnSkillProposal(
+            env,
+            probing.personId,
+            await proposalKey()
+          );
+          return 1;
+        },
+        "nothing"
+      ),
+      await answer("as someone who isn't a member", async () => {
+        await coreBrain.settleOwnSkillProposal(env, stranger(), others.key);
+      }),
+    ];
+  },
+  // A text checked as a person's own skill takes it: no reader, and only
+  // what it is given (so never the markers, which it would echo back).
+  ownSkillTextOf: async () => [
+    await answer(
+      "a skill",
+      async () =>
+        await Promise.resolve(
+          coreBrain.ownSkillTextOf(
+            "---\nname: probe\ndescription: A probe.\n---\nSteps.\n"
+          )
+        )
+    ),
+    await answer(
+      "a skill declaring needs it can't say",
+      async () =>
+        await Promise.resolve(
+          coreBrain.ownSkillTextOf(
+            "---\nname: probe\ndescription: A probe.\nrequires:\n  tools: mail.send\n---\nSteps.\n"
+          )
+        )
+    ),
+    await answer(
+      "no skill",
+      async () => await Promise.resolve(coreBrain.ownSkillTextOf("Steps."))
+    ),
+  ],
   // A number, the longest question recall takes: the same for everyone.
   recallQuestionMaxLength: async () => [
     await answer(
       "the longest question",
       async () => await Promise.resolve(coreBrain.recallQuestionMaxLength)
+    ),
+  ],
+  // A number, the most events one add takes: the same for everyone.
+  eventsPerAddMax: async () => [
+    await answer(
+      "the most events one add takes",
+      async () => await Promise.resolve(coreBrain.eventsPerAddMax)
+    ),
+  ],
+  // A number, the longest group name the Brain takes: the same for everyone.
+  principalMaxLength: async () => [
+    await answer(
+      "the longest group name",
+      async () => await Promise.resolve(coreBrain.principalMaxLength)
     ),
   ],
   // A number, the most sources one removal takes: the same for everyone.
@@ -4208,18 +4572,23 @@ export const coreProbes = {
   alarmHostOf: async ({ personId, markers }) => [
     await answer(
       "the shared store's",
-      async () => await coreBrain.alarmHostOf(env, "brain")
+      async () => await coreBrain.alarmHostOf(env, "brain", noRuns)
     ),
     await answer(
       "a store named by the markers",
-      async () => await coreBrain.alarmHostOf(env, markers.join(" "))
+      async () => await coreBrain.alarmHostOf(env, markers.join(" "), noRuns)
     ),
     await answer(
       "a person's store named by the markers",
-      async () => await coreBrain.alarmHostOf(env, `person:${markers.join("")}`)
+      async () =>
+        await coreBrain.alarmHostOf(env, `person:${markers.join("")}`, noRuns)
     ),
     await answer("the reader's own store's, its report kept", async () => {
-      const host = await coreBrain.alarmHostOf(env, `person:${personId}`);
+      const host = await coreBrain.alarmHostOf(
+        env,
+        `person:${personId}`,
+        noRuns
+      );
       await host.report(
         await personalBrainOf(
           inJurisdiction(env, env.BRAIN_STORE),
@@ -4287,6 +4656,104 @@ export const coreProbes = {
       );
     }),
   ],
+  // Events have no reader and nothing reads them back (GRA-1763): a
+  // record answers alike whether its steps are marked, someone else's or
+  // no member's, and holds no marker; one refused names nothing of them.
+  recordEvents: async ({ personId, markers }) => {
+    const record = async (
+      name: string,
+      steps: unknown,
+      about?: Answer["about"]
+    ) =>
+      await answer(
+        name,
+        async () => {
+          await coreBrain.recordEvents(env, unchecked(steps));
+        },
+        about
+      );
+    const marked = markers.map((marker) =>
+      stepOf(personId, takenOnce(marker), marker)
+    );
+    return [
+      await record("the reader's marked steps", marked, "hidden"),
+      await record("the same steps again", marked, "hidden"),
+      await record(
+        "a step of someone who is no member",
+        [stepOf(stranger(), "mail.send", null)],
+        "nothing"
+      ),
+      await record("a marked step dated after now", [
+        {
+          ...stepOf(personId, takenOnce(markers[0] ?? "mail"), null),
+          at: new Date(Date.now() + 86_400_000),
+        },
+      ]),
+      await record("a step longer than a step may be", [
+        stepOf(personId, markers.join(" ").repeat(64), null),
+      ]),
+      await record("a step of no one", [stepOf("", markers.join(" "), null)]),
+      await record("a step at no time", [
+        { ...stepOf(personId, "mail.send", null), at: markers.join(" ") },
+      ]),
+    ];
+  },
+  expireEvents: async ({ personId, markers }) => {
+    await coreBrain.recordEvents(env, [
+      {
+        key: crypto.randomUUID(),
+        personId,
+        step: takenOnce(markers[0] ?? "mail"),
+        system: takenOnce(markers[0] ?? "mail"),
+        writes: true,
+        item: markers.join(" "),
+        at: new Date(),
+      },
+    ]);
+    return [
+      await answer("an expiry with marked events kept", async () => {
+        await coreBrain.expireEvents(env);
+      }),
+    ];
+  },
+  // Routines seen in activity (GRA-1764): what at least five people of a
+  // team did, never fewer. The reader and three more of a team of five
+  // taking marked steps, again and again, answers just as before.
+  observedRoutinesOf: async ({ personId, markers }) => {
+    const before = await answer(
+      "the routines seen, before four people took marked steps",
+      async () => await coreBrain.observedRoutinesOf(env),
+      "nothing"
+    );
+    const others = await Promise.all(
+      Array.from(
+        { length: minTeamShown - 1 },
+        async () => await orgMember("user")
+      )
+    );
+    await newTeam(personId, ...others.map(({ userId }) => userId));
+    const four = [personId, ...others.slice(1).map(({ userId }) => userId)];
+    const hourAgo = new Date(Date.now() - 3_600_000);
+    // The same marked steps for the four, and for no one else.
+    const marks = markers.map(takenOnce);
+    await coreBrain.recordEvents(
+      env,
+      four.flatMap((who) =>
+        marks.flatMap((marker) => [
+          { ...stepOf(who, "deals.read", null), system: marker, at: hourAgo },
+          { ...stepOf(who, marker, marker), system: "mail" },
+        ])
+      )
+    );
+    return [
+      before,
+      await answer(
+        "the routines seen, after four people took marked steps",
+        async () => await coreBrain.observedRoutinesOf(env),
+        "hidden"
+      ),
+    ];
+  },
 } satisfies Record<
   Exclude<CoreMember, CorePersonMember | CoreCodeMember | CoreAppMember>,
   Probe
@@ -8545,6 +9012,75 @@ export const storeProbes = {
       await add("no change", strangers(), text, keyOf(missingSource()), ""),
     ];
   },
+  // Its own marked source alone: a hidden one's readers are the world
+  // the passes after this one read.
+  changeReaders: async ({ markers }) => {
+    const text = markedText(markers);
+    const change = async (
+      name: string,
+      access: Access,
+      source = keyOf(missingSource()),
+      key = crypto.randomUUID()
+    ) =>
+      await answer(
+        name,
+        async () => await store().changeReaders({ source, change: key, access })
+      );
+    const source = keyOf(missingSource());
+    const narrowing = crypto.randomUUID();
+    const otherStrangers: Access = {
+      kind: "readers",
+      groups: [stranger(), stranger()],
+    };
+    return [
+      await change("a source no one added", strangers()),
+      await change("for someone else alone, which the shared store refuses", {
+        kind: "owner",
+        person: stranger(),
+      }),
+      await change("an unknown kind", unchecked({ kind: "everyone" })),
+      await change("no groups", unchecked({ kind: "readers", groups: [] })),
+      await change(
+        "a group of the markers twice",
+        unchecked({
+          kind: "readers",
+          groups: [markers.join(""), markers.join("")],
+        })
+      ),
+      await change(
+        "an instruction file's key named by the markers",
+        strangers(),
+        `instructions:${markers.join("")}`
+      ),
+      await answer("a marked source, first", async () => {
+        await store().addSource({
+          source,
+          change: crypto.randomUUID(),
+          text,
+          access: strangers(),
+        });
+      }),
+      await change(
+        "narrowed to other strangers",
+        otherStrangers,
+        source,
+        narrowing
+      ),
+      await change(
+        "the same narrowing again",
+        otherStrangers,
+        source,
+        narrowing
+      ),
+      await change(
+        "the same change with other readers",
+        { kind: "none" },
+        source,
+        narrowing
+      ),
+      await change("readers it already has", otherStrangers, source),
+    ];
+  },
   // A number, never text: a change the reader may not read answers as
   // one no one made.
   changeVersion: async ({ reader, hiddenVersions, markers }) => {
@@ -9966,6 +10502,22 @@ export const storeProbes = {
         ...of(stranger(), []),
         reason: markers.join(" "),
       }),
+      // With events, under the key the store's events are under, so no
+      // later pass's planted event is dropped: tags made of the markers,
+      // and tags that are the markers, which no tag can be.
+      await erase("events under tags made of the markers", {
+        ...of(stranger(), []),
+        events: {
+          keyId: await eventKeyId(),
+          who: markers.map((marker) =>
+            marker.replaceAll(/[^0-9a-f]/gu, "").padEnd(64, "0")
+          ),
+        },
+      }),
+      await erase("events under tags that are the markers", {
+        ...of(stranger(), []),
+        events: { keyId: await eventKeyId(), who: markers },
+      }),
     ];
   },
   // No reader either: the host names the writer. Its answer is a time and
@@ -10396,6 +10948,106 @@ export const storeProbes = {
       ),
     ];
   },
+  // Skill proposals (GRA-1756), through the contract: only a person's own
+  // store, only for them; what reaches a model is only what they may read.
+  proposeSkill: async ({ reader, markers, hiddenVersions }) => [
+    await answer(
+      "the reader's own, from sources they may not read, ticked",
+      async () => {
+        await personalStore(reader.person).proposeSkill({
+          person: reader.person,
+          key: await proposalKey(),
+          about: markedText(markers),
+          subject: "probe@1",
+        });
+        return await askedOnTick(reader.person, draftedFrom(hiddenVersions));
+      }
+    ),
+    await answer("the shared store", async () => {
+      await store().proposeSkill({
+        person: reader.person,
+        key: await proposalKey(),
+        about: "A routine.",
+        subject: "probe@1",
+      });
+    }),
+    await answer("someone else's own store, as the reader", async () => {
+      await personalStore(stranger()).proposeSkill({
+        person: reader.person,
+        key: await proposalKey(),
+        about: "A routine.",
+        subject: "probe@1",
+      });
+    }),
+    await answer("a key named by the markers", async () => {
+      await personalStore(reader.person).proposeSkill(
+        unchecked({
+          person: reader.person,
+          key: markers.join(""),
+          about: "A routine.",
+          subject: "probe@1",
+        })
+      );
+    }),
+  ],
+  skillProposals: async (probing) => {
+    const others = await strangersProposal(probing);
+    const { reader } = probing;
+    return [
+      await answer(
+        "the reader's own",
+        async () =>
+          await personalStore(reader.person).skillProposals({ reader })
+      ),
+      await answer(
+        "the shared store",
+        async () => await store().skillProposals({ reader })
+      ),
+      await answer(
+        "someone else's own store, as the reader",
+        async () =>
+          await personalStore(others.person).skillProposals({ reader })
+      ),
+    ];
+  },
+  settleSkillProposal: async (probing) => {
+    const others = await strangersProposal(probing);
+    const { person } = probing.reader;
+    return [
+      await answer(
+        "someone else's marked proposal, in the reader's own store",
+        async () => {
+          await personalStore(person).settleSkillProposal({
+            person,
+            key: others.key,
+          });
+        },
+        "hidden"
+      ),
+      await answer(
+        "a proposal nobody made",
+        async () => {
+          await personalStore(person).settleSkillProposal({
+            person,
+            key: await proposalKey(),
+          });
+        },
+        "nothing"
+      ),
+      await answer("someone else's own store, as the reader", async () => {
+        await personalStore(others.person).settleSkillProposal({
+          person,
+          key: others.key,
+        });
+      }),
+      await answer("the shared store", async () => {
+        await store().settleSkillProposal({
+          person,
+          key: others.key,
+        });
+      }),
+    ];
+  },
   startRestore: async (probing) => {
     const others = await companyExport(probing);
     return [
@@ -10476,6 +11128,108 @@ export const storeProbes = {
       ),
     ];
   },
+  // As core's (above), through the contract itself: no reader, and no
+  // answer but a refusal that names nothing of what it was given.
+  addEvents: async ({ personId, markers }) => {
+    const keyId = await eventKeyId();
+    const add = async (
+      name: string,
+      request: unknown,
+      about?: Answer["about"],
+      into: Brain = store()
+    ) =>
+      await answer(
+        name,
+        async () => {
+          await into.addEvents(unchecked(request));
+        },
+        about
+      );
+    const marked = {
+      keyId,
+      events: markers.map((marker) =>
+        eventOf(`team:${marker}`, `Sent ${marker}`)
+      ),
+    };
+    return [
+      await add("marked events", marked, "hidden"),
+      await add("the same events again", marked, "hidden"),
+      await add(
+        "an event of a team no one is in",
+        { keyId, events: [eventOf(`team:${crypto.randomUUID()}`, "Sent")] },
+        "nothing"
+      ),
+      await add("an event whose item is readable", {
+        keyId,
+        events: [{ ...eventOf("team:x", "Sent"), item: markers.join(" ") }],
+      }),
+      await add("no events", { keyId, events: [] }),
+      await add("an event under a key id that is the markers", {
+        keyId: markers.join(" "),
+        events: [eventOf("team:x", "Sent")],
+      }),
+      await add("more events than one add takes", {
+        keyId,
+        events: Array.from({ length: eventsPerAddMax + 1 }, () =>
+          eventOf("team:x", markers.join(" "))
+        ),
+      }),
+      await add(
+        "marked events, into the reader's own store",
+        marked,
+        undefined,
+        personalStore(personId)
+      ),
+    ];
+  },
+  // Routines seen in activity, through the contract: four people's
+  // marked steps in a team answer just as before they were kept, and a
+  // person's own store refuses, naming nothing.
+  observedRoutines: async ({ personId, markers }) => {
+    const before = await answer(
+      "the routines seen, before four people's marked steps",
+      async () => await store().observedRoutines(),
+      "nothing"
+    );
+    const hourAgo = new Date(Date.now() - 3_600_000).toISOString();
+    // A team of this call's own: the passes run this probe again and again.
+    const marks = markers.map(takenOnce);
+    await store().addEvents({
+      keyId: await eventKeyId(),
+      events: Array.from({ length: minTeamShown - 1 }, aTag).flatMap((who) =>
+        marks.flatMap((marker) => [
+          {
+            ...eventOf(`team:${marker}`, `Read ${marker}`),
+            system: marker,
+            writes: false,
+            who,
+            at: hourAgo,
+          },
+          { ...eventOf(`team:${marker}`, `Sent ${marker}`), who },
+        ])
+      ),
+    });
+    return [
+      before,
+      await answer(
+        "the routines seen, after four people's marked steps",
+        async () => await store().observedRoutines(),
+        "hidden"
+      ),
+      await answer(
+        "the routines seen, from the reader's own store",
+        async () => await personalStore(personId).observedRoutines()
+      ),
+    ];
+  },
+  expireEvents: async ({ personId }) => [
+    await answer("an expiry", async () => {
+      await store().expireEvents();
+    }),
+    await answer("an expiry of the reader's own store", async () => {
+      await personalStore(personId).expireEvents();
+    }),
+  ],
   ...memoryProbes,
   ...linkingProbes,
 } satisfies Record<StoreMember, Probe>;

@@ -71,7 +71,7 @@ import type { WorkContext } from "./work.ts";
 // leaves both out, as no one reads them; and the skills
 // Grasp ships (contract.ts `shippedSkillsPrefix`), which each release adds
 // again. It holds the company's instruction files and its own skills. Of
-// memories and extraction marks, those one group reads (the shared store
+// memories and extraction marks, those groups read (the shared store
 // keeps none only one person may read) and that rest on no version, or on
 // one the export holds, in the statement that selects them
 // (`exportedMemorySql`): so it never holds a memory drawn from what it
@@ -672,20 +672,24 @@ const companyBindings: Record<(typeof memoryPhases)[number], number> = {
 const memoryPartRows = 500;
 
 /**
- * Whether the set of readers whose key is `key` (an expression) is one
- * group: what a company export holds of memories and extraction marks
- * (the contract's `audience`), never one person alone or no one.
+ * Whether the set of readers whose key is `key` (an expression) is groups
+ * alone, one or several: what a company export holds of memories and
+ * extraction marks (the contract's `audience` and `readers`), never one
+ * person alone or no one.
  */
-const oneGroupSql = (key: string): string =>
-  `(json_array_length(${key}) = 1 AND ${key} ->> '$[0][0]' = 'group')`;
+const groupsSql = (key: string): string =>
+  `(json_array_length(${key}) >= 1 AND NOT EXISTS (
+    SELECT 1 FROM json_each(${key}) AS principal
+    WHERE principal.value ->> '$[0]' IS NOT 'group'
+  ))`;
 
 /**
  * Whether the set of readers whose key is `key` is one a `scope` export
- * holds of memories and extraction marks: one group's in the company's,
+ * holds of memories and extraction marks: groups' in the company's,
  * the person's alone in theirs (`?6` its key).
  */
 const exportedReadersSql = (scope: ExportScope["kind"], key: string): string =>
-  scope === "company" ? oneGroupSql(key) : `(${key} = ?6)`;
+  scope === "company" ? groupsSql(key) : `(${key} = ?6)`;
 
 /**
  * `?2` the export: whether a part it wrote holds the version `version` of
@@ -706,7 +710,7 @@ const writtenVersionSql = (
 
 /**
  * `?2` the export, `?4` the stamp it started at: whether the memory
- * `alias` is one the export holds: learned by then, read by one group, no
+ * `alias` is one the export holds: learned by then, read by groups, no
  * erasure of its writer since (memories.ts `unerasedSql`), and resting on
  * no version or one a part of it wrote.
  */
@@ -829,8 +833,9 @@ const jsonOf = (value: SqlStorageValue | undefined): unknown =>
   JSON.parse(textOf(value));
 
 /**
- * The access a set of readers' key names, which a step selects only as one
- * group's in the company's export, and as the person's alone in theirs.
+ * The access a set of readers' key names, which a step selects only as
+ * groups' (one or several) in the company's export, and as the person's
+ * alone in theirs.
  */
 const exportedAccessOf = (
   scope: ExportScope,
@@ -839,7 +844,7 @@ const exportedAccessOf = (
   const access = accessOfKey(textOf(key));
   const exported =
     scope.kind === "company"
-      ? access?.kind === "audience"
+      ? access?.kind === "audience" || access?.kind === "readers"
       : access?.kind === "owner" && access.person === scope.person;
   if (access === undefined || !exported) {
     throw new Error("The Brain selected readers it doesn't export");

@@ -204,6 +204,34 @@
       "when": 1794922879415,
       "tag": "0028_extractors",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1794965790717,
+      "tag": "0029_skill_proposals",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1794996787562,
+      "tag": "0030_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1795001400302,
+      "tag": "0031_person_erasure_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1795012821248,
+      "tag": "0032_events_system",
+      "breakpoints": true
     }
   ]
 }

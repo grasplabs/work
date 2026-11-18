@@ -20,6 +20,20 @@ import {
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
 /**
+ * A read of an account's groups under way (reader-groups.ts): when it
+ * started, the account and the address it reads for, the groups found so
+ * far, the members still to ask, and the next page of the first of them.
+ */
+export interface ReaderGroupsReading {
+  startedAt: number;
+  account: string;
+  address: string | null;
+  found: string[];
+  pending: string[];
+  page: string | null;
+}
+
+/**
  * One connection to an outside system, and the MCP server that carries out
  * its actions: a native connector of ours (`server` names it) or a Composio
  * server scoped to one toolkit (`server` is its HTTPS URL).
@@ -64,6 +78,56 @@ export const connections = sqliteTable(
      */
     accountEmail: text("account_email"),
     /**
+     * The account's address as its provider confirmed it, when connected
+     * and again at each renewal (providers.ts `confirmAddress`), for the
+     * providers whose reader lists name accounts by address (Google's);
+     * null when the last renewal confirmed none, and for every other
+     * provider. What core counts a person in a copied reader list by
+     * (`personalAccounts`).
+     */
+    verifiedEmail: text("verified_email"),
+    /**
+     * When the provider last confirmed `verified_email`: when connected,
+     * or at the last renewal that confirmed it. Core counts the address
+     * only while this is recent (`readerProofMaxAgeMs`), so an address an
+     * idle connection or one needing reconnecting holds stops counting.
+     */
+    verifiedEmailAt: timestamp("verified_email_at"),
+    /**
+     * The addresses `verified_email` held before a renewal or reconnect
+     * replaced or cleared it (`pastAddressesAfter`), kept until its
+     * person's erasure, which forgets the reader tokens of each (core's
+     * person-erasure.ts `identity`). Nothing reads them for access: a past
+     * address proves nothing.
+     */
+    pastVerifiedEmails: text("past_verified_emails", { mode: "json" }).$type<
+      string[]
+    >(),
+    /**
+     * The groups the account is in at the provider, nested ones included,
+     * as the last whole read with its own token said (reader-groups.ts),
+     * for the providers whose reader lists name groups: null until one
+     * was. What core counts a person in a list's group by
+     * (`personalAccounts`), only while `reader_groups_at` is recent.
+     */
+    readerGroups: text("reader_groups", { mode: "json" }).$type<string[]>(),
+    /** When a whole read last said `reader_groups`. */
+    readerGroupsAt: timestamp("reader_groups_at"),
+    /**
+     * When a turn of a read of the account's groups was last taken, whole
+     * or not: one is due again only once the connection's access token was
+     * minted after it, or while a read is under way (reader-groups.ts).
+     */
+    readerGroupsTriedAt: timestamp("reader_groups_tried_at"),
+    /**
+     * A read of the account's groups under way, as its last turn left it:
+     * the groups found so far, which count for nothing until it is whole,
+     * and the members still to ask. Null when none is.
+     */
+    readerGroupsReading: text("reader_groups_reading", {
+      mode: "json",
+    }).$type<ReaderGroupsReading>(),
+    /**
      * The other addresses the account's mailbox receives mail at (its
      * primary address and SMTP aliases), as its provider said when it was
      * connected (account-addresses.ts); null when never read.
@@ -77,6 +141,13 @@ export const connections = sqliteTable(
      * it was connected (account-addresses.ts); null when never read.
      */
     accountSenders: text("account_senders", { mode: "json" }).$type<string[]>(),
+    /**
+     * For a shared connection whose places an admin picks: one up with
+     * each save that changed them (sync.ts `pickSyncPlaces`), so core
+     * hides what a save un-picked only for a save newer than the last it
+     * hid for (brain-sync.ts `hideUnpickedPlaces`). Null before the first.
+     */
+    syncPicksVersion: integer("sync_picks_version"),
     connectedBy: text("connected_by"),
     /**
      * For a Composio connection: the MCP server and the auth config
@@ -495,6 +566,29 @@ export const connectionTokens = sqliteTable("connection_tokens", {
   grantedScopes: text("granted_scopes"),
   updatedAt: timestamp("updated_at").notNull(),
 });
+
+/**
+ * A place of a shared connection an admin picked for one of its
+ * connector's syncs (`places: "picked"`: a shared drive, a document
+ * library): the only places that sync reads of it (sync.ts). Who picked
+ * is in the audit log, not here.
+ */
+export const syncPicks = sqliteTable(
+  "sync_picks",
+  {
+    connectionId: text("connection_id")
+      .notNull()
+      .references(() => connections.id),
+    /** The connector's sync, such as `shared-drives`. */
+    feed: text().notNull(),
+    /** The place's ID at the provider, as the sync listed it. */
+    place: text().notNull(),
+    pickedAt: timestamp("picked_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.connectionId, table.feed, table.place] }),
+  ]
+);
 
 /**
  * A revoke at its provider still owed for a connection's grant (GRA-1191,

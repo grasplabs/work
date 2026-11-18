@@ -1385,3 +1385,150 @@ export const personErasureMemories = sqliteTable("person_erasure_memories", {
   /** The erasure that hid it (`erasures.key`). */
   erasure: text().notNull(),
 });
+
+/**
+ * What happened, as small records (events.ts): a team, a kind of step, the
+ * item it was on, when, and a tag of who took it that only the host can
+ * compute. Never a person's name or ID, and never read: no member of the
+ * contract answers a row of it, so recall, exports and restores never
+ * hold one. Each is deleted once it is older than `eventsKeptMs`, or when
+ * its tag's person is erased (erasure.ts `erasePersonShared`, events.ts
+ * `eraseEventsIn`).
+ */
+export const events = sqliteTable(
+  "events",
+  {
+    row: integer().primaryKey({ autoIncrement: true }),
+    /** The host's key for the event and its team: one row a pair. */
+    key: text().notNull(),
+    /** The team's group, as the host names it. */
+    team: text().notNull(),
+    step: text().notNull(),
+    /**
+     * The system the step was in: its connector, as the host's catalog
+     * names it (GRA-1764), so a step that writes into another system than
+     * the one before it shows as data copied between them. Nullable, as a
+     * column a release adds: the release before keeps events without one
+     * (rolled back to), and routines-observed.ts leaves those out.
+     */
+    system: text(),
+    /** Whether the step changed something in its system: null with `system`. */
+    writes: integer({ mode: "boolean" }),
+    /** A MAC of the item's ID, in hex; null when it was on none. */
+    item: text(),
+    /**
+     * A MAC of who took the step and the team, in hex, by the host's key:
+     * the same person's in one team alike, in two teams apart.
+     */
+    who: text().notNull(),
+    /**
+     * When it happened, in milliseconds, rounded down to the hour: never
+     * later than when it was kept.
+     */
+    at: integer().notNull(),
+  },
+  (table) => [
+    uniqueIndex("events_key_team_idx").on(table.key, table.team),
+    // Expiry deletes by age.
+    index("events_at_idx").on(table.at),
+    // A person's erasure deletes by their tags.
+    index("events_who_idx").on(table.who),
+    // Routines read each person's steps in a team in order
+    // (routines-observed.ts).
+    index("events_trail_idx").on(table.team, table.who, table.at, table.row),
+  ]
+);
+
+/**
+ * The tags of who took events (`events.who`) that an erasure closed
+ * (events.ts `eraseEventsIn`): an add of an event under one is refused, so a
+ * drain that read a person's teams before their erasure can't bring their
+ * events back after it. Each is kept only as long as an event could live
+ * (`eventsKeptMs` from `at`), then the expiry deletes it. Opaque without
+ * the host's key.
+ */
+export const closedEventTags = sqliteTable(
+  "closed_event_tags",
+  {
+    who: text().primaryKey(),
+    /** When it was closed, in milliseconds. */
+    at: integer().notNull(),
+  },
+  (table) => [index("closed_event_tags_at_idx").on(table.at)]
+);
+
+/**
+ * The events a person's erasure in the shared store erased (erasure.ts
+ * `erasePersonShared`): each of their tags, and the host's key they were
+ * made under, by the erasure (`erasures.key`). Its ledger entry's body is
+ * written from these, so a replay after a restore of the store's storage
+ * erases their events again (events.ts `eraseEventsIn`). Kept only until
+ * that entry is written (erasure.ts `confirm`), and never by a replay,
+ * whose entry already holds them. Opaque without the host's key.
+ */
+export const personErasureEvents = sqliteTable(
+  "person_erasure_events",
+  {
+    erasure: text().notNull(),
+    who: text().notNull(),
+    keyId: text("key_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.erasure, table.who] })]
+);
+
+/**
+ * Which of the host's keys the events' tags and keys are made with, by an
+ * id of it the host gives (a MAC of a fixed label under it), never the
+ * key: one row. A call under another id finds tags no erasure could
+ * compute again, so it first deletes every event and closed tag
+ * (events.ts `underKey`).
+ */
+export const eventKey = sqliteTable(
+  "event_key",
+  {
+    row: integer().primaryKey(),
+    id: text().notNull(),
+  },
+  (table) => [check("event_key_one_row", sql`${table.row} = 1`)]
+);
+
+/**
+ * A skill drafted for the person whose own store this is, from sources of
+ * theirs that keep ending the same way (skill-proposals.ts), under the
+ * host's key for what they have in common. Open, it holds the draft and
+ * the versions it rests on, and is listed only while every one of them is
+ * still current and readable by its person; an erasure of one of them
+ * deletes it. Once settled (accepted or dismissed: nothing tells them
+ * apart) it keeps its key alone, so the
+ * same key is never drafted again, and nothing in it says what it was
+ * drawn from or what became of it. Only in a person's own store.
+ */
+export const skillProposals = sqliteTable("skill_proposals", {
+  key: text().primaryKey(),
+  state: text({ enum: ["open", "settled"] }).notNull(),
+  /** The `SKILL.md` drafted; null once settled. */
+  text: text(),
+  /** The versions it rests on, as JSON `[{ source, version }]`; null once settled. */
+  restsOn: text("rests_on"),
+  draftedAt: integer("drafted_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+/**
+ * Each source an open skill proposal rests on (skill-proposals.ts), by the
+ * proposal's key: written as the proposal is saved, from what it rests
+ * on, in the same transaction, and nowhere else. An erasure of a source
+ * finds by it the proposals that rest on it and deletes them with these
+ * rows (erasure.ts `apply`); settling a proposal deletes its rows. Only in
+ * a person's own store.
+ */
+export const proposalSources = sqliteTable(
+  "proposal_sources",
+  {
+    source: text().notNull(),
+    proposal: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.source, table.proposal] }),
+    index("proposal_sources_proposal_idx").on(table.proposal),
+  ]
+);

@@ -59,6 +59,9 @@ const typeRules: readonly {
   { action: "connection.connect", type: "config" },
   // An admin changing which tools a connected app allows (GRA-993).
   { action: "connection.tools", type: "config" },
+  // An admin picking which places of a shared connection sync into the
+  // Brain (shared drives, document libraries).
+  { action: "connection.sync_places", type: "config" },
   // Connect sending, editing or deleting a message as the client's own bot
   // on a chat platform, or refusing a request core's chat adapters sent.
   { action: "channel.call", type: "action" },
@@ -111,6 +114,9 @@ const typeRules: readonly {
   { action: "connection.app.pointed", type: "config" },
   // A connection's tokens stopped working: it needs signing in again.
   { action: "connection.needs_reauth", type: "config" },
+  // A renewal of a connection's tokens found its account's address changed,
+  // or no longer confirmed (connect's tokens.ts, GRA-1761).
+  { action: "connection.account_changed", type: "config" },
   // Connect reading what changed at a connection for workflows' event
   // triggers, dropping an event it couldn't deliver, and starting or
   // stopping listening there, being refused it, or failing to read it.
@@ -151,6 +157,11 @@ const typeRules: readonly {
   // and that erasure, or a disconnect's, ended (core's shared-reads.ts,
   // GRA-1831): the connection and how many records, by IDs and a count.
   { action: "brain.shared_reads", type: "action" },
+  // Native sync making a page of a connected system's changes into Brain
+  // sources, and erasing what it copied once its connection was
+  // disconnected (core's brain-sync.ts, GRA-1758): the connection, its
+  // sync and counts, never an item.
+  { action: "brain.sync", type: "action" },
   // An App, a workflow's run or a chat's code recalling from the Brain
   // for a person (core's src/brain-recall.ts): for whom, how many
   // passages and whether the budget cut it short, or why it was refused;

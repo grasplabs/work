@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7e1d34e8-dcd1-4ef3-a83d-9b192ee444b3",
+  "id": "85c06727-3d1d-4195-933c-639cfe0f5699",
   "prevId": "23b6501b-b8b2-48bf-81e1-1f90a04fe4cf",
   "tables": {
     "audit_outbox": {
@@ -1026,6 +1026,20 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "rating": {
+          "name": "rating",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "rating_reason": {
+          "name": "rating_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -1054,60 +1068,6 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "chat_request_keys": {
-      "name": "chat_request_keys",
-      "columns": {
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "key": {
-          "name": "key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "chat_id": {
-          "name": "chat_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "at": {
-          "name": "at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "chat_request_keys_at": {
-          "name": "chat_request_keys_at",
-          "columns": [
-            "at"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "chat_request_keys_kind_key_pk": {
-          "columns": [
-            "kind",
-            "key"
-          ],
-          "name": "chat_request_keys_kind_key_pk"
-        }
-      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

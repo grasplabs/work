@@ -911,7 +911,7 @@ describe(SourcesPage, () => {
     }).toStrictEqual({ calls: ["list", "search invoices"], shown: true });
   });
 
-  it("says what the Brain keeps of a person's own connections, marks each it keeps reads from, and says when there are none", async () => {
+  it("says what the Brain keeps of a person's own connections, marks each it keeps reads from and each that can't tell what changed in it, and says when there are none", async () => {
     await shown([
       {
         name: "Gmail",
@@ -926,7 +926,13 @@ describe(SourcesPage, () => {
         via: "direct",
         matches: [],
       },
-      { name: "HubSpot", status: "connected", via: "composio", matches: [] },
+      {
+        name: "HubSpot",
+        status: "connected",
+        via: "composio",
+        matches: [],
+        activityGap: true,
+      },
     ]);
     const feeds = section("How your connections feed the Brain");
     act(() => {
@@ -942,7 +948,8 @@ describe(SourcesPage, () => {
         "When an agent reads for you through an account you connected yourself, the Brain keeps what it read for you alone, while that account stays connected: one Gmail message or attachment, one OneNote page, or the answer of a read in another app, the company’s records included. Everything else agents search live when you ask, and the Brain keeps nothing of it." +
         "GmailThe Brain may keep, for you alone, some of what an agent reads for you through this connection, while it stays connected." +
         "Microsoft 365Searched live, nothing kept." +
-        "HubSpotSearched live, nothing kept.",
+        "HubSpotSearched live, nothing kept." +
+        "A gap: this connection can’t tell Grasp what changed in it, so Grasp sees only what is done there through Grasp.",
       none: "How your connections feed the BrainYou have no connections yet.",
     });
   });
@@ -1297,6 +1304,8 @@ describe(SourcesPage, () => {
       }
     );
     await press("Erase for good");
+    const told =
+      document.querySelector('[role="alertdialog"]')?.textContent ?? "";
     // The dialog's own button, after the row's of the same words.
     const confirm = [...document.querySelectorAll("button")].findLast(
       (button) => button.textContent.trim() === "Erase for good"
@@ -1321,6 +1330,11 @@ describe(SourcesPage, () => {
       // The one in use isn't marked removed.
       removedMarks: sharedText.split("Removed by its uploader").length - 1,
       labels,
+      // What it erases, and that a workflow's kept state stays unread.
+      told: [
+        "Every version of it is erased from the Brain",
+        "What a workflow kept from it between its runs isn't erased, but it is no longer shown or used.",
+      ].map((text) => told.includes(text)),
       after: ["Payroll.vtt", "An upload"].map((text) =>
         section("Shared uploads").includes(text)
       ),
@@ -1331,6 +1345,7 @@ describe(SourcesPage, () => {
       listed: [true, true, true, true, true, true, true],
       removedMarks: 1,
       labels: ["Erase Payroll.vtt for good", "Erase this upload for good"],
+      told: [true, true],
       after: [false, true],
       calls: ["sharedUploads", "deleteUpload u-3", "sharedUploads"],
     });

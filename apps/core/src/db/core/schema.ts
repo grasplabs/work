@@ -101,6 +101,26 @@ export const accounts = sqliteTable(
      * so staff sessions can be checked against the current staff list.
      */
     oid: text(),
+    /**
+     * The address the ID token of the latest sign-in gave and marked
+     * verified (`email_verified`, Google's): what an item's reader list
+     * may name this account by (source-readers.ts). Null for Entra, whose
+     * `email` claim is not verified.
+     */
+    verifiedEmail: text("verified_email"),
+    /**
+     * When the latest sign-in confirmed `verified_email`: the address
+     * counts only within a day of it (source-readers.ts,
+     * `readerProofMaxAgeMs`), as every proof of an address does.
+     */
+    verifiedEmailAt: timestamp("verified_email_at"),
+    /**
+     * The tenant the ID token of the latest sign-in was checked against
+     * (Entra's `tid`, Google's `hd`): this account counts as a reader in a
+     * copied list only while the sign-in config names that tenant
+     * (source-readers.ts).
+     */
+    verifiedTenant: text("verified_tenant"),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },
@@ -3462,7 +3482,7 @@ export const connectionBrainAudiences = sqliteTable(
  * `connected` kind: written before the Brain is given the key, so every key
  * the Brain holds of a connection is named here, for its erasure to find.
  * `generation` is the connection's erasure generation it was kept in
- * (`connection_brain_erasures`); `read_at` when it was first read.
+ * (`connection_brain_erasures`); `read_at` when it was last read.
  */
 export const connectionBrainReads = sqliteTable(
   "connection_brain_reads",
@@ -3503,6 +3523,192 @@ export const connectionBrainErasures = sqliteTable(
     closed: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [index("connection_brain_erasures_erasing_idx").on(table.erasing)]
+);
+
+/**
+ * The sources native sync reads into the Brain (brain-sync.ts, GRA-1758),
+ * one row per connection, sync (`feed`) and place: whose connection it is
+ * (`personId`; null for a shared connection's picked places, which no
+ * one person owns: GRA-1719) and how to name its items' readers
+ * (`provider`, `tenant`,
+ * `account`, its own account as its items' readers name it, as connect
+ * last listed them), where its next page reads
+ * on from (`cursor`, null to list it from the start), the number of its
+ * latest listing (`listing`; an item a listing named carries it) and
+ * whether that listing is under way (`listingOpen`: from a null cursor
+ * until its first page with nothing more), when it is next due, the run
+ * that holds it (`leaseId` until `leaseUntil`), when a page last applied
+ * and the code of the latest failure and when it was (`lastErrorAt`),
+ * kept after a later page applies, for the staff's view, and what the page under way did so
+ * far in the Brain (`added`, `changed`, `removed`), counted once each,
+ * whichever run did it, for the page's one audit event. Beside it, the
+ * daily full relist: its own cursor (`relistCursor`), whether one is under
+ * way (`relisting`), when its next page is due, or the next one starts
+ * (`relistAt`), and when the one under way was due to start
+ * (`relistSince`), by which an overdue relist is seen; and whether an
+ * item of it may still be leaving a key a stopped run left unerased
+ * (`leavesOwed`), cleared when a page commits. The kind of items it
+ * brings (`kind`: mail and events relist names only), whether its place
+ * is no longer listed (`dropped`: read no more, its keys erased by the
+ * clock, then the row deleted), and whether its relist is fetching what
+ * its names-only listing found unknown or changed (`relistCatchUp`).
+ * For a sync that lists places, the places listing that named the place
+ * last (`seenIn`); its listing itself is a row of its own here, place
+ * `:places`, its cursor where the listing goes on, and, for a shared
+ * connection's picked places, the version of the picks whose un-picked
+ * places core last hid (`picksVersion`: connect's, one up with each save;
+ * brain-sync.ts `hideUnpickedPlaces`).
+ */
+export const brainSyncSources = sqliteTable(
+  "brain_sync_sources",
+  {
+    connectionId: text("connection_id").notNull(),
+    feed: text().notNull(),
+    place: text().notNull(),
+    personId: text("person_id"),
+    provider: text().notNull(),
+    tenant: text(),
+    account: text(),
+    cursor: text(),
+    listing: integer().notNull(),
+    listingOpen: integer("listing_open", { mode: "boolean" }).notNull(),
+    dueAt: timestamp("due_at").notNull(),
+    leaseId: text("lease_id"),
+    leaseUntil: timestamp("lease_until"),
+    lastSuccessAt: timestamp("last_success_at"),
+    lastError: text("last_error"),
+    added: integer().notNull(),
+    changed: integer().notNull(),
+    removed: integer().notNull(),
+    relistCursor: text("relist_cursor"),
+    relisting: integer({ mode: "boolean" }).notNull(),
+    relistAt: timestamp("relist_at").notNull(),
+    relistSince: timestamp("relist_since"),
+    leavesOwed: integer("leaves_owed", { mode: "boolean" }).notNull(),
+    kind: text({ enum: ["mail", "file", "event"] }).notNull(),
+    dropped: integer({ mode: "boolean" }).notNull(),
+    relistCatchUp: integer("relist_catch_up", { mode: "boolean" }).notNull(),
+    seenIn: integer("seen_in"),
+    lastErrorAt: timestamp("last_error_at"),
+    picksVersion: integer("picks_version"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.connectionId, table.feed, table.place] }),
+    index("brain_sync_sources_due_idx").on(table.dueAt),
+    // The live places of shared connections, read with every read of the
+    // Brain (connection-audiences.ts `sharedPlacesRead`).
+    index("brain_sync_sources_person_idx").on(table.personId, table.dropped),
+  ]
+);
+
+/**
+ * Each item native sync handed the Brain (brain-sync.ts), by connection,
+ * sync and the provider's ID of it (unique within the connection), the
+ * place whose source added it (`place`): its source's key under `sync:`
+ * (`key`, its `generation` the key's middle part, one up each time the
+ * item leaves the Brain, so a key erased is never added to again), the
+ * store it is in now (`own`, `shared`, or null when it is in neither),
+ * the change last added (null while an add is under way), the Brain's
+ * version of it as last answered, a hash of the provider's change marker
+ * it was added at (`marker`), the item it is part of (an attachment's
+ * message), the listing that last named it, and the key it is leaving
+ * (`leaving`, in the store `leavingStore`): named here before the Brain
+ * erases it, so an erase a stopped run left is finished on its next read,
+ * and a disconnect's erasure finds it; and since when its removal is held
+ * (`heldSince`: gone from one place of a sync that lists places, kept
+ * until the others have read, so a move between two leaves no hole), and
+ * when a page last saved a change of it (`savedAt`: one saved since its
+ * source last committed a page is the uncommitted page's own, whose step
+ * a replay of that page records again). Never its readers: each
+ * page gives them to the Brain again, so nothing here names a person.
+ * Core names a key here before the Brain is given it, so a disconnect's
+ * erasure finds every key it gave.
+ */
+export const brainSyncItems = sqliteTable(
+  "brain_sync_items",
+  {
+    connectionId: text("connection_id").notNull(),
+    feed: text().notNull(),
+    itemId: text("item_id").notNull(),
+    place: text().notNull(),
+    key: text().notNull(),
+    generation: integer().notNull(),
+    store: text({ enum: ["own", "shared"] }),
+    change: text(),
+    version: integer(),
+    marker: text(),
+    partOf: text("part_of"),
+    listing: integer().notNull(),
+    leaving: text(),
+    leavingStore: text("leaving_store", { enum: ["own", "shared"] }),
+    heldSince: timestamp("held_since"),
+    savedAt: timestamp("saved_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.connectionId, table.feed, table.itemId] }),
+    index("brain_sync_items_store_idx").on(table.connectionId, table.store),
+    index("brain_sync_items_leaving_idx").on(
+      table.connectionId,
+      table.feed,
+      table.leaving
+    ),
+    index("brain_sync_items_place_idx").on(
+      table.connectionId,
+      table.feed,
+      table.place
+    ),
+    index("brain_sync_items_part_of_idx").on(
+      table.connectionId,
+      table.feed,
+      table.partOf
+    ),
+  ]
+);
+
+/**
+ * What a source's names-only relist (brain-sync.ts) found unknown, held
+ * without content, or at another version than held, by the provider's ID:
+ * fetched once in full after that listing, then forgotten. Emptied when a
+ * relist starts, so a relist catches up at most once.
+ */
+export const brainSyncCatchUps = sqliteTable(
+  "brain_sync_catch_ups",
+  {
+    connectionId: text("connection_id").notNull(),
+    feed: text().notNull(),
+    place: text().notNull(),
+    itemId: text("item_id").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.connectionId, table.feed, table.place, table.itemId],
+    }),
+  ]
+);
+
+/**
+ * The connections a disconnect closed for native sync (brain-sync.ts),
+ * one row each, kept for good: nothing is synced or named under one again.
+ * The disconnect it serves (connect's event's id), who disconnected and
+ * when (`actor`, an audit actor as JSON, cleared once the erasure it owed
+ * ended and its event was written), whether erasing what it synced
+ * into the shared store is under way (`erasing`, which the clock
+ * completes), and how many sources it erased.
+ */
+export const brainSyncDisconnects = sqliteTable(
+  "brain_sync_disconnects",
+  {
+    connectionId: text("connection_id").primaryKey(),
+    request: text().notNull(),
+    actor: text(),
+    requestedAt: timestamp("requested_at").notNull(),
+    erasing: integer({ mode: "boolean" }).notNull(),
+    erased: integer().notNull(),
+    /** The run that holds the erase, until when: its token (brain-sync.ts `takeErasure`). */
+    leaseId: text("lease_id"),
+    leaseUntil: timestamp("lease_until"),
+  },
+  (table) => [index("brain_sync_disconnects_erasing_idx").on(table.erasing)]
 );
 
 /**
@@ -5042,10 +5248,18 @@ export const workflowStartReceipts = sqliteTable(
      * read once and frozen: the hash of its snapshot
      * (`workflowStateSnapshots`), which every activation of its run reads
      * (`$state`); null for a start that admits no run, and once retention
-     * removed its details. Last, as the admitting statement writes every
-     * column in order.
+     * removed its details. The admitting statement writes every column in
+     * order.
      */
     stateHash: text("state_hash"),
+    /**
+     * How many keys of what the workflow kept its run started without:
+     * withheld, as the run that set each read what the company may no
+     * longer read (workflow-state.ts `readableStateOf`, GRA-1996); null
+     * for none. The run's page says so. Last, as the admitting statement
+     * writes every column in order.
+     */
+    stateWithheld: integer("state_withheld"),
   },
   (table) => [
     uniqueIndex("workflow_start_receipts_key").on(
@@ -5892,6 +6106,8 @@ export const workflowCandidateRuns = sqliteTable(
      * activation. A test run writes none back.
      */
     stateHash: text("state_hash"),
+    /** How many kept keys it started without, as a start's receipt says. */
+    stateWithheld: integer("state_withheld"),
     fixtures: text().notNull(),
     status: text({
       enum: ["starting", "running", "completed", "failed", "cancelled"],
@@ -6048,23 +6264,27 @@ export const brainTeamGroups = sqliteTable("brain_team_groups", {
   teamIds: text("team_ids").notNull(),
   /** Its place in the company's order. */
   position: integer().notNull(),
-  /** When an admin confirmed it; null while it is only Grasp's proposal. */
+  /**
+   * When it was kept: set on every row, as every group counts (GRA-1993).
+   * Kept for the release before, which reads a row without it as a
+   * proposal (expand, then contract).
+   */
   confirmedAt: timestamp("confirmed_at"),
   savedAt: timestamp("saved_at").notNull(),
 });
 
 /**
- * Each time an admin confirmed the groups of teams (brain-team-groups.ts):
- * the groups whole, as they were before and as confirmed, so an earlier
- * set can be put back. Never changed or deleted; the audit event of the
- * save names its id, and who saved it.
+ * Each time an admin saved the groups of teams, or Grasp arranged them
+ * (brain-team-groups.ts): the groups whole, as they were before and after,
+ * so an earlier set can be put back. Never changed or deleted; the audit
+ * event of the change names its id, and who made it.
  */
 export const brainTeamGroupSaves = sqliteTable("brain_team_group_saves", {
   id: text().primaryKey(),
   savedAt: timestamp("saved_at").notNull(),
   /** The groups before, as JSON: each one's id, name, teams and whether confirmed. */
   before: text().notNull(),
-  /** The groups as confirmed, as JSON, the same way. */
+  /** The groups after, as JSON, the same way. */
   after: text().notNull(),
 });
 
@@ -6741,3 +6961,90 @@ export const brainOwnStores = sqliteTable("brain_own_stores", {
   /** Whether its SQLite is near what one object holds (`storeNearLimit`). */
   nearLimit: integer("near_limit", { mode: "boolean" }).notNull(),
 });
+
+/**
+ * Every address a person's sign-ins proved (`accounts.verified_email`),
+ * the current one and those a later sign-in replaced (auth.ts): for their
+ * erasure alone, which forgets the reader tokens of each and then these
+ * rows (person-erasure.ts `identity`, source-readers.ts). Nothing reads
+ * it for access: a past address proves nothing.
+ */
+export const signInAddresses = sqliteTable(
+  "sign_in_addresses",
+  {
+    userId: text("user_id").notNull(),
+    address: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.address] })]
+);
+
+/**
+ * The token the Brain knows each account on a copied reader list by
+ * (source-readers.ts, GRA-1761), so the Brain never holds an address or an
+ * object ID, and nor does this table: `key` is a keyed hash of the account
+ * as lists name it (`<provider>:<account>`, compared form), `token` random,
+ * minted the first time a list names the account. `person` is the member
+ * who last proved the account theirs as they read (null until one has):
+ * erasing them deletes their rows (person-erasure.ts `identity`), so the
+ * lists made before name a token nobody holds again; a later list naming
+ * the account mints a new one.
+ */
+export const sourceReaderTokens = sqliteTable(
+  "source_reader_tokens",
+  {
+    key: text().primaryKey(),
+    person: text(),
+    token: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [index("source_reader_tokens_person_idx").on(table.person)]
+);
+
+/**
+ * Every group of a provider's that a copied reader list ever named
+ * (source-readers.ts `readerPrincipalsOf`, GRA-1761), by the Brain's name
+ * of it (`group:<provider>:<tenant>:<group>`), written before the list
+ * reaches the Brain. A person reads as only those of their own groups
+ * that are here (`heldPrincipalsOf`): the groups sources are shared with,
+ * however many groups they are in. A group is no person; nothing is
+ * removed, as a name no source holds any more costs a reader nothing.
+ */
+export const sourceReaderGroups = sqliteTable("source_reader_groups", {
+  name: text().primaryKey(),
+});
+
+/**
+ * What Grasp proposes for a team's routine (opportunities.ts, GRA-1750),
+ * at the evidence it rests on: the model's answer, held to what it was
+ * given, kept so it is asked once per evidence. Only while that evidence
+ * stands: an opportunity list forgets the rest. No person's data: a form,
+ * an App's id, systems from the catalog and step numbers.
+ */
+export const opportunityProposals = sqliteTable(
+  "opportunity_proposals",
+  {
+    /** The onboarding's id for the team's piece of work. */
+    routine: text().notNull(),
+    /** The drawing it rests on, by its id in the Brain. */
+    evidence: text().notNull(),
+    /** The proposal, as JSON (opportunities.ts `proposalSchema`). */
+    proposal: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.routine, table.evidence] })]
+);
+
+/**
+ * Opportunities an admin dismissed (opportunities.ts, GRA-1750), each at
+ * the evidence it was shown with: hidden until that changes. Who dismissed
+ * it is in the audit log, not here.
+ */
+export const opportunityDismissals = sqliteTable(
+  "opportunity_dismissals",
+  {
+    routine: text().notNull(),
+    evidence: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.routine, table.evidence] })]
+);

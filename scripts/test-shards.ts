@@ -31,12 +31,12 @@ export interface ShardFile {
 /**
  * How many files a shard's runner works through at once, on average: with
  * `projectStartSeconds` and `coreStartSeconds`, what predicted the test
- * step of six merge-queue runs' 180 shards best, within 28 s on average
- * and as often over as under (November 2026). Each of the runner's 6
- * Vitest workers shares its 4 CPUs with the workerd it drives, so fewer
- * than 6.
+ * step of a run's 30 shards over rather than under, by 44 s on average
+ * and never more than 3 s under, once each file's time counted its setup
+ * and import (November 2026). Each of the runner's 6 Vitest workers shares
+ * its 4 CPUs with the workerd it drives, so fewer than 6.
  */
-export const concurrentFiles = 3.5;
+export const concurrentFiles = 4;
 
 /**
  * The least a file is taken to take: loading it and the reset before it,
@@ -114,17 +114,50 @@ export const shardSeconds = (files: readonly ShardFile[]): number => {
 export const wholeProjectSeconds = 2 * projectStartSeconds;
 
 /**
- * `files` in the units the split places: a small project's files
- * together (`wholeProjectSeconds`), every other file on its own.
+ * A file that takes at least this long runs on a shard of its own. Its
+ * time is what it took beside a shard's other files, sharing the runner's
+ * CPUs with them, and alone it takes a fraction of that: the new Brain's
+ * leak test took 224 to 376 s beside 174 other files of core's, and 72 s
+ * on a laptop alone, 159 s on a shard alone (November 2026). Counted as
+ * running at that time beside others, it set the time every shard of its
+ * group was filled up to, so they all slowed to it again, and one ran
+ * past its step's timeout. At 100 s, 18 files of 42 shards ran alone, a
+ * minute or more of each shard unused.
+ */
+export const aloneSeconds = 120;
+
+/** Whether `shard` is one file that takes `aloneSeconds` or longer, alone. */
+const isAlone = (shard: readonly ShardFile[]): boolean =>
+  shard.length === 1 && (shard[0]?.seconds ?? 0) >= aloneSeconds;
+
+/**
+ * How long the longest of `shards` takes, of those not a file alone
+ * (`aloneSeconds`): what more shards can shorten.
+ */
+const sharedSecondsOf = (shards: readonly ShardFile[][]): number =>
+  Math.max(0, ...shards.filter((shard) => !isAlone(shard)).map(shardSeconds));
+
+/**
+ * `files` in the units the split places: a file of `aloneSeconds` or more
+ * on its own, so it can run alone, then of the rest a small project's
+ * files together (`wholeProjectSeconds`) and every other file on its own.
+ * Grouped first, a small project's long file went with its short ones.
  */
 const unitsOf = (files: readonly ShardFile[]): ShardFile[][] => {
-  const projects = Map.groupBy(files, ({ project }) => project);
-  return [...projects.values()].flatMap((own) =>
-    workOf(own) / (own[0]?.serial === true ? 1 : concurrentFiles) <=
-    wholeProjectSeconds
-      ? [own]
-      : own.map((file) => [file])
+  const long = files.filter(({ seconds }) => seconds >= aloneSeconds);
+  const projects = Map.groupBy(
+    files.filter(({ seconds }) => seconds < aloneSeconds),
+    ({ project }) => project
   );
+  return [
+    ...long.map((file) => [file]),
+    ...[...projects.values()].flatMap((own) =>
+      workOf(own) / (own[0]?.serial === true ? 1 : concurrentFiles) <=
+      wholeProjectSeconds
+        ? [own]
+        : own.map((file) => [file])
+    ),
+  ];
 };
 
 /**
@@ -150,16 +183,30 @@ export const runsInFirstShard = ({ key, browser }: ShardFile): boolean =>
 const keyOfUnit = (unit: readonly ShardFile[]): string => unit[0]?.key ?? "";
 
 /**
+ * `files` by key. Every runner computes the split alone, from the files in
+ * whatever order Vitest found them, which isn't the same on two runners:
+ * the order a unit's or a shard's times are added in changes the sum in
+ * its last bit, and with it which of two shards that tie a file goes to.
+ * From the same order, every runner adds the same numbers in the same
+ * order, and every tie falls the same way: by the shards' order, which
+ * follows the keys. So the split is a function of the set of files and
+ * their times alone. Unsorted, a plan that left a file in no shard, or in
+ * two, was a matter of the order Vitest found the files in.
+ */
+const byFileKey = (files: readonly ShardFile[]): ShardFile[] =>
+  files.toSorted((a, b) => byKey(a.key, b.key));
+
+/**
  * `files` spread over `count` shards: the longest unit first, each into
  * the shard it lengthens least, and of shards it lengthens alike, the one
- * with the least work.
+ * with the least work, then the first.
  */
 export const spreadOver = (
   files: readonly ShardFile[],
   count: number
 ): ShardFile[][] => {
   const shards: ShardFile[][] = Array.from({ length: count }, () => []);
-  const units = unitsOf(files);
+  const units = unitsOf(byFileKey(files));
   const pinned = (unit: readonly ShardFile[]): boolean =>
     unit.some(runsInFirstShard);
   for (const unit of units.filter(pinned)) {
@@ -170,11 +217,28 @@ export const spreadOver = (
     .toSorted(
       (a, b) => workOf(b) - workOf(a) || byKey(keyOfUnit(a), keyOfUnit(b))
     );
-  for (const unit of longestFirst) {
-    let best = 0;
+  // Each long file to a shard of its own while one is left for the rest
+  // (`aloneSeconds`), longest first.
+  const alone = new Set<number>();
+  const others = longestFirst.filter((unit) => {
+    const free = shards.findIndex((shard) => shard.length === 0);
+    const lone = isAlone(unit) && free !== -1 && alone.size + 1 < count;
+    if (lone) {
+      shards[free]?.push(...unit);
+      alone.add(free);
+    }
+    return !lone;
+  });
+  for (const unit of others) {
+    let best = shards.findIndex((_, index) => !alone.has(index));
     let bestSeconds = Number.POSITIVE_INFINITY;
     let bestWork = Number.POSITIVE_INFINITY;
     for (const [index, shard] of shards.entries()) {
+      // A shard a long file was given alone, not one a long file happens
+      // to be the first in.
+      if (alone.has(index)) {
+        continue;
+      }
       const seconds = shardSeconds([...shard, ...unit]);
       const work = workOf(shard);
       if (
@@ -203,13 +267,14 @@ export const spreadOver = (
  * whose shards would end last, of those that end later than their longest
  * unit alone would: a group held up by one long file (the compiler's
  * longest build) gains nothing from more, which then go where they help.
- * The same files always split the same way, on every runner.
+ * The same files always split the same way, on every runner, in whatever
+ * order they come (`byFileKey`).
  */
 export const splitIntoShards = (
   files: readonly ShardFile[],
   count: number
 ): ShardFile[][] => {
-  const groups = Map.groupBy(files, ({ group }) => group);
+  const groups = Map.groupBy(byFileKey(files), ({ group }) => group);
   const order = [...groups.keys()].toSorted((a, b) => a - b);
   if (count < order.length) {
     throw new Error(
@@ -227,17 +292,21 @@ export const splitIntoShards = (
   const shardsOf = new Map(
     order.map((group) => [group, spreadOver(groups.get(group) ?? [], 1)])
   );
-  const longestOf = (shards: readonly ShardFile[][]): number =>
-    Math.max(...shards.map(shardSeconds));
-  /** The soonest a group's shards can end, however many: its longest unit's. */
+  /**
+   * The soonest a group's shards can end, however many: its longest
+   * unit's, of those that don't run alone.
+   */
   const floorOf = new Map(
-    order.map((group) => [group, longestOf(unitsOf(groups.get(group) ?? []))])
+    order.map((group) => [
+      group,
+      sharedSecondsOf(unitsOf(groups.get(group) ?? [])),
+    ])
   );
   for (let left = count - order.length; left > 0; left -= 1) {
     let slowest: number | undefined;
     let slowestSeconds = Number.NEGATIVE_INFINITY;
     for (const group of order) {
-      const seconds = longestOf(shardsOf.get(group) ?? []);
+      const seconds = sharedSecondsOf(shardsOf.get(group) ?? []);
       const shortens = seconds > (floorOf.get(group) ?? 0);
       if (shortens && seconds > slowestSeconds) {
         slowest = group;

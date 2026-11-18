@@ -222,6 +222,10 @@ const ProducerBadge = ({ producer }: { producer: BrainSourceProducer }) => {
       message: "Read from a shared connection",
       context: "a source of the Brain",
     }),
+    sync: t({
+      message: "Copied from a connected system",
+      context: "a source of the Brain",
+    }),
   }[producer];
   return <Badge variant="outline">{label}</Badge>;
 };
@@ -714,7 +718,7 @@ const UploadActions = ({
           confirm={deletes === "erase" ? t`Delete for good` : t`Delete`}
           description={
             deletes === "erase"
-              ? t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone.`
+              ? t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone. What a workflow kept from it between its runs isn't erased, but it is no longer shown or used.`
               : t`Nobody can find or read it from then on, you included, and it can't be brought back. The Brain keeps its history until an admin erases it.`
           }
           label={t`Delete this upload`}
@@ -841,7 +845,7 @@ const ConnectionFeeds = ({ connections }: { connections: Connection[] }) => {
             </Trans>
           </p>
           <ul className="flex flex-col gap-2 text-sm">
-            {connections.map(({ name, keepsReads }) => (
+            {connections.map(({ name, keepsReads, activityGap }) => (
               <li className="flex flex-col" key={name}>
                 <span>{name}</span>
                 <span className="text-muted-foreground">
@@ -855,6 +859,14 @@ const ConnectionFeeds = ({ connections }: { connections: Connection[] }) => {
                     <Trans>Searched live, nothing kept.</Trans>
                   )}
                 </span>
+                {activityGap === true ? (
+                  <span className="text-muted-foreground">
+                    <Trans>
+                      A gap: this connection can’t tell Grasp what changed in
+                      it, so Grasp sees only what is done there through Grasp.
+                    </Trans>
+                  </span>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -1419,7 +1431,7 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
                     busy={busy}
                     button={t`Erase for good`}
                     confirm={t`Erase for good`}
-                    description={t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone.`}
+                    description={t`Every version of it is erased from the Brain for everyone who could read it. This can't be undone. What a workflow kept from it between its runs isn't erased, but it is no longer shown or used.`}
                     label={
                       name === null
                         ? t`Erase this upload for good`

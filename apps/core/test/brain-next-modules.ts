@@ -21,8 +21,16 @@ export const brainModules = {
   "apps/core/src/agent-app-access.ts": "agentApps",
   // The skills' rules (GRA-1826): its own surface, each export probed.
   "apps/core/src/brain-skills.ts": "skills",
-  // Runs core's workBrain on the clock, and hands nothing of it on.
+  // Runs core's workBrain and expireEvents on the clock, and hands nothing
+  // of them on.
   "apps/core/src/clock.ts": "core",
+  // Keeps the tool calls connect audited as events with core's
+  // recordEvents, which answers nothing.
+  "apps/core/src/brain-events.ts": "core",
+  // An admin's opportunities: the routines seen in activity, as core's
+  // observedRoutinesOf answers them (its probe holds what it returns),
+  // with their systems by catalog name, and nothing more of the Brain.
+  "apps/core/src/opportunities.ts": "core",
   // Answers the staff with core's brainStaffReport, actOnBrainForStaff and
   // brainErasureForStaff, through their schemas.
   "apps/core/src/brain-report.ts": "core",
@@ -53,12 +61,24 @@ export const brainModules = {
   // and who uploaded what, from core's own records, read only by recall's
   // `whoKnowsFor`, whose probe holds what it hands on.
   "apps/core/src/brain-uploads.ts": "sources",
+  // Native sync's run (GRA-1758): adds what a connected system holds with
+  // core's addSource, changes its readers with changeSourceReaders and
+  // erases it with eraseSource and eraseOwnGroup, on the clock and the
+  // disconnect drain, and hands nothing of the Brain on.
+  "apps/core/src/brain-sync.ts": "core",
   // Adds what a chat's agent read through a connection with core's
   // addSource, for the chat's person alone, and hands nothing on.
   "apps/core/src/connection-capture.ts": "core",
   // Writing and sharing skills (GRA-1754): its own surface, each export
   // probed as the signed-in person.
   "apps/core/src/skill-shares.ts": "shares",
+  // Skills proposed from a person's own runs (GRA-1756): asks their own
+  // store to draft one with core's proposeOwnSkill, lists theirs with
+  // ownSkillProposalsAs and settles one with settleOwnSkillProposal, whose
+  // probes hold what they answer; adds one with core's addOwnSkill; hands
+  // on beside them only what core's own records say of the person's own
+  // runs.
+  "apps/core/src/skill-proposals.ts": "core",
   // Code's recall: an App's action, a workflow's step and a chat's code;
   // and who knows about a topic, for a chat's code.
   "apps/core/src/brain-recall.ts": "recall",

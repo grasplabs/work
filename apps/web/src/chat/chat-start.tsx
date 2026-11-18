@@ -1,10 +1,12 @@
 import type { Blueprint } from "@grasp-os/shared/apps";
 import type { ChatMake } from "@grasp-os/shared/chat";
+import type { Opportunity } from "@grasp-os/shared/opportunities";
 import { canBuild } from "@grasp-os/shared/roles";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Await, useRouteContext } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
+import { briefOf, useStartFrom } from "../brain/opportunity-drafts.ts";
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
 import type { Session } from "../core.ts";
 import { SiteHeader } from "../frame/site-header.tsx";
@@ -33,7 +35,10 @@ import { useAsk } from "./use-ask.ts";
 // `&project=`): what to get done, and ideas to start from in place of the
 // questions (make/make-ideas.tsx), the blueprints for an App, a few
 // starting sentences for a workflow; the first question starts the chat
-// with what to make (`ChatMake`), which the chat keeps. Asking starts a new
+// with what to make (`ChatMake`), which the chat keeps. From an
+// opportunity an admin drafts (`opportunity`, GRA-1751), the box starts
+// with its brief (brain/opportunity-drafts.ts) for them to change and
+// send: nothing is asked until they do. Asking starts a new
 // chat in Grasp's one chat (global-chat.tsx), which opens full screen over
 // the page with the answer coming in, as on every other page.
 
@@ -109,12 +114,15 @@ export const ChatStart = ({
   make,
   ideas,
   agent,
+  opportunity,
 }: {
   make: ChatMake | undefined;
   ideas: Promise<Loaded<MakeIdeas>> | undefined;
   agent?: string | undefined;
+  /** The opportunity whose brief the box starts with, once read. */
+  opportunity?: Promise<Loaded<Opportunity | undefined>> | undefined;
 }) => {
-  const { t } = useLingui();
+  const { t, i18n } = useLingui();
   const { offered } = useGlobalChat();
   const { identity } = useRouteContext({ from: "/_shell" });
   const agents = offered?.agents ?? [];
@@ -149,6 +157,13 @@ export const ChatStart = ({
       { kind: "agent", id: named.id, label: named.name, trigger: "@" },
     ]);
   }, [named, typed, onText, onMentions]);
+  // The opportunity's brief, once read, fills the box.
+  const kind = make?.kind;
+  useStartFrom(opportunity, (read) => {
+    if (kind !== undefined) {
+      onText(briefOf(read, kind, i18n));
+    }
+  });
   // Offered the tour, his question stands in the greeting's place, and
   // nothing to start from under the box until it is answered. Never to
   // who came to make something: they came for that, not a tour.

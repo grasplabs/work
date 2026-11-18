@@ -1,14 +1,21 @@
 import { z } from "zod";
 
 import type { BrainBucket } from "./bucket.ts";
-import { erasureReasons, refusalPrefix, restoringNow } from "./contract.ts";
+import {
+  erasureReasons,
+  personEventsSchema,
+  refusalPrefix,
+  restoringNow,
+} from "./contract.ts";
 import type {
   ErasureReason,
   ErasureStatus,
   ErasuresOverview,
   Identifier,
+  PersonEvents,
 } from "./contract.ts";
 import { foldIdentifier } from "./entities.ts";
+import { eraseEventsIn, tagSlices } from "./events.ts";
 import { hashOf, releaseVectors } from "./files.ts";
 import {
   deleteMemories,
@@ -621,6 +628,8 @@ const personBodySchema = z.union([
     subjects: z.array(
       z.string().regex(/^(?:[0-9a-f]{64}|entity:[0-9a-f-]{36})$/u)
     ),
+    /** Their events' tags and the host's key they were made under (events.ts). */
+    events: personEventsSchema.optional(),
   }),
   z.strictObject({ parts: z.int().nonnegative() }),
 ]);
@@ -628,15 +637,19 @@ type PersonBody = z.infer<typeof personBodySchema>;
 
 /**
  * Records the person's erasure `key` (`entry`) and applies it to what
- * `found` names (people.ts `applyPerson`), in the caller's transaction;
- * none found (a legacy entry's body): its record alone.
+ * `found` names (people.ts `applyPerson`), and to their events (`events`:
+ * those deleted and their tags closed as of the erasure, events.ts
+ * `eraseEventsIn`, the tags kept with it for its entry's body), in the
+ * caller's transaction; none found (a legacy entry's body): its record
+ * alone.
  */
 const applyPersonEntry = (
   sql: SqlStorage,
   key: string,
   entry: LedgerEntry,
   confirmed: boolean,
-  found: PersonFound | undefined
+  found: PersonFound | undefined,
+  events: PersonEvents | undefined
 ): void => {
   sql.exec(
     `INSERT OR IGNORE INTO erasures
@@ -650,6 +663,22 @@ const applyPersonEntry = (
   );
   if (found !== undefined) {
     applyPerson(sql, { key, subject: entry.subject }, found);
+  }
+  if (events !== undefined) {
+    // Kept only until its entry is written (`confirm`), which a replay's
+    // entry already is.
+    if (!confirmed) {
+      for (const listed of tagSlices(events.who)) {
+        sql.exec(
+          `INSERT OR IGNORE INTO person_erasure_events (erasure, who, key_id)
+          SELECT ?, value, ? FROM json_each(?)`,
+          key,
+          events.keyId,
+          listed
+        );
+      }
+    }
+    eraseEventsIn(sql, events, entry.at);
   }
 };
 
@@ -744,6 +773,22 @@ const apply = (
     sql.exec("DELETE FROM removed_sources WHERE source = ?", source);
     const rows = rowsOf(sql, source);
     sources += rows.length > 0 ? 1 : 0;
+    // A skill drafted from it (skill-proposals.ts) goes with it, open,
+    // found through what proposals rest on (`proposal_sources`), by
+    // index. Nothing on the queue names a source: a draft asks which as it
+    // runs. One settled holds nothing of it, and rests on nothing.
+    for (const { proposal } of sql
+      .exec<{ proposal: string }>(
+        "DELETE FROM proposal_sources WHERE source = ? RETURNING proposal",
+        source
+      )
+      .toArray()) {
+      sql.exec(
+        "DELETE FROM skill_proposals WHERE key = ? AND state = 'open'",
+        proposal
+      );
+      sql.exec("DELETE FROM proposal_sources WHERE proposal = ?", proposal);
+    }
     if (hideVersions(sql, source, rows, key)) {
       stopped.push(source);
     }
@@ -1221,31 +1266,27 @@ interface Recorded extends Record<string, SqlStorageValue> {
 }
 
 /**
- * Writes `recorded`'s ledger entry within `ledgerWaitMs`, and confirms
- * it: throws if R2 fails. Written again, it is the same.
+ * The body of the ledger entry `key` (`named`), from what the store keeps
+ * of it: a source's mark of a group, a writer's change and count, a
+ * person's closed subjects and their events' tags.
  */
-const confirm = async (
-  { storage, bucket, groups }: ErasureStore,
-  { key }: Recorded
-): Promise<void> => {
-  const named = entryOf(key);
-  let body =
-    groups &&
-    named?.kind === "source" &&
-    isKnownGroup(storage.sql, named.subject)
-      ? groupBody
-      : "";
+const bodyOf = (
+  sql: SqlStorage,
+  groups: boolean,
+  key: string,
+  named: LedgerEntry | undefined
+): string => {
   if (named?.kind === "writer") {
-    const { change, memories } = storage.sql
+    const { change, memories } = sql
       .exec<{ change: string | null; memories: number | null }>(
         "SELECT change, memories FROM erasures WHERE key = ?",
         key
       )
       .one();
-    body = JSON.stringify(writerBodySchema.parse({ change, memories }));
+    return JSON.stringify(writerBodySchema.parse({ change, memories }));
   }
   if (named?.kind === "person") {
-    const subjects = storage.sql
+    const subjects = sql
       .exec<{ subject: string }>(
         `SELECT subject FROM person_erasure_subjects WHERE erasure = ?
         ORDER BY subject`,
@@ -1253,10 +1294,73 @@ const confirm = async (
       )
       .toArray()
       .map(({ subject }) => subject);
-    body = JSON.stringify(personBodySchema.parse({ subjects }));
+    const tags = sql
+      .exec<{ who: string; keyId: string }>(
+        `SELECT who, key_id AS keyId FROM person_erasure_events
+        WHERE erasure = ? ORDER BY who`,
+        key
+      )
+      .toArray();
+    const [first] = tags;
+    return JSON.stringify(
+      personBodySchema.parse({
+        subjects,
+        ...(first === undefined
+          ? {}
+          : {
+              events: {
+                keyId: first.keyId,
+                who: tags.map(({ who }) => who),
+              },
+            }),
+      })
+    );
+  }
+  return groups && named?.kind === "source" && isKnownGroup(sql, named.subject)
+    ? groupBody
+    : "";
+};
+
+/**
+ * Writes `recorded`'s ledger entry within `ledgerWaitMs`, and confirms
+ * it: throws if R2 fails. Written again, it is the same. Its body is built
+ * in the transaction that asks whether it is still unconfirmed: once
+ * another caller confirmed it (a live retry while the tick waited on an
+ * earlier entry), it is never written again, as its working rows went
+ * with that confirmation (a person's events' tags) and a body built
+ * without them would lose them. Built while unconfirmed, a body holds
+ * them all, as they go only with the confirmation; so two callers that
+ * both build one write the same.
+ */
+const confirm = async (
+  { storage, bucket, groups }: ErasureStore,
+  { key }: Recorded
+): Promise<void> => {
+  const named = entryOf(key);
+  const body = storage.transactionSync(() => {
+    const [row] = storage.sql
+      .exec<{ confirmed: number }>(
+        "SELECT confirmed FROM erasures WHERE key = ?",
+        key
+      )
+      .toArray();
+    return row === undefined || row.confirmed === 1
+      ? undefined
+      : bodyOf(storage.sql, groups, key, named);
+  });
+  if (body === undefined) {
+    return;
   }
   await inTime(bucket.put(key, body));
-  storage.sql.exec("UPDATE erasures SET confirmed = 1 WHERE key = ?", key);
+  // The entry holds the events' tags now: their working rows go with the
+  // confirmation, in one transaction.
+  storage.transactionSync(() => {
+    storage.sql.exec("UPDATE erasures SET confirmed = 1 WHERE key = ?", key);
+    storage.sql.exec(
+      "DELETE FROM person_erasure_events WHERE erasure = ?",
+      key
+    );
+  });
 };
 
 /**
@@ -1516,10 +1620,12 @@ export const erasePersonShared = async (
     person,
     identifiers,
     reason,
+    events,
   }: {
     person: string;
     identifiers: readonly Identifier[];
     reason: ErasureReason;
+    events?: PersonEvents;
   }
 ): Promise<void> => {
   const { storage } = store;
@@ -1551,11 +1657,18 @@ export const erasePersonShared = async (
       at: nextAt(sql),
     };
     const key = ledgerKeyOf(entry);
-    applyPersonEntry(sql, key, entry, false, {
-      people: [person],
-      identifiers: held,
-      subjects: closing,
-    });
+    applyPersonEntry(
+      sql,
+      key,
+      entry,
+      false,
+      {
+        people: [person],
+        identifiers: held,
+        subjects: closing,
+      },
+      events
+    );
     return { key, confirmed: 0 };
   });
   if (recorded.confirmed === 0) {
@@ -1676,7 +1789,7 @@ interface EntryRead {
   group?: boolean;
   writer?: WriterBody;
   /** A person's entry: what it names in this copy; undefined for a legacy body (`personBodySchema`). */
-  person?: { found: PersonFound | undefined };
+  person?: { found: PersonFound | undefined; events?: PersonEvents };
 }
 
 /**
@@ -1704,6 +1817,9 @@ const readEntry = async (
     replayMemos.set(storage, memo);
     return {
       person: {
+        ...("events" in body && body.events !== undefined
+          ? { events: body.events }
+          : {}),
         found:
           "subjects" in body
             ? await foundForReplay(
@@ -1812,7 +1928,14 @@ export const replayStep = async ({
             keepGroup(sql, entry.subject);
           }
           if (person !== undefined) {
-            applyPersonEntry(sql, key, entry, true, person.found);
+            applyPersonEntry(
+              sql,
+              key,
+              entry,
+              true,
+              person.found,
+              person.events
+            );
             return [];
           }
           return apply(sql, key, entry, true, writer).stopped;

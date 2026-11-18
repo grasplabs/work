@@ -23,6 +23,7 @@ import type { ModelsApi } from "./models.ts";
 import type { NotificationsApi } from "./notifications.ts";
 import type { OnboardingGateApi } from "./onboarding-gate.ts";
 import type { OnboardingApi } from "./onboarding.ts";
+import type { OpportunitiesApi } from "./opportunities.ts";
 import type { OrgSettingsApi } from "./org-settings.ts";
 import type { OrganizationApi } from "./organization.ts";
 import type { PagesApi } from "./pages.ts";
@@ -128,6 +129,8 @@ export interface SessionApi {
    * undoing one there.
    */
   readonly brainMemories: BrainMemoriesApi;
+  /** What the company could automate or improve, from its routines: for admins. */
+  readonly opportunities: OpportunitiesApi;
   /** Instruction files, for those who may edit each. */
   readonly instructions: InstructionsApi;
   /**

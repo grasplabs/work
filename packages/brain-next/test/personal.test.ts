@@ -1520,6 +1520,15 @@ const leavingWork: Record<string, (who: string) => Promise<void>> = {
   addSource: async (who) => {
     await add(own(who), "A source to embed", theirs(who));
   },
+  // A draft of a skill for them (skill-proposals.ts): written by the queue.
+  proposeSkill: async (who) => {
+    await own(who).proposeSkill({
+      person: who,
+      key: await sha256(crypto.randomUUID()),
+      about: "A routine.",
+      subject: "routine@1",
+    });
+  },
   // Their own export: written by the queue, a part a run.
   startOwnExport: async (who) => {
     await own(who).startOwnExport({ person: who, deployment: "test" });
@@ -1622,6 +1631,9 @@ const leavingNone = [
   // Memories and entities are written and read whole in their call, and
   // erased with what they rest on: none of their methods leaves work.
   "addMemories",
+  // A person's own store takes only their own readers, which its sources
+  // already have: it answers with the current version, writing nothing.
+  "changeReaders",
   // One statement of which version a change made, if the reader may read it.
   "changeVersion",
   "confirmMemory",
@@ -1634,9 +1646,12 @@ const leavingNone = [
   // One read of which keys and memories an erasure took.
   "erasedOf",
   // The shared store's alone: a person's own store refuses them.
+  "addEvents",
   "erasePersonShared",
   "eraseWriter",
   "erasureStatus",
+  "expireEvents",
+  "observedRoutines",
   "exportFile",
   "exportStatus",
   "findEntities",
@@ -1666,6 +1681,10 @@ const leavingNone = [
   "listWritten",
   "retireWritten",
   "searchVectors",
+  // A person's skill proposals, listed and settled in one statement each
+  // (skill-proposals.ts).
+  "settleSkillProposal",
+  "skillProposals",
   "startExport",
   // A person's own store refuses the company's export and every restore.
   "checkRestore",

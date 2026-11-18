@@ -1,6 +1,9 @@
 import { log } from "@grasp-os/shared/log";
 
 import { eraseSource, removeSharedSources } from "../brain-next.ts";
+import { brainTeams } from "../brain-rpc.ts";
+import { arrangeTeams } from "../brain-team-groups.ts";
+import { eraseOpportunitiesOn, proposerOf } from "../opportunities.ts";
 import type { FallingSource } from "./sources-fall.ts";
 import { Onboarding as OnboardingStore } from "./store.ts";
 
@@ -25,6 +28,12 @@ const takeOut = async (
         readers: { kind: "members" },
         reason: "deleted",
       });
+      // What an opportunity keeps of a drawing goes with it (GRA-1750): if
+      // this fails, the drawing stays owed, and core's clock erases both.
+      if (source.producer === "drawing") {
+        // oxlint-disable-next-line no-await-in-loop -- one erasure at a time
+        await eraseOpportunitiesOn(env, source.id);
+      }
       erased.push(source);
     } catch (error) {
       log.error("onboarding.brain_erasure_failed", {
@@ -40,11 +49,22 @@ const takeOut = async (
  * its binding names): the store, given the one way it reaches the Brain
  * itself, taking team claims and drawings that stop standing out of use in
  * the shared store before the change that drops them commits (GRA-1946,
- * GRA-1748, the store's `#fallenFirst`). Given here, through core's Brain module, as the store
- * can't import that module: it reads the store back (a cycle).
+ * GRA-1748, the store's `#fallenFirst`), asking what Grasp proposes
+ * for its routines (`proposerOf`, GRA-1750), and arranging the Brain's
+ * teams into regions (`arrangeTeams`, GRA-1993). Given here, through
+ * core's modules, as the store can't import them: they read the store back
+ * (a cycle).
  */
 export class Onboarding extends OnboardingStore {
   constructor(ctx: DurableObjectState, env: Env) {
-    super(ctx, env, async (sources) => await takeOut(env, sources));
+    super(
+      ctx,
+      env,
+      async (sources) => await takeOut(env, sources),
+      proposerOf(env),
+      async () => {
+        await arrangeTeams(env, async () => await brainTeams(env));
+      }
+    );
   }
 }

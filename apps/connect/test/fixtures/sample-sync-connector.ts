@@ -81,6 +81,17 @@ export default defineConnector({
           host: sampleHost,
           path: "/v1/me/folders/{place}/changes",
         },
+        // A names-only listing, and items fetched by ID (core's daily pass).
+        {
+          method: "GET",
+          host: sampleHost,
+          path: "/v1/me/folders/{place}/names",
+        },
+        {
+          method: "GET",
+          host: sampleHost,
+          path: "/v1/me/folders/{place}/items",
+        },
       ],
       places: async ({ cursor }) => {
         const url = new URL(`${api}/v1/me/folders`);
@@ -88,6 +99,10 @@ export default defineConnector({
           url.searchParams.set("from", cursor);
         }
         const response = await fetch(url);
+        // A folder list's position the provider no longer knows.
+        if (response.status === 410) {
+          throw new RestartSyncError();
+        }
         if (!response.ok) {
           throw new Error(`The provider answered ${response.status}`);
         }
@@ -96,9 +111,68 @@ export default defineConnector({
           .parse(await response.json());
         return { places: folders, cursor: next ?? null };
       },
+      read: async ({ place, cursor, names, ids }) => {
+        const folder = `${api}/v1/me/folders/${encodeURIComponent(place)}`;
+        let url: URL;
+        if (ids === null) {
+          url = new URL(`${folder}/${names ? "names" : "changes"}`);
+          if (cursor !== null) {
+            url.searchParams.set("from", cursor);
+          }
+        } else {
+          url = new URL(`${folder}/items`);
+          for (const id of ids) {
+            url.searchParams.append("id", id);
+          }
+        }
+        const response = await fetch(url);
+        if (response.status === 410) {
+          throw new RestartSyncError();
+        }
+        if (!response.ok) {
+          throw new Error(`The provider answered ${response.status}`);
+        }
+        const feed = feedSchema.parse(await response.json());
+        return { items: feed.changes, cursor: feed.next, more: feed.more };
+      },
+    }),
+    // Places of a shared connection an admin picks (shared drives,
+    // libraries), listed with their names, each read from its own feed,
+    // the route's `{place}` bound to it.
+    defineSync({
+      name: "sites",
+      kind: "file",
+      routes: [
+        { method: "GET", host: sampleHost, path: "/v1/sites" },
+        { method: "GET", host: sampleHost, path: "/v1/sites/{place}/changes" },
+      ],
+      choices: async ({ cursor }) => {
+        const url = new URL(`${api}/v1/sites`);
+        if (cursor !== null) {
+          url.searchParams.set("from", cursor);
+        }
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`The provider answered ${response.status}`);
+        }
+        const { sites, next } = z
+          .object({
+            sites: z.array(z.object({ id: z.string(), name: z.string() })),
+            next: z.string().nullish(),
+          })
+          .parse(await response.json());
+        return {
+          choices: sites.map(({ id, name }) => ({
+            place: id,
+            title: name,
+            within: null,
+          })),
+          cursor: next ?? null,
+        };
+      },
       read: async ({ place, cursor }) => {
         const url = new URL(
-          `${api}/v1/me/folders/${encodeURIComponent(place)}/changes`
+          `${api}/v1/sites/${encodeURIComponent(place)}/changes`
         );
         if (cursor !== null) {
           url.searchParams.set("from", cursor);
