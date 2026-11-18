@@ -1533,6 +1533,9 @@ export const admitWorkflowStart = async (
     null,
     authorization.restricted ? 1 : 0,
     stateHashOf(authorization),
+    authorization.state !== null && authorization.state.withheld > 0
+      ? authorization.state.withheld
+      : null,
   ].map((value) => (value === null ? sql`NULL` : sql`${value}`));
   const detail = {
     ...noted,

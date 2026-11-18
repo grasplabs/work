@@ -414,6 +414,10 @@ msgstr "{count, plural, one {Aus deinem letzten Lauf von {workflow}, Version {ve
 msgid "{count, plural, one {It can't be shared yet: # problem} other {It can't be shared yet: # problems}}"
 msgstr "{count, plural, one {Es kann noch nicht geteilt werden: # Problem} other {Es kann noch nicht geteilt werden: # Probleme}}"
 
+#: src/workflows/run-detail.tsx
+msgid "{count, plural, one {It started without # kept value: the run that kept it read something that is no longer there to read.} other {It started without # kept values: the runs that kept them read something that is no longer there to read.}}"
+msgstr "{count, plural, one {Er startete ohne # behaltenen Wert: Der Lauf, der ihn behalten hat, hat etwas gelesen, das nicht mehr zu lesen ist.} other {Er startete ohne # behaltene Werte: Die Läufe, die sie behalten haben, haben etwas gelesen, das nicht mehr zu lesen ist.}}"
+
 #: src/brain/thinking/use-thinking.ts
 msgid "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
 msgstr "{count, plural, one {Lese # Workflow} other {Lese # Workflows}}"
@@ -5591,8 +5595,8 @@ msgid "Every tool it has: Apps and agents use only what they are granted."
 msgstr "Jedes seiner Tools: Apps und Agenten nutzen nur, was ihnen erlaubt ist."
 
 #: src/brain/sources-page.tsx
-msgid "Every version of it is erased from the Brain for everyone who could read it. This can't be undone."
-msgstr "Jede Version davon wird für alle, die sie lesen konnten, aus dem Brain gelöscht. Das lässt sich nicht rückgängig machen."
+msgid "Every version of it is erased from the Brain for everyone who could read it. This can't be undone. What a workflow kept from it between its runs isn't erased, but it is no longer shown or used."
+msgstr "Jede Version davon wird für alle, die sie lesen konnten, aus dem Brain gelöscht. Das lässt sich nicht rückgängig machen. Was ein Workflow daraus zwischen seinen Läufen behalten hat, wird nicht gelöscht, aber nicht mehr angezeigt oder verwendet."
 
 #: src/agents/agent-wakes.tsx
 msgid "Every weekday"

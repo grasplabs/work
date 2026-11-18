@@ -11,6 +11,7 @@ import { rollback } from "../src/publish.ts";
 import { createWorkflowResource } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import { sweepWorkflowStartDetails } from "../src/workflows/retention.ts";
 import { boundIn, withFiles } from "./app-definitions.ts";
 import { commitDefined } from "./apps.ts";
 import { person, queryReference, seal } from "./sealed-apps.ts";
@@ -133,11 +134,7 @@ describe("a workflow reference's run list", { timeout: 120_000 }, () => {
       },
       { timeout: 30_000, interval: 100 }
     );
-    await env.DB.prepare(
-      "UPDATE workflow_start_receipts SET details_removed_at = ?, input = NULL, params = NULL WHERE id = ?"
-    )
-      .bind(Date.now(), started)
-      .run();
+    await sweepWorkflowStartDetails(env, new Date(Date.now() + 1), new Date());
     const [removed] = await offered();
     const offeredOnce = [
       { started: true, canWatch: true, watched: "shown" },
@@ -442,11 +439,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     );
     // Once the retention sweep removed the run's details (as it marks
     // its receipt), its history tells nothing.
-    await env.DB.prepare(
-      "UPDATE workflow_start_receipts SET details_removed_at = ?, input = NULL, params = NULL WHERE id = ?"
-    )
-      .bind(Date.now(), failed)
-      .run();
+    await sweepWorkflowStartDetails(env, new Date(Date.now() + 1), new Date());
     const removed = pageOf(await askNext({ runId: failed, pagination: {} }));
     expect({
       throughOld,
