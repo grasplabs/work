@@ -18,7 +18,7 @@ import {
   teams,
   users,
 } from "./db/core/schema.ts";
-import { chunks, inList, statementsWithin } from "./db/d1.ts";
+import { chunks, inList } from "./db/d1.ts";
 import { teamNameKey } from "./onboarding/kickoff-company.ts";
 
 // One list of teams with one id (GRA-2055): the onboarding's staff list
@@ -55,6 +55,9 @@ const leftRowsSchema = z.array(
 
 /** The directory's placeholder addresses (auth/directory-members.ts): no sign-in verified them. */
 const placeholderSuffix = "%@directory.invalid";
+
+/** How many places one statement keeps: each a few dozen bytes of JSON in one bound value. */
+const placesPerStatement = 500;
 
 /** How many people's changes go in one batch: six statements each at most. */
 const peoplePerBatch = 50;
@@ -373,16 +376,19 @@ export const keepStaffListPlaces = async (
       teamOf.set(address, team);
     }
   }
-  const now = new Date();
-  const rows = [...teamOf].map(([email, teamId]) => ({
-    email,
-    teamId,
-    confirmedAt: now,
-  }));
+  const now = Date.now();
+  const places = [...teamOf].map(([email, team]) => ({ email, team }));
   await db.batch([
     db.delete(staffListPlaces),
-    ...statementsWithin(rows, (part) =>
-      db.insert(staffListPlaces).values(part)
+    // A place only in a team that exists as the statement runs: one the
+    // admin deleted while the confirm ran (and so never made again,
+    // `intoMembersTeams`) places nobody, and fails nothing.
+    ...chunks(places, placesPerStatement).map((part) =>
+      db.insert(staffListPlaces).select(
+        sql`SELECT json_extract(place.value, '$.email'), json_extract(place.value, '$.team'), ${now}
+          FROM json_each(${JSON.stringify(part)}) AS place
+          WHERE EXISTS (SELECT 1 FROM ${teams} WHERE ${teams.id} = json_extract(place.value, '$.team'))`
+      )
     ),
   ]);
 };
