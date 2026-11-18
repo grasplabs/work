@@ -68,8 +68,15 @@ export interface ThreadProps<T extends ThreadItemBase> {
   items: T[];
   /** Draws one message: the caller's own message component. */
   renderItem: (item: T, index: number) => ReactNode;
-  /** Its name, as a screen reader and an agent say it ("Conversation with the research agent"). */
-  "aria-label": string;
+  /**
+   * Its name, as a screen reader and an agent say it ("Conversation with the research agent").
+   * Give this, or `aria-labelledby`, unless the thread stands in a holder already named for it (a
+   * dialog, a region or a panel with its own name): in development a thread with no name and no
+   * named holder is an error in the console.
+   */
+  "aria-label"?: string;
+  /** The id of an element whose words name it (the chat's heading), in place of `aria-label`. */
+  "aria-labelledby"?: string;
   /** The id of the first message the person has not read: an "Unread" line stands before it. */
   unreadFrom?: string;
   /** There are older messages to load at the top. */
@@ -748,9 +755,11 @@ const LOADING_PAIRS = [
  */
 const ThreadLoading = ({
   label,
+  labelledBy,
   words,
 }: {
-  label: string;
+  label: string | undefined;
+  labelledBy: string | undefined;
   words: ThreadWords;
 }) => (
   <div data-slot="thread" data-loading="" {...stylex.props(styles.root)}>
@@ -758,6 +767,7 @@ const ThreadLoading = ({
     <div
       role="log"
       aria-label={label}
+      aria-labelledby={labelledBy}
       aria-busy="true"
       data-under-start=""
       {...stylex.props(styles.scroller, styles.opening, styles.still)}
@@ -781,11 +791,36 @@ const ThreadLoading = ({
   </div>
 );
 
+// The roles whose own name can stand for a thread inside them.
+const NAMED_HOLDERS =
+  "dialog, alertdialog, [role=dialog], [role=alertdialog], [role=region], [role=complementary], aside, section, main, [role=main]";
+
+const named = (element: Element) =>
+  (element.getAttribute("aria-label") ?? "").trim() !== "" ||
+  (element.getAttribute("aria-labelledby") ?? "").trim() !== "";
+
+/**
+ * In development, says in the console when a thread has no name and stands in no holder that is
+ * named: a screen reader would announce an unnamed log. In production it does nothing.
+ */
+const checkNamed = (log: HTMLElement | null) => {
+  if (!import.meta.env?.DEV || log === null || named(log)) {
+    return;
+  }
+  const holder = log.parentElement?.closest(NAMED_HOLDERS);
+  if (holder === null || holder === undefined || !named(holder)) {
+    console.error(
+      "Thread: give it `aria-label` or `aria-labelledby`, or place it in a dialog, region or panel that has its own name; a screen reader would announce an unnamed log."
+    );
+  }
+};
+
 /** The live thread: its rows, placed by the virtualiser, and the follower. */
 const ThreadLive = <T extends ThreadItemBase>({
   items,
   renderItem,
   "aria-label": ariaLabel,
+  "aria-labelledby": labelledBy,
   unreadFrom,
   hasOlder = false,
   onLoadOlder,
@@ -838,6 +873,11 @@ const ThreadLive = <T extends ThreadItemBase>({
   const scroller = useRef<HTMLDivElement | null>(null);
   const box = useRef<HTMLDivElement | null>(null);
   const [mounted, setMounted] = useState(false);
+
+  // In development: a thread with no name of its own and no named holder says so, once.
+  useEffect(() => {
+    checkNamed(scroller.current);
+  }, []);
 
   if (made.estimate !== estimate) {
     setMade({ ...made, estimate, source: createRowSource<T>(estimate, rows) });
@@ -1046,6 +1086,7 @@ const ThreadLive = <T extends ThreadItemBase>({
         // by the status line below, once each.
         aria-live="off"
         aria-label={ariaLabel}
+        aria-labelledby={labelledBy}
         aria-busy={loading || undefined}
         tabIndex={SCROLLER_TAB_INDEX}
         onScroll={onScroll}
@@ -1175,7 +1216,11 @@ export const Thread = <T extends ThreadItemBase>({
 }: ThreadProps<T>) => {
   const words = useThreadWords(props.words, props.jumpLabel);
   return loading ? (
-    <ThreadLoading label={props["aria-label"]} words={words} />
+    <ThreadLoading
+      label={props["aria-label"]}
+      labelledBy={props["aria-labelledby"]}
+      words={words}
+    />
   ) : (
     <ThreadLive {...props} />
   );

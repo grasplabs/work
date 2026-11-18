@@ -34,6 +34,7 @@ import { Shimmer } from "../shimmer";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { useWords as useCatalogue, withGiven } from "../words/words";
 import { ChatMessageCopy } from "./copy";
+import { messageMarker } from "./message.stylex";
 import { Thoughts } from "./thoughts";
 import type { ChatMessageThoughtsLook } from "./thoughts";
 import { chatMessageWords } from "./words";
@@ -192,8 +193,8 @@ const styles = stylex.create({
     margin: 0,
     color: grasp.ink,
     fontFamily: grasp.fontSans,
-    fontSize: grasp.textMd,
-    lineHeight: grasp.textMdLine,
+    fontSize: grasp.chatText,
+    lineHeight: grasp.chatTextLine,
   },
   person: {
     justifyItems: "end",
@@ -229,13 +230,23 @@ const styles = stylex.create({
     lineHeight: grasp.textSmLine,
     fontWeight: grasp.weightMedium,
   },
-  // The time at the message's foot, under its actions, at the message's own edge: small, muted,
-  // and as wide as its words, so it never stretches across the column.
   time: {
     justifySelf: "start",
     color: grasp.muted,
     fontSize: grasp.textXs,
     lineHeight: grasp.textXsLine,
+    // Where a pointer hovers; on touch there is nothing to hover, so it always shows there.
+    opacity: {
+      default: 1,
+      [media.hover]: {
+        default: 0,
+        [stylex.when.ancestor(":hover", messageMarker)]: 1,
+        [stylex.when.ancestor(":focus-within", messageMarker)]: 1,
+      },
+    },
+    transitionProperty: "opacity",
+    transitionDuration: { default: grasp.durationHover, [media.reduced]: "0s" },
+    transitionTimingFunction: grasp.ease,
   },
   // The agent's words keep their line breaks, as a person's do; wide content (a line of code)
   // scrolls inside them rather than widening the page.
@@ -1085,7 +1096,12 @@ export const ChatMessage = ({
         aria-label={text.person}
         data-slot="chat-message"
         data-from="person"
-        {...stylex.props(styles.root, styles.person, layout ?? styleProp)}
+        {...stylex.props(
+          messageMarker,
+          styles.root,
+          styles.person,
+          layout ?? styleProp
+        )}
       >
         <div {...stylex.props(styles.bubble)}>{children}</div>
         {row}
@@ -1106,6 +1122,7 @@ export const ChatMessage = ({
       // keyboard is, for the keyboard only. A message is words with no box of its own, so the ring
       // is the one for words: a step off them, with the small corner.
       {...stylex.props(
+        messageMarker,
         styles.root,
         roomOf(live, copyText, actions, time),
         styles.focusable,

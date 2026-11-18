@@ -177,7 +177,7 @@ export const PasswordInput = ({
               state.readOnly && inputStyles.readOnly,
               state.disabled && inputStyles.disabled,
               isInvalid(props["aria-invalid"]) && inputStyles.invalid,
-              focus.field
+              state.readOnly ? focus.fieldRead : focus.field
             )}
           />
         )}

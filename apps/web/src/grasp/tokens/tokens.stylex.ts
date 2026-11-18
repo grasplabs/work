@@ -86,6 +86,7 @@ export const grasp = stylex.defineConsts({
   // Type: weights and tracking.
   weightRegular: "var(--grasp-weight-regular)",
   weightMedium: "var(--grasp-weight-medium)",
+  weightSemibold: "var(--grasp-weight-semibold)",
   trackingTitle: "var(--grasp-tracking-title)",
   trackingUi: "var(--grasp-tracking-ui)",
   trackingUiTitle: "var(--grasp-tracking-ui-title)",
@@ -290,6 +291,8 @@ export const grasp = stylex.defineConsts({
   popoverPadding: "var(--grasp-popover-padding)",
   popoverGap: "var(--grasp-popover-gap)",
   popoverWidth: "var(--grasp-popover-width)",
+  hoverCardMinWidth: "var(--grasp-hover-card-min-width)",
+  hoverCardMaxWidth: "var(--grasp-hover-card-max-width)",
   tooltipFill: "var(--grasp-tooltip-fill)",
   tooltipText: "var(--grasp-tooltip-text)",
   tooltipMuted: "var(--grasp-tooltip-muted)",
@@ -578,6 +581,7 @@ export const grasp = stylex.defineConsts({
   composerDot: "var(--grasp-composer-dot)",
   composerScaleDot: "var(--grasp-composer-scale-dot)",
   composerScaleGap: "var(--grasp-composer-scale-gap)",
+  composerVoiceRowBand: "var(--grasp-composer-voice-row-band)",
   modelMenuWidth: "var(--grasp-model-menu-width)",
   attachmentMaxWidth: "var(--grasp-attachment-max-width)",
   attachmentThumb: "var(--grasp-attachment-thumb)",
@@ -586,6 +590,8 @@ export const grasp = stylex.defineConsts({
   questionHeight: "var(--grasp-question-height)",
   // Chat message: chat message.
   chatBubbleWidth: "var(--grasp-chat-bubble-width)",
+  chatText: "var(--grasp-chat-text)",
+  chatTextLine: "var(--grasp-chat-text-line)",
   // Audio player: audio player.
   audioWidth: "var(--grasp-audio-width)",
   // Sidebar: sidebar.
