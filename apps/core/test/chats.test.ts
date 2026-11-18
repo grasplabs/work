@@ -985,7 +985,8 @@ describe("chats", () => {
     await settled(first);
     // The next question is under way, its answer streaming, when the
     // object restarts.
-    await ann.chats.send(chat.id, { text: "And this?", model });
+    const again = { key: crypto.randomUUID(), text: "And this?", model };
+    await ann.chats.send(chat.id, again);
     await vi.waitFor(
       () => {
         expect(first.now()?.partial).not.toBeNull();
@@ -1004,6 +1005,9 @@ describe("chats", () => {
     };
     await restart();
     await restart();
+    // Sent again with its key, as a page that never heard it was taken:
+    // the same question, still being answered, not a second one.
+    await ann.chats.send(chat.id, again);
     const after = await follow(ann.chats, chat.id);
     await vi.waitFor(
       () => {
@@ -1075,6 +1079,11 @@ describe("chats", () => {
     await vi.waitFor(() => {
       expect(follower.messages().at(-1)?.text).toBe("Again.");
     });
+    // Another chat's key says nothing of a question here.
+    const other = await ann.chats.create("Elsewhere");
+    await expect(outcome(ann.chats.send(other.id, question))).resolves.toBe(
+      "agent.invalid_question"
+    );
     // A malformed key is no key.
     await expect(
       outcome(ann.chats.send(chat.id, { ...question, key: "again" }))

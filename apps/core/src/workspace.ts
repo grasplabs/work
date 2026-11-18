@@ -90,6 +90,7 @@ import {
   desc,
   eq,
   gt,
+  gte,
   lt,
   lte,
   inArray,
@@ -1086,7 +1087,10 @@ export class Workspace extends DurableObject<Env> {
    */
   readonly #sent = new Set<Promise<unknown>>();
   /** The questions sent with a key whose turn is still starting, by key (`send`). */
-  readonly #starting = new Map<string, Promise<boolean>>();
+  readonly #starting = new Map<
+    string,
+    { chatId: ChatId; started: Promise<boolean> }
+  >();
 
   /**
    * Set once its person's erasure began (`erasePerson`): from then on
@@ -1441,7 +1445,7 @@ export class Workspace extends DurableObject<Env> {
       key === undefined ? undefined : this.#requested("create", key);
     if (repeated !== undefined) {
       // The person's own chat, as the first call made it.
-      return this.#graspChat(repeated, personId);
+      return this.#graspChat(repeated.chatId, personId);
     }
     const agent = workspaceAgentIdSchema.safeParse(agentId);
     if (!agent.success) {
@@ -1483,10 +1487,13 @@ export class Workspace extends DurableObject<Env> {
     return chat;
   }
 
-  /** The chat a request with `key` was kept for, if one was within a day. */
-  #requested(kind: "create" | "send", key: string): ChatId | undefined {
+  /** The chat a request with `key` was kept for, and when, if one was within a day. */
+  #requested(
+    kind: "create" | "send",
+    key: string
+  ): { chatId: ChatId; at: Date } | undefined {
     return this.#db
-      .select({ chatId: chatRequestKeys.chatId })
+      .select({ chatId: chatRequestKeys.chatId, at: chatRequestKeys.at })
       .from(chatRequestKeys)
       .where(
         and(
@@ -1495,7 +1502,30 @@ export class Workspace extends DurableObject<Env> {
           gt(chatRequestKeys.at, new Date(Date.now() - requestKeyMs))
         )
       )
-      .get()?.chatId;
+      .get();
+  }
+
+  /**
+   * Whether the question `chat` took at `at` is still there: its turn
+   * under way, or something of it kept. A key outlives a restart, and a
+   * turn that had only just started may not: its question was kept
+   * nowhere yet, so a repeat asks it again rather than answer for it.
+   */
+  async #questionStands(chat: Chat, at: Date): Promise<boolean> {
+    if (this.#turns.has(chat.id)) {
+      return true;
+    }
+    const kept = this.#db
+      .select({ id: chatMessages.id })
+      .from(chatMessages)
+      .where(
+        and(eq(chatMessages.chatId, chat.id), gte(chatMessages.createdAt, at))
+      )
+      .limit(1)
+      .get();
+    return (
+      kept !== undefined || (await this.#activeTurn(chat.id)) !== undefined
+    );
   }
 
   /** Keeps `key` for what `chatId` just took, and drops the keys past their day. */
@@ -1508,6 +1538,11 @@ export class Workspace extends DurableObject<Env> {
     this.#db
       .insert(chatRequestKeys)
       .values({ kind, key, chatId, at: new Date(now) })
+      // A question asked again after a restart lost it (`#questionStands`).
+      .onConflictDoUpdate({
+        target: [chatRequestKeys.kind, chatRequestKeys.key],
+        set: { chatId, at: new Date(now) },
+      })
       .run();
   }
 
@@ -2772,23 +2807,27 @@ export class Workspace extends DurableObject<Env> {
   ): Promise<void> {
     const chat = this.#graspChat(chatId, personId);
     if (key !== undefined) {
-      const starting = this.#starting.get(key);
-      if (starting !== undefined) {
-        await starting;
+      const taken = this.#requested("send", key);
+      // Another chat's key says nothing of this question.
+      if (
+        (taken ?? this.#starting.get(key) ?? { chatId: chat.id }).chatId !==
+        chat.id
+      ) {
+        throw agentErrors.create("agent.invalid_question");
+      }
+      if (taken !== undefined && (await this.#questionStands(chat, taken.at))) {
         return;
       }
-      const taken = this.#requested("send", key);
-      if (taken !== undefined) {
-        // Another chat's key says nothing of this question.
-        if (taken !== chat.id) {
-          throw agentErrors.create("agent.invalid_question");
-        }
+      // After the last await, so of two repeats only one starts a turn.
+      const starting = this.#starting.get(key);
+      if (starting !== undefined) {
+        await starting.started;
         return;
       }
     }
     const started = Promise.withResolvers<boolean>();
     if (key !== undefined) {
-      this.#starting.set(key, started.promise);
+      this.#starting.set(key, { chatId: chat.id, started: started.promise });
     }
     const ended = this.#sentTurns(chat, question, started);
     this.#sent.add(ended);

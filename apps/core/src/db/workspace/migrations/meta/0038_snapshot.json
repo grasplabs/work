@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "61a6895e-0159-4d2c-be39-da3009c02f56",
+  "id": "7e1d34e8-dcd1-4ef3-a83d-9b192ee444b3",
   "prevId": "23b6501b-b8b2-48bf-81e1-1f90a04fe4cf",
   "tables": {
     "audit_outbox": {
@@ -1098,21 +1098,7 @@
           "isUnique": false
         }
       },
-      "foreignKeys": {
-        "chat_request_keys_chat_id_chats_id_fk": {
-          "name": "chat_request_keys_chat_id_chats_id_fk",
-          "tableFrom": "chat_request_keys",
-          "tableTo": "chats",
-          "columnsFrom": [
-            "chat_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {
         "chat_request_keys_kind_key_pk": {
           "columns": [

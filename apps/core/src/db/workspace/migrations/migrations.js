@@ -37,7 +37,7 @@ import m0034 from './0034_chat_make.sql';
 import m0035 from './0035_answer_agent.sql';
 import m0036 from './0036_greedy_rafael_vega.sql';
 import m0037 from './0037_mature_tinkerer.sql';
-import m0038 from './0038_uneven_grandmaster.sql';
+import m0038 from './0038_chat_request_keys.sql';
 
   export default {
     journal,
