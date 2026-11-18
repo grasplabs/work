@@ -373,10 +373,6 @@ msgstr "{count, plural, one {# entrevista en la semana {week}} other {# entrevis
 msgid "{count, plural, one {# invited team not interviewed yet: {teams}.} other {# invited teams not interviewed yet: {teams}.}}"
 msgstr "{count, plural, one {# equipo invitado aún sin entrevistar: {teams}.} other {# equipos invitados aún sin entrevistar: {teams}.}}"
 
-#: src/inbox/inbox-page.tsx
-msgid "{count, plural, one {# item} other {# items}}"
-msgstr "{count, plural, one {# elemento} other {# elementos}}"
-
 #: src/chat/subject-bar.tsx
 msgid "{count, plural, one {# more App this chat worked on} other {# more Apps this chat worked on}}"
 msgstr "{count, plural, one {# app más en la que trabajó este chat} other {# apps más en las que trabajó este chat}}"
@@ -1758,6 +1754,10 @@ msgstr "Un token bearer"
 #: src/workflows/binding-approvals.tsx
 msgid "A Brain collection it may read"
 msgstr "Una colección del cerebro que puede leer"
+
+#: src/inbox/item-detail.tsx
+msgid "A builder"
+msgstr "Un creador"
 
 #: src/inbox/items.ts
 msgid "A builder asked for this version of {name} to go live: approved, it is the version the company runs. Send it back to keep the version that runs now."
@@ -9137,6 +9137,7 @@ msgid "Live, being measured"
 msgstr "En marcha, en medición"
 
 #: src/frame/page-failed.tsx
+#: src/inbox/inbox-page.tsx
 msgid "Loaded"
 msgstr "Cargado"
 
@@ -10586,6 +10587,7 @@ msgid "Not listed"
 msgstr "No indicados"
 
 #: src/frame/page-failed.tsx
+#: src/inbox/inbox-page.tsx
 msgid "Not loaded"
 msgstr "No cargado"
 
@@ -14690,7 +14692,6 @@ msgstr "Suave"
 msgid "Some files weren’t added. I can read PDF, Word, Excel, PowerPoint and text."
 msgstr "No se añadió todo. Puedo leer PDF, Word, Excel, PowerPoint y texto."
 
-#: src/inbox/item-detail.tsx
 #: src/workflows/requests/request-parts.tsx
 msgid "Someone"
 msgstr "Alguien"
@@ -16935,6 +16936,7 @@ msgstr "Intentar"
 #: src/frame/page-failed.tsx
 #: src/frame/part-words.tsx
 #: src/frame/setting-up.tsx
+#: src/inbox/inbox-page.tsx
 #: src/interview/sound-check.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/profile-name.tsx
@@ -16957,6 +16959,7 @@ msgstr "Vuelve a buscar"
 
 #: src/chat/builds.tsx
 #: src/frame/page-failed.tsx
+#: src/inbox/inbox-page.tsx
 #: src/settings/section.tsx
 msgid "Trying again…"
 msgstr "Reintentando…"
@@ -17411,7 +17414,6 @@ msgstr "Versión {number}, actual"
 #: src/apps/app-workflows.tsx
 #: src/brain/brain.ts
 #: src/brain/sources-page.tsx
-#: src/inbox/item-detail.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/workflows/version-source.tsx
 #: src/workflows/workflow-triggers.tsx
@@ -18813,6 +18815,7 @@ msgstr "ti"
 #: src/connections/connection-list.tsx
 #: src/connections/integration-inspector.tsx
 #: src/frame/part-words.tsx
+#: src/inbox/item-detail.tsx
 #: src/knowledge/timeline.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/workflows/go-lives-waiting.tsx

@@ -318,7 +318,9 @@ const useDecide = (onSaid: (said: string) => void) => {
 const useApprovalWords = (): Partial<ApprovalWords> => {
   const { t } = useLingui();
   return {
-    theAgent: t`Someone`,
+    // Who asks when an item names nobody: a held write or start, which a
+    // chat's agent or an App run in Grasp asked for.
+    theAgent: "Grasp",
     details: t`Details`,
     askForChanges: t`Ask for changes`,
     whatShouldChange: t`What should change`,
@@ -496,7 +498,6 @@ const HeldStartItem = ({
       onDecline={async (session) => {
         await session.heldStarts.decline(start.id);
       }}
-      summary={frame.item.context}
     />
   );
 };
@@ -561,7 +562,7 @@ const WorkflowGoLiveDetail = ({
       grave
       onApprove={decide("approve")}
       onDecline={decide("reject")}
-      summary={t`Version ${version}`}
+      who={item.selfApproval ? t`You` : t`A builder`}
     />
   );
 };

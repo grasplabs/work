@@ -1,9 +1,9 @@
 import type { AuditRecord } from "@grasp-os/shared/audit-log";
 import type { MessageDescriptor } from "@lingui/core";
-import { msg, plural } from "@lingui/core/macro";
+import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Await, Link, useNavigate } from "@tanstack/react-router";
+import { Await, Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { actorOf } from "../activity/audit-log.tsx";
@@ -19,8 +19,10 @@ import { Alert } from "../grasp/alert/index.ts";
 import { Avatar } from "../grasp/avatar/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { BrandIcon } from "../grasp/brand-icon/index.ts";
+import { Button, useAction } from "../grasp/button/index.ts";
 import {
   Empty,
+  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
@@ -267,6 +269,7 @@ const ToDo = ({
 }) => {
   const { t, i18n } = useLingui();
   const navigate = useNavigate();
+  const router = useRouter();
   // Where the open item stood, so the one after it opens once it is settled.
   const [at, setAt] = useState(0);
   const counts = new Map<Group, number>();
@@ -278,7 +281,6 @@ const ToDo = ({
   // A group that has emptied falls back to everything.
   const current = group === "all" || counts.has(group) ? group : "all";
   const list = listed(items, current, "urgent");
-  const count = list.length;
   const index = list.findIndex(({ id }) => id === chosen);
   if (index !== -1 && index !== at) {
     setAt(index);
@@ -343,6 +345,13 @@ const ToDo = ({
     };
   }, []);
 
+  // Nothing loaded: Try again reads the inbox again, and works until it has.
+  const retry = useAction(
+    async () => {
+      await router.invalidate({ sync: true });
+    },
+    { working: t`Trying again…`, done: t`Loaded`, failed: t`Not loaded` }
+  );
   const failed = notLoaded.flatMap((part) => notLoadedText(part, i18n) ?? []);
   if (items.length === 0) {
     return failed.length === 0 ? (
@@ -359,6 +368,11 @@ const ToDo = ({
           <EmptyTitle>{t`The inbox didn't load`}</EmptyTitle>
           <EmptyDescription>{failed.join(" ")}</EmptyDescription>
         </EmptyHeader>
+        <EmptyContent>
+          <Button variant="ink" {...retry.props}>
+            {t`Try again`}
+          </Button>
+        </EmptyContent>
       </Empty>
     );
   }
@@ -398,11 +412,7 @@ const ToDo = ({
             </TabsList>
           </Tabs>
         )}
-        <SectionCard
-          density="compact"
-          flush
-          title={t`${plural(count, { one: "# item", other: "# items" })}`}
-        >
+        <SectionCard aria-label={t`What waits on you`} density="compact" flush>
           <ItemList list={list} onOpen={open} selected={selected} />
         </SectionCard>
         {olderFailures ? (
