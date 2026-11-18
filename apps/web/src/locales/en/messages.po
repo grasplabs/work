@@ -1037,6 +1037,10 @@ msgstr "{name} is signed out everywhere."
 msgid "{name} is too large."
 msgstr "{name} is too large."
 
+#: src/settings/sign-in-settings.tsx
+msgid "{name} isn’t on the sign-in page yet."
+msgstr "{name} isn’t on the sign-in page yet."
+
 #: src/frame/setting-up.tsx
 msgid "{name} isn't ready yet"
 msgstr "{name} isn't ready yet"
@@ -10604,10 +10608,6 @@ msgstr "Not now"
 msgid "Not offered"
 msgstr "Not offered"
 
-#: src/settings/sign-in-settings.tsx
-msgid "Not on the sign-in page yet"
-msgstr "Not on the sign-in page yet"
-
 #: src/onboarding/send-plan-form.tsx
 msgid "Not planned yet"
 msgstr "Not planned yet"
@@ -11282,10 +11282,6 @@ msgstr "Only the workflow's builders can change these."
 msgid "Only when asked"
 msgstr "Only when asked"
 
-#: src/settings/sign-in-settings.tsx
-msgid "Only work accounts at {hostedDomain}."
-msgstr "Only work accounts at {hostedDomain}."
-
 #: src/connections/integration-inspector.tsx
 msgid "Only you"
 msgstr "Only you"
@@ -11313,10 +11309,6 @@ msgstr "Only you see it while you try it. You share it when it's right."
 #: src/workflows/workflow-status.tsx
 msgid "Only you see this"
 msgstr "Only you see this"
-
-#: src/settings/sign-in-settings.tsx
-msgid "Only your organization’s work accounts."
-msgstr "Only your organization’s work accounts."
 
 #: src/chat/sidebar-chats.tsx
 #: src/connections/request-app-dialog.tsx
@@ -11471,15 +11463,15 @@ msgstr "Open the run started {started}"
 msgid "Open this link again whenever you like, and carry on where you stopped."
 msgstr "Open this link again whenever you like, and carry on where you stopped."
 
+#: src/settings/staff-access.tsx
+msgid "Open until"
+msgstr "Open until"
+
 #: src/decision-confirmation.tsx
 #: src/routes/decisions.$decision.tsx
 msgctxt "until when a decision can be answered"
 msgid "Open until"
 msgstr "Open until"
-
-#: src/settings/staff-access.tsx
-msgid "Open until {until}"
-msgstr "Open until {until}"
 
 #: src/inbox/interviews-item.tsx
 msgid "Open your onboarding"
@@ -13359,7 +13351,6 @@ msgstr "Risk-to-Compliance"
 msgid "Rocket"
 msgstr "Rocket"
 
-#: src/routes/_shell.settings.profile.tsx
 #: src/settings/invitations.tsx
 msgid "Role"
 msgstr "Role"
@@ -16935,6 +16926,7 @@ msgstr "Try"
 #: src/settings/ai-providers.tsx
 #: src/settings/profile-name.tsx
 #: src/settings/section.tsx
+#: src/settings/sign-in-settings.tsx
 #: src/settings/workspace-name.tsx
 msgid "Try again"
 msgstr "Try again"

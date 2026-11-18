@@ -4,21 +4,14 @@ import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { formatList } from "../format.ts";
 import { Combobox } from "../grasp/combobox/index.ts";
-import { EU, Flag } from "../grasp/flags/index.ts";
+import { Input } from "../grasp/input/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
-import {
-  FactRow,
-  SettingRow,
-  SettingsRows,
-} from "../grasp/setting-row/index.ts";
-import { Text } from "../grasp/text/index.ts";
-import { grasp } from "../grasp/tokens/tokens.stylex.ts";
+import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import {
@@ -26,7 +19,7 @@ import {
   SettingsError,
   SettingsLoading,
 } from "../settings/section.tsx";
-import { SignInSection } from "../settings/sign-in-settings.tsx";
+import { SignInRow } from "../settings/sign-in-settings.tsx";
 import { StaffAccessSection } from "../settings/staff-access.tsx";
 import {
   controlStyles,
@@ -40,8 +33,8 @@ import {
 // works in, which its admins change, and where its data lives, which the
 // deployment decides. Everyone sees them; core refuses a change from
 // anyone but the organization's own admins, and everyone else sees the
-// values read-only. Then, for admins, how people sign in
-// (settings/sign-in-settings.tsx) and Grasp's staff access
+// values read-only; for admins, how people sign in, as one of its rows
+// (settings/sign-in-settings.tsx). Then, for admins, Grasp's staff access
 // (settings/staff-access.tsx).
 
 /** The time zones to pick from, each by a city in the reader's language. */
@@ -120,10 +113,28 @@ const zones: { value: string; label: MessageDescriptor }[] = [
     label: msg({ message: "Athens", comment: "A time zone, by its city" }),
   },
 ];
-const styles = stylex.create({
-  // A place: its flag, then its name.
-  place: { display: "inline-flex", alignItems: "center", gap: grasp.space2 },
-});
+/** A fact of the workspace nobody changes here, in a field that only reads. */
+const ReadOnlyRow = ({
+  label,
+  info,
+  value,
+}: {
+  label: string;
+  info: string;
+  value: string;
+}) => (
+  <SettingRow info={info} label={label}>
+    {(field) => (
+      <Input
+        {...field}
+        layout={controlStyles.fill}
+        readOnly
+        size="sm"
+        value={value}
+      />
+    )}
+  </SettingRow>
+);
 
 /** `timeZone`'s offset from UTC now, such as "GMT+2", in the reader's language. */
 const offsetOf = (timeZone: string, locale: string): string =>
@@ -217,43 +228,31 @@ const WorkspaceSettings = ({
 }) => {
   const { t } = useLingui();
   return (
-    <>
-      <SectionCard density="compact" flush title={t`Organization`}>
-        <SettingsRows>
-          <NameField canChange={canChange} name={organization.name} />
-          <LogoField
-            canChange={canChange}
-            logo={organization.logo}
-            name={organization.name}
-          />
-          <TimeZoneField
-            canChange={canChange}
-            timeZone={organization.timeZone}
-          />
-          <FactRow
-            info={t`People sign in with an address in these. To change them, ask your Grasp contact.`}
-            label={t`Sign-in domains`}
-          >
-            {/* With the @ an address has, so a domain reads as where people sign in from. */}
-            <Text size="sm">
-              {formatList(
-                organization.signInDomains.map((domain) => `@${domain}`)
-              )}
-            </Text>
-          </FactRow>
-          <FactRow
-            info={t`Everything Grasp stores for you stays here.`}
-            label={t`Data location`}
-          >
-            <span {...stylex.props(styles.place)}>
-              <Flag flag={EU} />
-              <Text size="sm">{t`European Union`}</Text>
-            </span>
-          </FactRow>
-        </SettingsRows>
-      </SectionCard>
-      <SignInSection />
-    </>
+    <SectionCard density="compact" flush title={t`Organization`}>
+      <SettingsRows>
+        <NameField canChange={canChange} name={organization.name} />
+        <LogoField
+          canChange={canChange}
+          logo={organization.logo}
+          name={organization.name}
+        />
+        <TimeZoneField canChange={canChange} timeZone={organization.timeZone} />
+        {/* With the @ an address has, so a domain reads as where people sign in from. */}
+        <ReadOnlyRow
+          info={t`People sign in with an address in these. To change them, ask your Grasp contact.`}
+          label={t`Sign-in domains`}
+          value={formatList(
+            organization.signInDomains.map((domain) => `@${domain}`)
+          )}
+        />
+        <SignInRow />
+        <ReadOnlyRow
+          info={t`Everything Grasp stores for you stays here.`}
+          label={t`Data location`}
+          value={t`European Union`}
+        />
+      </SettingsRows>
+    </SectionCard>
   );
 };
 

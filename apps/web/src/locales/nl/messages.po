@@ -1037,6 +1037,10 @@ msgstr "{name} is overal afgemeld."
 msgid "{name} is too large."
 msgstr "{name} is te groot."
 
+#: src/settings/sign-in-settings.tsx
+msgid "{name} isn’t on the sign-in page yet."
+msgstr "{name} staat nog niet op de inlogpagina."
+
 #: src/frame/setting-up.tsx
 msgid "{name} isn't ready yet"
 msgstr "{name} is nog niet klaar"
@@ -10604,10 +10608,6 @@ msgstr "Nu niet"
 msgid "Not offered"
 msgstr "Niet aangeboden"
 
-#: src/settings/sign-in-settings.tsx
-msgid "Not on the sign-in page yet"
-msgstr "Nog niet op de inlogpagina"
-
 #: src/onboarding/send-plan-form.tsx
 msgid "Not planned yet"
 msgstr "Nog niet gepland"
@@ -11282,10 +11282,6 @@ msgstr "Alleen de bouwers van de workflow kunnen deze wijzigen."
 msgid "Only when asked"
 msgstr "Alleen als het gevraagd wordt"
 
-#: src/settings/sign-in-settings.tsx
-msgid "Only work accounts at {hostedDomain}."
-msgstr "Alleen werkaccounts bij {hostedDomain}."
-
 #: src/connections/integration-inspector.tsx
 msgid "Only you"
 msgstr "Alleen jij"
@@ -11313,10 +11309,6 @@ msgstr "Alleen jij ziet het terwijl je het uitprobeert. Je deelt het als het goe
 #: src/workflows/workflow-status.tsx
 msgid "Only you see this"
 msgstr "Alleen jij ziet dit"
-
-#: src/settings/sign-in-settings.tsx
-msgid "Only your organization’s work accounts."
-msgstr "Alleen werkaccounts van je organisatie."
 
 #: src/chat/sidebar-chats.tsx
 #: src/connections/request-app-dialog.tsx
@@ -11471,15 +11463,15 @@ msgstr "Run gestart op {started} openen"
 msgid "Open this link again whenever you like, and carry on where you stopped."
 msgstr "Open deze link weer wanneer je wilt, en ga verder waar je gebleven was."
 
+#: src/settings/staff-access.tsx
+msgid "Open until"
+msgstr "Open tot"
+
 #: src/decision-confirmation.tsx
 #: src/routes/decisions.$decision.tsx
 msgctxt "until when a decision can be answered"
 msgid "Open until"
 msgstr "Open tot"
-
-#: src/settings/staff-access.tsx
-msgid "Open until {until}"
-msgstr "Open tot {until}"
 
 #: src/inbox/interviews-item.tsx
 msgid "Open your onboarding"
@@ -13359,7 +13351,6 @@ msgstr "Risk-to-Compliance"
 msgid "Rocket"
 msgstr "Raket"
 
-#: src/routes/_shell.settings.profile.tsx
 #: src/settings/invitations.tsx
 msgid "Role"
 msgstr "Rol"
@@ -16935,6 +16926,7 @@ msgstr "Proberen"
 #: src/settings/ai-providers.tsx
 #: src/settings/profile-name.tsx
 #: src/settings/section.tsx
+#: src/settings/sign-in-settings.tsx
 #: src/settings/workspace-name.tsx
 msgid "Try again"
 msgstr "Opnieuw proberen"
