@@ -7,6 +7,7 @@ import { eraseSource, recallAs } from "../src/brain-next.ts";
 import { overdueRelists, runSync } from "../src/brain-sync.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode } from "./connect-providers.ts";
+import { countingBinds } from "./counting-binds.ts";
 import { driveSyncControlUrl } from "./drive-sync-fake.ts";
 import type { DriveFile, DriveWorld } from "./drive-sync-fake.ts";
 import { mockIdp } from "./idp.ts";
@@ -1438,6 +1439,278 @@ describe("native sync", () => {
         ],
         deleted: [true, false],
         stillThere: [true, true],
+      });
+    }
+  );
+
+  it(
+    "keeps a message that comes back as it was while its removal is held, in the place it left or in another, read in either order",
+    setUpTime,
+    async () => {
+      const owner = await signedInApi(idp, "user");
+      const marks = { m1: markerOf(), m2: markerOf(), m3: markerOf() };
+      // One ID wherever the message is, as a provider with stable IDs
+      // gives it.
+      const message = (name: keyof typeof marks) =>
+        mailItem(name, `Mail ${marks[name]}`);
+      const quiet = { changes: [], next: "q", more: false };
+      const { world } = await connectSampleFeed(owner, { "": quiet, q: quiet });
+      const a: Record<string, unknown> = {
+        "": feedPage([message("m1"), message("m2"), message("m3")], "a1"),
+        a1: feedPage([], "a1"),
+      };
+      const b: Record<string, unknown> = {
+        "": feedPage([], "b1"),
+        b1: feedPage([], "b1"),
+      };
+      const set = async (failing: string[]) => {
+        await world({
+          places: ["a", "b"],
+          folders: { a: { changes: a }, b: { changes: b } },
+          failing,
+        });
+      };
+      await set([]);
+      later(pollMs);
+      await sync();
+      later(pollMs);
+      await sync();
+      const run = async () => {
+        later(pollMs);
+        await sync();
+      };
+      const found = async () => ({
+        m1: await finds(owner.userId, marks.m1),
+        m2: await finds(owner.userId, marks.m2),
+        m3: await finds(owner.userId, marks.m3),
+      });
+      // m1 and m2 go from a, b failing: both held.
+      a.a1 = feedPage([goneItem("m1"), goneItem("m2")], "a2");
+      a.a2 = feedPage([], "a2");
+      await set(["b"]);
+      await run();
+      // m1 comes back to a as it was, while b still fails; then b comes
+      // back with m2 as it was, which ends every hold.
+      a.a2 = feedPage([message("m1")], "a3");
+      a.a3 = feedPage([], "a3");
+      b.b1 = feedPage([message("m2")], "b2");
+      b.b2 = feedPage([], "b2");
+      await run();
+      await set([]);
+      await run();
+      await run();
+      await run();
+      const returned = await found();
+      // m3 moves from a to b, b read first: a fails meanwhile, then names
+      // it gone.
+      b.b2 = feedPage([message("m3")], "b3");
+      b.b3 = feedPage([], "b3");
+      await set(["a"]);
+      await run();
+      a.a3 = feedPage([goneItem("m3")], "a4");
+      a.a4 = feedPage([], "a4");
+      await set([]);
+      await run();
+      await run();
+      await run();
+
+      expect({ returned, after: await found() }).toStrictEqual({
+        returned: { m1: true, m2: true, m3: true },
+        after: { m1: true, m2: true, m3: true },
+      });
+    }
+  );
+
+  it(
+    "keeps a message's attachments across the daily names-only pass, takes them with a message that went, and drops one the message no longer has",
+    setUpTime,
+    async () => {
+      const owner = await signedInApi(idp, "user");
+      const marks = {
+        message: markerOf(),
+        first: markerOf(),
+        second: markerOf(),
+        went: markerOf(),
+        wentFile: markerOf(),
+      };
+      const quiet = { changes: [], next: "q", more: false };
+      const { world } = await connectSampleFeed(owner, { "": quiet, q: quiet });
+      const message = (version: string) =>
+        mailItem("a/m", `Mail ${marks.message}`, { version });
+      const first = mailItem("a/m/1", `File ${marks.first}`, {
+        partOf: "a/m",
+      });
+      const second = mailItem("a/m/2", `File ${marks.second}`, {
+        partOf: "a/m",
+      });
+      const changes: Record<string, unknown> = {
+        "": feedPage(
+          [
+            message("1"),
+            first,
+            second,
+            mailItem("a/x", `Gone ${marks.went}`),
+            mailItem("a/x/1", `File ${marks.wentFile}`, { partOf: "a/x" }),
+          ],
+          "c1"
+        ),
+        c1: feedPage([], "c1"),
+      };
+      const set = async () => {
+        await world({
+          places: ["a"],
+          folders: {
+            a: {
+              changes,
+              // The list call names the message alone, as a mailbox's
+              // does: no attachment, and not the message that went.
+              names: {
+                "": feedPage([mailItem("a/m", null, { version: "1" })], "n"),
+              },
+              items: {},
+            },
+          },
+        });
+      };
+      await set();
+      later(pollMs);
+      await sync();
+      later(pollMs);
+      await sync();
+      const found = async () => ({
+        message: await finds(owner.userId, marks.message),
+        first: await finds(owner.userId, marks.first),
+        second: await finds(owner.userId, marks.second),
+        went: await finds(owner.userId, marks.went),
+        wentFile: await finds(owner.userId, marks.wentFile),
+      });
+      const before = await found();
+      // A day on: the names-only relist, and runs after it.
+      later(24 * 60 * 60 * 1000);
+      await sync();
+      later(pollMs);
+      await sync();
+      later(pollMs);
+      await sync();
+      const relisted = await found();
+      // The message read in full again, without its second attachment.
+      changes.c1 = feedPage([message("2"), first], "c2");
+      changes.c2 = feedPage([], "c2");
+      await set();
+      later(pollMs);
+      await sync();
+
+      expect({ before, relisted, reread: await found() }).toStrictEqual({
+        before: {
+          message: true,
+          first: true,
+          second: true,
+          went: true,
+          wentFile: true,
+        },
+        relisted: {
+          message: true,
+          first: true,
+          second: true,
+          went: false,
+          wentFile: false,
+        },
+        reread: {
+          message: true,
+          first: true,
+          second: false,
+          went: false,
+          wentFile: false,
+        },
+      });
+    }
+  );
+
+  it(
+    "keeps every statement within the values D1 binds, at a page of 30 and at a names-only listing of a thousand",
+    setUpTime,
+    async () => {
+      const owner = await signedInApi(idp, "user");
+      const quiet = { changes: [], next: "q", more: false };
+      const { world, fetchedOf } = await connectSampleFeed(owner, {
+        "": quiet,
+        q: quiet,
+      });
+      const marks = Array.from({ length: 30 }, () => markerOf());
+      const held = marks.map((mark, index) =>
+        mailItem(`a/held${index}`, `Mail ${mark}`)
+      );
+      // The largest page a list call gives: Drive's thousand, Gmail's 500.
+      const unknown = Array.from(
+        { length: 1000 - held.length },
+        (_, index) => `a/new${String(index).padStart(4, "0")}`
+      );
+      await world({
+        places: ["a"],
+        folders: {
+          a: {
+            changes: {
+              "": feedPage(held, "c1"),
+              c1: feedPage([], "c1"),
+            },
+            names: {
+              "": feedPage(
+                [
+                  ...held.map(({ id }) => mailItem(id, null)),
+                  ...unknown.map((id) => mailItem(id, null)),
+                ],
+                "n"
+              ),
+            },
+            // Each gone by the time it is fetched: what the catch-up asks
+            // is what counts.
+            items: {},
+          },
+        },
+      });
+      const { db, bound } = countingBinds();
+      const countedSync = async () => {
+        vi.useFakeTimers({ toFake: ["Date"], now: clockAt });
+        try {
+          await runSync({ ...env, DB: db });
+        } finally {
+          vi.useRealTimers();
+        }
+      };
+      later(pollMs);
+      await countedSync();
+      later(pollMs);
+      await countedSync();
+      later(24 * 60 * 60 * 1000);
+      for (let run = 0; run < 3; run += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one run after another
+        await countedSync();
+        later(pollMs);
+      }
+      const asked = await fetchedOf("a");
+      const requests = Array.isArray(asked) ? asked : [];
+
+      expect({
+        overLimit: bound.filter((count) => count > 100),
+        held: await Promise.all(
+          [marks[0], marks.at(-1)].map(
+            async (mark) => await finds(owner.userId, String(mark))
+          )
+        ),
+        asked: requests
+          .flat()
+          .map(String)
+          .toSorted((one, other) => one.localeCompare(other)),
+        largest: Math.max(
+          ...requests.map((ids: unknown) =>
+            Array.isArray(ids) ? ids.length : 0
+          )
+        ),
+      }).toStrictEqual({
+        overLimit: [],
+        held: [true, true],
+        asked: unknown,
+        largest: 50,
       });
     }
   );

@@ -85,7 +85,13 @@ export const syncItemSchema = z.discriminatedUnion("gone", [
     readers: z.array(syncReaderSchema).nullable(),
     /** The account ID of who changed it last, if the provider says. */
     changedBy: sourceIdSchema.nullable(),
-    /** For an attachment: the ID of the item it belongs to. */
+    /**
+     * For an attachment: the ID of the item it belongs to. A part follows
+     * its item: an item read with its content comes with every part it has,
+     * in the same page, so a part left out is no longer one of them; an
+     * item without its content (names only, or passed over) keeps its
+     * parts as they are, and a gone item takes them with it.
+     */
     partOf: sourceIdSchema.nullable(),
   }),
   z.strictObject({

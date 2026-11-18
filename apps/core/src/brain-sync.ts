@@ -20,7 +20,7 @@ import { uploadTypes } from "@grasp-os/shared/uploads";
 import type { UploadMediaType } from "@grasp-os/shared/uploads";
 import { clockLeaseMs, clockPeriods } from "@grasp-os/workerflow/clock";
 import { and, asc, eq, isNotNull, isNull, lt, sql } from "drizzle-orm";
-import type { SQL } from "drizzle-orm";
+import type { SQL, SQLWrapper } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
@@ -714,33 +714,40 @@ const nextKey = async (applying: Applying, row: Item): Promise<Item> => {
 };
 
 /**
- * Takes out every attachment of the messages `gone` names: a mailbox
- * reports only the message as gone, never its parts.
+ * What `page` says of the parts it doesn't name (`partOf`: a message's
+ * attachments), the one rule for an item's parts: they follow the item
+ * they are part of. A page that reads an item in full (with its content)
+ * names every part it has with it; one that names it without content (a
+ * names-only listing, whose list calls name no attachments, or an item
+ * passed over) may name none. So a part the page doesn't name goes with
+ * an item the page names gone (`out`, held as the item is), goes when
+ * the page reads its item in full (`dropped`: no longer one of its
+ * parts), and stays, named with it, when the page names its item without
+ * content (`kept`). A part the page names is applied as any item is. The
+ * rows are the page's (`rowsOf`), parts included.
  */
-const leaveParts = async (
+const unnamedParts = (
   applying: Applying,
-  gone: readonly string[]
-): Promise<void> => {
-  const { db, budget, source } = applying;
-  if (gone.length === 0) {
-    return;
+  page: SyncPage,
+  rows: ReadonlyMap<string, Item>
+): { out: Item[]; dropped: Item[]; kept: Item[] } => {
+  const named = new Map(page.items.map((item) => [item.id, item]));
+  const out: Item[] = [];
+  const dropped: Item[] = [];
+  const kept: Item[] = [];
+  for (const row of rows.values()) {
+    const parent = row.partOf === null ? undefined : named.get(row.partOf);
+    if (parent === undefined || row.store === null || named.has(row.itemId)) {
+      continue;
+    }
+    if (!parent.gone) {
+      (parent.content === null ? kept : dropped).push(row);
+    } else if (row.place === applying.source.place) {
+      // Only in the place it is in: a gone elsewhere says nothing of it.
+      out.push(row);
+    }
   }
-  spend(budget, 1);
-  const parts = await db
-    .select()
-    .from(brainSyncItems)
-    .where(
-      and(
-        eq(brainSyncItems.connectionId, source.connectionId),
-        eq(brainSyncItems.feed, source.feed),
-        isNotNull(brainSyncItems.store),
-        inList(brainSyncItems.partOf, gone)
-      )
-    );
-  for (const part of parts) {
-    // oxlint-disable-next-line no-await-in-loop -- in order, within the budget
-    await (holds(source, part) ? hold(applying, part) : leave(applying, part));
-  }
+  return { out, dropped, kept };
 };
 
 /**
@@ -947,7 +954,10 @@ const add = async (
   countedIn(applying, counter, stored);
 };
 
-/** The rows of the page's items, by the provider's ID. */
+/**
+ * The rows of the page's items and of their parts (`unnamedParts`), by
+ * the provider's ID.
+ */
 const rowsOf = async (
   applying: Applying,
   items: readonly SyncItem[]
@@ -956,21 +966,75 @@ const rowsOf = async (
   if (items.length === 0) {
     return new Map();
   }
-  spend(budget, 1);
-  const rows = await db
-    .select()
-    .from(brainSyncItems)
-    .where(
-      and(
-        eq(brainSyncItems.connectionId, source.connectionId),
-        eq(brainSyncItems.feed, source.feed),
-        inList(
-          brainSyncItems.itemId,
-          items.map(({ id }) => id)
+  const ids = items.map(({ id }) => id);
+  const rowsWhere = (column: SQLWrapper) =>
+    db
+      .select()
+      .from(brainSyncItems)
+      .where(
+        and(
+          eq(brainSyncItems.connectionId, source.connectionId),
+          eq(brainSyncItems.feed, source.feed),
+          inList(column, ids)
         )
-      )
-    );
+      );
+  spend(budget, 1);
+  // Two halves, not one OR: each half by its own index, never a scan of
+  // the connection's every row.
+  const rows = await rowsWhere(brainSyncItems.itemId).unionAll(
+    rowsWhere(brainSyncItems.partOf)
+  );
   return new Map(rows.map((row) => [row.itemId, row]));
+};
+
+/**
+ * Brings back, here, each item the page names that the Brain holds
+ * (`kept`, its parts a names-only listing keeps with it included): in
+ * this place, the one a later gone counts in (`applyRemovals`), and no
+ * longer held to go (`hold`). Whether or not anything of it is written
+ * after, so an item that comes back as it was is never erased when its
+ * hold ends, nor by a gone from the place it left. One statement for
+ * the page, only when one of them is elsewhere or held.
+ */
+const bringBack = async (
+  applying: Applying,
+  page: SyncPage,
+  rows: Map<string, Item>,
+  kept: readonly Item[]
+): Promise<void> => {
+  const { db, budget, source } = applying;
+  const back = [
+    ...page.items.flatMap((item) => {
+      const row = item.gone ? undefined : rows.get(item.id);
+      return row === undefined ? [] : [row];
+    }),
+    ...kept,
+  ].filter(
+    (row) =>
+      row.store !== null &&
+      (row.heldSince !== null || row.place !== source.place)
+  );
+  if (back.length === 0) {
+    return;
+  }
+  const here = {
+    place: source.place,
+    heldSince: null,
+    listing: source.listing,
+  };
+  spend(budget, 1);
+  await db
+    .update(brainSyncItems)
+    .set(here)
+    .where(
+      sql`${brainSyncItems.connectionId} = ${source.connectionId} AND ${brainSyncItems.feed} = ${source.feed} AND ${inList(
+        brainSyncItems.itemId,
+        back.map(({ itemId }) => itemId)
+      )} AND ${brainSyncItems.store} IS NOT NULL AND ${stillHeld(applying)}`
+    );
+  for (const row of back) {
+    rows.set(row.itemId, { ...row, ...here });
+  }
 };
 
 /**
@@ -1039,15 +1103,14 @@ const noteCatchUps = async (
     return;
   }
   spend(budget, 1);
+  // The IDs bound as one value, however many the page names (`inList`):
+  // D1 binds at most 100 to a statement, and a listing's page can name a
+  // thousand. The WHERE is SQLite's: without one, its parser takes the
+  // conflict clause for a join's.
   await db
     .insert(brainSyncCatchUps)
-    .values(
-      wanted.map((itemId) => ({
-        connectionId: source.connectionId,
-        feed: source.feed,
-        place: source.place,
-        itemId,
-      }))
+    .select(
+      sql`SELECT ${source.connectionId}, ${source.feed}, ${source.place}, value FROM json_each(${JSON.stringify(wanted)}) WHERE true`
     )
     .onConflictDoNothing();
 };
@@ -1055,13 +1118,14 @@ const noteCatchUps = async (
 /**
  * A page's first half: what went away and every change of readers of the
  * shared store (an item that leaves it for its owner's own store erased
- * there), then a gone message's attachments. Nothing of the page is added
- * before all of it.
+ * there), then the parts that go with their item (`unnamedParts`).
+ * Nothing of the page is added before all of it.
  */
 const applyRemovals = async (
   applying: Applying,
   page: SyncPage,
-  rows: Map<string, Item>
+  rows: Map<string, Item>,
+  parts: { out: readonly Item[]; dropped: readonly Item[] }
 ): Promise<void> => {
   const { source } = applying;
   for (const item of page.items) {
@@ -1070,6 +1134,11 @@ const applyRemovals = async (
       continue;
     }
     if (item.gone) {
+      // Gone from here, but named in another place since (`bringBack`):
+      // moved there, so this gone says nothing of it.
+      if (row.place !== source.place) {
+        continue;
+      }
       rows.set(
         item.id,
         // oxlint-disable-next-line no-await-in-loop -- in order, within the budget
@@ -1089,11 +1158,14 @@ const applyRemovals = async (
       : changeReaders(applying, row, plan));
     rows.set(item.id, changed);
   }
-  // A gone message's attachments, which its mailbox doesn't name.
-  await leaveParts(
-    applying,
-    page.items.flatMap((item) => (item.gone ? [item.id] : []))
-  );
+  for (const part of parts.out) {
+    // oxlint-disable-next-line no-await-in-loop -- in order, within the budget
+    await (holds(source, part) ? hold(applying, part) : leave(applying, part));
+  }
+  for (const part of parts.dropped) {
+    // oxlint-disable-next-line no-await-in-loop -- in order, within the budget
+    await leave(applying, part);
+  }
 };
 
 /**
@@ -1146,18 +1218,22 @@ const applyAdds = async (
 const apply = async (applying: Applying, page: SyncPage): Promise<void> => {
   const { db, budget, source } = applying;
   const rows = await rowsOf(applying, page.items);
+  const parts = unnamedParts(applying, page, rows);
   if ((source.listingOpen || source.relisting) && rows.size > 0) {
     // Named while a listing is under way, by it or by a change since,
-    // whatever else the page does with them: there, so not swept.
+    // whatever else the page does with them, their parts with them
+    // (`unnamedParts`): there, so not swept. What is in another place is
+    // brought here, listing and all, or left alone (`bringBack`).
     spend(budget, 1);
     await db
       .update(brainSyncItems)
       .set({ listing: source.listing })
       .where(
-        sql`${brainSyncItems.connectionId} = ${source.connectionId} AND ${brainSyncItems.feed} = ${source.feed} AND ${inList(brainSyncItems.itemId, [...rows.keys()])} AND ${stillHeld(applying)}`
+        sql`${brainSyncItems.connectionId} = ${source.connectionId} AND ${brainSyncItems.feed} = ${source.feed} AND ${brainSyncItems.place} = ${source.place} AND ${inList(brainSyncItems.itemId, [...rows.keys()])} AND ${stillHeld(applying)}`
       );
   }
-  await applyRemovals(applying, page, rows);
+  await bringBack(applying, page, rows, parts.kept);
+  await applyRemovals(applying, page, rows, parts);
   await (applying.mode === "names"
     ? noteCatchUps(applying, page, rows)
     : applyAdds(applying, page, rows));
