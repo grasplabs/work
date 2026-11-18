@@ -516,7 +516,8 @@ const librariesOf = async (
       ) {
         choices.push({
           place: library.id,
-          title: `${siteName} › ${library.name ?? ""}`,
+          title: library.name ?? "",
+          within: siteName,
         });
       }
     }

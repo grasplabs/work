@@ -13,6 +13,7 @@ import {
 } from "@grasp-os/ui/components/empty";
 import {
   Field,
+  FieldContent,
   FieldDescription,
   FieldLabel,
   FieldLegend,
@@ -129,7 +130,7 @@ const PlacesForm = ({
         </Trans>
       </FieldDescription>
       <ul className="flex flex-col gap-2">
-        {places.choices.map(({ place, title }) => (
+        {places.choices.map(({ place, title, within }) => (
           <li key={place}>
             <Field orientation="horizontal">
               <Checkbox
@@ -141,7 +142,12 @@ const PlacesForm = ({
                   setPicked(checked ? [...rest, place] : rest);
                 }}
               />
-              <FieldLabel htmlFor={`${ids}-${place}`}>{title}</FieldLabel>
+              <FieldContent>
+                <FieldLabel htmlFor={`${ids}-${place}`}>{title}</FieldLabel>
+                {within === null ? null : (
+                  <FieldDescription>{within}</FieldDescription>
+                )}
+              </FieldContent>
             </Field>
           </li>
         ))}

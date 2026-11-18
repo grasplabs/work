@@ -394,8 +394,8 @@ describe("syncing a shared connection's picked shared drives", () => {
       choices: {
         feed: "shared-drives",
         choices: [
-          { place: sales.id, title: "Sales", picked: true },
-          { place: legal.id, title: "Legal", picked: false },
+          { place: sales.id, title: "Sales", within: null, picked: true },
+          { place: legal.id, title: "Legal", within: null, picked: false },
         ],
         cursor: null,
       },

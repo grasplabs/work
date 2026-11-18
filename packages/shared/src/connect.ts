@@ -783,12 +783,20 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
 
 /**
  * Every place of a shared connection an admin may pick to sync, as its
- * connector lists them: the sync they are of, and each place's ID, name
- * and whether it is picked.
+ * connector lists them: the sync they are of, and each place.
  */
 export interface SharedSyncPlaces {
   feed: string;
-  choices: { place: string; title: string; picked: boolean }[];
+  /**
+   * Each place: its ID, its own name, what it is in (a library's site;
+   * null for a shared drive), and whether it is picked. Names are whole.
+   */
+  choices: {
+    place: string;
+    title: string;
+    within: string | null;
+    picked: boolean;
+  }[];
 }
 
 // The catalog: everything an admin can connect, in one list. Native

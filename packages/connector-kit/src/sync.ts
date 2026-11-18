@@ -1,5 +1,4 @@
 import {
-  syncChoiceTitleLength,
   syncChoicesSchema,
   syncContentSchema,
   syncCursorSchema,
@@ -283,17 +282,15 @@ const spaces = /\s+/gu;
 
 /**
  * A place's name as an admin is shown it: anyone who can name a shared
- * drive or a library can name it anything, so it is only data, on one
- * line, without control or format characters, cut to its bound.
+ * drive, a site or a library can name it anything, so it is only data, on
+ * one line, without control or format characters. It is never cut: it is
+ * only shown, and connect reads a connector's answer up to its bound.
  */
-const cleanTitle = (title: string): string =>
-  cutText(
-    title.replaceAll(spaces, " ").replaceAll(invisible, "").trim(),
-    syncChoiceTitleLength
-  ).trim();
+const cleanName = (name: string): string =>
+  name.replaceAll(spaces, " ").replaceAll(invisible, "").trim();
 
-/** Places to pick from as a sync answered them, each name cleaned (`cleanTitle`). */
-const withCleanTitles = (answered: unknown): unknown => {
+/** Places to pick from as a sync answered them, each name cleaned (`cleanName`). */
+const withCleanNames = (answered: unknown): unknown => {
   const choices = fieldOf(answered, "choices");
   if (!Array.isArray(choices)) {
     return answered;
@@ -301,8 +298,14 @@ const withCleanTitles = (answered: unknown): unknown => {
   return {
     choices: choices.map((choice: unknown) => {
       const title = fieldOf(choice, "title");
-      return typeof title === "string"
-        ? { place: fieldOf(choice, "place"), title: cleanTitle(title) }
+      const within = fieldOf(choice, "within");
+      return typeof title === "string" &&
+        (typeof within === "string" || within === null)
+        ? {
+            place: fieldOf(choice, "place"),
+            title: cleanName(title),
+            within: within === null ? null : cleanName(within),
+          }
         : choice;
     }),
     cursor: fieldOf(answered, "cursor"),
@@ -346,7 +349,7 @@ export const defineSync = (definition: SyncDefinition): Sync => ({
     // A list with one place that isn't one is refused whole.
     const parsed =
       definition.places === undefined
-        ? syncChoicesSchema.safeParse(withCleanTitles(places))
+        ? syncChoicesSchema.safeParse(withCleanNames(places))
         : syncPlacesSchema.safeParse(places);
     return parsed.success ? parsed.data : { failure: { code: "failed" } };
   },

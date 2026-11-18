@@ -176,7 +176,7 @@ const choicesOf = async ({
     const page = drivesSchema.parse(await read.json());
     for (const each of page.drives ?? []) {
       if (syncPlaceSchema.safeParse(each.id).success) {
-        choices.push({ place: each.id, title: each.name ?? "" });
+        choices.push({ place: each.id, title: each.name ?? "", within: null });
       }
     }
     const next = page.nextPageToken ?? "";

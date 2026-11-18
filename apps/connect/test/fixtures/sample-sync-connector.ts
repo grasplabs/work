@@ -137,7 +137,11 @@ export default defineConnector({
           })
           .parse(await response.json());
         return {
-          choices: sites.map(({ id, name }) => ({ place: id, title: name })),
+          choices: sites.map(({ id, name }) => ({
+            place: id,
+            title: name,
+            within: null,
+          })),
           cursor: next ?? null,
         };
       },
