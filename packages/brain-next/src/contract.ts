@@ -334,12 +334,15 @@ export type NewSource = z.infer<typeof newSourceSchema>;
  * new version with the text of its current one and these readers
  * (`access`). `readAt` as an add's: when the producer read who may read
  * it, so a late change of an older read never replaces a newer one.
+ * `extract` as an add's: how memories are drawn from the source, for the
+ * new version when it needs drawing (`Brain.changeReaders`).
  */
 export const readersChangeSchema = z.strictObject({
   source: sourceIdSchema,
   change: changeKeySchema,
   access: accessSchema,
   readAt: z.int().nonnegative().optional(),
+  extract: extractSchema.optional(),
 });
 export type ReadersChange = z.infer<typeof readersChangeSchema>;
 
@@ -3000,6 +3003,15 @@ export interface Brain {
    * version added meanwhile is read again, so text is never taken back.
    * Null for a source with no current version. Access a store may not
    * keep is refused as an add's is.
+   *
+   * Memories are drawn from the new version, as `extract` says or else as
+   * an item on the queue was drawing the source, only when it needs it:
+   * the old version's drawing hadn't finished, or the change adds a
+   * reader. A memory is read only by a reader of both its version and the
+   * current one, so what was drawn under the old readers is never shown
+   * to a reader the change adds: it is drawn again, for them. A narrowing
+   * whose drawing had finished draws nothing: those who remain read what
+   * was drawn.
    */
   changeReaders: (change: ReadersChange) => Promise<AddedVersion | null>;
   /**

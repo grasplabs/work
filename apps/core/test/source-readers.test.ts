@@ -24,9 +24,10 @@ import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { noProducers } from "./no-producers.ts";
-import { acmeTenant, otherTenant } from "./sign-in-config.ts";
+import { acmeTenant, entraClient, otherTenant } from "./sign-in-config.ts";
 import {
   coreOrigin,
+  entraPerson,
   googlePerson,
   openRpc,
   outcome,
@@ -744,6 +745,113 @@ describe("readers copied from the source", () => {
       );
 
       await expect(finds(member.userId, source, marker)).resolves.toBeTruthy();
+    }
+  );
+
+  it(
+    "counts a sign-in only in the tenant it proved, and in a tenant the config moves to only once signed in through it",
+    setUpTime,
+    async () => {
+      const claims = entraPerson(acmeTenant);
+      const { userId } = await whoami(
+        await signedIn(idp, "microsoft", claims, {
+          coreEnv: withSignIn({ admins: [claims.email] }),
+        })
+      );
+      const accountMarker = uniqueWord();
+      const byAccount = await sharedItem(
+        accountMarker,
+        readersOf({
+          kind: "account",
+          provider: "microsoft",
+          tenant: acmeTenant,
+          account: String(claims.oid),
+        })
+      );
+      const tenantMarker = uniqueWord();
+      const byTenant = await sharedItem(
+        tenantMarker,
+        readersOf({
+          kind: "tenant",
+          provider: "microsoft",
+          tenant: otherTenant,
+        })
+      );
+      const movedEnv = withSignIn({
+        entra: { tenantId: otherTenant, clientId: entraClient.id },
+      });
+      const findsWith = async (
+        coreEnv: Env,
+        source: SourceRef,
+        marker: string
+      ) => {
+        const { items } = await recallAs(coreEnv, userId, {
+          personal: true,
+          question: marker,
+          budget: { tokens: recallBudgetMax },
+        });
+        return items.some(({ source: found }) => found.id === source.id);
+      };
+      const before = await findsWith(env, byAccount, accountMarker);
+      // The config moves to another tenant: their sign-in proved the first.
+      const moved = {
+        account: await findsWith(movedEnv, byAccount, accountMarker),
+        tenant: await findsWith(movedEnv, byTenant, tenantMarker),
+      };
+      // Signed in through the new tenant, the same account.
+      await signedIn(
+        idp,
+        "microsoft",
+        { ...claims, tid: otherTenant },
+        { coreEnv: movedEnv }
+      );
+
+      expect({
+        before,
+        moved,
+        signedIn: {
+          account: await findsWith(movedEnv, byAccount, accountMarker),
+          tenant: await findsWith(movedEnv, byTenant, tenantMarker),
+        },
+      }).toStrictEqual({
+        before: true,
+        moved: { account: false, tenant: false },
+        signedIn: { account: true, tenant: true },
+      });
+    }
+  );
+
+  it(
+    "forgets the token of a Google account a person connected under another address than they sign in with, though they never read by it",
+    setUpTime,
+    async () => {
+      const admin = await signedInApi(idp, "admin");
+      // Signed in with Google; their account's address has changed since,
+      // so the connection Google gives them carries the new one.
+      const claims = googlePerson();
+      const session = await signedIn(idp, "google", claims);
+      const { userId } = await whoami(session);
+      const renamed = `${String(claims.sub)}@acme.test`;
+      const marker = uniqueWord();
+      const list = await sharedItem(
+        marker,
+        readersOf({
+          kind: "account",
+          provider: "google",
+          tenant: "acme.test",
+          account: renamed,
+        })
+      );
+      await connectedGoogle({ session, email: renamed });
+      await admin.api.members.remove(userId);
+      await admin.api.members.erase(userId, String(claims.name));
+      await runMinuteTasks();
+      // Someone new, given the address their account had changed to.
+      const { userId: newcomer } = await whoami(
+        await signedIn(idp, "google", googlePerson({ email: renamed }))
+      );
+
+      await expect(finds(newcomer, list, marker)).resolves.toBeFalsy();
     }
   );
 

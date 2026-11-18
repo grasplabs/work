@@ -108,6 +108,13 @@ export const accounts = sqliteTable(
      * `email` claim is not verified.
      */
     verifiedEmail: text("verified_email"),
+    /**
+     * The tenant the ID token of the latest sign-in was checked against
+     * (Entra's `tid`, Google's `hd`): this account counts as a reader in a
+     * copied list only while the sign-in config names that tenant
+     * (source-readers.ts).
+     */
+    verifiedTenant: text("verified_tenant"),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },

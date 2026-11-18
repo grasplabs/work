@@ -1379,6 +1379,52 @@ export const enqueueExtraction = (
 };
 
 /**
+ * How the memories of `source` are being drawn, if an item on the queue
+ * draws them now (of any version): whose words, when said, in which time
+ * zone and class. For a change of a source's readers, which draws its new
+ * version as the item would have drawn the old one (sources.ts
+ * `changeReaders`).
+ */
+export const queuedExtractOf = (
+  storage: DurableObjectStorage,
+  source: SourceId
+): Extract | undefined => {
+  const [item] = storage.sql
+    .exec<{ payload: string }>(
+      "SELECT payload FROM work_items WHERE kind = ? AND key = ?",
+      extractKind,
+      source
+    )
+    .toArray();
+  const payload =
+    item === undefined
+      ? undefined
+      : payloadSchema.safeParse(JSON.parse(item.payload)).data;
+  return payload === undefined
+    ? undefined
+    : {
+        speaker: payload.speaker,
+        saidAt: new Date(payload.saidAt),
+        timeZone: payload.timeZone,
+        priority: payload.priority,
+      };
+};
+
+/** Whether memories were drawn from the version `version` of `source` (its mark). */
+export const isExtracted = (
+  storage: DurableObjectStorage,
+  source: SourceId,
+  version: number
+): boolean =>
+  storage.sql
+    .exec(
+      "SELECT 1 FROM memory_extractions WHERE source = ? AND version = ? LIMIT 1",
+      source,
+      version
+    )
+    .toArray().length > 0;
+
+/**
  * Puts the version `version` of `source` on the queue to draw memories
  * from, as `extract` says, unless it was drawn from already (its mark,
  * `extracted`) or an item of extraction of that version is on the queue: for

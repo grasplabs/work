@@ -53,6 +53,7 @@ import {
   storeKindOf,
 } from "@grasp-os/brain-next/contract";
 import type {
+  Extract as BrainExtract,
   Access,
   AskModel,
   AttributeRule,
@@ -1092,6 +1093,17 @@ const sourceRefusalOf = (error: unknown): unknown => {
   return error;
 };
 
+/** How the Brain draws memories from what `said` says was said. */
+const extractOf = async (
+  env: Pick<Env, "DB">,
+  said: Said
+): Promise<BrainExtract> => ({
+  speaker: speakerOf(said.by),
+  saidAt: said.at,
+  timeZone: await organizationTimeZone(env.DB),
+  priority: said.priority,
+});
+
 /**
  * Adds `text` to the Brain as a version of `source` that `readers` may
  * read; it replaces the version before in recall, which stays as history.
@@ -1188,16 +1200,7 @@ export const addSource = async (
   const access = await accessFor(env, readers);
   const key = sourceKeyOf(source);
   const extract =
-    said === undefined
-      ? {}
-      : {
-          extract: {
-            speaker: speakerOf(said.by),
-            saidAt: said.at,
-            timeZone: await organizationTimeZone(env.DB),
-            priority: said.priority,
-          },
-        };
+    said === undefined ? {} : { extract: await extractOf(env, said) };
   let version: number;
   let newer: true | undefined;
   try {
@@ -1229,6 +1232,7 @@ const readersChangeSchema = z.strictObject({
   source: sourceRefSchema,
   change: changeSchema,
   readers: sourceReadersSchema,
+  said: saidSchema.optional(),
   readAt: z.date().optional(),
 });
 
@@ -1242,7 +1246,9 @@ const readersChangeSchema = z.strictObject({
  * `change` answers with the version it made; readers the current version
  * already has answer with it. Null for a source the Brain doesn't hold.
  * `readAt`, as an add's: a change read before the current version was
- * writes nothing (`newer`).
+ * writes nothing (`newer`). `said`, as an add's: how memories are drawn
+ * from the source, for the new version when it needs drawing (a widening,
+ * or a drawing not yet finished; the Brain's `changeReaders`).
  *
  * For producers on the server only, as `addSource`, with its codes. A
  * person's own source (`owner`) never changes readers: what one person
@@ -1254,10 +1260,11 @@ export const changeSourceReaders = async (
     source: SourceRef;
     change: string;
     readers: SourceReaders;
+    said?: Said;
     readAt?: Date;
   }
 ): Promise<(SourceVersionRef & { newer?: true }) | null> => {
-  const { source, change, readers, readAt } = checked(
+  const { source, change, readers, said, readAt } = checked(
     readersChangeSchema,
     changed
   );
@@ -1268,6 +1275,8 @@ export const changeSourceReaders = async (
   }
   refuseOtherConnectionReaders(source, readers);
   const access = await accessFor(env, readers);
+  const extract =
+    said === undefined ? {} : { extract: await extractOf(env, said) };
   try {
     const made = await whileNotRestoring(
       async () =>
@@ -1275,6 +1284,7 @@ export const changeSourceReaders = async (
           source: sourceKeyOf(source),
           change,
           access,
+          ...extract,
           ...(readAt === undefined ? {} : { readAt: readAt.getTime() }),
         })
     );
