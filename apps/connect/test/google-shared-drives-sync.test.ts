@@ -4,7 +4,12 @@ import { syncErrors } from "@grasp-os/shared/sync";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { connectAccount, mailboxAccount, someone } from "./connect.ts";
+import {
+  connectAccount,
+  heldPicks,
+  mailboxAccount,
+  someone,
+} from "./connect.ts";
 import { scopeRefusal, syncGrant } from "./google-scopes.ts";
 import { fakeInternet } from "./internet.ts";
 import { fakeProviders } from "./oauth-provider.ts";
@@ -330,6 +335,7 @@ const pick = async (
     person: admin,
     connectionId,
     feed,
+    from: await heldPicks(connectionId, feed),
     places,
   });
 
@@ -392,10 +398,12 @@ describe("syncing a shared connection's picked shared drives", () => {
       }),
     }).toStrictEqual({
       choices: {
+        feed: "shared-drives",
         choices: [
           { place: sales.id, title: "Sales", within: null, picked: true },
           { place: legal.id, title: "Legal", within: null, picked: false },
         ],
+        picks: [sales.id],
         cursor: null,
       },
       places: { places: [sales.id], cursor: null },

@@ -4524,6 +4524,10 @@ msgstr "Als Markdown kopieren"
 msgid "Copy code"
 msgstr "Code kopieren"
 
+#: src/connections/sync-places.tsx
+msgid "Copy into the Brain from {label}"
+msgstr "Aus {label} ins Brain kopieren"
+
 #: src/shown-once.tsx
 msgid "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgstr "Kopieren Sie es jetzt: Sie sehen es nicht noch einmal. Geht es verloren, kann es nur ersetzt werden."
@@ -5720,6 +5724,10 @@ msgstr "Alle mit Grasp"
 #: src/people/people-teams-picker.tsx
 msgid "Everyone with the {name} role"
 msgstr "Alle mit der Rolle {name}"
+
+#: src/connections/sync-places.tsx
+msgid "Everyone you let read {label} in the Brain will be able to read everything in the places you pick, because the permissions in {label} are not copied."
+msgstr "Alle, die {label} im Brain lesen dürfen, können alles an den Orten lesen, die Sie auswählen, denn die Berechtigungen in {label} werden nicht übernommen."
 
 #: src/inbox/inbox-page.tsx
 msgctxt "inbox filter"
@@ -9848,6 +9856,10 @@ msgstr "Derzeit dient nichts, was der Workflow nutzen darf: Geben Sie dem Workfl
 msgid "Nothing this App asked for is waiting."
 msgstr "Nichts, was diese App angefragt hat, wartet noch."
 
+#: src/connections/sync-places.tsx
+msgid "Nothing to copy into the Brain yet"
+msgstr "Noch nichts, was ins Brain kopiert werden kann"
+
 #: src/dashboard/report.ts
 #: src/dashboard/signals.tsx
 msgid "Nothing to make better right now."
@@ -11362,6 +11374,14 @@ msgstr "Liest seine Anweisungen…"
 msgid "Reading people and teams…"
 msgstr "Personen und Teams werden gelesen…"
 
+#: src/connections/sync-places.tsx
+msgid "Reading the places"
+msgstr "Orte werden gelesen"
+
+#: src/connections/sync-places.tsx
+msgid "Reading the places {label} can open…"
+msgstr "Die Orte, die {label} öffnen kann, werden gelesen…"
+
 #: src/chat/thread.tsx
 msgid "Reading the workspace"
 msgstr "Workspace wird gelesen"
@@ -12378,6 +12398,10 @@ msgstr "Link speichern"
 #: src/brain/memories-page.tsx
 msgid "Save the correction"
 msgstr "Korrektur speichern"
+
+#: src/connections/sync-places.tsx
+msgid "Save the places"
+msgstr "Orte speichern"
 
 #: src/interview/destination.tsx
 msgid "Save where they go"
@@ -14127,6 +14151,14 @@ msgstr "Das war der Rundgang. Fragen Sie mich gern, auf jeder Seite. Sie finden 
 msgid "The {top} that spent most; more spent less."
 msgstr "Die {top} mit den höchsten Ausgaben; weitere haben weniger ausgegeben."
 
+#: src/connections/sync-places.tsx
+msgid "The account connected as {label} can't open any shared drives."
+msgstr "Das als {label} verbundene Konto kann keine geteilten Ablagen öffnen."
+
+#: src/connections/sync-places.tsx
+msgid "The account connected as {label} can't open any SharePoint document libraries."
+msgstr "Das als {label} verbundene Konto kann keine SharePoint-Dokumentbibliotheken öffnen."
+
 #: src/routes/_shell.settings.security.tsx
 msgid "The account you signed in with."
 msgstr "Das Konto, mit dem Sie sich angemeldet haben."
@@ -14638,6 +14670,10 @@ msgstr "Die Person in {field}"
 #: src/apps/access-view.tsx
 msgid "the person who added it"
 msgstr "die Person, die ihn hinzugefügt hat"
+
+#: src/connections/sync-places.tsx
+msgid "The places picked from {label} were changed in the meantime. These are the ones picked now: pick again if you still want to change them."
+msgstr "Die aus {label} ausgewählten Orte wurden inzwischen geändert. Diese sind jetzt ausgewählt: Wählen Sie erneut, wenn Sie sie noch ändern möchten."
 
 #: src/apps/resource-bindings.tsx
 msgid "The platform's statistics"
@@ -15527,6 +15563,7 @@ msgstr "Versuchen"
 #: src/chat/builds.tsx
 #: src/chat/chat-panel.tsx
 #: src/chat/thread.tsx
+#: src/connections/sync-places.tsx
 #: src/decision-card.tsx
 #: src/frame/page-states.tsx
 #: src/frame/setting-up.tsx
