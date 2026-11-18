@@ -183,8 +183,7 @@ export const StephenCard = ({
           <Switch
             checked={reach.on}
             disabled={!can}
-            label={t`Stephen outside Grasp`}
-            labelHidden
+            aria-label={t`Stephen outside Grasp`}
             onCheckedChange={(on) => {
               if (on) {
                 void onReach(true, reach.audience);

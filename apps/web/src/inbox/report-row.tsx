@@ -317,7 +317,7 @@ export const ReportItem = ({
           </ItemContent>
         </Item>
       </ItemGroup>
-      <Sheet onOpenChange={setOpen} open={open} size="wide">
+      <Sheet onOpenChange={setOpen} open={open} size="lg">
         <SheetContent>
           <SheetTitle>{t`Week ${week}`}</SheetTitle>
           <Await promise={report}>

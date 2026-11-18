@@ -4,11 +4,21 @@
 // has no carousel; its look is Grasp's: Previous and Next are quiet Buttons with Hugeicons
 // chevrons under the slides, and a row of small marks says which page you are on.
 //
-//   <Carousel label="Featured stories">
-//     <Story … />
-//     <Story … />
+// Since release step 6 its slides and buttons are parts, as in shadcn's:
+//
+//   <Carousel aria-label="Featured stories">
+//     <CarouselContent>
+//       <CarouselItem><Story … /></CarouselItem>
+//       <CarouselItem><Story … /></CarouselItem>
+//     </CarouselContent>
+//     <CarouselPrevious />
+//     <CarouselNext />
 //   </Carousel>
-//   <Carousel label="Team photos" slidesPerPage={3} loop>…</Carousel>
+//
+// Previous and Next stand under the slides at the end of the row, after the marks (`indicators`),
+// wherever they are written. The older shape, each child a slide, keeps working until step 9:
+//
+//   <Carousel aria-label="Team photos" slidesPerPage={3} loop>…</Carousel>
 //
 // It never turns on its own: a person decides when to move on. Every value is a token.
 "use client";
@@ -17,18 +27,19 @@
 import * as stylex from "@stylexjs/stylex";
 import {
   Carousel as CarouselPrimitive,
-  CarouselContent,
+  CarouselContent as ContentPrimitive,
   CarouselIndicator,
   CarouselIndicatorGroup,
-  CarouselItem,
-  CarouselNext,
-  CarouselPrevious,
+  CarouselItem as ItemPrimitive,
+  CarouselNext as NextPrimitive,
+  CarouselPrevious as PreviousPrimitive,
   CarouselViewport,
 } from "@ui-sdk/react/carousel";
 import type {
   CarouselIndicatorGroupState,
   CarouselIndicatorState,
 } from "@ui-sdk/react/carousel";
+import { createContext, isValidElement, useContext } from "react";
 import type { ReactNode } from "react";
 
 import { Button } from "../button";
@@ -45,7 +56,10 @@ export type CarouselLayoutStyle = LayoutStyle;
 
 /** Every prop a Carousel takes. */
 export interface CarouselProps {
-  /** The slides, one child each, in order. */
+  /**
+   * Its CarouselContent, then CarouselPrevious and CarouselNext. In the older shape (until release
+   * step 9) each child is a slide: write each in a CarouselItem, in a CarouselContent, instead.
+   */
   children: ReactNode;
   /** What the slides are, said to a screen reader and an agent ("Featured stories"). */
   "aria-label"?: string;
@@ -80,6 +94,18 @@ export interface CarouselProps {
   style?: CarouselLayoutStyle;
   /** Layout only: margins, alignment and width. */
   layout?: CarouselLayoutStyle;
+}
+
+/** Every prop a CarouselContent or CarouselItem takes. */
+export interface CarouselPartProps {
+  /** A CarouselContent's CarouselItems, one per slide, in order; or a CarouselItem's slide. */
+  children: ReactNode;
+}
+
+/** Every prop a CarouselPrevious or CarouselNext takes. */
+export interface CarouselButtonProps {
+  /** Its name, for this one carousel. The words the product gives (GraspWords) otherwise: "Previous", "Next". */
+  "aria-label"?: string;
 }
 
 /** The words a Carousel says, so the product can say them in its own language. */
@@ -187,7 +213,7 @@ const styles = stylex.create({
   },
 });
 
-/** The slides in order: nested arrays flattened; null, undefined and booleans dropped, as React renders nothing for them. */
+/** Children in order: nested arrays flattened; null, undefined and booleans dropped, as React renders nothing for them. */
 const toSlides = (node: ReactNode): ReactNode[] => {
   if (Array.isArray(node)) {
     return node.flatMap((item: ReactNode) => toSlides(item));
@@ -221,6 +247,97 @@ const pagesOf = (
     ? Math.max(1, Math.ceil(slides / perPage))
     : slides);
 
+// What the parts read from the root: a slide's width, and the buttons' words.
+const PerPage = createContext<NonNullable<CarouselProps["slidesPerPage"]>>(1);
+const Words = createContext<CarouselLabels>(carouselWords);
+
+// ---- The parts (release step 6) --------------------------------------------------------------------
+
+/** The slides' window and their row: its CarouselItems, one per slide. */
+export const CarouselContent = ({ children }: CarouselPartProps) => (
+  // Its ring stands off the slides' own edges (the mark's offset), never on a card's border.
+  <CarouselViewport {...stylex.props(styles.viewport, focus.mark)}>
+    <ContentPrimitive {...stylex.props(styles.content)}>
+      {children}
+    </ContentPrimitive>
+  </CarouselViewport>
+);
+
+/** One slide, as wide as a view holds slides (`slidesPerPage`). */
+export const CarouselItem = ({ children }: CarouselPartProps) => {
+  const perPage = useContext(PerPage);
+  return (
+    <ItemPrimitive {...stylex.props(styles.item, basis[perPage])}>
+      {children}
+    </ItemPrimitive>
+  );
+};
+
+/** The button that goes back a page: a quiet Button with a chevron, under the slides. */
+export const CarouselPrevious = ({
+  "aria-label": label,
+}: CarouselButtonProps) => {
+  const words = useContext(Words);
+  return (
+    <PreviousPrimitive
+      render={(props: Record<string, unknown>) => (
+        <Button
+          {...props}
+          variant="quiet"
+          size="sm"
+          icon={ChevronLeft}
+          aria-label={label ?? words.previous}
+        />
+      )}
+    />
+  );
+};
+
+/** The button that goes on a page: a quiet Button with a chevron, under the slides. */
+export const CarouselNext = ({ "aria-label": label }: CarouselButtonProps) => {
+  const words = useContext(Words);
+  return (
+    <NextPrimitive
+      render={(props: Record<string, unknown>) => (
+        <Button
+          {...props}
+          variant="quiet"
+          size="sm"
+          icon={ChevronRight}
+          aria-label={label ?? words.next}
+        />
+      )}
+    />
+  );
+};
+
+const isPart = (child: ReactNode, part: unknown) =>
+  isValidElement(child) && child.type === part;
+const isButton = (child: ReactNode) =>
+  isPart(child, CarouselPrevious) || isPart(child, CarouselNext);
+
+/** The slides written in the CarouselContents among `children`: one per CarouselItem. */
+const countSlides = (children: ReactNode[]) =>
+  children
+    .filter((child) => isPart(child, CarouselContent))
+    .flatMap((child) =>
+      toSlides(
+        isValidElement<CarouselPartProps>(child) ? child.props.children : null
+      )
+    )
+    .filter((child) => isPart(child, CarouselItem)).length;
+
+/** The older shape's children, each a slide, as the parts (until release step 9). */
+const asParts = (slides: ReactNode[]) => [
+  <CarouselContent key="content">
+    {slides.map((slide, index) => (
+      <CarouselItem key={index}>{slide}</CarouselItem>
+    ))}
+  </CarouselContent>,
+  <CarouselPrevious key="previous" />,
+  <CarouselNext key="next" />,
+];
+
 /** A set of slides shown a view at a time, with Previous, Next and a mark per page. */
 export const Carousel = ({
   children,
@@ -235,7 +352,11 @@ export const Carousel = ({
   style: styleProp,
   layout,
 }: CarouselProps) => {
-  const slides = toSlides(children);
+  const written = toSlides(children);
+  const parts = written.some((child) => isPart(child, CarouselContent))
+    ? written
+    : asParts(written);
+  const slides = parts === written ? countSlides(written) : written.length;
   const words = withGiven(useWords("carousel", carouselWords), given ?? {});
   return (
     <CarouselPrimitive
@@ -246,83 +367,46 @@ export const Carousel = ({
       onPageChangeComplete={onPageChange}
       {...stylex.props(styles.carousel, layout ?? styleProp)}
     >
-      {/* Its ring stands off the slides' own edges (the mark's offset), never on a card's border. */}
-      <CarouselViewport {...stylex.props(styles.viewport, focus.mark)}>
-        <CarouselContent {...stylex.props(styles.content)}>
-          {slides.map((slide, index) => (
-            <CarouselItem
-              key={index}
-              {...stylex.props(styles.item, basis[slidesPerPage])}
-            >
-              {slide}
-            </CarouselItem>
-          ))}
-        </CarouselContent>
-      </CarouselViewport>
-      <div {...stylex.props(styles.controls)}>
-        {indicators && (
-          <CarouselIndicatorGroup
-            aria-label={words.pages(label)}
-            {...stylex.props(styles.dots)}
-          >
-            {(group: CarouselIndicatorGroupState) =>
-              Array.from(
-                {
-                  length: pagesOf(
-                    group.pageCount,
-                    slides.length,
-                    slidesPerPage
-                  ),
-                },
-                (_, index) => (
-                  <CarouselIndicator
-                    key={index}
-                    page={index + 1}
-                    aria-label={words.page(index + 1)}
-                    className={
-                      stylex.props(styles.dot, focus.ring).className ?? ""
-                    }
-                  >
-                    {(state: CarouselIndicatorState) => (
-                      <span
-                        aria-hidden="true"
-                        {...stylex.props(
-                          styles.mark,
-                          state.selected && styles.markCurrent
+      <PerPage value={slidesPerPage}>
+        <Words value={words}>
+          {parts.filter((child) => !isButton(child))}
+          <div {...stylex.props(styles.controls)}>
+            {indicators && (
+              <CarouselIndicatorGroup
+                aria-label={words.pages(label)}
+                {...stylex.props(styles.dots)}
+              >
+                {(group: CarouselIndicatorGroupState) =>
+                  Array.from(
+                    { length: pagesOf(group.pageCount, slides, slidesPerPage) },
+                    (_, index) => (
+                      <CarouselIndicator
+                        key={index}
+                        page={index + 1}
+                        aria-label={words.page(index + 1)}
+                        className={
+                          stylex.props(styles.dot, focus.ring).className ?? ""
+                        }
+                      >
+                        {(state: CarouselIndicatorState) => (
+                          <span
+                            aria-hidden="true"
+                            {...stylex.props(
+                              styles.mark,
+                              state.selected && styles.markCurrent
+                            )}
+                          />
                         )}
-                      />
-                    )}
-                  </CarouselIndicator>
-                )
-              )
-            }
-          </CarouselIndicatorGroup>
-        )}
-        <div {...stylex.props(styles.steps)}>
-          <CarouselPrevious
-            render={(props: Record<string, unknown>) => (
-              <Button
-                {...props}
-                variant="quiet"
-                size="sm"
-                icon={ChevronLeft}
-                aria-label={words.previous}
-              />
+                      </CarouselIndicator>
+                    )
+                  )
+                }
+              </CarouselIndicatorGroup>
             )}
-          />
-          <CarouselNext
-            render={(props: Record<string, unknown>) => (
-              <Button
-                {...props}
-                variant="quiet"
-                size="sm"
-                icon={ChevronRight}
-                aria-label={words.next}
-              />
-            )}
-          />
-        </div>
-      </div>
+            <div {...stylex.props(styles.steps)}>{parts.filter(isButton)}</div>
+          </div>
+        </Words>
+      </PerPage>
     </CarouselPrimitive>
   );
 };

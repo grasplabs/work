@@ -3,18 +3,28 @@
 // the popup's raised surface with the one corner, a search icon before the field, a hairline under
 // it, and the list Select and Combobox share. The list is always shown; typing ranks it.
 //
-//   <Command
-//     aria-label="Search actions"
-//     items={[
-//       { type: "group", label: "Project", items: [
-//         { value: "new", label: "New project", icon: Plus, shortcut: "mod+j" },
-//         { value: "share", label: "Share", icon: UserAdd, failedLabel: "Could not share" },
-//       ] },
-//     ]}
-//     onAction={(value) => run(value)}
-//   />
+// Since release step 6 it is drawn by parts, as in shadcn's. The commands can stay data: a
+// CommandList with no children draws the root's `items`, so an agent and the keyboard know every
+// one before anything is typed.
 //
-// The commands are data, so an agent and the keyboard know every one before anything is typed.
+//   <Command items={commands} onAction={(value) => run(value)}>
+//     <CommandInput aria-label="Search actions" placeholder="Search actions" />
+//     <CommandEmpty>No results</CommandEmpty>
+//     <CommandList />
+//   </Command>
+//
+// Or written out by hand:
+//
+//   <CommandList>
+//     <CommandGroup heading="Project">
+//       <CommandItem value="new" icon={Plus} shortcut="mod+j">New project</CommandItem>
+//     </CommandGroup>
+//   </CommandList>
+//
+// The older shape below keeps working until step 9: the root draws the parts itself.
+//
+//   <Command aria-label="Search actions" items={commands} onAction={(value) => run(value)} />
+//
 // Every value is a token (src/tokens).
 "use client";
 
@@ -22,15 +32,15 @@
 import * as stylex from "@stylexjs/stylex";
 import {
   Command as CommandPrimitive,
-  CommandEmpty,
-  CommandGroup,
+  CommandEmpty as EmptyPrimitive,
+  CommandGroup as GroupPrimitive,
   CommandGroupLabel,
-  CommandInput,
-  CommandItem,
+  CommandInput as InputPrimitive,
+  CommandItem as ItemPrimitive,
   CommandItemIcon,
   CommandItemText,
-  CommandList,
-  CommandSeparator,
+  CommandList as ListPrimitive,
+  CommandSeparator as SeparatorPrimitive,
   CommandShortcut,
   CommandStatus,
 } from "@ui-sdk/react/command";
@@ -42,7 +52,14 @@ import type {
   CommandListState,
   CommandShortcutState,
 } from "@ui-sdk/react/command";
-import { useId, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 import type { KeyboardEvent, MouseEvent, PointerEvent, ReactNode } from "react";
 
 import { listStyles } from "../combobox/list.styles";
@@ -62,7 +79,7 @@ import type { LayoutStyle } from "../layout/layout";
 import { scroll } from "../scroll/scroll";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { useWords, withGiven } from "../words/words";
-import { commandRow } from "./markers.stylex";
+import { commandMarking, commandRow } from "./markers.stylex";
 import { commandWords } from "./words";
 
 /** One command. */
@@ -146,25 +163,27 @@ export type CommandLayoutStyle = LayoutStyle;
 
 /** Every prop a Command takes. */
 export interface CommandProps {
-  /** The commands, in the order they show before anything is typed. */
-  items: CommandItems;
+  /**
+   * Its parts: a CommandInput, a CommandEmpty and a CommandList. Leave it out only in the older
+   * shape, where the Command draws them itself.
+   */
+  children?: ReactNode;
+  /**
+   * The commands, in the order they show before anything is typed, drawn by a CommandList with no
+   * children. Leave it out when the CommandList holds CommandItem parts.
+   */
+  items?: CommandItems;
   /**
    * Runs the command with this value: Enter, a click, or its shortcut. Return a Promise and the
    * command shows it is working until it settles. If it throws or rejects, the command shows its
    * `failedLabel`, and a screen reader hears it.
    */
   onAction?: (value: string, details: CommandActionDetails) => unknown;
-  /** The search field's name, as a screen reader and an agent say it ("Search actions"). */
-  "aria-label": string;
-  /**
-   * What the empty field says: a verb and the thing.
-   * @default "Search"
-   */
+  /** @deprecated Use `CommandInput.aria-label`. */
+  "aria-label"?: string;
+  /** @deprecated Use `CommandInput.placeholder`. */
   placeholder?: string;
-  /**
-   * What the list says when nothing matches.
-   * @default "No results"
-   */
+  /** @deprecated Use `CommandEmpty`. */
   empty?: string;
   /** What a failed command says when it has no `failedLabel` of its own. @default "Failed" */
   failedLabel?: string;
@@ -212,7 +231,7 @@ export interface CommandProps {
   layout?: CommandLayoutStyle;
   /**
    * No fill, lift, corner or border of its own, for a Command inside a panel that is already a
-   * surface (a dialog, Commandbar's panel).
+   * surface (a dialog, CommandDialog's panel).
    * @default false
    */
   bare?: boolean;
@@ -356,8 +375,15 @@ const styles = stylex.create({
     outlineWidth: { default: null, [FORCED]: grasp.hairline },
     outlineOffset: { default: null, [FORCED]: `calc(-1 * ${grasp.hairline})` },
   },
-  // The other rows of a list that marks the open one: the regular weight.
-  notCurrent: { fontWeight: grasp.weightRegular },
+  // The other rows of a list that marks the open one: the regular weight. Read from the page itself
+  // (:has), so a list written as parts marks it as one given as `items` does.
+  notCurrent: {
+    fontWeight: {
+      default: grasp.weightMedium,
+      [stylex.when.ancestor(":has([aria-current=true])", commandMarking)]:
+        grasp.weightRegular,
+    },
+  },
   // The words a search matched, in a result's second line: in ink at the medium weight, no fill, so
   // the line stays calm (in forced colours, the system's mark).
   match: {
@@ -462,13 +488,15 @@ class CommandFailedError extends Error {
 
 /** What stands at the end of a command: the spinner while it works, its failure, or its keys. */
 const End = ({
-  entry,
   state,
-  failedLabel,
+  failed,
+  shortcut,
+  end,
 }: {
-  entry: CommandEntry;
   state: CommandItemState;
-  failedLabel: string;
+  failed: string;
+  shortcut?: string;
+  end?: ReactNode;
 }) => {
   if (state.pending) {
     return (
@@ -482,22 +510,20 @@ const End = ({
   }
   if (state.error !== undefined) {
     return (
-      <span {...stylex.props(listStyles.itemEnd, styles.failed)}>
-        {entry.failedLabel ?? failedLabel}
-      </span>
+      <span {...stylex.props(listStyles.itemEnd, styles.failed)}>{failed}</span>
     );
   }
-  const keys = entry.shortcut !== undefined && entry.shortcut !== "" && (
+  const keys = shortcut !== undefined && shortcut !== "" && (
     <CommandShortcut {...stylex.props(listStyles.itemEnd)}>
-      {(shortcut: CommandShortcutState) => shortcut.text}
+      {(keyState: CommandShortcutState) => keyState.text}
     </CommandShortcut>
   );
-  if (entry.end === undefined || entry.end === null) {
+  if (end === undefined || end === null) {
     return keys;
   }
   return (
     <span {...stylex.props(styles.endSlot)}>
-      {entry.end}
+      {end}
       {keys}
     </span>
   );
@@ -520,12 +546,15 @@ const Words = () => (
   </CommandItemText>
 );
 
+/** What the list keeps of each command, to find it by value: its name, its failure words, its actions. */
+type Known = Pick<CommandEntry, "value" | "label" | "failedLabel" | "actions">;
+
 /** What a row needs for its More: the one menu, and how it is named and opened. */
 interface RowMenu {
   menu: MenuController;
   moreLabel: (label: string) => string;
   hintId: string;
-  onOpen: (value: string | null) => void;
+  onOpen: (entry: Known | null) => void;
   field: () => HTMLInputElement | null;
 }
 
@@ -535,7 +564,7 @@ const MoreButton = ({
   rows,
   shown,
 }: {
-  entry: CommandEntry;
+  entry: Known;
   rows: RowMenu;
   shown: boolean;
 }) => (
@@ -553,40 +582,199 @@ const MoreButton = ({
       }}
       onClick={(event: MouseEvent) => {
         event.stopPropagation();
-        rows.onOpen(entry.value);
+        rows.onOpen(entry);
       }}
     />
   </span>
 );
 
-const Entry = ({
-  entry,
-  failedLabel,
-  rows,
-  marking = false,
-}: {
-  entry: CommandEntry;
+// ---- The parts (release step 6) --------------------------------------------------------------------
+
+/** What the parts read from their Command: its words, its state, and the one menu of row actions. */
+interface Scope {
+  fieldLabel: string | undefined;
+  placeholder: string;
+  empty: string;
+  loading: boolean;
+  loadingLabel: string;
+  said: string;
+  handleFieldKeys: (event: KeyboardEvent<HTMLInputElement>) => void;
   failedLabel: string;
   rows: RowMenu;
-  marking?: boolean;
-}) => {
-  const withActions = entry.actions !== undefined && entry.actions.length > 0;
+  byValue: Map<string, CommandEntry>;
+  register: (entry: Known) => () => void;
+}
+
+const CommandScope = createContext<Scope | null>(null);
+
+const useScope = (): Scope => {
+  const scope = useContext(CommandScope);
+  if (scope === null) {
+    throw new Error(
+      "A Command part belongs inside a Command or a CommandDialog."
+    );
+  }
+  return scope;
+};
+
+/** Every prop a CommandInput takes. */
+export interface CommandInputProps {
+  /**
+   * The search field's name, as a screen reader and an agent say it ("Search actions"). In a
+   * CommandDialog, the dialog's `aria-label` when left out.
+   */
+  "aria-label"?: string;
+  /**
+   * What the empty field says: a verb and the thing. In a CommandDialog, "Type a command or search"
+   * when left out.
+   * @default "Search"
+   */
+  placeholder?: string;
+}
+
+/** The search field, with its icon and the hairline under it; the list says here when it is loading. */
+export const CommandInput = ({
+  "aria-label": ariaLabel,
+  placeholder,
+}: CommandInputProps) => {
+  const scope = useScope();
   return (
-    <CommandItem
-      data-command-value={entry.value}
-      aria-current={entry.current === true ? "true" : undefined}
+    <>
+      <div {...stylex.props(styles.search)}>
+        <span aria-hidden="true" {...stylex.props(styles.searchIcon)}>
+          <Icon icon={Search} />
+        </span>
+        <InputPrimitive
+          aria-label={ariaLabel ?? scope.fieldLabel}
+          placeholder={placeholder ?? scope.placeholder}
+          onKeyDown={scope.handleFieldKeys}
+          {...stylex.props(styles.input)}
+        />
+      </div>
+      <output {...stylex.props(visuallyHidden)}>{scope.said}</output>
+      <CommandStatus
+        {...stylex.props(scope.loading ? styles.loading : visuallyHidden)}
+      >
+        {scope.loading && (
+          <>
+            <span aria-hidden="true" {...stylex.props(styles.spinner)}>
+              <Icon icon={Spinner} />
+            </span>
+            {scope.loadingLabel}
+          </>
+        )}
+      </CommandStatus>
+    </>
+  );
+};
+
+/** Every prop a CommandEmpty takes. */
+export interface CommandEmptyProps {
+  /**
+   * What the list says when nothing matches.
+   * @default "No results"
+   */
+  children?: ReactNode;
+}
+
+/** What the list says when nothing matches; it waits while results load. */
+export const CommandEmpty = ({ children }: CommandEmptyProps) => {
+  const { empty, loading } = useScope();
+  return (
+    <EmptyPrimitive
+      {...stylex.props(
+        listStyles.empty,
+        styles.empty,
+        loading && visuallyHidden
+      )}
+    >
+      {loading ? "" : (children ?? empty)}
+    </EmptyPrimitive>
+  );
+};
+
+/** Every prop a CommandGroup takes. */
+export interface CommandGroupProps {
+  /** The group's name, small and quiet above it ("Project"). */
+  heading?: string;
+  /** Its CommandItem parts, in order. */
+  children: ReactNode;
+}
+
+/** A named run of commands. */
+export const CommandGroup = ({ heading, children }: CommandGroupProps) => (
+  <GroupPrimitive>
+    {heading !== undefined && heading !== "" && (
+      <CommandGroupLabel {...stylex.props(listStyles.groupLabel)}>
+        {heading}
+      </CommandGroupLabel>
+    )}
+    {children}
+  </GroupPrimitive>
+);
+
+/** A hairline between commands or groups. */
+export const CommandSeparator = () => (
+  <SeparatorPrimitive {...stylex.props(listStyles.separator)} />
+);
+
+/** Every prop a CommandItem takes: a command's, as `items` gives them, with its words as children. */
+export interface CommandItemProps extends Omit<CommandEntry, "label"> {
+  /** The words on the command, a verb first ("Invite people"). Typing matches them when they are plain words. */
+  children: ReactNode;
+  /** The words typing matches and its More is named by, when `children` is not plain words. */
+  label?: string;
+}
+
+/** One command: Enter, a click or its shortcut runs it. */
+export const CommandItem = ({
+  children,
+  label: labelGiven,
+  value,
+  icon,
+  media: mark,
+  shortcut,
+  keywords,
+  disabled,
+  failedLabel,
+  description,
+  end,
+  actions,
+  current = false,
+}: CommandItemProps) => {
+  const { rows, failedLabel: fallback, register } = useScope();
+  const plain = typeof children === "string";
+  const label = plain ? children : labelGiven;
+  const name = label ?? value;
+  const withActions = actions !== undefined && actions.length > 0;
+  // Known by value, so a failure finds its words and the right arrow its actions.
+  useEffect(
+    () => register({ value, label: name, failedLabel, actions }),
+    [register, value, name, failedLabel, actions]
+  );
+  const words = plain ? (
+    <Words />
+  ) : (
+    <span {...stylex.props(listStyles.itemWords)}>{children}</span>
+  );
+  return (
+    <ItemPrimitive
+      data-command-value={value}
+      aria-current={current ? "true" : undefined}
       aria-describedby={withActions ? rows.hintId : undefined}
-      value={entry.value}
-      label={entry.label}
-      keywords={entry.keywords}
-      disabled={entry.disabled}
-      shortcut={entry.shortcut}
+      value={value}
+      label={label}
+      keywords={keywords}
+      disabled={disabled}
+      shortcut={shortcut}
       className={(state: CommandItemState) =>
         className(
           listStyles.item,
+          // A list that marks the open one draws its rows at the regular weight, the open one at the
+          // medium: the weight alone tells it, the highlight the list's only fill.
+          styles.notCurrent,
+          current && styles.current,
           state.highlighted && listStyles.itemHighlighted,
-          marking &&
-            (entry.current === true ? styles.current : styles.notCurrent),
           state.disabled && !state.pending && listStyles.itemDisabled,
           state.pending && styles.pending,
           withActions && commandRow,
@@ -596,32 +784,28 @@ const Entry = ({
     >
       {(state: CommandItemState) => (
         <>
-          {entry.media !== undefined &&
-          entry.media !== null &&
-          entry.media !== false ? (
+          {mark !== undefined && mark !== null && mark !== false ? (
             <span
               aria-hidden="true"
               data-slot="command-media"
               {...stylex.props(styles.media)}
             >
-              {entry.media}
+              {mark}
             </span>
           ) : (
-            entry.icon && (
+            icon && (
               <CommandItemIcon {...stylex.props(listStyles.itemIcon)}>
-                <Icon icon={entry.icon} />
+                <Icon icon={icon} />
               </CommandItemIcon>
             )
           )}
-          {entry.description !== undefined && entry.description !== "" ? (
+          {description !== undefined && description !== "" ? (
             <span {...stylex.props(styles.stack)}>
-              <Words />
-              <span {...stylex.props(styles.description)}>
-                {entry.description}
-              </span>
+              {words}
+              <span {...stylex.props(styles.description)}>{description}</span>
             </span>
           ) : (
-            <Words />
+            words
           )}
           {withActions ? (
             <span
@@ -631,91 +815,96 @@ const Entry = ({
                 state.highlighted && styles.endAsideNow
               )}
             >
-              <End entry={entry} state={state} failedLabel={failedLabel} />
+              <End
+                state={state}
+                failed={failedLabel ?? fallback}
+                shortcut={shortcut}
+                end={end}
+              />
             </span>
           ) : (
-            <End entry={entry} state={state} failedLabel={failedLabel} />
+            <End
+              state={state}
+              failed={failedLabel ?? fallback}
+              shortcut={shortcut}
+              end={end}
+            />
           )}
           {withActions && (
-            <MoreButton entry={entry} rows={rows} shown={state.highlighted} />
+            <MoreButton
+              entry={{ value, label: name, failedLabel, actions }}
+              rows={rows}
+              shown={state.highlighted}
+            />
           )}
         </>
       )}
-    </CommandItem>
+    </ItemPrimitive>
   );
 };
 
-/** The commands as parts, in the order the list gives them. */
+/** One command from `items`, as its part. */
+const Entry = ({ entry }: { entry: CommandEntry }) => {
+  const { label, ...rest } = entry;
+  return <CommandItem {...rest}>{label}</CommandItem>;
+};
+
+/** The commands from `items` as parts, in the order the list gives them. */
 const Entries = ({
   items,
   byValue,
-  failedLabel,
-  rows,
-  marking,
 }: {
   items: CommandData;
   byValue: Map<string, CommandEntry>;
-  failedLabel: string;
-  rows: RowMenu;
-  marking: boolean;
 }) =>
   items.map((entry, index) => {
     if (typeof entry === "string") {
       const known = byValue.get(entry);
-      return known ? (
-        <Entry
-          key={entry}
-          entry={known}
-          failedLabel={failedLabel}
-          rows={rows}
-          marking={marking}
-        />
-      ) : null;
+      return known ? <Entry key={entry} entry={known} /> : null;
     }
     if ("type" in entry && entry.type === "separator") {
       // A separator has no value; its place in the list is its key.
-      return (
-        <CommandSeparator
-          key={`separator-${index}`}
-          {...stylex.props(listStyles.separator)}
-        />
-      );
+      return <CommandSeparator key={`separator-${index}`} />;
     }
     if ("type" in entry && entry.type === "group") {
       return (
-        <CommandGroup key={`group-${entry.label ?? index}`}>
-          {entry.label !== undefined && entry.label !== "" && (
-            <CommandGroupLabel {...stylex.props(listStyles.groupLabel)}>
-              {entry.label}
-            </CommandGroupLabel>
-          )}
+        <CommandGroup
+          key={`group-${entry.label ?? index}`}
+          heading={entry.label}
+        >
           {entry.items.map((inner) => {
             const value = typeof inner === "string" ? inner : inner.value;
             const known = byValue.get(value);
-            return known ? (
-              <Entry
-                key={value}
-                entry={known}
-                failedLabel={failedLabel}
-                rows={rows}
-                marking={marking}
-              />
-            ) : null;
+            return known ? <Entry key={value} entry={known} /> : null;
           })}
         </CommandGroup>
       );
     }
     const known = byValue.get(entry.value);
-    return known ? (
-      <Entry
-        key={entry.value}
-        entry={known}
-        failedLabel={failedLabel}
-        rows={rows}
-        marking={marking}
-      />
-    ) : null;
+    return known ? <Entry key={entry.value} entry={known} /> : null;
   });
+
+/** Every prop a CommandList takes. */
+export interface CommandListProps {
+  /**
+   * The commands: CommandItem, CommandGroup and CommandSeparator parts, in order. Leave it out to
+   * draw the Command's `items`, ranked as the user types.
+   */
+  children?: ReactNode;
+}
+
+/** The commands, under the field; it scrolls past a popup's height. */
+export const CommandList = ({ children }: CommandListProps) => {
+  const { byValue } = useScope();
+  return (
+    <ListPrimitive {...stylex.props(styles.list, scroll.bar)}>
+      {children ??
+        ((state: CommandListState) => (
+          <Entries items={state.items} byValue={byValue} />
+        ))}
+    </ListPrimitive>
+  );
+};
 
 /** Runs the page's action, and says whether it threw rather than letting the throw through. */
 const callAction = (
@@ -737,7 +926,6 @@ const settled = async (result: unknown, fail: () => never) => {
   }
 };
 
-/** The command list, with or without a surface of its own; Commandbar uses it bare in its panel. */
 /** Each command by its value, so the parts can wear its icon and failure words. */
 const commandsByValue = (items: CommandItems): Map<string, CommandEntry> => {
   const map = new Map<string, CommandEntry>();
@@ -758,7 +946,7 @@ const commandsByValue = (items: CommandItems): Map<string, CommandEntry> => {
  * arrow at the end of the words, which come back to the field when it closes.
  */
 const useRowActions = (
-  byValue: Map<string, CommandEntry>,
+  find: (value: string) => Known | undefined,
   moreLabel: (label: string) => string
 ) => {
   const root = useRef<HTMLDivElement | null>(null);
@@ -766,7 +954,7 @@ const useRowActions = (
   // One menu for every row's actions, opened from a row's More or the right arrow.
   // oxlint-disable-next-line react/hook-use-state -- made once, never set
   const [menu] = useState(() => createMenuController());
-  const [actionsFor, setActionsFor] = useState<string | null>(null);
+  const [opened, setOpened] = useState<Known | null>(null);
   const field = () =>
     root.current?.querySelector<HTMLInputElement>("input") ?? null;
   const rowOf = (value: string) =>
@@ -774,12 +962,9 @@ const useRowActions = (
       ...(root.current?.querySelectorAll<HTMLElement>("[data-command-value]") ??
         []),
     ].find((row) => row.dataset.commandValue === value) ?? null;
-  const openActions = (value: string | null) => {
-    setActionsFor(value);
-  };
-  const rows: RowMenu = { menu, moreLabel, hintId, onOpen: openActions, field };
+  const rows: RowMenu = { menu, moreLabel, hintId, onOpen: setOpened, field };
   // The right arrow at the end of the words opens the highlighted command's actions.
-  const onFieldKeys = (event: KeyboardEvent<HTMLInputElement>) => {
+  const handleFieldKeys = (event: KeyboardEvent<HTMLInputElement>) => {
     const input = event.currentTarget;
     const atEnd =
       input.selectionStart === input.value.length &&
@@ -788,8 +973,7 @@ const useRowActions = (
     const highlighted = root.current?.querySelector<HTMLElement>(
       "[data-command-value][data-highlighted]"
     )?.dataset.commandValue;
-    const entry =
-      highlighted === undefined ? undefined : byValue.get(highlighted);
+    const entry = highlighted === undefined ? undefined : find(highlighted);
     if (
       event.key !== "ArrowRight" ||
       !atEnd ||
@@ -799,11 +983,10 @@ const useRowActions = (
       return;
     }
     event.preventDefault();
-    setActionsFor(entry.value);
+    setOpened(entry);
     void menu.open({ anchor: rowOf(entry.value) ?? undefined, focus: "first" });
   };
-  const opened = actionsFor === null ? undefined : byValue.get(actionsFor);
-  return { root, rows, onFieldKeys, opened };
+  return { root, rows, handleFieldKeys, opened: opened ?? undefined };
 };
 
 /** The one menu of a row's actions, beside the row it was opened from. */
@@ -814,7 +997,7 @@ const RowActionsMenu = ({
   onRowAction,
 }: {
   rows: RowMenu;
-  opened: CommandEntry | undefined;
+  opened: Known | undefined;
   moreHint: string;
   onRowAction: CommandProps["onRowAction"];
 }) => {
@@ -866,7 +1049,11 @@ const RowActionsMenu = ({
   );
 };
 
+const NO_ITEMS: CommandItems = [];
+
+/** The command list, with or without a surface of its own; CommandDialog uses it bare in its panel. */
 export const CommandView = ({
+  children,
   items,
   onAction,
   "aria-label": ariaLabel,
@@ -901,15 +1088,27 @@ export const CommandView = ({
     more: moreLabelGiven,
     moreHint: moreHintGiven,
   });
-  const byValue = commandsByValue(items);
-  // A list that marks the open one (`current`) draws its rows at the regular weight, the open one
-  // at the medium: the weight alone tells it, the highlight the list's only fill.
-  const marking = [...byValue.values()].some((entry) => entry.current === true);
-  const { root, rows, onFieldKeys, opened } = useRowActions(byValue, moreLabel);
+  const byValue = commandsByValue(items ?? NO_ITEMS);
+  // The commands written as parts, known by value once they are on the page.
+  const known = useRef(new Map<string, Known>());
+  const find = (value: string): Known | undefined =>
+    byValue.get(value) ?? known.current.get(value);
+  const register = (entry: Known) => {
+    known.current.set(entry.value, entry);
+    return () => {
+      if (known.current.get(entry.value) === entry) {
+        known.current.delete(entry.value);
+      }
+    };
+  };
+  const { root, rows, handleFieldKeys, opened } = useRowActions(
+    find,
+    moreLabel
+  );
   // A failed action shows its failedLabel on the command, and the status line says it aloud.
   const [said, setSaid] = useState("");
   const run = (value: string, details: CommandActionDetails) => {
-    const words = byValue.get(value)?.failedLabel ?? failedLabel;
+    const words = find(value)?.failedLabel ?? failedLabel;
     const fail = () => {
       setSaid(words);
       throw new CommandFailedError(words);
@@ -923,6 +1122,19 @@ export const CommandView = ({
     const thenable =
       result !== null && typeof result === "object" && "then" in result;
     return thenable ? settled(result, fail) : result;
+  };
+  const scope: Scope = {
+    fieldLabel: ariaLabel,
+    placeholder,
+    empty,
+    loading,
+    loadingLabel,
+    said,
+    handleFieldKeys,
+    failedLabel,
+    rows,
+    byValue,
+    register,
   };
   return (
     <CommandPrimitive
@@ -943,58 +1155,35 @@ export const CommandView = ({
       loop
       onAction={run}
       pendingAnnouncement="Working"
-      {...stylex.props(styles.root, bare && styles.bare, layout ?? styleProp)}
+      {...stylex.props(
+        commandMarking,
+        styles.root,
+        bare && styles.bare,
+        layout ?? styleProp
+      )}
     >
-      <div {...stylex.props(styles.search)}>
-        <span aria-hidden="true" {...stylex.props(styles.searchIcon)}>
-          <Icon icon={Search} />
-        </span>
-        <CommandInput
-          aria-label={ariaLabel}
-          placeholder={placeholder}
-          onKeyDown={onFieldKeys}
-          {...stylex.props(styles.input)}
-        />
-      </div>
-      <output {...stylex.props(visuallyHidden)}>{said}</output>
-      <CommandStatus
-        {...stylex.props(loading ? styles.loading : visuallyHidden)}
-      >
-        {loading && (
-          <>
-            <span aria-hidden="true" {...stylex.props(styles.spinner)}>
-              <Icon icon={Spinner} />
-            </span>
-            {loadingLabel}
-          </>
-        )}
-      </CommandStatus>
-      <CommandEmpty
-        {...stylex.props(
-          listStyles.empty,
-          styles.empty,
-          loading && visuallyHidden
-        )}
-      >
-        {loading ? "" : empty}
-      </CommandEmpty>
-      <CommandList {...stylex.props(styles.list, scroll.bar)}>
-        {(state: CommandListState) => (
-          <Entries
-            items={state.items}
-            byValue={byValue}
-            failedLabel={failedLabel}
+      {/* A function, so UI SDK does not look for its own CommandList among the children: not finding
+          it (Grasp's wraps it), it would mount a second list for `items` first. */}
+      {() => (
+        <>
+          {/* oxlint-disable-next-line react/jsx-no-constructed-context-values -- compiled */}
+          <CommandScope value={scope}>
+            {children ?? (
+              <>
+                <CommandInput />
+                <CommandEmpty />
+                <CommandList />
+              </>
+            )}
+          </CommandScope>
+          <RowActionsMenu
             rows={rows}
-            marking={marking}
+            opened={opened}
+            moreHint={moreHint}
+            onRowAction={onRowAction}
           />
-        )}
-      </CommandList>
-      <RowActionsMenu
-        rows={rows}
-        opened={opened}
-        moreHint={moreHint}
-        onRowAction={onRowAction}
-      />
+        </>
+      )}
     </CommandPrimitive>
   );
 };

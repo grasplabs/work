@@ -16,6 +16,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useId, useState } from "react";
 
 import { visuallyHidden } from "../hidden/hidden";
+import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 import type { ChartLayoutStyle } from "./chart";
 import type { ChartConfig } from "./chart-context";
@@ -121,7 +122,7 @@ const styles = stylex.create({
     cursor: "default",
     outline: "none",
     transitionProperty: "transform, opacity",
-    transitionDuration: { default: grasp.durationHover, [media.reduced]: "0s" },
+    transitionDuration: simply.hover,
     transitionTimingFunction: grasp.ease,
     stroke: { default: "transparent", ":focus-visible": grasp.ring },
     strokeWidth: 2,
@@ -160,7 +161,7 @@ const styles = stylex.create({
     gridColumn: "1 / -1",
     gridTemplateColumns: "subgrid",
     transitionProperty: "opacity",
-    transitionDuration: { default: grasp.durationHover, [media.reduced]: "0s" },
+    transitionDuration: simply.hover,
   },
   swatch: { width: 8, height: 8, borderRadius: 2, alignSelf: "center" },
   swatchTone: (colour: string) => ({

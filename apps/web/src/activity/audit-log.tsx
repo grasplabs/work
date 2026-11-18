@@ -452,13 +452,15 @@ const LogFiltersControl = ({ search }: { search: LogSearch }) => {
               />
             </Field>
           )}
-          <Switch
-            checked={shown.archive}
-            label={t`Search the archive`}
-            onCheckedChange={(archive: boolean) => {
-              setShown({ ...shown, archive });
-            }}
-          />
+          <Field orientation="horizontal">
+            <FieldLabel>{t`Search the archive`}</FieldLabel>
+            <Switch
+              checked={shown.archive}
+              onCheckedChange={(archive: boolean) => {
+                setShown({ ...shown, archive });
+              }}
+            />
+          </Field>
         </div>
         <PopoverFooter>
           <PopoverAction

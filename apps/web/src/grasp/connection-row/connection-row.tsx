@@ -281,8 +281,6 @@ const On = ({
       >
         <Switch
           id={id}
-          label={label}
-          labelHidden
           aria-describedby={help === undefined ? undefined : helpId}
           {...state}
         />

@@ -43,6 +43,7 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "../grasp/empty/index.ts";
+import { Field, FieldLabel } from "../grasp/field/index.ts";
 import {
   CalendarIcon,
   Conversation,
@@ -295,7 +296,11 @@ const RecentActivity = ({
   return (
     <SectionCard density="compact" flush title={t`Recent activity`}>
       {ran.length === 0 && asked === null ? (
-        <Empty size="inline">{t`Nothing yet. What it does shows here.`}</Empty>
+        <Empty size="sm">
+          <EmptyHeader>
+            <EmptyDescription>{t`Nothing yet. What it does shows here.`}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
         <ItemGroup separated>
           {asked === null ? null : (
@@ -354,7 +359,7 @@ const Access = ({
     // Core didn't say, as it won't for Grasp's staff: said, never left
     // blank or shown as anyone's.
     return (
-      <Empty size="section" tone="danger">
+      <Empty size="md" tone="danger">
         <EmptyHeader>
           <EmptyTitle>{t`Access isn't shown`}</EmptyTitle>
           <EmptyDescription>
@@ -653,16 +658,17 @@ export const AgentPage = ({
       <PageHeader
         actions={
           <div {...stylex.props(styles.actions)}>
-            <Switch
-              checked={on}
-              disabled={!can}
-              label={t`On`}
-              onCheckedChange={(next) => {
-                void change(async (session) => {
-                  await session.connections.setAgentPaused(agent.id, !next);
-                });
-              }}
-            />
+            <Field orientation="horizontal" disabled={!can}>
+              <FieldLabel>{t`On`}</FieldLabel>
+              <Switch
+                checked={on}
+                onCheckedChange={(next) => {
+                  void change(async (session) => {
+                    await session.connections.setAgentPaused(agent.id, !next);
+                  });
+                }}
+              />
+            </Field>
             <EditAgent
               agent={agent}
               can={can}

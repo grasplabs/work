@@ -2,7 +2,12 @@ import { useLingui } from "@lingui/react/macro";
 import { useState } from "react";
 
 import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
-import { Command } from "../grasp/command/index.ts";
+import {
+  Command,
+  CommandInput,
+  CommandEmpty,
+  CommandList,
+} from "../grasp/command/index.ts";
 import type { CommandEntry } from "../grasp/command/index.ts";
 import { ChevronDown, Icon } from "../grasp/icons/index.ts";
 import {
@@ -188,9 +193,7 @@ export const PersonPicker = ({
       </PopoverTrigger>
       <PopoverContent align={align}>
         <Command
-          aria-label={t`Search people`}
           bare
-          empty={t`Nobody with that name.`}
           filter={false}
           items={entriesTyped(entries, query)}
           loading={people === null}
@@ -205,9 +208,15 @@ export const PersonPicker = ({
             }
           }}
           onQueryChange={setQuery}
-          placeholder={t`Search people`}
           query={query}
-        />
+        >
+          <CommandInput
+            aria-label={t`Search people`}
+            placeholder={t`Search people`}
+          />
+          <CommandEmpty>{t`Nobody with that name.`}</CommandEmpty>
+          <CommandList />
+        </Command>
       </PopoverContent>
     </Popover>
   );

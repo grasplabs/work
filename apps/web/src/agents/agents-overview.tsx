@@ -336,7 +336,7 @@ export const AgentsOverview = ({
     <Page>
       <PageHeading action={newAgent} title={t`Agents`} />
       {agents.length === 0 ? (
-        <Empty size="page">
+        <Empty size="lg">
           <EmptyHeader>
             <EmptyMedia icon={AgentPerson} />
             <EmptyTitle>{t`No agents yet`}</EmptyTitle>
@@ -387,10 +387,14 @@ export const AgentsOverview = ({
             </div>
           )}
           {shown.length === 0 ? (
-            <Empty size="section">
-              {asked === ""
-                ? t`No agent to show here`
-                : t`No agent matches “${asked}”`}
+            <Empty size="md">
+              <EmptyHeader>
+                <EmptyDescription>
+                  {asked === ""
+                    ? t`No agent to show here`
+                    : t`No agent matches “${asked}”`}
+                </EmptyDescription>
+              </EmptyHeader>
             </Empty>
           ) : (
             <AgentGroups

@@ -4,6 +4,7 @@ import * as stylex from "@stylexjs/stylex";
 
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
+import { Field, FieldLabel } from "../grasp/field/index.ts";
 import { visuallyHidden } from "../grasp/hidden/hidden.ts";
 import { Edit, Lock, Show } from "../grasp/icons/index.ts";
 import {
@@ -72,12 +73,15 @@ export const ToolChoice = ({
               : t({ message: "Write", context: "what a tool may do" })}
           </Button>
         )}
-        <Switch
-          checked={choice !== undefined}
+        <Field
+          orientation="horizontal"
           disabled={disabled || (locked && choice !== undefined)}
-          label={<span {...stylex.props(visuallyHidden)}>{name}</span>}
-          onCheckedChange={onAllow}
-        />
+        >
+          <FieldLabel>
+            <span {...stylex.props(visuallyHidden)}>{name}</span>
+          </FieldLabel>
+          <Switch checked={choice !== undefined} onCheckedChange={onAllow} />
+        </Field>
       </ItemActions>
     </Item>
   );

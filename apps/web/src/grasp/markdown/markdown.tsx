@@ -101,8 +101,8 @@ export interface MarkdownProps {
   pace?: PacedOptions["pace"];
   /**
    * `md` for an answer in a thread; `sm` for words in a card or a panel (an agent's instructions,
-   * a note), a step smaller, its headings too; `xs` a step smaller again, for a note beside the
-   * answer (an agent's thoughts). Left out inside a Chat message, the chat's words (chat-text,
+   * a note), a step smaller, its headings too; `xs` a note beside the answer (an agent's thoughts):
+   * the chat's size, set apart by the muted ink, not by size (Ruben, 18 November). Left out inside a Chat message, the chat's words (chat-text,
    * 14px), the headings at their `md` sizes; left out anywhere else, `md`.
    */
   size?: "md" | "sm" | "xs";
@@ -195,7 +195,7 @@ interface Context {
   lineBreaks: boolean;
   /** The smaller size, for words in a card. */
   small: boolean;
-  /** A step smaller again (`size="xs"`). */
+  /** A note beside the answer (`size="xs"`): the chat's size, in the muted ink. */
   xsmall: boolean;
   /**
    * Written here, word by word: its lines break where they fill, never weighed again as a word

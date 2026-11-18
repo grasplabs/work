@@ -25,14 +25,20 @@ import {
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
-import { ApprovalRequest } from "../grasp/approval-request/index.ts";
+import {
+  ApprovalRequest,
+  ApprovalRequestApprove,
+} from "../grasp/approval-request/index.ts";
 import type { ApprovalWords } from "../grasp/approval-request/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import { CodeBlock } from "../grasp/code-block/index.ts";
 import { External } from "../grasp/icons/index.ts";
 import { KeyValueList } from "../grasp/key-value/index.ts";
-import { QuestionTool } from "../grasp/question-tool/index.ts";
+import {
+  QuestionTool,
+  QuestionToolSubmit,
+} from "../grasp/question-tool/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -246,7 +252,7 @@ const ItemFrame = ({
             </div>
           )}
           {failure === undefined ? null : (
-            <Alert variant="danger">{failure}</Alert>
+            <Alert tone="danger">{failure}</Alert>
           )}
           {/* What `extra` shows says these already, in its own words. */}
           {extra === undefined && facts.length > 0 ? (
@@ -381,7 +387,6 @@ const ApprovalFrame = ({
       <ApprovalRequest
         {...(item.asker === undefined ? {} : { agent: item.asker })}
         {...(summary === undefined ? {} : { summary })}
-        {...(approveLabel === undefined ? {} : { approveLabel })}
         {...(approveHeld === undefined ? {} : { approveHeld })}
         askedAt={item.date === "" ? undefined : formatDate(item.date)}
         grave={grave}
@@ -392,6 +397,9 @@ const ApprovalFrame = ({
         variant="ledger"
         words={words}
       >
+        {approveLabel === undefined ? null : (
+          <ApprovalRequestApprove>{approveLabel}</ApprovalRequestApprove>
+        )}
         {details}
       </ApprovalRequest>
     </div>
@@ -713,8 +721,9 @@ const AskedItem = ({
           label={t`Question`}
           onSubmit={answer}
           question={notification.question}
-          submitLabel={t`Answer`}
-        />
+        >
+          <QuestionToolSubmit>{t`Answer`}</QuestionToolSubmit>
+        </QuestionTool>
       }
       failure={undefined}
       frame={{
@@ -779,8 +788,9 @@ const GapItem = ({
           label={t`Question`}
           onSubmit={answer}
           question={question}
-          submitLabel={t`Answer`}
-        />
+        >
+          <QuestionToolSubmit>{t`Answer`}</QuestionToolSubmit>
+        </QuestionTool>
       }
       failure={failure}
       frame={{

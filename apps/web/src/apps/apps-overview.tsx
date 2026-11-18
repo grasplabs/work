@@ -98,7 +98,7 @@ export const AppsOverview = ({
         title={<Trans>Apps</Trans>}
       />
       {apps.length === 0 ? (
-        <Empty size="page">
+        <Empty size="lg">
           <EmptyHeader>
             <EmptyMedia picture="nothing" />
             <EmptyTitle>{t`No Apps yet`}</EmptyTitle>

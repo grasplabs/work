@@ -8,7 +8,12 @@ import type { ReactNode } from "react";
 
 import { useCopy } from "../copy.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
-import { Breadcrumb } from "../grasp/breadcrumb/index.ts";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbList,
+  BreadcrumbPage,
+} from "../grasp/breadcrumb/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import {
   Empty,
@@ -169,11 +174,16 @@ const downloadFile = (path: string, text: string): void => {
 const PathCrumbs = ({ path }: { path: string }) => {
   const { t } = useLingui();
   return (
-    <Breadcrumb
-      aria-label={t`Open file`}
-      items={path.split("/").map((label) => ({ label }))}
-      layout={styles.crumbs}
-    />
+    <Breadcrumb aria-label={t`Open file`} layout={styles.crumbs}>
+      <BreadcrumbList>
+        {path.split("/").map((label, at, all) => (
+          // A path's folders can repeat a name: its place tells them apart.
+          <BreadcrumbItem key={all.slice(0, at + 1).join("/")}>
+            <BreadcrumbPage>{label}</BreadcrumbPage>
+          </BreadcrumbItem>
+        ))}
+      </BreadcrumbList>
+    </Breadcrumb>
   );
 };
 

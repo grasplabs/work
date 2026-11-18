@@ -12,7 +12,10 @@ import type { ReactNode } from "react";
 import { formatList } from "../format.ts";
 import { Button } from "../grasp/button/index.ts";
 import { Icon, Question } from "../grasp/icons/index.ts";
-import { QuestionTool } from "../grasp/question-tool/index.ts";
+import {
+  QuestionTool,
+  QuestionToolSubmit,
+} from "../grasp/question-tool/index.ts";
 import type { QuestionAnswer } from "../grasp/question-tool/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -299,9 +302,10 @@ const AskedQuestions = ({
         skipLabel={t`Type instead`}
         step={{ index: step, count: total }}
         stepLabel={(number, count) => t`${number} of ${count}`}
-        submitLabel={last ? t`Send` : t`Next`}
         value={cardValueOf(answer)}
-      />
+      >
+        <QuestionToolSubmit>{last ? t`Send` : t`Next`}</QuestionToolSubmit>
+      </QuestionTool>
     </ChoiceFocus>
   );
 };

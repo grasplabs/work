@@ -64,4 +64,4 @@ export const nextWakeAt = (wakes: readonly AgentWake[]): string | undefined =>
 
 /** Why a change to an agent failed, where it was asked; nothing when it didn't. */
 export const AgentFailure = ({ children }: { children: string | undefined }) =>
-  children === undefined ? null : <Alert title={children} variant="danger" />;
+  children === undefined ? null : <Alert title={children} tone="danger" />;
