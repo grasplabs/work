@@ -1,8 +1,8 @@
 import { env } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 
-import { workflowStateOf } from "../src/workflow-state.ts";
 import { endLiveResourceRuns } from "./json-workflow-apps.ts";
+import { workflowStateOf } from "./kept-state.ts";
 import { answeringProvider, connectModels } from "./model-provider.ts";
 import type { SentRequest } from "./model-provider.ts";
 import {

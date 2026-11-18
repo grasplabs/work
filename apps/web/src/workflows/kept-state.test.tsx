@@ -184,6 +184,52 @@ describe("what a workflow keeps between its runs, on its page", () => {
     expect(document.body.textContent).not.toContain("Kept between runs");
   });
 
+  it("says why a key's value isn't shown: withheld, as the run that kept it read what is gone, or can't be checked now", async () => {
+    await shown(true);
+    // As core serves them: a withheld key has no value.
+    const withheld: WorkflowState = {
+      entries: [
+        {
+          key: "lead",
+          withheld: "revoked",
+          runId: "run-3",
+          updatedAt: "2026-11-06T09:00:00.000Z",
+        },
+        {
+          key: "summary",
+          withheld: "unchecked",
+          runId: "run-4",
+          updatedAt: "2026-11-06T10:00:00.000Z",
+        },
+        {
+          key: "count",
+          value: 3,
+          runId: "run-5",
+          updatedAt: "2026-11-06T11:00:00.000Z",
+        },
+      ],
+      bytes: 300,
+    };
+    await act(async () => {
+      page.readAgain?.(withheld);
+      await settled();
+    });
+    const rows = [...document.querySelectorAll("tbody tr")].map((row) =>
+      [...row.querySelectorAll("td")]
+        .slice(0, 2)
+        .map((cell) => cell.textContent.trim())
+    );
+
+    expect(rows).toStrictEqual([
+      [
+        "lead",
+        "Withheld: the run that kept it read something that is no longer there to read, so later runs start without it.",
+      ],
+      ["summary", "Can't be shown right now."],
+      ["count", "3"],
+    ]);
+  });
+
   it("offers a reader who may not reset it no reset", async () => {
     await shown(false);
 

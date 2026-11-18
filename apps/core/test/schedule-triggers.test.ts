@@ -31,6 +31,7 @@ import {
 import { startDueScheduleTriggers } from "../src/workflows/schedule-triggers.ts";
 import { allEvents } from "./audit-events.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
+import { brainAway, keptFromTheBrain } from "./kept-state.ts";
 import { outcome, unique } from "./sign-in.ts";
 import { publishDefinition } from "./workflow-publishing.ts";
 
@@ -754,6 +755,42 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
         },
         { action: "trigger.schedule.restarted", detail: {} },
       ],
+    });
+  });
+
+  it("back off, never stopping, while what the workflow keeps can't be checked, and start once it can", async () => {
+    const admin = await person("admin");
+    const workflow = await reporting(admin);
+    const trigger = await scheduleTrigger(admin, workflow.id);
+    await keptFromTheBrain(env, workflow.id);
+    const occurrence = lastMinute();
+    await dueAt(trigger.id, occurrence);
+    // The Brain away for every try, longer than any count stops.
+    for (let attempt = 0; attempt < maxFailedStarts + 2; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      await startDueScheduleTriggers(
+        brainAway(env),
+        new Date(Date.now() + 2 ** attempt * minuteMs)
+      );
+    }
+    const afterOutage = await scheduleOf(trigger.id);
+    // Back: its occurrence starts.
+    await startDueScheduleTriggers(
+      env,
+      new Date(Date.now() + 2 ** (maxFailedStarts + 3) * minuteMs)
+    );
+    const started = await runsOf(trigger.id);
+
+    expect({
+      outage: {
+        next: afterOutage?.nextAt,
+        failedStarts: afterOutage?.failedStarts,
+        backedOff: (afterOutage?.attempts ?? 0) > 0,
+      },
+      runs: started.map(({ key }) => key),
+    }).toStrictEqual({
+      outage: { next: occurrence.getTime(), failedStarts: 0, backedOff: true },
+      runs: [keyOf(trigger.id, occurrence)],
     });
   });
 

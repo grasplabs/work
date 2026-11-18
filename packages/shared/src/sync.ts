@@ -13,8 +13,21 @@ import { defineErrorFamily } from "./errors.ts";
 export const syncItemKindSchema = z.enum(["mail", "file", "event"]);
 export type SyncItemKind = z.infer<typeof syncItemKindSchema>;
 
+/**
+ * The bounds an item's fields keep, so no vendor's value can make an item
+ * unbounded. The connector kit fits every item a sync answers to them
+ * (`fitItem`): a title is cut, a part that doesn't fit is left out.
+ */
+export const syncItemLimits = {
+  /** An ID: of an item, an account, a group or a domain. */
+  idLength: 1024,
+  versionLength: 1024,
+  titleLength: 1024,
+  contentTypeLength: 255,
+} as const;
+
 /** A provider's ID of an item, an account, a group or a domain. */
-const sourceIdSchema = z.string().min(1).max(1024);
+const sourceIdSchema = z.string().min(1).max(syncItemLimits.idLength);
 
 /**
  * Who may open an item, as the source lists it: one account, by its
@@ -38,7 +51,7 @@ export const syncContentSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("text"), text: z.string() }),
   z.strictObject({
     type: z.literal("file"),
-    contentType: z.string().min(1).max(255),
+    contentType: z.string().min(1).max(syncItemLimits.contentTypeLength),
     base64: z.base64(),
   }),
 ]);
@@ -59,10 +72,10 @@ export const syncItemSchema = z.discriminatedUnion("gone", [
      * Its change marker: the provider's version of it. Core keys each
      * version by it, so reading a page again changes nothing.
      */
-    version: z.string().min(1).max(1024),
+    version: z.string().min(1).max(syncItemLimits.versionLength),
     /** When it last changed, as the provider says. */
     changedAt: z.iso.datetime({ offset: true }),
-    title: z.string().max(1024),
+    title: z.string().max(syncItemLimits.titleLength),
     /**
      * Null when nothing of it is readable here: no text, or more than a
      * page holds. Core counts it as skipped.
