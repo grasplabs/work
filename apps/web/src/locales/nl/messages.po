@@ -2641,6 +2641,10 @@ msgstr "Alle plekken"
 msgid "All settings"
 msgstr "Alle instellingen"
 
+#: src/frame/part-words.tsx
+msgid "All steps done"
+msgstr "Alle stappen klaar"
+
 #: src/workflows/requests/request-filters.tsx
 msgid "All teams"
 msgstr "Alle teams"
@@ -5319,6 +5323,11 @@ msgstr "Valuta"
 msgid "Current plan"
 msgstr "Huidig abonnement"
 
+#: src/frame/part-words.tsx
+msgctxt "a step's state"
+msgid "current step"
+msgstr "huidige stap"
+
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.settings.appearance.tsx
 msgid "Dark"
@@ -5857,6 +5866,11 @@ msgstr "Niet toestaan zolang dit record ernaar linkt"
 #: src/knowledge/uploads.tsx
 msgid "Don’t upload interview recordings or their captions: interviews go through the interview flow."
 msgstr "Upload geen opnames van interviews of hun ondertitels: interviews gaan via de interviewflow."
+
+#: src/frame/part-words.tsx
+msgctxt "a step's state"
+msgid "done"
+msgstr "klaar"
 
 #: src/apps/blueprints.tsx
 #: src/chat/use-dictation.ts
@@ -6527,6 +6541,11 @@ msgstr "Wordt uitgelezen"
 
 #: src/workflows/today-lanes.tsx
 msgctxt "a run that ended in failure"
+msgid "failed"
+msgstr "mislukt"
+
+#: src/frame/part-words.tsx
+msgctxt "a step's state"
 msgid "failed"
 msgstr "mislukt"
 
@@ -10622,6 +10641,11 @@ msgstr "Niet afgemeld"
 #: src/workflows/requests/request-parts.tsx
 msgid "Not sorted yet"
 msgstr "Nog niet ingedeeld"
+
+#: src/frame/part-words.tsx
+msgctxt "a step's state"
+msgid "not started"
+msgstr "nog niet begonnen"
 
 #: src/workflows/stop-run.tsx
 msgid "Not stopped"
@@ -14905,6 +14929,10 @@ msgstr "Stap {n}"
 #: src/dashboard/signals.tsx
 msgid "Step {step} of {about} failed in {failures} of {runs, plural, one {# run} other {# runs}} in {days, plural, one {the last day} other {the last # days}}."
 msgstr "Stap {step} van {about} mislukte {days, plural, one {de afgelopen dag} other {de afgelopen # dagen}} in {failures} van {runs, plural, one {# run} other {# runs}}."
+
+#: src/frame/part-words.tsx
+msgid "Step {step} of {total}"
+msgstr "Stap {step} van {total}"
 
 #: src/interview/words.ts
 msgid "Step by step"

@@ -59,6 +59,7 @@ import { shareAccessWords } from "../grasp/share-access/words.ts";
 import { sheetWords } from "../grasp/sheet/words.ts";
 import { sidebarWords } from "../grasp/sidebar/words.ts";
 import { sourcesWords } from "../grasp/sources/words.ts";
+import { stepperWords } from "../grasp/stepper/words.ts";
 import { tagInputWords } from "../grasp/tag-input/words.ts";
 import { tagWords } from "../grasp/tag/words.ts";
 import { themeSwitchWords } from "../grasp/theme-switch/words.ts";
@@ -132,6 +133,7 @@ export const englishPartWords: GraspWordsCatalog = {
   sheet: sheetWords,
   sidebar: sidebarWords,
   sources: sourcesWords,
+  stepper: stepperWords,
   tag: tagWords,
   themeSwitch: themeSwitchWords,
   thread: threadWords,
@@ -316,6 +318,16 @@ export const usePartWords = (): GraspWordsCatalog => {
       done: t`Done`,
       notDone: t`Not done`,
       table: t`Table`,
+    },
+    stepper: {
+      states: {
+        done: t({ message: "done", context: "a step's state" }),
+        current: t({ message: "current step", context: "a step's state" }),
+        coming: t({ message: "not started", context: "a step's state" }),
+        failed: t({ message: "failed", context: "a step's state" }),
+      },
+      count: (step, total) => t`Step ${step} of ${total}`,
+      finished: t`All steps done`,
     },
     sources: {
       source: (number) => t`Source ${number}`,

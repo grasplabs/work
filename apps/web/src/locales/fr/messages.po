@@ -2641,6 +2641,10 @@ msgstr "Tous les lieux"
 msgid "All settings"
 msgstr "Tous les réglages"
 
+#: src/frame/part-words.tsx
+msgid "All steps done"
+msgstr "Toutes les étapes sont terminées"
+
 #: src/workflows/requests/request-filters.tsx
 msgid "All teams"
 msgstr "Toutes les équipes"
@@ -5319,6 +5323,11 @@ msgstr "Devise"
 msgid "Current plan"
 msgstr "Abonnement actuel"
 
+#: src/frame/part-words.tsx
+msgctxt "a step's state"
+msgid "current step"
+msgstr "étape en cours"
+
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.settings.appearance.tsx
 msgid "Dark"
@@ -5857,6 +5866,11 @@ msgstr "Ne pas l’autoriser tant que cet enregistrement y est lié"
 #: src/knowledge/uploads.tsx
 msgid "Don’t upload interview recordings or their captions: interviews go through the interview flow."
 msgstr "N’importez pas d’enregistrements d’entretiens ni leurs sous-titres : les entretiens passent par le parcours d’entretien."
+
+#: src/frame/part-words.tsx
+msgctxt "a step's state"
+msgid "done"
+msgstr "terminée"
 
 #: src/apps/blueprints.tsx
 #: src/chat/use-dictation.ts
@@ -6527,6 +6541,11 @@ msgstr "Extraction"
 
 #: src/workflows/today-lanes.tsx
 msgctxt "a run that ended in failure"
+msgid "failed"
+msgstr "échouée"
+
+#: src/frame/part-words.tsx
+msgctxt "a step's state"
 msgid "failed"
 msgstr "échouée"
 
@@ -10622,6 +10641,11 @@ msgstr "Non déconnecté"
 #: src/workflows/requests/request-parts.tsx
 msgid "Not sorted yet"
 msgstr "Pas encore classé"
+
+#: src/frame/part-words.tsx
+msgctxt "a step's state"
+msgid "not started"
+msgstr "pas commencée"
 
 #: src/workflows/stop-run.tsx
 msgid "Not stopped"
@@ -14905,6 +14929,10 @@ msgstr "Étape {n}"
 #: src/dashboard/signals.tsx
 msgid "Step {step} of {about} failed in {failures} of {runs, plural, one {# run} other {# runs}} in {days, plural, one {the last day} other {the last # days}}."
 msgstr "L’étape {step} de {about} a échoué {failures} fois sur {runs, plural, one {# exécution} other {# exécutions}} {days, plural, one {ces dernières 24 heures} other {ces # derniers jours}}."
+
+#: src/frame/part-words.tsx
+msgid "Step {step} of {total}"
+msgstr "Étape {step} sur {total}"
 
 #: src/interview/words.ts
 msgid "Step by step"

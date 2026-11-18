@@ -27,7 +27,9 @@ import { Cross, Icon, Tick } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { useWords } from "../words/words";
 import { LookStepper } from "./looks";
+import { stepperWords } from "./words";
 
 /** Where a step is: done, the one you are on, still to come, or failed. */
 export type StepperState = "done" | "current" | "coming" | "failed";
@@ -328,12 +330,6 @@ const names = {
   done: styles.nameDone,
   failed: styles.nameFailed,
 } as const;
-const defaultSaid: Record<StepperState, string> = {
-  done: "done",
-  current: "current step",
-  coming: "not started",
-  failed: "failed",
-};
 
 /** Where a step stands from `current`, when it says nothing of its own. */
 const placeOf = (index: number, current: number): StepperState => {
@@ -415,9 +411,12 @@ const ClassicStepper = ({
   style: styleProp,
   layout,
   onSelect,
-  finishedLabel = "All steps done",
+  finishedLabel: finishedGiven,
 }: StepperProps) => {
-  const said = { ...defaultSaid, ...stateLabels };
+  // Its words: the product's, by its catalogue, else English; the caller's props still win.
+  const words = useWords("stepper", stepperWords);
+  const finishedLabel = finishedGiven ?? words.finished;
+  const said = { ...words.states, ...stateLabels };
   const across = orientation === "horizontal";
   const finished = across && current >= steps.length;
   return (

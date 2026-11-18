@@ -212,6 +212,8 @@ const styles = stylex.create({
     margin: 0,
     fontFamily: grasp.fontSans,
   },
+  // Embedded, it fills what holds it (a composer may be wider than the composer's own width).
+  rootEmbedded: { maxWidth: "none" },
   bare: {
     borderWidth: 0,
     backgroundColor: "transparent",
@@ -559,6 +561,10 @@ const controlsIn = (root: HTMLElement | null) => [
 const onChoiceOf = (target: EventTarget | null) =>
   target instanceof HTMLElement &&
   /^(?:radio|checkbox)$/u.test(target.getAttribute("role") ?? "");
+
+/** Embedded it fills what holds it; standing alone it keeps the composer's width. */
+const rootWidth = (embedded: boolean) =>
+  embedded ? styles.rootEmbedded : null;
 
 /**
  * Whether Enter submits from here: from a choice, the Other field or (embedded) the text, never
@@ -1127,7 +1133,11 @@ const QuestionCard = (props: Resolved) => {
       aria-describedby={failed ? failedId : undefined}
       onSubmit={embedded ? undefined : onFormSubmit}
       onKeyDown={onKeyDown}
-      {...stylex.props(styles.root, props.layout ?? props.style)}
+      {...stylex.props(
+        styles.root,
+        rootWidth(embedded),
+        props.layout ?? props.style
+      )}
     >
       <div {...stylex.props(styles.card, embedded && styles.bare)}>
         <div {...stylex.props(styles.head)}>

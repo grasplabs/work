@@ -105,6 +105,8 @@ export interface ThreadProps<T extends ThreadItemBase> {
    * up a line at a time. Once the answer is taller than that room, the thread follows it as ever.
    * The thread needs a height of its own for this (a fixed one, or its place in a layout that
    * gives it one): in a box only as tall as its messages no room is kept, and nothing else changes.
+   * Keep it set after the answer ends, until the next message is sent: clearing it gives the room
+   * up, and the thread jumps.
    */
   answerTo?: string;
   /** The words it writes itself, any of them replaced: the Unread line, the status words, the days. */

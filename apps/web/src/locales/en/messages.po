@@ -2641,6 +2641,10 @@ msgstr "All places"
 msgid "All settings"
 msgstr "All settings"
 
+#: src/frame/part-words.tsx
+msgid "All steps done"
+msgstr "All steps done"
+
 #: src/workflows/requests/request-filters.tsx
 msgid "All teams"
 msgstr "All teams"
@@ -5319,6 +5323,11 @@ msgstr "Currency"
 msgid "Current plan"
 msgstr "Current plan"
 
+#: src/frame/part-words.tsx
+msgctxt "a step's state"
+msgid "current step"
+msgstr "current step"
+
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.settings.appearance.tsx
 msgid "Dark"
@@ -5857,6 +5866,11 @@ msgstr "Don’t allow it while this record links to it"
 #: src/knowledge/uploads.tsx
 msgid "Don’t upload interview recordings or their captions: interviews go through the interview flow."
 msgstr "Don’t upload interview recordings or their captions: interviews go through the interview flow."
+
+#: src/frame/part-words.tsx
+msgctxt "a step's state"
+msgid "done"
+msgstr "done"
 
 #: src/apps/blueprints.tsx
 #: src/chat/use-dictation.ts
@@ -6527,6 +6541,11 @@ msgstr "Extracting"
 
 #: src/workflows/today-lanes.tsx
 msgctxt "a run that ended in failure"
+msgid "failed"
+msgstr "failed"
+
+#: src/frame/part-words.tsx
+msgctxt "a step's state"
 msgid "failed"
 msgstr "failed"
 
@@ -10622,6 +10641,11 @@ msgstr "Not signed out"
 #: src/workflows/requests/request-parts.tsx
 msgid "Not sorted yet"
 msgstr "Not sorted yet"
+
+#: src/frame/part-words.tsx
+msgctxt "a step's state"
+msgid "not started"
+msgstr "not started"
 
 #: src/workflows/stop-run.tsx
 msgid "Not stopped"
@@ -14905,6 +14929,10 @@ msgstr "Step {n}"
 #: src/dashboard/signals.tsx
 msgid "Step {step} of {about} failed in {failures} of {runs, plural, one {# run} other {# runs}} in {days, plural, one {the last day} other {the last # days}}."
 msgstr "Step {step} of {about} failed in {failures} of {runs, plural, one {# run} other {# runs}} in {days, plural, one {the last day} other {the last # days}}."
+
+#: src/frame/part-words.tsx
+msgid "Step {step} of {total}"
+msgstr "Step {step} of {total}"
 
 #: src/interview/words.ts
 msgid "Step by step"

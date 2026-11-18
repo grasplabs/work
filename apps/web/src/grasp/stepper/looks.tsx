@@ -10,8 +10,10 @@ import { Cross, Icon, Tick } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { useWords } from "../words/words";
 import type { StepperProps, StepperState, StepperStep } from "./stepper";
 import { stepMarker } from "./stepper.stylex";
+import { stepperWords } from "./words";
 
 const FORCED = media.forced;
 const REDUCED = media.reduced;
@@ -562,14 +564,6 @@ const tileStyles = {
   done: styles.tileDone,
   failed: styles.tileFailed,
 } as const;
-const defaultSaid: Record<StepperState, string> = {
-  done: "done",
-  current: "current step",
-  coming: "not started",
-  failed: "failed",
-};
-const defaultCount = (step: number, total: number) =>
-  `Step ${step} of ${total}`;
 
 const placeOf = (index: number, current: number): StepperState => {
   if (index < current) {
@@ -874,12 +868,16 @@ export const LookStepper = ({
   style,
   look = "light",
   onSelect,
-  countLabel = defaultCount,
-  finishedLabel = "All steps done",
+  countLabel: countGiven,
+  finishedLabel: finishedGiven,
   working = false,
 }: StepperProps) => {
+  // Its words: the product's, by its catalogue, else English; the caller's props still win.
+  const catalogued = useWords("stepper", stepperWords);
+  const countLabel = countGiven ?? catalogued.count;
+  const finishedLabel = finishedGiven ?? catalogued.finished;
   const drawn: Look = look === "classic" ? "light" : look;
-  const said = { ...defaultSaid, ...stateLabels };
+  const said = { ...catalogued.states, ...stateLabels };
   const across = orientation === "horizontal";
   const count = steps.length;
   const states = steps.map((step, index) => stateOf(step, index, current));

@@ -2641,6 +2641,10 @@ msgstr "Alle Orte"
 msgid "All settings"
 msgstr "Alle Einstellungen"
 
+#: src/frame/part-words.tsx
+msgid "All steps done"
+msgstr "Alle Schritte erledigt"
+
 #: src/workflows/requests/request-filters.tsx
 msgid "All teams"
 msgstr "Alle Teams"
@@ -5319,6 +5323,11 @@ msgstr "Währung"
 msgid "Current plan"
 msgstr "Aktueller Tarif"
 
+#: src/frame/part-words.tsx
+msgctxt "a step's state"
+msgid "current step"
+msgstr "aktueller Schritt"
+
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/routes/_shell.settings.appearance.tsx
 msgid "Dark"
@@ -5857,6 +5866,11 @@ msgstr "Nicht erlauben, solange dieser Datensatz darauf verweist"
 #: src/knowledge/uploads.tsx
 msgid "Don’t upload interview recordings or their captions: interviews go through the interview flow."
 msgstr "Laden Sie keine Interviewaufnahmen oder deren Untertitel hoch: Interviews laufen über den Interviewablauf."
+
+#: src/frame/part-words.tsx
+msgctxt "a step's state"
+msgid "done"
+msgstr "erledigt"
 
 #: src/apps/blueprints.tsx
 #: src/chat/use-dictation.ts
@@ -6527,6 +6541,11 @@ msgstr "Wird ausgelesen"
 
 #: src/workflows/today-lanes.tsx
 msgctxt "a run that ended in failure"
+msgid "failed"
+msgstr "fehlgeschlagen"
+
+#: src/frame/part-words.tsx
+msgctxt "a step's state"
 msgid "failed"
 msgstr "fehlgeschlagen"
 
@@ -10622,6 +10641,11 @@ msgstr "Nicht abgemeldet"
 #: src/workflows/requests/request-parts.tsx
 msgid "Not sorted yet"
 msgstr "Noch nicht zugeordnet"
+
+#: src/frame/part-words.tsx
+msgctxt "a step's state"
+msgid "not started"
+msgstr "noch nicht begonnen"
 
 #: src/workflows/stop-run.tsx
 msgid "Not stopped"
@@ -14905,6 +14929,10 @@ msgstr "Schritt {n}"
 #: src/dashboard/signals.tsx
 msgid "Step {step} of {about} failed in {failures} of {runs, plural, one {# run} other {# runs}} in {days, plural, one {the last day} other {the last # days}}."
 msgstr "Schritt {step} von {about} ist {days, plural, one {am letzten Tag} other {in den letzten # Tagen}} in {failures} von {runs, plural, one {# Durchlauf} other {# Durchläufen}} fehlgeschlagen."
+
+#: src/frame/part-words.tsx
+msgid "Step {step} of {total}"
+msgstr "Schritt {step} von {total}"
 
 #: src/interview/words.ts
 msgid "Step by step"
