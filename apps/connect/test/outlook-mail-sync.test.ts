@@ -1,4 +1,7 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import { connectorIsolateRequests } from "@grasp-os/connector-kit/manifest";
+import { mailSync } from "@grasp-os/connector-microsoft-365/mail-sync";
 import { syncErrors } from "@grasp-os/shared/sync";
 import type { SyncPage } from "@grasp-os/shared/sync";
 import { exports } from "cloudflare:workers";
@@ -25,9 +28,6 @@ const graphHost = "graph.microsoft.com";
 const messagesPath = "/v1.0/me/messages";
 const foldersPath = "/v1.0/me/mailFolders";
 
-/** The connected person's Entra object ID, as Graph's /me gives it. */
-let ownerId = "";
-
 type Message = Record<string, unknown> & { id: string };
 
 /** A folder's delta: each token's entries, and the delta token after them. */
@@ -35,6 +35,10 @@ type Feed = Record<string, { entries: Message[]; end: string }>;
 
 /** What the mailbox holds, for each test to set. */
 interface Mailbox {
+  /** The connected person's Entra object ID, as Graph's /me gives it. */
+  owner: string;
+  /** How many requests Graph has answered from it. */
+  requests: number;
   /** Each folder's parent. */
   parents: Record<string, string | null>;
   /** Hidden folders, and search folders, by ID. */
@@ -62,8 +66,38 @@ interface Mailbox {
   answer?: (url: URL) => Response | undefined;
 }
 
-const mailbox: Mailbox = {
-  parents: {},
+/** The well-known names Graph takes for folders. */
+const wellKnown: Record<string, string> = {
+  msgfolderroot: "root",
+  searchfolders: "searches",
+  deleteditems: "deleted",
+  junkemail: "junk",
+  drafts: "drafts",
+};
+
+/**
+ * Each test's own mailbox, by its account's subject. Graph's requests are
+ * answered from the mailbox of the account their token was issued to, so
+ * a test that runs on past its end (a timeout doesn't stop it) changes
+ * only its own.
+ */
+const mailboxes = new Map<string, Mailbox>();
+
+/** A mailbox as each test starts it. */
+const newMailbox = (owner: string): Mailbox => ({
+  owner,
+  requests: 0,
+  parents: {
+    root: "top",
+    searches: "root",
+    inbox: "root",
+    projects: "inbox",
+    archive: "root",
+    deleted: "root",
+    "old-project": "deleted",
+    junk: "root",
+    drafts: "root",
+  },
   hidden: new Set(),
   search: new Set(),
   folderPage: 1000,
@@ -74,41 +108,25 @@ const mailbox: Mailbox = {
   messages: {},
   attachments: {},
   contents: {},
-};
+});
 
-/** The well-known names Graph takes for folders. */
-const wellKnown: Record<string, string> = {
-  msgfolderroot: "root",
-  searchfolders: "searches",
-  deleteditems: "deleted",
-  junkemail: "junk",
-  drafts: "drafts",
-};
+/** The mailbox requests with no token answer from: the sync's, driven in this test. */
+const inProcess = new AsyncLocalStorage<Mailbox>();
 
-const reset = (): void => {
-  mailbox.parents = {
-    root: "top",
-    searches: "root",
-    inbox: "root",
-    projects: "inbox",
-    archive: "root",
-    deleted: "root",
-    "old-project": "deleted",
-    junk: "root",
-    drafts: "root",
-  };
-  mailbox.hidden = new Set();
-  mailbox.search = new Set();
-  mailbox.folderPage = 1000;
-  mailbox.stuckListing = false;
-  mailbox.expiredListing = new Set();
-  mailbox.dropOnce = new Set();
-  mailbox.feeds = {};
-  mailbox.messages = {};
-  mailbox.attachments = {};
-  mailbox.contents = {};
-  mailbox.slow = undefined;
-  mailbox.answer = undefined;
+/**
+ * The mailbox of the account a request's bearer token was issued to; with
+ * no token, that of the sync driven in this test.
+ */
+const mailboxOf = (
+  authorization: string | null | undefined
+): Mailbox | undefined => {
+  const token = /^Bearer (?<token>.+)$/u.exec(authorization ?? "")?.groups
+    ?.token;
+  if (token === undefined) {
+    return inProcess.getStore();
+  }
+  const account = providers.state.holders.get(token);
+  return account === undefined ? undefined : mailboxes.get(account.subject);
 };
 
 /** Documented properties (resource pages), for the fake's `$select`. */
@@ -211,7 +229,7 @@ const unknownOption = (url: URL, known: readonly string[]): Response | null =>
     : Response.json({ error: { code: "BadRequest" } }, { status: 400 });
 
 /** A folder, as Graph gives it. */
-const folderOf = (id: string): Record<string, unknown> => ({
+const folderOf = (mailbox: Mailbox, id: string): Record<string, unknown> => ({
   ...(mailbox.search.has(id)
     ? { "@odata.type": "#microsoft.graph.mailSearchFolder" }
     : {}),
@@ -225,7 +243,7 @@ const folderOf = (id: string): Record<string, unknown> => ({
  * The mailbox's folders, as mailFolder delta lists them: as many a page
  * as `odata.maxpagesize` asks and Graph gives, with a skip token on.
  */
-const folderDelta = (url: URL, prefer: string): Response => {
+const folderDelta = (mailbox: Mailbox, url: URL, prefer: string): Response => {
   const refused = unknownOption(url, ["$select", "$skiptoken", "$deltatoken"]);
   if (refused !== null) {
     return refused;
@@ -254,7 +272,9 @@ const folderDelta = (url: URL, prefer: string): Response => {
   const all = Object.keys(mailbox.parents).filter((id) => id !== "top");
   const more = from + size < all.length;
   return Response.json({
-    value: all.slice(from, from + size).map((id) => only(folderOf(id), fields)),
+    value: all
+      .slice(from, from + size)
+      .map((id) => only(folderOf(mailbox, id), fields)),
     ...(more
       ? {
           "@odata.nextLink": `https://${graphHost}${foldersPath}/delta?$skiptoken=${from + size}`,
@@ -269,7 +289,12 @@ const folderDelta = (url: URL, prefer: string): Response => {
  * One page of a folder's delta: from its first listing (no token) or a
  * skip or delta token, as many messages as `odata.maxpagesize` asks.
  */
-const messageDelta = (url: URL, folder: string, prefer: string): Response => {
+const messageDelta = (
+  mailbox: Mailbox,
+  url: URL,
+  folder: string,
+  prefer: string
+): Response => {
   const refused = unknownOption(url, ["$select", "$skiptoken", "$deltatoken"]);
   if (refused !== null) {
     return refused;
@@ -326,7 +351,11 @@ const optionsOf = (
 };
 
 /** A message, its attachments, or an attachment's bytes. */
-const messageAnswer = (url: URL, rest: string[]): Response => {
+const messageAnswer = (
+  mailbox: Mailbox,
+  url: URL,
+  rest: string[]
+): Response => {
   const [id = "", part, attachment, value] = rest;
   const message = mailbox.messages[id];
   if (message === undefined) {
@@ -370,6 +399,11 @@ const messageAnswer = (url: URL, rest: string[]): Response => {
 };
 
 const internet = fakeInternet(async (request, url) => {
+  const mailbox = mailboxOf(request.headers.get("authorization"));
+  if (mailbox === undefined) {
+    return new Response(null, { status: 401 });
+  }
+  mailbox.requests += 1;
   if (mailbox.slow?.path === url.pathname) {
     await scheduler.wait(mailbox.slow.ms);
   }
@@ -382,13 +416,18 @@ const internet = fakeInternet(async (request, url) => {
   }
   const path = url.pathname;
   if (path === `${foldersPath}/delta`) {
-    return folderDelta(url, request.headers.get("prefer") ?? "");
+    return folderDelta(mailbox, url, request.headers.get("prefer") ?? "");
   }
   const delta =
     /^\/v1\.0\/me\/mailFolders\/(?<folder>[^/]+)\/messages\/delta$/u.exec(path)
       ?.groups?.folder;
   if (delta !== undefined) {
-    return messageDelta(url, delta, request.headers.get("prefer") ?? "");
+    return messageDelta(
+      mailbox,
+      url,
+      delta,
+      request.headers.get("prefer") ?? ""
+    );
   }
   if (path.startsWith(`${foldersPath}/`)) {
     const name = path.slice(foldersPath.length + 1);
@@ -402,44 +441,31 @@ const internet = fakeInternet(async (request, url) => {
     }
     const id = wellKnown[name] ?? name;
     return Object.hasOwn(mailbox.parents, id)
-      ? Response.json(only(folderOf(id), fields))
+      ? Response.json(only(folderOf(mailbox, id), fields))
       : notFound();
   }
   if (path.startsWith(`${messagesPath}/`)) {
-    return messageAnswer(url, path.slice(messagesPath.length + 1).split("/"));
+    return messageAnswer(
+      mailbox,
+      url,
+      path.slice(messagesPath.length + 1).split("/")
+    );
   }
   return notFound();
 });
 
-/** What reached Graph. */
-const sentToGraph = () =>
-  internet.sent.filter(({ host }) => host === graphHost);
-
-/** Depths from `from` to `to`, both included. */
-const depthsFrom = (from: number, to: number): number[] =>
-  Array.from({ length: to - from + 1 }, (_, index) => from + index);
-
-/**
- * Chain depths to list: every short one, those whose walks end around a
- * read's last request (a read has the isolate's requests, less the five
- * well-known reads and a page on the first), the same around two reads',
- * and a deep one.
- */
-const chainDepths = [
-  ...depthsFrom(1, 12),
-  ...depthsFrom(connectorIsolateRequests - 7, connectorIsolateRequests + 2),
-  ...depthsFrom(
-    2 * connectorIsolateRequests - 12,
-    2 * connectorIsolateRequests
-  ),
-  120,
-];
+/** What reached Graph from a test's own connection. */
+const sentToGraph = (mailbox: Mailbox) =>
+  internet.sent.filter(
+    ({ host, headers }) =>
+      host === graphHost && mailboxOf(headers.authorization) === mailbox
+  );
 
 /**
  * A chain of `depth` folders under the inbox, each in the one before,
  * listed deepest first ahead of the other folders: its IDs, top first.
  */
-const chainOf = (depth: number): string[] => {
+const chainOf = (mailbox: Mailbox, depth: number): string[] => {
   const chain = Array.from({ length: depth }, (_, index) => `d${index + 1}`);
   mailbox.parents = {
     ...Object.fromEntries(
@@ -455,30 +481,30 @@ const chainOf = (depth: number): string[] => {
   return chain;
 };
 
+/** One read of a folder listing, from its cursor. */
+type ListRead = (
+  cursor: string | null
+) => Promise<{ places: string[]; cursor: string | null }>;
+
 /**
  * The mailbox's folders listed to the end, read after read: whether it
  * finished, what it listed, and whether every read stayed within an
- * isolate's requests, counted at Graph.
+ * isolate's requests, counted at the fake Graph.
  */
 const listAll = async (
-  connectionId: string
+  mailbox: Mailbox,
+  listRead: ListRead
 ): Promise<{ done: boolean; places: Set<string>; withinRequests: boolean }> => {
   const places = new Set<string>();
   let cursor: string | null = null;
   let withinRequests = true;
   // Far more reads than any listing here takes: a listing that never ends
   // fails instead of hanging.
-  for (let reads = 0; reads < 1000; reads += 1) {
-    const before = sentToGraph().length;
-    const answer: { places: string[]; cursor: string | null } =
-      // oxlint-disable-next-line no-await-in-loop -- reads come one after another
-      await exports.default.listSyncPlaces({
-        connectionId,
-        feed: "mail",
-        cursor,
-      });
-    withinRequests &&=
-      sentToGraph().length - before <= connectorIsolateRequests;
+  for (let reads = 0; reads < 100; reads += 1) {
+    const before = mailbox.requests;
+    // oxlint-disable-next-line no-await-in-loop -- reads come one after another
+    const answer = await listRead(cursor);
+    withinRequests &&= mailbox.requests - before <= connectorIsolateRequests;
     for (const place of answer.places) {
       places.add(place);
     }
@@ -490,13 +516,45 @@ const listAll = async (
   return { done: false, places, withinRequests };
 };
 
-/** Someone's own Microsoft account, connected. */
-const connected = async (): Promise<string> => {
-  reset();
+/** A read of the listing through connect, as core asks for it. */
+const throughConnect =
+  (connectionId: string): ListRead =>
+  async (cursor) =>
+    await exports.default.listSyncPlaces({
+      connectionId,
+      feed: "mail",
+      cursor,
+    });
+
+/**
+ * A read of the listing by the sync itself, in this test, against the
+ * mailbox: what connect runs in the connector's isolate, without the
+ * isolate and egress around each request.
+ */
+const inThisTest =
+  (mailbox: Mailbox): ListRead =>
+  async (cursor) => {
+    const answer = await inProcess.run(
+      mailbox,
+      async () => await mailSync.places({ name: "mail", cursor })
+    );
+    if ("failure" in answer) {
+      throw new Error(`The listing failed: ${answer.failure.code}`);
+    }
+    return answer;
+  };
+
+/** Someone's own Microsoft account, connected, with a mailbox of its own. */
+const connected = async (): Promise<{
+  connectionId: string;
+  mailbox: Mailbox;
+}> => {
   const person = someone();
   const account = ownAccount(person);
-  ownerId = account.subject.toLowerCase();
-  return await connectAccount(providers, person, account);
+  const mailbox = newMailbox(account.subject.toLowerCase());
+  mailboxes.set(account.subject, mailbox);
+  const connectionId = await connectAccount(providers, person, account);
+  return { connectionId, mailbox };
 };
 
 const read = async (
@@ -512,7 +570,11 @@ const read = async (
   });
 
 /** A message, as a folder's delta lists it and as Graph reads it. */
-const message = (id: string, fields: Record<string, unknown> = {}): Message => {
+const message = (
+  mailbox: Mailbox,
+  id: string,
+  fields: Record<string, unknown> = {}
+): Message => {
   const whole: Message = {
     id,
     changeKey: `${id}-1`,
@@ -535,7 +597,7 @@ const removed = (id: string): Message => ({
   "@removed": { reason: "deleted" },
 });
 
-const owner = () => [{ kind: "account", id: ownerId }];
+const owner = (mailbox: Mailbox) => [{ kind: "account", id: mailbox.owner }];
 
 /** A page's items, each with whether it came with its content. */
 const withContent = (page: SyncPage) =>
@@ -552,7 +614,7 @@ const pdf = {
 
 describe("syncing a person's own mailbox, folder by folder", () => {
   it("lists every mail folder as a place, and not the bin, junk, drafts, hidden or search folders or what is under them", async () => {
-    const connectionId = await connected();
+    const { connectionId, mailbox } = await connected();
     mailbox.parents = {
       ...mailbox.parents,
       secret: "root",
@@ -573,13 +635,13 @@ describe("syncing a person's own mailbox, folder by folder", () => {
   });
 
   it("finishes a chain ninety folders deep listed deepest first, a folder a page", async () => {
-    const connectionId = await connected();
+    const { connectionId, mailbox } = await connected();
     // The inbox and 89 folders under it, one in the next. Each walk up is
     // longer than a read's requests, its parents are on pages still to
     // come, and the second read's walk ends on its last request.
     mailbox.folderPage = 1;
-    const chain = chainOf(89);
-    const listing = await listAll(connectionId);
+    const chain = chainOf(mailbox, 89);
+    const listing = await listAll(mailbox, throughConnect(connectionId));
     expect(listing).toStrictEqual({
       done: true,
       places: new Set(["root", "inbox", "projects", "archive", ...chain]),
@@ -587,41 +649,52 @@ describe("syncing a person's own mailbox, folder by folder", () => {
     });
   });
 
-  it("finishes chains of every length listed deepest first, each read within its requests", async () => {
-    const connectionId = await connected();
+  it("finishes chains around a read's requests listed deepest first, each read within them", async () => {
+    // Driven in this test, not through connect: a few milliseconds. Each
+    // request keeps a timer for the page's 15 s (`AbortSignal.timeout`),
+    // and a Worker holds 10,000 at once, so the depths are a handful.
+    const limit = connectorIsolateRequests;
+    const cases = [
+      ...[
+        1,
+        2,
+        limit - 1,
+        limit,
+        limit + 1,
+        2 * limit - 1,
+        2 * limit,
+        2 * limit + 1,
+      ].map((depth) => ({ depth, folderPage: 1 })),
+      { depth: limit, folderPage: 2 },
+      { depth: 2 * limit, folderPage: 2 },
+    ];
     const failed: string[] = [];
-    for (const folderPage of [1, 2]) {
-      for (const depth of chainDepths) {
-        reset();
-        mailbox.folderPage = folderPage;
-        const chain = chainOf(depth);
-        const listing =
-          // oxlint-disable-next-line no-await-in-loop -- one listing after another
-          await listAll(connectionId).catch(() => null);
-        const whole = new Set([
-          "root",
-          "inbox",
-          "projects",
-          "archive",
-          ...chain,
-        ]);
-        if (
-          listing === null ||
-          !listing.done ||
-          !listing.withinRequests ||
-          listing.places.size !== whole.size ||
-          [...whole].some((id) => !listing.places.has(id))
-        ) {
-          failed.push(`${depth} folders, ${folderPage} a page`);
-        }
+    for (const { depth, folderPage } of cases) {
+      const mailbox = newMailbox("owner");
+      mailbox.folderPage = folderPage;
+      const chain = chainOf(mailbox, depth);
+      const listing =
+        // oxlint-disable-next-line no-await-in-loop -- one listing after another
+        await listAll(mailbox, inThisTest(mailbox)).catch(() => null);
+      const whole = new Set(["root", "inbox", "projects", "archive", ...chain]);
+      if (
+        listing === null ||
+        !listing.done ||
+        !listing.withinRequests ||
+        listing.places.size !== whole.size ||
+        [...whole].some((id) => !listing.places.has(id))
+      ) {
+        failed.push(`${depth} folders, ${folderPage} a page`);
       }
     }
     expect(failed).toStrictEqual([]);
   });
 
   it("tries a message again whole when its read drops part-way, never passing it over", async () => {
-    const connectionId = await connected();
-    mailbox.feeds.inbox = { "": { entries: [message("a")], end: "t1" } };
+    const { connectionId, mailbox } = await connected();
+    mailbox.feeds.inbox = {
+      "": { entries: [message(mailbox, "a")], end: "t1" },
+    };
     mailbox.dropOnce = new Set(["a"]);
     const dropped = await read(connectionId, "inbox", null).catch(
       (error: unknown) => error
@@ -637,13 +710,13 @@ describe("syncing a person's own mailbox, folder by folder", () => {
   });
 
   it("asks Graph for a thousand folders a page", async () => {
-    const connectionId = await connected();
+    const { connectionId, mailbox } = await connected();
     await exports.default.listSyncPlaces({
       connectionId,
       feed: "mail",
       cursor: null,
     });
-    const listings = sentToGraph().filter(({ path }) =>
+    const listings = sentToGraph(mailbox).filter(({ path }) =>
       path.startsWith(`${foldersPath}/delta`)
     );
     expect(
@@ -656,7 +729,7 @@ describe("syncing a person's own mailbox, folder by folder", () => {
   });
 
   it("waits as for a rate limit when a folder listing read moves nothing on", async () => {
-    const connectionId = await connected();
+    const { connectionId, mailbox } = await connected();
     // Graph answers no folder and the same place on, page after page.
     mailbox.stuckListing = true;
     const first = await exports.default.listSyncPlaces({
@@ -674,7 +747,7 @@ describe("syncing a person's own mailbox, folder by folder", () => {
   });
 
   it("lists the folders again from the start when Graph no longer knows the listing's token", async () => {
-    const connectionId = await connected();
+    const { connectionId, mailbox } = await connected();
     // Graph gives two folders a page: the first read stops partway, on a
     // skip token Graph then forgets.
     mailbox.folderPage = 2;
@@ -724,7 +797,7 @@ describe("syncing a person's own mailbox, folder by folder", () => {
   });
 
   it("lists the folders on every page of Graph's, across reads when they don't fit one", async () => {
-    const connectionId = await connected();
+    const { connectionId, mailbox } = await connected();
     // Graph gives two folders a page: more pages than one read has requests.
     mailbox.folderPage = 2;
     const many = Array.from({ length: 120 }, (_, index) => `f${index}`);
@@ -754,12 +827,12 @@ describe("syncing a person's own mailbox, folder by folder", () => {
   });
 
   it("brings in a folder's messages and their files, and no draft", async () => {
-    const connectionId = await connected();
+    const { connectionId, mailbox } = await connected();
     mailbox.feeds.inbox = {
       "": {
         entries: [
-          message("offer", { hasAttachments: true }),
-          message("draft", { isDraft: true }),
+          message(mailbox, "offer", { hasAttachments: true }),
+          message(mailbox, "draft", { isDraft: true }),
         ],
         end: "t1",
       },
@@ -796,7 +869,7 @@ describe("syncing a person's own mailbox, folder by folder", () => {
             type: "text",
             text: "From: Ann <ann@acme.test>\nTo: me@acme.test\nDate: 2026-11-10T08:59:00Z\nSubject: About offer\n\nBody of offer",
           },
-          readers: owner(),
+          readers: owner(mailbox),
           changedBy: null,
           partOf: null,
         },
@@ -812,7 +885,7 @@ describe("syncing a person's own mailbox, folder by folder", () => {
             contentType: "application/pdf",
             base64: btoa("%PDF-1.7"),
           },
-          readers: owner(),
+          readers: owner(mailbox),
           changedBy: null,
           partOf: "inbox/offer",
         },
@@ -824,7 +897,7 @@ describe("syncing a person's own mailbox, folder by folder", () => {
     });
     // Immutable IDs on every read, and only the folder's own delta.
     expect(
-      sentToGraph().every(
+      sentToGraph(mailbox).every(
         ({ headers }) =>
           headers.prefer?.includes('IdType="ImmutableId"') === true
       )
@@ -832,11 +905,14 @@ describe("syncing a person's own mailbox, folder by folder", () => {
   });
 
   it("then brings only what changed, and what was deleted or moved out", async () => {
-    const connectionId = await connected();
+    const { connectionId, mailbox } = await connected();
     mailbox.feeds.inbox = {
-      "": { entries: [message("a"), message("b")], end: "t1" },
+      "": {
+        entries: [message(mailbox, "a"), message(mailbox, "b")],
+        end: "t1",
+      },
       t1: {
-        entries: [message("a", { changeKey: "a-2" }), removed("b")],
+        entries: [message(mailbox, "a", { changeKey: "a-2" }), removed("b")],
         end: "t2",
       },
       t2: { entries: [], end: "t2" },
@@ -860,10 +936,12 @@ describe("syncing a person's own mailbox, folder by folder", () => {
   });
 
   it("keeps a message moved to another folder there, whatever order the two folders are read in", async () => {
-    const connectionId = await connected();
+    const { connectionId, mailbox } = await connected();
     // m keeps its ID when it moves (immutable IDs).
     mailbox.feeds.inbox = { "": { entries: [removed("m")], end: "t1" } };
-    mailbox.feeds.archive = { "": { entries: [message("m")], end: "t1" } };
+    mailbox.feeds.archive = {
+      "": { entries: [message(mailbox, "m")], end: "t1" },
+    };
     const archive = await read(connectionId, "archive", null);
     const inbox = await read(connectionId, "inbox", null);
     expect({
@@ -876,13 +954,15 @@ describe("syncing a person's own mailbox, folder by folder", () => {
   });
 
   it("passes over a message larger than connect reads, without its content, and goes on", async () => {
-    const connectionId = await connected();
+    const { connectionId, mailbox } = await connected();
     const huge = "x".repeat(11 * 1024 * 1024);
     mailbox.feeds.inbox = {
       "": {
         entries: [
-          message("huge", { body: { contentType: "text", content: huge } }),
-          message("next"),
+          message(mailbox, "huge", {
+            body: { contentType: "text", content: huge },
+          }),
+          message(mailbox, "next"),
         ],
         end: "t1",
       },
@@ -900,10 +980,13 @@ describe("syncing a person's own mailbox, folder by folder", () => {
     "leaves a message whose file is late to the next page once the page holds one, and passes the first over when late twice",
     { timeout: 180_000 },
     async () => {
-      const connectionId = await connected();
+      const { connectionId, mailbox } = await connected();
       mailbox.feeds.inbox = {
         "": {
-          entries: [message("a"), message("b", { hasAttachments: true })],
+          entries: [
+            message(mailbox, "a"),
+            message(mailbox, "b", { hasAttachments: true }),
+          ],
           end: "t1",
         },
       };
@@ -933,9 +1016,9 @@ describe("syncing a person's own mailbox, folder by folder", () => {
   );
 
   it("goes through a folder of many messages, each page within what a read may send, skipping none", async () => {
-    const connectionId = await connected();
+    const { connectionId, mailbox } = await connected();
     const many = Array.from({ length: 120 }, (_, index) =>
-      message(`m${index}`)
+      message(mailbox, `m${index}`)
     );
     mailbox.feeds.inbox = { "": { entries: many, end: "t1" } };
     const seen: string[] = [];
@@ -943,10 +1026,10 @@ describe("syncing a person's own mailbox, folder by folder", () => {
     let page: SyncPage;
     let reads = 0;
     do {
-      const sent = sentToGraph().length;
+      const sent = sentToGraph(mailbox).length;
       // oxlint-disable-next-line no-await-in-loop -- pages come one after another
       page = await read(connectionId, "inbox", cursor);
-      expect(sentToGraph().length - sent).toBeLessThanOrEqual(50);
+      expect(sentToGraph(mailbox).length - sent).toBeLessThanOrEqual(50);
       seen.push(...page.items.map(({ id }) => id));
       ({ cursor } = page);
       reads += 1;
@@ -957,7 +1040,7 @@ describe("syncing a person's own mailbox, folder by folder", () => {
   });
 
   it("lists a folder again when Graph no longer knows its token, or the cursor isn't one the sync wrote", async () => {
-    const connectionId = await connected();
+    const { connectionId, mailbox } = await connected();
     mailbox.feeds.inbox = { "": { entries: [], end: "t1" } };
     const { cursor } = await read(connectionId, "inbox", null);
     mailbox.feeds.inbox = {};
@@ -970,7 +1053,7 @@ describe("syncing a person's own mailbox, folder by folder", () => {
   });
 
   it("waits when Graph throttles, as long as it asks", async () => {
-    const connectionId = await connected();
+    const { connectionId, mailbox } = await connected();
     mailbox.answer = () =>
       new Response(null, { status: 429, headers: { "retry-after": "30" } });
     const limited = await read(connectionId, "inbox", null).catch(

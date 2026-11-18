@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./graph": "./src/graph.ts"
+    "./graph": "./src/graph.ts",
+    "./mail-sync": "./src/mail-sync.ts"
   },
   "dependencies": {
     "@grasp-os/connector-kit": "workspace:*",
