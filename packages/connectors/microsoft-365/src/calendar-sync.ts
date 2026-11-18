@@ -303,6 +303,18 @@ const itemOf = (
 };
 
 /**
+ * An event passed over (the kit's `passOver`), with no request: gone, or
+ * itself without its content. An event comes whole in its feed page and
+ * takes no request of its own, so the kit never passes one over now; it
+ * is what an event is without room.
+ */
+const passOverEvent = (owner: SyncReader[], event: Event): SyncItem[] => {
+  const room = { requests: 0, bytes: 0, deadline: 0, empty: true };
+  const item = itemOf(room, owner, event);
+  return item === "full" ? [] : [item];
+};
+
+/**
  * The last of each event's entries: an event that changed twice in a round
  * may come twice; its last entry counts.
  */
@@ -374,20 +386,21 @@ const takePage = async (
   }
   // The kit's `fillPage`: after the event handled, by its key, or from the
   // top of Graph's page when that event isn't there as it was.
-  const filled = await fillPage(
+  const filled = await fillPage({
     room,
-    feed.value,
-    position.after,
+    entries: feed.value,
+    after: position.after,
     keyOf,
     // oxlint-disable-next-line require-await -- the kit's fillPage takes a promise
-    async (event) => {
+    itemsFor: async (event) => {
       if (!room.empty && Date.now() >= room.deadline) {
         return "full";
       }
       const item = itemOf(room, owner, event);
       return item === "full" ? "full" : [item];
-    }
-  );
+    },
+    passOver: (event) => passOverEvent(owner, event),
+  });
   if (!filled.done) {
     return {
       items: filled.items,
