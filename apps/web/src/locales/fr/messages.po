@@ -6177,6 +6177,10 @@ msgstr "Terminer la visite"
 msgid "Ended"
 msgstr "Terminé"
 
+#: src/workflows/resource-runs.tsx
+msgid "Ended {ended}"
+msgstr "Terminée le {ended}"
+
 #: src/settings/staff-access.tsx
 msgid "Ending access"
 msgstr "Fin de l'accès en cours"
@@ -17281,6 +17285,11 @@ msgstr "Version {number}, actuelle"
 #: src/workflows/workflows-table.tsx
 msgid "Version {version}"
 msgstr "Version {version}"
+
+#: src/workflows/resource-runs.tsx
+#: src/workflows/traces.tsx
+msgid "Version {version} · {by}"
+msgstr "Version {version} · {by}"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Version {version} declares no binding to approve."

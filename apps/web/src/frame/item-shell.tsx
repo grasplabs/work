@@ -119,13 +119,16 @@ export const ItemBar = ({
   back,
   name,
   state,
+  views,
   actions,
 }: {
   back: Crumb;
   name: string;
   /** Where it stands: Draft, Live and its label, or its version. */
   state?: ReactNode;
-  /** Its views, Share, then the page's one lime action, in that order. */
+  /** Its views, in the bar's middle: a row of their own under it where the bar is narrow. */
+  views?: ReactNode;
+  /** Share, then the page's one lime action, in that order. */
   actions?: ReactNode;
 }) => (
   <>
@@ -134,6 +137,7 @@ export const ItemBar = ({
     <SiteHeader
       actions={actions}
       crumbs={[back, { label: name }]}
+      {...(views === undefined ? {} : { middle: views })}
       phoneCrumbs="last-two"
       // Where it stands gives way to its actions where the bar is narrow.
       trailing={

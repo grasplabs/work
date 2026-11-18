@@ -354,7 +354,6 @@ const WorkspaceBar = ({
     <ItemBar
       actions={
         <>
-          <ViewSwitch app={app.id} view={view} />
           <MoreMenu app={app} changing={hasChanges(draft)} chatId={chatId} />
           {sharesApp(app, identity) ? (
             <ShareWithTeam
@@ -375,6 +374,10 @@ const WorkspaceBar = ({
           <StatusBadge app={app} who={userNames(members ?? [])} />
         )
       }
+      // In the bar's middle, which goes to a row of its own where the bar
+      // is too narrow for it beside the rest; there the views fold to one
+      // button where even that row is too narrow (Grasp UI's TabsNav).
+      views={<ViewSwitch app={app.id} view={view} />}
     />
   );
 };

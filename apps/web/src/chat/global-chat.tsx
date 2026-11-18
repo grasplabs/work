@@ -47,19 +47,25 @@ import { useAsk } from "./use-ask.ts";
 /** Narrower than this, a phone or a narrow window: the chat stands docked, never floating. */
 const narrowQuery = "(max-width: 767px)";
 
-const onWidthChange = (onChange: () => void): (() => void) => {
-  const query = matchMedia(narrowQuery);
-  query.addEventListener("change", onChange);
-  return () => {
-    query.removeEventListener("change", onChange);
-  };
-};
+/**
+ * App shell's narrow shell (its `width < 40rem`), a phone: docked, the chat
+ * covers the whole page, so a page about a subject shows itself first.
+ */
+const phoneQuery = "(width < 40rem)";
 
-const roomBesideNow = (): boolean => !matchMedia(narrowQuery).matches;
-
-/** Whether the window has room beside the page for the chat to float over. */
-const useRoomBeside = (): boolean =>
-  useSyncExternalStore(onWidthChange, roomBesideNow, () => true);
+/** Whether the window matches `query` now, followed as it changes; never on the server. */
+const useMatches = (query: string): boolean =>
+  useSyncExternalStore(
+    (onChange) => {
+      const list = matchMedia(query);
+      list.addEventListener("change", onChange);
+      return () => {
+        list.removeEventListener("change", onChange);
+      };
+    },
+    () => matchMedia(query).matches,
+    () => false
+  );
 
 // Grasp's one chat, on every page: the person's open chat
 // (active-chat.ts), so what is asked anywhere goes on there and shows in
@@ -158,16 +164,21 @@ export interface ChatWords {
  * Where the chat may show on this page (chat-presence.ts): nowhere for
  * Grasp staff who reach the onboarding alone, whom core refuses chats;
  * docked beside a page about a subject (chat-subject.ts), as part of it,
- * whatever its route says for anyone who isn't building there.
+ * whatever its route says for anyone who isn't building there; on a
+ * `phone`, its bar there too, to open it by.
  */
-const usePresenceHere = (): ChatPresence => {
+const usePresenceHere = (phone: boolean): ChatPresence => {
   const { identity } = useRouteContext({ from: "/_shell" });
   const presence = useChatPresence();
   const about = subjectOf(useShownSlot());
   if (identity.onboardingOnly === true) {
     return chatPresence.hidden;
   }
-  return about === undefined ? presence : chatPresence.docked;
+  if (about === undefined) {
+    return presence;
+  }
+  // On a phone the subject's page shows first, its chat a bar to open.
+  return phone ? { ...chatPresence.docked, bar: true } : chatPresence.docked;
 };
 
 /**
@@ -252,7 +263,8 @@ export type ChatSession = ReturnType<typeof useChatSession>;
 
 const useGlobalChatValue = () => {
   const { identity } = useRouteContext({ from: "/_shell" });
-  const presence = usePresenceHere();
+  const phone = useMatches(phoneQuery);
+  const presence = usePresenceHere(phone);
   const available = presence.placements.length > 0;
   // Read once for every page, not again as the person moves between them,
   // and on a chat's own page too, where the dock has no place: anywhere
@@ -289,13 +301,17 @@ const useGlobalChatValue = () => {
     wasRunning.current = running;
   }, [running]);
   const layout = useChatLayout();
-  const roomBeside = useRoomBeside();
+  const roomBeside = !useMatches(narrowQuery);
   // About the page's subject, it stays open (chat-subject.ts), where the
-  // page has it: that page is where its subject is made. Elsewhere, open
-  // where it was put, where this page allows it there; elsewhere it stays
-  // open, and shows again on a page that does.
-  const keptOpen = subjectOf(slot) !== undefined;
-  const placement = keptOpen
+  // page has it: that page is where its subject is made. On a phone, where
+  // it would cover that page, the page shows first and the chat opens as
+  // anywhere else, when the person asks. Elsewhere, open where it was put,
+  // where this page allows it there; elsewhere it stays open, and shows
+  // again on a page that does.
+  const about = subjectOf(slot) !== undefined;
+  const keptOpen = about && !phone;
+  // A subject's page has it docked, wherever it was put elsewhere.
+  const placement = about
     ? (placementOn(presence, layout.placement) ?? layout.placement)
     : layout.placement;
   const open = (keptOpen || layout.open) && allows(presence, placement);

@@ -6177,6 +6177,10 @@ msgstr "Rondleiding stoppen"
 msgid "Ended"
 msgstr "Beëindigd"
 
+#: src/workflows/resource-runs.tsx
+msgid "Ended {ended}"
+msgstr "Klaar op {ended}"
+
 #: src/settings/staff-access.tsx
 msgid "Ending access"
 msgstr "Toegang wordt beëindigd"
@@ -17281,6 +17285,11 @@ msgstr "Versie {number}, huidig"
 #: src/workflows/workflows-table.tsx
 msgid "Version {version}"
 msgstr "Versie {version}"
+
+#: src/workflows/resource-runs.tsx
+#: src/workflows/traces.tsx
+msgid "Version {version} · {by}"
+msgstr "Versie {version} · {by}"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Version {version} declares no binding to approve."

@@ -539,12 +539,6 @@ const WorkflowResourceView = ({
         <ItemBar
           actions={
             <>
-              <ViewSwitch
-                flow={draft !== undefined}
-                runs={runs.state === "ready" ? runs.data.length : undefined}
-                view={view}
-                workflow={resource.id}
-              />
               <StartIndependentRun
                 // Read again for each version that goes live: what Run
                 // starts, and that there is one to start at all.
@@ -575,6 +569,14 @@ const WorkflowResourceView = ({
           back={back}
           name={resource.name}
           state={<VersionBadge version={resource.currentVersion} />}
+          views={
+            <ViewSwitch
+              flow={draft !== undefined}
+              runs={runs.state === "ready" ? runs.data.length : undefined}
+              view={view}
+              workflow={resource.id}
+            />
+          }
         />
       }
     >

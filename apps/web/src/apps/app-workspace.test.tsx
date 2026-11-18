@@ -43,6 +43,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
 import { activeChat, setActiveChat } from "../chat/active-chat.ts";
+import { ChatBar } from "../chat/chat-bar.tsx";
 import { ChatPanel } from "../chat/chat-panel.tsx";
 import { slotOf } from "../chat/chat-subject.ts";
 import { GlobalChatProvider } from "../chat/global-chat.tsx";
@@ -368,6 +369,7 @@ const opened = async (
         <GlobalChatProvider>
           <Outlet />
           <ChatPanel />
+          <ChatBar />
         </GlobalChatProvider>
         <Toaster aria-label="Notifications" />
       </SidebarProvider>
@@ -658,6 +660,35 @@ const askable = (): boolean =>
   document.querySelector(
     'textarea[aria-label="Ask for a change"]:not([inert] *)'
   ) !== null;
+
+/**
+ * The window `width` pixels wide, as its media queries answer: the widths
+ * the page asks about (`(width < 40rem)`, `(max-width: 767px)`,
+ * `(min-width: 64rem)`), at 16px a rem; any other query, no.
+ */
+const windowOf = (width: number): void => {
+  const widthQuery =
+    /^\((?<side>max-|min-)?width\s*(?<sign><|:)\s*(?<at>[\d.]+)(?<unit>px|rem)\)$/u;
+  vi.stubGlobal("matchMedia", (query: string) => {
+    const found = widthQuery.exec(query)?.groups;
+    const at = Number(found?.at) * (found?.unit === "rem" ? 16 : 1);
+    let matches = false;
+    if (found?.sign === "<") {
+      matches = width < at;
+    } else if (found?.side === "max-") {
+      matches = width <= at;
+    } else if (found?.side === "min-") {
+      matches = width >= at;
+    }
+    return Object.assign(new EventTarget(), { matches, media: query });
+  });
+};
+
+/** The idle bar's button that opens the chat, while the chat is closed. */
+const chatBar = (): HTMLButtonElement | undefined =>
+  [...document.querySelectorAll("button")].find((each) =>
+    (each.getAttribute("aria-label") ?? "").startsWith("Open the chat")
+  );
 
 /** Types `text` in the App's chat and sends it. */
 const typeAndSend = async (text: string): Promise<void> => {
@@ -1125,6 +1156,33 @@ describe(AppWorkspace, () => {
         (each) => nameOf(each) === "Close"
       ),
     }).toStrictEqual({ shown: true, after: true, close: false });
+  });
+
+  it("on a phone shows the App first, its chat a bar that opens it when asked", async () => {
+    windowOf(639);
+    await opened(fakeApps().apps, identityOf(false), "chat-kept-open");
+    await settled();
+    const bar = chatBar();
+    if (bar === undefined) {
+      throw new Error("No bar to open the chat by");
+    }
+    await press(bar);
+
+    expect({ bar: chatBar(), opened: askable() }).toStrictEqual({
+      bar: undefined,
+      opened: true,
+    });
+  });
+
+  it("from App shell's narrow width up keeps the App's chat open beside it, with no bar", async () => {
+    windowOf(640);
+    await opened(fakeApps().apps, identityOf(false), "chat-kept-open");
+    await settled();
+
+    expect({ bar: chatBar(), opened: askable() }).toStrictEqual({
+      bar: undefined,
+      opened: true,
+    });
   });
 
   it("asks about the App: each question carries it, named in the bar on the box", async () => {

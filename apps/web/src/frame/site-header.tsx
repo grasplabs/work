@@ -95,11 +95,18 @@ export const SiteHeader = ({
   actions,
   trailing,
   phoneCrumbs,
+  middle,
 }: {
   crumbs: readonly Crumb[];
   actions?: ReactNode;
   trailing?: ReactNode;
   phoneCrumbs?: "last-two" | "first";
+  /**
+   * In the bar's middle: the views of its subject (an App's App, Code,
+   * Data and Settings). The bar puts them on a row of their own under it
+   * where they don't fit beside the rest.
+   */
+  middle?: ReactNode;
 }) => {
   const { t } = useLingui();
   return (
@@ -111,6 +118,7 @@ export const SiteHeader = ({
       )}
       phoneCrumbs={phoneCrumbs}
       end={trailing}
+      {...(middle === undefined ? {} : { middle })}
     />
   );
 };
