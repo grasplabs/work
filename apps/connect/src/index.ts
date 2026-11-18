@@ -648,9 +648,10 @@ export default class Connect
 
   /**
    * What an admin may pick for a shared connection's sync (shared drives,
-   * document libraries), a read at a time, each with whether it is picked.
+   * document libraries), a read at a time, each with whether it is picked;
+   * null when the connection has no sync of picked places.
    */
-  async syncPlaceChoices(request: unknown): Promise<SyncPlaceChoices> {
+  async syncPlaceChoices(request: unknown): Promise<SyncPlaceChoices | null> {
     return await syncPlaceChoices(this.env, request);
   }
 
