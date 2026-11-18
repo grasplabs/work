@@ -7,6 +7,7 @@ import { documentTools } from "./documents.ts";
 import { draftTools } from "./drafts.ts";
 import { fileTools } from "./files.ts";
 import { graphHost } from "./graph.ts";
+import { librarySync } from "./library-sync.ts";
 import { listTools } from "./lists.ts";
 import { mailReplyTools } from "./mail-replies.ts";
 import { mailSortingTools } from "./mail-sorting.ts";
@@ -34,7 +35,10 @@ import { workbookTools } from "./workbook.ts";
  * (mail-sync.ts), on `Mail.ReadWrite`, which covers listing messages, their
  * attachments and folders (`Mail.Read` at least), and their own calendar
  * (calendar-sync.ts), on `Calendars.ReadWrite`, which covers calendarView
- * delta (`Calendars.Read`).
+ * delta (`Calendars.Read`). On a shared connection it syncs the SharePoint
+ * document libraries an admin picked (library-sync.ts), on
+ * `Sites.ReadWrite.All` for finding sites (`Sites.Read.All` at least) and
+ * `Files.ReadWrite.All` for a library's drive, delta and content.
  */
 export default defineConnector({
   name: "microsoft-365",
@@ -83,5 +87,5 @@ export default defineConnector({
     ...chatTools,
     ...meetingTools,
   ],
-  syncs: [onedriveSync, mailSync, calendarSync],
+  syncs: [onedriveSync, mailSync, calendarSync, librarySync],
 });
