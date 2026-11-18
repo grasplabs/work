@@ -16,6 +16,7 @@ import { useId } from "react";
 
 import { formatDateTime, formatList } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
+import { SectionTitle } from "../frame/page.tsx";
 import { Badge } from "../grasp/badge/index.ts";
 import { Empty } from "../grasp/empty/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
@@ -483,14 +484,98 @@ const SectionLink = ({
  * one open (`section`, or General) beside it. Definition is its builders'
  * alone, who read its draft.
  */
-export const WorkflowSettings = ({
-  section: asked,
+/** Concepts, for Ruben to choose (never merged): the sections folded into three tabs, or one page of them all. */
+const foldedTabs: readonly {
+  key: WorkflowSettingsSection;
+  label: MessageDescriptor;
+  holds: readonly WorkflowSettingsSection[];
+}[] = [
+  { key: "general", label: msg`General`, holds: ["general", "triggers"] },
+  {
+    key: "files",
+    label: msg`What it uses`,
+    holds: ["files", "parameters"],
+  },
+  { key: "versions", label: msg`Versions`, holds: ["versions", "definition"] },
+];
+
+/** A: three tabs, each holding two of the six sections. */
+const FoldedSettings = ({
+  asked,
   read,
 }: {
-  section: WorkflowSettingsSection | undefined;
+  asked: WorkflowSettingsSection | undefined;
   read: WorkflowRead;
 }) => {
   const { t, i18n } = useLingui();
+  const shown =
+    foldedTabs.find(
+      (tab) => asked !== undefined && tab.holds.includes(asked)
+    ) ?? foldedTabs[0];
+  return (
+    <div {...stylex.props(styles.settings)}>
+      <TabsNav aria-label={t`Settings sections`}>
+        {foldedTabs.map((tab) => (
+          <SectionLink
+            current={tab.key === shown?.key}
+            key={tab.key}
+            section={tab.key}
+            workflow={read.resource.id}
+          >
+            {i18n._(tab.label)}
+          </SectionLink>
+        ))}
+      </TabsNav>
+      <div {...stylex.props(styles.scroll)}>
+        <div {...stylex.props(styles.column)}>
+          {(shown?.holds ?? [])
+            .filter((each) => each !== "definition" || read.draft !== undefined)
+            .map((each) => (
+              <SectionBody key={each} read={read} section={each} />
+            ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/** B: one page, every section under its name, no tabs. */
+const OnePageSettings = ({ read }: { read: WorkflowRead }) => {
+  const { i18n } = useLingui();
+  return (
+    <div {...stylex.props(styles.settings)}>
+      <div {...stylex.props(styles.scroll)}>
+        <div {...stylex.props(styles.column)}>
+          {workflowSettingsSections
+            .filter((each) => each !== "definition" || read.draft !== undefined)
+            .map((each) => (
+              <section key={each} {...stylex.props(styles.column)}>
+                <SectionTitle>{i18n._(sectionLabels[each])}</SectionTitle>
+                <SectionBody read={read} section={each} />
+              </section>
+            ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export const WorkflowSettings = ({
+  section: asked,
+  read,
+  concept,
+}: {
+  section: WorkflowSettingsSection | undefined;
+  read: WorkflowRead;
+  concept?: "fold" | "page" | undefined;
+}) => {
+  const { t, i18n } = useLingui();
+  if (concept === "fold") {
+    return <FoldedSettings asked={asked} read={read} />;
+  }
+  if (concept === "page") {
+    return <OnePageSettings read={read} />;
+  }
   const sections = workflowSettingsSections.filter(
     (each) => each !== "definition" || read.draft !== undefined
   );

@@ -462,6 +462,7 @@ interface WorkflowPageRead {
 }
 
 const WorkflowResourceView = ({
+  concept,
   back,
   view: asked,
   section,
@@ -469,6 +470,8 @@ const WorkflowResourceView = ({
   ...read
 }: WorkflowPageRead & {
   back: Crumb;
+  /** Which Settings concept shows. */
+  concept: "fold" | "page" | undefined;
   /** The view the address asks for, if any. */
   view: WorkflowView | undefined;
   section: WorkflowSettingsSection | undefined;
@@ -636,6 +639,7 @@ const WorkflowResourceView = ({
                 ? read.lifecycle
                 : { state: "ready", data: status },
           }}
+          concept={concept}
           section={section}
         />
       ) : null}
@@ -678,7 +682,7 @@ const WorkflowResourcePage = () => {
   } = Route.useLoaderData();
   const people = usePeople(peopleRead);
   const { identity } = Route.useRouteContext();
-  const { view, section, run } = Route.useSearch();
+  const { view, section, run, concept } = Route.useSearch();
   const { t } = useLingui();
   const back = backCrumb({ label: t`Workflows`, to: "/workflows" }, project);
   if (resource.state !== "ready") {
@@ -700,6 +704,7 @@ const WorkflowResourcePage = () => {
       admin={isAdmin(identity.role)}
       approves={isMemberAdmin(identity)}
       back={back}
+      concept={concept}
       names={{ people, me: identity.userId }}
       resource={resource.data}
       run={run}
@@ -711,6 +716,8 @@ const WorkflowResourcePage = () => {
 
 /** What a link to a workflow's page may ask of it. */
 interface WorkflowSearch {
+  /** Which Settings concept shows, for Ruben to choose (never merged). */
+  concept?: "fold" | "page";
   /** The view it opens on: Flow for its builders, Runs for anyone else, by default. */
   view?: WorkflowView;
   /** In Settings, the section open: General by default. */
@@ -730,6 +737,9 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
     const section = workflowSettingsSectionOf(search.section);
     const project = projectSearchOf(search);
     return {
+      ...(search.concept === "fold" || search.concept === "page"
+        ? { concept: search.concept }
+        : {}),
       ...(view === undefined ? {} : { view }),
       ...(section === undefined ? {} : { section }),
       ...(project === undefined ? {} : { project }),
