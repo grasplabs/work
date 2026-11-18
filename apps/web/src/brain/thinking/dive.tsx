@@ -146,7 +146,7 @@ const styles = stylex.create({
   shared: {
     textDecorationLine: "underline",
     textDecorationColor: grasp.muted,
-    textUnderlineOffset: 4,
+    textUnderlineOffset: grasp.space1,
   },
   by: { color: grasp.muted, textWrap: "balance" },
   // What Grasp does now: the one dark thing on the canvas, as a tooltip is, its tail down.
