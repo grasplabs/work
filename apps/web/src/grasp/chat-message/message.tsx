@@ -26,6 +26,7 @@ import { visuallyHidden } from "../hidden/hidden";
 import { Alert, Icon, Retry, Stop } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
+import { simply } from "../motion/simply.stylex";
 import { useArriving } from "../motion/use-arriving";
 import { ArrivingContext, usePaced } from "../motion/use-paced";
 import type { PacedOptions } from "../motion/use-paced";
@@ -98,9 +99,13 @@ export interface ChatMessageProps {
    * @default "Try again"
    */
   retryLabel?: string;
-  /** The words Copy puts on the clipboard. Without it there is no Copy. */
+  /**
+   * The words Copy puts on the clipboard. Without it there is no Copy. Give it (and `actions`, and
+   * `time`) from the start, also while the agent writes: Copy is only drawn once the message is
+   * done, but the room its foot will take is kept from the first word, so the end moves nothing.
+   */
   copyText?: string;
-  /** More actions, after Copy: ChatMessageAction. For the agent once its message is done; for a person, under the bubble (Edit). */
+  /** More actions, after Copy: ChatMessageAction. For the agent once its message is done (give them while it writes, so their room is kept); for a person, under the bubble (Edit). */
   actions?: ReactNode;
   /**
    * The name of the row of actions.
@@ -284,6 +289,48 @@ const styles = stylex.create({
     alignItems: "center",
     gap: grasp.space1,
   },
+  // The agent's foot: the line of its ending and actions, then its time. While the message is
+  // written its room is kept, empty and unseen, so the end of an answer moves nothing.
+  foot: {
+    position: "relative",
+    display: "grid",
+    gap: grasp.space2,
+    minWidth: 0,
+  },
+  // The foot's first line: Stopped or the failure, then the actions, as tall as a small control
+  // whatever stands in it, so an ending that has no buttons keeps the room the actions kept.
+  footLine: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    columnGap: grasp.space3,
+    rowGap: grasp.space2,
+    minHeight: grasp.controlSm,
+  },
+  // What waits in the kept room: there, so it holds its size, but unseen; it fades in at the end
+  // (at once with reduced motion).
+  footPart: {
+    opacity: 1,
+    visibility: "visible",
+    transitionProperty: "opacity, visibility",
+    transitionDuration: simply.ui,
+    transitionTimingFunction: grasp.ease,
+  },
+  // Kept at once, never faded out: only the end fades in.
+  footKept: {
+    opacity: 0,
+    visibility: "hidden",
+    transitionProperty: "none",
+  },
+  // The working mark in the kept room, at its start, on its first line: it takes no room of its own.
+  footMark: {
+    position: "absolute",
+    insetBlockStart: 0,
+    insetInlineStart: 0,
+    display: "flex",
+    alignItems: "center",
+    blockSize: grasp.controlSm,
+  },
   // A fieldset, for its group role; its own border, padding, margin and minimum width taken off,
   // so it lays out as the div it replaced.
   actions: {
@@ -304,6 +351,8 @@ const styles = stylex.create({
     // The first button's icon stands under the first letter of the words.
     marginInlineStart: `calc(-1 * (${grasp.controlSm} - ${grasp.iconSm}) / 2)`,
   },
+  // After Stopped on the foot's line, the actions start after its words, not under the first letter.
+  afterEnding: { marginInlineStart: 0 },
   // A person's time stands at the bubble's end edge.
   personTime: {
     justifySelf: "end",
@@ -450,6 +499,8 @@ interface ActionRowProps {
   actions: ReactNode;
   label: string;
   copyLabels: { copy: string; copied: string; failed: string };
+  /** Stopped stands before it on the same line. */
+  afterEnding?: boolean;
 }
 
 const ActionRow = ({
@@ -459,6 +510,7 @@ const ActionRow = ({
   actions,
   label,
   copyLabels,
+  afterEnding = false,
 }: ActionRowProps) => {
   const person = from === "person";
   if (
@@ -470,7 +522,11 @@ const ActionRow = ({
   return (
     <fieldset
       aria-label={label}
-      {...stylex.props(styles.actions, person && styles.personActions)}
+      {...stylex.props(
+        styles.actions,
+        person && styles.personActions,
+        afterEnding && styles.afterEnding
+      )}
     >
       {filled(copyText) && (
         <ChatMessageCopy
@@ -629,6 +685,120 @@ const Ending = ({
   return status === "failed" ? (
     <Failure label={failedLabel} onRetry={onRetry} retryLabel={retryLabel} />
   ) : null;
+};
+
+interface FootProps extends Omit<EndingProps, "status"> {
+  status: ChatMessageStatus;
+  /** Still being written (thinking, streaming, or its last words still coming out). */
+  live: boolean;
+  /** The working mark, asked for with `streamingMark`. */
+  mark: boolean;
+  time: string | undefined;
+  dateTime: string | undefined;
+  row: Omit<ActionRowProps, "from" | "status" | "afterEnding">;
+}
+
+/** Whether the agent's message will have a foot: actions, Copy or a time. Only then is its room kept. */
+const hasFoot = (
+  copyText: string | undefined,
+  actions: ReactNode,
+  time: string | undefined
+) => filled(copyText) || present(actions) || filled(time);
+
+/** Still being written: thinking, streaming, or its last words still coming out. */
+const isLive = (status: ChatMessageStatus, streaming: boolean) =>
+  status === "thinking" || streaming;
+
+/** The working mark on a line of its own: asked for, while written, with no foot's room to stand in. */
+const markOnItsOwnLine = (streaming: boolean, asked: boolean, foot: boolean) =>
+  streaming && asked && !foot;
+
+/**
+ * The agent's foot: Stopped or its failure with its actions on one line, then its time. While the
+ * message is written the room is already there, its parts unseen, inert and not read out, and the
+ * working mark stands in it; at the end they fade into that room, so the end moves nothing.
+ */
+/** A part of the foot: unseen, inert and not read out while its room is kept, then faded in. */
+const FootPart = ({
+  kept,
+  children,
+}: {
+  kept: boolean;
+  children: ReactNode;
+}) => (
+  <div
+    inert={kept}
+    aria-hidden={kept || undefined}
+    {...stylex.props(styles.footPart, kept && styles.footKept)}
+  >
+    {children}
+  </div>
+);
+
+const Foot = ({
+  status,
+  live,
+  mark,
+  time,
+  dateTime,
+  row,
+  stoppedLabel,
+  failedLabel,
+  onRetry,
+  retryLabel,
+}: FootProps) => {
+  const acts = filled(row.copyText) || present(row.actions);
+  const kept = live && hasFoot(row.copyText, row.actions, time);
+  const ending = !live && (status === "stopped" || status === "failed");
+  if (!kept && !ending && !hasFoot(row.copyText, row.actions, time)) {
+    return null;
+  }
+  const line = acts || ending;
+  return (
+    <div
+      data-slot="chat-message-foot"
+      data-kept={kept || undefined}
+      {...stylex.props(styles.foot)}
+    >
+      {line && (
+        <div {...stylex.props(styles.footLine)}>
+          {ending && (
+            <Ending
+              status={status}
+              stoppedLabel={stoppedLabel}
+              failedLabel={failedLabel}
+              onRetry={onRetry}
+              retryLabel={retryLabel}
+            />
+          )}
+          {acts && status !== "failed" && (
+            // While kept the line holds a small control's height on its own: the buttons are only
+            // drawn at the end, into that room, so a message being written costs nothing more.
+            <FootPart kept={kept}>
+              {!kept && (
+                <ActionRow
+                  {...row}
+                  from="agent"
+                  status={status}
+                  afterEnding={ending}
+                />
+              )}
+            </FootPart>
+          )}
+        </div>
+      )}
+      {filled(time) && (
+        <FootPart kept={kept}>
+          <Stamp time={time} dateTime={dateTime} person={false} />
+        </FootPart>
+      )}
+      {kept && mark && (
+        <span {...stylex.props(styles.footMark)}>
+          <AgentIndicator />
+        </span>
+      )}
+    </div>
+  );
 };
 
 /** Where the last whole sentence of `text` ends. */
@@ -875,6 +1045,7 @@ export const ChatMessage = ({
   // Paced words written into the words' box fade in as they arrive, with nothing round any word.
   useArriving(wordsBox, fades);
 
+  const live = isLive(status, streaming);
   const row = (
     <ActionRow
       from={from}
@@ -946,20 +1117,37 @@ export const ChatMessage = ({
           )}
         </div>
       )}
+      {/* With a foot to come, the mark stands in its kept room; with none, on its own line. */}
       <Sign
         waiting={waiting}
-        mark={streaming && streamingMark}
+        mark={markOnItsOwnLine(
+          streaming,
+          streamingMark,
+          hasFoot(copyText, actions, time)
+        )}
         label={text.thinking}
       />
-      <Ending
+      <Foot
         status={status}
+        live={live}
+        mark={streamingMark}
+        time={time}
+        dateTime={dateTime}
+        row={{
+          copyText,
+          actions,
+          label: text.actions,
+          copyLabels: {
+            copy: text.copy,
+            copied: text.copied,
+            failed: text.copyFailed,
+          },
+        }}
         stoppedLabel={text.stopped}
         failedLabel={text.failed}
         onRetry={onRetry}
         retryLabel={text.retry}
       />
-      {row}
-      <Stamp time={time} dateTime={dateTime} person={false} />
       <output {...stylex.props(visuallyHidden)}>{said}</output>
     </article>
   );
