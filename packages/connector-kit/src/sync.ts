@@ -22,6 +22,7 @@ import { ToolError } from "./connector.ts";
 import { maxContentBytes } from "./content.ts";
 import {
   connectorIsolateRequests,
+  egressTooLargeMessage,
   syncManifestSchema,
   syncNameSchema,
   syncParamsSchema,
@@ -519,6 +520,14 @@ export const fillPage = async <Entry>({
   }
   return { items, at: { after: last, late: null }, done: true };
 };
+
+/**
+ * Whether a read failed because its answer is larger than connect's egress
+ * reads of one (`egressTooLargeMessage`), and nothing else: a connection
+ * dropped while it came is another failure, to try again.
+ */
+export const isTooLarge = (error: unknown): boolean =>
+  error instanceof Error && error.message === egressTooLargeMessage;
 
 /**
  * Sends one GET and reads its whole answer before `deadline` (ms since the
