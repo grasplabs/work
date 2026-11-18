@@ -655,6 +655,65 @@ describe("skill proposals", setUpTime, () => {
     }).toStrictEqual({ draftsAsked: 0, proposed: [] });
   });
 
+  it("neither shows nor adds a saved proposal once a run it rests on is past the retention, though no sweep has run yet", async () => {
+    const name = `weekly-report-${unique()}`;
+    const [builder, ada] = await Promise.all([
+      person("builder"),
+      person("user"),
+    ]);
+    const workflow = await workflowOf(builder.by, [ada.userId]);
+    // A run of hers past the retention, not swept, as the test above
+    // builds it, and four that succeeded since.
+    const [old = ""] = await oldStarts(ada.by, workflow.id, 1, true);
+    await addSource(env, {
+      source: { producer: "run", id: old },
+      change: "end",
+      text: "Workflow run completed.\n\nOld result.",
+      readers: { kind: "owner", personId: ada.userId },
+    });
+    const newer = await runs(ada.by, workflow.id, 4);
+    // A proposal saved resting on all five, as one drafted before the old
+    // run passed the retention: drawn by her own store from them.
+    const key = await sha256Of(`${workflow.id}:1`);
+    await ownStore(ada.userId).proposeSkill({
+      person: ada.userId,
+      key,
+      about: `Workflow "${workflow.name}"`,
+      subject: `${workflow.id}@1`,
+    });
+    await ownStore(ada.userId).work({
+      ask: async () =>
+        await Promise.resolve({
+          kind: "answer" as const,
+          text: `---\nname: ${name}\ndescription: When you ask for the weekly report.\n---\nSend it.\n`,
+          model: "test/model",
+        }),
+      at: new Date(),
+      embedders: {
+        model: null,
+        embed: async () => await Promise.resolve({ kind: "unavailable" }),
+      },
+      handOvers: {
+        handOver: async () => await Promise.resolve({ kind: "nothing" }),
+      },
+      contextTokens: null,
+      proposalSources: async () =>
+        await Promise.resolve([old, ...newer].map((id) => `run:${id}`)),
+    });
+    const saved = await ownStore(ada.userId).skillProposals({
+      reader: { person: ada.userId, groups: [] },
+    });
+    expect({
+      saved: saved.map(({ key: savedKey }) => savedKey),
+      proposed: await proposedFrom(ada.api, workflow.id),
+      adds: await outcome(ada.api.skills.acceptProposal(key)),
+    }).toStrictEqual({
+      saved: [key],
+      proposed: [],
+      adds: "skills.not_found",
+    });
+  });
+
   it("keeps a dismissed proposal away for its version, and proposes again for a new one", async () => {
     const { drafted } = await draftingProvider(`weekly-report-${unique()}`);
     const [builder, ada] = await Promise.all([

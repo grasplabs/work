@@ -218,8 +218,10 @@ export const proposalRunsFor = async (
 
 /**
  * What `proposal` rests on, for `person`: its runs, each theirs, of one
- * workflow they hold now, at one version, read in one statement; null
- * when any isn't, so it isn't shown.
+ * workflow they hold now, at one version, none with its details removed
+ * (`detailsRemoved`, run retention's own rule, as `streakOf` drafts by:
+ * a run past the retention counts as removed, swept or not), read in one
+ * statement; null when any isn't, so it is neither shown nor accepted.
  */
 const basisOf = async (
   env: Env,
@@ -239,8 +241,13 @@ const basisOf = async (
       name: workflowResources.name,
       version: workflowResourceRuns.version,
       endedAt: workflowResourceRuns.endedAt,
+      detailsRemovedAt: workflowStartReceipts.detailsRemovedAt,
     })
     .from(workflowResourceRuns)
+    .innerJoin(
+      workflowStartReceipts,
+      eq(workflowStartReceipts.id, workflowResourceRuns.id)
+    )
     .innerJoin(
       workflowResources,
       eq(workflowResources.id, workflowResourceRuns.workflowResourceId)
@@ -259,8 +266,10 @@ const basisOf = async (
     first === undefined ||
     rows.length !== new Set(ids).size ||
     rows.some(
-      ({ workflow, version }) =>
-        workflow !== first.workflow || version !== first.version
+      (run) =>
+        run.workflow !== first.workflow ||
+        run.version !== first.version ||
+        detailsRemoved(run)
     )
   ) {
     return null;
