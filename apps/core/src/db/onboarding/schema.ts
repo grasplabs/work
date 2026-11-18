@@ -806,5 +806,7 @@ export const brainDrawings = sqliteTable(
   (table) => [
     index("brain_drawings_record").on(table.record),
     index("brain_drawings_team").on(table.team),
+    // A turn reads the drawing of the work it is about, alone.
+    index("brain_drawings_workflow").on(table.workflow),
   ]
 );

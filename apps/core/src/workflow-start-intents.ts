@@ -29,7 +29,7 @@ import type { WorkflowStarts } from "./function-host.ts";
 import { defaultMaxAttempts } from "./outbox-delivery.ts";
 import type { OutboxEntry } from "./outbox-delivery.ts";
 import { allowingPermissionSql, grantedPermissions } from "./permissions.ts";
-import { isStaleRefusal, receiptOf } from "./workflow-starts.ts";
+import { isStaleRefusal, receiptOf, refusedForNow } from "./workflow-starts.ts";
 
 // Starting workflows from an App's server functions (spec 7.4, 9.5): an
 // action's `ctx.workflows.<alias>.start`, made as it runs, and a
@@ -328,7 +328,8 @@ const audited = async (
 /** Whether a refusal is one a later attempt may not repeat. */
 const isTransient = (error: unknown): boolean =>
   !isExpectedError(error) ||
-  workflowResourceErrors.codeOf(error) === "workflow.run_limit";
+  workflowResourceErrors.codeOf(error) === "workflow.run_limit" ||
+  refusedForNow(error);
 
 /**
  * Makes the start a committed mutation staged (see the header): delivered
