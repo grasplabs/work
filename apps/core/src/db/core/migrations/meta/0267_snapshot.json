@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "01e542fa-e3d9-4d42-8961-3f03fd510f18",
+  "id": "f395ee00-149f-4b3c-8d7e-7c3c15e44a6e",
   "prevId": "c0388866-23a0-458d-af73-7aaa59a96228",
   "tables": {
     "access_revocations": {
@@ -7720,30 +7720,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "kept_run_evidence": {
-      "name": "kept_run_evidence",
-      "columns": {
-        "run_id": {
-          "name": "run_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "kept_at": {
-          "name": "kept_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "knowledge_signal_computations": {
       "name": "knowledge_signal_computations",
       "columns": {
@@ -15320,6 +15296,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "captured_at": {
+          "name": "captured_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -16655,15 +16638,7 @@
           "autoincrement": false
         }
       },
-      "indexes": {
-        "workflow_state_run_idx": {
-          "name": "workflow_state_run_idx",
-          "columns": [
-            "run_id"
-          ],
-          "isUnique": false
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "workflow_state_workflow_resource_id_workflow_resources_id_fk": {
           "name": "workflow_state_workflow_resource_id_workflow_resources_id_fk",

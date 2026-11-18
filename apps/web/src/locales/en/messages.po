@@ -5191,6 +5191,11 @@ msgstr "Dropped an event no workflow could take"
 msgid "Dublin"
 msgstr "Dublin"
 
+#: src/brain/memories-page.tsx
+msgctxt "what the Brain remembers about something"
+msgid "Duration"
+msgstr "Duration"
+
 #: src/agents/agents-overview.tsx
 msgid "Each agent has its own name and job, answers only the people you choose, and does only what you let it."
 msgstr "Each agent has its own name and job, answers only the people you choose, and does only what you let it."
@@ -5646,6 +5651,11 @@ msgstr "Everything the Brain kept of what agents read through it is erased for g
 #: src/interview/closed.tsx
 msgid "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."
 msgstr "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."
+
+#: src/brain/memories-page.tsx
+msgctxt "what the Brain remembers about something"
+msgid "Evidence"
+msgstr "Evidence"
 
 #: src/brain/sources-page.tsx
 msgctxt "how search found a passage"
@@ -15695,6 +15705,11 @@ msgstr "Values were erased with the person who wrote them."
 msgid "Values weren't read."
 msgstr "Values weren't read."
 
+#: src/brain/memories-page.tsx
+msgctxt "what the Brain remembers about something"
+msgid "Variant"
+msgstr "Variant"
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "VAT number"
 msgstr "VAT number"
@@ -15805,6 +15820,11 @@ msgstr "Visitor of {app}"
 #: src/voice/sound-controls.tsx
 msgid "Volume"
 msgstr "Volume"
+
+#: src/brain/memories-page.tsx
+msgctxt "what the Brain remembers about something"
+msgid "Wait"
+msgstr "Wait"
 
 #: src/workflows/figures.tsx
 msgid "wait for a decision now"

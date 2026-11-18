@@ -77,7 +77,9 @@ export const brainMemoryAttributes = [
   "decision",
   "definition",
   "description",
+  "duration",
   "employer",
+  "evidence",
   "expertise",
   "feature",
   "frequency",
@@ -109,6 +111,8 @@ export const brainMemoryAttributes = [
   "trigger",
   "used_by",
   "uses",
+  "variant",
+  "wait",
 ] as const;
 export type BrainMemoryAttribute = (typeof brainMemoryAttributes)[number];
 

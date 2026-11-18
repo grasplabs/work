@@ -1,4 +1,5 @@
 import { delegateActorOf } from "@grasp-os/shared/audit";
+import type { AuditActor } from "@grasp-os/shared/audit";
 import { brainSourceErrors } from "@grasp-os/shared/brain-sources";
 import type { ConnectResult, ToolClass } from "@grasp-os/shared/connect";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -20,6 +21,8 @@ import {
 import { connectionOwnersOf } from "./connections.ts";
 import { nativeItemReads } from "./native-tool-classes.gen.ts";
 import { classOf } from "./tool-classes.ts";
+import type { CallingRun } from "./workflows/resource-authority.ts";
+import { markCaptured } from "./workflows/run-evidence.ts";
 
 // Capture (GRA-1730): what a chat's agent reads through its person's own
 // connection is kept in the Brain, an item a source, so every connected
@@ -128,24 +131,64 @@ import { classOf } from "./tool-classes.ts";
 // sign-in again (`needs_reauth`) is not ended: the same connection when
 // its person reconnects it.
 
+// A workflow run's reads (GRA-1828; the threat model and the decisions
+// are on the issue) are kept the same way, by the same code, when the run
+// acts for one person (`captureRunRead`): one a person started, or an App
+// or an agent for the person it works for, its principal. A run a trigger
+// started (a schedule, a webhook, a connector's event, a reply to a run's
+// mail) acts as the workflow itself, nobody opening anything there and
+// then: it keeps nothing. Nor does a call that passes a sensitive
+// argument (`sensitive`): the key hashes the call's input, and the answer
+// may carry what the value gave. What a run keeps is not a read of the
+// Brain, so nothing of it is pinned with the run (run-evidence.ts), whose
+// checks read as the company: the run read the connection, whose
+// authority is decided again on each call. The run is marked as one that
+// kept something before the Brain is written (`markCaptured`), so it
+// hands over only how it ended, never what it returned: a copy of what it
+// read that disconnecting the connection wouldn't erase.
+
 type CaptureEvent =
   | "brain.capture.kept"
   | "brain.capture.skipped"
   | "brain.capture.failed";
 
+/**
+ * For whom a read is kept, and where it was read: the one person whose
+ * own store keeps it, the chat or the run that read it, and who read it
+ * as its audit event names them (asked as the event is kept, so a scope
+ * core can't name an agent of fails the event alone).
+ */
+interface Capturer {
+  readonly personId: string;
+  readonly where: { readonly chat: string } | { readonly run: string };
+  readonly actor: () => AuditActor;
+  /**
+   * Asked just before anything is written to the Brain; throws to keep
+   * it nowhere. A run's marks it as one whose result copies what it kept.
+   */
+  readonly beforeKeep?: () => Promise<void>;
+}
+
+/** A chat's agent's read, kept for the chat's person. */
+const chatCapturer = (scope: AgentScope): Capturer => ({
+  personId: scope.personId,
+  where: { chat: scope.chatId },
+  actor: () => delegateActorOf(chatAuthority(scope), scope.via),
+});
+
 /** The audit event a capture ends in, through core's outbox. */
 const audited = async (
   env: Env,
-  scope: AgentScope,
+  capturer: Capturer,
   connectionId: string,
   action: CaptureEvent,
   detail: Record<string, string | number>
 ): Promise<void> => {
   await keepAuditEvent(env, drizzle(env.DB), {
-    actor: delegateActorOf(chatAuthority(scope), scope.via),
+    actor: capturer.actor(),
     action,
     target: { type: "connection", id: connectionId },
-    detail: { ...detail, chat: scope.chatId },
+    detail: { ...detail, ...capturer.where },
   });
 };
 
@@ -197,18 +240,20 @@ const skippedAll = (reason: string, items: number): Ended => [
 ];
 
 /**
- * Keeps `text` (redacted) under `id` for the chat's person alone, read at
- * `readAt`: what it ended in, kept, or skipped as `stale` or `erased`. Throws when the Brain
- * refused it otherwise (a text past its limit) or couldn't be reached.
+ * Keeps `text` (redacted) under `id` for its capturer's person alone,
+ * read at `readAt`: what it ended in, kept, or skipped as `stale` or
+ * `erased`. Throws when the Brain refused it otherwise (a text past its
+ * limit) or couldn't be reached.
  */
 const keptAs = async (
   env: Env,
-  scope: AgentScope,
+  capturer: Capturer,
   connectionId: string,
   id: string,
   text: string,
   readAt: Date
 ): Promise<Ended> => {
+  await capturer.beforeKeep?.();
   try {
     // Owner content: core's Brain module keeps it in the person's own
     // store, never the shared one.
@@ -223,7 +268,7 @@ const keptAs = async (
       // version again.
       change: crypto.randomUUID(),
       text,
-      readers: { kind: "owner", personId: scope.personId },
+      readers: { kind: "owner", personId: capturer.personId },
       readAt,
     });
     // A later read of it was kept first: this older one is not.
@@ -247,7 +292,7 @@ const keptAs = async (
  */
 const answerCaptured = async (
   env: Env,
-  scope: AgentScope,
+  capturer: Capturer,
   connectionId: string,
   action: string,
   input: unknown,
@@ -266,17 +311,17 @@ const answerCaptured = async (
   try {
     const id = await answerCaptureIdOf(
       connectionId,
-      scope.personId,
+      capturer.personId,
       action,
       input
     );
-    ended = await keptAs(env, scope, connectionId, id, text, readAt);
+    ended = await keptAs(env, capturer, connectionId, id, text, readAt);
   } catch (error) {
     // The Brain refused it (a text past its limit) or couldn't be
     // reached: the one item failed.
     log.warn("connection_capture.failed", {
       connectionId,
-      chatId: scope.chatId,
+      ...capturer.where,
       ...errorFields(error),
     });
     ended = [
@@ -300,7 +345,7 @@ const answerClasses: ReadonlySet<ToolClass | undefined> = new Set([
 /** What capturing `result` of `action` ended in. */
 const captured = async (
   env: Env,
-  scope: AgentScope,
+  capturer: Capturer,
   connectionId: string,
   action: string,
   input: unknown,
@@ -310,14 +355,14 @@ const captured = async (
   // A whole answer is one item, whatever its server named.
   const answers = owner !== undefined && keepsWholeAnswers(owner.source);
   const named = answers ? 1 : new Set(result.provenance).size;
-  if (owner?.ownerUserId !== scope.personId) {
+  if (owner?.ownerUserId !== capturer.personId) {
     return skippedAll("shared", named);
   }
   if (!(answers ? answerClasses : itemClasses).has(classOf(owner, action))) {
     return skippedAll("reach", named);
   }
   if (answers) {
-    return await answerCaptured(env, scope, connectionId, action, input, {
+    return await answerCaptured(env, capturer, connectionId, action, input, {
       result,
       readAt,
     });
@@ -331,15 +376,72 @@ const captured = async (
   if (itemRead === "file" && !asksText(input)) {
     return skippedAll("file", 1);
   }
-  const id = await captureIdOf(connectionId, scope.personId, action, itemId);
+  const id = await captureIdOf(connectionId, capturer.personId, action, itemId);
   return await keptAs(
     env,
-    scope,
+    capturer,
     connectionId,
     id,
     redact(result.output),
     readAt
   );
+};
+
+/** Keeps the audit event `ended` names; a failure to is logged. */
+const endedAudited = async (
+  env: Env,
+  capturer: Capturer,
+  connectionId: string,
+  ended: Ended
+): Promise<void> => {
+  try {
+    await audited(env, capturer, connectionId, ...ended);
+  } catch (error) {
+    log.error("connection_capture.unaudited", {
+      connectionId,
+      ...capturer.where,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
+ * Keeps what was read with the tool `action` through `connectionId`
+ * (`read`) for `capturer`, as `captureRead` says. Never throws.
+ */
+const capturedFor = async (
+  env: Env,
+  capturer: Capturer,
+  connectionId: string,
+  action: string,
+  input: unknown,
+  read: Read
+): Promise<void> => {
+  const { result } = read;
+  if (result.keep !== true) {
+    return;
+  }
+  let ended: Ended;
+  try {
+    ended = await captured(env, capturer, connectionId, action, input, read);
+  } catch (error) {
+    // Connect unreachable, or the Brain refused a native item (a text
+    // past its limit) or couldn't be reached: each item failed. A whole
+    // answer's failure ends in `answerCaptured`, so only connect failing
+    // to say what the connection is leaves its kind unknown here: then
+    // the call counts the items it named, and at least one, its answer.
+    log.warn("connection_capture.failed", {
+      connectionId,
+      ...capturer.where,
+      ...errorFields(error),
+    });
+    const items = Math.max(1, new Set(result.provenance).size);
+    ended = [
+      "brain.capture.failed",
+      { items, kept: 0, failed: items, skipped: 0 },
+    ];
+  }
+  await endedAudited(env, capturer, connectionId, ended);
 };
 
 /**
@@ -358,37 +460,108 @@ export const captureRead = async (
   input: unknown,
   read: Read
 ): Promise<void> => {
-  const { result } = read;
-  if (result.keep !== true) {
+  await capturedFor(
+    env,
+    chatCapturer(scope),
+    connectionId,
+    action,
+    input,
+    read
+  );
+};
+
+/** A workflow run's call, as its capture needs to know it. */
+export interface RunRead {
+  /** The run, and whom it acts for (its principal). */
+  readonly run: Pick<CallingRun, "runId" | "principal" | "invoker">;
+  /** Whether the call passed a sensitive argument (a binding argument). */
+  readonly sensitive: boolean;
+  /**
+   * When the step's attempt ends (resource-calls.ts `Effect.deadline`), in
+   * milliseconds since the epoch: the step waits for its capture, which
+   * may take no more than half of what is left of it.
+   */
+  readonly deadline: number;
+}
+
+/**
+ * Whether `capture` ended within `ms`; never rejects (`capture` doesn't).
+ * One it outlasted goes on by itself.
+ */
+const endedWithin = async (
+  capture: Promise<void>,
+  ms: number
+): Promise<boolean> =>
+  await Promise.race([
+    capture.then(() => true as const),
+    scheduler.wait(ms).then(() => false as const),
+  ]);
+
+/**
+ * Keeps what workflow run `run` read with the tool `action` through
+ * `connectionId` (`read`) for the one person it acts for, by
+ * `captureRead`'s rules, when it acts for one (the header). A run a
+ * trigger started acts for nobody: none of its calls is a capture's, as a
+ * call connect said nothing of isn't. A call that passed a sensitive
+ * argument is skipped (`sensitive`). Never throws.
+ */
+export const captureRunRead = async (
+  env: Env,
+  { run, sensitive, deadline }: RunRead,
+  connectionId: string,
+  action: string,
+  input: unknown,
+  read: Read
+): Promise<void> => {
+  if (read.result.keep !== true || run.invoker.type === "trigger") {
     return;
   }
-  let ended: Ended;
-  try {
-    ended = await captured(env, scope, connectionId, action, input, read);
-  } catch (error) {
-    // Connect unreachable, or the Brain refused a native item (a text
-    // past its limit) or couldn't be reached: each item failed. A whole
-    // answer's failure ends in `answerCaptured`, so only connect failing
-    // to say what the connection is leaves its kind unknown here: then
-    // the call counts the items it named, and at least one, its answer.
-    log.warn("connection_capture.failed", {
+  const capturer: Capturer = {
+    personId: run.principal,
+    where: { run: run.runId },
+    // As the run's call receipts name it (resource-calls.ts): the
+    // workflow, as a run, is the system's.
+    actor: () => ({ type: "system" }),
+    // Marked before the Brain is written, so a run whose read may be kept
+    // hands over only how it ended, never a copy of it in what it returned
+    // that disconnecting wouldn't erase (brain-sources.ts). Unmarked, the
+    // read is kept nowhere: the item fails.
+    beforeKeep: async () => {
+      await markCaptured(env, run.runId);
+    },
+  };
+  // The step waits for its capture (a run host has no `waitUntil`), and a
+  // capture is best effort: it never costs the run its answer, which the
+  // host takes only while the step's attempt holds its lease. So it may
+  // take half of what the attempt has left as the answer came, the other
+  // half left for the step's own code; with nothing left, it is skipped.
+  // One that takes longer is given up: the step goes on, and the capture
+  // with it, by itself. It still lands whole or not at all, never half:
+  // the run was marked before anything is written, so a mark with no
+  // capture only makes the run hand over how it ended, the safe side; and
+  // once the run has ended, its row takes no mark, so nothing is kept.
+  const left = deadline - Date.now();
+  const budget = Math.floor(left / 2);
+  // Counted as the items it named, and at least one, as a failure is.
+  const items = Math.max(1, new Set(read.result.provenance).size);
+  if (budget <= 0) {
+    log.warn("connection_capture.skipped_late", {
       connectionId,
-      chatId: scope.chatId,
-      ...errorFields(error),
+      ...capturer.where,
+      items,
+      leftMs: left,
     });
-    const items = Math.max(1, new Set(result.provenance).size);
-    ended = [
-      "brain.capture.failed",
-      { items, kept: 0, failed: items, skipped: 0 },
-    ];
+    return;
   }
-  try {
-    await audited(env, scope, connectionId, ...ended);
-  } catch (error) {
-    log.error("connection_capture.unaudited", {
+  const capture = sensitive
+    ? endedAudited(env, capturer, connectionId, skippedAll("sensitive", items))
+    : capturedFor(env, capturer, connectionId, action, input, read);
+  if (!(await endedWithin(capture, budget))) {
+    log.warn("connection_capture.given_up", {
       connectionId,
-      chatId: scope.chatId,
-      ...errorFields(error),
+      ...capturer.where,
+      items,
+      waitedMs: budget,
     });
   }
 };
