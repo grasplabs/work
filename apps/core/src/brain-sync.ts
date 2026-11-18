@@ -9,7 +9,7 @@ import {
   sourceReaderSchema,
 } from "@grasp-os/shared/source-readers";
 import type { SourceReader } from "@grasp-os/shared/source-readers";
-import { ownPlace, syncErrors } from "@grasp-os/shared/sync";
+import { ownPlace, placesListing, syncErrors } from "@grasp-os/shared/sync";
 import type {
   SyncItem,
   SyncPage,
@@ -43,6 +43,8 @@ import {
   brainSyncDisconnects,
   brainSyncItems,
   brainSyncSources,
+  connectionBrainAudiences,
+  connectionBrainErasures,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { localExtractor } from "./files/extract.ts";
@@ -56,9 +58,11 @@ import { erasureBegan, plainPrincipalOf } from "./source-readers.ts";
 // each other: core reads a page and applies it.
 //
 // - A source is a connection, one of its connector's syncs (`feed`) and
-//   a place: today a person's own account (`own`), as connect lists them
-//   (`syncSources`); a shared connection syncs only places picked on it,
-//   none yet. Core keeps its cursor, so a page is committed in one place.
+//   a place: a person's own account (`own`) or a place it lists (a mail
+//   folder), or a place an admin picked on a shared connection (a shared
+//   drive, a SharePoint library: GRA-1719), as connect lists them
+//   (`syncSources`). Core keeps its cursor, so a page is committed in one
+//   place.
 // - Each item is a Brain source under `sync:`, keyed by its connection,
 //   a generation, and a hash of its sync and the provider's ID
 //   (`keyOf`): the generation goes up each time the item leaves the
@@ -73,6 +77,16 @@ import { erasureBegan, plainPrincipalOf } from "./source-readers.ts";
 //   in the connection's group; any other file to the shared store, read
 //   by exactly its readers (`readersOf`). A file that crosses is erased
 //   where it was, then added where it goes, under its next key.
+// - A shared connection has no owner: everything of a place picked on it
+//   goes to the shared store for that place's group, whatever its own
+//   readers say (none are read), so never to whoever connected it. Core
+//   puts a reader in the place's group only beside the connection's own,
+//   which its Brain audience holds (GRA-1831), and only while the place
+//   is picked (brain-next.ts `withConnections`). So an un-pick hides the
+//   place in one statement (`hideUnpickedPlaces`), before the admin's
+//   save answers; the clock then erases it (`completeDroppedPlaces`).
+//   Nothing is read or kept while the audience is nobody, an erasure of
+//   the connection's records is under way, or a disconnect closed it.
 // - A page is applied in order: what went away, what lost the shared
 //   store, and every change of readers (the narrowings) first, then the
 //   adds, then the cursor, in one batch with the page's one audit event.
@@ -153,13 +167,6 @@ const nextRelistAt = async (
  */
 type Stream = "changes" | "relist";
 
-/**
- * The place of the row that lists a sync's places (`listSyncPlaces`) as
- * work in the same queue as its pages (`listPlaces`): no place a sync
- * lists can be it, since a place never holds ":" (`syncPlaceSchema`).
- */
-const placesListing = ":places";
-
 /** When a row's relist is never due: the places listing has none. */
 const never = new Date(8_640_000_000_000_000);
 
@@ -210,14 +217,27 @@ type Source = typeof brainSyncSources.$inferSelect;
 type Item = typeof brainSyncItems.$inferSelect;
 type Store = NonNullable<Item["store"]>;
 
-/** Who reads a synced item, by the Brain's groups. */
-interface Plan {
-  store: Store;
-  /** The readers of an item in the shared store; none in an own store. */
-  readers: SourceReader[];
-  /** Its readers, compared as core compares them, sorted, as JSON: hashed into its change keys, never kept. */
-  readersKey: string | null;
-}
+/**
+ * Who reads a synced item, by the Brain's groups: its owner, in their own
+ * store, or in the shared store, its `readers`, with them as compared
+ * (`readersKey`: as core compares them, sorted, as JSON; hashed into its
+ * change keys, never kept).
+ */
+type Plan =
+  | { store: "own"; readersKey: null }
+  | { store: "shared"; readers: SourceReaders; readersKey: string };
+
+/**
+ * The person whose own store `source` adds to. Only a person's own
+ * connection has one: a shared connection's places never go to anyone's
+ * own store (`planOf`), so asking for its owner is a bug.
+ */
+const ownerOf = (source: Pick<Source, "personId">): string => {
+  if (source.personId === null) {
+    throw new Error("A shared connection's source has no own store");
+  }
+  return source.personId;
+};
 
 /** The group every item synced through `connectionId` into its owner's own store is added in. */
 const syncGroupOf = (connectionId: string): SourceRef => ({
@@ -325,16 +345,30 @@ const readerKeyOf = (reader: SourceReader): string | undefined => {
 };
 
 /**
- * Where `item` goes and who reads it: the owner's own store for mail,
- * events and attachments, and for a file whose readers name nobody but
- * the connection's own account (or couldn't be read whole); else the
- * shared store, read by its readers.
+ * Where `item` goes and who reads it. Of a place picked on a shared
+ * connection, the shared store, for the place's group. Else the owner's
+ * own store for mail, events and attachments, and for a file whose
+ * readers name nobody but the connection's own account (or couldn't be
+ * read whole); else the shared store, read by its readers.
  */
 const planOf = (
   source: Source,
   item: Extract<SyncItem, { gone: false }>
 ): Plan => {
-  const own: Plan = { store: "own", readers: [], readersKey: null };
+  // A place picked on a shared connection: its group, never an owner's.
+  if (source.personId === null) {
+    return {
+      store: "shared",
+      readers: {
+        kind: "place",
+        connectionId: source.connectionId,
+        feed: source.feed,
+        place: source.place,
+      },
+      readersKey: JSON.stringify(["place", source.place]),
+    };
+  }
+  const own: Plan = { store: "own", readersKey: null };
   // Mail is its mailbox's own person's alone, an attachment its message's.
   if (item.kind !== "file" || item.partOf !== null || item.readers === null) {
     return own;
@@ -351,7 +385,11 @@ const planOf = (
     return own;
   }
   // Only ever hashed into a change key: no row keeps a reader.
-  return { store: "shared", readers, readersKey: JSON.stringify(keys) };
+  return {
+    store: "shared",
+    readers: { kind: "readers", readers },
+    readersKey: JSON.stringify(keys),
+  };
 };
 
 /** The extractor's types, by the type a connector names. */
@@ -448,6 +486,15 @@ const stillHeld = ({ source, leaseId }: Applying): SQL =>
 const closed = (connectionId: SQL | string): SQL =>
   sql`EXISTS (SELECT 1 FROM ${brainSyncDisconnects} WHERE ${brainSyncDisconnects.connectionId} = ${connectionId})`;
 
+/**
+ * That the shared connection `connectionId` has a Brain audience now,
+ * and no erasure of its records under way or closed by a disconnect
+ * (connection-audiences.ts, shared-reads.ts), as SQL.
+ */
+const audienced = (connectionId: SQL | string): SQL =>
+  sql`EXISTS (SELECT 1 FROM ${connectionBrainAudiences} WHERE ${connectionBrainAudiences.connectionId} = ${connectionId})
+    AND NOT EXISTS (SELECT 1 FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connectionId} AND (${connectionBrainErasures.erasing} = 1 OR ${connectionBrainErasures.closed} = 1))`;
+
 /** The source's row, while `applying`'s run holds it, as SQL. */
 const heldSource = (applying: Applying) =>
   and(
@@ -499,7 +546,7 @@ const countedIn = (
 /** The Brain's readers of `row`'s source as it was added: whose store it is in. */
 const addedReaders = (applying: Applying, store: Store): SourceReaders =>
   store === "own"
-    ? { kind: "owner", personId: applying.source.personId }
+    ? { kind: "owner", personId: ownerOf(applying.source) }
     : { kind: "none" };
 
 /**
@@ -772,7 +819,7 @@ const changeOf = async (parts: readonly unknown[]): Promise<string> =>
 const changeReaders = async (
   applying: Applying,
   row: Item,
-  plan: Plan
+  plan: Extract<Plan, { store: "shared" }>
 ): Promise<Item> => {
   const { env, db, budget, readAt } = applying;
   spend(budget, 1);
@@ -784,7 +831,7 @@ const changeReaders = async (
       readAt.getTime(),
       row.itemId,
     ]),
-    readers: { kind: "readers", readers: plan.readers },
+    readers: plan.readers,
     readAt,
   });
   // Not held yet, or an add of it under way (`change` null, its record
@@ -807,9 +854,25 @@ const changeReaders = async (
 };
 
 /**
+ * Whether the Brain may keep what `source` reads now, as SQL: its place
+ * still listed or picked (not `dropped`), and, for a place picked on a
+ * shared connection, an audience chosen for the connection and no
+ * erasure of its records under way or closed by a disconnect
+ * (shared-reads.ts), as `claimSharedRead` checks it. Nothing is kept
+ * while the audience is nobody.
+ */
+const mayKeep = (source: Source): SQL => {
+  const live = sql`EXISTS (SELECT 1 FROM ${brainSyncSources} AS live WHERE live.connection_id = ${source.connectionId} AND live.feed = ${source.feed} AND live.place = ${source.place} AND live.dropped = 0)`;
+  return source.personId === null
+    ? sql`${live} AND ${audienced(source.connectionId)}`
+    : live;
+};
+
+/**
  * Names `item`'s key for `plan` before the Brain is given it, while the
- * run holds its source and no disconnect closed its connection: the row
- * as it is now, with the add under way (`change` null).
+ * run holds its source, no disconnect closed its connection and the
+ * Brain may keep what it reads (`mayKeep`): the row as it is now, with
+ * the add under way (`change` null).
  */
 const claim = async (
   applying: Applying,
@@ -828,7 +891,7 @@ const claim = async (
     .insert(brainSyncItems)
     .select(
       sql`SELECT ${source.connectionId}, ${source.feed}, ${itemId}, ${source.place}, ${key}, ${generation}, ${plan.store}, NULL, NULL, NULL, ${item.partOf}, ${source.listing}, NULL, NULL, NULL
-        WHERE ${stillHeld(applying)} AND NOT ${closed(source.connectionId)}`
+        WHERE ${stillHeld(applying)} AND NOT ${closed(source.connectionId)} AND ${mayKeep(source)}`
     )
     .onConflictDoUpdate({
       target: [
@@ -897,8 +960,8 @@ const add = async (
       text,
       readers:
         plan.store === "own"
-          ? { kind: "owner", personId: source.personId }
-          : { kind: "readers", readers: plan.readers },
+          ? { kind: "owner", personId: ownerOf(source) }
+          : plan.readers,
       said: {
         by: { kind: "outside" },
         at: new Date(item.changedAt),
@@ -1654,8 +1717,9 @@ const syncPage = async (
 
 /**
  * The statement that keeps the source of `place` for the sync `of` names
- * (its connection's person, provider, tenant, account and kind), unless a
- * disconnect closed its connection or its person's erasure began (a row
+ * (its connection's person, none for a shared connection, provider,
+ * tenant, account and kind), unless a disconnect closed its connection
+ * or its person's erasure began (a row
  * naming them, written after their erasure deleted theirs, would outlive
  * it): made from no cursor, or one dropped
  * before read again from the start; `seenIn`, the places listing that
@@ -1683,7 +1747,7 @@ const sourceStatement = (
     .insert(brainSyncSources)
     .select(
       sql`SELECT ${of.connectionId}, ${of.feed}, ${place}, ${of.personId}, ${of.provider}, ${of.tenant}, ${of.account}, NULL, 1, 1, ${now}, NULL, NULL, NULL, NULL, 0, 0, 0, NULL, 0, ${relistAt}, NULL, 0, ${of.kind}, 0, 0, ${seenIn}
-        WHERE NOT ${closed(of.connectionId)} AND NOT ${erasureBegan(of.personId)} AND ${held}`
+        WHERE NOT ${closed(of.connectionId)} AND ${of.personId === null ? sql`1 = 1` : sql`NOT ${erasureBegan(of.personId)}`} AND ${held}`
     )
     .onConflictDoUpdate({
       target: [
@@ -1706,8 +1770,8 @@ const sourceStatement = (
 /**
  * The syncs connect lists now, each kept here, a page of connections at
  * a time: a sync of the whole account as its one source (`own`); a sync
- * that lists places as the row that lists them (`placesListing`), due at
- * once when it is new. Its places are listed by that row in the queue
+ * that lists places, or reads those picked on a shared connection, as the
+ * row that lists them (`placesListing`), due at once when it is new. Its places are listed by that row in the queue
  * (`listPlaces`), never here: listing every mailbox's folders on every
  * run would leave no run for the pages.
  */
@@ -1864,10 +1928,52 @@ const listPlaces = async (
   heldAfter(await move);
 };
 
+/**
+ * Hides at once every place of the shared connection `connectionId`'s
+ * sync `feed` that `picks` no longer names, once connect saved the
+ * admin's picks (sync-picks.ts), before their save answers (GRA-1719).
+ * In one batch: one statement marks each such place dropped, by place,
+ * so from the next read on nobody is in its group (brain-next.ts
+ * `withConnections`) and nothing more is kept of it (`mayKeep`); its
+ * copies are erased by the clock (`completeDroppedPlaces`). And the
+ * sync's places listing starts again, due now: whatever run held it
+ * loses it, so a listing that read the picks before they changed can't
+ * keep a place it no longer names, and a place picked now is read soon.
+ */
+export const hideUnpickedPlaces = async (
+  env: Pick<Env, "DB">,
+  {
+    connectionId,
+    feed,
+    picks,
+  }: { connectionId: string; feed: string; picks: readonly string[] }
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const ofSync = sql`${brainSyncSources.connectionId} = ${connectionId} AND ${brainSyncSources.feed} = ${feed} AND ${brainSyncSources.personId} IS NULL`;
+  await db.batch([
+    db
+      .update(brainSyncSources)
+      .set({ dropped: true })
+      .where(
+        sql`${ofSync} AND ${brainSyncSources.place} <> ${placesListing} AND ${brainSyncSources.dropped} = 0
+          AND ${brainSyncSources.place} NOT IN (SELECT value FROM json_each(${JSON.stringify(picks)}))`
+      ),
+    db
+      .update(brainSyncSources)
+      .set({
+        cursor: null,
+        dueAt: new Date(),
+        leaseId: null,
+        leaseUntil: null,
+      })
+      .where(sql`${ofSync} AND ${brainSyncSources.place} = ${placesListing}`),
+  ]);
+};
+
 /** The readers `source`'s person's own store adds with, or the shared store's. */
 const readersIn = (source: Source, store: Store): SourceReaders =>
   store === "own"
-    ? { kind: "owner", personId: source.personId }
+    ? { kind: "owner", personId: ownerOf(source) }
     : { kind: "none" };
 
 /** `completeDroppedPlaces` for one dropped source. */
@@ -1984,7 +2090,9 @@ const completeDroppedPlaces = async (
 
 /**
  * Claims the next source to read, unless its connection was closed by a
- * disconnect or another run holds it: this run's until `leaseMs` from
+ * disconnect, another run holds it, or it is a shared connection's with
+ * no audience (`audienced`: nothing is kept for nobody, so nothing is
+ * read): this run's until `leaseMs` from
  * now, with the cursor to follow: whichever has waited longest since it
  * was due, a source's changes or a relist's page, changes on a tie. So a
  * relist is never held up for good by changes that came due after it
@@ -2008,6 +2116,7 @@ const claimNext = async (
           AND due.dropped = 0
           AND (due.lease_until IS NULL OR due.lease_until <= ${now})
           AND NOT ${closed(sql`due.connection_id`)}
+          AND (due.person_id IS NOT NULL OR (${audienced(sql`due.connection_id`)}))
         ORDER BY CASE
             WHEN due.due_at <= ${now} AND due.relist_at <= ${now} THEN min(due.due_at, due.relist_at)
             WHEN due.due_at <= ${now} THEN due.due_at
@@ -2034,10 +2143,11 @@ const claimNext = async (
   };
 };
 
-/** A disconnect that stopped a person's own connection, for the sync's erasure. */
+/** A disconnect that stopped a native connection, for the sync's erasure. */
 export interface SyncDisconnect {
   connectionId: string;
-  personId: string;
+  /** Whose own connection it was; null for a shared one. */
+  personId: string | null;
   /** Connect's `connection.disconnect` event's ID. */
   request: string;
   actor: AuditActor;
@@ -2045,11 +2155,11 @@ export interface SyncDisconnect {
 }
 
 /**
- * Closes the person's own connection a disconnect stopped for native
- * sync, for good, before connect's event leaves its outbox
- * (capture-erasures.ts): everything synced into their own store erased at
+ * Closes the native connection a disconnect stopped for native sync, for
+ * good, before connect's event leaves its outbox (capture-erasures.ts):
+ * for a person's own, everything synced into their own store erased at
  * once, in one call (the connection's group, closed, so a late add in it
- * is refused), then, in one batch, the connection closed here (nothing
+ * is refused); then, for a shared one too, in one batch, the connection closed here (nothing
  * named under it again), its sources gone, and the erasure of what it
  * synced into the shared store owed to the clock (`stepSyncErasure`). A
  * repeat of the same disconnect changes nothing. Throws when the Brain or
@@ -2059,11 +2169,15 @@ export const closeSyncOfDisconnect = async (
   env: Env,
   { connectionId, personId, request, actor, at }: SyncDisconnect
 ): Promise<void> => {
-  const erased = await eraseOwnGroup(env, {
-    personId,
-    group: syncGroupOf(connectionId),
-    reason: "deleted",
-  });
+  // A shared connection put nothing in anyone's own store (`planOf`).
+  const erased =
+    personId === null
+      ? 0
+      : await eraseOwnGroup(env, {
+          personId,
+          group: syncGroupOf(connectionId),
+          reason: "deleted",
+        });
   const db = drizzle(env.DB);
   await db.batch([
     db

@@ -10,13 +10,15 @@ import type {
 } from "@grasp-os/shared/connect";
 import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq, sql } from "drizzle-orm";
+import { placesListing } from "@grasp-os/shared/sync";
+import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import {
+  brainSyncSources,
   connectionBrainAudiences,
   connectionBrainErasures,
   teams,
@@ -71,6 +73,32 @@ export const audiencesRead = (db: DrizzleD1Database) =>
     // that would.
     .where(
       sql`NOT EXISTS (SELECT 1 FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connectionBrainAudiences.connectionId} AND (${connectionBrainErasures.erasing} = 1 OR ${connectionBrainErasures.closed} = 1))`
+    );
+
+/**
+ * The read of every place a shared connection syncs into the Brain now
+ * (brain-sync.ts, GRA-1719), for the same batch as `audiencesRead`: each
+ * picked place still live (never one un-picked, `dropped`), of a
+ * connection with an audience. What it synced is kept for the place's
+ * own group (brain-next.ts `placeGroupOf`), which core puts a reader in
+ * only beside the connection's own group: so an un-pick hides a place
+ * from the next read on, in the one statement that marks it dropped.
+ */
+export const sharedPlacesRead = (db: DrizzleD1Database) =>
+  db
+    .select({
+      connectionId: brainSyncSources.connectionId,
+      feed: brainSyncSources.feed,
+      place: brainSyncSources.place,
+    })
+    .from(brainSyncSources)
+    .where(
+      and(
+        isNull(brainSyncSources.personId),
+        eq(brainSyncSources.dropped, false),
+        ne(brainSyncSources.place, placesListing),
+        sql`EXISTS (SELECT 1 FROM ${connectionBrainAudiences} WHERE ${connectionBrainAudiences.connectionId} = ${brainSyncSources.connectionId})`
+      )
     );
 
 /** Every shared connection's Brain audience, as an admin last chose it. */

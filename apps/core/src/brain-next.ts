@@ -149,6 +149,7 @@ import {
 import { holdsKnownCredential, redact } from "@grasp-os/shared/redact";
 import { skillErrors } from "@grasp-os/shared/skills";
 import { sourceReaderSchema } from "@grasp-os/shared/source-readers";
+import { syncFeedSchema, syncPlaceSchema } from "@grasp-os/shared/sync";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -164,7 +165,7 @@ import {
   largeEnoughAudiences,
   teamsOfAtLeast,
 } from "./brain-share-audiences.ts";
-import { audiencesRead } from "./connection-audiences.ts";
+import { audiencesRead, sharedPlacesRead } from "./connection-audiences.ts";
 import type { ConnectionAudience } from "./connection-audiences.ts";
 import { derivedHmacKey } from "./derived-keys.ts";
 import { inJurisdiction, workspace } from "./durable-objects.ts";
@@ -288,6 +289,15 @@ const sourceReadersSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("connection"),
     connectionId: connectionIdSchema,
+  }),
+  // Whoever the shared connection's Brain audience holds now, while the
+  // place an admin picked on it is still picked (GRA-1719): only for what
+  // native sync copies from that place (`sync`).
+  z.strictObject({
+    kind: z.literal("place"),
+    connectionId: connectionIdSchema,
+    feed: syncFeedSchema,
+    place: syncPlaceSchema,
   }),
   // Those the system an item lives in lists as its readers (GRA-1761),
   // each named as a group no other reader's name can be, an account by
@@ -829,6 +839,21 @@ const connectionGroup = (connectionId: string): string =>
   `${connectionPrefix}${checked(connectionIdSchema, connectionId)}`;
 
 /**
+ * A place picked on a shared connection, as the Brain's group (GRA-1719):
+ * what native sync copies from it is kept for this group, and core puts a
+ * reader in it beside the connection's own group while the place is
+ * still picked (`withConnections`). Its connection's group, a "/", then a
+ * hash of the sync and the place: a connection's ID holds neither "/" nor
+ * ":", so no other group can be named this, and it fits a principal.
+ */
+const placeGroupOf = async (
+  connectionId: string,
+  feed: string,
+  place: string
+): Promise<string> =>
+  `${connectionGroup(connectionId)}/${await sha256Hex(JSON.stringify([feed, place]))}`;
+
+/**
  * The Brain's access for `readers`: for a list copied from where a source
  * lives (`readers`), its groups as `principals` names them
  * (source-readers.ts `readerPrincipalsOf`, `accessFor`).
@@ -856,6 +881,9 @@ const accessOf = (
     case "connection": {
       return { kind: "audience", group: connectionGroup(readers.connectionId) };
     }
+    case "place": {
+      throw new Error("A place's group is named by `accessFor`");
+    }
     case "readers": {
       // A link, or nothing at all, is nobody.
       return principals.length === 0
@@ -875,10 +903,22 @@ const accessOf = (
 const accessFor = async (
   env: Pick<Env, "DB" | "BETTER_AUTH_SECRET">,
   readers: SourceReaders
-): Promise<Access> =>
-  readers.kind === "readers"
-    ? accessOf(readers, await readerPrincipalsOf(env, readers.readers))
-    : accessOf(readers);
+): Promise<Access> => {
+  if (readers.kind === "readers") {
+    return accessOf(readers, await readerPrincipalsOf(env, readers.readers));
+  }
+  if (readers.kind === "place") {
+    return {
+      kind: "audience",
+      group: await placeGroupOf(
+        readers.connectionId,
+        readers.feed,
+        readers.place
+      ),
+    };
+  }
+  return accessOf(readers);
+};
 
 /**
  * Whom a reader reads as: the person, the teams core counts them in and
@@ -889,6 +929,32 @@ const accessFor = async (
  * a visitor is never a member, so never a reader here.
  */
 export type Reach = "person" | "teams" | "company";
+
+/** A shared connection's audience, with the groups of the places picked on it now. */
+type HeldAudience = ConnectionAudience & { places: readonly string[] };
+
+/**
+ * Each of `audiences` with the groups of the places picked on its
+ * connection now (`placeGroupOf`), as `places` lists them; a row that
+ * can't be read names no place.
+ */
+const withPlaces = async (
+  audiences: readonly ConnectionAudience[],
+  places: readonly { connectionId: string; feed: string; place: string }[]
+): Promise<HeldAudience[]> => {
+  const groups = new Map<string, string[]>();
+  for (const { connectionId, feed, place } of places) {
+    if (connectionIdSchema.safeParse(connectionId).success) {
+      // oxlint-disable-next-line no-await-in-loop -- a hash, no call
+      const group = await placeGroupOf(connectionId, feed, place);
+      groups.set(connectionId, [...(groups.get(connectionId) ?? []), group]);
+    }
+  }
+  return audiences.map((audience) => ({
+    ...audience,
+    places: groups.get(audience.connectionId) ?? [],
+  }));
+};
 
 /**
  * The member `personId`'s own groups: their teams as core counts them
@@ -910,18 +976,19 @@ const memberGroupsOf = async (
 ): Promise<{
   person: string;
   groups: string[];
-  audiences: readonly ConnectionAudience[];
+  audiences: readonly HeldAudience[];
   accountGroups: string[];
 }> => {
   const id = checked(idSchema, personId);
-  // One snapshot: their teams, the audiences and their sign-in accounts,
-  // as one batch reads them.
+  // One snapshot: their teams, the audiences, the places picked on the
+  // connections and their sign-in accounts, as one batch reads them.
   const db = drizzle(env.DB);
-  const [[membership, memberTeams, audiences, signIns], connected] =
+  const [[membership, memberTeams, audiences, places, signIns], connected] =
     await Promise.all([
       db.batch([
         ...memberReads(db, id),
         audiencesRead(db),
+        sharedPlacesRead(db),
         signInAccountsRead(db, id),
       ]),
       asThemselves ? env.CONNECT.personalAccounts(id) : [],
@@ -937,7 +1004,7 @@ const memberGroupsOf = async (
       companyGroup,
       membersGroup,
     ],
-    audiences,
+    audiences: await withPlaces(audiences, places),
     accountGroups: asThemselves
       ? await heldPrincipalsOf(env, member.userId, signIns, connected)
       : [],
@@ -950,17 +1017,18 @@ const memberGroupsOf = async (
  * team. So what agents read through it reaches exactly as far as a
  * document shared with that audience would at the same reach: code's
  * included, and a shared thread's (the company alone) only for everyone.
- * An audience whose team is gone is in no one's groups: nobody's. A row
- * that can't be read is nobody's too.
+ * With it, the group of each place picked on it now (GRA-1719): never
+ * without the connection's own. An audience whose team is gone is in no
+ * one's groups: nobody's. A row that can't be read is nobody's too.
  */
 const withConnections = (
   groups: readonly string[],
-  audiences: readonly ConnectionAudience[]
+  audiences: readonly HeldAudience[]
 ): string[] => {
   const held = new Set(groups);
   return [
     ...groups,
-    ...audiences.flatMap(({ connectionId, teamId }) => {
+    ...audiences.flatMap(({ connectionId, teamId, places }) => {
       const connection = connectionIdSchema.safeParse(connectionId);
       const team = teamId === null ? undefined : idSchema.safeParse(teamId);
       if (!connection.success || team?.success === false) {
@@ -969,7 +1037,7 @@ const withConnections = (
       const audience =
         team === undefined ? companyGroup : `${teamPrefix}${team.data}`;
       return held.has(audience)
-        ? [`${connectionPrefix}${connection.data}`]
+        ? [`${connectionPrefix}${connection.data}`, ...places]
         : [];
     }),
   ];
@@ -1081,6 +1149,18 @@ const refuseOtherConnectionReaders = (
   ) {
     throw new Error(
       "Refused: only what agents read through a shared connection is for its audience, keyed under it"
+    );
+  }
+  // What native sync copies from a place picked on a shared connection
+  // (GRA-1719), and only that, is for the place's group: keyed under the
+  // connection (brain-sync.ts `keyOf`).
+  if (
+    readers.kind === "place" &&
+    (source.producer !== "sync" ||
+      !source.id.startsWith(`${readers.connectionId}/`))
+  ) {
+    throw new Error(
+      "Refused: only what native sync copies from a shared connection's picked place is for that place, keyed under the connection"
     );
   }
 };

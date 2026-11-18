@@ -1919,6 +1919,13 @@
       "when": 1795002069916,
       "tag": "0273_brain_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 274,
+      "version": "6",
+      "when": 1795012887473,
+      "tag": "0274_brain_sync_shared_places",
+      "breakpoints": true
     }
   ]
 }

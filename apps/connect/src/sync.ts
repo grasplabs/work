@@ -36,7 +36,7 @@ import type {
   SyncSource,
   SyncSourcePage,
 } from "@grasp-os/shared/sync";
-import { and, asc, eq, gt, not, sql } from "drizzle-orm";
+import { and, asc, eq, gt, not, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { nativeConnector } from "./bundled-connectors.ts";
@@ -648,13 +648,15 @@ export const pickSyncPlaces = async (
 
 /**
  * A page of the syncs core's sync run reads (GRA-1758), by connection ID
- * after `after`: each sync of each person's own native connection that is
- * active, of someone whose erasure hasn't begun, whose connector is for
- * the connection's provider, with its kind and whether it reads the whole
- * account or places it lists (`listSyncPlaces`). A shared
- * connection syncs only places picked on it: none yet (`mayRead`). A page
- * holds at most `connectionOwnersMax` connections, as connect's other
- * pages of connections for core.
+ * after `after`: each sync of each active native connection whose
+ * connector is for the connection's provider, with its kind and how it
+ * reads (`listSyncPlaces`). A person's own connection, of someone whose
+ * erasure hasn't begun: its syncs of the whole account (`own`) and of
+ * places it lists (`listed`). A shared connection: its syncs of places
+ * an admin picks (`picked`), with no person, as it has none (GRA-1719).
+ * Neither kind ever the other's syncs (`mayRead`). A page holds at most
+ * `connectionOwnersMax` connections, as connect's other pages of
+ * connections for core.
  */
 export const listSyncSources = async (
   env: Env,
@@ -678,10 +680,15 @@ export const listSyncSources = async (
     .from(connections)
     .where(
       and(
-        eq(connections.scope, "personal"),
         eq(connections.serverKind, "native"),
         eq(connections.status, "active"),
-        not(erasureBegan(sql`${connections.ownerUserId}`)),
+        or(
+          eq(connections.scope, "shared"),
+          and(
+            eq(connections.scope, "personal"),
+            not(erasureBegan(sql`${connections.ownerUserId}`))
+          )
+        ),
         after === null ? undefined : gt(connections.id, after)
       )
     )
@@ -698,15 +705,16 @@ export const listSyncSources = async (
       accountEmail,
     }) => {
       const manifest = nativeConnector(server)?.manifest;
-      if (ownerUserId === null || manifest?.provider !== provider) {
+      if (manifest?.provider !== provider) {
         return [];
       }
-      // A sync of picked places reads only a shared connection's.
+      // A shared connection has no person, and syncs only picked places;
+      // a person's own never syncs them.
+      const shared = ownerUserId === null;
       return Object.entries(manifest.syncs ?? {}).flatMap(
         ([feed, sync]): SyncSource[] =>
-          sync.places === "picked"
-            ? []
-            : [
+          (sync.places === "picked") === shared
+            ? [
                 {
                   connectionId: id,
                   ownerUserId,
@@ -721,6 +729,7 @@ export const listSyncSources = async (
                   places: sync.places,
                 },
               ]
+            : []
       );
     }
   );

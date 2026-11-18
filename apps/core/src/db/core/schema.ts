@@ -3528,7 +3528,9 @@ export const connectionBrainErasures = sqliteTable(
 /**
  * The sources native sync reads into the Brain (brain-sync.ts, GRA-1758),
  * one row per connection, sync (`feed`) and place: whose connection it is
- * and how to name its items' readers (`provider`, `tenant`,
+ * (`personId`; null for a shared connection's picked places, which no
+ * one person owns: GRA-1719) and how to name its items' readers
+ * (`provider`, `tenant`,
  * `account`, its own account as its items' readers name it, as connect
  * last listed them), where its next page reads
  * on from (`cursor`, null to list it from the start), the number of its
@@ -3559,7 +3561,7 @@ export const brainSyncSources = sqliteTable(
     connectionId: text("connection_id").notNull(),
     feed: text().notNull(),
     place: text().notNull(),
-    personId: text("person_id").notNull(),
+    personId: text("person_id"),
     provider: text().notNull(),
     tenant: text(),
     account: text(),
@@ -3587,6 +3589,9 @@ export const brainSyncSources = sqliteTable(
   (table) => [
     primaryKey({ columns: [table.connectionId, table.feed, table.place] }),
     index("brain_sync_sources_due_idx").on(table.dueAt),
+    // The live places of shared connections, read with every read of the
+    // Brain (brain-next.ts `memberGroupsOf`).
+    index("brain_sync_sources_person_idx").on(table.personId, table.dropped),
   ]
 );
 
