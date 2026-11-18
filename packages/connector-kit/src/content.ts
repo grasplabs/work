@@ -11,7 +11,7 @@ import type { readAsSchema } from "./manifest.ts";
  * Largest file or attachment a tool reads, in bytes; connect's egress lets
  * a connector read 10 MiB of a provider's answer (`maxEgressResponseBytes`).
  */
-const maxReadBytes = 4 * 1024 * 1024;
+export const maxReadBytes = 4 * 1024 * 1024;
 
 /**
  * Largest content a read returns, in bytes of JSON: base64 of the largest
@@ -19,7 +19,7 @@ const maxReadBytes = 4 * 1024 * 1024;
  * six bytes) would make it larger than connect reads (16 MiB,
  * `nativeResponseBytes`).
  */
-const maxContentBytes = 8 * 1024 * 1024;
+export const maxContentBytes = 8 * 1024 * 1024;
 
 type ReadAs = z.infer<typeof readAsSchema>;
 
