@@ -4499,6 +4499,10 @@ msgstr "Als Markdown kopieren"
 msgid "Copy code"
 msgstr "Code kopieren"
 
+#: src/connections/sync-places.tsx
+msgid "Copy into the Brain from {label}"
+msgstr "Aus {label} ins Brain kopieren"
+
 #: src/shown-once.tsx
 msgid "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgstr "Kopieren Sie es jetzt: Sie sehen es nicht noch einmal. Geht es verloren, kann es nur ersetzt werden."
@@ -5687,6 +5691,10 @@ msgstr "Alle mit Grasp"
 #: src/people/people-teams-picker.tsx
 msgid "Everyone with the {name} role"
 msgstr "Alle mit der Rolle {name}"
+
+#: src/connections/sync-places.tsx
+msgid "Everyone you let read {label} in the Brain will be able to read everything in the places you pick, because the permissions in {label} are not copied."
+msgstr "Alle, die {label} im Brain lesen dürfen, können alles an den Orten lesen, die Sie auswählen, denn die Berechtigungen in {label} werden nicht übernommen."
 
 #: src/inbox/inbox-page.tsx
 msgctxt "inbox filter"
@@ -9819,6 +9827,10 @@ msgstr "Derzeit dient nichts, was der Workflow nutzen darf: Geben Sie dem Workfl
 msgid "Nothing this App asked for is waiting."
 msgstr "Nichts, was diese App angefragt hat, wartet noch."
 
+#: src/connections/sync-places.tsx
+msgid "Nothing to copy into the Brain yet"
+msgstr "Noch nichts, was ins Brain kopiert werden kann"
+
 #: src/dashboard/report.ts
 #: src/dashboard/signals.tsx
 msgid "Nothing to make better right now."
@@ -12354,6 +12366,10 @@ msgstr "Link speichern"
 msgid "Save the correction"
 msgstr "Korrektur speichern"
 
+#: src/connections/sync-places.tsx
+msgid "Save the places"
+msgstr "Orte speichern"
+
 #: src/interview/destination.tsx
 msgid "Save where they go"
 msgstr "Speichern, wohin sie gehen"
@@ -14089,6 +14105,10 @@ msgstr "Das war der Rundgang. Fragen Sie mich gern, auf jeder Seite. Sie finden 
 #: src/routes/_shell.settings.spend.tsx
 msgid "The {top} that spent most; more spent less."
 msgstr "Die {top} mit den höchsten Ausgaben; weitere haben weniger ausgegeben."
+
+#: src/connections/sync-places.tsx
+msgid "The account connected as {label} can't open any shared drives or SharePoint libraries."
+msgstr "Das als {label} verbundene Konto kann keine geteilten Ablagen und keine SharePoint-Bibliotheken öffnen."
 
 #: src/routes/_shell.settings.security.tsx
 msgid "The account you signed in with."

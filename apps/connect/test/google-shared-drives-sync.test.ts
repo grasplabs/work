@@ -392,6 +392,7 @@ describe("syncing a shared connection's picked shared drives", () => {
       }),
     }).toStrictEqual({
       choices: {
+        feed: "shared-drives",
         choices: [
           { place: sales.id, title: "Sales", picked: true },
           { place: legal.id, title: "Legal", picked: false },

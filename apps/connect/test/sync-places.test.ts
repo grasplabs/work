@@ -491,6 +491,7 @@ describe("a shared connection's picked places", () => {
       ),
     }).toStrictEqual({
       choices: {
+        feed: "sites",
         choices: [
           { place: "sales", title: "Sales", picked: false },
           { place: "legal", title: "Legal Team", picked: true },
@@ -498,6 +499,35 @@ describe("a shared connection's picked places", () => {
         cursor: null,
       },
       member: "role.forbidden",
+    });
+  });
+
+  it("finds a connection's sync of picked places for a page that names none, and answers none where there is none", async () => {
+    const { admin, connectionId } = await sharedConnection();
+    const own = await ownConnection();
+    const toolkit = await addConnection();
+    const choicesOf = async (id: string) =>
+      await exports.default.syncPlaceChoices({
+        person: admin,
+        connectionId: id,
+        cursor: null,
+      });
+    expect({
+      shared: await choicesOf(connectionId),
+      own: await choicesOf(own),
+      toolkit: await choicesOf(toolkit),
+    }).toStrictEqual({
+      shared: {
+        feed: "sites",
+        choices: [
+          { place: "sales", title: "Sales", picked: false },
+          { place: "legal", title: "Legal", picked: false },
+          { place: "board", title: "Board", picked: false },
+        ],
+        cursor: null,
+      },
+      own: null,
+      toolkit: null,
     });
   });
 

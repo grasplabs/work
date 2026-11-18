@@ -424,6 +424,7 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
       }),
     }).toStrictEqual({
       choices: {
+        feed: "libraries",
         choices: [
           { place: salesDocs.id, title: "Sales › Documents", picked: false },
           {

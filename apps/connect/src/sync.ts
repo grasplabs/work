@@ -377,7 +377,7 @@ const refuseUnlessAdmin = async (
   env: Env,
   person: ConnectionPerson,
   connectionId: string,
-  feed: string
+  feed: string | null
 ): Promise<void> => {
   let reason: "connection.staff_not_allowed" | "role.forbidden" | undefined;
   if (person.staff) {
@@ -392,12 +392,40 @@ const refuseUnlessAdmin = async (
     env,
     person,
     "connection.sync_places",
-    { feed, outcome: "refused", reason },
+    { ...(feed === null ? {} : { feed }), outcome: "refused", reason },
     connectionId
   );
   throw reason === "role.forbidden"
     ? roleErrors.create("role.forbidden")
     : connectionErrors.create("connection.staff_not_allowed");
+};
+
+/**
+ * The sync of picked places of a shared connection's connector, if it has
+ * one (`places: "picked"`): none for a personal connection, a connection
+ * that is no native one, or a connector without one.
+ */
+const pickedFeedOf = async (
+  env: Env,
+  connectionId: string
+): Promise<string | null> => {
+  const found = await connectionOf(env, connectionId);
+  const connection = found?.connection;
+  if (
+    connection === undefined ||
+    connection.scope !== "shared" ||
+    connection.status === "disconnected"
+  ) {
+    return null;
+  }
+  const manifest = nativeConnector(connection.server)?.manifest;
+  if (manifest?.provider !== connection.provider) {
+    return null;
+  }
+  const [feed] = Object.entries(manifest.syncs ?? {}).flatMap(([name, sync]) =>
+    sync.places === "picked" ? [name] : []
+  );
+  return feed ?? null;
 };
 
 /**
@@ -424,17 +452,22 @@ const pickableOf = async (env: Env, connectionId: string, feed: string) => {
 export const syncPlaceChoices = async (
   env: Env,
   request: unknown
-): Promise<SyncPlaceChoices> => {
+): Promise<SyncPlaceChoices | null> => {
   const { person, connectionId, feed, cursor } = syncErrors.parse(
     "sync.invalid",
     syncPlaceChoicesRequestSchema,
     request
   );
-  await refuseUnlessAdmin(env, person, connectionId, feed);
-  const found = await pickableOf(env, connectionId, feed);
-  const listed = await choicesRead(env, found, feed, cursor);
-  const picks = await picksOf(env, connectionId, feed);
+  await refuseUnlessAdmin(env, person, connectionId, feed ?? null);
+  const sync = feed ?? (await pickedFeedOf(env, connectionId));
+  if (sync === null) {
+    return null;
+  }
+  const found = await pickableOf(env, connectionId, sync);
+  const listed = await choicesRead(env, found, sync, cursor);
+  const picks = await picksOf(env, connectionId, sync);
   return {
+    feed: sync,
     choices: listed.choices.map((choice) => ({
       ...choice,
       picked: picks.has(choice.place),

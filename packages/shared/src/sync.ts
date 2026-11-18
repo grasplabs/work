@@ -212,6 +212,8 @@ export type SyncPageRequest = z.input<typeof syncPageRequestSchema>;
  * its connector lists them, each with whether it is picked.
  */
 export const syncPlaceChoicesSchema = z.strictObject({
+  /** The sync whose places these are, as picks name it. */
+  feed: z.string().regex(/^[a-z][a-z\d-]{0,63}$/u, "Not a sync's name"),
   choices: z.array(syncChoiceSchema.extend({ picked: z.boolean() })),
   cursor: syncCursorSchema.nullable(),
 });
@@ -242,12 +244,17 @@ export const syncPicksSchema = z
 
 /**
  * What core asks connect for: the places the admin `person` may pick for a
- * sync of a shared connection, a read at a time from `cursor`.
+ * sync of a shared connection, a read at a time from `cursor`. Without a
+ * `feed`, the connection's one sync of picked places, whichever its
+ * connector has: an admin's page knows no connector's syncs.
  */
 export const syncPlaceChoicesRequestSchema = z.strictObject({
   person: connectionPersonSchema,
   connectionId: z.string().min(1).max(128),
-  feed: z.string().regex(/^[a-z][a-z\d-]{0,63}$/u, "Not a sync's name"),
+  feed: z
+    .string()
+    .regex(/^[a-z][a-z\d-]{0,63}$/u, "Not a sync's name")
+    .optional(),
   cursor: syncCursorSchema.nullable(),
 });
 export type SyncPlaceChoicesRequest = z.input<

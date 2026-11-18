@@ -761,6 +761,34 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
    * when done. Asking again while it runs changes nothing.
    */
   eraseBrainReads: (connectionId: string) => Promise<void>;
+  /**
+   * The places of the shared connection `connectionId` an admin may pick
+   * to sync into the Brain (its shared drives or SharePoint libraries, as
+   * the connected account sees them), every one, with whether it is
+   * picked; null when the connection syncs no picked places. Admins only,
+   * never Grasp staff.
+   */
+  syncPlaces: (connectionId: string) => Promise<SharedSyncPlaces | null>;
+  /**
+   * Sets which places of the shared connection the sync `feed` reads: the
+   * whole set, replacing the one before. Admins only, never Grasp staff;
+   * audited.
+   */
+  pickSyncPlaces: (request: {
+    connectionId: string;
+    feed: string;
+    places: string[];
+  }) => Promise<void>;
+}
+
+/**
+ * Every place of a shared connection an admin may pick to sync, as its
+ * connector lists them: the sync they are of, and each place's ID, name
+ * and whether it is picked.
+ */
+export interface SharedSyncPlaces {
+  feed: string;
+  choices: { place: string; title: string; picked: boolean }[];
 }
 
 // The catalog: everything an admin can connect, in one list. Native
