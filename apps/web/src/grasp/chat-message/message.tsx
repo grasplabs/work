@@ -179,6 +179,9 @@ export interface ChatMessageProps {
   layout?: ChatMessageLayoutStyle;
 }
 
+// The foot coming into its kept room at the end of a message.
+const appear = stylex.keyframes({ from: { opacity: 0 }, to: { opacity: 1 } });
+
 const styles = stylex.create({
   root: {
     [iconVars.size]: grasp.iconSm,
@@ -307,29 +310,37 @@ const styles = stylex.create({
     rowGap: grasp.space2,
     minHeight: grasp.controlSm,
   },
-  // What waits in the kept room: there, so it holds its size, but unseen; it fades in at the end
-  // (at once with reduced motion).
-  footPart: {
-    opacity: 1,
-    visibility: "visible",
-    transitionProperty: "opacity, visibility",
-    transitionDuration: simply.ui,
-    transitionTimingFunction: grasp.ease,
+  // The time's line: a grid, so it is as tall as the time's own line, not the message's.
+  timeLine: { display: "grid" },
+  // The kept room, while the message is written: no box at all (a box that moves down as the words
+  // grow is a layout shift, empty or not), only the message's own room at its foot, exactly the
+  // foot's height: the gap and its line, and with a time the gap and the time's line.
+  room: {
+    position: "relative",
+    paddingBlockEnd: `calc(${grasp.space2} + ${grasp.controlSm})`,
   },
-  // Kept at once, never faded out: only the end fades in.
-  footKept: {
-    opacity: 0,
-    visibility: "hidden",
-    transitionProperty: "none",
+  roomTimed: {
+    position: "relative",
+    paddingBlockEnd: `calc(${grasp.space2} * 2 + ${grasp.controlSm} + ${grasp.textXsLine})`,
   },
-  // The working mark in the kept room, at its start, on its first line: it takes no room of its own.
+  // At the end the foot fades into that room (at once with reduced motion); a message drawn done
+  // (from history) shows it at once.
+  footAppear: {
+    animationName: appear,
+    animationDuration: simply.ui,
+    animationTimingFunction: grasp.ease,
+  },
+  // The working mark in the kept room, at the start of the foot's line: it takes no room of its own.
   footMark: {
     position: "absolute",
-    insetBlockStart: 0,
     insetInlineStart: 0,
     display: "flex",
     alignItems: "center",
     blockSize: grasp.controlSm,
+    insetBlockEnd: 0,
+  },
+  footMarkTimed: {
+    insetBlockEnd: `calc(${grasp.space2} + ${grasp.textXsLine})`,
   },
   // A fieldset, for its group role; its own border, padding, margin and minimum width taken off,
   // so it lays out as the div it replaced.
@@ -718,21 +729,33 @@ const markOnItsOwnLine = (streaming: boolean, asked: boolean, foot: boolean) =>
  * message is written the room is already there, its parts unseen, inert and not read out, and the
  * working mark stands in it; at the end they fade into that room, so the end moves nothing.
  */
-/** A part of the foot: unseen, inert and not read out while its room is kept, then faded in. */
-const FootPart = ({
-  kept,
-  children,
-}: {
-  kept: boolean;
-  children: ReactNode;
-}) => (
-  <div
-    inert={kept}
-    aria-hidden={kept || undefined}
-    {...stylex.props(styles.footPart, kept && styles.footKept)}
-  >
-    {children}
-  </div>
+/** The room the message keeps at its foot while it is written: none without a foot to come. */
+const roomOf = (
+  live: boolean,
+  copyText: string | undefined,
+  actions: ReactNode,
+  time: string | undefined
+) => {
+  if (!live || !hasFoot(copyText, actions, time)) {
+    return null;
+  }
+  return filled(time) ? styles.roomTimed : styles.room;
+};
+
+/** Whether the message was written on the page, not drawn done: only then does its foot fade in. */
+const useWritten = (live: boolean) => {
+  const [written, setWritten] = useState(live);
+  if (live && !written) {
+    setWritten(true);
+  }
+  return written;
+};
+
+/** The working mark in the kept room, on the foot's line: above the time's line when there is one. */
+const RoomMark = ({ timed }: { timed: boolean }) => (
+  <span {...stylex.props(styles.footMark, timed && styles.footMarkTimed)}>
+    <AgentIndicator />
+  </span>
 );
 
 const Foot = ({
@@ -746,21 +769,25 @@ const Foot = ({
   failedLabel,
   onRetry,
   retryLabel,
-}: FootProps) => {
+  written,
+}: FootProps & { written: boolean }) => {
   const acts = filled(row.copyText) || present(row.actions);
-  const kept = live && hasFoot(row.copyText, row.actions, time);
   const ending = !live && (status === "stopped" || status === "failed");
-  if (!kept && !ending && !hasFoot(row.copyText, row.actions, time)) {
+  if (live) {
+    // Kept: the room is the message's own padding (roomOf); only the mark, when asked for, stands in it.
+    return hasFoot(row.copyText, row.actions, time) && mark ? (
+      <RoomMark timed={filled(time)} />
+    ) : null;
+  }
+  if (!ending && !hasFoot(row.copyText, row.actions, time)) {
     return null;
   }
-  const line = acts || ending;
   return (
     <div
       data-slot="chat-message-foot"
-      data-kept={kept || undefined}
-      {...stylex.props(styles.foot)}
+      {...stylex.props(styles.foot, written && styles.footAppear)}
     >
-      {line && (
+      {(acts || ending) && (
         <div {...stylex.props(styles.footLine)}>
           {ending && (
             <Ending
@@ -772,30 +799,19 @@ const Foot = ({
             />
           )}
           {acts && status !== "failed" && (
-            // While kept the line holds a small control's height on its own: the buttons are only
-            // drawn at the end, into that room, so a message being written costs nothing more.
-            <FootPart kept={kept}>
-              {!kept && (
-                <ActionRow
-                  {...row}
-                  from="agent"
-                  status={status}
-                  afterEnding={ending}
-                />
-              )}
-            </FootPart>
+            <ActionRow
+              {...row}
+              from="agent"
+              status={status}
+              afterEnding={ending}
+            />
           )}
         </div>
       )}
       {filled(time) && (
-        <FootPart kept={kept}>
+        <div {...stylex.props(styles.timeLine)}>
           <Stamp time={time} dateTime={dateTime} person={false} />
-        </FootPart>
-      )}
-      {kept && mark && (
-        <span {...stylex.props(styles.footMark)}>
-          <AgentIndicator />
-        </span>
+        </div>
       )}
     </div>
   );
@@ -1046,6 +1062,7 @@ export const ChatMessage = ({
   useArriving(wordsBox, fades);
 
   const live = isLive(status, streaming);
+  const written = useWritten(live);
   const row = (
     <ActionRow
       from={from}
@@ -1090,6 +1107,7 @@ export const ChatMessage = ({
       // is the one for words: a step off them, with the small corner.
       {...stylex.props(
         styles.root,
+        roomOf(live, copyText, actions, time),
         styles.focusable,
         layout ?? styleProp,
         focus.words
@@ -1128,6 +1146,7 @@ export const ChatMessage = ({
         label={text.thinking}
       />
       <Foot
+        written={written}
         status={status}
         live={live}
         mark={streamingMark}

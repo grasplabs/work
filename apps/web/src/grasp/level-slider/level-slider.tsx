@@ -269,6 +269,14 @@ const styles = stylex.create({
   disabled: {
     opacity: grasp.dim,
   },
+  // The empty line in the track's room and its ends' line, on the track's middle.
+  emptyRoom: {
+    display: "flex",
+    alignItems: "center",
+    minHeight: `calc(${grasp.tap} + ${grasp.textXsLine})`,
+    paddingBlockEnd: grasp.textXsLine,
+    boxSizing: "border-box",
+  },
 });
 
 /** The pointer's place along the track, 0 to 1, in reading order. */
@@ -533,13 +541,30 @@ export const LevelSlider = ({
   );
 
   if (levels.length < 2) {
+    // No scale to choose on: its name as ever, and the line in the room the track and its ends
+    // take, so a slider whose model has one level stands as tall as any other.
     return (
-      <p
-        data-slot="level-slider-empty"
-        {...stylex.props(styles.empty, layout ?? styleProp)}
+      <div
+        data-slot="level-slider"
+        data-empty=""
+        {...stylex.props(styles.root, layout ?? styleProp)}
       >
-        {emptyLabel}
-      </p>
+        <span
+          {...stylex.props(
+            styles.label,
+            size === "regular" && styles.labelRegular,
+            labelHidden && visuallyHidden
+          )}
+        >
+          {label}
+        </span>
+        <p
+          data-slot="level-slider-empty"
+          {...stylex.props(styles.empty, styles.emptyRoom)}
+        >
+          {emptyLabel}
+        </p>
+      </div>
     );
   }
 
