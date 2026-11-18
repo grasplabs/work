@@ -1094,7 +1094,6 @@ export const TableRecords = ({
         <div {...stylex.props(styles.grid)}>
           <DataTable
             columns={tableColumns}
-            appearance={{ head: "plain" }}
             density="compact"
             empty={
               read?.source.kind === "test"

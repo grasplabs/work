@@ -289,7 +289,7 @@ export interface DataTableProps<Row> {
   filterWords?: Partial<DataTableFilterWords>;
   /**
    * How chosen rows and the head show, where the system's look (Table's `tableLook`: the Data grid's
-   * mint wash and soft head) is not wanted.
+   * mint wash and a plain head on the table's ground) is not wanted.
    */
   appearance?: { range?: TableRangeLook; head?: TableHeadLook };
   /** @deprecated Use `appearance`. */

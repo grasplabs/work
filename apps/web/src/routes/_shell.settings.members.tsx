@@ -123,9 +123,6 @@ const styles = stylex.create({
   roleText: { margin: 0, color: grasp.muted },
 });
 
-/** The table's head: the column names muted on the card's own ground, a hairline under them. */
-const HEAD = "plain" as const;
-
 /** How many people a page of the table holds: the rest are a page further. */
 const pageSize = 20;
 
@@ -681,7 +678,6 @@ const PeopleTable = ({
       )}
       {/* A column's being hidden is read as the table starts: it starts again when the width crosses the phone's. */}
       <DataTable
-        appearance={{ head: HEAD }}
         key={narrow ? "narrow" : "wide"}
         columns={peopleColumns({
           words: {

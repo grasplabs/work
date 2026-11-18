@@ -1,8 +1,12 @@
+import { useLingui } from "@lingui/react/macro";
 import { useEffect, useRef } from "react";
 
+import { ComposerAction } from "../grasp/composer/index.ts";
+import { PanelToggle } from "../grasp/icons/index.ts";
+import { shortcutLabel } from "../shortcuts.ts";
 import { ChatComposer } from "./chat-composer.tsx";
 import { useOpenChat } from "./chat-presence.ts";
-import { useGlobalChat } from "./global-chat.tsx";
+import { chatKey, useGlobalChat } from "./global-chat.tsx";
 
 // Grasp's chat while it waits (global-chat.tsx): the chat's one box to ask
 // in (chat-composer.tsx), in one row, at the foot of the page, as one line to ask in. It mentions with
@@ -18,7 +22,8 @@ const returnWithinMs = 300;
 
 /** The chat's idle bar: on every page the chat shows on, while it is closed. */
 export const ChatBar = () => {
-  const { stage, composer, words, view } = useGlobalChat();
+  const { t } = useLingui();
+  const { presence, stage, composer, words, view } = useGlobalChat();
   const openHere = useOpenChat();
   const bar = useRef<HTMLDivElement>(null);
   // Back as the chat closes: the chat had the cursor, which it loses as it
@@ -66,11 +71,30 @@ export const ChatBar = () => {
   }
   // Nothing to ask with (no AI provider yet): the chat opens to say so.
   const canSend = (composer.models?.length ?? 0) > 0 && !composer.busy;
+  // The bar ends in Send: sending opens the chat, and the page's own bar has
+  // the button that opens it without asking. Only a page whose chat is part
+  // of it (an App's workspace on a phone) has no such button, so there the
+  // bar keeps one, or the chat's history could not be reached without asking.
+  const ownChat = !presence.placements.includes("floating");
+  const shortcut = shortcutLabel(chatKey);
   const { onAttach } = composer;
   return (
     <div ref={bar}>
       <ChatComposer
         {...composer}
+        {...(ownChat
+          ? {
+              footer: (
+                <ComposerAction
+                  aria-label={t`Open the chat (${shortcut})`}
+                  icon={PanelToggle}
+                  onClick={() => {
+                    openHere();
+                  }}
+                />
+              ),
+            }
+          : {})}
         compact
         label={words.title}
         // Files show in the chat's box, which opens to show them.

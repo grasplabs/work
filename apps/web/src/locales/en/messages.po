@@ -11035,6 +11035,10 @@ msgstr "Open Stephen in {app}, in a new tab"
 msgid "Open the App"
 msgstr "Open the App"
 
+#: src/chat/chat-bar.tsx
+msgid "Open the chat ({shortcut})"
+msgstr "Open the chat ({shortcut})"
+
 #: src/apps/app-workspace.tsx
 msgid "Open the chat in Chat"
 msgstr "Open the chat in Chat"
