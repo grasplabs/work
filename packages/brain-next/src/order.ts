@@ -57,11 +57,13 @@ export const byNearness = (a: NearPassage, b: NearPassage): number =>
 
 /**
  * A memory as recall orders it after a way's own score: whether the reader
- * may count a confirmation of it, when it was learned, when the reader
+ * may count a confirmation of it, whether it is the reader's own word (its
+ * writer is the reader's person), when it was learned, when the reader
  * last used it (the request's `used`, or null), its id.
  */
 export interface MemoryOrder {
   confirmed: boolean;
+  own: boolean;
   learnedAt: number;
   usedAt: number | null;
   id: string;
@@ -76,14 +78,27 @@ const freshnessOf = ({ learnedAt, usedAt }: MemoryOrder): number =>
   Math.max(learnedAt, usedAt ?? learnedAt);
 
 /**
+ * Where a memory stands for the reader: their own word first, as a saved
+ * memory is taken as correct, with no confirmation stored; level with a
+ * confirmed one, it is the newer word of the person asking, so it comes
+ * before it. Then a confirmed memory, then the rest.
+ */
+const standingOf = ({ own, confirmed }: MemoryOrder): number => {
+  if (own) {
+    return 0;
+  }
+  return confirmed ? 1 : 2;
+};
+
+/**
  * The one order of memories after a way's own score, wherever they are
  * cut or merged (recall-memories.ts, memories.ts `memoriesByWords`,
- * across.ts): confirmed first, so a confirmed memory never fades below one
- * that isn't; then fresher for the reader; then newer; then by id, as
- * SQLite orders text, the last first.
+ * across.ts): the reader's own word, then confirmed (`standingOf`), so
+ * neither ever fades below one that is neither; then fresher for the
+ * reader; then newer; then by id, as SQLite orders text, the last first.
  */
 export const byFreshness = (a: MemoryOrder, b: MemoryOrder): number =>
-  Number(!a.confirmed) - Number(!b.confirmed) ||
+  standingOf(a) - standingOf(b) ||
   freshnessOf(b) - freshnessOf(a) ||
   b.learnedAt - a.learnedAt ||
   byBytes(b.id, a.id);

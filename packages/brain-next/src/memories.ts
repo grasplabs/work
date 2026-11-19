@@ -1328,7 +1328,8 @@ export const usedAtOf = (used: RecallRequest["used"] = []): UsedAt => {
  * them by besides.
  */
 export const candidatesOuter = (score = ""): string => `
-SELECT row, id, confirmation IS NOT NULL AS confirmed, learned_at${score}
+SELECT row, id, confirmation IS NOT NULL AS confirmed,
+  ifnull(writer = ?2, 0) AS own, learned_at${score}
 FROM rows`;
 
 /** A candidate as `candidatesOuter` returns it. */
@@ -1336,15 +1337,18 @@ export interface CandidateRow extends Record<string, SqlStorageValue> {
   row: number;
   id: string;
   confirmed: number;
+  /** Whether it is the reader's own word (order.ts `MemoryOrder.own`). */
+  own: number;
   learned_at: number;
 }
 
 /** `candidate` as `byFreshness` (order.ts) orders it, with the reader's use. */
 export const orderOf = (
-  { id, confirmed, learned_at: learnedAt }: CandidateRow,
+  { id, confirmed, own, learned_at: learnedAt }: CandidateRow,
   used: UsedAt
 ): MemoryOrder => ({
   confirmed: confirmed === 1,
+  own: own === 1,
   learnedAt,
   usedAt: used.get(id) ?? null,
   id,

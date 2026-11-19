@@ -1051,10 +1051,12 @@ describe("a person's own store", () => {
           called(own().find({ ...asking, reader: two.reader })),
           called(shared().find({ ...asking, reader: two.reader })),
         ]);
-        const split = packAcross(asking.question, asking.budget.tokens, [
-          everyone,
-          mine,
-        ]);
+        const split = packAcross(
+          asking.question,
+          asking.budget.tokens,
+          [everyone, mine],
+          two.reader.person
+        );
         return {
           single,
           split: {
@@ -2095,10 +2097,15 @@ describe("recall by meaning across stores", () => {
       meaning: { model: splitModel, vector },
     };
     const single = await called(shared().recall({ ...asking, reader: one }));
-    const split = packAcross(asking.question, asking.budget.tokens, [
-      await called(shared().find({ ...asking, reader: two })),
-      await called(own().find({ ...asking, reader: two })),
-    ]);
+    const split = packAcross(
+      asking.question,
+      asking.budget.tokens,
+      [
+        await called(shared().find({ ...asking, reader: two })),
+        await called(own().find({ ...asking, reader: two })),
+      ],
+      two.person
+    );
     expect({
       ...split,
       items: split.items.map((item) => ({

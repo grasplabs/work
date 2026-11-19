@@ -1694,13 +1694,13 @@ const handedOver = ({
  * lists, say) gives nothing only the person may read.
  */
 const differsByOwn = (
-  { question, budget }: RecallRequest,
+  { question, budget, reader }: RecallRequest,
   [shared, own]: Findings,
   pack: Pack
 ): boolean =>
   own !== undefined &&
   handedOver(pack) !==
-    handedOver(packAcross(question, budget.tokens, [shared]));
+    handedOver(packAcross(question, budget.tokens, [shared], reader.person));
 
 /** A person's use of memories, per store (`usedOf`), for its requests. */
 type Used = Record<MemoryStore, NonNullable<RecallRequest["used"]>>;
@@ -1769,7 +1769,12 @@ const packedAs = async (
       : undefined,
   ]);
   const findings = await findingsOf(env, request, "find", used);
-  const packed = packAcross(request.question, request.budget.tokens, findings);
+  const packed = packAcross(
+    request.question,
+    request.budget.tokens,
+    findings,
+    request.reader.person
+  );
   const { items, memories, contested, notFound, truncated } = packed;
   const stores = storesOf(findings);
   const recalledMemories = memories.map((memory) => {
@@ -1870,7 +1875,8 @@ export const recallPassagesAs = async (
   const { items, notFound, truncated } = packAcross(
     request.question,
     request.budget.tokens,
-    await findingsOf(env, request, "findPassages")
+    await findingsOf(env, request, "findPassages"),
+    request.reader.person
   );
   return { items: recalledItems(items), notFound, truncated };
 };

@@ -1025,7 +1025,12 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
     const readable = await this.#readable();
     this.#countWithoutMeaning(asked);
     if (!readable) {
-      return packAcross(asked.question, asked.budget.tokens, [nothingFound]);
+      return packAcross(
+        asked.question,
+        asked.budget.tokens,
+        [nothingFound],
+        asked.reader.person
+      );
     }
     await this.#wakeForModel(asked);
     return recall(

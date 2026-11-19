@@ -2,6 +2,7 @@ import {
   brainOf,
   memoriesPerAddMax,
   personalBrainOf,
+  recallBudgetMax,
 } from "@grasp-os/brain-next/contract";
 import type {
   NewEntity,
@@ -22,7 +23,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { organizationId } from "../src/auth/auth.ts";
 import { correctFor } from "../src/brain-memories.ts";
-import { addSource, rememberAs } from "../src/brain-next.ts";
+import { addSource, recallAs, rememberAs } from "../src/brain-next.ts";
 import { teamMembers, teams } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { mockIdp } from "./idp.ts";
@@ -147,6 +148,21 @@ const statusFrom = (
   speaker: { kind: "system" },
   basis: { kind: "source", ...cited, quote: value },
 });
+
+/**
+ * The customer's statuses `personId`'s own chat recalls, in the pack's
+ * order: each statement holds as many of the question's words, as written.
+ */
+const recalledStatusesOf = async (personId: string): Promise<string[]> => {
+  const pack = await recallAs(env, personId, {
+    question: "Is the customer Renewing, Paused or Churned?",
+    budget: { tokens: recallBudgetMax },
+    personal: true,
+  });
+  return pack.memories
+    .map(({ statement }) => statement.replace("The customer is ", ""))
+    .filter((said) => ["Renewing", "Paused", "Churned"].includes(said));
+};
 
 /** Adds `memories` about the customer `customer` (an entity), readable by team `teamId`; the ids. */
 const remember = async (
@@ -753,6 +769,54 @@ describe("the Brain's memories, as a person reads them", () => {
       { id: saved?.memory, value: "Needs SOC 2", ended: false },
       { id: said.memory, value: "Needs ISO 27001", ended: true },
     ]);
+  });
+
+  it("recalls a person's correction of a fact colleagues settled first for them, and the settled side first for the colleagues", async () => {
+    const [anna, ben] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+    ]);
+    const sales = await teamOf(anna.userId, ben.userId);
+    const [renews, pauses] = await Promise.all([
+      sourceOf(sales, "Globex renews"),
+      sourceOf(sales, "Globex pauses"),
+    ]);
+    const { entities } = await remember(
+      sales,
+      { kind: "customer", names: ["Globex"] },
+      [statusFrom(renews.cited, "Renewing")]
+    );
+    const entity = entities.c ?? "";
+    const paused = await remember(sales, { kind: "customer", id: entity }, [
+      statusFrom(pauses.cited, "Paused"),
+    ]);
+    const { memories } = await shared().readMemories({
+      entity,
+      reader: { person: ben.userId, groups: [`team:${sales}`] },
+    });
+    const renewing = memories.find(({ value }) => value === "Renewing");
+    // Ben settles it; then Anna says that side is wrong.
+    await expect(
+      ben.api.brainMemories.confirm({
+        store: "shared",
+        memory: renewing?.id ?? "",
+      })
+    ).resolves.toBe("done");
+    await anna.api.brainMemories.correct({
+      wrong: { store: "shared", entity, memory: renewing?.id ?? "" },
+      right: "The customer is Churned",
+      change: crypto.randomUUID(),
+    });
+    expect({
+      paused: paused.memories.length,
+      anna: await recalledStatusesOf(anna.userId),
+      ben: await recalledStatusesOf(ben.userId),
+    }).toStrictEqual({
+      paused: 1,
+      // Her own word, taken as correct as saved, before the side settled.
+      anna: ["Churned", "Renewing", "Paused"],
+      ben: ["Renewing", "Paused"],
+    });
   });
 
   it("answers a retry of a correction with what it saved, and refuses its id with other words", async () => {
