@@ -18,6 +18,7 @@ import type {
   ConnectionSummary,
   OrganizationConnection,
 } from "@grasp-os/shared/connect";
+import { directoryProviderSchema } from "@grasp-os/shared/directory";
 import { randomToken, sha256Hex, toBase64Url } from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
@@ -25,7 +26,7 @@ import {
   relayedClientOf,
 } from "@grasp-os/shared/oauth-relay";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { and, desc, eq, isNull, like, lte, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, like, lt, lte, ne, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -751,6 +752,184 @@ const keepTokens = async (
   );
 };
 
+/**
+ * Stops `connection`: revokes the grant where the provider can, then
+ * marks it disconnected and deletes the tokens, in one write with its
+ * event, then drops the actions held for it, which can no longer run. A
+ * revoke the provider wouldn't take is owed: a sealed copy of the tokens
+ * stays with it, for the cron trigger to revoke with (src/revocations.ts).
+ * Returns whether the provider revoked the grant, and whether this call
+ * stopped it (a concurrent one may have first).
+ *
+ * One read while it needed connecting again had no grant to revoke, so it
+ * is stopped only while it still needs that: if it was reconnected
+ * meanwhile, it is read again and stopped as the active connection it is
+ * now, with the new grant revoked, not only deleted.
+ */
+const stop = async (
+  env: Env,
+  person: ConnectionPerson | null,
+  connection: ConnectionRow,
+  detail: Record<string, AuditDetailValue> = {}
+): Promise<{ revoked: boolean; stopped: boolean }> => {
+  const db = drizzle(env.DB);
+  // A Composio connection is stopped first, with its cleanup recorded in
+  // the same transaction, and deleted at Composio only after: calls stop
+  // whatever becomes of that deletion, and the clock retries it
+  // (src/composio-connections.ts). An OAuth grant is revoked first, as ever.
+  const composio = connection.serverKind === "composio";
+  // An HTTP connection's credential is the API's own: nothing to revoke
+  // at a provider, it is only deleted, below.
+  const http = connection.serverKind === "http";
+  const cleanupId = crypto.randomUUID();
+  const revokeOutcome =
+    composio || http ? "nothing" : await revokeAtProvider(env, connection);
+  const revokedGrant = revokeOutcome === "revoked";
+  const owed = revokeOutcome === "failed";
+  // Recorded only by the disconnect that stops it, if two run at once.
+  const waiting = connection.status === "needs_reauth";
+  const stillConnected = waiting
+    ? sql`${connections.id} = ${connection.id} AND ${connections.status} = 'needs_reauth'`
+    : sql`${connections.id} = ${connection.id} AND ${connections.status} <> 'disconnected'`;
+  const stopped = await recordEventIf(
+    env,
+    connectionEvent(person, "connection.disconnect", connection.id, {
+      ...detail,
+      provider: connection.provider,
+      scope: connection.scope,
+      outcome: "ok",
+      ...(composio
+        ? { tokenHolder: "composio" }
+        : { revoked: revokedGrant, ...(owed ? { revokePending: true } : {}) }),
+    }),
+    { from: connections, where: stillConnected },
+    [
+      ...(composio ? [disconnectCleanup(db, cleanupId, stillConnected)] : []),
+      db
+        .update(connections)
+        .set({
+          status: "disconnected",
+          // The groups its account is in: nothing counts a disconnected
+          // connection's, so none are kept (reader-groups.ts).
+          readerGroups: null,
+          readerGroupsAt: null,
+          readerGroupsTriedAt: null,
+          readerGroupsReading: null,
+          updatedAt: new Date(),
+        })
+        .where(stillConnected),
+      // After the status, by the call that stopped it: the revoke it owes,
+      // with a copy of the tokens to revoke with, before they go.
+      ...(owed
+        ? [
+            oweRevoke(
+              db,
+              connection.id,
+              "disconnected",
+              sql`EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
+            ),
+          ]
+        : []),
+      // After the status: only a stopped connection's credential goes.
+      ...(http
+        ? [
+            db
+              .update(httpConnections)
+              .set({ sealed: null })
+              .where(
+                sql`${httpConnections.connectionId} = ${connection.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
+              ),
+          ]
+        : []),
+      // After the status: only a stopped connection's tokens go.
+      db
+        .delete(connectionTokens)
+        .where(
+          sql`${connectionTokens.connectionId} = ${connection.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
+        ),
+    ]
+  );
+  const reconnected =
+    waiting && !stopped
+      ? await db
+          .select()
+          .from(connections)
+          .where(
+            and(
+              eq(connections.id, connection.id),
+              eq(connections.status, "active")
+            )
+          )
+          .get()
+      : undefined;
+  if (reconnected !== undefined) {
+    return await stop(env, person, reconnected, detail);
+  }
+  await dropPendingActions(
+    env,
+    eq(pendingActions.connectionId, connection.id),
+    "connection.disconnected",
+    person
+  );
+  const revoked =
+    composio && stopped
+      ? await revokeAtComposio(env, cleanupId, connection)
+      : revokedGrant;
+  return { revoked, stopped };
+};
+
+/**
+ * Stops the connections of a directory made before `connectionId`, just
+ * connected (GRA-2171). The directory is read through one connection, and
+ * an admin who connects it again with another account (an administrator's
+ * instead of one that can't read it) must not leave the one it replaces
+ * holding live tokens that no screen shows and nobody can disconnect.
+ * Only earlier ones: of two admins connecting at once, the later
+ * connection stands. A stop that fails is logged, not answered: the new
+ * connection is made, and the next one made stops what this one left.
+ */
+const replaceEarlierDirectories = async (
+  env: Env,
+  person: ConnectionPerson,
+  connectionId: string
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const made = await db
+    .select({
+      provider: connections.provider,
+      createdAt: connections.createdAt,
+    })
+    .from(connections)
+    .where(eq(connections.id, connectionId))
+    .get();
+  if (made === undefined) {
+    return;
+  }
+  const earlier = await db
+    .select()
+    .from(connections)
+    .where(
+      and(
+        eq(connections.provider, made.provider),
+        ne(connections.id, connectionId),
+        ne(connections.status, "disconnected"),
+        lt(connections.createdAt, made.createdAt)
+      )
+    )
+    .all();
+  for (const connection of earlier) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one stop at a time, each with its revoke
+      await stop(env, person, connection, { replacedBy: connectionId });
+    } catch (error) {
+      log.warn("connection.replace_failed", {
+        connectionId: connection.id,
+        ...errorFields(error),
+      });
+    }
+  }
+};
+
 /** Finishes `flow`, taken, as `finishConnection` says. */
 const finishFlow = async (
   env: Env,
@@ -824,6 +1003,9 @@ const finishFlow = async (
     tokens,
     refuse
   );
+  if (directoryProviderSchema.safeParse(provider.id).success) {
+    await replaceEarlierDirectories(env, person, connectionId);
+  }
   return { connectionId, returnTo: flow.returnTo };
 };
 
@@ -1106,132 +1288,6 @@ export const organizationConnections = async (
       },
     ];
   });
-};
-
-/**
- * Stops `connection`: revokes the grant where the provider can, then
- * marks it disconnected and deletes the tokens, in one write with its
- * event, then drops the actions held for it, which can no longer run. A
- * revoke the provider wouldn't take is owed: a sealed copy of the tokens
- * stays with it, for the cron trigger to revoke with (src/revocations.ts).
- * Returns whether the provider revoked the grant, and whether this call
- * stopped it (a concurrent one may have first).
- *
- * One read while it needed connecting again had no grant to revoke, so it
- * is stopped only while it still needs that: if it was reconnected
- * meanwhile, it is read again and stopped as the active connection it is
- * now, with the new grant revoked, not only deleted.
- */
-const stop = async (
-  env: Env,
-  person: ConnectionPerson | null,
-  connection: ConnectionRow,
-  detail: Record<string, AuditDetailValue> = {}
-): Promise<{ revoked: boolean; stopped: boolean }> => {
-  const db = drizzle(env.DB);
-  // A Composio connection is stopped first, with its cleanup recorded in
-  // the same transaction, and deleted at Composio only after: calls stop
-  // whatever becomes of that deletion, and the clock retries it
-  // (src/composio-connections.ts). An OAuth grant is revoked first, as ever.
-  const composio = connection.serverKind === "composio";
-  // An HTTP connection's credential is the API's own: nothing to revoke
-  // at a provider, it is only deleted, below.
-  const http = connection.serverKind === "http";
-  const cleanupId = crypto.randomUUID();
-  const revokeOutcome =
-    composio || http ? "nothing" : await revokeAtProvider(env, connection);
-  const revokedGrant = revokeOutcome === "revoked";
-  const owed = revokeOutcome === "failed";
-  // Recorded only by the disconnect that stops it, if two run at once.
-  const waiting = connection.status === "needs_reauth";
-  const stillConnected = waiting
-    ? sql`${connections.id} = ${connection.id} AND ${connections.status} = 'needs_reauth'`
-    : sql`${connections.id} = ${connection.id} AND ${connections.status} <> 'disconnected'`;
-  const stopped = await recordEventIf(
-    env,
-    connectionEvent(person, "connection.disconnect", connection.id, {
-      ...detail,
-      provider: connection.provider,
-      scope: connection.scope,
-      outcome: "ok",
-      ...(composio
-        ? { tokenHolder: "composio" }
-        : { revoked: revokedGrant, ...(owed ? { revokePending: true } : {}) }),
-    }),
-    { from: connections, where: stillConnected },
-    [
-      ...(composio ? [disconnectCleanup(db, cleanupId, stillConnected)] : []),
-      db
-        .update(connections)
-        .set({
-          status: "disconnected",
-          // The groups its account is in: nothing counts a disconnected
-          // connection's, so none are kept (reader-groups.ts).
-          readerGroups: null,
-          readerGroupsAt: null,
-          readerGroupsTriedAt: null,
-          readerGroupsReading: null,
-          updatedAt: new Date(),
-        })
-        .where(stillConnected),
-      // After the status, by the call that stopped it: the revoke it owes,
-      // with a copy of the tokens to revoke with, before they go.
-      ...(owed
-        ? [
-            oweRevoke(
-              db,
-              connection.id,
-              "disconnected",
-              sql`EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
-            ),
-          ]
-        : []),
-      // After the status: only a stopped connection's credential goes.
-      ...(http
-        ? [
-            db
-              .update(httpConnections)
-              .set({ sealed: null })
-              .where(
-                sql`${httpConnections.connectionId} = ${connection.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
-              ),
-          ]
-        : []),
-      // After the status: only a stopped connection's tokens go.
-      db
-        .delete(connectionTokens)
-        .where(
-          sql`${connectionTokens.connectionId} = ${connection.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
-        ),
-    ]
-  );
-  const reconnected =
-    waiting && !stopped
-      ? await db
-          .select()
-          .from(connections)
-          .where(
-            and(
-              eq(connections.id, connection.id),
-              eq(connections.status, "active")
-            )
-          )
-          .get()
-      : undefined;
-  if (reconnected !== undefined) {
-    return await stop(env, person, reconnected, detail);
-  }
-  await dropPendingActions(
-    env,
-    eq(pendingActions.connectionId, connection.id),
-    "connection.disconnected",
-    person
-  );
-  const revoked =
-    composio && stopped
-      ? await revokeAtComposio(env, cleanupId, connection)
-      : revokedGrant;
-  return { revoked, stopped };
 };
 
 /**
