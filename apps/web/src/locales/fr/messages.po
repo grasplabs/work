@@ -5823,10 +5823,6 @@ msgstr "Télécharger en Markdown"
 msgid "Download as PDF"
 msgstr "Télécharger en PDF"
 
-#: src/inbox/report-row.tsx
-msgid "Download page"
-msgstr "Télécharger la page"
-
 #: src/apps/app-code.tsx
 msgid "Download the file"
 msgstr "Télécharger le fichier"
@@ -8970,6 +8966,10 @@ msgstr "Chargement de la conversation"
 #: src/frame/part-words.tsx
 msgid "Loading the page"
 msgstr "Chargement de la page"
+
+#: src/inbox/report-row.tsx
+msgid "Loading the report"
+msgstr "Chargement du rapport"
 
 #: src/frame/part-words.tsx
 msgid "Loading the sound"
