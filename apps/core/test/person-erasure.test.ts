@@ -29,6 +29,7 @@ import { testApp } from "./app-definitions.ts";
 import { allEvents, eventsAfter, logHead } from "./audit-events.ts";
 import { finishedByTheClock } from "./brain-next-own-store.ts";
 import { consentCode } from "./connect-providers.ts";
+import { landingAt } from "./d1-landing.ts";
 import { mockIdp } from "./idp.ts";
 import { aloneInTheStore, answering, answeringWith } from "./interview-link.ts";
 import { runMinuteTasks } from "./maintenance.ts";
@@ -1833,6 +1834,64 @@ describe("erasing a person", () => {
       // Only the staff list kept it out, so the release is recorded there.
       recorded: [{ type: "person", userId: admin.userId }],
       after: [{ email: listed }],
+    });
+  });
+
+  it("lets no admin demoted as they release an address only the staff list keeps out release it", async () => {
+    const { admin, person } = await removedPerson();
+    // An address only the store keeps out: the list's other one for them.
+    const listed = `dir-${crypto.randomUUID().slice(0, 8)}@acme.test`;
+    const { theirSecret, roster } = await onTheList(listed);
+    const store = onboardingStore(env);
+    await store.openLink(await sha256Hex(theirSecret), {
+      account: person.userId,
+      address: listed,
+    });
+    await admin.api.members.erase(person.userId, String(person.person.name));
+    // Demoted just after core looked the address up, before the store's turn.
+    const { coreEnv, landed } = landingAt(
+      /select "user_id" from "person_erasures"/iu,
+      "after",
+      async () =>
+        await env.DB.prepare(
+          "UPDATE members SET role = 'user' WHERE user_id = ?"
+        )
+          .bind(admin.userId)
+          .run()
+    );
+    const { core } = await openRpc(admin.session, { coreEnv });
+    using api = core.authenticate();
+
+    const answered = await outcome(api.members.releaseAddress(listed));
+    const newcomer = `person-${crypto.randomUUID().slice(0, 8)}`;
+    const team = roster.teams[0]?.id ?? "";
+    await store.saveRoster(
+      {
+        ...roster,
+        people: [
+          ...roster.people,
+          {
+            id: newcomer,
+            name: "New",
+            team,
+            email: listed,
+            title: "",
+            away: false,
+          },
+        ],
+      },
+      { type: "system" }
+    );
+
+    expect({
+      landed: landed(),
+      answered,
+      entry: await onList("SELECT email FROM people WHERE id = ?", newcomer),
+    }).toStrictEqual({
+      landed: true,
+      answered: "role.forbidden",
+      // Still kept out on the list.
+      entry: [{ email: "" }],
     });
   });
 

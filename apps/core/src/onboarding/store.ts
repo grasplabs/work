@@ -793,6 +793,12 @@ const agreedOf = (stored: string): Record<string, string> =>
 const admissionSql = (person: string): SQL =>
   sql`(SELECT CASE WHEN agreed_at IS NULL THEN NULL ELSE coalesce(started_at, '') || '|' || revocations END FROM interview_states WHERE person = ${person})`;
 
+/**
+ * That a link's entry isn't one core erased (`erasedPeople`), as SQL over
+ * `links`: the one mark of an erasure on the list.
+ */
+const unmarked = sql`NOT EXISTS (SELECT 1 FROM ${erasedPeople} WHERE ${erasedPeople.person} = ${links.person})`;
+
 /** An address as `links.sent_to_email` keeps it, and a sign-in's is compared. */
 const foldedAddress = (email: string): string => email.trim().toLowerCase();
 
@@ -911,7 +917,7 @@ const linesMark = async (
  * (`#interviewWanted`), so a save that leaves that alone changes nothing.
  * NULL without an account or once core erased them.
  */
-const interviewDueSql = `CASE WHEN l.user_id IS NULL OR l.erased_at IS NOT NULL THEN NULL ELSE
+const interviewDueSql = `CASE WHEN l.user_id IS NULL OR EXISTS (SELECT 1 FROM erased_people e WHERE e.person = l.person) THEN NULL ELSE
   l.user_id || '|' || l.version
   || '|' || coalesce((SELECT p.withdrawn_at FROM participations p WHERE p.person = l.person), '-')
   || '|' || (SELECT count(*) || ':' || coalesce(max(a.at), '') FROM approvals a WHERE a.person = l.person)
@@ -5498,12 +5504,13 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Closes `person`'s link for good and deletes their interview, in the
-   * caller's transaction, as core erases `account` (`eraseEntries`), but
-   * only while it isn't closed yet and `account` or no account holds it:
+   * Closes `person`'s link and deletes their interview, in the caller's
+   * transaction, as core erases `account` (`eraseEntries`), before it
+   * marks their entry, which keeps the link closed for good: only while
+   * the entry isn't marked yet and `account` or no account holds it,
    * checked by the statement that closes it, so the next holder's link,
    * after a new start, is never closed for someone else, and an erasure
-   * that finds the same link twice deletes it once. The account it
+   * that finds the same entry twice deletes it once. The account it
    * belonged to and the address it went to are forgotten. Unlike a delete
    * on their own request, no new interview can be saved under it. Whether
    * it did.
@@ -5511,11 +5518,11 @@ export class Onboarding extends DurableObject<Env> {
   #closeHeldBy(person: string, account: string, now: string): boolean {
     const [link] = this.#db
       .update(links)
-      .set({ account: null, sentTo: null, erasedAt: now })
+      .set({ account: null, sentTo: null })
       .where(
         and(
           eq(links.person, person),
-          isNull(links.erasedAt),
+          unmarked,
           or(isNull(links.account), eq(links.account, account))
         )
       )
@@ -5665,6 +5672,9 @@ export class Onboarding extends DurableObject<Env> {
         if (this.#heldByAnother(id, account)) {
           continue;
         }
+        if (this.#closeHeldBy(id, account, now)) {
+          closed += 1;
+        }
         this.#db
           .insert(erasedPeople)
           .values({ person: id })
@@ -5678,9 +5688,6 @@ export class Onboarding extends DurableObject<Env> {
         this.#db.delete(linkCodes).where(eq(linkCodes.person, id)).run();
         this.#db.delete(askedAbout).where(eq(askedAbout.person, id)).run();
         this.#db.delete(mailOutbox).where(eq(mailOutbox.about, id)).run();
-        if (this.#closeHeldBy(id, account, now)) {
-          closed += 1;
-        }
       }
       for (const { to } of this.#db
         .selectDistinct({ to: mailOutbox.to })
@@ -7458,7 +7465,7 @@ export class Onboarding extends DurableObject<Env> {
     return this.#db
       .select({ person: links.person, sentTo: links.sentTo })
       .from(links)
-      .where(isNull(links.erasedAt))
+      .where(unmarked)
       .all()
       .some(
         ({ person, sentTo }) =>
@@ -7507,11 +7514,11 @@ export class Onboarding extends DurableObject<Env> {
     person: string
   ): { account: string; text: string; mark: string } | null {
     const [link] = this.#db
-      .select({ account: links.account, erasedAt: links.erasedAt })
+      .select({ account: links.account })
       .from(links)
-      .where(eq(links.person, person))
+      .where(and(eq(links.person, person), unmarked))
       .all();
-    if (link === undefined || link.account === null || link.erasedAt !== null) {
+    if (link === undefined || link.account === null) {
       return null;
     }
     const text = this.#admitted(person)
@@ -9868,7 +9875,7 @@ export class Onboarding extends DurableObject<Env> {
     // nobody else can hold its person up.
     if (
       link === undefined ||
-      link.erasedAt !== null ||
+      this.#erased(person.id) ||
       this.#heldAt(link, person.email, caller, use === "open") === null
     ) {
       return refused("interview.link_invalid");

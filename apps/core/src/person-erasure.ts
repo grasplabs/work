@@ -1220,7 +1220,18 @@ export const releaseAddress = async (
     // Released already, an address only the staff list kept out (another
     // of an erased person's, GRA-2111), or never an erased person's: the
     // store lets it in, recorded there, should it hold it. So is a release
-    // finished whose store call failed after the one above.
+    // finished whose store call failed after the one above. Only while
+    // they still are an admin, read now, after every wait: the store can't
+    // read core's database in its transaction, so what remains is the one
+    // call between this read and that transaction, as it is between the
+    // statement that releases below and its own call to the store.
+    const [admin] = await db
+      .select({ userId: users.id })
+      .from(users)
+      .where(and(eq(users.id, by.userId), activeMember(by.userId, ["admin"])));
+    if (admin === undefined) {
+      throw roleErrors.create("role.forbidden");
+    }
     return {
       released: await onboardingStore(env).releaseAddress(hash, actorOf(by)),
     };

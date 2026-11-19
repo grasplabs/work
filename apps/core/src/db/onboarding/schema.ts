@@ -151,9 +151,9 @@ export const links = sqliteTable("links", {
   /** When they deleted their interview: a copy left open can't save it back. */
   deletedAt: text("deleted_at"),
   /**
-   * When core erased them (person-erasure.ts): their link is closed for
-   * good. No code is made for it again, so nothing is saved under the
-   * entry that stays on the list, until an admin takes them off it.
+   * No longer read or written: core's erasure marks the entry instead
+   * (`erasedPeople`), the one mark. Dropped in a later release, as a
+   * schema contracts only after the code that read it is gone.
    */
   erasedAt: text("erased_at"),
   /**
