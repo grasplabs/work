@@ -107,6 +107,10 @@ const { sent } = fakeInternet((_request, url) => {
   if (url.pathname === groupsPath) {
     return searched(url);
   }
+  // The people read: nobody, which is all a groups test needs of it.
+  if (url.pathname === "/v1.0/users") {
+    return Response.json({ value: [] });
+  }
   const members = membersPath.exec(url.pathname)?.groups?.id;
   if (members !== undefined) {
     return membersPage(members, url);
@@ -148,6 +152,9 @@ const connectDirectory = async (
       tenant: provider === "microsoft-directory" ? acmeTenant : acmeDomain,
     }
   );
+
+const readPeople = async (connectionId: string) =>
+  await exports.default.readDirectory({ connectionId, cursor: null });
 
 const search = async (connectionId: string, query: string) =>
   await exports.default.searchDirectoryGroups({ connectionId, query });
@@ -252,6 +259,15 @@ describe("the directory's groups", () => {
         groupTypes: undefined,
       }),
       named("null", { visibility: null, isAssignableToRole: null }),
+      named("synced null", { visibility: null, onPremisesSyncEnabled: true }),
+      named("365 null", {
+        groupTypes: ["Unified"],
+        securityEnabled: false,
+        mailEnabled: true,
+        visibility: null,
+      }),
+      named("kind unsaid", { visibility: null, groupTypes: undefined }),
+      named("security public", { visibility: "Public" }),
       named("‮planted\u0007", {}),
       named("not entra", { id: "../users" }),
     ];
@@ -308,11 +324,36 @@ describe("the directory's groups", () => {
           membersFrom: "unknown",
           refusal: "unknown",
         },
+        // A null visibility is a Microsoft 365 group's matter only.
         {
           name: `${prefix} null`,
           kind: "security",
           membersFrom: "unknown",
+          refusal: null,
+        },
+        {
+          name: `${prefix} synced null`,
+          kind: "security",
+          membersFrom: "on_premises",
+          refusal: null,
+        },
+        {
+          name: `${prefix} 365 null`,
+          kind: "microsoft_365",
+          membersFrom: "owners",
           refusal: "unknown",
+        },
+        {
+          name: `${prefix} kind unsaid`,
+          kind: "unknown",
+          membersFrom: "unknown",
+          refusal: "unknown",
+        },
+        {
+          name: `${prefix} security public`,
+          kind: "security",
+          membersFrom: "owners",
+          refusal: "public",
         },
         {
           name: `${prefix} planted`,
@@ -445,45 +486,74 @@ describe("the directory's groups", () => {
     });
   });
 
-  it("refused to a connection made before groups were asked for, which then needs an admin to connect it again; refused to one that holds them, only that group", async () => {
+  it("aren't read for a connection made before Grasp asked for them, which renews with its grant and goes on reading people, until an admin connects the directory again", async () => {
+    const admin = someone("admin");
     const group = graphGroup();
     const groupId = String(group.id);
     graph.groups = [group];
     graph.members[groupId] = [user()];
-    const holds = await connectDirectory();
-    const older = await connectDirectory();
-    // Stored as a connection made before the scope was asked for.
+    const older = await connectDirectory(admin);
+    // Kept as a connection made before the scope was asked for, its token
+    // run out: Entra renews it with what it was granted then.
     await drizzle(env.DB)
       .update(connectionTokens)
-      .set({ grantedScopes: beforeGroups })
+      .set({ grantedScopes: beforeGroups, accessExpiresAt: new Date(0) })
       .where(eq(connectionTokens.connectionId, older));
+    providers.state.refreshGranted = beforeGroups;
+    const renewed = await codeOf(readPeople(older));
+    providers.state.refreshGranted = undefined;
+    const before = sent.length;
+    const groups = {
+      search: await codeOf(search(older, "Finance")),
+      read: await codeOf(readGroup(older, groupId)),
+      sentToGraph: sent.length - before,
+    };
+    const after = {
+      status: await statusOf(older),
+      people: await codeOf(readPeople(older)),
+    };
+    await exports.default.disconnect({ person: admin, connectionId: older });
+    const again = await connectDirectory(admin);
+    expect({
+      renewed,
+      groups,
+      after,
+      again: await codeOf(readGroup(again, groupId)),
+    }).toStrictEqual({
+      renewed: "ok",
+      groups: {
+        search: "directory.groups_not_granted",
+        read: "directory.groups_not_granted",
+        sentToGraph: 0,
+      },
+      after: { status: "active", people: "ok" },
+      again: "ok",
+    });
+  });
+
+  it("refused by Microsoft to a connection that holds them say so, and leave the connection as it is", async () => {
+    const group = graphGroup();
+    const groupId = String(group.id);
+    graph.groups = [group];
+    const holds = await connectDirectory();
     graph.answer = () =>
       Response.json(
         { error: { code: "Authorization_RequestDenied" } },
         { status: 403 }
       );
     const refused = {
-      holdsRead: await codeOf(readGroup(holds, groupId)),
-      holdsSearch: await codeOf(search(holds, "Finance")),
-      olderRead: await codeOf(readGroup(older, groupId)),
+      read: await codeOf(readGroup(holds, groupId)),
+      search: await codeOf(search(holds, "Finance")),
     };
     graph.answer = undefined;
-    expect({
-      ...refused,
-      holds: await statusOf(holds),
-      older: await statusOf(older),
-      olderAfter: await codeOf(search(older, "Finance")),
-    }).toStrictEqual({
-      holdsRead: "directory.group_refused",
-      holdsSearch: "directory.inactive",
-      olderRead: "directory.inactive",
-      holds: "active",
-      older: "needs_reauth",
-      olderAfter: "directory.inactive",
+    expect({ ...refused, status: await statusOf(holds) }).toStrictEqual({
+      read: "directory.group_refused",
+      search: "directory.group_refused",
+      status: "active",
     });
   });
 
-  it("are refused to a connection whose renewal no longer grants them, which then needs an admin to connect it again", async () => {
+  it("are refused to a connection whose renewal lost them, which then needs an admin to connect it again", async () => {
     const connectionId = await connectDirectory();
     await drizzle(env.DB)
       .update(connectionTokens)

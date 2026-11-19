@@ -128,7 +128,7 @@ describe("the directory's groups as teams' source", () => {
     });
   });
 
-  it("are mapped only as Microsoft answers them now: never one anyone can join, whose members can't all be read, or that Microsoft didn't describe, nor to a team that isn't there", async () => {
+  it("are mapped only as Microsoft answers them now: never one anyone can join, whose members can't all be read, or that Microsoft didn't describe, nor to a team that isn't there; a security group's null visibility is no refusal", async () => {
     const { admin } = await connectedDirectory(idp);
     const team = await teamNamed(admin.session, "Finance");
     const open = group({ groupTypes: ["Unified"], visibility: "Public" });
@@ -137,8 +137,17 @@ describe("the directory's groups as teams' source", () => {
       visibility: "HiddenMembership",
     });
     const unsaid = group({ visibility: undefined });
+    const unsaid365 = group({ groupTypes: ["Unified"], visibility: null });
+    const securityNull = group({ visibility: null });
     const fine = group();
-    await directoryGroupsHold([open, hidden, unsaid, fine]);
+    await directoryGroupsHold([
+      open,
+      hidden,
+      unsaid,
+      unsaid365,
+      securityNull,
+      fine,
+    ]);
     let tried: string[] = [];
     const recorded = await auditedDuring(async () => {
       tried = [
@@ -152,6 +161,9 @@ describe("the directory's groups as teams' source", () => {
           admin.api.directoryGroups.mapToTeam(String(unsaid.id), team)
         ),
         await outcome(
+          admin.api.directoryGroups.mapToTeam(String(unsaid365.id), team)
+        ),
+        await outcome(
           admin.api.directoryGroups.mapToTeam(String(fine.id), "no-such-team")
         ),
         await outcome(
@@ -160,14 +172,19 @@ describe("the directory's groups as teams' source", () => {
       ];
     });
     const listed = await admin.api.directoryGroups.list();
+    const nullMapped = await outcome(
+      admin.api.directoryGroups.mapToTeam(String(securityNull.id), team)
+    );
     expect({
       tried,
       recorded: mappingEvents(recorded),
       listed: listed.filter(({ groupId }) =>
-        [open.id, hidden.id, unsaid.id, fine.id].includes(groupId)
+        [open.id, hidden.id, unsaid.id, unsaid365.id, fine.id].includes(groupId)
       ),
+      nullMapped,
     }).toStrictEqual({
       tried: [
+        "directory.group_not_mappable",
         "directory.group_not_mappable",
         "directory.group_not_mappable",
         "directory.group_not_mappable",
@@ -176,6 +193,7 @@ describe("the directory's groups as teams' source", () => {
       ],
       recorded: [],
       listed: [],
+      nullMapped: "ok",
     });
   });
 

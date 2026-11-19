@@ -63,6 +63,8 @@ export const directoryClient = clients.microsoftDirectory;
  * offset of a page whose next link points back at itself (null for none).
  * Its groups: `{ groups }` as Graph answers a group, and `{ members }`,
  * each group's transitive members by its lower-case ID.
+ * `{ granted }` is what Entra says the directory's app was granted, at
+ * connecting and at each renewal (null for `directoryGranted`).
  * Its deleted users likewise: `{ deleted }` (`/directory/deletedItems`),
  * `{ deletedFailAt }` with `{ deletedFailStatus }` and `{ deletedFailBody }`
  * (null for Graph's error), and `{ deletedNext }`, the next link every page of
@@ -606,7 +608,7 @@ const slackAnswer = async (request, url) => {
   }
   return Response.json({ ok: true });
 };
-const directory = { users: [], failAt: null, loopAt: null, deleted: [], deletedFailAt: null, deletedFailStatus: 500, deletedFailBody: null, deletedNext: null, groups: [], members: {} };
+const directory = { granted: null, users: [], failAt: null, loopAt: null, deleted: [], deletedFailAt: null, deletedFailStatus: 500, deletedFailBody: null, deletedNext: null, groups: [], members: {} };
 /** Graph's groups, as the directory's group calls ask for them: a search by name, a group, its members a hundred to a page. */
 const groupsGraph = (url) => {
   const parts = url.pathname.split("/");
@@ -1095,6 +1097,30 @@ export default {
       return new Response("Not found", { status: 404 });
     }
     const form = new URLSearchParams(await request.text());
+    // The directory's app renewing its tokens, as Entra does: granted what
+    // \`{ granted }\` says (\`directoryControlUrl\`), in the tenant of the URL.
+    if (form.get("grant_type") === "refresh_token" && form.get("client_id") === ${JSON.stringify(directoryClient.id)}) {
+      if (form.get("client_secret") !== ${JSON.stringify(directoryClient.secret)}) {
+        return Response.json({ error: "invalid_client" }, { status: 401 });
+      }
+      const renewing = (form.get("refresh_token") ?? "").replace(/^refresh./u, "");
+      const issuer = url.pathname.split("/")[1];
+      const renewed = {
+        iss: "https://login.microsoftonline.com/" + issuer + "/v2.0",
+        aud: ${JSON.stringify(directoryClient.id)},
+        tid: issuer,
+        oid: renewing,
+        preferred_username: renewing + "@acme.test",
+      };
+      return Response.json({
+        token_type: "Bearer",
+        access_token: "access." + renewing + "." + crypto.randomUUID(),
+        refresh_token: "refresh." + renewing,
+        expires_in: 3600,
+        id_token: [encoded({ alg: "RS256" }), encoded(renewed), "signature"].join("."),
+        scope: directory.granted ?? ${JSON.stringify(directoryGranted)},
+      });
+    }
     const [challenge, tenant, subject, granted] = (form.get("code") ?? "").split(".");
     const verifier = new TextEncoder().encode(form.get("code_verifier") ?? "");
     const digest = base64Url(
@@ -1128,7 +1154,7 @@ export default {
       refresh_token: "refresh." + subject,
       expires_in: 3600,
       id_token: [encoded({ alg: "RS256" }), encoded(claims), "signature"].join("."),
-      ...(forDirectory ? { scope: ${JSON.stringify(directoryGranted)} } : {}),
+      ...(forDirectory ? { scope: directory.granted ?? ${JSON.stringify(directoryGranted)} } : {}),
       ...(forDocuments ? { scope: ${JSON.stringify(documentsGranted)} } : {}),
       ...(granted === undefined ? {} : { scope: atob(granted) }),
     });

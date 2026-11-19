@@ -23,7 +23,8 @@ import {
 } from "./directory.ts";
 import { SourceError, requestBudget } from "./event-kinds.ts";
 import type { ProviderAccess } from "./event-kinds.ts";
-import { markIfGrantLacks } from "./tokens.ts";
+import { grantHolds } from "./providers.ts";
+import { grantedScopesOf } from "./tokens.ts";
 
 // The directory's groups (GRA-2056): an admin maps an Entra group to a
 // team, and the daily read places the group's members. Read with the
@@ -40,17 +41,19 @@ import { markIfGrantLacks } from "./tokens.ts";
 // - A fact `Group.ReadBasic.All` doesn't answer taken as fine: what a
 //   group answers is unproved on a real tenant, so anything missing or
 //   null is `unknown`, and an unknown visibility is a refusal: core maps
-//   no group with one. Only the one null Microsoft documents has its
-//   meaning: `onPremisesSyncEnabled` null is "never synced".
+//   no group with one. Two nulls have the meaning Microsoft documents:
+//   `onPremisesSyncEnabled` null is "never synced", and a null visibility
+//   matters only for a Microsoft 365 group (`refusalOf`).
 // - A partial member list taken for the whole: every entry must say its
 //   type, a page past Graph's largest fails, and only a page without a
 //   next link ends a group. A group gone mid-read (404) is
 //   `directory.group_gone`, never an empty group.
-// - A connection made before groups were asked for: a refused group call
-//   marks it for an admin to connect again when its stored grant lacks
-//   the scope (`markIfGrantLacks`), as its next renewal would; the answer
-//   is `directory.inactive`. Refused with the scope held, it is this
-//   group (`directory.group_refused`).
+// - A connection made before groups were asked for: its renewals keep
+//   the grant it has (providers.ts `renewedAsGranted`), so it goes on
+//   reading people, leavers and teams; its group calls answer
+//   `directory.groups_not_granted`, send nothing, and leave it as it is.
+//   A refusal with the scope held is Microsoft's own
+//   (`directory.group_refused`), which connecting again doesn't mend.
 // - Personal data: of members, only Entra object IDs leave connect, and a
 //   count of the groups nested within. Group names are cleaned like any
 //   directory text.
@@ -146,9 +149,29 @@ const refusals = new Map<string, DirectoryGroup["refusal"]>([
   ["hiddenmembership", "hidden_membership"],
 ]);
 
-const refusalOf = ({ visibility }: GraphGroup): DirectoryGroup["refusal"] => {
+/**
+ * Why `group` may not be a team's, from its visibility. Microsoft
+ * documents visibility as a Microsoft 365 group's join policy (Public:
+ * "anyone can join"; HiddenMembership "only for Microsoft 365 groups"),
+ * and security groups made in the admin centre or synced from AD often
+ * answer it null. So a null visibility is no refusal for a group known
+ * not to be a Microsoft 365 one; for one that is, or whose kind Microsoft
+ * didn't answer, it is unknown, as is a visibility not answered at all or
+ * not documented. Public and HiddenMembership refuse whatever the kind.
+ */
+const refusalOf = ({
+  visibility,
+  groupTypes,
+}: GraphGroup): DirectoryGroup["refusal"] => {
+  if (visibility === null) {
+    const notMicrosoft365 =
+      groupTypes !== null &&
+      groupTypes !== undefined &&
+      !names(groupTypes, "unified");
+    return notMicrosoft365 ? null : "unknown";
+  }
   const refusal =
-    visibility === null || visibility === undefined
+    visibility === undefined
       ? undefined
       : refusals.get(visibility.toLowerCase());
   return refusal === undefined ? "unknown" : refusal;
@@ -202,25 +225,35 @@ const membersUrl = (groupId: string): URL =>
 const membersRequestOf = (groupId: string, cursor: string | null): URL =>
   linkedRequest(membersUrl(groupId), "$skiptoken", cursor);
 
+/** The scope the groups' calls are made with (providers.ts). */
+const groupsScope = "Group.ReadBasic.All";
+
 /**
- * Graph refusing a groups call, as the directory's error: a connection
- * whose grant lacks the groups' scope is marked for an admin to connect
- * again, as its next renewal would (`directory.inactive`). `refused` is
- * what a refusal with the scope held is.
+ * The access token of `connectionId` for a groups call, renewed if it must
+ * be: `directory.groups_not_granted` when its grant, as connect kept it,
+ * lacks the groups' scope (a connection made before Grasp asked for it,
+ * which renews with what it holds and goes on reading people). Nothing is
+ * sent then, and the connection is left as it is. A grant connect didn't
+ * keep is asked: a refusal is then the one below.
  */
-const groupsFailure = async (
-  env: Env,
-  connectionId: string,
-  error: unknown,
-  refused: unknown
-): Promise<unknown> => {
-  if (error instanceof SourceError && error.status === 403) {
-    return (await markIfGrantLacks(env, connectionId))
-      ? directoryErrors.create("directory.inactive")
-      : refused;
+const groupsToken = async (env: Env, connectionId: string): Promise<string> => {
+  const token = await directoryToken(env, connectionId);
+  const granted = await grantedScopesOf(env, connectionId);
+  if (granted !== null && !grantHolds(granted, groupsScope)) {
+    throw directoryErrors.create("directory.groups_not_granted");
   }
-  return readFailure(error);
+  return token;
 };
+
+/**
+ * Graph refusing a groups call, as the directory's error: with the scope
+ * held, Microsoft refused this read (`directory.group_refused`), which
+ * connecting again doesn't mend; the connection stays as it is.
+ */
+const groupsFailure = (error: unknown): unknown =>
+  error instanceof SourceError && error.status === 403
+    ? directoryErrors.create("directory.group_refused")
+    : readFailure(error);
 
 /** An Entra directory connection, active; any other is `directory.not_found`. */
 const entraConnection = async (env: Env, connectionId: string) => {
@@ -243,7 +276,7 @@ export const searchDirectoryGroups = async (
   );
   const connection = await entraConnection(env, connectionId);
   const access: ProviderAccess = {
-    token: await directoryToken(env, connection.connectionId),
+    token: await groupsToken(env, connection.connectionId),
     budget: requestBudget(1),
   };
   let page: z.output<typeof graphGroupPageSchema>;
@@ -252,12 +285,7 @@ export const searchDirectoryGroups = async (
       await graph(access, searchUrl(query).href)
     );
   } catch (error) {
-    throw await groupsFailure(
-      env,
-      connection.connectionId,
-      error,
-      directoryErrors.create("directory.inactive")
-    );
+    throw groupsFailure(error);
   }
   if (page.value.length > directoryLimits.groupsPerSearch) {
     throw directoryErrors.create("directory.provider_failed");
@@ -289,7 +317,7 @@ export const readDirectoryGroup = async (
   const id = groupId.toLowerCase();
   const url = membersRequestOf(id, cursor);
   const access: ProviderAccess = {
-    token: await directoryToken(env, connection.connectionId),
+    token: await groupsToken(env, connection.connectionId),
     budget: requestBudget(cursor === null ? 2 : 1),
   };
   let group: DirectoryGroup | null = null;
@@ -308,12 +336,7 @@ export const readDirectoryGroup = async (
     if (error instanceof SourceError && error.status === 404) {
       throw directoryErrors.create("directory.group_gone");
     }
-    throw await groupsFailure(
-      env,
-      connection.connectionId,
-      error,
-      directoryErrors.create("directory.group_refused")
-    );
+    throw groupsFailure(error);
   }
   const next = page["@odata.nextLink"] ?? null;
   // A next link elsewhere (another endpoint, another group), or a page
