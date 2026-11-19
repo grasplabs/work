@@ -253,6 +253,13 @@
       "when": 1795033402621,
       "tag": "0035_sync_picks_version",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1795094191905,
+      "tag": "0036_connection_tenant_tokens",
+      "breakpoints": true
     }
   ]
 }

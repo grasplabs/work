@@ -5427,6 +5427,10 @@ msgstr "Jedes Ereignis dieses Typs aus der Quelle startet einen Lauf, mit seinen
 msgid "Each file is read in the Brain only by those {label} lets open it, of those you let read {label} here. The account you connected must be able to share files in each drive you pick: nobody reads the files it can't share."
 msgstr "Jede Datei lesen im Brain nur die, denen {label} das Öffnen erlaubt, unter denen, die Sie {label} hier lesen lassen. Das verbundene Konto muss in jeder ausgewählten Ablage Dateien freigeben können: Dateien, die es nicht freigeben kann, liest niemand."
 
+#: src/connections/sync-places.tsx
+msgid "Each file is read in the Brain only by those {label} lets open it, of those you let read {label} here. The account you connected must own each site you pick: nobody reads the files of a library marked below. If every library is marked, disconnect {label} and connect it again."
+msgstr "Jede Datei lesen im Brain nur die, denen {label} das Öffnen erlaubt, unter denen, die Sie {label} hier lesen lassen. Das verbundene Konto muss jede ausgewählte Website besitzen: Die Dateien einer unten markierten Bibliothek liest niemand. Wenn jede Bibliothek markiert ist, trennen Sie {label} und verbinden Sie es erneut."
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "Each invoice as a PDF, as soon as it is issued."
 msgstr "Jede Rechnung als PDF, sobald sie ausgestellt ist."
@@ -5813,10 +5817,6 @@ msgstr "Alle mit Grasp"
 #: src/people/people-teams-picker.tsx
 msgid "Everyone with the {name} role"
 msgstr "Alle mit der Rolle {name}"
-
-#: src/connections/sync-places.tsx
-msgid "Everyone you let read {label} in the Brain will be able to read everything in the places you pick, because the permissions in {label} are not copied."
-msgstr "Alle, die {label} im Brain lesen dürfen, können alles an den Orten lesen, die Sie auswählen, denn die Berechtigungen in {label} werden nicht übernommen."
 
 #: src/inbox/inbox-page.tsx
 msgctxt "inbox filter"

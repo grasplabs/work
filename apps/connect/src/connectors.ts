@@ -1,3 +1,4 @@
+import { tenantHost } from "@grasp-os/connector-kit/manifest";
 import type {
   ActionManifest,
   SyncManifest,
@@ -14,7 +15,7 @@ import { loadConnector } from "./connector-isolate.ts";
 import type { EgressProps } from "./egress.ts";
 import { callTimeoutMs, mcpServer } from "./mcp.ts";
 import type { McpServer, McpTool, NativeMcpServer } from "./mcp.ts";
-import { credentialFor } from "./tokens.ts";
+import { credentialFor, tenantCredentialFor } from "./tokens.ts";
 
 // Native connectors: our own MCP servers (packages/connectors), shipped in
 // connect's release (build.ts) and run each in an isolate of its own
@@ -121,10 +122,16 @@ const isolateServer = async (
   { manifest, code }: NativeConnector,
   egress: Pick<EgressProps, "callId" | "routes" | "values">
 ): Promise<NativeMcpServer> => {
+  // The connection's own host and its credential, only for routes that
+  // name it (a sync's, `tenantHost`), and only where connect holds one.
+  const tenant = egress.routes.some(({ host }) => host === tenantHost)
+    ? await tenantCredentialFor(env, connection.id)
+    : undefined;
   const props: EgressProps = {
     connector: `${manifest.name}@${manifest.version}`,
     hosts: manifest.hosts,
     ...egress,
+    ...(tenant === undefined ? {} : { tenant }),
     credential: await credentialFor(env, connection.id),
     // The egress closes when connect's MCP client gives up on the call.
     expiresAt: Date.now() + callTimeoutMs,

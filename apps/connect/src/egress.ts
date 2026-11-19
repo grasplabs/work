@@ -6,6 +6,7 @@ import {
   pathMatches,
   redirectHostMatches,
   routeSchema,
+  tenantHost,
 } from "@grasp-os/connector-kit/manifest";
 import type { EgressKind, Route } from "@grasp-os/connector-kit/manifest";
 import { log } from "@grasp-os/shared/log";
@@ -22,7 +23,11 @@ import { z } from "zod";
 // the connector's hosts, over HTTPS, as a method and path template the
 // action declares, with the connector's credential and method-override
 // headers stripped and the call's credential added; anything else is refused before it
-// leaves. Redirects aren't followed, except one from a route that names
+// leaves. A sync route may name the connection's own host (`tenantHost`,
+// GRA-2145: a company's SharePoint host): only that one host, which connect
+// learned for the connection, matches it, and only it gets the
+// credential connect holds for it (`tenant`); the call's credential never
+// goes there, nor that one anywhere else. Redirects aren't followed, except one from a route that names
 // the hosts it may lead to (a download), which the handler follows itself,
 // once, without the token or anything of the connector's request. A
 // response is cut off once its bytes pass a size limit. Raw sockets are
@@ -99,6 +104,11 @@ const responseHeadersDropped = [
   egressHeader,
 ];
 
+const credentialSchema = z.strictObject({
+  header: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
+  value: z.string().min(1),
+});
+
 const egressPropsSchema = z.strictObject({
   /** Which connector, for the log: its name and version. */
   connector: z.string().min(1),
@@ -117,10 +127,15 @@ const egressPropsSchema = z.strictObject({
    * The connection's credential, for this call only: its access token as
    * a bearer token, or an app's API key in the header its record names.
    */
-  credential: z.strictObject({
-    header: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
-    value: z.string().min(1),
-  }),
+  credential: credentialSchema,
+  /**
+   * The connection's own host at its provider and its credential there,
+   * for a sync whose routes name it (`tenantHost`); none when connect
+   * holds none (the grant doesn't reach it): its requests are refused.
+   */
+  tenant: z
+    .strictObject({ host: z.string().min(1), credential: credentialSchema })
+    .optional(),
   /** When this call's egress closes, in ms since the epoch. */
   expiresAt: z.number().int(),
 });
@@ -152,17 +167,46 @@ const refuse = (
   );
 };
 
+/**
+ * Whether `route`'s host is `hostname`: one of the connector's as named,
+ * or the connection's own (`tenantHost`) as connect learned it, and never
+ * one of the connector's hosts.
+ */
+const routeHostIs = (
+  { hosts, tenant }: Pick<EgressProps, "hosts" | "tenant">,
+  route: Route,
+  hostname: string
+): boolean =>
+  route.host === tenantHost
+    ? tenant?.host === hostname && !hosts.includes(hostname)
+    : route.host === hostname;
+
+/**
+ * Whether `url` goes to exactly one of the connector's hosts, or the
+ * connection's own, over HTTPS on its own port, without credentials in
+ * the URL.
+ */
+const reachable = (
+  { hosts, tenant }: Pick<EgressProps, "hosts" | "tenant">,
+  url: URL
+): boolean =>
+  url.protocol === "https:" &&
+  url.username === "" &&
+  url.password === "" &&
+  url.port === "" &&
+  (hosts.includes(url.hostname) || tenant?.host === url.hostname);
+
 /** The route the request is for, if the call declares it. */
 const routeFor = (
-  { routes, values }: Pick<EgressProps, "routes" | "values">,
+  call: Pick<EgressProps, "hosts" | "tenant" | "routes" | "values">,
   method: string,
   url: URL
 ): Route | undefined =>
-  routes.find(
+  call.routes.find(
     (route) =>
       route.method === method &&
-      route.host === url.hostname &&
-      pathMatches(route.path, url.pathname, values)
+      routeHostIs(call, route, url.hostname) &&
+      pathMatches(route.path, url.pathname, call.values)
   );
 
 /** Redirects a route's `redirects` hosts may be followed for. */
@@ -319,24 +363,22 @@ export class ConnectorEgress extends WorkerEntrypoint<Env, EgressProps> {
       );
     }
     const call = props.data;
-    const { connector, callId, hosts, credential, expiresAt } = call;
+    const { connector, callId, expiresAt } = call;
     const remainingMs = expiresAt - Date.now();
     if (remainingMs <= 0) {
       return refuse(call, "expired", url, method);
     }
-    // Exactly one of the connector's hosts, over HTTPS on its own port,
-    // without credentials in the URL.
-    if (
-      url.protocol !== "https:" ||
-      url.username !== "" ||
-      url.password !== "" ||
-      url.port !== "" ||
-      !hosts.includes(url.hostname)
-    ) {
+    if (!reachable(call, url)) {
       return refuse(call, "host", url, method);
     }
     const route = routeFor(call, method, url);
     if (route === undefined) {
+      return refuse(call, "route", url, method);
+    }
+    // The connection's own host gets its own credential, never the call's.
+    const credential =
+      route.host === tenantHost ? call.tenant?.credential : call.credential;
+    if (credential === undefined) {
       return refuse(call, "route", url, method);
     }
     const headers = new Headers(request.headers);
@@ -360,18 +402,19 @@ export class ConnectorEgress extends WorkerEntrypoint<Env, EgressProps> {
       log.warn("egress.failed", {
         connector,
         callId,
-        host: url.hostname,
+        host: route.host,
         method,
         route: route.path,
       });
       return egressAnswer(egressKind.failed);
     }
     // Hosts, methods, declared paths and statuses only: never the path as
-    // sent, the query, headers or bodies (R17, EG7).
+    // sent, the query, headers or bodies (R17, EG7). The connection's own
+    // host as the route names it, not the company's name in it.
     log.info("egress.request", {
       connector,
       callId,
-      host: url.hostname,
+      host: route.host,
       method,
       route: route.path,
       status: response.status,
@@ -397,7 +440,7 @@ export class ConnectorEgress extends WorkerEntrypoint<Env, EgressProps> {
         connector,
         callId,
         reason: "redirect",
-        host: url.hostname,
+        host: route.host,
         method,
       });
       return egressAnswer(egressKind.failed);

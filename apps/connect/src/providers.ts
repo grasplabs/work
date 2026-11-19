@@ -22,6 +22,8 @@ import {
   classesOnByDefault,
   googleRights,
   microsoftRights,
+  rightKey,
+  rightsElsewhere,
 } from "./provider-rights.ts";
 
 // The providers people connect accounts from, as config records: one
@@ -127,6 +129,17 @@ export interface OAuthProviderConfig {
    */
   renewalRequires?: readonly string[];
   /**
+   * The connection's own host at the provider, a resource of its own
+   * that its connector's syncs may reach (`tenantHost`, GRA-2145), and
+   * how a token for it is asked for with the grant's refresh token: the
+   * host, as the connection's own token finds it, and the rights a token
+   * for that host is asked with (tokens.ts `tenantCredentialFor`).
+   */
+  tenantResource?: {
+    hostOf: (accessToken: string) => Promise<string>;
+    scope: (host: string) => string;
+  };
+  /**
    * Only shared connections, never a person's own (the directory's, the
    * documents').
    */
@@ -224,6 +237,42 @@ const googleIssuers = new Set([
   "accounts.google.com",
 ]);
 
+/** How long the root site's read may take. */
+const sharePointHostTimeoutMs = 10_000;
+
+/** A company's SharePoint host: one label under `sharepoint.com`, never a OneDrive's (`-my`). */
+const sharePointHostPattern =
+  /^(?!.*-my\.)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.sharepoint\.com$/u;
+
+const rootSiteSchema = z.object({ webUrl: z.string() });
+
+/**
+ * The company's SharePoint host, from its root site as the connection's
+ * own Graph token finds it
+ * (https://learn.microsoft.com/en-us/graph/api/site-get?view=graph-rest-1.0):
+ * `<tenant>.sharepoint.com`, or refused.
+ */
+const sharePointHostOf = async (accessToken: string): Promise<string> => {
+  const response = await fetch(
+    "https://graph.microsoft.com/v1.0/sites/root?$select=webUrl",
+    {
+      headers: { authorization: `Bearer ${accessToken}` },
+      redirect: "manual",
+      signal: AbortSignal.timeout(sharePointHostTimeoutMs),
+    }
+  );
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error(`Graph answered ${response.status} for the root site`);
+  }
+  const { webUrl } = rootSiteSchema.parse(await response.json());
+  const url = URL.parse(webUrl);
+  if (url?.protocol !== "https:" || !sharePointHostPattern.test(url.hostname)) {
+    throw new Error("The root site isn't on a company's SharePoint host");
+  }
+  return url.hostname;
+};
+
 const microsoftLogin = "https://login.microsoftonline.com";
 
 /**
@@ -287,6 +336,12 @@ const microsoft: OAuthProviderConfig = {
     credentials(env.MICROSOFT_CLIENT_ID, env.MICROSOFT_CLIENT_SECRET),
   subject: ({ idToken }) => oidOnly.safeParse(idTokenClaims(idToken)).data?.oid,
   account: entraAccount,
+  // SharePoint's REST API, for who may open a picked library's files
+  // (GRA-2145): `AllSites.Read` of the company's own host.
+  tenantResource: {
+    hostOf: sharePointHostOf,
+    scope: (host) => `https://${host}/AllSites.Read`,
+  },
 };
 
 /** Google's userinfo endpoint, as its discovery document names it. */
@@ -801,6 +856,10 @@ export const scopesLacking = (
   const granted = scopesOf(scope);
   return scopes.filter((each) => {
     const asked = each.toLowerCase();
-    return !(signInScopes.has(asked) || granted.has(asked));
+    return !(
+      signInScopes.has(asked) ||
+      rightsElsewhere.has(rightKey(each)) ||
+      granted.has(asked)
+    );
   });
 };

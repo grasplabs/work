@@ -9,11 +9,17 @@ import { recordEventIf } from "./audit.ts";
 import { pastAddressesAfter } from "./connections.ts";
 import {
   connections,
+  connectionTenantTokens,
   connectionTokens,
   tokenRevocations,
 } from "./db/schema.ts";
 import { ownerErased } from "./erased-people.ts";
-import { isInvalidGrant, refreshTokens, revokeToken } from "./oauth-client.ts";
+import {
+  OAuthResponseError,
+  isInvalidGrant,
+  refreshTokens,
+  revokeToken,
+} from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
 import { oweRevoke, revocable } from "./owed-revokes.ts";
 import {
@@ -671,6 +677,163 @@ export const credentialFor = async (
     throw connectErrors.create("connect.connection_inactive");
   }
   return provider.credential(tokens.apiKey);
+};
+
+/** A connection's token for its own host is sealed for it alone, apart from its grant's. */
+const tenantSealContext = (connectionId: string): string =>
+  `tenant-token:${connectionId}`;
+
+/**
+ * What a token endpoint answers when the grant doesn't reach a resource:
+ * no consent for its rights (a connection made before they were asked),
+ * or rights or a resource it doesn't know.
+ */
+const notConsented: ReadonlySet<string> = new Set([
+  "invalid_grant",
+  "consent_required",
+  "interaction_required",
+  "invalid_scope",
+  "invalid_resource",
+]);
+
+const isNotConsented = (error: unknown): boolean =>
+  error instanceof OAuthResponseError &&
+  error.oauthError !== undefined &&
+  notConsented.has(error.oauthError) &&
+  error.httpStatus < 500 &&
+  error.httpStatus !== 429;
+
+/** A connection's own host at its provider and the credential for it. */
+export interface TenantCredential {
+  host: string;
+  credential: Credential;
+}
+
+/**
+ * The host the connection's token for its own host is for, and that token,
+ * while it is of this grant and fresh for at least a minute; else none.
+ */
+const heldTenantCredential = async (
+  vault: Vault,
+  held: typeof connectionTenantTokens.$inferSelect | undefined,
+  row: TokenRow
+): Promise<TenantCredential | undefined> => {
+  if (
+    held === undefined ||
+    held.generation !== row.generation ||
+    held.accessExpiresAt.getTime() - expirySkewMs <= Date.now()
+  ) {
+    return undefined;
+  }
+  try {
+    return {
+      host: held.host,
+      credential: bearer(
+        await vault.open(held.sealed, tenantSealContext(held.connectionId))
+      ),
+    };
+  } catch (error) {
+    // Sealed under a key no longer held: asked for again.
+    if (error instanceof VaultError) {
+      return undefined;
+    }
+    throw error;
+  }
+};
+
+/**
+ * The credential of an active connection for its own host at the provider
+ * (`tenantResource`, GRA-2145: a company's SharePoint host), for one sync
+ * call's egress (connectors.ts), with the host it is for: none when the
+ * provider has no such host, or the grant doesn't reach it (a connection
+ * made before its rights were asked for, or whose consent left them out),
+ * so the call's requests there are refused and what it reads there is
+ * nobody's. The host is the connection's own token's finding, kept with
+ * the token; the token is asked for with the grant's refresh token, the
+ * rights of that host alone, and kept sealed until it is a minute from
+ * expiring. Microsoft doesn't revoke a refresh token used to get another
+ * ("Refresh tokens aren't revoked when used to acquire new access
+ * tokens"), so any new one this answer holds is let go, and the grant's
+ * own is never written here. A failure that may pass (the provider down)
+ * fails the call, to be tried again.
+ */
+export const tenantCredentialFor = async (
+  env: Env,
+  connectionId: string
+): Promise<TenantCredential | undefined> => {
+  const active = await activeConnection(env, connectionId);
+  const { connection, provider, row, vault } = active;
+  if (provider.kind !== "oauth" || provider.tenantResource === undefined) {
+    return undefined;
+  }
+  const db = drizzle(env.DB);
+  const held = await db
+    .select()
+    .from(connectionTenantTokens)
+    .where(eq(connectionTenantTokens.connectionId, connectionId))
+    .get();
+  const fresh = await heldTenantCredential(vault, held, row);
+  if (fresh !== undefined) {
+    return fresh;
+  }
+  const client = provider.client(env);
+  const { tenant } = connection;
+  if (client === undefined || tenant === null) {
+    throw connectionErrors.create("connection.provider_unavailable");
+  }
+  let host: string;
+  try {
+    host =
+      held?.generation === row.generation
+        ? held.host
+        : await provider.tenantResource.hostOf(
+            await freshAccessToken(env, active)
+          );
+  } catch (error) {
+    log.warn("connection.tenant_host_unknown", {
+      provider: provider.id,
+      ...errorFields(error),
+    });
+    return undefined;
+  }
+  let minted: TokenSet;
+  try {
+    const { refreshToken } = await openOAuthTokens(vault, row);
+    minted = await refreshTokens(
+      provider,
+      client,
+      tenant,
+      refreshToken,
+      provider.tenantResource.scope(host)
+    );
+  } catch (error) {
+    if (isNotConsented(error)) {
+      return undefined;
+    }
+    log.warn("connection.tenant_token_failed", {
+      provider: provider.id,
+      ...errorFields(error),
+    });
+    throw connectionErrors.create("connection.refresh_failed");
+  }
+  const sealed = await vault.seal(
+    minted.accessToken,
+    tenantSealContext(connectionId)
+  );
+  const now = Date.now();
+  // Only for the grant it was asked with: a grant connected again
+  // meanwhile asks for its own.
+  await env.DB.prepare(
+    `INSERT INTO connection_tenant_tokens (connection_id, host, sealed, access_expires_at, generation, updated_at)
+    SELECT ?1, ?2, ?3, ?4, ?5, ?6
+    WHERE EXISTS (SELECT 1 FROM connection_tokens WHERE connection_id = ?1 AND generation = ?5)
+    ON CONFLICT (connection_id) DO UPDATE SET host = excluded.host, sealed = excluded.sealed,
+      access_expires_at = excluded.access_expires_at, generation = excluded.generation,
+      updated_at = excluded.updated_at`
+  )
+    .bind(connectionId, host, sealed, minted.expiresAt, row.generation, now)
+    .run();
+  return { host, credential: bearer(minted.accessToken) };
 };
 
 /**
