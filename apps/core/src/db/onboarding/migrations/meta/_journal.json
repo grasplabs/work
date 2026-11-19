@@ -330,6 +330,13 @@
       "when": 1795031932916,
       "tag": "0046_team_minted",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "6",
+      "when": 1795093781494,
+      "tag": "0047_dusty_morlocks",
+      "breakpoints": true
     }
   ]
 }

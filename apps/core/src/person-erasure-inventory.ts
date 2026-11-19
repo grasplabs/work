@@ -514,7 +514,8 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "workspace.preview_releases": { erased: "workspace" },
   "workspace.preview_stores": { erased: "workspace" },
   // The onboarding: their interview, by its own deletion.
-  "onboarding.people": { company: "the company's roster (D5)" },
+  // The company's roster (D5): their entry stays, without their address.
+  "onboarding.people": { erased: "interview" },
   "onboarding.links": { erased: "interview" },
   "onboarding.link_codes": { erased: "interview" },
   "onboarding.interviews": { erased: "interview" },
@@ -542,9 +543,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // The roster's and the onboarding's own: who did what, by ID (D5).
   "onboarding.teams": { company: "the company's roster: a team's lead (D5)" },
   "onboarding.works": { company: "the company's roster: who does what (D5)" },
-  "onboarding.mail_outbox": {
-    company: "mail to the roster (D5), which keeps the address anyway",
-  },
+  "onboarding.mail_outbox": { erased: "interview" },
   "onboarding.events": { kept: "the onboarding's log, IDs only" },
   "onboarding.counted_works": { company: "who counted a work (D5)" },
   "onboarding.documents": { company: "documents the admin shared" },
@@ -574,6 +573,12 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "onboarding.team_counts": noPerson,
   "onboarding.usage": noPerson,
   "onboarding.referrals": { erased: "interview" },
+  "onboarding.erased_addresses": {
+    kept: "keeps someone erased off the staff list, as keyed hashes of their address",
+  },
+  "onboarding.erased_people": {
+    kept: "marks the entries of someone erased, by entry ID",
+  },
   "onboarding.more_voices": {
     none: "work to hear more about; who asked is the audit log's",
   },
@@ -974,6 +979,7 @@ export const reviewedPersonColumns: Readonly<
   "onboarding.link_codes": ["person"],
   "onboarding.links": ["person", "sent_to_email", "user_id"],
   "onboarding.participations": ["person"],
+  "onboarding.erased_people": ["person"],
   "onboarding.people": ["email"],
   "onboarding.readbacks": ["person"],
   "onboarding.referrals": ["person"],

@@ -482,13 +482,16 @@ const runs: ErasureStep = {
  * its person's own request (`deleteOnRequest`): what they said and agreed
  * to, every drawing it was in, the Brain's records resting on it, and
  * everything the voice said in it; and everything the voice said for them
- * as an admin, on their onboarding. Found by the account their interview
- * belongs to (GRA-1790), whatever the list says now; and on the list by
- * the address that was theirs, through its keyed hash, so whichever area
- * ran first; once an admin released the address, or under an older key, it
- * is found by address no more.
- * Their entry on the list is the company's (Nick's D5): it stays, removed
- * only by an admin.
+ * as an admin, on their onboarding. And their address, everywhere the
+ * onboarding keeps one (GRA-2111): erasure is final. Their entries on the
+ * list are found by the account their interview belongs to (GRA-1790),
+ * whatever the list says now, and by the address that was theirs, through
+ * its keyed hash; each stays, the company's (Nick's D5), without the
+ * address, and nothing reaches it again (`eraseEntries`). The hash stays
+ * in the store too, so no save of the list writes the address again
+ * until an admin releases it, which waits for this area
+ * (`releaseAddress`). Once an admin released the address, or under an
+ * older key, it is found by address no more.
  */
 const interview: ErasureStep = {
   area: "interview",
@@ -498,26 +501,19 @@ const interview: ErasureStep = {
       .select({
         emailHash: personErasures.emailHash,
         keyVersion: personErasures.emailKeyVersion,
-        requestedAt: personErasures.requestedAt,
       })
       .from(personErasures)
       .where(eq(personErasures.userId, userId));
     if (erasure === undefined) {
       return;
     }
+    const store = onboardingStore(env);
     // What the voice said for them as an admin, on their onboarding, goes
     // from its cache, whoever they were on the list (GRA-1897).
-    await onboardingStore(env).forgetSpokenForAdmin(userId);
-    // The interview that belongs to their account now (GRA-1790),
-    // whatever address the list has for them: found by the account it
-    // opened under, and deleted, its link closed, only while that account
-    // holds it (`eraseInterviewOf`).
-    const store = onboardingStore(env);
-    const sentBy = erasure.requestedAt.toISOString();
-    const owned = await store.personOfAccount(userId);
-    if (owned !== null) {
-      await store.eraseInterviewOf(owned, userId, sentBy);
-    }
+    await store.forgetSpokenForAdmin(userId);
+    const hash =
+      erasure.keyVersion === emailKeyVersion ? erasure.emailHash : null;
+    const found = await store.eraseEntries(userId, hash);
     // Whatever the Brain holds under their account, from any link, also
     // one it no longer holds (a new start gave it to someone else), goes
     // before this area is done: keyed by the account alone, so the link's
@@ -525,29 +521,15 @@ const interview: ErasureStep = {
     // is tried again.
     await eraseOnboardingAccount(env, userId);
     // Their address released, or hashed under an older key: they can't be
-    // found on the list by it, and whatever interview they have is left.
+    // found on the list by it, and whatever entry has it is left.
     // Recorded as skipped, never as done.
-    if (erasure.emailHash === null || erasure.keyVersion !== emailKeyVersion) {
+    if (hash === null) {
       await marked(db, userId, "interview", "skipped");
       return;
     }
-    let found = 0;
-    for (const { id, email } of await store.rosterEmails()) {
-      // oxlint-disable-next-line no-await-in-loop -- one entry at a time
-      if ((await emailHashOf(env, email)) === erasure.emailHash) {
-        // Only an interview from a link sent before the erasure was asked
-        // for (the address may have been released, and a link sent to the
-        // entry since, as this ran), and held by them or by nobody: never
-        // the interview of whoever holds that link now (`eraseInterviewOf`).
-        // A link nobody holds has nothing in the Brain; theirs went above.
-        // oxlint-disable-next-line no-await-in-loop -- one entry at a time
-        await store.eraseInterviewOf(id, userId, sentBy);
-        found += 1;
-      }
-    }
     if (found === 0) {
-      // Not on the list by the address they signed in with: an interview
-      // under another address is left. IDs only.
+      // Not on the list by their account or the address they signed in
+      // with. IDs only.
       log.warn("member.erasure_interview_unmatched", { userId });
     }
     await completed(db, userId, "interview");
@@ -1211,8 +1193,13 @@ export const erasePerson = async (
  * Lets the address `email` in again, as one of the client's admins asked:
  * the company gave the address that was an erased person's to someone
  * else. Only the hash goes, while the admin still is one, recorded with
- * the erased person's ID only, never the address. Answers whether an
- * erased person's address it was.
+ * the erased person's ID only, never the address; then the onboarding's
+ * copy of it, so the staff list takes the address again (GRA-2111). Not
+ * while their erasure's `interview` area is pending, checked by the
+ * statement that releases: that area takes the address off the list, and
+ * a release landing as it ran could neither be undone by it nor leave
+ * the address behind. A release whose store call failed is finished by
+ * asking again. Answers whether an erased person's address it was.
  */
 export const releaseAddress = async (
   env: Env,
@@ -1230,8 +1217,16 @@ export const releaseAddress = async (
     .from(personErasures)
     .where(erasedAddress(hash));
   if (erased === undefined) {
-    return { released: false };
+    // Released already, or never an erased person's: the store lets it in
+    // too, should an earlier release have stopped before it did.
+    return { released: await onboardingStore(env).releaseAddress(hash) };
   }
+  const listedNow = sql`NOT EXISTS (
+    SELECT 1 FROM ${personErasureAreas}
+    WHERE ${personErasureAreas.userId} = ${erased.userId}
+      AND ${personErasureAreas.area} = 'interview'
+      AND ${personErasureAreas.state} = 'pending'
+  )`;
   const [released] = await auditedBatch(env, db, [
     db
       .update(personErasures)
@@ -1240,7 +1235,8 @@ export const releaseAddress = async (
         and(
           eq(personErasures.userId, erased.userId),
           erasedAddress(hash),
-          activeMember(by.userId, ["admin"])
+          activeMember(by.userId, ["admin"]),
+          listedNow
         )
       )
       .returning({ userId: personErasures.userId }),
@@ -1252,8 +1248,21 @@ export const releaseAddress = async (
     }),
   ]);
   if (released.length === 0) {
-    throw roleErrors.create("role.forbidden");
+    const [erasing] = await db
+      .select({ userId: personErasureAreas.userId })
+      .from(personErasureAreas)
+      .where(
+        and(
+          eq(personErasureAreas.userId, erased.userId),
+          eq(personErasureAreas.area, "interview"),
+          eq(personErasureAreas.state, "pending")
+        )
+      );
+    throw erasing === undefined
+      ? roleErrors.create("role.forbidden")
+      : memberErrors.create("member.release_erasing");
   }
+  await onboardingStore(env).releaseAddress(hash);
   return { released: true };
 };
 

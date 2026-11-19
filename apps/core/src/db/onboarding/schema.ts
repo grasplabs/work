@@ -579,6 +579,25 @@ export const referrals = sqliteTable("referrals", {
   at: text().notNull(),
 });
 
+/**
+ * The addresses of people core erased (person-erasure.ts), as the keyed
+ * hash core keeps of each (erased-people.ts `emailHashOf`), never the
+ * address: an address that hashes to one is saved blank, in the save's own
+ * transaction, until an admin releases it (`releaseAddress`).
+ */
+export const erasedAddresses = sqliteTable("erased_addresses", {
+  hash: text().primaryKey(),
+});
+
+/**
+ * Entries on the list whose person core erased: the entry stays, the
+ * company's record (D5), without an address, and gets no link, no mail and
+ * no referral. The mark goes when an admin takes the entry off the list.
+ */
+export const erasedPeople = sqliteTable("erased_people", {
+  person: text().primaryKey(),
+});
+
 export const drawFailures = sqliteTable("draw_failures", {
   item: text().primaryKey(),
   tries: integer().notNull(),
