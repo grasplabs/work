@@ -16,6 +16,8 @@ import {
   directoryReads,
   erasedSubjects,
 } from "./db/core/schema.ts";
+import { groupStatements, mappedGroupsRead } from "./directory-group-reads.ts";
+import type { GroupRead } from "./directory-group-reads.ts";
 import { suspensionStatements } from "./directory-suspensions.ts";
 import {
   jsonValuesOf,
@@ -324,6 +326,7 @@ const apply = async (
   connection: DirectoryConnection,
   listed: Listed,
   json: string,
+  groups: readonly GroupRead[],
   placement: Placement,
   startedAt: Date
 ): Promise<void> => {
@@ -409,6 +412,9 @@ const apply = async (
     // Before the placement, so someone listed on again is lifted and
     // placed in the same batch.
     ...suspensionStatements(db, kind, claimed, startedAt),
+    // After the people's rows, which each group row needs, and before the
+    // placement, which places by them.
+    ...groupStatements(db, kind, listed.tenant, groups, claimed, startedAt),
   ];
   const results: unknown[] = await auditedBatch(env, db, [
     claim,
@@ -547,11 +553,29 @@ const readKind = async (
   try {
     const listed = await listedIn(env, kind, connection, tenant, deadline);
     const json = await entriesOf(env, kind, listed);
-    const placement = await readPlacementOf(env, kind, listed.people);
+    // The mapped groups, each read whole or held (directory-group-reads.ts).
+    const groups = await mappedGroupsRead(
+      env,
+      kind,
+      connection,
+      async (readPage, take) => {
+        await everyPage(deadline, readPage, take);
+      }
+    );
+    const placement = await readPlacementOf(env, kind, listed.people, groups);
     if (Date.now() >= deadline) {
       throw directoryErrors.create("directory.read_too_long");
     }
-    await apply(env, kind, connection, listed, json, placement, startedAt);
+    await apply(
+      env,
+      kind,
+      connection,
+      listed,
+      json,
+      groups,
+      placement,
+      startedAt
+    );
     if (listed.deletedFailure !== null) {
       // The fall-back `deletedOf` chose: the rest of the read was applied,
       // with nobody suspended for having left.
