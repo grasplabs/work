@@ -849,6 +849,10 @@ msgstr "{name} antwoordt in deze chat"
 msgid "{name} couldn't be deleted. Try again."
 msgstr "{name} kon niet worden verwijderd. Probeer het opnieuw."
 
+#: src/settings/directory-reconnect.tsx
+msgid "{name} couldn’t be reached just now. Try again in a moment."
+msgstr "{name} is nu even niet bereikbaar. Probeer het zo opnieuw."
+
 #: src/settings/teams.tsx
 msgid "{name} couldn't be renamed. Try again."
 msgstr "{name} kon niet worden hernoemd. Probeer het opnieuw."
@@ -872,6 +876,10 @@ msgstr "{name} is nog niet uitgelezen."
 #: src/settings/stephen-settings.tsx
 msgid "{name} in {appName}"
 msgstr "{name} in {appName}"
+
+#: src/settings/directory-reconnect.tsx
+msgid "{name} is connected again. Grasp reads it within a quarter of an hour."
+msgstr "{name} is weer gekoppeld. Grasp leest hem binnen een kwartier uit."
 
 #: src/onboarding/connect-steps.tsx
 msgid "{name} is connected. I’ll only read what you share with me."
@@ -4375,6 +4383,10 @@ msgstr "{app} koppelen"
 msgid "Connect {name}"
 msgstr "{name} koppelen"
 
+#: src/settings/directory-reconnect.tsx
+msgid "Connect {name} again"
+msgstr "{name} opnieuw koppelen"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Connect accounts of their own"
 msgstr "Eigen accounts koppelen"
@@ -6694,8 +6706,8 @@ msgid "Grasp can’t email your people their interview links for now. Send each 
 msgstr "Grasp kan je mensen hun interviewlinks voorlopig niet mailen. Stuur iedereen zelf zijn link, vanuit Interviews."
 
 #: src/settings/directory-reads.tsx
-msgid "Grasp can’t read the directory with the connection it has: an administrator of your organization has to connect it again. That can’t be done from Settings yet, so ask Grasp’s support."
-msgstr "Grasp kan de directory met de huidige koppeling niet uitlezen: een beheerder van je organisatie moet hem opnieuw koppelen. Dat kan nog niet vanuit Instellingen, dus vraag de support van Grasp."
+msgid "Grasp can’t read the directory with the connection it has. Connect it again, signing in with an account that administers your directory."
+msgstr "Grasp kan de directory met de huidige koppeling niet uitlezen. Koppel hem opnieuw en log daarbij in met een account dat je directory beheert."
 
 #: src/settings/erasures.tsx
 msgid "Grasp can’t say how far it got just now. It goes on all the same."
