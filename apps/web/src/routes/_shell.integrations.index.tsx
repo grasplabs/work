@@ -467,12 +467,12 @@ const Details = ({
       <SheetContent closeLabel={t`Close`}>
         {/* Named for a screen reader only: the panel's own head says its name. */}
         <SheetTitle hidden>{integration.name}</SheetTitle>
-        {/* Its own close: the hidden title draws no bar to hold the Sheet's. */}
+        {/* The Sheet's corner close is its only one: a second in the panel's own bar drew an
+            opaque bar over the head's dither. */}
         <IntegrationInspector
           framed={false}
           identity={identity}
           integration={integration}
-          onClose={close}
           tools={tools}
           uses={uses}
         />

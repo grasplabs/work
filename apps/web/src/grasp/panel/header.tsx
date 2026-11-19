@@ -90,6 +90,12 @@ export interface PanelHeaderProps {
    */
   texture?: boolean;
   /**
+   * The icon stands beside the title, on its line, instead of above it: for a head whose icon is a
+   * mark (an app's logo) and its title a short name. The description runs under both.
+   * @default false
+   */
+  iconBeside?: boolean;
+  /**
    * This instance's own words, over the catalogue's (GraspWords), key by key (`{ close: "Close the details" }`). Any left out
    * are the catalogue's, else English. A flat text prop given beside it still wins until the
    * release's step 5.
@@ -167,6 +173,15 @@ const styles = stylex.create({
   // With no bar above the head, the texture starts at the head's own top.
   textureTopmost: { insetBlockStart: 0 },
   tile: { position: "relative", marginBlockEnd: grasp.space3 },
+  // The icon beside the title (`iconBeside`): two columns, the icon and the title on one line, what
+  // follows across both.
+  headIconBeside: {
+    gridTemplateColumns: "auto minmax(0, 1fr)",
+    columnGap: grasp.space3,
+    alignItems: "center",
+  },
+  tileBeside: { marginBlockEnd: 0 },
+  across: { gridColumn: "1 / -1" },
   title: {
     position: "relative",
     margin: 0,
@@ -529,6 +544,45 @@ const Meta = ({ meta }: { meta: ReactNode[] }) => (
   </div>
 );
 
+/** The head's box: its dither behind, then its tile, then what the head says. */
+const HeadFrame = ({
+  icon,
+  texture,
+  topmost,
+  beside,
+  sideBySide,
+  loading,
+  children,
+}: {
+  icon: ReactNode;
+  texture: boolean;
+  topmost: boolean;
+  beside: boolean;
+  sideBySide: boolean;
+  loading: boolean;
+  children: ReactNode;
+}) => (
+  <div
+    data-slot="panel-head"
+    aria-busy={loading ? "true" : undefined}
+    {...stylex.props(
+      styles.head,
+      beside && styles.headBeside,
+      sideBySide && styles.headIconBeside
+    )}
+  >
+    {texture && (
+      <PanelTexture layout={topmost ? styles.textureTopmost : styles.texture} />
+    )}
+    {given(icon) && (
+      <span {...stylex.props(styles.tile, sideBySide && styles.tileBeside)}>
+        {icon}
+      </span>
+    )}
+    {children}
+  </div>
+);
+
 /** The head: the tile, the title, its line, and who and when. */
 const Head = ({
   title,
@@ -540,6 +594,7 @@ const Head = ({
   topmost,
   loading,
   beside,
+  iconBeside,
 }: Pick<PanelHeaderProps, "description" | "icon" | "meta"> & {
   title: string | undefined;
   level: 1 | 2;
@@ -547,51 +602,41 @@ const Head = ({
   topmost: boolean;
   loading: boolean;
   beside: boolean;
+  iconBeside: boolean;
 }) => {
+  const sideBySide = iconBeside && given(icon);
   const Heading = headings[level];
+  const frame = { icon, texture, topmost, beside, sideBySide, loading };
   if (loading) {
     return (
-      <div
-        data-slot="panel-head"
-        aria-busy="true"
-        {...stylex.props(styles.head, beside && styles.headBeside)}
-      >
-        {texture && (
-          <PanelTexture
-            layout={topmost ? styles.textureTopmost : styles.texture}
-          />
-        )}
-        {given(icon) && <span {...stylex.props(styles.tile)}>{icon}</span>}
+      <HeadFrame {...frame}>
         <div {...stylex.props(styles.titleWaitLine)}>
           <Skeleton layout={styles.titleWait} />
         </div>
         {description !== undefined && (
-          <p {...stylex.props(styles.description)}>
+          <p {...stylex.props(styles.description, sideBySide && styles.across)}>
             <Skeleton text="sm" layout={styles.descriptionWait} />
           </p>
         )}
-      </div>
+      </HeadFrame>
     );
   }
   return (
-    <div
-      data-slot="panel-head"
-      {...stylex.props(styles.head, beside && styles.headBeside)}
-    >
-      {texture && (
-        <PanelTexture
-          layout={topmost ? styles.textureTopmost : styles.texture}
-        />
-      )}
-      {given(icon) && <span {...stylex.props(styles.tile)}>{icon}</span>}
+    <HeadFrame {...frame}>
       {title !== undefined && (
         <Heading {...stylex.props(styles.title)}>{title}</Heading>
       )}
       {given(description) && (
-        <p {...stylex.props(styles.description)}>{description}</p>
+        <p {...stylex.props(styles.description, sideBySide && styles.across)}>
+          {description}
+        </p>
       )}
-      {meta !== undefined && meta.length > 0 && <Meta meta={meta} />}
-    </div>
+      {meta !== undefined && meta.length > 0 && (
+        <div {...stylex.props(sideBySide && styles.across)}>
+          <Meta meta={meta} />
+        </div>
+      )}
+    </HeadFrame>
   );
 };
 
@@ -676,6 +721,7 @@ export const PanelHeader = ({
   level: levelDeprecated,
   headingLevel: level = levelDeprecated ?? 2,
   texture = false,
+  iconBeside = false,
   words,
   loading = false,
 }: PanelHeaderProps) => {
@@ -730,6 +776,7 @@ export const PanelHeader = ({
           topmost={!holds}
           loading={loading}
           beside={reachesHead(seat, holds, hasViews)}
+          iconBeside={iconBeside}
         />
       )}
       {!holds && hasViews && <Bar bar={bar} closeLabel={closeLabel} bare />}

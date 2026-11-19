@@ -33,12 +33,12 @@ import { ProviderMark } from "./provider-mark.tsx";
 
 const styles = stylex.create({
   // Tiles side by side, as many as the width takes.
-  // One height for every tile on the page: room for a name on two lines
-  // and its fact, so a long name never makes its row taller than the rest.
+  // One height for every tile on the page, the tallest tile's: a mark,
+  // a name and its fact, with the small Item's own padding and no more.
   grid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 15rem), 1fr))",
-    gridAutoRows: "minmax(5.5rem, 1fr)",
+    gridAutoRows: "1fr",
     gap: grasp.space4,
     margin: 0,
     padding: 0,

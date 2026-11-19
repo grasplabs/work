@@ -316,6 +316,7 @@ export const IntegrationInspector = ({
           />
         }
         {...(onClose === undefined ? {} : { onClose })}
+        iconBeside
         texture
         title={integration.name}
       />
