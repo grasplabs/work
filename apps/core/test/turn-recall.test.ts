@@ -31,7 +31,6 @@ import type {
 import { keepAudience } from "../src/chat-audiences.ts";
 import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
 import { chatAudiences, teamMembers, teams } from "../src/db/core/schema.ts";
-import brainGrantPinsRemoved from "../src/db/workspace/migrations/0040_brain_grant_pins_removed.sql";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { brainMemoryRead } from "../src/history-access.ts";
 import {
@@ -2131,53 +2130,29 @@ describe("what the recall before a question may reach", setUpTime, () => {
     }).toStrictEqual({ steered: 1, marker: false });
   });
 
-  it("keeps a run a chat pinned to the Brain grant before every agent read the Brain, once its migration ran, and the turn goes on", async () => {
-    /** A chat whose first turn recalled a fact, its run pinned to the old grant too. */
-    const pinnedTheOldWay = async () => {
-      const depot = word();
-      const fact = `Depot ${depot} opens at seven`;
-      const chat = await recallingChat(says("Noted."), says("And again."));
-      await added(fact, owner(chat.personId));
-      await chat.ask(`When does depot ${depot} open?`);
-      await runInDurableObject(chat.stub, (_object, state) => {
-        state.storage.sql.exec(
-          "INSERT INTO chat_run_sources (chat_id, run_id, source_id, withheld_at) SELECT DISTINCT chat_id, run_id, 'brain-grant', NULL FROM chat_run_sources WHERE chat_id = ?",
-          chat.chat.id
-        );
-      });
-      /** What the next turn's first request sent of the fact. */
-      const next = async () => {
-        const before = chat.provider.requests.length;
-        const answered = await outcome(chat.ask("Thanks!"));
-        const body = JSON.stringify(chat.provider.requests[before]?.body ?? "");
-        return {
-          answered,
-          fact: body.includes(fact),
-          withheld: body.includes(withheldResult),
-        };
-      };
-      return { ...chat, next };
-    };
-    const migrated = await pinnedTheOldWay();
-    await runInDurableObject(migrated.stub, (_object, state) => {
-      for (const statement of brainGrantPinsRemoved.split(
-        "--> statement-breakpoint"
-      )) {
-        state.storage.sql.exec(statement);
-      }
+  it("keeps a run an earlier release pinned to the Brain grant, and the turn goes on", async () => {
+    const depot = word();
+    const fact = `Depot ${depot} opens at seven`;
+    const chat = await recallingChat(says("Noted."), says("And again."));
+    await added(fact, owner(chat.personId));
+    await chat.ask(`When does depot ${depot} open?`);
+    // Its run pinned to the grant too, as a release before this one, which
+    // checked an agent's grant to read the Brain, wrote it.
+    await runInDurableObject(chat.stub, (_object, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO chat_run_sources (chat_id, run_id, source_id, withheld_at) SELECT DISTINCT chat_id, run_id, 'brain-grant', NULL FROM chat_run_sources WHERE chat_id = ?",
+        chat.chat.id
+      );
     });
-    // Each chat's next turn before the next chat: one fake provider answers.
-    const afterMigration = await migrated.next();
-    // The same pin left in place: a source no check names.
-    const left = await pinnedTheOldWay();
+    const before = chat.provider.requests.length;
+    const answered = await outcome(chat.ask("Thanks!"));
+    const body = JSON.stringify(chat.provider.requests[before]?.body ?? "");
 
     expect({
-      migrated: afterMigration,
-      left: await left.next(),
-    }).toStrictEqual({
-      migrated: { answered: "ok", fact: true, withheld: false },
-      left: { answered: "ok", fact: false, withheld: true },
-    });
+      answered,
+      fact: body.includes(fact),
+      withheld: body.includes(withheldResult),
+    }).toStrictEqual({ answered: "ok", fact: true, withheld: false });
   });
 
   it("withholds what it handed over once the person may no longer read it, and audits how much, never which or what it said", async () => {

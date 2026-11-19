@@ -641,6 +641,42 @@ describe("a chat's agent asking to start a workflow", setUpTime, () => {
     });
   });
 
+  it("runs a confirmed start to its end when its chat's run carries the Brain grant's pin an earlier release wrote", async () => {
+    const person = await signedInApi(idp, "user");
+    const { workflow, builder } = await workflowFor(person.userId);
+    const chats = await personalChatsOf(person.userId);
+    await grantStart(builder, chats.agent.agentId, workflow.id);
+    const { chatId, workflows } = await chatOf(chats, person);
+    // What the chat had read before its agent asked, under the grant an
+    // earlier release checked, which its start pins onto the run.
+    await runInDurableObject(chats.stub, (_object, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO chat_run_sources (chat_id, run_id, source_id, withheld_at) VALUES (?, 'run-1', 'brain-grant', NULL)",
+        chatId
+      );
+    });
+    const held = await workflows.start(workflow.id, { who: "Ada" }, "kept");
+    const listed = await person.api.heldStarts.list();
+    const shown = listed.find(({ id }) => id === held.held);
+    const confirmed = await person.api.heldStarts.confirm(
+      held.held,
+      shown?.argsHash ?? ""
+    );
+    const pinned = await env.DB.prepare(
+      "SELECT DISTINCT source_id AS source FROM run_chat_sources WHERE agent_id = ?"
+    )
+      .bind(chats.agent.agentId)
+      .all<{ source: string }>();
+
+    expect({
+      ended: await endOf(confirmed.run ?? confirmed.start),
+      pinned: pinned.results,
+    }).toStrictEqual({
+      ended: { status: "completed", code: null },
+      pinned: [{ source: "brain-grant" }],
+    });
+  });
+
   it("hands only how a confirmed start's run ended to its person's Brain, never what it returned, once its chat had read something", async () => {
     const person = await signedInApi(idp, "user");
     const { workflow, builder } = await workflowFor(person.userId);
