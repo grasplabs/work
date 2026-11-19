@@ -616,13 +616,6 @@ const readKind = async (
     .select({ readAt: directoryReads.readAt })
     .from(directoryReads)
     .where(eq(directoryReads.provider, kind.provider));
-  if (
-    status?.readAt !== null &&
-    status?.readAt !== undefined &&
-    at.getTime() - status.readAt.getTime() < dayMs
-  ) {
-    return;
-  }
   const connection = await connectionOf(env, kind.provider);
   const config = signInConfig(env);
   const tenant =
@@ -633,11 +626,19 @@ const readKind = async (
   if (connection === undefined) {
     // Read before, and its connection gone since (disconnected, or one of
     // another tenant only): a failure an admin mends by connecting it
-    // again (GRA-2171), not a silence that reads as fine. A directory
-    // never read before is none the company uses.
+    // again (GRA-2171), said from the next quarter hour on, not a silence
+    // that reads as fine until the next daily read. A directory never
+    // read before is none the company uses.
     if (status !== undefined) {
       await recordUnconnected(env, kind);
     }
+    return;
+  }
+  if (
+    status?.readAt !== null &&
+    status?.readAt !== undefined &&
+    at.getTime() - status.readAt.getTime() < dayMs
+  ) {
     return;
   }
   // Before the first page: a read that started later, whichever ends

@@ -1,4 +1,7 @@
-import { directorySuiteOf } from "@grasp-os/shared/directory";
+import {
+  directoryProviderSchema,
+  directorySuiteOf,
+} from "@grasp-os/shared/directory";
 import type { DirectoryProvider } from "@grasp-os/shared/directory";
 import { Button } from "@grasp-os/ui/components/button";
 import { Spinner } from "@grasp-os/ui/components/spinner";
@@ -9,19 +12,27 @@ import { z } from "zod";
 
 import { useCore } from "../use-core.ts";
 
-// Connecting the directory again after the onboarding (GRA-2171), beside
-// the read's failure in Settings › Members: the flow the company step
+// Connecting the directory again after the onboarding (GRA-2171), under
+// its read's status in Settings › Members: the flow the company step
 // starts, coming back here, where nothing reads or saves a roster. Core
 // and connect decide who may (the client's admins) and which account
-// (one of the organization's own tenant); a connection made with another
-// account replaces the one before it. The next quarter hour's read then
-// goes through it.
+// (one of the organization's own tenant): the same account renews the
+// connection in place; another replaces it once it has shown it reads.
+// The next daily read goes through it, a quarter of an hour away at most
+// while reads fail, a day while they don't.
 
-/** Where the sign-in comes back to: this page. */
-const membersPage = "/settings/members";
+/** Where the sign-in of `provider`'s directory comes back to: this page, naming it. */
+const membersPage = (provider: DirectoryProvider): string =>
+  `/settings/members?directory=${provider}`;
 
-/** Back from the sign-in: connect names the connection it made or mended. */
-const returnedSchema = z.object({ connection: z.string().min(1) });
+/**
+ * Back from the sign-in: the directory it was for, and the connection
+ * connect made or mended.
+ */
+const returnedSchema = z.object({
+  directory: directoryProviderSchema,
+  connection: z.string().min(1),
+});
 
 /** A button that connects `provider`'s directory again; once back, says what follows. */
 export const DirectoryReconnect = ({
@@ -35,11 +46,12 @@ export const DirectoryReconnect = ({
   const core = useCore();
   const search: unknown = useSearch({ strict: false });
   const [state, setState] = useState<"idle" | "starting" | "failed">("idle");
-  if (returnedSchema.safeParse(search).success) {
+  const returned = returnedSchema.safeParse(search);
+  if (returned.success && returned.data.directory === provider) {
     return (
       <p>
         <Trans>
-          {name} is connected again. Grasp reads it within a quarter of an hour.
+          {name} is connected again. Grasp reads it at its next daily read.
         </Trans>
       </p>
     );
@@ -51,7 +63,7 @@ export const DirectoryReconnect = ({
         async (session) =>
           await session.onboarding.connectDirectory(
             directorySuiteOf(provider),
-            membersPage
+            membersPage(provider)
           )
       );
       window.location.assign(url);

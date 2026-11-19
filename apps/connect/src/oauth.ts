@@ -18,7 +18,10 @@ import type {
   ConnectionSummary,
   OrganizationConnection,
 } from "@grasp-os/shared/connect";
-import { directoryProviderSchema } from "@grasp-os/shared/directory";
+import {
+  directoryErrors,
+  directoryProviderSchema,
+} from "@grasp-os/shared/directory";
 import { randomToken, sha256Hex, toBase64Url } from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
@@ -60,6 +63,7 @@ import {
   oauthFlows,
   pendingActions,
 } from "./db/schema.ts";
+import { readDirectory } from "./directory.ts";
 import { erasureBegan, ownerErased } from "./erased-people.ts";
 import { httpSummaries } from "./http-connections.ts";
 import { exchangeCode } from "./oauth-client.ts";
@@ -171,7 +175,8 @@ const reconnects = (
 /**
  * Whether finishing `flow` renews `held` in place: the organization's
  * directory connection, still active, of the account the flow came back
- * with, in the flow's own tenant (GRA-2171). Connecting the directory
+ * with (GRA-2171), which the provider vouched for in the flow's own
+ * tenant before this (`keepTokens`, `connection.wrong_account`). Connecting the directory
  * again with the account it has is how an admin mends a read, and how a
  * connection made before a scope was asked for (`Group.ReadBasic.All`)
  * gains it; it keeps its ID, so nothing that names it changes. Any other
@@ -180,15 +185,14 @@ const reconnects = (
  */
 const renewsInPlace = (
   held: ConnectionRow,
-  flow: Target,
+  flow: Pick<Target, "scope">,
   provider: ProviderConfig
 ): boolean =>
   held.status === "active" &&
   held.scope === "shared" &&
   flow.scope === "shared" &&
   provider.kind === "oauth" &&
-  directoryProviderSchema.safeParse(provider.id).success &&
-  (held.tenant ?? "").toLowerCase() === flow.tenant;
+  directoryProviderSchema.safeParse(provider.id).success;
 
 /** Only admins connect or disconnect what the organization shares. */
 const mayManage = (person: ConnectionPerson, scope: ConnectionScope): boolean =>
@@ -1008,27 +1012,79 @@ const stop = async (
   return { revoked, stopped };
 };
 
+/** Why a new directory connection's first read failed: `undefined` when it read. */
+type ProbeFailure =
+  | "connection.directory_unreadable"
+  | "connection.directory_unchecked";
+
+/**
+ * Reads the first page of people through `connectionId`, as the daily read
+ * does: whether its account can read the directory. A refusal (Google's
+ * answer to an account that isn't its admin, `directory.not_admin`;
+ * Entra's 401 or 403, `directory.inactive`, on tokens just issued) is
+ * `connection.directory_unreadable`; anything else that failed (throttled,
+ * a server error, no answer) is `connection.directory_unchecked`.
+ */
+const probeFailure = async (
+  env: Env,
+  connectionId: string
+): Promise<ProbeFailure | undefined> => {
+  try {
+    await readDirectory(env, { connectionId, cursor: null });
+    return undefined;
+  } catch (error) {
+    const code = directoryErrors.codeOf(error);
+    return code === "directory.not_admin" || code === "directory.inactive"
+      ? "connection.directory_unreadable"
+      : "connection.directory_unchecked";
+  }
+};
+
+/** The IDs of `provider`'s connections not disconnected, now. */
+const liveConnectionIds = async (
+  env: Env,
+  provider: string
+): Promise<Set<string>> => {
+  const rows = await drizzle(env.DB)
+    .select({ id: connections.id })
+    .from(connections)
+    .where(
+      and(
+        eq(connections.provider, provider),
+        ne(connections.status, "disconnected")
+      )
+    );
+  return new Set(rows.map(({ id }) => id));
+};
+
 /**
  * Stops the connections of a directory made before `connectionId`, just
- * connected (GRA-2171). The directory is read through one connection, and
- * an admin who connects it again with another account (an administrator's
+ * made (GRA-2171). The directory is read through one connection, and an
+ * admin who connects it again with another account (an administrator's
  * instead of one that can't read it) must not leave the one it replaces
  * holding live tokens that no screen shows and nobody can disconnect.
+ *
+ * Only once the new one has shown it reads: an admin who signs in with an
+ * account that can't (their own, not the directory's admin) would
+ * otherwise stop a working directory. A new connection whose first read
+ * is refused, or failed for the moment, is stopped itself (its own grant,
+ * another account's than any earlier connection's, is the one revoked),
+ * the earlier ones stay as they are, and the flow is refused with why.
+ *
  * Only earlier ones: of two admins connecting at once, the later
- * connection stands. A stop that fails is logged, not answered: the new
- * connection is made, and the next one made stops what this one left.
+ * connection stands. A stop of an earlier one that fails is logged, not
+ * answered: the new connection is made, and the next one made stops what
+ * this one left.
  */
 const replaceEarlierDirectories = async (
   env: Env,
   person: ConnectionPerson,
-  connectionId: string
+  connectionId: string,
+  refuse: Refuse
 ): Promise<void> => {
   const db = drizzle(env.DB);
   const made = await db
-    .select({
-      provider: connections.provider,
-      createdAt: connections.createdAt,
-    })
+    .select()
     .from(connections)
     .where(eq(connections.id, connectionId))
     .get();
@@ -1047,6 +1103,15 @@ const replaceEarlierDirectories = async (
       )
     )
     .all();
+  if (earlier.length === 0) {
+    return;
+  }
+  const failed = await probeFailure(env, connectionId);
+  if (failed !== undefined) {
+    await stop(env, person, made);
+    await refuse(failed, { connectionId });
+    throw connectionErrors.create(failed);
+  }
   for (const connection of earlier) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- one stop at a time, each with its revoke
@@ -1125,6 +1190,12 @@ const finishFlow = async (
     throw connectionErrors.create("connection.provider_refused");
   }
 
+  // A directory's connections before: one this flow makes new replaces
+  // the earlier ones; one it reconnects or renews in place replaces none.
+  const directory = directoryProviderSchema.safeParse(provider.id).success;
+  const before = directory
+    ? await liveConnectionIds(env, provider.id)
+    : new Set<string>();
   const connectionId = await keepTokens(
     env,
     setUp,
@@ -1133,8 +1204,8 @@ const finishFlow = async (
     tokens,
     refuse
   );
-  if (directoryProviderSchema.safeParse(provider.id).success) {
-    await replaceEarlierDirectories(env, person, connectionId);
+  if (directory && !before.has(connectionId)) {
+    await replaceEarlierDirectories(env, person, connectionId, refuse);
   }
   return { connectionId, returnTo: flow.returnTo };
 };

@@ -878,8 +878,8 @@ msgid "{name} in {appName}"
 msgstr "{name} in {appName}"
 
 #: src/settings/directory-reconnect.tsx
-msgid "{name} is connected again. Grasp reads it within a quarter of an hour."
-msgstr "{name} ist wieder verbunden. Grasp liest es innerhalb einer Viertelstunde."
+msgid "{name} is connected again. Grasp reads it at its next daily read."
+msgstr "{name} ist wieder verbunden. Grasp liest es bei seinem nächsten täglichen Abgleich."
 
 #: src/onboarding/connect-steps.tsx
 msgid "{name} is connected. I’ll only read what you share with me."

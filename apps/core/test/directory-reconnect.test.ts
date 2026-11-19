@@ -5,11 +5,15 @@ import { consentCode } from "./connect-providers.ts";
 import {
   connectedGoogleDirectory,
   consentDirectory,
+  directoryFailsAt,
   directoryGrants,
   directoryGroup,
   directoryGroupsHold,
   directoryHolds,
   directoryUser as user,
+  googleDirectoryHolds,
+  googleDirectoryRefuses,
+  googleDirectoryUser,
 } from "./directory.ts";
 import { mockIdp } from "./idp.ts";
 import { runClockTask } from "./maintenance.ts";
@@ -70,6 +74,16 @@ const connectionOf = async (subject: string) => {
     throw new Error(`No directory connection of ${subject}`);
   }
   return row;
+};
+
+/** The Google directory's live connections, by ID. */
+const liveGoogle = async (): Promise<string[]> => {
+  const { results } = await connectDb()
+    .prepare(
+      "SELECT id FROM connections WHERE provider = 'google-directory' AND status = 'active' ORDER BY id"
+    )
+    .all<{ id: string }>();
+  return results.map(({ id }) => id);
 };
 
 /** An Entra account's subject, new to every test. */
@@ -212,12 +226,12 @@ describe("connecting the directory again from Settings", () => {
     const admin = await signedInApi(idp, "admin");
     const before = account();
     await consentDirectory(admin, { returnTo: settings, subject: before });
+    await directoryHolds([user()]);
     const after = account();
     const { back } = await consentDirectory(admin, {
       returnTo: settings,
       subject: after,
     });
-    await directoryHolds([user()]);
     await readAt(nextDay());
     const replacing = await connectionOf(after);
     const replaced = await connectionOf(before);
@@ -247,16 +261,16 @@ describe("connecting the directory again from Settings", () => {
     await directoryHolds([user()]);
     await readAt(nextDay());
     const { id } = await connectionOf(subject);
-    // As Integrations disconnects it.
+    // As Integrations disconnects it; the clock's next quarter hour, a
+    // day before the next read is due, says so.
     await admin.api.connections.disconnect(id);
-    const at = nextDay();
-    await readAt(at);
+    await readAt(new Date(Date.now() + 15 * 60 * 1000));
     const unconnected = await read();
     const { back } = await consentDirectory(admin, {
       returnTo: settings,
       subject,
     });
-    await readAt(new Date(at.getTime() + 15 * 60 * 1000));
+    await readAt(nextDay());
     const mended = await read();
 
     expect({
@@ -389,6 +403,94 @@ describe("connecting the directory again from Settings", () => {
       google: google.back.searchParams.has("connection"),
       microsoft: status,
     }).toStrictEqual({ google: true, microsoft: "active" });
+  });
+
+  it("keeps a working Google directory when an admin signs in with an account that can't read it, or Google throttles the check, and says why", async () => {
+    await googleDirectoryHolds([googleDirectoryUser()]);
+    await connectedGoogleDirectory(idp);
+    const working = await liveGoogle();
+    const outcomes: Record<string, ReturnType<typeof landed>> = {};
+    for (const [why, status] of [
+      ["notAdmin", 403],
+      ["throttled", 429],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one sign-in at a time
+      await googleDirectoryRefuses(status);
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one sign-in at a time
+        const { back } = await connectedGoogleDirectory(idp);
+        outcomes[why] = landed(back);
+      } finally {
+        // oxlint-disable-next-line no-await-in-loop -- one sign-in at a time
+        await googleDirectoryHolds([googleDirectoryUser()]);
+      }
+    }
+    await runClockTask("directory.people", {}, nextDay());
+    const google = await env.DB.prepare(
+      "SELECT connection_id AS connectionId, failure FROM directory_reads WHERE provider = 'google-directory'"
+    ).first<{ connectionId: string; failure: string | null }>();
+
+    expect({
+      outcomes,
+      live: await liveGoogle(),
+      read: google,
+    }).toStrictEqual({
+      outcomes: {
+        notAdmin: {
+          page: "/integrations",
+          connection: null,
+          error: "connection.directory_unreadable",
+        },
+        throttled: {
+          page: "/integrations",
+          connection: null,
+          error: "connection.directory_unchecked",
+        },
+      },
+      live: working,
+      read: { connectionId: working[0], failure: null },
+    });
+  });
+
+  it("renews a connection in place without checking it against older ones, even while the directory fails to answer", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const renewed = account();
+    await consentDirectory(admin, { returnTo: settings, subject: renewed });
+    // An older connection still live beside it: this one made "later",
+    // so the one connected next neither replaces it nor is replaced.
+    await connectDb()
+      .prepare(
+        "UPDATE connections SET created_at = created_at + 3600000 WHERE provider = 'microsoft-directory' AND account_id = ?"
+      )
+      .bind(renewed)
+      .run();
+    const older = account();
+    await consentDirectory(admin, { returnTo: settings, subject: older });
+    const { id } = await connectionOf(renewed);
+    await directoryFailsAt(0);
+    let again: URL;
+    try {
+      ({ back: again } = await consentDirectory(admin, {
+        returnTo: settings,
+        subject: renewed,
+      }));
+    } finally {
+      await directoryHolds([user()]);
+    }
+    const [{ status }, beside] = [
+      await connectionOf(renewed),
+      await connectionOf(older),
+    ];
+
+    expect({
+      landed: landed(again),
+      status,
+      older: beside.status,
+    }).toStrictEqual({
+      landed: { page: settings, connection: id, error: null },
+      status: "active",
+      older: "active",
+    });
   });
 
   // Last: it leaves a connection made "later" than any after it.
