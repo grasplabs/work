@@ -176,9 +176,9 @@ describe("the Integrations overview", () => {
       ...host.querySelectorAll<HTMLElement>('ul[aria-label="Apps"] li'),
     ];
     expect(tiles.map((tile) => heard(tile))).toStrictEqual([
-      "Microsoft 365chat",
+      "Microsoft 3653 tools",
       "Google WorkspaceSign in again",
-      "Acme CRMchat",
+      "Acme CRM3 tools",
     ]);
     await expect(appAfter(router, tiles[2]?.querySelector("a"))).resolves.toBe(
       "native:acme-crm"

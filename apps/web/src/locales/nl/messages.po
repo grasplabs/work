@@ -468,6 +468,10 @@ msgstr "{count, plural, one {Terug naar de vraag} other {Terug naar de # vragen}
 msgid "{count, plural, one {Grasp reaches # app} other {Grasp reaches # apps}}"
 msgstr "{count, plural, one {Grasp bereikt # app} other {Grasp bereikt # apps}}"
 
+#: src/connections/integration-tile.tsx
+msgid "{count, plural, one {In # workflow} other {In # workflows}}"
+msgstr "{count, plural, one {In # workflow} other {In # workflows}}"
+
 #: src/apps/publish.tsx
 msgid "{count, plural, one {It can't be published yet: # problem} other {It can't be published yet: # problems}}"
 msgstr "{count, plural, one {De app kan nog niet worden gepubliceerd: # probleem} other {De app kan nog niet worden gepubliceerd: # problemen}}"
@@ -500,7 +504,6 @@ msgstr "{count, plural, one {Dit is geen e-mailadres:} other {Dit zijn geen e-ma
 msgid "{count, plural, one {Took # step} other {Took # steps}}"
 msgstr "{count, plural, one {# stap gezet} other {# stappen gezet}}"
 
-#: src/connections/integration-tile.tsx
 #: src/connections/workflows-using.tsx
 msgid "{count, plural, one {Used by # workflow} other {Used by # workflows}}"
 msgstr "{count, plural, one {Gebruikt door # workflow} other {Gebruikt door # workflows}}"
@@ -1480,6 +1483,10 @@ msgstr "{title} mislukt"
 #: src/inbox/items.ts
 msgid "{title} on {connection}"
 msgstr "{title} op {connection}"
+
+#: src/connections/integration-tile.tsx
+msgid "{toolCount, plural, one {# tool} other {# tools}}"
+msgstr "{toolCount, plural, one {# tool} other {# tools}}"
 
 #: src/settings/ai-spend.tsx
 msgid "{top} spent the most this month."
@@ -4772,12 +4779,10 @@ msgid "Connected by"
 msgstr "Gekoppeld door"
 
 #: src/connections/integration-item.tsx
-#: src/connections/integration-tile.tsx
 msgid "Connected for everyone"
 msgstr "Verbonden voor iedereen"
 
 #: src/connections/integration-item.tsx
-#: src/connections/integration-tile.tsx
 msgid "Connected for you"
 msgstr "Verbonden voor jou"
 
@@ -6939,6 +6944,7 @@ msgstr "Zeg voor elke vergadering vandaag wie er komt, wat er het laatst met hen
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
+#: src/connections/integration-tile.tsx
 msgid "For everyone"
 msgstr "Voor iedereen"
 
@@ -10294,10 +10300,6 @@ msgstr "Nog geen workflow staat open om te vragen."
 msgid "No workflow uses {app} yet."
 msgstr "Nog geen workflow gebruikt {app}."
 
-#: src/connections/integration-tile.tsx
-msgid "No workflow uses it yet"
-msgstr "Nog door geen workflow gebruikt"
-
 #: src/brain/brain.ts
 msgid "No workflow yet"
 msgstr "Nog geen workflow"
@@ -10701,6 +10703,7 @@ msgstr "Niet hetzelfde bij {team}"
 msgid "Not used in the last 30 days"
 msgstr "Niet gebruikt in de afgelopen 30 dagen"
 
+#: src/connections/integration-tile.tsx
 #: src/settings/ai-providers.tsx
 msgid "Not used yet"
 msgstr "Nog niet gebruikt"
@@ -11230,6 +11233,7 @@ msgid "Only when asked"
 msgstr "Alleen als het gevraagd wordt"
 
 #: src/connections/integration-inspector.tsx
+#: src/connections/integration-tile.tsx
 msgid "Only you"
 msgstr "Alleen jij"
 

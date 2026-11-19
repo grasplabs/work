@@ -108,7 +108,7 @@ const styles = stylex.create({
     gap: grasp.space8,
     minWidth: 0,
   },
-  kind: { display: "flex", flexDirection: "column", gap: grasp.space3 },
+  kind: { display: "flex", flexDirection: "column", gap: grasp.space4 },
   more: { alignSelf: "start" },
   mark: { display: "block", height: "1px" },
 });

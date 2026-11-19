@@ -468,6 +468,10 @@ msgstr "{count, plural, one {Back to the question} other {Back to the # question
 msgid "{count, plural, one {Grasp reaches # app} other {Grasp reaches # apps}}"
 msgstr "{count, plural, one {Grasp reaches # app} other {Grasp reaches # apps}}"
 
+#: src/connections/integration-tile.tsx
+msgid "{count, plural, one {In # workflow} other {In # workflows}}"
+msgstr "{count, plural, one {In # workflow} other {In # workflows}}"
+
 #: src/apps/publish.tsx
 msgid "{count, plural, one {It can't be published yet: # problem} other {It can't be published yet: # problems}}"
 msgstr "{count, plural, one {It can't be published yet: # problem} other {It can't be published yet: # problems}}"
@@ -500,7 +504,6 @@ msgstr "{count, plural, one {This is not an email address:} other {These are not
 msgid "{count, plural, one {Took # step} other {Took # steps}}"
 msgstr "{count, plural, one {Took # step} other {Took # steps}}"
 
-#: src/connections/integration-tile.tsx
 #: src/connections/workflows-using.tsx
 msgid "{count, plural, one {Used by # workflow} other {Used by # workflows}}"
 msgstr "{count, plural, one {Used by # workflow} other {Used by # workflows}}"
@@ -1480,6 +1483,10 @@ msgstr "{title} failed"
 #: src/inbox/items.ts
 msgid "{title} on {connection}"
 msgstr "{title} on {connection}"
+
+#: src/connections/integration-tile.tsx
+msgid "{toolCount, plural, one {# tool} other {# tools}}"
+msgstr "{toolCount, plural, one {# tool} other {# tools}}"
 
 #: src/settings/ai-spend.tsx
 msgid "{top} spent the most this month."
@@ -4772,12 +4779,10 @@ msgid "Connected by"
 msgstr "Connected by"
 
 #: src/connections/integration-item.tsx
-#: src/connections/integration-tile.tsx
 msgid "Connected for everyone"
 msgstr "Connected for everyone"
 
 #: src/connections/integration-item.tsx
-#: src/connections/integration-tile.tsx
 msgid "Connected for you"
 msgstr "Connected for you"
 
@@ -6939,6 +6944,7 @@ msgstr "For each meeting today, say who is coming, what was last agreed with the
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
+#: src/connections/integration-tile.tsx
 msgid "For everyone"
 msgstr "For everyone"
 
@@ -10294,10 +10300,6 @@ msgstr "No workflow is open to asking yet."
 msgid "No workflow uses {app} yet."
 msgstr "No workflow uses {app} yet."
 
-#: src/connections/integration-tile.tsx
-msgid "No workflow uses it yet"
-msgstr "No workflow uses it yet"
-
 #: src/brain/brain.ts
 msgid "No workflow yet"
 msgstr "No workflow yet"
@@ -10701,6 +10703,7 @@ msgstr "Not the same in {team}"
 msgid "Not used in the last 30 days"
 msgstr "Not used in the last 30 days"
 
+#: src/connections/integration-tile.tsx
 #: src/settings/ai-providers.tsx
 msgid "Not used yet"
 msgstr "Not used yet"
@@ -11230,6 +11233,7 @@ msgid "Only when asked"
 msgstr "Only when asked"
 
 #: src/connections/integration-inspector.tsx
+#: src/connections/integration-tile.tsx
 msgid "Only you"
 msgstr "Only you"
 

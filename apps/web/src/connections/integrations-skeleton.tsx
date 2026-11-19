@@ -22,11 +22,11 @@ const styles = stylex.create({
     flexDirection: "column",
     gap: grasp.space8,
   },
-  run: { display: "flex", flexDirection: "column", gap: grasp.space3 },
+  run: { display: "flex", flexDirection: "column", gap: grasp.space4 },
   header: { height: "10rem" },
   heading: { width: "8rem" },
-  // As tall as a loaded tile: Item `sm`, its mark and two lines.
-  tile: { height: "3.75rem" },
+  // As tall as a loaded tile, which the grid sets.
+  tile: { height: "100%" },
 });
 
 /** How many tiles each run shows while waiting. */
