@@ -487,8 +487,8 @@ const runs: ErasureStep = {
  * list are found by the account their interview belongs to (GRA-1790),
  * whatever the list says now, and by the address that was theirs, through
  * its keyed hash; each stays, the company's (Nick's D5), without the
- * address, its link closed for good (`eraseEntries`). Every address of
- * theirs stays out of the list until an admin releases it, which waits
+ * address, its link closed for good (`eraseEntries`). Those addresses of
+ * theirs stay out of the list until an admin releases them, which waits
  * for this area (`releaseAddress`, GRA-2189). Once an admin released the
  * address, or under an older key, it is found by address no more.
  */
@@ -1210,7 +1210,7 @@ const releaseOnTheList = async (
   if (admin === undefined) {
     throw roleErrors.create("role.forbidden");
   }
-  return await onboardingStore(env).releaseAddress(hash, null, actorOf(by));
+  return await onboardingStore(env).releaseAddress(hash, actorOf(by));
 };
 
 /**
@@ -1286,7 +1286,7 @@ export const releaseAddress = async (
       ? roleErrors.create("role.forbidden")
       : memberErrors.create("member.release_erasing");
   }
-  await onboardingStore(env).releaseAddress(hash, erased.userId, null);
+  await onboardingStore(env).releaseAddress(hash, null);
   return { released: true };
 };
 

@@ -580,7 +580,8 @@ export const referrals = sqliteTable("referrals", {
 });
 
 /**
- * Every address of someone core erased (person-erasure.ts), as the keyed
+ * The addresses of someone core erased (person-erasure.ts) that the store
+ * still had when the erasure ran (GRA-2194 for one it no longer had), as the keyed
  * hash core keeps of one (erased-people.ts `emailHashOf`), never the
  * address (GRA-2189): what the store's own transactions decide by, which
  * can't wait on core's database. A save writes such an address blank

@@ -131,7 +131,7 @@ import { z } from "zod";
 import { drainObjectOutbox } from "../audit-outbox.ts";
 import { signInConfig } from "../auth/config.ts";
 import { handOverProducers } from "../brain-hand-overs.ts";
-import { organizations } from "../db/core/schema.ts";
+import { organizations, personErasures } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 import { migrateOnWake } from "../db/migrate.ts";
 import migrations from "../db/onboarding/migrations/migrations.js";
@@ -5570,8 +5570,9 @@ export class Onboarding extends DurableObject<Env> {
    * list's addresses, in one transaction (GRA-2111): their entries, found
    * by the account their link belongs to (GRA-1790) and, with `hash`, by
    * every address that hashes to it (erased-people.ts `emailHashOf`),
-   * whatever the list has since. Every address of theirs (`hash`, and
-   * those of the entry and link their account holds) goes from the store:
+   * whatever the list has since. Their addresses the store still has
+   * (`hash`, and those of the entry and link their account holds; not one
+   * on an entry taken off the list before, GRA-2194) go from the store:
    * from their entries, from mail to it and from any link's record of
    * having gone to it. Each entry stays, the company's (D5), without its
    * address; its link is closed for good (`links.erased_at`, a closed one
@@ -5779,39 +5780,32 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Lets the address that hashes to `hash` onto the list again, as core
    * asks once an admin released it (person-erasure.ts `releaseAddress`):
-   * kept as released for `userId`, the erased person it was kept out for,
-   * when core knows them, so an attempt of their erasure still under way
-   * writes nothing by it (`#keepOut`). Recorded as `by`'s when given: for
-   * an address only the store kept out, whose release core's own record
+   * kept as released, so an attempt of the erasure it was kept out for
+   * still under way writes nothing by it (`#keepOut`). A release waits for
+   * that erasure's step, which keeps the hash, so the row is there for
+   * every address core releases. Recorded as `by`'s when given: for an
+   * address only the store kept out, whose release core's own record
    * doesn't cover. Entries an erasure closed stay as they are until an
    * admin takes them off the list. Whether the store kept it out.
    */
-  releaseAddress(
-    hash: string,
-    userId: string | null,
-    by: AuditActor | null
-  ): boolean {
+  releaseAddress(hash: string, by: AuditActor | null): boolean {
     const held = this.ctx.storage.transactionSync(() => {
-      const [row] = this.#db
-        .select()
-        .from(erasedAddresses)
-        .where(eq(erasedAddresses.hash, hash))
-        .all();
-      const keptOut = row !== undefined && !row.released;
-      if (row !== undefined || userId !== null) {
+      const released =
         this.#db
-          .insert(erasedAddresses)
-          .values({ hash, userId: row?.userId ?? userId ?? "", released: true })
-          .onConflictDoUpdate({
-            target: erasedAddresses.hash,
-            set: { released: true },
-          })
-          .run();
-      }
-      if (keptOut && by !== null) {
+          .update(erasedAddresses)
+          .set({ released: true })
+          .where(
+            and(
+              eq(erasedAddresses.hash, hash),
+              eq(erasedAddresses.released, false)
+            )
+          )
+          .returning({ hash: erasedAddresses.hash })
+          .all().length > 0;
+      if (released && by !== null) {
         this.#changed(by, "onboarding.address.released", {});
       }
-      return keptOut;
+      return released;
     });
     if (held && by !== null) {
       this.#deliverAudit();
@@ -9385,15 +9379,54 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * Whether core erased `person`: it recorded the erasure of the address
-   * their entry has (erased-people.ts), or its interview area took the
-   * address off and closed their link already (`eraseEntries`), read
-   * last, after the wait.
+   * their entry has (erased-people.ts), or of the account their link
+   * belongs to, whatever address the entry has (`#linkedToErased`), or its
+   * interview area took the address off and closed their link already
+   * (`eraseEntries`), read last, after the wait.
    */
   async #erasedNow(person: string): Promise<boolean> {
     const email = this.#roster()?.people.find(({ id }) => id === person)?.email;
-    const recorded =
+    const byAddress =
       email !== undefined && (await isErasedEmail(this.env, email));
-    return recorded || this.#erased(person);
+    const byAccount = await this.#linkedToErased([person]);
+    return byAddress || byAccount.has(person) || this.#erased(person);
+  }
+
+  /**
+   * Which of `persons` have a link that belongs to an account core
+   * recorded an erasure of (`person_erasures`, GRA-1790): found so
+   * whatever address their entry has, before the erasure's step for the
+   * list ran, and after it, as the record keeps the account's ID after a
+   * release too. One read of core's database.
+   */
+  async #linkedToErased(persons: readonly string[]): Promise<Set<string>> {
+    const wanted = new Set(persons);
+    const held = this.#db
+      .select({ person: links.person, account: links.account })
+      .from(links)
+      .where(isNotNull(links.account))
+      .all()
+      .flatMap(({ person, account }) =>
+        account !== null && wanted.has(person) ? [{ person, account }] : []
+      );
+    if (held.length === 0) {
+      return new Set();
+    }
+    const rows = await drizzleD1(this.env.DB)
+      .select({ userId: personErasures.userId })
+      .from(personErasures)
+      .where(
+        inList(
+          personErasures.userId,
+          held.map(({ account }) => account)
+        )
+      );
+    const erased = new Set(rows.map(({ userId }) => userId));
+    return new Set(
+      held.flatMap(({ person, account }) =>
+        erased.has(account) ? [person] : []
+      )
+    );
   }
 
   async #referOne(personId: string, at: string): Promise<void> {
@@ -9419,12 +9452,17 @@ export class Onboarding extends DurableObject<Env> {
     const teamNames = new Map(roster.teams.map(({ id, name }) => [id, name]));
     // Someone erased stays on the list, the company's entry (D5), but is
     // never named again: found by the address that was theirs, as their
-    // erasure keeps it (erased-people.ts), until an admin releases it; and,
-    // once their erasure took the address off their entry, by its link,
-    // closed for good (`eraseEntries`). Both before the model is asked.
+    // erasure keeps it (erased-people.ts), until an admin releases it, and
+    // by the account their link belongs to, whatever address the entry has
+    // (`#linkedToErased`); and, once their erasure took the address off
+    // their entry, by its link, closed for good (`eraseEntries`). Core's
+    // records first; all before the model is asked.
     const erased = await erasedEmailsAmong(
       this.env,
       roster.people.map(({ email }) => email)
+    );
+    const linkedToErased = await this.#linkedToErased(
+      roster.people.map(({ id }) => id)
     );
     const closed = this.#erasedPeople();
     const found = await referralOf(
@@ -9438,6 +9476,7 @@ export class Onboarding extends DurableObject<Env> {
               id !== personId &&
               !away &&
               !erased.has(normalizedEmail(email)) &&
+              !linkedToErased.has(id) &&
               !closed.has(id)
           )
           .map(({ id, name, title, team }) => ({
