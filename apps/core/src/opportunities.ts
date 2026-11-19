@@ -2,6 +2,7 @@ import { actorOf } from "@grasp-os/shared/audit";
 import type { WorkflowVersionRecord } from "@grasp-os/shared/brain-records";
 import type { CatalogEntry } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { teamNameKey } from "@grasp-os/shared/onboarding";
 import { opportunityForms } from "@grasp-os/shared/opportunities";
 import type {
   Opportunity,
@@ -68,7 +69,9 @@ import { teamsWithMembers } from "./organization-teams.ts";
 // there; nothing of them is kept here either, so one that falls in the
 // Brain is gone from the next list. A seen routine is the same as a
 // described one when they are of the same team, by its id (the staff list
-// names the members' teams, GRA-2055, so a rename splits nothing) and the
+// names the members' teams, GRA-2055, so a rename splits nothing), or,
+// for a staff-list team no members' team has the id of (one saved before
+// that), by its name where one members' team alone has it, and the
 // described one names a system the seen one is in: its text names the
 // system whole, or a system its proposal found in that text is the
 // catalog's (`namesWhole`, the same test as for what is connected). Then
@@ -359,6 +362,8 @@ interface Described {
 /** A routine seen in a team, with its systems as the catalog names them. */
 interface Seen {
   routine: SeenInTeam;
+  /** Its team's name in Settings › Members, compared form (`teamNameKey`). */
+  teamKey: string;
   /** Each step's system, in step order. */
   systems: SeenSystem[];
 }
@@ -424,20 +429,20 @@ const comparisonOf = (
 
 /**
  * Pairs each seen routine with the described one it is (see the top): of
- * its team, describing the most of its systems, at least one;
+ * its team (`sameTeam`), describing the most of its systems, at least one;
  * each described one with one seen one at most, the first that matches it
  * best.
  */
 const pairsOf = (
   described: readonly Described[],
-  seen: readonly Seen[]
+  seen: readonly Seen[],
+  sameTeam: (listTeam: string, seenOne: Seen) => boolean
 ): Map<StandingDrawing, Seen> => {
   const pairs = new Map<StandingDrawing, Seen>();
   for (const each of seen) {
     const [best] = described
       .filter(
-        ({ drawing }) =>
-          !pairs.has(drawing) && drawing.team === each.routine.team
+        ({ drawing }) => !pairs.has(drawing) && sameTeam(drawing.team, each)
       )
       .map((one) => ({
         drawing: one.drawing,
@@ -634,19 +639,41 @@ export const listOpportunities = async (
     teamsWithMembers(env),
   ]);
   // A team deleted since shows nothing it was seen doing.
-  const teamIds = new Set(memberTeams.map(({ id }) => id));
-  const seen = observed.flatMap((routine): Seen[] =>
-    teamIds.has(routine.team)
-      ? [
+  const teamKeys = new Map(
+    memberTeams.map(({ id, name }) => [id, teamNameKey(name)])
+  );
+  const seen = observed.flatMap((routine): Seen[] => {
+    const teamKey = teamKeys.get(routine.team);
+    return teamKey === undefined
+      ? []
+      : [
           {
             routine,
+            teamKey,
             systems: routine.steps.map(({ system }) =>
               systemOf(catalog, system)
             ),
           },
-        ]
-      : []
+        ];
+  });
+  // A staff-list team by its id; one no members' team has the id of (saved
+  // before the list named the members' teams) by its name, where one
+  // members' team alone has that name.
+  const roster = await store.companyTeams();
+  const listKeys = new Map(
+    (roster?.teams ?? []).map(({ id, name }) => [id, teamNameKey(name)])
   );
+  const named = new Map<string, number>();
+  for (const key of teamKeys.values()) {
+    named.set(key, (named.get(key) ?? 0) + 1);
+  }
+  const sameTeam = (listTeam: string, seenOne: Seen): boolean => {
+    if (teamKeys.has(listTeam)) {
+      return listTeam === seenOne.routine.team;
+    }
+    const key = listKeys.get(listTeam);
+    return key === seenOne.teamKey && named.get(key) === 1;
+  };
   const described = drawings.map((drawing) => ({
     drawing,
     text: drawingText(drawing),
@@ -654,7 +681,7 @@ export const listOpportunities = async (
       kept.proposals.get(keyOf(drawing.workflow, drawing.source))?.systems ??
       null,
   }));
-  const pairs = pairsOf(described, seen);
+  const pairs = pairsOf(described, seen, sameTeam);
   const paired = new Set(pairs.values());
   const opportunities: Opportunity[] = [];
   for (const each of seen.filter((one) => !paired.has(one))) {

@@ -21,10 +21,11 @@ export const useTeamChange = (refresh: () => Promise<void>) => {
     if (error.status === 403) {
       return t`Only admins can change teams.`;
     }
-    // A team on the onboarding's staff list is deleted only once it is
-    // off it (core's auth.ts, GRA-2055).
+    // A team on the onboarding's staff list, as saved or as last
+    // confirmed, is deleted only once it is off both (core's auth.ts,
+    // GRA-2055): taken off the list, and the list confirmed.
     if (error.status === 409) {
-      return t`This team is on the staff list. Take it off there first.`;
+      return t`This team is on the staff list. Take it off there and confirm the list first.`;
     }
     return undefined;
   };

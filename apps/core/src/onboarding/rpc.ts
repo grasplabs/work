@@ -1,6 +1,5 @@
 import { dayOf } from "@grasp-os/shared/admin/org-record";
 import { actorOf } from "@grasp-os/shared/audit";
-import type { AuditActor } from "@grasp-os/shared/audit";
 import type {
   DirectoryPeople,
   DirectorySuite,
@@ -20,7 +19,6 @@ import type {
   HrPlatform,
   OnboardingHr,
 } from "@grasp-os/shared/hr";
-import { log } from "@grasp-os/shared/log";
 import {
   linksTakenSchema,
   onboardingErrors,
@@ -66,11 +64,7 @@ import { z } from "zod";
 import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
-import {
-  intoMembersTeams,
-  placedVersion,
-  placePrimaries,
-} from "../staff-list-teams.ts";
+import { intoMembersTeams, syncTeams } from "../staff-list-teams.ts";
 import {
   inProgramme,
   nextReport,
@@ -181,27 +175,6 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
     return await this.#keepRoster(roster, true);
   }
 
-  /**
-   * Places the confirmed list (`placePrimaries`): whether the version the
-   * store holds now, or a newer one, is placed after. A placing that
-   * failed is logged by its name alone, as a failed query's message holds
-   * its addresses.
-   */
-  async #placedNow(
-    store: ReturnType<typeof onboardingStore>,
-    by: AuditActor
-  ): Promise<boolean> {
-    const version = await store.confirmedVersion();
-    try {
-      await placePrimaries(this.#env, by);
-    } catch (error) {
-      log.error("onboarding.placing_failed", {
-        error: error instanceof Error ? error.name : "unknown",
-      });
-    }
-    return (await placedVersion(this.#env)) >= version;
-  }
-
   async #keepRoster(
     roster: RosterInput,
     confirmed: boolean
@@ -216,9 +189,9 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
       const by = actorOf(person);
       // The list names the members' teams (GRA-2055): each of its teams
       // keeps one id from the first save that names it (a members' team's,
-      // one the store holds, or a new one core makes); on a confirm its
-      // placing makes and names its members' team under it, in order with
-      // every other confirm's, before people join it.
+      // one the store holds, or a new one core makes); a confirm makes and
+      // names its members' teams under those ids, in order with every other
+      // confirm and rename (`syncTeams`). A confirm changes no membership.
       const store = onboardingStore(this.#env);
       const { roster: named, minted } = await intoMembersTeams(
         this.#env,
@@ -226,17 +199,12 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
         { held: async () => await store.heldTeams() }
       );
       const view = await store.saveRoster(named, by, { confirmed, minted });
-      // Done only once this list, or a newer one, is placed; else it is
-      // saved, and the clock places it (`placeUnplaced`). Placed first,
-      // right after the save, so the clock's minute has the least time to
-      // find it unplaced; nothing below needs it before.
-      const placed = confirmed ? await this.#placedNow(store, by) : true;
+      if (confirmed) {
+        await syncTeams(this.#env, by);
+      }
       // A team the save took under seven loses its claims in the Brain now,
       // not only by core's clock (onboarding/new-brain.ts).
       await eraseOwedClaimsQuietly(this.#env);
-      if (!placed) {
-        throw onboardingErrors.create("onboarding.teams_follow");
-      }
       return view;
     });
   }

@@ -104,7 +104,7 @@ export const readerGroupRequestsPerTick = 1000;
 export const readerGroupQueriesPerTick = 500;
 
 /** `part` as two names of it are compared: Unicode NFC, lowercase. */
-export const comparable = (part: string): string =>
+const comparable = (part: string): string =>
   part.normalize("NFC").toLowerCase();
 
 /** What the key of `source_reader_tokens` is derived for, and nothing else. */
@@ -298,7 +298,7 @@ export const signInAccountsRead = (db: DrizzleD1Database, userId: string) =>
     );
 
 /** A sign-in account as `signInAccountsRead` reads it. */
-export type SignIn = Awaited<ReturnType<typeof signInAccountsRead>>[number];
+type SignIn = Awaited<ReturnType<typeof signInAccountsRead>>[number];
 
 /** An account someone proved is theirs: the system, its tenant and what lists name it by. */
 interface Account {
@@ -321,69 +321,11 @@ const inDomains = (address: string, domains: readonly string[]): boolean => {
 };
 
 /**
- * The accounts a person's sign-ins (`signIns`) proved are theirs: who each
- * provably is, in the tenant the deployment's sign-in is pinned to
- * (auth/config.ts), only while the config names it. Microsoft's by object
- * ID; Google's by the address its ID token marked verified, only in one of
- * the company's sign-in domains, with when that sign-in confirmed it
- * (`provedAt`). Entra's address is never proved. The one proof of who
- * someone is by their sign-in: for reading here only while recent
- * (`readingAccountsOf`), and lasting for the staff list's places
- * (staff-list-teams.ts `provedMembersOf`).
- */
-export const provedSignInAccounts = (
-  env: Pick<Env, "SIGN_IN">,
-  signIns: readonly SignIn[]
-): (Account & { provedAt: number | null })[] => {
-  const config = signInConfig(env);
-  if (config === undefined) {
-    return [];
-  }
-  return signIns.flatMap(
-    ({ providerId, oid, verifiedEmail, verifiedEmailAt, verifiedTenant }) => {
-      // A tenant the config moved to is proved by a sign-in through it.
-      const proved = (tenant: string): boolean =>
-        verifiedTenant !== null &&
-        comparable(verifiedTenant) === comparable(tenant);
-      if (
-        providerId === providerIds.entra &&
-        config.entra &&
-        oid !== null &&
-        proved(config.entra.tenantId)
-      ) {
-        return [
-          {
-            provider: "microsoft",
-            tenant: config.entra.tenantId,
-            account: oid,
-            provedAt: null,
-          },
-        ];
-      }
-      return providerId === providerIds.google &&
-        config.google &&
-        verifiedEmail !== null &&
-        inDomains(verifiedEmail, config.domains) &&
-        proved(config.google.hostedDomain)
-        ? [
-            {
-              provider: "google",
-              tenant: config.google.hostedDomain,
-              account: verifiedEmail,
-              provedAt: verifiedEmailAt?.getTime() ?? null,
-            },
-          ]
-        : [];
-    }
-  );
-};
-
-/**
  * The accounts a person proved are theirs and that count for reading now:
- * their sign-in accounts (`provedSignInAccounts`), and the suite accounts
- * they connected as their own (`connected`). Microsoft's by object ID;
- * Google's by verified address, only in one of the company's sign-in
- * domains.
+ * their sign-in accounts (`signIns`), in the tenant the deployment's
+ * sign-in is pinned to (auth/config.ts), and the suite accounts they
+ * connected as their own (`connected`). Microsoft's by object ID; Google's
+ * by verified address, only in one of the company's sign-in domains.
  */
 const readingAccountsOf = (
   env: Pick<Env, "SIGN_IN">,
@@ -399,11 +341,37 @@ const readingAccountsOf = (
       ? [{ provider: "google", tenant, account: address }]
       : [];
   return [
+    // Each in the tenant its sign-in proved, only while the config names
+    // it: a tenant the config moved to is proved by a sign-in through it.
     // A sign-in's address, as every proof of an address, only while
     // confirmed within a day (`recent`): one signed in once and then used
     // only through a chat app stops counting by it.
-    ...provedSignInAccounts(env, signIns).flatMap(({ provedAt, ...account }) =>
-      account.provider === "google" && !recent(provedAt) ? [] : [account]
+    ...signIns.flatMap(
+      ({ providerId, oid, verifiedEmail, verifiedEmailAt, verifiedTenant }) => {
+        const proved = (tenant: string): boolean =>
+          verifiedTenant !== null &&
+          comparable(verifiedTenant) === comparable(tenant);
+        if (
+          providerId === providerIds.entra &&
+          config.entra &&
+          oid !== null &&
+          proved(config.entra.tenantId)
+        ) {
+          return [
+            {
+              provider: "microsoft",
+              tenant: config.entra.tenantId,
+              account: oid,
+            },
+          ];
+        }
+        return providerId === providerIds.google &&
+          config.google &&
+          proved(config.google.hostedDomain) &&
+          recent(verifiedEmailAt?.getTime() ?? null)
+          ? google(config.google.hostedDomain, verifiedEmail)
+          : [];
+      }
     ),
     // A connection's only while connected, and its address only while
     // the provider confirmed it within a day (`readerProofMaxAgeMs`): an

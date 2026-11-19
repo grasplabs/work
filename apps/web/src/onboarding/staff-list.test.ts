@@ -38,12 +38,6 @@ const inDirectory = (
   ...fields,
 });
 
-/** Each person's Microsoft directory account on `roster`, by name; null for none. */
-const accountsOf = (roster: { people: readonly Roster["people"][number][] }) =>
-  Object.fromEntries(
-    roster.people.map(({ name, entra }) => [name, entra ?? null])
-  );
-
 describe("a staff list as rows", () => {
   it("reads commas, semicolons or tabs, whichever the first line uses, with quoted cells", () => {
     expect(
@@ -410,85 +404,12 @@ describe("a staff list shared again", () => {
     });
   });
 
-  it("keeps the Microsoft directory account of each person it matches, from a file, a directory without accounts and the HR platform alike, and none for someone new", () => {
-    // The saved list came from the Microsoft directory: Lea carries her
-    // account in it.
-    const account = { tenant: "tenant-1", oid: "oid-lea" };
-    const fromDirectory: Roster = rosterSchema.parse({
-      ...saved,
-      people: saved.people.map((person) =>
-        person.id === idOf("Lea Bakker")
-          ? { ...person, entra: account }
-          : person
-      ),
-    });
-    const withNew = [...rows, ["Nia Jansen", "nia@x.com", "Ops", ""]];
-    // A file read again, then a directory with no accounts (Google's, or
-    // the HR platform's people), then the HR platform's leads.
-    const fromFile = withSaved(
-      staffListOf(withNew, "Other").roster,
-      fromDirectory
-    );
-    const fromPeople = withSaved(
-      directoryListOf(
-        withNew.slice(1).map(([name, email, department]) =>
-          inDirectory(String(email), {
-            name: String(name),
-            email: String(email),
-            department: String(department),
-          })
-        ),
-        "Other"
-      ).roster,
-      fromDirectory
-    );
-    const fromHr = withLeadsFrom(
-      staffListOf(withNew, "Other").roster,
-      fromDirectory
-    );
-    const expected = {
-      "Lea Bakker": account,
-      "Sam Visser": null,
-      "Ona Smit": null,
-      "Kim Bos": null,
-      "Nia Jansen": null,
-    };
-    expect({
-      fromFile: accountsOf(fromFile),
-      fromPeople: accountsOf(fromPeople),
-      fromHr: accountsOf(fromHr),
-    }).toStrictEqual({
-      fromFile: expected,
-      fromPeople: expected,
-      fromHr: expected,
-    });
-  });
-
   it("is the list itself when nothing was saved before", () => {
     expect(withSaved(first, null)).toStrictEqual(first);
   });
 });
 
 describe("the teams and people in a directory", () => {
-  it("keeps each person's account in a Microsoft directory, with its tenant, and none from Google's", () => {
-    const people = [inDirectory("oid-1", { department: "Sales" })];
-    const accounts = (tenant?: string) =>
-      directoryListOf(people, "Other", tenant).roster.people.map(
-        ({ entra }) => entra
-      );
-    expect({
-      microsoft: accounts("tenant-1"),
-      google: accounts(),
-      valid: rosterSchema.safeParse(
-        directoryListOf(people, "Other", "tenant-1").roster
-      ).success,
-    }).toStrictEqual({
-      microsoft: [{ tenant: "tenant-1", oid: "oid-1" }],
-      google: [undefined],
-      valid: true,
-    });
-  });
-
   it("makes teams of departments, leads of who most of a team reports to, and puts people in no department under Other, as a roster core takes", () => {
     const list = directoryListOf(
       [

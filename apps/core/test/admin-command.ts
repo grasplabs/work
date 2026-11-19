@@ -94,10 +94,10 @@ export const deliver = async (
   });
 };
 
-/** The admin snapshot as core answers it, before the admin parses it: its text. */
-export const adminSnapshotText = async (
+/** The admin snapshot as the admin reads it: signed, now, by `commandStaff`. All it shows of what commands changed. */
+export const adminSnapshot = async (
   coreEnv: Env = env
-): Promise<string> => {
+): Promise<AdminSnapshot> => {
   const body = JSON.stringify({
     sentAt: new Date().toISOString(),
     staff: { email: commandStaff },
@@ -121,14 +121,8 @@ export const adminSnapshotText = async (
   if (!response.ok) {
     throw new Error(`The snapshot wasn't read (${response.status})`);
   }
-  return await response.text();
+  return adminSnapshotSchema.parse(await response.json());
 };
-
-/** The admin snapshot as the admin reads it: signed, now, by `commandStaff`. All it shows of what commands changed. */
-export const adminSnapshot = async (
-  coreEnv: Env = env
-): Promise<AdminSnapshot> =>
-  adminSnapshotSchema.parse(JSON.parse(await adminSnapshotText(coreEnv)));
 
 /** A refusal: the code core answered with, for `outcome` to read. */
 class CommandRefusedError extends Error {

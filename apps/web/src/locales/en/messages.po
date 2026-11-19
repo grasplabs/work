@@ -12456,10 +12456,6 @@ msgstr "Saved, but it doesn't pass yet: Definition says what to fix."
 msgid "Saved."
 msgstr "Saved."
 
-#: src/onboarding/setup-steps.tsx
-msgid "Saved. Your people are put in their teams shortly."
-msgstr "Saved. Your people are put in their teams shortly."
-
 #: src/chat/thread.tsx
 msgid "Saving to your memory"
 msgstr "Saving to your memory"
@@ -15299,8 +15295,8 @@ msgid "This page's stored code no longer matches the code that was published, so
 msgstr "This page's stored code no longer matches the code that was published, so it wasn't opened. Tell an admin."
 
 #: src/settings/use-team-change.ts
-msgid "This team is on the staff list. Take it off there first."
-msgstr "This team is on the staff list. Take it off there first."
+msgid "This team is on the staff list. Take it off there and confirm the list first."
+msgstr "This team is on the staff list. Take it off there and confirm the list first."
 
 #: src/brain/sources-page.tsx
 msgid "This upload was already made with another file, which is kept as it was. Choose the file again to upload it as a new upload, or add it as a new version."

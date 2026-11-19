@@ -1,4 +1,3 @@
-import { onboardingErrors } from "@grasp-os/shared/onboarding";
 import type { OnboardingProgress, Roster } from "@grasp-os/shared/onboarding";
 import { noChoices } from "@grasp-os/shared/onboarding-choices";
 import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
@@ -8,7 +7,6 @@ import {
   afterAi,
   brainScene,
   closesOn,
-  confirmOrg,
   documentSources,
   dotsOf,
   finishedAt,
@@ -486,58 +484,5 @@ describe("a team's numbers", () => {
     expect(teamNumbersOf({ asked: null, talked: null })).toStrictEqual({
       shown: "none",
     });
-  });
-});
-
-/** A staff list core keeps. */
-const kept: Roster = {
-  teams: [{ id: "sales", name: "Sales", lead: null, does: "", off: false }],
-  people: [
-    {
-      id: "ada",
-      name: "Ada",
-      email: "",
-      team: "sales",
-      title: "",
-      away: false,
-    },
-  ],
-};
-
-/** Core's onboarding as the confirm reaches it, `confirm` answering the confirm. */
-const answering = (confirm: () => Promise<{ roster: Roster | null }>) => ({
-  confirmRoster: confirm,
-  view: async () => await Promise.resolve({ roster: kept }),
-});
-
-describe("the admin's confirm of their organization", () => {
-  it("is saved, its people following shortly, when core placed them only partly", async () => {
-    await expect(
-      confirmOrg(
-        answering(async () => {
-          await Promise.resolve();
-          throw onboardingErrors.create("onboarding.teams_follow");
-        }),
-        kept
-      )
-    ).resolves.toStrictEqual({ roster: kept, follow: true });
-  });
-
-  it("is done when core placed them, and fails on any other refusal", async () => {
-    await expect(
-      confirmOrg(
-        answering(async () => await Promise.resolve({ roster: kept })),
-        kept
-      )
-    ).resolves.toStrictEqual({ roster: kept, follow: false });
-    await expect(
-      confirmOrg(
-        answering(async () => {
-          await Promise.resolve();
-          throw onboardingErrors.create("onboarding.invalid");
-        }),
-        kept
-      )
-    ).rejects.toThrow(onboardingErrors.create("onboarding.invalid").message);
   });
 });

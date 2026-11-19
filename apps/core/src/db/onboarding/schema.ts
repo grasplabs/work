@@ -131,10 +131,6 @@ export const people = sqliteTable("people", {
   team: text().notNull(),
   title: text().notNull(),
   away: integer({ mode: "boolean" }).notNull(),
-  /** Their Microsoft directory account's tenant, with `entraOid` (`rosterPersonSchema`'s `entra`). */
-  entraTenant: text("entra_tenant"),
-  /** Their Microsoft directory account's object id: what the list places a Microsoft sign-in by. */
-  entraOid: text("entra_oid"),
 });
 
 /**
@@ -926,36 +922,3 @@ export const opinionBackers = sqliteTable(
     index("opinion_backers_person").on(table.person),
   ]
 );
-
-/**
- * Where the list the admin last confirmed puts each entry, by what core
- * places the members by (GRA-2055, staff-list-teams.ts `placePrimaries`):
- * its address, and its Microsoft directory account where it has one; the
- * first of two entries sharing either keeps it.
- * Replaced whole by each confirmed save, under the next version
- * (`confirmedVersion`); a person's address and account leave it when they
- * are erased or removed as a member, so nobody signing in with either
- * later is placed.
- */
-export const confirmedPlaces = sqliteTable("confirmed_places", {
-  /** The entry on the list. */
-  person: text().primaryKey(),
-  /** Its address, lower case; empty when it has none, or another entry has it. */
-  email: text().notNull(),
-  /** Its Microsoft directory account, when it has one another entry doesn't. */
-  entraTenant: text("entra_tenant"),
-  entraOid: text("entra_oid"),
-  team: text().notNull(),
-});
-
-/**
- * The entries on the list whose person core erased (GRA-2055), by the
- * entry's id: the entry stays, the company's, without its address
- * (`eraseAddress`), and is never named, given a link or placed again
- * until an admin takes it off the list, as a link core erased is
- * (`links.erased_at`); this holds the entries no link went out to as well.
- */
-export const erasedPeople = sqliteTable("erased_people", {
-  person: text().primaryKey(),
-  erasedAt: text("erased_at").notNull(),
-});

@@ -24,17 +24,7 @@ import {
 } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  gt,
-  isNotNull,
-  isNull,
-  or,
-  sql,
-} from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -61,7 +51,6 @@ import { signInConfig } from "./auth/config.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
 import { personOf } from "./connections.ts";
 import {
-  accounts,
   channelAccounts,
   invitations,
   memberRemovals,
@@ -71,12 +60,10 @@ import {
   sessions,
   skillShares,
   teamMembers,
-  teamPrimaries,
   users,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { emailHashOf, erasedAddress } from "./erased-people.ts";
-import { onboardingStore } from "./onboarding/store.ts";
 import { teamsWithMembers } from "./organization-teams.ts";
 import {
   erasePerson,
@@ -292,9 +279,6 @@ const recordRemoval = async (
     outboxedIfChanged(db, memberEntry(by, "member.removed", memberId, userId)),
     db.delete(teamMembers).where(and(eq(teamMembers.userId, userId), removed)),
     db
-      .delete(teamPrimaries)
-      .where(and(eq(teamPrimaries.userId, userId), removed)),
-    db
       .delete(members)
       .where(
         and(
@@ -416,22 +400,6 @@ const removeMember = async (
   } else if (!(await isRemoved(env, target))) {
     throw refusal(by, memberErrors.create("member.not_found"));
   }
-  // Where the confirmed staff list places them goes (GRA-2055), by their
-  // address and by the Microsoft object ids their accounts carry: they
-  // aren't put in a team by it, should they sign in again. Asked again,
-  // the removal finishes it.
-  const db = drizzle(env.DB);
-  const [person, held] = await db.batch([
-    db.select({ email: users.email }).from(users).where(eq(users.id, target)),
-    db
-      .select({ oid: accounts.oid })
-      .from(accounts)
-      .where(and(eq(accounts.userId, target), isNotNull(accounts.oid))),
-  ]);
-  await onboardingStore(env).forgetPlaceOf({
-    emails: person.map(({ email }) => email),
-    oids: held.flatMap(({ oid }) => (oid === null ? [] : [oid])),
-  });
   // What they typed into Apps' previews stays with each App's test data,
   // which its other builders share (app-preview.ts): no preview is theirs
   // alone, and they no longer reach any.

@@ -42,7 +42,6 @@ import {
   readerGroupRequestsPerTick,
 } from "./source-readers.ts";
 import { sweepSpokenLines } from "./speech-cache.ts";
-import { placeUnplaced } from "./staff-list-teams.ts";
 import { sendStephenSummaries } from "./stephen-summary.ts";
 import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
 import { pumpConnectorEvents } from "./workflows/connector-events.ts";
@@ -149,9 +148,6 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "minute",
     run: retryAccessRevocations,
   },
-  // The staff list the admin confirmed, put into the members' teams where
-  // a confirm's own placing didn't finish (src/staff-list-teams.ts).
-  { name: "staff_list.places", period: "minute", run: placeUnplaced },
   // Deploys apply migrations first (CI's db:migrate, and the admin's
   // deploy), so `platform_versions` exists. A version running before it
   // does records nothing, and the first run after the migration records

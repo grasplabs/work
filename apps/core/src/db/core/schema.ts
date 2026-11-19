@@ -542,75 +542,25 @@ export const teamMembers = sqliteTable(
 );
 
 /**
- * Each member's primary team (GRA-2055): the one the onboarding's staff
- * list last gave them, beside Better Auth's `team_members`, whose rows
- * carry no fields of ours. One per member, by the key: their saved
- * assignment, which stands while the list names them by `placeKey`,
- * whether or not their sign-in proves it now. The row stays when an admin
- * takes the membership away by hand, the marker that they did: the list
- * adds it again only when it gives them another team (staff-list-teams.ts
- * `placementOf`).
+ * The confirmed staff list whose teams were last made and named in
+ * Settings › Members (GRA-2055), by the onboarding store's version of
+ * them: one row for the company. Each sync claims its version here, only
+ * when it is newer, in the same batch as its writes, and each write holds
+ * only while the row names that version (staff-list-teams.ts `syncTeams`):
+ * an older confirm never makes or names a team after a newer one.
  */
-export const teamPrimaries = sqliteTable(
-  "team_primaries",
-  {
-    userId: text("user_id")
-      .primaryKey()
-      .references(() => users.id, { onDelete: "cascade" }),
-    teamId: text("team_id")
-      .notNull()
-      .references(() => teams.id, { onDelete: "cascade" }),
-    placedAt: timestamp("placed_at").notNull(),
-    /**
-     * Whether the list made the membership itself: only then does it take
-     * it away when it moves them (staff-list-teams.ts `placementOf`), never
-     * one an admin added by hand, before the list or since.
-     */
-    made: integer({ mode: "boolean" }).notNull(),
-    /**
-     * What the list names them by (staff-list-teams.ts `PlaceKey`): their
-     * entry's address, or its Microsoft directory account.
-     */
-    placeKey: text("place_key").notNull(),
-    /**
-     * Whether the list gave them this team without adding the membership
-     * yet, as nothing proved who they are when it moved them: added once
-     * their sign-in proves it.
-     */
-    pending: integer({ mode: "boolean" }).notNull(),
-  },
-  (table) => [index("team_primaries_team_id_idx").on(table.teamId)]
-);
-
-/**
- * The placing of the staff list the admin confirmed into the members'
- * teams (GRA-2055), by the onboarding store's version of it: one row for
- * the company (staff-list-teams.ts `placePrimaries`). A placing claims its
- * version here before it reads, under a lease of its own, and every
- * statement it writes holds only while the row still has its lease: an
- * older confirm never applies after a newer one, nor a placing taken for
- * dead after the one that took over. Its last batch marks the version
- * placed; the clock places again what is claimed and not placed once no
- * lease is live.
- */
-export const staffListPlaced = sqliteTable("staff_list_placed", {
+export const staffListSynced = sqliteTable("staff_list_synced", {
   organizationId: text("organization_id").primaryKey(),
-  /** The version claimed last: placed, or being placed. */
   version: integer().notNull(),
-  /** The version whose placing finished, 0 before any. */
-  placed: integer().notNull(),
-  /** The lease of the placing under way, none once it ended. */
-  leaseId: text("lease_id"),
-  leaseUntil: timestamp("lease_until"),
 });
 
 /**
  * The ids of every team deleted (GRA-2055), kept for good: written by the
- * trigger `teams_delete_retires` (migration 0278) in the statement that
+ * trigger `teams_delete_retires` (migration 0278, staff_list_teams) in the statement that
  * deletes the row, so no code of any release, before this one or after a
  * rollback, deletes a team without it. The staff list makes a members'
  * team only under an id not here, checked in the statement that makes it
- * (staff-list-teams.ts `intoMembersTeams`), so a deleted team's id never
+ * (staff-list-teams.ts `syncTeams`), so a deleted team's id never
  * comes back with what was shared with it, whatever the onboarding's
  * store holds.
  */

@@ -1,9 +1,7 @@
 import type { AiProvidersListing } from "@grasp-os/shared/ai-providers";
 import type { CatalogSource, OAuthProvider } from "@grasp-os/shared/connect";
-import { onboardingErrors } from "@grasp-os/shared/onboarding";
 import type {
   OnboardingProgress,
-  OnboardingView,
   Plan,
   Roster,
 } from "@grasp-os/shared/onboarding";
@@ -522,30 +520,4 @@ export const teamNumbersOf = (team: {
   return team.talked === null
     ? { shown: "asked", asked: team.asked }
     : { shown: "both", talked: team.talked, asked: team.asked };
-};
-
-/**
- * The admin confirms their organization (`draft`): the list as core kept
- * it, and whether its people are put in their teams only shortly. Core
- * answers `onboarding.teams_follow` when the list is saved but placing its
- * people didn't finish yet (its clock finishes it): saved all the same,
- * so the list is read again and the admin goes on.
- */
-export const confirmOrg = async (
-  onboarding: {
-    confirmRoster: (roster: Roster) => Promise<Pick<OnboardingView, "roster">>;
-    view: () => Promise<Pick<OnboardingView, "roster">>;
-  },
-  draft: Roster
-): Promise<{ roster: Roster | null; follow: boolean }> => {
-  try {
-    const { roster } = await onboarding.confirmRoster(draft);
-    return { roster, follow: false };
-  } catch (error) {
-    if (onboardingErrors.codeOf(error) !== "onboarding.teams_follow") {
-      throw error;
-    }
-    const { roster } = await onboarding.view();
-    return { roster, follow: true };
-  }
 };

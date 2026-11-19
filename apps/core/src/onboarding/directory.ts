@@ -147,11 +147,7 @@ export const readOnboardingDirectory = async (
     }
     cursor = read.next;
     if (cursor === null) {
-      return {
-        suite: directorySuiteOf(connection.provider),
-        tenant: connection.tenant,
-        people,
-      };
+      return { suite: directorySuiteOf(connection.provider), people };
     }
   }
   throw directoryErrors.create("directory.too_large");

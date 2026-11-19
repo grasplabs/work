@@ -12456,10 +12456,6 @@ msgstr "Gespeichert, besteht die Prüfung aber noch nicht: Unter Definition steh
 msgid "Saved."
 msgstr "Gespeichert."
 
-#: src/onboarding/setup-steps.tsx
-msgid "Saved. Your people are put in their teams shortly."
-msgstr "Gespeichert. Deine Leute kommen in Kürze in ihre Teams."
-
 #: src/chat/thread.tsx
 msgid "Saving to your memory"
 msgstr "Wird in Ihrem Gedächtnis gespeichert"
@@ -15299,8 +15295,8 @@ msgid "This page's stored code no longer matches the code that was published, so
 msgstr "Der gespeicherte Code dieser Seite stimmt nicht mehr mit dem veröffentlichten Code überein, daher wurde sie nicht geöffnet. Informieren Sie einen Admin."
 
 #: src/settings/use-team-change.ts
-msgid "This team is on the staff list. Take it off there first."
-msgstr "Dieses Team steht auf der Mitarbeiterliste. Nehmen Sie es zuerst dort heraus."
+msgid "This team is on the staff list. Take it off there and confirm the list first."
+msgstr "Dieses Team steht auf der Mitarbeiterliste. Nimm es dort heraus und bestätige die Liste zuerst."
 
 #: src/brain/sources-page.tsx
 msgid "This upload was already made with another file, which is kept as it was. Choose the file again to upload it as a new upload, or add it as a new version."
