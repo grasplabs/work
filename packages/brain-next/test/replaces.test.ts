@@ -776,6 +776,56 @@ describe("a memory that replaces earlier ones of its writer", () => {
     });
   });
 
+  it("undoes a save that was forgotten before, keeping its first retirement and its first undo", async () => {
+    const at = setUp();
+    const old = await add(at, requirement("old", at.writer));
+    const replacing = await add(
+      at,
+      requirement("new", at.writer, [old.memory]),
+      {
+        entity: old.entity,
+        reader: at.reader,
+      }
+    );
+    const retire = async (change: string, undo: boolean) =>
+      await shared().retireMemory({
+        memory: replacing.memory,
+        reader: at.reader,
+        writer: at.writer,
+        change,
+        ...(undo ? { undo } : {}),
+      });
+    const forgotten = await retire("forget", false);
+    const forgottenRead = await currentOf(old.entity, at.reader);
+    const undone = await retire("undo", true);
+    // When the first undo had landed: the next read's moment.
+    const { memories: atFirstUndo } = await shared().readMemories({
+      entity: old.entity,
+      reader: at.reader,
+    });
+    const firstUndoAt = new Date(Date.now());
+    await retire("undo again", true);
+    const { memories: asOfFirst } = await shared().readMemories({
+      entity: old.entity,
+      reader: at.reader,
+      asOf: firstUndoAt,
+    });
+
+    expect({
+      forgottenRead,
+      undone,
+      atFirstUndo: atFirstUndo.map(({ statement }) => statement),
+      asOfFirst: asOfFirst.map(({ statement }) => statement),
+    }).toStrictEqual({
+      forgottenRead: [],
+      // Told the retirement as recorded: the forget's.
+      undone: forgotten,
+      atFirstUndo: ["old"],
+      // The second undo stamped nothing: the first's time stands.
+      asOfFirst: ["old"],
+    });
+  });
+
   it("undoes a save whatever its dates, while a forget keeps to them", async () => {
     const at = setUp();
     const now = Date.now();

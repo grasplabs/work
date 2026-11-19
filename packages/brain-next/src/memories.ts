@@ -1202,9 +1202,10 @@ export const confirmMemory = (
  * An undo of its save (`undo`) retires it whatever its world time (one
  * valid from tomorrow, or expired, still ends what it replaced), and it no
  * longer replaces what it named from then on
- * (`memory_replacements.undone_at`), which is current again, whatever
- * happened since; any other retirement keeps them ended: forgetting never
- * brings anything back.
+ * (`memory_replacements.undone_at`, the first undo's time), which is
+ * current again, whatever happened since, also when it was retired
+ * before; any other retirement keeps them ended: forgetting never brings
+ * anything back.
  * Answers when it was retired and by which change (`change`, kept with
  * it), as recorded: one this writer already retired answers its recorded
  * time and change again, never new ones, whatever change the call names,
@@ -1254,38 +1255,51 @@ export const retireMemory = (
       undo ? 1 : 0
     )
     .toArray();
-  if (retired !== undefined) {
-    keepStamp(sql, stamp);
-    // An undo of its save: it no longer replaces anything from now on, so
-    // what it replaced is current again, whatever happened since; a read
-    // of a moment before still sees it replaced. Any other retirement
-    // keeps them ended (`newerSql`): forgetting brings nothing back.
-    if (undo) {
-      sql.exec(
-        "UPDATE memory_replacements SET undone_at = ?2 WHERE memory = ?1",
-        retired.row,
-        stamp
-      );
-    }
-    return {
-      retiredAt: new Date(retired.retired_at),
-      change: retired.retired_change,
-    };
-  }
   // Retired already, by this writer, and the reader may read it: a retry
   // or another call, answered with the time and change recorded then.
-  const [again] = sql
-    .exec<{ retired_at: number; retired_change: string | null }>(
-      `WITH ${readableSql}
-      SELECT m.retired_at, m.retired_change FROM memories AS m
-      WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at <= ?5
-        AND ${visibleSql("m")}`,
-      ...asked
-    )
-    .toArray();
-  return again === undefined
-    ? null
-    : { retiredAt: new Date(again.retired_at), change: again.retired_change };
+  const [again] =
+    retired === undefined
+      ? sql
+          .exec<{
+            row: number;
+            retired_at: number;
+            retired_change: string | null;
+          }>(
+            `WITH ${readableSql}
+            SELECT m.row, m.retired_at, m.retired_change FROM memories AS m
+            WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at <= ?5
+              AND ${visibleSql("m")}`,
+            ...asked
+          )
+          .toArray()
+      : [];
+  const kept = retired ?? again;
+  if (kept === undefined) {
+    return null;
+  }
+  // An undo of its save: it no longer replaces anything from now on, so
+  // what it replaced is current again, whatever happened since, also when
+  // it was retired before (forgotten, then undone); a read of a moment
+  // before still sees it replaced. Each link once: a repeat keeps the
+  // first undo. Any other retirement keeps them ended (`newerSql`):
+  // forgetting brings nothing back.
+  const undone = undo
+    ? sql
+        .exec(
+          `UPDATE memory_replacements SET undone_at = ?2
+          WHERE memory = ?1 AND undone_at IS NULL RETURNING memory`,
+          kept.row,
+          stamp
+        )
+        .toArray()
+    : [];
+  if (retired !== undefined || undone.length > 0) {
+    keepStamp(sql, stamp);
+  }
+  return {
+    retiredAt: new Date(kept.retired_at),
+    change: kept.retired_change,
+  };
 };
 
 /**
