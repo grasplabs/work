@@ -1,7 +1,7 @@
 import { createAuditEvent } from "@grasp-os/shared/audit";
 import { directoryErrors } from "@grasp-os/shared/directory";
 import type { DirectoryConnection } from "@grasp-os/shared/directory";
-import { log } from "@grasp-os/shared/log";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { clockLeaseMs } from "@grasp-os/workerflow/clock";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -34,9 +34,11 @@ import { connectionOf } from "./onboarding/directory.ts";
 //   and only the connection of the deployment's own tenant is read
 //   (onboarding/directory.ts `connectionOf`), each page refused unless it
 //   says the tenant the deployment's sign-in config names.
-// - A slow tie: object IDs are kept lower case where they are written (the
-//   sign-in's account, connect's read), so the tie compares them as they
-//   are, by `accounts_oid_idx`, one lookup a person.
+// - A slow tie: the directory's rows keep object IDs lower case (connect's
+//   read), and the tie compares `lower()` of the account's, as the
+//   provider gave it, by the index on that expression
+//   (`accounts_provider_oid_lower_idx`): one lookup a person, and no other
+//   comparison of a sign-in's object ID changes.
 // - A read that failed or stopped part way: every page is read before
 //   anything is written, then the whole read is applied in one batch, one
 //   transaction. A failure records only itself (`directory_reads`): the
@@ -285,6 +287,7 @@ const recordFailure = async (
   env: Env,
   kind: DirectoryKind,
   connection: DirectoryConnection,
+  tenant: string,
   code: string,
   startedAt: Date
 ): Promise<void> => {
@@ -294,7 +297,7 @@ const recordFailure = async (
     .values({
       provider: kind.provider,
       connectionId: connection.id,
-      tenant: connection.tenant,
+      tenant,
       failure: code,
       failedAt,
     })
@@ -308,6 +311,40 @@ const recordFailure = async (
     connectionId: connection.id,
     code,
   });
+};
+
+/**
+ * Records `failure`, what stopped a read started at `startedAt`, as the
+ * read's failure; whatever stopped it, nothing of the read was kept. One
+ * that isn't the directory's own (D1 refusing the batch, say) goes on to
+ * the clock's report too. Should recording it fail as well, that is
+ * logged, and `failure` is still the error the clock reports.
+ */
+const failedWith = async (
+  env: Env,
+  kind: DirectoryKind,
+  connection: DirectoryConnection,
+  tenant: string,
+  startedAt: Date,
+  failure: unknown
+): Promise<void> => {
+  const code = directoryErrors.codeOf(failure);
+  try {
+    await recordFailure(
+      env,
+      kind,
+      connection,
+      tenant,
+      code ?? "directory.read_failed",
+      startedAt
+    );
+  } catch (error) {
+    log.error("directory.read_failure_unrecorded", errorFields(error));
+    throw failure;
+  }
+  if (code === undefined) {
+    throw failure;
+  }
 };
 
 /**
@@ -351,20 +388,7 @@ const readKind = async (
     }
     await apply(env, kind, connection, listed, json, startedAt);
   } catch (error) {
-    // Whatever stopped it, the read is recorded as failed; one that isn't
-    // the directory's own (D1 refusing the batch, say) goes on to the
-    // clock's report too.
-    const code = directoryErrors.codeOf(error);
-    await recordFailure(
-      env,
-      kind,
-      connection,
-      code ?? "directory.read_failed",
-      startedAt
-    );
-    if (code === undefined) {
-      throw error;
-    }
+    await failedWith(env, kind, connection, tenant, startedAt, error);
   }
 };
 

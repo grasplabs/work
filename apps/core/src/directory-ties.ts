@@ -27,10 +27,12 @@ export interface DirectoryKind {
   /** The sign-in provider (auth/config.ts) whose accounts name its people. */
   signInProvider: string;
   /**
-   * The column of an account holding the provider's ID of its person, lower
-   * case as written (auth.ts `keptClaimsOf`, connect's read): a sign-in's,
-   * which ties them, or another of theirs that carries the same ID (one the
-   * directory made from a Teams message), which only their erasure reads.
+   * The column of an account holding the provider's ID of its person, as
+   * the provider gave it: a sign-in's, which ties them, or another of
+   * theirs that carries the same ID (one the directory made from a Teams
+   * message), which only their erasure reads. Compared lower case, as the
+   * directory's rows keep IDs, by the index on it with `lower()`
+   * (`accounts_provider_oid_lower_idx`): no other comparison of it changes.
    */
   signedInAs: SQLiteColumn;
   /** The subject erasure keeps of a person with provider ID `id` (erased-people.ts). */
@@ -55,7 +57,10 @@ const entra: DirectoryKind = {
 export const directoryKinds: readonly DirectoryKind[] = [entra];
 
 /**
- * The member tied to the row being written: the one whose `kind` sign-in
+ * The member tied to the row being written (both sides compared through
+ * `lower()`: the row's ID is lower case already, and so written, SQLite
+ * seeks the account by `accounts_provider_oid_lower_idx` rather than
+ * scanning the provider's accounts): the one whose `kind` sign-in
  * account names the row's ID in the row's tenant, while they are a member.
  * One account per sign-in subject, so at most one member; the lowest user
  * ID if ever two.
@@ -63,7 +68,7 @@ export const directoryKinds: readonly DirectoryKind[] = [entra];
 const tiedMember = (kind: DirectoryKind): SQL => sql`(
   SELECT ${accounts.userId} FROM ${accounts}
   WHERE ${accounts.providerId} = ${kind.signInProvider}
-    AND ${kind.signedInAs} = ${directoryPeople.accountId}
+    AND lower(${kind.signedInAs}) = lower(${directoryPeople.accountId})
     AND lower(${accounts.verifiedTenant}) = ${directoryPeople.tenant}
     AND ${activeMember(accounts.userId)}
   ORDER BY ${accounts.userId}
@@ -97,7 +102,7 @@ export const tieSignedIn = async (env: Env, userId: string): Promise<void> => {
       db,
       kind,
       sql`${directoryPeople.accountId} IN (
-        SELECT ${kind.signedInAs} FROM ${accounts}
+        SELECT lower(${kind.signedInAs}) FROM ${accounts}
         WHERE ${accounts.userId} = ${userId}
           AND ${accounts.providerId} = ${kind.signInProvider}
       )`

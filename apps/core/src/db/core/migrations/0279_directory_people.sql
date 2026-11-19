@@ -22,3 +22,5 @@ CREATE TABLE `directory_reads` (
 	`failure` text,
 	`failed_at` integer
 );
+--> statement-breakpoint
+CREATE INDEX `accounts_provider_oid_lower_idx` ON `accounts` (`provider_id`,lower("oid"));

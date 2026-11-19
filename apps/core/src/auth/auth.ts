@@ -710,9 +710,7 @@ const keptClaimsOf = (
   const verifiedEmail =
     claims.email_verified === true ? (claims.email ?? null) : null;
   return {
-    // Lower case, as the directory's read keeps object IDs
-    // (directory-ties.ts), so the two compare as they are, by the index.
-    oid: claims.oid?.toLowerCase() ?? null,
+    oid: claims.oid ?? null,
     verifiedEmail,
     verifiedEmailAt: verifiedEmail === null ? null : new Date(),
     verifiedTenant: claims.tid ?? claims.hd ?? null,

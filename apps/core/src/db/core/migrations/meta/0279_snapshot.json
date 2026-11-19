@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "3d2e5e81-3b53-45f6-b761-8b6d1efe383e",
+  "id": "7b75b545-0168-47ed-8237-68e6f25cd779",
   "prevId": "1c4538e4-927c-4532-bca2-33ef65548e11",
   "tables": {
     "access_revocations": {
@@ -222,6 +222,14 @@
           "name": "accounts_oid_idx",
           "columns": [
             "oid"
+          ],
+          "isUnique": false
+        },
+        "accounts_provider_oid_lower_idx": {
+          "name": "accounts_provider_oid_lower_idx",
+          "columns": [
+            "provider_id",
+            "lower(\"oid\")"
           ],
           "isUnique": false
         },
@@ -17859,6 +17867,14 @@
     "columns": {}
   },
   "internal": {
-    "indexes": {}
+    "indexes": {
+      "accounts_provider_oid_lower_idx": {
+        "columns": {
+          "lower(\"oid\")": {
+            "isExpression": true
+          }
+        }
+      }
+    }
   }
 }

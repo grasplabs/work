@@ -107,6 +107,10 @@ const untiedRow = (
   userId: null,
 });
 
+/** A D1 call that fails with `message`, as D1 refusing it would. */
+const failing = (message: string) => async (): Promise<never> =>
+  await Promise.reject(new Error(message));
+
 /** `list` in the order `rows` answers. */
 const byId = (list: Row[]): Row[] =>
   list.toSorted((one, other) => one.id.localeCompare(other.id));
@@ -287,11 +291,13 @@ describe("the directory's daily read", () => {
     await directoryHolds([user()]);
     await readAt(nextDay());
     const good = await rows();
-    // Quotes and backslashes, each escaped in JSON: 80 characters of text,
-    // 160 of JSON. 9,000 such people are 1.7 MB of text and 2.5 MB of JSON.
-    const department = '"\\'.repeat(40);
+    // Quotes and backslashes, each two characters of JSON, and letters of
+    // Dutch, German and French names, each two bytes of UTF-8: 80
+    // characters of text, 120 of JSON, 160 bytes. 8,000 such people are
+    // 1.9 million characters of JSON but 2.2 MB as sent.
+    const department = '"\\Éö'.repeat(20);
     await directoryHolds(
-      Array.from({ length: 9000 }, () => user({ department }))
+      Array.from({ length: 8000 }, () => user({ department }))
     );
 
     await readAt(nextDay());
@@ -338,6 +344,45 @@ describe("the directory's daily read", () => {
       rows: good,
       failure: "directory.read_failed",
     });
+  });
+
+  it("reports the read's own failure when recording it fails too", async () => {
+    await connectedDirectory(idp);
+    await directoryHolds([user()]);
+    await readAt(nextDay());
+    await directoryHolds([user(), user()]);
+    // D1 refusing the read's batch, and the write of its failure after it.
+    const refusing = new Proxy(env.DB, {
+      get: (target, key) => {
+        if (key === "batch") {
+          return failing("D1_ERROR: batch refused");
+        }
+        if (key === "prepare") {
+          return (query: string): unknown =>
+            query.startsWith('insert into "directory_reads"')
+              ? {
+                  bind: () => ({
+                    run: failing("D1_ERROR: status refused"),
+                    all: failing("D1_ERROR: status refused"),
+                    raw: failing("D1_ERROR: status refused"),
+                    first: failing("D1_ERROR: status refused"),
+                  }),
+                }
+              : target.prepare(query);
+        }
+        const value: unknown = Reflect.get(target, key, target);
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+
+    const outcome = await readAt(nextDay(), { DB: refusing }).then(
+      () => "applied",
+      (error: unknown) => (error instanceof Error ? error.message : "refused")
+    );
+
+    expect(outcome).toBe("D1_ERROR: batch refused");
   });
 
   it("fails the whole read when the directory repeats a next link, and applies none of it", async () => {
@@ -595,7 +640,7 @@ describe("the directory's daily read", () => {
     });
   });
 
-  it("ties thousands of people to thousands of members in one read, each found by the object ID index", async () => {
+  it("ties thousands of people to thousands of members in one read, each found by the index on the object ID", async () => {
     await connectedDirectory(idp);
     const count = 3000;
     const people = Array.from({ length: count }, () => ({
@@ -635,8 +680,36 @@ describe("the directory's daily read", () => {
     expect({
       tied: kept.filter(({ userId }) => userId !== null).length,
       byIndex: plan.results.some(({ detail }) =>
-        detail.includes("accounts_oid_idx")
+        detail.includes(
+          "accounts_provider_oid_lower_idx (provider_id=? AND <expr>=?)"
+        )
       ),
     }).toStrictEqual({ tied: count, byIndex: true });
+  });
+
+  it("ties a member whose object ID has upper-case letters in their token and in Graph's answers, and erases every row and hash of them", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const oid = crypto.randomUUID().toUpperCase();
+    const dirk = await memberWith(oid);
+    await directoryHolds([user({ id: oid, department: "Legal" })]);
+    await readAt(nextDay());
+    const tied = await tieOf(oid.toLowerCase());
+
+    await admin.api.members.remove(dirk.userId);
+    await admin.api.members.erase(dirk.userId, dirk.name);
+    const erased = await rows();
+    // The directory still lists them: the hash their erasure kept is found.
+    await readAt(nextDay());
+    const after = await rows();
+
+    const theirs = (list: Row[]) =>
+      list.filter(
+        ({ id, userId }) => id === oid.toLowerCase() || userId === dirk.userId
+      );
+    expect({
+      tied,
+      erased: theirs(erased),
+      after: theirs(after),
+    }).toStrictEqual({ tied: dirk.userId, erased: [], after: [] });
   });
 });

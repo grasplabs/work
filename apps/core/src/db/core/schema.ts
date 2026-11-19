@@ -129,6 +129,13 @@ export const accounts = sqliteTable(
     // Who writes in Teams, by the object id its messages carry
     // (channels/who.ts).
     index("accounts_oid_idx").on(table.oid),
+    // The directory's people by the object id a sign-in of a provider
+    // kept, compared lower case as the daily read keeps it
+    // (directory-ties.ts), with no other comparison of the id changed.
+    index("accounts_provider_oid_lower_idx").on(
+      table.providerId,
+      sql`lower(${table.oid})`
+    ),
     uniqueIndex("accounts_provider_account_idx").on(
       table.providerId,
       table.accountId
