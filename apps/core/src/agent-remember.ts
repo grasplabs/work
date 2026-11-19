@@ -391,10 +391,13 @@ export const rememberTool = (
     if (about === null) {
       throw new Error(unknownEntity);
     }
+    // Each memory once, however often the call names it.
+    const replaces =
+      input.replaces === undefined ? undefined : [...new Set(input.replaces)];
     const replaced =
-      input.replaces === undefined
+      replaces === undefined
         ? []
-        : await replacedOf(env, scope.personId, about.entity, input.replaces);
+        : await replacedOf(env, scope.personId, about.entity, replaces);
     if (replaced === null) {
       throw new Error(notTheirMemory);
     }
@@ -427,7 +430,7 @@ export const rememberTool = (
         type: input.type,
         statement: input.statement,
         quote: input.quote,
-        ...(input.replaces === undefined ? {} : { replaces: input.replaces }),
+        ...(replaces === undefined ? {} : { replaces }),
       }
     );
     return {

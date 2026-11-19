@@ -5140,14 +5140,15 @@ export const rememberAs = async (
 };
 
 /**
- * The statements of the member `personId`'s memories `ids`, about
- * `entity`, in their own store (theirs alone), current or history, in the
- * order asked: what a save of theirs that replaces them is checked
- * against (agent-remember.ts). Null when any isn't one: alike for none,
- * one in another store and one an erasure hides. The Brain takes only
- * those in their own word (contract.ts `NewMemory.replaces`). Every page
- * of the entity's memories read at one moment. Refused once they are no
- * longer a member.
+ * The statements of the member `personId`'s own memories `ids` (distinct)
+ * about `entity`, in their own store, in their own word (written by them,
+ * never drawn from a source), current or history (a replay of a save
+ * still finds what its first try ended), in the order asked: what a save
+ * of theirs that replaces them is checked against (agent-remember.ts).
+ * Null when any isn't one: alike for none, one in another store, one
+ * drawn from a source and one an erasure hides. Every page of the
+ * entity's memories read at one moment, until each is found. Refused once
+ * they are no longer a member.
  */
 export const ownWordAs = async (
   env: BrainEnv & ReaderEnv,
@@ -5169,7 +5170,9 @@ export const ownWordAs = async (
       ...(after === undefined ? {} : { after }),
     });
     for (const memory of page.memories) {
-      if (asked.has(memory.id)) {
+      // Their own word alone: written by them (one drawn from a source
+      // has no writer).
+      if (asked.has(memory.id) && memory.writer === reader.person) {
         found.set(memory.id, memory.statement);
       }
     }

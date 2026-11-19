@@ -1,10 +1,12 @@
 import { personalBrainOf } from "@grasp-os/brain-next/contract";
+import type { MemoriesCursor } from "@grasp-os/brain-next/contract";
 import type { ChatMessage } from "@grasp-os/shared/chat";
 import { env } from "cloudflare:workers";
+import { Value } from "typebox/value";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { rememberFor } from "../src/brain-memories.ts";
+import { rememberTool } from "../src/agent-remember.ts";
 import { addSource, eraseSource, rememberAs } from "../src/brain-next.ts";
 import type { SourceReaders } from "../src/brain-next.ts";
 import { keepAudience } from "../src/chat-audiences.ts";
@@ -164,15 +166,27 @@ const lovesSushi = (quote: string, replaces?: string[]) =>
     ...(replaces === undefined ? {} : { replaces }),
   });
 
-/** Each memory about `personId` themselves in their own store, history included: whether it is current. */
+/** Each memory about `personId` themselves in their own store, history included, every page: whether it is current. */
 const ownHistoryOf = async (personId: string) => {
   const store = personalBrainOf(inJurisdiction(env, env.BRAIN_STORE), personId);
   const reader = { person: personId, groups: [] };
   const entity = await store.ownEntity({ reader });
-  const { memories } =
-    entity === null
-      ? { memories: [] }
-      : await store.readMemories({ entity, reader, history: true });
+  const memories: { statement: string; endedAt: Date | null }[] = [];
+  let after: MemoriesCursor | undefined;
+  do {
+    const page =
+      entity === null
+        ? { memories: [], more: false as const }
+        : // oxlint-disable-next-line no-await-in-loop -- each page after the last
+          await store.readMemories({
+            entity,
+            reader,
+            history: true,
+            ...(after === undefined ? {} : { after }),
+          });
+    memories.push(...page.memories);
+    after = page.more ? page.next : undefined;
+  } while (after !== undefined);
   return Object.fromEntries(
     memories.map(({ statement, endedAt }) => [statement, endedAt === null])
   );
@@ -942,42 +956,200 @@ describe("the agent remembering in a person's own chat", () => {
   );
 
   it(
-    "replaces once however often the same save is made again",
+    "answers a replay of the same save through the tool with that save, replacing once, also after an Undo",
     slow,
     async () => {
       const member = await signedInApi(idp, "user");
       const pizza = await lovesPizza(member.userId);
-      const save = async () =>
-        await rememberFor(
-          env,
-          {
-            person: member.userId,
-            actor: { type: "person", userId: member.userId },
-            target: { type: "chat", id: crypto.randomUUID() },
-          },
-          {
-            change: "chat:replayed:call_1",
-            about: { kind: "person", own: true },
-            attribute: "preference",
-            value: "sushi",
-            type: "preference",
-            statement: "Loves sushi",
-            quote: "it's sushi now",
-            replaces: [pizza],
-          }
-        );
-      const first = await save();
-      const again = await save();
-      await member.api.brainMemories.forget(first.memory);
+      const chats = await personalChatsOf(
+        member.userId,
+        checked(true),
+        checked(true),
+        checked(true)
+      );
+      const { chat } = await chats.newChat();
+      const tool = rememberTool(
+        env,
+        {
+          workspaceId: chats.id,
+          agentId: chats.agent.agentId,
+          chatId: chat.id,
+          personId: member.userId,
+        },
+        "Not pizza any more, it's sushi now.",
+        () => {}
+      );
+      // The model's call as it comes in, checked by the tool's own schema.
+      const input: unknown = {
+        about: "me",
+        attribute: "preference",
+        value: "sushi",
+        type: "preference",
+        statement: "Loves sushi",
+        quote: "it's sushi now",
+        replaces: [pizza],
+      };
+      if (!Value.Check(tool.parameters, input)) {
+        throw new Error("Not the tool's input");
+      }
+      // A restart replays the same call, by its id.
+      const first = await tool.execute("call_replayed", input);
+      const again = await tool.execute("call_replayed", input);
+      const replayed = await ownHistoryOf(member.userId);
+      await member.api.brainMemories.forget(first.details.memory);
+      const afterUndo = await tool.execute("call_replayed", input);
 
       expect({
-        again: again.memory === first.memory,
-        // Undone once, the one replacement is gone and pizza is back.
+        again: again.details,
+        afterUndo: afterUndo.details.memory === first.details.memory,
+        replayed,
+        // The Undo stands: the replay replaced nothing again.
         kept: await ownHistoryOf(member.userId),
       }).toStrictEqual({
-        again: true,
+        again: first.details,
+        afterUndo: true,
+        replayed: { "Loves pizza": false, "Loves sushi": true },
         kept: { "Loves pizza": true, "Loves sushi": false },
       });
+    }
+  );
+
+  it(
+    "finds what it replaces past the first page of their memories about the subject",
+    slow,
+    async () => {
+      const member = await signedInApi(idp, "user");
+      const person = member.userId;
+      const pizza = await lovesPizza(person);
+      // More of their own than one page holds, read before their preferences.
+      const store = personalBrainOf(
+        inJurisdiction(env, env.BRAIN_STORE),
+        person
+      );
+      for (const count of [100, 1]) {
+        // oxlint-disable-next-line no-await-in-loop -- one add after another
+        await store.addMemories({
+          change: crypto.randomUUID(),
+          access: { kind: "owner", person },
+          entities: [{ key: "me", kind: "person", own: true }],
+          memories: Array.from({ length: count }, () => {
+            const skill = `skill ${unique()}`;
+            return {
+              about: "me",
+              attribute: "expertise",
+              value: skill,
+              type: "fact" as const,
+              statement: `Knows ${skill}`,
+              speaker: { kind: "internal" as const, person },
+              basis: { kind: "writer" as const, writer: person },
+            };
+          }),
+        });
+      }
+      const chats = await personalChatsOf(
+        person,
+        lovesSushi("it's sushi now", [pizza]),
+        checked(true),
+        says("Noted.")
+      );
+      const { chat, ask } = await chats.newChat();
+      await ask("Not pizza any more, it's sushi now.");
+      const shown = await savedShown(member, chat.id);
+      const kept = await ownHistoryOf(person);
+
+      expect({
+        replaced: shown.map(({ replaced }) => replaced),
+        pizza: kept["Loves pizza"],
+        sushi: kept["Loves sushi"],
+      }).toStrictEqual({
+        replaced: [["Loves pizza"]],
+        pizza: false,
+        sushi: true,
+      });
+    }
+  );
+
+  it(
+    "refuses, before any check, a memory of theirs drawn from a source",
+    slow,
+    async () => {
+      const member = await signedInApi(idp, "user");
+      const person = member.userId;
+      const store = personalBrainOf(
+        inJurisdiction(env, env.BRAIN_STORE),
+        person
+      );
+      const source = `test:${crypto.randomUUID()}`;
+      await store.addSource({
+        source,
+        change: crypto.randomUUID(),
+        text: "I love pizza.",
+        access: { kind: "owner", person },
+      });
+      const drawn = await store.addMemories({
+        change: crypto.randomUUID(),
+        access: { kind: "owner", person },
+        entities: [{ key: "me", kind: "person", own: true }],
+        memories: [
+          {
+            about: "me",
+            type: "fact",
+            statement: "Loves pizza",
+            speaker: { kind: "internal", person },
+            basis: {
+              kind: "source",
+              source,
+              version: 1,
+              quote: "I love pizza",
+            },
+          },
+        ],
+      });
+      const chats = await personalChatsOf(
+        person,
+        lovesSushi("it's sushi now", [drawn.memories[0] ?? ""]),
+        says("I couldn't.")
+      );
+      const { chat, ask } = await chats.newChat();
+      await ask("Not pizza any more, it's sushi now.");
+      const results = await toolResults(chats.stub, chat.id);
+
+      expect({
+        refused: results.some(
+          ({ isError, text }) => isError && text.includes("isn't one of theirs")
+        ),
+        checks: checksSent(chats.provider).length,
+      }).toStrictEqual({ refused: true, checks: 0 });
+    }
+  );
+
+  it(
+    "names a memory it replaces once however often the save names it",
+    slow,
+    async () => {
+      const member = await signedInApi(idp, "user");
+      const pizza = await lovesPizza(member.userId);
+      const chats = await personalChatsOf(
+        member.userId,
+        lovesSushi("it's sushi now", [pizza, pizza]),
+        checked(true),
+        says("Noted.")
+      );
+      const { chat, ask } = await chats.newChat();
+      await ask("Not pizza any more, it's sushi now.");
+      const shown = await savedShown(member, chat.id);
+      const events = await allEvents();
+
+      expect({
+        replaced: shown.map(({ replaced }) => replaced),
+        counted: events.flatMap(({ action, detail }) =>
+          action === "brain.memory.remembered" &&
+          detail.onBehalfOf === member.userId &&
+          detail.replaces !== undefined
+            ? [detail.replaces]
+            : []
+        ),
+      }).toStrictEqual({ replaced: [["Loves pizza"]], counted: [1, 1] });
     }
   );
 
