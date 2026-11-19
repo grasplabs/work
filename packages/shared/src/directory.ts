@@ -344,12 +344,15 @@ export const directoryErrors = defineErrorFamily({
     "The directory's daily read took longer than the clock gives it: nothing it read was kept.",
   "directory.read_failed":
     "The directory's daily read failed: nothing it read was kept.",
-  // Microsoft's answer alone: what came of the read is the reader's to
-  // say (core's directory-people.ts `deletedOf`), as it differs by page.
+  "directory.not_admin":
+    "The account that connected the directory can't read it: connect it with an admin account of the Workspace.",
+  // The directory's answer alone, Microsoft's or Google's: what came of the
+  // read is the reader's to say (core's directory-people.ts `deletedOf`),
+  // as it differs by page.
   "directory.deleted_refused":
-    "Microsoft refused to list the directory's deleted accounts.",
+    "The directory refused to list its deleted accounts.",
   "directory.deleted_unsupported":
-    "Microsoft's list of the directory's deleted accounts didn't answer as a list.",
+    "The directory's list of its deleted accounts didn't answer as a list.",
   "directory.group_gone": "That group is no longer in the directory.",
   "directory.group_refused":
     "Microsoft refused to read the directory's groups for this connection.",
