@@ -155,8 +155,8 @@ export interface SidebarGroupEntry {
   rows: readonly SidebarRow[];
   /**
    * Its own content in place of the rows, under its label: a Tree of what the section holds, with
-   * branches that open and close. Its rows are then left out (give `rows: []`), and it is not
-   * filtered.
+   * branches that open and close. Its rows are then left out (give `rows: []`); it is not filtered,
+   * and stands as it is while the filter holds words.
    */
   content?: ReactNode;
   /** What its fold is kept under in `storageKey`. @default its label */
@@ -1844,7 +1844,9 @@ const opensFromPeek = (next: boolean, open: boolean, peeking: boolean) =>
 
 /** Whether a list has no rows at all. */
 const isEmpty = (groups: readonly SidebarGroupEntry[]) =>
-  groups.every((group) => group.rows.length === 0);
+  groups.every(
+    (group) => group.rows.length === 0 && group.content === undefined
+  );
 
 /** Back, drawn as one of the sidebar's rows, with the chevron that points back. */
 const BackRow = ({ back }: { back: SidebarBack & { label: string } }) => (

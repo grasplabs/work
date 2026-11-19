@@ -28,6 +28,7 @@ import {
   InputGroupText,
 } from "../input-group";
 import { grasp, media } from "../tokens/tokens.stylex";
+import { TreeChevronSeated } from "../tree/seat";
 
 const HOVER = media.hover;
 const COARSE = media.coarse;
@@ -207,9 +208,29 @@ export const navStyles = stylex.create({
   // Folded, it points the way of reading: the mirrored icon already does.
   chevronFolded: { transform: { default: "none", ":dir(rtl)": "none" } },
   // A group's own content in place of its rows (a Tree), at the rows' inset.
+  // A Tree here takes the sidebar's rows' measures, words and fills through its tokens, so its rows
+  // read as the sidebar's own: the height, inset, gap and corner, the quieter words that brighten
+  // under a pointer, their weight and tracking, the icons in the words' colour, and the hover and
+  // current fills.
   content: {
     display: { default: "block", ":is([hidden])": "none" },
     minWidth: 0,
+    "--grasp-tree-row": grasp.shellRow,
+    "--grasp-tree-row-inset": grasp.shellRowInline,
+    "--grasp-tree-row-gap": grasp.shellRowGap,
+    "--grasp-tree-icon-gap": grasp.shellIconGap,
+    // A child's icon stands under its parent's words.
+    "--grasp-tree-indent": `calc(${grasp.shellIcon} + ${grasp.shellIconGap})`,
+    "--grasp-tree-row-corner": grasp.shellCorner,
+    "--grasp-tree-text": grasp.shellTextSecondary,
+    "--grasp-tree-text-hover": grasp.shellText,
+    "--grasp-tree-icon": grasp.shellTextSecondary,
+    "--grasp-tree-text-chosen": grasp.shellText,
+    "--grasp-tree-weight": grasp.weightMedium,
+    "--grasp-tree-weight-current": grasp.weightMedium,
+    "--grasp-tree-tracking": grasp.shellTracking,
+    "--grasp-tree-fill-hover": grasp.shellHover,
+    "--grasp-tree-fill-current": grasp.shellSelected,
   },
   list: {
     display: { default: "flex", ":is([hidden])": "none" },
@@ -869,9 +890,11 @@ export const SidebarNav = <Row extends NavRow>({
   const visible = groups.map((group) =>
     group.rows.filter((row) => matches(row, needle))
   );
-  const none = needle !== "" && visible.every((rows) => rows.length === 0);
-  const drawn = (index: number) =>
-    needle === "" || (visible[index]?.length ?? 0) > 0;
+  // A group of its own content (a Tree) is not filtered: it stands as it is while the filter holds words.
+  const held = (index: number) =>
+    groups[index]?.content !== undefined || (visible[index]?.length ?? 0) > 0;
+  const none = needle !== "" && groups.every((_group, index) => !held(index));
+  const drawn = (index: number) => needle === "" || held(index);
 
   return (
     <nav ref={nav} aria-label={label} {...stylex.props(navStyles.body)}>
@@ -889,7 +912,7 @@ export const SidebarNav = <Row extends NavRow>({
       )}
       {groups.map((group, index) => {
         const rows = visible[index] ?? [];
-        if (rows.length === 0 && needle !== "") {
+        if (!drawn(index)) {
           return null;
         }
         const named = group.label !== undefined && group.label !== "";
@@ -952,10 +975,13 @@ export const SidebarNav = <Row extends NavRow>({
             ) : (
               <div
                 id={listId}
+                data-slot="sidebar-group-content"
                 {...foldedLook(shut, foldsRead)}
                 {...stylex.props(navStyles.content)}
               >
-                {group.content}
+                <TreeChevronSeated value="icon">
+                  {group.content}
+                </TreeChevronSeated>
               </div>
             )}
           </div>

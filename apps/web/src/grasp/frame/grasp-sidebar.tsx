@@ -255,6 +255,8 @@ const useSettingsSection = (identity: Identity): SidebarSection | undefined => {
     id: "settings",
     title: t`Settings`,
     icon: Settings,
+    // Back and its name as one press: the name opens Settings' first page.
+    home: <Link to="/settings" />,
     back: {
       label: t`Back`,
       render:

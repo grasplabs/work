@@ -24,7 +24,7 @@ import {
   TreeItemLabel as LabelPrimitive,
 } from "@ui-sdk/react/tree";
 import type { TreeItemData } from "@ui-sdk/react/tree";
-import { useRef, useState } from "react";
+import { useContext, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 
 import { listStyles } from "../combobox/list.styles";
@@ -39,7 +39,9 @@ import {
 } from "../input-group";
 import { Spinner } from "../spinner";
 import { useWords } from "../words/words";
+import { TreeChevronSeated } from "./seat";
 import { treeStyles as styles } from "./styles";
+import { treeRowMarker } from "./tree.stylex";
 import { treeWords } from "./words";
 
 /** One item of a tree. */
@@ -234,17 +236,24 @@ const RowInside = ({
   node,
   current,
   query,
+  seated,
 }: {
   node: TreeNode;
   current: boolean;
   query: string;
+  seated: boolean;
 }) => {
   const inside = (
     <>
-      {node.icon && (
-        <span aria-hidden="true" {...stylex.props(styles.icon)}>
+      {node.icon ? (
+        <span
+          aria-hidden="true"
+          {...stylex.props(styles.icon, seated && styles.iconSeated)}
+        >
           <Icon icon={node.icon} />
         </span>
+      ) : (
+        seated && <span aria-hidden="true" {...stylex.props(styles.spacer)} />
       )}
       <span {...stylex.props(styles.words)}>
         <Marked words={node.label} query={query} />
@@ -283,19 +292,53 @@ const handleTreeKeyDown = (event: KeyboardEvent<HTMLElement>) => {
   }
 };
 
+interface ItemsProps {
+  nodes: TreeNode[];
+  current: string | null | undefined;
+  query: string;
+  /** The chevron stands in the icon's place (seat.ts). */
+  seated: boolean;
+  /** Draw the tree guide on nested items (Tree's `guides`). */
+  guides: boolean;
+  /** These items are a branch's children, under its row. */
+  nested?: boolean;
+}
+
 /**
  * A nested item's part of the tree guide, as Sidebar's: the stem down from its branch's chevron, a
  * rounded elbow into its row, and the stem on to the next sibling, which the last one has not.
  */
-const Guide = ({ last }: { last: boolean }) => (
+const Guide = ({
+  last,
+  short,
+  toWords,
+}: {
+  last: boolean;
+  short: boolean;
+  toWords: boolean;
+}) => (
   <>
-    <span aria-hidden="true" {...stylex.props(styles.guideStem)} />
     <span
       aria-hidden="true"
-      {...stylex.props(styles.guideBranch, !last && styles.guideBranchCut)}
+      data-tree-guide="stem"
+      {...stylex.props(styles.guideStem)}
+    />
+    <span
+      aria-hidden="true"
+      data-tree-guide="elbow"
+      {...stylex.props(
+        styles.guideBranch,
+        short && styles.guideBranchShort,
+        toWords && styles.guideBranchToWords,
+        !last && styles.guideBranchCut
+      )}
     />
     {last ? null : (
-      <span aria-hidden="true" {...stylex.props(styles.guideStemOn)} />
+      <span
+        aria-hidden="true"
+        data-tree-guide="on"
+        {...stylex.props(styles.guideStemOn)}
+      />
     )}
   </>
 );
@@ -304,17 +347,10 @@ const Items = ({
   nodes,
   current,
   query,
-  guides = false,
+  seated,
+  guides,
   nested = false,
-}: {
-  nodes: TreeNode[];
-  current: string | null | undefined;
-  query: string;
-  /** Draw the tree guide on nested items (Tree's `guides`). */
-  guides?: boolean;
-  /** These items are a branch's children, under its row. */
-  nested?: boolean;
-}) =>
+}: ItemsProps) =>
   nodes.map((node, index) => {
     const branch = node.children !== undefined;
     const guided = guides && nested;
@@ -327,8 +363,21 @@ const Items = ({
         label={node.label}
         {...stylex.props(styles.item, guided && styles.guided)}
       >
-        {guided ? <Guide last={index === nodes.length - 1} /> : null}
-        <LabelPrimitive {...stylex.props(styles.row, focus.row)}>
+        {guided ? (
+          <Guide
+            last={index === nodes.length - 1}
+            short={seated}
+            toWords={seated && node.icon === undefined && !branch}
+          />
+        ) : null}
+        <LabelPrimitive
+          {...stylex.props(
+            treeRowMarker,
+            styles.row,
+            seated && styles.rowSeated,
+            focus.row
+          )}
+        >
           {branch ? (
             <IndicatorPrimitive
               render={(
@@ -339,6 +388,7 @@ const Items = ({
                   {...props}
                   {...stylex.props(
                     styles.chevron,
+                    seated && styles.chevronSeated,
                     state.failed === true && styles.failed
                   )}
                 >
@@ -353,12 +403,16 @@ const Items = ({
               )}
             />
           ) : (
-            <span aria-hidden="true" {...stylex.props(styles.spacer)} />
+            <span
+              aria-hidden="true"
+              {...stylex.props(styles.spacer, seated && styles.spacerSeated)}
+            />
           )}
           <RowInside
             node={node}
             current={current === node.value}
             query={query}
+            seated={seated}
           />
         </LabelPrimitive>
         {branch && (
@@ -367,6 +421,7 @@ const Items = ({
               nodes={node.children ?? []}
               current={current}
               query={query}
+              seated={seated}
               guides={guides}
               nested
             />
@@ -492,6 +547,7 @@ export const Tree = ({
   onFilterChange,
 }: TreeProps) => {
   const words = useWords("tree", treeWords);
+  const seated = useContext(TreeChevronSeated) === "icon";
   // Children that loaded are kept here, so the tree knows them from then on.
   const [loaded, setLoaded] = useState<Record<string, TreeNode[]>>({});
   const box = useRef<HTMLDivElement>(null);
@@ -564,7 +620,13 @@ export const Tree = ({
       onKeyDown={handleTreeKeyDown}
       {...stylex.props(styles.tree)}
     >
-      <Items nodes={shown} current={current} query={query} guides={guides} />
+      <Items
+        nodes={shown}
+        current={current}
+        query={query}
+        seated={seated}
+        guides={guides}
+      />
     </TreePrimitive>
   );
   if (!filterable) {

@@ -36,8 +36,9 @@ import { useCoreRead } from "./use-core-read.ts";
 
 // An App's workspace as the sidebar's section, while one who builds it has
 // it open, as an agent's page and Settings are (grasp/frame/grasp-sidebar
-// .tsx): Back to the Apps, the App's mark and name, then its views (App,
-// Code, Data) and its settings' sections as rows. They are the workspace's
+// .tsx): Back to the Apps and the App's mark and name as one press (the name
+// opens the App itself), then its views (Code, Data) and its settings'
+// sections as rows. They are the workspace's
 // own addresses (`?view=`, `?section=`), so a row is a link the page reads.
 // Under its name, while the preview shows, how wide it is drawn (`?width=`).
 // It takes the views out of the App's bar, which keeps the preview's own
@@ -133,14 +134,14 @@ export const useAppSection = (
       label: t`Apps`,
       render: <Link to="/apps" />,
     },
+    // Back and its name as one press: the name opens the App itself, its preview.
+    home: (
+      <Link params={{ app: app.id }} replace search={held} to="/apps/$app" />
+    ),
+    homeCurrent: view === "preview",
     groups: [
       {
         rows: [
-          viewRow(
-            "preview",
-            t({ message: "App", context: "an app's workspace view" }),
-            AppWindow
-          ),
           viewRow(
             "code",
             t({ message: "Code", context: "an app's workspace view" }),

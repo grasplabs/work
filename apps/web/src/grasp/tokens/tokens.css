@@ -1073,6 +1073,159 @@
   --grasp-app-preview-bezel: 10px;
   /* The device look's outer corner. */
   --grasp-app-preview-device-corner: 28px;
+  /* Agent figure: agent figure palettes. */
+  /* Agent figure, evergreen palette: its night (the figure's own ground). */
+  --grasp-agent-figure-evergreen-0: var(--grasp-light-ink);
+  /* Agent figure, evergreen palette: its deepest light. */
+  --grasp-agent-figure-evergreen-1: var(--grasp-light-pine);
+  /* Agent figure, evergreen palette: its deep light. */
+  --grasp-agent-figure-evergreen-2: var(--grasp-light-mint);
+  /* Agent figure, evergreen palette: its middle light. */
+  --grasp-agent-figure-evergreen-3: var(--grasp-light-sea);
+  /* Agent figure, evergreen palette: its bright light. */
+  --grasp-agent-figure-evergreen-4: var(--grasp-light-lime);
+  /* Agent figure, evergreen palette: its brightest light. */
+  --grasp-agent-figure-evergreen-5: var(--grasp-light-paper);
+  /* Agent figure, meadow palette: its night (the figure's own ground). */
+  --grasp-agent-figure-meadow-0: color-mix(
+    in oklch,
+    var(--grasp-light-pine) 40%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, meadow palette: its deepest light. */
+  --grasp-agent-figure-meadow-1: var(--grasp-light-pine);
+  /* Agent figure, meadow palette: its deep light. */
+  --grasp-agent-figure-meadow-2: color-mix(
+    in oklch,
+    var(--grasp-light-mint) 70%,
+    var(--grasp-light-lime)
+  );
+  /* Agent figure, meadow palette: its middle light. */
+  --grasp-agent-figure-meadow-3: var(--grasp-light-lime);
+  /* Agent figure, meadow palette: its bright light. */
+  --grasp-agent-figure-meadow-4: color-mix(
+    in oklch,
+    var(--grasp-light-lime) 50%,
+    var(--grasp-light-paper)
+  );
+  /* Agent figure, meadow palette: its brightest light. */
+  --grasp-agent-figure-meadow-5: var(--grasp-light-paper);
+  /* Agent figure, ember palette: its night (the figure's own ground). */
+  --grasp-agent-figure-ember-0: color-mix(
+    in oklch,
+    var(--grasp-brain-heat) 22%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, ember palette: its deepest light. */
+  --grasp-agent-figure-ember-1: color-mix(
+    in oklch,
+    var(--grasp-brain-heat) 60%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, ember palette: its deep light. */
+  --grasp-agent-figure-ember-2: var(--grasp-brain-heat);
+  /* Agent figure, ember palette: its middle light. */
+  --grasp-agent-figure-ember-3: color-mix(
+    in oklch,
+    var(--grasp-brain-heat) 45%,
+    var(--grasp-brain-glow)
+  );
+  /* Agent figure, ember palette: its bright light. */
+  --grasp-agent-figure-ember-4: var(--grasp-brain-glow);
+  /* Agent figure, ember palette: its brightest light. */
+  --grasp-agent-figure-ember-5: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 40%,
+    var(--grasp-light-paper)
+  );
+  /* Agent figure, amber palette: its night (the figure's own ground). */
+  --grasp-agent-figure-amber-0: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 18%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, amber palette: its deepest light. */
+  --grasp-agent-figure-amber-1: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 45%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, amber palette: its deep light. */
+  --grasp-agent-figure-amber-2: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 75%,
+    var(--grasp-brain-heat)
+  );
+  /* Agent figure, amber palette: its middle light. */
+  --grasp-agent-figure-amber-3: var(--grasp-brain-glow);
+  /* Agent figure, amber palette: its bright light. */
+  --grasp-agent-figure-amber-4: color-mix(
+    in oklch,
+    var(--grasp-brain-glow) 55%,
+    var(--grasp-light-paper)
+  );
+  /* Agent figure, amber palette: its brightest light. */
+  --grasp-agent-figure-amber-5: var(--grasp-light-paper);
+  /* Agent figure, ocean palette: its night (the figure's own ground). */
+  --grasp-agent-figure-ocean-0: color-mix(
+    in oklch,
+    var(--grasp-info) 22%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, ocean palette: its deepest light. */
+  --grasp-agent-figure-ocean-1: color-mix(
+    in oklch,
+    var(--grasp-info) 55%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, ocean palette: its deep light. */
+  --grasp-agent-figure-ocean-2: var(--grasp-info);
+  /* Agent figure, ocean palette: its middle light. */
+  --grasp-agent-figure-ocean-3: color-mix(
+    in oklch,
+    var(--grasp-info) 55%,
+    var(--grasp-light-sea)
+  );
+  /* Agent figure, ocean palette: its bright light. */
+  --grasp-agent-figure-ocean-4: color-mix(
+    in oklch,
+    var(--grasp-info) 30%,
+    var(--grasp-light-paper)
+  );
+  /* Agent figure, ocean palette: its brightest light. */
+  --grasp-agent-figure-ocean-5: var(--grasp-light-paper);
+  /* Agent figure, moon palette: its night (the figure's own ground). */
+  --grasp-agent-figure-moon-0: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 10%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, moon palette: its deepest light. */
+  --grasp-agent-figure-moon-1: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 30%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, moon palette: its deep light. */
+  --grasp-agent-figure-moon-2: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 50%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, moon palette: its middle light. */
+  --grasp-agent-figure-moon-3: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 70%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, moon palette: its bright light. */
+  --grasp-agent-figure-moon-4: color-mix(
+    in oklch,
+    var(--grasp-light-paper) 86%,
+    var(--grasp-light-night)
+  );
+  /* Agent figure, moon palette: its brightest light. */
+  --grasp-agent-figure-moon-5: var(--grasp-light-paper);
   /* App card: app card tones. */
   /* Sea's first stop: a cool blue grey. */
   --grasp-app-card-sea-from: light-dark(
@@ -1779,6 +1932,26 @@
   --grasp-tree-row-inset: var(--grasp-space-2);
   /* A tree row's corner: small, as a list item's. */
   --grasp-tree-row-corner: 8px;
+  /* The room between two rows of a tree. */
+  --grasp-tree-row-gap: var(--grasp-hairline);
+  /* A tree row's words. */
+  --grasp-tree-text: var(--grasp-text);
+  /* The room between a tree row's chevron, icon and words. */
+  --grasp-tree-icon-gap: var(--grasp-space-2);
+  /* The width of a tree's guide (`guides`): its stem and elbows, the Sidebar's own. */
+  --grasp-tree-guide: var(--grasp-shell-guide);
+  /* A tree row's chevron and icon: quieter than its words, unless a host draws them in the words' colour (a sidebar does). */
+  --grasp-tree-icon: var(--grasp-muted);
+  /* A tree row's words under a pointer: as they stand, unless a host brightens them (a sidebar does). */
+  --grasp-tree-text-hover: var(--grasp-text);
+  /* The words of a chosen row and of the current page. */
+  --grasp-tree-text-chosen: var(--grasp-ink);
+  /* A tree row's words' weight. */
+  --grasp-tree-weight: var(--grasp-weight-regular);
+  /* The current page's words: a step heavier. */
+  --grasp-tree-weight-current: var(--grasp-weight-medium);
+  /* A tree row's letter spacing: as set, unless a host draws its rows closer (a sidebar does). */
+  --grasp-tree-tracking: normal;
   /* A tree's row under a pointer: a third of the current page's fill, so a row under the pointer is never taken for the current page (A3-nav-06), as the sidebar's hover is to its selected row. */
   --grasp-tree-fill-hover: light-dark(
     oklch(0.29 0.05 162 / 0.035),

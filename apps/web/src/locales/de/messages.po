@@ -2870,11 +2870,6 @@ msgstr "Gibt es etwas, das er immer wissen sollte?"
 msgid "App"
 msgstr "App"
 
-#: src/apps/app-section.tsx
-msgctxt "an app's workspace view"
-msgid "App"
-msgstr "App"
-
 #: src/apps/app-data.tsx
 #: src/connections/connection-list.tsx
 msgid "App {app}"
@@ -3398,7 +3393,6 @@ msgstr "Verfügbar, direkt"
 msgid "Available, via Composio"
 msgstr "Verfügbar, über Composio"
 
-#: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
 #: src/brain/brain-section.tsx
 #: src/chat/approval-words.ts
@@ -3418,10 +3412,6 @@ msgstr "Zurück und weiter"
 #: src/frame/part-words.tsx
 msgid "Back to {agent}"
 msgstr "Zurück zu {agent}"
-
-#: src/brain/atlas-overlays.tsx
-msgid "Back to {destination}"
-msgstr "Zurück zu {destination}"
 
 #: src/frame/part-words.tsx
 msgid "Back to Grasp"
@@ -3590,7 +3580,6 @@ msgstr "Gebunden an"
 #: src/brain/brain-section.tsx
 #: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
-#: src/routes/_shell.brain.index.tsx
 #: src/routes/_shell.brain.tsx
 msgid "Brain"
 msgstr "Gehirn"
@@ -18172,10 +18161,6 @@ msgstr "Wohin die {total} Läufe dieser Woche gingen."
 #: src/settings/where-stephen.tsx
 msgid "Where to reach Stephen"
 msgstr "Wo Sie Stephen erreichen"
-
-#: src/brain/atlas-overlays.tsx
-msgid "Where you are in the brain"
-msgstr "Wo Sie im Gehirn sind"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Where, for example Dropbox"

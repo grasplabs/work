@@ -3,7 +3,7 @@
 import * as stylex from "@stylexjs/stylex";
 import type { RenderProp } from "@ui-sdk/react/primitive";
 import { mergeProps, renderElement } from "@ui-sdk/react/primitive";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { isValidElement, useEffect, useLayoutEffect, useRef } from "react";
 import type {
   KeyboardEvent,
   MouseEvent,
@@ -15,7 +15,7 @@ import type {
 import { announce } from "../announce/announce";
 import { focus } from "../focus/focus";
 import { visuallyHidden } from "../hidden/hidden";
-import { Icon } from "../icons";
+import { ChevronLeft, Icon } from "../icons";
 import type { IconData } from "../icons";
 import { glide, spanOf } from "../motion/glide";
 import { simply } from "../motion/simply.stylex";
@@ -180,10 +180,82 @@ const styles = stylex.create({
     transitionDuration: `${simply.ui}, ${grasp.durationHover}`,
     transitionTimingFunction: grasp.ease,
   },
-  // A section's name as its home: a heading that holds the track, with no room of its own.
-  homeHeading: { margin: 0, fontSize: "inherit", fontWeight: "inherit" },
-  // The home segment: its words at the start, as a row's, in the shell's ink.
-  home: { justifyContent: "flex-start", textDecoration: "none" },
+  // Back and the home as one segment: raised out of the track as a chosen tab, its two parts each a
+  // press of its own, a row's height (a fingertip's on a touch screen), with its own hover fill and
+  // focus ring inside the shape, and a hairline between them.
+  homeSegment: {
+    display: "flex",
+    flexGrow: 1,
+    alignItems: "stretch",
+    minWidth: 0,
+    borderRadius: TAB_CORNER,
+    cornerShape: grasp.cornerShape,
+    backgroundColor: { default: grasp.shellCard, [FORCED]: "Canvas" },
+    backgroundImage: { default: VEIL, [FORCED]: "none" },
+    boxShadow: { default: grasp.liftLow, [FORCED]: "none" },
+    outline: { default: null, [FORCED]: `${grasp.hairline} solid CanvasText` },
+  },
+  homePart: {
+    position: "relative",
+    display: "flex",
+    alignItems: "center",
+    boxSizing: "border-box",
+    minHeight: { default: grasp.shellRow, [COARSE]: grasp.tap },
+    cornerShape: grasp.cornerShape,
+    fontFamily: grasp.fontSans,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
+    fontWeight: grasp.weightMedium,
+    letterSpacing: grasp.shellTracking,
+    textDecoration: "none",
+    backgroundColor: {
+      default: "transparent",
+      [HOVER]: { default: "transparent", ":hover": grasp.shellHover },
+    },
+    transitionProperty: "color, background-color",
+    transitionDuration: grasp.shellAnswer,
+    transitionTimingFunction: grasp.ease,
+  },
+  // Back: the chevron alone, centred on the rows' icon column (the track's inset and half its width
+  // put it there), the segment's start corners.
+  homeBack: {
+    justifyContent: "center",
+    flexShrink: 0,
+    width: { default: grasp.shellIconButton, [COARSE]: grasp.tap },
+    borderStartStartRadius: TAB_CORNER,
+    borderEndStartRadius: TAB_CORNER,
+    color: {
+      default: grasp.shellTextSecondary,
+      [HOVER]: { default: grasp.shellTextSecondary, ":hover": grasp.shellText },
+      [FORCED]: "LinkText",
+    },
+  },
+  homeRule: {
+    flexShrink: 0,
+    alignSelf: "center",
+    width: grasp.hairline,
+    height: grasp.space4,
+    backgroundColor: { default: grasp.shellRule, [FORCED]: "CanvasText" },
+  },
+  // The section's name: a heading that holds its link, with no room of its own.
+  homeHeading: {
+    display: "flex",
+    flexGrow: 1,
+    minWidth: 0,
+    margin: 0,
+    fontSize: "inherit",
+    fontWeight: "inherit",
+  },
+  // The home: the section's icon and name, in the shell's ink, the segment's end corners.
+  home: {
+    flexGrow: 1,
+    gap: grasp.shellIconGap,
+    minWidth: 0,
+    paddingInline: `calc(${grasp.shellRowInline} - ${INSET})`,
+    borderStartEndRadius: TAB_CORNER,
+    borderEndEndRadius: TAB_CORNER,
+    color: { default: grasp.shellText, [FORCED]: "LinkText" },
+  },
   // Chosen: its ink, and its own ground only until the thumb stands (and always in forced colours).
   tabChosen: {
     color: { default: grasp.shellText, [FORCED]: "HighlightText" },
@@ -343,49 +415,73 @@ export const SectionHead = ({
     lead = <Icon icon={icon} />;
   }
   if (home !== undefined) {
-    // Its name first, above Back, as a press of its own: the one raised segment of the track the
-    // main list's tabs stand in, so the section reads apart from the rows every page shares.
     return (
       <div
         data-slot="sidebar-section-head"
         {...stylex.props(styles.sectionHead)}
       >
-        <h2
-          data-slot="sidebar-section-title"
-          {...stylex.props(styles.homeHeading)}
+        <div
+          {...stylex.props(
+            rowMarker,
+            tabStyles.list,
+            tabStyles.listSegmented,
+            styles.tabs
+          )}
         >
           <div
-            {...stylex.props(
-              rowMarker,
-              tabStyles.list,
-              tabStyles.listSegmented,
-              styles.tabs
-            )}
+            data-slot="sidebar-section-home"
+            {...stylex.props(styles.homeSegment)}
           >
-            {renderElement(
-              "a",
-              {
-                "aria-current": homeCurrent ? "page" : undefined,
-                className: stylex.props(
-                  tabStyles.tab,
-                  tabStyles.segment,
-                  styles.tab,
-                  styles.home,
-                  styles.tabChosen,
-                  focus.inside
-                ).className,
-                children: (
-                  <>
-                    {lead}
-                    <span {...stylex.props(styles.titleWords)}>{title}</span>
-                  </>
-                ),
-              },
-              home
-            )}
+            <WithTip
+              name
+              tooltip={backLabel}
+              render={(tip: Record<string, unknown>) =>
+                renderElement(
+                  "a",
+                  mergeProps(tip, {
+                    href: back.href,
+                    onClick: back.onClick,
+                    "aria-label": backLabel,
+                    "data-slot": "sidebar-back",
+                    className: stylex.props(
+                      styles.homePart,
+                      styles.homeBack,
+                      focus.inside
+                    ).className,
+                    children: <Icon icon={ChevronLeft} />,
+                  }),
+                  isValidElement<Record<string, unknown>>(back.render)
+                    ? back.render
+                    : undefined
+                )
+              }
+            />
+            <span aria-hidden="true" {...stylex.props(styles.homeRule)} />
+            <h2
+              data-slot="sidebar-section-title"
+              {...stylex.props(styles.homeHeading)}
+            >
+              {renderElement(
+                "a",
+                {
+                  "aria-current": homeCurrent ? "page" : undefined,
+                  className: stylex.props(
+                    styles.homePart,
+                    styles.home,
+                    focus.inside
+                  ).className,
+                  children: (
+                    <>
+                      {lead}
+                      <span {...stylex.props(styles.titleWords)}>{title}</span>
+                    </>
+                  ),
+                },
+                home
+              )}
+            </h2>
           </div>
-        </h2>
-        {renderBack({ ...back, label: backLabel })}
+        </div>
       </div>
     );
   }

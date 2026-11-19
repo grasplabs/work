@@ -2870,11 +2870,6 @@ msgstr "Moet hij iets altijd weten?"
 msgid "App"
 msgstr "App"
 
-#: src/apps/app-section.tsx
-msgctxt "an app's workspace view"
-msgid "App"
-msgstr "App"
-
 #: src/apps/app-data.tsx
 #: src/connections/connection-list.tsx
 msgid "App {app}"
@@ -3398,7 +3393,6 @@ msgstr "Beschikbaar, direct"
 msgid "Available, via Composio"
 msgstr "Beschikbaar, via Composio"
 
-#: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
 #: src/brain/brain-section.tsx
 #: src/chat/approval-words.ts
@@ -3418,10 +3412,6 @@ msgstr "Terug en verder"
 #: src/frame/part-words.tsx
 msgid "Back to {agent}"
 msgstr "Terug naar {agent}"
-
-#: src/brain/atlas-overlays.tsx
-msgid "Back to {destination}"
-msgstr "Terug naar {destination}"
 
 #: src/frame/part-words.tsx
 msgid "Back to Grasp"
@@ -3590,7 +3580,6 @@ msgstr "Gekoppeld aan"
 #: src/brain/brain-section.tsx
 #: src/frame/shell-pending.tsx
 #: src/grasp/frame/grasp-sidebar.tsx
-#: src/routes/_shell.brain.index.tsx
 #: src/routes/_shell.brain.tsx
 msgid "Brain"
 msgstr "Brein"
@@ -18172,10 +18161,6 @@ msgstr "Waar de {total} runs van deze week naartoe gingen."
 #: src/settings/where-stephen.tsx
 msgid "Where to reach Stephen"
 msgstr "Waar je Stephen bereikt"
-
-#: src/brain/atlas-overlays.tsx
-msgid "Where you are in the brain"
-msgstr "Waar je bent in het Brein"
 
 #: src/onboarding/connect-steps.tsx
 msgid "Where, for example Dropbox"
