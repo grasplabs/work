@@ -180,11 +180,15 @@ export interface Scope {
   /** The fields of a file it asks for besides every read's (`baseFields`). */
   fields: string;
   /**
-   * The folder a file's chain of folders ends at without being read: a
-   * shared drive's own (its root, `driveId`); none in My Drive, whose
-   * chain ends at the folder with no parent.
+   * The folder every chain of folders must end at, and isn't read: a
+   * shared drive's own root (its `driveId`), or the person's My Drive,
+   * as its `root` alias names it, read once a read. Null when it can't be
+   * read, so no chain ends: nobody reads its files.
    */
-  root: (file: DriveFile) => string | null;
+  root: (
+    room: SyncRoom,
+    folders: Folders
+  ) => { id: string } | Promise<{ id: string } | null | "late">;
   /**
    * Who may open a file, read before its content, with the folders it is
    * in (`readersUnder`), each read once a read (`folders`): null when they
@@ -298,16 +302,17 @@ const readersOfPermissions = (
   });
 
 /**
- * A folder of a file's chain, as read once a read: whether it has limited
- * access (`inheritedPermissionsDisabled`) and its own folder; null when it
- * can't be read.
+ * A folder of a file's chain, as read once a read: its ID, whether it has
+ * limited access (`inheritedPermissionsDisabled`) and its own folder;
+ * null when it can't be read.
  */
-type Folder = { limited: boolean; parent: string | null } | null;
+type Folder = { id: string; limited: boolean; parent: string | null } | null;
 
 /** The folders a read has read, by ID. */
 export type Folders = Map<string, Folder>;
 
 const folderSchema = z.object({
+  id: z.string(),
   inheritedPermissionsDisabled: z.boolean().nullish(),
   parents: z.array(z.string()).nullish(),
 });
@@ -336,7 +341,7 @@ const folderOf = async (
     room,
     googleUrl(apisHost, `${files}/${segment(id)}`, {
       ...scope.file,
-      fields: "inheritedPermissionsDisabled,parents",
+      fields: "id,inheritedPermissionsDisabled,parents",
     })
   );
   if (response === "late") {
@@ -346,6 +351,7 @@ const folderOf = async (
   if (response.ok) {
     const read = folderSchema.parse(await response.json());
     folder = {
+      id: read.id,
       limited: read.inheritedPermissionsDisabled === true,
       parent: read.parents?.[0] ?? null,
     };
@@ -363,10 +369,12 @@ const folderOf = async (
 };
 
 /**
- * The folders `file` is in, from its own up to the root (`Scope.root`),
- * each with whether it has limited access: null when any of them can't
- * be read, or the chain doesn't reach the root; "late" when the read has
- * no room left. Never part of a chain.
+ * The folders `file` is in, from its own up to its scope's root
+ * (`Scope.root`), each with whether it has limited access: null when the
+ * chain doesn't reach that root, whether a folder can't be read (Drive
+ * refuses it, or no longer has it) or has nothing above it short of the
+ * root, or the file names no folder; "late" when the read has no room
+ * left. Never part of a chain.
  */
 const chainOf = async (
   room: SyncRoom,
@@ -374,28 +382,30 @@ const chainOf = async (
   file: DriveFile,
   folders: Folders
 ): Promise<{ id: string; limited: boolean }[] | null | "late"> => {
-  const root = scope.root(file);
+  const top = await scope.root(room, folders);
+  if (top === null || top === "late") {
+    return top;
+  }
+  const root = top.id;
   const chain: { id: string; limited: boolean }[] = [];
   const seen = new Set<string>();
   let next = file.parents?.[0] ?? null;
-  if (next === null) {
-    return null;
-  }
-  while (next !== null && next !== root) {
-    if (seen.has(next)) {
+  while (next !== root) {
+    if (next === null || seen.has(next)) {
       return null;
     }
     seen.add(next);
     // oxlint-disable-next-line no-await-in-loop -- up the chain, one folder at a time, each once a read
     const folder = await folderOf(room, scope, next, folders);
-    if (folder === null || folder === "late") {
-      return folder;
+    if (folder === "late") {
+      return "late";
     }
-    chain.push({ id: next, limited: folder.limited });
-    next = folder.parent;
+    if (folder !== null) {
+      chain.push({ id: next, limited: folder.limited });
+    }
+    next = folder?.parent ?? null;
   }
-  // A shared drive's chain ends at its root; My Drive's at its top folder.
-  return root === null || next === root ? chain : null;
+  return chain;
 };
 
 /** Roles that open a folder with limited access whatever its sharing. */
@@ -485,7 +495,12 @@ const ownDrive: Scope = {
   file: {},
   holds: isOwned,
   fields: `permissions(${permissionFields})`,
-  root: () => null,
+  // My Drive's own root, by the alias Google gives it ("The alias root can
+  // be used to refer to the root folder anywhere a file ID is provided").
+  root: async (room, folders) => {
+    const top = await folderOf(room, ownDrive, "root", folders);
+    return top === "late" || top === null ? top : { id: top.id };
+  },
   // A file of the person's own carries its permissions: the folders above
   // it are read, not its permissions.
   readersRead: async (room, file, folders) =>

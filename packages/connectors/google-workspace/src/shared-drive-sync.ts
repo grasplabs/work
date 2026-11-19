@@ -190,7 +190,7 @@ const sharedDrive = (driveId: string): Scope => ({
   holds: (file: DriveFile) => file.driveId === driveId && file.trashed !== true,
   fields: "capabilities(canShare)",
   // Its chain of folders ends at the drive's own root.
-  root: () => driveId,
+  root: () => ({ id: driveId }),
   // Only for a file the account can share: anyone else's list may be
   // their own access alone, so it is nobody's, and none is asked for.
   readersRead: async (room, file, folders) =>
