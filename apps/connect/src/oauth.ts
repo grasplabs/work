@@ -67,7 +67,7 @@ import type { TokenSet } from "./oauth-client.ts";
 import { oweRevoke } from "./owed-revokes.ts";
 import { dropPendingActions } from "./pending.ts";
 import { rightsFor } from "./provider-rights.ts";
-import { grantedAsAsked, providerFor } from "./providers.ts";
+import { grantedAsAsked, providerFor, renewedAsGranted } from "./providers.ts";
 import type {
   ApiKeyProviderConfig,
   OAuthClientCredentials,
@@ -76,7 +76,12 @@ import type {
   ProviderConfig,
 } from "./providers.ts";
 import { revokeAtProvider } from "./revocations.ts";
-import { apiKeyExpiresAt, discardMint, firstTokens } from "./tokens.ts";
+import {
+  apiKeyExpiresAt,
+  discardMint,
+  firstTokens,
+  grantedScopesOf,
+} from "./tokens.ts";
 import { resealBatchSize, vaultFor } from "./vault.ts";
 import type { Vault } from "./vault.ts";
 
@@ -162,6 +167,28 @@ const reconnects = (
   held.status === "needs_reauth" &&
   held.scope === flow.scope &&
   (held.scope === "shared" || held.ownerUserId === person.userId);
+
+/**
+ * Whether finishing `flow` renews `held` in place: the organization's
+ * directory connection, still active, of the account the flow came back
+ * with, in the flow's own tenant (GRA-2171). Connecting the directory
+ * again with the account it has is how an admin mends a read, and how a
+ * connection made before a scope was asked for (`Group.ReadBasic.All`)
+ * gains it; it keeps its ID, so nothing that names it changes. Any other
+ * connection of an account already held stays refused. The caller checked
+ * the role (an admin's, for a shared one) and the grant.
+ */
+const renewsInPlace = (
+  held: ConnectionRow,
+  flow: Target,
+  provider: ProviderConfig
+): boolean =>
+  held.status === "active" &&
+  held.scope === "shared" &&
+  flow.scope === "shared" &&
+  provider.kind === "oauth" &&
+  directoryProviderSchema.safeParse(provider.id).success &&
+  (held.tenant ?? "").toLowerCase() === flow.tenant;
 
 /** Only admins connect or disconnect what the organization shares. */
 const mayManage = (person: ConnectionPerson, scope: ConnectionScope): boolean =>
@@ -498,6 +525,30 @@ const storeConnection = async (
   return connectionId;
 };
 
+/** What a connection signed in to again takes of the sign-in. */
+const signedInAgain = (
+  provider: ProviderConfig,
+  flow: Target,
+  account: ProviderAccount,
+  addresses: AccountAddresses | undefined,
+  now: Date
+) => ({
+  tenant: tenantOf(flow),
+  accountName: account.name,
+  accountEmail: account.email?.toLowerCase() ?? null,
+  pastVerifiedEmails: pastAddressesAfter(confirmedAddressOf(provider, account)),
+  verifiedEmail: confirmedAddressOf(provider, account),
+  verifiedEmailAt: confirmedAddressOf(provider, account) === null ? null : now,
+  // A lookup that failed keeps what was read before.
+  ...(addresses === undefined
+    ? {}
+    : {
+        accountAddresses: addresses.receives,
+        accountSenders: addresses.sends,
+      }),
+  updatedAt: now,
+});
+
 /**
  * Gives `held`, whose grant ran out, the tokens of a new one and makes it
  * active again, in one write with its event. Only while it still needs
@@ -554,28 +605,68 @@ const reconnect = async (
         .update(connections)
         .set({
           status: "active",
-          tenant: tenantOf(flow),
-          accountName: account.name,
-          accountEmail: account.email?.toLowerCase() ?? null,
-          pastVerifiedEmails: pastAddressesAfter(
-            confirmedAddressOf(provider, account)
-          ),
-          verifiedEmail: confirmedAddressOf(provider, account),
-          verifiedEmailAt:
-            confirmedAddressOf(provider, account) === null ? null : new Date(),
-          // A lookup that failed keeps what was read before.
-          ...(addresses === undefined
-            ? {}
-            : {
-                accountAddresses: addresses.receives,
-                accountSenders: addresses.sends,
-              }),
-          updatedAt: now,
+          ...signedInAgain(provider, flow, account, addresses, now),
         })
         .where(stillWaiting),
     ]
   );
   return reconnected ? held.id : undefined;
+};
+
+/**
+ * Gives `held`, an active connection `renewsInPlace` names, the tokens of
+ * the sign-in just made, in one write with its event, only while it is
+ * still active. The tokens' generation starts at the time, past any the
+ * old ones reached, so a refresh of the old ones still under way can't
+ * write over them (`firstTokens`). Its ID if this call did, `undefined`
+ * if it was disconnected or marked for reconnecting meanwhile.
+ */
+const renewInPlace = async (
+  env: Env,
+  { provider, vault }: Keeping,
+  flow: Target,
+  person: ConnectionPerson,
+  held: ConnectionRow | undefined,
+  account: ProviderAccount,
+  tokens: Kept,
+  addresses: AccountAddresses | undefined
+): Promise<string | undefined> => {
+  if (held === undefined || !renewsInPlace(held, flow, provider)) {
+    return undefined;
+  }
+  const now = new Date();
+  const db = drizzle(env.DB);
+  const row = await firstTokens(vault, held.id, tokens, now);
+  const stillActive = sql`${connections.id} = ${held.id} AND ${connections.status} = 'active' AND NOT ${ownerErased(held.id)}`;
+  const renewed = await recordEventIf(
+    env,
+    connectionEvent(person, "connection.reconnected", held.id, {
+      provider: provider.id,
+      scope: held.scope,
+      outcome: "ok",
+    }),
+    { from: connections, where: stillActive },
+    [
+      db
+        .update(connectionTokens)
+        .set({
+          sealed: row.sealed,
+          accessExpiresAt: row.accessExpiresAt,
+          generation: row.generation,
+          refreshUntil: null,
+          grantedScopes: row.grantedScopes,
+          updatedAt: now,
+        })
+        .where(
+          sql`${connectionTokens.connectionId} = ${held.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${stillActive})`
+        ),
+      db
+        .update(connections)
+        .set(signedInAgain(provider, flow, account, addresses, now))
+        .where(stillActive),
+    ]
+  );
+  return renewed ? held.id : undefined;
 };
 
 /**
@@ -594,6 +685,34 @@ type RefusalReason =
   | "connection.already_connected"
   | "connection.provider_refused"
   | "connection.flow_invalid";
+
+/**
+ * Why a flow that came back with an account `held` holds is refused; none
+ * when it may have it: reconnected after its grant ran out (`reconnects`),
+ * or renewed in place (`renewsInPlace`) with a grant that holds all it
+ * held before. A narrower one is refused, and the working connection
+ * keeps its tokens (`drop` revokes nothing an active one holds).
+ */
+const heldRefusal = async (
+  env: Env,
+  provider: ProviderConfig,
+  flow: Target,
+  person: ConnectionPerson,
+  held: ConnectionRow | undefined,
+  kept: Kept
+): Promise<RefusalReason | undefined> => {
+  if (held === undefined || reconnects(held, flow, person)) {
+    return undefined;
+  }
+  if (!renewsInPlace(held, flow, provider)) {
+    return "connection.already_connected";
+  }
+  const asHeld =
+    provider.kind === "oauth" &&
+    "accessToken" in kept &&
+    renewedAsGranted(provider, kept, await grantedScopesOf(env, held.id));
+  return asHeld ? undefined : "connection.scopes_refused";
+};
 
 /**
  * Keeps what a sign-in got (tokens, or a key) for `account`, once it is
@@ -627,8 +746,9 @@ const keepAccount = async (
   ) {
     return await refusal("connection.not_own_account");
   }
-  if (held !== undefined && !reconnects(held, flow, person)) {
-    return await refusal("connection.already_connected");
+  const refused = await heldRefusal(env, provider, flow, person, held, kept);
+  if (refused !== undefined) {
+    return await refusal(refused);
   }
   // A suite's account's own addresses, read with the token just issued:
   // core counts mail to and from them as the account's
@@ -644,6 +764,16 @@ const keepAccount = async (
     // reconnected by another flow, it is a duplicate.
     return (
       (await reconnect(
+        env,
+        setUp,
+        flow,
+        person,
+        held,
+        account,
+        kept,
+        addresses
+      )) ??
+      (await renewInPlace(
         env,
         setUp,
         flow,

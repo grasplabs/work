@@ -28,8 +28,10 @@ import { SettingsBody, SettingsSection } from "./settings-parts.tsx";
 // one line. Nothing shows before a read was tried (with no directory, the
 // admin's own list is the source), nor when it can't be read.
 //
-// A failure an admin mends by connecting the directory again offers that
-// beside it (directory-reconnect.tsx, GRA-2171).
+// Each directory can be connected again under its status
+// (directory-reconnect.tsx, GRA-2171): what mends a read that needs it,
+// and what grants a scope asked for since (its groups'), which no read
+// fails for.
 
 /** The directory's provider, by its product's name (not translated). */
 const providerNames: Record<DirectoryProvider, string> = {
@@ -116,9 +118,6 @@ const ReadStatus = ({ read }: { read: DirectoryRead }) => {
             <p>
               <FailureAdvice advice={adviceOf(failure.code)} />
             </p>
-            {adviceOf(failure.code) === "connect" ? (
-              <DirectoryReconnect name={name} provider={read.provider} />
-            ) : null}
             <p>
               <Trans>
                 Until a read succeeds, nobody joins, moves or is suspended
@@ -142,6 +141,7 @@ const ReadStatus = ({ read }: { read: DirectoryRead }) => {
           </AlertDescription>
         </Alert>
       )}
+      <DirectoryReconnect name={name} provider={read.provider} />
     </div>
   );
 };

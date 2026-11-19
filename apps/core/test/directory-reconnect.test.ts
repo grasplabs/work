@@ -1,16 +1,22 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { consentCode } from "./connect-providers.ts";
 import {
+  connectedGoogleDirectory,
   consentDirectory,
+  directoryGrants,
+  directoryGroup,
+  directoryGroupsHold,
   directoryHolds,
   directoryUser as user,
 } from "./directory.ts";
 import { mockIdp } from "./idp.ts";
 import { runClockTask } from "./maintenance.ts";
-import { otherTenant } from "./sign-in-config.ts";
+import { acmeTenant, otherTenant } from "./sign-in-config.ts";
 import {
   outcome,
+  routed,
   signedIn,
   signedInApi,
   staffPerson,
@@ -69,6 +75,41 @@ const connectionOf = async (subject: string) => {
 /** An Entra account's subject, new to every test. */
 const account = (): string => `directory-${crypto.randomUUID()}`;
 
+/** The tokens connect keeps for connection `id`: which grant, and which generation of it. */
+const tokensOf = async (id: string) =>
+  await connectDb()
+    .prepare(
+      "SELECT sealed, generation, granted_scopes AS granted FROM connection_tokens WHERE connection_id = ?"
+    )
+    .bind(id)
+    .first<{ sealed: string; generation: number; granted: string }>();
+
+/** What Entra granted a directory connection made before Grasp asked for its groups. */
+const beforeGroups = "openid profile email User.Read User.Read.All";
+
+/**
+ * `admin` connecting SharePoint and OneDrive from Settings, consenting as
+ * the Entra account `subject`: where the browser came back to.
+ */
+const consentDocuments = async (
+  admin: Awaited<ReturnType<typeof signedInApi>>,
+  subject: string
+): Promise<URL> => {
+  const { url } = await admin.api.onboarding.connectDocumentPlaces(
+    "microsoft",
+    settings
+  );
+  const authorization = new URL(url);
+  const response = await routed(
+    `/api/connections/callback?${new URLSearchParams({
+      code: consentCode(authorization, acmeTenant, subject),
+      state: authorization.searchParams.get("state") ?? "",
+    }).toString()}`,
+    { headers: { cookie: admin.session } }
+  );
+  return new URL(response.headers.get("location") ?? "");
+};
+
 /** Where the browser came back to: the page, and the connection it names. */
 const landed = (back: URL) => ({
   page: back.pathname,
@@ -77,6 +118,12 @@ const landed = (back: URL) => ({
 });
 
 describe("connecting the directory again from Settings", () => {
+  // First: before any directory is connected here.
+  it("records nothing for a company that never connected a directory", async () => {
+    await readAt(nextDay());
+    await expect(read()).resolves.toBeNull();
+  });
+
   it("refuses a member, Grasp's staff, a suspended admin and another tenant's account, and leaves the connection as it was", async () => {
     const admin = await signedInApi(idp, "admin");
     const held = account();
@@ -191,6 +238,157 @@ describe("connecting the directory again from Settings", () => {
       replacing: "active",
       read: replacing.id,
     });
+  });
+
+  it("says a directory disconnected since its last read isn't connected, and connecting it again mends it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const subject = account();
+    await consentDirectory(admin, { returnTo: settings, subject });
+    await directoryHolds([user()]);
+    await readAt(nextDay());
+    const { id } = await connectionOf(subject);
+    // As Integrations disconnects it.
+    await admin.api.connections.disconnect(id);
+    const at = nextDay();
+    await readAt(at);
+    const unconnected = await read();
+    const { back } = await consentDirectory(admin, {
+      returnTo: settings,
+      subject,
+    });
+    await readAt(new Date(at.getTime() + 15 * 60 * 1000));
+    const mended = await read();
+
+    expect({
+      unconnected: unconnected?.failure,
+      landed: landed(back).page,
+      mended: mended?.failure,
+    }).toStrictEqual({
+      unconnected: "directory.not_connected",
+      landed: settings,
+      mended: null,
+    });
+  });
+
+  it("with the same account on a working connection, renews it in place, and one made before the groups were asked for then reads them", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const subject = account();
+    await consentDirectory(admin, { returnTo: settings, subject });
+    const { id } = await connectionOf(subject);
+    // As connect kept a connection made before the groups' scope, and as
+    // Entra renews it: with what was granted then.
+    await connectDb()
+      .prepare(
+        "UPDATE connection_tokens SET granted_scopes = ?, access_expires_at = 0 WHERE connection_id = ?"
+      )
+      .bind(beforeGroups, id)
+      .run();
+    const finance = directoryGroup({
+      displayName: `Finance ${crypto.randomUUID()}`,
+    });
+    await directoryGroupsHold([finance]);
+    await directoryGrants(beforeGroups);
+    let lacking: string;
+    try {
+      lacking = await outcome(admin.api.directoryGroups.search("Finance"));
+    } finally {
+      await directoryGrants(null);
+    }
+    const before = await tokensOf(id);
+
+    const { back } = await consentDirectory(admin, {
+      returnTo: settings,
+      subject,
+    });
+    const renewed = await connectionOf(subject);
+    const after = await tokensOf(id);
+    const found = await admin.api.directoryGroups.search("Finance");
+
+    expect({
+      lacking,
+      landed: landed(back),
+      renewed: renewed.status,
+      newTokens: after?.sealed !== before?.sealed,
+      later: (after?.generation ?? 0) > (before?.generation ?? 0),
+      found: found.groups.some((group) => group.id === finance.id),
+    }).toStrictEqual({
+      lacking: "directory.groups_not_granted",
+      landed: { page: settings, connection: id, error: null },
+      renewed: "active",
+      newTokens: true,
+      later: true,
+      found: true,
+    });
+  });
+
+  it("with the same account, refuses a grant narrower than the one the connection holds, and leaves its tokens working", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const subject = account();
+    await consentDirectory(admin, { returnTo: settings, subject });
+    const { id } = await connectionOf(subject);
+    const before = await tokensOf(id);
+    // Everything a new connection must hold, without User.Read it held.
+    await directoryGrants(
+      "openid profile email offline_access User.Read.All Group.ReadBasic.All"
+    );
+    let narrower: URL;
+    try {
+      ({ back: narrower } = await consentDirectory(admin, {
+        returnTo: settings,
+        subject,
+      }));
+    } finally {
+      await directoryGrants(null);
+    }
+    await directoryHolds([user(), user(), user()]);
+    await readAt(nextDay());
+    const now = await read();
+
+    expect({
+      landed: landed(narrower),
+      tokens: await tokensOf(id),
+      read: { connectionId: now?.connectionId, failure: now?.failure },
+    }).toStrictEqual({
+      landed: {
+        page: "/integrations",
+        connection: null,
+        error: "connection.scopes_refused",
+      },
+      tokens: before,
+      read: { connectionId: id, failure: null },
+    });
+  });
+
+  it("still refuses the same account again on a working connection that isn't the directory's", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const subject = `documents-${crypto.randomUUID()}`;
+    const first = await consentDocuments(admin, subject);
+    const again = await consentDocuments(admin, subject);
+
+    expect({
+      first: first.searchParams.has("connection"),
+      again: landed(again),
+    }).toStrictEqual({
+      first: true,
+      again: {
+        page: "/integrations",
+        connection: null,
+        error: "connection.already_connected",
+      },
+    });
+  });
+
+  it("never stops another directory's connection: Google's leaves Microsoft's as it was", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const microsoft = account();
+    await consentDirectory(admin, { returnTo: settings, subject: microsoft });
+    const google = await connectedGoogleDirectory(idp);
+    const { status } = await connectionOf(microsoft);
+
+    expect({
+      google: google.back.searchParams.has("connection"),
+      microsoft: status,
+    }).toStrictEqual({ google: true, microsoft: "active" });
   });
 
   // Last: it leaves a connection made "later" than any after it.

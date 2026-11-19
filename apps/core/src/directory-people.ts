@@ -549,6 +549,25 @@ const recordFailure = async (
 };
 
 /**
+ * Records that `kind`'s directory, read before, has no connection to read
+ * with now (`directory.not_connected`): the rows the last good read left
+ * stay, and so does the connection it names, the last one read.
+ */
+const recordUnconnected = async (
+  env: Env,
+  kind: DirectoryKind
+): Promise<void> => {
+  await drizzle(env.DB)
+    .update(directoryReads)
+    .set({ failure: "directory.not_connected", failedAt: new Date() })
+    .where(eq(directoryReads.provider, kind.provider));
+  log.warn("directory.read_failed", {
+    provider: kind.provider,
+    code: "directory.not_connected",
+  });
+};
+
+/**
  * Records `failure`, what stopped a read started at `startedAt`, as the
  * read's failure; whatever stopped it, nothing of the read was kept. One
  * that isn't the directory's own (D1 refusing the batch, say) goes on to
@@ -608,7 +627,17 @@ const readKind = async (
   const config = signInConfig(env);
   const tenant =
     config === undefined ? undefined : kind.tenantIn(config)?.toLowerCase();
-  if (connection === undefined || tenant === undefined) {
+  if (tenant === undefined) {
+    return;
+  }
+  if (connection === undefined) {
+    // Read before, and its connection gone since (disconnected, or one of
+    // another tenant only): a failure an admin mends by connecting it
+    // again (GRA-2171), not a silence that reads as fine. A directory
+    // never read before is none the company uses.
+    if (status !== undefined) {
+      await recordUnconnected(env, kind);
+    }
     return;
   }
   // Before the first page: a read that started later, whichever ends

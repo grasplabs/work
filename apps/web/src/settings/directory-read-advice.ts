@@ -15,8 +15,10 @@ export type ReadAdvice = "connect" | "tooLarge" | "wait";
  */
 export const adviceOf = (code: DirectoryReadFailure): ReadAdvice => {
   switch (code) {
-    // The connection can't be read with (Google's answer to an account that
-    // isn't the Workspace's admin among them), or is another organization's.
+    // No connection (disconnected since the last read), one that can't be
+    // read with (Google's answer to an account that isn't the Workspace's
+    // admin among them), or another organization's.
+    case "directory.not_connected":
     case "directory.inactive":
     case "directory.not_admin":
     case "directory.not_found":
