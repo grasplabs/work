@@ -5858,8 +5858,10 @@ export type Correction = z.input<typeof correctionSchema>;
  * correction with no name of its own (`liveNamed` names it). Under the same
  * attribute when it holds a value, so a newer correction of a one-value
  * attribute ends the one before. A wrong memory that is their own word is
- * retired too, as `forgetAs` retires it: on a many-value attribute the
- * correction would otherwise stand beside it.
+ * one the correction replaces (`NewMemory.replaces`): ended, kept as
+ * history, whatever its attribute (on a many-value one the correction
+ * would otherwise stand beside it), and current again once the
+ * correction's own save is undone, never what it replaced in turn.
  *
  * The shared store is left as it is: a correction others may read would
  * widen what the person read, theirs to publish, not this. What is saved
@@ -5867,8 +5869,7 @@ export type Correction = z.input<typeof correctionSchema>;
  * and kind, the memory's attribute and type, the text), so the same
  * `change` again answers what it saved while the wrong memory is one they
  * may still read, whatever else has happened to it since (ended by it, or
- * retired), and confirms and retires again, each a repeat that records
- * nothing new. Once they may no longer read it (its source narrowed or
+ * retired), and confirms again, a repeat that records nothing new. Once they may no longer read it (its source narrowed or
  * erased), a retry answers null, as for any memory they may not read: a
  * correction an earlier try saved stays in their own store, where the
  * page shows it and they can confirm it themselves. The same `change`
@@ -5902,6 +5903,9 @@ export const correctAs = async (
       ? { id: entity.id, kind: entity.kind }
       : { kind: entity.kind, identifiers: [sharedEntityRefOf(entity.id)] };
   const attribute = read.attribute ?? undefined;
+  // Their own word it replaces (`NewMemory.replaces`): ended, kept as
+  // history, and current again once the correction's save is undone.
+  const theirs = wrong.store === "own" && read.writer === reader.person;
   let saved: RememberedMemory;
   try {
     saved = await rememberAs(env, personId, {
@@ -5911,6 +5915,7 @@ export const correctAs = async (
       type: read.type,
       statement: right,
       quote: right,
+      ...(theirs ? { replaces: [read.id] } : {}),
     });
   } catch (error) {
     if (error instanceof Error && error.message === changeReused) {
@@ -5918,17 +5923,11 @@ export const correctAs = async (
     }
     throw error;
   }
-  const own = ownBrain(env, reader.person);
   try {
-    await own.confirmMemory({ memory: saved.memory, reader });
-    if (wrong.store === "own" && read.writer === reader.person) {
-      await own.retireMemory({
-        memory: read.id,
-        reader,
-        writer: reader.person,
-        change: `correct:${change}`,
-      });
-    }
+    await ownBrain(env, reader.person).confirmMemory({
+      memory: saved.memory,
+      reader,
+    });
   } catch (error) {
     throw erasedAs(error);
   }

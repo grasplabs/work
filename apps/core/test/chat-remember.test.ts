@@ -1154,7 +1154,7 @@ describe("the agent remembering in a person's own chat", () => {
   );
 
   it(
-    "brings back nothing a memory replaced when the person corrects it on their Memories page",
+    "brings back nothing a memory replaced when the person corrects it on their Memories page, and the corrected one when the correction is undone",
     slow,
     async () => {
       const member = await signedInApi(idp, "user");
@@ -1170,16 +1170,30 @@ describe("the agent remembering in a person's own chat", () => {
         quote: "it's sushi now",
         replaces: [pizza],
       });
-      await member.api.brainMemories.correct({
+      const ramen = await member.api.brainMemories.correct({
         wrong: { store: "own", entity: sushi.entity, memory: sushi.memory },
         right: "Loves ramen",
         change: crypto.randomUUID(),
       });
+      const corrected = await ownHistoryOf(person);
+      // The correction's own save undone: what it corrected comes back,
+      // never what that replaced in turn.
+      await member.api.brainMemories.forget(ramen?.memory ?? "");
 
-      await expect(ownHistoryOf(person)).resolves.toStrictEqual({
-        "Loves pizza": false,
-        "Loves sushi": false,
-        "Loves ramen": true,
+      expect({
+        corrected,
+        undone: await ownHistoryOf(person),
+      }).toStrictEqual({
+        corrected: {
+          "Loves pizza": false,
+          "Loves sushi": false,
+          "Loves ramen": true,
+        },
+        undone: {
+          "Loves pizza": false,
+          "Loves sushi": true,
+          "Loves ramen": false,
+        },
       });
     }
   );
