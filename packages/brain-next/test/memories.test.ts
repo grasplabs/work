@@ -1626,6 +1626,7 @@ describe("what hidden memories never decide, and when a fact ends", () => {
   // Threat 3: a confirmation made without seeing a rival never ranks first for one who sees it.
   it("counts a confirmation only for a reader whose every current rival it was made over", async () => {
     const left = unique("left");
+    const middle = unique("middle");
     const right = unique("right");
     const made = await remember(
       audience(left),
@@ -1633,7 +1634,47 @@ describe("what hidden memories never decide, and when a fact ends", () => {
       [byWriter(unique("w1"), { attribute: "status", value: "active" })]
     );
     const entity = made.entities.c ?? "";
-    // Added for someone who sees both sides, readable by the right only.
+    const all = readerOf(unique("adder"), left, middle, right);
+    // Two rivals, each readable by one more group only.
+    for (const [group, value] of [
+      [middle, "lost"],
+      [right, "churned"],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one rival after another
+      await shared().addMemories({
+        change: crypto.randomUUID(),
+        access: audience(group),
+        reader: all,
+        entities: [{ key: "c", kind: "customer", id: entity }],
+        memories: [byWriter(unique("w"), { attribute: "status", value })],
+      });
+    }
+    // Made by someone who sees one rival, not the other.
+    await expect(
+      shared().confirmMemory({
+        memory: made.memories[0] ?? "",
+        reader: readerOf(unique("a"), left, middle),
+      })
+    ).resolves.toBe("done");
+
+    const { memories } = await shared().readMemories({
+      entity,
+      reader: readerOf(unique("b"), left, middle, right),
+    });
+    const active = memories.find(({ value }) => value === "active");
+    expect([active?.contested, active?.confirmed]).toStrictEqual([true, null]);
+  });
+
+  it("confirms nothing of a memory no current memory the reader may read contests: a saved memory is taken as correct", async () => {
+    const left = unique("left");
+    const right = unique("right");
+    const made = await remember(
+      audience(left),
+      [{ key: "c", kind: "customer" }],
+      [byWriter(unique("w1"), { attribute: "status", value: "active" })]
+    );
+    const entity = made.entities.c ?? "";
+    // A rival the confirmer may not read.
     await shared().addMemories({
       change: crypto.randomUUID(),
       access: audience(right),
@@ -1643,19 +1684,18 @@ describe("what hidden memories never decide, and when a fact ends", () => {
         byWriter(unique("w2"), { attribute: "status", value: "lost" }),
       ],
     });
-    await expect(
-      shared().confirmMemory({
-        memory: made.memories[0] ?? "",
-        reader: readerOf(unique("a"), left),
-      })
-    ).resolves.toBe("done");
-
+    const memory = made.memories[0] ?? "";
+    const leftOnly = readerOf(unique("a"), left);
+    const outcome = await shared().confirmMemory({ memory, reader: leftOnly });
     const { memories } = await shared().readMemories({
       entity,
-      reader: readerOf(unique("b"), left, right),
+      reader: leftOnly,
     });
-    const active = memories.find(({ value }) => value === "active");
-    expect([active?.contested, active?.confirmed]).toStrictEqual([true, null]);
+
+    expect({
+      outcome,
+      active: memories.map(({ value, confirmed }) => [value, confirmed]),
+    }).toStrictEqual({ outcome: "nothing", active: [["active", null]] });
   });
 
   it("ends what a source's earlier version said once a later version is marked fully extracted", async () => {
@@ -1762,6 +1802,12 @@ describe("what hidden memories never decide, and when a fact ends", () => {
       audience(group),
       [{ key: "c", kind: "customer" }],
       [byWriter(unique("w"), { attribute: "status", value: "active" })]
+    );
+    // A rival, so there is a disagreement to settle.
+    await remember(
+      audience(group),
+      [{ key: "c", kind: "customer", id: made.entities.c ?? "" }],
+      [byWriter(unique("w2"), { attribute: "status", value: "lost" })]
     );
     const reader = readerOf(unique("p"), group);
     const memory = made.memories[0] ?? "";

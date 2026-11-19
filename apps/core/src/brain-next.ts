@@ -5362,8 +5362,8 @@ export const forgetAs = async (
 
 // The Brain's Memories page (GRA-1746), for a person core verified: the
 // entities they may see, what the Brain remembers about one, history
-// included, the facts sources disagree on, and their confirmation or
-// correction. Each reads as them, from what they may read alone, in the
+// included, the facts sources disagree on, and their confirmation of a
+// side (settling it) or correction. Each reads as them, from what they may read alone, in the
 // store each entity and memory is in: their own (theirs alone) or the
 // shared one, whose ids are their own, so each is named with its store.
 // A listing reads their own store first, then the shared one, a page of
@@ -5814,11 +5814,13 @@ const memoryPlaceSchema = memoryRefSchema.omit({ entity: true });
 export type StoredMemoryPlace = z.infer<typeof memoryPlaceSchema>;
 
 /**
- * The member `personId` confirms memory `memory`, current and one they may
- * read, over the current memories they may read that say otherwise, as
- * their own word (the Brain's `confirmMemory`): `nothing` alike for one
- * there isn't, they may not read, or that isn't current. Refused once
- * they are no longer a member.
+ * The member `personId` settles a fact sources disagree on: confirms
+ * memory `memory`, current and one they may read, over the current
+ * memories they may read that say otherwise, as their own word (the
+ * Brain's `confirmMemory`): `nothing` alike for one there isn't, they may
+ * not read, that isn't current, or that nothing they may read contests (a
+ * saved memory is taken as correct). Refused once they are no longer a
+ * member.
  */
 export const confirmAs = async (
   env: BrainEnv & ReaderEnv,
@@ -5851,8 +5853,7 @@ export type Correction = z.input<typeof correctionSchema>;
 /**
  * The member `personId` says memory `wrong` is wrong, and what is right
  * (`right`): saved as their own word, readable by them alone, in their own
- * store (`rememberAs`), and confirmed there over what they may read that
- * says otherwise. About the same entity: in their own store by its id;
+ * store (`rememberAs`), and taken as correct as saved. About the same entity: in their own store by its id;
  * from the shared one, the entity of theirs that stands for it, found by
  * its exact identifier (`sharedEntityRefOf`) alone, made at the first
  * correction with no name of its own (`liveNamed` names it). Under the same
@@ -5869,10 +5870,10 @@ export type Correction = z.input<typeof correctionSchema>;
  * and kind, the memory's attribute and type, the text), so the same
  * `change` again answers what it saved while the wrong memory is one they
  * may still read, whatever else has happened to it since (ended by it, or
- * retired), and confirms again, a repeat that records nothing new. Once they may no longer read it (its source narrowed or
+ * retired). Once they may no longer read it (its source narrowed or
  * erased), a retry answers null, as for any memory they may not read: a
  * correction an earlier try saved stays in their own store, where the
- * page shows it and they can confirm it themselves. The same `change`
+ * page shows it. The same `change`
  * with other text is refused (`brain.correction_reused`). Null alike when
  * the memory isn't one they may read and when it is a relation. Refused
  * once they are no longer a member.
@@ -5906,9 +5907,8 @@ export const correctAs = async (
   // Their own word it replaces (`NewMemory.replaces`): ended, kept as
   // history, and current again once the correction's save is undone.
   const theirs = wrong.store === "own" && read.writer === reader.person;
-  let saved: RememberedMemory;
   try {
-    saved = await rememberAs(env, personId, {
+    return await rememberAs(env, personId, {
       change: `correct:${change}`,
       about,
       ...(attribute === undefined ? {} : { attribute, value: right }),
@@ -5923,22 +5923,13 @@ export const correctAs = async (
     }
     throw error;
   }
-  try {
-    await ownBrain(env, reader.person).confirmMemory({
-      memory: saved.memory,
-      reader,
-    });
-  } catch (error) {
-    throw erasedAs(error);
-  }
-  return saved;
 };
 
 // Sharing a memory (GRA-1815, threat model on the issue): a person
 // widens one of their own memories on purpose, as a new memory in the
 // shared store, in their own word, for a team they are in or the
 // company. Their own stays as it is, theirs alone: nothing only one
-// person may read leaves their own store but the text they confirmed.
+// person may read leaves their own store but the text they shared.
 // Only the person, on their own session, shares (brain-memories-rpc.ts):
 // no agent, App or workflow reaches this.
 

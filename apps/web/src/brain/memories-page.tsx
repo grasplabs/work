@@ -393,7 +393,7 @@ const MemoryOrigin = ({ memory }: { memory: BrainMemoryShown }) => {
 
 /**
  * Says `memory` is wrong, with what is right: the person's own word,
- * theirs alone, confirmed. One opening of it (`opening`, the page keys it
+ * theirs alone. One opening of it (`opening`, the page keys it
  * by that) is one correction, its id first the opening's, so a retry
  * saves it once, and the key its answer is tied to: a reply for an
  * earlier opening lands nowhere. The page holds it apart from the row
@@ -886,7 +886,7 @@ const TakeBackButton = ({
   );
 };
 
-/** Confirms `memory` over the sides that say otherwise. */
+/** Settles a fact sources disagree on: confirms `memory` over the sides that say otherwise. */
 const ConfirmButton = ({
   memory,
   read,
@@ -954,7 +954,9 @@ const MemoryMarks = ({ memory }: { memory: BrainMemoryShown }) => {
           <Trans>Sources disagree</Trans>
         </Badge>
       ) : null}
-      {confirmed === null ? null : (
+      {/* A saved memory is taken as correct: a confirmation is shown only
+          where it settled a disagreement. */}
+      {current && memory.contested && confirmed !== null ? (
         <Badge variant="passed">
           {confirmed.byYou ? (
             <Trans>Confirmed by you</Trans>
@@ -962,7 +964,7 @@ const MemoryMarks = ({ memory }: { memory: BrainMemoryShown }) => {
             <Trans>Confirmed</Trans>
           )}
         </Badge>
-      )}
+      ) : null}
       <span>
         <MemoryOrigin memory={memory} />
       </span>
@@ -1060,12 +1062,8 @@ const MemoryLine = ({
   }
   const current = endedAt === null;
   // Offered on a side that disagrees with another until the person said
-  // it is right, and on their own word not yet confirmed (a correction
-  // whose confirmation never landed), so it can still come first.
-  const confirmable =
-    current &&
-    confirmed?.byYou !== true &&
-    (memory.contested || (memory.store === "own" && memory.yours));
+  // it is right.
+  const confirmable = current && memory.contested && confirmed?.byYou !== true;
   // Where focus goes once confirmed, as the button goes: the memory itself.
   const said = useRef<HTMLSpanElement>(null);
   return (

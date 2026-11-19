@@ -1132,10 +1132,12 @@ const currentOneSql = memoriesSql({
 });
 
 /**
- * The reader confirms the memory `id`, current and readable to them, over
- * the current memories they may read that say something else of its
- * entity and one-value attribute (contract.ts `confirmMemory`). Run in one
- * transaction: what it reads and writes is one snapshot.
+ * The reader settles a fact sources disagree on: confirms the memory `id`,
+ * current, readable to them and contested for them, over the current
+ * memories they may read that say something else of its entity and
+ * one-value attribute (contract.ts `confirmMemory`). A memory nobody
+ * contests is taken as correct once saved, so there is nothing to confirm.
+ * Run in one transaction: what it reads and writes is one snapshot.
  */
 export const confirmMemory = (
   sql: SqlStorage,
@@ -1143,21 +1145,23 @@ export const confirmMemory = (
 ): MemoryChangeOutcome => {
   const at = readMoment(sql);
   const [target] = memoryRows(sql, currentOneSql, id, reader, at, 1);
-  if (target === undefined) {
+  // A contested memory has an attribute: `rivalSql` asks for one.
+  if (
+    target === undefined ||
+    target.contested === 0 ||
+    target.attribute === null
+  ) {
     return "nothing";
   }
-  const over =
-    target.attribute === null || target.contested === 0
-      ? []
-      : memoryRows(
-          sql,
-          currentOfAttributeSql,
-          target.entity_row,
-          reader,
-          at,
-          -1,
-          target.attribute
-        ).filter(({ value_key: key }) => key !== target.value_key);
+  const over = memoryRows(
+    sql,
+    currentOfAttributeSql,
+    target.entity_row,
+    reader,
+    at,
+    -1,
+    target.attribute
+  ).filter(({ value_key: key }) => key !== target.value_key);
   const overRows = JSON.stringify(over.map((memory) => memory.row));
   // The same person over the same rivals again: already recorded.
   const [again] = sql
