@@ -78,7 +78,8 @@ export interface BackdropProps {
   progress?: BackdropProgress;
   /**
    * The drawing fades out towards the box's foot and stops short of it, as the product's Chat page
-   * has it; a dither or sand stands on the page's own ground. Chat start turns it on.
+   * has it; a dither or sand stands on the page's own ground. A scene covers its box whole and never
+   * fades. Chat start turns it on.
    * @default false
    */
   fadeFoot?: boolean;
@@ -136,7 +137,8 @@ export const Backdrop = ({
         layout ?? styleProp
       )}
     >
-      {fadeFoot ? (
+      {/* A scene is night all over and covers its box whole: it never fades into the page. */}
+      {fadeFoot && scheme !== "dark" ? (
         <div aria-hidden="true" {...stylex.props(styles.foot)}>
           <BackdropField
             clear={clear}
