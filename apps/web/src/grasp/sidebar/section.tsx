@@ -22,7 +22,7 @@ import { tabStyles } from "../tabs/tabs";
 import { rowMarker } from "../tabs/tabs.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { ms } from "../tokens/tokens.values";
-import { WithTip } from "../tooltip/lazy-tip";
+import { Tip } from "../tooltip/tip";
 import { useWords, withGiven } from "../words/words";
 import { useSidebarGivenWords } from "./shell";
 import { sidebarWords } from "./words";
@@ -485,11 +485,7 @@ const Tab = ({
       {counted && <Unseen>{` ${tab.countLabel ?? String(tab.count)}`}</Unseen>}
     </button>
   );
-  return iconOnly ? (
-    <WithTip name render={drawn} tooltip={tab.label} />
-  ) : (
-    drawn({})
-  );
+  return iconOnly ? <Tip name render={drawn} tooltip={tab.label} /> : drawn({});
 };
 
 /** The chosen tab in the switch. */

@@ -2135,6 +2135,7 @@ msgstr "Activité : tout voir dans Traces"
 
 #: src/agents/agent-wakes.tsx
 #: src/apps/indexes-view.tsx
+#: src/apps/publish.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/settings/ai-providers.tsx
 msgid "Add"
@@ -3775,6 +3776,7 @@ msgstr "Impossible de proposer Exécuter : {unread}"
 #: src/apps/blueprints.tsx
 #: src/apps/data-model-changes.tsx
 #: src/apps/field-editor.tsx
+#: src/apps/publish.tsx
 #: src/apps/release-controls.tsx
 #: src/apps/reset-test-data.tsx
 #: src/apps/resource-bindings.tsx
@@ -3869,6 +3871,7 @@ msgid "Cc / Bcc"
 msgstr "Cc / Cci"
 
 #: src/agents/new-agent.tsx
+#: src/apps/publish.tsx
 #: src/settings/ai-providers.tsx
 msgid "Change"
 msgstr "Modifier"
@@ -3916,10 +3919,6 @@ msgstr "Changer quelque chose au plan"
 #: src/workflows/workflow-diagram.tsx
 msgid "Change step {id}"
 msgstr "Modifier l’étape {id}"
-
-#: src/apps/publish.tsx
-msgid "Change the address"
-msgstr "Changer l'adresse"
 
 #: src/settings/stephen-settings.tsx
 msgid "Change the company's"
@@ -4233,6 +4232,10 @@ msgstr "Vérification de la disponibilité de Grasp"
 #: src/workflows/workflow-flow.tsx
 msgid "Checking…"
 msgstr "Vérification…"
+
+#: src/apps/publish.tsx
+msgid "Checks"
+msgstr "Vérifications"
 
 #: src/apps/publish.tsx
 msgid "Checks pass"
@@ -4920,7 +4923,6 @@ msgid "Copenhagen"
 msgstr "Copenhague"
 
 #: src/activity/audit-event.tsx
-#: src/apps/app-code.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-failed.tsx
@@ -4960,7 +4962,6 @@ msgstr "Copier {what}"
 msgid "Copy as Markdown"
 msgstr "Copier en Markdown"
 
-#: src/apps/app-code.tsx
 #: src/frame/part-words.tsx
 msgid "Copy code"
 msgstr "Copier le code"
@@ -4979,6 +4980,7 @@ msgstr "Copier dans Our skills"
 msgid "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgstr "Copiez-le maintenant : vous ne le reverrez pas. Perdu, il ne peut qu'être remplacé."
 
+#: src/apps/publish.tsx
 #: src/frame/part-words.tsx
 msgid "Copy link"
 msgstr "Copier le lien"
@@ -5590,7 +5592,7 @@ msgctxt "workflow status"
 msgid "Designed"
 msgstr "Repensé"
 
-#: src/apps/preview-controls.tsx
+#: src/apps/app-section.tsx
 #: src/frame/part-words.tsx
 msgid "Desktop"
 msgstr "Ordinateur"
@@ -5819,6 +5821,7 @@ msgid "done"
 msgstr "terminée"
 
 #: src/apps/blueprints.tsx
+#: src/apps/publish.tsx
 #: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 #: src/onboarding/setup-steps.tsx
@@ -6394,6 +6397,10 @@ msgstr "Tout le monde dans l’organisation"
 #: src/knowledge/new-collection.tsx
 msgid "Everyone in the organization, and their agents."
 msgstr "Tout le monde dans l’organisation, et leurs agents."
+
+#: src/apps/publish.tsx
+msgid "Everyone it is shared with can open it once it is published."
+msgstr "Toutes les personnes avec qui elle est partagée peuvent l’ouvrir dès qu’elle est publiée."
 
 #: src/brain/share-record.tsx
 msgid "Everyone it is shared with, and their agents, read it as accepted. Yours stays as it is."
@@ -7526,10 +7533,6 @@ msgstr "Passations"
 #: src/frame/part-words.tsx
 msgid "Has access"
 msgstr "A accès"
-
-#: src/apps/publish.tsx
-msgid "has it"
-msgstr "l’a"
 
 #: src/activity/audit-event.tsx
 msgid "Hash"
@@ -8991,6 +8994,7 @@ msgstr "Citron vert"
 msgid "Link"
 msgstr "Lien"
 
+#: src/apps/publish.tsx
 #: src/frame/part-words.tsx
 msgid "Link copied"
 msgstr "Lien copié"
@@ -9116,7 +9120,6 @@ msgstr "Chargement de la valeur"
 
 #: src/activity/audit-log.tsx
 #: src/apps/app-workspace.tsx
-#: src/apps/publish.tsx
 #: src/frame/page-states.tsx
 #: src/knowledge/nav.tsx
 #: src/settings/erasures.tsx
@@ -9303,6 +9306,7 @@ msgstr "Rend {table} sensible : son historique ne garde aucune valeur, et chaque
 msgid "Making"
 msgstr "Création"
 
+#: src/apps/publish.tsx
 #: src/connections/integration-item.tsx
 #: src/settings/ai-providers.tsx
 msgid "Manage"
@@ -9978,10 +9982,6 @@ msgstr "Pas de {onlySignIn} ? Une liste du personnel fonctionne aussi."
 msgid "No {unit}"
 msgstr "Aucun {unit}"
 
-#: src/apps/publish.tsx
-msgid "No address yet"
-msgstr "Pas encore d'adresse"
-
 #: src/workflows/workflow-triggers.tsx
 msgid "No admin has been asked to let it read these events on its connection: it hears nothing until one allows it."
 msgstr "Aucun administrateur n'a été sollicité pour l'autoriser à lire ces événements sur sa connexion : il ne reçoit rien tant qu'aucun ne l'autorise."
@@ -10322,10 +10322,6 @@ msgstr "Personne ne modifie les enregistrements de {table}, pas même Sam."
 msgid "Nobody else to add."
 msgstr "Personne d'autre à ajouter."
 
-#: src/apps/publish.tsx
-msgid "Nobody else to share with."
-msgstr "Personne d’autre avec qui partager."
-
 #: src/workflows/definition-editor.tsx
 msgid "Nobody has edited it since its current version."
 msgstr "Personne ne l’a modifié depuis sa version actuelle."
@@ -10383,6 +10379,7 @@ msgid "None of your chats are in it. Only you see the chats you put here."
 msgstr "Aucun de vos chats n’y est. Vous seul voyez les chats que vous y mettez."
 
 #: src/apps/app-settings.tsx
+#: src/apps/publish.tsx
 #: src/brain/brain.ts
 #: src/routes/_shell.settings.billing.tsx
 #: src/settings/ai-providers.tsx
@@ -10706,7 +10703,6 @@ msgstr "Non vérifié"
 msgid "Not working"
 msgstr "Ne fonctionne pas"
 
-#: src/apps/publish.tsx
 #: src/chat/approval-words.ts
 #: src/inbox/item-detail.tsx
 msgid "Not yet"
@@ -10755,6 +10751,10 @@ msgstr "Noté : {name}. Nous la connecterons avec vous. En attendant, vérifiez 
 #: src/onboarding/connect-steps.tsx
 msgid "Noted. We’ll get in touch to put it on the laptops with you."
 msgstr "Noté. Nous vous contacterons pour l’installer avec vous sur les ordinateurs."
+
+#: src/apps/publish.tsx
+msgid "Nothing changed since the live version."
+msgstr "Rien n’a changé depuis la version en ligne."
 
 #: src/frame/part-words.tsx
 #: src/onboarding/place-picker.tsx
@@ -11312,10 +11312,6 @@ msgstr "Ouvrir Données"
 msgid "Open external link?"
 msgstr "Ouvrir le lien externe ?"
 
-#: src/apps/app-code.tsx
-msgid "Open file"
-msgstr "Fichier ouvert"
-
 #: src/workflows/unapproved-start.tsx
 msgid "Open Files and apps"
 msgstr "Ouvrir Fichiers et applications"
@@ -11855,7 +11851,6 @@ msgstr "En attente"
 msgid "people"
 msgstr "personnes"
 
-#: src/apps/publish.tsx
 #: src/chat/mentions.tsx
 #: src/people/people-teams-picker.tsx
 #: src/projects/project-dialog.tsx
@@ -11970,7 +11965,7 @@ msgctxt "column: a workflow's phase"
 msgid "Phase"
 msgstr "Phase"
 
-#: src/apps/preview-controls.tsx
+#: src/apps/app-section.tsx
 msgid "Phone"
 msgstr "Téléphone"
 
@@ -12128,7 +12123,7 @@ msgstr "Aperçu de l’arrière-plan de votre chat"
 msgid "Preview the purge"
 msgstr "Prévisualiser la purge"
 
-#: src/apps/preview-controls.tsx
+#: src/apps/app-section.tsx
 msgid "Preview width"
 msgstr "Largeur de l’aperçu"
 
@@ -12216,6 +12211,10 @@ msgstr "Fournisseurs"
 #: src/apps/publish.tsx
 msgid "Publish"
 msgstr "Publier"
+
+#: src/apps/publish.tsx
+msgid "Publish {name}"
+msgstr "Publier {name}"
 
 #. placeholder {0}: draft.revision
 #: src/workflows/definition-editor.tsx
@@ -14201,10 +14200,6 @@ msgstr "Boîtes partagées, registres et données de l'entreprise, après avoir 
 msgid "Shared with"
 msgstr "Partagée avec"
 
-#: src/apps/publish.tsx
-msgid "Shared with {who}"
-msgstr "Partagé avec {who}"
-
 #: src/brain/memory-page.tsx
 msgctxt "memory records: others' that you read"
 msgid "Shared with you"
@@ -14218,10 +14213,6 @@ msgstr "Partage en cours"
 msgctxt "an app's settings section"
 msgid "Sharing"
 msgstr "Partage"
-
-#: src/apps/publish.tsx
-msgid "Sharing undone"
-msgstr "Partage annulé"
 
 #: src/agents/new-agent.tsx
 msgid "Should it work on its own?"
@@ -14694,6 +14685,10 @@ msgstr "Autre chose"
 msgid "Something new is marked"
 msgstr "Quelque chose de nouveau est surligné"
 
+#: src/apps/publish.tsx
+msgid "Something to fix first"
+msgstr "Quelque chose à corriger d’abord"
+
 #: src/pages/frame-failure.tsx
 msgid "Something went wrong while it opened."
 msgstr "Un problème est survenu à l’ouverture."
@@ -14926,6 +14921,11 @@ msgstr "Affirmations"
 #: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/traces.tsx
+msgid "Status"
+msgstr "Statut"
+
+#: src/apps/publish.tsx
+msgctxt "where an App stands"
 msgid "Status"
 msgstr "Statut"
 
@@ -15187,7 +15187,7 @@ msgstr "Nom de la table"
 msgid "Tables"
 msgstr "Tables"
 
-#: src/apps/preview-controls.tsx
+#: src/apps/app-section.tsx
 #: src/frame/part-words.tsx
 msgid "Tablet"
 msgstr "Tablette"
@@ -15326,7 +15326,6 @@ msgstr "Taille de l’équipe inconnue"
 msgid "Team size unknown."
 msgstr "Taille de l’équipe inconnue."
 
-#: src/apps/publish.tsx
 #: src/brain/brain.ts
 #: src/knowledge/collection-markers.tsx
 #: src/knowledge/new-collection.tsx
@@ -18264,7 +18263,6 @@ msgstr "Qui peut lui parler"
 msgid "Who does it"
 msgstr "Qui le fait"
 
-#: src/apps/publish.tsx
 #: src/chat/plan-card.tsx
 msgid "Who gets it"
 msgstr "Qui le reçoit"
@@ -18916,6 +18914,10 @@ msgstr "L'éditeur de votre navigateur transcrit ce que vous dites."
 #: src/apps/app-history.tsx
 msgid "Your changes go back to how they were then, for everyone who builds this App. What came after stays in its history."
 msgstr "Vos modifications reviennent à ce qu’elles étaient alors, pour tous ceux qui construisent cette App. Ce qui a suivi reste dans son historique."
+
+#: src/apps/publish.tsx
+msgid "Your changes go live for everyone it is shared with."
+msgstr "Vos modifications sont mises en ligne pour toutes les personnes avec qui elle est partagée."
 
 #: src/inbox/items.ts
 msgid "Your chat's agent asked to start this workflow for you. Nothing runs until you confirm it, with exactly the input shown."

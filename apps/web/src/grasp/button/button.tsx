@@ -30,7 +30,7 @@ import { simply } from "../motion/simply.stylex";
 import { Spinner } from "../spinner";
 import { spinnerVars } from "../spinner/spinner.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
-import { WithTip } from "../tooltip/lazy-tip";
+import { Tip } from "../tooltip/tip";
 import { useWords } from "../words/words";
 import { wrap } from "../wrap/wrap";
 import { buttonMarker, layerMarker } from "./button.stylex";
@@ -1419,7 +1419,7 @@ export const Button = (allProps: ButtonProps) => {
       return <Pressable {...allProps} held={held} />;
     }
     return (
-      <WithTip
+      <Tip
         name
         render={(trigger) => {
           // One element takes the tooltip trigger's props and ref with the caller's, handlers merged.

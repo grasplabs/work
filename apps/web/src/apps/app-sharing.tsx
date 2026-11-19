@@ -202,10 +202,13 @@ const ShareWith = ({
   app,
   members,
   named,
+  onChanged,
 }: {
   app: App;
   members: readonly AppMember[];
   named: (member: AppMember) => string;
+  /** Told once whom it is shared with changed. */
+  onChanged?: () => void;
 }) => {
   const { t } = useLingui();
   const router = useRouter();
@@ -233,6 +236,9 @@ const ShareWith = ({
         }
       );
     });
+    if (done) {
+      onChanged?.();
+    }
     return done;
   };
   const gone = removing === undefined ? "" : named(removing);
@@ -329,6 +335,35 @@ const ShareWith = ({
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+};
+
+/**
+ * Sharing the App, as Share's dialog in its bar holds it: the same list as
+ * its Sharing settings. For its builders.
+ */
+export const AppShareAccess = ({
+  app,
+  members,
+  onChanged,
+}: {
+  app: App;
+  members: readonly AppMember[];
+  onChanged: () => void;
+}) => {
+  const words = useMemberWords();
+  const apart = usePeopleApart(
+    members.flatMap(({ type, id, name }) =>
+      type === "person" && name !== null ? [{ id, name }] : []
+    )
+  );
+  return (
+    <ShareWith
+      app={app}
+      members={members}
+      named={(member) => memberName(member, words, apart)}
+      onChanged={onChanged}
+    />
   );
 };
 

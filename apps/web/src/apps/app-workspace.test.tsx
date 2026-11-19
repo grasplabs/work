@@ -59,8 +59,8 @@ import { markMade } from "./made-tip.ts";
 // at the App's own address, where anyone else gets the live App with
 // nothing that builds it; its main area always shows the App, its draft
 // previewed, or, where the App has no page yet, what it should do, asked
-// in its place; Share asks who gets it and shares it with whoever was
-// ticked; Publish says where it stands, what applies and whether its
+// in its place; Share's dialog shares it as its Sharing settings do;
+// Publish's dialog says where it stands, what applies and whether its
 // changes pass their checks, and publishes them as the person over the
 // revision shown, the page reads it again afterwards, and what core
 // refuses is said in the page's words; once shared and live, a line under
@@ -538,35 +538,48 @@ const callerGrant = (workflow: string, path: string): Permission => {
   };
 };
 
-/** The sheet Share opens, once open. */
-const sheet = (): HTMLElement | null =>
-  document.querySelector('[data-slot="drawer-content"]');
+/** The dialog titled `title`, once open. */
+const dialogTitled = (title: string): HTMLElement | null =>
+  [
+    ...document.querySelectorAll<HTMLElement>('[data-slot="dialog-content"]'),
+  ].find(
+    (each) => each.querySelector("h2")?.textContent.startsWith(title) === true
+  ) ?? null;
 
-/** The button in the sheet called `name`. */
-const sheetButton = (name: string): HTMLButtonElement => {
-  const found = [...(sheet()?.querySelectorAll("button") ?? [])].find(
-    (each) => nameOf(each) === name
+/** The dialog Share opens, once open. */
+const sheet = (): HTMLElement | null => dialogTitled("Share");
+
+/** Picks `name` in Share's dialog and adds them, as its list does. */
+const shareWith = async (name: string): Promise<void> => {
+  const box = sheet()?.querySelector<HTMLInputElement>(
+    "input[aria-label='Add people, teams or projects']"
   );
-  if (found === undefined) {
-    throw new Error(`No button ${name} in the sheet`);
+  if (box === undefined || box === null) {
+    throw new TypeError("No picker in Share's dialog");
   }
-  return found;
-};
-
-/** Ticks `name` among who gets it, in the sheet. */
-const tick = async (name: string): Promise<void> => {
-  const box = [
-    ...(sheet()?.querySelectorAll<HTMLElement>('[role="checkbox"]') ?? []),
-  ].find((each) => {
-    const label = each.getAttribute("aria-labelledby");
-    const named = label === null ? null : document.querySelector(`#${label}`);
-    // The label's own words, not the mark it keeps hidden from a reader.
-    return named?.firstChild?.textContent?.trim() === name;
+  await act(async () => {
+    box.focus();
+    box.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })
+    );
+    await Promise.resolve();
   });
-  if (box === undefined) {
-    throw new Error(`No ${name} to tick`);
+  await settled();
+  const option = [
+    ...document.querySelectorAll<HTMLElement>("[role=option]"),
+  ].find((each) => each.textContent.includes(name));
+  if (option === undefined) {
+    throw new Error(`No ${name} to pick`);
   }
-  await press(box);
+  await press(option);
+  const add = [...(sheet()?.querySelectorAll("button") ?? [])].find(
+    (each) => nameOf(each) === "Add"
+  );
+  if (add === undefined) {
+    throw new Error("No Add in Share's dialog");
+  }
+  await press(add);
+  await settled();
 };
 
 /** The asking dialog's confirming action: its last, after Cancel. */
@@ -590,31 +603,40 @@ const shareButton = (): HTMLButtonElement => button("Share");
 /** Publish, in the bar. */
 const publishButton = (): HTMLButtonElement => button("Publish");
 
-/** The popover Publish opens, once open. */
-const panel = (): HTMLElement | null =>
-  document.querySelector('[data-slot="popover-content"]');
+/** The dialog Publish opens, once open. */
+const panel = (): HTMLElement | null => dialogTitled("Publish");
 
-/** The button in Publish's popover called `name`. */
+/** The button in Publish's dialog called `name`. */
 const panelButton = (name: string): HTMLButtonElement => {
   const found = [...(panel()?.querySelectorAll("button") ?? [])].find(
     (each) => nameOf(each) === name
   );
   if (found === undefined) {
-    throw new Error(`No button ${name} in the popover`);
+    throw new Error(`No button ${name} in Publish's dialog`);
   }
   return found;
 };
 
-/** What Publish's popover says of the App, row by row, without what each row is. */
-const facts = (): string[] =>
-  [...(panel()?.querySelectorAll('[data-slot="item"]') ?? [])].map((row) => {
-    const copy = row.cloneNode(true);
-    if (!(copy instanceof HTMLElement)) {
-      return "";
+/** Each fact Publish's dialog shows: its value's words, without its own button. */
+const factValues = (): string[] =>
+  [...(panel()?.querySelectorAll('[data-slot="key-value"] dd') ?? [])].map(
+    (value) => {
+      const copy = value.cloneNode(true);
+      if (!(copy instanceof HTMLElement)) {
+        return "";
+      }
+      for (const each of copy.querySelectorAll("button")) {
+        each.remove();
+      }
+      return copy.textContent.trim();
     }
-    copy.querySelector('[data-slot="item-description"]')?.remove();
-    return copy.textContent.trim();
-  });
+  );
+
+/** Where Publish's dialog says the App stands: its first fact. */
+const stands = (): string | undefined => factValues()[0];
+
+/** What Publish's dialog says of the App past where it stands, fact by fact. */
+const facts = (): string[] => factValues().slice(1);
 
 /** Whether the workspace is gone from the page: no Publish in it. */
 const publishGone = (): boolean =>
@@ -1561,7 +1583,7 @@ describe(AppWorkspace, () => {
 
     await press(publishButton());
     const shown = {
-      stands: panel()?.querySelector("h2")?.textContent,
+      stands: stands(),
       facts: facts(),
     };
     await press(panelButton("Publish"));
@@ -1576,7 +1598,7 @@ describe(AppWorkspace, () => {
       before: { status: "Only you see this", lime: true },
       shown: {
         stands: "Not live",
-        facts: ["No address yet", "Only its builders", "Checks pass"],
+        facts: ["None yet", "Only its builders", "Checks pass"],
       },
       published: [["invoice-desk", 1, "Published from the App's workspace"]],
       // Publishing shares it with nobody.
@@ -1586,7 +1608,7 @@ describe(AppWorkspace, () => {
     });
   });
 
-  it("shares the App with whoever is ticked from Share, publishing nothing, and says so", async () => {
+  it("shares the App from Share's dialog with whom the builder adds, publishing nothing, as its Sharing settings do", async () => {
     const fake = fakeApps({ currentVersion: 1 });
     const published: unknown[][] = [];
     await opened(
@@ -1611,44 +1633,23 @@ describe(AppWorkspace, () => {
     await press(shareButton());
     const shown = {
       title: sheet()?.querySelector("h2")?.textContent,
-      who: [
-        ...(sheet()?.querySelectorAll('[aria-label="Who gets it"] label') ??
-          []),
-      ].map((each) => each.firstChild?.textContent?.trim()),
       sees: says("They'll find it under Apps, and see it as it is now."),
-      // Nobody ticked yet: nothing to share with.
-      off: off(sheetButton("Share")),
     };
-    await tick("Finance team");
-    await press(sheetButton("Share"));
+    await shareWith("Finance team");
 
     expect({
       before,
       shown,
       published,
       calls: fake.calls,
-      after: {
-        status: status(),
-        sheet: sheet() !== null,
-        toasts: toasts(),
-      },
+      status: status(),
     }).toStrictEqual({
       // Publish is the page's main action, never Share.
       before: { status: "Only you see this", lime: false },
-      shown: {
-        title: "Share Invoices",
-        // Its owner isn't offered: it is theirs.
-        who: ["Finance team", "Bo"],
-        sees: true,
-        off: true,
-      },
+      shown: { title: "Share Invoices", sees: true },
       published: [],
       calls: ["share team:t-fin as user"],
-      after: {
-        status: "Finance team uses it",
-        sheet: false,
-        toasts: ["Shared with Finance teamUndo"],
-      },
+      status: "Finance team uses it",
     });
   });
 
@@ -1692,66 +1693,6 @@ describe(AppWorkspace, () => {
     expect(fake.calls).toStrictEqual([
       "publish invoice-desk 1 over 0 from null",
     ]);
-  });
-
-  it("undoes a share from its toast: whoever was added is taken off, and only whom it had no share with was added", async () => {
-    const fake = fakeApps({
-      currentVersion: 1,
-      sharedWith: [memberOf("person", "p-bo")],
-    });
-    await opened(
-      fake.apps,
-      identityOf(false),
-      "chat-undoing",
-      async () => await Promise.resolve(watching()),
-      undefined,
-      async () => await Promise.resolve(draftOf("invoice-desk", []))
-    );
-    await settled();
-
-    await press(shareButton());
-    const hasIt = sheet()?.textContent.includes("has it");
-    await tick("Finance team");
-    await press(sheetButton("Share"));
-    const shared = { toasts: toasts(), status: status() };
-    await press(button("Undo"));
-
-    expect({
-      hasIt,
-      shared,
-      calls: fake.calls,
-      status: status(),
-    }).toStrictEqual({
-      hasIt: true,
-      shared: {
-        toasts: ["Shared with Finance teamUndo"],
-        status: "Bo and Finance team use it",
-      },
-      calls: ["share team:t-fin as user", "unshare team:t-fin"],
-      status: "Bo uses it",
-    });
-  });
-
-  it("shares only with whom it has no share yet, so nobody's role changes", async () => {
-    const fake = fakeApps({ currentVersion: 1 });
-    await opened(
-      fake.apps,
-      identityOf(false),
-      "chat-share-new",
-      async () => await Promise.resolve(watching()),
-      undefined,
-      async () => await Promise.resolve(draftOf("invoice-desk", []))
-    );
-    await settled();
-    await press(shareButton());
-    await tick("Finance team");
-    await tick("Bo");
-    // A colleague makes Bo a builder of it while the sheet is open.
-    fake.sharedMeanwhile({ ...memberOf("person", "p-bo"), role: "builder" });
-    await press(sheetButton("Share"));
-
-    // Bo stays a builder: only the team, which had no share, is added.
-    expect(fake.calls).toStrictEqual(["share team:t-fin as user"]);
   });
 
   it("undoes publishing from its toast: the team has the version it had before again, and the changes published are the draft again", async () => {
@@ -1799,13 +1740,13 @@ describe(AppWorkspace, () => {
 
     // Live, with changes only its builders see.
     await press(publishButton());
-    const stands = panel()?.querySelector("h2")?.textContent;
+    const standing = stands();
     await press(panelButton("Publish"));
     const said = toasts();
     await press(button("Undo"));
     await settled();
 
-    expect({ stands, said, calls: fake.calls }).toStrictEqual({
+    expect({ stands: standing, said, calls: fake.calls }).toStrictEqual({
       stands: "Live, 26.11.1; changes not live yet",
       said: ["Invoices is liveUndo"],
       calls: [

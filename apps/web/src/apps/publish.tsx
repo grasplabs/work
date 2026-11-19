@@ -4,12 +4,7 @@ import type {
   AppDraftChanges,
   AppDraftProblem,
 } from "@grasp-os/shared/app-drafts";
-import type {
-  App,
-  AppMember,
-  AppMemberRef,
-  ShareCandidates,
-} from "@grasp-os/shared/apps";
+import type { App, AppMember, AppMemberRef } from "@grasp-os/shared/apps";
 import { i18n as pageI18n } from "@lingui/core";
 import type { I18n, MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
@@ -21,60 +16,39 @@ import { useEffect, useState } from "react";
 import { useGlobalChat } from "../chat/global-chat.tsx";
 import { formatList } from "../format.ts";
 import { Alert } from "../grasp/alert/index.ts";
-import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
+import { AvatarGroup } from "../grasp/avatar/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Checkbox } from "../grasp/checkbox/index.ts";
 import { Collapsible } from "../grasp/collapsible/index.ts";
 import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldLabel,
-} from "../grasp/field/index.ts";
+  Dialog,
+  DialogAction,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogTitle,
+} from "../grasp/dialog/index.ts";
 import {
-  ChevronRight,
   Database,
   Done,
-  Edit,
   Key,
   Link as LinkIcon,
   People,
   Sparkles,
   Upload,
 } from "../grasp/icons/index.ts";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemMedia,
-  ItemTitle,
-} from "../grasp/item/index.ts";
-import {
-  Popover,
-  PopoverContent,
-  PopoverFooter,
-  PopoverTitle,
-  PopoverTrigger,
-} from "../grasp/popover/index.ts";
-import {
-  Sheet,
-  SheetBody,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetTitle,
-} from "../grasp/sheet/index.ts";
+import { KeyValueList } from "../grasp/key-value/index.ts";
+import type { KeyValueItem } from "../grasp/key-value/index.ts";
 import { Spinner } from "../grasp/spinner/index.ts";
 import { Text } from "../grasp/text/index.ts";
 import { toast } from "../grasp/toast/index.ts";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
-import { usePeopleApart } from "../people/people-apart.ts";
 import { useCore } from "../use-core.ts";
 import { ConfirmChange, useDraftChange } from "./app-history.tsx";
 import type { Asked } from "./app-history.tsx";
 import { AppLinkDialog, linkAddress } from "./app-own-link.tsx";
+import { AppShareAccess } from "./app-sharing.tsx";
 import { userNames } from "./app-status.tsx";
 import { planLines } from "./data-model-changes.tsx";
 import {
@@ -225,6 +199,8 @@ const styles = stylex.create({
   wide: { display: { default: "contents", [media.belowPhone]: "none" } },
   narrow: { display: { default: "none", [media.belowPhone]: "contents" } },
   stack: { display: "grid", gap: grasp.space3, minWidth: 0 },
+  // A fact's value with its own action after it.
+  value: { display: "inline-flex", alignItems: "center", gap: grasp.space2 },
   facts: { display: "grid", gap: grasp.space1, minWidth: 0 },
   tight: {
     display: "grid",
@@ -494,9 +470,6 @@ const versionToPublish = (
     ? draft.base
     : undefined;
 
-/** A share's key: its kind and ID. */
-const keyOf = ({ type, id }: AppMemberRef): string => `${type}:${id}`;
-
 /** Someone to share with, by name. */
 export interface Recipient extends AppMemberRef {
   name: string;
@@ -608,67 +581,6 @@ const usePublishing = (
 };
 
 /**
- * Shares `app` with `recipients`, those with no share of it yet, so
- * nobody's role changes; `onShared` and a toast with Undo once done, why
- * not otherwise.
- */
-const useSharing = (app: App, onShared: () => void) => {
-  const { t } = useLingui();
-  const core = useCore();
-  const router = useRouter();
-  const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<string>();
-  const share = async (recipients: readonly Recipient[]): Promise<boolean> => {
-    setBusy(true);
-    setFailure(undefined);
-    const shared = await settled(core, async (session) => {
-      // Only who has no share yet: a builder ticked stays one.
-      const sharedWith = await session.apps.members.list(app.id);
-      const had = new Set(sharedWith.map((member) => keyOf(member)));
-      const added = recipients.filter(
-        (recipient) => !had.has(keyOf(recipient))
-      );
-      for (const { type, id } of added) {
-        // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
-        await session.apps.members.add(app.id, { type, id, role: "user" });
-      }
-      return added;
-    });
-    setBusy(false);
-    if (!shared.ok) {
-      setFailure(publishFailureText(shared.error));
-      return false;
-    }
-    onShared();
-    await router.invalidate();
-    const tools = { core, router, onDone: onShared };
-    const who = formatList(recipients.map(({ name }) => name));
-    toast.success(t`Shared with ${who}`, {
-      action: {
-        label: t`Undo`,
-        onAction: () => {
-          void undoChange(tools, {
-            app: app.id,
-            added: shared.value.map(({ type, id }) => ({ type, id })),
-            back: undefined,
-            undone: msg`Sharing undone`,
-          });
-        },
-      },
-    });
-    return true;
-  };
-  return {
-    busy,
-    failure,
-    share,
-    clear: () => {
-      setFailure(undefined);
-    },
-  };
-};
-
-/**
  * The changes to publish, read while the App has some and Grasp isn't
  * working on it, with whether they may be published now (`ready`) and
  * Fix with Grasp for what stops them.
@@ -708,224 +620,6 @@ const usePublishable = (
   };
 };
 
-/** Who the sheet offers: the teams, then the people, by name. */
-const recipientsOf = (
-  candidates: ShareCandidates | undefined,
-  owner: string
-): Recipient[] =>
-  candidates === undefined
-    ? []
-    : [
-        ...candidates.teams.map(({ id, name }) => ({
-          type: "team" as const,
-          id,
-          name,
-        })),
-        ...candidates.people
-          .filter(({ id }) => id !== owner)
-          .map(({ id, name }) => ({ type: "person" as const, id, name })),
-      ];
-
-/** Ticks who gets the App: whom it is shared with already stays ticked. */
-const WhoGetsIt = ({
-  offered,
-  members,
-  chosen,
-  disabled,
-  onChosen,
-}: {
-  offered: readonly Recipient[] | undefined;
-  members: readonly AppMember[];
-  chosen: readonly string[];
-  disabled: boolean;
-  onChosen: (chosen: string[]) => void;
-}) => {
-  const { t } = useLingui();
-  // Everyone offered or shared with, so a person is told apart from a
-  // namesake by the end of their ID.
-  const apart = usePeopleApart(
-    [...(offered ?? []), ...members].flatMap(({ type, id, name }) =>
-      type === "person" && name !== null ? [{ id, name }] : []
-    )
-  );
-  if (offered === undefined) {
-    return <Spinner aria-label={t`Loading…`} />;
-  }
-  const shared = new Set(members.map((member) => keyOf(member)));
-  if (offered.length === 0) {
-    return (
-      <Text size="sm" tone="muted">
-        {t`Nobody else to share with.`}
-      </Text>
-    );
-  }
-  // Teams, then people, each under its own heading, never "Team" on
-  // every row; a person by their face.
-  const groups = [
-    { label: t`Teams`, of: offered.filter(({ type }) => type === "team") },
-    { label: t`People`, of: offered.filter(({ type }) => type === "person") },
-  ].filter(({ of }) => of.length > 0);
-  return (
-    <section aria-label={t`Who gets it`} {...stylex.props(styles.stack)}>
-      {groups.map((group) => (
-        <div key={group.label} {...stylex.props(styles.tight)}>
-          <Text size="xs" tone="muted" weight="medium">
-            {group.label}
-          </Text>
-          <ul aria-label={group.label} {...stylex.props(styles.tight)}>
-            {group.of.map((recipient) => {
-              const key = keyOf(recipient);
-              const has = shared.has(key);
-              const named =
-                recipient.type === "person"
-                  ? apart.named(recipient)
-                  : (recipient.name ?? "");
-              return (
-                <li key={key}>
-                  <Field orientation="horizontal">
-                    <Checkbox
-                      checked={has || chosen.includes(key)}
-                      disabled={has || disabled}
-                      onCheckedChange={(checked) => {
-                        const rest = chosen.filter((one) => one !== key);
-                        onChosen(checked === true ? [...rest, key] : rest);
-                      }}
-                    />
-                    {recipient.type === "person" ? (
-                      <Avatar decorative name={named} size="xs">
-                        <AvatarFallback />
-                      </Avatar>
-                    ) : null}
-                    <FieldContent>
-                      <FieldLabel>{named}</FieldLabel>
-                      {has ? (
-                        <FieldDescription>{t`has it`}</FieldDescription>
-                      ) : null}
-                    </FieldContent>
-                  </Field>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      ))}
-    </section>
-  );
-};
-
-/**
- * Share's sheet: who gets the App, its teams and people by name, whom it
- * is shared with already ticked. Share gives it to whoever was ticked and
- * nothing else: what they open is what was published.
- */
-const ShareSheet = ({
-  app,
-  members,
-  open,
-  onOpenChange,
-  onShared,
-}: {
-  app: App;
-  /** Whom it is shared with now. */
-  members: readonly AppMember[];
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onShared: () => void;
-}) => {
-  const { t } = useLingui();
-  const core = useCore();
-  const { name } = app;
-  const [candidates, setCandidates] = useState<ShareCandidates>();
-  const [chosen, setChosen] = useState<string[]>([]);
-  const { busy, failure, share, clear } = useSharing(app, onShared);
-  const offered =
-    candidates === undefined ? undefined : recipientsOf(candidates, app.owner);
-  const recipients = (offered ?? []).filter((each) =>
-    chosen.includes(keyOf(each))
-  );
-  // Who may get it, read each time the sheet opens, from the bar or from
-  // Publish.
-  useEffect(() => {
-    let current = true;
-    const load = async (): Promise<void> => {
-      if (!open) {
-        return;
-      }
-      const listed = await settled(
-        core,
-        async (session) => await session.apps.members.candidates(app.id)
-      );
-      if (current) {
-        setCandidates(
-          listed.ok ? listed.value : { people: [], teams: [], projects: [] }
-        );
-      }
-    };
-    void load();
-    return () => {
-      current = false;
-    };
-  }, [core, app.id, open]);
-  const close = (): void => {
-    clear();
-    onOpenChange(false);
-  };
-  return (
-    <Sheet
-      onOpenChange={(opening) => {
-        if (opening) {
-          onOpenChange(true);
-        } else {
-          close();
-        }
-      }}
-      open={open}
-    >
-      <SheetContent closeLabel={t`Close`}>
-        <SheetTitle>{t`Share ${name}`}</SheetTitle>
-        <SheetDescription>
-          {app.currentVersion === null
-            ? t`They'll find it under Apps once it is published.`
-            : t`They'll find it under Apps, and see it as it is now.`}
-        </SheetDescription>
-        <SheetBody>
-          <div {...stylex.props(styles.stack)}>
-            <WhoGetsIt
-              chosen={chosen}
-              disabled={busy}
-              members={members}
-              offered={offered}
-              onChosen={setChosen}
-            />
-            {failure === undefined ? null : (
-              <Alert tone="danger">{failure}</Alert>
-            )}
-          </div>
-        </SheetBody>
-        <SheetFooter>
-          <Button onClick={close} variant="ghost">
-            {t`Not yet`}
-          </Button>
-          <Button
-            disabled={recipients.length === 0 || busy}
-            onClick={() => {
-              void (async () => {
-                if (await share(recipients)) {
-                  close();
-                  setChosen([]);
-                }
-              })();
-            }}
-            variant="ink"
-          >
-            {t`Share`}
-          </Button>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
-  );
-};
-
 /** Where the App stands, in one line with a dot: live and at which version, or not yet. */
 const StateLine = ({ app, changing }: { app: App; changing: boolean }) => {
   const { t } = useLingui();
@@ -944,8 +638,8 @@ const StateLine = ({ app, changing }: { app: App; changing: boolean }) => {
   );
 };
 
-/** How the changes' check stands, as one row: running, passed, or nothing to publish. */
-const CheckLine = ({
+/** How the changes' check stands, in words, and whether it is still going. */
+const useCheckState = ({
   publishable,
   running,
   first,
@@ -954,47 +648,39 @@ const CheckLine = ({
   running: boolean;
   /** Whether its first version is published as it is, with no changes to check. */
   first: boolean;
-}) => {
+}): { words: string; working: boolean } | undefined => {
   const { t } = useLingui();
   if (running || (publishable.changing && publishable.changes === undefined)) {
-    // Why the read failed stands under the rows.
-    return publishable.read?.state === "failed" && !running ? null : (
-      <Item size="sm">
-        <ItemMedia>
-          <Spinner />
-        </ItemMedia>
-        <ItemContent>
-          <ItemTitle>
-            {running ? t`Grasp is still working on it…` : t`Checking it…`}
-          </ItemTitle>
-        </ItemContent>
-      </Item>
-    );
+    // Why the read failed stands under the facts.
+    if (publishable.read?.state === "failed" && !running) {
+      return undefined;
+    }
+    return {
+      words: running ? t`Grasp is still working on it…` : t`Checking it…`,
+      working: true,
+    };
   }
   if (publishable.changes?.check.passed === false) {
-    // What stops it stands under the rows, with Fix with Grasp.
-    return null;
+    // What stops it stands under the facts, with Fix with Grasp.
+    return { words: t`Something to fix first`, working: false };
   }
-  return (
-    <Item size="sm">
-      <ItemMedia icon={Done} />
-      <ItemContent>
-        <ItemTitle>
-          {publishable.changing || first
-            ? t`Checks pass`
-            : t`Nothing new to publish`}
-        </ItemTitle>
-      </ItemContent>
-    </Item>
-  );
+  return {
+    words:
+      publishable.changing || first
+        ? t`Checks pass`
+        : t`Nothing new to publish`,
+    working: false,
+  };
 };
 
 /**
- * What Publish's popover holds: where the App stands, its address, who
- * can open it and how its check stands, then what applies to the changes
- * and Publish.
+ * Publish's dialog: where the App stands, its address, who can open it and
+ * how its check stands, as facts, then what applies to the changes, and
+ * Publish. Address and Who can open it each lead to their own dialog.
  */
-const PublishPanel = ({
+const PublishDialog = ({
+  open,
+  onOpenChange,
   app,
   members,
   publishable,
@@ -1007,6 +693,8 @@ const PublishPanel = ({
   onFix,
   onPublish,
 }: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   app: App;
   members: readonly AppMember[];
   publishable: ReturnType<typeof usePublishable>;
@@ -1022,75 +710,158 @@ const PublishPanel = ({
   onPublish: () => void;
 }) => {
   const { t } = useLingui();
+  const { name } = app;
   const who = userNames(members);
+  const check = useCheckState({ publishable, running, first });
+  let says = t`Nothing changed since the live version.`;
+  if (first) {
+    says = t`Everyone it is shared with can open it once it is published.`;
+  } else if (publishable.changing) {
+    says = t`Your changes go live for everyone it is shared with.`;
+  }
+  const facts: KeyValueItem[] = [
+    {
+      key: t({ message: "Status", context: "where an App stands" }),
+      icon: Upload,
+      value: <StateLine app={app} changing={publishable.changing} />,
+    },
+    {
+      key: t`Address`,
+      icon: LinkIcon,
+      value: (
+        <span {...stylex.props(styles.value)}>
+          {app.link === null ? t`None yet` : linkAddress(app.link)}
+          <Button onClick={onLink} size="xs" variant="quiet">
+            {app.link === null ? t`Add` : t`Change`}
+          </Button>
+        </span>
+      ),
+    },
+    {
+      key: t`Who can open it`,
+      icon: People,
+      value: (
+        <span {...stylex.props(styles.value)}>
+          {who.length === 0 ? (
+            t`Only its builders`
+          ) : (
+            <AvatarGroup
+              aria-label={formatList(who)}
+              max={3}
+              people={who.map((each) => ({ name: each }))}
+            />
+          )}
+          <Button onClick={onShare} size="xs" variant="quiet">
+            {t`Manage`}
+          </Button>
+        </span>
+      ),
+    },
+    ...(check === undefined
+      ? []
+      : [
+          {
+            key: t`Checks`,
+            icon: Done,
+            value: check.working ? (
+              <span {...stylex.props(styles.value)}>
+                <Spinner />
+                {check.words}
+              </span>
+            ) : (
+              check.words
+            ),
+          },
+        ]),
+  ];
   return (
-    <>
-      <PopoverTitle>
-        <StateLine app={app} changing={publishable.changing} />
-      </PopoverTitle>
-      <div {...stylex.props(styles.facts)}>
-        <Item size="sm">
-          <ItemMedia icon={LinkIcon} />
-          <ItemContent>
-            <ItemTitle>
-              {app.link === null ? t`No address yet` : linkAddress(app.link)}
-            </ItemTitle>
-            <ItemDescription>{t`Address`}</ItemDescription>
-          </ItemContent>
-          <ItemActions>
-            <Button
-              aria-label={t`Change the address`}
-              icon={Edit}
-              onClick={onLink}
-              size="xs"
-              variant="ghost"
-            />
-          </ItemActions>
-        </Item>
-        <Item size="sm">
-          <ItemMedia icon={People} />
-          <ItemContent>
-            <ItemTitle>
-              {who.length === 0 ? t`Only its builders` : formatList(who)}
-            </ItemTitle>
-            <ItemDescription>{t`Who can open it`}</ItemDescription>
-          </ItemContent>
-          <ItemActions>
-            <Button
-              aria-label={t`Share`}
-              icon={ChevronRight}
-              onClick={onShare}
-              size="xs"
-              variant="ghost"
-            />
-          </ItemActions>
-        </Item>
-        <CheckLine first={first} publishable={publishable} running={running} />
-      </div>
-      {publishable.read?.state === "failed" ? (
-        <Alert tone="danger">{publishable.read.text}</Alert>
-      ) : null}
-      {publishable.changes === undefined ? null : (
-        <ChangesNotes changes={publishable.changes} onFix={onFix} />
-      )}
-      {failure === undefined ? null : <Alert tone="danger">{failure}</Alert>}
-      <PopoverFooter>
-        <Button disabled={!canPublish} onClick={onPublish} variant="ink">
-          {t`Publish`}
-        </Button>
-      </PopoverFooter>
-    </>
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent closeLabel={t`Close`}>
+        <DialogTitle>{t`Publish ${name}`}</DialogTitle>
+        <DialogDescription>{says}</DialogDescription>
+        <DialogBody>
+          <div {...stylex.props(styles.stack)}>
+            <KeyValueList divided items={facts} variant="inline" />
+            {publishable.read?.state === "failed" ? (
+              <Alert tone="danger">{publishable.read.text}</Alert>
+            ) : null}
+            {publishable.changes === undefined ? null : (
+              <ChangesNotes changes={publishable.changes} onFix={onFix} />
+            )}
+            {failure === undefined ? null : (
+              <Alert tone="danger">{failure}</Alert>
+            )}
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <DialogAction>{t`Cancel`}</DialogAction>
+          <Button disabled={!canPublish} onClick={onPublish} variant="ink">
+            {t`Publish`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+/** Share's dialog: whom the App is shared with, as its Sharing settings list them, with Copy link and Done. */
+const ShareDialog = ({
+  app,
+  members,
+  open,
+  onOpenChange,
+  onShared,
+}: {
+  app: App;
+  members: readonly AppMember[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onShared: () => void;
+}) => {
+  const { t } = useLingui();
+  const { name } = app;
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent closeLabel={t`Close`}>
+        <DialogTitle>{t`Share ${name}`}</DialogTitle>
+        <DialogDescription>
+          {app.currentVersion === null
+            ? t`They'll find it under Apps once it is published.`
+            : t`They'll find it under Apps, and see it as it is now.`}
+        </DialogDescription>
+        <DialogBody>
+          <AppShareAccess app={app} members={members} onChanged={onShared} />
+        </DialogBody>
+        <DialogFooter>
+          <Button
+            icon={LinkIcon}
+            onClick={() => {
+              void (async () => {
+                await navigator.clipboard.writeText(
+                  `${window.location.origin}/apps/${app.id}`
+                );
+                toast.success(t`Link copied`);
+              })();
+            }}
+            variant="quiet"
+          >
+            {t`Copy link`}
+          </Button>
+          <DialogAction>{t`Done`}</DialogAction>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };
 
 /**
  * The end of the App's bar: Share, then Publish, the page's one ink
- * action. Share opens its sheet, who gets the App. Publish opens a
- * popover that says where the App stands, its address, who can open it
- * and whether its changes pass their check, and publishes them: the
- * changes only its builders see become what everyone it is shared with
- * opens. On a phone Share folds into Publish's popover (its "Who can open
- * it" row), and Publish is its icon alone, so the bar keeps one row.
+ * action. Share opens its dialog, whom the App is shared with. Publish
+ * opens its dialog, which says where the App stands, its address, who can
+ * open it and whether its changes pass their check, and publishes them:
+ * the changes only its builders see become what everyone it is shared
+ * with opens. On a phone Share folds into Publish's dialog (its Who can
+ * open it), and Publish is its icon alone, so the bar keeps one row.
  */
 export const ShareAndPublish = ({
   app,
@@ -1110,8 +881,7 @@ export const ShareAndPublish = ({
   onShared?: () => void;
 }) => {
   const { t } = useLingui();
-  // Which of Publish's two triggers has its popover open: the worded one, or a phone's icon.
-  const [open, setOpen] = useState<"wide" | "narrow">();
+  const [publishing, setPublishing] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [linking, setLinking] = useState(false);
   const told = (): void => {
@@ -1125,41 +895,9 @@ export const ShareAndPublish = ({
   const first = versionToPublish(app, draft) !== undefined;
   const canPublish =
     (publishable.changing || first) && publishable.ready && !busy && !running;
-  const panel = (
-    <PublishPanel
-      app={app}
-      canPublish={canPublish}
-      failure={failure}
-      first={first}
-      members={members}
-      onFix={(problems) => {
-        setOpen(undefined);
-        publishable.fix(problems);
-      }}
-      onLink={() => {
-        setOpen(undefined);
-        setLinking(true);
-      }}
-      onPublish={() => {
-        void (async () => {
-          if (await publish(publishable.changes)) {
-            setOpen(undefined);
-          }
-        })();
-      }}
-      onShare={() => {
-        setOpen(undefined);
-        setSharing(true);
-      }}
-      publishable={publishable}
-      running={running}
-    />
-  );
-  const opens = (width: "wide" | "narrow") => (opening: boolean) => {
-    if (opening) {
-      clear();
-    }
-    setOpen(opening ? width : undefined);
+  const openPublish = (): void => {
+    clear();
+    setPublishing(true);
   };
   return (
     <>
@@ -1174,30 +912,56 @@ export const ShareAndPublish = ({
         >
           {t`Share`}
         </Button>
-        <Popover onOpenChange={opens("wide")} open={open === "wide"}>
-          <PopoverTrigger
-            disabled={draft === undefined}
-            size="sm"
-            variant="ink"
-          >
-            {t`Publish`}
-          </PopoverTrigger>
-          <PopoverContent align="end">{panel}</PopoverContent>
-        </Popover>
+        <Button
+          disabled={draft === undefined}
+          onClick={openPublish}
+          size="sm"
+          variant="ink"
+        >
+          {t`Publish`}
+        </Button>
       </span>
       <span {...stylex.props(styles.narrow)}>
-        <Popover onOpenChange={opens("narrow")} open={open === "narrow"}>
-          <PopoverTrigger
-            aria-label={t`Publish`}
-            disabled={draft === undefined}
-            icon={Upload}
-            size="sm"
-            variant="ink"
-          />
-          <PopoverContent align="end">{panel}</PopoverContent>
-        </Popover>
+        <Button
+          aria-label={t`Publish`}
+          disabled={draft === undefined}
+          icon={Upload}
+          onClick={openPublish}
+          size="sm"
+          variant="ink"
+        />
       </span>
-      <ShareSheet
+      <PublishDialog
+        app={app}
+        canPublish={canPublish}
+        failure={failure}
+        first={first}
+        members={members}
+        onFix={(problems) => {
+          setPublishing(false);
+          publishable.fix(problems);
+        }}
+        onLink={() => {
+          setPublishing(false);
+          setLinking(true);
+        }}
+        onOpenChange={setPublishing}
+        onPublish={() => {
+          void (async () => {
+            if (await publish(publishable.changes)) {
+              setPublishing(false);
+            }
+          })();
+        }}
+        onShare={() => {
+          setPublishing(false);
+          setSharing(true);
+        }}
+        open={publishing}
+        publishable={publishable}
+        running={running}
+      />
+      <ShareDialog
         app={app}
         members={members}
         onOpenChange={setSharing}

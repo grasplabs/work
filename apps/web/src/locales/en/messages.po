@@ -2135,6 +2135,7 @@ msgstr "Activity: see all of it in Traces"
 
 #: src/agents/agent-wakes.tsx
 #: src/apps/indexes-view.tsx
+#: src/apps/publish.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/settings/ai-providers.tsx
 msgid "Add"
@@ -3775,6 +3776,7 @@ msgstr "Can't offer Run: {unread}"
 #: src/apps/blueprints.tsx
 #: src/apps/data-model-changes.tsx
 #: src/apps/field-editor.tsx
+#: src/apps/publish.tsx
 #: src/apps/release-controls.tsx
 #: src/apps/reset-test-data.tsx
 #: src/apps/resource-bindings.tsx
@@ -3869,6 +3871,7 @@ msgid "Cc / Bcc"
 msgstr "Cc / Bcc"
 
 #: src/agents/new-agent.tsx
+#: src/apps/publish.tsx
 #: src/settings/ai-providers.tsx
 msgid "Change"
 msgstr "Change"
@@ -3916,10 +3919,6 @@ msgstr "Change something about the plan"
 #: src/workflows/workflow-diagram.tsx
 msgid "Change step {id}"
 msgstr "Change step {id}"
-
-#: src/apps/publish.tsx
-msgid "Change the address"
-msgstr "Change the address"
 
 #: src/settings/stephen-settings.tsx
 msgid "Change the company's"
@@ -4233,6 +4232,10 @@ msgstr "Checking whether Grasp can be reached"
 #: src/workflows/workflow-flow.tsx
 msgid "Checking…"
 msgstr "Checking…"
+
+#: src/apps/publish.tsx
+msgid "Checks"
+msgstr "Checks"
 
 #: src/apps/publish.tsx
 msgid "Checks pass"
@@ -4920,7 +4923,6 @@ msgid "Copenhagen"
 msgstr "Copenhagen"
 
 #: src/activity/audit-event.tsx
-#: src/apps/app-code.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-failed.tsx
@@ -4960,7 +4962,6 @@ msgstr "Copy {what}"
 msgid "Copy as Markdown"
 msgstr "Copy as Markdown"
 
-#: src/apps/app-code.tsx
 #: src/frame/part-words.tsx
 msgid "Copy code"
 msgstr "Copy code"
@@ -4979,6 +4980,7 @@ msgstr "Copy into Our skills"
 msgid "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgstr "Copy it now: you won't see it again. Lost, it can only be replaced."
 
+#: src/apps/publish.tsx
 #: src/frame/part-words.tsx
 msgid "Copy link"
 msgstr "Copy link"
@@ -5590,7 +5592,7 @@ msgctxt "workflow status"
 msgid "Designed"
 msgstr "Designed"
 
-#: src/apps/preview-controls.tsx
+#: src/apps/app-section.tsx
 #: src/frame/part-words.tsx
 msgid "Desktop"
 msgstr "Desktop"
@@ -5819,6 +5821,7 @@ msgid "done"
 msgstr "done"
 
 #: src/apps/blueprints.tsx
+#: src/apps/publish.tsx
 #: src/chat/use-dictation.ts
 #: src/frame/part-words.tsx
 #: src/onboarding/setup-steps.tsx
@@ -6394,6 +6397,10 @@ msgstr "Everyone in the organization"
 #: src/knowledge/new-collection.tsx
 msgid "Everyone in the organization, and their agents."
 msgstr "Everyone in the organization, and their agents."
+
+#: src/apps/publish.tsx
+msgid "Everyone it is shared with can open it once it is published."
+msgstr "Everyone it is shared with can open it once it is published."
 
 #: src/brain/share-record.tsx
 msgid "Everyone it is shared with, and their agents, read it as accepted. Yours stays as it is."
@@ -7526,10 +7533,6 @@ msgstr "Handovers"
 #: src/frame/part-words.tsx
 msgid "Has access"
 msgstr "Has access"
-
-#: src/apps/publish.tsx
-msgid "has it"
-msgstr "has it"
 
 #: src/activity/audit-event.tsx
 msgid "Hash"
@@ -8991,6 +8994,7 @@ msgstr "Lime"
 msgid "Link"
 msgstr "Link"
 
+#: src/apps/publish.tsx
 #: src/frame/part-words.tsx
 msgid "Link copied"
 msgstr "Link copied"
@@ -9116,7 +9120,6 @@ msgstr "Loading the value"
 
 #: src/activity/audit-log.tsx
 #: src/apps/app-workspace.tsx
-#: src/apps/publish.tsx
 #: src/frame/page-states.tsx
 #: src/knowledge/nav.tsx
 #: src/settings/erasures.tsx
@@ -9303,6 +9306,7 @@ msgstr "Makes {table} sensitive: its history keeps no values, and every read is 
 msgid "Making"
 msgstr "Making"
 
+#: src/apps/publish.tsx
 #: src/connections/integration-item.tsx
 #: src/settings/ai-providers.tsx
 msgid "Manage"
@@ -9978,10 +9982,6 @@ msgstr "No {onlySignIn}? A staff list works too."
 msgid "No {unit}"
 msgstr "No {unit}"
 
-#: src/apps/publish.tsx
-msgid "No address yet"
-msgstr "No address yet"
-
 #: src/workflows/workflow-triggers.tsx
 msgid "No admin has been asked to let it read these events on its connection: it hears nothing until one allows it."
 msgstr "No admin has been asked to let it read these events on its connection: it hears nothing until one allows it."
@@ -10322,10 +10322,6 @@ msgstr "Nobody changes the records in {table}, Sam included."
 msgid "Nobody else to add."
 msgstr "Nobody else to add."
 
-#: src/apps/publish.tsx
-msgid "Nobody else to share with."
-msgstr "Nobody else to share with."
-
 #: src/workflows/definition-editor.tsx
 msgid "Nobody has edited it since its current version."
 msgstr "Nobody has edited it since its current version."
@@ -10383,6 +10379,7 @@ msgid "None of your chats are in it. Only you see the chats you put here."
 msgstr "None of your chats are in it. Only you see the chats you put here."
 
 #: src/apps/app-settings.tsx
+#: src/apps/publish.tsx
 #: src/brain/brain.ts
 #: src/routes/_shell.settings.billing.tsx
 #: src/settings/ai-providers.tsx
@@ -10706,7 +10703,6 @@ msgstr "Not verified"
 msgid "Not working"
 msgstr "Not working"
 
-#: src/apps/publish.tsx
 #: src/chat/approval-words.ts
 #: src/inbox/item-detail.tsx
 msgid "Not yet"
@@ -10755,6 +10751,10 @@ msgstr "Noted: {name}. We’ll connect it with you. Meanwhile, check who leads w
 #: src/onboarding/connect-steps.tsx
 msgid "Noted. We’ll get in touch to put it on the laptops with you."
 msgstr "Noted. We’ll get in touch to put it on the laptops with you."
+
+#: src/apps/publish.tsx
+msgid "Nothing changed since the live version."
+msgstr "Nothing changed since the live version."
 
 #: src/frame/part-words.tsx
 #: src/onboarding/place-picker.tsx
@@ -11312,10 +11312,6 @@ msgstr "Open Data"
 msgid "Open external link?"
 msgstr "Open external link?"
 
-#: src/apps/app-code.tsx
-msgid "Open file"
-msgstr "Open file"
-
 #: src/workflows/unapproved-start.tsx
 msgid "Open Files and apps"
 msgstr "Open Files and apps"
@@ -11855,7 +11851,6 @@ msgstr "Pending"
 msgid "people"
 msgstr "people"
 
-#: src/apps/publish.tsx
 #: src/chat/mentions.tsx
 #: src/people/people-teams-picker.tsx
 #: src/projects/project-dialog.tsx
@@ -11970,7 +11965,7 @@ msgctxt "column: a workflow's phase"
 msgid "Phase"
 msgstr "Phase"
 
-#: src/apps/preview-controls.tsx
+#: src/apps/app-section.tsx
 msgid "Phone"
 msgstr "Phone"
 
@@ -12128,7 +12123,7 @@ msgstr "Preview of your chat background"
 msgid "Preview the purge"
 msgstr "Preview the purge"
 
-#: src/apps/preview-controls.tsx
+#: src/apps/app-section.tsx
 msgid "Preview width"
 msgstr "Preview width"
 
@@ -12216,6 +12211,10 @@ msgstr "Providers"
 #: src/apps/publish.tsx
 msgid "Publish"
 msgstr "Publish"
+
+#: src/apps/publish.tsx
+msgid "Publish {name}"
+msgstr "Publish {name}"
 
 #. placeholder {0}: draft.revision
 #: src/workflows/definition-editor.tsx
@@ -14201,10 +14200,6 @@ msgstr "Shared mailboxes, registers and the company's records, after they press 
 msgid "Shared with"
 msgstr "Shared with"
 
-#: src/apps/publish.tsx
-msgid "Shared with {who}"
-msgstr "Shared with {who}"
-
 #: src/brain/memory-page.tsx
 msgctxt "memory records: others' that you read"
 msgid "Shared with you"
@@ -14218,10 +14213,6 @@ msgstr "Sharing"
 msgctxt "an app's settings section"
 msgid "Sharing"
 msgstr "Sharing"
-
-#: src/apps/publish.tsx
-msgid "Sharing undone"
-msgstr "Sharing undone"
 
 #: src/agents/new-agent.tsx
 msgid "Should it work on its own?"
@@ -14694,6 +14685,10 @@ msgstr "Something else"
 msgid "Something new is marked"
 msgstr "Something new is marked"
 
+#: src/apps/publish.tsx
+msgid "Something to fix first"
+msgstr "Something to fix first"
+
 #: src/pages/frame-failure.tsx
 msgid "Something went wrong while it opened."
 msgstr "Something went wrong while it opened."
@@ -14926,6 +14921,11 @@ msgstr "Statements"
 #: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/traces.tsx
+msgid "Status"
+msgstr "Status"
+
+#: src/apps/publish.tsx
+msgctxt "where an App stands"
 msgid "Status"
 msgstr "Status"
 
@@ -15187,7 +15187,7 @@ msgstr "Table name"
 msgid "Tables"
 msgstr "Tables"
 
-#: src/apps/preview-controls.tsx
+#: src/apps/app-section.tsx
 #: src/frame/part-words.tsx
 msgid "Tablet"
 msgstr "Tablet"
@@ -15326,7 +15326,6 @@ msgstr "Team size unknown"
 msgid "Team size unknown."
 msgstr "Team size unknown."
 
-#: src/apps/publish.tsx
 #: src/brain/brain.ts
 #: src/knowledge/collection-markers.tsx
 #: src/knowledge/new-collection.tsx
@@ -18264,7 +18263,6 @@ msgstr "Who can talk to him"
 msgid "Who does it"
 msgstr "Who does it"
 
-#: src/apps/publish.tsx
 #: src/chat/plan-card.tsx
 msgid "Who gets it"
 msgstr "Who gets it"
@@ -18916,6 +18914,10 @@ msgstr "Your browser's maker writes down what you say."
 #: src/apps/app-history.tsx
 msgid "Your changes go back to how they were then, for everyone who builds this App. What came after stays in its history."
 msgstr "Your changes go back to how they were then, for everyone who builds this App. What came after stays in its history."
+
+#: src/apps/publish.tsx
+msgid "Your changes go live for everyone it is shared with."
+msgstr "Your changes go live for everyone it is shared with."
 
 #: src/inbox/items.ts
 msgid "Your chat's agent asked to start this workflow for you. Nothing runs until you confirm it, with exactly the input shown."

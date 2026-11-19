@@ -25,7 +25,7 @@ import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
-import { WithTip } from "../tooltip/lazy-tip";
+import { Tip } from "../tooltip/tip";
 import { ToggleGroupContext } from "./toggle-context";
 import type { ToggleSize } from "./toggle-context";
 
@@ -244,22 +244,21 @@ export const Toggle = ({
   const square = children === undefined || children === null;
   // An icon alone says what it turns on in a tooltip, its name, as an icon-only Button does.
   const name = square ? rest["aria-label"] : undefined;
-  return (
-    <WithTip
-      name
-      render={(trigger) => (
-        <OneToggle
-          {...mergeProps(trigger, rest)}
-          icon={icon}
-          scale={scale}
-          square={square}
-          grouped={group.grouped}
-          layout={layout ?? styleProp}
-        >
-          {children}
-        </OneToggle>
-      )}
-      tooltip={name === "" ? undefined : name}
-    />
+  const drawn = (trigger: Record<string, unknown>) => (
+    <OneToggle
+      {...mergeProps(trigger, rest)}
+      icon={icon}
+      scale={scale}
+      square={square}
+      grouped={group.grouped}
+      layout={layout ?? styleProp}
+    >
+      {children}
+    </OneToggle>
+  );
+  return name === undefined || name === "" ? (
+    drawn({})
+  ) : (
+    <Tip name render={drawn} tooltip={name} />
   );
 };
