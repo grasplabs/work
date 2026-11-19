@@ -4,10 +4,13 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { addSource, eraseSource } from "../src/brain-next.ts";
+import type { SourceReaders } from "../src/brain-next.ts";
 import { keepAudience } from "../src/chat-audiences.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import {
+  chatOf,
   codeStep,
   model,
   personalChatsOf,
@@ -15,6 +18,7 @@ import {
   toolResults,
   toolStep,
 } from "./agent-chat.ts";
+import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import type { FakeProvider } from "./model-provider.ts";
@@ -488,6 +492,51 @@ describe("the agent remembering in a person's own chat", () => {
       expect(
         checkInputs(chats.provider).map(({ answering }) => answering)
       ).toStrictEqual([undefined]);
+    }
+  );
+
+  it(
+    "shows the check none of the agent's words that rest on a source the person may no longer read",
+    slow,
+    async () => {
+      const [member, admin] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "admin"),
+      ]);
+      const fact = `Depot ${unique()} opens at seven`;
+      const chat = await chatOf(
+        member.userId,
+        says(`${fact}, the file says. Anything else?`),
+        savesPreference(),
+        checked(true),
+        says("Noted.")
+      );
+      await requestGranted(idp, admin, {
+        subject: chat.agent,
+        object: { type: "platform" },
+        actions: ["brain"],
+        binding: "BRAIN",
+      });
+      const source = { producer: "upload" as const, id: crypto.randomUUID() };
+      const readers: SourceReaders = { kind: "owner", personId: member.userId };
+      await addSource(env, {
+        source,
+        change: crypto.randomUUID(),
+        text: fact,
+        readers,
+      });
+      await chat.ask(`When does the depot in ${fact.split(" ")[1]} open?`);
+      await eraseSource(env, { source, readers, reason: "deleted" });
+      await chat.ask("I always want answers in Dutch.");
+      const checks = checksSent(chat.provider);
+
+      expect({
+        recalled: JSON.stringify(chat.provider.requests[0]?.body).includes(
+          fact
+        ),
+        checks: checks.length,
+        sawTheFact: checks.some((body) => body.includes(fact)),
+      }).toStrictEqual({ recalled: true, checks: 1, sawTheFact: false });
     }
   );
 

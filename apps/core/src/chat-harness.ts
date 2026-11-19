@@ -605,6 +605,13 @@ export class ChatHarness {
   #active: string | undefined;
   /** The rebase under way (`rebase`): a note waits for it. */
   #rebasing: Promise<void> | undefined;
+  /**
+   * The agent's last words before the turn's question, from the context
+   * as rebased for it (`#submit`): what its `remember` checks a short
+   * answer against (agent-remember.ts), never what the chat may no longer
+   * read. None for a turn a restart set up again.
+   */
+  #answering: string | undefined;
   /** Whether pi runs the agent now (`pi.live.run`). */
   #running = false;
   /** The answer streaming in, as `pi.live` has it now. */
@@ -1067,8 +1074,12 @@ export class ChatHarness {
       turn.answerId = null;
       turn.captureOwed = false;
     }, context);
+    this.#answering = undefined;
     const turn = await this.#setUp(request);
     await this.#rebaseIfNeeded(request);
+    // Read from the context as rebased, as the turn's model is given it.
+    const { messages } = await this.#conversation.context(context);
+    this.#answering = lastWordsOf(messages);
     // At least once: should the object reset before the submit below, the
     // turn asked again sets up and recalls again, a second recall run
     // audited as the first was. Who reads the answer decides what it may
@@ -1413,10 +1424,12 @@ export class ChatHarness {
       // (`followUp`), which starts from core's words, never theirs.
       ...(request.personal && request.question.followUp !== true
         ? {
-            remember: rememberTool(env, scope, {
-              said: request.question.text,
-              answering: lastWordsOf(transcript.messages),
-            }),
+            remember: rememberTool(
+              env,
+              scope,
+              request.question.text,
+              () => this.#answering
+            ),
           }
         : {}),
       // Only in a person's own chat, by an agent that may read the brain.

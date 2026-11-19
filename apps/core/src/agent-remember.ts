@@ -317,13 +317,17 @@ const notTheirWords =
 
 /**
  * The tool for one turn of `scope`'s chat, which the person's message
- * started (`said`): only in the person's own chat, in Grasp's app or their
- * direct message on a chat app, in a turn they started.
+ * `said` started: only in the person's own chat, in Grasp's app or their
+ * direct message on a chat app, in a turn they started. `answering` gives
+ * the agent's last words before it as the turn's model is given them,
+ * read when a save is checked: what the chat may no longer read never
+ * reaches the check (chat-harness.ts).
  */
 export const rememberTool = (
   env: Env,
   scope: Omit<AgentScope, "runId">,
-  said: Said
+  said: string,
+  answering: () => string | undefined
 ): AgentTool<typeof parameters, ChatSavedMemory> => ({
   name: rememberName,
   label: "Remember",
@@ -338,14 +342,21 @@ export const rememberTool = (
     if (isNamedMe(input.about)) {
       throw new Error(namedMe);
     }
-    if (!isTheirWords(said.said, input.quote)) {
+    if (!isTheirWords(said, input.quote)) {
       throw new Error(notTheirWords);
     }
     const about = await subjectOf(env, scope.personId, input.about);
     if (about === null) {
       throw new Error(unknownEntity);
     }
-    if (!(await statedByThem(env, scope, said, about.subject, input))) {
+    const stated = await statedByThem(
+      env,
+      scope,
+      { said, answering: answering() },
+      about.subject,
+      input
+    );
+    if (!stated) {
       throw new Error(notTheirWords);
     }
     signal?.throwIfAborted();
