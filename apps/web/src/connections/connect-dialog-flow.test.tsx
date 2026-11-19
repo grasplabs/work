@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { ConnectDialog } from "./connect-dialog.tsx";
 import { integrationsOf } from "./integrations.ts";
 import type { Integration } from "./integrations.ts";
+import { toolWords } from "./tool-rows.tsx";
 
 // The connect dialog against core's connections as the page reaches them
 // over RPC, faked: what an admin chooses for each tool of a Composio
@@ -170,7 +171,8 @@ const press = async (element: Element | null | undefined): Promise<void> => {
 const row = (name: string): HTMLElement => {
   const found = [...document.querySelectorAll("li")].find(
     (each) =>
-      each.textContent?.includes(name) && each.querySelector("li") === null
+      each.textContent?.includes(toolWords(name, "hubspot")) &&
+      each.querySelector("li") === null
   );
   if (found === undefined) {
     throw new Error(`No row for ${name}`);

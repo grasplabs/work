@@ -89,13 +89,21 @@ describe(integrationsOf, () => {
     expect(listed[1]?.connections).toStrictEqual([]);
   });
 
-  it("keeps a connection whose entry the catalog doesn't list, under its provider's ID", () => {
+  it("keeps a connection whose entry the catalog doesn't list, under its product's name or else its provider's ID", () => {
     const listed = integrationsOf(
       [],
-      [connection("hubspot", "shared", "active")]
+      [
+        connection("hubspot", "shared", "active"),
+        connection("microsoft-directory", "shared", "active"),
+      ]
     );
     expect(listed).toMatchObject([
       { key: "native:hubspot", name: "hubspot", listed: false, offered: false },
+      {
+        key: "native:microsoft-directory",
+        name: "Microsoft Entra ID",
+        listed: false,
+      },
     ]);
   });
 
