@@ -37,6 +37,12 @@ interface Drive {
   changes: Record<string, Record<string, unknown>>;
   /** Each file's content, by ID. */
   contents: Record<string, string>;
+  /**
+   * The person's folders, by ID: the one each is in (none for the top of
+   * their Drive), and whether its access is limited, which Google gives a
+   * folder alone.
+   */
+  folders: Record<string, { parent?: string; limited?: boolean }>;
   /** A file's version now, by ID, when it moved since it was listed or changed. */
   versions: Record<string, string>;
   /** Answers every request instead, when it answers. */
@@ -53,14 +59,19 @@ const drive: Drive = {
   owned: [],
   changes: {},
   contents: {},
+  folders: {},
   versions: {},
 };
+
+/** The top of the person's My Drive: no folder above it. */
+const myDrive = "my-drive";
 
 const reset = (): void => {
   drive.start = "100";
   drive.owned = [];
   drive.changes = {};
   drive.contents = {};
+  drive.folders = { [myDrive]: {} };
   drive.versions = {};
   drive.answer = undefined;
   drive.slow = undefined;
@@ -137,6 +148,14 @@ const internet = fakeInternet((request, url) => {
     return listing(url);
   }
   const [id = "", exported] = path.slice("/drive/v3/files/".length).split("/");
+  const asFolder = drive.folders[id];
+  if (asFolder !== undefined && exported === undefined) {
+    return Response.json({
+      id,
+      ...(asFolder.parent === undefined ? {} : { parents: [asFolder.parent] }),
+      inheritedPermissionsDisabled: asFolder.limited === true,
+    });
+  }
   const content = drive.contents[id];
   if (content === undefined) {
     return Response.json({ error: { code: 404 } }, { status: 404 });
@@ -185,6 +204,7 @@ const ownedFile = (
   version: "3",
   ownedByMe: true,
   lastModifyingUser: { emailAddress: "Owner@Acme.test" },
+  parents: [myDrive],
   permissions: [{ type: "user", emailAddress: owner }],
   ...fields,
 });
@@ -275,6 +295,44 @@ describe("syncing a person's own Drive", () => {
         path.startsWith("/drive/v3/files/video")
       )
     ).toBeFalsy();
+  });
+
+  it("gives a file in a folder with limited access only to its owner and those it is shared with on the file itself", async () => {
+    const connectionId = await connected();
+    drive.folders.hr = { parent: myDrive, limited: true };
+    drive.owned = [
+      ownedFile("salaries", {
+        parents: ["hr"],
+        permissions: [
+          { type: "user", emailAddress: owner, role: "owner" },
+          // Shared on the folder above: My Drive doesn't say where from.
+          {
+            type: "user",
+            emailAddress: "colleague@acme.test",
+            role: "reader",
+            permissionDetails: [{ inherited: true }],
+          },
+          {
+            type: "user",
+            emailAddress: "hr@acme.test",
+            role: "reader",
+            permissionDetails: [{ inherited: false }],
+          },
+        ],
+      }),
+    ];
+    drive.contents.salaries = "salaries";
+
+    const { items } = await read(connectionId, null);
+
+    expect(
+      items.flatMap((item) => (item.gone ? [] : [item.readers]))
+    ).toStrictEqual([
+      [
+        { kind: "account", id: owner },
+        { kind: "account", id: "hr@acme.test" },
+      ],
+    ]);
   });
 
   it("then brings only what changed, and what went away", async () => {

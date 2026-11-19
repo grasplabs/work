@@ -465,6 +465,8 @@ export const docFile = (
   modifiedTime: "2026-11-10T09:00:00.000Z",
   version: "1",
   ownedByMe: true,
+  // At the top of their My Drive (drive-sync-fake.ts).
+  parents: ["my-drive"],
   lastModifyingUser: { emailAddress: owner },
   permissions: [{ type: "user", role: "owner", emailAddress: owner }],
   ...more,
