@@ -270,5 +270,8 @@ export const directoryErrors = defineErrorFamily({
   "directory.deleted_unsupported":
     "Microsoft's list of the directory's deleted accounts didn't answer as a list.",
   "directory.group_gone": "That group is no longer in the directory.",
-  "directory.group_refused": "Microsoft refused to read that group.",
+  "directory.group_refused":
+    "Microsoft refused to read the directory's groups for this connection.",
+  "directory.groups_not_granted":
+    "This directory connection was made before Grasp could read groups. To map groups, an admin disconnects the directory and connects it again.",
 });

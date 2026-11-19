@@ -112,11 +112,15 @@ export interface OAuthProviderConfig {
    * `allowed`, or less than `required`, are refused
    * (`connection.scopes_refused`). For a connection that must hold no
    * more than it asks for, as the directory's and the documents'; none
-   * for the rest.
+   * for the rest. A renewal (`renewedAsGranted`) must hold `kept`
+   * (`required` when unset) and all its connection held before: a scope
+   * added to `required` later is asked of connecting only, so a
+   * connection made before it goes on with what it was granted.
    */
   granted?: {
     allowed: ReadonlySet<string>;
     required: readonly string[];
+    kept?: readonly string[];
   };
   /**
    * Scopes a renewed token must hold, or its connection is marked for
@@ -436,6 +440,10 @@ const microsoftDirectory: OAuthProviderConfig = {
       microsoftDirectoryScopes.map((scope) => scope.toLowerCase())
     ),
     required: ["User.Read.All", "Group.ReadBasic.All"],
+    // A connection made before groups were asked for renews with what it
+    // was granted, and keeps reading people (directory-groups.ts answers
+    // its group calls `directory.groups_not_granted`).
+    kept: ["User.Read.All"],
   },
   sharedOnly: true,
   client: (env) =>
@@ -794,6 +802,45 @@ const signInScopes: ReadonlySet<string> = new Set([
   "email",
   "offline_access",
 ]);
+
+/**
+ * Whether a renewal's `tokens` hold what their connection was granted,
+ * where it must hold no more (`granted`): nothing beyond what is allowed,
+ * nothing short of what every renewal must keep, and nothing less than
+ * the connection's earlier grant (`before`, its token answer's scope, as
+ * kept; null where connect didn't keep it), the OpenID scopes aside. A
+ * grant that predates a scope asked for since is no change; one that lost
+ * a scope it had, or gained one unasked, is. An answer that lists none is
+ * refused.
+ */
+export const renewedAsGranted = (
+  { granted }: OAuthProviderConfig,
+  { scope }: TokenSet,
+  before: string | null
+): boolean => {
+  if (granted === undefined) {
+    return true;
+  }
+  if (scope === undefined) {
+    return false;
+  }
+  const scopes = scopesOf(scope);
+  const held = before === null ? [] : [...scopesOf(before)];
+  return (
+    [...scopes].every((each) => granted.allowed.has(each)) &&
+    (granted.kept ?? granted.required).every((each) =>
+      scopes.has(each.toLowerCase())
+    ) &&
+    held.every(
+      (each) =>
+        signInScopes.has(each) || !granted.allowed.has(each) || scopes.has(each)
+    )
+  );
+};
+
+/** Whether a grant of `scope` (a token answer's, as kept) holds `wanted`. */
+export const grantHolds = (scope: string, wanted: string): boolean =>
+  scopesOf(scope).has(wanted.toLowerCase());
 
 /**
  * The scopes `provider` asks for now that a grant of `scope` (a token
