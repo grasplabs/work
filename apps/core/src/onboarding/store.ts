@@ -659,8 +659,9 @@ const listenFor = (terms: readonly string[]): string[] => {
 };
 
 /**
- * A live transcription, as the onboarding notes it: its ID, who it is
- * for, and the person whose link it is on, if it is on one.
+ * A live transcription of the onboarding's, as the onboarding notes it:
+ * its ID, who it is for, and the person whose link it is on, if it is on
+ * one. A member's dictation has none: it is no part of the onboarding.
  */
 export interface TranscriptionSessionNote {
   id: string;
@@ -2606,7 +2607,7 @@ export class Onboarding extends DurableObject<Env> {
    * The words to listen out for when someone talks (`listenFor`): the
    * company's name, the names of `person`'s team and its lead, the
    * company's own words from Stephen's setup, and the tools the shared
-   * documents name. Without `person`, as for an admin, the team's names
+   * documents name. Without `person`, as for someone signed in, the team's names
    * are left out.
    */
   async listeningTerms(person?: string): Promise<string[]> {
@@ -4133,12 +4134,16 @@ export class Onboarding extends DurableObject<Env> {
     return answered(null);
   }
 
-  /** Seconds heard by live transcription for an admin today. */
-  heardForAdmin(
+  /**
+   * Seconds heard by live transcription today for someone signed in, by
+   * their user ID alone: one count a person, whatever their role and
+   * whatever it was heard for.
+   */
+  heardForUser(
     userId: string,
     now: string = new Date().toISOString()
   ): { who: string; heard: number } {
-    const who = heardKey(`admin:${userId}`);
+    const who = heardKey(`user:${userId}`);
     return { who, heard: this.voiceSaid(who, now) };
   }
 
@@ -4146,22 +4151,27 @@ export class Onboarding extends DurableObject<Env> {
    * Opens a live transcription for `who`: holds the seconds it may hear
    * against `who`'s budget for today, at once, so sockets opened side by
    * side share one budget rather than each finding it untouched, and a
-   * socket whose close is never counted keeps what it held. Notes it on
-   * someone's link in the onboarding's own log, which only staff read,
-   * never in the audit log, which would tell the company who talked, and
-   * when; for an admin in the audit log, with the session's ID and
-   * nothing heard. The seconds held, and the day they are held on; none,
-   * and nothing noted, when the budget is spent.
+   * socket whose close is never counted keeps what it held. With a
+   * `note`, the onboarding's own: on someone's link it is noted in the
+   * onboarding's own log, which only staff read, never in the audit log,
+   * which would tell the company who talked, and when; for Grasp's staff
+   * in the audit log, with the session's ID and nothing heard. Without
+   * one, a member's dictation, only the seconds are held. The seconds
+   * held, and the day they are held on; none, and nothing noted, when the
+   * budget is spent.
    */
   transcriptionOpened(
-    session: TranscriptionSessionNote & {
+    session: {
       who: string;
       budget: number;
       most: number;
+      note?: TranscriptionSessionNote;
     },
     now: string = new Date().toISOString()
   ): { held: number; day: string } {
     const day = now.slice(0, 10);
+    const { note } = session;
+    const audited = note !== undefined && note.person === undefined;
     const held = this.ctx.storage.transactionSync(() => {
       const left = session.budget - this.voiceSaid(session.who, now);
       const most = Math.floor(Math.min(left, session.most));
@@ -4177,41 +4187,54 @@ export class Onboarding extends DurableObject<Env> {
           set: { seconds: sql`${voiceUse.seconds} + ${most}` },
         })
         .run();
-      if (session.person === undefined) {
-        this.#changed(session.by, "onboarding.transcription.opened", {
-          session: session.id,
+      if (note?.person !== undefined) {
+        this.#noted(note.person, "transcription.opened", now);
+      } else if (note !== undefined) {
+        this.#changed(note.by, "onboarding.transcription.opened", {
+          session: note.id,
         });
-      } else {
-        this.#noted(session.person, "transcription.opened", now);
       }
       return most;
     });
-    if (held > 0 && session.person === undefined) {
+    if (held > 0 && audited) {
       this.#deliverAudit();
     }
     return { held, day };
   }
 
   /**
-   * Counts a live transcription once it closed: the seconds of audio it
-   * heard in the onboarding's use, what it held and didn't hear given
-   * back to `who`'s budget on the day it was held (`transcriptionOpened`),
-   * and notes it as it was opened, with how it ended. Never anything
-   * heard.
+   * Counts a live transcription once it closed: what it held and isn't
+   * charged given back to `who`'s budget on the day it was held
+   * (`transcriptionOpened`). Charged is what it heard in whole seconds,
+   * rounded up, as the model gateway charges and audits each socket
+   * (models.ts `chargedSeconds`), and a second at least: every socket
+   * opened may be an upstream session and a model call in the audit log
+   * however little it heard, so opening and closing them runs out of the
+   * day's budget too, after as many sockets as it has seconds. The
+   * onboarding's own (`noted`) has the
+   * seconds of audio it heard counted in the onboarding's use, and is
+   * noted as it was opened, with how it ended; a member's dictation is
+   * neither. Never anything heard.
    */
   transcriptionClosed(
-    session: TranscriptionSessionNote & {
+    session: {
       who: string;
-      purpose: Took["purpose"];
       seconds: number;
       held: number;
       day: string;
-      ended: string;
+      noted?: {
+        note: TranscriptionSessionNote;
+        purpose: Took["purpose"];
+        ended: string;
+      };
     },
     now: string = new Date().toISOString()
   ): void {
     const seconds = Math.min(counted(session.seconds), session.held);
-    const back = session.held - seconds;
+    const charged = Math.min(Math.max(Math.ceil(seconds), 1), session.held);
+    const back = session.held - charged;
+    const { noted } = session;
+    const audited = noted !== undefined && noted.note.person === undefined;
     this.ctx.storage.transactionSync(() => {
       if (back > 0) {
         this.#db
@@ -4222,21 +4245,22 @@ export class Onboarding extends DurableObject<Env> {
           )
           .run();
       }
-      this.meter(
-        { purpose: session.purpose, model: "transcription", seconds },
-        now
-      );
-      if (session.person === undefined) {
-        this.#changed(session.by, "onboarding.transcription.closed", {
-          session: session.id,
+      if (noted === undefined) {
+        return;
+      }
+      const { note, purpose, ended } = noted;
+      this.meter({ purpose, model: "transcription", seconds }, now);
+      if (note.person === undefined) {
+        this.#changed(note.by, "onboarding.transcription.closed", {
+          session: note.id,
           seconds: Math.round(seconds),
-          ended: session.ended,
+          ended,
         });
       } else {
-        this.#noted(session.person, "transcription.closed", now);
+        this.#noted(note.person, "transcription.closed", now);
       }
     });
-    if (session.person === undefined) {
+    if (audited) {
       this.#deliverAudit();
     }
   }
