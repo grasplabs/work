@@ -1,0 +1,74 @@
+import type { DirectoryAccount, Member } from "@grasp-os/shared/members";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Trans } from "@lingui/react/macro";
+import type { ReactElement } from "react";
+
+import { formatDate } from "../format.ts";
+
+// A member the directory's daily read suspended (GRA-2056; core's
+// directory-suspensions.ts): what their row in Settings › Members says.
+// Only the directory lifts a suspension (GRA-2141): someone it turned off
+// or deleted signs in through it too, so Grasp offers nothing to click,
+// and says where the way out is instead.
+
+/**
+ * Why `member` is suspended, as the directory has their account now. One
+ * sentence each, typed by every state there is: a state this page doesn't
+ * know fails the build, and is never shown as it came.
+ */
+const SuspensionReason = ({
+  reason,
+  since,
+}: {
+  reason: DirectoryAccount;
+  since: string;
+}) => {
+  const date = formatDate(since);
+  const said: Record<DirectoryAccount, ReactElement> = {
+    disabled: (
+      <Trans>Since {date}: the directory turned their account off.</Trans>
+    ),
+    deleted: (
+      <Trans>Since {date}: their account was deleted in the directory.</Trans>
+    ),
+    unlisted: (
+      <Trans>Since {date}: their account is no longer in the directory.</Trans>
+    ),
+    enabled: (
+      <Trans>
+        Since {date}. The directory has turned their account on again, so its
+        next daily read lifts this.
+      </Trans>
+    ),
+  };
+  return said[reason];
+};
+
+/** That `member` is suspended, since when, why, and where the way out is; nothing while they aren't. */
+export const MemberSuspension = ({ member }: { member: Member }) => {
+  const { suspension } = member;
+  if (suspension === null) {
+    return null;
+  }
+  return (
+    // The badge and each sentence on a line of their own: every row the
+    // same shape, however long the reason.
+    <div className="flex flex-col items-start gap-1">
+      <Badge variant="attention">
+        <Trans>Suspended</Trans>
+      </Badge>
+      <span className="text-muted-foreground">
+        <SuspensionReason reason={suspension.reason} since={suspension.since} />
+      </span>
+      {suspension.reason === "enabled" ? null : (
+        <span className="text-muted-foreground">
+          <Trans>
+            Turn the account back on, or restore it, in the directory, and Grasp
+            lifts the suspension at its next daily read. To end their access for
+            good, remove them.
+          </Trans>
+        </span>
+      )}
+    </div>
+  );
+};

@@ -13378,6 +13378,22 @@ msgstr "El inicio de sesión queda registrado en el inicio de sesión de tu empr
 msgid "Signing out didn't work"
 msgstr "No se pudo cerrar la sesión"
 
+#: src/settings/member-suspension.tsx
+msgid "Since {date}: the directory turned their account off."
+msgstr "Desde el {date}: el directorio desactivó su cuenta."
+
+#: src/settings/member-suspension.tsx
+msgid "Since {date}: their account is no longer in the directory."
+msgstr "Desde el {date}: su cuenta ya no está en el directorio."
+
+#: src/settings/member-suspension.tsx
+msgid "Since {date}: their account was deleted in the directory."
+msgstr "Desde el {date}: su cuenta se eliminó en el directorio."
+
+#: src/settings/member-suspension.tsx
+msgid "Since {date}. The directory has turned their account on again, so its next daily read lifts this."
+msgstr "Desde el {date}. El directorio ha vuelto a activar su cuenta, así que su próxima lectura diaria levanta la suspensión."
+
 #: src/workflows/files-and-apps.tsx
 msgid "Size"
 msgstr "Tamaño"
@@ -13903,6 +13919,10 @@ msgstr "Suministra"
 msgctxt "kind of app"
 msgid "Support"
 msgstr "Atención al cliente"
+
+#: src/settings/member-suspension.tsx
+msgid "Suspended"
+msgstr "Suspendido"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Switch a team off and nobody in it gets a link."
@@ -15778,6 +15798,10 @@ msgstr "Desactivar el sonido"
 #: src/voice/sound-controls.tsx
 msgid "Turn sound on"
 msgstr "Activar el sonido"
+
+#: src/settings/member-suspension.tsx
+msgid "Turn the account back on, or restore it, in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
+msgstr "Vuelve a activar o restaura la cuenta en el directorio y Grasp levantará la suspensión en su próxima lectura diaria. Para retirarle el acceso definitivamente, quítale de los miembros."
 
 #: src/agents/agent-apps-card.tsx
 msgid "Turned on, as it only reads: {turned}."

@@ -13378,6 +13378,22 @@ msgstr "Die Anmeldung wird von der Anmeldung Ihres Unternehmens erfasst, wie jed
 msgid "Signing out didn't work"
 msgstr "Abmelden hat nicht funktioniert"
 
+#: src/settings/member-suspension.tsx
+msgid "Since {date}: the directory turned their account off."
+msgstr "Seit {date}: Das Verzeichnis hat das Konto deaktiviert."
+
+#: src/settings/member-suspension.tsx
+msgid "Since {date}: their account is no longer in the directory."
+msgstr "Seit {date}: Das Konto ist nicht mehr im Verzeichnis."
+
+#: src/settings/member-suspension.tsx
+msgid "Since {date}: their account was deleted in the directory."
+msgstr "Seit {date}: Das Konto wurde im Verzeichnis gelöscht."
+
+#: src/settings/member-suspension.tsx
+msgid "Since {date}. The directory has turned their account on again, so its next daily read lifts this."
+msgstr "Seit {date}. Das Verzeichnis hat das Konto wieder aktiviert, beim nächsten täglichen Abgleich wird die Sperre also aufgehoben."
+
 #: src/workflows/files-and-apps.tsx
 msgid "Size"
 msgstr "Größe"
@@ -13903,6 +13919,10 @@ msgstr "Liefert"
 msgctxt "kind of app"
 msgid "Support"
 msgstr "Kundenservice"
+
+#: src/settings/member-suspension.tsx
+msgid "Suspended"
+msgstr "Gesperrt"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Switch a team off and nobody in it gets a link."
@@ -15778,6 +15798,10 @@ msgstr "Ton ausschalten"
 #: src/voice/sound-controls.tsx
 msgid "Turn sound on"
 msgstr "Ton einschalten"
+
+#: src/settings/member-suspension.tsx
+msgid "Turn the account back on, or restore it, in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
+msgstr "Aktivieren oder stellen Sie das Konto im Verzeichnis wieder her, dann hebt Grasp die Sperre beim nächsten täglichen Abgleich auf. Um den Zugang endgültig zu beenden, entfernen Sie die Person."
 
 #: src/agents/agent-apps-card.tsx
 msgid "Turned on, as it only reads: {turned}."

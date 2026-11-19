@@ -13378,6 +13378,22 @@ msgstr "Het inloggen wordt vastgelegd door de inlog van je bedrijf, zoals elke k
 msgid "Signing out didn't work"
 msgstr "Uitloggen is niet gelukt"
 
+#: src/settings/member-suspension.tsx
+msgid "Since {date}: the directory turned their account off."
+msgstr "Sinds {date}: de directory heeft hun account uitgeschakeld."
+
+#: src/settings/member-suspension.tsx
+msgid "Since {date}: their account is no longer in the directory."
+msgstr "Sinds {date}: hun account staat niet meer in de directory."
+
+#: src/settings/member-suspension.tsx
+msgid "Since {date}: their account was deleted in the directory."
+msgstr "Sinds {date}: hun account is in de directory verwijderd."
+
+#: src/settings/member-suspension.tsx
+msgid "Since {date}. The directory has turned their account on again, so its next daily read lifts this."
+msgstr "Sinds {date}. De directory heeft hun account weer ingeschakeld, dus de volgende dagelijkse uitlezing heft dit op."
+
 #: src/workflows/files-and-apps.tsx
 msgid "Size"
 msgstr "Grootte"
@@ -13903,6 +13919,10 @@ msgstr "Levert"
 msgctxt "kind of app"
 msgid "Support"
 msgstr "Klantenservice"
+
+#: src/settings/member-suspension.tsx
+msgid "Suspended"
+msgstr "Geschorst"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Switch a team off and nobody in it gets a link."
@@ -15778,6 +15798,10 @@ msgstr "Geluid uitzetten"
 #: src/voice/sound-controls.tsx
 msgid "Turn sound on"
 msgstr "Geluid aanzetten"
+
+#: src/settings/member-suspension.tsx
+msgid "Turn the account back on, or restore it, in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
+msgstr "Schakel het account in de directory weer in of zet het terug, dan heft Grasp de schorsing op bij de volgende dagelijkse uitlezing. Wil je hun toegang voorgoed beëindigen, verwijder hen dan."
 
 #: src/agents/agent-apps-card.tsx
 msgid "Turned on, as it only reads: {turned}."

@@ -13378,6 +13378,22 @@ msgstr "Signing in is recorded by your company's sign-in, as every sign-in is."
 msgid "Signing out didn't work"
 msgstr "Signing out didn't work"
 
+#: src/settings/member-suspension.tsx
+msgid "Since {date}: the directory turned their account off."
+msgstr "Since {date}: the directory turned their account off."
+
+#: src/settings/member-suspension.tsx
+msgid "Since {date}: their account is no longer in the directory."
+msgstr "Since {date}: their account is no longer in the directory."
+
+#: src/settings/member-suspension.tsx
+msgid "Since {date}: their account was deleted in the directory."
+msgstr "Since {date}: their account was deleted in the directory."
+
+#: src/settings/member-suspension.tsx
+msgid "Since {date}. The directory has turned their account on again, so its next daily read lifts this."
+msgstr "Since {date}. The directory has turned their account on again, so its next daily read lifts this."
+
 #: src/workflows/files-and-apps.tsx
 msgid "Size"
 msgstr "Size"
@@ -13903,6 +13919,10 @@ msgstr "Supplies"
 msgctxt "kind of app"
 msgid "Support"
 msgstr "Support"
+
+#: src/settings/member-suspension.tsx
+msgid "Suspended"
+msgstr "Suspended"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Switch a team off and nobody in it gets a link."
@@ -15778,6 +15798,10 @@ msgstr "Turn sound off"
 #: src/voice/sound-controls.tsx
 msgid "Turn sound on"
 msgstr "Turn sound on"
+
+#: src/settings/member-suspension.tsx
+msgid "Turn the account back on, or restore it, in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
+msgstr "Turn the account back on, or restore it, in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
 
 #: src/agents/agent-apps-card.tsx
 msgid "Turned on, as it only reads: {turned}."
