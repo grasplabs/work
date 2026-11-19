@@ -23,7 +23,7 @@ import { Tree } from "../grasp/tree/index.ts";
 import type { TreeNode } from "../grasp/tree/index.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { fileIconOf } from "./code-view.tsx";
+import { fileIconOf } from "./file-icon.ts";
 import { useCoreRead } from "./use-core-read.ts";
 
 // An App's code in its workspace, for its builders (app-workspace.tsx's

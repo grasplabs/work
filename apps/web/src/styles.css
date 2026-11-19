@@ -968,49 +968,6 @@
 }
 
 /*
- * An App's Code view (apps/code-view.tsx): @pierre/diffs draws each
- * file and diff in a shadow root, coloured by its custom properties, which
- * reach in from here. Its theme ("grasp", a theme of CSS variables) names
- * every colour a variable, each set to the theme's token, so the view
- * follows light and dark with the rest of the page. Added and removed
- * lines are the status colours; the code is set in the theme's mono at
- * the line height the library's virtualizer counts on: 20px, fixed in its
- * own code (`DEFAULT_VIRTUAL_FILE_METRICS`), so in pixels here too, not rem,
- * that a larger root font size can't move one from the other.
- */
-@layer components {
-  diffs-container {
-    color-scheme: light;
-    --diffs-font-family: var(--font-mono);
-    --diffs-header-font-family: var(--font-sans);
-    --diffs-font-size: 0.8125rem;
-    --diffs-line-height: 20px;
-    --diffs-tab-size: 2;
-    --diffs-foreground: var(--foreground);
-    --diffs-background: var(--card);
-    --diffs-token-comment: var(--muted-foreground);
-    --diffs-token-punctuation: var(--muted-foreground);
-    --diffs-token-keyword: var(--syntax-keyword);
-    --diffs-token-string: var(--syntax-string);
-    --diffs-token-string-expression: var(--syntax-string);
-    --diffs-token-constant: var(--syntax-constant);
-    --diffs-token-function: var(--syntax-function);
-    --diffs-token-parameter: var(--foreground);
-    --diffs-token-link: var(--syntax-function);
-    --diffs-token-inserted: var(--status-agreed);
-    --diffs-token-deleted: var(--destructive);
-    --diffs-addition-color-override: var(--status-agreed);
-    --diffs-deletion-color-override: var(--destructive);
-    --diffs-modified-color-override: var(--status-attention);
-    --diffs-fg-number-override: var(--faint);
-  }
-
-  .dark diffs-container {
-    color-scheme: dark;
-  }
-}
-
-/*
  * A beat's thread in the small picture of Grasp's thinking in an answer
  * (chat/thinking-card.tsx): it grows from the one before to the one the
  * beat names.

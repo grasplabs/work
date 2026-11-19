@@ -47,6 +47,8 @@ import {
 import { datePickerWords } from "../grasp/date-picker/words.ts";
 import { dateRangePickerWords } from "../grasp/date-range-picker/words.ts";
 import { dialogWords } from "../grasp/dialog/words.ts";
+import { diffFilesWords } from "../grasp/diff-files/words.ts";
+import { diffWords } from "../grasp/diff/words.ts";
 import { draftWords } from "../grasp/draft/words.ts";
 import type { DraftWords } from "../grasp/draft/words.ts";
 import { drawerWords } from "../grasp/drawer/words.ts";
@@ -165,6 +167,8 @@ export const englishPartWords: GraspWordsCatalog = {
   dataGrid: dataGridWords,
   dataTable: dataTableWords,
   dataTableFilters: englishFilterWords,
+  diff: diffWords,
+  diffFiles: diffFilesWords,
   dialog: dialogWords,
   draft: englishDraftWords,
   drawer: drawerWords,
@@ -579,6 +583,68 @@ export const usePartWords = (): GraspWordsCatalog => {
       agentPresses: (words) => t`Presses "${words}"`,
       agentStillSays: (shown) =>
         t`It still says "${shown}". Press it again in a moment.`,
+    },
+    diff: {
+      name: t({ message: "Changes", context: "a diff's name" }),
+      accept: t({ message: "Accept", context: "a change in a diff" }),
+      reject: t({ message: "Reject", context: "a change in a diff" }),
+      undo: t`Undo`,
+      accepted: t({ message: "Accepted", context: "a change in a diff" }),
+      rejected: t({ message: "Rejected", context: "a change in a diff" }),
+      added: t({ message: "Added", context: "a line a change adds" }),
+      removed: t({ message: "Removed", context: "a line a change removes" }),
+      before: t({ message: "Before", context: "a diff's old side" }),
+      after: t({ message: "After", context: "a diff's new side" }),
+      lineBefore: t`Line before`,
+      lineAfter: t`Line after`,
+      change: t({ message: "Change", context: "one change in a diff" }),
+      text: t({ message: "Text", context: "a diff's text" }),
+      nothing: t`Nothing changed.`,
+      same: t`Nothing changed: both are the same.`,
+      unchanged: (count) =>
+        plural(count, {
+          one: "Show # unchanged line",
+          other: "Show # unchanged lines",
+        }),
+      changeOf: (at, of, removed, added) =>
+        t`Change ${at} of ${of}: ${removed} removed, ${added} added`,
+      counts: (added, removed) =>
+        t`${plural(added, { 0: "No lines added", one: "# line added", other: "# lines added" })}, ${plural(removed, { 0: "none removed", other: "# removed" })}`,
+      said: (at, decision) => {
+        if (decision === null) {
+          return t`Change ${at} back to undecided`;
+        }
+        return decision === "accepted"
+          ? t`Change ${at} accepted`
+          : t`Change ${at} rejected`;
+      },
+      lines: (name) => t`${name}, lines`,
+      hunk: (oldStart, oldCount, newStart, newCount) => {
+        const oldEnd = oldStart + oldCount - 1;
+        const newEnd = newStart + newCount - 1;
+        // A side starts at 0 only when it has no lines (git's "-0,0").
+        const before = oldStart === 0 ? 0 : oldCount;
+        const after = newStart === 0 ? 0 : newCount;
+        return t`${plural(before, { 0: "No lines before", one: `Line ${oldStart} before`, other: `Lines ${oldStart} to ${oldEnd} before` })}, ${plural(after, { 0: "no lines after", one: `line ${newStart} after`, other: `lines ${newStart} to ${newEnd} after` })}`;
+      },
+    },
+    diffFiles: {
+      name: t({
+        message: "What changes",
+        context: "the files a change touches",
+      }),
+      added: t({ message: "Added", context: "a file a change adds" }),
+      deleted: t({ message: "Deleted", context: "a file a change removes" }),
+      modified: t({ message: "Modified", context: "a file a change changes" }),
+      filesChanged: (files) =>
+        plural(files, {
+          0: "No files changed",
+          one: "# file changed",
+          other: "# files changed",
+        }),
+      counts: (added, removed) =>
+        t`${plural(added, { 0: "No lines added", one: "# line added", other: "# lines added" })}, ${plural(removed, { 0: "none removed", other: "# removed" })}`,
+      nothing: t`No files changed.`,
     },
     codeBlock: {
       copy: t`Copy code`,

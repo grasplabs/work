@@ -91,6 +91,10 @@ msgstr "{action}: {count} {unit}"
 msgid "{actions} on {resource}"
 msgstr "{actions} on {resource}"
 
+#: src/frame/part-words.tsx
+msgid "{added, plural, =0 {No lines added} one {# line added} other {# lines added}}, {removed, plural, =0 {none removed} other {# removed}}"
+msgstr "{added, plural, =0 {No lines added} one {# line added} other {# lines added}}, {removed, plural, =0 {none removed} other {# removed}}"
+
 #: src/activity/audit-log.tsx
 msgid "{agent} for {person}"
 msgstr "{agent} for {person}"
@@ -208,6 +212,10 @@ msgstr "{asker} may read and change a collection"
 #: src/workflows/workflow-diagram.tsx
 msgid "{attempts, plural, one {# attempt} other {# attempts}}"
 msgstr "{attempts, plural, one {# attempt} other {# attempts}}"
+
+#: src/frame/part-words.tsx
+msgid "{before, plural, =0 {No lines before} one {Line {oldStart} before} other {Lines {oldStart} to {oldEnd} before}}, {after, plural, =0 {no lines after} one {line {newStart} after} other {lines {newStart} to {newEnd} after}}"
+msgstr "{before, plural, =0 {No lines before} one {Line {oldStart} before} other {Lines {oldStart} to {oldEnd} before}}, {after, plural, =0 {no lines after} one {line {newStart} after} other {lines {newStart} to {newEnd} after}}"
 
 #. A field's value before a change, then after it.
 #: src/apps/app-data.tsx
@@ -484,6 +492,10 @@ msgstr "{count, plural, one {It can't be published yet: # problem} other {It can
 msgid "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
 msgstr "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
 
+#: src/frame/part-words.tsx
+msgid "{count, plural, one {Show # unchanged line} other {Show # unchanged lines}}"
+msgstr "{count, plural, one {Show # unchanged line} other {Show # unchanged lines}}"
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "{count, plural, one {Show the # app in {label}} other {Show all # in {label}}}"
 msgstr "{count, plural, one {Show the # app in {label}} other {Show all # in {label}}}"
@@ -657,6 +669,10 @@ msgstr "{file} removed"
 #: src/agents/agent-documents.tsx
 msgid "{file} wasn't added."
 msgstr "{file} wasn't added."
+
+#: src/frame/part-words.tsx
+msgid "{files, plural, =0 {No files changed} one {# file changed} other {# files changed}}"
+msgstr "{files, plural, =0 {No files changed} one {# file changed} other {# files changed}}"
 
 #: src/activity/audit-log.tsx
 msgid "{firstShown}–{lastShown}"
@@ -1036,6 +1052,10 @@ msgstr "{name}, building"
 #: src/activity/audit-log.tsx
 msgid "{name}, in {app}"
 msgstr "{name}, in {app}"
+
+#: src/frame/part-words.tsx
+msgid "{name}, lines"
+msgstr "{name}, lines"
 
 #: src/onboarding/about-story.tsx
 msgid "{name}, where does the time go in your week?"
@@ -2041,6 +2061,16 @@ msgstr "About tools"
 msgid "About, by ID"
 msgstr "About, by ID"
 
+#: src/frame/part-words.tsx
+msgctxt "a change in a diff"
+msgid "Accept"
+msgstr "Accept"
+
+#: src/frame/part-words.tsx
+msgctxt "a change in a diff"
+msgid "Accepted"
+msgstr "Accepted"
+
 #: src/brain/memory-page.tsx
 msgctxt "memory record state"
 msgid "Accepted"
@@ -2352,8 +2382,13 @@ msgstr "Add who answers"
 msgid "Added"
 msgstr "Added"
 
-#: src/apps/draft-changes.tsx
+#: src/frame/part-words.tsx
 msgctxt "a file a change adds"
+msgid "Added"
+msgstr "Added"
+
+#: src/frame/part-words.tsx
+msgctxt "a line a change adds"
 msgid "Added"
 msgstr "Added"
 
@@ -2463,6 +2498,11 @@ msgstr "Admins can change anyone's role, end their sessions and remove them, oth
 #: src/inbox/items.ts
 msgid "Advisory"
 msgstr "Advisory"
+
+#: src/frame/part-words.tsx
+msgctxt "a diff's new side"
+msgid "After"
+msgstr "After"
 
 #: src/activity/audit-event.tsx
 #: src/routes/_shell.agents.$agent.tsx
@@ -3492,6 +3532,11 @@ msgctxt "an email's blind copies"
 msgid "Bcc"
 msgstr "Bcc"
 
+#: src/frame/part-words.tsx
+msgctxt "a diff's old side"
+msgid "Before"
+msgstr "Before"
+
 #: src/brain/brain.ts
 msgctxt "note property"
 msgid "Before"
@@ -3920,9 +3965,30 @@ msgctxt "inbox item kind"
 msgid "Change"
 msgstr "Change"
 
+#: src/frame/part-words.tsx
+msgctxt "one change in a diff"
+msgid "Change"
+msgstr "Change"
+
 #: src/interview/words.ts
 msgid "Change “{was}” to “{now}”."
 msgstr "Change “{was}” to “{now}”."
+
+#: src/frame/part-words.tsx
+msgid "Change {at} accepted"
+msgstr "Change {at} accepted"
+
+#: src/frame/part-words.tsx
+msgid "Change {at} back to undecided"
+msgstr "Change {at} back to undecided"
+
+#: src/frame/part-words.tsx
+msgid "Change {at} of {of}: {removed} removed, {added} added"
+msgstr "Change {at} of {of}: {removed} removed, {added} added"
+
+#: src/frame/part-words.tsx
+msgid "Change {at} rejected"
+msgstr "Change {at} rejected"
 
 #: src/apps/app-data-model.tsx
 msgid "Change {name}"
@@ -3978,11 +4044,6 @@ msgstr "Change: {text}"
 
 #: src/agents/agent-page.tsx
 #: src/apps/app-data.tsx
-msgid "Changed"
-msgstr "Changed"
-
-#: src/apps/draft-changes.tsx
-msgctxt "a file a change changes"
 msgid "Changed"
 msgstr "Changed"
 
@@ -4092,6 +4153,11 @@ msgid "Changed which integrations are offered"
 msgstr "Changed which integrations are offered"
 
 #: src/connections/tool-permissions.tsx
+msgid "Changes"
+msgstr "Changes"
+
+#: src/frame/part-words.tsx
+msgctxt "a diff's name"
 msgid "Changes"
 msgstr "Changes"
 
@@ -5562,6 +5628,11 @@ msgid "Delete your interview?"
 msgstr "Delete your interview?"
 
 #: src/settings/ai-providers.tsx
+msgid "Deleted"
+msgstr "Deleted"
+
+#: src/frame/part-words.tsx
+msgctxt "a file a change removes"
 msgid "Deleted"
 msgstr "Deleted"
 
@@ -9065,6 +9136,14 @@ msgstr "Lightbulb"
 msgid "Lime"
 msgstr "Lime"
 
+#: src/frame/part-words.tsx
+msgid "Line after"
+msgstr "Line after"
+
+#: src/frame/part-words.tsx
+msgid "Line before"
+msgstr "Line before"
+
 #: src/apps/app-own-link.tsx
 #: src/apps/app-settings.tsx
 #: src/apps/app-workspace.tsx
@@ -9560,6 +9639,11 @@ msgstr "Models aren't set up yet. Ask your admin to connect an AI provider in Se
 msgctxt "an advisory's severity"
 msgid "Moderate"
 msgstr "Moderate"
+
+#: src/frame/part-words.tsx
+msgctxt "a file a change changes"
+msgid "Modified"
+msgstr "Modified"
 
 #: src/apps/field-kinds.tsx
 msgctxt "a kind of field"
@@ -10165,6 +10249,10 @@ msgstr "No example records"
 #: src/apps/app-code.tsx
 msgid "No files"
 msgstr "No files"
+
+#: src/frame/part-words.tsx
+msgid "No files changed."
+msgstr "No files changed."
 
 #: src/knowledge/nav.tsx
 #: src/routes/_shell.knowledge.index.tsx
@@ -10839,6 +10927,14 @@ msgstr "Noted. We’ll get in touch to put it on the laptops with you."
 #: src/apps/publish.tsx
 msgid "Nothing changed since the live version."
 msgstr "Nothing changed since the live version."
+
+#: src/frame/part-words.tsx
+msgid "Nothing changed: both are the same."
+msgstr "Nothing changed: both are the same."
+
+#: src/frame/part-words.tsx
+msgid "Nothing changed."
+msgstr "Nothing changed."
 
 #: src/frame/part-words.tsx
 #: src/onboarding/place-picker.tsx
@@ -12717,6 +12813,11 @@ msgstr "Reference for support"
 msgid "Reject"
 msgstr "Reject"
 
+#: src/frame/part-words.tsx
+msgctxt "a change in a diff"
+msgid "Reject"
+msgstr "Reject"
+
 #: src/decision-confirmation.tsx
 #: src/routes/decisions.$decision.tsx
 msgctxt "a workflow's decision"
@@ -12731,6 +12832,11 @@ msgstr "Reject"
 #: src/chat/held-writes.tsx
 msgid "Reject all"
 msgstr "Reject all"
+
+#: src/frame/part-words.tsx
+msgctxt "a change in a diff"
+msgid "Rejected"
+msgstr "Rejected"
 
 #: src/routes/decisions.$decision.tsx
 msgid "Rejected by {name} on {date}."
@@ -12885,13 +12991,13 @@ msgctxt "a table row of something taken away"
 msgid "removed"
 msgstr "removed"
 
-#: src/apps/draft-changes.tsx
-msgctxt "a file a change removes"
+#: src/frame/part-words.tsx
+msgctxt "a guest a change takes off"
 msgid "Removed"
 msgstr "Removed"
 
 #: src/frame/part-words.tsx
-msgctxt "a guest a change takes off"
+msgctxt "a line a change removes"
 msgid "Removed"
 msgstr "Removed"
 
@@ -15517,6 +15623,11 @@ msgstr "Tests"
 msgid "Text"
 msgstr "Text"
 
+#: src/frame/part-words.tsx
+msgctxt "a diff's text"
+msgid "Text"
+msgstr "Text"
+
 #: src/apps/field-kinds.tsx
 msgctxt "a kind of field"
 msgid "Text"
@@ -17859,6 +17970,11 @@ msgid "What changed"
 msgstr "What changed"
 
 #: src/apps/publish.tsx
+msgid "What changes"
+msgstr "What changes"
+
+#: src/frame/part-words.tsx
+msgctxt "the files a change touches"
 msgid "What changes"
 msgstr "What changes"
 
