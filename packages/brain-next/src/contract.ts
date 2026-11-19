@@ -3639,8 +3639,10 @@ export interface Brain {
    * included), a person's own store is given anyone else's readers, or the
    * change was added before with other memories, or a memory names in
    * `replaces` one it may not: one that isn't of its own lineage, about
-   * its entity, and readable by the add's `reader` (which `replaces`
-   * needs), all refused alike, as one there isn't. An identifier a person's
+   * its entity (which it names by id or as the store's own), of its
+   * readers, and readable by the add's `reader` (which `replaces` needs),
+   * all refused alike, as one there isn't, judged on the add as asked,
+   * before anything below is left out of it. An identifier a person's
    * erasure closed is left out (`erasePersonShared`); when the add is
    * drawn from a source, so is that person's card with what is about it
    * or relates to it, which the answer then doesn't name. The same change
