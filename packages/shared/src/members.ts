@@ -9,7 +9,27 @@ export interface Member {
   role: Role;
   /** When they first signed in (ISO 8601). */
   joinedAt: string;
+  /**
+   * Their suspension, while they are suspended (they may not act or be
+   * read as): since when (ISO 8601), and why, as the directory has their
+   * account now (`DirectoryAccount`).
+   */
+  suspension: { since: string; reason: DirectoryAccount } | null;
+  /**
+   * Since when an admin keeps them active whatever the directory says
+   * (ISO 8601), and what the directory holds for their account now: what
+   * letting it decide again would act on. Null for the directory to
+   * decide.
+   */
+  keptActive: { since: string; directory: DirectoryAccount } | null;
 }
+
+/**
+ * A member's account as the organization's directory holds it now: turned
+ * on, turned off, deleted (Entra keeps a deleted account 30 days), or not
+ * in it at all.
+ */
+export type DirectoryAccount = "enabled" | "disabled" | "deleted" | "unlisted";
 
 /**
  * One of the organization's teams, as admins manage them: who is in it,
@@ -194,13 +214,29 @@ export interface MembersApi {
     userId: string,
     teamId: string
   ) => Promise<{ released: boolean }>;
+  /**
+   * Lifts the suspension of the member with `userId` and keeps them
+   * active: the directory's daily read no longer suspends them, until an
+   * admin lets it decide again (`letDirectoryDecide`). Audited; mints no
+   * session, so they sign in again. `member.not_suspended` when they
+   * aren't suspended.
+   */
+  liftSuspension: (userId: string) => Promise<void>;
+  /**
+   * Lets the directory decide again whether the member with `userId` is
+   * suspended: takes away the mark `liftSuspension` left, audited. Nothing
+   * changes until the directory's next daily read. Answers whether there
+   * was one.
+   */
+  letDirectoryDecide: (userId: string) => Promise<{ released: boolean }>;
 }
 
 /** Why an admin's change to a member was refused or not finished. */
 export const memberErrors = defineErrorFamily({
   "member.not_found": "There's no such member.",
   "member.self":
-    "You can't remove yourself or end your own sessions here. Ask another admin, or sign out.",
+    "You can't make this change to yourself here. Ask another admin, or sign out.",
+  "member.not_suspended": "They aren't suspended: there's nothing to lift.",
   "member.connections_pending":
     "They're removed, but not all their personal connections could be disconnected yet. This is retried automatically, or remove them again.",
   "member.role_invalid": "That isn't a role here.",

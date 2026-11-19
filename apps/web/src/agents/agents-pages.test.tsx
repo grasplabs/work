@@ -383,6 +383,8 @@ describe("the company's agents, on pages of their own", () => {
           email: "anna@acme.test",
           role: "user" as const,
           joinedAt: "2026-01-05T09:00:00.000Z",
+          suspension: null,
+          keptActive: null,
         },
       ];
       const asked = await mounted(
@@ -525,6 +527,8 @@ describe("the company's agents, on pages of their own", () => {
           email: "anna@acme.test",
           role: "user" as const,
           joinedAt: "2026-01-05T09:00:00.000Z",
+          suspension: null,
+          keptActive: null,
         },
       ];
       const asked = await mounted(

@@ -274,8 +274,8 @@ const listedIn = async (
   return listed;
 };
 
-/** One entry of the JSON the batch reads: ID, department, turned on (1 or 0), erased subject's hash. */
-type Entry = [string, string, 0 | 1, string];
+/** One entry of the JSON the batch reads: ID, department, turned on (1 or 0), erased subject's hash, deleted (1 or 0). */
+type Entry = [string, string, 0 | 1, string, 0 | 1];
 
 /**
  * `listed` as the batch's one JSON value, or `directory.too_large` when
@@ -291,12 +291,17 @@ const entriesOf = async (
   const entries: Entry[] = [];
   for (const { id, department } of listed.people) {
     // oxlint-disable-next-line no-await-in-loop -- one hash at a time
-    entries.push([id, department, 1, await hashOf(id)]);
+    entries.push([id, department, 1, await hashOf(id), 0]);
   }
-  // A deleted account is kept as one turned off: it can't sign in either.
-  for (const id of [...listed.disabled, ...listed.deleted]) {
+  for (const id of listed.disabled) {
     // oxlint-disable-next-line no-await-in-loop -- one hash at a time
-    entries.push([id, "", 0, await hashOf(id)]);
+    entries.push([id, "", 0, await hashOf(id), 0]);
+  }
+  // A deleted account is kept as one turned off, as it can't sign in
+  // either, marked deleted for an admin to see why.
+  for (const id of listed.deleted) {
+    // oxlint-disable-next-line no-await-in-loop -- one hash at a time
+    entries.push([id, "", 0, await hashOf(id), 1]);
   }
   const json = JSON.stringify(entries);
   // The JSON as D1 is sent it, escapes and all, in bytes.
@@ -384,7 +389,7 @@ const apply = async (
     db
       .insert(directoryPeople)
       .select(
-        sql`SELECT ${kind.provider}, ${listed.tenant}, value ->> 0, value ->> 1, value ->> 2, NULL
+        sql`SELECT ${kind.provider}, ${listed.tenant}, value ->> 0, value ->> 1, value ->> 2, value ->> 4, NULL
           FROM json_each(${json})
           WHERE NOT ${erased} AND ${claimed}`
       )
@@ -397,6 +402,7 @@ const apply = async (
         set: {
           department: sql`excluded.department`,
           enabled: sql`excluded.enabled`,
+          deleted: sql`excluded.deleted`,
         },
       }),
     tieDirectoryPeople(db, kind, claimed),
