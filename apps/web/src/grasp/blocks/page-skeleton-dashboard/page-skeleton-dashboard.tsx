@@ -12,6 +12,7 @@
 //   />
 import * as stylex from "@stylexjs/stylex";
 import type { RowData } from "@tanstack/react-table";
+import type { ReactNode } from "react";
 
 import { chartInset } from "../../chart/chart";
 import { chartAxisRoom } from "../../chart/chart-axis";
@@ -46,6 +47,24 @@ const LINES = 5;
 const noKey = () => "";
 
 export interface PageSkeletonDashboardProps<Row extends RowData> {
+  /**
+   * The page's own header (PageHeader's `loading`). `false` under a layout that already draws the
+   * page's title (a settings section) or on a page with none (Inbox): the content starts at the top.
+   * @default true
+   */
+  header?: boolean;
+  /**
+   * Between the header and the content: the page's tabs, search field or filters, as the loaded page
+   * has them where they need no data, else a PageSkeletonToolbar of their kind, so the content
+   * stands where it will.
+   */
+  toolbar?: ReactNode;
+  /**
+   * The page's actions in its header, as the loaded page has them (they need no data): drawn in
+   * their place, so actions that wrap under the title on a phone take their room at once and the
+   * content does not drop when the page arrives.
+   */
+  actions?: ReactNode;
   /**
    * The chart's card as the page will show it: its title, in the host's words, and the chart's
    * height (Chart's own `height`). Leave it out for a page with no chart.
@@ -89,14 +108,25 @@ export const PageSkeletonDashboard = <Row extends RowData>({
   stats,
   table,
   descriptionLines = 1,
+  header = true,
+  toolbar,
+  actions,
 }: PageSkeletonDashboardProps<Row>) => (
-  <div data-slot="page-skeleton-dashboard" {...stylex.props(styles.page)}>
-    <PageHeader
-      title=""
-      description={descriptionLines > 0 ? "" : undefined}
-      loadingLines={descriptionLines}
-      loading
-    />
+  <div
+    data-slot="page-skeleton-dashboard"
+    aria-busy={header ? undefined : true}
+    {...stylex.props(styles.page)}
+  >
+    {header ? (
+      <PageHeader
+        title=""
+        description={descriptionLines > 0 ? "" : undefined}
+        loadingLines={descriptionLines}
+        actions={actions}
+        loading
+      />
+    ) : null}
+    {toolbar}
     {chart === undefined ? null : (
       <SectionCard title={chart.title}>
         <div aria-hidden="true">

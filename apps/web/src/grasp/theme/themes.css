@@ -969,6 +969,7 @@
     transparent
   );
   --grasp-chat-start-gap: var(--grasp-space-8);
+  --grasp-chat-width: var(--grasp-chat-start-width);
   --grasp-sign-in-night: var(--grasp-light-night);
   --grasp-sign-in-veil: oklch(0.131 0.021 174.91 / 0.32);
   --grasp-inspector-pad: var(--grasp-space-6);
@@ -1944,6 +1945,7 @@
     transparent
   );
   --grasp-chat-start-gap: var(--grasp-space-8);
+  --grasp-chat-width: var(--grasp-chat-start-width);
   --grasp-sign-in-night: var(--grasp-light-night);
   --grasp-sign-in-veil: oklch(0.131 0.042 178 / 0.32);
   --grasp-inspector-pad: var(--grasp-space-6);
@@ -2907,6 +2909,7 @@
     transparent
   );
   --grasp-chat-start-gap: var(--grasp-space-8);
+  --grasp-chat-width: var(--grasp-chat-start-width);
   --grasp-sign-in-night: var(--grasp-light-night);
   --grasp-sign-in-veil: oklch(0.131 0.005 75 / 0.32);
   --grasp-inspector-pad: var(--grasp-space-6);

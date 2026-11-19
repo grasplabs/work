@@ -45,28 +45,34 @@ const useTools = (
   return read;
 };
 
+/**
+ * The heading's actions: the runs, and a new workflow for who builds.
+ * They need no data, so the pending page stands them too.
+ */
+const WorkflowsActions = () => {
+  const { t } = useLingui();
+  const { identity } = Route.useRouteContext();
+  return (
+    <>
+      <Button render={<Link to="/workflows/runs" />} size="sm">
+        {t`Runs`}
+      </Button>
+      {canBuild(identity.role) ? (
+        <MakeSomethingLink kind="workflow" size="sm" />
+      ) : null}
+    </>
+  );
+};
+
 const Workflows = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
-  const { identity } = Route.useRouteContext();
   const tools = useTools(page.tools);
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Workflows` }]} />
       <Page>
-        <PageHeading
-          action={
-            <>
-              <Button render={<Link to="/workflows/runs" />} size="sm">
-                {t`Runs`}
-              </Button>
-              {canBuild(identity.role) ? (
-                <MakeSomethingLink kind="workflow" size="sm" />
-              ) : null}
-            </>
-          }
-          title={t`Workflows`}
-        />
+        <PageHeading action={<WorkflowsActions />} title={t`Workflows`} />
         {page.overview.state === "ready" ? (
           <WorkflowsByPhase rows={page.overview.data} tools={tools} />
         ) : (
@@ -81,9 +87,10 @@ const Workflows = () => {
 const none = (): string => "";
 
 /**
- * The workflows before they are read: the bar, the header, and the
- * table waiting in its own form, its toolbar and head as the page's
- * (workflows/workflows-table.tsx).
+ * The workflows before they are read: the bar, the header with its real
+ * actions (so on a phone, where they wrap under the title, the table
+ * stands where it will), and the table waiting in its own form, its
+ * toolbar and head as the page's (workflows/workflows-table.tsx).
  */
 const WorkflowsPending = () => {
   const { t } = useLingui();
@@ -91,6 +98,7 @@ const WorkflowsPending = () => {
     <>
       <SiteHeader crumbs={[{ label: t`Workflows` }]} />
       <PageSkeletonTable<OverviewRow>
+        actions={<WorkflowsActions />}
         descriptionLines={0}
         table={{
           label: t`Workflows`,

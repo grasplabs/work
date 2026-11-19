@@ -6,8 +6,18 @@
 // header says it is loading.
 //
 //   <PageSkeletonList rows={6} />
+//   <PageSkeletonList variant="items" rows={6} />   two-line rows with an icon: Items in their `loading`
 import * as stylex from "@stylexjs/stylex";
+import type { ReactNode } from "react";
 
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../../item";
 import { PageHeader } from "../../page-header";
 import { RowList, RowListItem } from "../../row-list";
 import { Skeleton } from "../../skeleton";
@@ -47,6 +57,24 @@ const WIDTHS = [
 ];
 
 export interface PageSkeletonListProps {
+  /**
+   * The page's own header (PageHeader's `loading`). `false` under a layout that already draws the
+   * page's title (a settings section) or on a page with none (Inbox): the content starts at the top.
+   * @default true
+   */
+  header?: boolean;
+  /**
+   * Between the header and the content: the page's tabs, search field or filters, as the loaded page
+   * has them where they need no data, else a PageSkeletonToolbar of their kind, so the content
+   * stands where it will.
+   */
+  toolbar?: ReactNode;
+  /**
+   * The page's actions in its header, as the loaded page has them (they need no data): drawn in
+   * their place, so actions that wrap under the title on a phone take their room at once and the
+   * content does not drop when the page arrives.
+   */
+  actions?: ReactNode;
   /** How many rows to hold room for: as many as the page shows at first. @default 6 */
   rows?: number;
   /**
@@ -54,6 +82,14 @@ export interface PageSkeletonListProps {
    * none, 2 where it wraps (a phone, a long line). @default 1
    */
   descriptionLines?: number;
+  /**
+   * What the page's rows are: `rows`, RowList's one-line rows (44px); `items`, an ItemGroup of
+   * Items two lines high with an icon in its square, each an Item in its own `loading`.
+   * @default "rows"
+   */
+  variant?: "rows" | "items";
+  /** With `variant="items"`: a hairline between the rows, as the page's ItemGroup has. @default true */
+  separated?: boolean;
   /** The page's rows lead with their kind's icon: each placeholder shows the icon's box, then its line where the name will start. Without, the line starts where a name does. @default true */
   icons?: boolean;
 }
@@ -63,39 +99,62 @@ export const PageSkeletonList = ({
   rows = 6,
   descriptionLines = 1,
   icons = true,
+  variant = "rows",
+  separated = true,
+  header = true,
+  toolbar,
+  actions,
 }: PageSkeletonListProps) => (
   <div
     data-slot="page-skeleton-list"
     aria-busy="true"
     {...stylex.props(styles.page)}
   >
-    <PageHeader
-      title=""
-      description={descriptionLines > 0 ? "" : undefined}
-      loadingLines={descriptionLines}
-      loading
-    />
+    {header ? (
+      <PageHeader
+        title=""
+        description={descriptionLines > 0 ? "" : undefined}
+        loadingLines={descriptionLines}
+        actions={actions}
+        loading
+      />
+    ) : null}
+    {toolbar}
     <div aria-hidden="true">
-      <RowList>
-        {Array.from({ length: rows }, (_, index) => (
-          <RowListItem
-            key={index}
-            name=""
-            mark={
-              <span {...stylex.props(styles.lead)}>
-                {icons ? (
-                  <Skeleton variant="block" layout={styles.icon} />
-                ) : null}
-                <Skeleton
-                  text="sm"
-                  layout={WIDTHS[index % WIDTHS.length] ?? styles.w48}
-                />
-              </span>
-            }
-            detail={<Skeleton text="sm" layout={styles.detail} />}
-          />
-        ))}
-      </RowList>
+      {variant === "items" ? (
+        <ItemGroup separated={separated}>
+          {Array.from({ length: rows }, (_, index) => (
+            <Item key={index} loading>
+              {icons ? <ItemMedia /> : null}
+              <ItemContent>
+                <ItemTitle />
+                <ItemDescription />
+              </ItemContent>
+            </Item>
+          ))}
+        </ItemGroup>
+      ) : (
+        <RowList>
+          {Array.from({ length: rows }, (_, index) => (
+            <RowListItem
+              key={index}
+              name=""
+              mark={
+                <span {...stylex.props(styles.lead)}>
+                  {icons ? (
+                    <Skeleton variant="block" layout={styles.icon} />
+                  ) : null}
+                  <Skeleton
+                    text="sm"
+                    layout={WIDTHS[index % WIDTHS.length] ?? styles.w48}
+                  />
+                </span>
+              }
+              detail={<Skeleton text="sm" layout={styles.detail} />}
+            />
+          ))}
+        </RowList>
+      )}
     </div>
   </div>
 );

@@ -2,7 +2,7 @@ import { noBilling } from "@grasp-os/shared/org-settings";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
 
-import { SettingsSkeleton } from "../frame/page-skeletons-a.tsx";
+import { PageSkeletonSettings } from "../grasp/blocks/page-skeleton-settings/page-skeleton-settings.tsx";
 import { Button } from "../grasp/button/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import {
@@ -114,7 +114,11 @@ const BillingPage = () => {
 
 /** The billing details' card, the plan, then the billing emails. */
 const BillingPending = () => (
-  <SettingsSkeleton sections={[{ rows: 2, titled: false }, 2, 2]} />
+  <PageSkeletonSettings
+    header={false}
+    help={false}
+    sections={[{ rows: 2, title: false }, 2, 2]}
+  />
 );
 
 export const Route = createFileRoute("/_shell/settings/billing")({

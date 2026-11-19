@@ -10,6 +10,7 @@
 //     <PageSkeletonListDetail rows={8} />
 //   </AppShell>
 import * as stylex from "@stylexjs/stylex";
+import type { ReactNode } from "react";
 
 import { Panel, PanelHeader, PanelView } from "../../panel";
 import { Skeleton } from "../../skeleton";
@@ -33,6 +34,24 @@ const styles = stylex.create({
 const LINES = [3, 2, 4, 2];
 
 export interface PageSkeletonListDetailProps {
+  /**
+   * The page's own header (PageHeader's `loading`). `false` under a layout that already draws the
+   * page's title (a settings section) or on a page with none (Inbox): the content starts at the top.
+   * @default true
+   */
+  header?: boolean;
+  /**
+   * Between the header and the content: the page's tabs, search field or filters, as the loaded page
+   * has them where they need no data, else a PageSkeletonToolbar of their kind, so the content
+   * stands where it will.
+   */
+  toolbar?: ReactNode;
+  /**
+   * The page's actions in its header, as the loaded page has them (they need no data): drawn in
+   * their place, so actions that wrap under the title on a phone take their room at once and the
+   * content does not drop when the page arrives.
+   */
+  actions?: ReactNode;
   /** How many rows the list shows at first. @default 8 */
   rows?: number;
   /** How many lines the page's description takes: 0 for none. @default 1 */
@@ -46,11 +65,17 @@ export const PageSkeletonListDetail = ({
   rows = 8,
   descriptionLines = 1,
   icons = true,
+  header = true,
+  toolbar,
+  actions,
 }: PageSkeletonListDetailProps) => (
   <PageSkeletonList
+    toolbar={toolbar}
+    actions={actions}
     rows={rows}
     descriptionLines={descriptionLines}
     icons={icons}
+    header={header}
   />
 );
 

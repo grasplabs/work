@@ -8,7 +8,6 @@ import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { deadline, unlessAborted } from "../core.ts";
 import { formatDateTime } from "../format.ts";
-import { SettingsSkeleton } from "../frame/page-skeletons-a.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,6 +17,7 @@ import {
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
+import { PageSkeletonSettings } from "../grasp/blocks/page-skeleton-settings/page-skeleton-settings.tsx";
 import { BrandIcon } from "../grasp/brand-icon/index.ts";
 import type { Brand } from "../grasp/brand-icon/index.ts";
 import { Button } from "../grasp/button/index.ts";
@@ -321,7 +321,9 @@ const chatAccounts = async (
   });
 
 /** How the person signs in, then their devices, as many as fill the first screen. */
-const SecurityPending = () => <SettingsSkeleton sections={[1, 12]} />;
+const SecurityPending = () => (
+  <PageSkeletonSettings header={false} help={false} sections={[1, 12]} />
+);
 
 export const Route = createFileRoute("/_shell/settings/security")({
   pendingComponent: SecurityPending,

@@ -16,7 +16,6 @@ import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { formatDate } from "../format.ts";
-import { SettingsCardSkeleton } from "../frame/page-skeletons-a.tsx";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,6 +26,8 @@ import {
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
+import { PageSkeletonTable } from "../grasp/blocks/page-skeleton-table/page-skeleton-table.tsx";
+import { PageSkeletonToolbar } from "../grasp/blocks/page-skeleton-toolbar/page-skeleton-toolbar.tsx";
 import { Button } from "../grasp/button/index.ts";
 import { DataTable, DataTablePerson } from "../grasp/data-table/index.ts";
 import type { DataTableColumn } from "../grasp/data-table/index.ts";
@@ -744,37 +745,53 @@ const MembersPage = () => {
   );
 };
 
-const noPeople: readonly PersonRow[] = [];
-
 const ignoreNotice = (): void => undefined;
 
 /**
- * The people's card while they are read: the library's page-skeleton-table
- * as Settings stands it (frame/page-skeletons-a.tsx), the table waiting in
- * its own `loading` with the columns, label and page size it will have, so
- * its head and rows stand where they will.
+ * The people's card while they are read: the card as the loaded one
+ * stands (its title waiting, its head's actions in place), holding the library's page-skeleton-table
+ * without its header, the table waiting in its own `loading` with the
+ * columns, label and page size it will have (the name's column a
+ * person's placeholder), so its head and rows stand where they will.
  */
 const MembersPending = () => {
   const { t } = useLingui();
   const words = usePeopleWords();
   const narrow = useNarrow();
   return (
-    <SettingsCardSkeleton>
-      <DataTable
-        columns={peopleColumns({
-          words,
-          me: "",
-          narrow,
-          onNotice: ignoreNotice,
-        })}
-        label={t`Members`}
-        loading
-        pageSize={pageSize}
-        rowKey={(row) => row.key}
-        rows={noPeople}
-        unit={{ one: t`person`, other: t`people` }}
+    <SectionCard
+      actions={
+        // Roles and Invite need no data, so they stand as they will; the
+        // search waits as its field's empty frame, in the search's box.
+        <>
+          <RolesButton />
+          <div {...stylex.props(styles.search)}>
+            <PageSkeletonToolbar variant="search" />
+          </div>
+          <InviteButton />
+        </>
+      }
+      density="compact"
+      flush
+      loading
+      title=""
+      variant="grouped"
+    >
+      <PageSkeletonTable<PersonRow>
+        header={false}
+        table={{
+          columns: peopleColumns({
+            words,
+            me: "",
+            narrow,
+            onNotice: ignoreNotice,
+          }),
+          label: t`Members`,
+          pageSize,
+          unit: { one: t`person`, other: t`people` },
+        }}
       />
-    </SettingsCardSkeleton>
+    </SectionCard>
   );
 };
 

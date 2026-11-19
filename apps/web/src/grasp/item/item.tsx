@@ -22,6 +22,12 @@
 //   <Item media={<Avatar name="Anna de Vries" size="xs" />} title="Anna de Vries" description="anna@…" actions={…} />
 //   <Item icon={Key} iconLook="inline" title="API key" description="Ending in 4f2a" />
 //
+// Before its data, `loading` keeps the row's boxes: a part given empty waits as a quiet placeholder
+// of its own size (the mark's square, the title's line, the description's line), so the row is
+// already as tall as it will be:
+//
+//   <Item loading><ItemMedia /><ItemContent><ItemTitle /><ItemDescription /></ItemContent></Item>
+//
 // In a narrow row the actions drop under the words, on the row's end edge, rather than squeeze
 // them: by the row's own width, not the window's.
 //
@@ -41,6 +47,7 @@ import type { IconData } from "../icons";
 import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { Separator } from "../separator";
+import { Skeleton } from "../skeleton";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { ItemGroupContext } from "./context";
 import { itemMarker, itemRowMarker } from "./markers.stylex";
@@ -88,6 +95,13 @@ interface ItemBase {
    * @default "md"
    */
   size?: ItemSize;
+  /**
+   * Before its data, in the parts shape: each part given empty waits as a quiet placeholder of its
+   * own size (an ItemMedia with no icon its square, an ItemTitle its line, an ItemDescription its
+   * line), so the row stands as tall as it will be. The row says it is busy.
+   * @default false
+   */
+  loading?: boolean;
   /** @deprecated Use `layout`. */
   style?: ItemLayoutStyle;
   /** Layout only: margins, alignment and width. The look belongs to the item. */
@@ -412,12 +426,23 @@ export interface ItemMediaProps {
 
 /** Every prop an ItemContent, ItemTitle, ItemDetail, ItemDescription or ItemActions takes. */
 export interface ItemPartProps {
-  /** What it holds. */
-  children: ReactNode;
+  /** What it holds. Left out in a `loading` row, an ItemTitle or ItemDescription waits as its line. */
+  children?: ReactNode;
 }
+
+const waits = stylex.create({
+  // The mark's square, at the row's size.
+  media: { flexShrink: 0, width: grasp.controlMd, height: grasp.controlMd },
+  mediaSm: { width: grasp.controlSm, height: grasp.controlSm },
+  // The title's and the description's lines, as long as a short name and a short line.
+  title: { width: "10rem", maxWidth: "100%" },
+  description: { width: "14rem", maxWidth: "100%" },
+});
 
 // The row's size, for a mark's box and the words' gap.
 const RowSize = createContext<ItemSize>("md");
+// Whether the row waits for its data: an empty part then draws its placeholder.
+const RowLoading = createContext(false);
 // In a row that is a button: the ids its title and description take, so the button is named by the
 // title alone and described by the description.
 const PressIds = createContext<string | undefined>(undefined);
@@ -433,6 +458,15 @@ export const ItemMedia = ({
   children,
 }: ItemMediaProps) => {
   const size = useContext(RowSize);
+  const waiting = useContext(RowLoading);
+  if (waiting && !icon && (children === undefined || children === null)) {
+    return (
+      <Skeleton
+        variant="block"
+        layout={[waits.media, size !== "md" && waits.mediaSm]}
+      />
+    );
+  }
   if (children !== undefined && children !== null) {
     return (
       <span
@@ -479,7 +513,11 @@ export const ItemTitle = ({ children }: ItemPartProps) => (
     id={pressId(useContext(PressIds), "title")}
     {...stylex.props(styles.title)}
   >
-    {children}
+    {useContext(RowLoading) && isBlank(children) ? (
+      <Skeleton layout={waits.title} />
+    ) : (
+      children
+    )}
   </span>
 );
 
@@ -509,9 +547,18 @@ const Described = ({ children }: { children: ReactNode }) => (
 );
 
 /** One line about it: a date, a state, a count ("Updated 2 hours ago"). It wraps; never cut off. */
-export const ItemDescription = ({ children }: ItemPartProps) =>
+export const ItemDescription = ({ children }: ItemPartProps) => {
+  const waiting = useContext(RowLoading);
+  if (waiting && isBlank(children)) {
+    return (
+      <Described>
+        <Skeleton layout={waits.description} />
+      </Described>
+    );
+  }
   // With no words, nothing: the row then centres its mark on the title alone.
-  isBlank(children) ? null : <Described>{children}</Described>;
+  return isBlank(children) ? null : <Described>{children}</Described>;
+};
 
 /** Buttons at the end of the row, most used last ("Manage"). Not in an Item with `href`. */
 export const ItemActions = ({ children }: ItemPartProps) =>
@@ -614,6 +661,7 @@ const PartsRow = ({
   current = false,
   layout,
   onPress,
+  loading = false,
 }: Pick<
   ItemProps,
   | "children"
@@ -624,6 +672,7 @@ const PartsRow = ({
   | "current"
   | "layout"
   | "onPress"
+  | "loading"
 >) => {
   if (onPress !== undefined) {
     return (
@@ -641,7 +690,7 @@ const PartsRow = ({
   const linked = isLinked(href, render);
   const inside = (
     <RowSize value={size}>
-      {children}
+      <RowLoading value={loading}>{children}</RowLoading>
       {linked && (
         <span aria-hidden="true" {...stylex.props(styles.chevron)}>
           <Icon icon={ChevronRight} />
@@ -677,6 +726,7 @@ const PartsRow = ({
     <div
       data-slot="item"
       aria-current={current ? "true" : undefined}
+      aria-busy={loading || undefined}
       {...stylex.props(
         itemMarker,
         styles.item,

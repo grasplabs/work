@@ -2234,6 +2234,8 @@
   --grasp-chat-start-gap: var(--grasp-space-8);
   /* The widest the question and the box to ask in run, where a chat starts: the product's Chat page. */
   --grasp-chat-start-width: 48rem;
+  /* The widest a chat's column runs, its thread and the box under it: as wide as where the chat started, so the box keeps its width from the first question on. */
+  --grasp-chat-width: var(--grasp-chat-start-width);
   /* Sign in: sign in. */
   /* The sign-in page's ground under the glass door, and all it shows where the door cannot draw: night in both themes, as the website's login. */
   --grasp-sign-in-night: var(--grasp-light-night);

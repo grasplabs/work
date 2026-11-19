@@ -2,7 +2,7 @@ import { isMemberAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { SettingsSkeleton } from "../frame/page-skeletons-a.tsx";
+import { PageSkeletonSettings } from "../grasp/blocks/page-skeleton-settings/page-skeleton-settings.tsx";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { AiProvidersSettings } from "../settings/ai-providers.tsx";
@@ -43,7 +43,9 @@ const AiProvidersPage = () => {
 };
 
 /** The providers, the models (default, fallbacks, add), then the month's spend. */
-const AiProvidersPending = () => <SettingsSkeleton sections={[1, 3, 8]} />;
+const AiProvidersPending = () => (
+  <PageSkeletonSettings header={false} help={false} sections={[1, 3, 8]} />
+);
 
 export const Route = createFileRoute("/_shell/settings/ai-providers")({
   pendingComponent: AiProvidersPending,

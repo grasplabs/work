@@ -125,7 +125,8 @@ const Projects = () => {
 /**
  * The projects before they are read: the library's page-skeleton-list under
  * the page's own bar, its header without a description, as the page's is,
- * and as many rows as fill the first screen.
+ * and as many rows as fill the first screen, two lines high with the
+ * project's icon, as the page's Items are.
  */
 const ProjectsPending = () => {
   const { t } = useLingui();
@@ -133,7 +134,7 @@ const ProjectsPending = () => {
     <>
       <SiteHeader crumbs={[{ label: t`Projects` }]} />
       <Page>
-        <PageSkeletonList descriptionLines={0} rows={8} />
+        <PageSkeletonList descriptionLines={0} rows={8} variant="items" />
       </Page>
     </>
   );

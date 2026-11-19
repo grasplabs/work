@@ -7,7 +7,7 @@ import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
-import { SettingsSkeleton } from "../frame/page-skeletons-a.tsx";
+import { PageSkeletonSettings } from "../grasp/blocks/page-skeleton-settings/page-skeleton-settings.tsx";
 import { Combobox } from "../grasp/combobox/index.ts";
 import { SectionCard } from "../grasp/section-card/index.ts";
 import { SettingRow, SettingsRows } from "../grasp/setting-row/index.ts";
@@ -264,8 +264,10 @@ const Workspace = () => {
 
 /** The organization's card, the time zone and sign-in, then staff access. */
 const WorkspacePending = () => (
-  <SettingsSkeleton
-    sections={[{ rows: 5, titled: false }, { rows: 2, titled: false }, 1]}
+  <PageSkeletonSettings
+    header={false}
+    help={false}
+    sections={[{ rows: 5, title: false }, { rows: 2, title: false }, 1]}
   />
 );
 

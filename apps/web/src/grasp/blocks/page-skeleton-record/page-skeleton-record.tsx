@@ -9,6 +9,7 @@
 //     <PageSkeletonRecord rows={4} />
 //   </AppShell>
 import * as stylex from "@stylexjs/stylex";
+import type { ReactNode } from "react";
 
 import { InspectorPanel } from "../../inspector-panel";
 import { PageHeader } from "../../page-header";
@@ -51,6 +52,24 @@ const WIDTHS = [
 ];
 
 export interface PageSkeletonRecordProps {
+  /**
+   * The page's own header (PageHeader's `loading`). `false` under a layout that already draws the
+   * page's title (a settings section) or on a page with none (Inbox): the content starts at the top.
+   * @default true
+   */
+  header?: boolean;
+  /**
+   * Between the header and the content: the page's tabs, search field or filters, as the loaded page
+   * has them where they need no data, else a PageSkeletonToolbar of their kind, so the content
+   * stands where it will.
+   */
+  toolbar?: ReactNode;
+  /**
+   * The page's actions in its header (`actions` is the card's head here), as the loaded page has them (they need no data): drawn in
+   * their place, so actions that wrap under the title on a phone take their room at once and the
+   * content does not drop when the page arrives.
+   */
+  headerActions?: ReactNode;
   /** How many rows the record's card holds at first. @default 4 */
   rows?: number;
   /**
@@ -81,14 +100,25 @@ export const PageSkeletonRecord = ({
   icons = true,
   density = "comfortable",
   actions = 0,
+  header = true,
+  toolbar,
+  headerActions,
 }: PageSkeletonRecordProps) => (
-  <div data-slot="page-skeleton-record" {...stylex.props(styles.page)}>
-    <PageHeader
-      title=""
-      description={descriptionLines > 0 ? "" : undefined}
-      loadingLines={descriptionLines}
-      loading
-    />
+  <div
+    data-slot="page-skeleton-record"
+    aria-busy={header ? undefined : true}
+    {...stylex.props(styles.page)}
+  >
+    {header ? (
+      <PageHeader
+        title=""
+        description={descriptionLines > 0 ? "" : undefined}
+        loadingLines={descriptionLines}
+        actions={headerActions}
+        loading
+      />
+    ) : null}
+    {toolbar}
     <SectionCard
       title=""
       density={density}

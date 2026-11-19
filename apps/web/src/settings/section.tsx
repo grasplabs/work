@@ -9,7 +9,6 @@ import { isFileGone } from "../error-reports.ts";
 import { ErrorState } from "../frame/page-states.tsx";
 import { Alert } from "../grasp/alert/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { Card } from "../grasp/card/index.ts";
 import { Retry } from "../grasp/icons/index.ts";
 import { Label } from "../grasp/label/index.ts";
 import { Skeleton } from "../grasp/skeleton/index.ts";
@@ -51,8 +50,8 @@ import { useRouteErrorReason } from "../route-error.tsx";
 //   A long list (members, teams) takes `size="sm"` Items of one line: the
 //   Item's title is a TitleLine, its name and then a quieter detail (an
 //   email, a count) beside it, and no description.
-// - SectionNotLoaded, SettingsLoading and SettingsError: a section that
-//   didn't load, is loading, or failed as it rendered.
+// - SectionNotLoaded and SettingsError: a section that didn't load, or
+//   failed as it rendered.
 // All text in rows is text-sm (labels, help, values), as Grasp UI's type
 // foundation has it for dense parts. On a phone a row stacks: the control
 // goes under its label, full width.
@@ -299,13 +298,6 @@ export const LoadingLines = ({ lines = 3 }: { lines?: number }) => {
     </output>
   );
 };
-
-/** A section while its read is slow: a card of lines in placeholder, where its title and rows will be. */
-export const SettingsLoading = () => (
-  <Card>
-    <LoadingLines lines={5} />
-  </Card>
-);
 
 /**
  * Why a part of a page did not load, in the section it is part of: core's

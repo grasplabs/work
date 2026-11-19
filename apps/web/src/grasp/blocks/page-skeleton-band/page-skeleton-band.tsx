@@ -37,6 +37,18 @@ const styles = stylex.create({
 const LINES = [3, 2, 3, 2];
 
 export interface PageSkeletonBandProps {
+  /**
+   * The page's own header (PageHeader's `loading`). `false` under a layout that already draws the
+   * page's title (a settings section) or on a page with none (Inbox): the content starts at the top.
+   * @default true
+   */
+  header?: boolean;
+  /**
+   * Between the header and the content: the page's tabs, search field or filters, as the loaded page
+   * has them where they need no data, else a PageSkeletonToolbar of their kind, so the content
+   * stands where it will.
+   */
+  toolbar?: ReactNode;
   /** How many paragraphs the note's text shows at first. @default 3 */
   paragraphs?: number;
   /** How many lines the band's description takes: 0 for none. @default 1 */
@@ -50,16 +62,25 @@ export const PageSkeletonBand = ({
   paragraphs = 3,
   descriptionLines = 1,
   actions,
+  header = true,
+  toolbar,
 }: PageSkeletonBandProps) => (
-  <div data-slot="page-skeleton-band" {...stylex.props(styles.page)}>
-    <PageHeader
-      variant="band"
-      title=""
-      description={descriptionLines > 0 ? "" : undefined}
-      loadingLines={descriptionLines}
-      actions={actions}
-      loading
-    />
+  <div
+    data-slot="page-skeleton-band"
+    aria-busy={header ? undefined : true}
+    {...stylex.props(styles.page)}
+  >
+    {header ? (
+      <PageHeader
+        variant="band"
+        title=""
+        description={descriptionLines > 0 ? "" : undefined}
+        loadingLines={descriptionLines}
+        actions={actions}
+        loading
+      />
+    ) : null}
+    {toolbar}
     <div
       aria-hidden="true"
       data-slot="page-skeleton-band-body"

@@ -1,3 +1,4 @@
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
 import { loadThread } from "../chat/chat-body.tsx";
@@ -9,6 +10,7 @@ import { Fill, LoadingBar } from "../frame/page-skeletons-b.tsx";
 import { NotFound } from "../frame/page-states.tsx";
 import { PageSkeletonChat } from "../grasp/blocks/page-skeleton-chat/page-skeleton-chat.tsx";
 import { Composer, ComposerAdd } from "../grasp/composer/index.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 
 // A chat's own page (chat/chat-page.tsx), at its own address: linked,
@@ -25,13 +27,19 @@ const Chat = () => {
   return <ChatPage chatId={chatId} key={chatId} title={title} />;
 };
 
+const styles = stylex.create({
+  // The box at the chat's width, as the block's column has it.
+  composer: { maxWidth: grasp.chatWidth },
+});
+
 /** Does nothing: the box takes nothing until the chat is there. */
 const wait = (): void => undefined;
 
 /**
  * The chat before its first update: the bar, its name to come, the
  * thread's waiting pairs, and the chat's box still, with its add and
- * dictate, in the box it will have (chat/chat-composer.tsx).
+ * dictate, in the box it will have (chat/chat-composer.tsx): the library's
+ * chat block, its column and box at the chat's width (48rem).
  */
 const ChatPending = () => {
   const { words } = useGlobalChat();
@@ -44,6 +52,7 @@ const ChatPending = () => {
           composer={
             <Composer
               aria-label={words.title}
+              layout={styles.composer}
               loading
               onDictate={wait}
               onSend={wait}

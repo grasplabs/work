@@ -868,6 +868,7 @@ export const grasp = stylex.defineConsts({
   backdropDitherMask: "var(--grasp-backdrop-dither-mask)",
   chatStartGap: "var(--grasp-chat-start-gap)",
   chatStartWidth: "var(--grasp-chat-start-width)",
+  chatWidth: "var(--grasp-chat-width)",
   // Sign in: sign in.
   signInNight: "var(--grasp-sign-in-night)",
   signInColumn: "var(--grasp-sign-in-column)",

@@ -1,8 +1,13 @@
+import { canBuild } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { isMine, sharedWith } from "../apps/app-reach.ts";
-import { AppsOverview } from "../apps/apps-overview.tsx";
+import {
+  AppsBarPending,
+  AppsOverview,
+  BuildNewApp,
+} from "../apps/apps-overview.tsx";
 import { PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { PageSkeletonCards } from "../grasp/blocks/page-skeleton-cards/page-skeleton-cards.tsx";
@@ -35,14 +40,23 @@ const AppsPage = () => {
 
 /**
  * The Apps before they are read: the bar as it will be, then the header
- * and two rows of waiting cards in the page's dense grid.
+ * with Build new app for who builds (on a phone it wraps under the title,
+ * so it takes its room at once), the tabs and search waiting in their
+ * row, and two rows of waiting cards in the page's dense grid.
  */
 const AppsPending = () => {
   const { t } = useLingui();
+  const { identity } = Route.useRouteContext();
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Apps` }]} />
-      <PageSkeletonCards cards={8} density="dense" descriptionLines={0} />
+      <PageSkeletonCards
+        actions={canBuild(identity.role) ? <BuildNewApp /> : undefined}
+        cards={8}
+        density="dense"
+        descriptionLines={0}
+        toolbar={<AppsBarPending />}
+      />
     </>
   );
 };

@@ -1,7 +1,7 @@
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { SettingsSkeleton } from "../frame/page-skeletons-a.tsx";
+import { PageSkeletonSettings } from "../grasp/blocks/page-skeleton-settings/page-skeleton-settings.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import {
   EventSourcesSettings,
@@ -21,7 +21,9 @@ const IncomingEventsPage = () => {
 };
 
 /** The sources' card, as tall as its empty state. */
-const IncomingEventsPending = () => <SettingsSkeleton sections={[3]} />;
+const IncomingEventsPending = () => (
+  <PageSkeletonSettings header={false} help={false} sections={[3]} />
+);
 
 export const Route = createFileRoute("/_shell/settings/webhooks")({
   // Only the organization's own admins manage sources: anyone else who

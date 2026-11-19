@@ -11,6 +11,7 @@ import { PageSkeletonCards } from "../grasp/blocks/page-skeleton-cards/page-skel
 import { PageSkeletonList } from "../grasp/blocks/page-skeleton-list/page-skeleton-list.tsx";
 import { PageSkeletonRecord } from "../grasp/blocks/page-skeleton-record/page-skeleton-record.tsx";
 import { PageSkeletonSettings } from "../grasp/blocks/page-skeleton-settings/page-skeleton-settings.tsx";
+import { PageSkeletonToolbar } from "../grasp/blocks/page-skeleton-toolbar/page-skeleton-toolbar.tsx";
 import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
 import { SiteHeader } from "./site-header.tsx";
 import type { Crumb } from "./site-header.tsx";
@@ -107,7 +108,8 @@ export const SettingsPending = ({
 }) => (
   <div {...stylex.props(styles.pane)}>
     <div {...stylex.props(styles.settingsColumn)}>
-      <PageSkeletonSettings sections={sections} />
+      {/* No header: the cards stand at the column's top, under the App's or workflow's own bar. */}
+      <PageSkeletonSettings header={false} sections={sections} />
     </div>
   </div>
 );
@@ -167,8 +169,22 @@ const BrainBody = ({ page }: { page: BrainPage }) => {
           // Since you last looked, as a card of what came in.
           <PageSkeletonRecord descriptionLines={0} rows={5} />
         ) : null}
-        {page === "memory" || page === "sources" ? (
-          <PageSkeletonList descriptionLines={0} rows={6} />
+        {page === "memory" ? (
+          // Its kinds of record as tabs under the title, its records as Items.
+          <PageSkeletonList
+            descriptionLines={0}
+            rows={6}
+            toolbar={<PageSkeletonToolbar variant="tabs" />}
+            variant="items"
+          />
+        ) : null}
+        {page === "sources" ? (
+          // The search under the title, then the sources.
+          <PageSkeletonList
+            descriptionLines={0}
+            rows={6}
+            toolbar={<PageSkeletonToolbar variant="search" />}
+          />
         ) : null}
         {page === "section" ? (
           // A part's notes as blocks, three to a row as the part's page has them.

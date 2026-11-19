@@ -14,6 +14,7 @@ import {
   appCardGroundOf,
 } from "../grasp/app-card/index.ts";
 import type { AppCardAction } from "../grasp/app-card/index.ts";
+import { PageSkeletonToolbar } from "../grasp/blocks/page-skeleton-toolbar/page-skeleton-toolbar.tsx";
 import {
   Empty,
   EmptyContent,
@@ -73,9 +74,13 @@ const styles = stylex.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: grasp.space4,
-    marginBlockEnd: grasp.space6,
   },
+  // The room between the bar and the cards, where the bar stands over them.
+  barRoom: { marginBlockEnd: grasp.space6 },
   search: { maxWidth: "18rem" },
+  // The search's placeholder in the search's box: as wide as the row lets
+  // it be, up to the search's width.
+  searchBox: { width: "100%", maxWidth: "18rem" },
 });
 
 /** Who looks at the Apps: what they may make and change follows from it. */
@@ -212,6 +217,33 @@ const newestFirst = (apps: readonly AppOverview[]): AppOverview[] =>
 /** The tabs, in order: the first with Apps in it is shown first. */
 const REACHES: readonly AppReach[] = ["mine", "shared", "company"];
 
+/**
+ * The tabs and the search before the Apps are read (the pending page's
+ * row, routes/_shell.apps.index.tsx): the library's toolbar placeholders,
+ * the tabs as their words' lines on their hairline and the search as its
+ * field's empty frame, laid out as the loaded row, so the cards under it
+ * stand where they will.
+ */
+export const AppsBarPending = () => (
+  <div {...stylex.props(styles.bar)}>
+    <PageSkeletonToolbar count={REACHES.length} variant="tabs" />
+    <div {...stylex.props(styles.searchBox)}>
+      <PageSkeletonToolbar variant="search" />
+    </div>
+  </div>
+);
+
+/**
+ * Build new app: a chat to make one (make/make-link.tsx). It needs no
+ * data, so the pending page stands it too.
+ */
+export const BuildNewApp = () => {
+  const { t } = useLingui();
+  return (
+    <MakeSomethingLink kind="app" label={t`Build new app`} variant="ink" />
+  );
+};
+
 /** One tab's Apps, or why it has none. */
 const AppsTab = ({
   apps,
@@ -297,9 +329,7 @@ export const AppsOverview = ({
     shared: t`Shared apps`,
     company: t`Company apps`,
   };
-  const build = (
-    <MakeSomethingLink kind="app" label={t`Build new app`} variant="ink" />
-  );
+  const build = <BuildNewApp />;
   return (
     <Page>
       <PageHeading
@@ -331,7 +361,7 @@ export const AppsOverview = ({
           }}
           value={tab}
         >
-          <div {...stylex.props(styles.bar)}>
+          <div {...stylex.props(styles.bar, styles.barRoom)}>
             <TabsList aria-label={t`Apps`}>
               {REACHES.map((reach) => (
                 <TabsTrigger key={reach} value={reach}>

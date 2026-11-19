@@ -43,16 +43,17 @@ const Inbox = () => {
 
 /**
  * The Inbox before what waits is read: the library's page-skeleton-list-detail,
- * the list under the page's bar and the chosen item waiting in the shell's
- * page panel, which the shell shows beside a wide page and keeps as a closed
- * sheet on a phone, as it does the loaded one.
+ * the list under the page's bar with no header of its own (the page has
+ * none), and the chosen item waiting in the shell's page panel, which the
+ * shell shows beside a wide page and keeps as a closed sheet on a phone, as
+ * it does the loaded one.
  */
 const InboxPending = () => {
   const { t } = useLingui();
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Inbox` }]} />
-      <PageSkeletonListDetail descriptionLines={0} rows={8} />
+      <PageSkeletonListDetail header={false} rows={8} />
       <PagePanel label={t`Inbox`}>
         <PageSkeletonDetail />
       </PagePanel>
