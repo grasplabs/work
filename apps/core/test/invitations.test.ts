@@ -511,6 +511,27 @@ describe("inviting someone the directory made a member before they signed in", (
     await expect(isPending(id)).resolves.toBeTruthy();
   });
 
+  it("records no role change for a configured admin an admin gave another role before they signed in, whose role stays", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = newcomer();
+    const member = await madeByDirectory(person);
+    await admin.api.members.setRole(member, "builder");
+    let session = "";
+    const events = await auditedDuring(async () => {
+      session = await signedIn(idp, "microsoft", person, {
+        coreEnv: withSignIn({ admins: [String(person.email)] }),
+      });
+    });
+
+    await expect(whoami(session)).resolves.toMatchObject({
+      userId: member,
+      role: "builder",
+    });
+    expect(
+      events.filter(({ action }) => action === "member.role.updated")
+    ).toStrictEqual([]);
+  });
+
   it("gives nothing when withdrawn just before their first sign-in lands", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = newcomer();
@@ -535,6 +556,45 @@ describe("inviting someone the directory made a member before they signed in", (
       userId: member,
       role: "user",
     });
+  });
+
+  it("records a configured admin's role once when their invitation is withdrawn just before their first sign-in lands", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = newcomer();
+    const email = String(person.email);
+    const member = await madeByDirectory(person);
+    const { id } = await admin.api.members.invite(email, "builder");
+    // Withdrawn after core read the invitation, just before the fold lands.
+    const racing = racingDb(
+      async (db) =>
+        await db
+          .prepare("UPDATE invitations SET status = 'canceled' WHERE id = ?")
+          .bind(id)
+          .run()
+    );
+    let session = "";
+    const events = await auditedDuring(async () => {
+      session = await signedIn(idp, "microsoft", person, {
+        coreEnv: { ...withSignIn({ admins: [email] }), DB: racing },
+      });
+    });
+
+    await expect(whoami(session)).resolves.toMatchObject({
+      userId: member,
+      role: "admin",
+    });
+    expect(
+      events
+        .filter(({ action }) =>
+          ["member.invitation.accepted", "member.role.updated"].includes(action)
+        )
+        .map(({ action, detail }) => ({ action, detail }))
+    ).toStrictEqual([
+      {
+        action: "member.role.updated",
+        detail: { userId: member, role: "admin", reason: "joined" },
+      },
+    ]);
   });
 
   it("gives nothing, and takes up nothing, when the fold doesn't land", async () => {
