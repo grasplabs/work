@@ -298,6 +298,13 @@ const darkWhen = (scheme: PictureProps["scheme"]) => {
 /** The library's Skeleton, the window's whole box, while what it shows loads: nothing jumps when it comes. */
 const Waiting = () => <Skeleton variant="block" layout={styles.waiting} />;
 
+/** The window while the card itself loads (AppCard's `loading`): only its waiting look, no words. */
+export const WindowWaiting = () => (
+  <div {...stylex.props(styles.window)} data-slot="app-card-window">
+    <Waiting />
+  </div>
+);
+
 /** One screenshot: only the shot of the scheme the card stands in is loaded, at the size it is drawn. */
 const Picture = ({
   light,

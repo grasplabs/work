@@ -70,6 +70,7 @@ import {
   GoForward10SecIcon,
   GridViewIcon,
   HashtagIcon,
+  Heading02Icon,
   HelpCircleIcon,
   Home01Icon,
   Idea01Icon,
@@ -83,7 +84,9 @@ import {
   LaptopIcon,
   LeftToRightListBulletIcon,
   LeftToRightListDashIcon,
+  LeftToRightListNumberIcon,
   Link04Icon,
+  ListCollapseIcon,
   Loading03Icon,
   Location01Icon,
   Logout03Icon,
@@ -104,6 +107,7 @@ import {
   PencilEdit02Icon,
   PercentIcon,
   PlayIcon,
+  QuoteDownIcon,
   Redo02Icon,
   RefreshIcon,
   RepeatIcon,
@@ -571,3 +575,13 @@ export const Place: IconData = Location01Icon;
 export const VideoCall: IconData = Video01Icon;
 /** A spreadsheet: a head row over a grid of cells. SheetIcon. */
 export const Spreadsheet: IconData = SheetIcon;
+/** A heading in written text: the document editor's format bar. Heading02Icon. */
+export const HeadingText: IconData = Heading02Icon;
+/** A numbered list: steps in order. LeftToRightListNumberIcon. */
+export const ListNumbered: IconData = LeftToRightListNumberIcon;
+/** A bulleted list. LeftToRightListBulletIcon. */
+export const ListBulleted: IconData = LeftToRightListBulletIcon;
+/** A quotation, set apart. QuoteDownIcon. */
+export const QuoteText: IconData = QuoteDownIcon;
+/** A section that folds: its summary, and what it hides. ListCollapseIcon. */
+export const FoldSection: IconData = ListCollapseIcon;

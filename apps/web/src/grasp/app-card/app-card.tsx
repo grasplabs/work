@@ -30,12 +30,13 @@ import { Avatar, AvatarImage, AvatarFallback } from "../avatar";
 import type { BackdropLook } from "../backdrop/look";
 import { Icon, Plus } from "../icons";
 import type { LayoutStyle } from "../layout/layout";
+import { Skeleton } from "../skeleton";
 import { useWords, withGiven } from "../words/words";
 import { cardMarker } from "./app-card.stylex";
 import { AppCardGround } from "./ground";
 import type { AppCardGroundHue } from "./ground";
 import type { AppCardLabels } from "./labels";
-import { MoreMenu, Window } from "./parts";
+import { MoreMenu, Window, WindowWaiting } from "./parts";
 import type { AppCardAction, AppCardPreview } from "./parts";
 import { styles } from "./styles";
 import { useAttention } from "./watch";
@@ -115,6 +116,16 @@ export interface AppCardProps {
   groundScenes?: string;
   /** The actions in the "…" menu. Without them there is no "…". */
   actions?: readonly AppCardAction[];
+  /**
+   * The app is not there yet (its page's first paint): the frame and its window stand as they will,
+   * the window in its waiting look, the title, the description's lines and the owner's line quiet in
+   * their own boxes, so a grid of cards does not move when the apps arrive. The card is busy and its
+   * placeholders hidden from a reader; nothing can be pressed. Give `title` as "" while it holds.
+   * @default false
+   */
+  loading?: boolean;
+  /** While `loading`: how many lines the description takes (0 for none). @default 2 */
+  loadingLines?: number;
   /**
    * Where the app stands: `building` draws App building in the window and says so in the meta
    * line; `failed` a quiet window that says so, the meta line keeping who and when.
@@ -243,6 +254,63 @@ const FrameGround = ({
     <AppCardGround look={ground} hue={hue} scenes={scenes} />
   );
 
+/** A card before its app arrives: the frame, its waiting window, and quiet lines for its words. */
+const LoadingCard = ({
+  tone,
+  ground,
+  hue,
+  scenes,
+  lines,
+  layout,
+}: {
+  tone: AppCardTone;
+  ground: BackdropLook | undefined;
+  hue: AppCardGroundHue | undefined;
+  scenes: string | undefined;
+  lines: number;
+  layout: AppCardLayoutStyle | undefined;
+}) => (
+  <article
+    data-slot="app-card"
+    data-loading=""
+    aria-busy="true"
+    data-tone={tone}
+    {...stylex.props(styles.card, cardMarker, layout)}
+  >
+    <div
+      data-slot="app-card-frame"
+      {...stylex.props(styles.frame, toneOf(ground, tone))}
+    >
+      <FrameGround ground={ground} hue={hue} scenes={scenes} />
+      <WindowWaiting />
+    </div>
+    <div aria-hidden="true" {...stylex.props(styles.words)}>
+      <div {...stylex.props(styles.titleRow)}>
+        <Skeleton layout={styles.headingWait} />
+      </div>
+      {lines > 0 ? (
+        <div
+          data-slot="app-card-description"
+          {...stylex.props(styles.description, styles.descriptionWait)}
+        >
+          {Array.from({ length: lines }, (_, line) => (
+            <Skeleton
+              key={line}
+              layout={
+                line === lines - 1 && lines > 1 ? styles.lineShort : undefined
+              }
+            />
+          ))}
+        </div>
+      ) : null}
+      <p data-slot="app-card-meta" {...stylex.props(styles.meta)}>
+        <Skeleton variant="circle" layout={styles.avatarWait} />
+        <Skeleton layout={styles.metaLine} />
+      </p>
+    </div>
+  </article>
+);
+
 /** The meta line's words in each state: the caller's meta (who and when), or that the app is being built. A failed app says so in its window, not again here. */
 const metaOf = (
   state: AppCardState,
@@ -255,7 +323,7 @@ const metaOf = (
   return meta;
 };
 
-export const AppCard = ({
+const ReadyCard = ({
   title,
   mark,
   href,
@@ -276,7 +344,7 @@ export const AppCard = ({
   headingLevel: level = levelDeprecated ?? 3,
   labels,
   layout,
-}: AppCardProps) => {
+}: Omit<AppCardProps, "loading" | "loadingLines">) => {
   const id = useId();
   const words = withGiven(useWords("appCard", englishLabels), labels ?? {});
   const described = description !== undefined && description !== "";
@@ -356,6 +424,25 @@ export const AppCard = ({
     </article>
   );
 };
+
+/** An app on the Apps page: its window, its title and what it is; or, `loading`, the card's shape before it arrives. */
+export const AppCard = ({
+  loading = false,
+  loadingLines = 2,
+  ...props
+}: AppCardProps) =>
+  loading ? (
+    <LoadingCard
+      tone={props.tone ?? "sea"}
+      ground={props.ground}
+      hue={props.groundHue}
+      scenes={props.groundScenes}
+      lines={loadingLines}
+      layout={props.layout}
+    />
+  ) : (
+    <ReadyCard {...props} />
+  );
 
 /** How many cards a row the grid stands, by its own width. */
 export type AppCardGridDensity = "comfortable" | "compact" | "dense";

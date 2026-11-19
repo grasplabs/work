@@ -10,7 +10,7 @@ const PHONE = media.belowPhone;
 
 // Where a dialog stands while it opens and as it closes: a little lower and smaller, and clear.
 // On a phone it is a sheet below the window instead.
-const away = `translateY(${grasp.dialogFromShift}) scale(${grasp.dialogFromScale})`;
+const away = `translateY(var(--dialog-shift, ${grasp.dialogFromShift})) scale(${grasp.dialogFromScale})`;
 const below = "translateY(100%)";
 // Arriving, it starts from the browser's own @starting-style, so the fade begins in the first frame
 // it is drawn; UI SDK's data-starting-style comes off a frame later, which would hold the panel

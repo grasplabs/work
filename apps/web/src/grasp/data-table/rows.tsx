@@ -26,6 +26,10 @@ import type { DataTableWords } from "./words";
 
 const detailId = (key: string) => `${key}-detail`;
 
+/** A placeholder stands on its column's side: a number's at the cell's end, as its value will. */
+const waitingAlign = (align: "start" | "end" | undefined) =>
+  align === "end" ? styles.waitingEnd : null;
+
 interface ToggleProps<Row extends RowData> {
   row: TableRowOf<Row>;
   /** Open now: given, not asked of the row (whose own answer a memoized part would not see change). */
@@ -394,7 +398,10 @@ export const Placeholders = <Row extends RowData>({
           hideBelow={model.hideOf(column.id)}
         >
           <span
-            {...stylex.props(at === 0 ? styles.waitingLead : styles.waiting)}
+            {...stylex.props(
+              at === 0 ? styles.waitingLead : styles.waiting,
+              waitingAlign(model.metaOf(column.id)?.align)
+            )}
           >
             <Skeleton />
           </span>

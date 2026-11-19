@@ -635,10 +635,7 @@ const Words = ({
     >
       {loading ? (
         <>
-          <Skeleton
-            variant="block"
-            layout={[styles.titleWait, look.titleWait]}
-          />
+          <Skeleton layout={[styles.titleWait, look.titleWait]} />
           {description !== undefined &&
             (folds ? (
               <div {...stylex.props(styles.under)}>

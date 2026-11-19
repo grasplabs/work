@@ -563,7 +563,7 @@ const Head = ({
         )}
         {given(icon) && <span {...stylex.props(styles.tile)}>{icon}</span>}
         <div {...stylex.props(styles.titleWaitLine)}>
-          <Skeleton variant="block" layout={styles.titleWait} />
+          <Skeleton layout={styles.titleWait} />
         </div>
         {description !== undefined && (
           <p {...stylex.props(styles.description)}>

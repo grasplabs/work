@@ -188,6 +188,10 @@ export const styles = stylex.create({
     width: "80%",
     overflow: "hidden",
   },
+  // On the column's side: an end column's placeholder (a number's) at the cell's end.
+  waitingEnd: { marginInlineStart: "auto" },
+  // The chosen count while the rows load: its room kept, not seen or said.
+  countWaiting: { visibility: "hidden" },
   // The column's menu, after its name.
   // On a touch screen it stands further off the name, so each keeps a finger's 44px.
   menu: {

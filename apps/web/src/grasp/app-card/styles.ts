@@ -229,6 +229,13 @@ export const styles = stylex.create({
     display: "flex",
     flexShrink: 0,
   },
+  // A loading card's placeholders: the title's line at the title's height, the description's
+  // lines, the owner's picture.
+  headingWait: { width: "8rem", maxWidth: "100%", height: grasp.titleUiLine },
+  descriptionWait: { display: "grid" },
+  lineShort: { width: "60%" },
+  metaLine: { width: "10rem", maxWidth: "100%" },
+  avatarWait: { flexShrink: 0, width: grasp.avatarXs, height: grasp.avatarXs },
   heading: {
     flexGrow: 1,
     minWidth: 0,

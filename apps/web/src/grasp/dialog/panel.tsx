@@ -18,7 +18,7 @@ import { panelMarker } from "./dialog.stylex";
 import { useSize } from "./size-context";
 import { useStill } from "./still-context";
 import { dialogStyles as styles } from "./styles";
-import { sureClose } from "./sure-close";
+import { watchPanel } from "./sure-close";
 import { dialogWords } from "./words";
 import type { DialogWords } from "./words";
 
@@ -94,7 +94,7 @@ export const DialogContent = ({
     <>
       <BackdropPrimitive {...stylex.props(styles.scrim)} />
       <ContentPrimitive
-        {...mergeProps(rest, { ref: sureClose })}
+        {...mergeProps(rest, { ref: watchPanel })}
         {...stylex.props(
           panelMarker,
           styles.panel,

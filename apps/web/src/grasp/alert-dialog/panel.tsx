@@ -14,7 +14,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { panelMarker } from "../dialog/dialog.stylex";
 import { useStill } from "../dialog/still-context";
 import { dialogStyles as styles } from "../dialog/styles";
-import { sureClose } from "../dialog/sure-close";
+import { watchPanel } from "../dialog/sure-close";
 
 type ContentPrimitiveProps = ComponentProps<typeof ContentPrimitive>;
 
@@ -59,7 +59,7 @@ export const AlertDialogContent = ({
     <>
       <BackdropPrimitive {...stylex.props(styles.scrim)} />
       <ContentPrimitive
-        {...mergeProps(rest, { ref: sureClose })}
+        {...mergeProps(rest, { ref: watchPanel })}
         {...stylex.props(
           panelMarker,
           styles.panel,
