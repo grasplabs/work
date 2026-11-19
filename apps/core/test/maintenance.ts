@@ -39,6 +39,36 @@ export const runQuarterHourTasks = async (
 };
 
 /**
+ * Runs the one clock task `name` for its slot at `at`, as its alarm does,
+ * on an env with `changes`: its failure fails the caller, where the clock
+ * would only report it.
+ */
+export const runClockTask = async (
+  name: string,
+  changes: Partial<Env> = {},
+  at = new Date()
+): Promise<void> => {
+  const tasks = clockTasks.filter((task) => task.name === name);
+  const [task] = tasks;
+  if (task === undefined) {
+    throw new Error(`No clock task ${name}`);
+  }
+  const failures: unknown[] = [];
+  await runClockTasks(
+    { ...env, ...changes },
+    tasks,
+    task.period,
+    at.getTime(),
+    (_event, _task, error) => {
+      failures.push(error);
+    }
+  );
+  if (failures.length > 0) {
+    throw failures[0];
+  }
+};
+
+/**
  * How many events of `action` on target `targetId` wait in `database`'s
  * audit outbox.
  */

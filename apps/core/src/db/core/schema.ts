@@ -129,6 +129,13 @@ export const accounts = sqliteTable(
     // Who writes in Teams, by the object id its messages carry
     // (channels/who.ts).
     index("accounts_oid_idx").on(table.oid),
+    // The directory's people by the object id a sign-in of a provider
+    // kept, compared lower case as the daily read keeps it
+    // (directory-ties.ts), with no other comparison of the id changed.
+    index("accounts_provider_oid_lower_idx").on(
+      table.providerId,
+      sql`lower(${table.oid})`
+    ),
     uniqueIndex("accounts_provider_account_idx").on(
       table.providerId,
       table.accountId
@@ -540,6 +547,159 @@ export const teamMembers = sqliteTable(
     index("team_members_user_id_idx").on(table.userId),
   ]
 );
+
+/**
+ * The confirmed staff list whose teams were last made in Settings ›
+ * Members (GRA-2055), by the onboarding store's version of them: one row
+ * for the company. Each sync claims its version here, only when it is
+ * newer, in the same batch as its writes, and each write holds only while
+ * the row names that version (staff-list-teams.ts `syncTeams`): an older
+ * confirm never makes a team after a newer one.
+ */
+export const staffListSynced = sqliteTable("staff_list_synced", {
+  organizationId: text("organization_id").primaryKey(),
+  version: integer().notNull(),
+});
+
+/**
+ * The ids of every team deleted (GRA-2055), kept for good: written by the
+ * trigger `teams_delete_retires` (migration 0278, staff_list_teams) in the statement that
+ * deletes the row, so no code of any release, before this one or after a
+ * rollback, deletes a team without it. The staff list makes a members'
+ * team only under an id not here, checked in the statement that makes it
+ * (staff-list-teams.ts `syncTeams`), so a deleted team's id never
+ * comes back with what was shared with it, whatever the onboarding's
+ * store holds.
+ */
+export const retiredTeamIds = sqliteTable("retired_team_ids", {
+  id: text().primaryKey(),
+});
+
+/**
+ * Everyone the organization's directory listed at its last daily read
+ * that was applied whole (GRA-2056, directory-people.ts): the provider's
+ * ID of each, in the tenant read, with what later reads act on, and the
+ * member they are tied to. Written by that read alone, which replaces
+ * every row of its provider in one batch, and by the tie at sign-in
+ * (`userId` alone). No name, address, title or manager: nothing reads
+ * them here. A person's erasure deletes their rows.
+ */
+export const directoryPeople = sqliteTable(
+  "directory_people",
+  {
+    /** The directory read (`microsoft-directory`). */
+    provider: text().notNull(),
+    /** The provider's tenant the read came from (Entra's tenant ID). */
+    tenant: text().notNull(),
+    /** The provider's ID of the person (Entra's object ID), lower case. */
+    accountId: text("account_id").notNull(),
+    /** Their department, as connect cleaned it; empty for none. */
+    department: text().notNull(),
+    /** Whether their account is turned on; nothing acts on it yet. */
+    enabled: integer({ mode: "boolean" }).notNull(),
+    /**
+     * The member whose sign-in account names the same ID in the same
+     * tenant, while they are a member (`tieDirectoryPeople`); null for
+     * nobody.
+     */
+    userId: text("user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.provider, table.tenant, table.accountId] }),
+    index("directory_people_user_id_idx").on(table.userId),
+  ]
+);
+
+/**
+ * Which members' team each department of the directory fills (GRA-2056,
+ * directory-teams.ts): by the team's id, linked by name once, when the
+ * read first met the department and exactly one team had its name
+ * (`teamNameKey`); held by id after, so a rename of either never breaks
+ * it. Goes with the team. Names a department and a team, no person.
+ */
+export const directoryDepartments = sqliteTable(
+  "directory_departments",
+  {
+    provider: text().notNull(),
+    /** The department as the read keeps it (`directory_people.department`). */
+    department: text().notNull(),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.provider, table.department] }),
+    index("directory_departments_team_id_idx").on(table.teamId),
+  ]
+);
+
+/**
+ * The team memberships the directory's daily read made (GRA-2056,
+ * directory-teams.ts), by the membership's own key: the only ones it ever
+ * takes away. Goes with the membership however it goes (by hand, with
+ * the team, a removal or an erasure). Better Auth's `team_members` takes
+ * no field of ours, so this is the mark beside it.
+ */
+export const directoryMemberships = sqliteTable("directory_memberships", {
+  membershipKey: text("membership_key")
+    .primaryKey()
+    .references(() => teamMembers.membershipKey, { onDelete: "cascade" }),
+});
+
+/**
+ * A member an admin put in a team, or took out of it, by hand (GRA-2056):
+ * the directory's read never changes that pair until an admin lets it
+ * (`releaseTeamPin`, members.ts). Written in Better Auth's before hooks
+ * of the two routes that change a membership by hand (auth.ts).
+ */
+export const teamPins = sqliteTable(
+  "team_pins",
+  {
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /**
+     * Kept in the team (true) or out of it (false): the read never takes
+     * them out of it, or never puts them in it (directory-teams.ts).
+     */
+    kept: integer({ mode: "boolean" }).notNull(),
+    pinnedAt: timestamp("pinned_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.teamId] }),
+    index("team_pins_team_id_idx").on(table.teamId),
+  ]
+);
+
+/**
+ * Where each provider's daily read of the directory stands (GRA-2056,
+ * directory-people.ts), for the admin: the read last applied, what it
+ * counted, and the last failure since. `run` and `startedAt` are the
+ * claim of the newest read, taken in the batch that applies it, which
+ * holds only while no later-started read claimed it: an older read never
+ * lands after a newer one.
+ */
+export const directoryReads = sqliteTable("directory_reads", {
+  provider: text().primaryKey(),
+  /** The directory connection last read or tried. */
+  connectionId: text("connection_id").notNull(),
+  tenant: text().notNull(),
+  run: text(),
+  startedAt: timestamp("started_at"),
+  /** When the last read was applied; null before one was. */
+  readAt: timestamp("read_at"),
+  /** How many people that read listed, and how many of them were turned off. */
+  people: integer(),
+  disabled: integer(),
+  /** The last read's failure since `readAt`, as a directory error code. */
+  failure: text(),
+  failedAt: timestamp("failed_at"),
+});
 
 /**
  * Part of the SSO plugin's model, and stays empty: sign-in providers come

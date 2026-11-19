@@ -325,6 +325,22 @@ const queuedKey = "forget_lines_queued";
 const kickoffChangesKey = "kickoff_changes";
 
 /**
+ * The teams of the list the admin last confirmed (GRA-2055), by id and
+ * name, with a version one more at each confirm: what core makes in
+ * Settings › Members when it doesn't have them yet (staff-list-teams.ts
+ * `syncTeams`), never an older version after a newer.
+ */
+const confirmedTeamsKey = "confirmed_teams";
+
+const confirmedTeamsSchema = z.object({
+  version: z.int().positive(),
+  teams: z.array(z.object({ id: z.string(), name: z.string() })),
+});
+
+/** What `confirmedTeams` answers. */
+export type ConfirmedTeams = z.infer<typeof confirmedTeamsSchema>;
+
+/**
  * The company's teams as the admin last confirmed them (`#rosterConfirmed`):
  * when, and each confirmed team taking part, its name, the admin's own
  * description and its head count. What every member reads on the Brain
@@ -659,8 +675,9 @@ const listenFor = (terms: readonly string[]): string[] => {
 };
 
 /**
- * A live transcription, as the onboarding notes it: its ID, who it is
- * for, and the person whose link it is on, if it is on one.
+ * A live transcription of the onboarding's, as the onboarding notes it:
+ * its ID, who it is for, and the person whose link it is on, if it is on
+ * one. A member's dictation has none: it is no part of the onboarding.
  */
 export interface TranscriptionSessionNote {
   id: string;
@@ -1486,10 +1503,17 @@ export class Onboarding extends DurableObject<Env> {
   async saveRoster(
     roster: Roster,
     by: AuditActor,
-    { confirmed = true }: { confirmed?: boolean } = {}
+    {
+      confirmed = true,
+      minted = new Set(),
+    }: {
+      confirmed?: boolean;
+      /** The ids of `roster`'s teams core made for the list (`teams.minted`). */
+      minted?: ReadonlySet<string>;
+    } = {}
   ): Promise<OnboardingView> {
     return await this.#fallenFirst(
-      async () => await this.#saveRosterOnce(roster, by, { confirmed })
+      async () => await this.#saveRosterOnce(roster, by, { confirmed, minted })
     );
   }
 
@@ -1497,18 +1521,22 @@ export class Onboarding extends DurableObject<Env> {
   async #saveRosterOnce(
     roster: Roster,
     by: AuditActor,
-    { confirmed = true }: { confirmed?: boolean } = {}
+    { confirmed, minted }: { confirmed: boolean; minted: ReadonlySet<string> }
   ): Promise<OnboardingView> {
     const fresh = await this.#freshCodes(roster);
     const said = this.ctx.storage.transactionSync(() => {
       const before = this.#roster();
       const { removed, erased } = this.#writeRoster(roster, fresh, {
         late: false,
+        minted,
       });
       this.#dueAgain(teamsBack(before, roster, { confirmed }));
       if (confirmed) {
         this.#confirmed(before, roster);
         this.#rosterConfirmed(new Date().toISOString());
+        this.#keepConfirmedTeams(
+          roster.teams.map(({ id, name }) => ({ id, name }))
+        );
       } else {
         this.#holdNew(before, roster);
       }
@@ -1649,7 +1677,7 @@ export class Onboarding extends DurableObject<Env> {
   #writeRoster(
     roster: Roster,
     fresh: readonly { person: string; linkId: string; mark: string }[],
-    { late }: { late: boolean },
+    { late, minted }: { late: boolean; minted: ReadonlySet<string> },
     now: string = new Date().toISOString()
   ): { removed: number; erased: string[] } {
     const kept = new Set(roster.people.map((person) => person.id));
@@ -1682,6 +1710,7 @@ export class Onboarding extends DurableObject<Env> {
         .values({
           ...team,
           position,
+          minted: minted.has(team.id),
           mappedAt: was?.mappedAt ?? null,
           // What its map drew, kept apart from what the admin wrote (GRA-1748).
           mappedDoes: was?.mappedDoes ?? null,
@@ -2606,7 +2635,7 @@ export class Onboarding extends DurableObject<Env> {
    * The words to listen out for when someone talks (`listenFor`): the
    * company's name, the names of `person`'s team and its lead, the
    * company's own words from Stephen's setup, and the tools the shared
-   * documents name. Without `person`, as for an admin, the team's names
+   * documents name. Without `person`, as for someone signed in, the team's names
    * are left out.
    */
   async listeningTerms(person?: string): Promise<string[]> {
@@ -4133,12 +4162,16 @@ export class Onboarding extends DurableObject<Env> {
     return answered(null);
   }
 
-  /** Seconds heard by live transcription for an admin today. */
-  heardForAdmin(
+  /**
+   * Seconds heard by live transcription today for someone signed in, by
+   * their user ID alone: one count a person, whatever their role and
+   * whatever it was heard for.
+   */
+  heardForUser(
     userId: string,
     now: string = new Date().toISOString()
   ): { who: string; heard: number } {
-    const who = heardKey(`admin:${userId}`);
+    const who = heardKey(`user:${userId}`);
     return { who, heard: this.voiceSaid(who, now) };
   }
 
@@ -4146,22 +4179,27 @@ export class Onboarding extends DurableObject<Env> {
    * Opens a live transcription for `who`: holds the seconds it may hear
    * against `who`'s budget for today, at once, so sockets opened side by
    * side share one budget rather than each finding it untouched, and a
-   * socket whose close is never counted keeps what it held. Notes it on
-   * someone's link in the onboarding's own log, which only staff read,
-   * never in the audit log, which would tell the company who talked, and
-   * when; for an admin in the audit log, with the session's ID and
-   * nothing heard. The seconds held, and the day they are held on; none,
-   * and nothing noted, when the budget is spent.
+   * socket whose close is never counted keeps what it held. With a
+   * `note`, the onboarding's own: on someone's link it is noted in the
+   * onboarding's own log, which only staff read, never in the audit log,
+   * which would tell the company who talked, and when; for Grasp's staff
+   * in the audit log, with the session's ID and nothing heard. Without
+   * one, a member's dictation, only the seconds are held. The seconds
+   * held, and the day they are held on; none, and nothing noted, when the
+   * budget is spent.
    */
   transcriptionOpened(
-    session: TranscriptionSessionNote & {
+    session: {
       who: string;
       budget: number;
       most: number;
+      note?: TranscriptionSessionNote;
     },
     now: string = new Date().toISOString()
   ): { held: number; day: string } {
     const day = now.slice(0, 10);
+    const { note } = session;
+    const audited = note !== undefined && note.person === undefined;
     const held = this.ctx.storage.transactionSync(() => {
       const left = session.budget - this.voiceSaid(session.who, now);
       const most = Math.floor(Math.min(left, session.most));
@@ -4177,41 +4215,54 @@ export class Onboarding extends DurableObject<Env> {
           set: { seconds: sql`${voiceUse.seconds} + ${most}` },
         })
         .run();
-      if (session.person === undefined) {
-        this.#changed(session.by, "onboarding.transcription.opened", {
-          session: session.id,
+      if (note?.person !== undefined) {
+        this.#noted(note.person, "transcription.opened", now);
+      } else if (note !== undefined) {
+        this.#changed(note.by, "onboarding.transcription.opened", {
+          session: note.id,
         });
-      } else {
-        this.#noted(session.person, "transcription.opened", now);
       }
       return most;
     });
-    if (held > 0 && session.person === undefined) {
+    if (held > 0 && audited) {
       this.#deliverAudit();
     }
     return { held, day };
   }
 
   /**
-   * Counts a live transcription once it closed: the seconds of audio it
-   * heard in the onboarding's use, what it held and didn't hear given
-   * back to `who`'s budget on the day it was held (`transcriptionOpened`),
-   * and notes it as it was opened, with how it ended. Never anything
-   * heard.
+   * Counts a live transcription once it closed: what it held and isn't
+   * charged given back to `who`'s budget on the day it was held
+   * (`transcriptionOpened`). Charged is what it heard in whole seconds,
+   * rounded up, as the model gateway charges and audits each socket
+   * (models.ts `chargedSeconds`), and a second at least: every socket
+   * opened may be an upstream session and a model call in the audit log
+   * however little it heard, so opening and closing them runs out of the
+   * day's budget too, after as many sockets as it has seconds. The
+   * onboarding's own (`noted`) has the
+   * seconds of audio it heard counted in the onboarding's use, and is
+   * noted as it was opened, with how it ended; a member's dictation is
+   * neither. Never anything heard.
    */
   transcriptionClosed(
-    session: TranscriptionSessionNote & {
+    session: {
       who: string;
-      purpose: Took["purpose"];
       seconds: number;
       held: number;
       day: string;
-      ended: string;
+      noted?: {
+        note: TranscriptionSessionNote;
+        purpose: Took["purpose"];
+        ended: string;
+      };
     },
     now: string = new Date().toISOString()
   ): void {
     const seconds = Math.min(counted(session.seconds), session.held);
-    const back = session.held - seconds;
+    const charged = Math.min(Math.max(Math.ceil(seconds), 1), session.held);
+    const back = session.held - charged;
+    const { noted } = session;
+    const audited = noted !== undefined && noted.note.person === undefined;
     this.ctx.storage.transactionSync(() => {
       if (back > 0) {
         this.#db
@@ -4222,21 +4273,22 @@ export class Onboarding extends DurableObject<Env> {
           )
           .run();
       }
-      this.meter(
-        { purpose: session.purpose, model: "transcription", seconds },
-        now
-      );
-      if (session.person === undefined) {
-        this.#changed(session.by, "onboarding.transcription.closed", {
-          session: session.id,
+      if (noted === undefined) {
+        return;
+      }
+      const { note, purpose, ended } = noted;
+      this.meter({ purpose, model: "transcription", seconds }, now);
+      if (note.person === undefined) {
+        this.#changed(note.by, "onboarding.transcription.closed", {
+          session: note.id,
           seconds: Math.round(seconds),
-          ended: session.ended,
+          ended,
         });
       } else {
-        this.#noted(session.person, "transcription.closed", now);
+        this.#noted(note.person, "transcription.closed", now);
       }
     });
-    if (session.person === undefined) {
+    if (audited) {
       this.#deliverAudit();
     }
   }
@@ -4876,6 +4928,82 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * A team renamed in Settings › Members (GRA-2055): the staff list names
+   * the members' teams, so its name there follows at once, and so does
+   * what every member reads of the company's teams, given to the Brain
+   * anew (`#keepConfirmed`). Its name changes there alone: core never
+   * renames a members' team, and the list's next save takes the name from
+   * there again if this copy was lost. Nothing when the list has no such
+   * team.
+   */
+  renameTeam(id: string, name: string): void {
+    this.ctx.storage.transactionSync(() => {
+      this.#db.update(teams).set({ name }).where(eq(teams.id, id)).run();
+      const confirmed = this.confirmedTeams();
+      if (confirmed !== null) {
+        this.ctx.storage.kv.put(confirmedTeamsKey, {
+          ...confirmed,
+          teams: confirmed.teams.map((team) =>
+            team.id === id ? { ...team, name } : team
+          ),
+        });
+      }
+      const held = this.companyTeams();
+      if (held === null || !held.teams.some((team) => team.id === id)) {
+        return;
+      }
+      this.#keepConfirmed(
+        held.at,
+        held.teams.map((team) => (team.id === id ? { ...team, name } : team))
+      );
+    });
+    this.#deliverAudit();
+  }
+
+  /**
+   * The staff list's teams as the store holds them (GRA-2055): their ids,
+   * names, and whether core made each id for the list (`teams.minted`).
+   */
+  heldTeams(): { id: string; name: string; minted: boolean }[] {
+    return this.#db
+      .select({ id: teams.id, name: teams.name, minted: teams.minted })
+      .from(teams)
+      .all();
+  }
+
+  /**
+   * The teams of the list the admin last confirmed, with its version
+   * (GRA-2055): null before any confirm.
+   */
+  confirmedTeams(): ConfirmedTeams | null {
+    const held = this.ctx.storage.kv.get(confirmedTeamsKey);
+    return held === undefined ? null : confirmedTeamsSchema.parse(held);
+  }
+
+  /** In a transaction: `confirmed` as the confirmed list's teams, under the next version. */
+  #keepConfirmedTeams(confirmed: ConfirmedTeams["teams"]): void {
+    this.ctx.storage.kv.put(confirmedTeamsKey, {
+      version: (this.confirmedTeams()?.version ?? 0) + 1,
+      teams: confirmed,
+    });
+  }
+
+  /**
+   * Whether the staff list has the members' team `id` (GRA-2055): the list
+   * as saved, or as last confirmed, whose teams core makes and names.
+   */
+  listsTeam(id: string): boolean {
+    return (
+      this.#db
+        .select({ id: teams.id })
+        .from(teams)
+        .where(eq(teams.id, id))
+        .all().length > 0 ||
+      this.confirmedTeams()?.teams.some((team) => team.id === id) === true
+    );
+  }
+
+  /**
    * The roster as Grasp's staff read it: what each team does as its lead's
    * map drew it, where it did (`mappedDoes`), else as the admin described
    * it. Staff's alone (admin-snapshot.ts); never a member's, never the
@@ -4940,7 +5068,11 @@ export class Onboarding extends DurableObject<Env> {
    * teams, as a version saying so, so it never keeps listing them.
    */
   #rosterConfirmed(at: string): void {
-    const confirmed = this.#confirmedTeams();
+    this.#keepConfirmed(at, this.#confirmedTeams());
+  }
+
+  /** `#rosterConfirmed`'s keeping of `confirmed`, as confirmed at `at`. */
+  #keepConfirmed(at: string, confirmed: CompanyTeam[]): void {
     this.ctx.storage.kv.put(rosterConfirmedKey, { at, teams: confirmed });
     const before = this.#rosterHanded();
     if (confirmed.length === 0 && before === null) {

@@ -10,18 +10,40 @@ import { testBinding } from "./test-env.ts";
 const isFetcher = (value: unknown): value is Fetcher =>
   typeof value === "object" && value !== null && "fetch" in value;
 
-/** Who is in the tenant's directory, from now on, as Graph has them. */
-export const directoryHolds = async (
-  users: Record<string, unknown>[]
-): Promise<void> => {
+/** Sets the fake Graph's directory (`directoryControlUrl`). */
+const setDirectory = async (fields: Record<string, unknown>): Promise<void> => {
   const providers = testBinding("CONNECT_PROVIDERS");
   if (!isFetcher(providers)) {
     throw new TypeError("Expected the providers Worker as CONNECT_PROVIDERS");
   }
   await providers.fetch(directoryControlUrl, {
     method: "POST",
-    body: JSON.stringify({ users }),
+    body: JSON.stringify(fields),
   });
+};
+
+/** Who is in the tenant's directory, from now on, as Graph has them, every page answered. */
+export const directoryHolds = async (
+  users: Record<string, unknown>[]
+): Promise<void> => {
+  await setDirectory({ users, failAt: null, loopAt: null });
+};
+
+/**
+ * Has Graph answer the page of the directory's reads that starts at offset
+ * `from` with a next link back to that same page, until `directoryHolds`
+ * is called again.
+ */
+export const directoryLoopsAt = async (from: number): Promise<void> => {
+  await setDirectory({ loopAt: from });
+};
+
+/**
+ * Has Graph fail the page of the directory's reads that starts at offset
+ * `from` (a hundred to a page), until `directoryHolds` is called again.
+ */
+export const directoryFailsAt = async (from: number): Promise<void> => {
+  await setDirectory({ failAt: from });
 };
 
 /** Someone in Entra, as Graph answers the directory's reads. */

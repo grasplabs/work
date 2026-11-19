@@ -1805,6 +1805,10 @@ msgstr "Een team kan deze upload lezen."
 msgid "A team it is no longer shared with"
 msgstr "Een team waarmee hij niet meer gedeeld is"
 
+#: src/settings/use-team-change.ts
+msgid "A team on the staff list has this name. It appears here once the staff list is confirmed."
+msgstr "Een team op de personeelslijst heeft deze naam. Het verschijnt hier zodra de personeelslijst is bevestigd."
+
 #: src/onboarding/setup-steps.tsx
 msgid "A team without a lead gets its links on the first day, and I ask each person what they do."
 msgstr "Een team zonder teamleider krijgt zijn links op de eerste dag, en ik vraag iedereen wat ze doen."
@@ -15442,6 +15446,10 @@ msgstr "De opgeslagen code van deze pagina komt niet meer overeen met de gepubli
 #: src/settings/event-source-activity.tsx
 msgid "This payload is no longer kept."
 msgstr "Deze payload wordt niet meer bewaard."
+
+#: src/settings/use-team-change.ts
+msgid "This team is on the staff list. Take it off there and confirm the list first."
+msgstr "Dit team staat op de personeelslijst. Haal het daar af en bevestig eerst de lijst."
 
 #: src/brain/sources-page.tsx
 msgid "This upload was already made with another file, which is kept as it was. Choose the file again to upload it as a new upload, or add it as a new version."

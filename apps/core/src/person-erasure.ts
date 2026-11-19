@@ -69,6 +69,7 @@ import {
   stephenSummaries,
   stephenSummaryReaders,
   teamMembers,
+  teamPins,
   users,
   workflowDecisionConfirmations,
   apps as appRegistry,
@@ -78,6 +79,7 @@ import {
   workflowState,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
+import { forgetDirectoryPeople } from "./directory-ties.ts";
 import { appPreview, workspace, inJurisdiction } from "./durable-objects.ts";
 import {
   emailHashOf,
@@ -296,6 +298,9 @@ const identity: ErasureStep = {
           .values({ subjectHash, keyVersion: subjectKeyVersion, userId })
           .onConflictDoNothing()
       ),
+      // The directory's rows of them (GRA-2056), by the IDs their accounts
+      // name: before the accounts go, in the same batch.
+      forgetDirectoryPeople(db, userId),
       db.delete(accounts).where(
         and(
           eq(accounts.userId, userId),
@@ -626,6 +631,9 @@ const channels: ErasureStep = {
       ...theirInvitations,
       db.delete(notifications).where(eq(notifications.personId, userId)),
       db.delete(teamMembers).where(eq(teamMembers.userId, userId)),
+      // What an admin pinned of their teams (directory-teams.ts), whatever
+      // their removal cleaned up before.
+      db.delete(teamPins).where(eq(teamPins.userId, userId)),
       // The cards still to be pressed of their requests, then the requests.
       db
         .delete(stephenRequestCards)

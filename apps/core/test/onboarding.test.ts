@@ -8,6 +8,7 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminCommands } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
 import { holdAlarm } from "./interview-link.ts";
+import { teamsMade } from "./members-teams.ts";
 import { auditedDuring, outcome, signedInApi } from "./sign-in.ts";
 
 // The onboarding's store (src/onboarding/store.ts), over `/rpc`: the
@@ -71,7 +72,7 @@ const textOf = (events: AuditEvent[]): string => JSON.stringify(events);
 describe("the admin's onboarding", () => {
   it("keeps the roster and the plan and gives them back", async () => {
     const { api } = await signedInApi(idp, "admin");
-    await api.onboarding.saveRoster(roster);
+    await api.onboarding.saveRoster(await teamsMade(roster));
     await api.onboarding.savePlan(plan());
     const view = await api.onboarding.view();
     expect(view.roster?.teams.map(({ id }) => id)).toStrictEqual([
@@ -133,7 +134,7 @@ describe("the admin's onboarding", () => {
 
   it("refuses a plan that starts in the past, or runs longer than six weeks", async () => {
     const { api } = await signedInApi(idp, "admin");
-    await api.onboarding.saveRoster(roster);
+    await api.onboarding.saveRoster(await teamsMade(roster));
     await expect(
       outcome(api.onboarding.savePlan({ start: "2020-01-06", days: 14 }))
     ).resolves.toBe("onboarding.past");
@@ -316,7 +317,7 @@ describe("Grasp's staff in the onboarding", () => {
   it("let no link out before the agreements are in, nor while the interviews are paused", async () => {
     const { api } = await signedInApi(idp, "admin");
     const store = onboardingStore(env);
-    await api.onboarding.saveRoster(roster);
+    await api.onboarding.saveRoster(await teamsMade(roster));
     await api.onboarding.savePlan(plan());
     await expect(store.releaseDue()).resolves.toStrictEqual([]);
 
@@ -355,17 +356,19 @@ describe("Grasp's staff in the onboarding", () => {
     const store = onboardingStore(env);
     const run = crypto.randomUUID().slice(0, 8);
     const [lead, member, alone] = [`lea-${run}`, `sam-${run}`, `oli-${run}`];
-    await api.onboarding.confirmRoster({
-      teams: [
-        { id: `sales-${run}`, name: "Sales", lead },
-        { id: `ops-${run}`, name: "Ops", lead: null },
-      ],
-      people: [
-        person(lead, `sales-${run}`),
-        person(member, `sales-${run}`),
-        person(alone, `ops-${run}`),
-      ],
-    });
+    await api.onboarding.confirmRoster(
+      await teamsMade({
+        teams: [
+          { id: `sales-${run}`, name: "Sales", lead },
+          { id: `ops-${run}`, name: "Ops", lead: null },
+        ],
+        people: [
+          person(lead, `sales-${run}`),
+          person(member, `sales-${run}`),
+          person(alone, `ops-${run}`),
+        ],
+      })
+    );
     // Agreed first, with the interviews a week off: nothing is due yet.
     const weekOn = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     await api.onboarding.savePlan({
@@ -395,7 +398,7 @@ describe("Grasp's staff in the onboarding", () => {
   it("put every change in the audit log, as who made it, with no name in it", async () => {
     const { api, userId } = await signedInApi(idp, "admin");
     const events = await auditedDuring(async () => {
-      await api.onboarding.saveRoster(roster);
+      await api.onboarding.saveRoster(await teamsMade(roster));
       await api.onboarding.savePlan(plan());
       await adminCommands().pause();
       await adminCommands().resume();
@@ -452,7 +455,7 @@ describe("a list shared again while the plan runs", () => {
     const { api } = await signedInApi(idp, "admin");
     const store = onboardingStore(env);
     const now = new Date().toISOString();
-    await api.onboarding.confirmRoster(confirmedFirst);
+    await api.onboarding.confirmRoster(await teamsMade(confirmedFirst));
     // Moved back in the store: core plans from today on.
     await store.savePlan(
       { start: weeksAgo(now), days: 42 },
@@ -471,15 +474,17 @@ describe("a list shared again while the plan runs", () => {
       await store.linkOf("sam"),
     ];
     const linksBefore = await links();
-    const saved = await api.onboarding.saveRoster(sharedAgain);
+    const saved = await api.onboarding.saveRoster(await teamsMade(sharedAgain));
     const beforeConfirmed = await store.releaseDue(now);
     // On the confirm page the admin picks Oli to lead Ops.
-    const confirmed = await api.onboarding.confirmRoster({
-      ...sharedAgain,
-      teams: sharedAgain.teams.map((team) =>
-        team.id === "ops" ? { ...team, lead: "oli" } : team
-      ),
-    });
+    const confirmed = await api.onboarding.confirmRoster(
+      await teamsMade({
+        ...sharedAgain,
+        teams: sharedAgain.teams.map((team) =>
+          team.id === "ops" ? { ...team, lead: "oli" } : team
+        ),
+      })
+    );
     const afterConfirmed = await store.releaseDue();
     // Ona waits for her lead, as anyone does in a team that starts late.
     const later = new Date(Date.now() + 7 * 86_400_000).toISOString();
@@ -507,7 +512,7 @@ describe("someone taken off the list", () => {
   it("keeps no link and nothing of where their interview stood", async () => {
     const { api } = await signedInApi(idp, "admin");
     const store = onboardingStore(env);
-    await api.onboarding.saveRoster(roster);
+    await api.onboarding.saveRoster(await teamsMade(roster));
     await api.onboarding.savePlan(plan());
     await adminCommands().setAgreements({
       processing: true,
@@ -521,10 +526,12 @@ describe("someone taken off the list", () => {
       startedAt: new Date().toISOString(),
       completedAt: null,
     });
-    await api.onboarding.saveRoster({
-      ...roster,
-      people: roster.people.filter(({ id }) => id !== "oli"),
-    });
+    await api.onboarding.saveRoster(
+      await teamsMade({
+        ...roster,
+        people: roster.people.filter(({ id }) => id !== "oli"),
+      })
+    );
     const sent = await store.sentLinks();
     expect(sent.map(({ person: id }) => id)).not.toContain("oli");
     expect(sent.map(({ person: id }) => id)).toContain("ona");

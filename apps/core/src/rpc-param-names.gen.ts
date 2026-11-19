@@ -299,6 +299,7 @@ export const rpcParamNames: ParamNames = {
     "invite": ["email","role"],
     "list": [],
     "releaseAddress": ["email"],
+    "releaseTeamPin": ["userId","teamId"],
     "remove": ["userId"],
     "removed": ["before"],
     "revokeSessions": ["userId"],

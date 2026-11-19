@@ -2447,6 +2447,48 @@ describe("groups copied from the source", () => {
   );
 
   it(
+    "keeps a Microsoft member whose object ID has upper-case letters theirs everywhere: their own connection, a list naming them as Graph does, and a group they are in",
+    setUpTime,
+    async () => {
+      const oid = crypto.randomUUID().toUpperCase();
+      const claims = entraPerson(acmeTenant, "acme.test", { oid });
+      const session = await signedIn(idp, "microsoft", claims, {
+        coreEnv: withSignIn({ admins: [String(claims.email)] }),
+      });
+      const { userId } = await whoami(session);
+      const group = crypto.randomUUID();
+      await inGroups(oid, [group]);
+      // Entra's consent names the same object ID, in the same case.
+      const connected = await connectedMicrosoft({ session, oid }).then(
+        () => "connected",
+        (error: unknown) => (error instanceof Error ? error.message : "refused")
+      );
+      await groupsRead(await connectionTo(oid));
+      const markers = { listed: uniqueWord(), grouped: uniqueWord() };
+      // Graph's permissions name a user by their object ID in lower case.
+      const listed = await sharedItem(
+        markers.listed,
+        readersOf({
+          kind: "account",
+          provider: "microsoft",
+          tenant: acmeTenant,
+          account: oid.toLowerCase(),
+        })
+      );
+      const grouped = await sharedItem(
+        markers.grouped,
+        readersOf(entraGroup(group))
+      );
+
+      expect({
+        connected,
+        listed: await finds(userId, listed, markers.listed),
+        grouped: await finds(userId, grouped, markers.grouped),
+      }).toStrictEqual({ connected: "connected", listed: true, grouped: true });
+    }
+  );
+
+  it(
     "lets someone in more groups than a reader can hold find their own, the company's, and what is shared with one of their groups, and nothing shared with a group they aren't in",
     setUpTime,
     async () => {

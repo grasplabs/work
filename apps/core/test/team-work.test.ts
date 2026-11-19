@@ -139,10 +139,10 @@ const workOnPage = async (ids: { team: string }) => {
   const { workflows, statements } = await member.api.brain.read();
   return {
     claims: statements
-      .filter(({ teamIds }) => teamIds.includes(`team-${ids.team}`))
+      .filter(({ teamIds }) => teamIds.includes(ids.team))
       .map(({ text }) => text),
     drawings: workflows
-      .filter(({ teamId }) => teamId === `team-${ids.team}`)
+      .filter(({ teamId }) => teamId === ids.team)
       .flatMap(({ drawings }) => drawings ?? []),
   };
 };
@@ -505,7 +505,7 @@ describe(
         const brain = await member.api.brain.read();
         return {
           source: brain.sources.some(
-            ({ teamIds }) => teamIds?.includes(`team-${ids.team}`) === true
+            ({ teamIds }) => teamIds?.includes(ids.team) === true
           ),
           weeks: brain.interviewWeeks.reduce(
             (sum, { interviews }) => sum + interviews,

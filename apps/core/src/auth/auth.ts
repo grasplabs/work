@@ -4,8 +4,12 @@ import { actorOf } from "@grasp-os/shared/audit";
 import { staffWindowOpen } from "@grasp-os/shared/deployment-config";
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { fromBase64Url } from "@grasp-os/shared/encoding";
-import { log } from "@grasp-os/shared/log";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { relayRedirectUri } from "@grasp-os/shared/oauth-relay";
+import {
+  staffListTeamRefusals,
+  teamNameKey,
+} from "@grasp-os/shared/onboarding";
 import { roleSchema } from "@grasp-os/shared/roles";
 import { routerClientIpHeader } from "@grasp-os/shared/router";
 import type { SignInRefusal } from "@grasp-os/shared/sign-in";
@@ -23,7 +27,11 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { teamAccessMayHaveDropped, teamGone } from "../access-revocations.ts";
+import {
+  teamAccessMayHaveDropped,
+  teamGone,
+  tellKept,
+} from "../access-revocations.ts";
 import {
   auditedBatch,
   keepAuditEvent,
@@ -41,6 +49,8 @@ import {
   users,
   verifications,
 } from "../db/core/schema.ts";
+import { pinTeamMember, placeMember } from "../directory-teams.ts";
+import { directoryKinds, tieSignedIn } from "../directory-ties.ts";
 import {
   isErasedEmail,
   isErasedSubject,
@@ -49,6 +59,7 @@ import {
 import { mayComeIn, staffMayStay } from "../onboarding/gate.ts";
 import { onboardingStore } from "../onboarding/store.ts";
 import { keepSignInAddress } from "../source-readers.ts";
+import { namedOnListUnmade } from "../staff-list-teams.ts";
 import { checkClaims } from "./claims.ts";
 import {
   devIdpOrigin,
@@ -571,6 +582,25 @@ const isErasedSignIn = async (
 };
 
 /**
+ * Ties the directory's people their sign-in accounts name to the member
+ * signing in (directory-people.ts, GRA-2056), by the daily read's own
+ * rule. Their sign-in goes on whatever comes of it: the next read ties
+ * them all the same.
+ */
+const tieAtSignIn = async (env: Env, userId: string): Promise<void> => {
+  try {
+    await tieSignedIn(env, userId);
+    // And placed in the teams their departments fill, by the same rule.
+    for (const kind of directoryKinds) {
+      // oxlint-disable-next-line no-await-in-loop -- one provider at a time
+      await tellKept(env, await placeMember(env, kind, userId));
+    }
+  } catch (error) {
+    log.error("directory.tie_failed", errorFields(error));
+  }
+};
+
+/**
  * The session a sign-in through `providerId` gets, or `false` for none.
  * Staff sessions are marked and cut short; everyone else's opens in the
  * deployment's organization, as a member.
@@ -619,17 +649,19 @@ const startSession = async <T extends { expiresAt: Date; userId: string }>(
           })
         : session.userId;
     // For members.
-    return (await ensureMember(env, config, userId))
-      ? {
-          data: {
-            ...session,
-            userId,
-            staff: false,
-            interview: false,
-            activeOrganizationId: organizationId,
-          },
-        }
-      : false;
+    if (!(await ensureMember(env, config, userId))) {
+      return false;
+    }
+    await tieAtSignIn(env, userId);
+    return {
+      data: {
+        ...session,
+        userId,
+        staff: false,
+        interview: false,
+        activeOrganizationId: organizationId,
+      },
+    };
   }
   // The gate is closed to them: a session for their own interview alone,
   // if a link of one went to their address (GRA-1790). They join nothing:
@@ -754,15 +786,17 @@ const auditedChanges: Record<
     action: "team.deleted",
     target: { type: "team", id: change.teamId ?? "unknown" },
   }),
+  // A hand add or removal pins the pair (`pinTeamMember`): the directory's
+  // read leaves it as the admin set it until an admin lets it.
   "/organization/add-team-member": (change) => ({
     action: "team.member.added",
     target: { type: "team", id: change.teamId ?? "unknown" },
-    detail: { userId: change.userId ?? null },
+    detail: { userId: change.userId ?? null, pinned: "in" },
   }),
   "/organization/remove-team-member": (change) => ({
     action: "team.member.removed",
     target: { type: "team", id: change.teamId ?? "unknown" },
-    detail: { userId: change.userId ?? null },
+    detail: { userId: change.userId ?? null, pinned: "out" },
   }),
 };
 
@@ -775,6 +809,21 @@ const auditedChanges: Record<
 const loadSso = async (): Promise<typeof sso> => {
   const { sso: plugin } = await import("@better-auth/sso");
   return plugin;
+};
+
+/**
+ * Refuses a team made or renamed in Settings › Members under a name the
+ * staff list gives a team it hasn't made yet (GRA-2055): the confirm keeps
+ * the list's team by its id, so it would be a second of the name.
+ */
+const refuseNameOnListUnmade = async (env: Env, name: string) => {
+  if (await namedOnListUnmade(env, name)) {
+    throw new APIError("CONFLICT", {
+      code: staffListTeamRefusals.notMadeYet,
+      message:
+        "A team on the staff list has this name. It appears here once the staff list is confirmed.",
+    });
+  }
 };
 
 const createAuth = (
@@ -999,6 +1048,26 @@ const createAuth = (
         // App shared with it away: their hosts tell the open pages to
         // look again (access-revocations.ts).
         organizationHooks: {
+          // An admin's hand change of a membership, pinned ahead of Better
+          // Auth's own write (directory-teams.ts): the directory's read
+          // never undoes it. These two routes alone change a membership
+          // by hand (routes.ts keeps the others off).
+          beforeAddTeamMember: async ({ teamMember }) => {
+            await pinTeamMember(
+              env,
+              teamMember.teamId,
+              teamMember.userId,
+              true
+            );
+          },
+          beforeRemoveTeamMember: async ({ teamMember }) => {
+            await pinTeamMember(
+              env,
+              teamMember.teamId,
+              teamMember.userId,
+              false
+            );
+          },
           afterRemoveTeamMember: async ({ teamMember }) => {
             await teamAccessMayHaveDropped(env, teamMember.teamId, [
               teamMember.userId,
@@ -1006,6 +1075,48 @@ const createAuth = (
           },
           afterDeleteTeam: async ({ team }) => {
             await teamGone(env, team.id);
+          },
+          // The onboarding's staff list names these same teams (GRA-2055,
+          // staff-list-teams.ts), whose names change here alone: a rename
+          // shows on the list at once. The rename is kept whatever comes of
+          // that, so a failure is logged, not answered: the list's next
+          // save takes the name from here again (`intoMembersTeams`). A
+          // team on the list, saved or confirmed, is taken off there
+          // first, so it never names one gone.
+          afterUpdateTeam: async ({ team }) => {
+            if (team === null) {
+              return;
+            }
+            try {
+              await onboardingStore(env).renameTeam(team.id, team.name);
+            } catch (error) {
+              log.error("onboarding.team_rename_unfollowed", {
+                teamId: team.id,
+                error: error instanceof Error ? error.name : "unknown",
+              });
+            }
+          },
+          beforeDeleteTeam: async ({ team }) => {
+            if (await onboardingStore(env).listsTeam(team.id)) {
+              throw new APIError("CONFLICT", {
+                code: staffListTeamRefusals.onList,
+                message: "The team is on the staff list.",
+              });
+            }
+          },
+          // A name the staff list gives a team it hasn't made yet stays its
+          // own (GRA-2055, `refuseNameOnListUnmade`).
+          beforeCreateTeam: async ({ team }) => {
+            await refuseNameOnListUnmade(env, team.name);
+          },
+          // Renamed to it too: the same second team at the confirm.
+          beforeUpdateTeam: async ({ team, updates }) => {
+            if (
+              updates.name !== undefined &&
+              teamNameKey(updates.name) !== teamNameKey(team.name)
+            ) {
+              await refuseNameOnListUnmade(env, updates.name);
+            }
           },
         },
       }),

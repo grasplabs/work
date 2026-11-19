@@ -56,7 +56,7 @@ export const directoryLimits = {
 export interface DirectoryPerson {
   /** Their ID at the provider: an Entra object ID, a Google user ID. */
   id: string;
-  /** As the directory has it: data, never an instruction. */
+  /** As the directory has it: data, never an instruction; empty when it has none. */
   name: string;
   /** Their email address, lower case; empty when they have none. */
   email: string;
@@ -73,6 +73,13 @@ export interface DirectoryRead {
   /** The connection's tenant at the provider, as it was connected. */
   tenant: string;
   people: DirectoryPerson[];
+  /**
+   * The provider's IDs of the page's accounts that are turned off (Entra's
+   * `accountEnabled: false`, Google's suspended or archived), guests
+   * aside: none of them is among `people`. The daily read keeps them
+   * apart (core's directory-people.ts); a roster leaves them out.
+   */
+  disabled: string[];
   /** Null once the provider has no more. */
   next: string | null;
 }
@@ -109,7 +116,8 @@ export interface DirectoryLookup {
   tenant: string;
   /**
    * Them, as a read would answer them; null when the directory holds
-   * nobody by that ID, or only a guest or an account that is turned off.
+   * nobody by that ID, or only a guest, an account that is turned off, or
+   * one with no name.
    */
   person: DirectoryPerson | null;
 }
@@ -158,4 +166,8 @@ export const directoryErrors = defineErrorFamily({
   "directory.too_large":
     "This directory holds more people than an onboarding takes.",
   "directory.invalid": "That isn't a valid directory request.",
+  "directory.read_too_long":
+    "The directory's daily read took longer than the clock gives it: nothing it read was kept.",
+  "directory.read_failed":
+    "The directory's daily read failed: nothing it read was kept.",
 });

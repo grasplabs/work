@@ -4,6 +4,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
+import { teamsMade } from "./members-teams.ts";
 import {
   auditedDuring,
   openRpc,
@@ -42,19 +43,21 @@ const rosterWith = async (
   role: string,
   ...holders: Signed[]
 ): Promise<void> => {
-  await admin.api.onboarding.saveRoster({
-    teams: roster.teams,
-    people: [
-      ...roster.people,
-      ...holders.map(({ userId, person }, index) => ({
-        id: `p-${userId}`.replaceAll(/[^A-Za-z0-9_-]/gu, "").slice(0, 60),
-        name: `Holder ${index + 1}`,
-        email: String(person.email),
-        team: "finance",
-        title: role,
-      })),
-    ],
-  });
+  await admin.api.onboarding.saveRoster(
+    await teamsMade({
+      teams: roster.teams,
+      people: [
+        ...roster.people,
+        ...holders.map(({ userId, person }, index) => ({
+          id: `p-${userId}`.replaceAll(/[^A-Za-z0-9_-]/gu, "").slice(0, 60),
+          name: `Holder ${index + 1}`,
+          email: String(person.email),
+          team: "finance",
+          title: role,
+        })),
+      ],
+    })
+  );
 };
 
 /** The questions `person` was asked, as their notifications list them. */
@@ -106,7 +109,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
   it("add a team's sizes and stakeholders as dated values, joining the onboarding's team for whoever reads it: every member once the admin confirmed it", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
-    await admin.api.onboarding.confirmRoster(roster);
+    await admin.api.onboarding.confirmRoster(await teamsMade(roster));
     const tag = unique();
     const team = `sales-${tag}`;
     await admin.api.brain.addRecords([
@@ -116,7 +119,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
         kind: "interview",
         title: "Sales interview",
         date: "2026-10-20",
-        teamIds: ["team-finance"],
+        teamIds: ["finance"],
       },
       { type: "team", id: team, name: "Sales", sourceId: `src-${tag}` },
       {
@@ -140,7 +143,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
       {
         type: "teamCount",
         id: `count-${tag}-2`,
-        teamId: "team-finance",
+        teamId: "finance",
         sourceId: `src-${tag}`,
         date: "2026-10-01",
         people: 2,
@@ -153,14 +156,14 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
     expect({
       sales: asAdmin.teams.find(({ id }) => id === team),
       financeCounts: asAdmin.teams
-        .find(({ id }) => id === "team-finance")
+        .find(({ id }) => id === "finance")
         ?.counts.map(({ sourceId, people }) => ({ sourceId, people })),
       memberTeams: asMember.teams.map(({ id }) => id),
       roster: await outcome(
         admin.api.brain.addRecords([
           {
             type: "team",
-            id: "team-finance",
+            id: "finance",
             name: "Finance",
             sourceId: `src-${tag}`,
           },
@@ -192,7 +195,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
       // The confirmed roster's teams are every member's (GRA-1748), with
       // the records' own; its roles and counts from the records stay the
       // admin's.
-      memberTeams: ["team-finance", team],
+      memberTeams: ["finance", team],
       // A roster team's id, now or later, is never a team record's.
       roster: "brain.record_invalid",
     });
@@ -200,7 +203,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
 
   it("refuse a team, workflow or record that doesn't exist", async () => {
     const admin = await signedInApi(idp, "admin");
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.saveRoster(await teamsMade(roster));
     const { ids, records } = gapRecords(unique());
     await admin.api.brain.addRecords(records.slice(0, 2));
 
@@ -217,7 +220,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
           {
             type: "teamCount",
             id: `${ids.source}-count`,
-            teamId: "team-nowhere",
+            teamId: "nowhere",
             sourceId: ids.source,
             date: "2026-10-20",
             people: 3,
@@ -232,7 +235,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
             kind: "goal",
             text: "Close the books in three days.",
             sourceId: ids.source,
-            teamIds: ["team-nowhere"],
+            teamIds: ["nowhere"],
           },
         ])
       ),
@@ -262,7 +265,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
 
   it("refuse the onboarding's source ids as any record's own id, and a gap about what isn't a note", async () => {
     const admin = await signedInApi(idp, "admin");
-    await admin.api.onboarding.saveRoster(roster);
+    await admin.api.onboarding.saveRoster(await teamsMade(roster));
     const tag = unique();
     const team = `team${tag}`;
     await admin.api.brain.addRecords([
@@ -351,7 +354,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
   it("show members the onboarding source a gap or team names, and each team's values in date order", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
-    await admin.api.onboarding.confirmRoster(roster);
+    await admin.api.onboarding.confirmRoster(await teamsMade(roster));
     const tag = unique();
     const team = `team${tag}`;
     const source = `src-${tag}`;
@@ -421,7 +424,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
       {
         type: "teamCount",
         id: `count-${tag}-finance`,
-        teamId: "team-finance",
+        teamId: "finance",
         sourceId: source,
         date: "2020-01-01",
         people: 2,
@@ -437,7 +440,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
       counts: sales?.counts.map(({ date, people }) => ({ date, people })),
       stakeholders: sales?.stakeholders.map(({ role }) => role),
       finance: asAdmin.teams
-        .find(({ id }) => id === "team-finance")
+        .find(({ id }) => id === "finance")
         ?.counts.map(({ sourceId }) => sourceId)
         .filter((id) => id === source || id === "src-roster"),
     }).toStrictEqual({

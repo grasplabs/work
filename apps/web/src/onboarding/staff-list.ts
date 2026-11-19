@@ -2,6 +2,7 @@ import type { DirectoryPerson } from "@grasp-os/shared/directory";
 import {
   onboardingPeopleMax,
   onboardingTeamsMax,
+  teamNameKey,
 } from "@grasp-os/shared/onboarding";
 import type {
   Roster,
@@ -215,7 +216,7 @@ const teamIds = () => {
   const byName = new Map<string, string>();
   const taken = new Set<string>();
   return (name: string): { id: string; fresh: boolean } => {
-    const key = name.toLowerCase();
+    const key = teamNameKey(name);
     const known = byName.get(key);
     if (known !== undefined) {
       return { id: known, fresh: false };
@@ -449,18 +450,70 @@ export const directoryListOf = (
 };
 
 /**
+ * `read` with each team the saved list has by name (any case) under the
+ * saved one's id: core keeps a team under its members' team's id
+ * (GRA-2055), never the id a list read here makes of its name. Every
+ * saved id is its own team's alone: a team the saved list doesn't have
+ * keeps the id read here unless a saved team has it, else takes the next
+ * free one (`-2`, `-3`), so no two teams share an id and no new team
+ * takes on what was kept for another.
+ */
+const underSavedIds = (
+  read: StaffList["roster"],
+  saved: Roster
+): StaffList["roster"] => {
+  const savedIds = new Map(
+    saved.teams.map((team) => [teamNameKey(team.name), team.id])
+  );
+  const idOf = new Map<string, string>();
+  const unmatched: string[] = [];
+  for (const team of read.teams) {
+    const savedId = savedIds.get(teamNameKey(team.name));
+    if (savedId === undefined) {
+      unmatched.push(team.id);
+    } else {
+      idOf.set(team.id, savedId);
+    }
+  }
+  const taken = new Set([...saved.teams.map((team) => team.id), ...unmatched]);
+  for (const id of unmatched) {
+    let free = id;
+    if (saved.teams.some((team) => team.id === id)) {
+      let next = 2;
+      while (taken.has(free)) {
+        free = `${id}-${next}`;
+        next += 1;
+      }
+      taken.add(free);
+    }
+    idOf.set(id, free);
+  }
+  return {
+    teams: read.teams.map((team) => ({
+      ...team,
+      id: idOf.get(team.id) ?? team.id,
+    })),
+    people: read.people.map((person) => ({
+      ...person,
+      team: idOf.get(person.team) ?? person.team,
+    })),
+  };
+};
+
+/**
  * A staff list read again, with what the admin set on the one before kept
  * for the teams and people in both, by id: a team they switched off stays
  * off, someone marked away stays away, a lead they picked stays the lead
  * while still in that team, and what a team does stays said.
  */
 export const withSaved = (
-  roster: StaffList["roster"],
+  read: StaffList["roster"],
   saved: Roster | null
 ): StaffList["roster"] => {
   if (saved === null) {
-    return roster;
+    return read;
   }
+  const roster = underSavedIds(read, saved);
   const savedTeams = new Map(saved.teams.map((team) => [team.id, team]));
   const savedPeople = new Map(
     saved.people.map((person) => [person.id, person])
@@ -503,8 +556,10 @@ export const withLeadsFrom = (
   roster: StaffList["roster"],
   saved: Roster | null
 ): StaffList["roster"] => {
-  const kept = withSaved(roster, saved);
-  const named = new Map(roster.teams.map((team) => [team.id, team.lead]));
+  // The platform's leads by the ids the saved list has its teams under.
+  const read = saved === null ? roster : underSavedIds(roster, saved);
+  const kept = withSaved(read, saved);
+  const named = new Map(read.teams.map((team) => [team.id, team.lead]));
   return {
     ...kept,
     teams: kept.teams.map((team) => ({

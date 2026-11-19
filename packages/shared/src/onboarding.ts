@@ -93,8 +93,32 @@ const idSchema = z
   .string()
   .regex(/^[A-Za-z0-9_-]{1,60}$/u, "Letters, digits, - and _ only");
 
+/**
+ * A team's name as people mean it, whichever way it is written: trimmed,
+ * in one Unicode form (NFC) and lower case. Two names with the same key are
+ * the same team, to the web's staff list and to core alike.
+ */
+export const teamNameKey = (name: string): string =>
+  name.trim().normalize("NFC").toLowerCase();
+
+/**
+ * What Settings › Members answers a team change the staff list stops
+ * (GRA-2055), as Better Auth's error `code`: deleting a team the saved or
+ * confirmed list names, or making one under a name the list gives a team
+ * it hasn't made yet.
+ */
+export const staffListTeamRefusals = {
+  onList: "STAFF_LIST_TEAM_ON_LIST",
+  notMadeYet: "STAFF_LIST_TEAM_NOT_MADE_YET",
+} as const;
+
 /** A team, as the staff list and its admin have it. */
 export const rosterTeamSchema = z.strictObject({
+  /**
+   * The members' team it is (GRA-2055): core saves a team under the id of
+   * the members' team with this id or, failing that, with its name, and
+   * makes a new one, under an id of its own, for any other.
+   */
   id: idSchema,
   name: nameSchema,
   /** Its lead, by person: someone in the team. */

@@ -60,6 +60,7 @@ import {
   sessions,
   skillShares,
   teamMembers,
+  teamPins,
   users,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
@@ -278,6 +279,8 @@ const recordRemoval = async (
       .returning({ userId: memberRemovals.userId }),
     outboxedIfChanged(db, memberEntry(by, "member.removed", memberId, userId)),
     db.delete(teamMembers).where(and(eq(teamMembers.userId, userId), removed)),
+    // What an admin pinned of their teams: no use for someone removed.
+    db.delete(teamPins).where(and(eq(teamPins.userId, userId), removed)),
     db
       .delete(members)
       .where(
@@ -440,6 +443,50 @@ const revokeMemberSessions = async (
   if (ended.length === 0 && !(await stillAdmin(env, by.userId))) {
     throw refusal(by, roleErrors.create("role.forbidden"));
   }
+};
+
+/**
+ * Lets the directory's read decide whether `userId` is in team `teamId`
+ * again (GRA-2056, directory-teams.ts): takes away the pin an admin's hand
+ * add or removal put on the pair. The membership stays as it is until the
+ * next read. Only while the admin still is one, in the same statement;
+ * audited when a pin went.
+ */
+const releaseTeamPin = async (
+  env: Env,
+  by: Identity,
+  userId: unknown,
+  teamId: unknown
+): Promise<{ released: boolean }> => {
+  requireMemberAdmin(by);
+  const person = identifierSchema.safeParse(userId);
+  const team = identifierSchema.safeParse(teamId);
+  if (!(person.success && team.success)) {
+    throw refusal(by, memberErrors.create("member.not_found"));
+  }
+  const db = drizzle(env.DB);
+  const [released] = await auditedBatch(env, db, [
+    db
+      .delete(teamPins)
+      .where(
+        and(
+          eq(teamPins.userId, person.data),
+          eq(teamPins.teamId, team.data),
+          isActiveAdmin(by.userId)
+        )
+      )
+      .returning({ userId: teamPins.userId }),
+    outboxedIfChanged(db, {
+      actor: actorOf(by),
+      action: "team.member.pin_released",
+      target: { type: "team", id: team.data },
+      detail: { userId: person.data },
+    }),
+  ]);
+  if (released.length === 0 && !(await stillAdmin(env, by.userId))) {
+    throw refusal(by, roleErrors.create("role.forbidden"));
+  }
+  return { released: released.length > 0 };
 };
 
 /**
@@ -937,6 +984,16 @@ export class MembersRpc extends CoreRpcTarget implements MembersApi {
     return await withPerson(
       this.#check,
       async (person) => await erasePerson(this.#env, person, userId, name)
+    );
+  }
+
+  async releaseTeamPin(
+    userId: string,
+    teamId: string
+  ): Promise<{ released: boolean }> {
+    return await withPerson(
+      this.#check,
+      async (person) => await releaseTeamPin(this.#env, person, userId, teamId)
     );
   }
 

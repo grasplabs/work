@@ -140,3 +140,11 @@ export const statementsWithin = <Row, Statement>(
   }
   return statements;
 };
+
+/** A random version 4 UUID, as SQL, for each row it is read in. */
+export const uuidSql = sql`lower(
+  hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' ||
+  substr(hex(randomblob(2)), 2) || '-' ||
+  substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) ||
+  '-' || hex(randomblob(6))
+)`;

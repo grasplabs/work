@@ -208,9 +208,10 @@ const frontendResponse = async (
  * (src/guests.ts) has no session: the secret is all it has. Someone's own
  * interview needs the session of the account it belongs to too, which only
  * these routes read for it (src/onboarding/links.ts, interview-caller.ts);
- * its lines are said at the speech endpoint, and what they say is written
- * down over a WebSocket, both also for an admin signed in
- * (src/onboarding/speech.ts, src/onboarding/transcription.ts).
+ * its lines are said at the speech endpoint, also for an admin signed in
+ * (src/onboarding/speech.ts), and what they say is written down over a
+ * WebSocket, which also takes a member's dictation
+ * (src/onboarding/transcription.ts).
  */
 const linkResponse = async (
   pathname: string,
