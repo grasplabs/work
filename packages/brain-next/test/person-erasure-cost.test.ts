@@ -23,18 +23,22 @@ const countedStore = async () => {
 
 type Store = Awaited<ReturnType<typeof countedStore>>["stub"];
 
+/** An add's memories in one person's word: an add takes 100, one more is the rival. */
+const perAdd = 99;
+
 /**
  * Adds `count` memories in `person`'s word, each about an entity of its
- * own, a hundred an add, and has `person` confirm the first of each add.
+ * own, `perAdd` an add, and has `person` confirm the first of each add
+ * over the one more each add holds that says otherwise of it.
  */
 const saidBy = async (
   stub: Store,
   person: string,
   count: number
 ): Promise<void> => {
-  for (let start = 0; start < count; start += 100) {
+  for (let start = 0; start < count; start += perAdd) {
     const keys = Array.from(
-      { length: Math.min(100, count - start) },
+      { length: Math.min(perAdd, count - start) },
       (_, index) => `e${index}`
     );
     // oxlint-disable-next-line no-await-in-loop -- one add at a time
@@ -46,19 +50,35 @@ const saidBy = async (
         kind: "customer",
         names: [`${person} ${start} ${key}`],
       })),
-      memories: keys.map((key) => ({
-        about: key,
-        type: "fact",
-        statement: `${person} said ${start} ${key}`,
-        speaker: { kind: "internal", person },
-        basis: { kind: "writer", writer: "app:cost" },
-      })),
+      memories: [
+        ...keys.map((key) => ({
+          about: key,
+          type: "fact" as const,
+          statement: `${person} said ${start} ${key}`,
+          // The first one's status, which the last says otherwise of.
+          ...(key === "e0" ? { attribute: "status", value: "active" } : {}),
+          speaker: { kind: "internal" as const, person },
+          basis: { kind: "writer" as const, writer: "app:cost" },
+        })),
+        {
+          about: "e0",
+          type: "fact",
+          statement: `${person} heard otherwise ${start}`,
+          attribute: "status",
+          value: "lost",
+          speaker: { kind: "system" },
+          basis: { kind: "writer", writer: "app:rival" },
+        },
+      ],
     });
     // oxlint-disable-next-line no-await-in-loop -- one confirmation at a time
-    await stub.confirmMemory({
+    const confirmed = await stub.confirmMemory({
       memory: memories[0] ?? "",
       reader: { person, groups: [group] },
     });
+    if (confirmed !== "done") {
+      throw new Error("Each add's first memory is confirmed");
+    }
   }
 };
 

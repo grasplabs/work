@@ -41,7 +41,7 @@ export type BrainMemoryOutcome = "done" | "nothing";
 // The Brain's Memories page (`session.brainMemories`, GRA-1746): the
 // entities a person may see, by kind; what the Brain remembers about one,
 // history included, each memory with where it came from; the facts sources
-// disagree on; and the person's confirmation or correction. Core answers
+// disagree on; and the person's settling of one or correction. Core answers
 // each from what they may read alone, as if nothing else existed. An
 // entity and a memory are in one of two stores: the person's own, whose
 // content is theirs alone (nobody else sees it, admins included), or the
@@ -191,7 +191,7 @@ export interface BrainMemoryShown {
   learnedAt: string;
   /** When it stopped being believed, as they see it; null while current. */
   endedAt: string | null;
-  /** A confirmation they may see: when, and whether it was theirs. */
+  /** A confirmation they may see (one that settled a disagreement, or their own correction's): when, and whether it was theirs. */
   confirmed: { at: string; byYou: boolean } | null;
   /** When it starts and stops being true, when it says (ISO 8601); null for no such bound. */
   validFrom: string | null;
@@ -358,7 +358,7 @@ export interface BrainMemoriesApi {
   ) => Promise<BrainMemoryPage>;
   /** A page of the facts sources disagree on that they may read: their own store's first. */
   contested: (next?: BrainMemoryPageNext | null) => Promise<BrainContestedPage>;
-  /** Confirms a current memory they may read, over the sides they may read that say otherwise. */
+  /** Settles a fact sources disagree on: confirms a current side they may read over the sides they may read that say otherwise; `nothing` for a memory nothing contests. */
   confirm: (memory: BrainMemoryPlace) => Promise<BrainMemoryOutcome>;
   /** Says a memory is wrong, with what is right: saved as their own word, for them alone, and confirmed. */
   correct: (correction: BrainCorrection) => Promise<BrainCorrected>;

@@ -1134,20 +1134,32 @@ const currentOneSql = memoriesSql({
 /**
  * The reader confirms the memory `id`, current and readable to them, over
  * the current memories they may read that say something else of its
- * entity and one-value attribute (contract.ts `confirmMemory`). Run in one
- * transaction: what it reads and writes is one snapshot.
+ * entity and one-value attribute (contract.ts `confirmMemory`): a side of
+ * a fact they may read sources disagree on, or, as a `correction`, their
+ * own word whatever contests it. A saved memory is taken as correct, so
+ * any other is `nothing`. Run in one transaction: what it reads and writes
+ * is one snapshot.
  */
 export const confirmMemory = (
   sql: SqlStorage,
-  { id, reader }: { id: string; reader: PersonReader }
+  {
+    id,
+    reader,
+    correction = false,
+  }: { id: string; reader: PersonReader; correction?: boolean }
 ): MemoryChangeOutcome => {
   const at = readMoment(sql);
   const [target] = memoryRows(sql, currentOneSql, id, reader, at, 1);
   if (target === undefined) {
     return "nothing";
   }
+  // A contested memory has an attribute: `rivalSql` asks for one.
+  const settles = target.attribute !== null && target.contested === 1;
+  if (!settles && !(correction && target.writer === reader.person)) {
+    return "nothing";
+  }
   const over =
-    target.attribute === null || target.contested === 0
+    target.attribute === null || !settles
       ? []
       : memoryRows(
           sql,
