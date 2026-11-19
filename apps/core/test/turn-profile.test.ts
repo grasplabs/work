@@ -1,7 +1,7 @@
 import { personalBrainOf } from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import {
@@ -16,7 +16,7 @@ import {
 } from "../../../scripts/seed/documents.ts";
 import { addSource, forgetAs, rememberAs } from "../src/brain-next.ts";
 import { keepAudience } from "../src/chat-audiences.ts";
-import { personalWorkspaceId } from "../src/chats-rpc.ts";
+import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
 import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import {
   chatOf,
@@ -106,14 +106,46 @@ const handedSchema = z.object({ evidence: z.array(z.unknown()) });
 const sentOf = (requests: readonly { body: unknown }[]): string =>
   JSON.stringify(requests.map(({ body }) => body));
 
+/** `personId`'s own chats with Grasp's own chat agent, answered by `replies`. */
+const ownChatsOf = async (personId: string, ...replies: ProviderReply[]) => {
+  const stub = workspace(env, personalWorkspaceId(personId));
+  const provider = await fakeProvider(...replies);
+  const newChat = async (agentId = chatAgentId) => {
+    const chat = await stub.createChat("Questions", personId, agentId);
+    return {
+      chat,
+      ask: async (text: string) => await stub.ask(chat.id, { text, model }),
+    };
+  };
+  return { stub, provider, newChat };
+};
+
+/** An agent an admin made, everyone may ask. */
+const madeAgent = async (
+  admin: Awaited<ReturnType<typeof signedInApi>>,
+  name: string
+) => {
+  const agent = await admin.api.connections.makeAgent({
+    name,
+    face: "pen",
+    job: `${name}'s job.`,
+    modelRole: null,
+  });
+  await admin.api.connections.setAgentReach(agent.id, true, {
+    who: "everyone",
+  });
+  return agent;
+};
+
 describe("the profile without the Brain grant", setUpTime, () => {
   // GRA-2202: what a person told Grasp about themselves reaches their own
-  // later chats on the chat agent as Grasp ships it, with no Brain grant;
-  // never a chat others read, a retired memory, or another person's.
-  it("is in the model's input in a new chat of theirs, whatever the question's words", async () => {
+  // later chats with Grasp's own chat agent, with no Brain grant; never a
+  // chat others read, a woken turn, another agent without the grant, a
+  // retired memory, or another person's.
+  it("is in the model's input in a new chat of theirs, whatever the question's words, with no search step", async () => {
     const { personId } = await memberAndAdmin();
     await aboutThemselves(personId, "Pizza is my favourite food");
-    const chats = await personalChatsOf(personId, says("Pizza."), says("Yes."));
+    const chats = await ownChatsOf(personId, says("Pizza."), says("Yes."));
     const asked = [];
     for (const question of [
       "whats ym favourite food",
@@ -134,46 +166,135 @@ describe("the profile without the Brain grant", setUpTime, () => {
     expect(asked).toStrictEqual([true, true]);
   });
 
-  it("is never in a chat others share, nor in another person's own chat", async () => {
+  it("is never in a chat others share, a woken turn, nor another person's own chat", async () => {
     const [{ personId }, other] = await Promise.all([
       memberAndAdmin(),
       signedInWithRole(idp, "user"),
     ]);
     const mark = word();
     await aboutThemselves(personId, `My badge word is ${mark}`);
-    const stub = workspace(env, personalWorkspaceId(personId));
-    const provider = await fakeProvider(says("Shared."));
-    const chat = await stub.createChat(
+    const chats = await ownChatsOf(
+      personId,
+      says("Shared."),
+      says("Woken."),
+      says("No idea.")
+    );
+    const shared = await chats.stub.createChat(
       "Shared",
       personId,
-      crypto.randomUUID(),
+      chatAgentId,
       undefined,
       "web",
       `T${unique()}`
     );
     await keepAudience(
       env,
-      { workspaceId: personalWorkspaceId(personId), chatId: chat.id },
+      { workspaceId: personalWorkspaceId(personId), chatId: shared.id },
       personId,
       { members: [personId, other.userId], outsiders: false }
     );
-    await stub.ask(chat.id, { text: "What is my badge word?", model });
-    const shared = sentOf(provider.requests);
-    const theirs = await personalChatsOf(other.userId, says("No idea."));
-    const theirChat = await theirs.newChat();
-    await theirChat.ask("What is my badge word?");
+    const seen = async (act: () => Promise<unknown>) => {
+      const before = chats.provider.requests.length;
+      await act();
+      return sentOf(chats.provider.requests.slice(before)).includes(mark);
+    };
+    const woken = await chats.newChat();
+    const theirs = await workspace(
+      env,
+      personalWorkspaceId(other.userId)
+    ).createChat("Questions", other.userId, chatAgentId);
 
     expect({
-      shared: shared.includes(mark),
-      other: sentOf(theirs.provider.requests).includes(mark),
-    }).toStrictEqual({ shared: false, other: false });
+      shared: await seen(
+        async () =>
+          await chats.stub.ask(shared.id, {
+            text: "What is my badge word?",
+            model,
+          })
+      ),
+      woken: await seen(
+        async () =>
+          await chats.stub.askUnattended(woken.chat.id, {
+            text: "What is my badge word?",
+            model,
+          })
+      ),
+      other: await seen(
+        async () =>
+          await workspace(env, personalWorkspaceId(other.userId)).ask(
+            theirs.id,
+            { text: "What is my badge word?", model }
+          )
+      ),
+    }).toStrictEqual({ shared: false, woken: false, other: false });
+  });
+
+  it("is only Grasp's own chat agent's without the grant: an agent an admin made gets it once granted, also when addressed after another", async () => {
+    const { admin, personId } = await memberAndAdmin();
+    const mark = word();
+    await aboutThemselves(personId, `My badge word is ${mark}`);
+    const [plain, granted] = await Promise.all([
+      madeAgent(admin, "Claire"),
+      madeAgent(admin, "Pat"),
+    ]);
+    await requestGranted(idp, admin, {
+      subject: { type: "agent", agentId: granted.id },
+      object: { type: "platform" },
+      actions: ["brain"],
+      binding: "BRAIN",
+    });
+    const chats = await ownChatsOf(
+      personId,
+      says("Plain."),
+      says("Granted."),
+      says("Claire."),
+      says("Pat.")
+    );
+    const seen = async (agentId: string) => {
+      const { ask } = await chats.newChat(agentId);
+      const before = chats.provider.requests.length;
+      await ask("What is my badge word?");
+      return sentOf(chats.provider.requests.slice(before)).includes(mark);
+    };
+    const alone = {
+      plain: await seen(plain.id),
+      granted: await seen(granted.id),
+    };
+    // Both addressed in one question: each turn by its own agent's rule.
+    const { chat } = await chats.newChat(plain.id);
+    const before = chats.provider.requests.length;
+    await chats.stub.send(chat.id, personId, {
+      text: "@Claire @Pat what is my badge word?",
+      model,
+      mentions: [
+        { kind: "agent", id: plain.id, name: "Claire" },
+        { kind: "agent", id: granted.id, name: "Pat" },
+      ],
+    });
+    await vi.waitFor(
+      () => {
+        expect(chats.provider.requests).toHaveLength(before + 2);
+      },
+      { timeout: 20_000 }
+    );
+    const [first, next] = chats.provider.requests.slice(before);
+
+    expect({
+      alone,
+      addressed: [first, next].map((request) =>
+        JSON.stringify(request?.body).includes(mark)
+      ),
+    }).toStrictEqual({
+      alone: { plain: false, granted: true },
+      addressed: [false, true],
+    });
   });
 
   it("leaves out a memory they had Grasp forget, in a new chat and from a later request of the chat that had it", async () => {
     const { personId } = await memberAndAdmin();
     const mark = word();
     const saved = await aboutThemselves(personId, `My desk is ${mark}`);
-    const chats = await personalChatsOf(
+    const chats = await ownChatsOf(
       personId,
       says("Noted."),
       says("Again."),

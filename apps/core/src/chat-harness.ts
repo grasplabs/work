@@ -1085,11 +1085,8 @@ export class ChatHarness {
     // audited as the first was. Who reads the answer decides what it may
     // hand over (turn-recall.ts).
     // Without the Brain grant, only the person's own profile, in their own
-    // chat (turn-recall.ts `ownProfileOf`, GRA-2202).
-    const recall =
-      request.readsBrain || request.personal
-        ? await this.#recall(turn, request)
-        : undefined;
+    // chat with Grasp's own agent (turn-recall.ts `findsOf`, GRA-2202).
+    const recall = await this.#recall(turn, request);
     try {
       return await this.#conversation.submit(
         {
@@ -1116,7 +1113,8 @@ export class ChatHarness {
               ...(request.question.built === undefined
                 ? {}
                 : { built: shownBuilt(request.question.built) }),
-              ...(recall === undefined
+              // A step for a search alone: a profile handed over is none.
+              ...(recall === undefined || !recall.searched
                 ? {}
                 : {
                     recall: {

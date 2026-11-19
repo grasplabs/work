@@ -16,7 +16,8 @@ import {
   recalledTokens,
   rememberAs,
 } from "../src/brain-next.ts";
-import { appHost, inJurisdiction } from "../src/durable-objects.ts";
+import { chatAgentId, personalWorkspaceId } from "../src/chats-rpc.ts";
+import { appHost, inJurisdiction, workspace } from "../src/durable-objects.ts";
 import { heldStartMs } from "../src/held-starts.ts";
 import { turnRecallBudget } from "../src/turn-recall.ts";
 import {
@@ -451,6 +452,55 @@ describe("what a chat writes for others once it used something only its person m
           chats.provider.requests.map(({ body }) => body)
         ).includes(statement),
         after: await titles(),
+      }).toStrictEqual({ answers: ["held"], handed: true, after: [] });
+      await eventsOf("chat.private_read", chat.id, 1);
+    }
+  );
+
+  it(
+    "holds a write after a turn that handed Grasp's own chat agent the person's profile without the Brain grant (GRA-2202)",
+    slow,
+    async () => {
+      const builder = await signedInApi(idp, "builder");
+      const { app, release } = await liveNotes(builder);
+      const marker = `profile-${unique()}`;
+      const provider = await fakeProvider(
+        writesNote(app, release, marker),
+        says("It waits for you.")
+      );
+      // Grasp's own chat agent, granted the App and not the Brain.
+      await requestGranted(idp, builder, {
+        subject: { type: "agent", agentId: chatAgentId },
+        object: { type: "app", appId: app },
+        actions: ["read", "write"],
+        binding: "NOTES",
+      });
+      const statement = `Leads the ${word()} depot`;
+      await rememberAs(env, builder.userId, {
+        change: crypto.randomUUID(),
+        about: { kind: "person", own: true },
+        type: "fact",
+        statement,
+        quote: statement,
+      });
+      const stub = workspace(env, personalWorkspaceId(builder.userId));
+      const chat = await stub.createChat(
+        "Questions",
+        builder.userId,
+        chatAgentId
+      );
+
+      await stub.ask(chat.id, {
+        text: `Add a note about the ${word()} keys.`,
+        model,
+      });
+
+      expect({
+        answers: await answers(stub, chat.id),
+        handed: JSON.stringify(
+          provider.requests.map(({ body }) => body)
+        ).includes(statement),
+        after: await noteTitles(builder.userId, app, release),
       }).toStrictEqual({ answers: ["held"], handed: true, after: [] });
       await eventsOf("chat.private_read", chat.id, 1);
     }
