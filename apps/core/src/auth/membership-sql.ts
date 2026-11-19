@@ -20,29 +20,61 @@ export const organizationId = "organization";
  * nothing brings a removed person back.
  */
 export const notRemoved = (
-  userId: string | SQLiteColumn
+  userId: string | SQLiteColumn | SQL
 ): SQL => sql`NOT EXISTS (
   SELECT 1 FROM ${memberRemovals}
   WHERE ${memberRemovals.organizationId} = ${organizationId}
     AND ${memberRemovals.userId} = ${userId}
 )`;
 
+/**
+ * That `userId` (an ID, or a column holding one) may act, and be read as,
+ * in the organization now, as a SQL condition: the one check everything
+ * that decides so shares (sign-in, every RPC, Apps, agents and workflows
+ * acting for them, Teams and Slack, the counts of a team's people). An
+ * admin's removal is the reason today; `notRemoved` alone asks only that,
+ * for removal itself, erasure's "removed first" and the directory's tie.
+ */
+export const mayAct = (userId: string | SQLiteColumn | SQL): SQL =>
+  notRemoved(userId);
+
 /** `members`, as `activeMember` reads it: apart from any caller's. */
 const activeMembership = alias(members, "active_membership");
 
 /**
- * That `userId` (an ID, or a column holding one) is an active member of
- * the organization now, with one of `roles` if given, as a SQL condition.
- * Its own read of `members` is aliased: a caller's column of `members`
- * (a query on members itself) is that caller's row, never this read's.
+ * That `userId` (an ID, or a column holding one) is a member of the
+ * organization, with one of `roles` if given, while `standing` holds of
+ * them, as a SQL condition. Its own read of `members` is aliased: a
+ * caller's column of `members` (a query on members itself) is that
+ * caller's row, never this read's.
  */
-export const activeMember = (
+const memberWhile = (
   userId: string | SQLiteColumn | SQL,
-  withRoles?: readonly string[]
+  withRoles: readonly string[] | undefined,
+  standing: (user: SQLiteColumn) => SQL
 ): SQL => sql`EXISTS (
   SELECT 1 FROM ${members} AS ${activeMembership}
   WHERE ${activeMembership.organizationId} = ${organizationId}
     AND ${activeMembership.userId} = ${userId}
     ${withRoles === undefined ? sql`` : sql`AND ${inList(activeMembership.role, withRoles)}`}
-    AND ${notRemoved(activeMembership.userId)}
+    AND ${standing(activeMembership.userId)}
 )`;
+
+/**
+ * That `userId` is a member who may act now (`mayAct`), with one of
+ * `roles` if given, as a SQL condition.
+ */
+export const activeMember = (
+  userId: string | SQLiteColumn | SQL,
+  withRoles?: readonly string[]
+): SQL => memberWhile(userId, withRoles, mayAct);
+
+/**
+ * That `userId` is a member an admin hasn't removed, whether or not they
+ * may act now, as a SQL condition: for removal itself and the directory's
+ * tie (`notRemoved`).
+ */
+export const memberNotRemoved = (
+  userId: string | SQLiteColumn | SQL,
+  withRoles?: readonly string[]
+): SQL => memberWhile(userId, withRoles, notRemoved);

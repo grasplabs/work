@@ -2,7 +2,7 @@ import { and, count, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { organizationId } from "./auth/auth.ts";
-import { notRemoved } from "./auth/membership-sql.ts";
+import { mayAct } from "./auth/membership-sql.ts";
 import { members, teamMembers } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 
@@ -35,7 +35,7 @@ export const teamsOfAtLeast = async (
       and(
         // One bound value however many teams: D1 binds 100 a statement.
         inList(teamMembers.teamId, teamIds),
-        notRemoved(teamMembers.userId)
+        mayAct(teamMembers.userId)
       )
     )
     .groupBy(teamMembers.teamId);
@@ -58,10 +58,7 @@ export const largeEnoughAudiences = async (
       .select({ members: count() })
       .from(members)
       .where(
-        and(
-          eq(members.organizationId, organizationId),
-          notRemoved(members.userId)
-        )
+        and(eq(members.organizationId, organizationId), mayAct(members.userId))
       ),
     teamsOfAtLeast(database, teamIds, shareAudienceMembersMin),
   ]);

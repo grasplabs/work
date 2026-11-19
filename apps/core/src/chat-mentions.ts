@@ -8,7 +8,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import type { QuestionMention } from "./agent.ts";
 import { appFor } from "./apps.ts";
-import { currentMembership, notRemoved, organizationId } from "./auth/auth.ts";
+import { currentMembership, mayAct, organizationId } from "./auth/auth.ts";
 import { teamsOf } from "./auth/identity.ts";
 import { chatAgentsFor } from "./chat-agents.ts";
 import { members, users } from "./db/core/schema.ts";
@@ -113,10 +113,7 @@ export const mentionablePeople = async (
     .from(members)
     .innerJoin(users, eq(users.id, members.userId))
     .where(
-      and(
-        eq(members.organizationId, organizationId),
-        notRemoved(members.userId)
-      )
+      and(eq(members.organizationId, organizationId), mayAct(members.userId))
     )
     .orderBy(asc(users.name), asc(users.id));
   const admin = isMemberAdmin(by);

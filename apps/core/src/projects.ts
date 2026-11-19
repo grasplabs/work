@@ -56,7 +56,7 @@ import {
   outboxedIfChanged,
   storedEvent,
 } from "./audit-outbox.ts";
-import { activeMember, notRemoved, organizationId } from "./auth/auth.ts";
+import { activeMember, mayAct, organizationId } from "./auth/auth.ts";
 import {
   apps,
   appMembers,
@@ -908,7 +908,7 @@ export const projectShareCandidates = async (
       .where(
         and(
           eq(members.organizationId, organizationId),
-          notRemoved(members.userId),
+          mayAct(members.userId),
           ne(users.id, project.ownerId),
           inIt("person", users.id)
         )

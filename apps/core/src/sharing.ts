@@ -11,7 +11,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
-import { activeMember, notRemoved, organizationId } from "./auth/auth.ts";
+import { activeMember, mayAct, organizationId } from "./auth/auth.ts";
 import { memberRole } from "./auth/identity.ts";
 import { members, projects, teams, users } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
@@ -202,10 +202,7 @@ export const organizationPeopleAndTeams = async (
       .from(members)
       .innerJoin(users, eq(users.id, members.userId))
       .where(
-        and(
-          eq(members.organizationId, organizationId),
-          notRemoved(members.userId)
-        )
+        and(eq(members.organizationId, organizationId), mayAct(members.userId))
       )
       .orderBy(asc(users.name), asc(users.id)),
     db

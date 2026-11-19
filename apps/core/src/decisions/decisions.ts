@@ -44,7 +44,7 @@ import {
   outboxedIfChanged,
   outboxedWhere,
 } from "../audit-outbox.ts";
-import { notRemoved, organizationId } from "../auth/auth.ts";
+import { mayAct, organizationId } from "../auth/auth.ts";
 import { signInConfig } from "../auth/config.ts";
 import type { Member } from "../auth/identity.ts";
 import { tellInChat } from "../channels/reach.ts";
@@ -573,7 +573,7 @@ const eligibleMembers = (
   return (
     and(
       eq(members.organizationId, organizationId),
-      notRemoved(members.userId),
+      mayAct(members.userId),
       or(named, recipientsCondition(run.id)),
       starter
     ) ?? sql`0`

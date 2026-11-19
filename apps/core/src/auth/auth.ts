@@ -68,11 +68,22 @@ import {
   providerIds,
 } from "./config.ts";
 import type { OidcProvider } from "./config.ts";
-import { activeMember, notRemoved, organizationId } from "./membership-sql.ts";
+import {
+  activeMember,
+  mayAct,
+  notRemoved,
+  organizationId,
+} from "./membership-sql.ts";
 
 // Kept apart (membership-sql.ts), with nothing but the schema imported, so
 // access checks read by the revocations this file reaches can use them.
-export { activeMember, notRemoved, organizationId } from "./membership-sql.ts";
+export {
+  activeMember,
+  mayAct,
+  memberNotRemoved,
+  notRemoved,
+  organizationId,
+} from "./membership-sql.ts";
 
 /** Better Auth's routes, under core's API. */
 export const authBasePath = "/api/auth";
@@ -130,19 +141,27 @@ const authLogger = {
 
 /**
  * `userId`'s current membership of the organization, as a SQL condition on
- * `members`: none once an admin removed them.
+ * `members`: none once they may no longer act (`mayAct`).
  */
 export const currentMembership = (userId: string): SQL | undefined =>
   and(
     eq(members.organizationId, organizationId),
     eq(members.userId, userId),
-    notRemoved(userId)
+    mayAct(userId)
   );
 
 /** Whether an admin removed `userId` from the organization. */
 export const isRemoved = async (env: Env, userId: string): Promise<boolean> => {
   const row = await drizzle(env.DB).get<{ member: number }>(
     sql`SELECT ${notRemoved(userId)} AS member`
+  );
+  return row.member === 0;
+};
+
+/** Whether `userId` may no longer act or be read as (`mayAct`). */
+export const mayNotAct = async (env: Env, userId: string): Promise<boolean> => {
+  const row = await drizzle(env.DB).get<{ member: number }>(
+    sql`SELECT ${mayAct(userId)} AS member`
   );
   return row.member === 0;
 };
@@ -155,7 +174,7 @@ export const activeAdminExists = (except?: string): SQL => sql`EXISTS (
   SELECT 1 FROM ${members}
   WHERE ${members.organizationId} = ${organizationId}
     AND ${members.role} = 'admin'
-    AND ${notRemoved(members.userId)}
+    AND ${mayAct(members.userId)}
     ${except === undefined ? sql`` : sql`AND ${members.userId} <> ${except}`}
 )`;
 
@@ -190,7 +209,7 @@ const restoreAdmin = async (env: Env, userId: string): Promise<void> => {
       .where(
         and(
           eq(members.id, membership.id),
-          notRemoved(userId),
+          mayAct(userId),
           sql`NOT ${activeAdminExists()}`
         )
       ),
@@ -353,7 +372,7 @@ const ensureMember = async (
   if (configuredAdmin) {
     await restoreAdmin(env, userId);
   }
-  return !(await isRemoved(env, userId));
+  return !(await mayNotAct(env, userId));
 };
 
 /** `userId`'s address, as their sign-in gave it. */
@@ -671,7 +690,7 @@ const startSession = async <T extends { expiresAt: Date; userId: string }>(
   // `/organization/` hook). Nobody an admin removed comes in for one either.
   const { userId } = session;
   return (await interviewInvites(env, await emailOf(env, userId))) &&
-    !(await isRemoved(env, userId))
+    !(await mayNotAct(env, userId))
     ? { data: { ...session, userId, staff: false, interview: true } }
     : false;
 };
@@ -1008,7 +1027,7 @@ const createAuth = (
         if (
           caller &&
           (caller.session.interview === true ||
-            (await isRemoved(env, caller.user.id)))
+            (await mayNotAct(env, caller.user.id)))
         ) {
           throw new APIError("FORBIDDEN", { message: "Not a member." });
         }
