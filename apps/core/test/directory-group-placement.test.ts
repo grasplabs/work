@@ -5,6 +5,9 @@ import { z } from "zod";
 import { landingAt } from "./d1-landing.ts";
 import {
   connectedDirectory,
+  connectedGoogleDirectory,
+  googleDirectoryHolds,
+  googleDirectoryUser,
   directoryGroup as group,
   directoryGroupFails,
   directoryGroupsHold,
@@ -412,6 +415,42 @@ describe("teams that follow directory groups", () => {
       during: { vic: [second], readAt: null },
       // The next read reads the group for Support: Uma joins, Vic leaves.
       after: { uma: true, vic: [] },
+    });
+  });
+
+  it("are read by the Entra directory's read alone: the Google directory's read reads no group and leaves their rows and teams as they are", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const wes = await member();
+    await directoryHolds([inDirectory({ id: wes.oid })]);
+    const team = await teamNamed(admin.session, unique("Legal"));
+    const legal = group();
+    const id = String(legal.id);
+    await directoryGroupsHold([legal], { [id]: listing(wes) });
+    await admin.api.directoryGroups.mapToTeam(id, team);
+    days += 2;
+    const at = new Date(Date.now() + days * dayMs);
+    await runClockTask("directory.people", {}, at);
+    const before = {
+      rows: await rowsOf(wes.oid),
+      teams: await teamsOf(wes.userId),
+    };
+    // Graph would fail the group now: a read of it fails the whole read.
+    await directoryGroupFails(id);
+    await connectedGoogleDirectory(idp);
+    await googleDirectoryHolds([googleDirectoryUser()]);
+    // The same slot: Entra's read was applied in it, Google's is due.
+    await runClockTask("directory.people", {}, at);
+    const google = await env.DB.prepare(
+      "SELECT failure, read_at IS NOT NULL AS applied FROM directory_reads WHERE provider = 'google-directory'"
+    ).first<{ failure: string | null; applied: number }>();
+    expect({
+      before,
+      google,
+      after: { rows: await rowsOf(wes.oid), teams: await teamsOf(wes.userId) },
+    }).toStrictEqual({
+      before: { rows: 1, teams: [team] },
+      google: { failure: null, applied: 1 },
+      after: { rows: 1, teams: [team] },
     });
   });
 

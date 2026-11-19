@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "3586ba48-54b7-40d9-a063-1391078c96e6",
+  "id": "277f8c67-7d0b-4e5f-b5f0-659ecdc52392",
   "prevId": "72903dba-615b-4f29-bb20-07b7b3aae5a0",
   "tables": {
     "access_revocations": {
@@ -230,6 +230,14 @@
           "columns": [
             "provider_id",
             "lower(\"oid\")"
+          ],
+          "isUnique": false
+        },
+        "accounts_provider_account_lower_idx": {
+          "name": "accounts_provider_account_lower_idx",
+          "columns": [
+            "provider_id",
+            "lower(\"account_id\")"
           ],
           "isUnique": false
         },
@@ -7035,97 +7043,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "directory_group_members": {
-      "name": "directory_group_members",
-      "columns": {
-        "provider": {
-          "name": "provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tenant": {
-          "name": "tenant",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "group_id": {
-          "name": "group_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "account_id": {
-          "name": "account_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "directory_group_members_person_idx": {
-          "name": "directory_group_members_person_idx",
-          "columns": [
-            "provider",
-            "tenant",
-            "account_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "directory_group_members_provider_tenant_account_id_directory_people_provider_tenant_account_id_fk": {
-          "name": "directory_group_members_provider_tenant_account_id_directory_people_provider_tenant_account_id_fk",
-          "tableFrom": "directory_group_members",
-          "tableTo": "directory_people",
-          "columnsFrom": [
-            "provider",
-            "tenant",
-            "account_id"
-          ],
-          "columnsTo": [
-            "provider",
-            "tenant",
-            "account_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "directory_group_members_provider_group_id_directory_group_teams_provider_group_id_fk": {
-          "name": "directory_group_members_provider_group_id_directory_group_teams_provider_group_id_fk",
-          "tableFrom": "directory_group_members",
-          "tableTo": "directory_group_teams",
-          "columnsFrom": [
-            "provider",
-            "group_id"
-          ],
-          "columnsTo": [
-            "provider",
-            "group_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "directory_group_members_provider_group_id_tenant_account_id_pk": {
-          "columns": [
-            "provider",
-            "group_id",
-            "tenant",
-            "account_id"
-          ],
-          "name": "directory_group_members_provider_group_id_tenant_account_id_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "directory_group_teams": {
       "name": "directory_group_teams",
       "columns": {
@@ -7181,13 +7098,6 @@
         "read_at": {
           "name": "read_at",
           "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "held": {
-          "name": "held",
-          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -18412,6 +18322,13 @@
       "accounts_provider_oid_lower_idx": {
         "columns": {
           "lower(\"oid\")": {
+            "isExpression": true
+          }
+        }
+      },
+      "accounts_provider_account_lower_idx": {
+        "columns": {
+          "lower(\"account_id\")": {
             "isExpression": true
           }
         }
