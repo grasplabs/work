@@ -1152,6 +1152,28 @@ export const memoryConfirmedOver = sqliteTable(
 );
 
 /**
+ * A memory its writer said replaces another of theirs (contract.ts
+ * `NewMemory.replaces`): `replaced` ends from `memory`'s start, for a
+ * reader who may read `memory`, while `memory` isn't retired (memories.ts
+ * `newerSql`). Goes with either memory when it is deleted.
+ */
+export const memoryReplacements = sqliteTable(
+  "memory_replacements",
+  {
+    memory: integer()
+      .notNull()
+      .references(() => memories.row, { onDelete: "cascade" }),
+    replaced: integer()
+      .notNull()
+      .references(() => memories.row, { onDelete: "cascade" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.memory, table.replaced] }),
+    index("memory_replacements_replaced_idx").on(table.replaced),
+  ]
+);
+
+/**
  * A version of a source fully extracted (contract.ts `extracted`): every
  * memory of its source's lineage from an earlier version ends at `at`,
  * for readers of both the add that marked it and this version. Deleted

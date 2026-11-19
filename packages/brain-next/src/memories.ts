@@ -188,7 +188,10 @@ const outSql = (alias: string, at: string, only = ""): string => `
  * its lineage (a later version's, or a later row of the same), about the
  * same entity and attribute and, for an attribute of many values, the
  * same value; for a memory filed under no attribute, a restatement of it
- * (remember.ts `valueKeyFor`): each learned by `learned` and started by
+ * (remember.ts `valueKeyFor`); and those that name it as one they replace
+ * (`memory_replacements`, contract.ts `NewMemory.replaces`: of its
+ * lineage and entity, as their add checked), whatever their attribute:
+ * each learned by `learned` and started by
  * `valid` (its world start, or when it was learned), and neither retired
  * nor out by `learned`: a retired memory ends nothing, so forgetting a
  * newer value makes the one before current again; nor does one whose
@@ -221,7 +224,10 @@ export const newerSql = (
     AND NOT EXISTS (${outSql("newer", learned)})
     ${visible ? `AND ${visibleSql("newer")}` : ""}
     ${only}`;
+  // One term of the statement it is in, whose compound holds few
+  // (workerd's SQLite): its three ways in a compound of their own.
   return `
+  SELECT at FROM (
   SELECT ${startSql("newer")} AS at FROM memories AS newer
   WHERE ${alias}.one_value = 1
     AND newer.entity = ${alias}.entity
@@ -233,7 +239,12 @@ export const newerSql = (
     AND newer.entity = ${alias}.entity
     AND newer.attribute IS ${alias}.attribute
     AND newer.lineage = ${alias}.lineage
-    AND newer.value_key = ${alias}.value_key${rest}`;
+    AND newer.value_key = ${alias}.value_key${rest}
+  UNION ALL
+  SELECT ${startSql("newer")} AS at FROM memory_replacements AS named
+  CROSS JOIN memories AS newer ON newer.row = named.memory
+  WHERE named.replaced = ${alias}.row${rest}
+  )`;
 };
 
 /**

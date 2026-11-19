@@ -2296,6 +2296,12 @@ const isPersonsOwnWordOnly = (
  * relation (what one-value attributes are compared by, folded as search
  * folds words); its type, statement, world clock (`validUntil` after
  * `validFrom`), whose word it is, and what it rests on.
+ *
+ * `replaces` names memories its writer says it replaces (GRA-2184): each
+ * one ends from this one's start, as a newer memory of its lineage ends
+ * one, for a reader who may read this one; this one retired, it ends
+ * nothing. Only a writer's memory names any: one drawn from a source ends
+ * by its source's versions. At most as many as an add's memories.
  */
 export const newMemorySchema = z
   .strictObject({
@@ -2309,7 +2315,15 @@ export const newMemorySchema = z
     validUntil: z.date().optional(),
     speaker: speakerSchema,
     basis: memoryBasisSchema,
+    replaces: z.array(memoryIdSchema).min(1).max(memoriesPerAddMax).optional(),
   })
+  .refine(
+    ({ replaces, basis }) => replaces === undefined || basis.kind === "writer",
+    {
+      message: "Only a writer's memory replaces memories",
+      path: ["replaces"],
+    }
+  )
   .refine(
     ({ validFrom, validUntil }) =>
       validFrom === undefined ||
@@ -3606,7 +3620,10 @@ export interface Brain {
    * object or names one of another kind, a value is missing or given to a
    * relation, a source version isn't one this store holds (erased ones
    * included), a person's own store is given anyone else's readers, or the
-   * change was added before with other memories. An identifier a person's
+   * change was added before with other memories, or a memory names in
+   * `replaces` one it may not: one that isn't of its own lineage, about
+   * its entity, and readable by the add's `reader` (which `replaces`
+   * needs), all refused alike, as one there isn't. An identifier a person's
    * erasure closed is left out (`erasePersonShared`); when the add is
    * drawn from a source, so is that person's card with what is about it
    * or relates to it, which the answer then doesn't name. The same change

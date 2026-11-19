@@ -839,6 +839,17 @@ const restoreMemory = async (
           : extractorRowOf(sql, line.extractor)
       )
       .one();
+    // What it replaces, of what this store holds, as its add checked it:
+    // each restored before it, as lines come in the store's order.
+    if (line.replaces !== undefined) {
+      sql.exec(
+        `INSERT INTO memory_replacements (memory, replaced)
+        SELECT ?1, row FROM memories
+        WHERE id IN (SELECT value FROM json_each(?2))`,
+        row,
+        JSON.stringify(line.replaces)
+      );
+    }
     indexMemoryWords(sql, row, line.statement, new Map());
     // Without an identifier a person's erasure closed, as an add keeps it.
     const kept = strippedOf(

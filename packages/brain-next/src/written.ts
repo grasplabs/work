@@ -128,7 +128,8 @@ export const listWritten = (
  *
  * In the same statement, every older memory of theirs it ends (memories.ts
  * `newerSql`: the same entity and attribute, and for an attribute of many
- * values or none, the same value) is retired too, under the same change:
+ * values or none, the same value; or one it replaces) is retired too,
+ * under the same change:
  * a retired memory ends nothing, so taking back the newer of two copies
  * would otherwise make the older one current again for its readers.
  */
@@ -150,6 +151,10 @@ export const retireWritten = (
       WHERE m.lineage = ?2 AND m.retired_at IS NULL AND ${unerasedSql("m")}
         AND EXISTS (
           SELECT 1 FROM taken WHERE taken.row = m.row
+            OR EXISTS (
+              SELECT 1 FROM memory_replacements AS named
+              WHERE named.memory = taken.row AND named.replaced = m.row
+            )
             OR (taken.entity = m.entity
               AND (taken.lineage_order > m.lineage_order
                 OR (taken.lineage_order = m.lineage_order AND taken.row > m.row))

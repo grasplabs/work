@@ -29,6 +29,7 @@ import {
   lineageOfSource,
   lineageOfWriter,
   stampWrite,
+  visibleSql,
 } from "./memories.ts";
 import { isOwnEntityRow, ownEntityRow } from "./own-entity.ts";
 import {
@@ -40,7 +41,12 @@ import {
 import type { Naming } from "./people.ts";
 import { CurrentTextsNeededError, heldIn, judgeLate } from "./quotes.ts";
 import type { CurrentText, CurrentTexts, Written } from "./quotes.ts";
-import { accessOfKey, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
+import {
+  accessOfKey,
+  readableSql,
+  readerSetKeyOf,
+  readerSetOf,
+} from "./reader-sets.ts";
 import { isRestoring } from "./restoring.ts";
 import { foldForSearch, indexMemoryWords } from "./words.ts";
 import type { WordMemo } from "./words.ts";
@@ -334,6 +340,8 @@ interface Into {
   restatements: readonly string[];
   /** The calls that drew each memory, by its place in the add as asked; none for an add extraction didn't make. */
   extractors: readonly Extractor[] | undefined;
+  /** Who the add is made for, as the host resolved them (contract.ts `NewMemories.reader`). */
+  reader: Adding["reader"];
   learnedAt: number;
   memo: WordMemo;
 }
@@ -510,6 +518,50 @@ const keepMentions = (into: Into, plan: Planned, row: number): void => {
 };
 
 /**
+ * Records that the memory of row `row` replaces each memory `replaces`
+ * names, if any (contract.ts `NewMemory.replaces`), refused unless every
+ * one is of its lineage, about its entity and readable by the add's
+ * reader (so none without one), no erasure hiding it: one that isn't is
+ * refused as one there isn't. Each was stored before it, so is earlier in
+ * its lineage: a replacement never comes round to itself.
+ */
+const keepReplaces = (
+  into: Into,
+  { row, lineage, entity }: { row: number; lineage: string; entity: number },
+  replaces: readonly string[] | undefined,
+  index: number
+): void => {
+  if (replaces === undefined) {
+    return;
+  }
+  const { reader } = into;
+  const asked = [...new Set(replaces)];
+  const written =
+    reader === undefined
+      ? 0
+      : into.sql
+          .exec(
+            `WITH ${readableSql}
+            INSERT INTO memory_replacements (memory, replaced)
+            SELECT ?1, m.row FROM memories AS m
+            WHERE m.id IN (SELECT value FROM json_each(?4))
+              AND m.lineage = ?5 AND m.entity = ?6
+              AND ${visibleSql("m")}
+            RETURNING replaced`,
+            row,
+            reader.person,
+            JSON.stringify(reader.groups),
+            JSON.stringify(asked),
+            lineage,
+            entity
+          )
+          .toArray().length;
+  if (written !== asked.length) {
+    throw refused(`memory ${index} replaces a memory it may not name`);
+  }
+};
+
+/**
  * Writes `memory`, the add's `index`th, with its words and stems and the
  * names and identifiers of the entities it mentions, as it gave them.
  * Answers its id, and its row with what it rests on.
@@ -564,6 +616,12 @@ const writeMemory = (
       extractor === undefined ? null : extractorRowOf(sql, extractor)
     )
     .one();
+  keepReplaces(
+    into,
+    { row, lineage: based.lineage, entity: aboutRow },
+    memory.replaces,
+    index
+  );
   indexMemoryWords(sql, row, memory.statement, into.memo);
   keepMentions(into, plan, row);
   return {
@@ -762,6 +820,7 @@ export const writeAdd = (
       writers,
       restatements,
       extractors: asked.extractors,
+      reader: asked.reader,
       learnedAt: stampWrite(sql),
       memo: new Map(),
     };
