@@ -98,9 +98,10 @@ test("a page visited before shows what it read at once, then what core says now"
     core[Symbol.dispose]();
   }
 
-  // Back to Projects: the list read before, at once, while it is read again.
+  // Back to Projects (no longer in the sidebar): the list read before, at
+  // once, while it is read again.
   lists.hold();
-  await nav.getByRole("link", { name: "Projects" }).click();
+  await page.goBack();
   await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
   await expect.poll(lists.stalled).toBeGreaterThan(0);
   await expect(page.getByText(name)).toHaveCount(0);

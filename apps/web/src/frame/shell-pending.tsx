@@ -17,7 +17,6 @@ import {
   Cycle,
   Home,
   Icon,
-  Projects,
 } from "../grasp/icons/index.ts";
 import { Sidebar } from "../grasp/sidebar/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
@@ -106,12 +105,6 @@ export const ShellPending = () => {
                           icon: Brain,
                           render: <Link to="/brain" />,
                           current: at("/brain"),
-                        },
-                        {
-                          label: t`Projects`,
-                          icon: Projects,
-                          render: <Link to="/projects" />,
-                          current: at("/projects"),
                         },
                         {
                           label: t`Apps`,

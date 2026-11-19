@@ -43,7 +43,6 @@ import {
   Conversation,
   Home,
   Cycle,
-  Projects,
   Question,
   Settings,
   Computer,
@@ -122,12 +121,6 @@ const useGroups = (
         icon: Brain,
         render: <Link to="/brain" />,
         current: at("/brain"),
-      },
-      {
-        label: t`Projects`,
-        icon: Projects,
-        render: <Link to="/projects" />,
-        current: at("/projects"),
       },
       {
         label: t`Apps`,

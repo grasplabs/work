@@ -12178,8 +12178,6 @@ msgstr "Profiel"
 msgid "Project"
 msgstr "Project"
 
-#: src/frame/shell-pending.tsx
-#: src/grasp/frame/grasp-sidebar.tsx
 #: src/projects/project-view.tsx
 #: src/routes/_shell.projects.$projectId.tsx
 #: src/routes/_shell.projects.index.tsx
