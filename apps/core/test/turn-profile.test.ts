@@ -1,4 +1,5 @@
 import { personalBrainOf } from "@grasp-os/brain-next/contract";
+import type { ChatMessage, ChatUpdate } from "@grasp-os/shared/chat";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -120,6 +121,21 @@ const ownChatsOf = async (personId: string, ...replies: ProviderReply[]) => {
   return { stub, provider, newChat };
 };
 
+/** What `chatId`'s page shows, as it reads the chat. */
+const shownIn = async (
+  stub: ReturnType<typeof workspace>,
+  chatId: string,
+  personId: string
+): Promise<ChatMessage[]> => {
+  const updates: ChatUpdate[] = [];
+  await stub.watch(chatId, personId, null, async (update: ChatUpdate) => {
+    updates.push(update);
+    await Promise.resolve();
+  });
+  await expect.poll(() => updates.length).toBeGreaterThan(0);
+  return updates.flatMap(({ messages }) => messages);
+};
+
 /** An agent an admin made, everyone may ask. */
 const madeAgent = async (
   admin: Awaited<ReturnType<typeof signedInApi>>,
@@ -147,12 +163,13 @@ describe("the profile without the Brain grant", setUpTime, () => {
     await aboutThemselves(personId, "Pizza is my favourite food");
     const chats = await ownChatsOf(personId, says("Pizza."), says("Yes."));
     const asked = [];
+    let shown = "";
     for (const question of [
       "whats ym favourite food",
       "you know some foods I like, right?",
     ]) {
       // oxlint-disable-next-line no-await-in-loop -- one chat after another
-      const { ask } = await chats.newChat();
+      const { chat, ask } = await chats.newChat();
       const before = chats.provider.requests.length;
       // oxlint-disable-next-line no-await-in-loop -- one chat after another
       await ask(question);
@@ -161,9 +178,15 @@ describe("the profile without the Brain grant", setUpTime, () => {
           "Pizza is my favourite food"
         )
       );
+      // oxlint-disable-next-line no-await-in-loop -- one chat after another
+      shown += JSON.stringify(await shownIn(chats.stub, chat.id, personId));
     }
 
-    expect(asked).toStrictEqual([true, true]);
+    expect({
+      asked,
+      // No search ran, so the chat shows none.
+      searchStep: shown.includes("searchBrain"),
+    }).toStrictEqual({ asked: [true, true], searchStep: false });
   });
 
   it("is never in a chat others share, a woken turn, nor another person's own chat", async () => {
