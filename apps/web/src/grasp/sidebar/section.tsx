@@ -2,7 +2,7 @@
 
 import * as stylex from "@stylexjs/stylex";
 import type { RenderProp } from "@ui-sdk/react/primitive";
-import { mergeProps, renderElement } from "@ui-sdk/react/primitive";
+import { renderElement } from "@ui-sdk/react/primitive";
 import { isValidElement, useEffect, useLayoutEffect, useRef } from "react";
 import type {
   KeyboardEvent,
@@ -23,7 +23,7 @@ import { tabStyles } from "../tabs/tabs";
 import { rowMarker } from "../tabs/tabs.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
 import { ms } from "../tokens/tokens.values";
-import { WithTip } from "../tooltip/lazy-tip";
+import { Tip, withTip } from "../tooltip/tip";
 import { useWords, withGiven } from "../words/words";
 import { useSidebarGivenWords } from "./shell";
 import { sidebarWords } from "./words";
@@ -432,24 +432,27 @@ export const SectionHead = ({
             data-slot="sidebar-section-home"
             {...stylex.props(styles.homeSegment)}
           >
-            <WithTip
+            <Tip
               name
               tooltip={backLabel}
               render={(tip: Record<string, unknown>) =>
                 renderElement(
                   "a",
-                  mergeProps(tip, {
-                    href: back.href,
-                    onClick: back.onClick,
-                    "aria-label": backLabel,
-                    "data-slot": "sidebar-back",
-                    className: stylex.props(
-                      styles.homePart,
-                      styles.homeBack,
-                      focus.inside
-                    ).className,
-                    children: <Icon icon={ChevronLeft} />,
-                  }),
+                  withTip(
+                    {
+                      href: back.href,
+                      onClick: back.onClick,
+                      "aria-label": backLabel,
+                      "data-slot": "sidebar-back",
+                      className: stylex.props(
+                        styles.homePart,
+                        styles.homeBack,
+                        focus.inside
+                      ).className,
+                      children: <Icon icon={ChevronLeft} />,
+                    },
+                    tip
+                  ),
                   isValidElement<Record<string, unknown>>(back.render)
                     ? back.render
                     : undefined
@@ -608,7 +611,7 @@ const Tab = ({
     ),
   };
   const drawn = (trigger: Record<string, unknown>) => (
-    <button type="button" {...mergeProps(trigger, own)}>
+    <button type="button" {...withTip(own, trigger)}>
       <span
         aria-hidden="true"
         {...stylex.props(
@@ -639,12 +642,9 @@ const Tab = ({
       {counted && <Unseen>{` ${tab.countLabel ?? String(tab.count)}`}</Unseen>}
     </button>
   );
-  // The tip repeats the name, so it describes nothing (`name`): a screen reader hears it once.
-  return iconOnly ? (
-    <WithTip name tooltip={tab.label} render={drawn} />
-  ) : (
-    drawn({})
-  );
+  // The tip repeats the name, so it describes nothing (`name`): a screen reader hears it once. It is
+  // imported, not loaded lazily, as an icon-only Button's is: a late swap drops focus and refs.
+  return iconOnly ? <Tip name tooltip={tab.label} render={drawn} /> : drawn({});
 };
 
 /** The chosen tab in the switch. */

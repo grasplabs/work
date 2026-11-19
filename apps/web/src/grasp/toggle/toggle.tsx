@@ -4,6 +4,8 @@
 // muted until pressed. Alone, pressed lays a veil of ink deeper than hover's; in a ToggleGroup,
 // pressed raises it out of the track, as Palermo's. A small toggle takes a smaller icon.
 //
+// An icon alone shows its `aria-label` in a Tooltip, as an icon-only Button does.
+//
 //   <Toggle icon={Bold} aria-label="Bold" />
 //   <Toggle defaultPressed>Show archived</Toggle>
 //
@@ -12,7 +14,6 @@
 
 /* oxlint-disable typescript/no-deprecated -- the breaking release's step 1: this file keeps an old name working beside its new one until step 9 removes it (handover/audit/RELEASE.md §7). */
 import * as stylex from "@stylexjs/stylex";
-import { mergeProps } from "@ui-sdk/react/primitive";
 import { Toggle as TogglePrimitive } from "@ui-sdk/react/toggle";
 import type { ToggleState } from "@ui-sdk/react/toggle";
 import { useContext } from "react";
@@ -25,7 +26,7 @@ import { iconVars } from "../icons/icon.stylex";
 import type { LayoutStyle } from "../layout/layout";
 import { simply } from "../motion/simply.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
-import { Tip } from "../tooltip/tip";
+import { Tip, withTip } from "../tooltip/tip";
 import { ToggleGroupContext } from "./toggle-context";
 import type { ToggleSize } from "./toggle-context";
 
@@ -190,46 +191,12 @@ const styles = stylex.create({
 // A grouped toggle's height, by the group's size.
 const groupedSize = { sm: styles.groupedSm, md: styles.groupedMd } as const;
 
-/** One toggle as it is drawn, with a tooltip's trigger props merged in when it has one. */
-const OneToggle = ({
-  children,
-  icon,
-  scale,
-  square,
-  grouped,
-  layout,
-  ...rest
-}: Omit<ToggleProps, "size" | "style"> & {
-  scale: ToggleSize;
-  square: boolean;
-  grouped: boolean;
-}) => (
-  <TogglePrimitive
-    {...rest}
-    className={(state: ToggleState) =>
-      stylex.props(
-        styles.toggle,
-        grouped ? groupedSize[scale] : styles[scale],
-        grouped && styles.grouped,
-        scale === "sm" && styles.iconSm,
-        square && styles.square,
-        !state.disabled && !state.pressed && styles.live,
-        !state.disabled && !state.pressed && grouped && styles.liveGrouped,
-        state.pressed && (grouped ? styles.raised : styles.pressed),
-        state.disabled && styles.disabled,
-        layout,
-        focus.ring
-      ).className
-    }
-  >
-    <span
-      aria-hidden="true"
-      {...stylex.props(styles.target, grouped && styles.targetGrouped)}
-    />
-    {icon && <Icon icon={icon} />}
-    {children}
-  </TogglePrimitive>
-);
+/** The name an icon-only toggle shows in a tooltip: its `aria-label`, unless a tooltip already drives it. */
+const shownName = (square: boolean, given: Record<string, unknown>) => {
+  const name = given["aria-label"];
+  const free = square && given["data-tooltip-trigger"] === undefined;
+  return free && typeof name === "string" && name !== "" ? name : undefined;
+};
 
 export const Toggle = ({
   children,
@@ -242,23 +209,38 @@ export const Toggle = ({
   const group = useContext(ToggleGroupContext);
   const scale = group.grouped ? group.size : (size ?? "md");
   const square = children === undefined || children === null;
-  // An icon alone says what it turns on in a tooltip, its name, as an icon-only Button does.
-  const name = square ? rest["aria-label"] : undefined;
-  const drawn = (trigger: Record<string, unknown>) => (
-    <OneToggle
-      {...mergeProps(trigger, rest)}
-      icon={icon}
-      scale={scale}
-      square={square}
-      grouped={group.grouped}
-      layout={layout ?? styleProp}
-    >
+  const given: Record<string, unknown> = rest;
+  const className = (state: ToggleState) =>
+    stylex.props(
+      styles.toggle,
+      group.grouped ? groupedSize[scale] : styles[scale],
+      group.grouped && styles.grouped,
+      scale === "sm" && styles.iconSm,
+      square && styles.square,
+      !state.disabled && !state.pressed && styles.live,
+      !state.disabled && !state.pressed && group.grouped && styles.liveGrouped,
+      state.pressed && (group.grouped ? styles.raised : styles.pressed),
+      state.disabled && styles.disabled,
+      layout ?? styleProp,
+      focus.ring
+    ).className;
+  const drawn = (tip: Record<string, unknown>) => (
+    <TogglePrimitive {...rest} {...withTip(given, tip)} className={className}>
+      <span
+        aria-hidden="true"
+        {...stylex.props(styles.target, group.grouped && styles.targetGrouped)}
+      />
+      {icon && <Icon icon={icon} />}
       {children}
-    </OneToggle>
+    </TogglePrimitive>
   );
-  return name === undefined || name === "" ? (
+  // The tooltip repeats the name, so it is no description: a screen reader hears it once. It is
+  // imported, not loaded lazily: a late swap of the element would drop its focus, its held refs and
+  // a group's tab stop, and an icon-only toggle is on nearly every page.
+  const name = shownName(square, given);
+  return name === undefined ? (
     drawn({})
   ) : (
-    <Tip name render={drawn} tooltip={name} />
+    <Tip name tooltip={name} render={drawn} />
   );
 };

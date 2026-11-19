@@ -431,12 +431,9 @@ const RowLink = ({
       }
       off={!away}
       // The tooltip shows the link's own name, so it is not also its description ("Data, Data").
+      name
       render={(tipProps: Record<string, unknown>) =>
-        renderElement(
-          "a",
-          { ...mergeProps(tipProps, own), "aria-describedby": undefined },
-          render
-        )
+        renderElement("a", mergeProps(tipProps, own), render)
       }
     />
   );

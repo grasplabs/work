@@ -4,7 +4,6 @@
 import * as stylex from "@stylexjs/stylex";
 import { Button as ButtonPrimitive } from "@ui-sdk/react/button";
 import type { ButtonActionDetails } from "@ui-sdk/react/button";
-import { mergeProps } from "@ui-sdk/react/primitive";
 import {
   Suspense,
   isValidElement,
@@ -30,7 +29,7 @@ import { simply } from "../motion/simply.stylex";
 import { Spinner } from "../spinner";
 import { spinnerVars } from "../spinner/spinner.stylex";
 import { grasp, media } from "../tokens/tokens.stylex";
-import { Tip } from "../tooltip/tip";
+import { Tip, withTip } from "../tooltip/tip";
 import { useWords } from "../words/words";
 import { wrap } from "../wrap/wrap";
 import { buttonMarker, layerMarker } from "./button.stylex";
@@ -1385,24 +1384,46 @@ const LazyCut = (allProps: ButtonProps) => (
 const drawnByPart = (props: Record<string, unknown>) =>
   typeof props["data-slot"] === "string";
 
-/** Whether a merged prop is a press handler: the tooltip trigger's comes untyped. */
-const isPress = (value: unknown): value is (...args: unknown[]) => unknown =>
-  typeof value === "function";
+/**
+ * The name an icon-only button shows in a tooltip of its own: its `aria-label`, unless a tooltip
+ * already drives it (TooltipTrigger, a layer's `tooltip`, a cut Button mark it data-tooltip-trigger).
+ */
+const shownName = (
+  props: Record<string, unknown>,
+  label: string | undefined
+) => {
+  const name = givenName(props) ?? label;
+  const free =
+    props.icon !== undefined &&
+    isEmpty(props.children) &&
+    props["data-tooltip-trigger"] === undefined;
+  return free && name !== undefined && name !== "" ? name : undefined;
+};
 
 /**
- * The name an icon-only button shows in its tooltip: its `aria-label`, unless it has words of its
- * own or a tooltip already drives it (a TooltipTrigger, a layer's `tooltip`, a cut button).
+ * The button, with its name in a Tooltip when it shows only an icon. The tooltip repeats the name,
+ * so it is no description: a screen reader hears it once. Imported, not loaded lazily: a late swap
+ * of the element would drop its focus and the refs held on it, and an icon-only button is on nearly
+ * every page.
  */
-const shownName = (props: Record<string, unknown>): string | undefined => {
-  const words = props.children;
-  const iconOnly =
-    props.icon !== undefined &&
-    (words === undefined || words === null || words === false || words === "");
-  if (!iconOnly || "data-tooltip-trigger" in props) {
-    return undefined;
+const Shown = (allProps: ButtonProps) => {
+  const name = shownName({ ...allProps }, allProps.label);
+  if (name === undefined) {
+    return <Pressable {...allProps} held={null} />;
   }
-  const name = props["aria-label"] ?? props.label;
-  return typeof name === "string" && name !== "" ? name : undefined;
+  return (
+    <Tip
+      name
+      tooltip={name}
+      render={(tip) => (
+        <Pressable
+          {...allProps}
+          {...withTip({ ...allProps }, tip)}
+          held={null}
+        />
+      )}
+    />
+  );
 };
 
 export const Button = (allProps: ButtonProps) => {
@@ -1417,43 +1438,11 @@ export const Button = (allProps: ButtonProps) => {
     if (cut) {
       return <LazyCut {...allProps} />;
     }
-    // An icon alone says what it does in a tooltip, its name: on a pointer's rest and on focus.
-    const name = held === null ? shownName({ ...allProps }) : undefined;
-    if (name === undefined) {
-      return <Pressable {...allProps} held={held} />;
-    }
-    return (
-      <Tip
-        name
-        render={(trigger) => {
-          // One element takes the tooltip trigger's props and ref with the caller's, handlers merged.
-          const merged: Record<string, unknown> = mergeProps(
-            trigger,
-            allProps,
-            {
-              ref: allProps.ref,
-            }
-          );
-          // The press: the tip's first, then the control's, whose result it returns: a pending
-          // action's promise keeps the button working, and an agent's press reads how it went.
-          const tipPress = trigger.onClick;
-          const ownPress = allProps.onClick;
-          return (
-            <Pressable
-              {...allProps}
-              {...merged}
-              held={held}
-              onClick={(...args: Parameters<NonNullable<typeof ownPress>>) => {
-                if (isPress(tipPress)) {
-                  tipPress(...args);
-                }
-                return ownPress?.(...args);
-              }}
-            />
-          );
-        }}
-        tooltip={name}
-      />
+    // Inside a hold the popover's trigger speaks for it ("Hold to delete"): no tooltip of its own.
+    return held === null ? (
+      <Shown {...allProps} />
+    ) : (
+      <Pressable {...allProps} held={held} />
     );
   }
   return <LazyHold {...allProps} />;

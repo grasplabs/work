@@ -131,6 +131,7 @@ export const TooltipTrigger = ({
   if (render !== undefined) {
     // The layout lands on the element `render` draws, as Item's row takes it.
     const { className } = stylex.props(layout ?? styleProp);
+    // Marked, so a Grasp Button given as `render` adds no tooltip of its own.
     return still ? (
       renderElement(
         "span",
@@ -142,7 +143,11 @@ export const TooltipTrigger = ({
         {...rest}
         aria-label={label}
         render={(props: Record<string, unknown>) =>
-          renderElement("button", { ...props, className, children }, render)
+          renderElement(
+            "button",
+            { ...props, "data-tooltip-trigger": "", className, children },
+            render
+          )
         }
       />
     );
@@ -157,8 +162,9 @@ export const TooltipTrigger = ({
     layout: layout ?? styleProp,
     children,
   } as ButtonProps;
+  // data-tooltip-trigger: this tooltip drives the Button, so an icon-only one adds no tooltip of its own.
   if (still) {
-    return <Button {...look} type="button" />;
+    return <Button {...look} type="button" data-tooltip-trigger="" />;
   }
   return (
     <TriggerPrimitive
