@@ -1408,8 +1408,10 @@ export class ChatHarness {
       // each of which shows a notice of every memory with its Undo
       // (agent-remember.ts; channels/remembered.ts). What they said there
       // is the only word of theirs it may keep. Never a chat others share,
-      // nor a turn nobody started (a wake), which has no word of theirs.
-      ...(request.personal
+      // nor a turn nobody started (a wake), which has no word of theirs,
+      // nor a next agent's turn of a question addressed to several
+      // (`followUp`), which starts from core's words, never theirs.
+      ...(request.personal && request.question.followUp !== true
         ? {
             remember: rememberTool(env, scope, {
               said: request.question.text,
