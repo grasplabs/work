@@ -54,6 +54,8 @@ export const googleConnectClient = clients.google;
 
 /** Grasp's Entra app for the directory's connection, as set on connect. */
 export const directoryClient = clients.microsoftDirectory;
+/** The directory's own Google client, as set on connect. */
+export const googleDirectoryClient = clients.googleDirectory;
 
 /**
  * Where tests set who is in the tenant's directory, for the directory's
@@ -61,6 +63,8 @@ export const directoryClient = clients.microsoftDirectory;
  * `$expand=manager`), a hundred to a page; `{ failAt }`, the offset of
  * a page Graph then fails with a server error; and `{ loopAt }`, the
  * offset of a page whose next link points back at itself (null for none).
+ * Its groups: `{ groups }` as Graph answers a group, and `{ members }`,
+ * each group's transitive members by its lower-case ID.
  * `{ granted }` is what Entra says the directory's app was granted, at
  * connecting and at each renewal (null for `directoryGranted`).
  * Its deleted users likewise: `{ deleted }` (`/directory/deletedItems`),
@@ -492,7 +496,12 @@ const googleRefresh = async (request) => {
  */
 const googleConsent = async (request) => {
   const form = new URLSearchParams(await request.text());
-  if (form.get("grant_type") !== "authorization_code" || form.get("client_id") !== ${JSON.stringify(clients.google.id)}) {
+  const secrets = {
+    [${JSON.stringify(clients.google.id)}]: ${JSON.stringify(clients.google.secret)},
+    [${JSON.stringify(clients.googleDirectory.id)}]: ${JSON.stringify(clients.googleDirectory.secret)},
+  };
+  const client = form.get("client_id") ?? "";
+  if (form.get("grant_type") !== "authorization_code" || secrets[client] === undefined) {
     return undefined;
   }
   // The domain has dots of its own: the code always ends in what was granted.
@@ -504,12 +513,12 @@ const googleConsent = async (request) => {
   const digest = base64Url(
     new Uint8Array(await crypto.subtle.digest("SHA-256", verifier))
   );
-  if (form.get("client_secret") !== ${JSON.stringify(clients.google.secret)} || digest !== challenge) {
+  if (form.get("client_secret") !== secrets[client] || digest !== challenge) {
     return Response.json({ error: "invalid_grant" }, { status: 400 });
   }
   const claims = {
     iss: "https://accounts.google.com",
-    aud: ${JSON.stringify(clients.google.id)},
+    aud: client,
     sub: subject,
     hd: domain,
     email: subject + "@" + domain,
@@ -606,7 +615,66 @@ const slackAnswer = async (request, url) => {
   }
   return Response.json({ ok: true });
 };
-const directory = { granted: null, users: [], failAt: null, loopAt: null, deleted: [], deletedFailAt: null, deletedFailStatus: 500, deletedFailBody: null, deletedNext: null };
+const directory = { granted: null, users: [], failAt: null, loopAt: null, deleted: [], deletedFailAt: null, deletedFailStatus: 500, deletedFailBody: null, deletedNext: null, groups: [], members: {}, google: [], googleDeleted: [], googleFailAt: null, googleRefused: null, googleDeletedRefused: null };
+/** Google's Admin SDK users, as the directory's reads ask for them, a page at a time: its deleted ones with \`showDeleted\`. */
+const googleUsersList = (url) => {
+  // Every page refused, as Google refuses a token of someone who isn't an admin.
+  if (directory.googleRefused !== null) {
+    return Response.json({ error: { code: directory.googleRefused, message: "Not Authorized to access this resource/api" } }, { status: directory.googleRefused });
+  }
+  const top = Number(url.searchParams.get("maxResults") ?? "100");
+  const from = Number(url.searchParams.get("pageToken") ?? "0");
+  const deleted = url.searchParams.get("showDeleted") === "true";
+  // The deleted users alone refused, as a role that may list people but not them might be.
+  if (deleted && directory.googleDeletedRefused !== null) {
+    return Response.json({ error: { code: directory.googleDeletedRefused } }, { status: directory.googleDeletedRefused });
+  }
+  const users = deleted ? directory.googleDeleted : directory.google;
+  if (!deleted && directory.googleFailAt === from) {
+    return Response.json({ error: { code: 500 } }, { status: 500 });
+  }
+  const next = from + top;
+  return Response.json({
+    kind: "admin#directory#users",
+    users: users.slice(from, next),
+    ...(next < users.length ? { nextPageToken: String(next) } : {}),
+  });
+};
+/** Graph's groups, as the directory's group calls ask for them: a search by name, a group, its members a hundred to a page. */
+const groupsGraph = (url) => {
+  const parts = url.pathname.split("/");
+  if (url.pathname === "/v1.0/groups") {
+    const filter = url.searchParams.get("$filter") ?? "";
+    const prefix = "startswith(displayName,'";
+    const text = filter.startsWith(prefix) && filter.endsWith("')") ? filter.slice(prefix.length, -2).replaceAll("''", "'") : null;
+    return text === null
+      ? Response.json({ error: { code: "BadRequest" } }, { status: 400 })
+      : Response.json({ value: directory.groups.filter((group) => String(group.displayName).startsWith(text)) });
+  }
+  const id = parts[3]?.toLowerCase();
+  if (parts.length === 5 && parts[4] === "transitiveMembers") {
+    const known = directory.groups.some((each) => each.id.toLowerCase() === id);
+    const members = directory.members[id] ?? (known ? [] : undefined);
+    if (members === undefined) {
+      return Response.json({ error: { code: "Request_ResourceNotFound" } }, { status: 404 });
+    }
+    const from = Number(url.searchParams.get("$skiptoken") ?? "0");
+    const next = from + 100;
+    return Response.json({
+      value: members.slice(from, next),
+      ...(next < members.length
+        ? { "@odata.nextLink": "https://graph.microsoft.com/v1.0/groups/" + id + "/transitiveMembers?$skiptoken=" + next }
+        : {}),
+    });
+  }
+  if (parts.length === 4) {
+    const group = directory.groups.find((each) => each.id.toLowerCase() === id);
+    return group === undefined
+      ? Response.json({ error: { code: "Request_ResourceNotFound" } }, { status: 404 })
+      : Response.json(group);
+  }
+  return undefined;
+};
 const hibob = { key: null, employees: [] };
 /** Graph's users, as the directory's reads ask for them, a page at a time. */
 const directoryGraph = (url) => {
@@ -754,6 +822,12 @@ export default {
         ? Response.json({ error: { code: "Request_ResourceNotFound" } }, { status: 404 })
         : Response.json(found);
     }
+    if (url.hostname === "graph.microsoft.com" && request.method === "GET" && url.pathname.startsWith("/v1.0/groups")) {
+      const answered = groupsGraph(url);
+      if (answered !== undefined) {
+        return answered;
+      }
+    }
     if (url.href === ${JSON.stringify(stephenGraphUrl)}) {
       return await stephenGraph.control(request);
     }
@@ -774,6 +848,9 @@ export default {
     }
     if (url.hostname === "graph.microsoft.com" && request.method === "GET" && url.pathname === "/v1.0/directory/deletedItems/microsoft.graph.user") {
       return deletedGraph(url);
+    }
+    if (url.hostname === "admin.googleapis.com" && request.method === "GET" && url.pathname === "/admin/directory/v1/users") {
+      return googleUsersList(url);
     }
     if (url.hostname === "graph.microsoft.com") {
       // Graph's mail, as Microsoft 365's native actions use it: sending

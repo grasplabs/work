@@ -942,6 +942,49 @@ describe("connector triggers", { timeout: 120_000 }, () => {
     });
   });
 
+  it("are listened for no more while their person is suspended, and again once it lifts", async () => {
+    const admin = await person("admin");
+    const workflow = await filing(admin);
+    const shared = await connection();
+    const trigger = await connectorTrigger(admin, workflow.id, shared, {
+      hears: false,
+    });
+    await granted(admin, {
+      subject: {
+        type: "trigger",
+        triggerId: triggerIdSchema.parse(trigger.id),
+      },
+      object: {
+        type: "connection",
+        connectionId: connectionIdSchema.parse(shared),
+      },
+      actions: ["mail.list"],
+    });
+    const listening = async () => {
+      const listeners = await listenersOf(env);
+      return listeners.some(
+        (listener) =>
+          listener.connection === shared && listener.owner === admin.userId
+      );
+    };
+    const suspended = async (at: number | null) => {
+      await env.DB.prepare(
+        "UPDATE members SET suspended_at = ?, suspended_by = ? WHERE user_id = ?"
+      )
+        .bind(at, at === null ? null : "directory", admin.userId)
+        .run();
+    };
+    const before = await listening();
+    // Suspended as the directory's read suspends someone (GRA-2056).
+    await suspended(Date.now());
+    const whileSuspended = await listening();
+    await suspended(null);
+
+    expect({ before, whileSuspended, lifted: await listening() }).toStrictEqual(
+      { before: true, whileSuspended: false, lifted: true }
+    );
+  });
+
   it("sweep a backlog of places past their hour larger than one statement deletes, in one clock run", async () => {
     const admin = await person("admin");
     const workflow = await filing(admin);
