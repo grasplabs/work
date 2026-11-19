@@ -62,6 +62,7 @@ import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { RemovedPeople } from "../settings/erasures.tsx";
 import { InvitationRow, InviteButton } from "../settings/invitations.tsx";
+import { MemberSuspension } from "../settings/member-suspension.tsx";
 import { MembersTabs } from "../settings/members-tabs.tsx";
 import {
   SettingsError,
@@ -71,7 +72,9 @@ import {
 import { useCoreAction } from "../use-core-action.ts";
 
 // Offboarding, for admins: the organization's members, each with their
-// role, a way to end their sessions, and a way to remove them for good;
+// role, whether the directory suspended them and why
+// (settings/member-suspension.tsx), a way to end their sessions, and a way
+// to remove them for good;
 // then the people removed, and a way to erase them (settings/erasures.tsx).
 // Core checks the role on every call; anyone else sees why they can't.
 // The admin's own row has no actions: core refuses removing yourself or
@@ -471,6 +474,7 @@ const MembersList = ({
             <span className="text-muted-foreground truncate">
               {member.email}
             </span>
+            <MemberSuspension member={member} />
           </div>
           {member.userId === me ? (
             <Badge variant="outline">{roleLabel(member.role)}</Badge>
