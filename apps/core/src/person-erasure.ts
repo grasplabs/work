@@ -78,6 +78,7 @@ import {
   workflowState,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
+import { forgetDirectoryPeople } from "./directory-ties.ts";
 import { appPreview, workspace, inJurisdiction } from "./durable-objects.ts";
 import {
   emailHashOf,
@@ -296,6 +297,9 @@ const identity: ErasureStep = {
           .values({ subjectHash, keyVersion: subjectKeyVersion, userId })
           .onConflictDoNothing()
       ),
+      // The directory's rows of them (GRA-2056), by the IDs their accounts
+      // name: before the accounts go, in the same batch.
+      forgetDirectoryPeople(db, userId),
       db.delete(accounts).where(
         and(
           eq(accounts.userId, userId),

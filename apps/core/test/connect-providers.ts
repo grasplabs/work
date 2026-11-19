@@ -58,7 +58,8 @@ export const directoryClient = clients.microsoftDirectory;
 /**
  * Where tests set who is in the tenant's directory, for the directory's
  * reads: POST `{ users }` as Graph has them (`/users` with `$select` and
- * `$expand=manager`), a hundred to a page.
+ * `$expand=manager`), a hundred to a page, and `{ failAt }`, the offset of
+ * a page Graph then fails with a server error (null for none).
  */
 export const directoryControlUrl = "https://graph-control.test/directory";
 
@@ -597,13 +598,17 @@ const slackAnswer = async (request, url) => {
   }
   return Response.json({ ok: true });
 };
-const directory = { users: [] };
+const directory = { users: [], failAt: null };
 const hibob = { key: null, employees: [] };
 /** Graph's users, as the directory's reads ask for them, a page at a time. */
 const directoryGraph = (url) => {
   const top = Number(url.searchParams.get("$top") ?? "100");
   const from = Number(url.searchParams.get("$skiptoken") ?? "0");
   const next = from + top;
+  // The page a test has Graph fail, as a server error would.
+  if (directory.failAt === from) {
+    return Response.json({ error: { code: "generalException" } }, { status: 500 });
+  }
   return Response.json({
     value: directory.users.slice(from, next),
     ...(next < directory.users.length

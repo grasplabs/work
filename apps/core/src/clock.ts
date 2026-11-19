@@ -22,6 +22,7 @@ import { sweepChannelSignals } from "./channels/signals.ts";
 import { sweepStephenRequests } from "./channels/stephen-requests.ts";
 import { drainAuditOutboxesNoticing } from "./connector-source-notices.ts";
 import { refreshDailySignals } from "./daily-signals.ts";
+import { readDirectories } from "./directory-people.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { warmQuestionEmbedder } from "./embedder.ts";
 import { sweepGuestChats } from "./guests.ts";
@@ -317,6 +318,10 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   // since, a few a run (src/packages/rescan.ts).
   { name: "packages.rescan", period: "quarterHour", run: rescanPackages },
   { name: "apps.releases", period: "quarterHour", run: sweepReleases },
+  // The organization's directory, read once a day and kept by the
+  // provider's IDs of its people, tied to the members who signed in
+  // (src/directory-people.ts, GRA-2056).
+  { name: "directory.people", period: "quarterHour", run: readDirectories },
   // Model usage past its retention (src/model-usage.ts).
   { name: "models.usage", period: "quarterHour", run: sweepModelUsage },
   {

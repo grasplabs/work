@@ -73,6 +73,13 @@ export interface DirectoryRead {
   /** The connection's tenant at the provider, as it was connected. */
   tenant: string;
   people: DirectoryPerson[];
+  /**
+   * The provider's IDs of the page's accounts that are turned off (Entra's
+   * `accountEnabled: false`, Google's suspended or archived), guests
+   * aside: none of them is among `people`. The daily read keeps them
+   * apart (core's directory-people.ts); a roster leaves them out.
+   */
+  disabled: string[];
   /** Null once the provider has no more. */
   next: string | null;
 }

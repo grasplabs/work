@@ -30,12 +30,12 @@ import { startOnboardingConnection } from "./connections.ts";
 // roster the browser saves is what stays.
 
 /**
- * The directory connection the onboarding reads: one of the organization's
- * own tenant, a working one before one that needs reconnecting, the
- * newest first. Another tenant's (the deployment's sign-in moved since) is
- * never read.
+ * The directory connection the onboarding and the daily read
+ * (directory-people.ts) read: one of the organization's own tenant, a
+ * working one before one that needs reconnecting, the newest first.
+ * Another tenant's (the deployment's sign-in moved since) is never read.
  */
-const connectionOf = async (
+export const connectionOf = async (
   env: Env,
   provider?: DirectoryConnection["provider"]
 ): Promise<DirectoryConnection | undefined> => {
