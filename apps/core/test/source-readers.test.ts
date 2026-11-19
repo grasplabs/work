@@ -38,7 +38,7 @@ import {
   groupsControlUrl,
 } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
-import { runMinuteTasks } from "./maintenance.ts";
+import { runClockTask, runMinuteTasks } from "./maintenance.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { noProducers } from "./no-producers.ts";
 import {
@@ -471,6 +471,7 @@ const readGroupsOnce = async (): Promise<void> => {
   await env.CONNECT.readReaderGroups({
     requests: readerGroupRequestsPerTick,
     queries: readerGroupQueriesPerTick,
+    paused: [],
   });
 };
 
@@ -2411,6 +2412,7 @@ describe("groups copied from the source", () => {
         await env.CONNECT.readReaderGroups({
           requests: 3,
           queries: readerGroupQueriesPerTick,
+          paused: [],
         });
         const row = await connectDb()
           .prepare(
@@ -2618,6 +2620,7 @@ describe("groups copied from the source", () => {
       const first = await env.CONNECT.readReaderGroups({
         requests: readerGroupRequestsPerTick,
         queries: 30,
+        paused: [],
       });
       for (const id of connectionIds) {
         // oxlint-disable-next-line no-await-in-loop -- each in turn
@@ -2714,6 +2717,7 @@ describe("groups copied from the source", () => {
           await env.CONNECT.readReaderGroups({
             requests: 40,
             queries: readerGroupQueriesPerTick,
+            paused: [],
           });
           // oxlint-disable-next-line no-await-in-loop -- until hers is whole
           if (await aliceWhole()) {
@@ -2746,6 +2750,111 @@ describe("groups copied from the source", () => {
         last: true,
         late: false,
       });
+    }
+  );
+});
+
+// GRA-2143: connect reads nothing of a suspended member's own connections
+// in the background, their groups included, and reads them again once the
+// suspension lifts.
+/** Where `connectionId`'s groups read is: under way (`reading`), and when last tried. */
+const groupsReadOf = async (connectionId: string) => {
+  const row = await connectDb()
+    .prepare(
+      "SELECT reader_groups_reading AS reading, reader_groups_tried_at AS triedAt FROM connections WHERE id = ?"
+    )
+    .bind(connectionId)
+    .first<{ reading: string | null; triedAt: number | null }>();
+  return row ?? { reading: null, triedAt: null };
+};
+
+/** `userId` suspended (`at`) as the directory's read suspends someone (GRA-2056), or lifted (null). */
+const suspendedAt = async (userId: string, at: number | null) => {
+  await env.DB.prepare(
+    "UPDATE members SET suspended_at = ?, suspended_by = ? WHERE user_id = ?"
+  )
+    .bind(at, at === null ? null : "directory", userId)
+    .run();
+};
+
+describe("the groups of a suspended member", () => {
+  let minute = 0;
+  /** One run of the clock's task, a minute after the last. */
+  const readOnce = async (): Promise<void> => {
+    minute += 1;
+    await runClockTask(
+      "brain.reader_groups",
+      {},
+      new Date(Date.now() + minute * 60_000)
+    );
+  };
+
+  /** Five runs of the clock's task, one after another. */
+  const readFiveTimes = async (): Promise<void> => {
+    for (let run = 0; run < 5; run += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one run after another
+      await readOnce();
+    }
+  };
+
+  it(
+    "are read nothing of while the member is suspended, and are read again once it lifts",
+    setUpTime,
+    async () => {
+      const bob = await microsoftMember();
+      const { id: connectionId } = await connectedGoogle(bob);
+      const tried = async (): Promise<boolean> => {
+        const { triedAt } = await groupsReadOf(connectionId);
+        return triedAt !== null;
+      };
+      await suspendedAt(bob.userId, Date.now());
+      await readFiveTimes();
+      const whileSuspended = await tried();
+      await suspendedAt(bob.userId, null);
+      const lifted = await eventually(async () => {
+        await readOnce();
+        return await tried();
+      });
+
+      expect({ whileSuspended, lifted }).toStrictEqual({
+        whileSuspended: false,
+        lifted: true,
+      });
+    }
+  );
+
+  it(
+    "stop a read under way where it is while the member is suspended, and go on with it once it lifts",
+    setUpTime,
+    async () => {
+      const bob = await microsoftMember();
+      const { id: connectionId } = await connectedGoogle(bob);
+      // Runs too small to finish: his read stops part-way.
+      const stopped = await eventually(async () => {
+        await env.CONNECT.readReaderGroups({
+          requests: 3,
+          queries: readerGroupQueriesPerTick,
+          paused: [],
+        });
+        const { reading } = await groupsReadOf(connectionId);
+        return reading !== null;
+      });
+      const partWay = await groupsReadOf(connectionId);
+      await suspendedAt(bob.userId, Date.now());
+      await readFiveTimes();
+      const whileSuspended = await groupsReadOf(connectionId);
+      await suspendedAt(bob.userId, null);
+      const finished = await eventually(async () => {
+        await readOnce();
+        const { reading } = await groupsReadOf(connectionId);
+        return reading === null;
+      });
+
+      expect({
+        stopped,
+        unmoved: whileSuspended,
+        finished,
+      }).toStrictEqual({ stopped: true, unmoved: partWay, finished: true });
     }
   );
 });
