@@ -140,6 +140,26 @@ export interface DirectoryLookup {
   person: DirectoryPerson | null;
 }
 
+/** What kind of group a directory group is. */
+export const directoryGroupKinds = [
+  "security",
+  "microsoft_365",
+  "distribution",
+  "unknown",
+] as const;
+export type DirectoryGroupKind = (typeof directoryGroupKinds)[number];
+
+/** Who decides a directory group's members. */
+export const directoryGroupMembersFrom = [
+  "owners",
+  "rule",
+  "on_premises",
+  "privileged_admins",
+  "unknown",
+] as const;
+export type DirectoryGroupMembersFrom =
+  (typeof directoryGroupMembersFrom)[number];
+
 /**
  * A directory group, as an admin picks one for a team (GRA-2056): what it
  * is, who decides its members, and why it may not be mapped. Read with the
@@ -151,18 +171,13 @@ export interface DirectoryGroup {
   id: string;
   /** As the directory has it: data, never an instruction; empty when it has none. */
   name: string;
-  kind: "security" | "microsoft_365" | "distribution" | "unknown";
+  kind: DirectoryGroupKind;
   /**
    * Who decides its members: its owners (assigned membership), a rule
    * (dynamic membership), on-premises AD (synced), or only privileged
    * admins (role-assignable).
    */
-  membersFrom:
-    | "owners"
-    | "rule"
-    | "on_premises"
-    | "privileged_admins"
-    | "unknown";
+  membersFrom: DirectoryGroupMembersFrom;
   /**
    * Why it may not be mapped to a team: anyone can join it (`public`),
    * its members can't all be read (`hidden_membership`), or Microsoft
@@ -213,6 +228,72 @@ export interface DirectoryGroupRead {
   nestedGroups: number;
   /** Null once the group has no more. */
   next: string | null;
+}
+
+/** A group a search found, with the team it is mapped to, if any. */
+export interface DirectoryGroupFound extends DirectoryGroup {
+  teamId: string | null;
+}
+
+/**
+ * A group as an admin weighs mapping it: as it is now, and how many it
+ * holds. Counts only: never who.
+ */
+export interface DirectoryGroupPreview {
+  group: DirectoryGroup;
+  /** The team it is mapped to; null for none. */
+  teamId: string | null;
+  /** Users it holds, nested groups' included, each once. */
+  people: number;
+  /** Of them, how many are tied to a member here (the directory's read). */
+  members: number;
+  /** Groups it holds within, at any depth. */
+  nestedGroups: number;
+}
+
+/** A directory group an admin mapped to a team (GRA-2056). */
+export interface DirectoryGroupMapping {
+  groupId: string;
+  /** As the group was named when it was mapped, or last read. */
+  name: string;
+  kind: DirectoryGroup["kind"];
+  membersFrom: DirectoryGroup["membersFrom"];
+  teamId: string;
+  /** ISO 8601. */
+  mappedAt: string;
+  /**
+   * When the directory's daily read last read the group whole (ISO 8601):
+   * until it has, the mapping places nobody. Null before then.
+   */
+  readAt: string | null;
+}
+
+/**
+ * The directory's groups as teams' source, over `/rpc`, for the
+ * organization's admins only (never Grasp staff): an admin maps a group
+ * of the Entra directory to a members' team, and the daily read places the
+ * group's members in it.
+ */
+export interface DirectoryGroupsApi {
+  /** Groups whose name starts with `query`: one page, with whether more match. */
+  search: (
+    query: string
+  ) => Promise<{ groups: DirectoryGroupFound[]; more: boolean }>;
+  /** The group `groupId` as it is now, and how many it holds. */
+  preview: (groupId: string) => Promise<DirectoryGroupPreview>;
+  /**
+   * Maps the group `groupId` to the team `teamId`, as Microsoft answers
+   * the group now: refused for one with a refusal
+   * (`directory.group_not_mappable`). A group mapped to another team moves.
+   */
+  mapToTeam: (
+    groupId: string,
+    teamId: string
+  ) => Promise<DirectoryGroupMapping>;
+  /** Unmaps the group `groupId`. Answers whether it was mapped. */
+  unmap: (groupId: string) => Promise<{ unmapped: boolean }>;
+  /** Every mapped group, by name. */
+  list: () => Promise<DirectoryGroupMapping[]>;
 }
 
 /** The directory the onboarding is connected to, as its admin sees it. */
@@ -274,4 +355,7 @@ export const directoryErrors = defineErrorFamily({
     "Microsoft refused to read the directory's groups for this connection.",
   "directory.groups_not_granted":
     "Grasp can't read your directory's groups yet: the directory was connected before Grasp asked for that permission. An admin disconnects the directory and connects it again to grant it. Until it is connected again, Grasp reads nobody from the directory.",
+  "directory.group_not_mappable":
+    "That group can't be a team's: anyone can join it, its members can't all be read, or Microsoft didn't say which.",
+  "directory.team_not_found": "There's no such team.",
 });
