@@ -194,7 +194,6 @@ import type { SkillNeeds } from "./skill-needs.ts";
 import {
   directoryGroupsRead,
   heldPrincipalsOf,
-  pairPrincipalOf,
   plainPrincipalOf,
   readerPrincipalsOf,
   signInAccountsRead,
@@ -285,14 +284,6 @@ const idSchema = wellFormedString()
   .min(1)
   .max(principalMaxLength - teamPrefix.length);
 
-/** A reader list copied from where an item lives, each short enough to name. */
-const copiedReadersSchema = z.array(
-  sourceReaderSchema.refine(
-    (reader) => (plainPrincipalOf(reader)?.length ?? 0) <= principalMaxLength,
-    { message: "Too long a reader's ID" }
-  )
-);
-
 const sourceReadersSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("owner"), personId: idSchema }),
   z.strictObject({ kind: z.literal("team"), teamId: idSchema }),
@@ -305,24 +296,27 @@ const sourceReadersSchema = z.discriminatedUnion("kind", [
     kind: z.literal("connection"),
     connectionId: connectionIdSchema,
   }),
-  // Those of an item's readers where it lives (`readers`, as below) whom
-  // the shared connection's Brain audience holds now, while the place an
-  // admin picked on it is still picked (GRA-2145): the source decides who
-  // may read, the audience only narrows it. Only for what native sync
-  // copies from that place (`sync`).
+  // Whoever the shared connection's Brain audience holds now, while the
+  // place an admin picked on it is still picked (GRA-1719): only for what
+  // native sync copies from that place (`sync`).
   z.strictObject({
     kind: z.literal("place"),
     connectionId: connectionIdSchema,
     feed: syncFeedSchema,
     place: syncPlaceSchema,
-    readers: copiedReadersSchema,
   }),
   // Those the system an item lives in lists as its readers (GRA-1761),
   // each named as a group no other reader's name can be, an account by
   // its token (source-readers.ts), short enough for one.
   z.strictObject({
     kind: z.literal("readers"),
-    readers: copiedReadersSchema,
+    readers: z.array(
+      sourceReaderSchema.refine(
+        (reader) =>
+          (plainPrincipalOf(reader)?.length ?? 0) <= principalMaxLength,
+        { message: "Too long a reader's ID" }
+      )
+    ),
   }),
 ]);
 
@@ -854,14 +848,14 @@ const connectionGroup = (connectionId: string): string =>
   `${connectionPrefix}${checked(connectionIdSchema, connectionId)}`;
 
 /**
- * A place picked on a shared connection, as a group (GRA-1719): one half
- * of each pair what native sync copies from it is kept for
- * (source-readers.ts `pairPrincipalOf`, GRA-2145); nobody holds it alone.
- * Its connection's group, a "/", then a hash of the sync and the place: a
- * connection's ID holds neither "/" nor ":", so no other group can be
- * named this.
+ * A place picked on a shared connection, as the Brain's group (GRA-1719):
+ * what native sync copies from it is kept for this group, and core puts a
+ * reader in it beside the connection's own group while the place is
+ * still picked (`withConnections`). Its connection's group, a "/", then a
+ * hash of the sync and the place: a connection's ID holds neither "/" nor
+ * ":", so no other group can be named this, and it fits a principal.
  */
-export const placeGroupOf = async (
+const placeGroupOf = async (
   connectionId: string,
   feed: string,
   place: string
@@ -923,26 +917,14 @@ const accessFor = async (
     return accessOf(readers, await readerPrincipalsOf(env, readers.readers));
   }
   if (readers.kind === "place") {
-    // The item's own readers, each paired with the place (GRA-2145): kept
-    // for pairs only someone who holds the place and that reader holds
-    // (`memberGroupsOf`), each pair kept before the list reaches the Brain
-    // (`readerPrincipalsOf`). An empty or unknown list is nobody's.
-    const place = await placeGroupOf(
-      readers.connectionId,
-      readers.feed,
-      readers.place
-    );
-    const principals = await readerPrincipalsOf(env, readers.readers, place);
-    return principals.length === 0
-      ? { kind: "none" }
-      : {
-          kind: "readers",
-          groups: await Promise.all(
-            principals.map(
-              async (principal) => await pairPrincipalOf(place, principal)
-            )
-          ),
-        };
+    return {
+      kind: "audience",
+      group: await placeGroupOf(
+        readers.connectionId,
+        readers.feed,
+        readers.place
+      ),
+    };
   }
   return accessOf(readers);
 };
@@ -957,11 +939,7 @@ const accessFor = async (
  */
 export type Reach = "person" | "teams" | "company";
 
-/**
- * A shared connection's audience, with groups of the places picked on it
- * now (`places`): their own (`withPlaces`), then, for a reader, the pairs
- * of them the reader holds (`memberGroupsOf`).
- */
+/** A shared connection's audience, with the groups of the places picked on it now. */
 type HeldAudience = ConnectionAudience & { places: readonly string[] };
 
 /**
@@ -990,44 +968,6 @@ const withPlaces = async (
     ...audience,
     places: groups.get(audience.connectionId) ?? [],
   }));
-};
-
-/**
- * `groups`, with the group of each shared connection whose Brain audience
- * is one of them (GRA-1831): `company` for everyone, a team's for that
- * team. So what agents read through it reaches exactly as far as a
- * document shared with that audience would at the same reach: code's
- * included, and a shared thread's (the company alone) only for everyone.
- * Beside them, apart (`places`), the pairs the reader holds of each place
- * picked on such a connection now (GRA-2145, `memberGroupsOf`): never
- * without the connection's own. An
- * audience whose team is gone is in no one's groups: nobody's. A row that
- * can't be read is nobody's too.
- */
-const withConnections = (
-  groups: readonly string[],
-  audiences: readonly HeldAudience[]
-): { groups: string[]; places: string[] } => {
-  const held = new Set(groups);
-  const audienced = audiences.filter(({ connectionId, teamId }) => {
-    const connection = connectionIdSchema.safeParse(connectionId);
-    const team = teamId === null ? undefined : idSchema.safeParse(teamId);
-    if (!connection.success || team?.success === false) {
-      return false;
-    }
-    return held.has(
-      team === undefined ? companyGroup : `${teamPrefix}${team.data}`
-    );
-  });
-  return {
-    groups: [
-      ...groups,
-      ...audienced.map(
-        ({ connectionId }) => `${connectionPrefix}${connectionId}`
-      ),
-    ],
-    places: audienced.flatMap(({ places }) => places),
-  };
 };
 
 /**
@@ -1076,54 +1016,60 @@ const memberGroupsOf = async (
   if (member === undefined) {
     throw permissionErrors.create("permission.person_inactive");
   }
-  const groups = [
-    ...member.teams.map(({ id: teamId }) => teamGroup(teamId)),
-    companyGroup,
-    membersGroup,
-  ];
-  const withPlaceGroups = await withPlaces(audiences, places);
-  // Each place's pairs the reader holds (GRA-2145), never the place's own
-  // group: an item of a place is kept for its readers' pairs alone
-  // (`accessFor`), so only someone who holds the place and one of its
-  // readers reads it; a reader with none of their accounts or groups (as
-  // their teams, as code reads) holds none. Only of the places their
-  // audiences hold, in the order a reader holds them (`withConnections`),
-  // and only as many as the bound of groups leaves room for
-  // (`readerGroupsOf`): no pair past it is read or named.
-  const reached = withConnections(groups, withPlaceGroups);
   const held = asThemselves
-    ? await heldPrincipalsOf(
-        env,
-        member.userId,
-        { signIns, connected, directory },
-        reached.places,
-        readerGroupsMax - new Set(reached.groups).size
-      )
-    : { accounts: [], groups: [], pairs: [] };
-  const room =
-    readerGroupsMax -
-    new Set([...reached.groups, ...held.accounts]).size -
-    held.groups.length;
-  const pairsOf = new Map<string, string[]>();
-  for (const { place, principal } of held.pairs.slice(0, Math.max(0, room))) {
-    // oxlint-disable-next-line no-await-in-loop -- a hash, no call
-    const group = await pairPrincipalOf(place, principal);
-    const ofPlace = pairsOf.get(place);
-    if (ofPlace === undefined) {
-      pairsOf.set(place, [group]);
-    } else {
-      ofPlace.push(group);
-    }
-  }
+    ? await heldPrincipalsOf(env, member.userId, {
+        signIns,
+        connected,
+        directory,
+      })
+    : { accounts: [], groups: [] };
   return {
     person: member.userId,
-    groups,
-    audiences: withPlaceGroups.map((audience) => ({
-      ...audience,
-      places: audience.places.flatMap((place) => pairsOf.get(place) ?? []),
-    })),
+    groups: [
+      ...member.teams.map(({ id: teamId }) => teamGroup(teamId)),
+      companyGroup,
+      membersGroup,
+    ],
+    audiences: await withPlaces(audiences, places),
     accountGroups: held.accounts,
     sourceGroups: held.groups,
+  };
+};
+
+/**
+ * `groups`, with the group of each shared connection whose Brain audience
+ * is one of them (GRA-1831): `company` for everyone, a team's for that
+ * team. So what agents read through it reaches exactly as far as a
+ * document shared with that audience would at the same reach: code's
+ * included, and a shared thread's (the company alone) only for everyone.
+ * Beside them, apart (`places`), the group of each place picked on such
+ * a connection now (GRA-1719): never without the connection's own. An
+ * audience whose team is gone is in no one's groups: nobody's. A row that
+ * can't be read is nobody's too.
+ */
+const withConnections = (
+  groups: readonly string[],
+  audiences: readonly HeldAudience[]
+): { groups: string[]; places: string[] } => {
+  const held = new Set(groups);
+  const audienced = audiences.filter(({ connectionId, teamId }) => {
+    const connection = connectionIdSchema.safeParse(connectionId);
+    const team = teamId === null ? undefined : idSchema.safeParse(teamId);
+    if (!connection.success || team?.success === false) {
+      return false;
+    }
+    return held.has(
+      team === undefined ? companyGroup : `${teamPrefix}${team.data}`
+    );
+  });
+  return {
+    groups: [
+      ...groups,
+      ...audienced.map(
+        ({ connectionId }) => `${connectionPrefix}${connectionId}`
+      ),
+    ],
+    places: audienced.flatMap(({ places }) => places),
   };
 };
 
@@ -1275,7 +1221,7 @@ const refuseOtherConnectionReaders = (
     );
   }
   // What native sync copies from a place picked on a shared connection
-  // (GRA-1719), and only that, is for the place's pairs: keyed under the
+  // (GRA-1719), and only that, is for the place's group: keyed under the
   // connection (brain-sync.ts `keyOf`).
   if (
     readers.kind === "place" &&

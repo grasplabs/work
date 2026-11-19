@@ -218,7 +218,7 @@ export const rpcParamNames: ParamNames = {
     "setAgentToolClass": ["agentId","toolClass","audience"],
     "setAgentWakePaused": ["wakeId","paused"],
     "setAppToolClass": ["app","toolClass","audience"],
-    "setBrainAudience": ["connectionId","audience","from"],
+    "setBrainAudience": ["connectionId","audience","from","acknowledged"],
     "setOffered": ["source","id","offered"],
     "setStephenPlace": ["place","audience","acts"],
     "setStephenReach": ["on","audience"],

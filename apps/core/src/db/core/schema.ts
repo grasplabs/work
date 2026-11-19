@@ -7337,16 +7337,14 @@ export const sourceReaderGroups = sqliteTable("source_reader_groups", {
 });
 
 /**
- * Every pair of a place picked on a shared connection and a reader of an
- * item synced from it (GRA-2145) that a copied reader list ever named:
- * the place's group in the Brain (`place`, brain-next.ts `placeGroupOf`)
- * and the reader's (`principal`: an account's token, a tenant, a group,
- * as `readerPrincipalsOf` names them, never an address or an object ID).
- * Written before the list reaches the Brain, in the batch that names its
- * readers. A person holds the pair's group (`pairPrincipalOf`) only for
- * pairs here whose place they hold and whose reader they proved
- * (`heldPrincipalsOf`): those a kept item may name. Nothing is removed:
- * a pair no item names any more gives its holder nothing.
+ * No longer read or written (GRA-2207): what a place picked on a shared
+ * connection holds is read by the connection's audience, not by the
+ * readers its source names, so no pair of a place and a reader is kept.
+ * The table stays until a later release drops it (expand, then contract),
+ * so a release before this one, after a rollback, finds it as it left it.
+ * It held pairs of a place's group and a reader as the Brain names them
+ * (an account's token, a tenant, a group), never an address or an object
+ * ID.
  */
 export const sourceReaderPairs = sqliteTable(
   "source_reader_pairs",

@@ -223,20 +223,13 @@ export const refreshTokens = async (
   provider: OAuthProviderConfig,
   client: OAuthClientCredentials,
   tenant: string,
-  refreshToken: string,
-  /**
-   * The rights of the one resource the token is for, where it isn't the
-   * grant's first (Entra: "Refresh tokens are valid for all permissions
-   * that your client has already received consent for").
-   */
-  scope?: string
+  refreshToken: string
 ): Promise<TokenSet> => {
   const requestedAt = Date.now();
   return tokenSet(
     await post(provider.tokenEndpoint(tenant), provider, client, {
       grant_type: "refresh_token",
       refresh_token: refreshToken,
-      ...(scope === undefined ? {} : { scope }),
     }),
     requestedAt
   );
