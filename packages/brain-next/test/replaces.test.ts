@@ -732,6 +732,172 @@ describe("a memory that replaces earlier ones of its writer", () => {
     }).toStrictEqual({ takenBack: [], erased: ["first"] });
   });
 
+  it("ends what it names from its start on, as a newer memory of one value ends the one before, also once it expires", async () => {
+    const at = setUp();
+    const now = Date.now();
+    const day = 24 * 60 * 60 * 1000;
+    const dated = {
+      validFrom: new Date(now + day),
+      validUntil: new Date(now + 2 * day),
+    };
+    const status = (statement: string): NewMemory => ({
+      ...requirement(statement, at.writer),
+      attribute: "status",
+    });
+    const before = await add(at, status("before"));
+    await add(at, { ...status("after"), ...dated }, { entity: before.entity });
+    const old = await add(at, requirement("old", at.writer));
+    await add(
+      at,
+      { ...requirement("new", at.writer, [old.memory]), ...dated },
+      { entity: old.entity, reader: at.reader }
+    );
+    /** What is current about `entity` at each moment: before, during and after the dates. */
+    const over = async (entity: string) =>
+      await Promise.all(
+        [Date.now() + 1000, now + day + 1000, now + 3 * day].map(
+          async (moment) => {
+            const { memories } = await shared().readMemories({
+              entity,
+              reader: at.reader,
+              asOf: new Date(moment),
+            });
+            return memories.map(({ statement }) => statement);
+          }
+        )
+      );
+
+    expect({
+      oneValue: await over(before.entity),
+      replaced: await over(old.entity),
+    }).toStrictEqual({
+      oneValue: [["before"], ["after"], []],
+      replaced: [["old"], ["new"], []],
+    });
+  });
+
+  it("undoes a save that was forgotten before, keeping its first retirement and its first undo", async () => {
+    const at = setUp();
+    const old = await add(at, requirement("old", at.writer));
+    const replacing = await add(
+      at,
+      requirement("new", at.writer, [old.memory]),
+      {
+        entity: old.entity,
+        reader: at.reader,
+      }
+    );
+    const retire = async (change: string, undo: boolean) =>
+      await shared().retireMemory({
+        memory: replacing.memory,
+        reader: at.reader,
+        writer: at.writer,
+        change,
+        ...(undo ? { undo } : {}),
+      });
+    const forgotten = await retire("forget", false);
+    const forgottenRead = await currentOf(old.entity, at.reader);
+    const undone = await retire("undo", true);
+    // When the first undo had landed: the next read's moment.
+    const { memories: atFirstUndo } = await shared().readMemories({
+      entity: old.entity,
+      reader: at.reader,
+    });
+    const firstUndoAt = new Date(Date.now());
+    await retire("undo again", true);
+    const { memories: asOfFirst } = await shared().readMemories({
+      entity: old.entity,
+      reader: at.reader,
+      asOf: firstUndoAt,
+    });
+
+    expect({
+      forgottenRead,
+      undone,
+      atFirstUndo: atFirstUndo.map(({ statement }) => statement),
+      asOfFirst: asOfFirst.map(({ statement }) => statement),
+    }).toStrictEqual({
+      forgottenRead: [],
+      // Told the retirement as recorded: the forget's.
+      undone: forgotten,
+      atFirstUndo: ["old"],
+      // The second undo stamped nothing: the first's time stands.
+      asOfFirst: ["old"],
+    });
+  });
+
+  it("undoes a save whatever its dates, while a forget keeps to them", async () => {
+    const at = setUp();
+    const now = Date.now();
+    const day = 24 * 60 * 60 * 1000;
+    const saved = async (dates: Partial<NewMemory>) => {
+      const old = await add(at, requirement("old", at.writer));
+      const replacing = await add(
+        at,
+        { ...requirement("new", at.writer, [old.memory]), ...dates },
+        { entity: old.entity, reader: at.reader }
+      );
+      return { old, replacing };
+    };
+    const retire = async (memory: string, undo: boolean) =>
+      await shared().retireMemory({
+        memory,
+        reader: at.reader,
+        writer: at.writer,
+        change: `retire ${memory}`,
+        ...(undo ? { undo } : {}),
+      });
+    /** What is current about `entity` now and the day after tomorrow. */
+    const nowAndLater = async (entity: string) =>
+      await Promise.all(
+        [Date.now() + 1000, now + 2 * day + 1000].map(async (moment) => {
+          const { memories } = await shared().readMemories({
+            entity,
+            reader: at.reader,
+            asOf: new Date(moment),
+          });
+          return memories.map(({ statement }) => statement);
+        })
+      );
+    const tomorrow = { validFrom: new Date(now + day) };
+    const expired = {
+      validFrom: new Date(now - 2 * day),
+      validUntil: new Date(now - day),
+    };
+    const futureUndone = await saved(tomorrow);
+    const expiredUndone = await saved(expired);
+    const futureForgotten = await saved(tomorrow);
+    const expiredForgotten = await saved(expired);
+    const outcomes = {
+      futureUndone:
+        (await retire(futureUndone.replacing.memory, true)) !== null,
+      expiredUndone:
+        (await retire(expiredUndone.replacing.memory, true)) !== null,
+      futureForgotten: await retire(futureForgotten.replacing.memory, false),
+      expiredForgotten: await retire(expiredForgotten.replacing.memory, false),
+    };
+
+    expect({
+      outcomes,
+      futureUndone: await nowAndLater(futureUndone.old.entity),
+      expiredUndone: await nowAndLater(expiredUndone.old.entity),
+      futureForgotten: await nowAndLater(futureForgotten.old.entity),
+      expiredForgotten: await nowAndLater(expiredForgotten.old.entity),
+    }).toStrictEqual({
+      outcomes: {
+        futureUndone: true,
+        expiredUndone: true,
+        futureForgotten: null,
+        expiredForgotten: null,
+      },
+      futureUndone: [["old"], ["old"]],
+      expiredUndone: [["old"], ["old"]],
+      // As on main: outside its dates, a forget retires nothing.
+      futureForgotten: [["old"], ["new"]],
+      expiredForgotten: [[], []],
+    });
+  });
+
   it("keeps reads of a moment before an undo as they were, the undo stamped once however often it is repeated", async () => {
     const at = setUp();
     const old = await add(at, requirement("old", at.writer));
