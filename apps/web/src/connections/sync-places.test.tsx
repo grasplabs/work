@@ -73,7 +73,7 @@ const audienceChosen = async (
   });
 };
 
-/** The picker with the audience held now, and the Sales team's name. */
+/** The picker with the audience held now, and its team's name, Sales the one team the page knows. */
 const Picker = ({ connection }: { connection: CatalogConnection }) => {
   const audience = useSyncExternalStore(
     (listener) => {
@@ -89,7 +89,11 @@ const Picker = ({ connection }: { connection: CatalogConnection }) => {
       audience={audience}
       connection={connection}
       label={label}
-      team="Sales"
+      team={
+        audience.kind === "team" && audience.teamId === "sales"
+          ? "Sales"
+          : undefined
+      }
     />
   );
 };
@@ -329,6 +333,19 @@ describe("picking a shared connection's places to sync", () => {
         },
       ],
     });
+  });
+
+  it("names a team the page doesn't know as this team, never by an empty name", async () => {
+    audienceNow = { kind: "team", teamId: "gone" };
+    await shown({ held: libraries() });
+    await click(boxOf("Documents", "Legal"));
+    expect({
+      asked:
+        boxOf(
+          `Everyone in this team will be able to read everything in the places you pick, whatever their permissions in ${label}.`
+        ) !== undefined,
+      empty: text().includes("Everyone in the team  will"),
+    }).toStrictEqual({ asked: true, empty: false });
   });
 
   it("saves only what was ticked and unticked, from every pick held, a pick the listing didn't show included", async () => {

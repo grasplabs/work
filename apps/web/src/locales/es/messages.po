@@ -5842,6 +5842,14 @@ msgstr "Todos los de la organización están en este equipo."
 msgid "Everyone in the team {team} will be able to read everything in the places you pick, whatever their permissions in {label}."
 msgstr "Todos en el equipo {team} podrán leer todo lo que haya en los lugares que elijas, sean cuales sean sus permisos en {label}."
 
+#: src/connections/brain-audience.tsx
+msgid "Everyone in this team will be able to find what agents read through {label} and what is copied from it, including what was kept before, whatever their permissions in {label}."
+msgstr "Todos en este equipo podrán encontrar lo que los agentes leen a través de {label} y lo que se copia de allí, también lo que se guardó antes, sean cuales sean sus permisos en {label}."
+
+#: src/connections/sync-places.tsx
+msgid "Everyone in this team will be able to read everything in the places you pick, whatever their permissions in {label}."
+msgstr "Todos en este equipo podrán leer todo lo que haya en los lugares que elijas, sean cuales sean sus permisos en {label}."
+
 #: src/apps/access-view.tsx
 #: src/apps/draft-changes.tsx
 msgid "everyone who uses the App"

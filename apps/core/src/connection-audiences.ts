@@ -10,13 +10,17 @@ import type {
 } from "@grasp-os/shared/connect";
 import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { placesListing } from "@grasp-os/shared/sync";
+import { placesListing, syncErrors } from "@grasp-os/shared/sync";
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
-import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
+import {
+  appendAuditEvent,
+  auditedBatch,
+  outboxedIfChanged,
+} from "./audit-outbox.ts";
 import {
   brainSyncSources,
   connectionBrainAudiences,
@@ -225,6 +229,49 @@ const heldOf = (audience: ConnectionBrainAudience): Held => {
   return audience.kind === "team" ? audience.teamId : null;
 };
 
+/** Whether `one` and `other` are the same audience: the same team, if one. */
+export const sameAudience = (
+  one: ConnectionBrainAudience,
+  other: ConnectionBrainAudience
+): boolean => heldOf(one) === heldOf(other);
+
+/** `audience` as the audit log names it: who, and which team. */
+export const audienceFields = (
+  audience: ConnectionBrainAudience
+): Record<string, string> => audienceDetail(heldOf(audience), "");
+
+/**
+ * Refuses (`sync.unacknowledged`), and records the refusal as `action`,
+ * unless `acknowledged` is `audience`: the admin confirmed that it will
+ * read everything a shared connection brings, the places picked on it
+ * included, whatever the source's permissions (GRA-2207).
+ */
+export const requireAcknowledged = async (
+  env: Env,
+  identity: Identity,
+  action: "connection.sync_places" | "brain.connection_audience.changed",
+  connectionId: string,
+  audience: ConnectionBrainAudience,
+  acknowledged: ConnectionBrainAudience | undefined,
+  detail: Record<string, string> = {}
+): Promise<void> => {
+  if (acknowledged !== undefined && sameAudience(acknowledged, audience)) {
+    return;
+  }
+  await appendAuditEvent(env, {
+    actor: actorOf(identity),
+    action,
+    target: { type: "connection", id: connectionId },
+    detail: {
+      ...detail,
+      outcome: "refused",
+      reason: "sync.unacknowledged",
+      ...audienceFields(audience),
+    },
+  });
+  throw syncErrors.create("sync.unacknowledged");
+};
+
 /** The audience `connectionId` holds now. */
 const heldBy = async (
   db: DrizzleD1Database,
@@ -303,13 +350,20 @@ const requireOpenable = async (
  * Otherwise it throws `connection.brain_audience_changed` and changes
  * nothing; the page reads the audience again. Choosing what is held
  * already changes nothing, whatever `from` says.
+ *
+ * A change that lets anyone read who couldn't before (to a team from
+ * nobody or another team, or to everyone) is refused
+ * (`sync.unacknowledged`), and recorded, unless `acknowledged` is the
+ * audience chosen: the admin confirmed it reads everything the
+ * connection brings, whatever the source's permissions (GRA-2207).
  */
 export const setConnectionAudience = async (
   env: Env,
   identity: Identity,
   connectionId: unknown,
   audience: unknown,
-  from: unknown
+  from: unknown,
+  acknowledged?: unknown
 ): Promise<void> => {
   requireAdmin(identity);
   if (identity.staff) {
@@ -318,7 +372,10 @@ export const setConnectionAudience = async (
   const id = brainConnectionIdSchema.safeParse(connectionId);
   const chosen = connectionBrainAudienceSchema.safeParse(audience);
   const seen = connectionBrainAudienceSchema.safeParse(from);
-  if (!(id.success && chosen.success && seen.success)) {
+  const confirmed = connectionBrainAudienceSchema
+    .optional()
+    .safeParse(acknowledged);
+  if (!(id.success && chosen.success && seen.success && confirmed.success)) {
     throw connectionErrors.create("connection.invalid");
   }
   const expected = heldOf(seen.data);
@@ -354,6 +411,19 @@ export const setConnectionAudience = async (
     }
     if (wanted !== undefined && unopenable === "erasing") {
       throw connectionErrors.create("connection.brain_erasing");
+    }
+    // Opens to someone new: everyone from anything less, or a team from
+    // nobody or another team.
+    if (wanted !== undefined && held !== null) {
+      // oxlint-disable-next-line no-await-in-loop -- refuses, ending the loop
+      await requireAcknowledged(
+        env,
+        identity,
+        "brain.connection_audience.changed",
+        id.data,
+        chosen.data,
+        confirmed.data
+      );
     }
     const event = outboxedIfChanged(db, {
       actor: actorOf(identity),

@@ -774,12 +774,16 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
    * never Grasp staff; audited. Refused (`connection.brain_erasing`) while
    * what the Brain kept of it is being erased. `from` is the audience the
    * admin was looking at: refused (`connection.brain_audience_changed`),
-   * with nothing changed, once another is held.
+   * with nothing changed, once another is held. A change that lets anyone
+   * read who couldn't before is refused (`sync.unacknowledged`) unless
+   * `acknowledged` is `audience`: the admin confirmed it reads everything
+   * the connection brings, whatever the source's permissions (GRA-2207).
    */
   setBrainAudience: (
     connectionId: string,
     audience: ConnectionBrainAudience,
-    from: ConnectionBrainAudience
+    from: ConnectionBrainAudience,
+    acknowledged?: ConnectionBrainAudience
   ) => Promise<void>;
   /**
    * Erases everything the Brain kept from the shared connection

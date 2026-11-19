@@ -20,6 +20,7 @@ import {
   staffPerson,
   unique,
 } from "./sign-in.ts";
+import { newTeam } from "./teams.ts";
 import { connectDb, testBinding } from "./test-env.ts";
 
 // The places of a shared connection an admin picks to sync into the Brain
@@ -286,15 +287,18 @@ describe("picking a shared connection's places to sync", setUpTime, () => {
     });
   });
 
-  it("picks a place only once the admin confirmed who will read everything in it now, and records each refusal", async () => {
+  it("picks a place only once the admin confirmed who will read everything in it now, and records each refusal with that audience", async () => {
     const admin = await signedInApi(idp, "admin");
     const connectionId = await sharedGoogle(admin);
+    const [sales, finance] = await Promise.all([newTeam(), newTeam()]);
     const prefix = `drive-${unique()}`;
     const zero = `${prefix}-0`;
     const one = `${prefix}-1`;
     await driveHeld(zero);
     await driveHeld(one);
-    await chooseAudience(admin.api, connectionId, { kind: "everyone" });
+    const forSales = { kind: "team", teamId: sales } as const;
+    const forFinance = { kind: "team", teamId: finance } as const;
+    await chooseAudience(admin.api, connectionId, forSales);
     const save = async (
       places: string[],
       acknowledged?: ConnectionBrainAudience
@@ -319,13 +323,18 @@ describe("picking a shared connection's places to sync", setUpTime, () => {
     const picks: Record<string, string[]> = {};
     const refusals = await auditedDuring(async () => {
       outcomes.unconfirmed = await save([zero]);
-      // Confirmed for the audience the page showed before it was widened.
-      outcomes.stale = await save([zero], { kind: "nobody" });
+      // Confirmed for an audience the page showed before another was chosen.
+      outcomes.staleNobody = await save([zero], { kind: "nobody" });
+      // The page shows Sales; another admin moves it to Finance meanwhile.
+      await chooseAudience(admin.api, connectionId, forFinance);
+      outcomes.staleTeam = await save([zero], forSales);
       picks.refused = await picksNow();
-      outcomes.confirmed = await save([zero], { kind: "everyone" });
-      // Another place needs confirming again; un-picking needs none.
+      outcomes.confirmed = await save([zero], forFinance);
+      // Another place needs confirming again, swapped for one too;
+      // un-picking needs none.
       outcomes.another = await save([zero, one]);
-      outcomes.both = await save([zero, one], { kind: "everyone" });
+      outcomes.swapped = await save([one]);
+      outcomes.both = await save([zero, one], forFinance);
       outcomes.unpicked = await save([one]);
       picks.after = await picksNow();
     });
@@ -343,20 +352,25 @@ describe("picking a shared connection's places to sync", setUpTime, () => {
     }).toStrictEqual({
       outcomes: {
         unconfirmed: "sync.unacknowledged",
-        stale: "sync.unacknowledged",
+        staleNobody: "sync.unacknowledged",
+        staleTeam: "sync.unacknowledged",
         confirmed: "ok",
         another: "sync.unacknowledged",
+        swapped: "sync.unacknowledged",
         both: "ok",
         unpicked: "ok",
       },
       picks: { refused: [], after: [one] },
-      recorded: Array.from({ length: 3 }, () => ({
+      // Each with the audience it was refused for.
+      recorded: [sales, sales, finance, finance, finance].map((team) => ({
         actor: admin.userId,
         target: connectionId,
         detail: {
           feed: "shared-drives",
           outcome: "refused",
           reason: "sync.unacknowledged",
+          who: "team",
+          team,
         },
       })),
     });

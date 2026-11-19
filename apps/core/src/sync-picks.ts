@@ -1,7 +1,6 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import { connectionBrainAudienceSchema } from "@grasp-os/shared/connect";
 import type {
-  ConnectionBrainAudience,
   ConnectionPerson,
   SharedSyncPlaces,
 } from "@grasp-os/shared/connect";
@@ -16,7 +15,10 @@ import { z } from "zod";
 
 import { appendAuditEvent } from "./audit-outbox.ts";
 import { hideUnpickedPlaces } from "./brain-sync.ts";
-import { connectionAudienceOf } from "./connection-audiences.ts";
+import {
+  connectionAudienceOf,
+  requireAcknowledged,
+} from "./connection-audiences.ts";
 
 // The places of a shared connection an admin picks to sync into the Brain
 // (GRA-1758, GRA-1759): its connector's shared drives or SharePoint
@@ -42,14 +44,6 @@ const pickSchema = z.strictObject({
   places: syncPicksSchema,
   acknowledged: connectionBrainAudienceSchema.optional(),
 });
-
-/** Whether `one` and `other` are the same audience. */
-const sameAudience = (
-  one: ConnectionBrainAudience,
-  other: ConnectionBrainAudience
-): boolean =>
-  one.kind === other.kind &&
-  (one.kind !== "team" || other.kind !== "team" || one.teamId === other.teamId);
 
 /**
  * Refuses, with `role.forbidden`, anyone but one of the company's admins,
@@ -161,18 +155,16 @@ export const pickSyncPlaces = async (
   const audience = await connectionAudienceOf(env, connectionId);
   // `from` is what connect checks the picks held against, so a place it
   // doesn't hold is one this save picks.
-  const picksMore = places.some((place) => !from.includes(place));
-  if (
-    picksMore &&
-    (acknowledged === undefined || !sameAudience(acknowledged, audience))
-  ) {
-    await appendAuditEvent(env, {
-      actor: actorOf(identity),
-      action: "connection.sync_places",
-      target: { type: "connection", id: connectionId },
-      detail: { feed, outcome: "refused", reason: "sync.unacknowledged" },
-    });
-    throw syncErrors.create("sync.unacknowledged");
+  if (places.some((place) => !from.includes(place))) {
+    await requireAcknowledged(
+      env,
+      identity,
+      "connection.sync_places",
+      connectionId,
+      audience,
+      acknowledged,
+      { feed }
+    );
   }
   const { version } = await env.CONNECT.pickSyncPlaces({
     person: await person(),

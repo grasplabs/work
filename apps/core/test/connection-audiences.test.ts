@@ -1,4 +1,5 @@
 import { recallBudgetMax } from "@grasp-os/brain-next/contract";
+import type { ConnectionBrainAudience } from "@grasp-os/shared/connect";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -435,6 +436,73 @@ describe("a shared connection's Brain audience", setUpTime, () => {
     });
   });
 
+  it("opens to anyone new only once the admin confirmed it reads everything the connection brings, and records each refusal with that audience", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const [sales, support] = await Promise.all([newTeam(), newTeam()]);
+    const shared = await connection();
+    const nobody = { kind: "nobody" } as const;
+    const everyone = { kind: "everyone" } as const;
+    const forSales = { kind: "team", teamId: sales } as const;
+    const forSupport = { kind: "team", teamId: support } as const;
+    const set = async (
+      next: ConnectionBrainAudience,
+      from: ConnectionBrainAudience,
+      acknowledged?: ConnectionBrainAudience
+    ): Promise<string> =>
+      await outcome(
+        admin.api.connections.setBrainAudience(
+          shared,
+          next,
+          from,
+          ...(acknowledged === undefined ? [] : [acknowledged])
+        )
+      );
+
+    const outcomes: Record<string, string> = {};
+    const events = await auditedDuring(async () => {
+      outcomes.unconfirmed = await set(forSales, nobody);
+      outcomes.otherConfirmed = await set(forSales, nobody, everyone);
+      outcomes.confirmed = await set(forSales, nobody, forSales);
+      // Another team is someone new too.
+      outcomes.anotherTeam = await set(forSupport, forSales);
+      outcomes.everyone = await set(everyone, forSales, everyone);
+      // Narrowing lets nobody new read: nothing to confirm.
+      outcomes.narrowed = await set(forSales, everyone);
+      outcomes.closed = await set(nobody, forSales);
+    });
+
+    expect({
+      outcomes,
+      refused: events
+        .filter(({ detail }) => detail?.outcome === "refused")
+        .map(({ action, target, detail }) => ({
+          action,
+          target: target?.id,
+          detail,
+        })),
+    }).toStrictEqual({
+      outcomes: {
+        unconfirmed: "sync.unacknowledged",
+        otherConfirmed: "sync.unacknowledged",
+        confirmed: "ok",
+        anotherTeam: "sync.unacknowledged",
+        everyone: "ok",
+        narrowed: "ok",
+        closed: "ok",
+      },
+      refused: [sales, sales, support].map((team) => ({
+        action: "brain.connection_audience.changed",
+        target: shared,
+        detail: {
+          outcome: "refused",
+          reason: "sync.unacknowledged",
+          who: "team",
+          team,
+        },
+      })),
+    });
+  });
+
   it("refuses a change made from an audience that changed meanwhile, records nothing of it, and records what the other change replaced", async () => {
     const [first, second] = await Promise.all([
       signedInApi(idp, "admin"),
@@ -469,7 +537,8 @@ describe("a shared connection's Brain audience", setUpTime, () => {
           identity,
           connectionId,
           { kind: "team", teamId: support },
-          { kind: "team", teamId: sales }
+          { kind: "team", teamId: sales },
+          { kind: "team", teamId: support }
         )
       );
     });
@@ -480,7 +549,8 @@ describe("a shared connection's Brain audience", setUpTime, () => {
       first.api.connections.setBrainAudience(
         connectionId,
         { kind: "team", teamId: support },
-        { kind: "team", teamId: sales }
+        { kind: "team", teamId: sales },
+        { kind: "team", teamId: support }
       )
     );
     const audiences = await first.api.connections.brainAudiences();

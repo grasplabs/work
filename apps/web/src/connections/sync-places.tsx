@@ -159,7 +159,7 @@ const Readers = ({
   label,
 }: {
   audience: ConnectionBrainAudience;
-  team: string;
+  team: string | undefined;
   label: string;
 }) => {
   if (audience.kind === "everyone") {
@@ -170,11 +170,19 @@ const Readers = ({
       </Trans>
     );
   }
-  if (audience.kind === "team") {
+  if (audience.kind === "team" && team !== undefined) {
     return (
       <Trans>
         Everyone in the team {team} will be able to read everything in the
         places you pick, whatever their permissions in {label}.
+      </Trans>
+    );
+  }
+  if (audience.kind === "team") {
+    return (
+      <Trans>
+        Everyone in this team will be able to read everything in the places you
+        pick, whatever their permissions in {label}.
       </Trans>
     );
   }
@@ -199,8 +207,8 @@ const PlacesForm = ({
   label: string;
   /** The connection's Brain audience as core holds it now. */
   audience: ConnectionBrainAudience;
-  /** The name of the audience's team, if it is one. */
-  team: string;
+  /** The name of the audience's team, if it is one the page knows. */
+  team: string | undefined;
   places: SharedSyncPlaces;
   /**
    * The picks were asked for, `changed` when another change landed
@@ -364,8 +372,8 @@ export const SyncPlaces = ({
   label: string;
   /** The connection's Brain audience as core holds it now. */
   audience: ConnectionBrainAudience;
-  /** The name of the audience's team, if it is one. */
-  team: string;
+  /** The name of the audience's team, if it is one the page knows. */
+  team: string | undefined;
 }) => {
   const { t } = useLingui();
   const { read, reload } = usePlaces(connection.id);
