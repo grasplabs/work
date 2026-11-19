@@ -933,6 +933,17 @@ const listingGet = async <Schema extends z.ZodType>(
 };
 
 /**
+ * Libraries asked of Graph per page of a site's drives (`$top`): a
+ * platform bound, not a cap on what is listed. A read may send
+ * `syncPageLimits.requests` requests; less the page of sites and the page
+ * of drives, that leaves one check of each library's sharing
+ * (`sharingReadOf`) for this many. So a page a read ran out of room in,
+ * which the next read takes again from its start, always fits that next
+ * read, and the listing always moves on.
+ */
+const librariesPerPage = syncPageLimits.requests - 2;
+
+/**
  * The document libraries of one page of a site's drives, as places to
  * pick, each with whether the account may read who opens its files
  * (`sharingReadOf`); `OutOfRoomError` before any of them when the read has
@@ -988,6 +999,7 @@ const listSite = async (
       atPage(
         graphUrl(`/sites/${segment(site.id)}/drives`, {
           $select: "id,name,driveType,sharepointIds",
+          $top: String(librariesPerPage),
         }),
         listing.drivePage ?? undefined
       ),

@@ -722,12 +722,8 @@ const isNotConsented = (error: unknown): boolean =>
 export interface TenantCredential {
   host: string;
   credential: Credential;
-  /**
-   * Whether it was kept from an earlier call (`held`), with when it
-   * expires, which names the kept row; else minted for this call.
-   */
+  /** Whether it was kept from an earlier call; else minted for this one. */
   held: boolean;
-  expiresAt: number;
 }
 
 /**
@@ -751,7 +747,6 @@ const heldTenantCredential = async (
         await vault.open(held.sealed, tenantSealContext(held.connectionId))
       ),
       held: true,
-      expiresAt: held.accessExpiresAt.getTime(),
     };
   } catch (error) {
     // Sealed under a key no longer held: asked for again.
@@ -868,25 +863,21 @@ export const tenantCredentialFor = async (
     host,
     credential: bearer(minted.accessToken),
     held: false,
-    expiresAt: minted.expiresAt,
   };
 };
 
 /**
- * Lets go of a connection's kept token for its own host that the host
- * no longer takes (a 401 to a token kept from an earlier call): the next
- * call mints another. Only that token, by when it expires, never one
- * minted since.
+ * Lets go of a connection's kept token for its own host, which the host
+ * refused (egress.ts `tenantRefused`): the next call mints another.
  */
 export const dropTenantToken = async (
   env: Env,
-  connectionId: string,
-  expiresAt: number
+  connectionId: string
 ): Promise<void> => {
   await env.DB.prepare(
-    "DELETE FROM connection_tenant_tokens WHERE connection_id = ? AND access_expires_at = ?"
+    "DELETE FROM connection_tenant_tokens WHERE connection_id = ?"
   )
-    .bind(connectionId, expiresAt)
+    .bind(connectionId)
     .run();
 };
 

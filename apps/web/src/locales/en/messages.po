@@ -6140,6 +6140,10 @@ msgctxt "kind of app"
 msgid "Files and documents"
 msgstr "Files and documents"
 
+#: src/connections/brain-audience.tsx
+msgid "Files copied from the places picked below are read only by those who can open them in {label}, and the audience chosen here narrows that further; what agents read through {label} is decided by this audience alone."
+msgstr "Files copied from the places picked below are read only by those who can open them in {label}, and the audience chosen here narrows that further; what agents read through {label} is decided by this audience alone."
+
 #: src/workflows/run-files.tsx
 msgid "Files it wrote"
 msgstr "Files it wrote"
@@ -17414,10 +17418,6 @@ msgstr "Who may read it"
 msgctxt "a memory shared with others"
 msgid "Who may read it"
 msgstr "Who may read it"
-
-#: src/connections/brain-audience.tsx
-msgid "Who may read it is decided inside Grasp, not by the permissions in {label}: choose a team if not everyone should see it."
-msgstr "Who may read it is decided inside Grasp, not by the permissions in {label}: choose a team if not everyone should see it."
 
 #: src/connections/brain-audience.tsx
 msgid "Who may read what agents read through {label} was changed in the meantime. This is who may read it now: choose again if you still want to change it."

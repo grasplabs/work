@@ -134,9 +134,8 @@ const egressPropsSchema = z.strictObject({
    * The connection's own host at its provider and its credential there,
    * for a sync whose routes name it (`tenantHost`); none when connect
    * holds none (the grant doesn't reach it): its requests are refused.
-   * Whether connect kept it from an earlier call (`held`, the kept one
-   * named by when it expires), for what a refusal of it means
-   * (`tenantRefused`).
+   * Whether connect kept it from an earlier call (`held`), for what a
+   * refusal of it means (`tenantRefused`).
    */
   tenant: z
     .strictObject({
@@ -144,7 +143,6 @@ const egressPropsSchema = z.strictObject({
       credential: credentialSchema,
       connectionId: z.string().min(1),
       held: z.boolean(),
-      expiresAt: z.number().int(),
     })
     .optional(),
   /** When this call's egress closes, in ms since the epoch. */
@@ -352,13 +350,16 @@ const capped = (response: Response): Response => {
 };
 
 /**
- * The connection's own host refusing its credential (401). One connect
- * kept from an earlier call may have run out or been revoked: it is let
- * go (`dropTenantToken`), and the refusal passes on, so the call fails
- * and the next mints another. One minted for this very call that the
- * host refuses all the same (an access policy of the host's) is as good
- * as none: refused here, as a call with no credential for the host is,
- * so what it reads is nobody's, and the sync goes on.
+ * The connection's own host refusing its credential (401). Either way the
+ * kept token is let go (`dropTenantToken`), so the next call mints
+ * another. One connect kept from an earlier call may have run out or been
+ * revoked: the refusal passes on, so the call fails once. One minted for
+ * this very call that the host refuses all the same (an access policy of
+ * the host's) is as good as none: refused here, as a call with no
+ * credential for the host is, so what it reads is nobody's and the sync
+ * goes on. Under such a policy, a token an earlier call minted and never
+ * sent counts as kept, so a page can still fail once before the next
+ * completes: bounded, and never past nobody.
  */
 const tenantRefused = async (
   env: Env,
@@ -367,8 +368,10 @@ const tenantRefused = async (
   response: Response
 ): Promise<Response> => {
   const { tenant } = call;
+  if (tenant !== undefined) {
+    await dropTenantToken(env, tenant.connectionId);
+  }
   if (tenant?.held === true) {
-    await dropTenantToken(env, tenant.connectionId, tenant.expiresAt);
     return capped(response);
   }
   await response.body?.cancel();

@@ -1,5 +1,5 @@
 import { syncErrors } from "@grasp-os/shared/sync";
-import type { SyncPage } from "@grasp-os/shared/sync";
+import type { SyncPage, SyncPlaceChoices } from "@grasp-os/shared/sync";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -455,7 +455,11 @@ const siteOrDriveCall = (url: URL): Response => {
     }
     // Graph's position in the site's drives, as its next link carries it.
     const from = Number(url.searchParams.get("$skiptoken") ?? 0);
-    const size = sharePoint.drivesPerPage ?? drives.length;
+    // At most `$top` ("The service may return fewer"), and as the test asks.
+    const size = Math.min(
+      sharePoint.drivesPerPage ?? drives.length,
+      Number(url.searchParams.get("$top") ?? drives.length)
+    );
     const next = from + size;
     return Response.json({
       // Each library with where SharePoint keeps it.
@@ -723,6 +727,56 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
       },
       places: { places: [salesContracts.id, legalDocs.id], cursor: null },
     });
+  });
+
+  it("lists every library of a site with as many libraries as one read can check, and one more or one fewer", async () => {
+    const outcomes = [];
+    for (const count of [47, 48, 49]) {
+      // oxlint-disable-next-line no-await-in-loop -- one connection after another
+      const { admin, connectionId } = await sharedConnection();
+      const libraries = Array.from({ length: count }, (_, index) => ({
+        id: `b!many-${count}-${index}`,
+        name: `Library ${index}`,
+        driveType: "documentLibrary",
+      }));
+      for (const [index, { id }] of libraries.entries()) {
+        whereIs[id] = {
+          site: "/sites/sales",
+          list: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+        };
+      }
+      sharePoint.sitePages = [[{ id: salesSite, displayName: "Sales" }]];
+      sharePoint.drives = { [salesSite]: libraries };
+      const listed: string[] = [];
+      const failed: string[] = [];
+      let cursor: string | null = null;
+      for (let at = 0; at < 4; at += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one read after another, each from the last one's cursor
+        const answer: SyncPlaceChoices | null | string = await exports.default
+          .syncPlaceChoices({ person: admin, connectionId, feed, cursor })
+          .catch((error: unknown) => syncErrors.codeOf(error) ?? "failed");
+        if (typeof answer === "string") {
+          failed.push(answer);
+          break;
+        }
+        listed.push(
+          ...(answer?.choices ?? [])
+            .filter(({ sharingRead }) => sharingRead)
+            .map(({ place }) => place)
+        );
+        cursor = answer?.cursor ?? null;
+        if (cursor === null) {
+          break;
+        }
+      }
+      outcomes.push({ count, listed: listed.length, failed });
+    }
+
+    expect(outcomes).toStrictEqual([
+      { count: 47, listed: 47, failed: [] },
+      { count: 48, listed: 48, failed: [] },
+      { count: 49, listed: 49, failed: [] },
+    ]);
   });
 
   it("lists a site with more pages of drives than one read can take, across reads, every library once, no read past its requests", async () => {
@@ -1213,16 +1267,63 @@ describe("syncing a shared connection's picked SharePoint libraries", () => {
     });
   });
 
-  it("gives nobody a file when SharePoint refuses a token minted that very call, and the page goes on", async () => {
+  it("gives every file nobody under a SharePoint policy that refuses every token, and never fails two pages in a row", async () => {
     const { admin, connectionId } = await sharedConnection();
     await pick(admin, connectionId, [salesDocs.id]);
     // An access policy of SharePoint's that refuses every token for this
     // account, however fresh.
     sharePoint.restStatus = 401;
+    sharePoint.feeds[salesDocs.id] = {
+      ...sharePoint.feeds[salesDocs.id],
+      // Each change page brings the file again, as the sync's clock reads it.
+      t1: { entries: [fileIn(salesDocs, `${salesDocs.id}-file`)], end: "t1" },
+    };
+    const outcomes: string[] = [];
+    const readers: unknown[] = [];
+    let cursor: string | null = null;
+    for (let at = 0; at < 6; at += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one page after another, as the sync reads them
+      const page: SyncPage | string = await read(
+        connectionId,
+        salesDocs.id,
+        cursor
+      ).catch((error: unknown) => syncErrors.codeOf(error) ?? "failed");
+      if (typeof page === "string") {
+        outcomes.push(page);
+      } else {
+        outcomes.push("ok");
+        readers.push(
+          ...page.items.flatMap((item) => (item.gone ? [] : [item.readers]))
+        );
+        ({ cursor } = page);
+      }
+    }
 
-    await expect(
-      readersRead(connectionId, salesDocs.id)
-    ).resolves.toStrictEqual([null]);
+    expect({
+      // A failed page is always followed by one that completes.
+      twoFailedInARow: outcomes.some(
+        (outcome, index) =>
+          outcome !== "ok" &&
+          outcomes[index + 1] !== "ok" &&
+          index + 1 < outcomes.length
+      ),
+      // A failed page waits, as a refused kept token does: never more.
+      otherFailures: outcomes.filter(
+        (outcome) => outcome !== "ok" && outcome !== "sync.throttled"
+      ),
+      completed: outcomes.filter((outcome) => outcome === "ok").length >= 3,
+      // One page fails: the one after the listing's empty catch-up, whose
+      // token was minted and never sent, so it counts as kept. A refused
+      // fresh token is let go, so it never fails the page after it.
+      failed: outcomes.filter((outcome) => outcome !== "ok").length,
+      readers: [...new Set(readers.map((reader) => JSON.stringify(reader)))],
+    }).toStrictEqual({
+      twoFailedInARow: false,
+      otherFailures: [],
+      completed: true,
+      failed: 1,
+      readers: ["null"],
+    });
   });
 
   it("keeps a grant's SharePoint token across Graph's renewals, and gives a grant connected again its own", async () => {
