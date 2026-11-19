@@ -1,3 +1,4 @@
+import { staffListTeamRefusals } from "@grasp-os/shared/onboarding";
 import { useLingui } from "@lingui/react/macro";
 import { useState } from "react";
 
@@ -21,11 +22,15 @@ export const useTeamChange = (refresh: () => Promise<void>) => {
     if (error.status === 403) {
       return t`Only admins can change teams.`;
     }
-    // A team on the onboarding's staff list, as saved or as last
-    // confirmed, is deleted only once it is off both (core's auth.ts,
-    // GRA-2055): taken off the list, and the list confirmed.
-    if (error.status === 409) {
+    // The onboarding's staff list's own refusals (core's auth.ts,
+    // GRA-2055), each by its code: a team on the list, saved or as last
+    // confirmed, is deleted only once it is off both; and a name the list
+    // gives a team it hasn't made yet is the list's.
+    if (error.code === staffListTeamRefusals.onList) {
       return t`This team is on the staff list. Take it off there and confirm the list first.`;
+    }
+    if (error.code === staffListTeamRefusals.notMadeYet) {
+      return t`A team on the staff list has this name. It appears here once the staff list is confirmed.`;
     }
     return undefined;
   };

@@ -1757,6 +1757,10 @@ msgstr "A team can read this upload."
 msgid "A team it is no longer shared with"
 msgstr "A team it is no longer shared with"
 
+#: src/settings/use-team-change.ts
+msgid "A team on the staff list has this name. It appears here once the staff list is confirmed."
+msgstr "A team on the staff list has this name. It appears here once the staff list is confirmed."
+
 #: src/onboarding/setup-steps.tsx
 msgid "A team without a lead gets its links on the first day, and I ask each person what they do."
 msgstr "A team without a lead gets its links on the first day, and I ask each person what they do."

@@ -6,6 +6,7 @@ import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { fromBase64Url } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";
 import { relayRedirectUri } from "@grasp-os/shared/oauth-relay";
+import { staffListTeamRefusals } from "@grasp-os/shared/onboarding";
 import { roleSchema } from "@grasp-os/shared/roles";
 import { routerClientIpHeader } from "@grasp-os/shared/router";
 import type { SignInRefusal } from "@grasp-os/shared/sign-in";
@@ -49,7 +50,7 @@ import {
 import { mayComeIn, staffMayStay } from "../onboarding/gate.ts";
 import { onboardingStore } from "../onboarding/store.ts";
 import { keepSignInAddress } from "../source-readers.ts";
-import { syncTeams } from "../staff-list-teams.ts";
+import { namedOnListUnmade } from "../staff-list-teams.ts";
 import { checkClaims } from "./claims.ts";
 import {
   devIdpOrigin,
@@ -1009,21 +1010,18 @@ const createAuth = (
             await teamGone(env, team.id);
           },
           // The onboarding's staff list names these same teams (GRA-2055,
-          // staff-list-teams.ts), whose names are their own, here: a
-          // rename shows on the list at once, as a new version of its
-          // confirmed teams that a confirm under way never writes over
-          // (`syncTeams`). The rename is kept whatever comes of that, so
-          // a failure is logged, not answered: the list's next save takes
-          // the name from here again (`intoMembersTeams`). A team on the
-          // list, saved or confirmed, is taken off there first, so it
-          // never names one gone.
+          // staff-list-teams.ts), whose names change here alone: a rename
+          // shows on the list at once. The rename is kept whatever comes of
+          // that, so a failure is logged, not answered: the list's next
+          // save takes the name from here again (`intoMembersTeams`). A
+          // team on the list, saved or confirmed, is taken off there
+          // first, so it never names one gone.
           afterUpdateTeam: async ({ team }) => {
             if (team === null) {
               return;
             }
             try {
               await onboardingStore(env).renameTeam(team.id, team.name);
-              await syncTeams(env, { type: "system" });
             } catch (error) {
               log.error("onboarding.team_rename_unfollowed", {
                 teamId: team.id,
@@ -1034,7 +1032,20 @@ const createAuth = (
           beforeDeleteTeam: async ({ team }) => {
             if (await onboardingStore(env).listsTeam(team.id)) {
               throw new APIError("CONFLICT", {
+                code: staffListTeamRefusals.onList,
                 message: "The team is on the staff list.",
+              });
+            }
+          },
+          // A name the staff list gives a team it hasn't made yet stays its
+          // own: made here first, the confirm would keep the list's team by
+          // its id and make a second of the name (GRA-2055).
+          beforeCreateTeam: async ({ team }) => {
+            if (await namedOnListUnmade(env, team.name)) {
+              throw new APIError("CONFLICT", {
+                code: staffListTeamRefusals.notMadeYet,
+                message:
+                  "A team on the staff list has this name. It appears here once the staff list is confirmed.",
               });
             }
           },

@@ -101,6 +101,17 @@ const idSchema = z
 export const teamNameKey = (name: string): string =>
   name.trim().normalize("NFC").toLowerCase();
 
+/**
+ * What Settings › Members answers a team change the staff list stops
+ * (GRA-2055), as Better Auth's error `code`: deleting a team the saved or
+ * confirmed list names, or making one under a name the list gives a team
+ * it hasn't made yet.
+ */
+export const staffListTeamRefusals = {
+  onList: "STAFF_LIST_TEAM_ON_LIST",
+  notMadeYet: "STAFF_LIST_TEAM_NOT_MADE_YET",
+} as const;
+
 /** A team, as the staff list and its admin have it. */
 export const rosterTeamSchema = z.strictObject({
   /**

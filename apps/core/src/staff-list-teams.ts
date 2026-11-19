@@ -8,6 +8,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { organizationId } from "./auth/membership-sql.ts";
 import { retiredTeamIds, staffListSynced, teams } from "./db/core/schema.ts";
+import { inList } from "./db/d1.ts";
 import { onboardingStore } from "./onboarding/store.ts";
 
 // One list of teams with one id (GRA-2055): the onboarding's staff list
@@ -27,9 +28,12 @@ import { onboardingStore } from "./onboarding/store.ts";
 //   makes a team.
 // - A rename or a confirm splitting what one team holds: a team keeps one
 //   id from the first save that names it, and everything keys by it.
-// - Two confirms, or a confirm and a rename in Settings, leaving a team's
-//   name in Settings other than the list's: each sync claims the store's
-//   version in the batch that writes, only when newer (`syncTeams`).
+// - A team's name written from two sides, a stale copy over the other: a
+//   members' team's name changes in Settings › Members alone, and the
+//   list takes it from there at every save (`intoMembersTeams`).
+// - An older confirm making a team after a newer one: each sync claims
+//   the store's version in the batch that writes, only when newer
+//   (`syncTeams`).
 // - A team the admin only drafted: made at the confirm, never before, so a
 //   draft fixed before it leaves no team behind.
 
@@ -119,21 +123,15 @@ export const intoMembersTeams = async (
     taken.add(id);
     idOf.set(team.id, id);
   }
-  // A members' team's name is its own, in Settings › Members (the one
-  // owner of it): the list follows it, so a rename there whose copy here
-  // was lost comes back at the next save. Only a name the admin changed on
-  // the list since the store kept it is the list's own, which a confirm
-  // then gives the members' team (`syncTeams`).
-  const heldName = new Map(held.map(({ id, name }) => [id, name]));
+  // A members' team's name changes in Settings › Members alone (Better
+  // Auth's update-team, the one path): the list takes it as it is there,
+  // whatever the request says, so a rename there whose copy here was lost
+  // comes back at the next save, and a page opened before it never writes
+  // the old name back. A team only on the list keeps the list's name until
+  // the confirm makes it.
   const listed = roster.teams.map((team) => {
     const id = idOf.get(team.id) ?? team.id;
-    const own = known.get(id);
-    const renamedOnList = heldName.has(id) && heldName.get(id) !== team.name;
-    return {
-      ...team,
-      id,
-      name: own === undefined || renamedOnList ? team.name : own,
-    };
+    return { ...team, id, name: known.get(id) ?? team.name };
   });
   const wasMinted = new Set(mintedHeld.map(({ id }) => id));
   return {
@@ -153,18 +151,17 @@ export const intoMembersTeams = async (
 };
 
 /**
- * Makes and names the members' teams as the list the admin last confirmed
- * has them (GRA-2055), from the onboarding store's confirmed teams, never
- * from a request: each team the members' teams don't have yet is made
- * under its id, as Better Auth's own create-team makes a team, and only
- * under an id never retired, checked in the statement itself; each one
- * named otherwise takes the list's name. None is ever deleted here, as one
- * may hold what was shared with it. One batch, one transaction: it claims
- * the store's version (`staff_list_synced`) only when it is newer than the
- * one claimed, and every write in it holds only while the row names that
- * version, so an older confirm, or a confirm that read a name a rename in
- * Settings has since changed, writes nothing after a newer one. Called by
- * each confirm and each rename in Settings; idempotent.
+ * Makes the members' teams the list the admin last confirmed names and
+ * Settings › Members doesn't have yet (GRA-2055), from the onboarding
+ * store's confirmed teams, never from a request: each under its id, as
+ * Better Auth's own create-team makes a team, with the list's name, and
+ * only under an id never retired, checked in the statement itself. It
+ * renames none: a members' team's name changes in Settings alone. None is
+ * ever deleted here, as one may hold what was shared with it. One batch,
+ * one transaction: it claims the store's version (`staff_list_synced`)
+ * only when it is newer than the one claimed, and every insert in it holds
+ * only while the row names that version, so an older confirm makes nothing
+ * after a newer one. Idempotent.
  */
 export const syncTeams = async (env: Env, actor: AuditActor): Promise<void> => {
   const confirmed = await onboardingStore(env).confirmedTeams();
@@ -174,10 +171,10 @@ export const syncTeams = async (env: Env, actor: AuditActor): Promise<void> => {
   const { version } = confirmed;
   const db = drizzle(env.DB);
   const existing = await db
-    .select({ id: teams.id, name: teams.name })
+    .select({ id: teams.id })
     .from(teams)
     .where(eq(teams.organizationId, organizationId));
-  const known = new Map(existing.map(({ id, name }) => [id, name]));
+  const known = new Set(existing.map(({ id }) => id));
   const holds = sql`EXISTS (SELECT 1 FROM ${staffListSynced} WHERE ${staffListSynced.organizationId} = ${organizationId} AND ${staffListSynced.version} = ${version})`;
   const now = Date.now();
   const entry = (action: string, id: string): AuditEntry => ({
@@ -187,33 +184,20 @@ export const syncTeams = async (env: Env, actor: AuditActor): Promise<void> => {
     detail: { via },
   });
   const writes = confirmed.teams.flatMap(
-    ({ id, name }): BatchItem<"sqlite">[] => {
-      const was = known.get(id);
-      if (was === undefined) {
-        return [
-          db
-            .insert(teams)
-            .select(
-              sql`SELECT ${id}, ${name}, 0, ${organizationId}, ${now}, ${now}
-                WHERE ${holds}
-                  AND NOT EXISTS (SELECT 1 FROM ${retiredTeamIds} WHERE ${retiredTeamIds.id} = ${id})`
-            )
-            .onConflictDoNothing(),
-          outboxedIfChanged(db, entry("team.created", id)),
-        ];
-      }
-      return was === name
+    ({ id, name }): BatchItem<"sqlite">[] =>
+      known.has(id)
         ? []
         : [
             db
-              .update(teams)
-              .set({ name, updatedAt: new Date(now) })
-              .where(
-                sql`${teams.id} = ${id} AND ${teams.organizationId} = ${organizationId} AND ${holds}`
-              ),
-            outboxedIfChanged(db, entry("team.updated", id)),
-          ];
-    }
+              .insert(teams)
+              .select(
+                sql`SELECT ${id}, ${name}, 0, ${organizationId}, ${now}, ${now}
+                  WHERE ${holds}
+                    AND NOT EXISTS (SELECT 1 FROM ${retiredTeamIds} WHERE ${retiredTeamIds.id} = ${id})`
+              )
+              .onConflictDoNothing(),
+            outboxedIfChanged(db, entry("team.created", id)),
+          ]
   );
   await auditedBatch(env, db, [
     db
@@ -226,4 +210,39 @@ export const syncTeams = async (env: Env, actor: AuditActor): Promise<void> => {
       }),
     ...writes,
   ]);
+};
+
+/**
+ * Whether the saved or the confirmed staff list gives a team it hasn't
+ * made in Settings › Members yet the name `name` (by `teamNameKey`): then
+ * a team made there under it would be a second one of that name once the
+ * list is confirmed, which keeps its own team by its id (GRA-2055).
+ */
+export const namedOnListUnmade = async (
+  env: Env,
+  name: string
+): Promise<boolean> => {
+  const store = onboardingStore(env);
+  const [held, confirmed] = await Promise.all([
+    store.heldTeams(),
+    store.confirmedTeams(),
+  ]);
+  const key = teamNameKey(name);
+  const named = [...held, ...(confirmed?.teams ?? [])].filter(
+    (team) => teamNameKey(team.name) === key
+  );
+  if (named.length === 0) {
+    return false;
+  }
+  const made = await drizzle(env.DB)
+    .select({ id: teams.id })
+    .from(teams)
+    .where(
+      sql`${teams.organizationId} = ${organizationId} AND ${inList(
+        teams.id,
+        named.map(({ id }) => id)
+      )}`
+    );
+  const madeIds = new Set(made.map(({ id }) => id));
+  return named.some(({ id }) => !madeIds.has(id));
 };

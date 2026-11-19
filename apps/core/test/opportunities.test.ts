@@ -851,6 +851,59 @@ describe("opportunities", { timeout: 120_000 }, () => {
     expect(tickets?.basis).toBe("both");
   });
 
+  it("pair no routine by a name two Settings teams share, for a staff-list team an earlier release saved under an id no members' team has", async () => {
+    const { ids } = await drawnTeam("Send the answer from the Excel sheet.");
+    const admin = await signedInApi(idp, "admin");
+    const tag = crypto.randomUUID().slice(0, 8);
+    await onboardingStore(env).renameTeam(ids.team, `Ops ${tag}`);
+    // Two members' teams of the list team's name: neither is it.
+    const ops = await membersOf(5);
+    await namedTeam(`Ops ${tag}`, ...ops);
+    await namedTeam(`Ops ${tag}`);
+    await recordEvents(
+      env,
+      eachTook(
+        ops,
+        { step: "tickets.read", system: "zendesk", writes: false },
+        { step: "tickets.update", system: "zendesk", writes: true }
+      )
+    );
+    const { tickets } = await ticketsOf(admin.api, ids);
+    for (const person of ops) {
+      // oxlint-disable-next-line no-await-in-loop -- one person at a time
+      await erasedBy(admin, person);
+    }
+
+    expect(tickets?.basis).toBe("described");
+  });
+
+  it("pair a routine with the staff-list team it is by id, never with another Settings team of the same name seen doing it", async () => {
+    const { ids } = await drawnTeam("Send the answer from the Excel sheet.");
+    const admin = await signedInApi(idp, "admin");
+    const tag = crypto.randomUUID().slice(0, 8);
+    // The list's team, as a members' team, and another of its name: only
+    // the other one is seen doing the routine.
+    await teamAs(ids.team, `Ops ${tag}`);
+    await onboardingStore(env).renameTeam(ids.team, `Ops ${tag}`);
+    const others = await membersOf(5);
+    await namedTeam(`Ops ${tag}`, ...others);
+    await recordEvents(
+      env,
+      eachTook(
+        others,
+        { step: "tickets.read", system: "zendesk", writes: false },
+        { step: "tickets.update", system: "zendesk", writes: true }
+      )
+    );
+    const { tickets } = await ticketsOf(admin.api, ids);
+    for (const person of others) {
+      // oxlint-disable-next-line no-await-in-loop -- one person at a time
+      await erasedBy(admin, person);
+    }
+
+    expect(tickets?.basis).toBe("described");
+  });
+
   it("say which systems were described and not seen only once a proposal names them, never that both use the same before", async () => {
     const { ids } = await drawnTeam("Send the answer from the Excel sheet.");
     const admin = await signedInApi(idp, "admin");

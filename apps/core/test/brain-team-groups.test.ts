@@ -2,6 +2,7 @@ import type { RosterInput } from "@grasp-os/shared/onboarding";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { brainTeams } from "../src/brain-rpc.ts";
 import { arrangeTeams } from "../src/brain-team-groups.ts";
@@ -12,6 +13,7 @@ import { teamsMade } from "./members-teams.ts";
 import { arrangementCalls, arrangementReplies } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
+import { testBinding } from "./test-env.ts";
 
 // The company's own groups of teams, the brain's regions (core's
 // brain-team-groups.ts). What can go wrong, tried here: someone who isn't
@@ -135,6 +137,9 @@ const regionsRow = async () =>
       .toArray();
     return row ?? null;
   });
+
+/** A staff-list team's id as the Brain named it before its bare id (GRA-2055). */
+const was = (id: string): string => `team-${id}`;
 
 /** How many times the groups were kept (`brain_team_group_saves`). */
 const keptSets = async (): Promise<number> => {
@@ -696,5 +701,110 @@ describe("the company's groups of teams", { timeout: 120_000 }, () => {
       ),
       owed: owed?.tries,
     }).toStrictEqual({ asked: 0, placed: [], owed: 0 });
+  });
+
+  it("keep every team in the region it was in before the Brain named a staff-list team by its bare id, and place none of them again", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const tag = unique();
+    const finance = `finance-${tag}`;
+    const sales = `sales-${tag}`;
+    const support = `support-${tag}`;
+    await admin.api.onboarding.saveRoster(await teamsMade(rosterOf(tag)));
+    // The regions and their kept sets as main's code wrote them: each
+    // staff-list team as `team-<id>`. A region whose name holds "team-";
+    // an empty one; Support placed once, then taken out of every region by
+    // an admin ("No group"); and the teams of the Brain's arrangement only.
+    const regions = (withSupport: boolean) => [
+      {
+        id: `money-${tag}`,
+        name: "team-money",
+        teamIds: [was(finance), ...(withSupport ? [was(support)] : [])],
+        confirmed: true,
+      },
+      {
+        id: `front-${tag}`,
+        name: "Front",
+        teamIds: [was(sales)],
+        confirmed: true,
+      },
+      { id: `empty-${tag}`, name: "Empty", teamIds: [], confirmed: true },
+    ];
+    const now = Date.now();
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM brain_team_groups"),
+      ...regions(false).map((region, position) =>
+        env.DB.prepare(
+          "INSERT INTO brain_team_groups (id, name, team_ids, position, confirmed_at, saved_at) VALUES (?, ?, ?, ?, ?, ?)"
+        ).bind(
+          region.id,
+          region.name,
+          JSON.stringify(region.teamIds),
+          position,
+          now,
+          now
+        )
+      ),
+      env.DB.prepare(
+        "INSERT INTO brain_team_group_saves (id, saved_at, before, after) VALUES (?, ?, '[]', ?)"
+      ).bind(`first-${tag}`, now - 2, JSON.stringify(regions(true))),
+      env.DB.prepare(
+        "INSERT INTO brain_team_group_saves (id, saved_at, before, after) VALUES (?, ?, ?, ?)"
+      ).bind(
+        `second-${tag}`,
+        now - 1,
+        JSON.stringify(regions(true)),
+        JSON.stringify(regions(false))
+      ),
+    ]);
+    // The rewrite core migration 0278 makes of them, once.
+    const migrations = z
+      .array(z.object({ name: z.string(), queries: z.array(z.string()) }))
+      .parse(testBinding("CORE_MIGRATIONS"));
+    const rewrite = (
+      migrations.find(({ name }) => name === "0278_staff_list_teams.sql")
+        ?.queries ?? []
+    ).filter((query) => query.includes("brain_team_group"));
+    await env.DB.batch(rewrite.map((query) => env.DB.prepare(query)));
+
+    const { teamGroups } = await admin.api.brain.read();
+    const { results: rows } = await env.DB.prepare(
+      "SELECT name, team_ids AS teams FROM brain_team_groups ORDER BY position"
+    ).all<{ name: string; teams: string }>();
+    const { requests } = await arrangingWith(
+      [arranging({ groups: [{ name: "Help", teamIds: [support] }] })],
+      async () => {
+        await arrangeTeams(env, async () => await brainTeams(env));
+      }
+    );
+    const after = await admin.api.brain.read();
+
+    expect({
+      rewrote: rewrite.length,
+      // As kept, the empty region too, which the read leaves out, as it
+      // did before.
+      rows,
+      regions: teamGroups.map(({ name, teamIds }) => ({ name, teamIds })),
+      asked: requests.length,
+      unchanged: after.teamGroups.map(({ name, teamIds }) => ({
+        name,
+        teamIds,
+      })),
+    }).toStrictEqual({
+      rewrote: 2,
+      rows: [
+        { name: "team-money", teams: JSON.stringify([finance]) },
+        { name: "Front", teams: JSON.stringify([sales]) },
+        { name: "Empty", teams: "[]" },
+      ],
+      regions: [
+        { name: "team-money", teamIds: [finance] },
+        { name: "Front", teamIds: [sales] },
+      ],
+      asked: 0,
+      unchanged: [
+        { name: "team-money", teamIds: [finance] },
+        { name: "Front", teamIds: [sales] },
+      ],
+    });
   });
 });

@@ -326,9 +326,9 @@ const kickoffChangesKey = "kickoff_changes";
 
 /**
  * The teams of the list the admin last confirmed (GRA-2055), by id and
- * name, with a version one more at each confirm and each rename in
- * Settings: what core makes and names in Settings › Members
- * (staff-list-teams.ts `syncTeams`), never an older version after a newer.
+ * name, with a version one more at each confirm: what core makes in
+ * Settings › Members when it doesn't have them yet (staff-list-teams.ts
+ * `syncTeams`), never an older version after a newer.
  */
 const confirmedTeamsKey = "confirmed_teams";
 
@@ -4931,20 +4931,22 @@ export class Onboarding extends DurableObject<Env> {
    * A team renamed in Settings › Members (GRA-2055): the staff list names
    * the members' teams, so its name there follows at once, and so does
    * what every member reads of the company's teams, given to the Brain
-   * anew (`#keepConfirmed`). On the confirmed list, a new version of it
-   * (`confirmedTeams`), so a confirm that read the old name never writes it
-   * back. Nothing when the list has no such team.
+   * anew (`#keepConfirmed`). Its name changes there alone: core never
+   * renames a members' team, and the list's next save takes the name from
+   * there again if this copy was lost. Nothing when the list has no such
+   * team.
    */
   renameTeam(id: string, name: string): void {
     this.ctx.storage.transactionSync(() => {
       this.#db.update(teams).set({ name }).where(eq(teams.id, id)).run();
       const confirmed = this.confirmedTeams();
-      if (confirmed?.teams.some((team) => team.id === id) === true) {
-        this.#keepConfirmedTeams(
-          confirmed.teams.map((team) =>
+      if (confirmed !== null) {
+        this.ctx.storage.kv.put(confirmedTeamsKey, {
+          ...confirmed,
+          teams: confirmed.teams.map((team) =>
             team.id === id ? { ...team, name } : team
-          )
-        );
+          ),
+        });
       }
       const held = this.companyTeams();
       if (held === null || !held.teams.some((team) => team.id === id)) {

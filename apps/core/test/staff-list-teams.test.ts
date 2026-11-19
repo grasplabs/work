@@ -256,13 +256,17 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
       people: [sales, support],
       created: [{ id: sales, detail: { via: "staffList" } }],
     });
-    // Renamed by the list: the members' team follows, under its id.
-    await admin.api.onboarding.confirmRoster({
+    // Renamed on the list once it is a members' team: its name changes in
+    // Settings alone, and the list takes it from there.
+    const { roster: renamedOnList } = await admin.api.onboarding.confirmRoster({
       teams: [{ id: support, name: `Help ${tag}`, lead: null }],
       people: [{ id: `bo-${tag}`, name: "Bo", team: support }],
     });
-    const renamed = await membersTeams(admin);
-    expect(renamed.get(`Help ${tag}`)?.id).toBe(support);
+    const kept = await membersTeams(admin);
+    expect({
+      settings: [...kept].find(([, team]) => team.id === support)?.[0],
+      list: renamedOnList?.teams[0]?.name,
+    }).toStrictEqual({ settings: `Support ${tag}`, list: `Support ${tag}` });
   });
 
   it("follow a rename in Settings, and keep a team on the list from being deleted there", async () => {
@@ -749,111 +753,169 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
     });
   });
 
-  it("name a team in Settings as the staff list names it, though two confirms rename it in opposite orders", async () => {
+  it("make no team a newer confirm's list leaves out, though an older confirm that had it reaches its writes after", async () => {
     const admin = await signedInApi(idp, "admin");
     const tag = unique();
-    const named = (id: string, name: string): RosterInput => ({
-      teams: [{ id, name, lead: null }],
-      people: [{ id: `bo-${tag}`, name: "Bo", team: id }],
-    });
-    const { roster: first } = await admin.api.onboarding.confirmRoster(
-      named("team", `Team ${tag}`)
-    );
-    const id = first?.teams[0]?.id ?? "";
-    /**
-     * Confirm A renames it to Sales; just `when` its rename, confirm B
-     * renames it to Revenue and finishes; then A goes on. Whether the
-     * team's name and the list's agree after.
-     */
-    const agreeWhen = async (when: "before" | "after") => {
-      const landing = landingAt(
-        /^update "teams" set "name"/iu,
-        when,
-        async () => {
-          await admin.api.onboarding.confirmRoster(
-            named(id, `Revenue ${when} ${tag}`)
-          );
-        }
-      );
-      await confirmOn(
-        admin,
-        landing.coreEnv,
-        named(id, `Sales ${when} ${tag}`)
-      );
-      const { roster } = await admin.api.onboarding.view();
-      const row = await env.DB.prepare("SELECT name FROM teams WHERE id = ?")
-        .bind(id)
-        .first<{ name: string }>();
-      return landing.landed() && row?.name === roster?.teams[0]?.name;
+    const withExtra: RosterInput = {
+      teams: [
+        { id: "sales", name: `Sales ${tag}`, lead: null },
+        { id: "extra", name: `Extra ${tag}`, lead: null },
+      ],
+      people: [{ id: `bo-${tag}`, name: "Bo", team: "sales" }],
     };
-
-    expect({
-      after: await agreeWhen("after"),
-      before: await agreeWhen("before"),
-    }).toStrictEqual({ after: true, before: true });
-  });
-
-  it("name a team as a rename in Settings did, though a confirm's placing that read the list's older name was under way", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const tag = unique();
-    const named = (id: string, name: string): RosterInput => ({
-      teams: [{ id, name, lead: null }],
-      people: [{ id: `bo-${tag}`, name: "Bo", team: id }],
-    });
-    const { roster: first } = await admin.api.onboarding.confirmRoster(
-      named("team", `Team ${tag}`)
-    );
-    const id = first?.teams[0]?.id ?? "";
-    // A confirm renames it Sales; just before its placing writes that, an
-    // admin renames it Revenue in Settings.
+    const { roster: drafted } =
+      await admin.api.onboarding.saveRoster(withExtra);
+    if (drafted === null) {
+      throw new Error("The draft wasn't kept");
+    }
+    const sales = drafted.teams.find(({ name }) => name === `Sales ${tag}`);
+    // Confirm A, with Extra, reaches its writes only after confirm B,
+    // without it, made the teams.
     const landing = landingAt(
-      /^update "teams" set "name"/iu,
+      /insert into "staff_list_synced"/iu,
       "before",
       async () => {
-        await callAuth("/organization/update-team", admin.session, {
-          teamId: id,
-          data: { name: `Revenue ${tag}` },
+        await admin.api.onboarding.confirmRoster({
+          teams: sales === undefined ? [] : [sales],
+          people: [{ id: `bo-${tag}`, name: "Bo", team: sales?.id ?? "" }],
         });
       }
     );
-    await confirmOn(admin, landing.coreEnv, named(id, `Sales ${tag}`));
-    const { roster } = await admin.api.onboarding.view();
-    const row = await env.DB.prepare("SELECT name FROM teams WHERE id = ?")
-      .bind(id)
-      .first<{ name: string }>();
+    await confirmOn(admin, landing.coreEnv, drafted);
+    const teams = await membersTeams(admin);
 
     expect({
       landed: landing.landed(),
-      settings: row?.name,
-      list: roster?.teams[0]?.name,
-    }).toStrictEqual({
-      landed: true,
-      settings: `Revenue ${tag}`,
-      list: `Revenue ${tag}`,
-    });
+      sales: teams.has(`Sales ${tag}`),
+      extra: teams.has(`Extra ${tag}`),
+    }).toStrictEqual({ landed: true, sales: true, extra: false });
   });
 
-  it("give the staff list a team's name as renamed in Settings though the list's copy of the rename was lost: Settings answers the rename, and the next save takes it", async () => {
+  it("keep a team's name as renamed in Settings though a page opened before the rename confirms the list with the old one", async () => {
     const admin = await signedInApi(idp, "admin");
     const tag = unique();
     const { roster: first } = await admin.api.onboarding.confirmRoster({
       teams: [{ id: "team", name: `Team ${tag}`, lead: null }],
       people: [{ id: `bo-${tag}`, name: "Bo", team: "team" }],
     });
-    const id = first?.teams[0]?.id ?? "";
-    const renamed = await routed(
-      "/api/auth/organization/update-team",
-      {
-        method: "POST",
-        headers: {
-          origin: clientOrigin,
-          cookie: admin.session,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ teamId: id, data: { name: `Revenue ${tag}` } }),
-      },
-      withOneRenameLost()
+    if (first === null) {
+      throw new Error("No staff list");
+    }
+    const id = first.teams[0]?.id ?? "";
+    // The page holds the list as it was; the team is renamed in Settings.
+    await callAuth("/organization/update-team", admin.session, {
+      teamId: id,
+      data: { name: `Revenue ${tag}` },
+    });
+    const { roster: confirmed } =
+      await admin.api.onboarding.confirmRoster(first);
+    const teams = await membersTeams(admin);
+
+    expect({
+      settings: [...teams].find(([, team]) => team.id === id)?.[0],
+      list: confirmed?.teams[0]?.name,
+    }).toStrictEqual({ settings: `Revenue ${tag}`, list: `Revenue ${tag}` });
+  });
+
+  it("make a team only on the list under the name the list gave it last, renamed there before the confirm", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const tag = unique();
+    const listed = (id: string, name: string): RosterInput => ({
+      teams: [{ id, name, lead: null }],
+      people: [{ id: `bo-${tag}`, name: "Bo", team: id }],
+    });
+    const { roster: drafted } = await admin.api.onboarding.saveRoster(
+      listed("team", `Salse ${tag}`)
     );
+    const id = drafted?.teams[0]?.id ?? "";
+    const { roster: confirmed } = await admin.api.onboarding.confirmRoster(
+      listed(id, `Sales ${tag}`)
+    );
+    const teams = await membersTeams(admin);
+
+    expect({
+      sameId: confirmed?.teams[0]?.id === id,
+      settings: [...teams].find(([, team]) => team.id === id)?.[0],
+    }).toStrictEqual({ sameId: true, settings: `Sales ${tag}` });
+  });
+
+  it("refuse to make a team in Settings under a name the list gives a team it hasn't made yet, in any case or Unicode form, and keep the list's team its one", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const tag = unique();
+    const listed: RosterInput = {
+      teams: [{ id: "cafe", name: `Caf\u00E9 ${tag}`, lead: null }],
+      people: [{ id: `bo-${tag}`, name: "Bo", team: "cafe" }],
+    };
+    const { roster: drafted } = await admin.api.onboarding.saveRoster(listed);
+    const create = async (name: string) => {
+      const made = await callAuth("/organization/create-team", admin.session, {
+        name,
+      });
+      const { code } = z
+        .object({ code: z.string().optional() })
+        .parse(await made.json());
+      return { status: made.status, code };
+    };
+    const refused = {
+      same: await create(`Caf\u00E9 ${tag}`),
+      otherCase: await create(` CAFE\u0301 ${tag.toUpperCase()}`),
+    };
+    const { roster: confirmed } = await admin.api.onboarding.confirmRoster(
+      drafted ?? listed
+    );
+    const teams = await admin.api.members.teams();
+    const notMadeYet = {
+      status: 409,
+      code: "STAFF_LIST_TEAM_NOT_MADE_YET",
+    };
+
+    expect({
+      refused,
+      named: teams.filter(({ name }) => name === `Caf\u00E9 ${tag}`).length,
+      sameId: confirmed?.teams[0]?.id === drafted?.teams[0]?.id,
+    }).toStrictEqual({
+      refused: { same: notMadeYet, otherCase: notMadeYet },
+      named: 1,
+      sameId: true,
+    });
+  });
+
+  it("keep two teams as renamed in Settings though the list's copy of the first rename was lost and the second came after: Settings answers both, and the next save takes them", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const tag = unique();
+    const { roster: first } = await admin.api.onboarding.confirmRoster({
+      teams: [
+        { id: "one", name: `One ${tag}`, lead: null },
+        { id: "two", name: `Two ${tag}`, lead: null },
+      ],
+      people: [{ id: `bo-${tag}`, name: "Bo", team: "one" }],
+    });
+    const [one, two] = (first?.teams ?? []).map(({ id }) => id);
+    const rename = async (teamId: string | undefined, name: string, on: Env) =>
+      await routed(
+        "/api/auth/organization/update-team",
+        {
+          method: "POST",
+          headers: {
+            origin: clientOrigin,
+            cookie: admin.session,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ teamId, data: { name } }),
+        },
+        on
+      );
+    // The list's copy of the first rename is lost; the second goes through.
+    const lostRename = await rename(one, `Uno ${tag}`, withOneRenameLost());
+    const nextRename = await rename(two, `Dos ${tag}`, env);
+    const answered = [lostRename.status, nextRename.status];
+    const settingsNames = async () => {
+      const teams = await membersTeams(admin);
+      return [one, two].map(
+        (id) => [...teams].find(([, team]) => team.id === id)?.[0]
+      );
+    };
+    const before = await settingsNames();
     const { roster: lost } = await admin.api.onboarding.view();
     if (lost === null) {
       throw new Error("No staff list");
@@ -865,21 +927,19 @@ describe("the staff list's teams", { timeout: 120_000 }, () => {
       throw new Error("No staff list");
     }
     await admin.api.onboarding.confirmRoster(saved);
-    const { roster: confirmed } = await admin.api.onboarding.view();
-    const teams = await membersTeams(admin);
 
     expect({
-      answered: renamed.status,
-      lostCopy: lost.teams[0]?.name,
-      saved: saved.teams[0]?.name,
-      confirmed: confirmed?.teams[0]?.name,
-      settings: [...teams].find(([, team]) => team.id === id)?.[0],
+      answered,
+      lostCopy: lost.teams.map(({ name }) => name),
+      before,
+      saved: saved.teams.map(({ name }) => name),
+      after: await settingsNames(),
     }).toStrictEqual({
-      answered: 200,
-      lostCopy: `Team ${tag}`,
-      saved: `Revenue ${tag}`,
-      confirmed: `Revenue ${tag}`,
-      settings: `Revenue ${tag}`,
+      answered: [200, 200],
+      lostCopy: [`One ${tag}`, `Dos ${tag}`],
+      before: [`Uno ${tag}`, `Dos ${tag}`],
+      saved: [`Uno ${tag}`, `Dos ${tag}`],
+      after: [`Uno ${tag}`, `Dos ${tag}`],
     });
   });
 

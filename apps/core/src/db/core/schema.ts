@@ -542,12 +542,12 @@ export const teamMembers = sqliteTable(
 );
 
 /**
- * The confirmed staff list whose teams were last made and named in
- * Settings › Members (GRA-2055), by the onboarding store's version of
- * them: one row for the company. Each sync claims its version here, only
- * when it is newer, in the same batch as its writes, and each write holds
- * only while the row names that version (staff-list-teams.ts `syncTeams`):
- * an older confirm never makes or names a team after a newer one.
+ * The confirmed staff list whose teams were last made in Settings ›
+ * Members (GRA-2055), by the onboarding store's version of them: one row
+ * for the company. Each sync claims its version here, only when it is
+ * newer, in the same batch as its writes, and each write holds only while
+ * the row names that version (staff-list-teams.ts `syncTeams`): an older
+ * confirm never makes a team after a newer one.
  */
 export const staffListSynced = sqliteTable("staff_list_synced", {
   organizationId: text("organization_id").primaryKey(),
