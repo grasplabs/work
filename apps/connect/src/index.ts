@@ -55,6 +55,7 @@ import type {
 } from "@grasp-os/shared/connect";
 import type {
   DirectoryConnection,
+  DirectoryDeletedRead,
   DirectoryLookup,
   DirectoryRead,
 } from "@grasp-os/shared/directory";
@@ -121,6 +122,7 @@ import { requireDecision } from "./decisions.ts";
 import {
   directoryConnections,
   lookUpInDirectory,
+  readDeletedDirectoryUsers,
   readDirectory,
 } from "./directory.ts";
 import {
@@ -600,6 +602,12 @@ export default class Connect
 
   async readDirectory(request: unknown): Promise<DirectoryRead> {
     return await readDirectory(this.env, request);
+  }
+
+  async readDeletedDirectoryUsers(
+    request: unknown
+  ): Promise<DirectoryDeletedRead> {
+    return await readDeletedDirectoryUsers(this.env, request);
   }
 
   async lookUpInDirectory(request: unknown): Promise<DirectoryLookup> {

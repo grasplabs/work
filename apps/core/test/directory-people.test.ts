@@ -197,6 +197,7 @@ describe("the directory's daily read", () => {
             provider: "microsoft-directory",
             people: 230,
             disabled: 1,
+            deleted: 0,
             tied: 1,
           },
         },

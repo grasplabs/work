@@ -61,6 +61,9 @@ export const directoryClient = clients.microsoftDirectory;
  * `$expand=manager`), a hundred to a page; `{ failAt }`, the offset of
  * a page Graph then fails with a server error; and `{ loopAt }`, the
  * offset of a page whose next link points back at itself (null for none).
+ * Its deleted users likewise: `{ deleted }` (`/directory/deletedItems`),
+ * `{ deletedFailAt }`, and `{ deletedNext }`, the next link every page of
+ * them answers in place of its own (null for its own).
  */
 export const directoryControlUrl = "https://graph-control.test/directory";
 
@@ -599,7 +602,7 @@ const slackAnswer = async (request, url) => {
   }
   return Response.json({ ok: true });
 };
-const directory = { users: [], failAt: null, loopAt: null };
+const directory = { users: [], failAt: null, loopAt: null, deleted: [], deletedFailAt: null, deletedNext: null };
 const hibob = { key: null, employees: [] };
 /** Graph's users, as the directory's reads ask for them, a page at a time. */
 const directoryGraph = (url) => {
@@ -617,6 +620,22 @@ const directoryGraph = (url) => {
     ...(after < directory.users.length
       ? { "@odata.nextLink": "https://graph.microsoft.com/v1.0/users?$top=" + top + "&$skiptoken=" + after }
       : {}),
+  });
+};
+/** Graph's deleted users, as the directory's reads ask for them, a page at a time. */
+const deletedGraph = (url) => {
+  const top = Number(url.searchParams.get("$top") ?? "100");
+  const from = Number(url.searchParams.get("$skiptoken") ?? "0");
+  const next = from + top;
+  if (directory.deletedFailAt === from) {
+    return Response.json({ error: { code: "generalException" } }, { status: 500 });
+  }
+  const link = directory.deletedNext ?? (next < directory.deleted.length
+    ? "https://graph.microsoft.com/v1.0/directory/deletedItems/microsoft.graph.user?$top=" + top + "&$skiptoken=" + next
+    : null);
+  return Response.json({
+    value: directory.deleted.slice(from, next).map(({ id, userType }) => ({ id, userType })),
+    ...(link === null ? {} : { "@odata.nextLink": link }),
   });
 };
 const documents = { files: [] };
@@ -744,6 +763,9 @@ export default {
     }
     if (url.hostname === "graph.microsoft.com" && request.method === "GET" && url.pathname === "/v1.0/users" && url.searchParams.has("$expand")) {
       return directoryGraph(url);
+    }
+    if (url.hostname === "graph.microsoft.com" && request.method === "GET" && url.pathname === "/v1.0/directory/deletedItems/microsoft.graph.user") {
+      return deletedGraph(url);
     }
     if (url.hostname === "graph.microsoft.com") {
       // Graph's mail, as Microsoft 365's native actions use it: sending

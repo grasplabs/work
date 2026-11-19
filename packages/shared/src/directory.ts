@@ -84,6 +84,20 @@ export interface DirectoryRead {
   next: string | null;
 }
 
+/**
+ * One page of a directory's deleted accounts (Entra keeps them 30 days),
+ * and where the next read starts: the proof that a person no longer
+ * listed has left (core's directory-people.ts, GRA-2056).
+ */
+export interface DirectoryDeletedRead {
+  /** The connection's tenant at the provider, as it was connected. */
+  tenant: string;
+  /** The provider's IDs of the page's deleted accounts, guests aside. */
+  deleted: string[];
+  /** Null once the provider has no more. */
+  next: string | null;
+}
+
 /** A directory connection, as core finds it. */
 export interface DirectoryConnection {
   id: string;
