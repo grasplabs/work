@@ -209,6 +209,19 @@ export const members = sqliteTable(
       .references(() => users.id, { onDelete: "cascade" }),
     role: text().notNull(),
     createdAt: timestamp("created_at").notNull(),
+    /**
+     * When the member was suspended: they may not act or be read as
+     * (membership-sql.ts `mayAct`), and everything of theirs stays as it
+     * is, for when it is lifted. Null while they may act. Written by the
+     * directory's daily read alone (directory-suspensions.ts); no client
+     * can (Better Auth's `input: false`, auth.ts).
+     */
+    suspendedAt: timestamp("suspended_at"),
+    /**
+     * What suspended them: `directory`, the daily read, which alone lifts
+     * the suspensions it made. Null while they may act.
+     */
+    suspendedBy: text("suspended_by"),
   },
   (table) => [
     uniqueIndex("members_organization_user_idx").on(

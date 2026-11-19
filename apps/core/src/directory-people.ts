@@ -15,6 +15,7 @@ import {
   directoryReads,
   erasedSubjects,
 } from "./db/core/schema.ts";
+import { suspensionStatements } from "./directory-suspensions.ts";
 import {
   keptIn,
   placementStatements,
@@ -263,6 +264,9 @@ const apply = async (
         },
       }),
     tieDirectoryPeople(db, kind, claimed),
+    // Before the placement, so someone listed on again is lifted and
+    // placed in the same batch.
+    ...suspensionStatements(db, kind, claimed, startedAt),
   ];
   const results: unknown[] = await auditedBatch(env, db, [
     claim,

@@ -38,7 +38,7 @@ import {
 } from "./app-provenance.ts";
 import type { AppSources } from "./app-provenance.ts";
 import { auditedBatch, outboxed, outboxedWhere } from "./audit-outbox.ts";
-import { activeMember, notRemoved, organizationId } from "./auth/auth.ts";
+import { activeMember, mayAct, organizationId } from "./auth/auth.ts";
 import { memberOf } from "./auth/identity.ts";
 import {
   appMembers,
@@ -197,7 +197,7 @@ const openersOf = async (
         and(
           eq(members.organizationId, organizationId),
           inList(members.userId, ids),
-          notRemoved(members.userId)
+          mayAct(members.userId)
         )
       ),
     db

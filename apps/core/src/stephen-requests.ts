@@ -50,7 +50,7 @@ import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
-import { activeMember, notRemoved, organizationId } from "./auth/auth.ts";
+import { activeMember, mayAct, organizationId } from "./auth/auth.ts";
 import { companyDay, toolsIn } from "./channels/stephen-requests.ts";
 import {
   channelConversations,
@@ -269,10 +269,7 @@ const reachOf = async (env: Env): Promise<Reach> => {
     .from(members)
     .leftJoin(teamMembers, eq(teamMembers.userId, members.userId))
     .where(
-      and(
-        eq(members.organizationId, organizationId),
-        notRemoved(members.userId)
-      )
+      and(eq(members.organizationId, organizationId), mayAct(members.userId))
     );
   const audience = reach.on ? reach.audience : { who: "nobody" as const };
   const inAudience = (teamId: string | null): boolean =>

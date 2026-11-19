@@ -39,7 +39,7 @@ import {
   outboxedEventWhere,
   storedEvent,
 } from "./audit-outbox.ts";
-import { activeMember, notRemoved, organizationId } from "./auth/auth.ts";
+import { activeMember, mayAct, organizationId } from "./auth/auth.ts";
 import {
   apps,
   appMembers,
@@ -234,7 +234,7 @@ const checkedPeople = async (
         and(
           eq(members.organizationId, organizationId),
           inList(members.userId, others),
-          notRemoved(members.userId)
+          mayAct(members.userId)
         )
       ),
     db

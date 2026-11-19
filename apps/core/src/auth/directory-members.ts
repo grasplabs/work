@@ -5,7 +5,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { auditedBatch, outboxedIfChanged } from "../audit-outbox.ts";
 import { accounts, members, organizations, users } from "../db/core/schema.ts";
 import { entraSubject, isErasedSubject } from "../erased-people.ts";
-import { notRemoved, organizationId } from "./auth.ts";
+import { mayAct, organizationId } from "./auth.ts";
 import { directoryProviderId } from "./config.ts";
 
 // Members made from the organization's directory (GRA-748), so Stephen
@@ -105,9 +105,9 @@ export const memberFromDirectory = async (
       .insert(members)
       .select(
         sql`SELECT ${crypto.randomUUID()}, ${organizationId}, ${userId}, 'user',
-          ${now.getTime()}
+          ${now.getTime()}, NULL, NULL
           WHERE EXISTS (SELECT 1 FROM ${users} WHERE ${users.id} = ${userId})
-            AND ${notRemoved(userId)}`
+            AND ${mayAct(userId)}`
       )
       .onConflictDoNothing(),
     outboxedIfChanged(db, {
@@ -135,7 +135,7 @@ export const memberFromDirectory = async (
       and(
         eq(members.organizationId, organizationId),
         eq(members.userId, made.userId),
-        notRemoved(made.userId)
+        mayAct(made.userId)
       )
     );
   return member === undefined ? null : made.userId;

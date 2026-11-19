@@ -41,8 +41,8 @@ import {
 import {
   activeAdminExists,
   activeMember,
-  currentMembership,
   isRemoved,
+  memberNotRemoved,
   notRemoved,
   openInvitationAt,
   organizationId,
@@ -127,7 +127,11 @@ const targetOf = (by: Identity, userId: unknown): string => {
   return parsed.data;
 };
 
-/** The current membership of `userId`, read now. */
+/**
+ * The membership of `userId` an admin hasn't removed, read now: whether or
+ * not they may act, so an admin can still remove or change someone the
+ * directory suspended.
+ */
 const membershipOf = async (
   env: Env,
   userId: string
@@ -135,7 +139,13 @@ const membershipOf = async (
   const [membership] = await drizzle(env.DB)
     .select({ id: members.id, role: members.role })
     .from(members)
-    .where(currentMembership(userId));
+    .where(
+      and(
+        eq(members.organizationId, organizationId),
+        eq(members.userId, userId),
+        notRemoved(userId)
+      )
+    );
   return membership;
 };
 
@@ -249,7 +259,8 @@ const recordRemoval = async (
 ): Promise<{ removed: boolean; kept: KeptRevocation[] }> => {
   const db = drizzle(env.DB);
   const removed = sql`NOT ${notRemoved(userId)}`;
-  const removing = sql`${activeMember(userId)} AND ${isActiveAdmin(by.userId)}`;
+  // Whether or not they may act now: a suspended member is removed too.
+  const removing = sql`${memberNotRemoved(userId)} AND ${isActiveAdmin(by.userId)}`;
   const [keptForAll, keptForSome, inserted] = await auditedBatch(env, db, [
     // First, under the marker's own condition, while their membership and
     // teams are still there to say what they reached, in the role they
@@ -550,7 +561,9 @@ const setMemberRole = async (
       .set({ role: newRole })
       .where(
         and(
-          currentMembership(target.data),
+          eq(members.organizationId, organizationId),
+          eq(members.userId, target.data),
+          notRemoved(target.data),
           eq(members.role, membership.role),
           isActiveAdmin(by.userId),
           keepsAnAdmin

@@ -7,7 +7,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import { providerIds } from "./auth/config.ts";
-import { activeMember } from "./auth/membership-sql.ts";
+import { memberNotRemoved } from "./auth/membership-sql.ts";
 import { accounts, directoryPeople } from "./db/core/schema.ts";
 import { entraSubject } from "./erased-people.ts";
 
@@ -70,7 +70,7 @@ const tiedMember = (kind: DirectoryKind): SQL => sql`(
   WHERE ${accounts.providerId} = ${kind.signInProvider}
     AND lower(${kind.signedInAs}) = lower(${directoryPeople.accountId})
     AND lower(${accounts.verifiedTenant}) = ${directoryPeople.tenant}
-    AND ${activeMember(accounts.userId)}
+    AND ${memberNotRemoved(accounts.userId)}
   ORDER BY ${accounts.userId}
   LIMIT 1
 )`;
