@@ -1,5 +1,5 @@
 import type { PersonalAccount } from "@grasp-os/shared/connect";
-import { toHex } from "@grasp-os/shared/encoding";
+import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { readerProofMaxAgeMs } from "@grasp-os/shared/source-readers";
 import type { SourceReader } from "@grasp-os/shared/source-readers";
 import { and, eq, inArray, isNull, ne, not, or, sql } from "drizzle-orm";
@@ -13,6 +13,7 @@ import {
   personErasures,
   signInAddresses,
   sourceReaderGroups,
+  sourceReaderPairs,
   sourceReaderTokens,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
@@ -162,8 +163,28 @@ const groupPrincipal = (
 ): string =>
   `${groupPrefix}${provider}:${comparable(tenant)}:${comparable(group)}`;
 
+/** What names an account's token as the Brain's group. */
+const tokenPrefix = "account:";
+
 /** The Brain's group of an account by its token. */
-const tokenPrincipal = (token: string): string => `account:${token}`;
+const tokenPrincipal = (token: string): string => `${tokenPrefix}${token}`;
+
+/**
+ * The Brain's group of a pair (GRA-2145): the group of a place picked on
+ * a shared connection (`place`, brain-next.ts `placeGroupOf`) and one of
+ * the readers an item synced from it names (`principal`, as
+ * `readerPrincipalsOf` names it). An item of the place is kept for its
+ * readers' pairs, and a person holds a pair only while they hold both
+ * (`heldPrincipalsOf`): so a person reads it only where the source lets
+ * them and the connection's audience holds them, with nothing new in the
+ * Brain. The one name of a pair: a hash of the two, so it fits a
+ * principal, under its own kind, which no other group of core's has.
+ */
+export const pairPrincipalOf = async (
+  place: string,
+  principal: string
+): Promise<string> =>
+  `pair:${await sha256Hex(JSON.stringify([place, principal]))}`;
 
 /**
  * The Brain's group of `reader` where it names no account: a group's or
@@ -226,11 +247,15 @@ export const keepSignInAddress = async (
  * the producer of a list (brain-next.ts `addSource`, `changeSourceReaders`):
  * one batch however long the list, each statement binding the list as one
  * value, as D1 binds at most 100 a query ("Maximum bound parameters per
- * query", Cloudflare's D1 limits).
+ * query", Cloudflare's D1 limits). For an item of the place `place`
+ * (GRA-2145), the same batch keeps each reader's pair with it
+ * (`source_reader_pairs`), before the list reaches the Brain: so a person
+ * who holds both holds the pair from the next read on.
  */
 export const readerPrincipalsOf = async (
   env: Pick<Env, "DB" | "BETTER_AUTH_SECRET">,
-  readers: readonly SourceReader[]
+  readers: readonly SourceReader[],
+  place?: string
 ): Promise<string[]> => {
   const keys = await keysOf(
     env,
@@ -249,8 +274,27 @@ export const readerPrincipalsOf = async (
       sql`SELECT value FROM json_each(${JSON.stringify(named)}) WHERE true`
     )
     .onConflictDoNothing();
+  // The place's pairs: of the readers named by a group or a tenant, and
+  // of those named by an account's token, once minted (after it in the
+  // batch).
+  const plainPairs = (at: string) =>
+    db
+      .insert(sourceReaderPairs)
+      .select(
+        sql`SELECT ${at}, value FROM json_each(${JSON.stringify(plain)}) WHERE true`
+      )
+      .onConflictDoNothing();
+  const tokenPairs = (at: string) =>
+    db
+      .insert(sourceReaderPairs)
+      .select(
+        sql`SELECT ${at}, ${tokenPrefix} || ${sourceReaderTokens.token} FROM ${sourceReaderTokens} WHERE ${inList(sourceReaderTokens.key, keys)}`
+      )
+      .onConflictDoNothing();
   if (keys.length === 0) {
-    if (named.length > 0) {
+    if (place !== undefined && plain.length > 0) {
+      await db.batch([nameGroups, plainPairs(place)]);
+    } else if (named.length > 0) {
       await nameGroups;
     }
     return plain;
@@ -269,6 +313,7 @@ export const readerPrincipalsOf = async (
       .from(sourceReaderTokens)
       .where(inList(sourceReaderTokens.key, keys)),
     nameGroups,
+    ...(place === undefined ? [] : [plainPairs(place), tokenPairs(place)]),
   ]);
   return [
     ...new Set([...tokens.map(({ token }) => tokenPrincipal(token)), ...plain]),
@@ -400,13 +445,22 @@ const readingAccountsOf = (
 };
 
 /**
- * The Brain's groups of the groups the suite accounts the member connected
- * as their own (`connected`) are in: of each connection still connected,
- * the groups its last whole read found (connect's reader-groups.ts), while
- * that read is recent (`readerProofMaxAgeMs`), in its own tenant.
+ * The Brain's groups of the groups a member provably holds, the one place
+ * a group is proved for a person, whatever proves it. Each source of
+ * proof is one field of `proofs`, and counts only while it is recent
+ * (`readerProofMaxAgeMs`):
+ *
+ * - `connected`: the suite accounts they connected as their own: of each
+ *   connection still connected, the groups its last whole read with
+ *   their own token found (connect's reader-groups.ts), in its own tenant.
+ *
+ * The company's directory read of a group's members, tied by Entra object
+ * ID, is to be one more (GRA-2146).
  */
-const groupsHeldBy = (connected: readonly PersonalAccount[]): string[] =>
-  connected.flatMap(
+const provedGroupsOf = (proofs: {
+  connected: readonly PersonalAccount[];
+}): string[] =>
+  proofs.connected.flatMap(
     ({ provider, tenant, groups, groupsReadAt, connected: live }) =>
       live && recent(groupsReadAt)
         ? groups.map((group) => groupPrincipal(provider, tenant, group))
@@ -426,33 +480,111 @@ const namedGroupsRead = (db: DrizzleD1Database, groups: readonly string[]) =>
     .orderBy(sourceReaderGroups.name);
 
 /**
+ * The read of the pairs (`source_reader_pairs`) of the places `places`
+ * whose reader is one of `plain` (a tenant's or a group's name) or the
+ * token of one of the accounts keyed `keys`, for the batch of a read: the
+ * pairs a person holds, of those an item ever named. Each half by the
+ * index of readers, the lists bound as one value each.
+ */
+const pairsRead = (
+  db: DrizzleD1Database,
+  places: readonly string[],
+  plain: readonly string[],
+  keys: readonly string[]
+) => {
+  const inPlaces = sql`${sourceReaderPairs.place} IN (SELECT value FROM json_each(${JSON.stringify(places)}))`;
+  const columns = {
+    place: sourceReaderPairs.place,
+    principal: sourceReaderPairs.principal,
+  };
+  return db
+    .select(columns)
+    .from(sourceReaderPairs)
+    .where(
+      sql`${sourceReaderPairs.principal} IN (SELECT value FROM json_each(${JSON.stringify(plain)})) AND ${inPlaces}`
+    )
+    .union(
+      db
+        .select(columns)
+        .from(sourceReaderPairs)
+        .where(
+          sql`${sourceReaderPairs.principal} IN (SELECT ${tokenPrefix} || ${sourceReaderTokens.token} FROM ${sourceReaderTokens} WHERE ${inList(sourceReaderTokens.key, keys)}) AND ${inPlaces}`
+        )
+    );
+};
+
+/**
+ * The Brain's groups of the pairs `found`, in the order of `places`, then
+ * of their readers: a person past the bound of groups leaves out the same
+ * ones each read (brain-next.ts `readerGroupsOf`).
+ */
+const pairGroupsOf = async (
+  places: readonly string[],
+  found: readonly { place: string; principal: string }[]
+): Promise<{ place: string; group: string }[]> => {
+  const order = new Map(places.map((place, index) => [place, index]));
+  const sorted = found.toSorted(
+    (one, other) =>
+      (order.get(one.place) ?? 0) - (order.get(other.place) ?? 0) ||
+      (one.principal < other.principal ? -1 : 1)
+  );
+  return await Promise.all(
+    sorted.map(async ({ place, principal }) => ({
+      place,
+      group: await pairPrincipalOf(place, principal),
+    }))
+  );
+};
+
+/**
  * The Brain's groups the member `userId` holds, reading as themselves, by
  * the accounts they proved are theirs (`signIns`, `connected`): each
- * account's token and its tenant's name (`accounts`), and those of the
- * groups their connected accounts are in (`groupsHeldBy`) that a list
- * named, read in the same batch, sorted (`groups`). One batch: they claim the tokens of those
- * accounts (`person`, written only where it changes), and their tokens
- * and named groups are read. Nothing is minted: an account no list named
- * has no token, and holds nothing.
+ * account's token and its tenant's name (`accounts`), those of the
+ * groups they provably hold (`provedGroupsOf`) that a list named, sorted
+ * (`groups`), and the pairs of the places `places` with any of these an
+ * item named (`pairs`, GRA-2145; the places those a reader holds now,
+ * brain-next.ts `memberGroupsOf`). One batch: they claim the tokens of
+ * those accounts (`person`, written only where it changes), and their
+ * tokens, named groups and pairs are read. Nothing is minted: an account
+ * no list named has no token, and holds nothing.
  */
 export const heldPrincipalsOf = async (
   env: Pick<Env, "DB" | "SIGN_IN" | "BETTER_AUTH_SECRET">,
   userId: string,
   signIns: readonly SignIn[],
-  connected: readonly PersonalAccount[]
-): Promise<{ accounts: string[]; groups: string[] }> => {
+  connected: readonly PersonalAccount[],
+  places: readonly string[] = []
+): Promise<{
+  accounts: string[];
+  groups: string[];
+  pairs: { place: string; group: string }[];
+}> => {
   const reading = readingAccountsOf(env, signIns, connected);
-  const groups = [...new Set(groupsHeldBy(connected))];
+  const groups = [...new Set(provedGroupsOf({ connected }))];
   const db = drizzle(env.DB);
   if (reading.length === 0) {
     if (groups.length === 0) {
-      return { accounts: [], groups: [] };
+      return { accounts: [], groups: [], pairs: [] };
     }
-    const named = await namedGroupsRead(db, groups);
-    return { accounts: [], groups: named.map(({ name }) => name) };
+    if (places.length === 0) {
+      const named = await namedGroupsRead(db, groups);
+      return { accounts: [], groups: named.map(({ name }) => name), pairs: [] };
+    }
+    const [named, found] = await db.batch([
+      namedGroupsRead(db, groups),
+      pairsRead(db, places, groups, []),
+    ]);
+    return {
+      accounts: [],
+      groups: named.map(({ name }) => name),
+      pairs: await pairGroupsOf(places, found),
+    };
   }
   const keys = await keysOf(env, reading);
-  const [, tokens, named] = await db.batch([
+  const tenants = reading.map(({ provider, tenant }) =>
+    tenantPrincipal(provider, tenant)
+  );
+  const [, tokens, named, found] = await db.batch([
     db
       .update(sourceReaderTokens)
       .set({ person: userId })
@@ -471,17 +603,17 @@ export const heldPrincipalsOf = async (
       .from(sourceReaderTokens)
       .where(inList(sourceReaderTokens.key, keys)),
     namedGroupsRead(db, groups),
+    pairsRead(db, places, [...tenants, ...groups], keys),
   ]);
   return {
     accounts: [
       ...new Set([
         ...tokens.map(({ token }) => tokenPrincipal(token)),
-        ...reading.map(({ provider, tenant }) =>
-          tenantPrincipal(provider, tenant)
-        ),
+        ...tenants,
       ]),
     ],
     groups: named.map(({ name }) => name),
+    pairs: await pairGroupsOf(places, found),
   };
 };
 
