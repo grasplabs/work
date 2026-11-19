@@ -184,6 +184,37 @@ const outSql = (alias: string, at: string, only = ""): string => `
   WHERE out.memory = ${alias}.row AND current.added_at <= ${at} ${only}`;
 
 /**
+ * Whether the retired memory `alias` still ends what it ends (`newerSql`):
+ * when it was retired, a newer memory naming it as one it replaces
+ * (`memory_replacements`) ended it, one not retired by then or itself
+ * still ending it this way, along the chain. So forgetting a memory that
+ * was already history (B, once C replaced it) never brings back what it
+ * replaced (A), while undoing one still current does. Each ender is one
+ * `visible` keeps to the reader when given: one they may not read keeps
+ * nothing ended, as a store without it would tell. A link always names
+ * an earlier memory and `UNION` keeps each step once, so the walk ends;
+ * it is as long as the chain of memories forgotten after they were
+ * replaced, and walked only for a retired one.
+ */
+const stillEndsSql = (alias: string, visible: boolean): string => {
+  const ender = `
+    JOIN memory_replacements AS link ON link.replaced = chain.row
+    JOIN memories AS ender ON ender.row = link.memory
+    WHERE ${startSql("ender")} <= chain.at
+      ${visible ? `AND ${visibleSql("ender")}` : ""}`;
+  return `EXISTS (
+    WITH RECURSIVE chain(row, at) AS (
+      SELECT ${alias}.row, ${alias}.retired_at
+      UNION
+      SELECT ender.row, ender.retired_at FROM chain${ender}
+        AND ender.retired_at <= chain.at
+    )
+    SELECT 1 FROM chain${ender}
+      AND (ender.retired_at IS NULL OR ender.retired_at > chain.at)
+  )`;
+};
+
+/**
  * The newer memories of `alias`'s lineage that end it, by the order of
  * its lineage (a later version's, or a later row of the same), about the
  * same entity and attribute and, for an attribute of many values, the
@@ -194,7 +225,8 @@ const outSql = (alias: string, at: string, only = ""): string => `
  * each learned by `learned` and started by
  * `valid` (its world start, or when it was learned), and neither retired
  * nor out by `learned`: a retired memory ends nothing, so forgetting a
- * newer value makes the one before current again; nor does one whose
+ * newer value makes the one before current again, unless it had itself
+ * been replaced when it was retired (`stillEndsSql`); nor does one whose
  * quote left its source (quotes.ts), so a source that says "Anna", then
  * "Bob", then "Anna" again, with no memory drawn from the last, has Anna
  * current again. `visible` keeps to those the reader may read, so a
@@ -220,7 +252,8 @@ export const newerSql = (
       OR (newer.lineage_order = ${alias}.lineage_order AND newer.row > ${alias}.row))
     AND newer.learned_at <= ${learned}
     AND ${startSql("newer")} <= ${valid}
-    AND (newer.retired_at IS NULL OR newer.retired_at > ${learned})
+    AND (newer.retired_at IS NULL OR newer.retired_at > ${learned}
+      OR ${stillEndsSql("newer", visible)})
     AND NOT EXISTS (${outSql("newer", learned)})
     ${visible ? `AND ${visibleSql("newer")}` : ""}
     ${only}`;

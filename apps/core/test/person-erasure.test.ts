@@ -15,6 +15,7 @@ import { organizationId } from "../src/auth/auth.ts";
 import { addSource } from "../src/brain-next.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace, inJurisdiction } from "../src/durable-objects.ts";
+import { emailHashOf, emailKeyVersion } from "../src/erased-people.ts";
 import { brainVersionRead } from "../src/history-access.ts";
 import type { Onboarding } from "../src/onboarding/store.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
@@ -1592,6 +1593,354 @@ describe("erasing a person", () => {
     });
   });
 
+  it("holds the address that was theirs nowhere in the onboarding store: not on their entry, a link or any mail, sent or not", async () => {
+    const { admin, person } = await removedPerson();
+    const email = String(person.person.email);
+    const { theirs, others } = await onTheList(email);
+    // Mail sent to their address about nobody in particular, and someone
+    // else's link that once went to it.
+    await onList(
+      "INSERT INTO mail_outbox (key, about, to_address, mail, state, next_at, queued_at, settled_at) VALUES (?, NULL, ?, '{}', 'sent', 0, ?, ?)",
+      `note/${crypto.randomUUID()}`,
+      email,
+      new Date().toISOString(),
+      new Date().toISOString()
+    );
+    await onList(
+      "UPDATE links SET sent_to_email = ? WHERE person = ?",
+      email.toLowerCase(),
+      others
+    );
+
+    await admin.api.members.erase(person.userId, String(person.person.name));
+
+    const holding = await runInDurableObject(
+      onboardingStore(env),
+      (_instance, state) => {
+        const tables = state.storage.sql
+          .exec<{ name: string }>(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'"
+          )
+          .toArray()
+          .map(({ name }) => name);
+        const kept = [
+          ...tables.map((name) => ({
+            name,
+            rows: state.storage.sql.exec(`SELECT * FROM "${name}"`).toArray(),
+          })),
+          ...[...state.storage.kv.list()].map(([key, value]) => ({
+            name: `kv:${key}`,
+            rows: [value],
+          })),
+        ];
+        return kept
+          .filter(({ rows }) =>
+            JSON.stringify(rows).toLowerCase().includes(email.toLowerCase())
+          )
+          .map(({ name }) => name);
+      }
+    );
+    const entry = await onList(
+      "SELECT name, email FROM people WHERE id = ?",
+      theirs
+    );
+    const otherMail = await onList(
+      "SELECT key FROM mail_outbox WHERE about = ?",
+      others
+    );
+    expect({
+      holding,
+      entry,
+      otherMail: otherMail.length > 0,
+    }).toStrictEqual({
+      holding: [],
+      // Their entry is the company's: it stays, without the address.
+      entry: [{ name: "Them", email: "" }],
+      otherMail: true,
+    });
+  });
+
+  it("takes every address of theirs off an entry their account's link found, though the list had others for them, and the mail sent to each", async () => {
+    const { admin, person } = await removedPerson();
+    // The directory's address for them, not the one they signed in with:
+    // they opened their link under it, then the list's was corrected.
+    const opened = `dir-${crypto.randomUUID().slice(0, 8)}@acme.test`;
+    const corrected = `fixed-${crypto.randomUUID().slice(0, 8)}@acme.test`;
+    const { theirs, theirSecret } = await onTheList(opened);
+    await onboardingStore(env).openLink(await sha256Hex(theirSecret), {
+      account: person.userId,
+      address: opened,
+    });
+    await onList("UPDATE people SET email = ? WHERE id = ?", corrected, theirs);
+    // Mail to each, about nobody in particular.
+    for (const to of [opened, corrected]) {
+      // oxlint-disable-next-line no-await-in-loop -- one mail at a time
+      await onList(
+        "INSERT INTO mail_outbox (key, about, to_address, mail, state, next_at, queued_at, settled_at) VALUES (?, NULL, ?, '{}', 'sent', 0, ?, ?)",
+        `note/${crypto.randomUUID()}`,
+        to,
+        new Date(Date.now() - 60_000).toISOString(),
+        new Date(Date.now() - 60_000).toISOString()
+      );
+    }
+
+    await admin.api.members.erase(person.userId, String(person.person.name));
+
+    const entry = await onList("SELECT email FROM people WHERE id = ?", theirs);
+    const mailTo = async (to: string) => {
+      const rows = await onList(
+        "SELECT key FROM mail_outbox WHERE lower(to_address) = ?",
+        to
+      );
+      return rows.length;
+    };
+    expect({
+      entry,
+      opened: await mailTo(opened),
+      corrected: await mailTo(corrected),
+    }).toStrictEqual({ entry: [{ email: "" }], opened: 0, corrected: 0 });
+  });
+
+  it("closes the link of an entry erased before any went out: it opens for nobody, and no link, reminder or mail goes to it", async () => {
+    const { admin, person } = await removedPerson();
+    const email = String(person.person.email);
+    const { theirs, roster } = await onTheList(
+      `away-${crypto.randomUUID().slice(0, 8)}@acme.test`
+    );
+    const store = onboardingStore(env);
+    const by = { type: "system" } as const;
+    // On the list with the address that was theirs, no link out yet.
+    const withThem = (away: boolean) => ({
+      ...roster,
+      people: roster.people.map((one) =>
+        one.id === theirs ? { ...one, email, away } : one
+      ),
+    });
+    await onList("DELETE FROM links WHERE person = ?", theirs);
+    await store.saveRoster(withThem(true), by);
+
+    await admin.api.members.erase(person.userId, String(person.person.name));
+    // Back from away, and everything due run again, a week on.
+    await store.saveRoster(withThem(false), by);
+    const released = await store.releaseDue();
+    const later = new Date(Date.now() + 7 * 86_400_000).toISOString();
+    const reminded = await store.remindDue(later);
+    const again = await store.sendAgain(theirs, by);
+    const listed = await admin.api.onboarding.links();
+    const codes = await onList(
+      "SELECT person FROM link_codes WHERE person = ?",
+      theirs
+    );
+    const mail = await onList(
+      "SELECT key FROM mail_outbox WHERE about = ?",
+      theirs
+    );
+    expect({
+      released: released.includes(theirs),
+      reminded: reminded.includes(theirs),
+      again,
+      path: pathOf(listed, theirs),
+      link: await store.linkOf(theirs),
+      codes,
+      mail,
+    }).toStrictEqual({
+      released: false,
+      reminded: false,
+      again: "none_failed",
+      path: null,
+      link: null,
+      codes: [],
+      mail: [],
+    });
+  });
+
+  it("misses no address that came onto the list while the erasure hashed what the store holds", async () => {
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+    });
+    const { person } = await removedPerson();
+    const email = String(person.person.email);
+    const { roster } = await onTheList(
+      `before-${crypto.randomUUID().slice(0, 8)}@acme.test`
+    );
+    const hash = await emailHashOf(env, email);
+    const newcomer = `person-${crypto.randomUUID().slice(0, 8)}`;
+    const team = roster.teams[0]?.id ?? "";
+    const saved = await runInDurableObject(
+      onboardingStore(env),
+      async (store: Onboarding) => {
+        // The erasure's first hash waits until the save below is done.
+        const { promise: done, resolve } = Promise.withResolvers<boolean>();
+        const sign = crypto.subtle.sign.bind(crypto.subtle);
+        let held = false;
+        vi.spyOn(crypto.subtle, "sign").mockImplementation(
+          async (...args: Parameters<SubtleCrypto["sign"]>) => {
+            if (!held) {
+              held = true;
+              await done;
+            }
+            return await sign(...args);
+          }
+        );
+        const erasing = store.eraseEntries(
+          person.userId,
+          hash,
+          new Date().toISOString()
+        );
+        await store.saveRoster(
+          {
+            ...roster,
+            people: [
+              ...roster.people,
+              {
+                id: newcomer,
+                name: "New",
+                team,
+                email,
+                title: "",
+                away: false,
+              },
+            ],
+          },
+          { type: "system" }
+        );
+        resolve(true);
+        return await erasing;
+      }
+    );
+
+    const entry = await onList(
+      "SELECT email FROM people WHERE id = ?",
+      newcomer
+    );
+    expect({ saved, entry }).toStrictEqual({
+      saved: 1,
+      entry: [{ email: "" }],
+    });
+  });
+
+  it("gives the model nothing of their entries once their erasure took the address off, whether a link had gone out to them or not", async () => {
+    // The test draws the referral itself, inside its faked provider (aloneInTheStore).
+    await aloneInTheStore();
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+    });
+    const { admin, person } = await removedPerson();
+    const store = onboardingStore(env);
+    const ids = await onboardingTeam([
+      "lea",
+      "max",
+      "mia",
+      "mo",
+      "noor",
+      "pim",
+    ]);
+    await mapped(ids);
+    // Noor and Pim were them: Noor's link went out, Pim's never did.
+    const email = String(person.person.email);
+    for (const id of [ids.noor, ids.pim]) {
+      // oxlint-disable-next-line no-await-in-loop -- one entry at a time
+      await onList("UPDATE people SET email = ? WHERE id = ?", email, id);
+    }
+    await onList(
+      "INSERT OR IGNORE INTO links (person, sent_at) VALUES (?, ?)",
+      ids.noor,
+      new Date(Date.now() - 60_000).toISOString()
+    );
+    await onList("DELETE FROM links WHERE person = ?", ids.pim);
+    await admin.api.members.erase(person.userId, String(person.person.name));
+    const works = await store.teamWorks(ids.team);
+    const rota = works.find(({ name }) => name === "planning the rota");
+    if (rota === undefined) {
+      throw new Error("Expected the team's map");
+    }
+    await agree(ids.max, [
+      fact("x1", "who", "Mia handles the new tickets, not Max."),
+      fact("x2", "work", "Max plans the rota with Lea."),
+    ]);
+
+    const { requests } = await answering(
+      [
+        {
+          text: JSON.stringify({ does: rota.id, person: ids.mia }),
+          inputTokens: 100,
+          outputTokens: 20,
+        },
+      ],
+      async () => await store.drawNext()
+    );
+
+    const asked = JSON.stringify(requests);
+    expect({
+      mia: asked.includes(ids.mia),
+      noor: asked.includes(ids.noor),
+      pim: asked.includes(ids.pim),
+    }).toStrictEqual({ mia: true, noor: false, pim: false });
+  });
+
+  it("gives the model nothing of their entry while their erasure is recorded but not yet applied to the list", async () => {
+    // The test draws the referral itself, inside its faked provider (aloneInTheStore).
+    await aloneInTheStore();
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+    });
+    const { admin, person } = await removedPerson();
+    const store = onboardingStore(env);
+    const ids = await onboardingTeam(["lea", "max", "mia", "mo", "noor"]);
+    await mapped(ids);
+    const email = String(person.person.email);
+    await onList("UPDATE people SET email = ? WHERE id = ?", email, ids.noor);
+    // Their erasure recorded, its step for the list still to run.
+    const now = Date.now();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO person_erasures (user_id, name, email_hash, email_key_version, requested_by, requested_at) VALUES (?, ?, ?, ?, ?, ?)"
+      ).bind(
+        person.userId,
+        String(person.person.name),
+        await emailHashOf(env, email),
+        emailKeyVersion,
+        admin.userId,
+        now
+      ),
+      env.DB.prepare(
+        "INSERT INTO person_erasure_areas (user_id, area, state, attempts, updated_at) VALUES (?, 'interview', 'pending', 0, ?)"
+      ).bind(person.userId, now),
+    ]);
+    const works = await store.teamWorks(ids.team);
+    const rota = works.find(({ name }) => name === "planning the rota");
+    if (rota === undefined) {
+      throw new Error("Expected the team's map");
+    }
+    await agree(ids.max, [
+      fact("x1", "who", "Mia handles the new tickets, not Max."),
+      fact("x2", "work", "Max plans the rota with Lea."),
+    ]);
+
+    const { requests } = await answering(
+      [
+        {
+          text: JSON.stringify({ does: rota.id, person: ids.mia }),
+          inputTokens: 100,
+          outputTokens: 20,
+        },
+      ],
+      async () => await store.drawNext()
+    );
+
+    const asked = JSON.stringify(requests);
+    const [entry] = await onList(
+      "SELECT email FROM people WHERE id = ?",
+      ids.noor
+    );
+    expect({
+      mia: asked.includes(ids.mia),
+      noor: asked.includes(ids.noor),
+      // Still on the list with it: the store wasn't told yet.
+      listed: entry?.email,
+    }).toStrictEqual({ mia: true, noor: false, listed: email });
+  });
+
   it("makes their link no new code once they are erased, as the admin lists the links or saves the list again", async () => {
     const { admin, person } = await removedPerson();
     const { theirs, others, theirSecret, roster } = await onTheList(
@@ -1640,14 +1989,14 @@ describe("erasing a person", () => {
     const keyMark = await accountFor(address);
 
     // Their page keeps saving for as long as core erases their interview
-    // (`eraseInterviewOf`, as person-erasure.ts asks it), the cleanup
+    // (`eraseEntries`, as person-erasure.ts asks it), the cleanup
     // after the delete included, between every step that waits.
     const saves = await runInDurableObject(
       onboardingStore(env),
       async (store: Onboarding) => {
         const erasure = { running: true };
         const erased = store
-          .eraseInterviewOf(theirs, keyMark, new Date().toISOString())
+          .eraseEntries(keyMark, null, new Date().toISOString())
           .finally(() => {
             erasure.running = false;
           });
@@ -1685,11 +2034,12 @@ describe("erasing a person", () => {
     );
     expect({
       kept: kept.length,
-      saves: [...new Set(saves)],
+      // Once refused for the erasure, every one after: a save before its
+      // transaction (refused here as they never agreed) is taken with it.
+      saves: [...new Set(saves.slice(saves.indexOf("interview.link_invalid")))],
       link: await sessionWith(theirSecret, String(person.person.email)),
     }).toStrictEqual({
       kept: 0,
-      // Every one of them, from the first.
       saves: ["interview.link_invalid"],
       link: "interview.link_invalid",
     });

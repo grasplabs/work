@@ -2299,9 +2299,14 @@ const isPersonsOwnWordOnly = (
  *
  * `replaces` names memories its writer says it replaces (GRA-2184): each
  * one ends from this one's start, as a newer memory of its lineage ends
- * one, for a reader who may read this one; this one retired, it ends
- * nothing. Only a writer's memory names any: one drawn from a source ends
- * by its source's versions. At most as many as an add's memories.
+ * one, for a reader who may read this one. Retired while current, it ends
+ * nothing (an undo brings back what it replaced); retired once it was
+ * itself replaced, it still does (forgetting history brings nothing
+ * back). Only a writer's memory names any: one drawn from a source ends
+ * by its source's versions. At most as many as an add's memories: the add
+ * checks each one inside its one synchronous transaction, which holds the
+ * store for every other call meanwhile, so the bound is what keeps that
+ * hold as short as an add of its most memories.
  */
 export const newMemorySchema = z
   .strictObject({

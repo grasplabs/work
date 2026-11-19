@@ -849,6 +849,10 @@ msgstr "{name} responde en este chat"
 msgid "{name} couldn't be deleted. Try again."
 msgstr "No se ha podido eliminar {name}. Inténtalo de nuevo."
 
+#: src/settings/directory-reconnect.tsx
+msgid "{name} couldn’t be reached just now. Try again in a moment."
+msgstr "No se ha podido conectar con {name} ahora mismo. Inténtalo de nuevo en un momento."
+
 #: src/settings/teams.tsx
 msgid "{name} couldn't be renamed. Try again."
 msgstr "No se ha podido cambiar el nombre de {name}. Inténtalo de nuevo."
@@ -872,6 +876,10 @@ msgstr "{name} aún no se ha leído."
 #: src/settings/stephen-settings.tsx
 msgid "{name} in {appName}"
 msgstr "{name} en {appName}"
+
+#: src/settings/directory-reconnect.tsx
+msgid "{name} is connected again. Grasp reads it at its next daily read."
+msgstr "{name} vuelve a estar conectado. Grasp lo leerá en su próxima lectura diaria."
 
 #: src/onboarding/connect-steps.tsx
 msgid "{name} is connected. I’ll only read what you share with me."
@@ -4375,6 +4383,10 @@ msgstr "Conectar {app}"
 msgid "Connect {name}"
 msgstr "Conectar {name}"
 
+#: src/settings/directory-reconnect.tsx
+msgid "Connect {name} again"
+msgstr "Volver a conectar {name}"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Connect accounts of their own"
 msgstr "Conectar cuentas propias"
@@ -6694,8 +6706,8 @@ msgid "Grasp can’t email your people their interview links for now. Send each 
 msgstr "Por ahora Grasp no puede enviar por correo a tu gente sus enlaces de entrevista. Envía a cada uno su enlace a mano desde Entrevistas."
 
 #: src/settings/directory-reads.tsx
-msgid "Grasp can’t read the directory with the connection it has: an administrator of your organization has to connect it again. That can’t be done from Settings yet, so ask Grasp’s support."
-msgstr "Grasp no puede leer el directorio con la conexión que tiene: un administrador de tu organización tiene que volver a conectarlo. Eso aún no se puede hacer desde Ajustes, así que pide ayuda al soporte de Grasp."
+msgid "Grasp can’t read the directory with the connection it has. Connect it again, signing in with an account that administers your directory."
+msgstr "Grasp no puede leer el directorio con la conexión que tiene. Vuelve a conectarlo iniciando sesión con una cuenta que administre tu directorio."
 
 #: src/settings/erasures.tsx
 msgid "Grasp can’t say how far it got just now. It goes on all the same."

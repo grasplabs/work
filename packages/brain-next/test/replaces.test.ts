@@ -17,6 +17,7 @@ import type {
 } from "@grasp-os/brain-next/contract";
 import { runInDurableObject } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { audience, readerOf, shared, unique } from "./entity-helpers.ts";
 import { exportSettled, restoredAfterLoss, tick } from "./export-reads.ts";
@@ -81,6 +82,32 @@ const add = async (
   return { memory: added.memories[0] ?? "", entity: added.entities.c ?? "" };
 };
 
+/** A memory's line of an export, as far as these tests read it. */
+const memoryLineSchema = z.looseObject({
+  kind: z.literal("memory"),
+  id: z.string(),
+  replaces: z.array(z.string()).optional(),
+});
+
+/** Every line of the done export `id`'s parts, parsed. */
+const linesOf = async (id: string): Promise<unknown[]> => {
+  const status = await shared().exportStatus({ id });
+  const lines: unknown[] = [];
+  for (const file of status?.files ?? []) {
+    if (file !== "manifest.json") {
+      // oxlint-disable-next-line no-await-in-loop -- one file at a time
+      const body = await shared().exportFile({ id, file });
+      lines.push(
+        ...(body ?? "")
+          .split("\n")
+          .filter(Boolean)
+          .map((line): unknown => JSON.parse(line))
+      );
+    }
+  }
+  return lines;
+};
+
 /** What `reader` reads of `entity`: the current statements, and each memory's end. */
 const readOf = async (entity: string, reader: Reader) => {
   const [current, all] = await Promise.all([
@@ -99,6 +126,48 @@ const readOf = async (entity: string, reader: Reader) => {
 const currentOf = async (entity: string, reader: Reader): Promise<string[]> => {
   const { current } = await readOf(entity, reader);
   return current;
+};
+
+/**
+ * Holds every delete of memories back while `held`, so what an erasure
+ * hides stays stored, hidden, as while its tick hasn't deleted it yet.
+ */
+const holdDeletes = async (held: boolean): Promise<void> => {
+  await runInDurableObject(shared(), (_instance, state) => {
+    state.storage.sql.exec(
+      held
+        ? `CREATE TRIGGER IF NOT EXISTS test_hold_deletes BEFORE DELETE ON memories BEGIN
+            SELECT RAISE(ABORT, 'held by the test');
+          END`
+        : "DROP TRIGGER IF EXISTS test_hold_deletes"
+    );
+  });
+};
+
+/** A memory of the customer's in `person`'s word, which their erasure will hide; and one the reader sees. */
+const inTheirWord = async (at: ReturnType<typeof setUp>, person: string) => {
+  const theirs = await add(at, {
+    ...requirement("theirs", at.writer),
+    speaker: { kind: "internal", person },
+  });
+  const kept = await add(at, requirement("kept", at.writer), {
+    entity: theirs.entity,
+  });
+  return { theirs, kept };
+};
+
+/** Erases `person` from the shared store, its deletes held: what it hides stays stored. */
+const hiddenByErasure = async (person: string): Promise<void> => {
+  await holdDeletes(true);
+  try {
+    await shared().erasePersonShared({
+      person,
+      identifiers: [],
+      reason: "person_erased",
+    });
+  } catch {
+    // A delete the trigger held: what it hid stays hidden.
+  }
 };
 
 describe("a memory that replaces earlier ones of its writer", () => {
@@ -379,7 +448,164 @@ describe("a memory that replaces earlier ones of its writer", () => {
     await expect(currentOf(old.entity, at.reader)).resolves.toStrictEqual([]);
   });
 
+  it("takes back what a chain ends when its writer takes back the last of it, also one that ends the next by its attribute", async () => {
+    const at = setUp();
+    const first = await add(at, requirement("first", at.writer));
+    const options = { entity: first.entity, reader: at.reader };
+    const second = await add(
+      at,
+      requirement("second", at.writer, [first.memory]),
+      options
+    );
+    const third = await add(
+      at,
+      requirement("third", at.writer, [second.memory]),
+      options
+    );
+    // A status twice, the second ending the first by its attribute alone,
+    // then a requirement that replaces the second.
+    const status = (statement: string): NewMemory => ({
+      ...requirement(statement, at.writer),
+      attribute: "status",
+    });
+    await add(at, status("older"), options);
+    const newer = await add(at, status("newer"), options);
+    const last = await add(
+      at,
+      requirement("last", at.writer, [newer.memory]),
+      options
+    );
+    const before = await currentOf(first.entity, at.reader);
+    for (const memory of [third.memory, last.memory]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      await shared().retireWritten({
+        memory,
+        writer: at.writer,
+        change: `taken back ${memory}`,
+      });
+    }
+
+    expect({
+      before,
+      after: await currentOf(first.entity, at.reader),
+    }).toStrictEqual({ before: ["last", "third"], after: [] });
+  });
+
+  it("keeps what a memory replaced ended when that memory is forgotten after it was itself replaced, for a reader of what replaced it", async () => {
+    const at = setUp();
+    const narrow = unique("g");
+    const both = readerOf(unique("p"), at.group, narrow);
+    const first = await add(at, requirement("first", at.writer));
+    const second = await add(
+      at,
+      requirement("second", at.writer, [first.memory]),
+      { entity: first.entity, reader: at.reader }
+    );
+    // Only readers of `narrow` may read what replaced the second.
+    await add(
+      { ...at, access: audience(narrow) },
+      requirement("third", at.writer, [second.memory]),
+      { entity: first.entity, reader: both }
+    );
+    // Forgotten as history, from the Memories page.
+    await shared().retireMemory({
+      memory: second.memory,
+      reader: both,
+      writer: at.writer,
+      change: "forget second",
+    });
+
+    expect({
+      both: await currentOf(first.entity, both),
+      // Without the third, the second was forgotten while current.
+      outside: await currentOf(first.entity, at.reader),
+    }).toStrictEqual({ both: ["third"], outside: ["first"] });
+  });
+
+  it("keeps a chain ended when each memory of it is forgotten after the next replaced it", async () => {
+    const at = setUp();
+    const options = (entity: string) => ({ entity, reader: at.reader });
+    const first = await add(at, requirement("first", at.writer));
+    const second = await add(
+      at,
+      requirement("second", at.writer, [first.memory]),
+      options(first.entity)
+    );
+    const third = await add(
+      at,
+      requirement("third", at.writer, [second.memory]),
+      options(first.entity)
+    );
+    await add(
+      at,
+      requirement("fourth", at.writer, [third.memory]),
+      options(first.entity)
+    );
+    // The third, then the second, forgotten as history.
+    for (const memory of [third.memory, second.memory]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      await shared().retireMemory({
+        memory,
+        reader: at.reader,
+        writer: at.writer,
+        change: `forget ${memory}`,
+      });
+    }
+
+    await expect(currentOf(first.entity, at.reader)).resolves.toStrictEqual([
+      "fourth",
+    ]);
+  });
+
+  it("refuses to replace a memory an erasure hides, before its tick deletes it", async () => {
+    const at = setUp();
+    const person = unique("person");
+    const { theirs } = await inTheirWord(at, person);
+    await hiddenByErasure(person);
+    try {
+      await expect(
+        add(at, requirement("new", at.writer, [theirs.memory]), {
+          entity: theirs.entity,
+          reader: at.reader,
+        })
+      ).rejects.toThrow(refusal);
+    } finally {
+      await holdDeletes(false);
+    }
+  });
+
   describe("through an export", () => {
+    it("names on a memory's line only what it replaced that the export holds", async () => {
+      const at = setUp();
+      const person = unique("person");
+      const { theirs, kept } = await inTheirWord(at, person);
+      const replacing = await add(
+        at,
+        requirement("new", at.writer, [theirs.memory, kept.memory]),
+        { entity: theirs.entity, reader: at.reader }
+      );
+      await hiddenByErasure(person);
+      let lines: unknown[] = [];
+      try {
+        const { id } = await shared().startExport("test");
+        await expect(exportSettled(shared, id)).resolves.toBe("done");
+        lines = await linesOf(id);
+      } finally {
+        await holdDeletes(false);
+      }
+      const memoryLines = lines.flatMap((line) => {
+        const parsed = memoryLineSchema.safeParse(line);
+        return parsed.success ? [parsed.data] : [];
+      });
+      const lineOf = (memory: string) =>
+        memoryLines.find(({ id }) => id === memory);
+
+      expect({
+        theirs: lineOf(theirs.memory),
+        replaces: lineOf(replacing.memory)?.replaces,
+      }).toStrictEqual({ theirs: undefined, replaces: [kept.memory] });
+    });
+
     it("is restored with what it replaces, and still brings it back once retired", async () => {
       const at = setUp();
       const old = await add(at, requirement("old", at.writer));
