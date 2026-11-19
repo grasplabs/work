@@ -2,7 +2,7 @@ import type { ChatUpdate } from "@grasp-os/shared/chat";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { model, says } from "./agent-chat.ts";
+import { model, says, toolStep } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { saveInstructions } from "./instruction-saves.ts";
 import { answeringProvider, fakeProvider } from "./model-provider.ts";
@@ -148,6 +148,46 @@ describe("agents mentioned in a question", slow, () => {
       ],
       chatAgent: pat.id,
     });
+  });
+
+  it("offer a next agent nothing to remember: its turn starts from core's words, not the person's", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const ann = await signedInApi(idp, "user");
+    const claire = await agentFor(admin, "Claire", "");
+    const pat = await agentFor(admin, "Pat", "");
+    const provider = await fakeProvider(
+      says("Claire: your name is on two invoices."),
+      // Pat tries to save core's words as Ann's.
+      toolStep("remember", {
+        about: "me",
+        type: "fact",
+        statement: "Wants Pat to answer as well",
+        quote: "answer",
+      }),
+      says("Pat: nothing more.")
+    );
+    const chat = await ann.api.chats.create("Monday");
+
+    await ann.api.chats.send(chat.id, {
+      text: "@Claire @Pat what should I know this week?",
+      model,
+      mentions: [
+        { kind: "agent", id: claire.id },
+        { kind: "agent", id: pat.id },
+      ],
+    });
+    await settled(ann, chat.id);
+
+    const offered = provider.requests.map(({ body }) =>
+      JSON.stringify(body).includes('"remember"')
+    );
+    expect({
+      claire: offered[0],
+      pat: offered[1],
+      checks: provider.requests.filter(({ body }) =>
+        JSON.stringify(body).includes("You check one thing")
+      ).length,
+    }).toStrictEqual({ claire: true, pat: false, checks: 0 });
   });
 
   it("stop at a next agent that can't answer, saying why on the chat, with nothing left waiting", async () => {
