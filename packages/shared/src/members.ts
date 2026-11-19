@@ -38,6 +38,66 @@ export interface OrganizationTeam {
   memberIds: string[];
 }
 
+/** A member, by name, as the directory's placement shows them to admins. */
+export interface PlacedMember {
+  userId: string;
+  name: string;
+  email: string;
+}
+
+/** A team, by its ID and name. */
+export interface TeamName {
+  id: string;
+  name: string;
+}
+
+/**
+ * A member who may act and is in no team (GRA-2056, slice 4), with what
+ * the directory says of them: an admin places them by hand.
+ */
+export interface UnplacedMember extends PlacedMember {
+  /**
+   * Their department as the directory holds it: empty for none, null when
+   * the directory holds no account of theirs (or none is read).
+   */
+  department: string | null;
+  /** The team that department is linked to, if it is. */
+  departmentTeam: TeamName | null;
+}
+
+/**
+ * A member in a team the directory's read put them in, which their
+ * department there no longer fills (GRA-2135): the read moves them only
+ * into the team their department fills, so they stay until an admin acts.
+ */
+export interface DirectoryMover extends PlacedMember {
+  /** The team the read put them in. */
+  team: TeamName;
+  /** Their department as the directory holds it now; empty for none. */
+  department: string;
+  /** The team that department is linked to, if it is. */
+  departmentTeam: TeamName | null;
+}
+
+/**
+ * An admin's hand add (`kept`) or removal of a member tied to the
+ * directory, in a team: the directory's read leaves that pair as the
+ * admin set it until an admin releases it (`releaseTeamPin`).
+ */
+export interface TeamPin extends PlacedMember {
+  team: TeamName;
+  kept: boolean;
+  /** When an admin set it (ISO 8601). */
+  pinnedAt: string;
+}
+
+/** Who the directory leaves for an admin to place, and what admins placed by hand. */
+export interface DirectoryPlacement {
+  unplaced: UnplacedMember[];
+  movers: DirectoryMover[];
+  pins: TeamPin[];
+}
+
 /**
  * An admin's invitation, not taken up yet: the role `email` gets when they
  * first sign in through the organization's IdP. Grasp sends no email;
@@ -208,6 +268,12 @@ export interface MembersApi {
     userId: string,
     teamId: string
   ) => Promise<{ released: boolean }>;
+  /**
+   * Who of the members the directory leaves for an admin to place (in no
+   * team; in a team its read made that their department no longer fills),
+   * and every hand pin on a member tied to the directory.
+   */
+  directoryPlacement: () => Promise<DirectoryPlacement>;
 }
 
 /** Why an admin's change to a member was refused or not finished. */

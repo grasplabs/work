@@ -402,6 +402,14 @@ msgstr "{count, plural, one {# Test} other {# Tests}}"
 msgid "{count, plural, one {# time waster} other {# time wasters}}"
 msgstr "{count, plural, one {# Zeitfresser} other {# Zeitfresser}}"
 
+#: src/settings/directory-placement.tsx
+msgid "{count, plural, one {# to check} other {# to check}}"
+msgstr "{count, plural, one {# zu prüfen} other {# zu prüfen}}"
+
+#: src/settings/directory-placement.tsx
+msgid "{count, plural, one {# to place} other {# to place}}"
+msgstr "{count, plural, one {# zuzuordnen} other {# zuzuordnen}}"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{count, plural, one {# tool allowed} other {# tools allowed}}"
 msgstr "{count, plural, one {# Tool erlaubt} other {# Tools erlaubt}}"
@@ -1446,6 +1454,11 @@ msgstr "{who} kann später nicht mehr erteilt werden: es muss erneut angefragt w
 msgid "{who} consented to this before connecting it:"
 msgstr "{who} hat vor dem Verbinden hier zugestimmt:"
 
+#: src/settings/directory-placement.tsx
+msgid "{who} couldn't be added to the team. Try again."
+msgstr "{who} konnte dem Team nicht hinzugefügt werden. Versuchen Sie es erneut."
+
+#: src/settings/directory-placement.tsx
 #: src/settings/team-members-dialog.tsx
 msgid "{who} couldn't be taken off {name}. Try again."
 msgstr "{who} konnte nicht aus {name} entfernt werden. Versuchen Sie es erneut."
@@ -2018,6 +2031,7 @@ msgstr "Akteur-ID"
 #: src/chat/composer-menu.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/settings/ai-providers.tsx
+#: src/settings/directory-placement.tsx
 #: src/settings/team-members-dialog.tsx
 msgid "Add"
 msgstr "Hinzufügen"
@@ -2489,6 +2503,10 @@ msgstr "Ein Admin ändert sie, unter Mitglieder und Rollen."
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "An admin connects this for everyone."
 msgstr "Ein Admin verbindet dies für alle."
+
+#: src/settings/directory-placement.tsx
+msgid "An admin put them in a team, or took them off one, by hand, and the directory’s daily read leaves that as it is. Letting the directory decide takes the pin away: from its next read, the directory may add them to that team, or take them off it if it put them there."
+msgstr "Ein Admin hat sie von Hand einem Team hinzugefügt oder aus einem entfernt, und der tägliche Abgleich des Verzeichnisses lässt das so. Wenn Sie das Verzeichnis entscheiden lassen, entfällt die Festlegung: Ab dem nächsten Abgleich kann das Verzeichnis sie diesem Team hinzufügen oder sie daraus entfernen, wenn es sie dort eingetragen hat."
 
 #: src/workflows/workflow-triggers.tsx
 msgid "An admin refused or took back its reading of these events: it hears nothing."
@@ -4042,6 +4060,10 @@ msgstr "Modell wählen"
 #: src/workflows/workflow-triggers.tsx
 msgid "Choose a source."
 msgstr "Wählen Sie eine Quelle."
+
+#: src/settings/directory-placement.tsx
+msgid "Choose a team"
+msgstr "Team auswählen"
 
 #: src/apps/app-workflows.tsx
 msgid "Choose a workflow"
@@ -7420,6 +7442,10 @@ msgstr "Importieren oder exportieren"
 msgid "In {name}, make a service user that may read people’s basic and work details, and paste its ID and token here."
 msgstr "Legen Sie in {name} einen Service-User an, der die Stamm- und Arbeitsdaten der Mitarbeitenden lesen darf, und fügen Sie hier seine ID und seinen Token ein."
 
+#: src/settings/directory-placement.tsx
+msgid "In {team} from the directory."
+msgstr "In {team} über das Verzeichnis."
+
 #: src/agents/agent-page.tsx
 msgid "In Grasp's chat"
 msgstr "Im Chat von Grasp"
@@ -8107,6 +8133,14 @@ msgstr "Zwischen Läufen behalten"
 msgid "Kept for 24 hours after the event came. Opening it is recorded in the audit trail."
 msgstr "Wird 24 Stunden nach Eingang des Ereignisses aufbewahrt. Das Öffnen wird im Audit-Trail festgehalten."
 
+#: src/settings/directory-placement.tsx
+msgid "Kept in {team} by hand since {date}."
+msgstr "Seit {date} von Hand in {team} gehalten."
+
+#: src/settings/directory-placement.tsx
+msgid "Kept out of {team} by hand since {date}."
+msgstr "Seit {date} von Hand aus {team} herausgehalten."
+
 #: src/activity/audit-words.ts
 msgid "Kept something the chat can no longer read from the model"
 msgstr "Etwas, das der Chat nicht mehr lesen darf, vom Modell ferngehalten"
@@ -8324,6 +8358,14 @@ msgstr "Eigene Agenten erlauben"
 #: src/activity/audit-words.ts
 msgid "Let someone visit an App"
 msgstr "Jemandem erlaubt, eine App zu besuchen"
+
+#: src/settings/directory-placement.tsx
+msgid "Let the directory decide"
+msgstr "Verzeichnis entscheiden lassen"
+
+#: src/settings/directory-placement.tsx
+msgid "Let the directory decide whether {who} is in {team}"
+msgstr "Das Verzeichnis entscheiden lassen, ob {who} in {team} ist"
 
 #: src/settings/erasures.tsx
 msgid "Let the old address of {who} in again"
@@ -9699,6 +9741,14 @@ msgstr "Nicht gut"
 msgctxt "inbox item kind: a mailbox or drive connect stopped hearing"
 msgid "Not hearing"
 msgstr "Kein Empfang"
+
+#: src/settings/directory-placement.tsx
+msgid "Not in a team"
+msgstr "In keinem Team"
+
+#: src/settings/directory-placement.tsx
+msgid "Not in the directory."
+msgstr "Nicht im Verzeichnis."
 
 #: src/brain/brain.ts
 msgid "Not interviewed yet."
@@ -11091,6 +11141,10 @@ msgstr "Rechtliche Aufbewahrung für Version {label} anordnen?"
 #: src/apps/release-controls.tsx
 msgid "Place hold"
 msgstr "Aufbewahrung anordnen"
+
+#: src/settings/directory-placement.tsx
+msgid "Placed by hand"
+msgstr "Von Hand zugeordnet"
 
 #: src/onboarding/place-picker.tsx
 msgid "Places"
@@ -14008,6 +14062,10 @@ msgstr "Geteiltes zurücknehmen: {statement}"
 msgid "Take off"
 msgstr "Wegnehmen"
 
+#: src/settings/directory-placement.tsx
+msgid "Take off {name}"
+msgstr "Aus {name} entfernen"
+
 #: src/dashboard/widget-board.tsx
 msgid "Take off the dashboard"
 msgstr "Vom Dashboard nehmen"
@@ -14120,6 +14178,14 @@ msgstr "Team {team} kann diesen Upload lesen."
 #: src/brain/sources-page.tsx
 msgid "Team {teamName}"
 msgstr "Team {teamName}"
+
+#: src/settings/directory-placement.tsx
+msgid "Team doesn’t match the directory"
+msgstr "Team passt nicht zum Verzeichnis"
+
+#: src/settings/directory-placement.tsx
+msgid "Team for {who}"
+msgstr "Team für {who}"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "team leads talked"
@@ -14700,6 +14766,22 @@ msgstr "Das Verzeichnis und die Anmeldung über Microsoft oder Google. Ergänzt 
 msgid "The directory brought in the teams and their roles."
 msgstr "Das Verzeichnis brachte die Teams und ihre Rollen."
 
+#: src/settings/directory-placement.tsx
+msgid "The directory gives no department."
+msgstr "Das Verzeichnis nennt keine Abteilung."
+
+#: src/settings/directory-placement.tsx
+msgid "The directory gives the department “{department}”, which is linked to {team}."
+msgstr "Das Verzeichnis nennt die Abteilung „{department}“, die mit {team} verknüpft ist."
+
+#: src/settings/directory-placement.tsx
+msgid "The directory gives the department “{department}”, which no team is linked to."
+msgstr "Das Verzeichnis nennt die Abteilung „{department}“, mit der kein Team verknüpft ist."
+
+#: src/settings/directory-placement.tsx
+msgid "The directory put them in a team their department there no longer fills. Its daily read moves someone only into the team their department fills, so they stay until you take them off or add them to the right team."
+msgstr "Das Verzeichnis hat sie einem Team zugeordnet, zu dem ihre Abteilung dort nicht mehr gehört. Der tägliche Abgleich verschiebt jemanden nur in das Team seiner Abteilung, also bleiben sie, bis Sie sie entfernen oder dem richtigen Team hinzufügen."
+
 #: src/agents/agent-documents.tsx
 msgid "The documents couldn't be loaded. Reload the page."
 msgstr "Die Dokumente konnten nicht geladen werden. Lade die Seite neu."
@@ -14861,6 +14943,10 @@ msgstr "Die Person in {field}"
 #: src/apps/access-view.tsx
 msgid "the person who added it"
 msgstr "die Person, die ihn hinzugefügt hat"
+
+#: src/settings/directory-placement.tsx
+msgid "The pin on {who} couldn't be released. Try again."
+msgstr "Die Festlegung für {who} konnte nicht aufgehoben werden. Versuchen Sie es erneut."
 
 #: src/connections/sync-places.tsx
 msgid "The places picked from {label} were changed in the meantime. These are the ones picked now: pick again if you still want to change them."
@@ -15150,6 +15236,10 @@ msgstr "Sie erscheinen, sobald die Interviews deiner Teams beschreiben, wie ihre
 #: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
 msgstr "Die Person wird überall abgemeldet, ihre persönlichen Verbindungen werden getrennt, und sie kann sich nicht mehr anmelden."
+
+#: src/settings/directory-placement.tsx
+msgid "They can use Grasp, but nothing shared with a team reaches them. Add each to a team: the directory’s daily read leaves a team you chose as it is."
+msgstr "Sie können Grasp nutzen, aber nichts, was mit einem Team geteilt wird, erreicht sie. Fügen Sie jede Person einem Team hinzu: Der tägliche Abgleich des Verzeichnisses lässt ein von Ihnen gewähltes Team unverändert."
 
 #: src/settings/team-members-dialog.tsx
 msgid "They couldn't be added to {name}. Try again."

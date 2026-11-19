@@ -10,6 +10,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { memberErrors } from "@grasp-os/shared/members";
 import type {
   DirectoryAccount,
+  DirectoryPlacement,
   Erasure,
   ErasurePreview,
   Invitation,
@@ -66,6 +67,7 @@ import {
   users,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
+import { directoryPlacementOf } from "./directory-placement.ts";
 import { directoryKinds } from "./directory-ties.ts";
 import { emailHashOf, erasedAddress } from "./erased-people.ts";
 import { teamsWithMembers } from "./organization-teams.ts";
@@ -536,6 +538,18 @@ const releaseTeamPin = async (
     throw refusal(by, roleErrors.create("role.forbidden"));
   }
   return { released: released.length > 0 };
+};
+
+/**
+ * Who the directory leaves for an admin to place, and the hand pins
+ * (directory-placement.ts). For admins.
+ */
+const directoryPlacement = async (
+  env: Env,
+  by: Identity
+): Promise<DirectoryPlacement> => {
+  requireMemberAdmin(by);
+  return await directoryPlacementOf(env);
 };
 
 /**
@@ -1045,6 +1059,13 @@ export class MembersRpc extends CoreRpcTarget implements MembersApi {
     return await withPerson(
       this.#check,
       async (person) => await releaseTeamPin(this.#env, person, userId, teamId)
+    );
+  }
+
+  async directoryPlacement(): Promise<DirectoryPlacement> {
+    return await withPerson(
+      this.#check,
+      async (person) => await directoryPlacement(this.#env, person)
     );
   }
 

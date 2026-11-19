@@ -1,4 +1,8 @@
-import type { Member, OrganizationTeam } from "@grasp-os/shared/members";
+import type {
+  DirectoryPlacement,
+  Member,
+  OrganizationTeam,
+} from "@grasp-os/shared/members";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Dialog,
@@ -34,22 +38,29 @@ import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
+import { DirectoryPlacementSections } from "./directory-placement.tsx";
 import { SettingsBody, SettingsSection } from "./settings-parts.tsx";
 import { createTeam, deleteTeam, renameTeam } from "./team-changes.ts";
 import { TeamMembersDialog } from "./team-members-dialog.tsx";
 import { useTeamChange } from "./use-team-change.ts";
 
 // Teams, for admins (GRA-1296): the organization's teams, each with how
-// many are in it; making one, renaming it, deleting it, and who is in it.
+// many are in it; making one, renaming it, deleting it, and who is in it;
+// then whom the directory leaves for an admin to place, and the hand pins
+// (directory-placement.tsx).
 // Everything that is shared with a team ("Chosen teams") picks from these,
 // and so does the onboarding's staff list, which names these same teams
 // (GRA-2055). Better Auth checks the role on every
 // change and core on every read; only admins see this tab at all.
 
-/** What the tab shows: the teams, and the members to put in them. */
+/**
+ * What the tab shows: the teams, the members to put in them, and whom the
+ * directory leaves for an admin to place (directory-placement.tsx).
+ */
 interface TeamsData {
   teams: OrganizationTeam[];
   members: Member[];
+  placement: DirectoryPlacement;
 }
 
 const readTeams = async (
@@ -59,11 +70,12 @@ const readTeams = async (
   await loadFromCore(
     core,
     async (session) => {
-      const [teams, members] = await Promise.all([
+      const [teams, members, placement] = await Promise.all([
         session.members.teams(),
         session.members.list(),
+        session.members.directoryPlacement(),
       ]);
-      return { teams, members };
+      return { teams, members, placement };
     },
     left
   );
@@ -364,33 +376,40 @@ const TeamsList = ({
   onChanged: () => Promise<void>;
 }) => {
   const { t } = useLingui();
-  const { teams, members } = data;
+  const { teams, members, placement } = data;
   return (
-    <SettingsSection
-      action={<NewTeamButton onChanged={onChanged} teams={teams} />}
-      description={
-        <Trans>
-          Teams group the people who work together, so apps, skills and
-          workflows can be shared with a whole team at once.
-        </Trans>
-      }
-      title={t`Teams`}
-    >
-      {teams.length === 0 ? (
-        <p className="text-muted-foreground border-t px-5 py-6 text-center">
-          <Trans>No teams yet.</Trans>
-        </p>
-      ) : null}
-      {teams.map((team) => (
-        <TeamRow
-          key={team.id}
-          members={members}
-          onChanged={onChanged}
-          team={team}
-          teams={teams}
-        />
-      ))}
-    </SettingsSection>
+    <div className="flex flex-col gap-6">
+      <SettingsSection
+        action={<NewTeamButton onChanged={onChanged} teams={teams} />}
+        description={
+          <Trans>
+            Teams group the people who work together, so apps, skills and
+            workflows can be shared with a whole team at once.
+          </Trans>
+        }
+        title={t`Teams`}
+      >
+        {teams.length === 0 ? (
+          <p className="text-muted-foreground border-t px-5 py-6 text-center">
+            <Trans>No teams yet.</Trans>
+          </p>
+        ) : null}
+        {teams.map((team) => (
+          <TeamRow
+            key={team.id}
+            members={members}
+            onChanged={onChanged}
+            team={team}
+            teams={teams}
+          />
+        ))}
+      </SettingsSection>
+      <DirectoryPlacementSections
+        onChanged={onChanged}
+        placement={placement}
+        teams={teams}
+      />
+    </div>
   );
 };
 

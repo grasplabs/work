@@ -293,6 +293,7 @@ export const rpcParamNames: ParamNames = {
     "save": ["saved"],
   },
   "MembersRpc": {
+    "directoryPlacement": [],
     "erase": ["userId","name"],
     "erasure": ["userId"],
     "invitations": [],
