@@ -61,6 +61,10 @@ export const directoryClient = clients.microsoftDirectory;
  * `$expand=manager`), a hundred to a page; `{ failAt }`, the offset of
  * a page Graph then fails with a server error; and `{ loopAt }`, the
  * offset of a page whose next link points back at itself (null for none).
+ * Its groups: `{ groups }` as Graph answers a group, and `{ members }`,
+ * each group's transitive members by its lower-case ID.
+ * `{ granted }` is what Entra says the directory's app was granted, at
+ * connecting and at each renewal (null for `directoryGranted`).
  * Its deleted users likewise: `{ deleted }` (`/directory/deletedItems`),
  * `{ deletedFailAt }` with `{ deletedFailStatus }` and `{ deletedFailBody }`
  * (null for Graph's error), and `{ deletedNext }`, the next link every page of
@@ -76,7 +80,8 @@ export const directoryControlUrl = "https://graph-control.test/directory";
 export const hibobControlUrl = "https://hibob-control.test/people";
 
 /** What the directory's Entra app is granted, as Entra's token answer says. */
-export const directoryGranted = "openid profile email User.Read User.Read.All";
+export const directoryGranted =
+  "openid profile email User.Read User.Read.All Group.ReadBasic.All";
 
 /** Grasp's Entra app for the documents' connection, as set on connect. */
 export const documentsClient = clients.microsoftDocuments;
@@ -603,7 +608,42 @@ const slackAnswer = async (request, url) => {
   }
   return Response.json({ ok: true });
 };
-const directory = { users: [], failAt: null, loopAt: null, deleted: [], deletedFailAt: null, deletedFailStatus: 500, deletedFailBody: null, deletedNext: null };
+const directory = { granted: null, users: [], failAt: null, loopAt: null, deleted: [], deletedFailAt: null, deletedFailStatus: 500, deletedFailBody: null, deletedNext: null, groups: [], members: {} };
+/** Graph's groups, as the directory's group calls ask for them: a search by name, a group, its members a hundred to a page. */
+const groupsGraph = (url) => {
+  const parts = url.pathname.split("/");
+  if (url.pathname === "/v1.0/groups") {
+    const filter = url.searchParams.get("$filter") ?? "";
+    const prefix = "startswith(displayName,'";
+    const text = filter.startsWith(prefix) && filter.endsWith("')") ? filter.slice(prefix.length, -2).replaceAll("''", "'") : null;
+    return text === null
+      ? Response.json({ error: { code: "BadRequest" } }, { status: 400 })
+      : Response.json({ value: directory.groups.filter((group) => String(group.displayName).startsWith(text)) });
+  }
+  const id = parts[3]?.toLowerCase();
+  if (parts.length === 5 && parts[4] === "transitiveMembers") {
+    const known = directory.groups.some((each) => each.id.toLowerCase() === id);
+    const members = directory.members[id] ?? (known ? [] : undefined);
+    if (members === undefined) {
+      return Response.json({ error: { code: "Request_ResourceNotFound" } }, { status: 404 });
+    }
+    const from = Number(url.searchParams.get("$skiptoken") ?? "0");
+    const next = from + 100;
+    return Response.json({
+      value: members.slice(from, next),
+      ...(next < members.length
+        ? { "@odata.nextLink": "https://graph.microsoft.com/v1.0/groups/" + id + "/transitiveMembers?$skiptoken=" + next }
+        : {}),
+    });
+  }
+  if (parts.length === 4) {
+    const group = directory.groups.find((each) => each.id.toLowerCase() === id);
+    return group === undefined
+      ? Response.json({ error: { code: "Request_ResourceNotFound" } }, { status: 404 })
+      : Response.json(group);
+  }
+  return undefined;
+};
 const hibob = { key: null, employees: [] };
 /** Graph's users, as the directory's reads ask for them, a page at a time. */
 const directoryGraph = (url) => {
@@ -750,6 +790,12 @@ export default {
       return found === undefined
         ? Response.json({ error: { code: "Request_ResourceNotFound" } }, { status: 404 })
         : Response.json(found);
+    }
+    if (url.hostname === "graph.microsoft.com" && request.method === "GET" && url.pathname.startsWith("/v1.0/groups")) {
+      const answered = groupsGraph(url);
+      if (answered !== undefined) {
+        return answered;
+      }
     }
     if (url.href === ${JSON.stringify(stephenGraphUrl)}) {
       return await stephenGraph.control(request);
@@ -1051,6 +1097,30 @@ export default {
       return new Response("Not found", { status: 404 });
     }
     const form = new URLSearchParams(await request.text());
+    // The directory's app renewing its tokens, as Entra does: granted what
+    // \`{ granted }\` says (\`directoryControlUrl\`), in the tenant of the URL.
+    if (form.get("grant_type") === "refresh_token" && form.get("client_id") === ${JSON.stringify(directoryClient.id)}) {
+      if (form.get("client_secret") !== ${JSON.stringify(directoryClient.secret)}) {
+        return Response.json({ error: "invalid_client" }, { status: 401 });
+      }
+      const renewing = (form.get("refresh_token") ?? "").replace(/^refresh./u, "");
+      const issuer = url.pathname.split("/")[1];
+      const renewed = {
+        iss: "https://login.microsoftonline.com/" + issuer + "/v2.0",
+        aud: ${JSON.stringify(directoryClient.id)},
+        tid: issuer,
+        oid: renewing,
+        preferred_username: renewing + "@acme.test",
+      };
+      return Response.json({
+        token_type: "Bearer",
+        access_token: "access." + renewing + "." + crypto.randomUUID(),
+        refresh_token: "refresh." + renewing,
+        expires_in: 3600,
+        id_token: [encoded({ alg: "RS256" }), encoded(renewed), "signature"].join("."),
+        scope: directory.granted ?? ${JSON.stringify(directoryGranted)},
+      });
+    }
     const [challenge, tenant, subject, granted] = (form.get("code") ?? "").split(".");
     const verifier = new TextEncoder().encode(form.get("code_verifier") ?? "");
     const digest = base64Url(
@@ -1084,7 +1154,7 @@ export default {
       refresh_token: "refresh." + subject,
       expires_in: 3600,
       id_token: [encoded({ alg: "RS256" }), encoded(claims), "signature"].join("."),
-      ...(forDirectory ? { scope: ${JSON.stringify(directoryGranted)} } : {}),
+      ...(forDirectory ? { scope: directory.granted ?? ${JSON.stringify(directoryGranted)} } : {}),
       ...(forDocuments ? { scope: ${JSON.stringify(documentsGranted)} } : {}),
       ...(granted === undefined ? {} : { scope: atob(granted) }),
     });

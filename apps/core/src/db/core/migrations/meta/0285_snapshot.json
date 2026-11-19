@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "431589ed-b5da-40d4-84df-25a82919bcfe",
+  "id": "72903dba-615b-4f29-bb20-07b7b3aae5a0",
   "prevId": "94965993-c06d-419e-a218-c85d79638ab3",
   "tables": {
     "access_revocations": {
@@ -7035,6 +7035,102 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "directory_group_teams": {
+      "name": "directory_group_teams",
+      "columns": {
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "group_id": {
+          "name": "group_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "team_id": {
+          "name": "team_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "members_from": {
+          "name": "members_from",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mapped_at": {
+          "name": "mapped_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "read_at": {
+          "name": "read_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "directory_group_teams_team_id_idx": {
+          "name": "directory_group_teams_team_id_idx",
+          "columns": [
+            "team_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "directory_group_teams_team_id_teams_id_fk": {
+          "name": "directory_group_teams_team_id_teams_id_fk",
+          "tableFrom": "directory_group_teams",
+          "tableTo": "teams",
+          "columnsFrom": [
+            "team_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "directory_group_teams_provider_group_id_pk": {
+          "columns": [
+            "provider",
+            "group_id"
+          ],
+          "name": "directory_group_teams_provider_group_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "directory_memberships": {
       "name": "directory_memberships",
       "columns": {
@@ -12678,47 +12774,6 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "source_reader_pairs": {
-      "name": "source_reader_pairs",
-      "columns": {
-        "place": {
-          "name": "place",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "principal": {
-          "name": "principal",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "source_reader_pairs_principal_idx": {
-          "name": "source_reader_pairs_principal_idx",
-          "columns": [
-            "principal",
-            "place"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "source_reader_pairs_place_principal_pk": {
-          "columns": [
-            "place",
-            "principal"
-          ],
-          "name": "source_reader_pairs_place_principal_pk"
-        }
-      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
