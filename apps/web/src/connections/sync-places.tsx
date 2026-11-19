@@ -35,11 +35,13 @@ import { useChange } from "./use-change.ts";
 // Brain what comes through it (brain-audience.tsx): which of its shared
 // drives or SharePoint libraries Grasp may copy into the Brain. The two
 // decisions belong together, and the page says, before anything is
-// picked, who will read what a picked place holds: for Google, those
-// Google lets open each file, of those the audience holds, which Grasp
-// reads only with an account that can share it (GRA-2145); each place
-// whose sharing the sync doesn't read is marked, as nobody reads its
-// files. Core and connect decide who may pick and check every pick
+// picked, who will read what a picked place holds: those the provider
+// lets open each file, of those the audience holds, which Grasp reads
+// only with an account that can share it in Google, or owns its site in
+// SharePoint (GRA-2145); each place whose sharing the sync doesn't read
+// is marked, as nobody reads its files. Where every library is marked,
+// the connection was most likely made before Grasp asked to read
+// SharePoint's sharing: connecting it again asks for it. Core and connect decide who may pick and check every pick
 // (sync-picks.ts, connect's sync.ts); the card only asks. It promises
 // nothing about when a copy is made or taken away.
 //
@@ -193,9 +195,11 @@ const PlacesForm = ({
           </Trans>
         ) : (
           <Trans>
-            Everyone you let read {label} in the Brain will be able to read
-            everything in the places you pick, because the permissions in{" "}
-            {label} are not copied.
+            Each file is read in the Brain only by those {label} lets open it,
+            of those you let read {label} here. The account you connected must
+            own each site you pick: nobody reads the files of a library marked
+            below. If every library is marked, disconnect {label} and connect it
+            again.
           </Trans>
         )}
       </FieldDescription>

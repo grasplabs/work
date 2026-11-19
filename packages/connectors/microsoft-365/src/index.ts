@@ -61,6 +61,10 @@ export default defineConnector({
     // (files.createDraft, under /me/drive).
     "Files.ReadWrite.All",
     "Sites.ReadWrite.All",
+    // Who may open a picked library's file, members of its site groups
+    // included, read through SharePoint's REST API (library-sync.ts): by
+    // SharePoint's app ID, as no company's host is known before sign-in.
+    "00000003-0000-0ff1-ce00-000000000000/AllSites.Read",
     // A person's own To Do, and the Planner plans of their groups.
     "Tasks.ReadWrite",
     "Notes.ReadWrite",
