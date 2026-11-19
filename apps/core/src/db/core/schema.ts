@@ -4861,7 +4861,8 @@ export const eventSources = sqliteTable("event_sources", {
 /**
  * What an event source accepted, for its admins to see
  * (workflows/source-deliveries.ts): one row for each delivery it accepted
- * and each test event an admin sent it (`test`), with the event's type,
+ * (its ID the hash of the source and its `webhook-id`, so a sender's
+ * retry is the same row) and each test event an admin sent it (`test`), with the event's type,
  * how many triggers it started (`triggers`; none for a test) and its data
  * (`payload`, JSON), which is set to null a day after `received_at`; the
  * row is deleted after seven days, or with its source. A source holds its

@@ -6,22 +6,29 @@ import {
 import type { EventSourcesApi } from "@grasp-os/shared/event-sources";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
+import {
+  createExecutionContext,
+  waitOnExecutionContext,
+} from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { Webhook } from "standardwebhooks";
 import { describe, expect, it } from "vite-plus/test";
 
 import { grantPermission, listPermissions } from "../src/permissions.ts";
 import { triggeredRunsPerHour } from "../src/workflows/runs.ts";
-import {
-  listDeliveries,
-  readDelivery,
-  sweepSourceDeliveries,
-} from "../src/workflows/source-deliveries.ts";
-import { sendTestEvent } from "../src/workflows/source-events.ts";
+import { sweepSourceDeliveries } from "../src/workflows/source-deliveries.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
-import { outcome, routed, signedInApi, unique } from "./sign-in.ts";
+import {
+  openRpc,
+  outcome,
+  routed,
+  signedIn,
+  signedInApi,
+  staffPerson,
+  unique,
+} from "./sign-in.ts";
 import { publishOverRpc } from "./workflow-publishing.ts";
 
 // Event sources and the webhook triggers on them (event-sources.ts,
@@ -151,7 +158,10 @@ const send = async (
   const signature =
     sending.signature ??
     new Webhook(sending.secret ?? secret).sign(id, at, body);
-  return await routed(
+  // What core writes after answering (what the source kept and counted)
+  // is in before the test reads it.
+  const ctx = createExecutionContext();
+  const response = await routed(
     `${eventSourcePath}/${token}`,
     {
       method: sending.method ?? "POST",
@@ -165,8 +175,11 @@ const send = async (
         ? {}
         : { body: sending.stream ?? body, duplex: "half" }),
     },
-    sending.coreEnv
+    sending.coreEnv,
+    ctx
   );
+  await waitOnExecutionContext(ctx);
+  return response;
 };
 
 /** The inputs of the runs trigger `trigger` started, oldest first. */
@@ -772,6 +785,51 @@ const deliveriesOf = async (sources: Sources, source: string) => {
   return page.deliveries;
 };
 
+/** D1 refusing a statement. */
+const databaseDown = async (): Promise<never> => {
+  await Promise.resolve();
+  throw new Error("The database is down.");
+};
+
+/**
+ * Core's env whose database fails every batch holding a statement whose
+ * query `at` matches: D1 refusing what a source keeps of a delivery.
+ */
+const failingBatchOf = (at: RegExp): Env => {
+  const real = env.DB;
+  const queries = new WeakMap<D1PreparedStatement, string>();
+  const remembered = (
+    statement: D1PreparedStatement,
+    query: string
+  ): D1PreparedStatement => {
+    queries.set(statement, query);
+    return statement;
+  };
+  const DB: D1Database = {
+    prepare: (query) => {
+      const statement = real.prepare(query);
+      const bind = statement.bind.bind(statement);
+      return remembered(
+        Object.assign(statement, {
+          bind: (...values: unknown[]) => remembered(bind(...values), query),
+        }),
+        query
+      );
+    },
+    batch: async <T>(statements: D1PreparedStatement[]) => {
+      if (statements.some((each) => at.test(queries.get(each) ?? ""))) {
+        throw new Error("The database is down.");
+      }
+      return await real.batch<T>(statements);
+    },
+    exec: async (query) => await real.exec(query),
+    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+    dump: async () => await real.dump(),
+    withSession: (constraint) => real.withSession(constraint),
+  };
+  return { ...env, DB };
+};
+
 /** The audit events of `action` on source `source`: their details. */
 const auditedOn = async (source: string, action: string) => {
   const events = await allEvents();
@@ -798,7 +856,10 @@ describe("what an event source received", () => {
     const read = await sources.delivery(source.id, listed?.id ?? "");
     const activity = await activityOf(sources, source.id);
     const theirs = builder.api.workflowResources.sources;
-    const staff = { ...(await deciding()), staff: true };
+    const staffRpc = await openRpc(
+      await signedIn(idp, "grasp-staff", staffPerson())
+    );
+    const staff = staffRpc.core.authenticate().workflowResources.sources;
     const refused = {
       builderLists: await outcome(theirs.deliveries(source.id)),
       builderReads: await outcome(theirs.delivery(source.id, listed?.id ?? "")),
@@ -810,12 +871,12 @@ describe("what an event source received", () => {
       memberLists: await outcome(
         member.api.workflowResources.sources.deliveries(source.id)
       ),
-      staffLists: await outcome(listDeliveries(env, staff, source.id)),
-      staffReads: await outcome(
-        readDelivery(env, staff, source.id, listed?.id ?? "")
-      ),
+      staffLists: await outcome(staff.deliveries(source.id)),
+      staffReads: await outcome(staff.delivery(source.id, listed?.id ?? "")),
+      staffRefusals: await outcome(staff.refusals(source.id)),
+      staffTriggers: await outcome(staff.triggers(source.id)),
       staffTests: await outcome(
-        sendTestEvent(env, staff, source.id, { type: "invoice.paid", data: {} })
+        staff.sendTest(source.id, { type: "invoice.paid", data: {} })
       ),
     };
     const forBuilder = await activityOf(theirs, source.id);
@@ -879,6 +940,8 @@ describe("what an event source received", () => {
         memberLists: "role.forbidden",
         staffLists: "role.forbidden",
         staffReads: "role.forbidden",
+        staffRefusals: "role.forbidden",
+        staffTriggers: "role.forbidden",
         staffTests: "role.forbidden",
       },
       forBuilder: null,
@@ -908,6 +971,17 @@ describe("what an event source received", () => {
       statuses.add(response.status);
     }
     const stale = await send(token, secret, body, { skew: -600 });
+    // Signed with its secret, and still not an event it takes.
+    const oversized = await send(
+      token,
+      secret,
+      eventOf(`${marker}${"x".repeat(70 * 1024)}`, 1)
+    );
+    const notAnEvent = await send(
+      token,
+      secret,
+      JSON.stringify({ data: { invoice: marker } })
+    );
     await sources.revokeSecret(source.id);
     const revoked = await send(token, secret, body);
     const rows = await storedRows();
@@ -920,6 +994,7 @@ describe("what an event source received", () => {
 
     expect({
       statuses: [...statuses, stale.status, revoked.status, unknown.status],
+      signed: [oversized.status, notAnEvent.status],
       deliveries: stored.deliveries,
       signatureRows:
         (stored.counts.find((row) => row.outcome === "signature")?.rows ?? 0) <=
@@ -937,12 +1012,15 @@ describe("what an event source received", () => {
       activity,
     }).toStrictEqual({
       statuses: [401, 401, 401, 401],
+      signed: [413, 400],
       deliveries: [],
       signatureRows: true,
       counts: [
+        { outcome: "body", count: 1 },
         { outcome: "headers", count: 1 },
         { outcome: "revoked", count: 1 },
         { outcome: "signature", count: 50 },
+        { outcome: "too_large", count: 1 },
       ],
       keptAnything: false,
       unknownWrote: 0,
@@ -950,8 +1028,10 @@ describe("what an event source received", () => {
         { reason: "revoked", lastDay: 1, lastWeek: 1, lastAt: true },
         { reason: "headers", lastDay: 1, lastWeek: 1, lastAt: true },
         { reason: "signature", lastDay: 50, lastWeek: 50, lastAt: true },
+        { reason: "too_large", lastDay: 1, lastWeek: 1, lastAt: true },
+        { reason: "body", lastDay: 1, lastWeek: 1, lastAt: true },
       ],
-      activity: { lastEventAt: null, acceptedLastDay: 0, refusedLastDay: 52 },
+      activity: { lastEventAt: null, acceptedLastDay: 0, refusedLastDay: 54 },
     });
   });
 
@@ -1307,6 +1387,79 @@ describe("what an event source received", () => {
       stored: { deliveries: [], counts: [] },
       listing: "webhook.source_unavailable",
       refusals: "webhook.source_unavailable",
+    });
+  });
+
+  it("lists a sender's retry of the same webhook-id once, as the one delivery that started its one run", async () => {
+    const { admin, source, secret, token } = await newSource();
+    const { trigger } = await triggerOn(source.id);
+    const { sources } = admin.api.workflowResources;
+    const id = `msg_${unique()}`;
+    const first = await send(token, secret, eventOf(), { id });
+    // The sender timed out and sends it again, signed afresh.
+    const retried = await send(token, secret, eventOf(), { id, skew: 30 });
+    const listed = await deliveriesOf(sources, source.id);
+    const activity = await activityOf(sources, source.id);
+
+    expect({
+      statuses: [first.status, retried.status],
+      runs: await runInputsOf(trigger.id),
+      listed: listed.map(({ type, triggersStarted }) => ({
+        type,
+        triggersStarted,
+      })),
+      accepted: activity?.acceptedLastDay,
+    }).toStrictEqual({
+      statuses: [202, 202],
+      runs: [{ invoice: "INV-1", amount: 120 }],
+      listed: [{ type: "invoice.paid", triggersStarted: 1 }],
+      accepted: 1,
+    });
+  });
+
+  it("counts a delivery whose secret was rotated as it was admitted, keeping nothing of it", async () => {
+    const { admin, source, secret, token } = await newSource();
+    await triggerOn(source.id);
+    const { sources } = admin.api.workflowResources;
+    const rotating = racedAt(admitting, async () => {
+      await sources.rotateSecret(source.id);
+    });
+    const raced = await send(token, secret, eventOf(), { coreEnv: rotating });
+    const stored = await storedOf(source.id);
+
+    expect({
+      status: raced.status,
+      deliveries: stored.deliveries,
+      counts: stored.counts.map((row) => ({
+        outcome: row.outcome,
+        count: row.count,
+      })),
+    }).toStrictEqual({
+      status: 401,
+      deliveries: [],
+      counts: [{ outcome: "rotated", count: 1 }],
+    });
+  });
+
+  it("answers a delivery as it would when what it keeps or counts can't be written", async () => {
+    const { source, secret, token } = await newSource();
+    const { trigger } = await triggerOn(source.id);
+    const uncounted = await send(token, secret, eventOf(), {
+      skew: -600,
+      coreEnv: racedAt(/event_source_counts/u, databaseDown),
+    });
+    const unkept = await send(token, secret, eventOf(), {
+      coreEnv: failingBatchOf(/event_source_deliveries/u),
+    });
+
+    expect({
+      statuses: [uncounted.status, unkept.status],
+      runs: await runInputsOf(trigger.id),
+      stored: await storedOf(source.id),
+    }).toStrictEqual({
+      statuses: [401, 202],
+      runs: [{ invoice: "INV-1", amount: 120 }],
+      stored: { deliveries: [], counts: [] },
     });
   });
 });

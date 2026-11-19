@@ -63,15 +63,23 @@ export const eventSourceRetention = {
 /**
  * Why a source refused a delivery it counts: its secret revoked; its
  * signing headers missing, malformed or more than five minutes from now;
- * signed with another secret, or not at all; or its secret rotated,
- * revoked or the source deleted as it was admitted. A delivery to a URL no
- * source has is counted nowhere.
+ * signed with another secret, or not at all; its secret rotated, revoked
+ * or the source deleted as it was admitted; its body larger than
+ * `eventSourceLimits.bodyBytes`; signed, but its body not an event (a
+ * JSON object with a `type` and `data`); its `webhook-id` delivered
+ * before with another event; or told to try again later (a workflow it
+ * starts had no room this hour, or couldn't start). A delivery to a URL
+ * no source has is counted nowhere.
  */
 export const eventSourceRefusalReasons = [
   "revoked",
   "headers",
   "signature",
   "rotated",
+  "too_large",
+  "body",
+  "conflict",
+  "busy",
 ] as const;
 
 export type EventSourceRefusalReason =
@@ -174,7 +182,11 @@ export interface EventSourceDelivery {
   type: string;
   /** Whether an admin sent it as a test: it started nothing. */
   test: boolean;
-  /** How many triggers it started a run for; none for a test. */
+  /**
+   * How many triggers it started a run for; none for a test. A delivery
+   * is listed once by its `webhook-id`: a sender's retry of it starts
+   * nothing more and isn't listed again.
+   */
   triggersStarted: number;
   /** Whether its payload is still held (`eventSourceRetention.payloadMs`). */
   payloadHeld: boolean;

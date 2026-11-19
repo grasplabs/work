@@ -283,6 +283,14 @@ msgid "{count, plural, one {# conversation came in: with the board, the teams an
 msgstr "{count, plural, one {# Gespräch kam herein: mit der Geschäftsleitung, den Teams und ihren Leuten.} other {# Gespräche kamen herein: mit der Geschäftsleitung, den Teams und ihren Leuten.}}"
 
 #: src/settings/event-source-activity.tsx
+msgid "{count, plural, one {# delivery refused in the last seven days: it was larger than 64 KiB.} other {# deliveries refused in the last seven days: they were larger than 64 KiB.}}"
+msgstr "{count, plural, one {# Zustellung in den letzten sieben Tagen abgelehnt: Sie war größer als 64 KiB.} other {# Zustellungen in den letzten sieben Tagen abgelehnt: Sie waren größer als 64 KiB.}}"
+
+#: src/settings/event-source-activity.tsx
+msgid "{count, plural, one {# delivery refused in the last seven days: it was signed, but its body wasn't a JSON object with a type and data.} other {# deliveries refused in the last seven days: they were signed, but their bodies weren't JSON objects with a type and data.}}"
+msgstr "{count, plural, one {# Zustellung in den letzten sieben Tagen abgelehnt: Sie war signiert, aber ihr Inhalt war kein JSON-Objekt mit Typ und Daten.} other {# Zustellungen in den letzten sieben Tagen abgelehnt: Sie waren signiert, aber ihr Inhalt war kein JSON-Objekt mit Typ und Daten.}}"
+
+#: src/settings/event-source-activity.tsx
 msgid "{count, plural, one {# delivery refused in the last seven days: it wasn't signed with this source's secret.} other {# deliveries refused in the last seven days: they weren't signed with this source's secret.}}"
 msgstr "{count, plural, one {# Zustellung in den letzten sieben Tagen abgelehnt: Sie war nicht mit dem Geheimnis dieser Quelle signiert.} other {# Zustellungen in den letzten sieben Tagen abgelehnt: Sie waren nicht mit dem Geheimnis dieser Quelle signiert.}}"
 
@@ -295,8 +303,16 @@ msgid "{count, plural, one {# delivery refused in the last seven days: its signi
 msgstr "{count, plural, one {# Zustellung in den letzten sieben Tagen abgelehnt: Ihre Signatur-Header fehlten oder waren älter als fünf Minuten.} other {# Zustellungen in den letzten sieben Tagen abgelehnt: Ihre Signatur-Header fehlten oder waren älter als fünf Minuten.}}"
 
 #: src/settings/event-source-activity.tsx
+msgid "{count, plural, one {# delivery refused in the last seven days: its webhook-id came before with another event.} other {# deliveries refused in the last seven days: their webhook-id came before with another event.}}"
+msgstr "{count, plural, one {# Zustellung in den letzten sieben Tagen abgelehnt: Ihre webhook-id kam zuvor mit einem anderen Ereignis.} other {# Zustellungen in den letzten sieben Tagen abgelehnt: Ihre webhook-id kam zuvor mit einem anderen Ereignis.}}"
+
+#: src/settings/event-source-activity.tsx
 msgid "{count, plural, one {# delivery refused in the last seven days: the secret changed as it arrived.} other {# deliveries refused in the last seven days: the secret changed as they arrived.}}"
 msgstr "{count, plural, one {# Zustellung in den letzten sieben Tagen abgelehnt: Das Geheimnis wurde geändert, während sie eintraf.} other {# Zustellungen in den letzten sieben Tagen abgelehnt: Das Geheimnis wurde geändert, während sie eintrafen.}}"
+
+#: src/settings/event-source-activity.tsx
+msgid "{count, plural, one {# delivery told to try again in the last seven days: a workflow it starts had no room for another run then.} other {# deliveries told to try again in the last seven days: a workflow they start had no room for another run then.}}"
+msgstr "{count, plural, one {# Zustellung in den letzten sieben Tagen zum erneuten Versuch aufgefordert: Ein Workflow, den sie startet, hatte gerade keinen Platz für einen weiteren Lauf.} other {# Zustellungen in den letzten sieben Tagen zum erneuten Versuch aufgefordert: Ein Workflow, den sie starten, hatte gerade keinen Platz für einen weiteren Lauf.}}"
 
 #: src/onboarding/document-drop.tsx
 msgid "{count, plural, one {# document added. I’m reading it.} other {# documents added. I’m reading them.}}"
@@ -15409,6 +15425,10 @@ msgstr "Diese Seite wurde gestoppt"
 #: src/pages/frame-failure.tsx
 msgid "This page's stored code no longer matches the code that was published, so it wasn't opened. Tell an admin."
 msgstr "Der gespeicherte Code dieser Seite stimmt nicht mehr mit dem veröffentlichten Code überein, daher wurde sie nicht geöffnet. Informieren Sie einen Admin."
+
+#: src/settings/event-source-activity.tsx
+msgid "This payload is no longer kept."
+msgstr "Diese Nutzdaten werden nicht mehr aufbewahrt."
 
 #: src/brain/sources-page.tsx
 msgid "This upload was already made with another file, which is kept as it was. Choose the file again to upload it as a new upload, or add it as a new version."

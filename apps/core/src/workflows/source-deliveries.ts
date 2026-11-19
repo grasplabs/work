@@ -52,15 +52,24 @@ import { triggersOnSource } from "../trigger-resources.ts";
 //   Nothing a sender sends is part of a key or a value.
 // - An unauthenticated sender flooding rows. Refused deliveries are one
 //   row for each source, reason and hour, however many came: at most the
-//   reasons times the hours of a week for a source, each write one upsert,
-//   after the router's limits by address and by URL (source-events.ts).
-//   The counts are never audited, so a flood can't fill the audit log.
+//   reasons times the hours of a week for a source. Each costs one
+//   upsert of a row already there, an anonymous write, bounded by the
+//   router's limits before core reads a byte (apps/router): 120 requests
+//   a minute for an address and 3,000 a minute for a URL. The counts are
+//   never audited, so a flood can't fill the audit log.
 // - Probing for tokens. A URL no live source has is counted nowhere and
 //   writes nothing (it is logged, as before), so a guess costs what it did
 //   and a count never says a token exists: only a URL that is a source's
 //   counts, to that source's admins. The answer to the sender is the same
-//   401 whatever was counted, and counting never delays it by more than
-//   its one write; a count that fails to write fails nothing.
+//   whatever was counted, and every write here runs after it
+//   (`waitUntil`), so a URL that is a source's answers no slower than one
+//   that isn't; a write that fails is logged and fails nothing.
+// - A retry read as a second run. A sender that resends a `webhook-id`
+//   (it timed out, say) is told 202 again and starts nothing anew, though
+//   each trigger says `started` of the run it already has. A delivery is
+//   kept under the hash of its source and `webhook-id` (what the audit
+//   log names it by), once: the retry leaves the first row and the counts
+//   as they are, so nobody reads two runs into one.
 // - A sender holding the secret sending a lot. Each accepted delivery is
 //   one row, and a source holds its newest `perSource` at most, trimmed in
 //   the batch that writes one, so a source's rows and payloads (each
@@ -87,6 +96,11 @@ import { triggersOnSource } from "../trigger-resources.ts";
 // - Reading across sources by ID. A delivery is read by its source and its
 //   ID together, in one condition: a delivery of another source is
 //   answered as one that isn't there, and audits nothing.
+// - A signed delivery that fails. One too large, not an event, in
+//   conflict with an earlier one of its `webhook-id` or told to try again
+//   is counted by a reason of its own (`too_large`, `body`, `conflict`,
+//   `busy`), as the likeliest mistakes of a sender being set up; its body
+//   is kept no more than an unsigned one's.
 // - A revoked or rotated secret. A delivery to a revoked secret, or one
 //   whose secret changed as it was admitted, is refused as before and
 //   counted (`revoked`, `rotated`). What the source accepted before stays
@@ -119,13 +133,14 @@ const counted = (
   db: DrizzleD1Database,
   source: string,
   outcome: "accepted" | EventSourceRefusalReason,
-  now: number
+  now: number,
+  also: SQL = sql`TRUE`
 ) =>
   db
     .insert(eventSourceCounts)
     .select(
       sql`SELECT ${source}, ${outcome}, ${hourOf(now)}, 1, ${now}
-        WHERE ${liveSql(source)}`
+        WHERE ${liveSql(source)} AND ${also}`
     )
     .onConflictDoUpdate({
       target: [
@@ -141,6 +156,11 @@ const counted = (
 
 /** What is kept of an event a source took. */
 interface Kept {
+  /**
+   * A delivery's: the hash of its source and `webhook-id`, as the audit
+   * log names it. A test event's: one of its own.
+   */
+  id: string;
   source: string;
   type: string;
   data: Json;
@@ -150,9 +170,9 @@ interface Kept {
 }
 
 /** The row of `kept`, written only while its source is live. */
-const keptRow = (db: DrizzleD1Database, id: string, kept: Kept, now: number) =>
+const keptRow = (db: DrizzleD1Database, kept: Kept, now: number) =>
   db.insert(eventSourceDeliveries).select(
-    sql`SELECT ${id}, ${kept.source}, ${now}, ${kept.type},
+    sql`SELECT ${kept.id}, ${kept.source}, ${now}, ${kept.type},
         ${kept.test ? 1 : 0}, ${kept.triggers}, ${JSON.stringify(kept.data)}
         WHERE ${liveSql(kept.source)}`
   );
@@ -171,10 +191,11 @@ const trimmed = (db: DrizzleD1Database, source: string) =>
   );
 
 /**
- * Keeps a delivery a source accepted, and counts it: one for each request
- * it accepted, so a sender's retry of an event already taken is listed
- * again, as it was received again. Never throws: the delivery was taken
- * whatever comes of recording it.
+ * Keeps a delivery a source accepted, and counts it, once by its ID: a
+ * sender's retry of a delivery already listed (the same `webhook-id`,
+ * which started nothing anew) leaves the first as it is and counts
+ * nothing. Never throws: the delivery was taken whatever comes of
+ * recording it.
  */
 export const recordDelivery = async (
   env: Env,
@@ -184,9 +205,10 @@ export const recordDelivery = async (
   const now = Date.now();
   try {
     await db.batch([
-      keptRow(db, crypto.randomUUID(), { ...kept, test: false }, now),
+      keptRow(db, { ...kept, test: false }, now).onConflictDoNothing(),
+      // Only when the row before it was written: `changes()` is its.
+      counted(db, kept.source, "accepted", now, sql`changes() > 0`),
       trimmed(db, kept.source),
-      counted(db, kept.source, "accepted", now),
     ]);
   } catch (error) {
     log.error("workflow.webhook.unrecorded", errorFields(error));
@@ -250,14 +272,14 @@ const viewOf = (
 export const recordTest = async (
   env: Env,
   by: Acting,
-  kept: Omit<Kept, "test" | "triggers">,
+  kept: Omit<Kept, "id" | "test" | "triggers">,
   matched: number
 ): Promise<EventSourceDelivery> => {
   const db = drizzle(env.DB);
   const id = crypto.randomUUID();
   const now = Date.now();
   await auditedBatch(env, db, [
-    keptRow(db, id, { ...kept, test: true, triggers: 0 }, now),
+    keptRow(db, { ...kept, id, test: true, triggers: 0 }, now),
     outboxedIfChanged(
       db,
       sourceEntry(by, "event_source.test_sent", kept.source, {
@@ -297,7 +319,7 @@ const adminSource = async (
 /** A page's cursor: the last delivery's time, a dot, and its ID. */
 const pageSchema = z
   .string()
-  .regex(/^(?<at>\d{1,15})\.(?<id>[0-9a-f-]{36})$/u)
+  .regex(/^(?<at>\d{1,15})\.(?<id>[0-9a-f-]{36,64})$/u)
   .transform((page) => {
     const [at = "", id = ""] = page.split(".");
     return { at: new Date(Number(at)), id };

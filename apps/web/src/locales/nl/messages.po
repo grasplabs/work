@@ -283,6 +283,14 @@ msgid "{count, plural, one {# conversation came in: with the board, the teams an
 msgstr "{count, plural, one {# gesprek kwam binnen: met het bestuur, de teams en hun mensen.} other {# gesprekken kwamen binnen: met het bestuur, de teams en hun mensen.}}"
 
 #: src/settings/event-source-activity.tsx
+msgid "{count, plural, one {# delivery refused in the last seven days: it was larger than 64 KiB.} other {# deliveries refused in the last seven days: they were larger than 64 KiB.}}"
+msgstr "{count, plural, one {# levering geweigerd in de laatste zeven dagen: ze was groter dan 64 KiB.} other {# leveringen geweigerd in de laatste zeven dagen: ze waren groter dan 64 KiB.}}"
+
+#: src/settings/event-source-activity.tsx
+msgid "{count, plural, one {# delivery refused in the last seven days: it was signed, but its body wasn't a JSON object with a type and data.} other {# deliveries refused in the last seven days: they were signed, but their bodies weren't JSON objects with a type and data.}}"
+msgstr "{count, plural, one {# levering geweigerd in de laatste zeven dagen: ze was ondertekend, maar de inhoud was geen JSON-object met een type en gegevens.} other {# leveringen geweigerd in de laatste zeven dagen: ze waren ondertekend, maar de inhoud was geen JSON-object met een type en gegevens.}}"
+
+#: src/settings/event-source-activity.tsx
 msgid "{count, plural, one {# delivery refused in the last seven days: it wasn't signed with this source's secret.} other {# deliveries refused in the last seven days: they weren't signed with this source's secret.}}"
 msgstr "{count, plural, one {# levering geweigerd in de laatste zeven dagen: ze was niet ondertekend met het geheim van deze bron.} other {# leveringen geweigerd in de laatste zeven dagen: ze waren niet ondertekend met het geheim van deze bron.}}"
 
@@ -295,8 +303,16 @@ msgid "{count, plural, one {# delivery refused in the last seven days: its signi
 msgstr "{count, plural, one {# levering geweigerd in de laatste zeven dagen: de ondertekeningsheaders ontbraken of waren ouder dan vijf minuten.} other {# leveringen geweigerd in de laatste zeven dagen: de ondertekeningsheaders ontbraken of waren ouder dan vijf minuten.}}"
 
 #: src/settings/event-source-activity.tsx
+msgid "{count, plural, one {# delivery refused in the last seven days: its webhook-id came before with another event.} other {# deliveries refused in the last seven days: their webhook-id came before with another event.}}"
+msgstr "{count, plural, one {# levering geweigerd in de laatste zeven dagen: de webhook-id kwam eerder binnen met een andere gebeurtenis.} other {# leveringen geweigerd in de laatste zeven dagen: de webhook-id kwam eerder binnen met een andere gebeurtenis.}}"
+
+#: src/settings/event-source-activity.tsx
 msgid "{count, plural, one {# delivery refused in the last seven days: the secret changed as it arrived.} other {# deliveries refused in the last seven days: the secret changed as they arrived.}}"
 msgstr "{count, plural, one {# levering geweigerd in de laatste zeven dagen: het geheim veranderde terwijl ze binnenkwam.} other {# leveringen geweigerd in de laatste zeven dagen: het geheim veranderde terwijl ze binnenkwamen.}}"
+
+#: src/settings/event-source-activity.tsx
+msgid "{count, plural, one {# delivery told to try again in the last seven days: a workflow it starts had no room for another run then.} other {# deliveries told to try again in the last seven days: a workflow they start had no room for another run then.}}"
+msgstr "{count, plural, one {# levering kreeg in de laatste zeven dagen het verzoek het opnieuw te proberen: een workflow die ze start had toen geen ruimte voor nog een run.} other {# leveringen kregen in de laatste zeven dagen het verzoek het opnieuw te proberen: een workflow die ze starten had toen geen ruimte voor nog een run.}}"
 
 #: src/onboarding/document-drop.tsx
 msgid "{count, plural, one {# document added. I’m reading it.} other {# documents added. I’m reading them.}}"
@@ -15409,6 +15425,10 @@ msgstr "Deze pagina is gestopt"
 #: src/pages/frame-failure.tsx
 msgid "This page's stored code no longer matches the code that was published, so it wasn't opened. Tell an admin."
 msgstr "De opgeslagen code van deze pagina komt niet meer overeen met de gepubliceerde code, dus is hij niet geopend. Laat het een beheerder weten."
+
+#: src/settings/event-source-activity.tsx
+msgid "This payload is no longer kept."
+msgstr "Deze payload wordt niet meer bewaard."
 
 #: src/brain/sources-page.tsx
 msgid "This upload was already made with another file, which is kept as it was. Choose the file again to upload it as a new upload, or add it as a new version."

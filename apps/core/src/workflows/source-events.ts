@@ -106,18 +106,27 @@ import {
 //   `retry-after`), holding nothing back: its retry under the same
 //   `webhook-id` starts only what didn't start. An unsigned request costs
 //   a lookup by a unique index, an HMAC and, when its URL is a source's,
-//   one more in that source's count for the hour (source-deliveries.ts);
-//   it is logged by reason, never audited, so an unauthenticated sender
-//   can't fill the audit log.
+//   one more in that source's count for the hour, written after the
+//   answer (source-deliveries.ts): at most the router's 120 a minute for
+//   an address and 3,000 a minute for a URL, each one upsert of a row
+//   that is already there. It is logged by reason, never audited, so an
+//   unauthenticated sender can't fill the audit log.
 // - Privacy. What is kept of a delivery, and for how long, is
-//   source-deliveries.ts's, with its own threat model: an accepted
-//   delivery's time, type and data are kept for the source's admins to
-//   see, the data for a day and the rest for seven, and a refused one is
-//   only counted, by its source, the reason and the hour, when its URL is
-//   a source's: no body, header, signature or sender's address of it is
-//   kept anywhere. Beyond that its data becomes the input of the runs it
-//   starts, kept and erased as any run's is, and the audit log names a
-//   delivery only by the hash of its `webhook-id`, never its body.
+//   source-deliveries.ts's, with its own threat model. Kept: a delivery
+//   answered 202, once by its `webhook-id`, with its time, type, how many
+//   triggers it started and its data, the data for a day and the rest for
+//   seven. Counted, by its source, the reason and the hour, and only when
+//   its URL is a live source's: a delivery answered 401 (its secret
+//   revoked; its signing headers missing, malformed or stale; its
+//   signature wrong; its secret changed as it was admitted), 413 (too
+//   large), 400 (signed, but not an event), 409 (its `webhook-id` came
+//   before with another event) or 503 (told to try again). Neither kept
+//   nor counted: a request to a URL no live source has, and one that
+//   isn't a POST. Of a delivery that is only counted, no body, header,
+//   signature or sender's address is kept anywhere. Beyond that its data
+//   becomes the input of the runs it starts, kept and erased as any run's
+//   is, and the audit log names a delivery only by the hash of its
+//   `webhook-id`, never its body.
 
 /** A token of a source's URL: 128 random bits, in hex. */
 const tokenPattern = /^[0-9a-f]{32}$/u;
@@ -242,26 +251,42 @@ const signedOf = (headers: Headers): Signed | undefined => {
     : undefined;
 };
 
+/** What answering a delivery takes: where its record is written after. */
+interface Answering {
+  env: Env;
+  /** What goes on after the answer: a count, a delivery kept. */
+  ctx: Pick<ExecutionContext, "waitUntil">;
+  requestId: string;
+}
+
 /**
- * Refuses a delivery as unsigned: logged by reason, never audited, and
- * counted for `source`, the live source its URL is, if it is one's
- * (source-deliveries.ts). Nothing of the delivery itself is kept.
+ * Refuses a delivery with `status` and `code`, counted by `reason` for
+ * `source`, the live source its URL is, if it is one's
+ * (source-deliveries.ts): after the answer, so a URL that is a source's
+ * answers no slower than one that isn't. Nothing of the delivery itself
+ * is kept.
  */
-const unsigned = async (
-  env: Env,
+const refusal = (
+  to: Answering,
+  source: string | undefined,
   reason: EventSourceRefusalReason | "unknown",
-  requestId: string,
-  source?: string
-): Promise<Response> => {
-  log.warn("workflow.webhook.unsigned", { reason });
+  status: number,
+  code: Parameters<typeof eventSourceErrors.create>[0]
+): Response => {
   if (source !== undefined && reason !== "unknown") {
-    await countRefusal(env, source, reason);
+    to.ctx.waitUntil(countRefusal(to.env, source, reason));
   }
-  return errorResponse(
-    401,
-    eventSourceErrors.create("webhook.signature_invalid"),
-    requestId
-  );
+  return errorResponse(status, eventSourceErrors.create(code), to.requestId);
+};
+
+/** Refuses a delivery as unsigned: logged by reason, never audited, counted. */
+const unsigned = (
+  to: Answering,
+  reason: "unknown" | "revoked" | "headers" | "signature" | "rotated",
+  source?: string
+): Response => {
+  log.warn("workflow.webhook.unsigned", { reason });
+  return refusal(to, source, reason, 401, "webhook.signature_invalid");
 };
 
 /** The body as an event's type and data, if it is one. */
@@ -356,39 +381,41 @@ export const startSourceTriggers = async (
 const retryAfterSeconds = 60;
 
 /**
- * The answer to a signed delivery to source `source` whose triggers came
- * to `outcomes` and waits to `routed`: told to sign again when the secret
- * changed under it (no trigger started, as each needed the same secret),
- * to try again later when any trigger may start later or a waiting run
- * take it later, accepted otherwise, and then kept for the source's
- * admins to see (source-deliveries.ts). A trigger or a run refusing it
+ * The answer to signed delivery `event` whose triggers came to `outcomes`
+ * and waits to `routed`: told to sign again when the secret changed under
+ * it (no trigger started, as each needed the same secret), to try again
+ * later when any trigger may start later or a waiting run take it later,
+ * accepted otherwise, and then kept for the source's admins to see, after
+ * the answer (source-deliveries.ts). A trigger or a run refusing it
  * for good is audited, and the event still accepted: the sender's retry
  * wouldn't change that, and others may have taken it.
  */
-const answerOf = async (
-  env: Env,
+const answerOf = (
+  to: Answering,
   event: SourceEvent,
-  outcomes: readonly (Outcome | "retry" | "stale")[],
-  requestId: string
-): Promise<Response> => {
+  outcomes: readonly (Outcome | "retry" | "stale")[]
+): Response => {
   if (outcomes.includes("stale")) {
-    return await unsigned(env, "rotated", requestId, event.source);
+    return unsigned(to, "rotated", event.source);
   }
   if (outcomes.includes("retry")) {
-    const response = errorResponse(
-      503,
-      eventSourceErrors.create("webhook.busy"),
-      requestId
-    );
+    const response = refusal(to, event.source, "busy", 503, "webhook.busy");
     response.headers.set("retry-after", String(retryAfterSeconds));
     return response;
   }
-  await recordDelivery(env, {
-    source: event.source,
-    type: event.type,
-    data: event.data,
-    triggers: outcomes.filter((outcome) => outcome === "started").length,
-  });
+  // Kept once by its `webhook-id` (`same`): `started` is also what a
+  // trigger that started on an earlier try of it says, so a sender's
+  // retry is the delivery already listed, never a second one that seems
+  // to have started its workflows again.
+  to.ctx.waitUntil(
+    recordDelivery(to.env, {
+      id: event.same,
+      source: event.source,
+      type: event.type,
+      data: event.data,
+      triggers: outcomes.filter((outcome) => outcome === "started").length,
+    })
+  );
   return Response.json({ accepted: true }, { status: 202 });
 };
 
@@ -402,28 +429,29 @@ export const sourceEventResponse = async (
   request: Request,
   env: Env,
   token: string,
-  requestId: string
+  requestId: string,
+  ctx: Pick<ExecutionContext, "waitUntil">
 ): Promise<Response> => {
   if (request.method !== "POST") {
     return new Response(null, { status: 405, headers: { allow: "POST" } });
   }
+  const to: Answering = { env, ctx, requestId };
   const source = tokenPattern.test(token)
     ? await sourceAt(env, token)
     : undefined;
   // No source there answers as a revoked secret: the same status and body.
   if (source === undefined || source.revokedAt !== null) {
     await request.body?.cancel();
-    return await unsigned(
-      env,
+    return unsigned(
+      to,
       source === undefined ? "unknown" : "revoked",
-      requestId,
       source?.id
     );
   }
   const signed = signedOf(request.headers);
   if (signed === undefined) {
     await request.body?.cancel();
-    return await unsigned(env, "headers", requestId, source.id);
+    return unsigned(to, "headers", source.id);
   }
   // SAFETY: a request's body in workerd is a byte stream, of Uint8Array
   // chunks; its type says `any` only for streams in general.
@@ -433,23 +461,15 @@ export const sourceEventResponse = async (
       ? new Uint8Array()
       : await readAtMost(stream, eventSourceLimits.bodyBytes);
   if (body === undefined) {
-    return errorResponse(
-      413,
-      eventSourceErrors.create("webhook.body_invalid"),
-      requestId
-    );
+    return refusal(to, source.id, "too_large", 413, "webhook.body_invalid");
   }
   const key = await sourceSecretKeyOf(env, source.id, source.generation);
   if (!(await signedWith(key, signed, body))) {
-    return await unsigned(env, "signature", requestId, source.id);
+    return unsigned(to, "signature", source.id);
   }
   const event = eventOf(body);
   if (event === undefined) {
-    return errorResponse(
-      400,
-      eventSourceErrors.create("webhook.body_invalid"),
-      requestId
-    );
+    return refusal(to, source.id, "body", 400, "webhook.body_invalid");
   }
   // The same `webhook-id`, however often sent and signed, is the same
   // event: a sender's retries start one run per trigger.
@@ -458,21 +478,16 @@ export const sourceEventResponse = async (
   const also = stillSignedSql(source.id, source.generation);
   const outcomes = await startSourceTriggers(env, taken, also);
   if (outcomes.includes("stale")) {
-    return await answerOf(env, taken, outcomes, requestId);
+    return answerOf(to, taken, outcomes);
   }
   const routed = await routeSourceEvent(env, taken, also);
   if (routed === "conflict") {
-    return errorResponse(
-      409,
-      eventSourceErrors.create("webhook.delivery_conflict"),
-      requestId
-    );
+    return refusal(to, source.id, "conflict", 409, "webhook.delivery_conflict");
   }
-  return await answerOf(
-    env,
+  return answerOf(
+    to,
     taken,
-    routed === "retry" || routed === "stale" ? [...outcomes, routed] : outcomes,
-    requestId
+    routed === "retry" || routed === "stale" ? [...outcomes, routed] : outcomes
   );
 };
 

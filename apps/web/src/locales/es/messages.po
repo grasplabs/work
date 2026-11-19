@@ -283,6 +283,14 @@ msgid "{count, plural, one {# conversation came in: with the board, the teams an
 msgstr "{count, plural, one {Llegó # conversación: con la dirección, los equipos y su gente.} other {Llegaron # conversaciones: con la dirección, los equipos y su gente.}}"
 
 #: src/settings/event-source-activity.tsx
+msgid "{count, plural, one {# delivery refused in the last seven days: it was larger than 64 KiB.} other {# deliveries refused in the last seven days: they were larger than 64 KiB.}}"
+msgstr "{count, plural, one {# entrega rechazada en los últimos siete días: superaba los 64 KiB.} other {# entregas rechazadas en los últimos siete días: superaban los 64 KiB.}}"
+
+#: src/settings/event-source-activity.tsx
+msgid "{count, plural, one {# delivery refused in the last seven days: it was signed, but its body wasn't a JSON object with a type and data.} other {# deliveries refused in the last seven days: they were signed, but their bodies weren't JSON objects with a type and data.}}"
+msgstr "{count, plural, one {# entrega rechazada en los últimos siete días: estaba firmada, pero su cuerpo no era un objeto JSON con un tipo y datos.} other {# entregas rechazadas en los últimos siete días: estaban firmadas, pero su cuerpo no era un objeto JSON con un tipo y datos.}}"
+
+#: src/settings/event-source-activity.tsx
 msgid "{count, plural, one {# delivery refused in the last seven days: it wasn't signed with this source's secret.} other {# deliveries refused in the last seven days: they weren't signed with this source's secret.}}"
 msgstr "{count, plural, one {# entrega rechazada en los últimos siete días: no estaba firmada con el secreto de esta fuente.} other {# entregas rechazadas en los últimos siete días: no estaban firmadas con el secreto de esta fuente.}}"
 
@@ -295,8 +303,16 @@ msgid "{count, plural, one {# delivery refused in the last seven days: its signi
 msgstr "{count, plural, one {# entrega rechazada en los últimos siete días: faltaban sus cabeceras de firma o tenían más de cinco minutos.} other {# entregas rechazadas en los últimos siete días: faltaban sus cabeceras de firma o tenían más de cinco minutos.}}"
 
 #: src/settings/event-source-activity.tsx
+msgid "{count, plural, one {# delivery refused in the last seven days: its webhook-id came before with another event.} other {# deliveries refused in the last seven days: their webhook-id came before with another event.}}"
+msgstr "{count, plural, one {# entrega rechazada en los últimos siete días: su webhook-id ya había llegado con otro evento.} other {# entregas rechazadas en los últimos siete días: su webhook-id ya había llegado con otro evento.}}"
+
+#: src/settings/event-source-activity.tsx
 msgid "{count, plural, one {# delivery refused in the last seven days: the secret changed as it arrived.} other {# deliveries refused in the last seven days: the secret changed as they arrived.}}"
 msgstr "{count, plural, one {# entrega rechazada en los últimos siete días: el secreto cambió mientras llegaba.} other {# entregas rechazadas en los últimos siete días: el secreto cambió mientras llegaban.}}"
+
+#: src/settings/event-source-activity.tsx
+msgid "{count, plural, one {# delivery told to try again in the last seven days: a workflow it starts had no room for another run then.} other {# deliveries told to try again in the last seven days: a workflow they start had no room for another run then.}}"
+msgstr "{count, plural, one {A # entrega se le pidió reintentar en los últimos siete días: un flujo de trabajo que inicia no tenía sitio para otra ejecución en ese momento.} other {A # entregas se les pidió reintentar en los últimos siete días: un flujo de trabajo que inician no tenía sitio para otra ejecución en ese momento.}}"
 
 #: src/onboarding/document-drop.tsx
 msgid "{count, plural, one {# document added. I’m reading it.} other {# documents added. I’m reading them.}}"
@@ -15409,6 +15425,10 @@ msgstr "Esta página se detuvo"
 #: src/pages/frame-failure.tsx
 msgid "This page's stored code no longer matches the code that was published, so it wasn't opened. Tell an admin."
 msgstr "El código guardado de esta página ya no coincide con el código publicado, así que no se abrió. Avisa a un administrador."
+
+#: src/settings/event-source-activity.tsx
+msgid "This payload is no longer kept."
+msgstr "Este contenido ya no se conserva."
 
 #: src/brain/sources-page.tsx
 msgid "This upload was already made with another file, which is kept as it was. Choose the file again to upload it as a new upload, or add it as a new version."

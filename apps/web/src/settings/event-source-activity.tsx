@@ -61,6 +61,18 @@ const Refusals = ({
       case "rotated": {
         return t`${plural(count, { one: "# delivery refused in the last seven days: the secret changed as it arrived.", other: "# deliveries refused in the last seven days: the secret changed as they arrived." })}`;
       }
+      case "too_large": {
+        return t`${plural(count, { one: "# delivery refused in the last seven days: it was larger than 64 KiB.", other: "# deliveries refused in the last seven days: they were larger than 64 KiB." })}`;
+      }
+      case "body": {
+        return t`${plural(count, { one: "# delivery refused in the last seven days: it was signed, but its body wasn't a JSON object with a type and data.", other: "# deliveries refused in the last seven days: they were signed, but their bodies weren't JSON objects with a type and data." })}`;
+      }
+      case "conflict": {
+        return t`${plural(count, { one: "# delivery refused in the last seven days: its webhook-id came before with another event.", other: "# deliveries refused in the last seven days: their webhook-id came before with another event." })}`;
+      }
+      case "busy": {
+        return t`${plural(count, { one: "# delivery told to try again in the last seven days: a workflow it starts had no room for another run then.", other: "# deliveries told to try again in the last seven days: a workflow they start had no room for another run then." })}`;
+      }
       default: {
         return reason satisfies never;
       }
@@ -281,7 +293,8 @@ export const SourceActivity = ({ source }: { source: EventSource }) => {
   const { busy, failure, run } = useCoreAction();
   const [open, setOpen] = useState(false);
   const [received, setReceived] = useState<Received>();
-  const [payload, setPayload] = useState<string>();
+  // A payload as shown: its JSON, or null for one core no longer holds.
+  const [payload, setPayload] = useState<string | null>();
   const { activity, name } = source;
   if (activity === null) {
     return null;
@@ -326,7 +339,9 @@ export const SourceActivity = ({ source }: { source: EventSource }) => {
         await session.workflowResources.sources.delivery(source.id, delivery.id)
     );
     if (answered !== undefined) {
-      setPayload(JSON.stringify(answered.payload, null, 2));
+      setPayload(
+        answered.payloadHeld ? JSON.stringify(answered.payload, null, 2) : null
+      );
     }
   };
 
@@ -408,7 +423,15 @@ export const SourceActivity = ({ source }: { source: EventSource }) => {
               </Trans>
             </DialogDescription>
           </DialogHeader>
-          <pre className="overflow-auto font-mono text-sm">{payload}</pre>
+          {payload === null ? (
+            <p className="text-muted-foreground text-sm">
+              <Trans>This payload is no longer kept.</Trans>
+            </p>
+          ) : (
+            <pre className="max-h-96 overflow-auto font-mono text-sm">
+              {payload}
+            </pre>
+          )}
         </DialogContent>
       </Dialog>
     </div>
