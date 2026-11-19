@@ -76,6 +76,8 @@ const anna: Member = {
   email: "anna@acme.test",
   role: "user",
   joinedAt: "2026-01-05T09:00:00.000Z",
+  suspension: null,
+  keptActive: null,
 };
 const people = [anna];
 
