@@ -260,6 +260,13 @@ export const rpcParamNames: ParamNames = {
     "resolve": ["intent"],
     "status": ["subject"],
   },
+  "DirectoryGroupsRpc": {
+    "list": [],
+    "mapToTeam": ["groupId","teamId"],
+    "preview": ["groupId"],
+    "search": ["query"],
+    "unmap": ["groupId"],
+  },
   "DraftsRpc": {
     "check": ["subject"],
     "checkpoints": ["subject","before"],

@@ -690,6 +690,40 @@ export const teamPins = sqliteTable(
 );
 
 /**
+ * The directory's groups an admin mapped to a members' team (GRA-2056,
+ * directory-groups.ts): the daily read places each group's members in its
+ * team. One team per group, by the group's Entra object ID, so a rename
+ * changes only the name kept here. Goes with the team. Holds no person:
+ * who mapped it is in the audit log.
+ */
+export const directoryGroupTeams = sqliteTable(
+  "directory_group_teams",
+  {
+    /** The directory read (`microsoft-directory`). */
+    provider: text().notNull(),
+    /** The group's Entra object ID, lower case. */
+    groupId: text("group_id").notNull(),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    /** The group's name, kind and who decides its members, as Microsoft last answered. */
+    name: text().notNull(),
+    kind: text().notNull(),
+    membersFrom: text("members_from").notNull(),
+    mappedAt: timestamp("mapped_at").notNull(),
+    /**
+     * When the daily read last read the group whole: until it has, since
+     * the group was mapped to this team, the mapping places nobody.
+     */
+    readAt: timestamp("read_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.provider, table.groupId] }),
+    index("directory_group_teams_team_id_idx").on(table.teamId),
+  ]
+);
+
+/**
  * Where each provider's daily read of the directory stands (GRA-2056,
  * directory-people.ts), for the admin: the read last applied, what it
  * counted, and the last failure since. `run` and `startedAt` are the

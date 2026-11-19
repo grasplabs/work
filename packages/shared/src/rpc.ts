@@ -15,6 +15,7 @@ import type { DashboardApi } from "./dashboard.ts";
 import type { DataPolicyApi } from "./data-policy.ts";
 import type { DecisionsApi } from "./decisions.ts";
 import type { DependenciesApi } from "./dependencies.ts";
+import type { DirectoryGroupsApi } from "./directory.ts";
 import type { DraftsApi, VersionsApi } from "./drafts.ts";
 import type { HeldStartsApi } from "./held-starts.ts";
 import type { InstructionsApi } from "./instruction-files.ts";
@@ -181,6 +182,8 @@ export interface SessionApi {
   readonly dataPolicy: DataPolicyApi;
   /** The organization's members: offboarding. Admins only. */
   readonly members: MembersApi;
+  /** The directory's groups, mapped to teams. Admins only. */
+  readonly directoryGroups: DirectoryGroupsApi;
   /**
    * The organization's name, time zone and where its data lives: everyone
    * reads them, its own admins change them.

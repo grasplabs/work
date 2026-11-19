@@ -85,6 +85,32 @@ export const directoryFailsAt = async (from: number): Promise<void> => {
   await setDirectory({ failAt: from });
 };
 
+/**
+ * The tenant's groups, from now on, as Graph has them, with each group's
+ * members, nested groups' included, by the group's lower-case ID.
+ */
+export const directoryGroupsHold = async (
+  groups: Record<string, unknown>[],
+  members: Record<string, Record<string, unknown>[]> = {}
+): Promise<void> => {
+  await setDirectory({ groups, members });
+};
+
+/** A group as Graph answers the directory's group calls: a private, assigned security group unless told. */
+export const directoryGroup = (
+  fields: Record<string, unknown> = {}
+): Record<string, unknown> => ({
+  id: crypto.randomUUID(),
+  displayName: "Finance",
+  groupTypes: [],
+  securityEnabled: true,
+  mailEnabled: false,
+  visibility: "Private",
+  isAssignableToRole: false,
+  onPremisesSyncEnabled: null,
+  ...fields,
+});
+
 /** Someone in Entra, as Graph answers the directory's reads. */
 export const directoryUser = (
   fields: Record<string, unknown> = {}
