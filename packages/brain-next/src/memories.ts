@@ -188,10 +188,15 @@ const outSql = (alias: string, at: string, only = ""): string => `
  * its lineage (a later version's, or a later row of the same), about the
  * same entity and attribute and, for an attribute of many values, the
  * same value; for a memory filed under no attribute, a restatement of it
- * (remember.ts `valueKeyFor`): each learned by `learned` and started by
- * `valid` (its world start, or when it was learned), and neither retired
- * nor out by `learned`: a retired memory ends nothing, so forgetting a
- * newer value makes the one before current again; nor does one whose
+ * (remember.ts `valueKeyFor`); and those that name it as one they replace
+ * (`memory_replacements`, contract.ts `NewMemory.replaces`: of its
+ * lineage, entity and readers, as their add checked), whatever their
+ * attribute: each learned by `learned` and started by
+ * `valid` (its world start, or when it was learned), and not out by
+ * `learned`. One of the first two ends nothing once retired by then, so
+ * forgetting a newer value makes the one before current again; a
+ * replacement ends what it names retired or not, as its writer said, until
+ * an undo of it (`retireMemory`), as read at `learned`; nor does one whose
  * quote left its source (quotes.ts), so a source that says "Anna", then
  * "Bob", then "Anna" again, with no memory drawn from the last, has Anna
  * current again. `visible` keeps to those the reader may read, so a
@@ -212,16 +217,20 @@ export const newerSql = (
   // second compares the attribute with IS, which the index takes as it
   // takes =, so one filed under none (one_value 0, attribute null) seeks
   // its restatements the same way.
-  const rest = `
+  const named = `
     AND (newer.lineage_order > ${alias}.lineage_order
       OR (newer.lineage_order = ${alias}.lineage_order AND newer.row > ${alias}.row))
     AND newer.learned_at <= ${learned}
     AND ${startSql("newer")} <= ${valid}
-    AND (newer.retired_at IS NULL OR newer.retired_at > ${learned})
     AND NOT EXISTS (${outSql("newer", learned)})
     ${visible ? `AND ${visibleSql("newer")}` : ""}
     ${only}`;
+  const rest = `${named}
+    AND (newer.retired_at IS NULL OR newer.retired_at > ${learned})`;
+  // One term of the statement it is in, whose compound holds few
+  // (workerd's SQLite): its three ways in a compound of their own.
   return `
+  SELECT at FROM (
   SELECT ${startSql("newer")} AS at FROM memories AS newer
   WHERE ${alias}.one_value = 1
     AND newer.entity = ${alias}.entity
@@ -233,7 +242,13 @@ export const newerSql = (
     AND newer.entity = ${alias}.entity
     AND newer.attribute IS ${alias}.attribute
     AND newer.lineage = ${alias}.lineage
-    AND newer.value_key = ${alias}.value_key${rest}`;
+    AND newer.value_key = ${alias}.value_key${rest}
+  UNION ALL
+  SELECT ${startSql("newer")} AS at FROM memory_replacements AS named
+  CROSS JOIN memories AS newer ON newer.row = named.memory
+  WHERE named.replaced = ${alias}.row
+    AND (named.undone_at IS NULL OR named.undone_at > ${learned})${named}
+  )`;
 };
 
 /**
@@ -1184,13 +1199,20 @@ export const confirmMemory = (
  * read it, it is not retired, and it is in its world time now: current, or
  * ended by a newer memory of its lineage, which a writer forgets as well,
  * so it never becomes current again when the newer one is retired too.
+ * An undo of its save (`undo`) retires it whatever its world time (one
+ * valid from tomorrow, or expired, still ends what it replaced), and it no
+ * longer replaces what it named from then on
+ * (`memory_replacements.undone_at`, the first undo's time), which is
+ * current again, whatever happened since, also when it was retired
+ * before; any other retirement keeps them ended: forgetting never brings
+ * anything back.
  * Answers when it was retired and by which change (`change`, kept with
  * it), as recorded: one this writer already retired answers its recorded
  * time and change again, never new ones, whatever change the call names,
  * so a retry answers what the first try did and another call learns it
  * wasn't the one (contract.ts `retireMemory`). Null alike
  * for no such memory, another writer's (retired or not), one the reader
- * may not read and one that expired before it was retired.
+ * may not read and, unless it is an undo, one outside its world time.
  */
 export const retireMemory = (
   sql: SqlStorage,
@@ -1199,7 +1221,14 @@ export const retireMemory = (
     reader,
     writer,
     change,
-  }: { id: string; reader: Reader; writer: string; change: string }
+    undo,
+  }: {
+    id: string;
+    reader: Reader;
+    writer: string;
+    change: string;
+    undo: boolean;
+  }
 ): RetiredMemory | null => {
   const asked = [
     id,
@@ -1210,40 +1239,67 @@ export const retireMemory = (
   ];
   const stamp = nextStamp(sql);
   const [retired] = sql
-    .exec<{ retired_at: number; retired_change: string | null }>(
+    .exec<{ row: number; retired_at: number; retired_change: string | null }>(
       `WITH ${readableSql}
       UPDATE memories AS m SET retired_at = ?6, retired_change = ?7
       WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at IS NULL
-        AND (m.valid_from IS NULL OR m.valid_from <= ?5)
-        AND (m.valid_until IS NULL OR m.valid_until > ?5)
+        AND (?8 = 1 OR (
+          (m.valid_from IS NULL OR m.valid_from <= ?5)
+          AND (m.valid_until IS NULL OR m.valid_until > ?5)
+        ))
         AND ${visibleSql("m")}
-      RETURNING retired_at, retired_change`,
+      RETURNING row, retired_at, retired_change`,
       ...asked,
       stamp,
-      change
+      change,
+      undo ? 1 : 0
     )
     .toArray();
-  if (retired !== undefined) {
-    keepStamp(sql, stamp);
-    return {
-      retiredAt: new Date(retired.retired_at),
-      change: retired.retired_change,
-    };
-  }
   // Retired already, by this writer, and the reader may read it: a retry
   // or another call, answered with the time and change recorded then.
-  const [again] = sql
-    .exec<{ retired_at: number; retired_change: string | null }>(
-      `WITH ${readableSql}
-      SELECT m.retired_at, m.retired_change FROM memories AS m
-      WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at <= ?5
-        AND ${visibleSql("m")}`,
-      ...asked
-    )
-    .toArray();
-  return again === undefined
-    ? null
-    : { retiredAt: new Date(again.retired_at), change: again.retired_change };
+  const [again] =
+    retired === undefined
+      ? sql
+          .exec<{
+            row: number;
+            retired_at: number;
+            retired_change: string | null;
+          }>(
+            `WITH ${readableSql}
+            SELECT m.row, m.retired_at, m.retired_change FROM memories AS m
+            WHERE m.id = ?1 AND m.lineage = ?4 AND m.retired_at <= ?5
+              AND ${visibleSql("m")}`,
+            ...asked
+          )
+          .toArray()
+      : [];
+  const kept = retired ?? again;
+  if (kept === undefined) {
+    return null;
+  }
+  // An undo of its save: it no longer replaces anything from now on, so
+  // what it replaced is current again, whatever happened since, also when
+  // it was retired before (forgotten, then undone); a read of a moment
+  // before still sees it replaced. Each link once: a repeat keeps the
+  // first undo. Any other retirement keeps them ended (`newerSql`):
+  // forgetting brings nothing back.
+  const undone = undo
+    ? sql
+        .exec(
+          `UPDATE memory_replacements SET undone_at = ?2
+          WHERE memory = ?1 AND undone_at IS NULL RETURNING memory`,
+          kept.row,
+          stamp
+        )
+        .toArray()
+    : [];
+  if (retired !== undefined || undone.length > 0) {
+    keepStamp(sql, stamp);
+  }
+  return {
+    retiredAt: new Date(kept.retired_at),
+    change: kept.retired_change,
+  };
 };
 
 /**

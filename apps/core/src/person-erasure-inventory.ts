@@ -754,6 +754,8 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // Their confirmations stand, their id replaced (`erasedConfirmer`).
   "brainStore.memory_confirmations": { erased: "brain_shared" },
   "brainStore.memory_confirmed_over": noPerson,
+  // Which memory replaces which, by row: deleted with either memory.
+  "brainStore.memory_replacements": noPerson,
   "brainStore.memory_extractions": {
     company: "marks of the versions fully drawn from",
   },

@@ -29,6 +29,7 @@ import {
   lineageOfSource,
   lineageOfWriter,
   stampWrite,
+  visibleSql,
 } from "./memories.ts";
 import { isOwnEntityRow, ownEntityRow } from "./own-entity.ts";
 import {
@@ -40,7 +41,12 @@ import {
 import type { Naming } from "./people.ts";
 import { CurrentTextsNeededError, heldIn, judgeLate } from "./quotes.ts";
 import type { CurrentText, CurrentTexts, Written } from "./quotes.ts";
-import { accessOfKey, readerSetKeyOf, readerSetOf } from "./reader-sets.ts";
+import {
+  accessOfKey,
+  readableSql,
+  readerSetKeyOf,
+  readerSetOf,
+} from "./reader-sets.ts";
 import { isRestoring } from "./restoring.ts";
 import { foldForSearch, indexMemoryWords } from "./words.ts";
 import type { WordMemo } from "./words.ts";
@@ -334,6 +340,8 @@ interface Into {
   restatements: readonly string[];
   /** The calls that drew each memory, by its place in the add as asked; none for an add extraction didn't make. */
   extractors: readonly Extractor[] | undefined;
+  /** What each memory replaces, by its place in the add as asked (`replacedRowsOf`). */
+  replaced: ReadonlyMap<number, readonly number[]>;
   learnedAt: number;
   memo: WordMemo;
 }
@@ -509,6 +517,93 @@ const keepMentions = (into: Into, plan: Planned, row: number): void => {
   }
 };
 
+/** The row of the store's own entity, if it has one: never made here. */
+const ownEntityRowIfAny = (sql: SqlStorage): number | undefined =>
+  sql
+    .exec<{ entity: number }>("SELECT entity FROM own_entity WHERE id = 1")
+    .toArray()[0]?.entity;
+
+/**
+ * The rows of what each memory of `asked` replaces (contract.ts
+ * `NewMemory.replaces`), by its place in the add as asked: judged on the
+ * add as asked, before anything is left out of it (people.ts), so whether
+ * and how an add is refused never depends on what an erasure hid. Each
+ * one named must be of the memory's lineage, about its entity, of the
+ * add's readers (`readers`: so whoever reads one reads the other) and
+ * readable by the add's reader (so none without one), no erasure hiding
+ * it; and the memory names its entity by id or as the store's own, so
+ * which entity it is about is known before anything is linked. Anything
+ * else is refused, alike, as one there isn't. Each was stored before the
+ * add, so is earlier in its lineage: a replacement never comes round to
+ * itself.
+ */
+const replacedRowsOf = (
+  sql: SqlStorage,
+  asked: Adding,
+  readers: string
+): Map<number, number[]> => {
+  const rows = new Map<number, number[]>();
+  for (const [index, memory] of asked.memories.entries()) {
+    if (memory.replaces === undefined) {
+      continue;
+    }
+    const why = `memory ${index} replaces a memory it may not name`;
+    const about = asked.entities.find(({ key }) => key === memory.about);
+    let entity: number | undefined;
+    if (about?.own === true) {
+      entity = ownEntityRowIfAny(sql);
+    } else if (about?.id !== undefined) {
+      entity = entityRowOf(sql, about.id)?.row;
+    }
+    const { reader } = asked;
+    if (
+      entity === undefined ||
+      reader === undefined ||
+      memory.basis.kind !== "writer"
+    ) {
+      throw refused(why);
+    }
+    const ids = [...new Set(memory.replaces)];
+    const found = sql
+      .exec<{ row: number }>(
+        `WITH ${readableSql}
+        SELECT m.row FROM memories AS m
+        WHERE m.id IN (SELECT value FROM json_each(?1))
+          AND m.lineage = ?4 AND m.entity = ?5 AND m.readers = ?6
+          AND ${visibleSql("m")}`,
+        JSON.stringify(ids),
+        reader.person,
+        JSON.stringify(reader.groups),
+        lineageOfWriter(memory.basis.writer),
+        entity,
+        readers
+      )
+      .toArray()
+      .map(({ row }) => row);
+    if (found.length !== ids.length) {
+      throw refused(why);
+    }
+    rows.set(index, found);
+  }
+  return rows;
+};
+
+/**
+ * Records that the memory of row `row`, the add's `index`th as asked,
+ * replaces what the add as asked was checked to replace
+ * (`replacedRowsOf`). Only a memory written records any: one an erasure
+ * left out of the add records none.
+ */
+const keepReplaces = (into: Into, row: number, index: number): void => {
+  for (const replaced of into.replaced.get(index) ?? []) {
+    into.sql.exec(
+      "INSERT INTO memory_replacements (memory, replaced) VALUES (?, ?)",
+      row,
+      replaced
+    );
+  }
+};
+
 /**
  * Writes `memory`, the add's `index`th, with its words and stems and the
  * names and identifiers of the entities it mentions, as it gave them.
@@ -564,6 +659,7 @@ const writeMemory = (
       extractor === undefined ? null : extractorRowOf(sql, extractor)
     )
     .one();
+  keepReplaces(into, row, index);
   indexMemoryWords(sql, row, memory.statement, into.memo);
   keepMentions(into, plan, row);
   return {
@@ -710,13 +806,16 @@ export const writeAdd = (
     // speaks for an internal person in the shared store, and it leaves out
     // what is in an erased person's word before it writes: one here is a
     // host's fault. A repeat of an add made before answers above, as it was.
+    // What each memory replaces, judged on the add as asked, before any
+    // other refusal and anything an erasure leaves out (`replacedRowsOf`).
+    const readers = readerSetKeyOf(asked.access);
+    const replaced = replacedRowsOf(sql, asked, readers);
     if (naming.speakers.some((person) => isErasedPerson(sql, person))) {
       throw refused("it is in the word of a person an erasure took");
     }
     // Every check on the add as asked, then what an erasure leaves out,
     // then the write: whether and how an add is refused never depends on
     // who was erased.
-    const readers = readerSetKeyOf(asked.access);
     checkAsAsked(sql, shared, asked, readers);
     const drawn =
       asked.extracted !== undefined ||
@@ -762,6 +861,7 @@ export const writeAdd = (
       writers,
       restatements,
       extractors: asked.extractors,
+      replaced,
       learnedAt: stampWrite(sql),
       memo: new Map(),
     };

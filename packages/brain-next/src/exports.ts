@@ -326,6 +326,21 @@ export const memoryLineSchema = z.strictObject({
    * export an older release wrote, which kept none.
    */
   extractor: extractorSchema.nullable().optional(),
+  /**
+   * The memories it replaces (contract.ts `NewMemory.replaces`), each one
+   * the export holds, by id, with when an undo of it ended that (in
+   * milliseconds), if one did by the export's moment: absent for none, and
+   * from an export an older release wrote, which kept none.
+   */
+  replaces: z
+    .array(
+      z.strictObject({
+        memory: memoryIdSchema,
+        undoneAt: z.int().nonnegative().nullable(),
+      })
+    )
+    .min(1)
+    .optional(),
 });
 export type MemoryLine = z.infer<typeof memoryLineSchema>;
 
@@ -749,7 +764,15 @@ const memoryPhaseSqlOf = (
     FROM entities AS named WHERE named.row IN (m.entity, m.object)) AS entities,
   (SELECT json_group_array(json_array(named.id, entity_names.type, entity_names.value))
     FROM entity_names JOIN entities AS named ON named.row = entity_names.entity
-    WHERE entity_names.memory = m.row) AS names
+    WHERE entity_names.memory = m.row) AS names,
+  (SELECT json_group_array(json_object('memory', id, 'undoneAt', undone_at)) FROM (
+    SELECT replaced.id AS id,
+      CASE WHEN named.undone_at <= ?4 THEN named.undone_at END AS undone_at
+    FROM memory_replacements AS named
+    JOIN memories AS replaced ON replaced.row = named.replaced
+    WHERE named.memory = m.row AND ${exportedMemorySql(scope, "replaced")}
+    ORDER BY replaced.row
+  )) AS replaces
 FROM memories AS m
 JOIN entities AS about ON about.row = m.entity
 LEFT JOIN entities AS object ON object.row = m.object
@@ -870,6 +893,11 @@ const memoriesLineOf = (
       .parse(jsonOf(row.entities));
     const source = textOrNull(row.source);
     const version = intOrNull(row.version);
+    const replaces = z
+      .array(
+        z.strictObject({ memory: z.string(), undoneAt: z.int().nullable() })
+      )
+      .parse(jsonOf(row.replaces));
     const line = memoryLineSchema.parse({
       kind: "memory",
       id: row.id,
@@ -900,6 +928,7 @@ const memoriesLineOf = (
       retiredAt: row.retired_at,
       retiredChange: row.retired_change,
       access: exportedAccessOf(scope, row.readers),
+      ...(replaces.length === 0 ? {} : { replaces }),
       ...(scope.kind === "company"
         ? {
             extractor: extractorOfColumns({

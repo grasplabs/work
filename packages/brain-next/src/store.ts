@@ -2542,7 +2542,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
 
   /** Retires one of the writer's own memories the reader may read (memories.ts). */
   async retireMemory(request: RetireRequest): Promise<RetiredMemory | null> {
-    const { memory, reader, writer, change } = checked(
+    const { memory, reader, writer, change, undo } = checked(
       retireRequestSchema,
       request
     );
@@ -2561,6 +2561,7 @@ export class BrainStore extends DurableObject<BrainStoreEnv> {
           reader,
           writer,
           change,
+          undo: undo === true,
         });
       });
     });
