@@ -9,11 +9,17 @@ import { recordEventIf } from "./audit.ts";
 import { pastAddressesAfter } from "./connections.ts";
 import {
   connections,
+  connectionTenantTokens,
   connectionTokens,
   tokenRevocations,
 } from "./db/schema.ts";
 import { ownerErased } from "./erased-people.ts";
-import { isInvalidGrant, refreshTokens, revokeToken } from "./oauth-client.ts";
+import {
+  OAuthResponseError,
+  isInvalidGrant,
+  refreshTokens,
+  revokeToken,
+} from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
 import { oweRevoke, revocable } from "./owed-revokes.ts";
 import {
@@ -686,6 +692,193 @@ export const credentialFor = async (
     throw connectErrors.create("connect.connection_inactive");
   }
   return provider.credential(tokens.apiKey);
+};
+
+/** A connection's token for its own host is sealed for it alone, apart from its grant's. */
+const tenantSealContext = (connectionId: string): string =>
+  `tenant-token:${connectionId}`;
+
+/**
+ * What a token endpoint answers when the grant doesn't reach a resource:
+ * no consent for its rights (a connection made before they were asked),
+ * or rights or a resource it doesn't know.
+ */
+const notConsented: ReadonlySet<string> = new Set([
+  "invalid_grant",
+  "consent_required",
+  "interaction_required",
+  "invalid_scope",
+  "invalid_resource",
+]);
+
+const isNotConsented = (error: unknown): boolean =>
+  error instanceof OAuthResponseError &&
+  error.oauthError !== undefined &&
+  notConsented.has(error.oauthError) &&
+  error.httpStatus < 500 &&
+  error.httpStatus !== 429;
+
+/** A connection's own host at its provider and the credential for it. */
+export interface TenantCredential {
+  host: string;
+  credential: Credential;
+  /** Whether it was kept from an earlier call; else minted for this one. */
+  held: boolean;
+}
+
+/**
+ * The host the connection's token for its own host is for, and that token,
+ * while it is of this grant and fresh for at least a minute; else none.
+ */
+const heldTenantCredential = async (
+  vault: Vault,
+  held: typeof connectionTenantTokens.$inferSelect | undefined
+): Promise<TenantCredential | undefined> => {
+  if (
+    held === undefined ||
+    held.accessExpiresAt.getTime() - expirySkewMs <= Date.now()
+  ) {
+    return undefined;
+  }
+  try {
+    return {
+      host: held.host,
+      credential: bearer(
+        await vault.open(held.sealed, tenantSealContext(held.connectionId))
+      ),
+      held: true,
+    };
+  } catch (error) {
+    // Sealed under a key no longer held: asked for again.
+    if (error instanceof VaultError) {
+      return undefined;
+    }
+    throw error;
+  }
+};
+
+/**
+ * The credential of an active connection for its own host at the provider
+ * (`tenantResource`, GRA-2145: a company's SharePoint host), for one sync
+ * call's egress (connectors.ts), with the host it is for: none when the
+ * provider has no such host, or the grant doesn't reach it (a connection
+ * made before its rights were asked for, or whose consent left them out),
+ * so the call's requests there are refused and what it reads there is
+ * nobody's. The host is the connection's own token's finding, kept with
+ * the token; the token is asked for with the grant's refresh token, the
+ * rights of that host alone, and kept sealed until it is a minute from
+ * expiring. Microsoft doesn't revoke a refresh token used to get another
+ * ("Refresh tokens aren't revoked when used to acquire new access
+ * tokens"), so any new one this answer holds is let go, and the grant's
+ * own is never written here. A failure that may pass (the provider down)
+ * fails the call, to be tried again.
+ */
+export const tenantCredentialFor = async (
+  env: Env,
+  connectionId: string
+): Promise<TenantCredential | undefined> => {
+  const active = await activeConnection(env, connectionId);
+  const { connection, provider, row, vault } = active;
+  if (provider.kind !== "oauth" || provider.tenantResource === undefined) {
+    return undefined;
+  }
+  const db = drizzle(env.DB);
+  const held = await db
+    .select()
+    .from(connectionTenantTokens)
+    .where(eq(connectionTenantTokens.connectionId, connectionId))
+    .get();
+  // Its grant's own: the row goes with the grant's `connection_tokens` row
+  // (ON DELETE CASCADE), which a grant connected again replaces, so a
+  // Graph renewal keeps it and a new grant never reads it.
+  const fresh = await heldTenantCredential(vault, held);
+  if (fresh !== undefined) {
+    return fresh;
+  }
+  const client = provider.client(env);
+  const { tenant } = connection;
+  if (client === undefined || tenant === null) {
+    throw connectionErrors.create("connection.provider_unavailable");
+  }
+  // The host this grant found, else found now: none when the company's
+  // root site isn't on such a host. A read that fails or is throttled
+  // fails the call, to be tried again: never nobody's for a blip.
+  let host: string | null;
+  try {
+    host =
+      held?.host ??
+      (await provider.tenantResource.hostOf(
+        await freshAccessToken(env, active)
+      ));
+  } catch (error) {
+    log.warn("connection.tenant_host_failed", {
+      provider: provider.id,
+      ...errorFields(error),
+    });
+    throw connectionErrors.create("connection.refresh_failed");
+  }
+  if (host === null) {
+    return undefined;
+  }
+  let minted: TokenSet;
+  try {
+    const { refreshToken } = await openOAuthTokens(vault, row);
+    minted = await refreshTokens(
+      provider,
+      client,
+      tenant,
+      refreshToken,
+      provider.tenantResource.scope(host)
+    );
+  } catch (error) {
+    if (isNotConsented(error)) {
+      return undefined;
+    }
+    log.warn("connection.tenant_token_failed", {
+      provider: provider.id,
+      ...errorFields(error),
+    });
+    throw connectionErrors.create("connection.refresh_failed");
+  }
+  const sealed = await vault.seal(
+    minted.accessToken,
+    tenantSealContext(connectionId)
+  );
+  const now = Date.now();
+  // Kept only while the grant's row is as it was read (its `generation`):
+  // a grant connected again meanwhile must never find this one's. A Graph
+  // renewal landing during the mint moves the generation too, so the write
+  // misses then, and the next call mints again: a renewal is hourly, a
+  // mint a few hundred milliseconds.
+  await env.DB.prepare(
+    `INSERT INTO connection_tenant_tokens (connection_id, host, sealed, access_expires_at, updated_at)
+    SELECT ?1, ?2, ?3, ?4, ?5
+    WHERE EXISTS (SELECT 1 FROM connection_tokens WHERE connection_id = ?1 AND generation = ?6)
+    ON CONFLICT (connection_id) DO UPDATE SET host = excluded.host, sealed = excluded.sealed,
+      access_expires_at = excluded.access_expires_at, updated_at = excluded.updated_at`
+  )
+    .bind(connectionId, host, sealed, minted.expiresAt, now, row.generation)
+    .run();
+  return {
+    host,
+    credential: bearer(minted.accessToken),
+    held: false,
+  };
+};
+
+/**
+ * Lets go of a connection's kept token for its own host, which the host
+ * refused (egress.ts `tenantRefused`): the next call mints another.
+ */
+export const dropTenantToken = async (
+  env: Env,
+  connectionId: string
+): Promise<void> => {
+  await env.DB.prepare(
+    "DELETE FROM connection_tenant_tokens WHERE connection_id = ?"
+  )
+    .bind(connectionId)
+    .run();
 };
 
 /**
