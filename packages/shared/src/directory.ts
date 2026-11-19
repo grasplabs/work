@@ -251,6 +251,19 @@ export interface DirectoryGroupPreview {
   nestedGroups: number;
 }
 
+/**
+ * Why the directory's daily read left a mapped group as it was: Microsoft
+ * has no such group (`gone`), refused to read it (`refused`), it can't be
+ * a team's now (`not_mappable`), or it lists nobody (`empty`).
+ */
+export const directoryGroupHelds = [
+  "gone",
+  "refused",
+  "not_mappable",
+  "empty",
+] as const;
+export type DirectoryGroupHeld = (typeof directoryGroupHelds)[number];
+
 /** A directory group an admin mapped to a team (GRA-2056). */
 export interface DirectoryGroupMapping {
   groupId: string;
@@ -266,6 +279,8 @@ export interface DirectoryGroupMapping {
    * until it has, the mapping places nobody. Null before then.
    */
   readAt: string | null;
+  /** Why the last read left the group as it was; null when it didn't. */
+  held: DirectoryGroupHeld | null;
 }
 
 /**
