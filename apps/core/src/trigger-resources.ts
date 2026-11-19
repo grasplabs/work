@@ -193,11 +193,16 @@ const scheduleInputFor = async (
 ): Promise<string> => {
   const { inputDescriptor } = await pinned(env, workflowId, version);
   try {
-    return acceptedInput(inputDescriptor, input);
+    return acceptedInput(inputDescriptor, input, "config.input");
   } catch (error) {
     if (isExpectedError(error)) {
+      // What the version's contract said of each field (its path and the
+      // contract's words, never a value); an input that isn't JSON at all
+      // has none.
       throw workflowResourceErrors.create("workflow.resource_invalid", {
-        issues: ["config.input: Not an input the workflow takes."],
+        issues: error.details?.issues ?? [
+          "config.input: Not an input the workflow takes.",
+        ],
       });
     }
     throw error;

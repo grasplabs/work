@@ -165,6 +165,7 @@ export const rpcParamNames: ParamNames = {
     "names": [],
     "packageRequests": ["chatId"],
     "people": [],
+    "rate": ["chatId","messageId","rating"],
     "remove": ["chatId"],
     "removeFile": ["chatId","fileId"],
     "rename": ["chatId","title"],

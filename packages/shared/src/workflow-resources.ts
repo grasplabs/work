@@ -6,6 +6,7 @@ import { defineErrorFamily } from "./errors.ts";
 import type { EventSourcesApi } from "./event-sources.ts";
 import { chatIdSchema, identifierSchema, workspaceIdSchema } from "./ids.ts";
 import type { Json } from "./json.ts";
+import { platformLimits } from "./platform-limits.ts";
 import type { RunFileListing } from "./run-files.ts";
 import { isEventType, sealedBuildLimits } from "./sealed-builds.ts";
 import type { MemberRole, SubjectMembersApi } from "./subject-members.ts";
@@ -166,8 +167,7 @@ export const workflowResourceErrors = defineErrorFamily({
     "The App function this run called failed, so the run failed. These details name the App's error code.",
   "workflow.decision_timed_out":
     "Nobody answered the run's decision before its deadline, so the run failed.",
-  "workflow.model_call_limit":
-    "The run made as many model calls as its workflow allows, so it failed.",
+  "workflow.model_call_limit": `The run made ${platformLimits.lineageModelRequests} model requests, the most one run may make, so it stopped.`,
   "workflow.paused":
     "This workflow is paused, so it starts no runs. Someone who builds it can resume it.",
   "workflow.step_not_found":

@@ -41,6 +41,7 @@ import {
   ZapIcon,
 } from "lucide-react";
 import { useEffect, useId, useState } from "react";
+import { z } from "zod";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
@@ -465,6 +466,19 @@ const jsonOf = (text: string): { ok: true; value: unknown } | { ok: false } => {
   }
 };
 
+const refusalSchema = z.object({
+  details: z.object({ issues: z.array(z.string()) }),
+});
+
+/**
+ * What core said is wrong with a config it refused, field by field
+ * (`details.issues`, core's own words): nothing for any other failure.
+ */
+const issuesIn = (error: unknown): string[] => {
+  const refusal = refusalSchema.safeParse(error);
+  return refusal.success ? refusal.data.details.issues : [];
+};
+
 /** The person's own time zone, as the browser has it. */
 const ownTimeZone = (): string =>
   Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -493,6 +507,7 @@ const AddTrigger = ({
   const ids = useId();
   const { busy, failure, run } = useCoreAction();
   const [problem, setProblem] = useState<string>();
+  const [issues, setIssues] = useState<string[]>([]);
   const [kind, setKind] = useState<AddedKind>("schedule");
   const [cron, setCron] = useState("");
   const [timeZone, setTimeZone] = useState(ownTimeZone);
@@ -561,18 +576,23 @@ const AddTrigger = ({
 
   const add = async (): Promise<void> => {
     setProblem(undefined);
+    setIssues([]);
     const config = configOf();
     if (config === undefined) {
       return;
     }
-    const created = await run(
-      async (session) =>
-        await session.workflowResources.triggers.create({
+    const created = await run(async (session) => {
+      try {
+        return await session.workflowResources.triggers.create({
           kind,
           workflowId: workflow,
           config,
-        })
-    );
+        });
+      } catch (error) {
+        setIssues(issuesIn(error));
+        throw error;
+      }
+    });
     if (created !== undefined) {
       setCron("");
       setInput("{}");
@@ -851,6 +871,13 @@ const AddTrigger = ({
         </div>
       ) : null}
       <ErrorText>{problem ?? failure}</ErrorText>
+      {issues.length === 0 ? null : (
+        <ul className="text-destructive list-disc pl-5 text-sm">
+          {issues.map((issue) => (
+            <li key={issue}>{issue}</li>
+          ))}
+        </ul>
+      )}
       <div>
         <Button disabled={busy} size="sm" type="submit">
           <Trans>Add the trigger</Trans>

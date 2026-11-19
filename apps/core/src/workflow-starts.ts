@@ -811,9 +811,15 @@ const ruleOf = async (
 /**
  * `input` as the version's contract takes it, normalized, as canonical
  * JSON: `workflow.start_invalid` with its issues (paths, never values)
- * otherwise, or when it is over the function input limit.
+ * otherwise, or when it is over the function input limit. `at` is where
+ * the input stands in what was sent, before each issue's path: a
+ * trigger's `config.input`, nothing for a start's own.
  */
-export const acceptedInput = (descriptor: string, input: unknown): string => {
+export const acceptedInput = (
+  descriptor: string,
+  input: unknown,
+  at = ""
+): string => {
   const schema = schemaFromDescriptor(descriptor);
   const checked = schema["~standard"].validate(input);
   if ("then" in checked) {
@@ -821,12 +827,15 @@ export const acceptedInput = (descriptor: string, input: unknown): string => {
   }
   if (checked.issues !== undefined) {
     throw workflowResourceErrors.create("workflow.start_invalid", {
-      issues: issuesOf({
-        issues: checked.issues.map(({ path, message }) => ({
-          path: (path ?? []).map(String),
-          message,
-        })),
-      }),
+      issues: issuesOf(
+        {
+          issues: checked.issues.map(({ path, message }) => ({
+            path: (path ?? []).map(String),
+            message,
+          })),
+        },
+        at
+      ),
     });
   }
   const parsed = z.json().safeParse(checked.value);
@@ -838,7 +847,7 @@ export const acceptedInput = (descriptor: string, input: unknown): string => {
     new TextEncoder().encode(text).byteLength > platformLimits.functionArgsBytes
   ) {
     throw workflowResourceErrors.create("workflow.start_invalid", {
-      issues: ["args: Too large for a start."],
+      issues: [`${at === "" ? "args" : at}: Too large for a start.`],
     });
   }
   return text;

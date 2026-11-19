@@ -14,6 +14,12 @@ import { botFrameworkKeysFake } from "../../connect/test/bot-framework-keys-fake
 import { graphEventsFake } from "../../connect/test/graph-events-fake.ts";
 import { npmRegistryFake } from "../../connect/test/npm-registry-fake.ts";
 import { osvFake } from "../../connect/test/osv-fake.ts";
+import {
+  outsideApiFake,
+  outsideApiInsideOrigin,
+  outsideApiOrigin,
+  outsideApiSlowMs,
+} from "../../connect/test/outside-api-fake.ts";
 import { acmeTenant, clients } from "../../connect/test/provider-config.ts";
 import { aiProvidersFake } from "./ai-providers-fake.ts";
 import { botConnectorFake } from "./bot-connector-fake.ts";
@@ -295,18 +301,9 @@ export const webhookReceiverOrigin = "https://hooks.acme-receiver.test";
 export const webhookReceivedUrl = "https://webhook-control.test/received";
 
 /**
- * An outside API an admin approves as an HTTP connection (connect's
- * http-connections.ts), on a host the fake DNS resolver answers with a
- * public address: `GET /v1/invoices` lists invoices, `POST /v1/invoices`
- * answers 201 with what it was sent, `/v1/moved` redirects off the origin.
- * `httpApiInsideOrigin`'s name resolves to a private address.
- */
-export const httpApiOrigin = "https://api.acme-billing.test";
-export const httpApiInsideOrigin = "https://inside.acme-billing.test";
-
-/**
- * Where tests read what reached the outside API, in order: each request's
- * URL, method, headers and body.
+ * Where tests read what reached the outside API an admin approves as an
+ * HTTP connection (connect's test/outside-api-fake.ts), in order: each
+ * request's URL, method, headers and body.
  */
 export const httpApiReceivedUrl = "https://http-api-control.test/received";
 
@@ -572,48 +569,12 @@ const webhookAnswer = async (request, url) => {
   }
   return new Response(null, { status: 200 });
 };
-const httpApiCalls = [];
-/** The outside API's answer to \`request\`, kept for tests to read. */
-const httpApiAnswer = async (request, url) => {
-  const body = await request.text();
-  httpApiCalls.push({
-    url: url.href,
-    method: request.method,
-    headers: Object.fromEntries(request.headers),
-    body,
-  });
-  if (url.pathname === "/v1/moved") {
-    return new Response(null, {
-      status: 302,
-      headers: { location: "https://collector.test/steal" },
-    });
-  }
-  if (url.pathname === "/v1/invoices" && request.method === "POST") {
-    return Response.json({ created: JSON.parse(body) }, { status: 201 });
-  }
-  if (url.pathname === "/v1/invoices") {
-    return Response.json({ invoices: [{ id: "inv-1", amount: 10 }] });
-  }
-  return new Response("not found", { status: 404 });
-};
-/** The addresses the fake DNS resolver answers each name with. */
-const dnsAddresses = new Map([
-  [new URL(${JSON.stringify(httpApiOrigin)}).hostname, "93.184.216.34"],
-  [new URL(${JSON.stringify(httpApiInsideOrigin)}).hostname, "10.0.0.7"],
-]);
-/** DNS over HTTPS, as connect asks Cloudflare's resolver. */
-const dnsAnswer = (url) => {
-  const name = url.searchParams.get("name") ?? "";
-  const address = dnsAddresses.get(name);
-  if (address === undefined) {
-    return Response.json({ Status: 3 });
-  }
-  const type = url.searchParams.get("type");
-  return Response.json({
-    Status: 0,
-    Answer: type === "A" ? [{ name, type: 1, TTL: 60, data: address }] : [],
-  });
-};
+/** The outside API, and the DNS answers for its names. */
+const outsideApi = (${outsideApiFake.toString()})(${JSON.stringify({
+  origin: outsideApiOrigin,
+  insideOrigin: outsideApiInsideOrigin,
+  slowMs: outsideApiSlowMs,
+})});
 const slackCalls = [];
 /** Slack's Web API, as far as the door's adapter calls it. */
 const slackAnswer = async (request, url) => {
@@ -887,13 +848,14 @@ export default {
       return await npm.answer(request);
     }
     if (url.hostname === "cloudflare-dns.com") {
-      return dnsAnswer(url);
+      // Any other name doesn't exist (NXDOMAIN).
+      return outsideApi.dns(url) ?? Response.json({ Status: 3 });
     }
-    if (url.origin === ${JSON.stringify(httpApiOrigin)}) {
-      return await httpApiAnswer(request, url);
+    if (url.origin === ${JSON.stringify(outsideApiOrigin)}) {
+      return await outsideApi.answer(request, url);
     }
     if (url.href === ${JSON.stringify(httpApiReceivedUrl)}) {
-      return Response.json(httpApiCalls);
+      return Response.json(outsideApi.calls);
     }
     if (url.origin === ${JSON.stringify(webhookReceiverOrigin)}) {
       return await webhookAnswer(request, url);

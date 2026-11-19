@@ -160,7 +160,10 @@ const shown = async (
       await Promise.resolve();
       asked.push({ create: input });
       if (changeFails) {
-        throw new Error("The trigger couldn't be read back.");
+        // As core refuses a config: its message, and what is wrong where.
+        throw Object.assign(new Error("The trigger couldn't be read back."), {
+          details: { issues: ["config.input.report: Expected a string."] },
+        });
       }
       return stoppedSchedule;
     },
@@ -519,7 +522,15 @@ describe("a workflow's Triggers", () => {
       readAgain: afterChange > before,
       readAfterAdding: listReads > afterChange,
       said: document.body.textContent.includes("couldn't be read back"),
-    }).toStrictEqual({ readAgain: true, readAfterAdding: true, said: true });
+      saidWhere: document.body.textContent.includes(
+        "config.input.report: Expected a string."
+      ),
+    }).toStrictEqual({
+      readAgain: true,
+      readAfterAdding: true,
+      said: true,
+      saidWhere: true,
+    });
   });
 
   it("adds a webhook trigger on the source and event type chosen, by the source's name", async () => {
