@@ -319,6 +319,10 @@ const subjectOf = async (
       };
 };
 
+/** What the model is told of a replacement about a subject named only by its name. */
+const replacesByName =
+  'Not saved: a save that replaces earlier memories names who or what it is about as "me", or by the id your earlier save answered, never by its name alone. Give that id, or leave `replaces` out.';
+
 /** What the model is told of a memory it may not replace. */
 const notTheirMemory =
   "Not saved: `replaces` names a memory that isn't one of theirs about this subject. Name only their own memories of the same subject, by the ids your earlier saves answered or recall gave as theirs, or leave `replaces` out.";
@@ -326,8 +330,9 @@ const notTheirMemory =
 /**
  * What each of `ids` says, the person's own memories about `entity` (the
  * subject as the Brain takes it), as their own store holds them, history
- * included (`ownWordAs`): null when any isn't one of theirs, or the
- * subject is new, so holds none.
+ * included (`ownWordAs`): null when any isn't one of theirs, or they have
+ * no entity of their own yet. Refused, with what to do instead, for a
+ * subject named only by its name, which the Brain doesn't take.
  */
 const replacedOf = async (
   env: Env,
@@ -337,9 +342,12 @@ const replacedOf = async (
 ): Promise<string[] | null> => {
   const id =
     entity.own === true ? await ownEntityIdAs(env, personId) : entity.id;
-  return id === undefined || id === null
-    ? null
-    : await ownWordAs(env, personId, id, ids);
+  // A subject named only by its name may be a new one: the Brain takes a
+  // replacement only of one named by its id (or the person themselves).
+  if (id === undefined) {
+    throw new Error(replacesByName);
+  }
+  return id === null ? null : await ownWordAs(env, personId, id, ids);
 };
 
 /** What the model is told of a new entity named "me". */

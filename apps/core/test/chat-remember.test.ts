@@ -1124,6 +1124,48 @@ describe("the agent remembering in a person's own chat", () => {
   );
 
   it(
+    "refuses, before any check, a save that replaces about a subject named only by its name, saying to give its id",
+    slow,
+    async () => {
+      const member = await signedInApi(idp, "user");
+      const customer = `Acme ${unique()}`;
+      const earlier = await rememberAs(env, member.userId, {
+        change: `chat:${crypto.randomUUID()}:call`,
+        about: { kind: "customer", names: [customer] },
+        attribute: "status",
+        value: "Renewing",
+        type: "fact",
+        statement: `${customer} is renewing`,
+        quote: `${customer} is renewing`,
+      });
+      const chats = await personalChatsOf(
+        member.userId,
+        toolStep("remember", {
+          about: { kind: "customer", name: customer },
+          attribute: "status",
+          value: "Churned",
+          type: "fact",
+          statement: `${customer} has churned`,
+          quote: "it has churned",
+          replaces: [earlier.memory],
+        }),
+        says("I couldn't.")
+      );
+      const { chat, ask } = await chats.newChat();
+      await ask(`Actually ${customer}, it has churned.`);
+      const results = await toolResults(chats.stub, chat.id);
+
+      expect({
+        refused: results.some(
+          ({ isError, text }) =>
+            isError && text.includes("by the id your earlier save answered")
+        ),
+        checks: checksSent(chats.provider).length,
+      }).toStrictEqual({ refused: true, checks: 0 });
+    }
+  );
+
+  it(
     "names a memory it replaces once however often the save names it",
     slow,
     async () => {
