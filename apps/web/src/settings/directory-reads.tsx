@@ -182,7 +182,10 @@ const ReadStatus = ({ read }: { read: DirectoryRead }) => {
       {read.failure === null ? null : (
         <ReadFailed failure={read.failure} readAt={read.readAt} />
       )}
-      {read.deletedFailure === null ? null : <WithoutDeleted />}
+      {/* About the last read applied: while the reads since fail, that failure is what to mend. */}
+      {read.deletedFailure === null || read.failure !== null ? null : (
+        <WithoutDeleted />
+      )}
     </div>
   );
 };
