@@ -98,10 +98,15 @@ describe("the directory's groups as teams' source", () => {
     const { admin } = await connectedDirectory(idp);
     const tied = crypto.randomUUID();
     await memberWith(tied);
-    await directoryHolds([directoryUser({ id: tied })]);
+    const others = Array.from({ length: 150 }, () => user());
+    // Two of the group's people the directory lists too, who never signed
+    // in: listed, but no member here.
+    await directoryHolds([
+      directoryUser({ id: tied }),
+      ...others.slice(0, 2).map(({ id }) => directoryUser({ id })),
+    ]);
     await runClockTask("directory.people", {}, new Date(Date.now() + 9e12));
     const weighed = group({ displayName: `Weighed ${crypto.randomUUID()}` });
-    const others = Array.from({ length: 150 }, () => user());
     await directoryGroupsHold([weighed], {
       [String(weighed.id)]: [
         user(tied),
@@ -342,6 +347,43 @@ describe("the directory's groups as teams' source", () => {
       mapping: { landed: true, answered: "role.forbidden", recorded: [] },
       unmapping: { landed: true, answered: "role.forbidden", recorded: [] },
       listed: [kept.id],
+    });
+  });
+
+  it("aren't unmapped by an unmap that another admin's move overtook: the group stays on the team it was moved to, and nothing is recorded as unmapped", async () => {
+    const { admin } = await connectedDirectory(idp);
+    const [first, second] = [
+      await teamNamed(admin.session, "Before"),
+      await teamNamed(admin.session, "After"),
+    ];
+    const moved = group();
+    const id = String(moved.id);
+    await directoryGroupsHold([moved]);
+    await admin.api.directoryGroups.mapToTeam(id, first);
+    const { coreEnv, landed } = landingAt(
+      /delete from "directory_group_teams"/iu,
+      "before",
+      async () => await admin.api.directoryGroups.mapToTeam(id, second)
+    );
+    const { core } = await openRpc(admin.session, { coreEnv });
+    using api = core.authenticate();
+    let answered: unknown;
+    const recorded = await auditedDuring(async () => {
+      answered = await api.directoryGroups.unmap(id);
+    });
+    const listed = await admin.api.directoryGroups.list();
+    expect({
+      landed: landed(),
+      answered,
+      unmapped: recorded.filter(
+        ({ action }) => action === "directory.group_unmapped"
+      ),
+      teamId: listed.find(({ groupId }) => groupId === id)?.teamId,
+    }).toStrictEqual({
+      landed: true,
+      answered: { unmapped: false },
+      unmapped: [],
+      teamId: second,
     });
   });
 

@@ -141,25 +141,24 @@ export interface DirectoryLookup {
 }
 
 /** What kind of group a directory group is. */
-export const directoryGroupKindSchema = z.enum([
+export const directoryGroupKinds = [
   "security",
   "microsoft_365",
   "distribution",
   "unknown",
-]);
-export type DirectoryGroupKind = z.infer<typeof directoryGroupKindSchema>;
+] as const;
+export type DirectoryGroupKind = (typeof directoryGroupKinds)[number];
 
 /** Who decides a directory group's members. */
-export const directoryGroupMembersFromSchema = z.enum([
+export const directoryGroupMembersFrom = [
   "owners",
   "rule",
   "on_premises",
   "privileged_admins",
   "unknown",
-]);
-export type DirectoryGroupMembersFrom = z.infer<
-  typeof directoryGroupMembersFromSchema
->;
+] as const;
+export type DirectoryGroupMembersFrom =
+  (typeof directoryGroupMembersFrom)[number];
 
 /**
  * A directory group, as an admin picks one for a team (GRA-2056): what it
@@ -257,13 +256,13 @@ export interface DirectoryGroupPreview {
  * has no such group (`gone`), refused to read it (`refused`), it can't be
  * a team's now (`not_mappable`), or it lists nobody (`empty`).
  */
-export const directoryGroupHeldSchema = z.enum([
+export const directoryGroupHelds = [
   "gone",
   "refused",
   "not_mappable",
   "empty",
-]);
-export type DirectoryGroupHeld = z.infer<typeof directoryGroupHeldSchema>;
+] as const;
+export type DirectoryGroupHeld = (typeof directoryGroupHelds)[number];
 
 /** A directory group an admin mapped to a team (GRA-2056). */
 export interface DirectoryGroupMapping {
