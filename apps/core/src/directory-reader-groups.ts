@@ -14,7 +14,7 @@ import {
   directoryPeople,
   sourceReaderGroups,
 } from "./db/core/schema.ts";
-import { readWholeGroup } from "./directory-group-reads.ts";
+import { newerReadKept, readWholeGroup } from "./directory-group-reads.ts";
 import type { EveryPage } from "./directory-group-reads.ts";
 import { everyPage } from "./directory-people.ts";
 import { jsonValuesOf } from "./directory-teams.ts";
@@ -56,9 +56,9 @@ import {
 //   one the daily read reads meanwhile is left to it. Until the daily read
 //   has read a newly mapped group, this read goes on with it, so its
 //   members' proof doesn't lapse; placement waits for the daily read. An
-//   older run landing after a newer one writes nothing: each batch holds
-//   only while no run of a later slot tried the group
-//   (`directory_tried_at`).
+//   older read landing after a newer one, of either read, writes nothing:
+//   a group's rows are replaced only while no whole read of it that
+//   started later was kept (directory-group-reads.ts `newerReadKept`).
 // - A group of another tenant: only names in the deployment's own Entra
 //   tenant are read; another's is proved only by its member's own
 //   connection.
@@ -124,10 +124,10 @@ export const unneededGroupRows = (db: DrizzleD1Database, groupId?: string) =>
  * The statements that keep what the clock's run of the slot `slot` found
  * of `groupId` (Brain name `name`), its read started at `startedAt`: its
  * users' rows replaced by those of `users` the daily read keeps, each from
- * `startedAt` (none when it was read whole but proves nothing: `null`);
- * the group recorded as tried at `slot`, and as read when it was read
- * whole (`whole`). Each only while the daily read hasn't read the group
- * for its team and no run of a later slot tried it.
+ * `startedAt` (none when it was read whole but proves nothing: `null`),
+ * and its whole read recorded (`whole`), each only while the daily read
+ * hasn't read the group for its team and no whole read of it that started
+ * later was kept; and the group recorded as tried at `slot`.
  */
 const keptRead = (
   db: DrizzleD1Database,
@@ -137,22 +137,23 @@ const keptRead = (
   { slot, startedAt }: { slot: number; startedAt: number }
 ) => {
   const { provider } = entra;
-  // Checked in each statement, as written: the record goes last.
-  const ours = sql`NOT ${mapped(groupId, true)} AND NOT EXISTS (
-    SELECT 1 FROM ${sourceReaderGroups}
-    WHERE ${sourceReaderGroups.name} = ${name}
-      AND ${sourceReaderGroups.directoryTriedAt} > ${slot}
-  )`;
+  const ours = sql`NOT ${mapped(groupId, true)} AND NOT ${newerReadKept(sql`${name}`, sql`${startedAt}`)}`;
+  const tried = db
+    .update(sourceReaderGroups)
+    .set({
+      directoryTriedAt: sql`max(coalesce(${sourceReaderGroups.directoryTriedAt}, 0), ${slot})`,
+    })
+    .where(eq(sourceReaderGroups.name, name));
+  if (!whole) {
+    return [tried] as const;
+  }
+  // Last: the rows' statements check that no newer read was kept.
   const record = db
     .update(sourceReaderGroups)
-    .set(
-      whole
-        ? { directoryTriedAt: new Date(slot), directoryReadAt: new Date(slot) }
-        : { directoryTriedAt: new Date(slot) }
-    )
+    .set({ directoryReadAt: new Date(startedAt) })
     .where(and(eq(sourceReaderGroups.name, name), ours));
   if (users === null) {
-    return [record] as const;
+    return [record, tried] as const;
   }
   return [
     db
@@ -181,6 +182,7 @@ const keptRead = (
         .onConflictDoNothing()
     ),
     record,
+    tried,
   ] as const;
 };
 

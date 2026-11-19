@@ -7319,9 +7319,12 @@ export const sourceReaderTokens = sqliteTable(
 export const sourceReaderGroups = sqliteTable("source_reader_groups", {
   name: text().primaryKey(),
   /**
-   * The clock's slot of the directory's last whole read of an Entra
-   * group's members (directory-reader-groups.ts, GRA-2146); null while it
-   * never read it whole. Only paces those reads: what proves a group is
+   * When the last whole read of an Entra group's members that was kept
+   * started (GRA-2146), by either read that keeps them: the daily read of
+   * a group mapped to a team (directory-group-reads.ts) or the read of
+   * the groups reader lists name (directory-reader-groups.ts); null while
+   * none was. No older read's rows land after it, and the second read
+   * paces itself by it. What proves a group is
    * `directory_group_members.read_at`.
    */
   directoryReadAt: timestamp("directory_read_at"),

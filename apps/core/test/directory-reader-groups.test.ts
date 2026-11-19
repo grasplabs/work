@@ -284,15 +284,15 @@ describe("a member's Entra groups proved by the company's directory", () => {
       await readDirectory();
       const marker = uniqueWord();
       const file = await sharedWith(marker, entraGroup(finance.id));
-      const readAt = later();
-      await readGroups(readAt);
+      const start = Date.now();
+      await readGroupsAsOf(start);
       // Bob leaves the group at the source.
       await directoryGroupsHold([finance], {
         [String(finance.id)]: listing(ann),
       });
-      await readGroups(new Date(readAt.getTime() + hourMs));
+      await readGroupsAsOf(start + hourMs);
       const anHourLater = await finds(bob.userId, file, marker);
-      await readGroups(new Date(readAt.getTime() + 13 * hourMs));
+      await readGroupsAsOf(start + 13 * hourMs);
 
       expect({
         anHourLater,
@@ -538,7 +538,7 @@ describe("a member's Entra groups proved by the company's directory", () => {
         [String(finance.id)]: listing(ann),
       });
       await readDirectory();
-      // Every other group read now, so only Finance is due next.
+      // Every other group tried now, so Finance is taken first next.
       const settled = later();
       await readGroups(settled);
       const marker = uniqueWord();
@@ -682,6 +682,95 @@ describe("a member's Entra groups proved by the company's directory", () => {
         beforeDailyRead: { bob: true, teams: [] },
         afterDailyRead: { bob: true, ann: [team], bobs: [team] },
       });
+    }
+  );
+
+  it(
+    "keep no older read's members once a newer read was kept: a daily read whose group moved team while the groups' read read it",
+    setUpTime,
+    async () => {
+      const { admin } = await connectedDirectory(idp);
+      const [ann, cy] = [await member(), await member()];
+      await directoryHolds(
+        [ann, cy].map(({ oid }) => inDirectory({ id: oid }))
+      );
+      const finance = group();
+      const id = String(finance.id);
+      await directoryGroupsHold([finance], { [id]: listing(ann) });
+      const [first, second] = [
+        await teamNamed(admin.session, `Finance ${unique()}`),
+        await teamNamed(admin.session, `Audit ${unique()}`),
+      ];
+      await admin.api.directoryGroups.mapToTeam(id, first);
+      const marker = uniqueWord();
+      const file = await sharedWith(marker, entraGroup(finance.id));
+      await readDirectory();
+      // The daily read reads Ann for the first team; before its batch
+      // lands, the group moves to the second, Ann leaves it and Cy joins,
+      // and the groups' read reads it.
+      const { coreEnv, landed } = landingAt(
+        /insert into "directory_reads"/iu,
+        "before",
+        async () => {
+          await admin.api.directoryGroups.mapToTeam(id, second);
+          await directoryGroupsHold([finance], { [id]: listing(cy) });
+          await readGroups();
+        }
+      );
+      await runClockTask("directory.people", { DB: coreEnv.DB }, later());
+
+      expect({
+        landed: landed(),
+        ann: await finds(ann.userId, file, marker),
+        cy: await finds(cy.userId, file, marker),
+        annRows: await rowsOf(ann.oid),
+      }).toStrictEqual({ landed: true, ann: false, cy: true, annRows: 0 });
+    }
+  );
+
+  it(
+    "keep no older read's members once a newer read was kept: the groups' read landing after a daily read of a group since moved",
+    setUpTime,
+    async () => {
+      const { admin } = await connectedDirectory(idp);
+      const [ann, cy] = [await member(), await member()];
+      await directoryHolds(
+        [ann, cy].map(({ oid }) => inDirectory({ id: oid }))
+      );
+      const finance = group();
+      const id = String(finance.id);
+      await directoryGroupsHold([finance], { [id]: listing(ann) });
+      const marker = uniqueWord();
+      const file = await sharedWith(marker, entraGroup(finance.id));
+      await readDirectory();
+      const [first, second] = [
+        await teamNamed(admin.session, `Finance ${unique()}`),
+        await teamNamed(admin.session, `Audit ${unique()}`),
+      ];
+      // The groups' read reads Ann; before its batch lands, the group is
+      // mapped, Ann leaves it and Cy joins, the daily read reads it for
+      // its team, and the group moves to another team.
+      const { coreEnv, landed } = landingAt(
+        /update "source_reader_groups"/iu,
+        "before",
+        async () => {
+          await admin.api.directoryGroups.mapToTeam(id, first);
+          await directoryGroupsHold([finance], { [id]: listing(cy) });
+          await readDirectory();
+          await admin.api.directoryGroups.mapToTeam(id, second);
+        }
+      );
+      await runClockTask(
+        "directory.reader_groups",
+        { DB: coreEnv.DB },
+        later()
+      );
+
+      expect({
+        landed: landed(),
+        ann: await finds(ann.userId, file, marker),
+        cy: await finds(cy.userId, file, marker),
+      }).toStrictEqual({ landed: true, ann: false, cy: true });
     }
   );
 
