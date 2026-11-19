@@ -355,7 +355,7 @@ export const directoryErrors = defineErrorFamily({
   "directory.group_refused":
     "Microsoft refused to read the directory's groups for this connection.",
   "directory.groups_not_granted":
-    "Grasp can't read your directory's groups yet: the directory was connected before Grasp asked for them. An administrator of your Microsoft Entra directory can grant Grasp's directory app the permission to read groups (admin consent). Grasp picks it up the next time it reads groups, with nothing to reconnect. Only if that can't be done: an admin disconnects the directory and connects it again, granting the permission. Until it is connected again, Grasp reads nobody from the directory.",
+    "Grasp can't read your directory's groups yet: the directory was connected before Grasp asked for that permission. An admin disconnects the directory and connects it again to grant it. Until it is connected again, Grasp reads nobody from the directory.",
   "directory.group_not_mappable":
     "That group can't be a team's: anyone can join it, its members can't all be read, or Microsoft didn't say which.",
   "directory.team_not_found": "There's no such team.",

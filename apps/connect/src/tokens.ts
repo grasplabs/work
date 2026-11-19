@@ -20,7 +20,6 @@ import {
   bearer,
   providerFor,
   scopesLacking,
-  grantHolds,
   renewalHolds,
   renewedAsGranted,
 } from "./providers.ts";
@@ -667,76 +666,6 @@ export const accessTokenFor = async (
   connectionId: string
 ): Promise<string> =>
   await freshAccessToken(env, await activeConnection(env, connectionId));
-
-/**
- * Asks the provider to renew `connectionId`'s grant for every scope its
- * provider asks for now, and keeps what it grants: whether that holds
- * `wanted`. For a connection made before its provider asked for `wanted`
- * (the directory's groups), once an admin consented to it since: a plain
- * renewal is for the scopes first asked for, so only one that names the
- * scope can bring it (Entra: refresh tokens "are valid for all permissions
- * that your client has already received consent for"). Nothing here marks
- * the connection: a refusal (no consent yet, or a renewal another took
- * meanwhile) leaves it as it was, holding what it held, and answers false.
- * A grant that comes back other than its connection held is never kept
- * (`renewedAsGranted`).
- */
-export const widenGrant = async (
-  env: Env,
-  connectionId: string,
-  wanted: string
-): Promise<boolean> => {
-  const { connection, provider, row, vault } = await activeConnection(
-    env,
-    connectionId
-  );
-  const client = provider.kind === "oauth" ? provider.client(env) : undefined;
-  if (
-    provider.kind !== "oauth" ||
-    connection.tenant === null ||
-    client === undefined ||
-    !(await takeLease(env.DB, row, Date.now()))
-  ) {
-    return false;
-  }
-  const context: RefreshContext = {
-    env,
-    vault,
-    provider,
-    client,
-    tenant: connection.tenant,
-  };
-  try {
-    const current = await openOAuthTokens(vault, row);
-    const minted = await refreshTokens(
-      provider,
-      client,
-      connection.tenant,
-      current.refreshToken,
-      provider.scopes.join(provider.scopeSeparator)
-    );
-    if (!renewedAsGranted(provider, minted, row.grantedScopes)) {
-      await discardMint(provider, client, minted);
-      await releaseLease(env.DB, row);
-      return false;
-    }
-    const stored = await storeRefreshed(
-      context,
-      row,
-      current,
-      minted,
-      await addressAt(context, connectionId, minted)
-    );
-    return stored !== undefined && grantHolds(minted.scope ?? "", wanted);
-  } catch (error) {
-    await releaseLease(env.DB, row);
-    log.info("oauth.widen_refused", {
-      provider: provider.id,
-      ...errorFields(error),
-    });
-    return false;
-  }
-};
 
 /**
  * What one call of an active connection's connector sends its requests
