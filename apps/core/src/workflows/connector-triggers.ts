@@ -18,6 +18,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { auditedBatch, outboxedIfChanged } from "../audit-outbox.ts";
+import { mayAct } from "../auth/membership-sql.ts";
 import {
   connectorTriggerHolds,
   permissions,
@@ -673,6 +674,10 @@ export const triggerListeners = async (
           eq(permissions.objectType, "connection"),
           eq(permissions.objectId, triggerResources.connectionId),
           sql`${permissions.resource} IS ${triggerResources.connectionResource}`,
+          // Only while its person may act: connect stops reading for a
+          // suspended person's triggers, whose runs would be refused, and
+          // reads again once it lifts (GRA-2143).
+          mayAct(triggerResources.principalBinding),
           sql`EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value = ${action})`
         )
       )

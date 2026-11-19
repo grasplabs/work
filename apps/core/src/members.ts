@@ -10,6 +10,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { memberErrors } from "@grasp-os/shared/members";
 import type {
   DirectoryAccount,
+  DirectoryRead,
   Erasure,
   ErasurePreview,
   Invitation,
@@ -54,6 +55,7 @@ import { personOf } from "./connections.ts";
 import {
   channelAccounts,
   directoryPeople,
+  directoryReads,
   invitations,
   memberRemovals,
   members,
@@ -274,6 +276,33 @@ const listTeams = async (
 ): ReturnType<MembersApi["teams"]> => {
   requireMemberAdmin(by);
   return await teamsWithMembers(env);
+};
+
+/**
+ * Where the daily read of each directory stands (directory-people.ts), for
+ * admins: what an admin can act on when it fails, or goes without the
+ * deleted accounts. Nothing about any person.
+ */
+const listDirectoryReads = async (
+  env: Env,
+  by: Identity
+): Promise<DirectoryRead[]> => {
+  requireMemberAdmin(by);
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(directoryReads)
+    .orderBy(asc(directoryReads.provider));
+  return rows.map((row) => ({
+    provider: row.provider,
+    readAt: row.readAt?.toISOString() ?? null,
+    people: row.people,
+    disabled: row.disabled,
+    failure:
+      row.failure === null || row.failedAt === null
+        ? null
+        : { code: row.failure, at: row.failedAt.toISOString() },
+    deletedFailure: row.deletedFailure,
+  }));
 };
 
 /**
@@ -975,6 +1004,13 @@ export class MembersRpc extends CoreRpcTarget implements MembersApi {
     return await withPerson(
       this.#check,
       async (person) => await listTeams(this.#env, person)
+    );
+  }
+
+  async directoryReads(): Promise<DirectoryRead[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await listDirectoryReads(this.#env, person)
     );
   }
 
