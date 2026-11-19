@@ -3367,6 +3367,7 @@ msgstr "Verfügbar, über Composio"
 #: src/grasp/frame/grasp-sidebar.tsx
 #: src/inbox/item-detail.tsx
 #: src/onboarding/setup-frame.tsx
+#: src/settings/ai-connect-concepts.tsx
 #: src/workflows/requests/request-detail.tsx
 msgid "Back"
 msgstr "Zurück"
@@ -3805,6 +3806,7 @@ msgid "Carry on there. Lost that device? Ask whoever sent you the link for a new
 msgstr "Machen Sie dort weiter. Haben Sie das Gerät nicht mehr? Bitten Sie die Person, die Ihnen den Link geschickt hat, um einen Neustart."
 
 #: src/agents/new-agent.tsx
+#: src/settings/ai-connect-concepts.tsx
 msgid "Change"
 msgstr "Ändern"
 
@@ -4178,6 +4180,10 @@ msgctxt "a kind of field"
 msgid "Choice"
 msgstr "Auswahl"
 
+#: src/settings/ai-connect-concepts.tsx
+msgid "Choose"
+msgstr "Auswählen"
+
 #: src/frame/part-words.tsx
 msgctxt "a table's checkbox column"
 msgid "Choose"
@@ -4246,6 +4252,10 @@ msgstr "Eine auswählen"
 #: src/agents/new-agent.tsx
 msgid "Choose or write an answer first"
 msgstr "Wähle oder schreibe zuerst eine Antwort"
+
+#: src/settings/ai-connect-concepts.tsx
+msgid "Choose the AI that Grasp's chat, agents and workflows run on."
+msgstr "Wählen Sie die KI, mit der Grasps Chat, Agenten und Workflows arbeiten."
 
 #: src/interview/before.tsx
 msgid "Choose who you want to be interviewed by."
@@ -4616,6 +4626,7 @@ msgstr "Von der Geschäftsführung bestätigt"
 #: src/connections/request-app-dialog.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/routes/_shell.integrations.$integration.tsx
+#: src/settings/ai-connect-concepts.tsx
 msgid "Connect"
 msgstr "Verbinden"
 
@@ -4624,11 +4635,19 @@ msgstr "Verbinden"
 msgid "Connect {app}"
 msgstr "{app} verbinden"
 
+#: src/settings/ai-connect-concepts.tsx
+msgid "Connect {label}"
+msgstr "{label} verbinden"
+
 #: src/connections/overview-lists.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/onboarding/hr-leads.tsx
 msgid "Connect {name}"
 msgstr "{name} verbinden"
+
+#: src/settings/ai-connect-concepts.tsx
+msgid "Connect a provider"
+msgstr "Anbieter verbinden"
 
 #: src/onboarding/place-picker.tsx
 msgid "Connect again"
@@ -4651,6 +4670,7 @@ msgid "Connect another account"
 msgstr "Weiteres Konto verbinden"
 
 #: src/onboarding/connect-steps.tsx
+#: src/settings/ai-connect-concepts.tsx
 msgid "Connected"
 msgstr "Verbunden"
 
@@ -4706,6 +4726,10 @@ msgstr "Verbunden, über Composio"
 #: src/onboarding/ai-step.tsx
 msgid "Connected: {names}"
 msgstr "Verbunden: {names}"
+
+#: src/settings/ai-connect-concepts.tsx
+msgid "Connecting"
+msgstr "Wird verbunden"
 
 #: src/connection-errors.ts
 msgid "Connecting didn't work. Try again, or ask an admin."
@@ -5097,6 +5121,10 @@ msgstr "Diese Antwort konnte nicht übernommen werden"
 #: src/frame/part-words.tsx
 msgid "Counted in the page's words. Code view marks them in its source."
 msgstr "In den Wörtern der Seite gezählt. Die Code-Ansicht markiert sie im Quelltext."
+
+#: src/settings/ai-connect-concepts.tsx
+msgid "Create a key at {label}"
+msgstr "Schlüssel bei {label} erstellen"
 
 #: src/connections/integration-facts.ts
 msgctxt "permission group"
@@ -7326,6 +7354,10 @@ msgstr "Die KI von Grasp arbeitet mit dem eigenen Schlüssel eines KI-Anbieters 
 #: src/settings/stephen-settings.tsx
 msgid "Grasp's chat"
 msgstr "Grasps Chat"
+
+#: src/settings/ai-connect-concepts.tsx
+msgid "Grasp's chat, agents and workflows run on the AI provider you connect, billed to your own account."
+msgstr "Grasps Chat, Agenten und Workflows laufen über den KI-Anbieter, den Sie verbinden, abgerechnet über Ihr eigenes Konto."
 
 #: src/agents/agent-form.tsx
 #: src/agents/agent-page.tsx
@@ -9766,6 +9798,7 @@ msgstr "Neuer"
 #: src/agents/new-agent.tsx
 #: src/chat/asked-questions.tsx
 #: src/frame/part-words.tsx
+#: src/settings/ai-connect-concepts.tsx
 #: src/settings/event-sources.tsx
 msgid "Next"
 msgstr "Weiter"
@@ -10302,6 +10335,7 @@ msgstr "Nicht geleert"
 msgid "Not confirmed by the board yet"
 msgstr "Noch nicht von der Geschäftsleitung bestätigt"
 
+#: src/settings/ai-connect-concepts.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Not connected"
 msgstr "Nicht verbunden"
@@ -10957,6 +10991,10 @@ msgstr "Einen Moment"
 msgid "One of a list of options"
 msgstr "Eine aus einer Liste von Optionen"
 
+#: src/settings/ai-providers.tsx
+msgid "One of the organization's own admins connects its AI provider."
+msgstr "Einer der eigenen Admins der Organisation verbindet ihren KI-Anbieter."
+
 #: src/interview/words.ts
 msgid "One real case"
 msgstr "Ein echter Fall"
@@ -11603,6 +11641,10 @@ msgstr "Fügen Sie den Schlüssel ein."
 msgid "Paste the new key."
 msgstr "Fügen Sie den neuen Schlüssel ein."
 
+#: src/settings/ai-connect-concepts.tsx
+msgid "Paste your key"
+msgstr "Schlüssel einfügen"
+
 #: src/knowledge/document.tsx
 msgid "Path"
 msgstr "Pfad"
@@ -12044,6 +12086,7 @@ msgstr "Pakete vorgeschlagen"
 msgid "Provider"
 msgstr "Anbieter"
 
+#: src/settings/ai-connect-concepts.tsx
 #: src/settings/ai-providers.tsx
 msgid "Providers"
 msgstr "Anbieter"
@@ -14791,6 +14834,7 @@ msgid "Stephen talks to nobody until you pick the day the interviews start."
 msgstr "Stephen spricht mit niemandem, bis Sie den Tag wählen, an dem die Interviews beginnen."
 
 #: src/connections/connect-dialog.tsx
+#: src/settings/ai-connect-concepts.tsx
 msgid "Steps"
 msgstr "Schritte"
 
@@ -15169,6 +15213,10 @@ msgstr "Technische Details"
 #: src/settings/ai-providers.tsx
 msgid "Test"
 msgstr "Testen"
+
+#: src/settings/ai-connect-concepts.tsx
+msgid "Test and connect"
+msgstr "Testen und verbinden"
 
 #: src/settings/ai-providers.tsx
 msgid "Test failed: {testFailure}"
@@ -18648,6 +18696,10 @@ msgstr "Ihre KI läuft auf der KI von Grasp"
 #: src/settings/ai-providers.tsx
 msgid "Your AI runs on your own keys"
 msgstr "Ihre KI läuft mit Ihren eigenen Schlüsseln"
+
+#: src/settings/ai-connect-concepts.tsx
+msgid "Your AI, on your own key"
+msgstr "Ihre KI, mit Ihrem eigenen Schlüssel"
 
 #: src/chat/brain-questions.tsx
 #: src/interview/composer.tsx
